@@ -1,11 +1,11 @@
-# UI Components
+# Title
 
-Date: 2024-05-10
-Authors: Gordon Brander
+Date: 2024-05-10  
+Authors: Gordon Brander  
 
 ## Goals
 
-- 
+- ...
 
 Non-goals:
 
@@ -22,12 +22,12 @@ User story: as a [role], I want to [x] so I can [y].
 
 Requirements
 
-- 
+- ...
 
 ## Milestones
 
 # FAQ
 
-### Q
+## Q
 
 A
