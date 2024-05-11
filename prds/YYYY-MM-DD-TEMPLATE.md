@@ -1,7 +1,7 @@
 # Title
 
-Date: 2024-05-10  
-Authors: Gordon Brander  
+Date: YYYY-MM-DD 
+Authors: YOUR NAME
 
 ## Goals
 
@@ -9,8 +9,7 @@ Authors: Gordon Brander
 
 Non-goals:
 
-- Exposing the full capability set of HTML
-- Exposing a styling language (CSS)
+- ...
 
 ## Background
 
@@ -18,7 +17,7 @@ Non-goals:
 
 ### Story
 
-User story: as a [role], I want to [x] so I can [y].
+User story: as a ROLE, I want to X so I can Y.
 
 Requirements
 
