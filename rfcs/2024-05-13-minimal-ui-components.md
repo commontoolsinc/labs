@@ -58,7 +58,7 @@ Elements inside flex layout elements are centered by default. Spacer can be used
         - Attributes
             - `title` - the text of the link
         - Children - the default slot is treated as the content for the associated panel.
-- `<tab-view>`
+- `<tab-view>` - manages a collection of tabs. Display style is contextual. May render as a horizontal series of tab, or a sidebar of tabs, etc. Handles tab state internally.
     - `<tab-item title="">`
         - Attributes
             - `title` - the title of the tab
