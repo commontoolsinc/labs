@@ -1,0 +1,20 @@
+[workspace]
+members = [
+  "rust/example-crate",
+]
+
+# See: https://github.com/rust-lang/rust/issues/90148#issuecomment-949194352
+resolver = "2"
+
+[workspace.dependencies]
+js-sys = { version = "0.3" }
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "tracing-log", "json"] }
+tracing-web = { version = "0.1" }
+wasm-bindgen = { version = "0.2" }
+web-sys = { version = "0.3" }
+wit-bindgen = { version = "0.24" }
+
+[profile.release]
+opt-level = 'z'
+lto = true

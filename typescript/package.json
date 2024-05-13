@@ -1,0 +1,30 @@
+{
+  "name": "@commontools-internal/root",
+  "author": "The Common Authors",
+  "version": "0.0.1",
+  "description": "Root package definition for the TypeScript workspace",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wireit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/commontoolsinc/labs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/commontoolsinc/labs/issues"
+  },
+  "homepage": "https://github.com/commontoolsinc/labs#readme",
+  "devDependencies": {
+    "wireit": "^0.14.4"
+  },
+  "wireit": {
+    "build": {
+      "dependencies": [
+        "./packages/example-package:build"
+      ]
+    }
+  }
+}
