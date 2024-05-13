@@ -12,15 +12,19 @@ Context: defining a minimal set of components for LLM-generated UI.
 - Expressive, allows for somewhat open-ended use-cases
 - Works well with LLM generation
 - Allows for user input, especially text input, buttons.
-- Designed around semantic (use-case-specific) components, rather than fine-grained visual styling.
+- Declarative use-case-specific components, rather than fine-grained visual styling.
     - The system may display these components in different ways depending on the context, for example on small screens, large screens, via audio, etc.
-    - The web started this way as well, and 
-- Can be evolved over time to:
+    - The web started this way and gradually excavated more control over style and behavior. We should follow this path too. Starting with declarative components means:
+        - Components can automatically adapt to context.
+        - API surface area is minimal to start, meaning easy to learn and easy to implement, easy to evolve.
+        - Side-steps many issues with malicious software by keeping things simple.
+        - [Lower-level mechanisms can be excavated over time](https://github.com/gordonbrander/generative-ui-playbook?tab=readme-ov-file#excavating-fine-grained-mechanisms). The system co-evolves with actual ecosystem needs.
+- Design can be evolved over time to:
     - Expand feature set
     - Excavate lower-level features
 - Optimized for small UI islands. Micro-components.
     - The kind of UI components used by Discord bots, under social media posts, etc.
-- Likely to use mostly “mobile-like” layouts.
+- Likely to use mostly “mobile-friendly” layouts.
 
 Non-goals:
 
@@ -28,7 +32,7 @@ Non-goals:
 - CSS or other styling support
 - Complex layout features
 - Separation of concerns
-- Turing complete scripting in views
+- Turing-complete scripting in views
 
 ## Proposal
 
