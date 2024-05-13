@@ -16,7 +16,7 @@ Context: defining a minimal set of components for LLM-generated UI.
     - The system may display these components in different ways depending on the context, for example on small screens, large screens, via audio, etc.
     - The web started this way and gradually excavated more control over style and behavior. We should follow this path too. Starting with declarative components means:
         - Components can automatically adapt to context.
-        - API surface area is minimal to start, meaning easy to learn and easy to implement, easy to evolve.
+        - API surface area is minimal to start, meaning easy to learn, easy to implement, easy to evolve.
         - Side-steps many issues with malicious software by keeping things simple.
         - [Lower-level mechanisms can be excavated over time](https://github.com/gordonbrander/generative-ui-playbook?tab=readme-ov-file#excavating-fine-grained-mechanisms). The system co-evolves with actual ecosystem needs.
 - Design can be evolved over time to:
@@ -88,6 +88,11 @@ Speculative:
 
 - `<text>`
     - Attributes
+        - `style`
+            - `style="body"` - the primary body style
+            - `style="secondary"` - the secondary body style
+            - `style="footnote"` - a footnote style
+            - `style="heading"` - a heading style
         - `markup`
             - `markup="plaintext"` / no attribute. No special markup rendering (default).
             - `markup="markdown"` Provides markdown rendering. LLMs are great at rendering Markdown. Makes sense to lean into this.
@@ -98,7 +103,7 @@ Speculative:
 
 ## Prior art
 
-### SwiftUI component set
+### SwiftUI
 
 The above component set is heavily inspired by SwiftUI’s approach to the problem.
 
@@ -145,9 +150,18 @@ Display components:
 
 There are many more components, but this covers most of what you’ll use on a day-to-day basis.
 
-### SwiftUI views
+**Typography**: rather than being designed around visual styles, typography in iOS is designed, by default, around a [set of declarative roles](
+https://developer.apple.com/design/human-interface-guidelines/typography#Large-Default):
 
-SwiftUI views are struct constructor functions. SwiftUI structs have many of the familiar features of classes, including methods. View structs may hold component state.
+- Body
+- Footnote
+- Callout
+- Title
+- etc
+
+This allows the system to adapt text automatically to different form factors (phone, iPad, watch, etc). Text styles can also be manually configured (font, color, etc), but these APIs are not the default, and you are encouraged to use the semantic roles instead.
+
+**[SwiftUI Views](https://developer.apple.com/documentation/swiftui/view)**: views in SwiftUI are struct constructor functions. SwiftUI structs have many of the familiar features of classes, including methods. View structs may hold component state.
 
 ```swift
 HStack {
@@ -156,7 +170,7 @@ HStack {
 }
 ``` 
 
-They leverage a syntax sugar that Swift offers... if the last argument is a closure, you can put the closure’s curly brackets on the outside of the function call, and omit the parenthesis if there are no other arguments. So, the above de-sugars to:
+Views leverage a Swift syntax sugar: when the last argument is a closure, you can put the closure’s curly brackets on the outside of the function call, and omit the parenthesis, if there are no other arguments. So, the above de-sugars to:
 
 ```swift
 HStack(content: {
@@ -165,9 +179,7 @@ HStack(content: {
 })
 ```
 
-In a web context, we may want to consider combining elements and constructor functions for a similar purpose.
-
-For example, [Spellcaster](https://github.com/gordonbrander/spellcaster) uses a combination of Hyperscript, Signals, and simple constructor functions to offer React-like / SwiftUI-like components:
+In a web context you could use classes or factory functions toward a similar purpose. For example, [Spellcaster](https://github.com/gordonbrander/spellcaster) uses a combination of Hyperscript, Signals, and simple constructor functions to offer React-like / SwiftUI-like components:
 
 ```JavaScript
 import {signal} from 'spellcaster/spellcaster.js'
