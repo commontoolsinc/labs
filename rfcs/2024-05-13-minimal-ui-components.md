@@ -98,8 +98,111 @@ Speculative:
 
 ## Prior art
 
-### SwiftUI
+### SwiftUI component set
 
+The above component set is heavily inspired by SwiftUI’s approach to the problem.
 
+Resources:
+
+- [SwiftUI developer reference](https://developer.apple.com/documentation/swiftui/)
+
+A quick tour of SwiftUI’s core component set...
+
+Layout components:
+
+- `VStack` - flexbox-like layout with column flex direction
+- `HStack` - flexbox-like layout with row flex direction
+- `ZStack` - a z-index stacking element 
+- `Spacer` - an element that fills available space (flex grow/flex shrink)
+
+This ends up being sufficiently expressive to build just about any UI. In addition, SwiftUI offers a few specialized layout components:
+
+- `LazyVStack` - a lazy vertical flexbox-like layout for virtual scrolling
+- `LazyHStack` - a lazy horizontal flexbox-like layout for virtual scrolling
+- `Grid` / `GridRow` - a table-like grid layout
+- `List` - a list of items with default styling appropriate to the platform
+
+Navigation components:
+
+- `NavigationView` / `NavigationStack` - manages sliding panels
+    - `NavigationLink` - activates navigation panels
+- `sheet` (view modifier) - places a set of views within a modal sheet
+
+Input components:
+
+- `TextField` - a text input component, similar to `<input type="text">`.
+    - Includes a label
+    - Supports a handful of rendering styles
+- `TextEditor` - a text input component, similar to `<textarea>`.
+- `Button` - a button component
+    - Supports a handful of rendering styles
+
+Display components:
+
+- `Text` - renders text
+    - Can be configured to render markdown
+    - Can also take attributed text strings for programmable rich text
+
+There are many more components, but this covers most of what you’ll use on a day-to-day basis.
+
+### SwiftUI views
+
+SwiftUI views are struct constructor functions. SwiftUI structs have many of the familiar features of classes, including methods. View structs may hold component state.
+
+```swift
+HStack {
+    Text("Hello-world")
+    Spacer()
+}
+``` 
+
+They leverage a syntax sugar that Swift offers... if the last argument is a closure, you can put the closure’s curly brackets on the outside of the function call, and omit the parenthesis if there are no other arguments. So, the above de-sugars to:
+
+```swift
+HStack(content: {
+    Text("Hello-world")
+    Spacer()
+})
+```
+
+In a web context, we may want to consider combining elements and constructor functions for a similar purpose.
+
+For example, [Spellcaster](https://github.com/gordonbrander/spellcaster) uses a combination of Hyperscript, Signals, and simple constructor functions to offer React-like / SwiftUI-like components:
+
+```JavaScript
+import {signal} from 'spellcaster/spellcaster.js'
+import {tags, text} from 'spellcaster/hyperscript.js'
+const {div, button} = tags
+
+const Counter = () => {
+  const [count, setCount] = signal(0)
+
+  return div(
+    {className: 'counter'},
+    [
+      div({className: 'counter-text'}, text(count)),
+      button(
+        {
+          className: 'counter-button',
+          onclick: () => setCount(count() + 1)
+        },
+        text('Increment')
+      )
+    ]
+  )
+}
+
+document.body.append(Counter())
+```
+
+Signals may either be local (constructed within the function), or external (passed down as props).
 
 ### AMP
+
+AMP is a blessed set of declarative components that have tightly-controlled composability and feature customization. Sites that publish AMP pages may have those components displayed within Google search results.
+
+One practical thing we might learn from / potentially borrow from AMP is this notion of restricted declarative component sets.
+
+When components are sufficiently declarative, they can be customized for display by the system in multiple contexts, and we are able to side-step a number of malicious 3P software challenges, such as cross-site scripting attacks, etc.
+
+Depending upon our goals, this is one tool we have in our toolbelt.
