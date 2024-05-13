@@ -1,0 +1,12 @@
+package local:cowsay;
+
+world cowsay {
+  export cow: interface {
+    enum cows {
+      default,
+      owl
+    }
+
+    say: func(text: string, cow: option<cows>) -> string;
+  }
+}
