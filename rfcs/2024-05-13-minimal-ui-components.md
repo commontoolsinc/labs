@@ -46,30 +46,39 @@ We’re not aiming to expose generalized layout features. Instead, we want to ha
 
 Elements inside flex layout elements are centered by default. Spacer can be used to cause them to fill available space.
 
-### Collections
+### Collection components
 
 - `<list>` - a  collection of items. Display style is contextual. May render as a scrolling list, or a series of items with a “more” button, etc.
 - `<gallery>` - a collection of images or other content. Display style is contextual, and depends upon number of child components and screen space. Think the media gallery component in Discord or Twitter. May render as several images side-by-side, or as a regular grid for additional elements.
 
-### Navigation
+### Navigation components
 
-- `<nav-stack>` - multi-step hierarchical flows (think sliding panels in iOS). Handles navigation state and associated controls.
+- `<nav-view>` - multi-step hierarchical flows (think sliding panels in iOS). Handles navigation state and associated controls.
     - `<nav-link title="">`
         - Attributes
             - `title` - the text of the link
-        - Default slot - the children of this element are treated as the content for the panel that it activates.
-- `<tabs>`
+        - Children - the default slot is treated as the content for the associated panel.
+- `<tab-view>`
+    - `<tab-item title="">`
+        - Attributes
+            - `title` - the title of the tab
+        - Children - the default slot is treated as the content for the associated panel.
+
+Speculative:
+
+- `<miniapp presented="$bool">` - wrapping a component set in this tag tells the system to display the components as a mini-app. This might be displayed as a mostly full-screen, or sheet-based interaction, depending upon context.
 
 ### Input components
 
 - `<button>`
-- `<input>`
 - `<textfield>`
 - `<rich-textfield>` - can wait
 - `<input type="text">`
 - `<input type="search">`
     - `<datalist id="">` - can be combined with text or search inputs to provide  simple type-ahead search.
-- `<input type="range">` = slider
+- Date input
+- Slider with label
+- Checkbox with label
 
 ### Display components
 
