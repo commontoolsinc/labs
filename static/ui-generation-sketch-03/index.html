@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <script type="module">
+      import { html, render } from "https://esm.run/lit-html";
+
+      class SpotifyPlaylistCard extends HTMLElement {
+        constructor() {
+          super();
+          this.attachShadow({ mode: "open" });
+        }
+
+        static get observedAttributes() {
+          return ["playlist-id"];
+        }
+
+        attributeChangedCallback(name, oldValue, newValue) {
+          if (name === "playlist-id") {
+            this.render();
+          }
+        }
+
+        render() {
+          const playlistId = this.getAttribute("playlist-id");
+          const embedUrl = `https://open.spotify.com/embed/playlist/${playlistId}`;
+
+          const template = html`
+            <style>
+              .card {
+                
+                width: 320px;
+                height: 480px;
+                border-radius: 4px;
+                overflow: hidden;
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+              }
+              iframe {
+                width: 100%;
+                height: 100%;
+                border: none;
+              }
+            </style>
+            <div class="card">
+              <iframe src="${embedUrl}" frameborder="0" allowtransparency="true" allow="encrypted-media"></iframe>
+            </div>
+          `;
+
+          render(template, this.shadowRoot);
+        }
+      }
+
+      customElements.define("spotify-playlist-card", SpotifyPlaylistCard);
+
+      class PlaylistHand extends HTMLElement {
+        constructor() {
+          super();
+          this.attachShadow({ mode: "open" });
+        }
+        connectedCallback() {
+          this.render();
+          // this.addEventListener("mousemove", this.handleMouseMove);
+          this.shadowRoot.addEventListener("mouseover", this.handleMouseOver);
+          this.shadowRoot.addEventListener("mouseout", this.handleMouseOut);
+          this.shadowRoot.addEventListener("mousedown", this.handleMouseDown);
+          this.shadowRoot.addEventListener("mouseup", this.handleMouseUp);
+        }
+
+        disconnectedCallback() {
+          let self = this
+          this.removeEventListener("mousemove", this.handleMouseMove.bind(this));
+          this.shadowRoot.removeEventListener(
+            "mouseover",
+            this.handleMouseOver.bind(this)
+          );
+          this.shadowRoot.removeEventListener("mouseout", this.handleMouseOut.bind(this));
+          this.shadowRoot.removeEventListener(
+            "mousedown",
+            (ev) => this.handleMouseDown(ev, self)
+          );
+          this.shadowRoot.removeEventListener("mouseup", (ev) => this.handleMouseUp(ev, self));
+        }
+
+        handleMouseDown(event, parent) {
+          if (event.target.classList.contains("card")) {
+            this.draggedCard = event.target;
+            this.initialMouseX = event.clientX;
+            this.initialCardX = this.draggedCard.offsetLeft;
+            this.addEventListener("mousemove", parent.handleCardDrag.bind(this));
+          }
+        }
+
+        handleMouseUp(event, parent) {
+          if (this.draggedCard) {
+            this.draggedCard = null;
+            this.removeEventListener("mousemove", parent.handleCardDrag.bind(this));
+          }
+        }
+
+        handleCardDrag(event) {
+          if (this.draggedCard) {
+            const deltaX = event.clientX - this.initialMouseX;
+            const newCardX = this.initialCardX + deltaX;
+            console.log(newCardX);
+
+            gsap.to(this.draggedCard, {
+              x: newCardX,
+              duration: 0.3,
+              ease: "power2.out",
+            });
+
+            const cards = Array.from(this.shadowRoot.querySelectorAll(".card"));
+            const draggedIndex = cards.indexOf(this.draggedCard);
+            const targetIndex = Math.round(
+              newCardX / this.draggedCard.offsetWidth
+            );
+
+            if (targetIndex !== draggedIndex) {
+              const targetCard = cards[targetIndex];
+              const targetCardX = targetCard.offsetLeft;
+
+              gsap.to(targetCard, {
+                x: this.initialCardX,
+                duration: 0.3,
+                ease: "power2.out",
+              });
+
+              cards.splice(draggedIndex, 1);
+              cards.splice(targetIndex, 0, this.draggedCard);
+
+              gsap.to(cards, {
+                x: (index) => index * this.draggedCard.offsetWidth,
+                duration: 0.3,
+                ease: "power2.out",
+              });
+
+              this.initialCardX = targetCardX;
+            }
+          }
+        }
+
+        handleMouseOver(event) {
+          if (event.target.classList.contains("card")) {
+            gsap.to(event.target, {
+              scale: 1.1,
+              duration: 0.3,
+              ease: "power2.out",
+            });
+          }
+        }
+
+        handleMouseOut(event) {
+          if (event.target.classList.contains("card")) {
+            gsap.to(event.target, {
+              scale: 1,
+              duration: 0.3,
+              ease: "power2.out",
+            });
+          }
+        }
+        handleMouseMove(event) {
+          const { clientX, clientY } = event;
+          const { width, height } =
+            this.shadowRoot.host.getBoundingClientRect();
+          const centerX = width / 2;
+          const centerY = height / 2;
+          const deltaX = (clientX - centerX) / centerX;
+          const deltaY = (clientY - centerY) / centerY;
+
+          gsap.to(this.shadowRoot.querySelectorAll(".card"), {
+            rotateY: deltaX * 15,
+            rotateX: -deltaY * 15,
+            duration: 0.8,
+            ease: "power2.out",
+          });
+        }
+        render() {
+          const template = html`
+            <style>
+              .hand {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                perspective: 1000px;
+              }
+              .card {
+                transform: perspective(1000px) rotateX(10deg) rotateY(0deg)
+                  rotateZ(0deg);
+                margin: 0 10px;
+              }
+            </style>
+            <div class="hand">
+              <spotify-playlist-card
+                class="card"
+                playlist-id="37i9dQZF1DX4sWSpwq3LiO"
+              ></spotify-playlist-card>
+              <spotify-playlist-card
+                class="card"
+                playlist-id="37i9dQZF1DX4sWSpwq3LiO"
+              ></spotify-playlist-card>
+              <spotify-playlist-card
+                class="card"
+                playlist-id="37i9dQZF1DX4sWSpwq3LiO"
+              ></spotify-playlist-card>
+            </div>
+          `;
+
+          render(template, this.shadowRoot);
+        }
+      }
+
+      customElements.define("playlist-hand", PlaylistHand);
+    </script>
+  </head>
+  <body>
+    <playlist-hand></playlist-hand>
+  </body>
+</html>
