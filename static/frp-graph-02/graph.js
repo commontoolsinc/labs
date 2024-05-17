@@ -3,6 +3,7 @@ import {
   map,
   fromEvent,
   from,
+  of,
   filter,
   combineLatest,
   debounceTime,
@@ -48,8 +49,8 @@ async function doLLM(input, system, response_model) {
   try {
     return await client.chat.completions.create({
       messages: [
-        { role: "user", content: input },
         { role: "system", content: system },
+        { role: "user", content: input },
       ],
       model,
     });
@@ -177,11 +178,6 @@ function Race() {
 
 function Age() {
   const age$ = new BehaviorSubject(30);
-
-  age$.subscribe((value) => {
-    console.log("age", value);
-  });
-
   const ui$ = fromEvent(startButton, "click")
     .pipe(
       map(() => {
@@ -210,12 +206,185 @@ function Age() {
   };
 }
 
-const name = Name();
-const race = Race();
-const age = Age();
+function grabViewTemplate(txt) {
+  return txt.match(/```vue\n([\s\S]+?)```/)[1];
+}
+
+function extractResponse(data) {
+  return data.choices[0].message.content;
+}
+// const name = Name();
+// const race = Race();
+// const age = Age();
+
+const uiPrompt = `Your task is to generate user interfaces using a vue compatible format. Here is an example component + state combo:
+
+  \`\`\`vue
+  <div>
+    <label for="name">Age:</label>
+    <input type="number" v-model="age" />
+  </div>
+  \`\`\
+
+  Extend this pattern, preferring simple unstyled html. Do not include a template tag, surround all components in a div.
+  `;
+
+const generatedAttributeUI = fromEvent(startButton, "click").pipe(
+  map(
+    () =>
+      `UI with Sliders to adjust STR, DEX, CON, INT, WIS, CHA for the character, assume these are available as \`str\`, \`dex\`, \`con\`, \`int\`, \`wis\`, \`cha\` in the template.`,
+  ),
+  tap((description) => {
+    render("attributesForm", `<div class="description">{{description}}</div>`, {
+      description,
+    });
+  }),
+  mergeMap((description) => {
+    return from(doLLM(description + "Return only the code.", uiPrompt));
+  }),
+  map(extractResponse),
+  map(grabViewTemplate),
+  tap(debug),
+);
+
+const attributes$ = {
+  str: new BehaviorSubject(10),
+  dex: new BehaviorSubject(10),
+  con: new BehaviorSubject(10),
+  int: new BehaviorSubject(10),
+  wis: new BehaviorSubject(10),
+  cha: new BehaviorSubject(10),
+};
+
+generatedAttributeUI
+  .pipe(
+    map((template) => {
+      render(
+        "attributesForm",
+        template,
+        Object.keys(attributes$).reduce((acc, key) => {
+          acc[key] = {
+            set(value) {
+              attributes$[key].next(value);
+            },
+            get() {
+              return attributes$[key].getValue();
+            },
+          };
+          return acc;
+        }, {}),
+      );
+    }),
+  )
+  .subscribe();
+
+const generatedNameUI = fromEvent(startButton, "click").pipe(
+  map(
+    () =>
+      `UI with a text input for the character name. Assume it is called \`name\`.`,
+  ),
+  tap((description) => {
+    render("nameForm", `<div class="description">{{description}}</div>`, {
+      description,
+    });
+  }),
+  mergeMap((description) => {
+    return from(doLLM(description + "Return only the code.", uiPrompt));
+  }),
+  map(extractResponse),
+  map(grabViewTemplate),
+  tap(debug),
+);
+
+const name$ = new BehaviorSubject("");
+
+generatedNameUI
+  .pipe(
+    map((template) => {
+      render("nameForm", template, {
+        get name() {
+          return name$.getValue();
+        },
+        set name(value) {
+          name$.next(value);
+        },
+      });
+    }),
+  )
+  .subscribe();
+
+const generatedRaceUI = fromEvent(startButton, "click").pipe(
+  map(
+    () =>
+      `UI with a select input for the character fantasy race (Orc, Elf, Dwarf, Human). Assume the model is called \`race\`.`,
+  ),
+  tap((description) => {
+    render("raceForm", `<div class="description">{{description}}</div>`, {
+      description,
+    });
+  }),
+  mergeMap((description) => {
+    return from(doLLM(description + "Return only the code.", uiPrompt));
+  }),
+  map(extractResponse),
+  map(grabViewTemplate),
+  tap(debug),
+);
+
+const race$ = new BehaviorSubject("human");
+
+generatedRaceUI
+  .pipe(
+    map((template) => {
+      render("raceForm", template, {
+        get race() {
+          return race$.getValue();
+        },
+        set race(value) {
+          race$.next(value);
+        },
+      });
+    }),
+  )
+  .subscribe();
+
+const generatedAgeUI = fromEvent(startButton, "click").pipe(
+  map(
+    () =>
+      `UI with a text input for the character age. Assume it is called \`age\`.`,
+  ),
+  tap((description) => {
+    render("ageForm", `<div class="description">{{description}}</div>`, {
+      description,
+    });
+  }),
+  mergeMap((description) => {
+    return from(doLLM(description + "Return only the code.", uiPrompt));
+  }),
+  map(extractResponse),
+  map(grabViewTemplate),
+  tap(debug),
+);
+
+const age$ = new BehaviorSubject(25);
+
+generatedAgeUI
+  .pipe(
+    map((template) => {
+      render("ageForm", template, {
+        get age() {
+          return age$.getValue();
+        },
+        set age(value) {
+          age$.next(value);
+        },
+      });
+    }),
+  )
+  .subscribe();
 
 // merge name race and age values together into a single object
-const character$ = combineLatest([name.name$, race.race$, age.age$]).pipe(
+const character$ = combineLatest([name$, race$, age$]).pipe(
   map(([name, race, age]) => ({ name, race, age })),
   filter((c) => c.name && c.race && c.age),
 );
