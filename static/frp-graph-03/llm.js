@@ -29,3 +29,26 @@ export async function doLLM(input, system, response_model) {
     console.error("Error analyzing text:", error);
   }
 }
+
+export function grabViewTemplate(txt) {
+  return txt.match(/```vue\n([\s\S]+?)```/)[1];
+}
+
+export function extractResponse(data) {
+  return data.choices[0].message.content;
+}
+// const name = Name();
+// const race = Race();
+// const age = Age();
+
+export const uiPrompt = `Your task is to generate user interfaces using a vue compatible format. Here is an example component + state combo:
+
+  \`\`\`vue
+  <div>
+    <label for="name">Age:</label>
+    <input type="number" v-model="age" />
+  </div>
+  \`\`\
+
+  Extend this pattern, preferring simple unstyled html. Do not include a template tag, surround all components in a div.
+  `;

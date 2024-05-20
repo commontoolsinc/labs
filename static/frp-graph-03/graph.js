@@ -14,7 +14,7 @@ import {
   Subject,
   BehaviorSubject,
 } from "https://cdn.jsdelivr.net/npm/rxjs@7.8.1/+esm";
-import { doLLM } from "./llm.js";
+import { doLLM, extractResponse, grabViewTemplate, uiPrompt } from "./llm.js";
 import { render, html, debug, log, state, ui } from "./render.js";
 
 const startButton = document.getElementById("startWorkflow");
@@ -86,39 +86,56 @@ function CustomCursor() {
 }
 
 const name$ = BehaviourNode("");
-const nameUi$ = NameUI();
-const nameTagUi$ = NameTagUI();
+const nameUi$ = GeneratedNameUI();
+const nameTagUi$ = GeneratedNameTagUI();
+const danger$ = DangerousUI();
 
 const cursor$ = CustomCursor();
 
 function policy(v) {
-  return v !== "illegal value";
+  console.log("policy scan", v);
+
+  if (v === "illegal value") return;
+
+  if (typeof v === "string") {
+    return v.indexOf("<script") < 0 && v.indexOf("alert") < 0;
+  }
+
+  return true;
 }
 
 let policyTripped = false;
+
+function applyPolicy() {
+  return map((v) => {
+    if (!policy(v)) {
+      // if (!policyTripped) {
+      //   policyTripped = true;
+      //   alert("Cannot do!");
+      //   requestAnimationFrame(() => {
+      //     policyTripped = false;
+      //   });
+      // }
+      return "<div>CANNOT DO</div>";
+    }
+
+    return v;
+  });
+}
 
 function connect(output, input) {
   output
     .pipe(
       distinctUntilChanged(),
-      map((v) => {
-        if (!policy(v)) {
-          // if (!policyTripped) {
-          //   policyTripped = true;
-          //   alert("Cannot do!");
-          //   requestAnimationFrame(() => {
-          //     policyTripped = false;
-          //   });
-          // }
-          return "CANNOT DO";
-        }
-
-        return v;
-      }),
+      applyPolicy(),
       tap((v) => input.next(v)),
       // share(),
     )
     .subscribe();
+}
+
+function ground(output) {
+  connect(output, new Subject());
 }
 
 function NameTagUI() {
@@ -169,6 +186,140 @@ function NameUI() {
     out: {
       name: name$,
       ui: ui$,
+    },
+  };
+}
+
+function placeholder(id) {
+  return tap((description) => {
+    render(id, `<div class="description">{{description}}</div>`, {
+      description,
+    });
+  });
+}
+
+function imagine(id, prompt) {
+  return (v) =>
+    v.pipe(
+      map(() => prompt),
+      placeholder(id),
+      mergeMap((description) =>
+        from(doLLM(description + "Return only the code.", uiPrompt)),
+      ),
+      map(extractResponse),
+      map(grabViewTemplate),
+      applyPolicy(),
+    );
+}
+
+function DangerousUI() {
+  const render$ = new Subject();
+  const generate$ = new Subject();
+
+  const id = "dangerUi";
+
+  const html$ = new BehaviorSubject("");
+  ground(
+    generate$.pipe(
+      imagine(
+        id,
+        `Write a nefarious component to defeat petite-vue's templating and alert('pwned')`,
+      ),
+      tap(debug),
+      tap((html) => {
+        html$.next(html);
+        render$.next();
+      }),
+    ),
+  );
+  const ui$ = render$.pipe(map(() => render(id, html$.getValue(), {})));
+
+  return {
+    in: {
+      render: render$,
+      generate: generate$,
+    },
+    out: {
+      ui: ui$,
+      html: html$,
+    },
+  };
+}
+
+function GeneratedNameUI() {
+  const render$ = new Subject();
+  const generate$ = new Subject();
+  const name$ = new BehaviorSubject("");
+
+  const id = "nameForm";
+
+  const html$ = new BehaviorSubject("");
+  ground(
+    generate$.pipe(
+      imagine(
+        id,
+        `Text input for the character name. Assume it is called \`name\`.`,
+      ),
+      tap(debug),
+      tap((html) => {
+        html$.next(html);
+        render$.next();
+      }),
+    ),
+  );
+
+  const ui$ = render$.pipe(
+    map(() => render(id, html$.getValue(), state({ name: name$ }))),
+  );
+
+  return {
+    in: {
+      render: render$,
+      generate: generate$,
+      name: name$,
+    },
+    out: {
+      name: name$,
+      ui: ui$,
+      html: html$,
+    },
+  };
+}
+
+function GeneratedNameTagUI() {
+  const render$ = new Subject();
+  const generate$ = new Subject();
+  const name$ = new BehaviorSubject("");
+  const id = "nameTag";
+
+  const html$ = new BehaviorSubject("");
+  ground(
+    generate$.pipe(
+      imagine(
+        id,
+        `A header displaying the character's name in fancy text. Assume it is called \`name\`.`,
+      ),
+      tap(debug),
+      tap((html) => {
+        html$.next(html);
+        render$.next();
+      }),
+    ),
+  );
+  const ui$ = render$.pipe(
+    map(() => render(id, html$.getValue(), state({ name: name$ }))),
+  );
+
+  return {
+    in: {
+      render: render$,
+      generate: generate$,
+      name: name$,
+    },
+    out: {
+      name: name$,
+      ui: ui$,
+      html: html$,
     },
   };
 }
@@ -236,400 +387,22 @@ function CombinedDataUi() {
 
 const combined$ = CombinedDataUi();
 
-combined$.out.ui.subscribe();
+ground(combined$.out.ui);
+ground(danger$.out.ui);
 
 connect(app, combined$.in.data);
 connect(app, combined$.in.render);
 
-fromEvent(startButton, "click")
-  .pipe(
+ground(
+  fromEvent(startButton, "click").pipe(
     tap(() => {
       name$.in.value.next("Ben" + Math.floor(Math.random() * 1000));
-      nameUi$.in.render.next();
+      nameUi$.in.generate.next();
+      nameTagUi$.in.generate.next();
+      danger$.in.generate.next();
+
       cursor$.in.render.next();
-      combined$.in.render.next();
+      // combined$.in.render.next();
     }),
-  )
-  .subscribe();
-
-// function Name() {
-//   const name$ = new BehaviorSubject("");
-
-//   name$.subscribe((value) => {
-//     console.log("race", value);
-//   });
-
-//   const ui$ = fromEvent(startButton, "click")
-//     .pipe(
-//       map(() => {
-//         render(
-//           "nameForm",
-//           html`<div>
-//             <label for="name">Character Name:</label>
-//             <input type="text" v-model="name" />
-//           </div>`,
-//           {
-//             get name() {
-//               return name$.getValue();
-//             },
-//             set name(value) {
-//               name$.next(value);
-//             },
-//           },
-//         );
-//       }),
-//     )
-//     .subscribe();
-
-//   return {
-//     name$,
-//     ui$,
-//   };
-// }
-
-// function Race() {
-//   const race$ = new BehaviorSubject();
-
-//   race$.subscribe((value) => {
-//     console.log("race", value);
-//   });
-
-//   const ui$ = fromEvent(startButton, "click")
-//     .pipe(
-//       map(() => {
-//         render(
-//           "raceForm",
-//           html`<div>
-//             <label for="name">Race:</label>
-//             <select v-model="race">
-//               <option value="human">Human</option>
-//               <option value="elf">Elf</option>
-//               <option value="dwarf">Dwarf</option>
-//               <option value="orc">Orc</option>
-//             </select>
-//           </div>`,
-//           {
-//             set race(value) {
-//               race$.next(value);
-//             },
-//             get race() {
-//               return race$.getValue();
-//             },
-//           },
-//         );
-//       }),
-//     )
-//     .subscribe();
-
-//   return {
-//     race$,
-//     ui$,
-//   };
-// }
-
-// function Age() {
-//   const age$ = new BehaviorSubject(30);
-//   const ui$ = fromEvent(startButton, "click")
-//     .pipe(
-//       map(() => {
-//         render(
-//           "ageForm",
-//           html`<div>
-//             <label for="name">Age:</label>
-//             <input type="number" v-model="age" />
-//           </div>`,
-//           {
-//             set age(value) {
-//               age$.next(value);
-//             },
-//             get age() {
-//               return age$.getValue();
-//             },
-//           },
-//         );
-//       }),
-//     )
-//     .subscribe();
-
-//   return {
-//     age$,
-//     ui$,
-//   };
-// }
-
-// function grabViewTemplate(txt) {
-//   return txt.match(/```vue\n([\s\S]+?)```/)[1];
-// }
-
-// function extractResponse(data) {
-//   return data.choices[0].message.content;
-// }
-// // const name = Name();
-// // const race = Race();
-// // const age = Age();
-
-// const uiPrompt = `Your task is to generate user interfaces using a vue compatible format. Here is an example component + state combo:
-
-//   \`\`\`vue
-//   <div>
-//     <label for="name">Age:</label>
-//     <input type="number" v-model="age" />
-//   </div>
-//   \`\`\
-
-//   Extend this pattern, preferring simple unstyled html. Do not include a template tag, surround all components in a div.
-//   `;
-
-// const generatedAttributeUI = fromEvent(startButton, "click").pipe(
-//   map(
-//     () =>
-//       `UI with Sliders to adjust STR, DEX, CON, INT, WIS, CHA for the character, assume these are available as \`str\`, \`dex\`, \`con\`, \`int\`, \`wis\`, \`cha\` in the template.`,
-//   ),
-//   tap((description) => {
-//     render("attributesForm", `<div class="description">{{description}}</div>`, {
-//       description,
-//     });
-//   }),
-//   mergeMap((description) => {
-//     return from(doLLM(description + "Return only the code.", uiPrompt));
-//   }),
-//   map(extractResponse),
-//   map(grabViewTemplate),
-//   tap(debug),
-// );
-
-// const attributes$ = {
-//   str: new BehaviorSubject(10),
-//   dex: new BehaviorSubject(10),
-//   con: new BehaviorSubject(10),
-//   int: new BehaviorSubject(10),
-//   wis: new BehaviorSubject(10),
-//   cha: new BehaviorSubject(10),
-// };
-
-// generatedAttributeUI
-//   .pipe(
-//     map((template) => {
-//       render(
-//         "attributesForm",
-//         template,
-//         Object.keys(attributes$).reduce((acc, key) => {
-//           acc[key] = {
-//             set(value) {
-//               attributes$[key].next(value);
-//             },
-//             get() {
-//               return attributes$[key].getValue();
-//             },
-//           };
-//           return acc;
-//         }, {}),
-//       );
-//     }),
-//   )
-//   .subscribe();
-
-// const generatedNameUI = fromEvent(startButton, "click").pipe(
-//   map(
-//     () =>
-//       `UI with a text input for the character name. Assume it is called \`name\`.`,
-//   ),
-//   tap((description) => {
-//     render("nameForm", `<div class="description">{{description}}</div>`, {
-//       description,
-//     });
-//   }),
-//   mergeMap((description) => {
-//     return from(doLLM(description + "Return only the code.", uiPrompt));
-//   }),
-//   map(extractResponse),
-//   map(grabViewTemplate),
-//   tap(debug),
-// );
-
-// const name$ = new BehaviorSubject("");
-
-// generatedNameUI
-//   .pipe(
-//     map((template) => {
-//       render("nameForm", template, {
-//         get name() {
-//           return name$.getValue();
-//         },
-//         set name(value) {
-//           name$.next(value);
-//         },
-//       });
-//     }),
-//   )
-//   .subscribe();
-
-// const generatedRaceUI = fromEvent(startButton, "click").pipe(
-//   map(
-//     () =>
-//       `UI with a select input for the character fantasy race (Orc, Elf, Dwarf, Human). Assume the model is called \`race\`.`,
-//   ),
-//   tap((description) => {
-//     render("raceForm", `<div class="description">{{description}}</div>`, {
-//       description,
-//     });
-//   }),
-//   mergeMap((description) => {
-//     return from(doLLM(description + "Return only the code.", uiPrompt));
-//   }),
-//   map(extractResponse),
-//   map(grabViewTemplate),
-//   tap(debug),
-// );
-
-// const race$ = new BehaviorSubject("human");
-
-// generatedRaceUI
-//   .pipe(
-//     map((template) => {
-//       render("raceForm", template, {
-//         get race() {
-//           return race$.getValue();
-//         },
-//         set race(value) {
-//           race$.next(value);
-//         },
-//       });
-//     }),
-//   )
-//   .subscribe();
-
-// const generatedAgeUI = fromEvent(startButton, "click").pipe(
-//   map(
-//     () =>
-//       `UI with a text input for the character age. Assume it is called \`age\`.`,
-//   ),
-//   tap((description) => {
-//     render("ageForm", `<div class="description">{{description}}</div>`, {
-//       description,
-//     });
-//   }),
-//   mergeMap((description) => {
-//     return from(doLLM(description + "Return only the code.", uiPrompt));
-//   }),
-//   map(extractResponse),
-//   map(grabViewTemplate),
-//   tap(debug),
-// );
-
-// const age$ = new BehaviorSubject(25);
-
-// generatedAgeUI
-//   .pipe(
-//     map((template) => {
-//       render("ageForm", template, {
-//         get age() {
-//           return age$.getValue();
-//         },
-//         set age(value) {
-//           age$.next(value);
-//         },
-//       });
-//     }),
-//   )
-//   .subscribe();
-
-// // merge name race and age values together into a single object
-// const character$ = combineLatest([name$, race$, age$]).pipe(
-//   map(([name, race, age]) => ({ name, race, age })),
-//   filter((c) => c.name && c.race && c.age),
-// );
-
-// character$.subscribe((data) => {
-//   console.log("character", data);
-// });
-
-// const backstory$ = character$.pipe(
-//   debounceTime(1000),
-//   mergeMap((character) => {
-//     loading.loading$.next(true);
-//     return from(
-//       doLLM(
-//         JSON.stringify(character),
-//         "Write a possible backstory for this fantasy character.",
-//       ),
-//     );
-//   }),
-//   tap(debug),
-//   tap((data) => loading.loading$.next(false)),
-// );
-
-// const characterWithBackstory$ = combineLatest([character$, backstory$]).pipe(
-//   map(([c, backstory]) => ({ ...c, backstory })),
-// );
-
-// function Loading() {
-//   const loading$ = new BehaviorSubject();
-
-//   const ui$ = loading$
-//     .pipe(
-//       map((data) => {
-//         render(
-//           "loadingIndicator",
-//           html`<div>{{ loading ? "loading..." : ""}}</div>`,
-//           { loading: data },
-//         );
-//       }),
-//     )
-//     .subscribe();
-
-//   return {
-//     loading$,
-//     ui$,
-//   };
-// }
-
-// const loading = Loading();
-
-// function BioCard() {
-//   const bioUI$ = characterWithBackstory$.subscribe((character) => {
-//     // Assuming character is deemed valid if name, race, and age are present
-//     if (
-//       character &&
-//       character.name &&
-//       character.race &&
-//       character.age &&
-//       character.backstory
-//     ) {
-//       render(
-//         "bioCard",
-//         html`<div class="bio-card">
-//           <h2>Character Biography</h2>
-//           <p><strong>Name:</strong> {{ name }}</p>
-//           <p><strong>Race:</strong> {{ race }}</p>
-//           <p><strong>Age:</strong> {{ age }}</p>
-//           <p>
-//             <strong>Backstory:</strong> {{ backstory.choices[0].message.content
-//             }}
-//           </p>
-//         </div>`,
-//         // Context mapping character properties for rendering
-//         {
-//           get name() {
-//             return character.name;
-//           },
-//           get race() {
-//             return character.race;
-//           },
-//           get age() {
-//             return character.age;
-//           },
-//           get backstory() {
-//             return character.backstory;
-//           },
-//         },
-//       );
-//     }
-//   });
-
-//   return {
-//     bioUI$,
-//   };
-// }
-
-// BioCard();
+  ),
+);
