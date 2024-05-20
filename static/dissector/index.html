@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reading Analysis App</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <div class="main-content">
+      <h1>Reading Analysis App</h1>
+      <div class="input-section">
+        <input type="text" id="url-input" placeholder="Enter a URL">
+        <button id="fetch-btn">Fetch</button>
+        <button id="analyze-btn">Analyze</button>
+      </div>
+      <textarea id="text-area" rows="20" cols="80"></textarea>
+      <div id="character-count">0 characters</div>
+    </div>
+    <div class="sidebar">
+      <h2>Analysis Feed</h2>
+      <div id="queue-status"></div>
+      <div id="feed"></div>
+    </div>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
