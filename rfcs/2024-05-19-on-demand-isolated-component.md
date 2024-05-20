@@ -83,7 +83,7 @@ For the purposes of reasoning about what may or may not be part of a component's
 
 ### Isolation
 
-This techniques in this document are centered on making components out of [Wasm][wasm]. Therefor, when the term isolation is used, it mainly refers to the properties enabled by the Wasm runtime insofar as we may access it in a web browser. In a typical case, a Wasm module:
+The techniques in this document are centered on making components out of [Wasm][wasm]. Therefor, when the term isolation is used, it mainly refers to the properties enabled by the Wasm runtime insofar as we may access it in a web browser. In a typical case, a Wasm module:
 
 - Will have its own, unshared buffer of memory
 - May only import objects, capabilities and metadata from "outside" the runtime when they are explicitly provided by its host
@@ -147,7 +147,7 @@ The response has `Content-Type: application/wasm` and the body is an octet strea
 
 With the [Build Server](#build-server) in place - enabled by the [code transformation](#code-transformation) toolchains that are available today and maintained by the [Bytecode Alliance][bytecode-alliance] - we have the basic ingredients needed to assemble a low-friction workflow.
 
-Web browsers do not currently support [Wasm Components][wasm-components]. Foretunately, Wasm Components can be expressed in terms of Core Wasm, so it is possible to polyfill support for Wasm Components in web browsers.
+Web browsers do not currently support [Wasm Components][wasm-components]. Fortunately, Wasm Components can be expressed in terms of Core Wasm, so it is possible to polyfill support for Wasm Components in web browsers.
 
 The [js-component-bindgen] Rust crate provides an API for transforming any valid Wasm Component into browser-compatible Core Wasm, including corresponding TypeScript definitions and high-level JavaScript bindings that export the component's API (as described in its [WIT][wit] definition). Conveniently, the [js-component-bindgen] crate can also be compiled to Wasm and run in a web browser.
 
@@ -165,7 +165,7 @@ The Service Worker intercepts `GET` requests to a well-known local path that is 
 4. Make a request to [`POST /api/v0/component`](#post-apiv0component) on a running [Build Server](#build-server) using the prepared request body
 5. Make a request for the prepared [Wasm Component][wasm-components] using [`GET /api/v0/component/:id`](#get-apiv0componentid) on a running Build Server
 6. Invoke the [`transpile`][js-component-bindgen-transpile] API provided by [js-component-bindgen] and cache the returned files at the appropriate paths
-7. Create a wrapper ESM that imports the cached artifacts re-exports the component API
+7. Create a wrapper ESM that imports the cached artifacts and re-exports the component API
 8. Respond to the intercepted request with the generated wrapper module
 
 ## PAQ
@@ -179,6 +179,10 @@ We may build a component once but request it many times.
 Wasm Components in their raw form are portable. When we polyfill the component, we generate binary artifacts that target a specific platform (distinguished mainly by the properties of its Wasm runtime). Therefor, the number of artifacts that must be produced to support a single target is multiplied by the number of targets we are interested in supporting.
 
 Additionally, once polyfilled the Wasm Component effectively consists of many files (the basic Hello World becomes 5 essential files, or 23 if you include all the TypeScript definition files). This makes them cumbersome to deliver as compared to a single Wasm Component.
+
+**JavaScript Wasm Components inline a whole JS VM. Won't this take up a lot of space in cache?**
+
+Yes. Each instance of the JS VM equals about 8MB of Wasm. There are strategies we might explore that may enable code-sharing under certain circumstances. But, for now this problem will remain unaddressed.
 
 ## Milestones
 
