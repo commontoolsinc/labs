@@ -37,11 +37,8 @@ export function grabViewTemplate(txt) {
 export function extractResponse(data) {
   return data.choices[0].message.content;
 }
-// const name = Name();
-// const race = Race();
-// const age = Age();
 
-export const uiPrompt = `Your task is to generate user interfaces using a vue compatible format. Here is an example component + state combo:
+export const uiPrompt = `Your task is to generate user interfaces using a petite-vue compatible format. Here is an example component + state combo:
 
   \`\`\`vue
   <div>
@@ -50,5 +47,5 @@ export const uiPrompt = `Your task is to generate user interfaces using a vue co
   </div>
   \`\`\
 
-  Extend this pattern, preferring simple unstyled html. Do not include a template tag, surround all components in a div.
+  Extend this pattern, preferring simple unstyled html unless otherwise instructed. Do not include a template tag, surround all components in a \`\`\`vue\`\`\` block.
   `;
