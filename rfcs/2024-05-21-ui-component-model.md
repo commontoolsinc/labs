@@ -8,7 +8,7 @@ Context: converge on a default UI component model for LLM-generated UI.
 
 ## Goals
 
-Product goals:
+### Product goals
 
 - Easy for LLMs to generate
     - Leverages patterns and/or frameworks that are widely present in the training data, or can be learned within a small context window.
@@ -17,7 +17,7 @@ Product goals:
 - Leverages familiar or established patterns for UI development
 - Conformable with existing web FE toolchains.
 
-Technical goals:
+### Technical goals
 
 - Components are encapsulated 
   - A component may control its child tree, but not its siblings or parent
@@ -49,11 +49,12 @@ Technical goals:
 - Components can be rendered on the web platform
 
 Soft goals:
-- UI templates are static
+
+- UI templates are static (P3)
     - They are compiled once at program start, and produce a static tree with specific “binding points” in the tree, where dynamic values and dynamic lists are rendered.
     - This may have a performance advantage over a totally dynamic VDOM tree, since it would allow us to analyze and enforce policies on the tree once, rather than after every render
 
-Non-goals:
+### Non-goals
 
 - Separation of concerns. At odds with high locality of behavior.
 
