@@ -70,7 +70,57 @@ Soft goals:
 
 ## Proposal
 
+## Alternatives
 
+### React-style functional components
+
+### Stateless templates
+
+Borrowing ideas from Mustache, Vue, and Svelte, we could separate logic from template. This would make the template a pure function. It would also encourage factoring out the logic into signal transformations.
+
+Key features:
+
+- All domain logic is pulled out of the template and is performed as signal graph transformations outside of the template.
+- Signals, values, and callbacks are exported from the “script” portion of the module
+- Mustache-style static templates
+    - Ordinary values are rendered statically
+    - Signals are rendered reactively
+    - Callbacks can be used to send messages up from the template
+
+A simple counter example:
+
+```html
+<script>
+  const [count, setCount] = signal(0)
+  export count
+
+  const [clicks, setClicks] = stream()
+  export setClicks
+
+  clicks.sink(_ => setCount(count() + 1))
+</script>
+
+<template>
+  <a onclick="{{setClicks}}">The count is: {{count}}</a>
+</template>
+```
+
+Under the hood, the system might be doing something like this:
+
+```js
+// Preprocessor somehow gets exports from script block
+import * as env from 'module:script'
+
+// Env contains the exported variables. E.g.
+// const {setClicks, count} = env
+
+// Template is populated and returns a UI tree with dynamic bindings
+// at specific locations in the tree
+const vdom = populate(template, env)
+
+// System manages rendering. Modules never have direct access to DOM
+render(dom, vdom)
+```
 
 ## Open questions
 
