@@ -20,10 +20,11 @@ Context: converge on a default UI component model for LLM-generated UI.
 ### Technical goals
 
 - Components are **encapsulated**
-  - A component may control its child tree, but not its siblings or parent
-  - Components are **black boxes**, with inputs and outputs
+    - A component may control its child tree, but not its siblings or parent
 - Components have **inputs**, and **output UI** and **events**
     - Are pure-ish functions of state (we may allow cheats for local component state ala hooks)
+    - Components are **black boxes**
+    - Components are decoupled and only communicate via input and output channels.
 - Component **inputs** and **outputs** are **statically-typed**
     - E.g. via TypeScript
     - Allows the runtime to enforce data policies on component
@@ -38,7 +39,7 @@ Context: converge on a default UI component model for LLM-generated UI.
     - Note: in something like the Elm App Architecture Pattern, Models, Views, and Update functions are “zippered” together, meaning components are “some assembly required”. This would fall short of this goal without some additional means of making an individual component free-standing.
 - Components are **composable**
     - Components can be combined together like lego to create larger components
-    - Composition should involve plugging together component inputs, outputs, and events, and arranging a UI tree. It shouldn’t be more complicated than that.
+    - Composing plugins should be as easy as plugging together component inputs, outputs, and events, and arranging a UI tree. It shouldn’t be more complicated than that.
 - Components can have **holes**, allowing you to slot in an arbitrary component of the right shape.
     - Inversion of control for templates.
     - The shape of the hole is determined by the data’s input and output types
@@ -47,10 +48,14 @@ Context: converge on a default UI component model for LLM-generated UI.
         - [passing down closures that evaluate to components](https://swiftwithmajid.com/2019/11/06/the-power-of-closures-in-swiftui/) 
         - [overridable blocks](https://mustache.github.io/mustache.5.html#Blocks)
 - Components have **[high locality of behavior](https://github.com/gordonbrander/generative-ui-playbook?tab=readme-ov-file#llms-work-best-with-high-locality)**
+- Components are relatively **small**
+    - LLMs will have higher accuracy generating small islands of interactivity vs whole apps
+    - Small composable components are easier to understand and debug
 - UI **templates** are **pure functions of state**
     - Templates take inputs, and output a UI tree and events
     - Templates produce a UI tree that is easy for the runtime to analyze and sanitize (probably a VDOM, probably not raw DOM).
-- Components can be rendered on the web platform
+- Components are renderable to web
+    - Other platforms may be supported in future, but web platform is primary
 
 Soft goals:
 
