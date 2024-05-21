@@ -19,42 +19,43 @@ Context: converge on a default UI component model for LLM-generated UI.
 
 ### Technical goals
 
-- Components are **encapsulated**
+- Components are **encapsulated** (P1)
     - A component may control its child tree, but not its siblings or parent
-- Components have **inputs**, and **output UI** and **events**
-    - Components are pure-ish functions of state (we may allow cheats for local component state ala hooks)
+- Components have **inputs**, and **output UI** and **events** (P1)
+    - Components can be understood as pure-ish functions that receive props and return a view description (we may allow cheats for local component state ala hooks)
     - Components are **black boxes**
     - Components are decoupled and only communicate via input and output channels.
-- Component **inputs** and **outputs** are **statically-typed**
+- Component **inputs** and **outputs** are **statically-typed** (P1)
     - E.g. via TypeScript
     - Allows the runtime to enforce data policies on component
-- Components have **local state**
+- Components have **local state** (P1)
     - State is encapsulated within component
     - Components may pass state down to child components as input
         - E.g. the React **[“lifting state up” pattern](https://legacy.reactjs.org/docs/lifting-state-up.html)**.
     - Local state may be **persisted**.
         - If it isn’t, it is **ephemeral**, and lasts for the lifetime of the component.
-- Components are **islands**
+- Components are **islands** (P1)
     - Components can be used free-standing, or within a larger component tree.
-    - Note: in something like the Elm App Architecture Pattern, Models, Views, and Update functions are “zippered” together, meaning components are “some assembly required”. This would fall short of this goal without some additional means of making an individual component free-standing.
-- Components are **composable**
+    - Note: this is in contrast to something like the Elm App Architecture Pattern, where models, views, and update functions are “zippered” together, meaning components are “some assembly required”. This would fall short of this goal without some additional means of making an individual component a free-standing island.
+- Components are **composable** (P1)
     - Components can be combined together like lego to create larger components
     - Composing plugins should be as easy as plugging together component inputs, outputs, and events, and arranging a UI tree. It shouldn’t be more complicated than that.
-- Components can have **holes**, allowing you to slot in an arbitrary component of the right shape.
+- Components can have **holes**, allowing you to slot in an arbitrary component of the right shape. (P1)
     - Inversion of control for templates.
     - The shape of the hole is determined by the data’s input and output types
     - Example mechanisms
         - [slots](https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_templates_and_slots)
         - [passing down closures that evaluate to components](https://swiftwithmajid.com/2019/11/06/the-power-of-closures-in-swiftui/) 
         - [overridable blocks](https://mustache.github.io/mustache.5.html#Blocks)
-- Components have **[high locality of behavior](https://github.com/gordonbrander/generative-ui-playbook?tab=readme-ov-file#llms-work-best-with-high-locality)**
+- Components have **[high locality of behavior](https://github.com/gordonbrander/generative-ui-playbook?tab=readme-ov-file#llms-work-best-with-high-locality)** (P1)
+    - All component behavior is colocated, including structure, style, and behavior
 - Components are relatively **small**
     - LLMs will have higher accuracy generating small islands of interactivity vs whole apps
     - Small composable components are easier to understand and debug
-- UI **templates** are **pure functions of state**
+- UI **templates** are **pure functions** (P1)
     - Templates take inputs, and output a UI tree and events
     - Templates produce a UI tree that is easy for the runtime to analyze and sanitize (probably a VDOM, probably not raw DOM).
-- Components are renderable to web
+- Components are renderable to web (P1)
     - Other platforms may be supported in future, but web platform is primary
 
 Soft goals:
