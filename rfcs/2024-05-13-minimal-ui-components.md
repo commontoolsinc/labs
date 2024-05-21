@@ -218,3 +218,12 @@ One practical thing we might learn from / potentially borrow from AMP is this no
 When components are sufficiently declarative, they can be customized for display by the system in multiple contexts, and we are able to side-step a number of malicious 3P software challenges, such as cross-site scripting attacks, etc.
 
 Depending upon our goals, this is one tool we have in our toolbelt.
+
+### Others
+
+- [Svelt Runes](https://svelte.dev/blog/runes)
+- [Vue templates](https://vuejs.org/examples/#hello-world)
+- [Mustache](https://mustache.github.io/mustache.5.html)
+- [WICG Template Instantiation Proposal](https://github.com/WICG/webcomponents/blob/gh-pages/proposals/Template-Instantiation.md)
+    - [Template Instantiation Proposal on CSS Tricks](https://css-tricks.com/apples-proposal-html-template-instantiation/)
+- [WICG DOM Parts Proposal](https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md)
