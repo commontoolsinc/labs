@@ -1,19 +1,32 @@
 [workspace]
 members = [
   "rust/example-crate",
+  "rust/usuba"
 ]
 
 # See: https://github.com/rust-lang/rust/issues/90148#issuecomment-949194352
 resolver = "2"
 
 [workspace.dependencies]
+async-trait = { version = "0.1" }
+axum = { version = "0.7" }
+blake3 = { version = "1.5" }
+bytes = { version = "1" }
 js-sys = { version = "0.3" }
+redb = { version = "2" }
+serde = { version = "1" }
+serde_json = { version = "1" }
+tempfile = { version = "3" }
+thiserror = { version = "1" }
+tokio = { version = "1" }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "tracing-log", "json"] }
 tracing-web = { version = "0.1" }
+utoipa = { version = "4" }
+utoipa-swagger-ui = { version = "7" }
 wasm-bindgen = { version = "0.2" }
 web-sys = { version = "0.3" }
-wit-bindgen = { version = "0.24" }
+wit-bindgen = { version = "0.25" }
 
 [profile.release]
 opt-level = 'z'

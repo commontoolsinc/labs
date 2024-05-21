@@ -1,0 +1,25 @@
+[package]
+name = "usuba"
+description = "An anything-to-Common-Wasm build server"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = { workspace = true }
+axum = { workspace = true, features = ["multipart"] }
+blake3 = { workspace = true }
+bytes = { workspace = true }
+redb = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "io-util", "process", "fs"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+utoipa = { workspace = true, features = ["axum_extras"] }
+utoipa-swagger-ui = { workspace = true, features = ["axum"] }
+# gcloud-sdk = { version = "0.24.6", features = ["google-cloud-aiplatform-v1"] }
+
