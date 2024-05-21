@@ -46,9 +46,9 @@ console.log(pythonComponent.hello());
 console.log(javascriptComponent.hello());
 ```
 
-In the example above, the action of importing each module invokes Wasm component compilation / transpilation and Wasm instantiation behind the scenes, producing "on-demand" isolated Wasm Components with high-level, comprehensively-typed JavaScript interfaces. The interface exported by the on-demand module can be invoked, re-exported and/or incorporated idiomatically into other JavaScript modules.
+In the example above, the action of importing each module invokes Wasm Component compilation / transpilation and Wasm instantiation behind the scenes, producing "on-demand" isolated components with high-level, comprehensively-typed JavaScript interfaces. The interface exported by the on-demand module can be invoked, re-exported and/or incorporated idiomatically into other JavaScript modules.
 
-Although the example uses [dynamic import][dynamic-import], the import specifiers in use should work equally well when used with static imports.
+Although the example uses [dynamic import][dynamic-import], the import specifiers should work equally well when used with static imports.
 
 ### Goals
 
@@ -62,7 +62,7 @@ _As an app developer, when I tell an LLM to generate a chunk of code in my (or t
 
 ### Non-goals
 
-- Define an explicit mechanism to provide a pre-defined, custom "standard library" to components (this will be the subject of a future RFC)
+- Implement a mechanism to provide a pre-defined, custom "standard library" to components (this will be the subject of a future RFC)
 - Prescribe specific userspace APIs or capabilities that will be available to components
 - Establish a security boundary for managing the execution of untrusted code
 - Integrate a scheme for policy enforcement on data passed into and out of components
@@ -75,9 +75,15 @@ _As an app developer, when I tell an LLM to generate a chunk of code in my (or t
 
 [Web Assembly (Wasm)][wasm] presents a tantelizing substrate for browser-based isolated components. In 2024, it is possible to run programs written in many languages (C, Rust, JavaScript, Java and Python to name just a few) within the Wasm runtime that is available in all major web browsers. Furthermore, [Wasm Components][wasm-components] provide a common IDL ([WIT][wit]) and ABI for connecting Wasm originating from different language toolchains. [The Bytecode Alliance][bytecode-alliance] hosts a number of tools that enable polyfill-like workflows while Wasm Components are still nascent.
 
+#### Core Wasm and Wasm Components
+
+Wasm runtimes in web browsers all implement [Core Wasm], which may be thought of as the minimum viable API for Wasm to be a useful construct.
+
+[Wasm Components][wasm-components] constitute an ABI defined on top of [Core Wasm], as part of ongoing [WASI] development efforts. Native support for Wasm Components is available in some Wasm runtimes, but it is not as ubiquitous as [Core Wasm].
+
 ### Components
 
-Although the term "component" is commonly used to refer to discrete, composable units of a user interface, this document uses the term in the sense of a [Wasm Component][wasm-components]. In this sense, a component may be thought of as any re-usable chunk of software.
+Although the term "component" commonly refers to discrete, composable units of a user interface, this document uses the term in the sense of a [Wasm Component][wasm-components]. In this sense, a component may be thought of as any re-usable chunk of software.
 
 For the purposes of reasoning about what may or may not be part of a component's interface: anything that can be expressed in a [WIT][wit] definition is considered a candidate (this means you can express anything you want, probably).
 
@@ -203,3 +209,5 @@ Yes. Each instance of the JS VM equals about 8MB of Wasm. There are strategies w
 [cargo-component]: https://github.com/bytecodealliance/cargo-component
 [Service Worker]: https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API
 [js-component-bindgen-transpile]: https://docs.rs/js-component-bindgen/latest/js_component_bindgen/fn.transpile.html
+[Core Wasm]: https://www.w3.org/TR/wasm-core-1/
+[WASI]: https://wasi.dev/
