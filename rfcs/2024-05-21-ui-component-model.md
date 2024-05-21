@@ -13,6 +13,7 @@ Product goals:
 - Easy for LLMs to generate
     - Leverages patterns and/or frameworks that are widely present in the training data, or can be learned within a small context window.
 - Easy for humans to edit
+    - [Maybe it’s not even code?](https://x.com/threepointone/status/1792930000766677034) Or maybe it’s a hybrid of code and plain language?
 - Leverages familiar or established patterns for UI development
 - Conformable with existing web FE toolchains.
 
