@@ -4,11 +4,11 @@ Authors: Gordon Brander
 
 ## Overview
 
-Context: defining a minimal set of components for LLM-generated UI.
+Context: define a UI component model and a minimal set of UI components for LLM-generated UI.
 
 ## Goals
 
-- A minimal set of components to start
+- A minimal set of primitives to start
 - Expressive, allows for somewhat open-ended use-cases
 - Works well with LLM generation
 - Allows for user input, especially text input, buttons.
@@ -80,9 +80,10 @@ Speculative:
 - `<input type="text">`
 - `<input type="search">`
     - `<datalist id="">` - can be combined with text or search inputs to provide  simple type-ahead search.
-- Date input
-- Slider with label
-- Checkbox with label
+- `<input type="date">`
+- `<input type="range">`
+- `<input type="checkbox">`
+- `<input type="radio">`
 
 ### Display components
 
