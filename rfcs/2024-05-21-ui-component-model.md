@@ -22,7 +22,7 @@ Context: converge on a default UI component model for LLM-generated UI.
 - Components are **encapsulated**
     - A component may control its child tree, but not its siblings or parent
 - Components have **inputs**, and **output UI** and **events**
-    - Are pure-ish functions of state (we may allow cheats for local component state ala hooks)
+    - Components are pure-ish functions of state (we may allow cheats for local component state ala hooks)
     - Components are **black boxes**
     - Components are decoupled and only communicate via input and output channels.
 - Component **inputs** and **outputs** are **statically-typed**
