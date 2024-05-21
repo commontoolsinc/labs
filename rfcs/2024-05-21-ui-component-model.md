@@ -108,15 +108,16 @@ A simple counter example:
 Under the hood, the system might be doing something like this:
 
 ```js
-// ...Somewhere in the runtime, invisible to the module...
+// ...Somewhere in the runtime, invisible to the module
 
-// Preprocessor somehow gets exports from script block
-import * as env from 'module:script'
+// System somehow compiles the component definition
+const {env, template} = compile(component)
 
-// Env contains the exported variables. E.g.
+// `template` contains the string contents of the template block.
+// `env` contains the exports from the script block, e.g.
 // const {setClicks, count} = env
 
-// Template is populated and returns a UI tree with dynamic bindings
+// Template is turned into a UI tree with dynamic bindings
 // at specific locations in the tree
 const vdom = populate(template, env)
 
