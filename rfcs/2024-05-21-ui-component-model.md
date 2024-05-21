@@ -108,6 +108,8 @@ A simple counter example:
 Under the hood, the system might be doing something like this:
 
 ```js
+// ...Somewhere in the runtime, invisible to the module...
+
 // Preprocessor somehow gets exports from script block
 import * as env from 'module:script'
 
@@ -118,8 +120,11 @@ import * as env from 'module:script'
 // at specific locations in the tree
 const vdom = populate(template, env)
 
+// Prune or sanitize as needed
+const cleanVdom = sanitize(vdom)
+
 // System manages rendering. Modules never have direct access to DOM
-render(dom, vdom)
+render(dom, cleanVdom)
 ```
 
 ## Open questions
