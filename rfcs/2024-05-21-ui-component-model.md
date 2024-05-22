@@ -89,9 +89,71 @@ Soft goals:
 
 When I give Claude the requirements and ask it to design a component, it usually produces something like this:
 
+```jsx
+const [count, setCount] = signal(0)
+const [clicks, setClicks] = stream()
+clicks.sink(_ => setCount(count() + 1))
 
+function Counter() {
+    return <a onclick="{setClicks}">The count is: {count}</a>
+}
+```
+
+Note the lifetimes:
+
+- Signals are constructed once (maybe in place, or maybe imported from the runtime somehow).
+- The counter function is called by the framework every time the count signal changes.
+
+Pros and cons:
+
+- Pro: lots of React-style functional components in the training set
+- Con: JSX produces a fully dynamic VDOM. The tree can arbitrarily change across calls
+
+Prior art:
+
+- https://preactjs.com/blog/introducing-signals/
 
 ### Spellcaster-style functional components
+
+[Spellcaster](https://github.com/gordonbrander/spellcaster) uses a 
+
+```js
+export function Counter() {
+    const [count, setCount] = signal(0)
+    const [clicks, setClicks] = stream()
+    clicks.sink(_ => setCount(count() + 1)) 
+  
+    return a(
+        {onclick: setClicks},
+        text(() => `The count is ${count()}`)
+    )
+}
+```
+
+Note the lifetimes:
+
+- Counter function is called once at program start, to construct the tree.
+- The FRP signals create bindings to specific parts of the tree to update them reactively
+
+The tree returned is largely static, with dynamic FRP bindings in specific places.
+
+Pros and cons:
+
+- Pro: vanilla JS
+- Pro: static tree
+- Con: less of this in the training set, but then again hyperscript is pretty common
+
+Alternatively this lifetime semantics could be used with JSX instead of hyperscript:
+
+```jsx
+export function Counter() {
+    const [count, setCount] = signal(0)
+    const [clicks, setClicks] = stream()
+    clicks.sink(_ => setCount(count() + 1)) 
+  
+    return <a onclick="{setClicks}">The count is: {count}</a>
+}
+```
 
 ### Stateless templates
 
