@@ -59,7 +59,7 @@ In a FE context, “UI component” means a bundle of UI and behavior that toget
 - Components generate a **intermediate representation** that the runtime can analyze (P1)
     - The UI tree that is generated is not a raw DOM, but some kind of UI tree, such as a **template description** with bindings, or a **VDOM**.
     - The format should be easy for the runtime to analyze and sanitize.
-- Component definitions must be **serializable**
+- Component definitions must be **serializable** (P1)
     - Will be embedded in recipes as some kind of module
 - Components have **no direct access to the DOM** (P1)
     - Like Elm, components produce an intermediate representation, such as a template or VDOM (see above)
