@@ -213,7 +213,7 @@ const cleanVdom = sanitize(vdom)
 render(dom, cleanVdom)
 ```
 
-## Fluent-style
+### Fluent-style
 
 ```html
 const [count, setCount] = signal(0)
