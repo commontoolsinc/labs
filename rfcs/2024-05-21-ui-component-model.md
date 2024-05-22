@@ -54,7 +54,13 @@ Context: converge on a default UI component model for LLM-generated UI.
     - Small composable components are easier to understand and debug
 - UI **templates** are **pure functions** (P1)
     - Templates take inputs, and output a UI tree and events
-    - Templates produce a UI tree that is easy for the runtime to analyze and sanitize (probably a VDOM, probably not raw DOM).
+- Components generate a intermediate representation that the runtime can analyze (P1)
+    - The UI tree that is generated is not a raw DOM, but some kind of UI tree, such as a template description with bindings, or a **VDOM**.
+    - The format should be easy for the runtime to analyze and sanitize.
+- Components do not have direct access to the DOM
+    - Like Elm, components produce an intermediate representation, such as a template or VDOM (see above)
+    - Components get generic messages for events, rather than raw DOM events
+    - The runtime handles all actual DOM rendering and event handling “behind the curtain” in a backend.
 - Components are renderable to web (P1)
     - Other platforms may be supported in future, but web platform is primary
 
@@ -67,6 +73,11 @@ Soft goals:
 ### Non-goals
 
 - Separation of concerns. At odds with high locality of behavior.
+
+### Out of scope for this proposal
+
+- The specific template tags / primitive components that are available.
+    - Code snippets are examples only, to illustrate component architecture. Some use HTML for illustrative purposes. However, we may not end up supporting all of these tags in practice. 
 
 ## Proposal
 
@@ -105,7 +116,29 @@ A simple counter example:
 </template>
 ```
 
-Under the hood, the system might be doing something like this:
+A more complex example:
+
+```html
+<script>
+  const [count, setCount] = signal(0)
+  export count
+
+  const [clicks, setClicks] = stream()
+  export setClicks
+
+  clicks.sink(_ => setCount(count() + 1))
+</script>
+
+<template>
+  <div class="todos">
+    {{#todos}}
+      <
+    {{/todos}}
+  <a onclick="{{setClicks}}">The count is: {{count}}</a>
+</template>
+```
+
+Under the hood, the runtime might be doing something like this:
 
 ```js
 // ...Somewhere in the runtime, invisible to the module
