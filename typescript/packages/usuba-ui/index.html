@@ -5,9 +5,27 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Usuba</title>
+  <link rel="stylesheet" href="/shoelace/dist/themes/light.css" />
+  <link rel="stylesheet" href="/shoelace/dist/themes/dark.css" />
+  <link rel="stylesheet" href="/styles.css" />
 </head>
 
 <body>
+  <section id="specifier">
+    <sl-select aria-label="Language" label="Language" value="js">
+      <sl-option aria-selected="true" value="js">JavaScript</sl-option>
+      <sl-option disabled value="py">Python</sl-option>
+      <sl-option disabled value="rs">Rust</sl-option>
+    </sl-select>
+    <sl-input aria-readonly="true" readonly label="Module specifier"></sl-input>
+    <sl-copy-button label="Copy to smizmar"></sl-copy-button>
+  </section>
+  <section id="code">
+    <sl-textarea label="WIT" resize="none" rows="16" spellcheck="false">
+    </sl-textarea>
+    <sl-textarea label="Source Code" resize="none" rows="16" spellcheck="false">
+    </sl-textarea>
+  </section>
 
   <script type="module">
     if ("serviceWorker" in navigator) {
@@ -29,35 +47,7 @@
     }
   </script>
 
-  <script type="module">
-    // Example component IDL
-    const witComponentDefinition = `
-package example:hello;
-world hello {
-  export hello: func() -> string;
-}`;
-
-    // JavaScript implementation
-    const javascriptSourceCode = `
-export function hello() {
-  return 'Hello, ShmavaScript!'
-}`;
-
-    // Base64-encode all sources
-    const witBase64 = btoa(witComponentDefinition);
-    const javascriptBase64 = btoa(javascriptSourceCode);
-
-    console.log(witBase64);
-
-    const { hello } = await import(
-      /* @vite-ignore */
-      `/module/on-demand/js/${witBase64}/${javascriptBase64}`
-    );
-
-    // Prints "Hello, JavaScript!" to the console
-    console.log("Message from a JavaScript Wasm Component:", hello());
-  </script>
-
+  <script type="module" src="./src/index.ts"></script>
 </body>
 
 </html>

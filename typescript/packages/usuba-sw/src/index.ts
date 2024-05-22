@@ -6,7 +6,6 @@ self.addEventListener('install', (_event) => {
 });
 
 self.addEventListener('fetch', async (event: FetchEvent) => {
-  console.log('Usuba sees a fetch event!');
   if (event.request.method !== 'GET') {
     return;
   }
@@ -14,6 +13,7 @@ self.addEventListener('fetch', async (event: FetchEvent) => {
   const requestUrl = new URL(event.request.url);
 
   if (requestUrl.pathname.startsWith('/module/transpiled')) {
+    console.log('Pulling generated artifact from cache...');
     event.respondWith(
       (async () => {
         const cache = await caches.open('v0/modules/transpiled');
@@ -26,6 +26,7 @@ self.addEventListener('fetch', async (event: FetchEvent) => {
       })()
     );
   } else if (requestUrl.pathname.startsWith('/module/on-demand')) {
+    console.log('On-demand module generation detected...');
     requestUrl.pathname.split('/').slice(2);
 
     const [ext, witBase64, sourceCodeBase64] = requestUrl.pathname
@@ -90,7 +91,7 @@ self.addEventListener('fetch', async (event: FetchEvent) => {
             });
 
             for (const [filename, bytes] of files) {
-              console.log(filename);
+              console.log('Caching artifact:', filename);
               const blob = new Blob([bytes], {
                 type: filename.endsWith('.wasm')
                   ? 'application/wasm'

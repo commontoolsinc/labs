@@ -17,7 +17,9 @@
     "url": "https://github.com/commontoolsinc/labs/issues"
   },
   "homepage": "https://github.com/commontoolsinc/labs#readme",
-  "dependencies": {},
+  "dependencies": {
+    "@shoelace-style/shoelace": "^2.15.1"
+  },
   "devDependencies": {
     "@commontools/usuba-sw": "^0.0.1",
     "typescript": "^5.2.2",
