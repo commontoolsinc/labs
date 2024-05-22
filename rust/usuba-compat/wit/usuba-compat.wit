@@ -1,0 +1,24 @@
+package local:usuba-compat;
+
+world usuba-compat {
+  type files = list<tuple<string, list<u8>>>;
+  type mappings = list<tuple<string, string>>;
+
+  record polyfill-options {
+    name: string,
+    mappings: option<mappings>
+  }
+
+  enum export-type {
+    function,
+    instance,
+  }
+
+  record artifacts {
+    files: files,
+    imports: list<string>,
+    exports: list<tuple<string, export-type>>
+  }
+
+  export polyfill: func(component: list<u8>, options: polyfill-options) -> result<artifacts, string>;
+}

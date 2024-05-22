@@ -1,0 +1,3 @@
+steps:
+- name: 'usuba:latest'
+  args: ['build', '-t', 'usuba:latest', '-f', './rust/usuba/Dockerfile', '.']

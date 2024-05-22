@@ -1,0 +1,63 @@
+{
+  "name": "@commontools/usuba-sw",
+  "author": "The Common Authors",
+  "version": "0.0.1",
+  "description": "Service-worker-based polyfill for Common Modules",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wireit",
+    "update-openapi-spec": "wireit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/commontoolsinc/labs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/commontoolsinc/labs/issues"
+  },
+  "homepage": "https://github.com/commontoolsinc/labs#readme",
+  "files": [
+    "./dist/usuba-sw.js"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "@bytecodealliance/preview2-shim": "^0.16.2",
+    "@hey-api/openapi-ts": "^0.46.0",
+    "@types/serviceworker": "^0.0.86",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0",
+    "wireit": "^0.14.4"
+  },
+  "wireit": {
+    "update-openapi-spec": {
+      "command": "./scripts/update-openapi-spec.sh"
+    },
+    "build:openapi-client": {
+      "files": [
+        "./openapi.json"
+      ],
+      "command": "npx @hey-api/openapi-ts -i ./openapi.json -o ./src/openapi-client"
+    },
+    "build:wasm": {
+      "command": "../../../rust/usuba-compat/build-wasm-component.sh",
+      "files": [
+        "../../../rust/**/*"
+      ],
+      "output": [
+        "./src/usuba_compat/**"
+      ]
+    },
+    "build": {
+      "dependencies": [
+        "build:wasm",
+        "build:openapi-client"
+      ],
+      "files": [
+        "./src/**/*"
+      ],
+      "command": "tsc --build -f && cp -r ./src/usuba_compat ./lib/usuba_compat && vite build"
+    }
+  }
+}

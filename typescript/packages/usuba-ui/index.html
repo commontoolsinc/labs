@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Usuba</title>
+</head>
+
+<body>
+
+  <script type="module">
+    if ("serviceWorker" in navigator) {
+      try {
+        const registration = await navigator.serviceWorker.register("/usuba-sw.js", {
+          type: "module",
+          scope: "/"
+        });
+        if (registration.installing) {
+          console.log("Service worker installing");
+        } else if (registration.waiting) {
+          console.log("Service worker installed");
+        } else if (registration.active) {
+          console.log("Service worker active");
+        }
+      } catch (error) {
+        console.error(`Registration failed with ${error}`);
+      }
+    }
+  </script>
+
+  <script type="module">
+    // Example component IDL
+    const witComponentDefinition = `
+package example:hello;
+world hello {
+  export hello: func() -> string;
+}`;
+
+    // JavaScript implementation
+    const javascriptSourceCode = `
+export function hello() {
+  return 'Hello, ShmavaScript!'
+}`;
+
+    // Base64-encode all sources
+    const witBase64 = btoa(witComponentDefinition);
+    const javascriptBase64 = btoa(javascriptSourceCode);
+
+    console.log(witBase64);
+
+    const { hello } = await import(
+      /* @vite-ignore */
+      `/module/on-demand/js/${witBase64}/${javascriptBase64}`
+    );
+
+    // Prints "Hello, JavaScript!" to the console
+    console.log("Message from a JavaScript Wasm Component:", hello());
+  </script>
+
+</body>
+
+</html>

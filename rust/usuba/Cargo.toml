@@ -11,7 +11,9 @@ async-trait = { workspace = true }
 axum = { workspace = true, features = ["multipart"] }
 blake3 = { workspace = true }
 bytes = { workspace = true }
+mime_guess = { workspace = true }
 redb = { workspace = true }
+rust-embed = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }

@@ -63,6 +63,8 @@ impl Bake for JavaScriptBaker {
 
         let wasm_bytes = tokio::fs::read(&wasm_path).await?;
 
+        info!("Finished baking");
+
         Ok(wasm_bytes.into())
     }
 }

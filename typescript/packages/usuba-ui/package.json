@@ -1,14 +1,11 @@
 {
-  "name": "@commontools-internal/root",
+  "name": "@commontools/usuba-ui",
   "author": "The Common Authors",
   "version": "0.0.1",
-  "description": "Root package definition for the TypeScript workspace",
+  "description": "Management UI for the Usuba build server",
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
-  "workspaces": [
-    "./packages/*"
-  ],
   "scripts": {
     "build": "wireit"
   },
@@ -20,16 +17,19 @@
     "url": "https://github.com/commontoolsinc/labs/issues"
   },
   "homepage": "https://github.com/commontoolsinc/labs#readme",
+  "dependencies": {},
   "devDependencies": {
+    "@commontools/usuba-sw": "^0.0.1",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0",
     "wireit": "^0.14.4"
   },
   "wireit": {
     "build": {
       "dependencies": [
-        "./packages/example-package:build",
-        "./packages/usuba-sw:build",
-        "./packages/usuba-ui:build"
-      ]
+        "../usuba-sw:build"
+      ],
+      "command": "vite build"
     }
   }
 }
