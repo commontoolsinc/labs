@@ -215,7 +215,7 @@ render(dom, cleanVdom)
 
 ### Fluent-style
 
-```html
+```js
 const [count, setCount] = signal(0)
 
 // Create a UI component
