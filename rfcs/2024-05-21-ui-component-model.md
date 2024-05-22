@@ -213,6 +213,29 @@ const cleanVdom = sanitize(vdom)
 render(dom, cleanVdom)
 ```
 
+## Fluent-style
+
+```html
+const [count, setCount] = signal(0)
+
+// Create a UI component
+const a = $('a')
+
+// Get events as a stream
+a.clicks()
+    .scan((state, event) => state + 1, 0)
+    .sink(setCount)
+
+// Method chaining to set properties, children, etc
+a.text(count => `the count is ${count}`, count)
+
+return a
+```
+
+Prior art:
+
+- [D3.js](https://d3js.org)
+
 ## Open questions
 
 ## Prior art
