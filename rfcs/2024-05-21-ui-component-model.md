@@ -6,6 +6,8 @@ Authors: Gordon Brander
 
 Context: converge on a default UI component model for LLM-generated UI.
 
+In a FE context, “UI component” means a bundle of UI and behavior that together describe an island of interactivity. There are various popular component models, including React, WebComponents, Vue, etc. In keeping with common FE terminology, this rfc uses the term “component” to mean “bundle of code that describes an island of UI”. For our specific context, a UI component is probably a type of module.
+
 ## Goals
 
 ### Product goals
@@ -85,6 +87,12 @@ Soft goals:
 
 ### React-style functional components
 
+When I give Claude the requirements and ask it to design a component, it usually produces something like this:
+
+
+
+### Spellcaster-style functional components
+
 ### Stateless templates
 
 Borrowing ideas from Mustache, Vue, and Svelte, we could separate logic from template. This would make the template a pure function. It would also encourage factoring out the logic into signal transformations.
@@ -112,28 +120,6 @@ A simple counter example:
 </script>
 
 <template>
-  <a onclick="{{setClicks}}">The count is: {{count}}</a>
-</template>
-```
-
-A more complex example:
-
-```html
-<script>
-  const [count, setCount] = signal(0)
-  export count
-
-  const [clicks, setClicks] = stream()
-  export setClicks
-
-  clicks.sink(_ => setCount(count() + 1))
-</script>
-
-<template>
-  <div class="todos">
-    {{#todos}}
-      <
-    {{/todos}}
   <a onclick="{{setClicks}}">The count is: {{count}}</a>
 </template>
 ```
