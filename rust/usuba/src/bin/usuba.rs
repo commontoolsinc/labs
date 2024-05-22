@@ -14,7 +14,8 @@ pub async fn main() -> Result<(), UsubaError> {
         .finish();
     tracing::subscriber::set_global_default(subscriber.with(Layer::default().pretty()))?;
 
-    let socket_address: SocketAddr = "127.0.0.1:8080".parse()?;
+    let port = std::option_env!("PORT").unwrap_or("8080");
+    let socket_address: SocketAddr = format!("0.0.0.0:{port}").parse()?;
     let listener = tokio::net::TcpListener::bind(socket_address).await?;
 
     info!("Server listening on {}", socket_address);
