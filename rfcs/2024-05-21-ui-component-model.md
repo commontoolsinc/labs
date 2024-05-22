@@ -134,12 +134,12 @@ export function Counter() {
 }
 ```
 
-Note the lifetimes:
+This looks superficially like a React component, but note the lifetimes:
 
-- Counter function is called once at program start, to construct the tree.
-- The FRP signals create bindings to specific parts of the tree to update them reactively
+- Counter function is a factory function that is called only once, to construct the tree.
+- The FRP signals are bound to specific parts of the tree and make fine-grained reactive updates to just those parts of the tree.
 
-The tree returned is largely static, with dynamic FRP bindings in specific places.
+So, the tree returned is largely static, with dynamic FRP bindings in specific places.
 
 Pros and cons:
 
