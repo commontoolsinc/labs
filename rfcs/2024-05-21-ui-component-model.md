@@ -56,10 +56,10 @@ In a FE context, “UI component” means a bundle of UI and behavior that toget
     - Small composable components are easier to understand and debug
 - UI **templates** are **pure functions** (P1)
     - Templates take inputs, and output a UI tree and events
-- Components generate a intermediate representation that the runtime can analyze (P1)
-    - The UI tree that is generated is not a raw DOM, but some kind of UI tree, such as a template description with bindings, or a **VDOM**.
+- Components generate a **intermediate representation** that the runtime can analyze (P1)
+    - The UI tree that is generated is not a raw DOM, but some kind of UI tree, such as a **template description** with bindings, or a **VDOM**.
     - The format should be easy for the runtime to analyze and sanitize.
-- Components do not have direct access to the DOM
+- Components have **no direct access to the DOM**
     - Like Elm, components produce an intermediate representation, such as a template or VDOM (see above)
     - Components get generic messages for events, rather than raw DOM events
     - The runtime handles all actual DOM rendering and event handling “behind the curtain” in a backend.
