@@ -15,30 +15,27 @@ import {
   BehaviorSubject,
 } from "https://cdn.jsdelivr.net/npm/rxjs@7.8.1/+esm";
 import { render, html, debug, log, state, ui } from "../render.js";
-import { connect } from "../connect.js";
+import { ground, connect } from "../connect.js";
 import { imagine } from "../imagine.js";
 
-export function GeneratedUI(id, prompt, localState) {
+export function GeneratedBackstoryUI() {
   const render$ = new Subject();
-  const generate$ = new BehaviorSubject(prompt);
+  const generate$ = new Subject();
+  const backstory$ = new BehaviorSubject("");
   const html$ = new BehaviorSubject("");
 
-  // map over state and create a new BehaviorSubject for each key
-  const state$ = Object.keys(localState).reduce((acc, key) => {
-    acc[key] = new BehaviorSubject(localState[key]);
-    return acc;
-  }, {});
+  const id = "backstoryPanel";
 
-  const generatedHtml$ = generate$.pipe(imagine(id), tap(debug));
-
-  const ui$ = render$.pipe(
-    map(() => render(id, html$.getValue(), state(state$))),
+  const generatedHtml$ = generate$.pipe(
+    imagine(id, `A paragraph containing a character's \`backstory\`.`),
+    tap(debug),
   );
 
-  Object.keys(state$).forEach((key) => {
-    connect(state$[key], render$);
-  });
+  const ui$ = render$.pipe(
+    map(() => render(id, html$.getValue(), state({ backstory: backstory$ }))),
+  );
 
+  connect(backstory$, render$);
   connect(html$, render$);
   connect(generatedHtml$, html$);
 
@@ -46,11 +43,12 @@ export function GeneratedUI(id, prompt, localState) {
     in: {
       render: render$,
       generate: generate$,
+      backstory: backstory$,
     },
     out: {
+      backstory: backstory$,
       ui: ui$,
       html: html$,
-      ...state$,
     },
   };
 }

@@ -32,6 +32,7 @@ export function GeneratedUI(id, prompt, localState) {
   const generatedHtml$ = generate$.pipe(imagine(id), tap(debug));
 
   const ui$ = render$.pipe(
+    filter(() => html$.getValue() !== ""),
     map(() => render(id, html$.getValue(), state(state$))),
   );
 
