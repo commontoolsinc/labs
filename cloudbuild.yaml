@@ -1,3 +1,5 @@
 steps:
 - name: 'usuba:latest'
   args: ['build', '-t', 'usuba:latest', '-f', './rust/usuba/Dockerfile', '.']
+options:
+  logging: CLOUD_LOGGING_ONLY
