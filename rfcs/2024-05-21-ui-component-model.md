@@ -24,14 +24,14 @@ In a FE context, “UI component” means a bundle of UI and behavior that toget
 - Components are **encapsulated** (P1)
     - A component may control its child tree, but not its siblings or parent
 - Components have **inputs**, and **outputs**
-    - Components output **signals**, **events** and **UI** (P1)
-    - Components can be understood as pure-ish functions that receive props and return a view description (we may allow cheats for local component state ala hooks)
     - Components are **black boxes**
-    - Components are decoupled and only communicate via input and output channels.
+        - Components are decoupled and only communicate through input and output channels.
+        - Components can be understood as pure-ish functions that receive props and return a view description (we may allow cheats for local component state ala hooks)
+    - Components can output **signals**, **event streams** and **UI** (P1)
     - Component inputs and outputs are **statically-typed** (P1)
         - E.g. via TypeScript
         - Allows the runtime to enforce data policies on component
-    - Component inputs and outputs must be serializable data types
+    - Component inputs and outputs must be **serializable** data types
 - Components have **local state** (P1)
     - State is encapsulated within component
     - Components may pass state down to child components as input
