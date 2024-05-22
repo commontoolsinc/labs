@@ -117,7 +117,9 @@ Prior art:
 
 ### Spellcaster-style functional components
 
-[Spellcaster](https://github.com/gordonbrander/spellcaster) uses a 
+[Spellcaster](https://github.com/gordonbrander/spellcaster) that uses signals to create functional components where the component definition is a factory function that is run once, and it returns a UI tree that is reactive.
+
+Spellcaster also has a minimalist attitude, asking “how vanilla can we get and still get a React functional component-like Dx”? It uses [hyperscript-style functions](https://github.com/hyperhype/hyperscript), rather than JSX, to describe UI. In Spellcaster these functions return DOM elements, but we could easily build equivalent hyperscript functions that return some intermediate representation.
 
 ```js
 export function Counter() {
@@ -145,7 +147,7 @@ Pros and cons:
 - Pro: static tree
 - Con: less of this in the training set, but then again hyperscript is pretty common
 
-Alternatively this lifetime semantics could be used with JSX instead of hyperscript:
+Alternatively this Spellcaster-style component definition could be used with JSX instead of hyperscript:
 
 ```jsx
 export function Counter() {
