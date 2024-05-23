@@ -1,0 +1,1 @@
+../../usuba-sw/dist/usuba-sw.js
