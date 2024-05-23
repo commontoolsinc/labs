@@ -215,6 +215,14 @@ const cleanVdom = sanitize(vdom)
 render(dom, cleanVdom)
 ```
 
+Pros/cons:
+
+- Pro: Mustache templates could be used for multiple purposes throughout the system
+    - Templating views
+    - Templating URLs
+    - Templating prompts
+- Pro: clean separation of logic from presentation makes views stateless, and may allow us to pull more of the logic into the recipe layer, where it is legible to the system.
+
 ### Fluent-style
 
 ```js
