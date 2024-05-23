@@ -1,6 +1,6 @@
-# On-demand Isolated Components
+# On-demand Isolated Modules
 
-This document proposes a basic assembly of tools and processes that aims to significantly reduce the time and effort required to experiment with multi-language isolated components within a host web browser Wasm runtime.
+This document proposes a basic assembly of tools and processes that aims to significantly reduce the time and effort required to experiment with multi-language isolated modules within a host web browser Wasm runtime.
 
 In most cases, the workflow may be reduced to importing a JavaScript module (available with associated TypeScript definitions) using the base64-encoded source file as a module specifier. For example:
 
@@ -32,11 +32,11 @@ const javascriptBase64 = atob(javascriptSourceCode);
 
 // Import the modules:
 const { pythonComponent } = await import(
-  `/__/wasm/on-demand/py/${witComponentDefinition}/${pythonSourceCode}`
+  `/module/on-demand/py/${witComponentDefinition}/${pythonSourceCode}`
 );
 
 const { javascriptComponent } = await import(
-  `/__/wasm/on-demand/js/${witComponentDefinition}/${javascriptSourceCode}`
+  `/module/on-demand/js/${witComponentDefinition}/${javascriptSourceCode}`
 );
 
 // Prints "Hello, Python!" to the console
@@ -46,7 +46,7 @@ console.log(pythonComponent.hello());
 console.log(javascriptComponent.hello());
 ```
 
-In the example above, the action of importing each module invokes Wasm Component compilation / transpilation and Wasm instantiation behind the scenes, producing "on-demand" isolated components with high-level, comprehensively-typed JavaScript interfaces. The interface exported by the on-demand module can be invoked, re-exported and/or incorporated idiomatically into other JavaScript modules.
+In the example above, the action of importing each JavaScript module invokes Wasm Component compilation / transpilation and Wasm instantiation behind the scenes, producing "on-demand" isolated Modules with high-level, comprehensively-typed JavaScript interfaces. The interface exported by the on-demand module can be invoked, re-exported and/or incorporated idiomatically into other standard JavaScript modules.
 
 Although the example uses [dynamic import][dynamic-import], the import specifiers should work equally well when used with static imports.
 
@@ -81,21 +81,21 @@ Wasm runtimes in web browsers all implement [Core Wasm], which may be thought of
 
 [Wasm Components][wasm-components] constitute an ABI defined on top of [Core Wasm], as part of ongoing [WASI] development efforts. Native support for Wasm Components is available in some Wasm runtimes, but it is not as ubiquitous as [Core Wasm].
 
-### Components
+### Modules
 
-Although the term "component" commonly refers to discrete, composable units of a user interface, this document uses the term in the sense of a [Wasm Component][wasm-components]. In this sense, a component may be thought of as any re-usable chunk of software.
+Modules are our domain jargon for a self-contained unit of code suitable for variable runtime environments. In our jargon, a [Wasm Component][wasm-components] may be thought of as a special case of a Module.
 
-For the purposes of reasoning about what may or may not be part of a component's interface: anything that can be expressed in a [WIT][wit] definition is considered a candidate (this means you can express anything you want, probably).
+For the purposes of reasoning about what may or may not be part of a Module's interface: anything that can be expressed in a [WIT][wit] definition is considered a candidate (this means you can express anything you want, probably).
 
 ### Isolation
 
-The techniques in this document are centered on making components out of [Wasm][wasm]. Therefor, when the term isolation is used, it mainly refers to the properties enabled by the Wasm runtime insofar as we may access it in a web browser. In a typical case, a Wasm module:
+The techniques in this document are centered on making Modules out of [Wasm][wasm]. Therefor, when the term isolation is used, it mainly refers to the properties enabled by the Wasm runtime insofar as we may access it in a web browser. In a typical case, a Wasm module:
 
 - Will have its own, unshared buffer of memory
 - May only import objects, capabilities and metadata from "outside" the runtime when they are explicitly provided by its host
 - Must be invoked explicitly by its host
 
-Wasm provides a reasonable, basic substrate for component isolation. But, it's important to note that this isolation does not constitute a security boundary. It is easy to accidentally grant more capabilities than intended to a Wasm module when providing it access to host APIs (especially within a web browser host). And, vulnerabilities such as [Specter][specter] and [Rowhammer][rowhammer] are theoretically possible to exploit from a Wasm module.
+Wasm provides a reasonable, basic substrate for Module isolation. But, it's important to note that this isolation does not constitute a security boundary. It is easy to accidentally grant more capabilities than intended to a Wasm module when providing it access to host APIs (especially within a web browser host). And, vulnerabilities such as [Specter][specter] and [Rowhammer][rowhammer] are theoretically possible to exploit from a Wasm module.
 
 ## Tools
 
@@ -114,14 +114,14 @@ We will create a Build Server. The Build Server is responsible transforming rece
 
 The Build Server provides a REST API domain in service of this responsibility.
 
-#### POST /api/v0/component
+#### POST /api/v0/module
 
 Accepts `multipart/form-data` requests.
 
 For the first version, the body is expected to contain two files:
 
 - A WIT component definition
-- A single source code file that implements the component interface
+- A single source code file that implements the suggested component interface
 
 To handle a valid request, the Build Server must:
 
@@ -141,7 +141,7 @@ The Build Server then responds with:
 
 In the future, we may expand on this API to support many WIT definitions and source files in a single request (including support for many languages in one collection of files).
 
-#### GET /api/v0/component/:id
+#### GET /api/v0/module/:id
 
 This API serves [Wasm Components][wasm-components] that were successfully built by earlier requests to [POST /api/v0/component](#post-apiv0component).
 
@@ -161,15 +161,15 @@ The [js-component-bindgen] Rust crate provides an API for transforming any valid
 
 We will create a [Service Worker] that wraps up the capabilities of [js-component-bindgen] in order to polyfill transparent, on-demand support for [Wasm Components][wasm-components] in a web browser.
 
-The Service Worker intercepts `GET` requests to a well-known local path that is unlikely to conflict with a REST-y path in use by the local application domain. For the purposes of this document, we'll say that the matching path looks like `/__/v0/wasm/on-demand/:ext/:wit/:source_code`. When a request is made to that path, the Service Worker performs the following steps:
+The Service Worker intercepts `GET` requests to a well-known local path. For the purposes of this document, we'll say that the matching path looks like `/module/on-demand/:ext/:wit/:source_code`. When a request is made to that path, the Service Worker performs the following steps:
 
 1. Resolve the [WIT][wit] component definition by base64-decoding the `wit` part of the path
 2. Resolve the component source code by base64-decoding the `source_code` part of the path
 3. Prepare a `multipart/form-data` request body that includes two files:
    1. `component.wit`: The resolved WIT component definition
    2. `component.$EXT`: The resolved source file, where `$EXT` is replaced with the `ext` part of the path
-4. Make a request to [`POST /api/v0/component`](#post-apiv0component) on a running [Build Server](#build-server) using the prepared request body
-5. Make a request for the prepared [Wasm Component][wasm-components] using [`GET /api/v0/component/:id`](#get-apiv0componentid) on a running Build Server
+4. Make a request to [`POST /api/v0/module`](#post-apiv0component) on a running [Build Server](#build-server) using the prepared request body
+5. Make a request for the prepared [Wasm Component][wasm-components] using [`GET /api/v0/module/:id`](#get-apiv0componentid) on a running Build Server
 6. Invoke the [`transpile`][js-component-bindgen-transpile] API provided by [js-component-bindgen] and cache the returned files at the appropriate paths
 7. Create a wrapper ESM that imports the cached artifacts and re-exports the component API
 8. Respond to the intercepted request with the generated wrapper module
