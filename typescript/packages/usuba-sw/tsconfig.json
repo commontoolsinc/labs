@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "es2021",
+    "module": "es6",
+    "lib": ["es2021"],
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "inlineSources": true,
+    "outDir": "./lib",
+    "rootDir": "./src",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitAny": true,
+    "noImplicitThis": true,
+    "moduleResolution": "node",
+    "allowSyntheticDefaultImports": true,
+    "experimentalDecorators": true,
+    "importHelpers": true,
+    "stripInternal": true,
+    "noImplicitOverride": true,
+    "types": []
+  },
+  "include": [
+    "src/**/*",
+    "../../node_modules/@bytecodealliance/preview2-shim",
+    "../../node_modules/@types/serviceworker/*.d.ts"
+  ]
+}
