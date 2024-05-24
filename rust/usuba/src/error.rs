@@ -5,6 +5,7 @@ use blake3::HexError;
 use redb::{CommitError, DatabaseError, StorageError, TableError, TransactionError};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::task::JoinError;
 use tracing::subscriber::SetGlobalDefaultError;
 use utoipa::ToSchema;
 
@@ -16,6 +17,8 @@ pub enum UsubaError {
     BakeFailure(String),
     #[error("Invalid configuration: {0}")]
     InvalidConfiguration(String),
+    #[error("Invalid module: {0}")]
+    InvalidModule(String),
     #[error("Module not found")]
     ModuleNotFound,
     #[error("An internal error occurred")]
@@ -89,10 +92,23 @@ impl From<HexError> for UsubaError {
     }
 }
 
+impl From<JoinError> for UsubaError {
+    fn from(value: JoinError) -> Self {
+        UsubaError::Internal(format!("{}", value))
+    }
+}
+
+impl From<anyhow::Error> for UsubaError {
+    fn from(value: anyhow::Error) -> Self {
+        todo!()
+    }
+}
+
 impl IntoResponse for UsubaError {
     fn into_response(self) -> axum::response::Response {
         let status = match self {
             UsubaError::BadRequest => StatusCode::BAD_REQUEST,
+            UsubaError::InvalidModule(_) => StatusCode::BAD_REQUEST,
             UsubaError::BakeFailure(_) => StatusCode::INTERNAL_SERVER_ERROR,
             UsubaError::InvalidConfiguration(_) => StatusCode::BAD_REQUEST,
             UsubaError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,

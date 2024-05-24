@@ -30,6 +30,10 @@ impl Guest for Polyfill {
             .map(|transpiled| transpiled.into())
             .map_err(|error| format!("{}", error))
     }
+
+    fn hash(bytes: Vec<u8>) -> String {
+        blake3::hash(&bytes).to_string()
+    }
 }
 
 export!(Polyfill);

@@ -32,13 +32,19 @@
   },
   "wireit": {
     "update-openapi-spec": {
-      "command": "./scripts/update-openapi-spec.sh"
+      "command": "./scripts/update-openapi-spec.sh",
+      "output": [
+        "./openapi.json"
+      ]
     },
     "build:openapi-client": {
+      "command": "npx @hey-api/openapi-ts -i ./openapi.json -o ./src/openapi-client",
       "files": [
         "./openapi.json"
       ],
-      "command": "npx @hey-api/openapi-ts -i ./openapi.json -o ./src/openapi-client"
+      "output": [
+        "./src/openapi-client/**/*"
+      ]
     },
     "build:wasm": {
       "command": "../../../rust/usuba-compat/build-wasm-component.sh",

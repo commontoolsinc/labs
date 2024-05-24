@@ -1,5 +1,8 @@
 use std::io::Cursor;
+use std::path::{Path, PathBuf};
 use tracing::instrument;
+
+use crate::UsubaError;
 
 use super::Bake;
 use async_trait::async_trait;
@@ -7,6 +10,16 @@ use bytes::Bytes;
 use tempfile::TempDir;
 
 use tokio::process::Command;
+use tokio::task::JoinSet;
+
+use wit_parser::UnresolvedPackage;
+
+async fn write_file(path: PathBuf, bytes: Bytes) -> Result<(), UsubaError> {
+    let mut file = tokio::fs::File::create(&path).await?;
+    let mut cursor = Cursor::new(bytes.as_ref());
+    tokio::io::copy(&mut cursor, &mut file).await?;
+    Ok(())
+}
 
 #[derive(Debug)]
 pub struct JavaScriptBaker {}
@@ -14,7 +27,12 @@ pub struct JavaScriptBaker {}
 #[async_trait]
 impl Bake for JavaScriptBaker {
     #[instrument]
-    async fn bake(&self, wit: Bytes, source_code: Bytes) -> Result<Bytes, crate::UsubaError> {
+    async fn bake(
+        &self,
+        world: &str,
+        wit: Vec<Bytes>,
+        source_code: Bytes,
+    ) -> Result<Bytes, crate::UsubaError> {
         let workspace = TempDir::new()?;
         debug!(
             "Created temporary workspace in {}",
@@ -23,31 +41,32 @@ impl Bake for JavaScriptBaker {
 
         let wasm_path = workspace.path().join("module.wasm");
         let js_path = workspace.path().join("module.js");
-        let wit_path = workspace.path().join("module.wit");
 
-        let (mut wit_file, mut js_file) = tokio::try_join!(
-            tokio::fs::File::create(&wit_path),
-            tokio::fs::File::create(&js_path),
-        )?;
+        debug!(?workspace, "Created temporary workspace");
 
-        debug!(?wit_path, ?js_path, "Created temporary input files");
+        let mut writes = JoinSet::new();
 
-        let mut wit_cursor = Cursor::new(wit);
-        let mut js_cursor = Cursor::new(source_code);
+        wit.into_iter()
+            .enumerate()
+            .map(|(i, wit)| write_file(workspace.path().join(format!("module{}.wit", i)), wit))
+            .chain([write_file(js_path.clone(), source_code)])
+            .for_each(|fut| {
+                writes.spawn(fut);
+            });
 
-        tokio::try_join!(
-            tokio::io::copy(&mut wit_cursor, &mut wit_file),
-            tokio::io::copy(&mut js_cursor, &mut js_file),
-        )?;
+        while let Some(result) = writes.try_join_next() {
+            result??;
+            continue;
+        }
 
-        debug!(?wit_path, ?js_path, "Populated temporary input files");
+        debug!(?workspace, "Populated temporary input files");
 
         let mut command = Command::new("jco");
 
         command
             .arg("componentize")
             .arg("-w")
-            .arg(wit_path.display().to_string())
+            .arg(workspace.path())
             .arg("-o")
             .arg(wasm_path.display().to_string())
             .arg(js_path.display().to_string());

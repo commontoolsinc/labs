@@ -1558,6 +1558,7 @@ dependencies = [
 name = "usuba"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "axum",
  "blake3",
@@ -1574,12 +1575,14 @@ dependencies = [
  "tracing-subscriber",
  "utoipa",
  "utoipa-swagger-ui",
+ "wit-parser 0.208.1",
 ]
 
 [[package]]
 name = "usuba-compat"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "js-component-bindgen",
  "wasmtime-environ",
  "wit-bindgen",

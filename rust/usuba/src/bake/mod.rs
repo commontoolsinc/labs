@@ -13,9 +13,14 @@ pub enum Baker {
 
 #[async_trait]
 impl Bake for Baker {
-    async fn bake(&self, wit: Bytes, source_code: Bytes) -> Result<Bytes, crate::UsubaError> {
+    async fn bake(
+        &self,
+        world: &str,
+        wit: Vec<Bytes>,
+        source_code: Bytes,
+    ) -> Result<Bytes, crate::UsubaError> {
         match self {
-            Baker::JavaScript => (JavaScriptBaker {}).bake(wit, source_code).await,
+            Baker::JavaScript => (JavaScriptBaker {}).bake(world, wit, source_code).await,
         }
     }
 }

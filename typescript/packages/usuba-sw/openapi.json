@@ -105,11 +105,20 @@
     "schemas": {
       "BuildModuleRequest": {
         "type": "object",
+        "description": "A `multipart/form-data` payload that consists of module WIT + source code as\nwell as additional (optional) library WIT files",
         "required": [
-          "files"
+          "module",
+          "library"
         ],
         "properties": {
-          "files": {
+          "library": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "binary"
+            }
+          },
+          "module": {
             "type": "array",
             "items": {
               "type": "string",

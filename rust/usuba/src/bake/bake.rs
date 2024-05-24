@@ -4,5 +4,10 @@ use bytes::Bytes;
 
 #[async_trait]
 pub trait Bake {
-    async fn bake(&self, wit: Bytes, source_code: Bytes) -> Result<Bytes, UsubaError>;
+    async fn bake(
+        &self,
+        world: &str,
+        wit: Vec<Bytes>,
+        source_code: Bytes,
+    ) -> Result<Bytes, UsubaError>;
 }

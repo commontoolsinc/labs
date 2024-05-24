@@ -7,6 +7,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = { workspace = true }
 async-trait = { workspace = true }
 axum = { workspace = true, features = ["multipart"] }
 blake3 = { workspace = true }
@@ -23,5 +24,6 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 utoipa = { workspace = true, features = ["axum_extras"] }
 utoipa-swagger-ui = { workspace = true, features = ["axum"] }
+wit-parser = { workspace = true }
 # gcloud-sdk = { version = "0.24.6", features = ["google-cloud-aiplatform-v1"] }
 

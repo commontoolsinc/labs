@@ -9,6 +9,7 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
+anyhow = { version = "1" }
 async-trait = { version = "0.1" }
 axum = { version = "0.7" }
 blake3 = { version = "1.5" }
@@ -32,6 +33,7 @@ wasm-bindgen = { version = "0.2" }
 wasmtime-environ = { version = "20" }
 web-sys = { version = "0.3" }
 wit-bindgen = { version = "0.25" }
+wit-parser = { version = "0.208" }
 
 [profile.release]
 opt-level = 'z'

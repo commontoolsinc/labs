@@ -21,4 +21,5 @@ world usuba-compat {
   }
 
   export polyfill: func(component: list<u8>, options: polyfill-options) -> result<artifacts, string>;
+  export hash: func(bytes: list<u8>) -> string;
 }
