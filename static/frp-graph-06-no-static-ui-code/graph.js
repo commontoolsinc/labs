@@ -17,7 +17,7 @@ import { connect, ground } from "./connect.js";
 import { SerializedGeneratedUI } from "./nodes/SerializedGeneratedUI.js";
 import { SerializedLLMNode } from "./nodes/SerializedLLMNode.js";
 
-const schemaConfigUI = SerializedGeneratedUI("dimensions", {
+const tableDimensionsUI = SerializedGeneratedUI("dimensions", {
   inputs: {
     prompt: {
       shape: {
@@ -32,11 +32,10 @@ const schemaConfigUI = SerializedGeneratedUI("dimensions", {
     rows: { shape: { kind: "number", default: 2 } },
     cols: { shape: { kind: "number", default: 2 } },
   },
-  contentType: "generated_ui",
-  body: ``,
+  contentType: "GeneratedUI",
 });
 
-const dataUI = SerializedGeneratedUI("table", {
+const dataTableUI = SerializedGeneratedUI("table", {
   inputs: {
     prompt: {
       shape: {
@@ -51,11 +50,10 @@ const dataUI = SerializedGeneratedUI("table", {
     fields: { shape: { kind: "array", default: [] } },
     data: { shape: { kind: "array", default: [] } },
   },
-  contentType: "generated_ui",
-  body: ``,
+  contentType: "GeneratedUI",
 });
 
-const fields$ = SerializedLLMNode({
+const generatedFieldNames$ = SerializedLLMNode({
   inputs: {
     fields: {
       shape: {
@@ -79,9 +77,10 @@ const fields$ = SerializedLLMNode({
   outputs: {
     result: { shape: { kind: "array", default: [] } },
   },
+  contentType: "LLMResult",
 });
 
-const dataTablePrompt$ = fields$.out.result.pipe(
+const dataTablePrompt$ = generatedFieldNames$.out.result.pipe(
   map((d) => {
     return `A datatable that displays records from a database schema. Data will be in \`data\` as a list of JSON records. The columns of the table will be in \`fields\` as a list of strings.
 
@@ -89,7 +88,7 @@ Here are the fields: ${JSON.stringify(d, null, 2)};`;
   }),
 );
 
-const data$ = SerializedLLMNode({
+const generatedData$ = SerializedLLMNode({
   inputs: {
     fields: {
       shape: {
@@ -118,17 +117,18 @@ const data$ = SerializedLLMNode({
   outputs: {
     result: { shape: { kind: "array", default: [] } },
   },
+  contentType: "LLMResult",
 });
 
-ground(schemaConfigUI.out.ui);
-ground(dataUI.out.ui);
+ground(tableDimensionsUI.out.ui);
+ground(dataTableUI.out.ui);
 
-connect(schemaConfigUI.out.cols, fields$.in.fields);
-connect(fields$.out.result, data$.in.fields);
-connect(schemaConfigUI.out.rows, data$.in.rows);
-connect(fields$.out.result, dataUI.out.fields);
-connect(data$.out.result, dataUI.out.data);
+connect(tableDimensionsUI.out.cols, generatedFieldNames$.in.fields);
+connect(generatedFieldNames$.out.result, generatedData$.in.fields);
+connect(tableDimensionsUI.out.rows, generatedData$.in.rows);
+connect(generatedFieldNames$.out.result, dataTableUI.out.fields);
+connect(generatedData$.out.result, dataTableUI.out.data);
 
-connect(data$.out.result, dataUI.in.render);
+connect(generatedData$.out.result, dataTableUI.in.render);
 
-connect(dataTablePrompt$, dataUI.in.prompt);
+connect(dataTablePrompt$.out.result, dataTableUI.in.prompt);
