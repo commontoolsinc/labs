@@ -22,6 +22,7 @@
   },
   "devDependencies": {
     "@commontools/usuba-sw": "^0.0.1",
+    "@commontools/usuba-api": "^0.0.1",
     "typescript": "^5.2.2",
     "vite": "^5.2.0",
     "wireit": "^0.14.4"
@@ -29,6 +30,7 @@
   "wireit": {
     "build": {
       "dependencies": [
+        "../usuba-api:build",
         "../usuba-sw:build"
       ],
       "command": "vite build"

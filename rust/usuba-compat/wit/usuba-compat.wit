@@ -6,7 +6,13 @@ world usuba-compat {
 
   record polyfill-options {
     name: string,
-    mappings: option<mappings>
+    mappings: option<mappings>,
+    instantiation: option<instantiation>
+  }
+
+  enum instantiation {
+    automatic,
+    manual
   }
 
   enum export-type {

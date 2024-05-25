@@ -27,6 +27,7 @@
     "build": {
       "dependencies": [
         "./packages/example-package:build",
+        "./packages/usuba-api:build",
         "./packages/usuba-sw:build",
         "./packages/usuba-ui:build"
       ]

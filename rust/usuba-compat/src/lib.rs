@@ -1,4 +1,4 @@
-use js_component_bindgen::{transpile, TranspileOpts, Transpiled};
+use js_component_bindgen::{transpile, InstantiationMode, TranspileOpts, Transpiled};
 use wasmtime_environ::component::Export as WasmtimeExport;
 
 wit_bindgen::generate!({
@@ -15,7 +15,10 @@ impl Guest for Polyfill {
                 .mappings
                 .map(|mappings| mappings.into_iter().collect()),
             no_typescript: true,
-            instantiation: None,
+            instantiation: options
+                .instantiation
+                .unwrap_or_else(|| Instantiation::Automatic)
+                .into(),
             import_bindings: None,
             no_nodejs_compat: true,
             base64_cutoff: 1024,
@@ -37,6 +40,15 @@ impl Guest for Polyfill {
 }
 
 export!(Polyfill);
+
+impl From<Instantiation> for Option<InstantiationMode> {
+    fn from(value: Instantiation) -> Self {
+        match value {
+            Instantiation::Automatic => None,
+            Instantiation::Manual => Some(InstantiationMode::Async),
+        }
+    }
+}
 
 impl From<Transpiled> for Artifacts {
     fn from(value: Transpiled) -> Self {
