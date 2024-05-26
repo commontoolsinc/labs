@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "build": "wireit",
-    "update-openapi-spec": "wireit"
+    "clean": "wireit"
   },
   "repository": {
     "type": "git",
@@ -55,6 +55,9 @@
         "./dist/*"
       ],
       "command": "tsc --build -f && cp -r ./src/usuba_compat ./lib/usuba_compat && vite build"
+    },
+    "clean": {
+      "command": "rm -rf ./lib ./dist ./.wireit"
     }
   }
 }

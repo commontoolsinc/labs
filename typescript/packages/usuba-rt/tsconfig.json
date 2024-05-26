@@ -1,11 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2022", "WebWorker"],
+    "lib": ["es2022", "DOM", "DOM.Iterable"],
     "outDir": "./lib",
     "rootDir": "./src",
   },
   "include": [
-    "src/**/*"
+    "src/**/*",
   ]
 }

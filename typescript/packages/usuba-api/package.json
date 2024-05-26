@@ -8,6 +8,7 @@
   "type": "module",
   "scripts": {
     "build": "wireit",
+    "clean": "wireit",
     "update-openapi-spec": "wireit"
   },
   "repository": {
@@ -22,23 +23,25 @@
     "./lib/**/*"
   ],
   "exports": "./lib/index.js",
-  "dependencies": {},
   "devDependencies": {
     "@hey-api/openapi-ts": "^0.46.0",
     "typescript": "^5.2.2",
-    "vite": "^5.2.0",
     "wireit": "^0.14.4"
   },
   "wireit": {
     "update-openapi-spec": {
       "command": "./scripts/update-openapi-spec.sh",
+      "files": [
+        "./scripts/update-openapi-spec.sh"
+      ],
       "output": [
         "./openapi.json"
       ]
     },
     "build:openapi-client": {
-      "command": "npx @hey-api/openapi-ts -i ./openapi.json -o ./src/openapi-client",
+      "command": "npx @hey-api/openapi-ts -i ./openapi.json -o ./src/openapi-client && ./scripts/fix-paths.sh",
       "files": [
+        "./scripts/fix-paths.sh",
         "./openapi.json"
       ],
       "output": [
@@ -56,6 +59,9 @@
         "./lib/**/*"
       ],
       "command": "tsc --build -f"
+    },
+    "clean": {
+      "command": "rm -rf ./lib ./.wireit"
     }
   }
 }
