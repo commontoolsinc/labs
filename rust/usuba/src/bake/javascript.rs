@@ -32,6 +32,7 @@ impl Bake for JavaScriptBaker {
         world: &str,
         wit: Vec<Bytes>,
         source_code: Bytes,
+        library: Vec<Bytes>,
     ) -> Result<Bytes, crate::UsubaError> {
         let workspace = TempDir::new()?;
         debug!(
@@ -44,12 +45,22 @@ impl Bake for JavaScriptBaker {
 
         debug!(?workspace, "Created temporary workspace");
 
+        let wit_path = workspace.path().join("wit");
+        let wit_deps_path = wit_path.join("deps");
+
+        tokio::fs::create_dir_all(&wit_deps_path).await?;
+
         let mut writes = JoinSet::new();
 
         wit.into_iter()
             .enumerate()
-            .map(|(i, wit)| write_file(workspace.path().join(format!("module{}.wit", i)), wit))
+            .map(|(i, wit)| write_file(wit_path.join(format!("module{}.wit", i)), wit))
             .chain([write_file(js_path.clone(), source_code)])
+            .chain(
+                library.into_iter().enumerate().map(|(i, wit)| {
+                    write_file(wit_deps_path.join(format!("library{}.wit", i)), wit)
+                }),
+            )
             .for_each(|fut| {
                 writes.spawn(fut);
             });
@@ -66,7 +77,7 @@ impl Bake for JavaScriptBaker {
         command
             .arg("componentize")
             .arg("-w")
-            .arg(workspace.path())
+            .arg(wit_path)
             .arg("-o")
             .arg(wasm_path.display().to_string())
             .arg(js_path.display().to_string());

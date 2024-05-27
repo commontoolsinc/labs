@@ -18,6 +18,7 @@
     "url": "https://github.com/commontoolsinc/labs/issues"
   },
   "homepage": "https://github.com/commontoolsinc/labs#readme",
+  "exports": "./lib/index.js",
   "files": [
     "./lib/*.js"
   ],

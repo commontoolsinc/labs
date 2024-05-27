@@ -1,6 +1,11 @@
 // use std::fmt::Display;
 
-use axum::{extract::multipart::MultipartError, http::StatusCode, response::IntoResponse, Json};
+use axum::{
+    extract::multipart::MultipartError,
+    http::{uri::InvalidUri, StatusCode},
+    response::IntoResponse,
+    Json,
+};
 use blake3::HexError;
 use redb::{CommitError, DatabaseError, StorageError, TableError, TransactionError};
 use serde::{Deserialize, Serialize};
@@ -21,6 +26,8 @@ pub enum UsubaError {
     InvalidModule(String),
     #[error("Module not found")]
     ModuleNotFound,
+    #[error("Upstream request failed: {0}")]
+    UpstreamError(String),
     #[error("An internal error occurred")]
     Internal(String),
 }
@@ -100,7 +107,20 @@ impl From<JoinError> for UsubaError {
 
 impl From<anyhow::Error> for UsubaError {
     fn from(value: anyhow::Error) -> Self {
-        todo!()
+        UsubaError::Internal(format!("{}", value))
+    }
+}
+
+impl From<hyper_util::client::legacy::Error> for UsubaError {
+    fn from(value: hyper_util::client::legacy::Error) -> Self {
+        UsubaError::UpstreamError(format!("{}", value))
+    }
+}
+
+impl From<InvalidUri> for UsubaError {
+    fn from(value: InvalidUri) -> Self {
+        warn!("{}", value);
+        UsubaError::BadRequest
     }
 }
 
@@ -113,6 +133,7 @@ impl IntoResponse for UsubaError {
             UsubaError::InvalidConfiguration(_) => StatusCode::BAD_REQUEST,
             UsubaError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             UsubaError::ModuleNotFound => StatusCode::NOT_FOUND,
+            UsubaError::UpstreamError(_) => StatusCode::BAD_GATEWAY,
         };
 
         (

@@ -9,5 +9,6 @@ pub trait Bake {
         world: &str,
         wit: Vec<Bytes>,
         source_code: Bytes,
+        library: Vec<Bytes>,
     ) -> Result<Bytes, UsubaError>;
 }

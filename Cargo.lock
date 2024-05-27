@@ -328,13 +328,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "example-crate"
-version = "0.1.0"
-dependencies = [
- "wit-bindgen",
-]
-
-[[package]]
 name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1397,6 +1390,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "tower-http"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e9cd434a998747dd2c4276bc96ee2e0c7a2eadf3cae88e52be55a05fa9053f5"
+dependencies = [
+ "bitflags",
+ "bytes",
+ "http",
+ "http-body",
+ "http-body-util",
+ "pin-project-lite",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
 name = "tower-layer"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1563,6 +1572,7 @@ dependencies = [
  "axum",
  "blake3",
  "bytes",
+ "hyper-util",
  "mime_guess",
  "redb",
  "rust-embed",
@@ -1571,6 +1581,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tower-http",
  "tracing",
  "tracing-subscriber",
  "utoipa",

@@ -1,6 +1,5 @@
 [workspace]
 members = [
-  "rust/example-crate",
   "rust/usuba",
   "rust/usuba-compat"
 ]
@@ -14,6 +13,7 @@ async-trait = { version = "0.1" }
 axum = { version = "0.7" }
 blake3 = { version = "1.5" }
 bytes = { version = "1" }
+hyper-util = { version = "0.1", features = ["client", "client-legacy"] }
 js-component-bindgen = { version = "1", features = ["transpile-bindgen"] }
 js-sys = { version = "0.3" }
 mime_guess = { version = "2" }
@@ -24,6 +24,7 @@ serde_json = { version = "1" }
 tempfile = { version = "3" }
 thiserror = { version = "1" }
 tokio = { version = "1" }
+tower-http = { version = "0.5" }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "tracing-log", "json"] }
 tracing-web = { version = "0.1" }

@@ -42,11 +42,12 @@ impl IntoResponse for BuildModuleResponse {
   )
 )]
 pub async fn build_module(
-    State(UsubaState { mut storage }): State<UsubaState>,
+    State(UsubaState { mut storage, .. }): State<UsubaState>,
     mut form_data: Multipart,
 ) -> Result<BuildModuleResponse, UsubaError> {
     let mut world_name: Option<String> = None;
     let mut wit: Vec<Bytes> = Vec::new();
+    let mut library: Vec<Bytes> = Vec::new();
     let mut source_code: Option<Bytes> = None;
     let mut baker: Option<Baker> = None;
 
@@ -89,7 +90,7 @@ pub async fn build_module(
                     }
                 }
                 Some("library") => {
-                    wit.push(field.bytes().await?);
+                    library.push(field.bytes().await?);
                 }
                 Some(name) => warn!("Unexpected multipart content: {name}"),
                 _ => warn!("Skipping unnamed multipart content"),
@@ -98,7 +99,7 @@ pub async fn build_module(
     }
 
     if let (Some(world_name), Some(source_code), Some(baker)) = (world_name, source_code, baker) {
-        let wasm = baker.bake(&world_name, wit, source_code).await?;
+        let wasm = baker.bake(&world_name, wit, source_code, library).await?;
         let hash = storage.write(wasm).await?;
 
         Ok(BuildModuleResponse {

@@ -18,9 +18,14 @@ impl Bake for Baker {
         world: &str,
         wit: Vec<Bytes>,
         source_code: Bytes,
+        library: Vec<Bytes>,
     ) -> Result<Bytes, crate::UsubaError> {
         match self {
-            Baker::JavaScript => (JavaScriptBaker {}).bake(world, wit, source_code).await,
+            Baker::JavaScript => {
+                (JavaScriptBaker {})
+                    .bake(world, wit, source_code, library)
+                    .await
+            }
         }
     }
 }

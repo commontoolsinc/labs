@@ -7,7 +7,7 @@
   <title>Usuba</title>
   <link rel="stylesheet" href="/shoelace/dist/themes/light.css" />
   <link rel="stylesheet" href="/shoelace/dist/themes/dark.css" />
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/usuba-ui/styles.css" />
 </head>
 
 <body>
@@ -42,6 +42,14 @@
           console.log("Service worker installed");
         } else if (registration.active) {
           console.log("Service worker active");
+        }
+
+        const clientOrigin = new URL(window.location.toString()).searchParams.get('client');
+
+        if (clientOrigin != null && self.parent != null) {
+          const targetOrigin = new URL(clientOrigin).origin.toString();
+          console.log(`Service worker activated; sending signal to ${targetOrigin}`);
+          self.parent.postMessage('activated', targetOrigin);
         }
       } catch (error) {
         console.error(`Registration failed with ${error}`);

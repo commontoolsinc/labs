@@ -281,6 +281,7 @@ export const instantiate = async (imports) => {
   }
 
   const getCoreModule = async (name) => fetch('${RUNTIME_TRANSPILED_MODULE_DIRNAME}/' + name).then(WebAssembly.compileStreaming);
+  console.log('Instantiating with:', imports);
   return innerInstantiate(getCoreModule, imports);
 };`;
 

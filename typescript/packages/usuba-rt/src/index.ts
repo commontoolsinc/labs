@@ -46,9 +46,14 @@ const FILE_EXTENSIONS: ContentTypeFileExtensions = {
  * definitions or promises that resolve to WIT definitions.
  */
 export class Runtime {
+  #serviceWorkerActivates: Promise<void>;
   #library: Promise<File[]>;
+  #usubaHost: URL;
 
-  constructor(library: PendingSourceCode[]) {
+  constructor(
+    library: PendingSourceCode[],
+    usubaHost: URL = new URL(window.location.origin)
+  ) {
     this.#library = Promise.all(library).then((library) =>
       library.map(
         (item, index) =>
@@ -58,6 +63,34 @@ export class Runtime {
           )
       )
     );
+    this.#usubaHost = usubaHost;
+    this.#serviceWorkerActivates = new Promise((resolve, _) => {
+      const iframe = document.createElement('iframe');
+      iframe.src = `${this.#usubaHost.origin}/$?client=${encodeURIComponent(
+        window.location.origin
+      )}`;
+      iframe.style.visibility = 'hidden';
+      iframe.style.position = 'absolute';
+      iframe.style.width = '1px';
+      iframe.style.height = '1px';
+
+      console.log('Waiting for service worker activation...');
+
+      const messageListener = (event: MessageEvent<string>) => {
+        console.log('Got postMessage event', event);
+        if (
+          event.origin == this.#usubaHost.origin &&
+          event.data == 'activated'
+        ) {
+          console.log('Detected service worker activation!');
+          resolve();
+          self.removeEventListener('message', messageListener, true);
+          iframe.remove();
+        }
+      };
+      self.addEventListener('message', messageListener, true);
+      document.body.prepend(iframe);
+    });
   }
 
   /**
@@ -73,12 +106,14 @@ export class Runtime {
   async defineModule<T>(
     definition: ModuleDefinition
   ): Promise<PreparedModule<T>> {
-    const [library, wit, sourceCode] = await Promise.all([
+    const [library, wit, sourceCode, _] = await Promise.all([
       this.#library,
       definition.wit,
       definition.sourceCode,
+      this.#serviceWorkerActivates,
     ]);
 
+    apiClient.OpenAPI.BASE = this.#usubaHost.origin;
     const { id } = await apiClient.buildModule({
       formData: {
         library,
@@ -93,7 +128,9 @@ export class Runtime {
     });
 
     const { instantiate } = await import(
-      /* @vite-ignore */ `/module/transpiled/runtime/${id}.js`
+      /* @vite-ignore */ `${
+        this.#usubaHost.origin
+      }/module/transpiled/runtime/${id}.js`
     );
 
     return new PreparedModule(
