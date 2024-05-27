@@ -3,7 +3,7 @@ import * as apiClient from '@commontools/usuba-api';
 export type SourceCode = string | Uint8Array;
 export type PendingSourceCode = SourceCode | Promise<SourceCode>;
 
-export type ContentType = 'text/javascript';
+export type ContentType = 'text/javascript' | 'text/x-python';
 
 export type ContentTypeFileExtensions = {
   [C in ContentType]: string;
@@ -31,6 +31,7 @@ export type ImportableMap = {
 
 const FILE_EXTENSIONS: ContentTypeFileExtensions = {
   'text/javascript': 'js',
+  'text/x-python': 'py',
 };
 
 /**

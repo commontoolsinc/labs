@@ -85,6 +85,10 @@ pub async fn build_module(
                                 source_code = Some(field.bytes().await?);
                                 baker = Some(Baker::JavaScript);
                             }
+                            Some("py") => {
+                                source_code = Some(field.bytes().await?);
+                                baker = Some(Baker::Python);
+                            }
                             _ => (),
                         };
                     }
@@ -106,6 +110,7 @@ pub async fn build_module(
             id: hash.to_string(),
         })
     } else {
+        warn!("Insufficient payload inputs to build the module");
         Err(UsubaError::BadRequest)
     }
 }

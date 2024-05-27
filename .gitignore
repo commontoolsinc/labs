@@ -2,4 +2,5 @@ target
 .wireit
 node_modules
 dist
+lib
 *.tsbuildinfo

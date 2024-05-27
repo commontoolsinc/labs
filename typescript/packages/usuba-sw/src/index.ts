@@ -1,11 +1,11 @@
 import * as apiClient from '@commontools/usuba-api';
 import { polyfill, hash } from './usuba_compat/usuba_compat.component.js';
 
-const SERVICE_WORKER_VERSION = '0.0.1';
+const SERVICE_WORKER_VERSION = '0.0.1-alpha.6';
 
 self.addEventListener('install', (_event) => {
   console.log(
-    `Usuba Service Worker installed (version ${SERVICE_WORKER_VERSION}`
+    `Usuba Service Worker installed (version ${SERVICE_WORKER_VERSION})`
   );
 });
 
@@ -216,6 +216,7 @@ const buildOnDemandModule = (event: FetchEvent, url: URL) => {
 const buildRuntimeModule = (event: FetchEvent, url: URL) => {
   event.respondWith(
     (async () => {
+      console.log('Preparing to build Runtime Module...');
       const formData = await event.request.formData();
       const moduleFiles = formData.getAll('module') as File[];
       const libraryFiles = formData.getAll('library') as File[];
@@ -250,19 +251,8 @@ const buildRuntimeModule = (event: FetchEvent, url: URL) => {
         exports: _exports,
       } = await buildModule(moduleSlug, moduleFiles, libraryFiles, 'manual');
 
-      const wasiShimImports = [];
-
-      for (const specifier of Object.values(WASI_SHIM_MAP)) {
-        const trimmedSpecifier = specifier.split('#').shift();
-        wasiShimImports.push(`'${trimmedSpecifier}': import('${specifier}')`);
-      }
-
-      // const wrapperModule = `export * from '${ON_DEMAND_TRANSPILED_MODULE_DIRNAME}/${moduleSlug}.js'`;
       const wrapperModule = `import {instantiate as innerInstantiate} from '${RUNTIME_TRANSPILED_MODULE_DIRNAME}/${moduleSlug}.js';
-
-const wasiShimImportPromises = {
-  ${wasiShimImports.join(',\n  ')}
-};
+import {shim as wasiShimImportPromises} from '/wasi.js';
 
 const wasiShimImports = Promise.all(
   Object.entries(wasiShimImportPromises)
@@ -281,7 +271,8 @@ export const instantiate = async (imports) => {
   }
 
   const getCoreModule = async (name) => fetch('${RUNTIME_TRANSPILED_MODULE_DIRNAME}/' + name).then(WebAssembly.compileStreaming);
-  console.log('Instantiating with:', imports);
+  console.log('Instantiating module with these resolved imports:', imports);
+  
   return innerInstantiate(getCoreModule, imports);
 };`;
 

@@ -146,5 +146,65 @@ export const demoTwo = async () => {
   console.log('fin');
 };
 
+/**
+ * Demo Three
+ */
+const EXAMPLE_HELLO_PY = `
+import random
+import hello
+from hello.imports import lookup
+
+class Hello(hello.Hello):
+    def hello(self) -> str:
+        return "Hello, Agent %s!" % lookup.entry(random.randint(0, 9))
+`;
+
+export const demoThree = async () => {
+  console.log('Initializing first Runtime');
+
+  const rtOne = new Runtime([]);
+
+  console.log('Defining first Module');
+
+  type ExpectedExportsOne = {
+    lookup: {
+      entry(index: number): string;
+    };
+  };
+
+  const moduleOne = await rtOne.defineModule<ExpectedExportsOne>({
+    contentType: 'text/javascript',
+    wit: COMMON_DIRECTORY_WIT,
+    sourceCode: COMMON_DIRECTORY_JS,
+  });
+
+  const rtTwo = new Runtime([COMMON_DIRECTORY_WIT]);
+
+  console.log('Defining second Module');
+
+  type ExpectedExportsTwo = {
+    hello: () => string;
+  };
+
+  const moduleTwo = await rtTwo.defineModule<ExpectedExportsTwo>({
+    contentType: 'text/x-python',
+    wit: EXAMPLE_HELLO_WIT,
+    sourceCode: EXAMPLE_HELLO_PY,
+  });
+
+  console.log('Instantiating both Modules');
+
+  const { hello } = await moduleTwo.instantiate({
+    'common:directory/lookup': (await moduleOne.instantiate({})).lookup,
+  });
+
+  console.log('Invoking final Module API:');
+
+  console.log(`%c${hello()}`, 'font-size: 1.5em; font-weight: bold;');
+
+  console.log('fin');
+};
+
 (self as any).demoOne = demoOne;
 (self as any).demoTwo = demoTwo;
+(self as any).demoThree = demoThree;
