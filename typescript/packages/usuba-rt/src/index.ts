@@ -34,6 +34,52 @@ const FILE_EXTENSIONS: ContentTypeFileExtensions = {
   'text/x-python': 'py',
 };
 
+const serviceWorkerActivates = (async () => {
+  if (typeof navigator.serviceWorker == 'undefined') {
+    throw new Error(
+      'Service Worker is not supported in this browser; Usuba will not work here.'
+    );
+  }
+
+  try {
+    const registration = await navigator.serviceWorker.register(
+      '/usuba-sw.js',
+      {
+        type: 'module',
+        scope: '/',
+      }
+    );
+
+    const hasPending =
+      registration.active && (registration.installing || registration.waiting);
+
+    let installationFinishes = !hasPending
+      ? Promise.resolve()
+      : new Promise((resolve) => {
+          if (registration.waiting) {
+            return self.location.reload();
+          }
+
+          registration.installing?.addEventListener(
+            'statechange',
+            async (_) => {
+              if (registration.waiting) {
+                self.location.reload();
+              } else {
+                resolve(undefined);
+              }
+            }
+          );
+        });
+
+    await installationFinishes;
+
+    console.log('Usuba Service Worker is active!');
+  } catch (error) {
+    console.error(`Registration failed with ${error}`);
+  }
+})();
+
 /**
  * A Runtime embodies:
  *
@@ -47,7 +93,7 @@ const FILE_EXTENSIONS: ContentTypeFileExtensions = {
  * definitions or promises that resolve to WIT definitions.
  */
 export class Runtime {
-  #serviceWorkerActivates: Promise<void>;
+  #serviceWorkerActivates: Promise<void> = serviceWorkerActivates;
   #library: Promise<File[]>;
   #usubaHost: URL;
 
@@ -65,33 +111,6 @@ export class Runtime {
       )
     );
     this.#usubaHost = usubaHost;
-    this.#serviceWorkerActivates = new Promise((resolve, _) => {
-      const iframe = document.createElement('iframe');
-      iframe.src = `${this.#usubaHost.origin}/$?client=${encodeURIComponent(
-        window.location.origin
-      )}`;
-      iframe.style.visibility = 'hidden';
-      iframe.style.position = 'absolute';
-      iframe.style.width = '1px';
-      iframe.style.height = '1px';
-
-      console.log('Waiting for service worker activation...');
-
-      const messageListener = (event: MessageEvent<string>) => {
-        console.log('Got postMessage event', event);
-        if (
-          event.origin == this.#usubaHost.origin &&
-          event.data == 'activated'
-        ) {
-          console.log('Detected service worker activation!');
-          resolve();
-          self.removeEventListener('message', messageListener, true);
-          iframe.remove();
-        }
-      };
-      self.addEventListener('message', messageListener, true);
-      document.body.prepend(iframe);
-    });
   }
 
   /**

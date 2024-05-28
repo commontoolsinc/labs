@@ -101,12 +101,14 @@ impl From<HexError> for UsubaError {
 
 impl From<JoinError> for UsubaError {
     fn from(value: JoinError) -> Self {
+        error!("{}", value);
         UsubaError::Internal(format!("{}", value))
     }
 }
 
 impl From<anyhow::Error> for UsubaError {
     fn from(value: anyhow::Error) -> Self {
+        error!("{}", value);
         UsubaError::Internal(format!("{}", value))
     }
 }
