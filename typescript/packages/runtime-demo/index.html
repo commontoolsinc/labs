@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Runtime Sandbox</title>
+  <link rel="stylesheet" href="./shoelace/dist/themes/light.css" />
+  <link rel="stylesheet" href="./shoelace/dist/themes/dark.css" />
+  <link rel="stylesheet" href="./styles.css" />
+  <style>
+    #demos {
+      display: flex;
+      flex-direction: row;
+      gap: 1em;
+    }
+  </style>
+</head>
+
+<body>
+  <section id="demos">
+    <button onclick="demoOne()">Demo 1</button>
+    <button onclick="demoTwo()">Demo 2</button>
+    <button onclick="demoThree()">Demo 3</button>
+    <button onclick="demoFour()">Demo 4</button>
+  </section>
+
+  <script type="module" src="./src/index.ts"></script>
+</body>
+
+</html>

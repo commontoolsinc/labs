@@ -1,12 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "lib": ["es2022", "DOM"],
     "outDir": "./lib",
     "rootDir": "./src",
   },
   "include": [
-    "src/**/*",
-    "../../node_modules/@bytecodealliance/preview2-shim",
-    "../../node_modules/@types/serviceworker/*.d.ts"
+    "src/**/*"
   ]
 }

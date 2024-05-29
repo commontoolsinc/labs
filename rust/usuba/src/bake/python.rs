@@ -1,20 +1,15 @@
-use tracing::instrument;
-
-use super::Bake;
 use async_trait::async_trait;
 use bytes::Bytes;
 use tempfile::TempDir;
+use tokio::{process::Command, task::JoinSet};
 
-use tokio::process::Command;
-use tokio::task::JoinSet;
-
-use crate::write_file;
+use crate::{write_file, Bake};
 
 #[derive(Debug)]
-pub struct JavaScriptBaker {}
+pub struct PythonBaker {}
 
 #[async_trait]
-impl Bake for JavaScriptBaker {
+impl Bake for PythonBaker {
     #[instrument]
     async fn bake(
         &self,
@@ -30,7 +25,7 @@ impl Bake for JavaScriptBaker {
         );
 
         let wasm_path = workspace.path().join("module.wasm");
-        let js_path = workspace.path().join("module.js");
+        let python_path = workspace.path().join("module.py");
 
         debug!(?workspace, "Created temporary workspace");
 
@@ -44,7 +39,7 @@ impl Bake for JavaScriptBaker {
         wit.into_iter()
             .enumerate()
             .map(|(i, wit)| write_file(wit_path.join(format!("module{}.wit", i)), wit))
-            .chain([write_file(js_path.clone(), source_code)])
+            .chain([write_file(python_path.clone(), source_code)])
             .chain(
                 library.into_iter().enumerate().map(|(i, wit)| {
                     write_file(wit_deps_path.join(format!("library{}.wit", i)), wit)
@@ -61,15 +56,20 @@ impl Bake for JavaScriptBaker {
 
         debug!(?workspace, "Populated temporary input files");
 
-        let mut command = Command::new("jco");
+        let mut command = Command::new("componentize-py");
 
         command
-            .arg("componentize")
-            .arg("-w")
+            .current_dir(workspace.path())
+            .arg("-d")
             .arg(wit_path)
+            .arg("-w")
+            .arg(world)
+            .arg("componentize")
+            .arg("-p")
+            .arg(workspace.path().display().to_string())
             .arg("-o")
-            .arg(wasm_path.display().to_string())
-            .arg(js_path.display().to_string());
+            .arg("module.wasm")
+            .arg("module");
 
         let child = command.spawn()?;
         let output = child.wait_with_output().await?;
@@ -78,7 +78,7 @@ impl Bake for JavaScriptBaker {
             warn!("{}", String::from_utf8_lossy(&output.stderr));
         }
 
-        debug!("Finished building with jco");
+        debug!("Finished building with componentize-py");
 
         let wasm_bytes = tokio::fs::read(&wasm_path).await?;
 

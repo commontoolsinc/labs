@@ -9,10 +9,11 @@ import type SlTextarea from '@shoelace-style/shoelace/dist/components/textarea/t
 import type SlInput from '@shoelace-style/shoelace/dist/components/input/input.js';
 import type SlCopyButton from '@shoelace-style/shoelace/dist/components/copy-button/copy-button.js';
 import type SlSelect from '@shoelace-style/shoelace/dist/components/select/select.js';
+import * as apiClient from '@commontools/usuba-api';
 
 setBasePath('/shoelace/dist');
 
-const $ = (s) => document.querySelector(s);
+const $ = (s: string) => document.querySelector(s);
 
 const witTextArea = $('sl-textarea[label="WIT"]') as SlTextarea;
 const sourceCodeTextArea = $('sl-textarea[label="Source Code"]') as SlTextarea;
@@ -45,3 +46,33 @@ const updateSpecifier = () => {
 };
 
 updateSpecifier();
+
+// $('sl-button')!.addEventListener('click', async () => {
+//   console.log('Lfgggg');
+//   const result = await apiClient.buildModule({
+//     formData: {
+//       library: [],
+//       module: [
+//         new File(
+//           [new Blob([witTextArea.value], { type: 'text/plain' })],
+//           'module.wit'
+//         ),
+//         new File(
+//           [new Blob([sourceCodeTextArea.value], { type: 'text/javascript' })],
+//           'module.js'
+//         ),
+//       ],
+//     },
+//   });
+//   console.log('DONE!', result);
+
+//   const { instantiate } = await import(
+//     /* @vite-ignore */ `/module/transpiled/runtime/${result.id}.js`
+//   );
+
+//   console.log(instantiate);
+
+//   const { hello } = await instantiate({});
+
+//   console.log(hello());
+// });

@@ -7,6 +7,7 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+blake3 = { workspace = true }
 js-component-bindgen = { workspace = true }
 wit-bindgen = { workspace = true }
 wasmtime-environ = { workspace = true,  features = ["component-model", "compile"] }
