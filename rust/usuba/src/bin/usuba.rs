@@ -14,10 +14,11 @@ pub async fn main() -> Result<(), UsubaError> {
         .finish();
     tracing::subscriber::set_global_default(subscriber.with(Layer::default().pretty()))?;
 
-    let port = std::option_env!("PORT").unwrap_or("8080");
+    let port = std::env::var("PORT").unwrap_or("8080".into());
     let socket_address: SocketAddr = format!("0.0.0.0:{port}").parse()?;
     let listener = tokio::net::TcpListener::bind(socket_address).await?;
-    let upstream = std::option_env!("UPSTREAM")
+    let upstream = std::env::var("UPSTREAM")
+        .ok()
         .map(|upstream| upstream.parse().ok())
         .unwrap_or(None);
 

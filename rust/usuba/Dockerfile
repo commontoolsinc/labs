@@ -40,5 +40,6 @@ RUN npm install -g @bytecodealliance/jco
 COPY --from=builder /build-root/target/release/usuba /usr/bin/usuba
 
 ENV RUST_LOG="debug"
+ENV UPSTREAM="localhost:5173"
 
 ENTRYPOINT ["/usr/bin/usuba"]

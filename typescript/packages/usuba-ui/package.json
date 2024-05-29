@@ -25,6 +25,7 @@
     "@commontools/usuba-sw": "^0.0.1",
     "@commontools/usuba-api": "^0.0.1",
     "typescript": "^5.2.2",
+    "tslib": "^2.6.2",
     "vite": "^5.2.0",
     "wireit": "^0.14.4"
   },
