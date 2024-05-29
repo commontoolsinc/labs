@@ -18,7 +18,7 @@ wasm-tools component new \
   -o usuba_compat.component.wasm \
   --adapt ./wasi_snapshot_preview1.reactor.wasm
 
-jco transpile -O --tla-compat ./usuba_compat.component.wasm  \
+jco transpile --tla-compat ./usuba_compat.component.wasm  \
   -o ./usuba_compat
 
 popd

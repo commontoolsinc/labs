@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "build": "wireit",
-    "update-openapi-spec": "wireit"
+    "clean": "wireit"
   },
   "repository": {
     "type": "git",
@@ -21,7 +21,9 @@
   "files": [
     "./dist/usuba-sw.js"
   ],
-  "dependencies": {},
+  "dependencies": {
+    "@commontools/usuba-api": "^0.0.1"
+  },
   "devDependencies": {
     "@bytecodealliance/preview2-shim": "^0.16.2",
     "@hey-api/openapi-ts": "^0.46.0",
@@ -31,15 +33,6 @@
     "wireit": "^0.14.4"
   },
   "wireit": {
-    "update-openapi-spec": {
-      "command": "./scripts/update-openapi-spec.sh"
-    },
-    "build:openapi-client": {
-      "files": [
-        "./openapi.json"
-      ],
-      "command": "npx @hey-api/openapi-ts -i ./openapi.json -o ./src/openapi-client"
-    },
     "build:wasm": {
       "command": "../../../rust/usuba-compat/build-wasm-component.sh",
       "files": [
@@ -51,13 +44,20 @@
     },
     "build": {
       "dependencies": [
-        "build:wasm",
-        "build:openapi-client"
+        "../usuba-api:build",
+        "build:wasm"
       ],
       "files": [
         "./src/**/*"
       ],
+      "output": [
+        "./lib/**/*",
+        "./dist/*"
+      ],
       "command": "tsc --build -f && cp -r ./src/usuba_compat ./lib/usuba_compat && vite build"
+    },
+    "clean": {
+      "command": "rm -rf ./lib ./dist ./.wireit"
     }
   }
 }

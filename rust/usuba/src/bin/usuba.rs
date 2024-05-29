@@ -17,10 +17,16 @@ pub async fn main() -> Result<(), UsubaError> {
     let port = std::option_env!("PORT").unwrap_or("8080");
     let socket_address: SocketAddr = format!("0.0.0.0:{port}").parse()?;
     let listener = tokio::net::TcpListener::bind(socket_address).await?;
+    let upstream = std::option_env!("UPSTREAM")
+        .map(|upstream| upstream.parse().ok())
+        .unwrap_or(None);
 
     info!("Server listening on {}", socket_address);
+    if let Some(upstream) = &upstream {
+        info!("Reverse proxying requests to {}", upstream);
+    }
 
-    serve(listener).await?;
+    serve(listener, upstream).await?;
 
     Ok(())
 }

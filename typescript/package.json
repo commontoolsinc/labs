@@ -10,7 +10,8 @@
     "./packages/*"
   ],
   "scripts": {
-    "build": "wireit"
+    "build": "wireit",
+    "clean": "wireit"
   },
   "repository": {
     "type": "git",
@@ -26,9 +27,18 @@
   "wireit": {
     "build": {
       "dependencies": [
-        "./packages/example-package:build",
+        "./packages/usuba-rt:build",
+        "./packages/usuba-api:build",
         "./packages/usuba-sw:build",
         "./packages/usuba-ui:build"
+      ]
+    },
+    "clean": {
+      "dependencies": [
+        "./packages/usuba-rt:clean",
+        "./packages/usuba-api:clean",
+        "./packages/usuba-sw:clean",
+        "./packages/usuba-ui:clean"
       ]
     }
   }

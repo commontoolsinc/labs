@@ -1,8 +1,8 @@
 {
-  "name": "@commontools/usuba-ui",
+  "name": "@commontools/runtime-demo",
   "author": "The Common Authors",
   "version": "0.0.1",
-  "description": "Management UI for the Usuba build server",
+  "description": "Testbed for usuba-rt",
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
@@ -18,12 +18,9 @@
     "url": "https://github.com/commontoolsinc/labs/issues"
   },
   "homepage": "https://github.com/commontoolsinc/labs#readme",
-  "dependencies": {
-    "@shoelace-style/shoelace": "^2.15.1"
-  },
   "devDependencies": {
-    "@commontools/usuba-sw": "^0.0.1",
-    "@commontools/usuba-api": "^0.0.1",
+    "@commontools/usuba-rt": "^0.0.1",
+    "@shoelace-style/shoelace": "^2.15.1",
     "typescript": "^5.2.2",
     "vite": "^5.2.0",
     "wireit": "^0.14.4"
@@ -31,10 +28,9 @@
   "wireit": {
     "build": {
       "dependencies": [
-        "../usuba-rt:build",
-        "../usuba-sw:build"
+        "../usuba-rt:build"
       ],
-      "command": "vite build && mv ./dist/index.html ./dist/$.html"
+      "command": "vite build"
     },
     "clean": {
       "command": "rm -rf ./lib ./dist ./.wireit"

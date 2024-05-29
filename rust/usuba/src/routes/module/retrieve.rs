@@ -15,7 +15,7 @@ use crate::{HashStorage, UsubaError, UsubaState};
   )
 )]
 pub async fn retrieve_module(
-    State(UsubaState { storage }): State<UsubaState>,
+    State(UsubaState { storage, .. }): State<UsubaState>,
     Path((id,)): Path<(String,)>,
 ) -> Result<Bytes, UsubaError> {
     let hash = Hash::from_str(&id)?;
