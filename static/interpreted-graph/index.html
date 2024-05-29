@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+    <head>
+        <title>rxjs</title>
+    </head>
+    <style type="text/css">
+        .debug {
+            font-size: 8px;
+            max-height: 128px;
+            max-width: 50vw;
+            overflow-y: auto;
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+            padding: 4px;
+            border-radius: 4px;
+        }
+
+        #workflow {
+            display: flex;
+            flex-direction: column;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        #workflow > * {
+        }
+
+        .columns {
+            display: flex;
+            gap: 16px;
+        }
+
+        .columns > * {
+            flex: 1;
+        }
+    </style>
+    <body>
+        <button id="startWorkflow">Start Workflow</button>
+        <div id="app">
+        </div>
+
+        <script type="module">
+            import { start } from "./graph.js";
+        </script>
+    </body>
+</html>
