@@ -33,9 +33,13 @@ export class ComThread extends LitElement {
   @property({ type: Object }) graph = {} as any
 
   render() {
+    const sortedNodes = this.graph.order.map((orderId: string) =>
+      this.graph.nodes.find((node: any) => node.id === orderId)
+    );
+
     return html`
       ${repeat(
-      this.graph.nodes,
+      sortedNodes,
       (node: any) => html`
           <com-thread-group>
             ${repeat(node.messages.filter((m: any) => m.role === 'user'), (node: any) => {
