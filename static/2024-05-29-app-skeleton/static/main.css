@@ -65,6 +65,7 @@ com-content {
 com-thread {
     display: flex;
     flex-direction: column;
+    gap: var(--gap);
 }
 
 com-thread-group {
@@ -84,7 +85,12 @@ com-prompt {
 }
 
 com-response {
+    background-color: var(--color-secondary-background);
     padding: var(--gap);
+
+    &:focus {
+        outline: none;
+    }
 }
 
 com-chat {
@@ -95,13 +101,13 @@ com-chat {
         "footer";
     height: 100cqh;
 
-    com-chat-main {
+    > com-main {
         grid-area: main;
         overflow-y: auto;
         overflow-x: hidden;
     }
 
-    com-chat-footer {
+    > com-footer {
         grid-area: footer;
     }
 }
