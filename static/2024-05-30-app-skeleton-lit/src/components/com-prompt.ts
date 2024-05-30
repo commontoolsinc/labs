@@ -5,6 +5,9 @@ import {base} from '../styles'
 const styles = css`
 :host {
   display: block;
+}
+
+.main {
   padding: var(--gap);
 
   &:focus {
@@ -18,6 +21,10 @@ export class ComPrompt extends LitElement {
   static styles = [base, styles]
 
   render() {
-    return html`<slot></slot>`
+    return html`
+    <div class="main">
+      <slot></slot>
+    </div>
+    `
   }
 }

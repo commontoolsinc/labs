@@ -32,7 +32,9 @@ export class ComAppGrid extends LitElement {
   render() {
     return html`
       <com-chat-main>
-        <slot name="main"></slot>
+        <com-content>
+          <slot name="main"></slot>
+        </com-content>
       </com-chat-main>
       <com-chat-footer>
         <slot name="footer"></slot>
