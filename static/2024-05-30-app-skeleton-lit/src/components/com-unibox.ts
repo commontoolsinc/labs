@@ -8,18 +8,21 @@ const styles = css`
   }
 
   .unibox {
+    --min-height: calc(var(--unit) * 15);
     display: grid;
     background-color: var(--color-white);
-    border-radius: var(--radius);
+    border-radius: calc(var(--min-height) / 2);
     grid-template-columns: 1fr min-content;
     grid-template-areas: "main end";
     gap: var(--gap);
-    padding: calc(var(--unit) * 2);  
+    padding: calc(var(--unit) * 2);
+    min-height: var(--min-height);
   }
 
   .unibox-main {
     grid-area: main;
     align-self: center;
+    padding-left: calc(var(--unit) * 4);
   }
 
   .unibox-end {

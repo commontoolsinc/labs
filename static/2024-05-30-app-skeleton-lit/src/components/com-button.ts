@@ -14,7 +14,7 @@ const styles = css`
     appearance: none;
     background-color: var(--color-button);
     border: 0;
-    border-radius: var(--radius);
+    border-radius: calc(var(--height) / 2);
     color: var(--color-button-text);
     display: block;
     font-size: var(--body-size);
