@@ -1,6 +1,6 @@
-import {LitElement, html, css} from 'lit-element'
-import {customElement, property} from 'lit/decorators.js'
-import {base} from '../styles'
+import { LitElement, html, css } from 'lit-element'
+import { customElement, property } from 'lit/decorators.js'
+import { base } from '../styles'
 
 const styles = css`
   :host {
@@ -20,11 +20,12 @@ const styles = css`
 export class ComEditor extends LitElement {
   static styles = [base, styles]
 
-  @property({type: String}) value = ''
+  @property({ type: String }) value = ''
+  @property({ type: Function }) onInput = (txt) => { }
 
   render() {
     return html`
-    <div class="editor" contenteditable="plaintext-only">${this.value}</div>
+    <textarea class="editor" type="text" @input=${(v) => this.onInput(v.target.value)}>${this.value}</textarea>
     `
   }
 }

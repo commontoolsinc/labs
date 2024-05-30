@@ -9,17 +9,20 @@ export class ComApp extends LitElement {
   static styles = [base]
 
   @state() graph = todoAppMockup as any
+  @state() userInput = ''
 
   appendMessage() {
     const newGraph = { ...this.graph }
     const id = 'new' + (Math.floor(Math.random() * 1000))
+
+    console.log('push message', this.userInput)
 
     newGraph.nodes.push({
       id,
       messages: [
         {
           role: 'user',
-          content: 'new message'
+          content: this.userInput
         }
       ],
       definition: {}
@@ -27,6 +30,12 @@ export class ComApp extends LitElement {
 
     newGraph.order.push(id);
     this.graph = newGraph;
+    // this.userInput = ''
+  }
+
+  onInput(text) {
+    this.userInput = text
+    console.log(this.userInput)
   }
 
   render() {
@@ -36,7 +45,7 @@ export class ComApp extends LitElement {
             <com-thread slot="main" .graph=${this.graph}></com-thread>
             <div slot="footer">
                 <com-unibox>
-                    <com-editor slot="main"></com-editor>
+                    <com-editor slot="main" .value=${this.userInput} .onInput=${(v) => this.onInput(v)}></com-editor>
                     <com-button slot="end" .action=${() => this.appendMessage()}>Send</com-button>
                 </com-unibox>
             </div>
