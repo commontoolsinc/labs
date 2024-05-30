@@ -1,4 +1,4 @@
-import { makeLattice, inferLabels, type Node, BOTTOM, TOP } from "./ifc.ts";
+import { makeLattice, inferState, type Binding, BOTTOM, TOP } from "./ifc.s";
 
 // Example state and bindings
 const initialState = {
@@ -12,7 +12,7 @@ const initialState = {
   },
 };
 
-const bindings: Node[] = [{ in: ["bar.baz", "bar.zab"], out: ["foo"] }];
+const bindings: Binding[] = [{ in: ["bar.baz", "bar.zab"], out: ["foo"] }];
 
 const lattice = makeLattice({
   [BOTTOM]: ["public"],
@@ -23,7 +23,7 @@ const lattice = makeLattice({
 });
 
 // Infer the state
-const inferredState = inferLabels(initialState, bindings, lattice);
+const inferredState = inferState(initialState, bindings, lattice);
 
 // Accessing the labels
 console.log(inferredState); // Output will reflect the inferred labels based on the lattice

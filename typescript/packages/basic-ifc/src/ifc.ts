@@ -238,7 +238,23 @@ function unify(
 ): Substitutions {
   const newSubstitutions = { ...substitutions };
 
-  // Go through all constraints, and where the right side is a grounded principal, unify it with the left side
+  // Go through all constraints, and where the right side is a grounded
+  // principal, unify it with the left side.
+  for (const [left, right] of constraints) {
+    for (const key in right) {
+      const groundedPrincipal = right[key];
+      if (isLatticeGroundedPrincipal(groundedPrincipal)) {
+        if (newSubstitutions[groundedPrincipal]) {
+          newSubstitutions[groundedPrincipal] = join(
+            [newSubstitutions[groundedPrincipal], left[key]],
+            lattice
+          );
+        } else {
+          newSubstitutions[groundedPrincipal] = left[key];
+        }
+      }
+    }
+  }
 
   return newSubstitutions;
 }
