@@ -9,3 +9,12 @@ export * as ComButton from './components/com-button'
 export * as ComUnibox from './components/com-unibox'
 export * as ComEditor from './components/com-editor'
 export * as ComApp from './components/com-app'
+
+import { doLLM } from './llm'
+
+async function start() {
+  const result = await doLLM('hello world', '', null)
+  console.log(result)
+}
+
+start()
