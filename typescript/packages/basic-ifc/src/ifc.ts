@@ -412,7 +412,7 @@ function applySubstitutions(
   }
 }
 
-function unify(constraints: Constraint[], lattice: Lattice): Constraints {
+function unify(constraints: Constraint[], lattice: Lattice): Constraint[] {
   function traverse(expression: PrincipalExpression): PrincipalExpression {
     if (isLatticeVariable(expression)) {
       return expression;
@@ -436,17 +436,39 @@ function unify(constraints: Constraint[], lattice: Lattice): Constraints {
       applySubstitutions(e, substitutions),
     ]);
   } while (Object.keys(substitutions).length > 0);
+
+  return constraints;
 }
 
-function inferLabels(state: State, bindings: Node[], lattice: Lattice): State {
-  const constraints = unify(generateConstraints(state, bindings), lattice);
+function inferLabels(
+  initialState: State,
+  bindings: Node[],
+  lattice: Lattice
+): State {
+  const constraints = unify(
+    generateConstraints(initialState, bindings),
+    lattice
+  );
 
   // Verify that there are no contradictions
   // TODO
 
   // Apply the constraints to the state and show all inferred labels
   // For now, this means turning variable names into paths and writing out the state
-  return {} as State;
+  const state: State = {};
+  for (const [variable, expression] of constraints) {
+    const [name, type] = variable.slice(1).split("-");
+    let current = state;
+    for (const part of name.split(".")) {
+      if (!current[part]) current[part] = {};
+      current = current[part];
+    }
+    if (!current[$label])
+      current[$label] = { integrity: undefined, confidentiality: undefined };
+    current[$label][type as IntegrityOrConfidentiality] = expression;
+  }
+
+  return state;
 }
 
 export { type Node, type State, makeLattice, inferLabels, BOTTOM, TOP };
