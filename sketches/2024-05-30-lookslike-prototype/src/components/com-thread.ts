@@ -32,6 +32,19 @@ export class ComThread extends LitElement {
 
   @property({ type: Object }) graph = {} as any
 
+  response(node) {
+    if (node.defintion) {
+      return html`<com-response slot="response">
+        ${definitionToHtml(node.defintion)}
+      </com-response>`
+    } else {
+      return html`<com-response slot="response">
+        ${node.messages.filter(m => m.role !== 'user').map(m => m.content).join(' ')}
+      </com-response>`
+    }
+
+  }
+
   render() {
     const sortedNodes = this.graph.order.map((orderId: string) =>
       this.graph.nodes.find((node: any) => node.id === orderId)
@@ -42,14 +55,13 @@ export class ComThread extends LitElement {
       sortedNodes,
       (node: any) => html`
           <com-thread-group>
-            ${repeat(node.messages.filter((m: any) => m.role === 'user'), (node: any) => {
-
+            ${repeat(node.messages.filter(m => m.role === 'user'), (node: any) => {
         return html`<com-prompt slot="prompt">
-              ${node.content}
-            </com-prompt>`
+                      ${node.content}
+                    </com-prompt>`
       })}
 
-            <com-response slot="response">${definitionToHtml(node.definition)}</com-response>
+            ${this.response(node)}
           </com-thread-group>
         `)
       }

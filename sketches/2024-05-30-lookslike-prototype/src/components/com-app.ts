@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js'
 import { base } from '../styles'
 
 import { todoAppMockup } from '../data'
+import { doLLM } from '../llm'
 
 @customElement('com-app')
 export class ComApp extends LitElement {
@@ -11,13 +12,13 @@ export class ComApp extends LitElement {
   @state() graph = todoAppMockup as any
   @state() userInput = ''
 
-  appendMessage() {
+  async appendMessage() {
     const newGraph = { ...this.graph }
     const id = 'new' + (Math.floor(Math.random() * 1000))
 
     console.log('push message', this.userInput)
 
-    newGraph.nodes.push({
+    const newNode = {
       id,
       messages: [
         {
@@ -26,11 +27,17 @@ export class ComApp extends LitElement {
         }
       ],
       definition: {}
-    });
+    }
+
+    newGraph.nodes.push(newNode);
 
     newGraph.order.push(id);
     this.graph = newGraph;
-    // this.userInput = ''
+
+    const result = await doLLM(this.userInput, '', null)
+    newNode.messages.push(result?.choices[0].message);
+
+    this.graph = { ...newGraph }
   }
 
   onInput(text) {
