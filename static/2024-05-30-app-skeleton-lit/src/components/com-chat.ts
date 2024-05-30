@@ -37,7 +37,9 @@ export class ComAppGrid extends LitElement {
         </com-content>
       </com-chat-main>
       <com-chat-footer>
-        <slot name="footer"></slot>
+        <com-content>
+          <slot name="footer"></slot>
+        </com-content>
       </com-chat-footer>
     `
   }
