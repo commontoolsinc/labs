@@ -8,36 +8,6 @@
     <script type="module" src="src/main.ts"></script>
 </head>
 <body class="theme">
-    <com-app-grid>
-        <com-chat slot="main">
-            <com-thread slot="main">
-                <com-thread-group>
-                    <com-prompt slot="prompt">
-                        <com-editor value="Henlo world"></com-editor>
-                    </com-prompt>
-                    <com-response slot="response">
-                        <com-editor value="Hello world"></com-editor>
-                    </com-response>
-                </com-thread-group>
-                <com-thread-group>
-                    <com-prompt slot="prompt">
-                        <com-editor value="Henlo world"></com-editor>
-                    </com-prompt>
-                    <com-response slot="response">
-                        <com-editor value="Hello world"></com-editor>
-                    </com-response>
-                </com-thread-group>
-            </com-thread>
-            <div slot="footer">
-                <com-unibox>
-                    <com-editor slot="main"></com-editor>
-                    <com-button slot="end">Send</com-button>
-                </com-unibox>
-            </div>
-        </com-chat>
-        <div slot="sidebar">
-
-        </div>
-    </com-app-grid>
+    <com-app></com-app>
 </body>
 </html>
