@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+    <head>
+        <title>rxjs</title>
+    </head>
+    <style type="text/css">
+    .columns {
+        display: flex;
+        gap: 16px;
+    }
+
+    .columns > * {
+        flex: 1;
+    }
+
+    pre {
+        font-size: 0.8rem;
+    }
+    </style>
+    <body>
+        <div id="app">
+        </div>
+
+        <hr />
+        <div class="columns">
+            <div>
+                <label>UI Tree</label>
+                <pre id="tree"></pre>
+            </div>
+            <div>
+                <label>Context</label>
+                <pre id="ctx"></pre>
+            </div>
+            <div>
+                <label>System</label>
+                <pre id="system"></pre>
+            </div>
+        </div>
+
+        <script type="module">
+            import "./index.js";
+        </script>
+    </body>
+</html>
