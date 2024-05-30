@@ -1,6 +1,9 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   inferLabels,
+  generateConstraints,
+  type State,
+  $label,
   type Node,
   makeLattice,
   join,
@@ -52,6 +55,57 @@ Deno.test("meet and join with type variables", () => {
   ]);
 
   assertEquals(join(["$foo", "$foo"], lattice), ["join", ["$foo"]]);
+});
+
+Deno.test("generate constraints", () => {
+  const initialState: State = {
+    bar: {
+      baz: {
+        [$label]: {
+          integrity: "trusted cloud",
+          confidentiality: "trusted cloud",
+        },
+      },
+      zab: {
+        [$label]: { integrity: "public", confidentiality: "public" },
+      },
+    },
+  };
+  const bindings: Node[] = [{ in: ["bar.baz", "bar.zab"], out: ["foo"] }];
+
+  const constraints = generateConstraints(initialState, bindings);
+
+  assertEquals(constraints, [
+    ["$bar.baz-integrity", "trusted cloud"],
+    ["$bar.baz-confidentiality", "trusted cloud"],
+    ["$bar.zab-integrity", "public"],
+    ["$bar.zab-confidentiality", "public"],
+    [
+      "$foo-integrity",
+      ["meet", ["$foo-integrity", "$bar.baz-integrity", "$bar.zab-integrity"]],
+    ],
+    [
+      "$foo-confidentiality",
+      [
+        "join",
+        [
+          "$foo-confidentiality",
+          "$bar.baz-confidentiality",
+          "$bar.zab-confidentiality",
+        ],
+      ],
+    ],
+    ["$bar.baz-integrity", ["join", ["$bar.baz-integrity", "$foo-integrity"]]],
+    [
+      "$bar.baz-confidentiality",
+      ["meet", ["$bar.baz-confidentiality", "$foo-confidentiality"]],
+    ],
+    ["$bar.zab-integrity", ["join", ["$bar.zab-integrity", "$foo-integrity"]]],
+    [
+      "$bar.zab-confidentiality",
+      ["meet", ["$bar.zab-confidentiality", "$foo-confidentiality"]],
+    ],
+  ]);
 });
 
 Deno.test("infer labels", () => {

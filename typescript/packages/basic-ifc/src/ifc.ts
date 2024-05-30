@@ -1,31 +1,41 @@
 type IntegrityOrConfidentiality = "integrity" | "confidentiality";
-type LatticeVariable = `\$${string}-${IntegrityOrConfidentiality}`;
-type LatticeGroundedPrincipal = Exclude<string, LatticeVariable>;
+type PrincipalVariable = `\$${string}-${IntegrityOrConfidentiality}`;
+type Principal = Exclude<string, PrincipalVariable>;
+
+type PrincipalExpression =
+  | Principal
+  | PrincipalVariable
+  | ["join" | "meet", PrincipalExpression[]]
+  | undefined;
 
 function isLatticeVariable(
-  principal: LatticePrincipal
-): principal is LatticeVariable {
+  principal: PrincipalExpression
+): principal is PrincipalVariable {
   return typeof principal === "string" && principal.startsWith("$");
 }
 
 function isLatticeGroundedPrincipal(
-  principal: LatticePrincipal
-): principal is LatticeGroundedPrincipal {
+  principal: PrincipalExpression
+): principal is Principal {
   return typeof principal === "string" && !principal.startsWith("$");
 }
 
-type LatticePrincipal =
-  | LatticeGroundedPrincipal
-  | LatticeVariable
-  | ["join" | "meet", LatticePrincipal[]];
+function isCombinedPrincipal(
+  principal: PrincipalExpression
+): principal is ["join" | "meet", PrincipalExpression[]] {
+  return Array.isArray(principal) && principal.length === 2;
+}
 
-type Label = { integrity: LatticePrincipal; confidentiality: LatticePrincipal };
+type Label = {
+  integrity: PrincipalExpression;
+  confidentiality: PrincipalExpression;
+};
 
-type Constraint = [Label, Label];
+type Constraint = [PrincipalVariable, PrincipalExpression];
 
-const $label = Symbol("label");
+export const $label = Symbol("label");
 type State = {
-  [$label]: Label;
+  [$label]?: Label;
   [key: string]: State;
 };
 
@@ -35,12 +45,12 @@ type Node = {
   out: string[];
 };
 
-const [TOP, BOTTOM] = ["TOP", "BOTTOM"] as const as LatticeGroundedPrincipal[];
+const [TOP, BOTTOM] = ["TOP", "BOTTOM"] as const as Principal[];
 
 // Each level lists its parents
 // If a key is missing, it's assumed to have TOP as its parent
 type LatticeRelationships = {
-  [label: LatticeGroundedPrincipal]: LatticeGroundedPrincipal[];
+  [label: Principal]: Principal[];
 };
 
 type Lattice = {
@@ -51,7 +61,7 @@ type Lattice = {
 function computeAllParentsForLabel(
   label: string,
   lattice: LatticeRelationships,
-  end: LatticePrincipal
+  end: PrincipalExpression
 ): string[] {
   if (label === end) {
     return [];
@@ -113,12 +123,10 @@ function makeLattice(latticeRelationships: LatticeRelationships): Lattice {
   return lattice;
 }
 
-function dedupe(principals: LatticePrincipal[]): LatticePrincipal[] {
-  const seen = new Set<LatticePrincipal>();
+function dedupe(principals: PrincipalExpression[]): PrincipalExpression[] {
+  const seen = new Set<PrincipalExpression>();
   return principals.filter((p) => {
-    if (seen.has(p)) {
-      return false;
-    }
+    if (p === undefined || seen.has(p)) return false;
     seen.add(p);
     return true;
   });
@@ -127,9 +135,9 @@ function dedupe(principals: LatticePrincipal[]): LatticePrincipal[] {
 // Computes the join of the principals in the lattice
 // Only grounded principals can join, if they are variables, we leave them alone
 function join(
-  principals: LatticePrincipal[],
+  principals: PrincipalExpression[],
   lattice: Lattice
-): LatticePrincipal {
+): PrincipalExpression {
   const groundedPrincipals = principals.filter(isLatticeGroundedPrincipal);
   const otherPrincipals = dedupe(
     principals.filter((p) => !isLatticeGroundedPrincipal(p))
@@ -150,14 +158,14 @@ function join(
           ...otherPrincipals,
           ...(commonParents.length ? [commonParents[0]] : []),
         ],
-      ] as LatticePrincipal)
+      ] as PrincipalExpression)
     : commonParents[0] ?? TOP;
 }
 
 function meet(
-  principals: LatticePrincipal[],
+  principals: PrincipalExpression[],
   lattice: Lattice
-): LatticePrincipal {
+): PrincipalExpression {
   const groundedPrincipals = principals.filter(isLatticeGroundedPrincipal);
   const otherPrincipals = dedupe(
     principals.filter((p) => !isLatticeGroundedPrincipal(p))
@@ -178,10 +186,50 @@ function meet(
           ...otherPrincipals,
           ...(commonChildren.length ? [commonChildren[0]] : []),
         ],
-      ] as LatticePrincipal)
+      ] as PrincipalExpression)
     : commonChildren[0] ?? BOTTOM;
 }
 
+// Creates an expression from a list of labels combined by join/meet, inlining
+// any nested join/meet expressions
+function combine(
+  op: "join" | "meet",
+  expressions: PrincipalExpression[]
+): PrincipalExpression {
+  const expressionsToJoin = dedupe(
+    expressions.flatMap((expression) => {
+      if (Array.isArray(expression) && expression[0] === op) {
+        return expression[1];
+      }
+      return expression;
+    })
+  );
+
+  if (expressionsToJoin.length === 0) return undefined;
+
+  if (expressionsToJoin.length === 1) return expressionsToJoin[0];
+
+  return [op, expressionsToJoin];
+}
+
+function generatePrincipalVariable(
+  name: string,
+  type: IntegrityOrConfidentiality
+): PrincipalVariable {
+  return `$${name}-${type}` as PrincipalVariable;
+}
+
+// Generate initial constraints from the state and bindings
+//
+// Output integrity is at most the meet of the input integrities Output
+// confidentiality is at least the join of the input confidences
+//
+// "at most" means `x ∧ y = x`, so we can combine all "at most" constraints with
+// a meet. Analogous for "at least" and join.
+//
+// When a label is in the initial state, and it's forcing a specific label.
+// Eventually we could support `base-integrity ∧ $other-integrity` to mean to
+// compute all other required integrity? Analogous for confidentiality.
 function generateConstraints(state: State, bindings: Node[]): Constraint[] {
   const constraints: Constraint[] = [];
 
@@ -191,13 +239,17 @@ function generateConstraints(state: State, bindings: Node[]): Constraint[] {
       const label = subState[$label];
       const name = path.join(".");
 
-      constraints.push([
-        {
-          integrity: `\$${name}-integrity`,
-          confidentiality: `\$${name}-confidentiality`,
-        },
-        label,
-      ]);
+      if (label.integrity)
+        constraints.push([
+          generatePrincipalVariable(name, "integrity"),
+          label.integrity,
+        ]);
+
+      if (label.confidentiality)
+        constraints.push([
+          generatePrincipalVariable(name, "confidentiality"),
+          label.confidentiality,
+        ]);
     }
     for (const key in subState) {
       traverse(subState[key], [...path, key]);
@@ -207,56 +259,143 @@ function generateConstraints(state: State, bindings: Node[]): Constraint[] {
   traverse(state, []);
 
   for (const binding of bindings) {
-    const integrity = [
+    // Compute output constraints based on inputs
+    const combinedInputintegrity = combine(
       "meet",
-      binding.in.map((input) => `\$${input}-integrity`),
-    ] as LatticePrincipal;
-    const confidentiality = [
+      binding.in.map((input) => generatePrincipalVariable(input, "integrity"))
+    );
+    const combinedInputconfidentiality = combine(
       "join",
-      binding.in.map((input) => `\$${input}-confidentiality`),
-    ] as LatticePrincipal;
+      binding.in.map((input) =>
+        generatePrincipalVariable(input, "confidentiality")
+      )
+    );
 
     binding.out.forEach((output) => {
-      constraints.push([
-        {
-          integrity: `\$${output}-integrity`,
-          confidentiality: `\$${output}-confidentiality`,
-        },
-        { integrity, confidentiality },
-      ]);
+      if (combinedInputintegrity !== undefined) {
+        const name = generatePrincipalVariable(output, "integrity");
+        constraints.push([
+          name,
+          combine("meet", [name, combinedInputintegrity]),
+        ]);
+      }
+
+      if (combinedInputconfidentiality !== undefined) {
+        const name = generatePrincipalVariable(output, "confidentiality");
+        constraints.push([
+          name,
+          combine("join", [name, combinedInputconfidentiality]),
+        ]);
+      }
+    });
+
+    // Compute input constraints based on outputs
+    const combinedOutputintegrity = combine(
+      "join",
+      binding.out.map((output) =>
+        generatePrincipalVariable(output, "integrity")
+      )
+    );
+    const combinedOutputconfidentiality = combine(
+      "meet",
+      binding.out.map((output) =>
+        generatePrincipalVariable(output, "confidentiality")
+      )
+    );
+
+    binding.in.forEach((input) => {
+      if (combinedOutputintegrity !== undefined) {
+        const name = generatePrincipalVariable(input, "integrity");
+        constraints.push([
+          name,
+          combine("join", [name, combinedOutputintegrity]),
+        ]);
+      }
+
+      if (combinedOutputconfidentiality !== undefined) {
+        const name = generatePrincipalVariable(input, "confidentiality");
+        constraints.push([
+          name,
+          combine("meet", [name, combinedOutputconfidentiality]),
+        ]);
+      }
     });
   }
 
   return constraints;
 }
 
-type Substitutions = { [key: LatticeVariable]: LatticeGroundedPrincipal };
-function unify(
-  constraints: Constraint[],
-  substitutions: Substitutions,
-  lattice: Lattice
-): Substitutions {
-  const newSubstitutions = { ...substitutions };
+type Substitutions = { [key: PrincipalVariable]: PrincipalExpression };
+// Substitution rules, in order of priority:
+//  - If the variable isn't mentioned on the right side, always substitute it
+//  - If a subset of an expression is just grounded principals, compute their
+//    join/meet.
+//  - If there is only one constraint for a variable, we can substitute it if
+//    the variable is only mentioned in the first layer.
+//  - If there are multiple constraints for a variable, and all contain the
+//    variable, see whether there are more top level joins or meets, and
+//    substitute the winner together. That is `a = a ∧ b` and `a = a ∧ c` can be
+//    simplified to `a = a ∧ b ∧ c`.
+//
+// Function will return the first class of these substitutions it finds. It'll
+// return an empty object if no substitutions are found.
+function findSubstitutions(constraints: Constraint[]): Substitutions {
+  const substitutions: Substitutions = {};
 
-  // Go through all constraints, and where the right side is a grounded
-  // principal, unify it with the left side.
-  for (const [left, right] of constraints) {
-    for (const key in right) {
-      const groundedPrincipal = right[key];
-      if (isLatticeGroundedPrincipal(groundedPrincipal)) {
-        if (newSubstitutions[groundedPrincipal]) {
-          newSubstitutions[groundedPrincipal] = join(
-            [newSubstitutions[groundedPrincipal], left[key]],
-            lattice
-          );
-        } else {
-          newSubstitutions[groundedPrincipal] = left[key];
-        }
-      }
-    }
+  // Return the deepest level the variable is found in, or 0 if not found.
+  function maxLevelVariableIsContained(
+    variable: PrincipalVariable,
+    expression: PrincipalExpression
+  ): number {
+    if (isCombinedPrincipal(expression))
+      return (
+        1 +
+        Math.max(
+          ...expression[1].map((e) => maxLevelVariableIsContained(variable, e))
+        )
+      );
+    else return expression === variable ? 1 : 0;
   }
 
-  return newSubstitutions;
+  // If the variable isn't mentioned on the right side, always substitute it
+  constraints.forEach(([variable, expression]) => {
+    const level = maxLevelVariableIsContained(variable, expression);
+    if (level === 0) substitutions[variable] = expression;
+  });
+  if (Object.keys(substitutions).length > 0) return substitutions;
+
+  // Split unique from non-unique constraints
+  const uniqueConstraints: Constraint[] = [];
+  const multipleConstraints: Map<PrincipalVariable, PrincipalExpression[]> =
+    new Map();
+  constraints.forEach(([variable, expression]) => {
+    if (constraints.filter(([v]) => v === variable).length === 1) {
+      uniqueConstraints.push([variable, expression]);
+    } else {
+      if (!multipleConstraints.has(variable)) {
+        multipleConstraints.set(variable, [expression]);
+      } else {
+        multipleConstraints.get(variable)!.push(expression);
+      }
+    }
+  });
+
+  // If there is only one constraint for a variable, we can substitute it if
+  // the variable is only mentioned in the first layer.
+  uniqueConstraints.forEach(([variable, expression]) => {
+    const level = maxLevelVariableIsContained(variable, expression);
+    // level 2 means it's $var = [ "meet"| "join", [$var, ...] ]
+    if (level == 2) {
+      const [op, expressions] = expression as [
+        "join" | "meet",
+        PrincipalExpression[]
+      ];
+      substitutions[variable] = [op, expressions.filter((e) => e !== variable)];
+    }
+  });
+  if (Object.keys(substitutions).length > 0) return substitutions;
+
+  return substitutions;
 }
 
 /*
@@ -325,6 +464,6 @@ function inferLabels(state: State, bindings: Node[], lattice: Lattice): State {
   return {} as State;
 }
 
-export { type Node, makeLattice, inferLabels, BOTTOM, TOP };
+export { type Node, type State, makeLattice, inferLabels, BOTTOM, TOP };
 
-export { join, meet }; // internals for testing
+export { join, meet, generateConstraints }; // internals for testing
