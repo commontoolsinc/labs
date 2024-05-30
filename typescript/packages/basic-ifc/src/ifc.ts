@@ -398,69 +398,54 @@ function findSubstitutions(constraints: Constraint[]): Substitutions {
   return substitutions;
 }
 
-/*
-function solveConstraints(
-  constraints: [Label[], Label[]][],
-  lattice: Lattice
-): { [key: string]: Label } {
-  const substitutions: { [key: string]: Label } = {};
-
-  function unify(label1: Label, label2: Label): Label {
-    return {
-      integrity: join(label1.integrity, label2.integrity, lattice),
-      confidentiality: meet(
-        label1.confidentiality,
-        label2.confidentiality,
-        lattice
-      ),
-    };
-  }
-
-  for (const [inputs, outputs] of constraints) {
-    const inferredLabel = inferLabels2(inputs, lattice);
-
-    for (const output of outputs) {
-      const key = `${output.integrity}-${output.confidentiality}`;
-      if (substitutions[key]) {
-        substitutions[key] = unify(substitutions[key], inferredLabel);
-      } else {
-        substitutions[key] = inferredLabel;
-      }
-    }
-  }
-
-  return substitutions;
-}
-
 function applySubstitutions(
-  state: State,
-  substitutions: { [key: string]: Label }
-): State {
-  const inferredState: State = JSON.parse(JSON.stringify(state)); // Deep copy the state
+  constraints: PrincipalExpression,
+  substitutions: Substitutions
+): PrincipalExpression {
+  if (isLatticeVariable(constraints)) {
+    return substitutions[constraints] ?? constraints;
+  } else if (isLatticeGroundedPrincipal(constraints)) {
+    return constraints;
+  } else if (isCombinedPrincipal(constraints)) {
+    const [op, expressions] = constraints;
+    return [op, expressions.map((e) => applySubstitutions(e, substitutions))];
+  }
+}
 
-  function applyToNested(obj: any): void {
-    for (const key in obj) {
-      if (obj[key] && typeof obj[key] === "object") {
-        if ("label" in obj[key]) {
-          const label = obj[key].label;
-          const keyLabel = `${label.integrity}-${label.confidentiality}`;
-          if (substitutions[keyLabel]) {
-            obj[key].label = substitutions[keyLabel];
-          }
-        }
-        applyToNested(obj[key]);
-      }
+function unify(constraints: Constraint[], lattice: Lattice): Constraints {
+  function traverse(expression: PrincipalExpression): PrincipalExpression {
+    if (isLatticeVariable(expression)) {
+      return expression;
+    } else if (isLatticeGroundedPrincipal(expression)) {
+      return expression;
+    } else if (isCombinedPrincipal(expression)) {
+      const [op, expressions] = expression;
+      const newExpression = expressions.map((e) =>
+        isCombinedPrincipal(e) ? traverse(e) : e
+      );
+      return (op === "join" ? join : meet)(newExpression, lattice);
     }
   }
 
-  applyToNested(inferredState);
-  return inferredState;
+  let substitutions: { [key: string]: PrincipalExpression } = {};
+  do {
+    constraints = constraints.map(([v, e]) => [v, traverse(e)]);
+    substitutions = findSubstitutions(constraints);
+    constraints = constraints.map(([v, e]) => [
+      v,
+      applySubstitutions(e, substitutions),
+    ]);
+  } while (Object.keys(substitutions).length > 0);
 }
-*/
+
 function inferLabels(state: State, bindings: Node[], lattice: Lattice): State {
-  /* const constraints = generateConstraints(state, bindings);
-  const substitutions = solveConstraints(constraints, lattice);
-  return applySubstitutions(state, substitutions);*/
+  const constraints = unify(generateConstraints(state, bindings), lattice);
+
+  // Verify that there are no contradictions
+  // TODO
+
+  // Apply the constraints to the state and show all inferred labels
+  // For now, this means turning variable names into paths and writing out the state
   return {} as State;
 }
 
