@@ -5,23 +5,22 @@ import {base} from '../styles'
 const styles = css`
   :host {
     display: block;
-  }
-  .grid {
+
     display: grid;
     grid-template-rows: 1fr min-content;
     grid-template-areas:
-        "main"
-        "footer";
+      "main"
+      "footer";
     height: 100cqh;
 
-    > .main {
-        grid-area: main;
-        overflow-y: auto;
-        overflow-x: hidden;
+    > com-chat-main {
+      grid-area: main;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
 
-    > .footer {
-        grid-area: footer;
+    > com-chat-footer {
+      grid-area: footer;
     }
   }
 `
@@ -32,14 +31,12 @@ export class ComAppGrid extends LitElement {
 
   render() {
     return html`
-      <div class="grid">
-        <div class="main">
-          <slot name="main"></slot>
-        </div>
-        <div class="footer>
-          <slot name="footer"></slot>
-        </div>
-      </div>
+      <com-chat-main>
+        <slot name="main"></slot>
+      </com-chat-main>
+      <com-chat-footer>
+        <slot name="footer"></slot>
+      </com-chat-footer>
     `
   }
 }

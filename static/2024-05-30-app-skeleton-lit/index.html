@@ -9,18 +9,21 @@
 </head>
 <body class="theme">
     <com-app-grid>
-        <div slot="main">
-            <com-content>
-                <com-chat>
-                    <div slot="main">
+        <com-content slot="main">
+            <com-chat>
+                <com-thread slot="main">
+                    <com-thread-group>
                         Hello world
-                    </div>
-                    <div slot="footer">
-                        Footer
-                    </div>
-                </com-chat>
-            </com-content>
-        </div>
+                    </com-thread-group>
+                    <com-thread-group>
+                        Hello world
+                    </com-thread-group>
+                </com-thread>
+                <div slot="footer">
+                    Footer
+                </div>
+            </com-chat>
+        </com-content>
         <div slot="sidebar">Hello world</div>
     </com-app-grid>
 </body>
