@@ -9,22 +9,32 @@
 </head>
 <body class="theme">
     <com-app-grid>
-        <com-content slot="main">
-            <com-chat>
-                <com-thread slot="main">
-                    <com-thread-group>
+        <com-chat slot="main">
+            <com-thread slot="main">
+                <com-thread-group>
+                    <com-prompt slot="prompt">
                         Hello world
-                    </com-thread-group>
-                    <com-thread-group>
+                    </com-prompt>
+                    <com-response slot="response">
+                        Henlo world
+                    </com-response>
+                </com-thread-group>
+                <com-thread-group>
+                    <com-prompt slot="prompt">
                         Hello world
-                    </com-thread-group>
-                </com-thread>
-                <div slot="footer">
-                    Footer
-                </div>
-            </com-chat>
-        </com-content>
-        <div slot="sidebar">Hello world</div>
+                    </com-prompt>
+                    <com-response slot="response">
+                        Henlo world
+                    </com-response>
+                </com-thread-group>
+            </com-thread>
+            <div slot="footer">
+                Footer
+            </div>
+        </com-chat>
+        <div slot="sidebar">
+
+        </div>
     </com-app-grid>
 </body>
 </html>
