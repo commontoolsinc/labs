@@ -12,6 +12,20 @@ const styles = css`
   }
 `
 
+function definitionToHtml(definition?: any) {
+  if (!definition) {
+    return html`<pre>loading...</pre>`
+  }
+
+  if (definition.contentType === 'text/javascript') {
+    return html`<pre>${definition.body}</pre>`
+  }
+  if (definition.contentType === 'application/json+vnd.common.ui') {
+    return html`<pre>${JSON.stringify(definition.body, null, 2)}</pre>`
+  }
+  return html`<pre>${JSON.stringify(definition, null, 2)}</pre>`
+}
+
 @customElement('com-thread')
 export class ComThread extends LitElement {
   static styles = [base, styles]
@@ -24,17 +38,17 @@ export class ComThread extends LitElement {
       this.graph.nodes,
       (node: any) => html`
           <com-thread-group>
-            ${repeat(node.messages, (node: any) => {
-        if (node.role === 'user') {
-          return html`<com-prompt slot="prompt">
+            ${repeat(node.messages.filter((m: any) => m.role === 'user'), (node: any) => {
+
+        return html`<com-prompt slot="prompt">
               ${node.content}
             </com-prompt>`
-        } else {
-          return html`<com-response slot="response">${node.content}</com-response>`
-        }
       })}
+
+            <com-response slot="response">${definitionToHtml(node.definition)}</com-response>
           </com-thread-group>
-        `)}
+        `)
+      }
     `
   }
 }
