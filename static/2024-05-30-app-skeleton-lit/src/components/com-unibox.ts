@@ -9,17 +9,17 @@ const styles = css`
 
   .unibox {
     display: grid;
-    grid-template-columns: min-content 1fr min-content;
-    grid-template-areas: "start main end";
+    background-color: var(--color-white);
+    border-radius: var(--radius);
+    grid-template-columns: 1fr min-content;
+    grid-template-areas: "main end";
     gap: var(--gap);
+    padding: calc(var(--unit) * 2);  
   }
 
   .unibox-main {
     grid-area: main;
-  }
-
-  .unibox-start {
-    grid-area: start;
+    align-self: center;
   }
 
   .unibox-end {
@@ -33,17 +33,14 @@ export class ComUnibox extends LitElement {
 
   render() {
     return html`
-    <menu class="unibox">
-      <li class="unibox-start">
-        <slot name="start"></slot>
-      </li>
-      <li class="unibox-main">
+    <div class="unibox">
+      <div class="unibox-main">
         <slot name="main"></slot>
-      </li>
-      <li class="unibox-end">
+      </div>
+      <div class="unibox-end">
         <slot name="end"></slot>
-      </li>
-    </menu>
+      </div>
+    </div>
     `
   }
 }

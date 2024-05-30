@@ -5,42 +5,48 @@ import {base} from '../styles'
 const styles = css`
   :host {
     display: block;
+  }
 
+  .layout {
     display: grid;
     grid-template-rows: 1fr min-content;
     grid-template-areas:
       "main"
       "footer";
-    height: 100cqh;
+      height: 100cqh;
+  }
 
-    > com-chat-main {
-      grid-area: main;
-      overflow-y: auto;
-      overflow-x: hidden;
-    }
+  .main {
+    grid-area: main;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: var(--gap);
+  }
 
-    > com-chat-footer {
-      grid-area: footer;
-    }
+  .footer {
+    grid-area: footer;
+    padding: 0 var(--gap) var(--gap);
   }
 `
 
 @customElement('com-chat')
-export class ComAppGrid extends LitElement {
+export class ComChat extends LitElement {
   static styles = [base, styles]
 
   render() {
     return html`
-      <com-chat-main>
+    <div class="layout">
+      <div class="main">
         <com-content>
           <slot name="main"></slot>
         </com-content>
-      </com-chat-main>
-      <com-chat-footer>
+      </div>
+      <div class="footer">
         <com-content>
           <slot name="footer"></slot>
         </com-content>
-      </com-chat-footer>
+      </div>
+    </div>
     `
   }
 }
