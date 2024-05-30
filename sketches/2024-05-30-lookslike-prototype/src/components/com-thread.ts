@@ -1,6 +1,8 @@
-import {LitElement, html, css} from 'lit-element'
-import {customElement} from 'lit/decorators.js'
-import {base} from '../styles'
+import { LitElement, html, css } from 'lit-element'
+import { customElement, property } from 'lit/decorators.js'
+import { repeat } from 'lit/directives/repeat.js'
+import { base } from '../styles'
+
 
 const styles = css`
   :host {
@@ -10,12 +12,59 @@ const styles = css`
   }
 `
 
+function definitionToHtml(definition?: any) {
+  if (!definition) {
+    return html`<pre>loading...</pre>`
+  }
+
+  if (definition.contentType === 'text/javascript') {
+    return html`<pre>${definition.body}</pre>`
+  }
+  if (definition.contentType === 'application/json+vnd.common.ui') {
+    return html`<pre>${JSON.stringify(definition.body, null, 2)}</pre>`
+  }
+  return html`<pre>${JSON.stringify(definition, null, 2)}</pre>`
+}
+
 @customElement('com-thread')
 export class ComThread extends LitElement {
   static styles = [base, styles]
 
+  @property({ type: Object }) graph = {} as any
+
+  response(node) {
+    if (node.defintion) {
+      return html`<com-response slot="response">
+        ${definitionToHtml(node.defintion)}
+      </com-response>`
+    } else {
+      return html`<com-response slot="response">
+        ${node.messages.filter(m => m.role !== 'user').map(m => m.content).join(' ')}
+      </com-response>`
+    }
+
+  }
+
   render() {
-    return html`<slot></slot>`
+    const sortedNodes = this.graph.order.map((orderId: string) =>
+      this.graph.nodes.find((node: any) => node.id === orderId)
+    );
+
+    return html`
+      ${repeat(
+      sortedNodes,
+      (node: any) => html`
+          <com-thread-group>
+            ${repeat(node.messages.filter(m => m.role === 'user'), (node: any) => {
+        return html`<com-prompt slot="prompt">
+                      ${node.content}
+                    </com-prompt>`
+      })}
+
+            ${this.response(node)}
+          </com-thread-group>
+        `)
+      }
+    `
   }
 }
-
