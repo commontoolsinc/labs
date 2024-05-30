@@ -11,28 +11,7 @@ function createElement(node, context) {
 
   if (!node || typeof node !== 'object') return null;
 
-  // Handle text nodes
-  if (!node.tag && node.$id && node.name) {
-    // Bind the reactive source to update the text node if it changes
-    if (context[node.name] && context[node.name].subscribe) {
-      if (node.type == 'slot') {
-        const uiNode = createElement(context[node.name].getValue(), context)
-        context[node.name].subscribe(newValue => {
-          uiNode.innerHTML = '';
-          uiNode.appendChild(createElement(newValue, context));
-        });
-        return uiNode;
-      } else {
-        const textNode = document.createTextNode(context[node.name] || '');
-        context[node.name].subscribe(newValue => {
-          textNode.textContent = newValue;
-        });
-        return textNode;
-      }
-    }
-  }
-
-  // Handle element nodes
+  // repeat node
   if (!node.tag && node.type == 'repeat') {
     const container = document.createElement('div');
     const items = context[node.binding] || [];
@@ -42,9 +21,10 @@ function createElement(node, context) {
     return container
   }
 
+  // element nodes
   const element = document.createElement(node.tag);
 
-  // Set properties
+  // set attributes
   for (const [key, value] of Object.entries(node.props || {})) {
     if (typeof value === 'object' && value.type) {
       // Handle specific types and bind reactive sources from context
@@ -59,7 +39,6 @@ function createElement(node, context) {
         }
       }
     } else if (value["$id"] && value["$id"] === STREAM && value.name) {
-      // Handle event binding to a stream
       if (context[value.name]) {
         element.addEventListener(key, context[value.name]);
       }
@@ -73,9 +52,9 @@ function createElement(node, context) {
     children = [children];
   }
 
-  // Recursively create and append child elements
+  // recursively create and append child elements
   children.forEach(childNode => {
-    if (childNode.binding && childNode.type == 'literal') {
+    if (childNode.binding && childNode.type == 'string') {
       const node = document.createTextNode(context[childNode.binding])
       element.appendChild(node);
       return
@@ -90,7 +69,7 @@ function createElement(node, context) {
   return element;
 }
 
-// Example usage with a simplified system.get function
+// system context mock
 const system = {
   get: (key) => {
     if (key === 'todos') {
@@ -104,14 +83,15 @@ const system = {
   }
 };
 
-// Function to create the RxJS network from the new JSON graph format
+// inflate the RxJS network from a JSON graph definition
 function createRxJSNetworkFromJson(graph) {
+  // track all inputs and outputs
   const context = {
     inputs: {},
     outputs: {}
   };
 
-  // Create subjects for each node
+  // populte context namespace
   graph.nodes.forEach(node => {
     const nodeName = node.definition.name;
     context.outputs[nodeName] = new BehaviorSubject(null);
@@ -126,7 +106,7 @@ function createRxJSNetworkFromJson(graph) {
     }
   });
 
-  // Set up reactive bindings based on edges
+  // set up reactive bindings based on edges
   graph.edges.forEach(edge => {
     const [source, target] = Object.entries(edge)[0];
     const sourceSubject = context.outputs[source];
@@ -137,7 +117,7 @@ function createRxJSNetworkFromJson(graph) {
     });
   });
 
-  // Process node definitions and set up reactive logic
+  // process node definitions and set up reactive logic
   graph.nodes.forEach(node => {
     const nodeName = node.definition.name;
     const { contentType, body, signature } = node.definition;
@@ -177,26 +157,6 @@ function createRxJSNetworkFromJson(graph) {
   return context;
 }
 
-// Function to render the template based on the node body and input values
-function renderTemplate(body, inputValues) {
-  // Simplified rendering logic for demonstration
-  if (body.type === 'repeat' && body.binding in inputValues) {
-    return inputValues[body.binding].map(item => {
-      return body.template.map(templateNode => {
-        return `<${templateNode.tag} class="${body.props?.className}">${item.label}</${templateNode.tag}>`;
-      }).join('');
-    }).join('');
-  } else {
-    let children = body.children;
-    if (!Array.isArray(body.children)) {
-      children = [body.children];
-    }
-
-    return `<${body.tag} class="${body.props.className}">${children.map(c => renderTemplate(c, inputValues)).join('\n')}</${body.tag}>`;
-  }
-}
-
-// Example JSON graph document
 const jsonDocument = {
   "nodes": [
     {
@@ -279,7 +239,7 @@ const jsonDocument = {
                     "className": "todo-label"
                   },
                   "children": [
-                    { type: 'literal', binding: 'label' }
+                    { type: 'string', binding: 'label' }
                   ]
                 }
               ]
