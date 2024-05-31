@@ -35,7 +35,15 @@ export function createElement(node, context) {
         context[name].subscribe(newValue => element[key] = newValue);
       } else {
         if (value.binding) {
-          element[key] = context[value.binding];
+          if (key === 'checked' || 'disabled' || 'hidden') {
+            if (context[value.binding]) {
+              element.setAttribute('checked', 'checked'); // Update the attribute
+            } else {
+              element.removeAttribute('checked'); // Remove the attribute if not checked
+            }
+          } else {
+            element[key] = context[value.binding];
+          }
         }
       }
     } else if (value["$id"] && value["$id"] === STREAM && value.name) {

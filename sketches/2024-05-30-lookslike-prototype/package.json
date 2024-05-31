@@ -12,9 +12,10 @@
   "author": "Gordon Brander",
   "license": "MIT",
   "dependencies": {
-    "lit": "^3.1.3",
     "@instructor-ai/instructor": "^1.3.0",
+    "lit": "^3.1.3",
     "openai": "^4.47.2",
+    "pretty": "^2.0.0",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
