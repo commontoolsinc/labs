@@ -1,0 +1,17 @@
+{
+  "name": "common-frp",
+  "version": "0.0.1",
+  "description": "Common functional reactive programming utilities",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "frp"
+  ],
+  "author": "Gordon Brander",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}
