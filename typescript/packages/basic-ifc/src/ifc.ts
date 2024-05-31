@@ -339,8 +339,12 @@ type Substitutions = { [key: PrincipalVariable]: PrincipalExpression };
 //
 // Function will return the first class of these substitutions it finds. It'll
 // return an empty object if no substitutions are found.
-function findSubstitutions(constraints: Constraint[]): Substitutions {
-  const substitutions: Substitutions = {};
+function findSubstitutions(
+  allConstraints: Constraint[],
+  substitutions: Substitutions
+): Substitutions {
+  const newSubstitutions: Substitutions = {};
+  const constraints = allConstraints.filter(([v]) => !substitutions[v]);
 
   // Return the deepest level the variable is found in, or 0 if not found.
   function maxLevelVariableIsContained(
@@ -360,9 +364,9 @@ function findSubstitutions(constraints: Constraint[]): Substitutions {
   // If the variable isn't mentioned on the right side, always substitute it
   constraints.forEach(([variable, expression]) => {
     const level = maxLevelVariableIsContained(variable, expression);
-    if (level === 0) substitutions[variable] = expression;
+    if (level === 0) newSubstitutions[variable] = expression;
   });
-  if (Object.keys(substitutions).length > 0) return substitutions;
+  if (Object.keys(newSubstitutions).length > 0) return newSubstitutions;
 
   // Split unique from non-unique constraints
   const uniqueConstraints: Constraint[] = [];
@@ -390,12 +394,15 @@ function findSubstitutions(constraints: Constraint[]): Substitutions {
         "join" | "meet",
         PrincipalExpression[]
       ];
-      substitutions[variable] = [op, expressions.filter((e) => e !== variable)];
+      newSubstitutions[variable] = [
+        op,
+        expressions.filter((e) => e !== variable),
+      ];
     }
   });
-  if (Object.keys(substitutions).length > 0) return substitutions;
+  if (Object.keys(newSubstitutions).length > 0) return newSubstitutions;
 
-  return substitutions;
+  return {};
 }
 
 function applySubstitutions(
@@ -428,14 +435,16 @@ function unify(constraints: Constraint[], lattice: Lattice): Constraint[] {
   }
 
   let substitutions: { [key: string]: PrincipalExpression } = {};
+  let newSubstitutions: { [key: string]: PrincipalExpression } = {};
   do {
     constraints = constraints.map(([v, e]) => [v, traverse(e)]);
-    substitutions = findSubstitutions(constraints);
+    newSubstitutions = findSubstitutions(constraints, substitutions);
     constraints = constraints.map(([v, e]) => [
       v,
-      applySubstitutions(e, substitutions),
+      applySubstitutions(e, newSubstitutions),
     ]);
-  } while (Object.keys(substitutions).length > 0);
+    substitutions = { ...substitutions, ...newSubstitutions };
+  } while (Object.keys(newSubstitutions).length > 0);
 
   return constraints;
 }

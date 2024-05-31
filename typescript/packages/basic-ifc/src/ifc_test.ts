@@ -108,7 +108,7 @@ Deno.test("generate constraints", () => {
   ]);
 });
 
-Deno.test("infer labels", () => {
+Deno.test("infer labels, simple", () => {
   // Example state and bindings
   const initialState: State = {
     bar: {
@@ -133,5 +133,66 @@ Deno.test("infer labels", () => {
 
   const inferredState = inferLabels(initialState, bindings, lattice);
 
-  assertEquals(inferredState, {});
+  assertEquals(inferredState, {
+    bar: {
+      baz: {
+        [$label]: {
+          integrity: "trusted cloud",
+          confidentiality: "trusted cloud",
+        },
+      },
+      zab: {
+        [$label]: { integrity: "public", confidentiality: "public" },
+      },
+    },
+    foo: {
+      [$label]: { integrity: "public", confidentiality: "trusted cloud" },
+    },
+  });
+});
+
+Deno.test("infer labels, two nodes", () => {
+  // Example state and bindings
+  const inputs: State = {
+    bar: {
+      baz: {
+        [$label]: {
+          integrity: "trusted cloud",
+          confidentiality: "trusted cloud",
+        },
+      },
+      zab: {
+        [$label]: { integrity: "public", confidentiality: "public" },
+      },
+    },
+  };
+  const bindings: Node[] = [
+    { in: ["bar.baz", "bar.zab"], out: ["foo"] },
+    { in: ["foo", "bar.zab"], out: ["zab"] },
+  ];
+
+  const lattice = makeLattice({
+    public: ["trusted cloud"],
+    "trusted cloud": ["cc", "openai", "anthropic"],
+    cc: ["ondevice"],
+  });
+
+  const inferredState = inferLabels(inputs, bindings, lattice);
+
+  assertEquals(inferredState, {
+    bar: {
+      baz: {
+        [$label]: {
+          integrity: "trusted cloud",
+          confidentiality: "trusted cloud",
+        },
+      },
+      zab: {
+        [$label]: { integrity: "public", confidentiality: "public" },
+      },
+    },
+    foo: {
+      [$label]: { integrity: "public", confidentiality: "trusted cloud" },
+    },
+  });
 });
