@@ -5,7 +5,33 @@ import { base } from '../styles'
 import { createElement } from '../ui'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import pretty from 'pretty'
+import { createRxJSNetworkFromJson } from '../graph'
 
+
+function snapshot(ctx) {
+  // grab values of behavior subjects
+  // preserve literals
+
+  const snapshot = {
+    inputs: {},
+    outputs: {}
+  }
+  for (const key in ctx.outputs) {
+    const value = ctx.outputs[key].getValue()
+    snapshot.outputs[key] = value
+  }
+
+  for (const key in ctx.inputs) {
+    snapshot.inputs[key] = {}
+    for (const inputKey in ctx.inputs[key]) {
+      const value = ctx.inputs[key][inputKey].getValue()
+      snapshot.inputs[key][inputKey] = value
+    }
+  }
+
+  return snapshot
+
+}
 
 const styles = css`
   :host {
@@ -25,23 +51,17 @@ const styles = css`
   }
 `
 
-function definitionToHtml(definition?: any) {
+function definitionToHtml(definition: any, context: any) {
   if (!definition) {
     return html`<pre>loading...</pre>`
   }
 
   if (definition.contentType === 'text/javascript') {
-    return html`<pre>${definition.body}</pre>`
+    const val = snapshot(context).outputs[definition.name]
+    return html`<pre class="code">${JSON.stringify(val, null, 2)}</pre><hr><pre>${definition.body}</pre>`
   }
   if (definition.contentType === 'application/json+vnd.common.ui') {
-    const el = createElement(definition.body, {
-      todos: [
-        { label: 'test', checked: false },
-        { label: 'test2', checked: true }
-      ]
-    })
-
-    console.log(el)
+    const el = createElement(definition.body, snapshot(context).outputs)
 
     return html`<div>${unsafeHTML(el.outerHTML)}</div><pre class="code">${pretty(el.outerHTML)}</pre>`
   }
@@ -54,10 +74,10 @@ export class ComThread extends LitElement {
 
   @property({ type: Object }) graph = {} as any
 
-  response(node) {
+  response(node, context) {
     if (node.definition) {
       return html`<com-response slot="response">
-        ${definitionToHtml(node.definition)}
+        ${definitionToHtml(node.definition, context)}
       </com-response>`
     } else {
       return html`<com-response slot="response">
@@ -72,6 +92,8 @@ export class ComThread extends LitElement {
       this.graph.nodes.find((node: any) => node.id === orderId)
     );
 
+    const context = createRxJSNetworkFromJson(this.graph)
+
     return html`
       ${repeat(
       sortedNodes,
@@ -83,7 +105,7 @@ export class ComThread extends LitElement {
                     </com-prompt>`
       })}
 
-            ${this.response(node)}
+            ${this.response(node, context)}
           </com-thread-group>
         `)
       }
