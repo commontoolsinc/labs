@@ -51,6 +51,14 @@ const styles = css`
     line-height: 1.5;
     margin-top: 1rem;
   }
+
+  .local-variable {
+    font-size: 0.5rem;
+    font-family: monospace;
+    border: 1px solid #ccc;
+    padding: 0 0.5rem;
+    background-color: #f0f0f0;
+  }
 `
 
 function definitionToHtml(definition: any, context: any) {
@@ -60,15 +68,17 @@ function definitionToHtml(definition: any, context: any) {
 
   if (definition.contentType === 'text/javascript') {
     const val = snapshot(context).outputs[definition.name]
-    return html`<pre>${definition.body}</pre><pre class="code">${JSON.stringify(val, null, 2)}</pre>`
+    return html`<pre>${definition.body}</pre><com-toggle><pre class="code">${JSON.stringify(val, null, 2)}</pre></com-toggle>`
   }
 
   if (definition.contentType === 'application/json+vnd.common.ui') {
     const el = createElement(definition.body, snapshot(context).outputs)
 
     return html`<div>${unsafeHTML(el.outerHTML)}</div>
+      <com-toggle>
       <pre class="code">${pretty(el.outerHTML)}</pre>
-      <pre class="code">${JSON.stringify(definition.body, null, 2)}</pre>`
+      <pre class="code">${JSON.stringify(definition.body, null, 2)}</pre>
+      </com-toggle>`
   }
 
   return html`<pre>${JSON.stringify(definition, null, 2)}</pre>`
@@ -84,6 +94,7 @@ export class ComThread extends LitElement {
     if (node.definition) {
       return html`<com-response slot="response">
         ${definitionToHtml(node.definition, context)}
+        <code class="local-variable">${node.definition?.name}</code>
       </com-response>`
     } else {
       return html`<com-response slot="response">

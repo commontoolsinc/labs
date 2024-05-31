@@ -1,15 +1,29 @@
 import { BehaviorSubject, combineLatest } from 'rxjs';
 import { createElement } from './ui';
 
+function serializationBoundary(obj) {
+  console.log('forwarding data', obj)
+  return JSON.parse(JSON.stringify(obj));
+}
+
 export const system = {
   get: (key) => {
     if (key === 'todos') {
-      return [
+      return serializationBoundary([
         { label: 'Buy groceries', checked: false },
         { label: 'Vacuum house', checked: true },
         { label: 'Learn RxJS', checked: false }
-      ];
+      ]);
     }
+
+    if (key === 'emails') {
+      return serializationBoundary([
+        { subject: 'Meeting', from: 'John', date: '2020-01-01', read: false },
+        { subject: 'Lunch', from: 'Jane', date: '2020-01-02', read: true },
+        { subject: 'Dinner', from: 'Joe', date: '2020-01-03', read: false }
+      ])
+    }
+
     return [];
   }
 };
@@ -57,12 +71,15 @@ export function createRxJSNetworkFromJson(graph) {
 
     if (contentType === 'text/javascript') {
       // Evaluate the JavaScript content and bind it to the subject
-      const func = new Function('system', body);
-      const result = func(system, {
-        get: (key) => context.outputs[nodeName].getValue(),
-        set: (key, value) => context.outputs[nodeName].next(value)
-      });
-      context.outputs[nodeName].next(result);
+      // collect inputs and pass to functions
+      const inputs = {};
+      for (const inputName in signature.inputs) {
+        inputs[inputName] = context.inputs[nodeName][inputName].getValue();
+      }
+
+      const func = new Function('system', 'inputs', body);
+      const result = func(system, inputs);
+      context.outputs[nodeName].next(serializationBoundary(result));
     } else if (contentType === 'application/json+vnd.common.ui') {
       // Set up template rendering
       const { inputs } = signature;

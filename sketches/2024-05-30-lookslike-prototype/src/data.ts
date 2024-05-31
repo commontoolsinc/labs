@@ -5,10 +5,11 @@ export type Graph = {
 }
 
 export type GraphNode = {
-  id: string,
-  messages: Message[],
+  id: string, // an actual unique ID
+  messages: Message[], // could be empty if a user hand-authored the node etc.
   definition?: {
-    name: string,
+    // should messages be stored inside definition?
+    name: string, // readable alias for ID
     contentType: string,
     signature: {
       inputs: any,
@@ -26,6 +27,12 @@ export type Message = {
   role: 'user' | 'assistant',
   content: string,
 }
+
+export const emptyGraph: Graph = {
+  "nodes": [],
+  "edges": [],
+  "order": []
+};
 
 export const todoAppMockup: Graph = {
   "nodes": [
