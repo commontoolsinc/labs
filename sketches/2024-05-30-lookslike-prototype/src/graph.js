@@ -24,6 +24,7 @@ export function createRxJSNetworkFromJson(graph) {
 
   // populte context namespace
   graph.nodes.forEach(node => {
+    if (!node.definition) return;
     const nodeName = node.definition.name;
     context.outputs[nodeName] = new BehaviorSubject(null);
 
@@ -50,6 +51,7 @@ export function createRxJSNetworkFromJson(graph) {
 
   // process node definitions and set up reactive logic
   graph.nodes.forEach(node => {
+    if (!node.definition) return;
     const nodeName = node.definition.name;
     const { contentType, body, signature } = node.definition;
 

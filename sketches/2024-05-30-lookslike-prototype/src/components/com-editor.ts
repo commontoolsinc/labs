@@ -31,15 +31,16 @@ export class ComEditor extends LitElement {
   static styles = [base, styles]
 
   @property({ type: String }) value = ''
+  @property({ type: Function }) setValue = (_: string) => { }
 
   render() {
     const oninput = (event: InputEvent) => {
       const textarea = event.target as HTMLTextAreaElement
-      this.value = textarea.value
+      this.setValue(textarea.value)
     }
 
     return html`
-      <textarea class="editor" @input=${oninput}>${this.value}</textarea>
+      <textarea class="editor" @input=${oninput} .value=${this.value}></textarea>
     `
   }
 

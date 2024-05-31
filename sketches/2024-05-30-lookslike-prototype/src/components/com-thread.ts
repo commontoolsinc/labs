@@ -70,6 +70,7 @@ function definitionToHtml(definition: any, context: any) {
       <pre class="code">${pretty(el.outerHTML)}</pre>
       <pre class="code">${JSON.stringify(definition.body, null, 2)}</pre>`
   }
+
   return html`<pre>${JSON.stringify(definition, null, 2)}</pre>`
 }
 

@@ -15,42 +15,44 @@ export class ComApp extends LitElement {
   async appendMessage() {
     const newGraph = { ...this.graph }
     const id = 'new' + (Math.floor(Math.random() * 1000))
-
-    console.log('push message', this.userInput)
+    const input = `${this.userInput}`
 
     const newNode = {
       id,
       messages: [
         {
           role: 'user',
-          content: this.userInput
+          content: input
         }
-      ],
-      definition: {}
+      ]
     }
 
     newGraph.nodes.push(newNode);
-
     newGraph.order.push(id);
     this.graph = newGraph;
+    this.userInput = '';
 
-    const result = await doLLM(this.userInput, '', null)
+    const result = await doLLM(input, '', null)
     const message = result?.choices[0]?.message
     if (message) {
       newNode.messages.push(message);
     }
 
-    this.graph = { ...newGraph }
+    this.graph = JSON.parse(JSON.stringify(newGraph));
   }
 
   render() {
+    const setUserInput = (input: string) => {
+      this.userInput = input
+    }
+
     return html`
       <com-app-grid>
         <com-chat slot="main">
             <com-thread slot="main" .graph=${this.graph}></com-thread>
             <div slot="footer">
                 <com-unibox>
-                    <com-editor slot="main" .value=${this.userInput}></com-editor>
+                    <com-editor slot="main" .value=${this.userInput} .setValue=${setUserInput}></com-editor>
                     <com-button slot="end" .action=${() => this.appendMessage()}>Send</com-button>
                 </com-unibox>
             </div>
