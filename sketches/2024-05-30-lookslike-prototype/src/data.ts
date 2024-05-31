@@ -1,4 +1,33 @@
-export const todoAppMockup = {
+export type Graph = {
+  nodes: GraphNode[],
+  edges: GraphEdge[],
+  order: string[],
+}
+
+export type GraphNode = {
+  id: string,
+  messages: Message[],
+  definition?: {
+    name: string,
+    contentType: string,
+    signature: {
+      inputs: any,
+      output: any
+    },
+    body: string | object
+  }
+};
+
+export type GraphEdge = {
+  [output: string]: [string, string]
+}
+
+export type Message = {
+  role: 'user' | 'assistant',
+  content: string,
+}
+
+export const todoAppMockup: Graph = {
   "nodes": [
     {
       "id": "a",

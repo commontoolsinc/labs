@@ -6,16 +6,19 @@ import { createElement } from '../ui'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import pretty from 'pretty'
 import { createRxJSNetworkFromJson } from '../graph'
+import { Graph, GraphNode } from '../data'
 
+type Context = {
+  inputs: { [node: string]: { [input: string]: any } },
+  outputs: { [node: string]: any },
+}
 
-function snapshot(ctx) {
-  // grab values of behavior subjects
-  // preserve literals
-
-  const snapshot = {
+function snapshot(ctx: Context) {
+  const snapshot: Context = {
     inputs: {},
     outputs: {}
   }
+
   for (const key in ctx.outputs) {
     const value = ctx.outputs[key].getValue()
     snapshot.outputs[key] = value
@@ -30,7 +33,6 @@ function snapshot(ctx) {
   }
 
   return snapshot
-
 }
 
 const styles = css`
@@ -58,12 +60,13 @@ function definitionToHtml(definition: any, context: any) {
 
   if (definition.contentType === 'text/javascript') {
     const val = snapshot(context).outputs[definition.name]
-    return html`<pre class="code">${JSON.stringify(val, null, 2)}</pre><hr><pre>${definition.body}</pre>`
+    return html`<pre>${definition.body}</pre><pre class="code">${JSON.stringify(val, null, 2)}</pre>`
   }
+
   if (definition.contentType === 'application/json+vnd.common.ui') {
     const el = createElement(definition.body, snapshot(context).outputs)
 
-    return html`<div>${unsafeHTML(el.outerHTML)}</div><pre class="code">${pretty(el.outerHTML)}</pre>`
+    return html`<div>${unsafeHTML(el.outerHTML)}</div><pre class="code">${pretty(el.outerHTML)}</pre><pre class="code">${JSON.stringify(definition.body, null, 2)}</pre>`
   }
   return html`<pre>${JSON.stringify(definition, null, 2)}</pre>`
 }
@@ -72,9 +75,9 @@ function definitionToHtml(definition: any, context: any) {
 export class ComThread extends LitElement {
   static styles = [base, styles]
 
-  @property({ type: Object }) graph = {} as any
+  @property({ type: Object }) graph = {} as Graph
 
-  response(node, context) {
+  response(node: GraphNode, context: object) {
     if (node.definition) {
       return html`<com-response slot="response">
         ${definitionToHtml(node.definition, context)}
@@ -89,22 +92,24 @@ export class ComThread extends LitElement {
 
   render() {
     const sortedNodes = this.graph.order.map((orderId: string) =>
-      this.graph.nodes.find((node: any) => node.id === orderId)
-    );
+      this.graph.nodes.find((node) => node.id === orderId)
+    )
+      .filter((node) => node) as GraphNode[];
 
     const context = createRxJSNetworkFromJson(this.graph)
 
     return html`
       ${repeat(
       sortedNodes,
-      (node: any) => html`
+      (node) => html`
           <com-thread-group>
-            ${repeat(node.messages.filter(m => m.role === 'user'), (node: any) => {
-        return html`<com-prompt slot="prompt">
+            ${repeat(
+        node.messages.filter(m => m.role === 'user'),
+        (node) => {
+          return html`<com-prompt slot="prompt">
                       ${node.content}
                     </com-prompt>`
-      })}
-
+        })}
             ${this.response(node, context)}
           </com-thread-group>
         `)
