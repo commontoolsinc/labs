@@ -66,7 +66,9 @@ function definitionToHtml(definition: any, context: any) {
   if (definition.contentType === 'application/json+vnd.common.ui') {
     const el = createElement(definition.body, snapshot(context).outputs)
 
-    return html`<div>${unsafeHTML(el.outerHTML)}</div><pre class="code">${pretty(el.outerHTML)}</pre><pre class="code">${JSON.stringify(definition.body, null, 2)}</pre>`
+    return html`<div>${unsafeHTML(el.outerHTML)}</div>
+      <pre class="code">${pretty(el.outerHTML)}</pre>
+      <pre class="code">${JSON.stringify(definition.body, null, 2)}</pre>`
   }
   return html`<pre>${JSON.stringify(definition, null, 2)}</pre>`
 }

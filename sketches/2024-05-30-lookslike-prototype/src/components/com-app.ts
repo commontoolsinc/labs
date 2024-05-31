@@ -35,14 +35,12 @@ export class ComApp extends LitElement {
     this.graph = newGraph;
 
     const result = await doLLM(this.userInput, '', null)
-    newNode.messages.push(result?.choices[0].message);
+    const message = result?.choices[0]?.message
+    if (message) {
+      newNode.messages.push(message);
+    }
 
     this.graph = { ...newGraph }
-  }
-
-  onInput(text) {
-    this.userInput = text
-    console.log(this.userInput)
   }
 
   render() {
@@ -52,7 +50,7 @@ export class ComApp extends LitElement {
             <com-thread slot="main" .graph=${this.graph}></com-thread>
             <div slot="footer">
                 <com-unibox>
-                    <com-editor slot="main" .value=${this.userInput} .onInput=${(v) => this.onInput(v)}></com-editor>
+                    <com-editor slot="main" .value=${this.userInput}></com-editor>
                     <com-button slot="end" .action=${() => this.appendMessage()}>Send</com-button>
                 </com-unibox>
             </div>
