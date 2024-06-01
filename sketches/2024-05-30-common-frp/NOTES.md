@@ -37,6 +37,7 @@ Libraries:
 - [SolidJS](https://www.solidjs.com/)
 - [Preact Signals](https://preactjs.com/guide/v10/signals/)
 - [S.js](https://github.com/adamhaile/S) implements transactions and dynamic graph with single-transaction callback registration, eliminating listener memory leaks.
+- [Elm Signals 3.0.0](https://github.com/elm-lang/core/blob/3.0.0/src/Native/Signal.js). Deprecated, but the implementation can be found here. 1st order FRP.
 
 ### Observables
 
@@ -59,3 +60,4 @@ Libraries:
 - Talk: [Controlling space and time: understanding the many formulations of FRP](https://www.youtube.com/watch?v=Agu6jipKfYw), Evan Czaplicki
 - Blog: [The Evolution of Signals in Javascript](https://dev.to/this-is-learning/the-evolution-of-signals-in-javascript-8ob). Notes on low-level implementation of signal libraries, from the creator of SolidJS.
 - Blog: [Introduction to fine-grained reactivity](https://dev.to/ryansolid/a-hands-on-introduction-to-fine-grained-reactivity-3ndf) from the creator of SolidJS.
+- GitHub: [General Theory of Reactivity](https://github.com/kriskowal/gtor)
