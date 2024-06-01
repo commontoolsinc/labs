@@ -85,60 +85,67 @@ const codePrompt = `
 const uiPrompt = `
   Your task is to take a user description or request and produce a UI node definition for the rendering of a data in a computation graph, for example:
 
+  Also provide the required edges to connect data from the environment to the inputs of the node. The keys of the \`edges\` are the names of local inputs and the values are variables available in the broader scope.
+
   "render my todos" ->
 
   \`\`\`json
   {
-    "name": "todo-ui",
-    "contentType": "application/json+vnd.common.ui",
-    "signature": {
-      "inputs": {
-        "todos": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "label": { "type": "string" },
-              "checked": { "type": "boolean" }
+    "definition": {
+      "name": "todoUi",
+      "contentType": "application/json+vnd.common.ui",
+      "signature": {
+        "inputs": {
+          "todos": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": { "type": "string" },
+                "checked": { "type": "boolean" }
+              }
             }
           }
+        },
+        "output": {
+          "type": "object"
         }
       },
-      "output": {
-        "type": "object"
+      "body": {
+        "tag": "ul",
+        "props": {
+          "className": "todo"
+        },
+        "children": {
+          "type": "repeat",
+          "binding": "todos",
+          "template": {
+            "tag": "li",
+            "props": {},
+            "children": [
+              {
+                "tag": "input",
+                "props": {
+                  "type": "checkbox",
+                  "checked": { type: 'boolean', binding: 'checked' }
+                }
+              },
+              {
+                "tag": "span",
+                "props": {
+                  "className": "todo-label"
+                },
+                "children": [
+                  { type: 'string', binding: 'label' }
+                ]
+              }
+            ]
+          }
+        }
       }
     },
-    "body": {
-      "tag": "ul",
-      "props": {
-        "className": "todo"
-      },
-      "children": {
-        "type": "repeat",
-        "binding": "todos",
-        "template": {
-          "tag": "li",
-          "props": {},
-          "children": [
-            {
-              "tag": "input",
-              "props": {
-                "type": "checkbox",
-                "checked": { type: 'boolean', binding: 'checked' }
-              }
-            },
-            {
-              "tag": "span",
-              "props": {
-                "className": "todo-label"
-              },
-              "children": [
-                { type: 'string', binding: 'label' }
-              ]
-            }
-          ]
-        }
-      }
+    "edges": {
+      "todos": "todos"
     }
   }
   \`\`\`
@@ -183,7 +190,7 @@ export class ComApp extends LitElement {
         newNode.definition = definition;
 
         // add all new edges
-        for (const [key, value] of Object.entries(data.edges)) {
+        for (const [key, value] of Object.entries(data.edges || {})) {
           newGraph.edges.push({
             [key]: [definition.name, (value as string).replace('./', '')]
           })

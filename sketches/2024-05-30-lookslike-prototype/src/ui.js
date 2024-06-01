@@ -43,6 +43,8 @@ export function createElement(node, context) {
           } else {
             element[key] = context[value.binding];
           }
+        } else {
+          element[key] = context[value];
         }
       }
     } else if (value["$id"] && value["$id"] === STREAM && value.name) {
@@ -61,10 +63,16 @@ export function createElement(node, context) {
 
   // recursively create and append child elements
   children.forEach(childNode => {
-    if (childNode.binding && childNode.type == 'string') {
-      const node = document.createTextNode(context[childNode.binding])
-      element.appendChild(node);
-      return
+    if (childNode.type === 'string') {
+      if (childNode.binding) {
+        const node = document.createTextNode(context[childNode.binding])
+        element.appendChild(node);
+        return
+      } else {
+        const node = document.createTextNode(context)
+        element.appendChild(node);
+        return
+      }
     }
 
     const childElement = createElement(childNode, context);

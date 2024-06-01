@@ -52,6 +52,10 @@ const styles = css`
     margin-top: 1rem;
   }
 
+  pre {
+    white-space: pre-wrap;
+  }
+
   .local-variable {
     font-size: 0.5rem;
     font-family: monospace;
