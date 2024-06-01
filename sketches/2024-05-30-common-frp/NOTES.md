@@ -61,3 +61,14 @@ Libraries:
 - Blog: [The Evolution of Signals in Javascript](https://dev.to/this-is-learning/the-evolution-of-signals-in-javascript-8ob). Notes on low-level implementation of signal libraries, from the creator of SolidJS.
 - Blog: [Introduction to fine-grained reactivity](https://dev.to/ryansolid/a-hands-on-introduction-to-fine-grained-reactivity-3ndf) from the creator of SolidJS.
 - GitHub: [General Theory of Reactivity](https://github.com/kriskowal/gtor)
+
+### Cold vs. Hot Observables
+
+The distinction between cold and hot observables (or their equivalent) is a significant part of many FRP systems. Cold observables are those where the data-producing sequence starts anew for each subscriber, whereas hot observables share a single execution path among all subscribers. This distinction affects how data streams are multicast to multiple observers.
+
+- Cold observable: creates a data producer for each subscriber.
+    - The observable is a pure transformation over the data producer.
+    - Examples: [Reducers in Clojure](https://clojure.org/reference/reducers), [RxJS Observables](https://rxjs.dev).
+- Hot observable: Multicast. Maintains a list of subscribers and dispatches to them from a single data producing source.
+    - Examples: [share](https://rxjs.dev/api/index/function/share) in RxJS.
+    - Has to deal with callback cleanup bookkeeping in dynamic graphs.
