@@ -4,7 +4,10 @@
   "description": "Common functional reactive programming utilities",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "vite build",
+    "preview": "vite preview",
+    "dev": "vite"
   },
   "keywords": [
     "frp"
@@ -12,6 +15,7 @@
   "author": "Gordon Brander",
   "license": "MIT",
   "devDependencies": {
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "vite": "^5.2.12"
   }
 }

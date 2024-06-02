@@ -2,28 +2,23 @@ export const config = {
   debug: false
 }
 
-const debugLog = (msg: string) => {
+const debugLog = (tag: string, msg: string) => {
   if (config.debug) {
-    console.debug(msg)
+    console.debug(`[${tag}] ${msg}`)
   }
 }
 
 export const chooseLeft = <T>(left: T, _right: T) => left
 
-class TransactionQueue {
-  name: string
-  #queue = new Map<(value: any) => void, any>()
+const TransactionQueue = (name: string) => {
+  const queue = new Map<(value: any) => void, any>()
 
-  constructor(name: string) {
-    this.name = name
-  }
-
-  transact() {
-    debugLog(`TransactionQueue ${this.name}: transacting ${this.#queue.size} jobs`)
-    for (const [perform, value] of this.#queue) {
+  const transact = () => {
+    debugLog(name, `transacting ${queue.size} jobs`)
+    for (const [perform, value] of queue) {
       perform(value)
     }
-    this.#queue.clear()
+    queue.clear()
   }
 
   /**
@@ -35,20 +30,22 @@ class TransactionQueue {
    * @param choose - A function to choose between two values if more than one
    *  has been set during the transaction (default is chooseLeft)
    */
-  withTransaction = <T>(
+  const withTransaction = <T>(
     perform: (value: T) => void,
     value: T,
     choose: (left: T, right: T) => T = chooseLeft
   ) => {
-    const left = this.#queue.get(perform)
-    this.#queue.set(perform, left !== undefined ? choose(left, value) : value)
+    const left = queue.get(perform)
+    queue.set(perform, left !== undefined ? choose(left, value) : value)
   }
+
+  return {transact, withTransaction}
 }
 
 const TransactionManager = () => {
-  const streamQueue = new TransactionQueue('streams')
-  const cellQueue = new TransactionQueue('cells')
-  const computedQueue = new TransactionQueue('computed')
+  const streamQueue = TransactionQueue('streams')
+  const cellQueue = TransactionQueue('cells')
+  const computedQueue = TransactionQueue('computed')
 
   let isScheduled = false
 
@@ -56,25 +53,25 @@ const TransactionManager = () => {
     if (isScheduled) {
       return
     }
-    debugLog(`TransactionManager: transaction scheduled`)
+    debugLog('TransactionManager', `transaction scheduled`)
     isScheduled = true
     queueMicrotask(transact)
   }
 
   const transact = () => {
-    debugLog(`TransactionManager: transaction start`)
-    debugLog(`TransactionManager: transact events`)
+    debugLog('TransactionManager', 'transaction start')
+    debugLog('TransactionManager', 'transact events')
     // First perform all events
     streamQueue.transact()
-    debugLog(`TransactionManager: transact cells`)
+    debugLog('TransactionManager', 'transact cells')
     // Then perform all cell updates
     cellQueue.transact()
 
-    debugLog(`TransactionManager: transact computed`)
+    debugLog('TransactionManager', 'transact computed')
     // Finally, update computed cells
     computedQueue.transact()
     isScheduled = false
-    debugLog(`TransactionManager: transaction end`)
+    debugLog('TransactionManager', 'transaction end')
   }
 
   const withCells = <T>(
@@ -82,6 +79,7 @@ const TransactionManager = () => {
     value: T,
     choose: (left: T, right: T) => T = chooseLeft
   ) => {
+    debugLog('withCells', 'queue job')
     cellQueue.withTransaction(perform, value, choose)
     schedule()
   }
@@ -91,6 +89,7 @@ const TransactionManager = () => {
     value: T,
     choose: (left: T, right: T) => T = chooseLeft
   ) => {
+    debugLog('withStreams', 'queue job')
     streamQueue.withTransaction(perform, value, choose)
     schedule()
   }
@@ -100,6 +99,7 @@ const TransactionManager = () => {
     value: T,
     choose: (left: T, right: T) => T = chooseLeft
   ) => {
+    debugLog('withComputed', 'queue job')
     computedQueue.withTransaction(perform, value, choose)
     schedule()
   }
@@ -109,11 +109,13 @@ const TransactionManager = () => {
 
 const {withCells, withStreams, withComputed} = TransactionManager()
 
-export type Send<T> = (value: T) => void
 export type Cancel = () => void
 
-type Topic<T> = {
-  notify: (value: T) => void,
+export type Send<T> = {
+  send: (value: T) => void
+}
+
+export type Sink<T> = {
   sink: (subscriber: Send<T>) => Cancel
 }
 
@@ -121,12 +123,15 @@ type Topic<T> = {
  * Create one-to-many event broadcast channel for a list of subscribers.
  * Publishes synchronously to all subscribers.
  */
-const Topic = <T>(): Topic<T> => {
-  const subscribers = new Set<(value: T) => void>()
+const Topic = <T>() => {
+  const subscribers = new Set<Send<T>>()
 
-  const notify = (value: T) => {
+  /** Get subscribers */
+  const subs = () => subscribers.values()
+
+  const send = (value: T) => {
     for (const subscriber of subscribers) {
-      subscriber(value)
+      subscriber.send(value)
     }
   }
 
@@ -135,7 +140,7 @@ const Topic = <T>(): Topic<T> => {
     return () => subscribers.delete(subscriber)
   }
 
-  return {notify, sink}
+  return {send, sink, subs}
 }
 
 const combineCancels = (cancels: Array<Cancel>): Cancel => () => {
@@ -144,152 +149,118 @@ const combineCancels = (cancels: Array<Cancel>): Cancel => () => {
   }
 }
 
-type Streamable<T> = {
-  sink: (subscriber: (value: T) => void) => () => void
+export const Stream = <T>() => {
+  const topic = Topic<T>()
+  const send = (value: T) => withStreams(topic.send, value)
+  const sink = (subscriber: Send<T>) => topic.sink(subscriber)
+  return {send, sink}
 }
 
-export class Stream<T> implements Streamable<T> {
-  #topic: Topic<T>
-  #choose: (left: T, right: T) => T
+const noOp = () => {}
 
-  constructor(
-    choose: (left: T, right: T) => T = chooseLeft  
-  ) {
-    this.#topic = Topic<T>()
-    this.#choose = choose
-  }
-
-  send(value: T) {
-    withStreams(this.#topic.notify, value, this.#choose)
-  }
-
-  sink(subscriber: (value: T) => void) {
-    return this.#topic.sink(subscriber)
-  }
-}
-
-export class ReadOnlyStream<T> implements Streamable<T> {
-  #stream: Streamable<T>
-
-  constructor(stream: Stream<T>) {
-    this.#stream = stream
-  }
-
-  sink(subscriber: (value: T) => void) {
-    return this.#stream.sink(subscriber)
-  }
-}
-
-export const useStream = <T>(
-  produce: (send: Send<T>) => void
+/**
+ * Generate a stream using a callback.
+ * Returns a read-only stream.
+ */
+export const generateStream = <T>(
+  produce: (send: (value: T) => void) => Cancel|void
 ) => {
-  const downstream = new Stream<T>()
-  produce(value => downstream.send(value))
-  return new ReadOnlyStream(downstream)
+  const {send, sink} = Stream<T>()
+  const cancel = produce(send) ?? noOp
+  return {cancel, sink}
 }
 
 export const mapStream = <T, U>(
-  upstream: Stream<T>,
+  upstream: Sink<T>,
   transform: (value: T) => U
-) => useStream(send => {
-  upstream.sink(value => send(transform(value)))
+) => generateStream(send => {
+  return upstream.sink({
+    send: value => send(transform(value))
+  })
 })
 
-export const scanStream = <T, U>(
-  upstream: Stream<T>,
-  step: (state: U, value: T) => U,
-  initial: U
-) => useStream(send => {
-  let state = initial
-  upstream.sink(value => {
-    state = step(state, value)
-    send(state)
+export const filterStream = <T>(
+  upstream: Sink<T>,
+  predicate: (value: T) => boolean
+) => generateStream(send => {
+  return upstream.sink({
+    send: value => {
+      if (predicate(value)) {
+        send(value)
+      }
+    }
   })
 })
 
 const isEqual = Object.is
 
-export type Cellable<T> = {
-  readonly value: T,
-  sink: (subscriber: (value: T) => void) => () => void
+export type Gettable<T> = {
+  get(): T
 }
 
-export class Cell<T> implements Cellable<T> {
-  #name: string
-  #value: T
-  #topic = Topic<T>()
+export const get = <T>(container: Gettable<T>) => container.get()
 
-  constructor(value: T, name: string) {
-    this.#value = value
-    this.#name = name
-  }
+export type CellLike<T> = Gettable<T> & Sink<T>
 
-  get name() {
-    return this.#name
-  }
+export const Cell = <T>(initial: T, name: string) => {
+  const topic = Topic<T>()
+  let state = initial
 
-  get value() {
-    return this.#value
-  }
+  const get = () => state
+  const getName = () => name
 
-  #setState = (value: T) => {
-      // Only notify downstream if state has changed value
-      if (!isEqual(this.#value, value)) {
-        this.#value = value
-        this.#topic.notify(value)
-      }    
-  }
-
-  send(value: T) {
-    withCells(this.#setState, value)
-  }
-
-  sink(subscriber: Send<T>) {
-    subscriber(this.#value)
-    return this.#topic.sink(subscriber)
-  }
-}
-
-export const getCell = <T>(cell: Cell<T>) => cell.value
-
-export class ComputedCell<T> implements Cellable<T> {
-  #topic = Topic<T>()
-  #isDirty = false
-  #value: T
-  #recalc: () => T
-  #upstreams: Array<Cell<any>>
-  cancel: Cancel
-
-  constructor(
-    upstreams: Array<Cell<any>>,
-    calc: (...values: Array<any>) => T
-  ) {
-    this.#upstreams = upstreams
-    this.#recalc = () => calc(...this.#upstreams.map(getCell))
-    this.#value = this.#recalc()
-
-    this.cancel = combineCancels(
-      upstreams.map(cell => cell.sink(value => {
-        withComputed(this.#markDirty, value)
-      }))
-    )
-  }
-
-  #markDirty = () => {
-    this.#isDirty = true
-  }
-
-  get value() {
-    if (this.#isDirty) {
-      this.#value = this.#recalc()
-      this.#isDirty = false
+  const setState = (value: T) => {
+    // Only notify downstream if state has changed value
+    if (!isEqual(state, value)) {
+      state = value
+      topic.send(value)
     }
-    return this.#value
   }
 
-  sink(subscriber: Send<T>): () => void {
-    return this.#topic.sink(subscriber)
+  const send = (value: T) => {
+    withCells(setState, value)
   }
+
+  const sink = (subscriber: Send<T>) => {
+    subscriber.send(state)
+    return topic.sink(subscriber)
+  }
+
+  return {get, name: getName, send, sink}
+}
+
+export const Computed = <T>(
+  upstreams: Array<CellLike<any>>,
+  calc: (...values: Array<any>) => T
+) => {
+  const topic = Topic<T>()
+
+  const recalc = (): T => calc(...upstreams.map(get))
+
+  let isDirty = false
+  let state = recalc()
+
+  const markDirty = () => isDirty = true
+
+  const subject = {
+    send: (value: T) => {
+      withComputed(markDirty, value)
+    }
+  }
+
+  const cancel = combineCancels(upstreams.map(cell => cell.sink(subject)))
+
+  const get = () => {
+    if (isDirty) {
+      state = recalc()
+      isDirty = false
+    }
+    return state
+  }
+
+  const sink = (subscriber: Send<T>) => topic.sink(subscriber)
+
+  return {get, sink, cancel}
 }
 
 /**
@@ -298,9 +269,10 @@ export class ComputedCell<T> implements Cellable<T> {
  * @param initial - the initial value for the cell
  * @returns cell
  */
-export const hold = <T>(stream: Stream<T>, initial: T): ComputedCell<T> => {
-  const cell = new Cell(initial, 'hold')
-  // TODO deal with cancel
-  stream.sink(value => cell.send(value))
-  return new ComputedCell([cell], (value) => value)
+export const hold = <T>(stream: Sink<T>, initial: T) => {
+  const {get, sink, send} = Cell(initial, 'hold')
+  const cancel = stream.sink({
+    send: value => send(value)
+  })
+  return {get, sink, cancel}
 }
