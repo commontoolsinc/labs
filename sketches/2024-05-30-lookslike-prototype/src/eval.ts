@@ -3,8 +3,7 @@ export function prepare(code: string) {
   return func;
 }
 
-function serializationBoundary(obj: any) {
-  console.log('forwarding data', obj)
+export function serializationBoundary(obj: any) {
   return JSON.parse(JSON.stringify(obj));
 }
 

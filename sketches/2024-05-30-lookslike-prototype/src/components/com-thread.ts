@@ -6,7 +6,7 @@ import { createElement } from '../ui'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import pretty from 'pretty'
 import { createRxJSNetworkFromJson } from '../graph'
-import { Graph, GraphNode } from '../data'
+import { Recipe, RecipeNode } from '../data'
 
 type Context = {
   inputs: { [node: string]: { [input: string]: any } },
@@ -65,60 +65,48 @@ const styles = css`
   }
 `
 
-function definitionToHtml(definition: any, context: any) {
-  if (!definition) {
+function definitionToHtml(node: RecipeNode, context: any) {
+  if (!node) {
     return html`<pre>loading...</pre>`
   }
 
-  if (definition.contentType === 'text/javascript') {
-    const val = snapshot(context).outputs[definition.name]
-    return html`<pre>${definition.body}</pre><com-toggle><pre class="code">${JSON.stringify(val, null, 2)}</pre></com-toggle>`
+  if (node.contentType === 'text/javascript') {
+    const val = snapshot(context).outputs[node.id]
+    return html`<pre>${node.body}</pre><com-toggle><pre class="code">${JSON.stringify(val, null, 2)}</pre></com-toggle>`
   }
 
-  if (definition.contentType === 'application/json+vnd.common.ui') {
-    const el = createElement(definition.body, snapshot(context).outputs)
+  if (node.contentType === 'application/json+vnd.common.ui') {
+    const el = createElement(node.body, snapshot(context).outputs)
 
     return html`<div>${unsafeHTML(el.outerHTML)}</div>
       <com-toggle>
       <pre class="code">${pretty(el.outerHTML)}</pre>
-      <pre class="code">${JSON.stringify(definition.body, null, 2)}</pre>
+      <pre class="code">${JSON.stringify(node.body, null, 2)}</pre>
       </com-toggle>`
   }
 
-  return html`<pre>${JSON.stringify(definition, null, 2)}</pre>`
+  return html`<pre>${JSON.stringify(node, null, 2)}</pre>`
 }
 
 @customElement('com-thread')
 export class ComThread extends LitElement {
   static styles = [base, styles]
 
-  @property({ type: Object }) graph = {} as Graph
+  @property({ type: Object }) graph = {} as Recipe
 
-  response(node: GraphNode, context: object) {
-    if (node.definition) {
-      return html`<com-response slot="response">
-        ${definitionToHtml(node.definition, context)}
-        <code class="local-variable">${node.definition?.name}</code>
+  response(node: RecipeNode, context: object) {
+    return html`<com-response slot="response">
+        ${definitionToHtml(node, context)}
+        <code class="local-variable">${node.id}</code>
       </com-response>`
-    } else {
-      return html`<com-response slot="response">
-        ${node.messages.filter(m => m.role !== 'user').map(m => m.content).join(' ')}
-      </com-response>`
-    }
-
   }
 
   render() {
-    const sortedNodes = this.graph.order.map((orderId: string) =>
-      this.graph.nodes.find((node) => node.id === orderId)
-    )
-      .filter((node) => node) as GraphNode[];
-
     const context = createRxJSNetworkFromJson(this.graph)
 
     return html`
       ${repeat(
-      sortedNodes,
+      this.graph,
       (node) => html`
           <com-thread-group>
             ${repeat(

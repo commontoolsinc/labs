@@ -2,38 +2,39 @@ import { LitElement, html } from 'lit-element'
 import { customElement, state } from 'lit/decorators.js'
 import { base } from '../styles'
 
-import { Graph, GraphNode, emptyGraph, todoAppMockup } from '../data'
+import { Recipe, emptyGraph, todoAppMockup, RecipeNode } from '../data'
 import { doLLM, grabJson } from '../llm'
 
 const codePrompt = `
   Your task is to take a user description or request and produce a node definition of a computation graph, for example:
 
-  Also provide the required edges to connect data from the environment to the inputs of the node. The keys of the \`edges\` are the names of local inputs and the values are variables available in the broader scope.
+  Also provide the required edges to connect data from the environment to the inputs of the node. The keys of \`in\` are the names of local inputs and the values are NodePaths (of the form [context, nodeId], where context is typically '.' meaning local namespace).
 
   "Fetch my todos" ->
 
   \`\`\`json
   {
-    "definition": {
-      "name": "todos",
-      "contentType": "text/javascript",
-      "signature": {
-        "inputs": {},
-        "output": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "label": { "type": "string" },
-              "checked": { "type": "boolean" }
-            }
-          }
-        }
+    "id": "todos",
+    "messages": [
+      {
+        "role": "user",
+        "content": "get my todos"
       },
-      "body": "return system.get('todos')"
+      {
+        "role": "assistant",
+        "content": "..."
+      }
+    ],
+    "contentType": "text/javascript",
+    "in": {},
+    "outputType": {
+      "$id": "https://common.tools/stream.schema.json",
+      "type": {
+        "$id": "https://common.tools/todos.json"
+      }
     },
-    "edges": {}
-  }
+    "body": "return system.get('todos')"
+  },
   \`\`\`
 
   Tasks that take no inputs require no edges.
@@ -41,39 +42,22 @@ const codePrompt = `
   "Take the existing todos and filter to unchecked" ->
   \`\`\`json
   {
-    "definition": {
-      "name": "filteredTodos",
-      "contentType": "text/javascript",
-      "signature": {
-        "inputs": {
-          "todos": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "label": { "type": "string" },
-                "checked": { "type": "boolean" }
-              }
-            }
-          }
-        },
-        "output": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "label": { "type": "string" },
-              "checked": { "type": "boolean" }
-            }
-          }
-        }
-      },
-      "body": "return inputs.todos.filter(todo => todo.checked)"
+    "id": "filteredTodos",
+    "contentType": "text/javascript",
+    "in": {
+      "todos": [".", "todos"]
     },
-    "edges": {
-      // all keys must correspond to the inputs
-      "todos": "tasks"
-    }
+    "outputType": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": { "type": "string" },
+          "checked": { "type": "boolean" }
+        }
+      }
+    },
+    "body": "return inputs.todos.filter(todo => todo.checked)"
   }
   \`\`\`
 
@@ -86,67 +70,61 @@ const codePrompt = `
 const uiPrompt = `
   Your task is to take a user description or request and produce a UI node definition for the rendering of a data in a computation graph, for example:
 
-  Also provide the required edges to connect data from the environment to the inputs of the node. The keys of the \`edges\` are the names of local inputs and the values are variables available in the broader scope.
+  Also provide the required edges to connect data from the environment to the inputs of the node. The keys of \`in\` are the names of local inputs and the values are NodePaths (of the form [context, nodeId], where context is typically '.' meaning local namespace).
 
   "render my todos" ->
 
   \`\`\`json
   {
-    "definition": {
-      "name": "todoUi",
-      "contentType": "application/json+vnd.common.ui",
-      "signature": {
-        "inputs": {
-          "todos": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "label": { "type": "string" },
-                "checked": { "type": "boolean" }
-              }
-            }
-          }
-        },
-        "output": {
-          "type": "object"
-        }
+    "id": "todoUi",
+    "messages": [
+      {
+        "role": "user",
+        "content": "render todo"
       },
-      "body": {
-        "tag": "ul",
-        "props": {
-          "className": "todo"
-        },
-        "children": {
-          "type": "repeat",
-          "binding": "todos",
-          "template": {
-            "tag": "li",
-            "props": {},
-            "children": [
-              {
-                "tag": "input",
-                "props": {
-                  "type": "checkbox",
-                  "checked": { type: 'boolean', binding: 'checked' }
-                }
-              },
-              {
-                "tag": "span",
-                "props": {
-                  "className": "todo-label"
-                },
-                "children": [
-                  { type: 'string', binding: 'label' }
-                ]
+      {
+        "role": "assistant",
+        "content": "..."
+      }
+    ],
+    "contentType": "application/json+vnd.common.ui",
+    "in": {
+      "todos": [".", "todos"]
+    },
+    "outputType": {
+      "$id": "https://common.tools/ui.schema.json"
+    },
+    "body": {
+      "tag": "ul",
+      "props": {
+        "className": "todo"
+      },
+      "children": {
+        "type": "repeat",
+        "binding": "todos",
+        "template": {
+          "tag": "li",
+          "props": {},
+          "children": [
+            {
+              "tag": "input",
+              "props": {
+                "type": "checkbox",
+                "checked": { type: 'boolean', binding: 'checked' }
               }
-            ]
-          }
+            },
+            {
+              "tag": "span",
+              "props": {
+                "className": "todo-label"
+              },
+              "children": [
+                { type: 'string', binding: 'label' }
+              ]
+            }
+          ]
         }
       }
-    },
-    "edges": {
-      "todos": "todos"
     }
   }
   \`\`\`
@@ -159,26 +137,31 @@ const uiPrompt = `
 export class ComApp extends LitElement {
   static styles = [base]
 
-  @state() graph: Graph = emptyGraph
+  @state() graph: Recipe = emptyGraph
   @state() userInput = ''
 
   async appendMessage() {
-    const newGraph = { ...this.graph }
+    const newGraph = [...this.graph]
+    // TODO: let GPT name the node
     const id = 'new' + (Math.floor(Math.random() * 1000))
     const input = `${this.userInput}`
 
-    const newNode: GraphNode = {
+    const newNode: RecipeNode = {
       id,
       messages: [
         {
           role: 'user',
           content: input
         }
-      ]
+      ],
+      // TODO: generate these
+      in: {},
+      outputType: {},
+      contentType: 'text/javascript',
+      body: ''
     }
 
-    newGraph.nodes.push(newNode);
-    newGraph.order.push(id);
+    newGraph.push(newNode);
     this.graph = newGraph;
     this.userInput = '';
 
@@ -187,24 +170,16 @@ export class ComApp extends LitElement {
     const message = result?.choices[0]?.message
     if (message) {
       const data = grabJson(message?.content)
-      const definition = data?.definition
-      if (data && definition) {
-        newNode.definition = definition;
-
-        // add all new edges
-        for (const [key, value] of Object.entries(data.edges || {})) {
-          newGraph.edges.push({
-            [key]: [definition.name, (value as string).replace('./', '')]
-          })
-        }
-
-        console.log(newGraph)
-      } else {
-        newNode.messages.push(message);
-      }
+      newNode.id = data.id || id
+      newNode.contentType = data.contentType || 'text/javascript'
+      newNode.outputType = data.outputType || {}
+      newNode.body = data.body || '...'
+      newNode.in = data.in || {}
+      newNode.messages = data.messages || newNode.messages
     }
 
     this.graph = JSON.parse(JSON.stringify(newGraph));
+    console.log('graph updated', this.graph);
   }
 
   render() {
