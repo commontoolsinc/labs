@@ -1,5 +1,6 @@
 import { BehaviorSubject, combineLatest } from 'rxjs';
 import { createElement } from './ui';
+import { prepare, run } from './eval';
 
 function serializationBoundary(obj) {
   console.log('forwarding data', obj)
@@ -36,7 +37,7 @@ export function createRxJSNetworkFromJson(graph) {
     outputs: {}
   };
 
-  // populte context namespace
+  // populate context namespace
   graph.nodes.forEach(node => {
     if (!node.definition) return;
     const nodeName = node.definition.name;
@@ -77,9 +78,9 @@ export function createRxJSNetworkFromJson(graph) {
         inputs[inputName] = context.inputs[nodeName][inputName].getValue();
       }
 
-      const func = new Function('system', 'inputs', body);
-      const result = func(system, inputs);
-      context.outputs[nodeName].next(serializationBoundary(result));
+      const module = prepare(body);
+      const result = run(module, system, inputs);
+      context.outputs[nodeName].next(result);
     } else if (contentType === 'application/json+vnd.common.ui') {
       // Set up template rendering
       const { inputs } = signature;

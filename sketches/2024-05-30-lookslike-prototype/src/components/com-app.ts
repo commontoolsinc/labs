@@ -80,6 +80,7 @@ const codePrompt = `
   Tasks that filter other data must pipe the data through the edges.
 
   Wrap your response in a json block. Respond with nothing else.
+  notalk;justgo
 `
 
 const uiPrompt = `
@@ -151,6 +152,7 @@ const uiPrompt = `
   \`\`\`
 
   Wrap your response in a json block. Respond with nothing else.
+  notalk;justgo
 `
 
 @customElement('com-app')
