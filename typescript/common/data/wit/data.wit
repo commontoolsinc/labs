@@ -8,7 +8,7 @@ interface types {
     deref: func() -> result<option<value>, %string>;
   }
 
-  resource map {
+  resource dictionary {
     get: func(key: %string) -> option<reference>;
   }
 
@@ -24,7 +24,7 @@ interface types {
     boolean(boolean),
     buffer(buffer),
     array(array),
-    map(map)
+    dictionary(dictionary)
   }
 }
 
