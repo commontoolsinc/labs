@@ -28,6 +28,9 @@ export async function generateImage(prompt: string) {
 
 export async function doLLM(input: string, system: string, response_model: any) {
   try {
+    console.log("input", input);
+    console.log("system", system);
+
     return await client.chat.completions.create({
       messages: [
         { role: "system", content: system },

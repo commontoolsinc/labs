@@ -1,29 +1,16 @@
-import { BehaviorSubject, combineLatest } from 'rxjs';
+import { BehaviorSubject, combineLatest, filter } from 'rxjs';
 import { createElement } from './ui';
-import { prepare, run, serializationBoundary } from './eval';
+import { prepare, run } from './eval';
 import { Recipe, RecipeNode } from './data';
+import { snapshot, system } from './state';
 
-export const system = {
-  get: (key: string) => {
-    if (key === 'todos') {
-      return serializationBoundary([
-        { label: 'Buy groceries', checked: false },
-        { label: 'Vacuum house', checked: true },
-        { label: 'Learn RxJS', checked: false }
-      ]);
-    }
-
-    if (key === 'emails') {
-      return serializationBoundary([
-        { subject: 'Meeting', from: 'John', date: '2020-01-01', read: false },
-        { subject: 'Lunch', from: 'Jane', date: '2020-01-02', read: true },
-        { subject: 'Dinner', from: 'Joe', date: '2020-01-03', read: false }
-      ])
-    }
-
-    return [];
-  }
-};
+export function collectSymbols(recipe: Recipe) {
+  const symbols = [] as { symbol: string, type: any }[];
+  recipe.forEach(node => {
+    symbols.push({ symbol: node.id, type: node.outputType })
+  });
+  return symbols;
+}
 
 // inflate the RxJS network from a JSON graph definition
 export function createRxJSNetworkFromJson(recipe: Recipe) {
@@ -58,7 +45,7 @@ export function createRxJSNetworkFromJson(recipe: Recipe) {
         const source = context.outputs[sourceNode];
         const target = context.inputs[node.id][inputName];
 
-        source.subscribe(value => {
+        source.pipe(filter(value => value != null)).subscribe(value => {
           target.next(value);
         });
       }
@@ -66,44 +53,43 @@ export function createRxJSNetworkFromJson(recipe: Recipe) {
   });
 
   // process node definitions and set up reactive logic
-  recipe.forEach(node => {
+  recipe.forEach(async node => {
     if (!node.body) return;
-    const nodeName = node.id;
-    const { contentType } = node;
-
-
-    const inputs = node.in;
     const inputObservables = [];
+    const inputs = {} as { [key: string]: BehaviorSubject<any> };
 
-    for (const inputName in inputs) {
-      if (context.outputs[inputName]) {
-        inputObservables.push(context.outputs[inputName]);
+    for (const inputName in node.in) {
+      const outputName = node.in[inputName][1];
+      if (context.outputs[outputName]) {
+        inputObservables.push(context.outputs[outputName].pipe(filter(value => value !== null)));
+        inputs[inputName] = context.outputs[outputName];
       }
     }
 
-    if (inputObservables.length === 0) {
-      executeNode(node, {}, context.outputs)
+    const initial = Object.entries(inputs).map(([k, v]) => [k, v.getValue()])
+    if (initial.every(([_k, v]) => v !== null)) {
+      await executeNode(node, Object.fromEntries(initial), context.outputs)
     }
 
-    combineLatest(inputObservables).subscribe(values => {
+    combineLatest(inputObservables).subscribe(async values => {
       const inputValues = values.reduce((acc, value, index) => {
         const key = Object.keys(inputs)[index];
         acc[key] = value;
         return acc;
       }, {});
 
-      executeNode(node, inputValues, context.outputs)
+      await executeNode(node, inputValues, context.outputs)
     });
   });
 
   return context;
 }
 
-function executeNode(node: RecipeNode, inputs: { [key: string]: any }, outputs: { [key: string]: BehaviorSubject<any> }) {
+async function executeNode(node: RecipeNode, inputs: { [key: string]: any }, outputs: { [key: string]: BehaviorSubject<any> }) {
   const { contentType } = node;
   if (contentType === 'text/javascript' && typeof node.body === 'string') {
     const module = prepare(node.body);
-    const result = run(module, system, inputs);
+    const result = await run(module, system, inputs);
     outputs[node.id].next(result);
   } else if (contentType === 'application/json+vnd.common.ui') {
     const renderedTemplate = createElement(node.body, inputs);

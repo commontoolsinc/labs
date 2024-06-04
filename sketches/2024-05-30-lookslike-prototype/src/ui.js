@@ -63,8 +63,8 @@ export function createElement(node, context) {
 
   // recursively create and append child elements
   children.forEach(childNode => {
-    if (childNode.type === 'string') {
-      if (childNode.binding) {
+    if (childNode.type === 'string' || typeof childNode === 'text' || typeof childNode === 'number') {
+      if (childNode.binding && typeof context === 'object' && context[childNode.binding]) {
         const node = document.createTextNode(context[childNode.binding])
         element.appendChild(node);
         return

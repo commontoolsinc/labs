@@ -7,33 +7,7 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import pretty from 'pretty'
 import { createRxJSNetworkFromJson } from '../graph'
 import { Recipe, RecipeNode } from '../data'
-
-type Context = {
-  inputs: { [node: string]: { [input: string]: any } },
-  outputs: { [node: string]: any },
-}
-
-function snapshot(ctx: Context) {
-  const snapshot: Context = {
-    inputs: {},
-    outputs: {}
-  }
-
-  for (const key in ctx.outputs) {
-    const value = ctx.outputs[key].getValue()
-    snapshot.outputs[key] = value
-  }
-
-  for (const key in ctx.inputs) {
-    snapshot.inputs[key] = {}
-    for (const inputKey in ctx.inputs[key]) {
-      const value = ctx.inputs[key][inputKey].getValue()
-      snapshot.inputs[key][inputKey] = value
-    }
-  }
-
-  return snapshot
-}
+import { snapshot } from '../state'
 
 const styles = css`
   :host {
@@ -76,7 +50,7 @@ function definitionToHtml(node: RecipeNode, context: any) {
   }
 
   if (node.contentType === 'application/json+vnd.common.ui') {
-    const el = createElement(node.body, snapshot(context).outputs)
+    const el = createElement(node.body, snapshot(context).inputs[node.id] || {})
 
     return html`<div>${unsafeHTML(el.outerHTML)}</div>
       <com-toggle>
@@ -93,16 +67,27 @@ export class ComThread extends LitElement {
   static styles = [base, styles]
 
   @property({ type: Object }) graph = {} as Recipe
+  @property({ type: Object }) context = {} as Context
+
+  lastGraph: Recipe = []
 
   response(node: RecipeNode, context: object) {
     return html`<com-response slot="response">
         ${definitionToHtml(node, context)}
         <code class="local-variable">${node.id}</code>
+        ${repeat(Object.entries(node.in), ([key, value]) => html`<code class="local-variable">${key}: ${value}</code>`)}
       </com-response>`
   }
 
   render() {
-    const context = createRxJSNetworkFromJson(this.graph)
+    if (this.graph != this.lastGraph) {
+      this.context = createRxJSNetworkFromJson(this.graph)
+      // trigger a re-render if any output changes
+      Object.values(this.context.outputs).forEach((output) => {
+        output.subscribe(() => this.requestUpdate())
+      });
+      this.lastGraph = this.graph
+    }
 
     return html`
       ${repeat(
@@ -116,7 +101,7 @@ export class ComThread extends LitElement {
                       ${node.content}
                     </com-prompt>`
         })}
-            ${this.response(node, context)}
+            ${this.response(node, this.context)}
           </com-thread-group>
         `)
       }
