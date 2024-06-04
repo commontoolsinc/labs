@@ -1,0 +1,12 @@
+package common:io@0.0.1;
+
+interface state {
+  use common:data/types@0.0.1.{reference,value,%string};
+
+  read: func(name: %string) -> option<reference>;
+  write: func(name: %string, value: value);
+}
+
+world common {
+  export state;
+}

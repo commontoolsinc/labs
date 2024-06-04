@@ -61,6 +61,14 @@ impl Bake for JavaScriptBaker {
 
         debug!(?workspace, "Populated temporary input files");
 
+        Command::new("cp")
+            .arg("-r")
+            .arg(format!("{}", workspace.path().display()))
+            .arg("/tmp/failed")
+            .spawn()?
+            .wait()
+            .await?;
+
         let mut command = Command::new("jco");
 
         command
