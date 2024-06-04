@@ -66,7 +66,10 @@ function computeAllParentsForLabel(
   if (label === end) {
     return [];
   }
-  const parents = lattice[label] || [end];
+  const parents = lattice[label];
+  if (!parents) {
+    return [];
+  }
   return parents.reduce(
     (acc, parent) => [
       ...acc,
@@ -99,25 +102,18 @@ function makeLattice(latticeRelationships: LatticeRelationships): Lattice {
   };
 
   // Compute all parents and children for each key
-  for (const key in latticeRelationships)
+  for (const key of allKeys) {
     lattice.parents[key] = [
       key,
       ...computeAllParentsForLabel(key, latticeRelationships, TOP),
+      TOP,
     ];
 
-  for (const key in invertedLattice)
     lattice.children[key] = [
       key,
       ...computeAllParentsForLabel(key, invertedLattice, BOTTOM),
+      BOTTOM,
     ];
-
-  for (const key of allKeys) {
-    if (!lattice.parents[key]) {
-      lattice.parents[key] = [key, TOP];
-    }
-    if (!lattice.children[key]) {
-      lattice.children[key] = [key, BOTTOM];
-    }
   }
 
   return lattice;
@@ -153,12 +149,12 @@ function join(
 
   return otherPrincipals.length
     ? ([
-        "join",
-        [
-          ...otherPrincipals,
-          ...(commonParents.length ? [commonParents[0]] : []),
-        ],
-      ] as PrincipalExpression)
+      "join",
+      [
+        ...otherPrincipals,
+        ...(commonParents.length ? [commonParents[0]] : []),
+      ],
+    ] as PrincipalExpression)
     : commonParents[0] ?? TOP;
 }
 
@@ -181,12 +177,12 @@ function meet(
 
   return otherPrincipals.length
     ? ([
-        "meet",
-        [
-          ...otherPrincipals,
-          ...(commonChildren.length ? [commonChildren[0]] : []),
-        ],
-      ] as PrincipalExpression)
+      "meet",
+      [
+        ...otherPrincipals,
+        ...(commonChildren.length ? [commonChildren[0]] : []),
+      ],
+    ] as PrincipalExpression)
     : commonChildren[0] ?? BOTTOM;
 }
 
@@ -426,7 +422,7 @@ function findSubstitutions(
       ];
       newSubstitutions[variable] = simplifyExpression(
         substituteWithoutSelfReference([variable, newExpression]) ??
-          newExpression
+        newExpression
       );
     }
   });
