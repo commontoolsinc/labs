@@ -88,7 +88,7 @@ export function createRxJSNetworkFromJson(recipe: Recipe) {
 async function executeNode(node: RecipeNode, inputs: { [key: string]: any }, outputs: { [key: string]: BehaviorSubject<any> }) {
   const { contentType } = node;
   if (contentType === 'text/javascript' && typeof node.body === 'string') {
-    const result = await run(node.body, system, inputs);
+    const result = await run(node.body, inputs);
     outputs[node.id].next(result);
   } else if (contentType === 'application/json+vnd.common.ui') {
     const renderedTemplate = createElement(node.body, inputs);

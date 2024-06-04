@@ -11,36 +11,31 @@ const codePrompt = `
   Your task is to take a user description or request and produce a series of nodes for a computation graph. Nodes can be code blocks or UI components and they communicate with named ports.
   you will provide the required edges to connect data from the environment to the inputs of the node. The keys of \`in\` are the names of local inputs and the values are NodePaths (of the form [context, nodeId], where context is typically '.' meaning local namespace).
 
-  "Fetch my todos" ->
+  "Imagine some todos" ->
 
   \`\`\`json
   [
     {
       "id": "todos",
-      "messages": [
-        {
-          "role": "user",
-          "content": "get my todos"
-        },
-        {
-          "role": "assistant",
-          "content": "..."
-        }
-      ],
       "contentType": "text/javascript",
       "in": {},
       "outputType": {
-        "$id": "https://common.tools/stream.schema.json",
-        "type": {
-          "$id": "https://common.tools/todos.json"
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "label": { "type": "string" },
+            "checked": { "type": "boolean" }
+          }
         }
       },
-      "body": "function() { return read('todos'); }"
+      "body": "function() { return [{ label: 'Water my plants', checked: false }, { label: 'Buy milk', checked: true }]; }"
     }
   ]
   \`\`\`
 
   Tasks that take no inputs require no edges.
+  All function bodies must take zero parameters. Inputs can be accessed via 'read' and 'deref'.
 
   ---
 
@@ -53,7 +48,7 @@ const codePrompt = `
       "contentType": "text/javascript",
       "in": {},
       "outputType": {},
-      "body": "async function() { const todos = await system.get('todos'); const newTodo = { label: 'water the plants', checked: false }; await system.set('todos', [...todos, newTodo]); return newTodo; }"
+      "body": "async function() { const todos = input('todos'); const newTodo = { label: 'water the plants', checked: false }; cost newTodos = [...todos, newTodo]; return newTodos; }"
     }
   ]
   \`\`\`
@@ -81,12 +76,13 @@ const codePrompt = `
           }
         }
       },
-      "body": "function() { return inputs.todos.filter(todo => todo.checked); }"
+      "body": "function() { const todos = input('todos'); return todos.filter(todo => todo.checked); }"
     }
   ]
   \`\`\`
 
   Tasks that filter other data must pipe the data through the edges.
+  All function bodies must take zero parameters. Inputs can be accessed via 'input()', values may be null.
 
   ContentType should be "text/javascript" for code.
   Always respond with code, even for static data. Wrap your response in a json block. Respond with nothing else.
@@ -186,16 +182,11 @@ export class ComApp extends LitElement {
       ${JSON.stringify(symbols, null, 2)}
       \`\`\`
 
-      The keys at the top of the list are the most recently created by the user, prefer these.
+      The keys at the top of the list are the most recently created by the user, prefer these when making connections.
+      Ensure the you use the name you assign to the input in the body of the code for any read calls.
       `
 
-    const systemContext = `
-      The current keys available in the system DB are:
-
-      \`\`\`json
-      ${JSON.stringify((await listKeys()).map(k => `system.get('${k}')`), null, 2)}
-      \`\`\`
-    `
+    const systemContext = ``
 
     const result = await doLLM(input + localContext, codePrompt + systemContext, null)
     const message = result?.choices[0]?.message
