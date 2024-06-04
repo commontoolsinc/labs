@@ -12,16 +12,16 @@ const xPos = mapStream(clicks, (event) => {
   return mouseEvent.clientX
 })
 
-const currentX = hold(xPos, 0, 'currentX')
+const currentX = hold(xPos, 0)
 
-const a = createCell(0, 'foo')
+const a = createCell(0)
 
 setInterval(() => {
   a.send(a.get() + 1)
 }, 1000)
 
-const b = createComputed([a, currentX], (a) => a + 1)
-const c = createComputed([a, currentX], (a) => a + 2)
+const b = createComputed([a, currentX], (a): number => a + 1)
+const c = createComputed([a, currentX], (a): number => a + 2)
 const d = createComputed([b, c], (b, c) => b + c)
 
 // You should only see one log message per update

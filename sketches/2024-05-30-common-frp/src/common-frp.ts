@@ -8,6 +8,11 @@ const debugLog = (tag: string, msg: string) => {
   }
 }
 
+let _cidCounter = 0
+
+/** Create a lifetime-unique client ID, based on incrementing a counter */
+const cid = () => `cid${_cidCounter++}`
+
 export const batched = <T>(perform: (value: T) => void) => {
   let isScheduled = false
   let state: T | undefined = undefined
@@ -27,39 +32,43 @@ export const batched = <T>(perform: (value: T) => void) => {
 
 export type Cancel = () => void
 
-export type Subscriber<T> = {
+function* filterMap<T, U>(
+  iterable: Iterable<T>,
+  transform: (value: T) => U|undefined
+): Generator<U> {
+  for (const value of iterable) {
+    const result = transform(value)
+    if (result !== undefined) {
+      yield result
+    }
+  }
+}
+
+export type Subject<T> = {
   send: (value: T) => void
 }
 
 export type Sink<T> = {
-  sink: (subscriber: Subscriber<T>) => Cancel
+  sink: (subscriber: Subject<T>) => Cancel
 }
 
-/**
- * Create one-to-many event broadcast channel for a list of subscribers.
- * This is a low-level helper that publishes *synchronously* to all subscribers.
- * We use this to implement higher-level abstractions like streams and cells,
- * which dispatch using a shared transaction system.
- */
-export const createPublisher = <T>() => {
-  const subscribers = new Set<Subscriber<T>>()
-
-  /** Get subscribers */
-  const subs = () => subscribers.values()
-
-  const send = (value: T) => {
-    debugLog('publisher', `dispatching ${value} to ${subscribers.size} subscribers`)
-    for (const subscriber of subscribers) {
-      subscriber.send(value)
-    }
+const pub = <T>(subscribers: Set<Subject<T>>, value: T) => {
+  debugLog('pub', `dispatching value ${value} to ${subscribers.size} subscribers`)
+  for (const subscriber of subscribers) {
+    subscriber.send(value)
   }
+}
 
-  const sink = (subscriber: Subscriber<T>): Cancel => {
-    subscribers.add(subscriber)
-    return () => subscribers.delete(subscriber)
+const sub = <T>(
+  subscribers: Set<Subject<T>>,
+  subscriber: Subject<T>
+) => {
+  debugLog('sub', 'subscribing')
+  subscribers.add(subscriber)
+  return () => {
+    debugLog('sub', 'canceling subscription')
+    subscribers.delete(subscriber)
   }
-
-  return {send, sink, subs}
 }
 
 export const combineCancels = (cancels: Array<Cancel>): Cancel => () => {
@@ -69,13 +78,17 @@ export const combineCancels = (cancels: Array<Cancel>): Cancel => () => {
 }
 
 export const createStream = <T>() => {
-  const updatesPublisher = createPublisher<T>()
+  const id = cid()
+  const downstreams = new Set<Subject<T>>()
+
   const send = batched((value: T) => {
-    debugLog('stream', `sending ${value}`)
-    updatesPublisher.send(value)
+    debugLog(`stream ${id}`, `sending ${value}`)
+    pub(downstreams, value)
   })
-  const sink = updatesPublisher.sink
-  return {name, send, sink}
+
+  const sink = (subscriber: Subject<T>) => sub(downstreams, subscriber)
+
+  return {send, sink}
 }
 
 const noOp = () => {}
@@ -95,11 +108,15 @@ export const generateStream = <T>(
 export const mapStream = <T, U>(
   upstream: Sink<T>,
   transform: (value: T) => U
-) => generateStream((send: (value: U) => void) => {
-  return upstream.sink({
-    send: value => send(transform(value))
+) => {
+  const transformed = createStream<U>()
+
+  const cancel = upstream.sink({
+    send: value => transformed.send(transform(value))
   })
-})
+
+  return {cancel, sink: transformed.sink}
+}
 
 export const filterStream = <T>(
   upstream: Sink<T>,
@@ -122,13 +139,9 @@ export type Gettable<T> = {
 
 export const sample = <T>(container: Gettable<T>) => container.get()
 
-export type CellLike<T> = {
-  get: () => T
-  sink(subscriber: Subscriber<T>): Cancel
-}
-
-export const createCell = <T>(initial: T, name: string) => {
-  const publisher = createPublisher<T>()
+export const createCell = <T>(initial: T) => {
+  const id = cid()
+  const downstreams = new Set<Subject<T>>()
   let state = initial
 
   const get = () => state
@@ -137,24 +150,30 @@ export const createCell = <T>(initial: T, name: string) => {
     // Only notify downstream if state has changed value
     if (!isEqual(state, value)) {
       state = value
-      debugLog('cell', `updated ${state}`)
-      publisher.send(state)
+      debugLog(`cell ${id}`, `updated ${state}`)
+      pub(downstreams, state)
     }
   })
 
-  const sink = (subscriber: Subscriber<T>) => {
+  const sink = (subscriber: Subject<T>) => {
     subscriber.send(state)
-    return publisher.sink(subscriber)
+    return sub(downstreams, subscriber)
   }
 
-  return {name, get, send, sink}
+  return {get, send, sink}
+}
+
+export type CellLike<T> = {
+  get: () => T
+  sink: (subscriber: Subject<T>) => Cancel
 }
 
 export const createComputed = <T>(
   upstreams: Array<CellLike<any>>,
   compute: (...values: Array<any>) => T
 ) => {
-  const publisher = createPublisher<T>()
+  const id = cid()
+  const downstreams = new Set<Subject<T>>()
 
   const recompute = (): T => compute(...upstreams.map(sample))
 
@@ -163,20 +182,20 @@ export const createComputed = <T>(
   const get = () => state
 
   const subject = {
-    send: batched(_value => {
+    send: batched(_ => {
       state = recompute()
-      debugLog('computed', `recomputed ${state}`)
-      publisher.send(state)
+      debugLog(`computed ${id}`, `recomputed ${state}`)
+      pub(downstreams, state)
     })
   }
 
   const cancel = combineCancels(upstreams.map(cell => cell.sink(subject)))
 
   const sink = (
-    subscriber: Subscriber<T>
+    subscriber: Subject<T>
   ) => {
     subscriber.send(state)
-    return publisher.sink(subscriber)
+    return sub(downstreams, subscriber)
   }
 
   return {get, sink, cancel}
@@ -188,8 +207,11 @@ export const createComputed = <T>(
  * @param initial - the initial value for the cell
  * @returns cell
  */
-export const hold = <T>(stream: Sink<T>, initial: T, name: string) => {
-  const cell = createCell(initial, name)
+export const hold = <T>(
+  stream: Sink<T>,
+  initial: T
+) => {
+  const cell = createCell(initial)
   const cancel = stream.sink(cell)
   return {get: cell.get, sink: cell.sink, cancel}
 }

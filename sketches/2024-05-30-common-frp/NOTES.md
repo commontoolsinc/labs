@@ -25,6 +25,18 @@ Rough notes and references while designing.
     - Update sinks: get updated cell and computed state. Computed state is recomputed if dirty.
         - Subscribe with sinks
 
+## Rough notes
+
+### Restricted operators
+
+- It may be worth offering operators that do not allow arbitrary Turing-complete function definitions. E.g. a restricted subset of data operators taken from SQL or Linq
+    - `select(keyPath: string)` - a restricted form of map
+    - `where(selector: formula)` - a restricted form of filter
+    - `groupBy()`
+    - `orderBy()`
+    - `union()`, `intersect()` - restricted forms of join/merge
+    - `count()`, `min()`, `max()`, `sum()`, `avg()`, `truncate()` - restricted forms of computation
+
 ## Prior art
 
 ### Classical FRP
