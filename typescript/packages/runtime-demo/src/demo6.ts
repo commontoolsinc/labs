@@ -29,9 +29,9 @@ export const module = {
   }
 };`;
 
-const bar = new Dictionary({
+const bar = {
   baz: 'quux',
-});
+};
 
 class LocalStorageIO implements IO {
   reset() {
@@ -40,11 +40,8 @@ class LocalStorageIO implements IO {
 
   read(key: string): Value | undefined {
     if (key == 'bar') {
-      console.log(`Reading special key '${bar}'...`);
-      return {
-        tag: 'dictionary',
-        val: bar,
-      };
+      console.log(`Reading special key '${key}'...`);
+      return infer(bar);
     }
 
     console.log(`Reading '${key}' from local storage`);
