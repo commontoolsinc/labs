@@ -110,3 +110,23 @@ The distinction between cold and hot observables (or their equivalent) is a sign
 - Hot observable: Multicast. Maintains a list of subscribers and dispatches to them from a single data producing source.
     - Examples: [share](https://rxjs.dev/api/index/function/share) in RxJS.
     - Has to deal with callback cleanup bookkeeping in dynamic graphs.
+
+### Pipeable operators
+
+Following RxJS, we enable piping through unary functions. This is a functional alternative to method chaining.
+
+> Problems with the patched operators for dot-chaining are:
+>
+> Any library that imports a patch operator will augment the Observable.prototype for all consumers of that library, creating blind dependencies. If the library removes their usage, they unknowingly break everyone else. With pipeables, you have to import the operators you need into each file you use them in.
+>
+> Operators patched directly onto the prototype are not "tree-shakeable" by tools like rollup or webpack. Pipeable operators will be as they are just functions pulled in from modules directly.
+>
+> Unused operators that are being imported in apps cannot be detected reliably by any sort of build tool or lint rule. That means that you might import scan, but stop using it, and it's still being added to your output bundle. With pipeable operators, if you're not using it, a lint rule can pick it up for you.
+>
+> Functional composition is awesome. Building your own custom operators becomes much easier, and now they work and look just like all other operators in rxjs. You don't need to extend Observable or override lift anymore.
+
+> [Pipeable Operators](https://v6.rxjs.dev/guide/v6/pipeable-operators)
+
+And:
+
+> "pipeable" operators is the current and recommended way of using operators since RxJS 5.5. The main difference is that it's easier to make custom operators and that it's better treeshakable while not altering some global Observable object that could possible make collisions if two different parties wanted to create an operator of the same name. - [StackOverflow](https://stackoverflow.com/questions/48668701/what-is-pipe-for-in-rxjs)
