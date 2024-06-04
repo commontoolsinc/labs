@@ -1,4 +1,4 @@
-import { IO, Runtime, Value, infer } from '@commontools/runtime';
+import { IO, Runtime, Dictionary, Value, infer } from '@commontools/runtime';
 
 const EXAMPLE_MODULE_JS = `
 import { read, write } from 'common:io/state@0.0.1';
@@ -6,10 +6,17 @@ import { read, write } from 'common:io/state@0.0.1';
 export class Body {
     run() {
         console.log('Running!');
+
         const foo = read('foo');
-        console.log('Reference:', foo);
         const value = foo?.deref();
+
         console.log('Value:', value);
+
+        const bar = read('bar');
+        const dict = bar?.deref()?.val;
+        const dictValue = dict.get('baz');
+
+        console.log('Dictionary value:', dictValue.deref()?.val);
     }
 }
 
@@ -22,13 +29,26 @@ export const module = {
   }
 };`;
 
+const bar = new Dictionary({
+  baz: 'quux',
+});
+
 class LocalStorageIO implements IO {
   reset() {
     localStorage.clear();
   }
 
   read(key: string): Value | undefined {
+    if (key == 'bar') {
+      console.log(`Reading special key '${bar}'...`);
+      return {
+        tag: 'dictionary',
+        val: bar,
+      };
+    }
+
     console.log(`Reading '${key}' from local storage`);
+
     let rawValue = localStorage.getItem(key);
     return infer(rawValue);
   }
