@@ -3,10 +3,19 @@
 Install some environment dependencies:
 
 ```sh
+cargo install wit-deps-cli wasm-tools
+rustup target add wasm32-wasi wasm32-unknown-unknown
+
 npm install -g @bytecodealliance/jco
 npm install -g @bytecodealliance/componentize-js
 
 pip install componentize-py
+```
+
+On a Mac, also do this also:
+
+```sh
+brew install wget gsed
 ```
 
 Set up an NPM project (using whatever stack) in `/typescript/packages` and add `@commontools/runtime` to your dependencies:
