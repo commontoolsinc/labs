@@ -7,7 +7,8 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "./packages/*"
+    "./packages/*",
+    "./common/*"
   ],
   "scripts": {
     "build": "wireit",
@@ -30,7 +31,13 @@
         "./packages/usuba-rt:build",
         "./packages/usuba-api:build",
         "./packages/usuba-sw:build",
-        "./packages/usuba-ui:build"
+        "./packages/usuba-ui:build",
+        "./packages/runtime-demo:build",
+        "./packages/example-module:build",
+        "./common/data:build",
+        "./common/io:build",
+        "./common/module:build",
+        "./common/runtime:build"
       ]
     },
     "clean": {
@@ -38,7 +45,13 @@
         "./packages/usuba-rt:clean",
         "./packages/usuba-api:clean",
         "./packages/usuba-sw:clean",
-        "./packages/usuba-ui:clean"
+        "./packages/usuba-ui:clean",
+        "./packages/runtime-demo:clean",
+        "./packages/example-module:clean",
+        "./common/data:clean",
+        "./common/io:clean",
+        "./common/module:clean",
+        "./common/runtime:clean"
       ]
     }
   }

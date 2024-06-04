@@ -1,0 +1,16 @@
+package common:module@0.0.1;
+
+interface module {
+  resource body {
+    run: func();
+  }
+
+  create: func() -> body;
+}
+
+world common {
+  import common:data/types@0.0.1;
+  import common:io/state@0.0.1;
+
+  export module;
+}
