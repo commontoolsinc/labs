@@ -364,7 +364,8 @@ function findSubstitutions(
   // If the variable isn't mentioned on the right side, always substitute it
   constraints.forEach(([variable, expression]) => {
     const level = maxLevelVariableIsContained(variable, expression);
-    if (level === 0) newSubstitutions[variable] = expression;
+    if (level === 0)
+      newSubstitutions[variable] = simplifyExpression(expression);
   });
   if (Object.keys(newSubstitutions).length > 0) return newSubstitutions;
 
@@ -384,9 +385,9 @@ function findSubstitutions(
     }
   });
 
-  // If there is only one constraint for a variable, we can substitute it if
-  // the variable is only mentioned in the first layer.
-  uniqueConstraints.forEach(([variable, expression]) => {
+  function substituteWithoutSelfReference([variable, expression]: Constraint):
+    | PrincipalExpression
+    | undefined {
     const level = maxLevelVariableIsContained(variable, expression);
     // level 2 means it's $var = [ "meet"| "join", [$var, ...] ]
     if (level == 2) {
@@ -394,10 +395,39 @@ function findSubstitutions(
         "join" | "meet",
         PrincipalExpression[]
       ];
-      newSubstitutions[variable] = [
+      return simplifyExpression([
         op,
         expressions.filter((e) => e !== variable),
+      ]);
+    }
+    return undefined;
+  }
+
+  // If there is only one constraint for a variable, we can substitute it if
+  // the variable is only mentioned in the first layer.
+  uniqueConstraints.forEach(([v, e]) => {
+    const substitution = substituteWithoutSelfReference([v, e]);
+    if (substitution) newSubstitutions[v] = substitution;
+  });
+  if (Object.keys(newSubstitutions).length > 0) return newSubstitutions;
+
+  // If there are multiple constraints for a variable, and one has the variable
+  // at the top level, substitute all others into it via the same join/meet,
+  // a = a v (b ^ c), a = a v (d ^ e) => a = a v (d ^ e) v (b ^ c ^ d ^ e)
+  multipleConstraints.forEach((expressions, variable) => {
+    const container = expressions.find(
+      (e) => maxLevelVariableIsContained(variable, e) === 2
+    );
+
+    if (container && isCombinedPrincipal(container)) {
+      const newExpression: PrincipalExpression = [
+        container[0],
+        [...container[1], ...expressions.filter((e) => e !== container)],
       ];
+      newSubstitutions[variable] = simplifyExpression(
+        substituteWithoutSelfReference([variable, newExpression]) ??
+          newExpression
+      );
     }
   });
   if (Object.keys(newSubstitutions).length > 0) return newSubstitutions;
@@ -419,6 +449,63 @@ function applySubstitutions(
   }
 }
 
+// Finds nested join and meet and flattens them into one
+function simplifyExpression(
+  expression: PrincipalExpression
+): PrincipalExpression {
+  if (isCombinedPrincipal(expression)) {
+    const [op, expressions] = expression;
+    const simplified: PrincipalExpression[] = [];
+    expressions.forEach((e) => {
+      if (isCombinedPrincipal(e)) {
+        if (e[0] === op) {
+          const flatten = (e: PrincipalExpression): PrincipalExpression[] => {
+            if (isCombinedPrincipal(e) && e[0] === op) {
+              return e[1].flatMap(flatten);
+            } else {
+              return [e];
+            }
+          };
+
+          simplified.push(...flatten(e));
+        } else {
+          // The opposite of `op`, so let's see whether we can swap it.
+          // Let's handle `B ^ (B v C)` <=> `B v (B ^ C)` for now.
+          // B AND (B OR C) AND D <=> B OR (B AND C) OR (B AND D)
+          const single = e[1].find((e) => !isCombinedPrincipal(e));
+          const combined = e[1].find(
+            (e) => isCombinedPrincipal(e) && e[0] === op
+          ) as ["join" | "meet", PrincipalExpression[]] | undefined;
+          if (
+            e[1].length === 2 &&
+            single &&
+            combined &&
+            single !== combined &&
+            combined[1].includes(single)
+          ) {
+            // We can commute the operation and so flatten it by one level
+            simplified.push(single);
+            simplified.push([e[0], combined[1]]);
+            console.log("commuted", single, combined);
+          } else {
+            simplified.push(simplifyExpression(e));
+          }
+        }
+      } else {
+        simplified.push(e);
+      }
+    });
+
+    const deduped = dedupe(simplified);
+    if (deduped.length === 1) console.log("single expression", deduped[0]);
+    return deduped.length === 1
+      ? simplifyExpression(deduped[0])
+      : [op, deduped];
+  } else {
+    return expression;
+  }
+}
+
 function unify(constraints: Constraint[], lattice: Lattice): Constraint[] {
   function traverse(expression: PrincipalExpression): PrincipalExpression {
     if (isLatticeVariable(expression)) {
@@ -434,19 +521,21 @@ function unify(constraints: Constraint[], lattice: Lattice): Constraint[] {
     }
   }
 
-  let substitutions: { [key: string]: PrincipalExpression } = {};
-  let newSubstitutions: { [key: string]: PrincipalExpression } = {};
+  let substitutions: { [key: PrincipalVariable]: PrincipalExpression } = {};
+  let newSubstitutions: { [key: PrincipalVariable]: PrincipalExpression } = {};
   do {
-    constraints = constraints.map(([v, e]) => [v, traverse(e)]);
+    constraints = constraints
+      .filter(([v]) => !substitutions[v])
+      .map(([v, e]) => [v, traverse(e)]);
     newSubstitutions = findSubstitutions(constraints, substitutions);
     constraints = constraints.map(([v, e]) => [
       v,
-      applySubstitutions(e, newSubstitutions),
+      simplifyExpression(applySubstitutions(e, newSubstitutions)),
     ]);
     substitutions = { ...substitutions, ...newSubstitutions };
   } while (Object.keys(newSubstitutions).length > 0);
 
-  return constraints;
+  return [...(Object.entries(substitutions) as Constraint[]), ...constraints];
 }
 
 function inferLabels(

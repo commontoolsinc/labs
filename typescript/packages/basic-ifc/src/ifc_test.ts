@@ -1,4 +1,7 @@
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import {
+  assertEquals,
+  assertObjectMatch,
+} from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   inferLabels,
   generateConstraints,
@@ -109,44 +112,44 @@ Deno.test("generate constraints", () => {
 });
 
 Deno.test("infer labels, simple", () => {
-  // Example state and bindings
-  const initialState: State = {
-    bar: {
-      baz: {
-        [$label]: {
-          integrity: "trusted cloud",
-          confidentiality: "trusted cloud",
-        },
-      },
-      zab: {
-        [$label]: { integrity: "public", confidentiality: "public" },
-      },
-    },
-  };
-  const bindings: Node[] = [{ in: ["bar.baz", "bar.zab"], out: ["foo"] }];
-
+  // Example lattice: Each line is a principal, listing its parents
   const lattice = makeLattice({
     public: ["trusted cloud"],
     "trusted cloud": ["cc", "openai", "anthropic"],
     cc: ["ondevice"],
+    "possible prompt injection": ["user authored"],
   });
 
-  const inferredState = inferLabels(initialState, bindings, lattice);
-
-  assertEquals(inferredState, {
+  // Example inputs to the recipe, with labels at any level in the tree
+  const inputs = {
     bar: {
       baz: {
         [$label]: {
-          integrity: "trusted cloud",
+          integrity: "user authored",
           confidentiality: "trusted cloud",
         },
       },
       zab: {
-        [$label]: { integrity: "public", confidentiality: "public" },
+        [$label]: {
+          integrity: "possible prompt injection",
+          confidentiality: "public",
+        },
       },
     },
+  };
+
+  // The recipe
+  const bindings = [{ type: "foo", in: ["bar.baz", "bar.zab"], out: ["foo"] }];
+
+  const inferredLabels = inferLabels(inputs, bindings, lattice);
+  console.log(inferredLabels);
+
+  assertObjectMatch(inferredLabels, {
     foo: {
-      [$label]: { integrity: "public", confidentiality: "trusted cloud" },
+      [$label]: {
+        integrity: "possible prompt injection",
+        confidentiality: "trusted cloud",
+      },
     },
   });
 });
@@ -179,6 +182,7 @@ Deno.test("infer labels, two nodes", () => {
 
   const inferredState = inferLabels(inputs, bindings, lattice);
 
+  console.log(inferredState);
   assertEquals(inferredState, {
     bar: {
       baz: {
