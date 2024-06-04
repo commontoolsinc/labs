@@ -32,18 +32,6 @@ export const batched = <T>(perform: (value: T) => void) => {
 
 export type Cancel = () => void
 
-function* filterMap<T, U>(
-  iterable: Iterable<T>,
-  transform: (value: T) => U|undefined
-): Generator<U> {
-  for (const value of iterable) {
-    const result = transform(value)
-    if (result !== undefined) {
-      yield result
-    }
-  }
-}
-
 export type Subject<T> = {
   send: (value: T) => void
 }
