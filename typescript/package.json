@@ -56,5 +56,8 @@
         "./common/runtime:clean"
       ]
     }
+  },
+  "dependencies": {
+    "@commontools/runtime": "^0.0.1"
   }
 }
