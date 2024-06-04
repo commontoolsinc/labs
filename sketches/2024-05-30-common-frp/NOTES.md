@@ -2,6 +2,29 @@
 
 Rough notes and references while designing.
 
+## Design
+
+- Discrete classical FRP
+    - Streams
+        - Events over time. Update during a moment.
+        - Independent. They may not depend upon each other's state.
+        - They may depend upon cells, but must get the cell's state before
+          the cell graph is updated.
+        - They act as IO input to the cell graph.
+    - Cells
+        - Reactive containers for state. Always have a value.
+    - Computed Cells
+        - Reactive computed states, derived from cells and other computed cells.
+
+## Implementation
+
+- Transaction 
+    - Update streams: Update streams:
+    - Update cells: mutate cell state and mark computed cells dirty (push)
+        - Dispatch "I am dirty" notification immediately during cell update phase to downstream cells 
+    - Update sinks: get updated cell and computed state. Computed state is recomputed if dirty.
+        - Subscribe with sinks
+
 ## Prior art
 
 ### Classical FRP
@@ -16,8 +39,23 @@ Qualities:
 - Resulting computation graph is pure.
 - Theory pioneered by Conal Elliott.
 - Full Turing-complete theory of reactive computation.
+- 10 primitives:
+    - map, merge, hold, snapshot, filter, lift, never, constant, sample, and switch. (Functional Reactive Programming, 2.3, Manning)
 
-Libraires:
+> Each FRP system has its own policy for merging simultaneous events. Sodium’s policy is as follows:
+>
+> - If the input events on the two input streams are simultaneous, merge combines them into one. merge takes a combining function as a second argument for this purpose. The signature of the combining function is A combine(A left, A right).
+> -The combining function is not used in the (usually more common) case where the input events are not simultaneous.
+> -You invoke merge like this: s1.merge(s2, f). If merge needs to combine simul- taneous events, the event from s1 is passed as the left argument of the combin- ing function f, and the event from s2 is passed on the right.
+> -The s1.orElse(s2) variant of merge doesn’t take a combining function. In the simultaneous case, the left s1 event takes precedence and the right s2 event is dropped. This is equivalent to s1.merge(s2, (l, r) -> l). The name orElse() was chosen to remind you to be careful, because events can be dropped.
+>
+> This policy has some nice results:
+> - There can only ever be one event per transaction in a given stream.
+> - There’s no such thing as event-processing order within a transaction. All events that occur in different streams within the same transaction are truly simultaneous in that there’s no detectable order between them.
+>
+> (Functional Reactive Programming, 2.6.1, Manning)
+
+Libraries:
 
 - [Sodium FRP](https://github.com/SodiumFRP)
     - [Sodium Typescript](https://github.com/SodiumFRP/sodium-typescript/tree/master/src/lib/sodium)

@@ -8,134 +8,53 @@ const debugLog = (tag: string, msg: string) => {
   }
 }
 
-export const chooseLeft = <T>(left: T, _right: T) => left
-
-const TransactionQueue = (name: string) => {
-  const queue = new Map<(value: any) => void, any>()
-
-  const transact = () => {
-    debugLog(name, `transacting ${queue.size} jobs`)
-    for (const [perform, value] of queue) {
-      perform(value)
-    }
-    queue.clear()
-  }
-
-  /**
-   * Queue a job to perform during the next transaction,
-   * along with a value to pass to the job
-   * @param perform - The function to perform (used as the unique key in
-   *  the queue)
-   * @param value - The value to pass to the perform function
-   * @param choose - A function to choose between two values if more than one
-   *  has been set during the transaction (default is chooseLeft)
-   */
-  const withTransaction = <T>(
-    perform: (value: T) => void,
-    value: T,
-    choose: (left: T, right: T) => T = chooseLeft
-  ) => {
-    const left = queue.get(perform)
-    queue.set(perform, left !== undefined ? choose(left, value) : value)
-  }
-
-  return {transact, withTransaction}
-}
-
-const TransactionManager = () => {
-  const streamQueue = TransactionQueue('streams')
-  const cellQueue = TransactionQueue('cells')
-  const computedQueue = TransactionQueue('computed')
-
+export const batched = <T>(perform: (value: T) => void) => {
   let isScheduled = false
-
-  const schedule = () => {
-    if (isScheduled) {
-      return
+  let state: T | undefined = undefined
+  const schedule = (value: T) => {
+    state = value
+    if (!isScheduled) {
+      isScheduled = true
+      queueMicrotask(() => {
+        debugLog('batched', `performing ${state}`)
+        perform(state!)
+        isScheduled = false
+      })
     }
-    debugLog('TransactionManager', `transaction scheduled`)
-    isScheduled = true
-    queueMicrotask(transact)
   }
-
-  const transact = () => {
-    debugLog('TransactionManager', 'transaction start')
-    debugLog('TransactionManager', 'transact events')
-    // First perform all events
-    streamQueue.transact()
-    debugLog('TransactionManager', 'transact cells')
-    // Then perform all cell updates
-    cellQueue.transact()
-
-    debugLog('TransactionManager', 'transact computed')
-    // Finally, update computed cells
-    computedQueue.transact()
-    isScheduled = false
-    debugLog('TransactionManager', 'transaction end')
-  }
-
-  const withCells = <T>(
-    perform: (value: T) => void,
-    value: T,
-    choose: (left: T, right: T) => T = chooseLeft
-  ) => {
-    debugLog('withCells', 'queue job')
-    cellQueue.withTransaction(perform, value, choose)
-    schedule()
-  }
-
-  const withStreams = <T>(
-    perform: (value: T) => void,
-    value: T,
-    choose: (left: T, right: T) => T = chooseLeft
-  ) => {
-    debugLog('withStreams', 'queue job')
-    streamQueue.withTransaction(perform, value, choose)
-    schedule()
-  }
-
-  const withComputed = <T>(
-    perform: (value: T) => void,
-    value: T,
-    choose: (left: T, right: T) => T = chooseLeft
-  ) => {
-    debugLog('withComputed', 'queue job')
-    computedQueue.withTransaction(perform, value, choose)
-    schedule()
-  }
-
-  return {withCells, withStreams, withComputed}
+  return schedule
 }
-
-const {withCells, withStreams, withComputed} = TransactionManager()
 
 export type Cancel = () => void
 
-export type Send<T> = {
+export type Subscriber<T> = {
   send: (value: T) => void
 }
 
 export type Sink<T> = {
-  sink: (subscriber: Send<T>) => Cancel
+  sink: (subscriber: Subscriber<T>) => Cancel
 }
 
 /**
  * Create one-to-many event broadcast channel for a list of subscribers.
- * Publishes synchronously to all subscribers.
+ * This is a low-level helper that publishes *synchronously* to all subscribers.
+ * We use this to implement higher-level abstractions like streams and cells,
+ * which dispatch using a shared transaction system.
  */
-const Topic = <T>() => {
-  const subscribers = new Set<Send<T>>()
+export const createPublisher = <T>() => {
+  const subscribers = new Set<Subscriber<T>>()
 
   /** Get subscribers */
   const subs = () => subscribers.values()
 
   const send = (value: T) => {
+    debugLog('publisher', `dispatching ${value} to ${subscribers.size} subscribers`)
     for (const subscriber of subscribers) {
       subscriber.send(value)
     }
   }
 
-  const sink = (subscriber: Send<T>): Cancel => {
+  const sink = (subscriber: Subscriber<T>): Cancel => {
     subscribers.add(subscriber)
     return () => subscribers.delete(subscriber)
   }
@@ -143,17 +62,20 @@ const Topic = <T>() => {
   return {send, sink, subs}
 }
 
-const combineCancels = (cancels: Array<Cancel>): Cancel => () => {
+export const combineCancels = (cancels: Array<Cancel>): Cancel => () => {
   for (const cancel of cancels) {
     cancel()
   }
 }
 
-export const Stream = <T>() => {
-  const topic = Topic<T>()
-  const send = (value: T) => withStreams(topic.send, value)
-  const sink = (subscriber: Send<T>) => topic.sink(subscriber)
-  return {send, sink}
+export const createStream = <T>() => {
+  const updatesPublisher = createPublisher<T>()
+  const send = batched((value: T) => {
+    debugLog('stream', `sending ${value}`)
+    updatesPublisher.send(value)
+  })
+  const sink = updatesPublisher.sink
+  return {name, send, sink}
 }
 
 const noOp = () => {}
@@ -165,7 +87,7 @@ const noOp = () => {}
 export const generateStream = <T>(
   produce: (send: (value: T) => void) => Cancel|void
 ) => {
-  const {send, sink} = Stream<T>()
+  const {send, sink} = createStream<T>()
   const cancel = produce(send) ?? noOp
   return {cancel, sink}
 }
@@ -173,7 +95,7 @@ export const generateStream = <T>(
 export const mapStream = <T, U>(
   upstream: Sink<T>,
   transform: (value: T) => U
-) => generateStream(send => {
+) => generateStream((send: (value: U) => void) => {
   return upstream.sink({
     send: value => send(transform(value))
   })
@@ -198,67 +120,64 @@ export type Gettable<T> = {
   get(): T
 }
 
-export const get = <T>(container: Gettable<T>) => container.get()
+export const sample = <T>(container: Gettable<T>) => container.get()
 
-export type CellLike<T> = Gettable<T> & Sink<T>
+export type CellLike<T> = {
+  get: () => T
+  sink(subscriber: Subscriber<T>): Cancel
+}
 
-export const Cell = <T>(initial: T, name: string) => {
-  const topic = Topic<T>()
+export const createCell = <T>(initial: T, name: string) => {
+  const publisher = createPublisher<T>()
   let state = initial
 
   const get = () => state
-  const getName = () => name
 
-  const setState = (value: T) => {
+  const send = batched((value: T) => {
     // Only notify downstream if state has changed value
     if (!isEqual(state, value)) {
       state = value
-      topic.send(value)
+      debugLog('cell', `updated ${state}`)
+      publisher.send(state)
     }
-  }
+  })
 
-  const send = (value: T) => {
-    withCells(setState, value)
-  }
-
-  const sink = (subscriber: Send<T>) => {
+  const sink = (subscriber: Subscriber<T>) => {
     subscriber.send(state)
-    return topic.sink(subscriber)
+    return publisher.sink(subscriber)
   }
 
-  return {get, name: getName, send, sink}
+  return {name, get, send, sink}
 }
 
-export const Computed = <T>(
+export const createComputed = <T>(
   upstreams: Array<CellLike<any>>,
-  calc: (...values: Array<any>) => T
+  compute: (...values: Array<any>) => T
 ) => {
-  const topic = Topic<T>()
+  const publisher = createPublisher<T>()
 
-  const recalc = (): T => calc(...upstreams.map(get))
+  const recompute = (): T => compute(...upstreams.map(sample))
 
-  let isDirty = false
-  let state = recalc()
+  let state = recompute()
 
-  const markDirty = () => isDirty = true
+  const get = () => state
 
   const subject = {
-    send: (value: T) => {
-      withComputed(markDirty, value)
-    }
+    send: batched(_value => {
+      state = recompute()
+      debugLog('computed', `recomputed ${state}`)
+      publisher.send(state)
+    })
   }
 
   const cancel = combineCancels(upstreams.map(cell => cell.sink(subject)))
 
-  const get = () => {
-    if (isDirty) {
-      state = recalc()
-      isDirty = false
-    }
-    return state
+  const sink = (
+    subscriber: Subscriber<T>
+  ) => {
+    subscriber.send(state)
+    return publisher.sink(subscriber)
   }
-
-  const sink = (subscriber: Send<T>) => topic.sink(subscriber)
 
   return {get, sink, cancel}
 }
@@ -269,10 +188,8 @@ export const Computed = <T>(
  * @param initial - the initial value for the cell
  * @returns cell
  */
-export const hold = <T>(stream: Sink<T>, initial: T) => {
-  const {get, sink, send} = Cell(initial, 'hold')
-  const cancel = stream.sink({
-    send: value => send(value)
-  })
-  return {get, sink, cancel}
+export const hold = <T>(stream: Sink<T>, initial: T, name: string) => {
+  const cell = createCell(initial, name)
+  const cancel = stream.sink(cell)
+  return {get: cell.get, sink: cell.sink, cancel}
 }
