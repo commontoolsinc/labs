@@ -72,6 +72,34 @@ const toolSpec: ChatCompletionTool[] = [
   {
     "type": "function",
     "function": {
+      "name": "addFetchNode",
+      "description": "Adds a new fetch node to the graph to retrieve (GET) data from the web.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "url": { "type": "string" }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "addMusicSearchNode",
+      "description": `Adds a new fetch node to the graph to search last.fm.`,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "query": { "type": "string" }
+        }
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "replaceNode",
       "description": "Replaces an existing node in the graph.",
       "parameters": {
@@ -102,8 +130,20 @@ const toolSpec: ChatCompletionTool[] = [
         }
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "getNodeOutputValue",
+      "description": "Snapshot the current value of node from the graph.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" }
+        }
+      }
+    }
   }
-
 ]
 
 
@@ -156,7 +196,7 @@ export async function processUserInput(input: string, system: string, availableF
         const functionName = toolCall.function.name;
         const functionToCall = availableFunctions[functionName];
         // escape all newlines in arguments string
-        const functionArgs = JSON.parse(toolCall.function.arguments.replace(/\n/g, "\\n"));
+        const functionArgs = JSON.parse(toolCall.function.arguments.replace(/\n/g, "\n"));
         const functionResponse = functionToCall(functionArgs);
         console.log("response", toolCall.id, functionResponse)
         messages.push({

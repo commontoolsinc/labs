@@ -7,7 +7,7 @@ import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import pretty from 'pretty'
 import { createRxJSNetworkFromJson } from '../graph'
 import { Recipe, RecipeNode } from '../data'
-import { snapshot } from '../state'
+import { Context, snapshot } from '../state'
 
 const styles = css`
   :host {
@@ -54,9 +54,14 @@ function definitionToHtml(node: RecipeNode, context: any) {
 
     return html`<div>${unsafeHTML(el.outerHTML)}</div>
       <com-toggle>
-      <com-data .data=${pretty(el.outerHTML)}</com-data>
-      <com-data .data=${JSON.stringify(node.body, null, 2)}</com-data>
+      <com-data .data=${pretty(el.outerHTML)}></com-data>
+      <com-data .data=${JSON.stringify(node.body, null, 2)}></com-data>
       </com-toggle>`
+  }
+
+  if (node.contentType === 'application/json') {
+    const val = snapshot(context).outputs[node.id]
+    return html`<com-data .data=${node.body}></com-data><com-data .data=${JSON.stringify(val, null, 2)}></com-data>`
   }
 
   return html`<pre>${JSON.stringify(node, null, 2)}</pre>`
@@ -68,6 +73,9 @@ export class ComThread extends LitElement {
 
   @property({ type: Object }) graph = {} as Recipe
   @property({ type: Object }) context = {} as Context
+
+  @property({ type: Function }) setContext = (_: Context) => { }
+
 
   lastGraph: Recipe = []
 
@@ -82,9 +90,13 @@ export class ComThread extends LitElement {
   render() {
     if (this.graph != this.lastGraph) {
       this.context = createRxJSNetworkFromJson(this.graph)
+
       // trigger a re-render if any output changes
       Object.values(this.context.outputs).forEach((output) => {
-        output.subscribe(() => this.requestUpdate())
+        output.subscribe(() => {
+          this.setContext(this.context)
+          this.requestUpdate()
+        })
       });
       this.lastGraph = this.graph
     }

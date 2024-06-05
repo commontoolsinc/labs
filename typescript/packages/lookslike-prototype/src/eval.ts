@@ -34,7 +34,7 @@ const code = (src: string) => `
   import { read, write } from 'common:io/state@0.0.1';
 
   export class Body {
-      run() {
+      async run() {
           function input(key) {
               const ref = read(key);
               console.log('read(' + key + '):', ref);
@@ -45,7 +45,7 @@ const code = (src: string) => `
 
           console.log('[begin]');
           const fn = function() { ${src} };
-          const result = fn();
+          const result = await fn();
           write('__result__', { tag: 'string', val: JSON.stringify(result) });
           console.log('[end]');
       }

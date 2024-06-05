@@ -93,5 +93,10 @@ async function executeNode(node: RecipeNode, inputs: { [key: string]: any }, out
   } else if (contentType === 'application/json+vnd.common.ui') {
     const renderedTemplate = createElement(node.body, inputs);
     outputs[node.id].next(renderedTemplate);
+  } else if (contentType === 'application/json' && typeof node.body === 'string') {
+    const url = node.body;
+    const response = await fetch(url);
+    const data = await response.json();
+    outputs[node.id].next(data);
   }
 }

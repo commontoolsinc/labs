@@ -5,7 +5,7 @@ import { base } from '../styles'
 import { Recipe, emptyGraph, todoAppMockup, RecipeNode } from '../data'
 import { doLLM, grabJson, processUserInput } from '../llm'
 import { collectSymbols } from '../graph'
-import { listKeys } from '../state'
+import { Context, snapshot } from '../state'
 
 const codePrompt = `
   Your task is to take a user description or request and produce a series of nodes for a computation graph. Nodes can be code blocks or UI components and they communicate with named ports.
@@ -30,9 +30,7 @@ const codePrompt = `
         }
       },
     },
-    "code": \`
-      return [{ label: 'Water my plants', checked: false }, { label: 'Buy milk', checked: true }];
-    \`
+    "code": "return [{ label: 'Water my plants', checked: false }, { label: 'Buy milk', checked: true }];"
   })
 
   Tasks that take no inputs require no edges.
@@ -57,14 +55,8 @@ const codePrompt = `
         }
       },
     },
-    "code": \`
-      const todos = input('todos');
-      const newTodo = { label: 'water the plants', checked: false };
-      const newTodos = [...todos, newTodo];
-      return newTodos;
-    \`
-    }
-  )
+    "code": "const todos = input('todos');\nconst newTodo = { label: 'water the plants', checked: false };\nconst newTodos = [...todos, newTodo];\nreturn newTodos;"
+  })
 
   Tasks that take no inputs require no edges.
 
@@ -90,12 +82,8 @@ const codePrompt = `
         }
       },
     },
-    "code": \`
-      const todos = input('todos');
-      return todos.filter(todo => todo.checked);
-    \`
-    }
-  )
+    "code": "const todos = input('todos');\nreturn todos.filter(todo => todo.checked);"
+  })
 
   Tasks that filter other data must pipe the data through the edges.
   All function bodies must take zero parameters. Inputs can be accessed via 'input()', values may be null.
@@ -200,6 +188,7 @@ export class ComApp extends LitElement {
 
   @state() graph: Recipe = emptyGraph
   @state() userInput = ''
+  @state() snapshot: Context
 
   async appendMessage() {
     const newGraph = [...this.graph]
@@ -234,6 +223,8 @@ export class ComApp extends LitElement {
       Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.
     `
 
+    const lastFmKey = '0060ba224307ff9f787deb837f4be376'
+
     const availableFunctions = {
       listNodes: () => {
         console.log('listNodes', this.graph)
@@ -253,8 +244,57 @@ export class ComApp extends LitElement {
         this.requestUpdate();
         return `Added node: ${id}`
       },
-      replaceNode: () => 'hello replace',
-      deleteNode: () => 'hello delete'
+      addFetchNode: ({ id, url }) => {
+        console.log('addFetchNode', id, url)
+        newGraph.push({
+          id,
+          contentType: 'application/json',
+          in: {},
+          outputType: {
+            type: 'object',
+          },
+          body: url
+        })
+        this.graph = JSON.parse(JSON.stringify(newGraph));
+        this.requestUpdate();
+        return `Added node: ${id}`
+      },
+      addMusicSearchNode: ({ id, query }) => {
+        console.log('addMusicSearchNode', id, query)
+        newGraph.push({
+          id,
+          contentType: 'application/json',
+          in: {},
+          outputType: {
+            type: 'object',
+          },
+          body: `https://ws.audioscrobbler.com/2.0/?method=album.search&album=${query}&api_key=${lastFmKey}&format=json`
+        })
+        this.graph = JSON.parse(JSON.stringify(newGraph));
+        this.requestUpdate();
+        return `Added node: ${id}`
+      },
+      replaceNode: ({ id, node, body }) => {
+        console.log('replaceNode', id, node, body)
+        const index = newGraph.findIndex(n => n.id === id)
+        newGraph[index] = { id, contentType: 'application/json+vnd.common.ui', ...node, body }
+        this.graph = JSON.parse(JSON.stringify(newGraph));
+        this.requestUpdate();
+        return `Replaced node: ${id}`
+      },
+      deleteNode: ({ id }) => {
+        console.log('deleteNode', id)
+        const index = newGraph.findIndex(n => n.id === id)
+        newGraph.splice(index, 1)
+        this.graph = JSON.parse(JSON.stringify(newGraph));
+        this.requestUpdate();
+        return `Deleted node: ${id}`
+      },
+      getNodeOutputValue: ({ id }) => {
+        const val = this.snapshot.outputs?.[id]
+        console.log('getNodeOutputValue', id, val)
+        return JSON.stringify(val)
+      }
     };
     const result = await processUserInput(input, codePrompt + systemContext, availableFunctions);
     console.log('result', result);
@@ -278,10 +318,15 @@ export class ComApp extends LitElement {
       this.userInput = input
     }
 
+    const setContext = (context: Context) => {
+      this.snapshot = snapshot(context)
+      console.log('SNAPSHOT', this.snapshot)
+    }
+
     return html`
       <com-app-grid>
         <com-chat slot="main">
-            <com-thread slot="main" .graph=${this.graph}></com-thread>
+            <com-thread slot="main" .graph=${this.graph} .setContext=${setContext}></com-thread>
             <div slot="footer">
                 <com-unibox>
                     <com-editor slot="main" .value=${this.userInput} .setValue=${setUserInput}></com-editor>

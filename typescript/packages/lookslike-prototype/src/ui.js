@@ -2,6 +2,20 @@
 export const STREAM = 'https://common.tools/stream-binding.schema.json'
 export const CELL = 'https://common.tools/cell-binding.schema.json'
 
+function readValue(context, binding) {
+  const path = binding.split('.');
+  let value = context;
+  if (path.length > 1) {
+    for (let i = 0; i < path.length; i++) {
+      value = value?.[path?.[i]];
+    }
+  } else {
+    value = context?.[path?.[0]];
+  }
+
+  return value;
+}
+
 export function createElement(node, context) {
   if (typeof node === 'string') {
     const textNode = document.createTextNode(node);
@@ -13,7 +27,8 @@ export function createElement(node, context) {
   // repeat node
   if (!node.tag && node.type == 'repeat') {
     const container = document.createElement('div');
-    const items = context[node.binding] || [];
+    debugger
+    const items = readValue(context, node.binding) || [];
     items.forEach(item => {
       container.appendChild(createElement(node.template, item));
     });
@@ -65,8 +80,9 @@ export function createElement(node, context) {
   // recursively create and append child elements
   children.forEach(childNode => {
     if (childNode.type === 'string' || typeof childNode === 'text' || typeof childNode === 'number') {
-      if (childNode.binding && typeof context === 'object' && context[childNode.binding]) {
-        const node = document.createTextNode(context[childNode.binding])
+      if (childNode.binding && typeof context === 'object') {
+        const value = readValue(context, childNode.binding);
+        const node = document.createTextNode(value)
         element.appendChild(node);
         return
       } else {
