@@ -13,8 +13,9 @@ const debugLog = (tag: string, msg: string) => {
 }
 
 const createTransactionManager = () => {
-  const updates = new Map<(value: any) => void, any>()
-  const reads = new Set<() => void>()
+  const streams = new Map<(value: any) => void, any>()
+  const cells = new Map<(value: any) => void, any>()
+  const sinks = new Set<() => void>()
 
   let isScheduled = false
 
@@ -29,42 +30,53 @@ const createTransactionManager = () => {
 
   const transact = () => {
     debugLog('TransactionManager.transact', 'transaction start')
+    // First perform all stream updates.
+    debugLog('TransactionManager.transact', `transact streams`)
+    for (const [job, value] of streams) {
+      job(value)
+    }
     // First perform all cell state changes.
     // - Update cell state
     // - Mark computed dirty
-    debugLog('TransactionManager.transact', `transact updates`)
-    for (const [job, value] of updates) {
+    debugLog('TransactionManager.transact', `transact cells`)
+    for (const [job, value] of cells) {
       job(value)
     }
-    updates.clear()
+    cells.clear()
     // Then perform all cell state reads
     // - Read cell state
     // - Recompute computed cells and mark clean
-    debugLog('TransactionManager.transact', `transact reads`)
-    for (const job of reads) {
+    debugLog('TransactionManager.transact', `transact sinks`)
+    for (const job of sinks) {
       job()
     }
-    reads.clear()
+    sinks.clear()
     isScheduled = false
     debugLog('TransactionManager.transact', 'transaction end')
   }
 
-  const withUpdates = <T>(job: (value: T) => void, value: T) => {
-    debugLog('TransactionManager.withUpdates', `queue job with value ${value}`)
-    updates.set(job, value)
+  const withStreams = <T>(job: (value: T) => void, value: T) => {
+    debugLog('TransactionManager.withStreams', `queue job with value ${value}`)
+    streams.set(job, value)
     schedule()
   }
 
-  const withReads =(job: () => void) => {
-    debugLog('TransactionManager.withReads', `queue job`)
-    reads.add(job)
+  const withCells = <T>(job: (value: T) => void, value: T) => {
+    debugLog('TransactionManager.withCells', `queue job with value ${value}`)
+    cells.set(job, value)
     schedule()
   }
 
-  return {withUpdates, withReads}
+  const withSinks =(job: () => void) => {
+    debugLog('TransactionManager.withSinks', `queue job`)
+    sinks.add(job)
+    schedule()
+  }
+
+  return {withStreams, withCells, withSinks}
 }
 
-const {withUpdates, withReads} = createTransactionManager()
+const {withStreams, withCells, withSinks} = createTransactionManager()
 
 export type Unsubscribe = () => void
 
@@ -133,15 +145,15 @@ export type ReadWriteStream<T> = Sink<T> & Updates<T> & Subject<T>
 export const createStream = <T>(): ReadWriteStream<T> => {
   const updates = createPublisher<T>()
 
-  const performUpdate = (value: T) => {
+  const perform = (value: T) => {
     debugLog(`stream`, `value: ${value}`)
     updates.pub(value)
   }
 
-  const send = (value: T) => withUpdates(performUpdate, value)
+  const send = (value: T) => withStreams(perform, value)
 
   const sink = (subscriber: Subscriber<T>) => updates.sub(
-    (value: T) => withReads(() => subscriber(value))
+    (value: T) => withSinks(() => subscriber(value))
   )
 
   return {send, [__updates__]: updates.sub, sink}
@@ -196,18 +208,18 @@ export const createCell = <T>(initial: T) => {
   const performUpdate = (value: T) => {
     // Only perform update if state has actually changed
     if (!isEqual(state, value)) {
-      debugLog(`cell`, `value: ${state}`)
       state = value
+      debugLog(`cell`, `value: ${state}`)
       updates.pub()
     }
   }
 
-  const send = (value: T) => withUpdates(performUpdate, value)
+  const send = (value: T) => withCells(performUpdate, value)
 
   const sink = (subscriber: Subscriber<T>) => {
     const job = () => subscriber(get())
     job()
-    return updates.sub(() => withReads(job))
+    return updates.sub(() => withSinks(job))
   }
 
   return {
@@ -311,7 +323,7 @@ export const createComputed: createComputed = (
   const sink = (subscriber: Subscriber<any>) => {
     const job = () => subscriber(get())
     job()
-    return updates.sub(() => withReads(job))
+    return updates.sub(() => withSinks(job))
   }
 
   return {
@@ -332,7 +344,7 @@ export const scan = <T, U>(
   initial: U
 ): ReadCell<U> => {
   const {get, [__updates__]: updates, sink, send} = createCell(initial)
-  const unsubscribe = stream.sink((value: T) => {
+  const unsubscribe = stream[__updates__]((value: T) => {
     send(step(get(), value))
   })
   return {get, [__updates__]: updates, sink, unsubscribe}
