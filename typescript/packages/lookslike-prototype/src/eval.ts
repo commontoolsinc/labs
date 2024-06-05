@@ -19,13 +19,14 @@ export async function run(src: string, inputs: { [key: string]: any }) {
   const module = await rt.eval('text/javascript', code(src), io);
 
   for (const key in inputs) {
-    io.write(key, infer(inputs[key]));
+    const input = infer(JSON.stringify(inputs[key]));
+    io.write(key, input);
   }
 
   console.log('Running the module:');
   module.run();
   const returnValue = io.read('__result__');
-  return returnValue?.val;
+  return JSON.parse(returnValue?.val);
 }
 
 
@@ -36,17 +37,17 @@ const code = (src: string) => `
       run() {
           function input(key) {
               const ref = read(key);
-              console.log('Reference:', ref);
+              console.log('read(' + key + '):', ref);
               const value = ref?.deref()?.val;
-              console.log('Value:', value);
-              return value;
+              console.log('value(' + key + '):', value);
+              return JSON.parse(value);
           }
 
-          console.log('Running!');
-          debugger;
-          const fn = ${src};
+          console.log('[begin]');
+          const fn = function() { ${src} };
           const result = fn();
-          write('__result__', { tag: 'string', val: result });
+          write('__result__', { tag: 'string', val: JSON.stringify(result) });
+          console.log('[end]');
       }
   }
 

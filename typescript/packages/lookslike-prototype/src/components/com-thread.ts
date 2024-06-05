@@ -46,7 +46,7 @@ function definitionToHtml(node: RecipeNode, context: any) {
 
   if (node.contentType === 'text/javascript') {
     const val = snapshot(context).outputs[node.id]
-    return html`<pre>${node.body}</pre><com-toggle><pre class="code">${JSON.stringify(val, null, 2)}</pre></com-toggle>`
+    return html`<com-code .code=${node.body}></com-code><com-data .data=${JSON.stringify(val, null, 2)}></com-data>`
   }
 
   if (node.contentType === 'application/json+vnd.common.ui') {
@@ -54,8 +54,8 @@ function definitionToHtml(node: RecipeNode, context: any) {
 
     return html`<div>${unsafeHTML(el.outerHTML)}</div>
       <com-toggle>
-      <pre class="code">${pretty(el.outerHTML)}</pre>
-      <pre class="code">${JSON.stringify(node.body, null, 2)}</pre>
+      <com-data .data=${pretty(el.outerHTML)}</com-data>
+      <com-data .data=${JSON.stringify(node.body, null, 2)}</com-data>
       </com-toggle>`
   }
 

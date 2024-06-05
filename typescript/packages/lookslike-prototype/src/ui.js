@@ -44,7 +44,8 @@ export function createElement(node, context) {
             element[key] = context[value.binding];
           }
         } else {
-          element[key] = context[value];
+          // the value is not in a subfield, context is the value
+          element[key] = context;
         }
       }
     } else if (value["$id"] && value["$id"] === STREAM && value.name) {

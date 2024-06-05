@@ -29,7 +29,7 @@ const codePrompt = `
           }
         }
       },
-      "body": "function() { return [{ label: 'Water my plants', checked: false }, { label: 'Buy milk', checked: true }]; }"
+      "body": "return [{ label: 'Water my plants', checked: false }, { label: 'Buy milk', checked: true }];"
     }
   ]
   \`\`\`
@@ -48,7 +48,7 @@ const codePrompt = `
       "contentType": "text/javascript",
       "in": {},
       "outputType": {},
-      "body": "async function() { const todos = input('todos'); const newTodo = { label: 'water the plants', checked: false }; cost newTodos = [...todos, newTodo]; return newTodos; }"
+      "body": "const todos = input('todos'); const newTodo = { label: 'water the plants', checked: false }; cost newTodos = [...todos, newTodo]; return newTodos;"
     }
   ]
   \`\`\`
@@ -76,7 +76,7 @@ const codePrompt = `
           }
         }
       },
-      "body": "function() { const todos = input('todos'); return todos.filter(todo => todo.checked); }"
+      "body": "const todos = input('todos'); return todos.filter(todo => todo.checked);"
     }
   ]
   \`\`\`
@@ -87,7 +87,52 @@ const codePrompt = `
   ContentType should be "text/javascript" for code.
   Always respond with code, even for static data. Wrap your response in a json block. Respond with nothing else.
 
-  render my todos" ->
+  ---
+
+  "render each image by url" ->
+  images is an array of strings (URLs)
+
+  \`\`\`json
+  [
+    {
+      "id": "imageUi",
+      "contentType": "application/json+vnd.common.ui",
+      "in": {
+        "images": [".", "images"]
+      },
+      "outputType": {
+        "$id": "https://common.tools/ui.schema.json"
+      },
+      "body": {
+        "tag": "ul",
+        "props": {
+          "className": "image"
+        },
+        "children": [
+          "type": "repeat",
+          "binding": "images",
+          "template": {
+            "tag": "li",
+            "props": {},
+            "children": [
+              {
+                "tag": "img",
+                "props": {
+                  "src": { type: 'string', binding: null },
+                }
+              }
+            ],
+          }
+        ]
+      }
+    }
+  ]
+
+  Raw values can be passed through by setting binding to null.
+
+  ---
+
+  "render my todos" ->
 
   \`\`\`json
   [
