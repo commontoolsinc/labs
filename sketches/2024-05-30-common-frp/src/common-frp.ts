@@ -150,7 +150,7 @@ export const generateStream = <T>(
 export const mapStream = <T, U>(
   stream: ReadStream<T>,
   transform: (value: T) => U
-) => generateStream((send) => {
+) => generateStream((send: (value: U) => void) => {
   const subscribe = (value: T) => send(transform(value))
   return stream[__updates__](subscribe)
 })
