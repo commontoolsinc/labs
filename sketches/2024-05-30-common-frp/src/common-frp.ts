@@ -108,21 +108,29 @@ export const combineUnsubscribes = (
 }
 
 /** Symbol for updates subscribe method */
-const __updates__: unique symbol = Symbol('updates')
+const __updates__ = Symbol('updates')
 
-export type UpdatesProvider<T> = {
+export type Updates<T> = {
   [__updates__]: (subscriber: Subscriber<T>) => Unsubscribe
 }
 
-export type SinkProvider<T> = {
+export type Sink<T> = {
   sink: (subscriber: Subscriber<T>) => Unsubscribe
 }
 
-export type ReadStream<T> = SinkProvider<T> & UpdatesProvider<T> & {
+export type Subject<T> = {
+  send: (value: T) => void
+}
+
+export type Unsubscribable = {
   unsubscribe?: Unsubscribe
 }
 
-export const createStream = <T>() => {
+export type ReadStream<T> = Sink<T> & Updates<T> & Unsubscribable
+
+export type ReadWriteStream<T> = Sink<T> & Updates<T> & Subject<T>
+
+export const createStream = <T>(): ReadWriteStream<T> => {
   const updates = createPublisher<T>()
 
   const performUpdate = (value: T) => {
@@ -155,10 +163,10 @@ export const mapStream = <T, U>(
   return stream[__updates__](subscribe)
 })
 
-export const filterStream = <T, U>(
+export const filterStream = <T>(
   stream: ReadStream<T>,
-  predicate: (value: T) => U
-) => generateStream((send) => {
+  predicate: (value: T) => boolean
+) => generateStream<T>(send => {
   const subscribe = (value: T) => {
     if (predicate(value)) {
       send(value)
@@ -173,13 +181,10 @@ export type Gettable<T> = {
   get(): T
 }
 
-export const sample = <T>(container: Gettable<T>) => container.get()
+const sample = <T>(container: Gettable<T>) => container.get()
 
-export type ReadCell<T> = {
-  get(): T
-  [__updates__]: (subscriber: Subscriber<void>) => Unsubscribe
-  sink: (subscriber: Subscriber<T>) => Unsubscribe
-}
+export type ReadCell<T> = Gettable<T> & Updates<void> & Sink<T> & Unsubscribable
+export type ReadWriteCell<T> = Gettable<T> & Updates<void> & Sink<T>
 
 export const createCell = <T>(initial: T) => {
   const updates = createPublisher<void>()
@@ -200,8 +205,9 @@ export const createCell = <T>(initial: T) => {
   const send = (value: T) => withUpdates(performUpdate, value)
 
   const sink = (subscriber: Subscriber<T>) => {
-    const forward = () => subscriber(get())
-    return updates.sub(() => withReads(forward))
+    const job = () => subscriber(get())
+    job()
+    return updates.sub(() => withReads(job))
   }
 
   return {
@@ -275,7 +281,7 @@ export type createComputed = {
 export const createComputed: createComputed = (
   upstreams: Array<ReadCell<any>>,
   compute: (...values: Array<any>) => any
-) => {
+): ReadCell<any> => {
   const updates = createPublisher<void>()
 
   const recompute = () => compute(...upstreams.map(sample))
@@ -303,8 +309,9 @@ export const createComputed: createComputed = (
   }
 
   const sink = (subscriber: Subscriber<any>) => {
-    const forward = () => subscriber(get())
-    return updates.sub(() => withReads(forward))
+    const job = () => subscriber(get())
+    job()
+    return updates.sub(() => withReads(job))
   }
 
   return {
@@ -316,10 +323,25 @@ export const createComputed: createComputed = (
 }
 
 /**
- * "Hold" the latest value from a stream in a cell
+ * Scan a stream producing a cell that contains the reductions of each step
+ * of the reduce operation.
  */
-export const hold = <T>(stream: ReadStream<T>, initial: T) => {
+export const scan = <T, U>(
+  stream: ReadStream<T>,
+  step: (state: U, value: T) => U,
+  initial: U
+): ReadCell<U> => {
   const {get, [__updates__]: updates, sink, send} = createCell(initial)
-  const unsubscribe = stream.sink((value: T) => send(value))
+  const unsubscribe = stream.sink((value: T) => {
+    send(step(get(), value))
+  })
   return {get, [__updates__]: updates, sink, unsubscribe}
 }
+
+/**
+ * Hold the latest value from a stream in a cell.
+ */
+export const hold = <T>(
+  stream: ReadStream<T>,
+  initial: T
+) => scan(stream, (_, value) => value, initial)
