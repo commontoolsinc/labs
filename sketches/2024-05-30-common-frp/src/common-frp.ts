@@ -35,6 +35,7 @@ const createTransactionManager = () => {
     for (const [job, value] of streams) {
       job(value)
     }
+    streams.clear()
     // First perform all cell state changes.
     // - Update cell state
     // - Mark computed dirty
