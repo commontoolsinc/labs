@@ -44,7 +44,11 @@ class CodeMirrorDataViewer extends LitElement {
   }
 
   updated() {
-    this.editor.dispatch({ changes: { from: 0, to: this.state.doc.length, insert: this.data } });
+    this.state = EditorState.create({
+      doc: this.data,
+      extensions: [basicSetup, json()]
+    })
+    this.editor.setState(this.state);
     this.foldAll();
   }
 

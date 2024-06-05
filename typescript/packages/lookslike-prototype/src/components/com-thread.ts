@@ -95,7 +95,7 @@ export class ComThread extends LitElement {
       (node) => html`
           <com-thread-group>
             ${repeat(
-        node.messages.filter(m => m.role === 'user'),
+        node.messages?.filter(m => m.role === 'user') || [],
         (node) => {
           return html`<com-prompt slot="prompt">
                       ${node.content}

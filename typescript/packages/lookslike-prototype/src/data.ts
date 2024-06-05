@@ -4,7 +4,7 @@ export type InputMap = { [port: string]: NodePath };
 
 export type RecipeNode = {
   id: string, // an actual unique ID
-  messages: Message[], // could be empty if a user hand-authored the node etc.
+  messages?: Message[], // could be empty if a user hand-authored the node etc.
   contentType: string,
   outputType: any,
   in: InputMap,
