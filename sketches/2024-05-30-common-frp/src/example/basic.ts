@@ -25,6 +25,4 @@ const c = createComputed([a, currentX], (a): number => a + 2)
 const d = createComputed([b, c], (b, c) => b + c)
 
 // You should only see one log message per update
-d.sink({
-  send: (x) => console.log(x)
-})
+d.sink(x => console.log(x))

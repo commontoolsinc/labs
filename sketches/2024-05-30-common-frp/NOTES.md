@@ -86,7 +86,11 @@ Libraries:
 - [TC39 Signals Proposal](https://github.com/tc39/proposal-signals)
 - [SolidJS](https://www.solidjs.com/)
 - [Preact Signals](https://preactjs.com/guide/v10/signals/)
-- [S.js](https://github.com/adamhaile/S) implements transactions and dynamic graph with single-transaction callback registration, eliminating listener memory leaks.
+- [S.js](https://github.com/adamhaile/S)
+    - implements transactions and dynamic graph with single-transaction callback registration, eliminating listener memory leaks.
+- [Arrow.js](https://www.arrow-js.com/docs/)
+    - Focuses on reactive objects, rather than values
+    - Key-path style indexing using Proxy
 - [Elm Signals 3.0.0](https://github.com/elm-lang/core/blob/3.0.0/src/Native/Signal.js). Deprecated, but the implementation can be found here. 1st order FRP.
 
 ### Observables
