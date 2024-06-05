@@ -175,9 +175,9 @@ export type Gettable<T> = {
 
 export const sample = <T>(container: Gettable<T>) => container.get()
 
-export type CellLike<T> = {
+export type ReadCell<T> = {
   get(): T
-  [__updates__]: (subscriber: Subscriber<T>) => Unsubscribe
+  [__updates__]: (subscriber: Subscriber<void>) => Unsubscribe
   sink: (subscriber: Subscriber<T>) => Unsubscribe
 }
 
@@ -212,13 +212,73 @@ export const createCell = <T>(initial: T) => {
   }
 }
 
-export const createComputed = <T>(
-  upstreams: Array<CellLike<any>>,
-  calc: (...values: Array<any>) => T
+export type createComputed = {
+  <A, B, Z>(
+    upstreams: [ReadCell<A>, ReadCell<B>],
+    compute: (a: A, b: B) => Z
+  ): ReadCell<Z>
+  <A, B, C, Z>(
+    upstreams: [ReadCell<A>, ReadCell<B>, ReadCell<C>],
+    compute: (a: A, b: B, c: C) => Z
+  ): ReadCell<Z>
+  <A, B, C, D, Z>(
+    upstreams: [ReadCell<A>, ReadCell<B>, ReadCell<C>, ReadCell<D>],
+    compute: (a: A, b: B, c: C, d: D) => Z
+  ): ReadCell<Z>
+  <A, B, C, D, E, Z>(
+    upstreams: [
+      ReadCell<A>,
+      ReadCell<B>,
+      ReadCell<C>,
+      ReadCell<D>,
+      ReadCell<E>],
+    compute: (a: A, b: B, c: C, d: D, e: E) => Z
+  ): ReadCell<Z>
+  <A, B, C, D, E, F, Z>(
+    upstreams: [
+      ReadCell<A>,
+      ReadCell<B>,
+      ReadCell<C>,
+      ReadCell<D>,
+      ReadCell<E>,
+      ReadCell<F>
+    ],
+    compute: (a: A, b: B, c: C, d: D, e: E, f: F) => Z
+  ): ReadCell<Z>
+  <A, B, C, D, E, F, G, Z>(
+    upstreams: [
+      ReadCell<A>,
+      ReadCell<B>,
+      ReadCell<C>,
+      ReadCell<D>,
+      ReadCell<E>,
+      ReadCell<F>,
+      ReadCell<G>
+    ],
+    compute: (a: A, b: B, c: C, d: D, e: E, f: F, g: G) => Z
+  ): ReadCell<Z>
+  <A, B, C, D, E, F, G, H, Z>(
+    upstreams: [
+      ReadCell<A>,
+      ReadCell<B>,
+      ReadCell<C>,
+      ReadCell<D>,
+      ReadCell<E>,
+      ReadCell<F>,
+      ReadCell<G>,
+      ReadCell<H>
+    ],
+    compute: (a: A, b: B, c: C, d: D, e: E, f: F, g: G, h: H) => Z
+  ): ReadCell<Z>
+}
+
+export const createComputed: createComputed = (
+  upstreams: Array<ReadCell<any>>,
+  compute: (...values: Array<any>) => any
 ) => {
   const updates = createPublisher<void>()
 
-  const recompute = (): T => calc(...upstreams.map(sample))
+  const recompute = () => compute(...upstreams.map(sample))
 
   let isDirty = false
   let state = recompute()
@@ -242,7 +302,7 @@ export const createComputed = <T>(
     return state
   }
 
-  const sink = (subscriber: Subscriber<T>) => {
+  const sink = (subscriber: Subscriber<any>) => {
     const forward = () => subscriber(get())
     return updates.sub(() => withReads(forward))
   }
