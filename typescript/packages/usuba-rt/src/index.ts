@@ -154,6 +154,7 @@ export class Runtime {
     );
 
     return new PreparedModule(
+      id,
       instantiate as (imports: ImportMap) => Promise<T>
     );
   }
@@ -170,9 +171,15 @@ export class Runtime {
  * always an implementation of the interface defined by the Module's WIT.
  */
 export class PreparedModule<T> {
+  #id;
   #instantiate: (imports: ImportMap) => Promise<T>;
 
-  constructor(instantiate: any) {
+  id() {
+    return this.#id;
+  }
+
+  constructor(id: string, instantiate: any) {
+    this.#id = id;
     this.#instantiate = instantiate;
   }
 

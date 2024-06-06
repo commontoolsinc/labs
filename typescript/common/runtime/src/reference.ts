@@ -2,7 +2,7 @@ import type {
   Value,
   Reference as CommonReference,
 } from '@commontools/data/interfaces/common-data-types.js';
-import { IO } from './io.js';
+import { IO } from './state/io.js';
 
 export class Reference implements CommonReference {
   #io;

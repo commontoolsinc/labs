@@ -69,5 +69,5 @@ export const demo = async () => {
   io.write('foo', infer('bar'));
 
   console.log('Running the module:');
-  module.run();
+  module.Sandbox();
 };
