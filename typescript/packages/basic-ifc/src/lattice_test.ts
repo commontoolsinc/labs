@@ -1,7 +1,6 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import { Const, Concept } from "./principals.ts";
 import { makeLattice, Trust, Lattice } from "./lattice.ts";
-import { assert } from "https://deno.land/std@0.224.0/assert/assert.ts";
 
 Deno.test("makeLattice with empty trust statements", () => {
   const trustStatements: Trust[] = [];

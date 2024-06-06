@@ -219,6 +219,14 @@ export class NetworkCapability extends Capability {
     super();
   }
 
+  join(other: Principal, lattice: Lattice): Principal {
+    if (!(other instanceof NetworkCapability))
+      return super.join(other, lattice);
+    const join = other.url.join(this.url, lattice);
+    if (join === TOP) return TOP;
+    return new NetworkCapability(join as URLPrincipal);
+  }
+
   toJSON() {
     return { type: "NetworkCapability", url: this.url };
   }
