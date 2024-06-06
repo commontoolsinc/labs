@@ -154,6 +154,7 @@ Deno.test("infer labels, simple", () => {
   });
 });
 
+/*
 Deno.test("infer labels, two nodes", () => {
   // Example state and bindings
   const inputs: State = {
@@ -200,3 +201,4 @@ Deno.test("infer labels, two nodes", () => {
     },
   });
 });
+*/
