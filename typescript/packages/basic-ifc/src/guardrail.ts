@@ -60,18 +60,6 @@ export class Guardrail extends Expression {
     }
   }
 
-  equals(other: Principal): boolean {
-    if (this === other) return true;
-    if (other instanceof Guardrail) {
-      if (
-        this.canFlowTo.length !== other.canFlowTo.length ||
-        this.declassifiers.length !== other.declassifiers.length
-      )
-        return false;
-      return true; // TODO: Implement
-    } else return super.equals(other);
-  }
-
   // Expand guardrails mentioned in declassifiers eagerly, i.e. look each up in
   // the lattice and multiply them out with the declassifier terms. The result
   // is again a meet of joins.
@@ -129,5 +117,16 @@ export class Guardrail extends Expression {
     }
 
     return new Guardrail(newCanFlowTo, newDeclassifiers);
+  }
+
+  toString(): string {
+    const canFlowToStr = this.canFlowTo.map((p) => p.toString()).join(", ");
+    const declassifiersStr = this.declassifiers
+      .map(
+        ([conditions, guardrail]) =>
+          `[${conditions.map((c) => c.toString()).join(", ")}, ${guardrail}]`
+      )
+      .join(", ");
+    return `Guardrail(canFlowTo: [${canFlowToStr}], declassifiers: [${declassifiersStr}])`;
   }
 }

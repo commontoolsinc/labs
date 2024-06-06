@@ -9,7 +9,11 @@ export class Principal {
   }
 
   equals(other: Principal): boolean {
-    return this === other;
+    return this.toString() == other.toString();
+  }
+
+  toString(): string {
+    return "Principal";
   }
 }
 
@@ -22,10 +26,6 @@ export class Concept extends Principal {
     super();
   }
 
-  equals(other: Principal): boolean {
-    return other instanceof Concept && other.url === this.url;
-  }
-
   // Resolve to concrete principals via the lattice. Returns first concrete
   // principal walking up the lattice, or the last concept on any branch if
   // there aren't any.
@@ -36,7 +36,7 @@ export class Concept extends Principal {
   }
 
   toString(): string {
-    return this.url;
+    return `Concept(${this.url})`;
   }
 }
 
@@ -68,9 +68,20 @@ export class Composite<T extends Principal> extends Principal {
   ) {
     super();
   }
+
+  toString(): string {
+    const params = Object.entries(this.parameters)
+      .map(([key, value]) => `${key}: ${value}`)
+      .join(", ");
+    return `Composite(${this.generic}, {${params}})`;
+  }
 }
 
-export class Expression extends Principal {}
+export class Expression extends Principal {
+  toString(): string {
+    return "Expression";
+  }
+}
 
 export class JoinExpression<
   T extends Principal = Principal
@@ -111,12 +122,21 @@ export class JoinExpression<
 
     return new JoinExpression<T>(deduped);
   }
+
+  toString(): string {
+    const principalsStr = this.principals.map((p) => p.toString()).join(", ");
+    return `Join([${principalsStr}])`;
+  }
 }
 
 /**
  * Principals that captures integrity of data
  */
-export class Integrity extends Principal {}
+export class Integrity extends Principal {
+  toString(): string {
+    return "Integrity";
+  }
+}
 
 /**
  * Example of a custom lattice that kicks in when the lattice has no opinion
@@ -136,11 +156,19 @@ export class URLPrincipal extends Integrity {
     }
     return result;
   }
+
+  toString(): string {
+    return `URLPrincipal(${this.url})`;
+  }
 }
 
 export class Const extends Integrity {
   constructor(public readonly hash: string) {
     super();
+  }
+
+  toString(): string {
+    return `Const(${this.hash})`;
   }
 }
 
@@ -148,11 +176,19 @@ export class Data extends Integrity {
   constructor() {
     super();
   }
+
+  toString(): string {
+    return "Data";
+  }
 }
 
 export class Module extends Principal {
   constructor(public readonly hash: string) {
     super();
+  }
+
+  toString(): string {
+    return `Module(${this.hash})`;
   }
 }
 
@@ -166,18 +202,34 @@ export class ModuleOutput extends Integrity {
 /**
  * Principals that capture confidentiality of data
  */
-export class Confidentiality extends Principal {}
+export class Confidentiality extends Principal {
+  toString(): string {
+    return "Confidentiality";
+  }
+}
 
-export class Capability extends Confidentiality {}
+export class Capability extends Confidentiality {
+  toString(): string {
+    return "Capability";
+  }
+}
 
 export class NetworkCapability extends Capability {
   constructor(public readonly url: URLPrincipal) {
     super();
   }
+
+  toString(): string {
+    return `NetworkCapability(${this.url.toString()})`;
+  }
 }
 
 export class User extends Confidentiality {
   // TBD, for multi-user scenarios
+
+  toString(): string {
+    return "User";
+  }
 }
 
 export class Environment extends Confidentiality {
@@ -185,5 +237,9 @@ export class Environment extends Confidentiality {
   // and runtime versions
   constructor(public readonly name: string) {
     super();
+  }
+
+  toString(): string {
+    return `Environment(${this.name})`;
   }
 }
