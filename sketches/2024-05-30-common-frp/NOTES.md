@@ -72,14 +72,13 @@ Implications:
 
 Qualities:
 
+- Comes in discrete and continuous flavors. We only care about discrete for our purposes.
 - Behaviors and events (also called cells and streams, or signals and streams)
     - Behaviors are reactive containers for state (think spreadsheet cell)
     - Events are streams of events over time
     - Both are synchronized by a transaction system that makes sure changes happen during discrete "moments" in time, and inconsistent graph states are not observable.
-- Comes in discrete and continuous flavors. We only care about discrete for our purposes.
 - Resulting computation graph is pure.
 - Theory pioneered by Conal Elliott.
-- Full Turing-complete theory of reactive computation.
 - 10 primitives:
     - map, merge, hold, snapshot, filter, lift, never, constant, sample, and switch. (Functional Reactive Programming, 2.3, Manning)
 
