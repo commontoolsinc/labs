@@ -9,7 +9,7 @@ export type Cancellable = {
 export type Send<T> = (value: T) => void
 
 /** Low-level pub-sub channel used under the hood by cells and sinks. */
-export const createPublisher = <T>() => {
+export const publisher = <T>() => {
   const subscribers = new Set<Send<T>>()
 
   const pub = (value: T) => {

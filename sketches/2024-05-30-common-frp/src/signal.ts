@@ -1,6 +1,6 @@
 import { debug } from './shared'
 import {
-  createPublisher,
+  publisher,
   Send,
   Cancel,
   Cancellable,
@@ -93,7 +93,7 @@ export const effect = <T>(
 }
 
 export const signal = <T>(initial: T) => {
-  const updates = createPublisher<void>()
+  const updates = publisher<void>()
 
   let state = initial
 
@@ -181,7 +181,7 @@ export const computed: computed = (
   upstreams: Array<Signal<any>>,
   compute: (...values: Array<any>) => any
 ): Signal<any> => {
-  const updates = createPublisher<void>()
+  const updates = publisher<void>()
 
   const recompute = () => compute(...upstreams.map(sample))
 

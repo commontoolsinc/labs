@@ -1,5 +1,5 @@
 import { debug } from "./shared"
-import { createPublisher, Send, Cancel, combineCancels } from "./publisher"
+import { publisher, Send, Cancel, combineCancels } from "./publisher"
 import { signal as signal, Signal, __updates__ } from "./signal"
 
 const __sink__ = Symbol('sink')
@@ -22,7 +22,7 @@ export const sink = <T>(
 export const stream = <T>(
   generate: (send: Send<T>) => Cancel|undefined
 ): Stream<T> => {
-  const {pub, sub} = createPublisher<T>()
+  const {pub, sub} = publisher<T>()
   const cancel = generate(pub)
   return {[__sink__]: sub, cancel}
 }
