@@ -1,4 +1,5 @@
-import {scan, config} from '../common-frp'
+import { config } from '../index'
+import { scan } from '../stream'
 import { events } from '../dom'
 
 config.debug = true
