@@ -58,8 +58,10 @@
     "@codemirror/language": "^6.10.2",
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.27.0",
+    "@types/json-schema": "^7.0.15",
     "codemirror": "^6.0.1",
     "idb-keyval": "^6.2.1",
+    "json-schema": "^0.4.0",
     "prettier": "^3.3.0"
   }
 }
