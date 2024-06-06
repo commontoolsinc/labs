@@ -89,7 +89,7 @@ const sample = <T>(container: Gettable<T>) => container.get()
 export type Signal<T> = Gettable<T> & Updates<void> & Sink<T> & Unsubscribable
 export type SignalSubject<T> = Gettable<T> & Updates<void> & Sink<T> & Subject<T>
 
-export const create = <T>(initial: T) => {
+export const createSignal = <T>(initial: T) => {
   const updates = createPublisher<void>()
 
   let state = initial
@@ -121,7 +121,7 @@ export const create = <T>(initial: T) => {
   }
 }
 
-export type computed = {
+export type createComputed = {
   <A, B, Z>(
     upstreams: [Signal<A>, Signal<B>],
     compute: (a: A, b: B) => Z
@@ -181,7 +181,7 @@ export type computed = {
   ): Signal<Z>
 }
 
-export const computed: computed = (
+export const computed: createComputed = (
   upstreams: Array<Signal<any>>,
   compute: (...values: Array<any>) => any
 ): Signal<any> => {

@@ -1,13 +1,13 @@
 import { debug } from "./shared"
 import { createPublisher, Send, Cancel, combineCancels } from "./publisher"
-import { create as createSignal, Signal, __updates__ } from "./signal"
+import { createSignal as createSignal, Signal, __updates__ } from "./signal"
 
 export type Stream<T> = {
   sink: (subscriber: Send<T>) => Cancel
   cancel?: Cancel
 }
 
-export const create = <T>(
+export const createStream = <T>(
   generate: (send: Send<T>) => Cancel|undefined
 ): Stream<T> => {
   const {pub, sub: sink} = createPublisher<T>()
@@ -18,14 +18,14 @@ export const create = <T>(
 export const map = <T, U>(
   stream: Stream<T>,
   transform: (value: T) => U
-) => create<U>(send => {
+) => createStream<U>(send => {
   return stream.sink((value: T) => send(transform(value)))
 })
 
 export const filter = <T>(
   stream: Stream<T>,
   predicate: (value: T) => boolean
-) => create<T>(send => {
+) => createStream<T>(send => {
   return stream.sink(value => {
     if (predicate(value)) {
       send(value)
@@ -37,7 +37,7 @@ export const zip = <T, U, V>(
   left: Stream<T>,
   right: Stream<U>,
   combine: (left: T, right: U) => V
-) => create<V>(send => {
+) => createStream<V>(send => {
   const leftQueue: Array<T> = []
   const rightQueue: Array<U> = []
 
@@ -84,6 +84,6 @@ export const scan = <T, U>(
  * Hold the latest value from a stream in a cell.
  */
 export const hold = <T>(
-  stream: Signal<T>,
+  stream: Stream<T>,
   initial: T
 ) => scan(stream, (_, value) => value, initial)
