@@ -267,6 +267,24 @@ export class ComApp extends LitElement {
           in: {},
           outputType: {
             type: 'object',
+            "properties": {
+              "results": {
+                "type": "object",
+                "properties": {
+                  "albummatches": {
+                    "type": "object",
+                    "properties": {
+                      "albums": {
+                        "type": "array",
+                        "items": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           body: `https://ws.audioscrobbler.com/2.0/?method=album.search&album=${query}&api_key=${lastFmKey}&format=json`
         })

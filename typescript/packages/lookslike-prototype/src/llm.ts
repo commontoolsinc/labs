@@ -87,7 +87,10 @@ const toolSpec: ChatCompletionTool[] = [
     "type": "function",
     "function": {
       "name": "addMusicSearchNode",
-      "description": `Adds a new fetch node to the graph to search last.fm.`,
+      "description": `Adds a new fetch node to the graph to search last.fm.
+
+      Results are stored in result.albumsmatches.album
+      `,
       "parameters": {
         "type": "object",
         "properties": {

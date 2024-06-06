@@ -98,6 +98,7 @@ export class ComThread extends LitElement {
           this.requestUpdate()
         })
       });
+
       this.lastGraph = this.graph
     }
 

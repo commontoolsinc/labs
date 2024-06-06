@@ -27,7 +27,6 @@ export function createElement(node, context) {
   // repeat node
   if (!node.tag && node.type == 'repeat') {
     const container = document.createElement('div');
-    debugger
     const items = readValue(context, node.binding) || [];
     items.forEach(item => {
       container.appendChild(createElement(node.template, item));

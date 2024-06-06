@@ -45,7 +45,7 @@ const code = (src: string) => `
 
           console.log('[begin]');
           const fn = function() { ${src} };
-          const result = await fn();
+          const result = fn();
           write('__result__', { tag: 'string', val: JSON.stringify(result) });
           console.log('[end]');
       }
