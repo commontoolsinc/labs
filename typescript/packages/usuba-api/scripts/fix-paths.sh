@@ -11,7 +11,14 @@ set -euo pipefail
 
 pushd $SCRIPT_DIR/../src/openapi-client
 
-find ./ -type f -exec sed -i "/import\|export/ s/\(.* '\.\/[^']*\)/\0.js/g" {} +
+SED=sed
+
+if command -v gsed &> /dev/null;
+then
+  SED=gsed
+fi
+
+find ./ -type f -exec $SED -i "/import\|export/ s/\(.* '\.\/[^']*\)/\0.js/g" {} +
 
 popd
 

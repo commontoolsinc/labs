@@ -1,0 +1,33 @@
+package common:data@0.0.1;
+
+interface types {
+  resource reference {
+    // Dereference a reference to a value
+    // This call is fallible (for example, if the dereference is not allowed)
+    // The value may be none (for example, if it is strictly opaque)
+    deref: func() -> result<option<value>, %string>;
+  }
+
+  resource dictionary {
+    get: func(key: %string) -> option<reference>;
+  }
+
+  type array = list<reference>;
+  type %string = string;
+  type boolean = bool;
+  type number = f64;
+  type buffer = list<u8>;
+
+  variant value {
+    %string(%string),
+    number(number),
+    boolean(boolean),
+    buffer(buffer),
+    array(array),
+    dictionary(dictionary)
+  }
+}
+
+world common {
+  export types;
+}
