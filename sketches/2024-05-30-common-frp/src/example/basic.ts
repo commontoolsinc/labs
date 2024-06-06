@@ -1,5 +1,6 @@
 import { config } from '../index'
 import { scan } from '../stream'
+import { effect } from '../signal'
 import { events } from '../dom'
 
 config.debug = true
@@ -10,7 +11,7 @@ const clicks = events(button, 'click')
 
 const clickCount = scan(clicks, (state, _) => state + 1, 0)
 
-clickCount.sink(x => {
+effect(clickCount, x => {
   button.textContent = `Clicks: ${x}`
   console.log(x)
 })

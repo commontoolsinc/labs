@@ -2,6 +2,10 @@ import { debug } from "./shared"
 
 export type Cancel = () => void
 
+export type Cancellable = {
+  cancel?: Cancel
+}
+
 export type Send<T> = (value: T) => void
 
 /** Low-level pub-sub channel used under the hood by cells and sinks. */

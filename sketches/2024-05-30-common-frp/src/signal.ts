@@ -3,6 +3,7 @@ import {
   createPublisher,
   Send,
   Cancel,
+  Cancellable,
   combineCancels
 } from './publisher'
 
@@ -66,16 +67,8 @@ export type Updates<T> = {
   [__updates__]: (subscriber: Send<T>) => Cancel
 }
 
-export type Sink<T> = {
-  sink: (subscriber: Send<T>) => Cancel
-}
-
 export type Subject<T> = {
   send: (value: T) => void
-}
-
-export type Unsubscribable = {
-  unsubscribe?: Cancel
 }
 
 const isEqual = Object.is
@@ -86,10 +79,20 @@ export type Gettable<T> = {
 
 const sample = <T>(container: Gettable<T>) => container.get()
 
-export type Signal<T> = Gettable<T> & Updates<void> & Sink<T> & Unsubscribable
-export type SignalSubject<T> = Gettable<T> & Updates<void> & Sink<T> & Subject<T>
+export type Signal<T> = Gettable<T> & Updates<void> & Cancellable
+export type SignalSubject<T> = Gettable<T> & Updates<void> & Subject<T>
 
-export const createSignal = <T>(initial: T) => {
+/** React to a signal, producing an effect any time it changes */
+export const effect = <T>(
+  signal: Signal<T>,
+  effect: Send<T>
+) => {
+  const job = () => effect(signal.get())
+  job()
+  return signal[__updates__](() => withReads(job))
+}
+
+export const signal = <T>(initial: T) => {
   const updates = createPublisher<void>()
 
   let state = initial
@@ -107,21 +110,14 @@ export const createSignal = <T>(initial: T) => {
 
   const send = (value: T) => withUpdates(performUpdate, value)
 
-  const sink = (subscriber: Send<T>) => {
-    const job = () => subscriber(get())
-    job()
-    return updates.sub(() => withReads(job))
-  }
-
   return {
     get,
     send,
-    [__updates__]: updates.sub,
-    sink
+    [__updates__]: updates.sub
   }
 }
 
-export type createComputed = {
+export type computed = {
   <A, B, Z>(
     upstreams: [Signal<A>, Signal<B>],
     compute: (a: A, b: B) => Z
@@ -181,7 +177,7 @@ export type createComputed = {
   ): Signal<Z>
 }
 
-export const computed: createComputed = (
+export const computed: computed = (
   upstreams: Array<Signal<any>>,
   compute: (...values: Array<any>) => any
 ): Signal<any> => {
@@ -198,7 +194,7 @@ export const computed: createComputed = (
     updates.pub()
   }
 
-  const unsubscribe = combineCancels(
+  const cancel = combineCancels(
     upstreams.map(cell => cell[__updates__](performUpdate))
   )
 
@@ -211,16 +207,9 @@ export const computed: createComputed = (
     return state
   }
 
-  const sink = (subscriber: Send<any>) => {
-    const job = () => subscriber(get())
-    job()
-    return updates.sub(() => withReads(job))
-  }
-
   return {
     get,
     [__updates__]: updates.sub,
-    sink,
-    unsubscribe: unsubscribe
+    cancel
   }
 }

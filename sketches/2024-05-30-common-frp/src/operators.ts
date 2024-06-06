@@ -90,15 +90,10 @@ export const filter = <T>(
   predicate: UnaryFn<T, boolean>
 ) => (stream: Stream<T>) => filterStream(stream, predicate)
 
-/** Scan a stream, accumulating step state in a cell */
-export const scan = <T, U>(
-  step: (state: U, value: T) => U, initial: U
-) => (stream: Stream<T>) => scanStream(stream, step, initial)
-
-export const hold = <T>(
-  initial: T
-) => (stream: Stream<T>) => holdStream(stream, initial)
-
+/**
+ * Zip two streams together.
+ * Will buffer left and right values until both are available.
+ */
 export const zip = <T, U, V>(
   right: Stream<U>
 ) => (
@@ -109,3 +104,13 @@ export const zip = <T, U, V>(
   right,
   combine
 )
+
+/** Scan a stream, accumulating step state in a cell */
+export const scan = <T, U>(
+  step: (state: U, value: T) => U, initial: U
+) => (stream: Stream<T>) => scanStream(stream, step, initial)
+
+/** Hold the latest value of a stream in a cell */
+export const hold = <T>(
+  initial: T
+) => (stream: Stream<T>) => holdStream(stream, initial)

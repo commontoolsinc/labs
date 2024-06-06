@@ -1,43 +1,61 @@
 import { debug } from "./shared"
 import { createPublisher, Send, Cancel, combineCancels } from "./publisher"
-import { createSignal as createSignal, Signal, __updates__ } from "./signal"
+import { signal as signal, Signal, __updates__ } from "./signal"
+
+const __sink__ = Symbol('sink')
 
 export type Stream<T> = {
-  sink: (subscriber: Send<T>) => Cancel
+  [__sink__]: (subscriber: Send<T>) => Cancel
   cancel?: Cancel
 }
 
-export const createStream = <T>(
+/**
+ * Subscribe to a stream, receiving all updates after the point of subscription.
+ * @return a function to cancel the subscription.
+ */
+export const sink = <T>(
+  upstream: Stream<T>,
+  subscriber: Send<T>
+) => upstream[__sink__](subscriber)
+
+/** Create a new stream source */
+export const stream = <T>(
   generate: (send: Send<T>) => Cancel|undefined
 ): Stream<T> => {
-  const {pub, sub: sink} = createPublisher<T>()
+  const {pub, sub} = createPublisher<T>()
   const cancel = generate(pub)
-  return {sink, cancel}
+  return {[__sink__]: sub, cancel}
 }
 
+/** Map a stream of values */
 export const map = <T, U>(
-  stream: Stream<T>,
+  upstream: Stream<T>,
   transform: (value: T) => U
-) => createStream<U>(send => {
-  return stream.sink((value: T) => send(transform(value)))
+) => stream<U>(send => {
+  return sink(upstream, value => send(transform(value)))
 })
 
+/** Filter a stream of values using a predicate function. */
 export const filter = <T>(
-  stream: Stream<T>,
+  upstream: Stream<T>,
   predicate: (value: T) => boolean
-) => createStream<T>(send => {
-  return stream.sink(value => {
+) => stream<T>(send => {
+  return sink(upstream, value => {
     if (predicate(value)) {
       send(value)
     }
   })
 })
 
+/**
+ * Zip two streams together.
+ * Will buffer left and right values until both are available.
+ */
 export const zip = <T, U, V>(
   left: Stream<T>,
   right: Stream<U>,
   combine: (left: T, right: U) => V
-) => createStream<V>(send => {
+) => stream<V>(send => {
   const leftQueue: Array<T> = []
   const rightQueue: Array<U> = []
 
@@ -51,12 +69,12 @@ export const zip = <T, U, V>(
     }
   }
 
-  const cancelLeft = left.sink(value => {
+  const cancelLeft = sink(left, value => {
     leftQueue.push(value)
     forward()
   })
 
-  const cancelRight = right.sink(value => {
+  const cancelRight = sink(right, value => {
     rightQueue.push(value)
     forward()
   })
@@ -64,26 +82,21 @@ export const zip = <T, U, V>(
   return combineCancels([cancelLeft, cancelRight])
 })
 
-/**
- * Scan a stream producing a cell that contains the reductions of each step
- * of the reduce operation.
- */
+/** Scan a stream, accumulating step state in a cell */
 export const scan = <T, U>(
-  stream: Stream<T>,
+  upstream: Stream<T>,
   step: (state: U, value: T) => U,
   initial: U
 ): Signal<U> => {
-  const {get, [__updates__]: updates, sink, send} = createSignal(initial)
-  const unsubscribe = stream.sink((value: T) => {
+  const {get, [__updates__]: updates, send} = signal(initial)
+  const cancel = sink(upstream, (value: T) => {
     send(step(get(), value))
   })
-  return {get, [__updates__]: updates, sink, unsubscribe}
+  return {get, [__updates__]: updates, cancel}
 }
 
-/**
- * Hold the latest value from a stream in a cell.
- */
+/** Hold the latest value of a stream in a cell */
 export const hold = <T>(
-  stream: Stream<T>,
+  upstream: Stream<T>,
   initial: T
-) => scan(stream, (_, value) => value, initial)
+) => scan(upstream, (_, value) => value, initial)
