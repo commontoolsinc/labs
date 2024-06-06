@@ -26,6 +26,13 @@ Implications:
     - However, you may produce a stream from cell changes
 - Streams are essentially "async" computation, while cells are "sync"
 
+---
+
+> Really quickly: reactive-banana is definitely pull-based not push-pull. reactive is push-pull. Yampa and netwire are arrowized. There are FRPs which allow "accumulating values" but don't allow "switching", FRPs which allow "switching" but not "accumulating values". Both of those are "simple" FRP. Arrowized FRP allows switching and accumulating and uses arrows to control the danger of combining those features. Monadic FRP like reactive-banana, sodium, and elerea use other careful mechanisms to ensure that switching and accumulating don't interact too much. – [J. Abrahamson  Oct 2, 2014 at 20:04](https://stackoverflow.com/questions/26164135/how-fundamentally-different-are-push-pull-and-arrowized-frp#comment41026849_26164135)
+
+> Arrowized FRP also has the neat feature that signals are always stated in context of their inputs which lets you transform the outputs covariantly and the inputs contravariantly in order to better simulate interactive FRP. See Genuinely Functional User Interfaces by Courtney and Elliott for a great example of that feature. – [J. Abrahamson Oct 2, 2014 at 20:05](https://stackoverflow.com/questions/26164135/how-fundamentally-different-are-push-pull-and-arrowized-frp#comment41026887_26164135)
+
+
 ## 2024-05-30
 
 ### Design
