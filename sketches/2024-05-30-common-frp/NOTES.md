@@ -1,8 +1,34 @@
 # Notes
 
-Rough notes and references while designing.
+Devlog, reverse chronological order.
 
-## Design
+Contains rough notes and references while designing.
+
+## 2024-06-05
+
+Proposed semantics after discussing with Berni.
+
+- Cells
+    - Discrete
+    - Use transactions to synchronize
+    - Last-write-wins at input boundary (e.g. too many clicks results in last click winning).
+- Streams
+    - Discrete
+    - Uses separate transaction system to ensure one event is always one event
+    - Buffered semantics. (e.g. too many clicks results in more transactions being added to queue)
+
+Implications:
+
+- Streams and events do not happen during shared moments
+- Streams may NEVER sample cell state
+    - Since they aren't synchronized, sampling might mean seeing the graph in an inconsistent state.
+    - Streams may only get values from upstream streams
+    - However, you may produce a stream from cell changes
+- Streams are essentially "async" computation, while cells are "sync"
+
+## 2024-05-30
+
+### Design
 
 - Discrete classical FRP
     - Streams
@@ -16,7 +42,7 @@ Rough notes and references while designing.
     - Computed Cells
         - Reactive computed states, derived from cells and other computed cells.
 
-## Implementation
+### Implementation
 
 - Transaction 
     - Update streams: Update streams:
@@ -24,8 +50,6 @@ Rough notes and references while designing.
         - Dispatch "I am dirty" notification immediately during cell update phase to downstream cells 
     - Update sinks: get updated cell and computed state. Computed state is recomputed if dirty.
         - Subscribe with sinks
-
-## Rough notes
 
 ### Restricted operators
 
@@ -36,8 +60,6 @@ Rough notes and references while designing.
     - `orderBy()`
     - `union()`, `intersect()` - restricted forms of join/merge
     - `count()`, `min()`, `max()`, `sum()`, `avg()`, `truncate()` - restricted forms of computation
-
-## Prior art
 
 ### Classical FRP
 
@@ -107,7 +129,7 @@ Libraries:
 - [TC39 Observable Proposal](https://github.com/tc39/proposal-observable)
 - [Apple Combine](https://developer.apple.com/documentation/combine/)
 
-## Concepts
+### Concepts
 
 - Paper: [Push-pull FRP](http://conal.net/papers/push-pull-frp/push-pull-frp.pdf), Conal Elliott
 - Book: [Functional Reactive Programming](https://www.manning.com/books/functional-reactive-programming), Manning 2016
