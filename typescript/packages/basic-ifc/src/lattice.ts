@@ -11,43 +11,38 @@ export type Trust = [Principal, Principal[]];
  */
 export interface Lattice {
   up: Map<Principal, Principal[]>;
-  allUp: Map<Principal, Principal[]>;
   concepts: Map<string, Principal[]>;
 }
 
 export function makeLattice(trustStatements: Trust[]): Lattice {
   function traverse(p: Principal): Principal[] {
-    const trusted = up.get(p);
+    const trusted = trustStatements.find(([q]) => q === p)?.[1];
     if (!trusted) return [p];
     return [p, ...trusted.flatMap(traverse)];
   }
 
   const up = new Map<Principal, Principal[]>();
-  const allUp = new Map<Principal, Principal[]>();
+  const concepts = new Map<string, Principal[]>();
   for (const [p, trusted] of trustStatements) {
-    up.set(p, trusted);
-
     // Get a partially sorted list all parents of p
     //
     // Strategy: Collect all recursively, then dedupe keeping the last entry.
     // That way there is no contradiaction.
-    const all = trusted.flatMap(traverse);
     const seen = new Set<Principal>();
-    const allDeduped: Principal[] = [];
-    all.reverse().forEach((p) => {
-      if (!seen.has(p)) {
-        seen.add(p);
-        allDeduped.push(p);
-      }
-    });
-    allUp.set(p, allDeduped);
+    const all: Principal[] = [];
+    traverse(p)
+      .reverse()
+      .forEach((p) => {
+        if (!seen.has(p)) {
+          seen.add(p);
+          all.push(p);
+        }
+      });
+    up.set(p, all.reverse());
+
+    // Add concepts to the concepts map, indexed by stringified concept
+    if (p instanceof Concept) concepts.set(p.toString(), trusted);
   }
 
-  const concepts = new Map<string, Principal[]>(
-    trustStatements
-      .filter((c) => c instanceof Concept)
-      .map(([c, p]) => [c.toString(), p])
-  );
-
-  return { up, allUp, concepts };
+  return { up, concepts };
 }

@@ -35,8 +35,8 @@ export class Guardrail extends Expression {
 
   constructor(
     // Data protected by this guardrail can flow to these principals
-    // (in)
     public readonly canFlowTo: (Confidentiality | Concept)[],
+    // Once these conditions are met, this new guardrail takes precedence
     public readonly declassifiers: [
       (Integrity | Concept)[],
       Guardrail | Concept
@@ -119,14 +119,14 @@ export class Guardrail extends Expression {
     return new Guardrail(newCanFlowTo, newDeclassifiers);
   }
 
-  toString(): string {
-    const canFlowToStr = this.canFlowTo.map((p) => p.toString()).join(", ");
-    const declassifiersStr = this.declassifiers
-      .map(
-        ([conditions, guardrail]) =>
-          `[${conditions.map((c) => c.toString()).join(", ")}, ${guardrail}]`
-      )
-      .join(", ");
-    return `Guardrail(canFlowTo: [${canFlowToStr}], declassifiers: [${declassifiersStr}])`;
+  toJSON() {
+    return {
+      type: "Guardrail",
+      canFlowTo: this.canFlowTo,
+      declassifiers: this.declassifiers.map(([conditions, guardrail]) => [
+        conditions,
+        guardrail,
+      ]),
+    };
   }
 }

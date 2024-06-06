@@ -2,18 +2,22 @@ import { Lattice } from "./lattice.ts";
 
 export class Principal {
   join(other: Principal, lattice: Lattice): Principal {
-    const thisParents = lattice.allUp.get(this) || [this];
-    const otherParents = lattice.allUp.get(other) || [other];
+    const thisParents = lattice.up.get(this) || [this];
+    const otherParents = lattice.up.get(other) || [other];
     const firstCommonParent = thisParents.find((p) => otherParents.includes(p));
     return firstCommonParent ?? TOP;
   }
 
   equals(other: Principal): boolean {
-    return this.toString() == other.toString();
+    return this.toString() === other.toString();
   }
 
-  toString(): string {
-    return "Principal";
+  toJSON() {
+    return { type: "Principal" };
+  }
+
+  toString() {
+    return JSON.stringify(this);
   }
 }
 
@@ -35,8 +39,8 @@ export class Concept extends Principal {
     return up.flatMap((p) => (p instanceof Concept ? p.resolve(lattice) : p));
   }
 
-  toString(): string {
-    return `Concept(${this.url})`;
+  toJSON() {
+    return { type: "Concept", url: this.url };
   }
 }
 
@@ -69,17 +73,18 @@ export class Composite<T extends Principal> extends Principal {
     super();
   }
 
-  toString(): string {
-    const params = Object.entries(this.parameters)
-      .map(([key, value]) => `${key}: ${value}`)
-      .join(", ");
-    return `Composite(${this.generic}, {${params}})`;
+  toJSON() {
+    return {
+      type: "Composite",
+      generic: this.generic,
+      parameters: this.parameters,
+    };
   }
 }
 
 export class Expression extends Principal {
-  toString(): string {
-    return "Expression";
+  toJSON() {
+    return { type: "Expression" };
   }
 }
 
@@ -123,9 +128,8 @@ export class JoinExpression<
     return new JoinExpression<T>(deduped);
   }
 
-  toString(): string {
-    const principalsStr = this.principals.map((p) => p.toString()).join(", ");
-    return `Join([${principalsStr}])`;
+  toJSON() {
+    return { type: "JoinExpression", principals: this.principals };
   }
 }
 
@@ -133,8 +137,8 @@ export class JoinExpression<
  * Principals that captures integrity of data
  */
 export class Integrity extends Principal {
-  toString(): string {
-    return "Integrity";
+  toJSON() {
+    return { type: "Integrity" };
   }
 }
 
@@ -157,8 +161,8 @@ export class URLPrincipal extends Integrity {
     return result;
   }
 
-  toString(): string {
-    return `URLPrincipal(${this.url})`;
+  toJSON() {
+    return { type: "URLPrincipal", url: this.url };
   }
 }
 
@@ -167,18 +171,14 @@ export class Const extends Integrity {
     super();
   }
 
-  toString(): string {
-    return `Const(${this.hash})`;
+  toJSON() {
+    return { type: "Const", hash: this.hash };
   }
 }
 
 export class Data extends Integrity {
-  constructor() {
-    super();
-  }
-
-  toString(): string {
-    return "Data";
+  toJSON() {
+    return { type: "Data" };
   }
 }
 
@@ -187,8 +187,8 @@ export class Module extends Principal {
     super();
   }
 
-  toString(): string {
-    return `Module(${this.hash})`;
+  toJSON() {
+    return { type: "Module", hash: this.hash };
   }
 }
 
@@ -203,14 +203,14 @@ export class ModuleOutput extends Integrity {
  * Principals that capture confidentiality of data
  */
 export class Confidentiality extends Principal {
-  toString(): string {
-    return "Confidentiality";
+  toJSON() {
+    return { type: "Confidentiality" };
   }
 }
 
 export class Capability extends Confidentiality {
-  toString(): string {
-    return "Capability";
+  toJSON() {
+    return { type: "Capability" };
   }
 }
 
@@ -219,16 +219,16 @@ export class NetworkCapability extends Capability {
     super();
   }
 
-  toString(): string {
-    return `NetworkCapability(${this.url.toString()})`;
+  toJSON() {
+    return { type: "NetworkCapability", url: this.url };
   }
 }
 
 export class User extends Confidentiality {
   // TBD, for multi-user scenarios
 
-  toString(): string {
-    return "User";
+  toJSON() {
+    return { type: "User" };
   }
 }
 
@@ -239,7 +239,7 @@ export class Environment extends Confidentiality {
     super();
   }
 
-  toString(): string {
-    return `Environment(${this.name})`;
+  toJSON() {
+    return { type: "Environment", name: this.name };
   }
 }
