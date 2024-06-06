@@ -59,6 +59,7 @@
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.27.0",
     "codemirror": "^6.0.1",
+    "idb-keyval": "^6.2.1",
     "prettier": "^3.3.0"
   }
 }
