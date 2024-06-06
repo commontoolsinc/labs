@@ -83,12 +83,22 @@ export const pipe: Pipe = (
 /** Map a stream of values */
 export const map = <T, U>(
   transform: UnaryFn<T, U>
-) => (stream: Stream<T>) => mapStream(stream, transform)
+) => (
+  stream: Stream<T>
+) => mapStream(stream, transform)
+
+export const select = <T extends object, U extends keyof T & string>(
+  key: U
+) => (
+  stream: Stream<T>
+) => mapStream(stream, (o: T) => o[key])
 
 /** Filter a stream of values using a predicate function. */
 export const filter = <T>(
   predicate: UnaryFn<T, boolean>
-) => (stream: Stream<T>) => filterStream(stream, predicate)
+) => (
+  stream: Stream<T>
+) => filterStream(stream, predicate)
 
 /**
  * Zip two streams together.

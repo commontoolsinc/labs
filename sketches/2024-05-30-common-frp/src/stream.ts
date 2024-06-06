@@ -35,6 +35,18 @@ export const map = <T, U>(
   return sink(upstream, value => send(transform(value)))
 })
 
+/** Get a key from an object */
+const getKey = <T extends object, U extends keyof T & string>(
+  obj: T,
+  key: U
+) => obj[key];
+
+/** Select a key from an object */
+export const select = <T extends object, U extends keyof T & string>(
+  upstream: Stream<T>,
+  key: U
+) => map(upstream, (o: T) => getKey(o, key))
+
 /** Filter a stream of values using a predicate function. */
 export const filter = <T>(
   upstream: Stream<T>,
