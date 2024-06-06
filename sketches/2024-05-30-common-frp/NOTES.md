@@ -89,6 +89,10 @@ Qualities:
 >
 > (Functional Reactive Programming, 2.6.1, Manning)
 
+Talks:
+
+- [A More Elegant Specification for Functional Reactive Programming, Conal Elliott](https://www.youtube.com/watch?v=9vMFHLHq7Y0)
+
 Libraries:
 
 - [Sodium FRP](https://github.com/SodiumFRP)
