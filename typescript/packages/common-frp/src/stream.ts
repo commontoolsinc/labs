@@ -1,6 +1,6 @@
 import { debug } from "./shared.js"
 import { publisher, Send, Cancel, combineCancels } from "./publisher.js"
-import { signal as signal, Signal, __updates__ } from "./signal.js"
+import { state, Signal, __updates__ } from "./signal.js"
 
 const __sink__ = Symbol('sink')
 
@@ -18,20 +18,33 @@ export const sink = <T>(
   subscriber: Send<T>
 ) => upstream[__sink__](subscriber)
 
-/** Create a new stream source */
-export const stream = <T>(
+/**
+ * Create a stream subject - a source for a stream that has a send method
+ * for publishing new items to stream.
+ */
+export const subject = <T>() => {
+  const { pub, sub } = publisher<T>()
+  return { [__sink__]: sub, send: pub }
+}
+
+/**
+ * Create a new stream source using a closure to publish new items to stream
+ * Closure receives a single argument, a send function to publish new items,
+ * and may return a cancel function to stop generation and clean up resources.
+ */
+export const generate = <T>(
   generate: (send: Send<T>) => Cancel | undefined
 ): Stream<T> => {
-  const { pub, sub } = publisher<T>()
-  const cancel = generate(pub)
-  return { [__sink__]: sub, cancel }
+  const { [__sink__]: sink, send } = subject<T>()
+  const cancel = generate(send)
+  return { [__sink__]: sink, cancel }
 }
 
 /** Map a stream of values */
 export const map = <T, U>(
   upstream: Stream<T>,
   transform: (value: T) => U
-) => stream<U>(send => {
+) => generate<U>(send => {
   return sink(upstream, value => send(transform(value)))
 })
 
@@ -51,7 +64,7 @@ export const select = <T extends object, U extends keyof T & string>(
 export const filter = <T>(
   upstream: Stream<T>,
   predicate: (value: T) => boolean
-) => stream<T>(send => {
+) => generate<T>(send => {
   return sink(upstream, value => {
     if (predicate(value)) {
       send(value)
@@ -67,7 +80,7 @@ export const zip = <T, U, V>(
   left: Stream<T>,
   right: Stream<U>,
   combine: (left: T, right: U) => V
-) => stream<V>(send => {
+) => generate<V>(send => {
   const leftQueue: Array<T> = []
   const rightQueue: Array<U> = []
 
@@ -100,7 +113,7 @@ export const scan = <T, U>(
   step: (state: U, value: T) => U,
   initial: U
 ): Signal<U> => {
-  const { get, [__updates__]: updates, send } = signal(initial)
+  const { get, [__updates__]: updates, send } = state(initial)
   const cancel = sink(upstream, (value: T) => {
     send(step(get(), value))
   })

@@ -11,6 +11,11 @@ import {
 export type UnaryFn<A, B> = (a: A) => B
 
 export type Pipe = {
+  <A, B>(
+    value: A,
+    a2b: UnaryFn<A, B>
+  ): B
+
   <A, B, C>(
     value: A,
     a2b: UnaryFn<A, B>,

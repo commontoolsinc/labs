@@ -12,7 +12,6 @@ Common functional reactive programming utilities.
     - [x] All graph dependencies held in array (in contrast to S.js style or Signals style where graph is defined via VM execution trace)
 - [x] Glitch free: updates happen during discrete moments using a transaction system
 - [x] Transformations should happen during same transaction
-- [ ] Transactions
-    - [ ] (see experimental for WIP)
-- [ ] Cycles
-    - [ ] TODO: switch from microtask-based topological sorting to transaction-based push-pull (see experimental for WIP)
+- [x] Transactions
+- [ ] Cycles supported for Signals
+    - [ ] TODO need to improve [push-pull dirty marking logic](https://github.com/tc39/proposal-signals?tab=readme-ov-file#common-algorithms).
