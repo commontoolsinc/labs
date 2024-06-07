@@ -91,17 +91,22 @@ export class ComThread extends LitElement {
 
   override render() {
     if (this.graph != this.lastGraph) {
+      if (this.context) {
+        this.context.cancellation?.forEach((cancel) => cancel())
+      }
       this.context = createRxJSNetworkFromJson(this.graph)
 
       // trigger a re-render if any output changes
       Object.values(this.context.outputs).forEach((output) => {
         const initial = output.get()
-        signal.effect(output, v => {
+        const cancel = signal.effect(output, v => {
           if (v !== initial) {
             this.setContext(this.context)
             this.requestUpdate()
           }
         })
+
+        this.context.cancellation.push(cancel);
       });
 
       this.lastGraph = this.graph

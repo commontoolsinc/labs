@@ -13,6 +13,7 @@ export async function listKeys() {
 export type Context<T> = {
   inputs: { [node: string]: { [input: string]: T } },
   outputs: { [node: string]: T },
+  cancellation: (() => void)[]
 }
 
 export function snapshot(ctx: Context<SignalSubject<any>>) {
