@@ -95,5 +95,5 @@ Deno.test("Simple recipe", () => {
     },
   ]);
 
-  //assertEquals(result, []);
+  assertEquals(result, []);
 });
