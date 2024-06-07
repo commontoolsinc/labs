@@ -60,6 +60,19 @@ export class Guardrail extends Expression {
     }
   }
 
+  walk(visitor: (p: Principal) => Principal): Principal {
+    return new Guardrail(
+      this.canFlowTo.map((p) => p.walk(visitor)) as (
+        | Confidentiality
+        | Concept
+      )[],
+      this.declassifiers.map(([conditions, guardrail]) => [
+        conditions.map((p) => p.walk(visitor)) as (Integrity | Concept)[],
+        guardrail.walk(visitor) as Guardrail | Concept,
+      ])
+    );
+  }
+
   // Expand guardrails mentioned in declassifiers eagerly, i.e. look each up in
   // the lattice and multiply them out with the declassifier terms. The result
   // is again a meet of joins.

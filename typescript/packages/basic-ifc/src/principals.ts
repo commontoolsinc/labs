@@ -12,6 +12,10 @@ export class Principal {
     return this.toString() === other.toString();
   }
 
+  walk(visitor: (p: Principal) => Principal): Principal {
+    return visitor(this);
+  }
+
   toJSON() {
     return { type: "Principal" };
   }
@@ -26,7 +30,7 @@ export class Principal {
  * concepts to these principals.
  */
 export class Concept extends Principal {
-  constructor(public readonly url: string) {
+  constructor(public readonly uri: string) {
     super();
   }
 
@@ -40,7 +44,7 @@ export class Concept extends Principal {
   }
 
   toJSON() {
-    return { type: "Concept", url: this.url };
+    return { type: "Concept", url: this.uri };
   }
 }
 
@@ -73,6 +77,21 @@ export class Composite<T extends Principal> extends Principal {
     super();
   }
 
+  walk(visitor: (p: Principal) => Principal): Principal {
+    function traverse(p: Parameter): Parameter {
+      if (p instanceof Principal) return visitor(p);
+      if (Array.isArray(p)) return p.map(traverse);
+      return Object.fromEntries(
+        Object.entries(p).map(([k, v]) => [k, traverse(v)])
+      );
+    }
+
+    return new Composite<T>(
+      visitor(this.generic) as T,
+      traverse(this.parameters) as { [key: string]: Parameter }
+    );
+  }
+
   toJSON() {
     return {
       type: "Composite",
@@ -82,7 +101,11 @@ export class Composite<T extends Principal> extends Principal {
   }
 }
 
-export class Expression extends Principal {
+export abstract class Expression extends Principal {
+  walk(_visitor: (p: Principal) => Principal): Principal {
+    throw new Error("Abstract method not implemented.");
+  }
+
   toJSON() {
     return { type: "Expression" };
   }
@@ -112,20 +135,31 @@ export class JoinExpression<
       principals = [...this.principals, other];
     }
 
-    principals =
-      other instanceof JoinExpression
-        ? [...this.principals, ...other.principals]
-        : [...this.principals, other];
+    return new JoinExpression<T>(principals).simplify(lattice);
+  }
 
+  simplify(lattice: Lattice): JoinExpression<T> {
     // dedupe principals, using .equals
     const deduped: T[] = [];
-    for (const p of principals) {
+    for (const p of this.principals) {
       if (!deduped.some((d) => d.equals(p))) {
         deduped.push(p);
       }
     }
 
-    return new JoinExpression<T>(deduped);
+    // THen we filter out principals who have a more trusted one in the list
+    const simplified = deduped.filter((p) => {
+      const up = lattice.up.get(p) || [p];
+      return !deduped.find((q) => q !== p && up.includes(q));
+    });
+
+    return new JoinExpression<T>(simplified);
+  }
+
+  walk(visitor: (p: Principal) => Principal): Principal {
+    return new JoinExpression<T>(
+      (this.principals as Principal[]).map((p) => p.walk(visitor)) as T[]
+    );
   }
 
   toJSON() {
@@ -146,14 +180,14 @@ export class Integrity extends Principal {
  * Example of a custom lattice that kicks in when the lattice has no opinion
  * otherwise.
  */
-export class URLPrincipal extends Integrity {
+export class URLPattern extends Integrity {
   constructor(public readonly url: string) {
     super();
   }
 
   join(other: Principal, lattice: Lattice): Principal {
     const result = super.join(other, lattice);
-    if (result === TOP && other instanceof URLPrincipal) {
+    if (result === TOP && other instanceof URLPattern) {
       // For now: Substring of the other is higher in the lattice
       if (this.url.startsWith(other.url)) return other;
       if (other.url.startsWith(this.url)) return this;
@@ -182,7 +216,7 @@ export class Data extends Integrity {
   }
 }
 
-export class Module extends Principal {
+export class ModulePrincipal extends Principal {
   constructor(public readonly hash: string) {
     super();
   }
@@ -193,9 +227,12 @@ export class Module extends Principal {
 }
 
 export class ModuleOutput extends Integrity {
-  constructor(hash: string, inputs: { [key: string]: Integrity }) {
+  constructor(
+    module: ModulePrincipal | Concept,
+    inputs: { [key: string]: Integrity }
+  ) {
     super();
-    return new Composite(new Module(hash), inputs);
+    return new Composite(module, inputs);
   }
 }
 
@@ -215,7 +252,7 @@ export class Capability extends Confidentiality {
 }
 
 export class NetworkCapability extends Capability {
-  constructor(public readonly url: URLPrincipal) {
+  constructor(public readonly url: URLPattern) {
     super();
   }
 
@@ -224,7 +261,7 @@ export class NetworkCapability extends Capability {
       return super.join(other, lattice);
     const join = other.url.join(this.url, lattice);
     if (join === TOP) return TOP;
-    return new NetworkCapability(join as URLPrincipal);
+    return new NetworkCapability(join as URLPattern);
   }
 
   toJSON() {

@@ -8,8 +8,8 @@ import {
   dedupe,
   Composite,
   JoinExpression,
-  URLPrincipal,
-  Module,
+  URLPattern,
+  ModulePrincipal,
   NetworkCapability,
   User,
 } from "./principals.ts";
@@ -47,7 +47,7 @@ Deno.test("dedupe", () => {
 });
 
 Deno.test("Composite principal", () => {
-  const module = new Module("0xcoffee");
+  const module = new ModulePrincipal("0xcoffee");
   const user = new User();
   const composite = new Composite(module, { user });
   assertEquals(composite.generic, module);
@@ -67,8 +67,8 @@ Deno.test("JoinExpression join", () => {
 });
 
 Deno.test("URLPrincipal join", () => {
-  const urlA = new URLPrincipal("http://example.com");
-  const urlB = new URLPrincipal("http://example.com/page");
+  const urlA = new URLPattern("http://example.com");
+  const urlB = new URLPattern("http://example.com/page");
   const trustStatements: Trust[] = [];
   const lattice = makeLattice(trustStatements);
   assertEquals(urlA.join(urlB, lattice), urlA);
@@ -76,9 +76,9 @@ Deno.test("URLPrincipal join", () => {
 });
 
 Deno.test("NetworkCapability principal", () => {
-  const urlPrincipalA = new URLPrincipal("http://example.com");
+  const urlPrincipalA = new URLPattern("http://example.com");
   const networkCapabilityA = new NetworkCapability(urlPrincipalA);
-  const urlPrincipalB = new URLPrincipal("http://example.com/page");
+  const urlPrincipalB = new URLPattern("http://example.com/page");
   const networkCapabilityB = new NetworkCapability(urlPrincipalB);
   const join = networkCapabilityA.join(networkCapabilityB, makeLattice([]));
   assertEquals(join.toString(), networkCapabilityA.toString());

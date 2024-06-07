@@ -53,7 +53,7 @@ Deno.test("Guardrail join with non-Guardrail principal", () => {
   const declassifiers: [(Integrity | Concept)[], Guardrail | Concept][] = [];
   const guardrail = new Guardrail(canFlowTo, declassifiers);
 
-  const otherPrincipal = new Expression();
+  const otherPrincipal = new Concept("mock");
   const result = guardrail.join(otherPrincipal, lattice);
 
   assert(result instanceof JoinExpression);

@@ -5,6 +5,20 @@ import { Principal, Concept } from "./principals.ts";
  */
 export type Trust = [Principal, Principal[]];
 
+export class TrustStatements {
+  private statements: Map<Principal, Principal[]> = new Map();
+
+  add(from: Principal, to: Principal | Principal[]) {
+    if (!Array.isArray(to)) to = [to];
+    if (!this.statements.has(from)) this.statements.set(from, []);
+    const list = this.statements.get(from)!;
+    to.forEach((p) => list.push(p));
+  }
+
+  get(): Trust[] {
+    return [...this.statements.entries()] as Trust[];
+  }
+}
 /**
  * Lattice of principals, each listing itself and all principals that are more
  * trusted than itself.
@@ -14,7 +28,14 @@ export interface Lattice {
   concepts: Map<string, Principal[]>;
 }
 
-export function makeLattice(trustStatements: Trust[]): Lattice {
+export function makeLattice(
+  trustStatementsOrInstance: Trust[] | TrustStatements
+): Lattice {
+  const trustStatements =
+    trustStatementsOrInstance instanceof TrustStatements
+      ? trustStatementsOrInstance.get()
+      : trustStatementsOrInstance;
+
   function traverse(p: Principal): Principal[] {
     const trusted = trustStatements.find(([q]) => q === p)?.[1];
     if (!trusted) return [p];
