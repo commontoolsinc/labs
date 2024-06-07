@@ -78,6 +78,11 @@ export type Pipe = {
     g2h: UnaryFn<G, H>,
     h2i: UnaryFn<H, I>
   ): I
+
+  (
+    value: any,
+    ...fns: [(value: any) => any]
+  ): any
 }
 
 /** Pipe a value through a series of functions */

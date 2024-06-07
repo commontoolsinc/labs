@@ -117,7 +117,7 @@ export const state = <T>(initial: T) => {
   }
 }
 
-export type computed = {
+export type Computed = {
   <A, B, Z>(
     upstreams: [Signal<A>, Signal<B>],
     compute: (a: A, b: B) => Z
@@ -175,9 +175,13 @@ export type computed = {
     ],
     compute: (a: A, b: B, c: C, d: D, e: E, f: F, g: G, h: H) => Z
   ): Signal<Z>
+  (
+    upstreams: Array<Signal<any>>,
+    compute: (...values: any) => any
+  ): Signal<any>
 }
 
-export const computed: computed = (
+export const computed: Computed = (
   upstreams: Array<Signal<any>>,
   compute: (...values: Array<any>) => any
 ): Signal<any> => {
