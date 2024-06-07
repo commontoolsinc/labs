@@ -93,6 +93,9 @@ export function createRxJSNetworkFromJson(recipe: Recipe): Context<Signal<any>> 
     })
 
     const cancel = signal.effect(allInputs, async (values) => {
+      // do not execute if any of the inputs are null
+      if (Object.values(values).some(v => v === null)) return;
+
       await executeNode(node, values, context.outputs)
     })
     context.cancellation.push(cancel)
