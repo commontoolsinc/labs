@@ -1,28 +1,13 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "es2017",
-    "module": "es2015",
-    "moduleResolution": "nodenext",
     "lib": [
+      "es2022",
       "esnext.array",
       "esnext",
-      "es2017",
       "dom"
     ],
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "inlineSources": true,
-    "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitAny": true,
-    "noImplicitThis": true,
     "outDir": "./",
-    // Only necessary because @types/uglify-js can't find types for source-map
-    "skipLibCheck": true,
     "experimentalDecorators": true
   },
   "include": [
