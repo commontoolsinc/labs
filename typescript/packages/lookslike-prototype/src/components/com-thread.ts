@@ -47,22 +47,28 @@ function definitionToHtml(node: RecipeNode, context: any) {
   }
 
   if (node.contentType === 'text/javascript') {
-    const val = snapshot(context).outputs[node.id]
+    const val = context[node.id]
     return html`<com-code .code=${node.body}></com-code><com-data .data=${JSON.stringify(val, null, 2)}></com-data>`
   }
 
   if (node.contentType === 'application/json+vnd.common.ui') {
-    const el = createElement(node.body, snapshot(context).inputs[node.id] || {})
+    const val = context[node.id]
+    if (!val) {
+      return html`<pre>loading...</pre>`
+    }
+    const el = createElement(node.body, context || {})
+    const sourceHtml = el.outerHTML
 
-    return html`<div>${unsafeHTML(el.outerHTML)}</div>
+    console.log('sourceHtml', sourceHtml)
+    return html`<div>${unsafeHTML(sourceHtml)}</div>
       <com-toggle>
-      <com-data .data=${pretty(el.outerHTML)}></com-data>
+      <com-data .data=${pretty(sourceHtml)}></com-data>
       <com-data .data=${JSON.stringify(node.body, null, 2)}></com-data>
       </com-toggle>`
   }
 
   if (node.contentType === 'application/json') {
-    const val = snapshot(context).outputs[node.id]
+    const val = context[node.id]
     return html`<com-data .data=${node.body}></com-data><com-data .data=${JSON.stringify(val, null, 2)}></com-data>`
   }
 
@@ -80,6 +86,8 @@ export class ComThread extends LitElement {
 
 
   lastGraph: Recipe = []
+  localScope: { [k: string]: any }
+  onCancel: () => void
 
   response(node: RecipeNode, context: object) {
     return html`<com-response slot="response">
@@ -91,24 +99,26 @@ export class ComThread extends LitElement {
 
   override render() {
     if (this.graph != this.lastGraph) {
-      if (this.context) {
-        this.context.cancellation?.forEach((cancel) => cancel())
-      }
-      this.context = createRxJSNetworkFromJson(this.graph)
+      // if (this.context) {
+      //   this.context.cancellation?.forEach((cancel) => cancel())
+      // }
+      const context = createRxJSNetworkFromJson(this.graph)
 
-      // trigger a re-render if any output changes
-      Object.values(this.context.outputs).forEach((output) => {
-        const initial = output.get()
-        const cancel = signal.effect(output, v => {
-          if (v !== initial) {
-            this.setContext(this.context)
-            this.requestUpdate()
-          }
-        })
-
-        this.context.cancellation.push(cancel);
+      const dependencies = [...Object.values(context.outputs)]
+      const combined = signal.computed(dependencies, (...outputs) => {
+        return outputs
       });
 
+      this.onCancel?.()
+      // trigger a re-render if any output changes
+      const cancel = signal.effect(combined, values => {
+        if (!values) return
+        this.localScope = Object.fromEntries(values.map((v, i) => [Object.keys(context.outputs)[i], v]))
+        // this.setContext(context)
+        this.requestUpdate()
+      })
+
+      this.onCancel = cancel
       this.lastGraph = this.graph
     }
 
@@ -124,7 +134,7 @@ export class ComThread extends LitElement {
                       ${node.content}
                     </com-prompt>`
         })}
-            ${this.response(node, this.context)}
+            ${this.response(node, this.localScope)}
           </com-thread-group>
         `)
       }

@@ -6,6 +6,7 @@ import { signal, config } from '@commontools/common-frp'
 import { Context } from './state.js';
 type Signal<T> = signal.SignalSubject<T>
 
+config.debug = true;
 
 export function collectSymbols(recipe: Recipe) {
   const symbols = [] as { symbol: string, type: any }[];
