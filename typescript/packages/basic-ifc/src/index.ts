@@ -1,18 +1,29 @@
-import { makeLattice, inferState, type Binding, BOTTOM, TOP } from "./ifc.s";
+import {
+  makeLattice,
+  inferLabels,
+  type Node,
+  type State,
+  $label,
+  BOTTOM,
+  TOP,
+} from "./ifc.ts";
 
 // Example state and bindings
-const initialState = {
+const initialState: State = {
   bar: {
     baz: {
-      label: { integrity: "trusted cloud", confidentiality: "trusted cloud" },
+      [$label]: {
+        integrity: "trusted cloud",
+        confidentiality: "trusted cloud",
+      },
     },
     zab: {
-      label: { integrity: "public", confidentiality: "public" },
+      [$label]: { integrity: "public", confidentiality: "public" },
     },
   },
 };
 
-const bindings: Binding[] = [{ in: ["bar.baz", "bar.zab"], out: ["foo"] }];
+const bindings: Node[] = [{ in: ["bar.baz", "bar.zab"], out: ["foo"] }];
 
 const lattice = makeLattice({
   [BOTTOM]: ["public"],
@@ -23,7 +34,7 @@ const lattice = makeLattice({
 });
 
 // Infer the state
-const inferredState = inferState(initialState, bindings, lattice);
+const inferredState = inferLabels(initialState, bindings, lattice);
 
 // Accessing the labels
 console.log(inferredState); // Output will reflect the inferred labels based on the lattice
