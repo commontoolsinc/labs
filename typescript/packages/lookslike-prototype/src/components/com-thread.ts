@@ -59,7 +59,8 @@ export class ComThread extends LitElement {
     }
 
     const onOverriden = (e: CustomEvent) => {
-      console.log('overriden', e.detail.data)
+      // stuck in infinite loop here?
+      this.context.outputs[node.id].send(JSON.parse(e.detail.data))
     }
 
     const onRefresh = () => {
