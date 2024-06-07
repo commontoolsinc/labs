@@ -126,12 +126,12 @@ export const zip = <T, U, V>(
   combine
 )
 
-/** Scan a stream, accumulating step state in a cell */
+/** Scan a stream, accumulating step state in a signal */
 export const scan = <T, U>(
   step: (state: U, value: T) => U, initial: U
 ) => (stream: Stream<T>) => scanStream(stream, step, initial)
 
-/** Hold the latest value of a stream in a cell */
+/** Hold the latest value of a stream in a signal */
 export const hold = <T>(
   initial: T
 ) => (stream: Stream<T>) => holdStream(stream, initial)

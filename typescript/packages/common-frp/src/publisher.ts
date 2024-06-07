@@ -8,7 +8,7 @@ export type Cancellable = {
 
 export type Send<T> = (value: T) => void
 
-/** Low-level pub-sub channel used under the hood by cells and sinks. */
+/** Low-level pub-sub channel used under the hood. */
 export const publisher = <T>() => {
   const subscribers = new Set<Send<T>>()
 
@@ -24,10 +24,10 @@ export const publisher = <T>() => {
    * @returns Unsubscribe function
    */
   const sub = (subscriber: Send<T>): Cancel => {
-    debug('sub', 'subscribing')
+    debug('sub', 'subscribing', subscriber)
     subscribers.add(subscriber)
     return () => {
-      debug('sub', 'canceling subscription')
+      debug('sub', 'canceling subscription', subscriber)
       subscribers.delete(subscriber)
     }
   }

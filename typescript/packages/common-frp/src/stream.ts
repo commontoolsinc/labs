@@ -89,17 +89,19 @@ export const zip = <T, U, V>(
       const leftValue = leftQueue.shift()!
       const rightValue = rightQueue.shift()!
       const value = combine(leftValue, rightValue)
-      debug('join', `dispatching value: ${value} from ${leftValue} and ${rightValue}`)
+      debug('zip', 'dispatching value', value)
       send(value)
     }
   }
 
   const cancelLeft = sink(left, value => {
+    debug('zip', 'queue value', value)
     leftQueue.push(value)
     forward()
   })
 
   const cancelRight = sink(right, value => {
+    debug('zip', 'queue value', value)
     rightQueue.push(value)
     forward()
   })
@@ -107,7 +109,7 @@ export const zip = <T, U, V>(
   return combineCancels([cancelLeft, cancelRight])
 })
 
-/** Scan a stream, accumulating step state in a cell */
+/** Scan a stream, accumulating step state in a signal */
 export const scan = <T, U>(
   upstream: Stream<T>,
   step: (state: U, value: T) => U,
@@ -120,7 +122,7 @@ export const scan = <T, U>(
   return { get, [__updates__]: updates, cancel }
 }
 
-/** Hold the latest value of a stream in a cell */
+/** Hold the latest value of a stream in a signal */
 export const hold = <T>(
   upstream: Stream<T>,
   initial: T
