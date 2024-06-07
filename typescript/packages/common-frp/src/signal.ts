@@ -17,24 +17,24 @@ const createTransactionManager = () => {
     if (isScheduled) {
       return
     }
-    debug('TransactionManager.schedule', `transaction scheduled`)
+    debug('TransactionManager.schedule', 'transaction scheduled')
     isScheduled = true
     queueMicrotask(transact)
   }
 
   const transact = () => {
-    // First perform all cell state changes.
-    // - Update cell state
+    // First perform all signal state changes.
+    // - Update signal state
     // - Mark computed dirty
-    debug('TransactionManager.transact', `updates`)
+    debug('TransactionManager.transact', 'updates')
     for (const [job, value] of updates) {
       job(value)
     }
     updates.clear()
-    // Then perform all cell state reads
-    // - Read cell state
-    // - Recompute computed cells and mark clean
-    debug('TransactionManager.transact', `reads`)
+    // Then perform all signal state reads
+    // - Read signal state
+    // - Recompute computed signals and mark clean
+    debug('TransactionManager.transact', 'reads')
     for (const job of reads) {
       job()
     }
@@ -44,13 +44,13 @@ const createTransactionManager = () => {
   }
 
   const withUpdates = <T>(job: (value: T) => void, value: T) => {
-    debug('TransactionManager.withUpdates', `queue job with value ${value}`)
+    debug('TransactionManager.withUpdates', 'queue job', job, value)
     updates.set(job, value)
     schedule()
   }
 
   const withReads = (job: () => void) => {
-    debug('TransactionManager.withReads', `queue job`)
+    debug('TransactionManager.withReads', 'queue job', job)
     reads.add(job)
     schedule()
   }
@@ -103,7 +103,7 @@ export const state = <T>(initial: T) => {
     // Only perform update if state has actually changed
     if (!isEqual(state, value)) {
       state = value
-      debug('cell', `value: ${state}`)
+      debug('state', 'value updated', state)
       updates.pub()
     }
   }
@@ -199,13 +199,13 @@ export const computed: Computed = (
   }
 
   const cancel = combineCancels(
-    upstreams.map(cell => cell[__updates__](performUpdate))
+    upstreams.map(signal => signal[__updates__](performUpdate))
   )
 
   const get = () => {
     if (isDirty) {
       state = recompute()
-      debug(`computed`, `recomputed state: ${state}`)
+      debug('computed', 'recomputed state', state)
       isDirty = false
     }
     return state

@@ -2,8 +2,8 @@ export const config = {
   debug: false
 }
 
-export const debug = (tag: string, msg: string) => {
+export const debug = (...data: Array<any>) => {
   if (config.debug) {
-    console.debug(tag, msg)
+    console.debug(...data)
   }
 }

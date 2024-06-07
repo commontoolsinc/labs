@@ -5,7 +5,7 @@ Common functional reactive programming utilities.
 ## Goals
 
 - [x] Classical FRP with behaviors and events (also called cells and streams, or signals and streams)
-    - [x] Behaviors (called cells) are reactive containers for state that can be formalized as functions of time
+    - [x] Behaviors (called streams) are reactive containers for state that can be formalized as functions of time
     - [x] Events (called streams) are streams of events over time
 - [x] 1st order FRP (static graph)
 - [ ] Graph description can be serialized to JSON
