@@ -118,28 +118,37 @@ export const state = <T>(initial: T) => {
 }
 
 export type Computed = {
-  <A, B, Z>(
+  <A, B>(
+    upstreams: [Signal<A>],
+    compute: (a: A) => B
+  ): Signal<B>
+
+  <A, B, C>(
     upstreams: [Signal<A>, Signal<B>],
-    compute: (a: A, b: B) => Z
-  ): Signal<Z>
-  <A, B, C, Z>(
+    compute: (a: A, b: B) => C
+  ): Signal<C>
+
+  <A, B, C, D>(
     upstreams: [Signal<A>, Signal<B>, Signal<C>],
-    compute: (a: A, b: B, c: C) => Z
-  ): Signal<Z>
-  <A, B, C, D, Z>(
+    compute: (a: A, b: B, c: C) => D
+  ): Signal<D>
+
+  <A, B, C, D, E>(
     upstreams: [Signal<A>, Signal<B>, Signal<C>, Signal<D>],
-    compute: (a: A, b: B, c: C, d: D) => Z
-  ): Signal<Z>
-  <A, B, C, D, E, Z>(
+    compute: (a: A, b: B, c: C, d: D) => E
+  ): Signal<E>
+
+  <A, B, C, D, E, F>(
     upstreams: [
       Signal<A>,
       Signal<B>,
       Signal<C>,
       Signal<D>,
       Signal<E>],
-    compute: (a: A, b: B, c: C, d: D, e: E) => Z
-  ): Signal<Z>
-  <A, B, C, D, E, F, Z>(
+    compute: (a: A, b: B, c: C, d: D, e: E) => F
+  ): Signal<F>
+
+  <A, B, C, D, E, F, G>(
     upstreams: [
       Signal<A>,
       Signal<B>,
@@ -148,9 +157,10 @@ export type Computed = {
       Signal<E>,
       Signal<F>
     ],
-    compute: (a: A, b: B, c: C, d: D, e: E, f: F) => Z
-  ): Signal<Z>
-  <A, B, C, D, E, F, G, Z>(
+    compute: (a: A, b: B, c: C, d: D, e: E, f: F) => G
+  ): Signal<G>
+
+  <A, B, C, D, E, F, G, H>(
     upstreams: [
       Signal<A>,
       Signal<B>,
@@ -160,9 +170,10 @@ export type Computed = {
       Signal<F>,
       Signal<G>
     ],
-    compute: (a: A, b: B, c: C, d: D, e: E, f: F, g: G) => Z
-  ): Signal<Z>
-  <A, B, C, D, E, F, G, H, Z>(
+    compute: (a: A, b: B, c: C, d: D, e: E, f: F, g: G) => H
+  ): Signal<H>
+
+  <A, B, C, D, E, F, G, H, I>(
     upstreams: [
       Signal<A>,
       Signal<B>,
@@ -173,8 +184,9 @@ export type Computed = {
       Signal<G>,
       Signal<H>
     ],
-    compute: (a: A, b: B, c: C, d: D, e: E, f: F, g: G, h: H) => Z
-  ): Signal<Z>
+    compute: (a: A, b: B, c: C, d: D, e: E, f: F, g: G, h: H) => I
+  ): Signal<I>
+
   (
     upstreams: Array<Signal<any>>,
     compute: (...values: any) => any
