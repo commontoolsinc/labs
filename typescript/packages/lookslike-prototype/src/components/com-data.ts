@@ -31,7 +31,7 @@ class CodeMirrorDataViewer extends LitElement {
           console.log('updated');
           const event = new CustomEvent('updated', {
             detail: {
-              code: this.editor.state.doc.toString()
+              data: this.editor.state.doc.toString()
             }
           });
           this.dispatchEvent(event);
@@ -79,7 +79,6 @@ class CodeMirrorDataViewer extends LitElement {
         insert: this.data
       }
     });
-    this.foldAll();
   }
 
   render() {
