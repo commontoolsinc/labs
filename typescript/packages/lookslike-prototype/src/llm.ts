@@ -181,7 +181,8 @@ export async function processUserInput(input: string, system: string, availableF
       messages,
       model,
       tools: toolSpec,
-      tool_choice: "auto"
+      tool_choice: "auto",
+      temperature: 0
     });
 
     if (response.choices[0].finish_reason === 'stop') {
