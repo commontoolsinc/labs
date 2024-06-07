@@ -92,7 +92,7 @@ export const effect = <T>(
   return signal[__updates__](() => withReads(job))
 }
 
-export const signal = <T>(initial: T) => {
+export const state = <T>(initial: T) => {
   const updates = publisher<void>()
 
   let state = initial
