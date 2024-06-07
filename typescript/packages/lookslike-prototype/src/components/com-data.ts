@@ -26,9 +26,20 @@ class CodeMirrorDataViewer extends LitElement {
   firstUpdated() {
     const editorContainer = this.shadowRoot?.getElementById('editor');
     if (editorContainer) {
+      const updateListener = EditorView.updateListener.of((update) => {
+        if (update.docChanged) {
+          console.log('updated');
+          const event = new CustomEvent('updated', {
+            detail: {
+              code: this.editor.state.doc.toString()
+            }
+          });
+          this.dispatchEvent(event);
+        }
+      });
       this.state = EditorState.create({
         doc: this.data,
-        extensions: [basicSetup, json()]
+        extensions: [basicSetup, json(), updateListener]
       })
       this.editor = new EditorView({
         state: this.state,
@@ -44,9 +55,20 @@ class CodeMirrorDataViewer extends LitElement {
   }
 
   updated() {
+    const updateListener = EditorView.updateListener.of((update) => {
+      if (update.docChanged) {
+        console.log('updated');
+        const event = new CustomEvent('updated', {
+          detail: {
+            data: this.editor.state.doc.toString()
+          }
+        });
+        this.dispatchEvent(event);
+      }
+    });
     this.state = EditorState.create({
       doc: this.data,
-      extensions: [basicSetup, json()]
+      extensions: [basicSetup, json(), updateListener]
     })
 
     // replace contents
