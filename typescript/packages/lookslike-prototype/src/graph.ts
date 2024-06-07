@@ -1,8 +1,10 @@
-import { BehaviorSubject, combineLatest, filter } from 'rxjs';
-import { createElement } from './ui';
-import { prepare, run } from './eval';
-import { Recipe, RecipeNode } from './data';
-import { snapshot, system } from './state';
+import { createElement } from './ui.js';
+import { run } from './eval.js';
+import { Recipe, RecipeNode } from './data.js';
+
+import { signal, } from '@commontools/common-frp'
+type Signal<T> = signal.SignalSubject<T>
+
 
 export function collectSymbols(recipe: Recipe) {
   const symbols = [] as { symbol: string, type: any }[];
@@ -16,21 +18,21 @@ export function collectSymbols(recipe: Recipe) {
 export function createRxJSNetworkFromJson(recipe: Recipe) {
   // track all inputs and outputs
   const context = {
-    inputs: {} as { [key: string]: { [key: string]: BehaviorSubject<any> } },
-    outputs: {} as { [key: string]: BehaviorSubject<any> }
+    inputs: {} as { [key: string]: { [key: string]: Signal<any> } },
+    outputs: {} as { [key: string]: Signal<any> }
   };
 
   // populate context namespace
   recipe.forEach(node => {
     const nodeName = node.id;
-    context.outputs[nodeName] = new BehaviorSubject(null);
+    context.outputs[nodeName] = signal.state(null)
 
     // foreach input in the signature, create a placeholder cell
     if (node.in) {
       const inputs = node.in;
       context.inputs[nodeName] = {};
       for (const inputName in inputs) {
-        context.inputs[nodeName][inputName] = new BehaviorSubject(null);
+        context.inputs[nodeName][inputName] = signal.state(null)
       }
     }
   });
@@ -45,9 +47,9 @@ export function createRxJSNetworkFromJson(recipe: Recipe) {
         const source = context.outputs[sourceNode];
         const target = context.inputs[node.id][inputName];
 
-        source.pipe(filter(value => value != null)).subscribe(value => {
-          target.next(value);
-        });
+        signal.effect(source, value => {
+          target.send(value)
+        })
       }
     }
   });
@@ -55,48 +57,49 @@ export function createRxJSNetworkFromJson(recipe: Recipe) {
   // process node definitions and set up reactive logic
   recipe.forEach(async node => {
     if (!node.body) return;
-    const inputObservables = [];
-    const inputs = {} as { [key: string]: BehaviorSubject<any> };
+    const inputObservables: Signal<any>[] = [];
+    // const inputs = {} as { [key: string]: Signal<any> };
 
     for (const inputName in node.in) {
       const outputName = node.in[inputName][1];
       if (context.outputs[outputName]) {
-        inputObservables.push(context.outputs[outputName].pipe(filter(value => value !== null)));
-        inputs[inputName] = context.outputs[outputName];
+        inputObservables.push(context.outputs[outputName]);
+        // inputs[inputName] = context.outputs[outputName];
       }
     }
 
-    const initial = Object.entries(inputs).map(([k, v]) => [k, v.getValue()])
-    if (initial.every(([_k, v]) => v !== null)) {
-      await executeNode(node, Object.fromEntries(initial), context.outputs)
-    }
+    // const initial = Object.entries(inputs).map(([k, v]) => [k, v.get()])
+    // if (initial.every(([_k, v]) => v !== null)) {
+    //   await executeNode(node, Object.fromEntries(initial), context.outputs)
+    // }
 
-    combineLatest(inputObservables).subscribe(async values => {
-      const inputValues = values.reduce((acc, value, index) => {
-        const key = Object.keys(inputs)[index];
-        acc[key] = value;
-        return acc;
-      }, {});
+    const allInputs = signal.computed(inputObservables, (...values) => {
+      return values
+    })
 
-      await executeNode(node, inputValues, context.outputs)
-    });
+    signal.effect(allInputs, async (values) => {
+      await executeNode(node, values, context.outputs)
+    })
   });
 
   return context;
 }
 
-async function executeNode(node: RecipeNode, inputs: { [key: string]: any }, outputs: { [key: string]: BehaviorSubject<any> }) {
+async function executeNode(
+  node: RecipeNode,
+  inputs: { [key: string]: any },
+  outputs: { [key: string]: SignalSubject<any> }) {
   const { contentType } = node;
   if (contentType === 'text/javascript' && typeof node.body === 'string') {
     const result = await run(node.body, inputs);
-    outputs[node.id].next(result);
+    outputs[node.id].send(result);
   } else if (contentType === 'application/json+vnd.common.ui') {
     const renderedTemplate = createElement(node.body, inputs);
-    outputs[node.id].next(renderedTemplate);
+    outputs[node.id].send(renderedTemplate);
   } else if (contentType === 'application/json' && typeof node.body === 'string') {
     const url = node.body;
     const response = await fetch(url);
     const data = await response.json();
-    outputs[node.id].next(data);
+    outputs[node.id].send(data);
   }
 }

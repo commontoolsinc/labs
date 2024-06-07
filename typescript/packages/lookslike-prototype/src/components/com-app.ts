@@ -1,11 +1,12 @@
 import { LitElement, html } from 'lit-element'
 import { customElement, state } from 'lit/decorators.js'
-import { base } from '../styles'
+import { base } from '../styles.js'
 
 import { Recipe, emptyGraph, todoAppMockup, RecipeNode } from '../data'
 import { doLLM, grabJson, processUserInput } from '../llm'
 import { collectSymbols } from '../graph'
 import { Context, snapshot } from '../state'
+import { SignalSubject } from '../../../common-frp/lib/signal.js'
 
 const codePrompt = `
   Your task is to take a user description or request and produce a series of nodes for a computation graph. Nodes can be code blocks or UI components and they communicate with named ports.
@@ -186,9 +187,15 @@ const codePrompt = `
 export class ComApp extends LitElement {
   static styles = [base]
 
+  static properties = {
+    graph: { type: Object },
+    userInput: { type: String },
+    snapshot: { type: Object }
+  }
+
   @state() graph: Recipe = emptyGraph
   @state() userInput = ''
-  @state() snapshot: Context
+  @state() snapshot: Context<SignalSubject<any>>
 
   async appendMessage() {
     const newGraph = [...this.graph]

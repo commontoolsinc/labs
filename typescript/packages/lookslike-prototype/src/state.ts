@@ -1,4 +1,5 @@
 import { get, set, del, keys } from 'idb-keyval';
+import { SignalSubject } from '../../common-frp/lib/signal.js';
 
 // Helper function for serialization boundary (this can be customized as needed)
 const serializationBoundary = (data: any) => {
@@ -9,26 +10,26 @@ export async function listKeys() {
   return await keys();
 }
 
-export type Context = {
-  inputs: { [node: string]: { [input: string]: any } },
-  outputs: { [node: string]: any },
+export type Context<T> = {
+  inputs: { [node: string]: { [input: string]: T } },
+  outputs: { [node: string]: T },
 }
 
-export function snapshot(ctx: Context) {
-  const snapshot: Context = {
+export function snapshot(ctx: Context<SignalSubject<any>>) {
+  const snapshot: Context<any> = {
     inputs: {},
     outputs: {}
   }
 
   for (const key in ctx.outputs) {
-    const value = ctx.outputs[key].getValue()
+    const value = ctx.outputs[key].get()
     snapshot.outputs[key] = value
   }
 
   for (const key in ctx.inputs) {
     snapshot.inputs[key] = {}
     for (const inputKey in ctx.inputs[key]) {
-      const value = ctx.inputs[key][inputKey].getValue()
+      const value = ctx.inputs[key][inputKey].get()
       snapshot.inputs[key][inputKey] = value
     }
   }

@@ -44,8 +44,10 @@ export function createElement(node, context) {
       if (value.type && value["$id"] && value["$id"] === CELL) {
         let name = value.name || key;
         if (!context[name]) continue;
-        element[key] = context[name].getValue();
-        context[name].subscribe(newValue => element[key] = newValue);
+        element[key] = context[name].get();
+        effect(context[name], newValue => {
+          element[key] = newValue
+        })
       } else {
         if (value.binding) {
           if (key === 'checked' || 'disabled' || 'hidden') {

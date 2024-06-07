@@ -1,6 +1,6 @@
-import {LitElement, html, css} from 'lit-element'
-import {customElement} from 'lit/decorators.js'
-import {base} from '../styles'
+import { LitElement, html, css } from 'lit-element'
+import { customElement } from 'lit/decorators.js'
+import { base } from '../styles.js'
 
 const styles = css`
 :host {
@@ -38,4 +38,3 @@ export class ComAppGrid extends LitElement {
     `
   }
 }
-
