@@ -7,13 +7,35 @@ import { RecipeNode } from '../data.js'
 import { SignalSubject } from '../../../common-frp/lib/signal.js'
 import { signal } from '@commontools/common-frp'
 
-function definitionToHtml(node: RecipeNode, value: any) {
+function definitionToHtml(node: RecipeNode, value: any, dispatch: (event: CustomEvent) => void) {
   if (!node) {
     return html`<pre>loading...</pre>`
   }
 
   if (node.contentType === 'text/javascript') {
-    return html`<com-code .code=${node.body}></com-code><com-data .data=${JSON.stringify(value, null, 2)}></com-data>`
+    const codeChanged = (ev) => {
+      node.body = ev.detail.code
+      const event = new CustomEvent('updated', {
+        detail: {
+          body: node.body
+        }
+      });
+      dispatch(event);
+    }
+
+    const dataChanged = (ev) => {
+      const event = new CustomEvent('overriden', {
+        detail: {
+          data: ev.detail.data
+        }
+      });
+      dispatch(event);
+    }
+
+    return html`
+      <com-code .code=${node.body} @updated=${codeChanged}></com-code>
+      <com-data .data=${JSON.stringify(value, null, 2)} @updated=${dataChanged}></com-data>
+    `
   }
 
   if (node.contentType === 'application/json+vnd.common.ui') {
@@ -32,7 +54,10 @@ function definitionToHtml(node: RecipeNode, value: any) {
   }
 
   if (node.contentType === 'application/json') {
-    return html`<com-data .data=${node.body}></com-data><com-data .data=${JSON.stringify(value, null, 2)}></com-data>`
+    return html`
+      <com-data .data=${node.body}></com-data>
+      <com-data .data=${JSON.stringify(value, null, 2)}></com-data>
+    `
   }
 
   return html`<pre>${JSON.stringify(node, null, 2)}</pre>`
@@ -80,7 +105,7 @@ export class ComResponse extends LitElement {
       return html`<pre>loading...</pre>`
     }
 
-    const defintion = definitionToHtml(this.node, this.value)
+    const defintion = definitionToHtml(this.node, this.value, this.dispatchEvent.bind(this))
     console.log('value', this.node.id, this.value)
 
     return html`

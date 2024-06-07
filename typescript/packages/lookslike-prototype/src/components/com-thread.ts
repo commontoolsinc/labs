@@ -2,13 +2,9 @@ import { LitElement, html, css } from 'lit-element'
 import { customElement, property, state } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
 import { base } from '../styles.js'
-import { createElement } from '../ui.js'
-import { unsafeHTML } from 'lit/directives/unsafe-html.js';
-import pretty from 'pretty'
 import { createRxJSNetworkFromJson } from '../graph.js'
 import { Recipe, RecipeNode } from '../data.js'
-import { Context, snapshot } from '../state.js'
-import { signal } from '@commontools/common-frp'
+import { Context } from '../state.js'
 import { SignalSubject } from '../../../common-frp/lib/signal.js'
 
 const styles = css`
@@ -54,12 +50,24 @@ export class ComThread extends LitElement {
 
   @property({ type: Function }) setContext = (_: Context<SignalSubject<any>>) => { }
 
-
   lastGraph: Recipe = []
   localScope: { [k: string]: any } = {}
 
   response(node: RecipeNode) {
-    return html`<com-response slot="response" .node=${node} .output=${this.context.outputs[node.id]}>
+    const onUpdated = (e: CustomEvent) => {
+      node.body = e.detail.body
+    }
+
+    const onOverriden = (e: CustomEvent) => {
+      console.log('overriden', e.detail.data)
+    }
+
+    const onRefresh = () => {
+      this.graph = JSON.parse(JSON.stringify(this.graph))
+    }
+
+    return html`<com-response slot="response" .node=${node} .output=${this.context.outputs[node.id]} @updated=${onUpdated} @overriden=${onOverriden}>
+      <button @click=${onRefresh}>Refresh</button>
         <code class="local-variable">${node.id}</code>
         ${repeat(Object.entries(node.in), ([key, value]) => html`<code class="local-variable">${key}: ${value}</code>`)}
       </com-response>`
