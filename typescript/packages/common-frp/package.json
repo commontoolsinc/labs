@@ -1,0 +1,63 @@
+{
+  "name": "@commontools/common-frp",
+  "author": "The Common Authors",
+  "version": "0.0.1",
+  "description": "An FRP implementation for Common Tools",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wireit",
+    "clean": "wireit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/commontoolsinc/labs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/commontoolsinc/labs/issues"
+  },
+  "homepage": "https://github.com/commontoolsinc/labs#readme",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js",
+      "types": "./lib/index.d.ts"
+    },
+    "signal": {
+      "default": "./lib/signal.js",
+      "types": "./lib/signal.d.ts"
+    },
+    "stream": {
+      "default": "./lib/stream.js",
+      "types": "./lib/stream.d.ts"
+    },
+    "operators": {
+      "default": "./lib/operators.js",
+      "types": "./lib/operators.d.ts"
+    }
+  },
+  "files": [
+    "./lib/index.js"
+  ],
+  "dependencies": {},
+  "devDependencies": {
+    "tslib": "^2.6.2",
+    "typescript": "^5.2.2",
+    "wireit": "^0.14.4",
+    "vite": "^5.2.12"
+  },
+  "wireit": {
+    "build": {
+      "files": [
+        "./src/**/*"
+      ],
+      "output": [
+        "./lib/**/*"
+      ],
+      "command": "tsc --build -f"
+    },
+    "clean": {
+      "command": "rm -rf ./lib ./.wireit"
+    }
+  }
+}
