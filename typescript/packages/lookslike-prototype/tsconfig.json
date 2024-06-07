@@ -1,5 +1,6 @@
 {
   "extends": "../../tsconfig.base.json",
+  "moduleResolution": "nodenext",
   "compilerOptions": {
     "lib": [
       "es2022",
@@ -8,7 +9,8 @@
       "dom"
     ],
     "outDir": "./",
-    "experimentalDecorators": true
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false
   },
   "include": [
     "src/**/*.ts"

@@ -1,13 +1,15 @@
 import { LitElement, html, css } from 'lit-element'
 import { customElement, property } from 'lit/decorators.js'
 import { repeat } from 'lit/directives/repeat.js'
-import { base } from '../styles'
-import { createElement } from '../ui'
+import { base } from '../styles.js'
+import { createElement } from '../ui.js'
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import pretty from 'pretty'
-import { createRxJSNetworkFromJson } from '../graph'
-import { Recipe, RecipeNode } from '../data'
-import { Context, snapshot } from '../state'
+import { createRxJSNetworkFromJson } from '../graph.js'
+import { Recipe, RecipeNode } from '../data.js'
+import { Context, snapshot } from '../state.js'
+import { signal } from '@commontools/common-frp'
+import { SignalSubject } from '../../../common-frp/lib/signal.js'
 
 const styles = css`
   :host {
@@ -72,9 +74,9 @@ export class ComThread extends LitElement {
   static styles = [base, styles]
 
   @property({ type: Object }) graph = {} as Recipe
-  @property({ type: Object }) context = {} as Context
+  @property({ type: Object }) context = {} as Context<SignalSubject<any>>
 
-  @property({ type: Function }) setContext = (_: Context) => { }
+  @property({ type: Function }) setContext = (_: Context<SignalSubject<any>>) => { }
 
 
   lastGraph: Recipe = []
@@ -87,15 +89,18 @@ export class ComThread extends LitElement {
       </com-response>`
   }
 
-  render() {
+  override render() {
     if (this.graph != this.lastGraph) {
       this.context = createRxJSNetworkFromJson(this.graph)
 
       // trigger a re-render if any output changes
       Object.values(this.context.outputs).forEach((output) => {
-        output.subscribe(() => {
-          this.setContext(this.context)
-          this.requestUpdate()
+        const initial = output.get()
+        signal.effect(output, v => {
+          if (v !== initial) {
+            this.setContext(this.context)
+            this.requestUpdate()
+          }
         })
       });
 
