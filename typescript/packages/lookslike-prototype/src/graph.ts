@@ -78,6 +78,10 @@ export function createRxJSNetworkFromJson(recipe: Recipe): Context<Signal<any>> 
     //   await executeNode(node, Object.fromEntries(initial), context.outputs)
     // }
 
+    if (inputObservables.length === 0) {
+      await executeNode(node, {}, context.outputs)
+    }
+
     const allInputs = signal.computed(inputObservables, (...values) => {
       // make an object out of node.in and the values
       const inputs = Object.entries(node.in).reduce((acc, [k, [_, v]], idx) => {
@@ -97,10 +101,15 @@ export function createRxJSNetworkFromJson(recipe: Recipe): Context<Signal<any>> 
   return context;
 }
 
+async function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function executeNode(
   node: RecipeNode,
   inputs: { [key: string]: any },
   outputs: { [key: string]: SignalSubject<any> }) {
+
   const { contentType } = node;
   if (contentType === 'text/javascript' && typeof node.body === 'string') {
     const result = await run(node.body, inputs);
