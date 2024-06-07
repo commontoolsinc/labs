@@ -2,7 +2,8 @@ import { createElement } from './ui.js';
 import { run } from './eval.js';
 import { Recipe, RecipeNode } from './data.js';
 
-import { signal, } from '@commontools/common-frp'
+import { signal, config } from '@commontools/common-frp'
+import { Context } from './state.js';
 type Signal<T> = signal.SignalSubject<T>
 
 
@@ -15,11 +16,12 @@ export function collectSymbols(recipe: Recipe) {
 }
 
 // inflate the RxJS network from a JSON graph definition
-export function createRxJSNetworkFromJson(recipe: Recipe) {
+export function createRxJSNetworkFromJson(recipe: Recipe): Context<Signal<any>> {
   // track all inputs and outputs
   const context = {
     inputs: {} as { [key: string]: { [key: string]: Signal<any> } },
-    outputs: {} as { [key: string]: Signal<any> }
+    outputs: {} as { [key: string]: Signal<any> },
+    cancellation: [] as (() => void)[]
   };
 
   // populate context namespace
@@ -47,9 +49,11 @@ export function createRxJSNetworkFromJson(recipe: Recipe) {
         const source = context.outputs[sourceNode];
         const target = context.inputs[node.id][inputName];
 
-        signal.effect(source, value => {
+        const cancel = signal.effect(source, value => {
           target.send(value)
         })
+
+        context.cancellation.push(cancel)
       }
     }
   });
@@ -74,12 +78,19 @@ export function createRxJSNetworkFromJson(recipe: Recipe) {
     // }
 
     const allInputs = signal.computed(inputObservables, (...values) => {
-      return values
+      // make an object out of node.in and the values
+      const inputs = Object.entries(node.in).reduce((acc, [k, [_, v]], idx) => {
+        acc[k] = values[idx];
+        return acc;
+      }, {} as { [key: string]: any });
+
+      return inputs
     })
 
-    signal.effect(allInputs, async (values) => {
+    const cancel = signal.effect(allInputs, async (values) => {
       await executeNode(node, values, context.outputs)
     })
+    context.cancellation.push(cancel)
   });
 
   return context;
