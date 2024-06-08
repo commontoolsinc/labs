@@ -82,14 +82,90 @@ const sample = <T>(container: Gettable<T>) => container.get()
 export type Signal<T> = Gettable<T> & Updates<void> & Cancellable
 export type SignalSubject<T> = Gettable<T> & Updates<void> & Subject<T>
 
+export type Effect = {
+  <A>(
+    upstreams: [Signal<A>],
+    perform: (a: A) => void
+  ): Cancel
+
+  <A, B>(
+    upstreams: [Signal<A>, Signal<B>],
+    perform: (a: A, b: B) => void
+  ): Cancel
+
+  <A, B, C>(
+    upstreams: [Signal<A>, Signal<B>, Signal<C>],
+    perform: (a: A, b: B, c: C) => void
+  ): Cancel
+
+  <A, B, C, D>(
+    upstreams: [Signal<A>, Signal<B>, Signal<C>, Signal<D>],
+    perform: (a: A, b: B, c: C, d: D) => void
+  ): Cancel
+
+  <A, B, C, D, E>(
+    upstreams: [Signal<A>, Signal<B>, Signal<C>, Signal<D>, Signal<E>],
+    perform: (a: A, b: B, c: C, d: D, e: E) => void
+  ): Cancel
+
+  <A, B, C, D, E, F>(
+    upstreams: [
+      Signal<A>,
+      Signal<B>,
+      Signal<C>,
+      Signal<D>,
+      Signal<E>,
+      Signal<F>
+    ],
+    perform: (a: A, b: B, c: C, d: D, e: E, f: F) => void
+  ): Cancel
+
+  <A, B, C, D, E, F, G>(
+    upstreams: [
+      Signal<A>,
+      Signal<B>,
+      Signal<C>,
+      Signal<D>,
+      Signal<E>,
+      Signal<F>,
+      Signal<G>
+    ],
+    perform: (a: A, b: B, c: C, d: D, e: E, f: F, g: G) => void
+  ): Cancel
+
+  <A, B, C, D, E, F, G, H>(
+    upstreams: [
+      Signal<A>,
+      Signal<B>,
+      Signal<C>,
+      Signal<D>,
+      Signal<E>,
+      Signal<F>,
+      Signal<G>,
+      Signal<H>
+    ],
+    perform: (a: A, b: B, c: C, d: D, e: E, f: F, g: G, h: H) => void
+  ): Cancel
+
+  (
+    upstreams: Array<Signal<any>>,
+    perform: (...values: Array<any>) => void
+  ): Cancel
+}
+
 /** React to a signal, producing an effect any time it changes */
-export const effect = <T>(
-  signal: Signal<T>,
-  effect: Send<T>
+export const effect: Effect = (
+  upstreams: Array<Signal<any>>,
+  perform: (...values: Array<any>) => void
 ) => {
-  const job = () => effect(signal.get())
+  const job = () => perform(...upstreams.map(sample))
+  const schedule = () => withReads(job)
+
   job()
-  return signal[__updates__](() => withReads(job))
+
+  return combineCancels(
+    upstreams.map(signal => signal[__updates__](schedule))
+  )
 }
 
 export const state = <T>(initial: T) => {

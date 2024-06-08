@@ -1,22 +1,34 @@
 import { signal } from "@commontools/common-frp";
-import { directive } from 'lit/directive.js';
-import { AsyncDirective } from 'lit/async-directive.js';
+import {directive} from 'lit/directive.js';
+import {AsyncDirective} from 'lit/async-directive.js';
 
-const { effect } = signal;
+const {state, effect} = signal;
 
 class WatchDirective extends AsyncDirective {
   #cancel: (() => void) | undefined = undefined;
+  #isWatching
 
   constructor(part: any) {
     super(part);
+    this.#isWatching = state(true);
   }
 
   override render(signal: any) {
     this.#cancel?.();
-    this.#cancel = effect(signal, value => {
-      this.setValue(value);
+    this.#cancel = effect([this.#isWatching, signal], (isWatching, value) => {
+      if (isWatching) {
+        this.setValue(value);
+      }
     });
     return signal.get();
+  }
+
+  protected override disconnected(): void {
+    this.#isWatching.send(false)
+  }
+
+  protected override reconnected(): void {
+    this.#isWatching.send(true)
   }
 }
 
