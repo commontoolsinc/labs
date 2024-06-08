@@ -11,7 +11,7 @@ const clicks = events(button, 'click')
 
 const clickCount = scan(clicks, (state, _) => state + 1, 0)
 
-effect(clickCount, x => {
+effect([clickCount], x => {
   button.textContent = `Clicks: ${x}`
   console.log(x)
 })
