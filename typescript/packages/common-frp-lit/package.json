@@ -8,7 +8,8 @@
   "type": "module",
   "scripts": {
     "build": "wireit",
-    "clean": "wireit"
+    "clean": "wireit",
+    "dev": "vite"
   },
   "repository": {
     "type": "git",
