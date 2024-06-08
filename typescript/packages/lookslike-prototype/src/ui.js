@@ -1,4 +1,3 @@
-
 export const STREAM = 'https://common.tools/stream-binding.schema.json'
 export const CELL = 'https://common.tools/cell-binding.schema.json'
 
