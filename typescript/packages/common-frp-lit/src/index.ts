@@ -6,7 +6,7 @@ const {state, effect} = signal;
 
 class WatchDirective extends AsyncDirective {
   #cancel: (() => void) | undefined = undefined;
-  #isWatching
+  #isWatching;
 
   constructor(part: any) {
     super(part);
@@ -24,11 +24,11 @@ class WatchDirective extends AsyncDirective {
   }
 
   protected override disconnected(): void {
-    this.#isWatching.send(false)
+    this.#isWatching.send(false);
   }
 
   protected override reconnected(): void {
-    this.#isWatching.send(true)
+    this.#isWatching.send(true);
   }
 }
 
@@ -36,4 +36,4 @@ class WatchDirective extends AsyncDirective {
  * Renders a signal and subscribes to it, updating the part when the signal
  * changes.
  */
-export const watch = directive(WatchDirective)
+export const watch = directive(WatchDirective);
