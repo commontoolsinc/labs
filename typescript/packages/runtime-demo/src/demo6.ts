@@ -1,4 +1,13 @@
-import { IO, Runtime, Dictionary, Value, infer } from '@commontools/runtime';
+import {
+  IO,
+  Runtime,
+  Dictionary,
+  Value,
+  infer,
+  Input,
+  LocalStorage,
+  WASM_SANDBOX,
+} from '@commontools/runtime';
 
 const EXAMPLE_MODULE_JS = `
 import { read, write } from 'common:io/state@0.0.1';
@@ -12,11 +21,12 @@ export class Body {
 
         console.log('Value:', value);
 
-        const bar = read('bar');
-        const dict = bar?.deref()?.val;
-        const dictValue = dict.get('baz');
+        console.log('Setting some output...');
 
-        console.log('Dictionary value:', dictValue.deref()?.val);
+        write('baz', {
+          tag: 'string',
+          val: 'quux'
+        });
     }
 }
 
@@ -33,41 +43,31 @@ const bar = {
   baz: 'quux',
 };
 
-class LocalStorageIO implements IO {
-  reset() {
-    localStorage.clear();
-  }
-
-  read(key: string): Value | undefined {
-    if (key == 'bar') {
-      console.log(`Reading special key '${key}'...`);
-      return infer(bar);
-    }
-
-    console.log(`Reading '${key}' from local storage`);
-
-    let rawValue = localStorage.getItem(key);
-    return infer(rawValue);
-  }
-
-  write(key: string, value: Value): void {
-    console.log(`Writing '${key} => ${value.val}' to local storage`);
-    // YOLO (don't do it this way actually)
-    localStorage.setItem(key, value.val);
-  }
-}
-
 export const demo = async () => {
+  localStorage.clear();
+
   const rt = new Runtime();
-  const io = new LocalStorageIO();
+  const storage = new LocalStorage();
 
-  io.reset();
+  console.log('Instantiating the module');
 
-  const module = await rt.eval('text/javascript', EXAMPLE_MODULE_JS, io);
+  const module = await rt.eval(
+    'example',
+    WASM_SANDBOX,
+    'text/javascript',
+    EXAMPLE_MODULE_JS,
+    new Input(storage, ['foo', 'baz'])
+  );
 
   console.log(`Setting 'foo => bar' at the host level`);
-  io.write('foo', infer('bar'));
+
+  await storage.write('foo', infer('bar'));
 
   console.log('Running the module:');
-  module.run();
+
+  await module.run();
+
+  const output = module.output(['baz']);
+
+  console.log('Reading output in host thread:', await output.read('baz'));
 };

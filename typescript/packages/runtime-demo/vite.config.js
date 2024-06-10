@@ -8,5 +8,11 @@ export default defineConfig({
   },
   resolve: {
     preserveSymlinks: true
+  },
+  worker: {
+    format: 'es'
+  },
+  optimizeDeps: {
+    noDiscovery: true
   }
 })
