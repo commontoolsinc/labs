@@ -1,15 +1,12 @@
-import { LitElement, html, css } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
-import { EditorView, basicSetup } from "codemirror"
-import { javascript } from "@codemirror/lang-javascript"
-import { json } from "@codemirror/lang-json"
-import { EditorState } from '@codemirror/state';
-import { format } from '../format'
-import { foldGutter, foldService, foldAll, foldEffect, foldedRanges } from "@codemirror/language";
+import { LitElement, html, css } from "lit";
+import { customElement, property } from "lit/decorators.js";
+import { EditorView, basicSetup } from "codemirror";
+import { EditorState } from "@codemirror/state";
+import { foldAll } from "@codemirror/language";
 
-@customElement('com-data')
-class CodeMirrorDataViewer extends LitElement {
-  @property({ type: String }) data = '';
+@customElement("com-data")
+export class CodeMirrorDataViewer extends LitElement {
+  @property({ type: String }) data = "";
 
   static styles = css`
     :host {
@@ -24,41 +21,10 @@ class CodeMirrorDataViewer extends LitElement {
   editor: EditorView;
 
   firstUpdated() {
-    const editorContainer = this.shadowRoot?.getElementById('editor');
-    if (editorContainer) {
-      const updateListener = EditorView.updateListener.of((update) => {
-        if (update.docChanged) {
-          console.log('updated');
-          const event = new CustomEvent('updated', {
-            detail: {
-              data: this.editor.state.doc.toString()
-            }
-          });
-          this.dispatchEvent(event);
-        }
-      });
-      this.state = EditorState.create({
-        doc: this.data,
-        extensions: [basicSetup, json(), updateListener]
-      })
-      this.editor = new EditorView({
-        state: this.state,
-        parent: editorContainer
-      })
-    }
-  }
-
-  foldAll() {
-    const view = this.editor;
-    foldAll(view)
-    view.dispatch({});
-  }
-
-  updated() {
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
-        console.log('updated');
-        const event = new CustomEvent('updated', {
+        console.log("updated");
+        const event = new CustomEvent("updated", {
           detail: {
             data: this.editor.state.doc.toString()
           }
@@ -66,24 +32,38 @@ class CodeMirrorDataViewer extends LitElement {
         this.dispatchEvent(event);
       }
     });
-    this.state = EditorState.create({
-      doc: this.data,
-      extensions: [basicSetup, json(), updateListener]
-    })
+    const editorContainer = this.shadowRoot?.getElementById("editor");
+    if (editorContainer) {
+      this.state = EditorState.create({
+        doc: this.data,
+        extensions: [basicSetup, updateListener]
+      });
+      this.editor = new EditorView({
+        state: this.state,
+        parent: editorContainer
+      });
+    }
+  }
 
-    // replace contents
-    this.editor.dispatch({
-      changes: {
-        from: 0,
-        to: this.editor.state.doc.length,
-        insert: this.data
-      }
-    });
+  foldAll() {
+    const view = this.editor;
+    foldAll(view);
+  }
+
+  updated() {
+    // replace contents if editor is not focused
+    if (!this.editor.hasFocus) {
+      this.editor.dispatch({
+        changes: {
+          from: 0,
+          to: this.editor.state.doc.length,
+          insert: this.data
+        }
+      });
+    }
   }
 
   render() {
-    return html`
-      <div id="editor" class="editor"></div>
-    `;
+    return html` <div id="editor" class="editor"></div> `;
   }
 }

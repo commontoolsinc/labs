@@ -1,23 +1,25 @@
-import { createElement } from './ui.js';
-import { run } from './eval.js';
-import { Recipe, RecipeNode } from './data.js';
+import { createElement } from "./ui.js";
+import { run } from "./eval.js";
+import { Recipe, RecipeNode } from "./data.js";
 
-import { signal, config } from '@commontools/common-frp'
-import { Context } from './state.js';
-type Signal<T> = signal.SignalSubject<T>
+import { signal, config } from "@commontools/common-frp";
+import { Context } from "./state.js";
+type Signal<T> = signal.SignalSubject<T>;
 
 config.debug = true;
 
 export function collectSymbols(recipe: Recipe) {
-  const symbols = [] as { symbol: string, type: any }[];
-  recipe.forEach(node => {
-    symbols.push({ symbol: node.id, type: node.outputType })
+  const symbols = [] as { symbol: string; type: any }[];
+  recipe.forEach((node) => {
+    symbols.push({ symbol: node.id, type: node.outputType });
   });
   return symbols;
 }
 
 // inflate the RxJS network from a JSON graph definition
-export function createRxJSNetworkFromJson(recipe: Recipe): Context<Signal<any>> {
+export function createRxJSNetworkFromJson(
+  recipe: Recipe
+): Context<Signal<any>> {
   // track all inputs and outputs
   const context = {
     inputs: {} as { [key: string]: { [key: string]: Signal<any> } },
@@ -26,41 +28,41 @@ export function createRxJSNetworkFromJson(recipe: Recipe): Context<Signal<any>> 
   };
 
   // populate context namespace
-  recipe.forEach(node => {
+  recipe.forEach((node) => {
     const nodeName = node.id;
-    context.outputs[nodeName] = signal.state(null)
+    context.outputs[nodeName] = signal.state(null);
 
     // foreach input in the signature, create a placeholder cell
     if (node.in) {
       const inputs = node.in;
       context.inputs[nodeName] = {};
       for (const inputName in inputs) {
-        context.inputs[nodeName][inputName] = signal.state(null)
+        context.inputs[nodeName][inputName] = signal.state(null);
       }
     }
   });
 
   // set up reactive bindings based on edges
-  recipe.forEach(node => {
+  recipe.forEach((node) => {
     if (node.in) {
       const inputs = node.in;
       for (const inputName in inputs) {
         const [sourceContext, sourceNode] = inputs[inputName];
-        if (sourceContext !== '.') throw Error('remote refs not allowed (yet)')
+        if (sourceContext !== ".") throw Error("remote refs not allowed (yet)");
         const source = context.outputs[sourceNode];
         const target = context.inputs[node.id][inputName];
 
-        const cancel = signal.effect(source, value => {
-          target.send(value)
-        })
+        const cancel = signal.effect([source], (value) => {
+          target.send(value);
+        });
 
-        context.cancellation.push(cancel)
+        context.cancellation.push(cancel);
       }
     }
   });
 
   // process node definitions and set up reactive logic
-  recipe.forEach(async node => {
+  recipe.forEach(async (node) => {
     if (!node.body) return;
     const inputObservables: Signal<any>[] = [];
     // const inputs = {} as { [key: string]: Signal<any> };
@@ -79,49 +81,55 @@ export function createRxJSNetworkFromJson(recipe: Recipe): Context<Signal<any>> 
     // }
 
     if (inputObservables.length === 0) {
-      await executeNode(node, {}, context.outputs)
+      await executeNode(node, {}, context.outputs);
     }
 
     const allInputs = signal.computed(inputObservables, (...values) => {
       // make an object out of node.in and the values
-      const inputs = Object.entries(node.in).reduce((acc, [k, [_, v]], idx) => {
-        acc[k] = values[idx];
-        return acc;
-      }, {} as { [key: string]: any });
+      const inputs = Object.entries(node.in).reduce(
+        (acc, [k, [_, v]], idx) => {
+          acc[k] = values[idx];
+          return acc;
+        },
+        {} as { [key: string]: any }
+      );
 
-      return inputs
-    })
+      return inputs;
+    });
 
-    const cancel = signal.effect(allInputs, async (values) => {
+    const cancel = signal.effect([allInputs], async (values) => {
       // do not execute if any of the inputs are null
       // TODO: this is a symptom of modelling some invalid states
-      if (Object.values(values).some(v => v === null)) return;
+      if (Object.values(values).some((v) => v === null)) return;
 
-      await executeNode(node, values, context.outputs)
-    })
-    context.cancellation.push(cancel)
+      await executeNode(node, values, context.outputs);
+    });
+    context.cancellation.push(cancel);
   });
 
   return context;
 }
 
 async function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function executeNode(
   node: RecipeNode,
   inputs: { [key: string]: any },
-  outputs: { [key: string]: SignalSubject<any> }) {
-
+  outputs: { [key: string]: SignalSubject<any> }
+) {
   const { contentType } = node;
-  if (contentType === 'text/javascript' && typeof node.body === 'string') {
-    const result = await run(node.body, inputs);
+  if (contentType === "text/javascript" && typeof node.body === "string") {
+    const result = await run(node.id, node.body, inputs);
     outputs[node.id].send(result);
-  } else if (contentType === 'application/json+vnd.common.ui') {
+  } else if (contentType === "application/json+vnd.common.ui") {
     const renderedTemplate = createElement(node.body, inputs);
     outputs[node.id].send(renderedTemplate);
-  } else if (contentType === 'application/json' && typeof node.body === 'string') {
+  } else if (
+    contentType === "application/json" &&
+    typeof node.body === "string"
+  ) {
     const url = node.body;
     const response = await fetch(url);
     const data = await response.json();

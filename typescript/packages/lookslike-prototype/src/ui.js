@@ -1,8 +1,8 @@
-export const STREAM = 'https://common.tools/stream-binding.schema.json'
-export const CELL = 'https://common.tools/cell-binding.schema.json'
+export const STREAM = "https://common.tools/stream-binding.schema.json";
+export const CELL = "https://common.tools/cell-binding.schema.json";
 
 function readValue(context, binding) {
-  const path = binding.split('.');
+  const path = binding.split(".");
   let value = context;
   if (path.length > 1) {
     for (let i = 0; i < path.length; i++) {
@@ -16,21 +16,21 @@ function readValue(context, binding) {
 }
 
 export function createElement(node, context) {
-  if (typeof node === 'string') {
+  if (typeof node === "string") {
     const textNode = document.createTextNode(node);
     return textNode;
   }
 
-  if (!node || typeof node !== 'object') return null;
+  if (!node || typeof node !== "object") return null;
 
   // repeat node
-  if (!node.tag && node.type == 'repeat') {
-    const container = document.createElement('div');
+  if (!node.tag && node.type == "repeat") {
+    const container = document.createElement("div");
     const items = readValue(context, node.binding) || [];
-    items.forEach(item => {
+    items.forEach((item) => {
       container.appendChild(createElement(node.template, item));
     });
-    return container
+    return container;
   }
 
   // element nodes
@@ -38,22 +38,22 @@ export function createElement(node, context) {
 
   // set attributes
   for (const [key, value] of Object.entries(node.props || {})) {
-    if (typeof value === 'object' && value.type) {
+    if (typeof value === "object" && value.type) {
       // Handle specific types and bind reactive sources from context
       if (value.type && value["$id"] && value["$id"] === CELL) {
         let name = value.name || key;
         if (!context[name]) continue;
         element[key] = context[name].get();
-        effect(context[name], newValue => {
-          element[key] = newValue
-        })
+        effect([context[name]], (newValue) => {
+          element[key] = newValue;
+        });
       } else {
         if (value.binding) {
-          if (key === 'checked' || 'disabled' || 'hidden') {
+          if (key === "checked" || "disabled" || "hidden") {
             if (context[value.binding]) {
-              element.setAttribute('checked', 'checked'); // Update the attribute
+              element.setAttribute("checked", "checked"); // Update the attribute
             } else {
-              element.removeAttribute('checked'); // Remove the attribute if not checked
+              element.removeAttribute("checked"); // Remove the attribute if not checked
             }
           } else {
             element[key] = context[value.binding];
@@ -78,17 +78,21 @@ export function createElement(node, context) {
   }
 
   // recursively create and append child elements
-  children.forEach(childNode => {
-    if (childNode.type === 'string' || typeof childNode === 'text' || typeof childNode === 'number') {
-      if (childNode.binding && typeof context === 'object') {
+  children.forEach((childNode) => {
+    if (
+      childNode.type === "string" ||
+      typeof childNode === "text" ||
+      typeof childNode === "number"
+    ) {
+      if (childNode.binding && typeof context === "object") {
         const value = readValue(context, childNode.binding);
-        const node = document.createTextNode(value)
+        const node = document.createTextNode(value);
         element.appendChild(node);
-        return
+        return;
       } else {
-        const node = document.createTextNode(context)
+        const node = document.createTextNode(context);
         element.appendChild(node);
-        return
+        return;
       }
     }
 

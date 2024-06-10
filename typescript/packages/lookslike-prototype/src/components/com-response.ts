@@ -2,7 +2,6 @@ import { LitElement, html, css } from "lit-element";
 import { customElement, property, state } from "lit/decorators.js";
 import { base } from "../styles";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
-import pretty from "pretty";
 import { RecipeNode } from "../data.js";
 import { SignalSubject } from "../../../common-frp/lib/signal.js";
 import { signal } from "@commontools/common-frp";
@@ -55,7 +54,7 @@ function definitionToHtml(
     console.log("sourceHtml", sourceHtml);
     return html`<div>${unsafeHTML(sourceHtml)}</div>
       <com-toggle>
-        <com-data .data=${pretty(sourceHtml)}></com-data>
+        <com-data .data=${sourceHtml}></com-data>
         <com-data .data=${JSON.stringify(node.body, null, 2)}></com-data>
       </com-toggle>`;
   }
@@ -101,7 +100,7 @@ export class ComResponse extends LitElement {
     if (changedProperties.has("output")) {
       console.log("output changed", this.node?.id, this.output);
       // trigger a re-render if any output changes
-      this.cancel = signal.effect(this.output, (value) => {
+      this.cancel = signal.effect([this.output], (value) => {
         // if (!value) return
         this.value = value;
         console.log("updated value", this.node?.id, value);

@@ -1,40 +1,65 @@
-import { IO, Runtime, Value, infer } from '@commontools/runtime';
+import {
+  IO,
+  Runtime,
+  Value,
+  infer,
+  Input,
+  LocalStorage,
+  WASM_SANDBOX
+} from "@commontools/runtime";
 
 export function prepare(code: string) {
-  const func = new Function('system', 'inputs', 'return async function() {' + code + '}');
+  const func = new Function(
+    "system",
+    "inputs",
+    "return async function() {" + code + "}"
+  );
   return func;
 }
 
 export function serializationBoundary(obj: any) {
-  console.log('serializationBoundary', obj);
+  console.log("serializationBoundary", obj);
   return JSON.parse(JSON.stringify(obj));
 }
 
-export async function run(src: string, inputs: { [key: string]: any }) {
+export async function run(
+  id: string,
+  src: string,
+  inputs: { [key: string]: any }
+) {
   const rt = new Runtime();
-  const io = new ProxyIO(inputs);
+  const storage = new LocalStorage();
 
-  io.reset();
+  console.log("Instantiating the module");
 
-  const module = await rt.eval('text/javascript', code(src), io);
+  const module = await rt.eval(
+    id,
+    WASM_SANDBOX,
+    "text/javascript",
+    code(src),
+    new Input(storage, Object.keys(inputs))
+  );
 
   for (const key in inputs) {
-    const input = infer(JSON.stringify(inputs[key]));
-    io.write(key, input);
+    const value = inputs[key];
+    if (value === null || value === undefined) {
+      throw new Error(`Input ${key} is null or undefined`);
+    }
+    await storage.write(key, { tag: "string", val: JSON.stringify(value) });
   }
 
-  console.log('Running the module:');
-  module.run();
-  const returnValue = io.read('__result__');
-  return JSON.parse(returnValue?.val);
+  console.log("Running the module:");
+  await module.run();
+  const output = module.output(["__result__"]);
+  const returnValue = await output.read("__result__");
+  return JSON.parse(returnValue.value.val);
 }
-
 
 const code = (src: string) => `
   import { read, write } from 'common:io/state@0.0.1';
 
   export class Body {
-      async run() {
+      run() {
           function input(key) {
               const ref = read(key);
               console.log('read(' + key + '):', ref);
@@ -58,7 +83,7 @@ const code = (src: string) => `
         console.log('Creating!');
         return new Body();
     }
-  };`
+  };`;
 
 const EXAMPLE_MODULE_JS = `
 import { read, write } from 'common:io/state@0.0.1';
@@ -89,7 +114,7 @@ class ProxyIO implements IO {
     this.inputs = inputs;
   }
 
-  reset() { }
+  reset() {}
 
   read(key: string): Value | undefined {
     console.log(`Reading '${key}' from inputs`);
@@ -127,11 +152,11 @@ export const demo = async () => {
 
   io.reset();
 
-  const module = await rt.eval('text/javascript', EXAMPLE_MODULE_JS, io);
+  const module = await rt.eval("text/javascript", EXAMPLE_MODULE_JS, io);
 
   console.log(`Setting 'foo => bar' at the host level`);
-  io.write('foo', infer('bar'));
+  io.write("foo", infer("bar"));
 
-  console.log('Running the module:');
+  console.log("Running the module:");
   module.run();
 };
