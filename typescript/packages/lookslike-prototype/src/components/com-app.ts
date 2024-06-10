@@ -1,12 +1,13 @@
-import { LitElement, html } from 'lit-element'
-import { customElement, state } from 'lit/decorators.js'
-import { base } from '../styles.js'
+import { LitElement, html } from "lit-element";
+import { customElement, state } from "lit/decorators.js";
+import { base } from "../styles.js";
 
-import { Recipe, emptyGraph, todoAppMockup, RecipeNode } from '../data'
-import { doLLM, grabJson, processUserInput } from '../llm'
-import { collectSymbols } from '../graph'
-import { Context, snapshot } from '../state'
-import { SignalSubject } from '../../../common-frp/lib/signal.js'
+import { Recipe, emptyGraph, todoAppMockup, RecipeNode } from "../data";
+import { doLLM, grabJson, processUserInput } from "../llm";
+import { collectSymbols } from "../graph";
+import { Context, snapshot } from "../state";
+import { SignalSubject } from "../../../common-frp/lib/signal.js";
+import { plan } from "../plan.js";
 
 const codePrompt = `
   Your task is to take a user description or request and produce a series of nodes for a computation graph. Nodes can be code blocks or UI components and they communicate with named ports.
@@ -181,110 +182,153 @@ const codePrompt = `
 
   UI trees cannot use any javascript methods, code blocks must prepare the data for the UI to consume.
   notalk;justgo
-`
+`;
 
-@customElement('com-app')
+@customElement("com-app")
 export class ComApp extends LitElement {
-  static styles = [base]
+  static styles = [base];
 
   static properties = {
     graph: { type: Object },
     userInput: { type: String },
     snapshot: { type: Object }
+  };
+
+  @state() graph: Recipe = emptyGraph;
+  @state() userInput = "";
+  @state() snapshot: Context<SignalSubject<any>>;
+
+  prepareSteps(userInput: string) {
+    return [
+      `Assist a user in dynamically generating software to solve their problems using a reactive graph data model. Modules, acting as nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules:
+
+      - Last.fm album search (searchMusic)
+      - Weather forecast (getWeather)
+      - Maps-based point of interest search (searchMaps)
+      - Wikipedia article search (searchWiki)
+      - GET request from arbitrary URL (fetch)
+      - Pure function (code)
+      - LLM Prompt (askLlm)
+      - User data query block (query)
+
+      Be extremely concise, using code or pseudocode as needed. Do not worry about the plan being human readable.`,
+      `
+      <user-request>${userInput}</user-request>
+
+      Based on the request and available modules, list requirements for a simple mobile app:
+
+      - Dynamic software generation using a reactive graph data model
+      - Connectable modules with output/input relationships
+      - Composition of well-known modules to solve manifold user problems
+
+      Identify additional features or limitations:
+
+      - Viewing additional information
+      - Filtering, browsing, editing data
+      - Consider user needs and potential challenges in implementation.
+      `,
+      `With the requirements specified, create a user interface using the following UI components:
+
+      - **Input box (\`input\`)**: Collect basic user input (text, number).
+      - **Data table (\`data\`)**: Display sortable and filterable rows of records with optional actions.
+      - **List (\`list\`)**: Display a list of items with optional actions.
+      - **Calendar (\`calendar\`)**: Show a calendar with items on each day.
+      - **Detail card (\`card\`)**: Show an information card for a document/item with appropriate data rendering.
+      - **Card pile (\`pile\`)**: Display a z-stacked set of media items with optional actions.
+      - **Text/code/data editor (\`editor\`)**: Provide a basic editor for unformatted text.
+
+      For the MVP, use the most appropriate components to present the interface:
+
+      1. **Input Box**: Collect user input.
+      2. **Data Table**: Display and manage records.
+      3. **Detail Card**: Show detailed information for selected items.
+
+      Keep the interface simple to gradually build towards a complete application.`
+    ];
   }
 
-  @state() graph: Recipe = emptyGraph
-  @state() userInput = ''
-  @state() snapshot: Context<SignalSubject<any>>
-
   async appendMessage() {
-    const newGraph = [...this.graph]
-    // TODO: let GPT name the node
-    const id = 'new' + (Math.floor(Math.random() * 1000))
-    const input = `${this.userInput}`
-
-    const newNode: RecipeNode = {
-      id,
-      messages: [
-        {
-          role: 'user',
-          content: input
-        }
-      ],
-      // TODO: generate these
-      in: {},
-      outputType: {},
-      contentType: 'text/javascript',
-      body: ''
-    }
+    const newGraph = [...this.graph];
+    const input = `${this.userInput}`;
+    const spec = await plan(input, this.prepareSteps(input));
 
     const symbols = collectSymbols(this.graph);
     symbols.reverse();
 
     this.graph = newGraph;
-    this.userInput = '';
+    this.userInput = "";
 
     const systemContext = `
       Ensure you list the current state of the graph and make a detailed step-by-step plan for updating the graph to match the user's request.'
 
       Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.
-    `
+    `;
 
-    const lastFmKey = '0060ba224307ff9f787deb837f4be376'
+    const lastFmKey = "0060ba224307ff9f787deb837f4be376";
 
     const availableFunctions = {
       listNodes: () => {
-        console.log('listNodes', this.graph)
-        return JSON.stringify(this.graph)
+        console.log("listNodes", this.graph);
+        return JSON.stringify(this.graph);
       },
       addCodeNode: ({ id, node, code }) => {
-        console.log('addCodeNode', id, node, code)
-        newGraph.push({ id, contentType: 'text/javascript', ...node, body: code })
+        console.log("addCodeNode", id, node, code);
+        newGraph.push({
+          id,
+          contentType: "text/javascript",
+          ...node,
+          body: code
+        });
         this.graph = JSON.parse(JSON.stringify(newGraph));
         this.requestUpdate();
-        return `Added node: ${id}`
+        return `Added node: ${id}`;
       },
       addUiNode: ({ id, node, body }) => {
-        console.log('addUiNode', id, node, body)
-        newGraph.push({ id, contentType: 'application/json+vnd.common.ui', ...node, body })
+        console.log("addUiNode", id, node, body);
+        newGraph.push({
+          id,
+          contentType: "application/json+vnd.common.ui",
+          ...node,
+          body
+        });
         this.graph = JSON.parse(JSON.stringify(newGraph));
         this.requestUpdate();
-        return `Added node: ${id}`
+        return `Added node: ${id}`;
       },
       addFetchNode: ({ id, url }) => {
-        console.log('addFetchNode', id, url)
+        console.log("addFetchNode", id, url);
         newGraph.push({
           id,
-          contentType: 'application/json',
+          contentType: "application/json",
           in: {},
           outputType: {
-            type: 'object',
+            type: "object"
           },
           body: url
-        })
+        });
         this.graph = JSON.parse(JSON.stringify(newGraph));
         this.requestUpdate();
-        return `Added node: ${id}`
+        return `Added node: ${id}`;
       },
       addMusicSearchNode: ({ id, query }) => {
-        console.log('addMusicSearchNode', id, query)
+        console.log("addMusicSearchNode", id, query);
         newGraph.push({
           id,
-          contentType: 'application/json',
+          contentType: "application/json",
           in: {},
           outputType: {
-            type: 'object',
-            "properties": {
-              "results": {
-                "type": "object",
-                "properties": {
-                  "albummatches": {
-                    "type": "object",
-                    "properties": {
-                      "albums": {
-                        "type": "array",
-                        "items": {
-                          "type": "object"
+            type: "object",
+            properties: {
+              results: {
+                type: "object",
+                properties: {
+                  albummatches: {
+                    type: "object",
+                    properties: {
+                      albums: {
+                        type: "array",
+                        items: {
+                          type: "object"
                         }
                       }
                     }
@@ -294,35 +338,44 @@ export class ComApp extends LitElement {
             }
           },
           body: `https://ws.audioscrobbler.com/2.0/?method=album.search&album=${query}&api_key=${lastFmKey}&format=json`
-        })
+        });
         this.graph = JSON.parse(JSON.stringify(newGraph));
         this.requestUpdate();
-        return `Added node: ${id}`
+        return `Added node: ${id}`;
       },
       replaceNode: ({ id, node, body }) => {
-        console.log('replaceNode', id, node, body)
-        const index = newGraph.findIndex(n => n.id === id)
-        newGraph[index] = { id, contentType: 'application/json+vnd.common.ui', ...node, body }
+        console.log("replaceNode", id, node, body);
+        const index = newGraph.findIndex((n) => n.id === id);
+        newGraph[index] = {
+          id,
+          contentType: "application/json+vnd.common.ui",
+          ...node,
+          body
+        };
         this.graph = JSON.parse(JSON.stringify(newGraph));
         this.requestUpdate();
-        return `Replaced node: ${id}`
+        return `Replaced node: ${id}`;
       },
       deleteNode: ({ id }) => {
-        console.log('deleteNode', id)
-        const index = newGraph.findIndex(n => n.id === id)
-        newGraph.splice(index, 1)
+        console.log("deleteNode", id);
+        const index = newGraph.findIndex((n) => n.id === id);
+        newGraph.splice(index, 1);
         this.graph = JSON.parse(JSON.stringify(newGraph));
         this.requestUpdate();
-        return `Deleted node: ${id}`
+        return `Deleted node: ${id}`;
       },
       getNodeOutputValue: ({ id }) => {
-        const val = this.snapshot.outputs?.[id]
-        console.log('getNodeOutputValue', id, val)
-        return JSON.stringify(val)
+        const val = this.snapshot.outputs?.[id];
+        console.log("getNodeOutputValue", id, val);
+        return JSON.stringify(val);
       }
     };
-    const result = await processUserInput(input, codePrompt + systemContext, availableFunctions);
-    console.log('result', result);
+    const result = await processUserInput(
+      input,
+      codePrompt + systemContext,
+      availableFunctions
+    );
+    console.log("result", result);
 
     // const result = await doLLM(input + localContext, codePrompt + systemContext, null)
     // const message = result?.choices[0]?.message
@@ -335,34 +388,42 @@ export class ComApp extends LitElement {
     // }
 
     this.graph = JSON.parse(JSON.stringify(newGraph));
-    console.log('graph updated', this.graph);
+    console.log("graph updated", this.graph);
   }
 
   render() {
     const setUserInput = (input: string) => {
-      this.userInput = input
-    }
+      this.userInput = input;
+    };
 
     const setContext = (context: Context) => {
-      this.snapshot = snapshot(context)
-      console.log('SNAPSHOT', this.snapshot)
-    }
+      this.snapshot = snapshot(context);
+      console.log("SNAPSHOT", this.snapshot);
+    };
 
     return html`
       <com-app-grid>
         <com-chat slot="main">
-            <com-thread slot="main" .graph=${this.graph} .setContext=${setContext}></com-thread>
-            <div slot="footer">
-                <com-unibox>
-                    <com-editor slot="main" .value=${this.userInput} .setValue=${setUserInput}></com-editor>
-                    <com-button slot="end" .action=${() => this.appendMessage()}>Send</com-button>
-                </com-unibox>
-            </div>
+          <com-thread
+            slot="main"
+            .graph=${this.graph}
+            .setContext=${setContext}
+          ></com-thread>
+          <div slot="footer">
+            <com-unibox>
+              <com-editor
+                slot="main"
+                .value=${this.userInput}
+                .setValue=${setUserInput}
+              ></com-editor>
+              <com-button slot="end" .action=${() => this.appendMessage()}
+                >Send</com-button
+              >
+            </com-unibox>
+          </div>
         </com-chat>
-        <div slot="sidebar">
-
-        </div>
-    </com-app-grid>
-    `
+        <div slot="sidebar"></div>
+      </com-app-grid>
+    `;
   }
 }
