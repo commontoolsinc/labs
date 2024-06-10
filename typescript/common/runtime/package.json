@@ -56,6 +56,12 @@
       "command": "tsc --build -f"
     },
     "clean": {
+      "dependencies": [
+        "../../packages/usuba-rt:clean",
+        "../data:clean",
+        "../io:clean",
+        "../module:clean"
+      ],
       "command": "rm -rf ./lib ./.wireit"
     }
   }

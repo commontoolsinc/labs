@@ -1,6 +1,4 @@
-import { RuntimeWorkerContext } from '../index.js';
+import { RuntimeContext } from '../index.js';
 import { RuntimeWasmWorker } from './runtime.js';
 
-(self as any).runtimeWorkerContext = new RuntimeWorkerContext(
-  new RuntimeWasmWorker()
-);
+(self as any).runtimeContext = new RuntimeContext(new RuntimeWasmWorker());

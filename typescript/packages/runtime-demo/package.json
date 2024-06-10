@@ -41,6 +41,13 @@
       "command": "vite build"
     },
     "clean": {
+      "dependencies": [
+        "../../common/module:clean",
+        "../../common/data:clean",
+        "../../common/io:clean",
+        "../../common/runtime:clean",
+        "../usuba-rt:clean"
+      ],
       "command": "rm -rf ./lib ./dist ./.wireit ./node_modules"
     }
   }

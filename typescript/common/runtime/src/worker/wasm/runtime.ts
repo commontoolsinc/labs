@@ -4,10 +4,10 @@ import { wit as commonModuleWit } from '@commontools/module';
 import { Runtime as UsubaRuntime } from '@commontools/usuba-rt';
 
 import { Dictionary, Reference, Value } from '../../index.js';
-import { GuestRuntime, ThreadLocalModule } from '../index.js';
+import { LocalRuntime, ThreadLocalModule } from '../index.js';
 import { IO } from '../../state/io/index.js';
 
-export class RuntimeWasmWorker implements GuestRuntime {
+export class RuntimeWasmWorker implements LocalRuntime {
   #inner = new UsubaRuntime([commonDataWit, commonIoWit]);
 
   async eval(
@@ -39,6 +39,7 @@ export class RuntimeWasmWorker implements GuestRuntime {
     });
 
     const innerModule = module.create();
+
     return {
       id: blueprint.id(),
       run() {

@@ -33,18 +33,26 @@ export class StateSlice implements IO {
     this.#table.set(key, value);
   }
 
-  static async fromStorage(storage: Storage, keys: string[]) {
-    const values = [];
+  async populateFrom(storage: Storage, keys: string[]) {
+    const values: Promise<[string, Value | void]>[] = [];
 
     for (const key of keys) {
-      values.push(storage.read(key).then((value) => [key, value]));
+      values.push(
+        storage.read(key).then((value: Value | void) => [key, value])
+      );
     }
 
-    return new StateSlice(
-      (await Promise.all(values)).reduce((map, [key, value]) => {
+    (await Promise.all(values)).reduce((map, [key, value]) => {
+      if (typeof value !== 'undefined') {
         map.set(key, value);
-        return map;
-      }, new Map())
-    );
+      }
+      return map;
+    }, this.#table);
+  }
+
+  static async fromStorage(storage: Storage, keys: string[]) {
+    let state = new StateSlice(new Map());
+    await state.populateFrom(storage, keys);
+    return state;
   }
 }

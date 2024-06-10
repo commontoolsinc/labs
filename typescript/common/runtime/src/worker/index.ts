@@ -1,11 +1,87 @@
 import { ContentType } from '../index.js';
-import { GuestEvents, GuestResponses } from '../ipc/guest.js';
-import { HANDSHAKE_EVENT, IPCEventHandler, IPCGuest } from '../ipc/index.js';
+import { RuntimeEventHandler, RuntimeRequests } from '../rpc/runtime.js';
+import {
+  HANDSHAKE_EVENT,
+  ModuleToHostRPC,
+  RuntimeToHostRPC,
+} from '../rpc/index.js';
 import { DuplexState } from '../state/io/duplex.js';
 import { IO } from '../state/io/index.js';
 import { StateSlice } from '../state/io/slice.js';
+import {
+  ModuleEventHandler,
+  ModuleRequests,
+  ModuleResponses,
+} from '../rpc/module.js';
+import { assertNever } from '../helpers.js';
+import { HostStorage } from '../state/storage/hoststorage.js';
 
-export interface GuestRuntime {
+export interface ThreadLocalModule {
+  id: string;
+  run: () => void;
+}
+
+export class ModuleInstance {
+  // @ts-ignore
+  #rpc;
+  #storage;
+  #input = new StateSlice(new Map());
+  #output = new StateSlice(new Map());
+  #inputKeys;
+
+  #moduleInitializes;
+
+  constructor(
+    port: MessagePort,
+    runtime: LocalRuntime,
+    contentType: ContentType,
+    sourceCode: string,
+    inputKeys: string[]
+  ) {
+    const rpc = new ModuleToHostRPC(port, this.#handleRPCEvent);
+    const storage = new HostStorage(rpc, inputKeys);
+
+    this.#moduleInitializes = (async () => {
+      await this.#input.populateFrom(storage, inputKeys);
+      const io = new DuplexState(this.#input, this.#output);
+      const module = await runtime.eval(contentType, sourceCode, io);
+
+      return module;
+    })();
+
+    this.#inputKeys = inputKeys;
+    this.#rpc = rpc;
+    this.#storage = storage;
+  }
+
+  #handleRPCEvent = (async (event, detail) => {
+    switch (event) {
+      case 'module:run': {
+        try {
+          const module = await this.#moduleInitializes;
+          await this.#input.populateFrom(this.#storage, this.#inputKeys);
+          module.run();
+        } catch (error) {
+          return {
+            error: `${error}`,
+          };
+        }
+        return {} as ModuleResponses['module:run'];
+      }
+      case 'module:output:read': {
+        const { key } = detail as ModuleRequests['module:output:read'];
+
+        return {
+          value: this.#output.read(key),
+        } as ModuleResponses['module:output:read'];
+      }
+    }
+
+    return assertNever(event);
+  }) as ModuleEventHandler;
+}
+
+export interface LocalRuntime {
   eval(
     contentType: ContentType,
     sourceCode: string,
@@ -13,96 +89,57 @@ export interface GuestRuntime {
   ): Promise<ThreadLocalModule>;
 }
 
-export interface ThreadLocalModule {
-  id: string;
-  run: () => void;
-}
-
-export interface Invocation {
-  module: ThreadLocalModule;
-  output: IO;
-}
-
-export class RuntimeWorkerContext {
+export class RuntimeContext {
   // @ts-ignore
-  #ipc: IPCGuest | null = null;
-  #invocations: Map<string, Invocation> = new Map();
+  #rpc: RuntimeToHostRPC | null = null;
+  #instances = new Map<string, ModuleInstance>();
   #runtime;
 
-  constructor(runtime: GuestRuntime) {
+  constructor(runtime: LocalRuntime) {
     this.#runtime = runtime;
-    self.addEventListener('message', this.#onGlobalMessage);
+    self.addEventListener('message', this.#handleGlobalMessage);
+    console.log('Worker runtime context initialized');
   }
 
-  #onGlobalMessage = (event: MessageEvent) => {
+  #handleGlobalMessage = (event: MessageEvent) => {
     if (event.data != HANDSHAKE_EVENT) {
       console.warn('Ignoring unexpected message:', event.data);
       return;
     }
 
+    console.log('Got handshake event', event);
+
     const [port] = event.ports;
-    this.#ipc = new IPCGuest(
-      port,
-      this.#onIPCMessage as IPCEventHandler<GuestEvents, GuestResponses>
-    );
+
+    this.#rpc = new RuntimeToHostRPC(port, this.#handleRPCEvent);
+    this.#rpc.send('rpc:handshake:confirmed', undefined);
   };
 
-  // TODO: Fix the types on this
-  #onIPCMessage = async (name: keyof GuestEvents, detail: unknown) => {
-    switch (name) {
-      case 'module:eval': {
-        const { contentType, sourceCode, state } =
-          detail as GuestEvents['module:eval'];
+  #handleRPCEvent = (async (event, detail) => {
+    switch (event) {
+      case 'runtime:eval':
+        const { id, contentType, sourceCode, inputKeys, port } =
+          detail as RuntimeRequests['runtime:eval'];
 
-        const input = new StateSlice(state);
-        const output = new StateSlice(new Map());
-        const io = new DuplexState(input, output);
-        const module = await this.#runtime.eval(contentType, sourceCode, io);
-
-        // TODO: This accounts well for the case where we have only unique modules, but it does not account for same modules w/ different state
-        this.#invocations.set(module.id, {
-          module,
-          output,
-        });
-
-        return {};
-      }
-      case 'module:run': {
-        const { id } = detail as GuestEvents['module:run'];
-        const module = this.#invocations.get(id)?.module;
-
-        if (!module) {
-          return {
-            error: `Module '${id}' does not exist`,
-          };
-        }
         try {
-          module.run();
+          const moduleInstance = await new ModuleInstance(
+            port,
+            this.#runtime,
+            contentType,
+            sourceCode,
+            inputKeys
+          );
+
+          this.#instances.set(id, moduleInstance);
         } catch (error) {
           return {
-            error: error?.toString() || 'Unknown error',
+            error: `${error}`,
           };
         }
+
         return {};
-      }
-      case 'output:read': {
-        const { id, key } = detail as GuestEvents['output:read'];
-        const invocation = this.#invocations.get(id);
-
-        if (!invocation) {
-          return {
-            error: `Module '${id}' does not exist`,
-          };
-        }
-
-        const { output } = invocation;
-        const value = output.read(key);
-
-        return {
-          value,
-        };
-      }
     }
-    throw new Error('Unexpected IPC message:', name);
-  };
+
+    return assertNever(event as never);
+  }) as RuntimeEventHandler;
 }

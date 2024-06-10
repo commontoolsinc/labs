@@ -5,6 +5,14 @@ export class DuplexState implements IO {
   #i;
   #o;
 
+  get input() {
+    return this.#i;
+  }
+
+  get output() {
+    return this.#o;
+  }
+
   constructor(i: IO, o: IO) {
     this.#i = i;
     this.#o = o;
