@@ -41,6 +41,44 @@ export type VNode = {
   children: Array<VNode | string>;
 }
 
+// NOTE: don't freeze this object, since the validator will want to mutate it.
+export const VNodeSchema = {
+  $id: "https://common.tools/schema/vnode.json",
+  title: "VNode",
+  description: "View Node",
+  type: "object",
+  properties: {
+    tag: { type: "string" },
+    props: {
+      type: "object",
+      additionalProperties: {
+        oneOf: [
+          { type: "string" },
+          { type: "number" },
+          { type: "boolean" },
+          { type: "null" },
+          { type: "object" },
+          { type: "array" },
+          { type: "signal" }
+        ]
+      }
+    },
+    children: {
+      type: "array",
+      items: {
+        oneOf: [
+          { type: "string" },
+          { $ref: "#" }
+        ]
+      }
+    }
+  },
+  required: ["tag", "props", "children"]
+}
+
+/** Is object a VNode? */
+export const isVNode = schema.compile(VNodeSchema)
+
 /** Internal helper for creating VNodes */
 const vh = (
   tag: string,
@@ -52,10 +90,14 @@ const vh = (
   children
 });
 
-export type Factory = (
-  props: Props,
-  ...children: Array<VNode | string>
-) => VNode;
+export type Factory = {
+  (): VNode
+
+  (
+    props: Props,
+    ...children: Array<VNode | string>
+  ): VNode
+};
 
 export type View = Factory & {
   tag: Tag;
@@ -65,16 +107,16 @@ export type View = Factory & {
 /**
  * Create a tag factory that validates props against a schema.
  * @param tagName - HTML tag name
- * @param props - JSON schema for props
+ * @param propsSchema - JSON schema for props
  */
 export const view = (
   tagName: string,
-  props: AnyJSONSchema
+  propsSchema: AnyJSONSchema = {}
 ): View => {
   // Normalize tag name
   const tag = tagName.toLowerCase();
   // Compile props validator for fast validation at runtime.
-  const validateProps = schema.compile(props);
+  const validateProps = schema.compile(propsSchema);
 
   /** Create an element from a view, validating props  */
   const create = (

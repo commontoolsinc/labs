@@ -1,13 +1,18 @@
 import { LitElement, html, css } from 'lit-element';
 import { customElement, property } from 'lit-element/decorators.js';
+import { VNode, view } from '../hyperscript/view.js';
+import { render, RenderContext } from '../hyperscript/render.js';
+import { div } from '../hyperscript/tags.js';
+
+export const navpanel = view('co-navpanel', {});
 
 export type PanelModel = {
   id: string;
-  content: any;
+  content: VNode;
 }
 
-@customElement('com-navpanel')
-export class PanelElement extends LitElement {
+@customElement('co-navpanel')
+export class NavPanelElement extends LitElement {
   static override styles = css`
   :host {
     --background: #fff;
@@ -41,8 +46,11 @@ export class PanelElement extends LitElement {
   }
   `;
 
-  @property({ type: String })
-  accessor content = '';
+  @property({ type: Object })
+  accessor content: VNode = div();
+
+  @property({ type: Object })
+  accessor props: RenderContext;
 
   #onClickBackButton(event: MouseEvent) {
     event.preventDefault();
@@ -64,7 +72,7 @@ export class PanelElement extends LitElement {
           <a @click="${this.#onClickBackButton}" href="#">Back</a>
         </header>
         <div class="panel-main">
-          ${this.content}
+          ${render(this.content, this.props)}
         </div>
       </section>
     `;

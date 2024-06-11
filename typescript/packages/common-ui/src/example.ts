@@ -1,2 +1,1 @@
-export * from './components/navstack.js'
-export * from './components/navpanel.js'
+export * as NavPanel from './components/navpanel.js';

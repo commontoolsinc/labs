@@ -1,7 +1,7 @@
 import { Cancel, combineCancels } from '@commontools/common-frp';
 import { Signal, effect } from '@commontools/common-frp/signal';
 import { isSignalBinding, VNode } from './view.js';
-import { getViewByTag } from './tags.js';
+import { getViewByTag } from './known-tags.js';
 
 export type RenderContext = Record<string, Signal<any>>
 
