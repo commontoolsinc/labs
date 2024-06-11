@@ -55,7 +55,7 @@ export class ComThoughtLog extends LitElement {
           <div class="role">${thought.role}</div>
           <pre class="preview">${last ? "" : truncatedContent}</pre>
           <com-toggle>
-            <pre class="content">${thought.content}</pre>
+            <markdown-element markdown=${thought.content}></markdown-element>
           </com-toggle>
         </div>`;
       })}

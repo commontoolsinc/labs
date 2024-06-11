@@ -14,6 +14,7 @@ export * as ComData from "./components/com-data.js";
 export * as ComThoughtLog from "./components/com-thought-log.js";
 export * as ComApp from "./components/com-app.js";
 
+import "@intcreator/markdown-element";
 import { activateServiceWorker } from "@commontools/usuba-rt";
 
 await activateServiceWorker();

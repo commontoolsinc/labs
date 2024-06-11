@@ -8,183 +8,8 @@ import { collectSymbols } from "../graph";
 import { Context, snapshot } from "../state";
 import { watch } from "@commontools/common-frp-lit";
 import { SignalSubject } from "../../../common-frp/lib/signal.js";
-import { plan, prepareSteps } from "../plan.js";
+import { codePrompt, plan, prepareSteps } from "../plan.js";
 import { thoughtLog } from "../model.js";
-
-const codePrompt = `
-  Your task is to take a user description or request and produce a series of nodes for a computation graph. Nodes can be code blocks or UI components and they communicate with named ports.
-
-  You will construct the graph using the available tools to add, remove, replace and list nodes.
-  You will provide the required edges to connect data from the environment to the inputs of the node. The keys of \`in\` are the names of local inputs and the values are NodePaths (of the form [context, nodeId], where context is typically '.' meaning local namespace).
-
-  "Imagine some todos" ->
-
-  addCodeNode({
-    "id": "todos",
-    "node": {
-      "in": {},
-      "outputType": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "label": { "type": "string" },
-            "checked": { "type": "boolean" }
-          }
-        }
-      },
-    },
-    "code": "return [{ label: 'Water my plants', checked: false }, { label: 'Buy milk', checked: true }];"
-  })
-
-  Tasks that take no inputs require no edges.
-  All function bodies must take zero parameters. Inputs can be accessed via 'read' and 'deref'.
-
-  ---
-
-  "Remind me to water the plants" ->
-
-  addCodeNode({
-    "id": "addReminder",
-    "node": {
-      "in": {},
-      "outputType": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "label": { "type": "string" },
-            "checked": { "type": "boolean" }
-          }
-        }
-      },
-    },
-    "code": "const todos = input('todos');\nconst newTodo = { label: 'water the plants', checked: false };\nconst newTodos = [...todos, newTodo];\nreturn newTodos;"
-  })
-
-  Tasks that take no inputs require no edges.
-
-  ---
-
-
-  "Take the existing todos and filter to unchecked" ->
-
-  addCodeNode({
-    "id": "filteredTodos",
-    "node": {
-      "in": {
-        "todos": [".", "todos"]
-      },
-      "outputType": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "label": { "type": "string" },
-            "checked": { "type": "boolean" }
-          }
-        }
-      },
-    },
-    "code": "const todos = input('todos');\nreturn todos.filter(todo => todo.checked);"
-  })
-
-  Tasks that filter other data must pipe the data through the edges.
-  All function bodies must take zero parameters. Inputs can be accessed via 'input()', values may be null.
-  Always respond with code, even for static data. Wrap your response in a json block. Respond with nothing else.
-
-  ---
-
-  "render each image by url" ->
-  images is an array of strings (URLs)
-
-  addUiNode({
-    "id": "imageUi",
-    "node": {
-      "in": {
-        "images": [".", "images"]
-      },
-      "outputType": {
-        "$id": "https://common.tools/ui.schema.json"
-      },
-    },
-    "body": {
-      "tag": "ul",
-      "props": {
-        "className": "image"
-      },
-      "children": [
-        "type": "repeat",
-        "binding": "images",
-        "template": {
-          "tag": "li",
-          "props": {},
-          "children": [
-            {
-              "tag": "img",
-              "props": {
-                "src": { type: 'string', binding: null },
-              }
-            }
-          ],
-        }
-      ]
-    }
-  })
-
-  Raw values can be passed through by setting binding to null.
-
-  ---
-
-  "render my todos" ->
-
-  addUiNode({
-    "id": "todoUi",
-    "node": {
-      "in": {
-        "todos": [".", "todos"]
-      },
-      "outputType": {
-        "$id": "https://common.tools/ui.schema.json"
-      },
-    },
-    "body": {
-      "tag": "ul",
-      "props": {
-        "className": "todo"
-      },
-      "children": {
-        "type": "repeat",
-        "binding": "todos",
-        "template": {
-          "tag": "li",
-          "props": {},
-          "children": [
-            {
-              "tag": "input",
-              "props": {
-                "type": "checkbox",
-                "checked": { type: 'boolean', binding: 'checked' }
-              }
-            },
-            {
-              "tag": "span",
-              "props": {
-                "className": "todo-label"
-              },
-              "children": [
-                { type: 'string', binding: 'label' }
-              ]
-            }
-          ]
-        }
-      }
-    }
-  })
-
-  UI trees cannot use any javascript methods, code blocks must prepare the data for the UI to consume.
-  notalk;justgo
-`;
 
 @customElement("com-app")
 export class ComApp extends LitElement {
@@ -201,17 +26,17 @@ export class ComApp extends LitElement {
   @state() snapshot: Context<SignalSubject<any>>;
 
   async appendMessage() {
+    const userInput = this.userInput;
+    this.userInput = "";
     const newGraph = [...this.graph];
-    const spec = await plan(this.userInput, prepareSteps(this.userInput));
-    const finalPlan = spec?.[spec?.length - 1];
-    console.log("finalPlan", finalPlan);
-    const input = `Implement the following plan using the available tools: ${finalPlan?.content} --- Current graph: \`\`\`json${JSON.stringify(this.graph)}\`\`\``;
 
     const symbols = collectSymbols(this.graph);
     symbols.reverse();
 
-    this.graph = newGraph;
-    this.userInput = "";
+    const spec = await plan(this.userInput, prepareSteps(userInput));
+    const finalPlan = spec?.[spec?.length - 1];
+    console.log("finalPlan", finalPlan);
+    const input = `Implement the following plan using the available tools: ${finalPlan?.content} --- Current graph: \`\`\`json${JSON.stringify(this.graph)}\`\`\``;
 
     const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
     const lastFmKey = "0060ba224307ff9f787deb837f4be376";
@@ -357,6 +182,9 @@ export class ComApp extends LitElement {
         return JSON.stringify(val);
       }
     };
+
+    this.graph = newGraph;
+
     const result = await processUserInput(
       input,
       codePrompt + systemContext,
