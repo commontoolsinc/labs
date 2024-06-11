@@ -7,15 +7,11 @@ export type RenderContext = Record<string, Signal<any>>
 
 export const __cancel__ = Symbol('cancel');
 
-/**
- * Render vnode with a context containing reactive data sources and primitive
- * values.
- * @returns HTMLElement
- */
-export const render = (
+/** Render a VNode tree, binding reactive data sources.  */
+const renderVNode = (
   vnode: VNode,
   context: RenderContext
-): HTMLElement => {
+): Node => {
   // Make sure we have a view for this tag. If we don't it is not whitelisted.
   const view = getViewByTag(vnode.tag);
 
@@ -62,6 +58,20 @@ export const render = (
   }
 
   return element;
+}
+
+/** Render a view tree, binding reactive data sources.  */
+export const render = (
+  vnode: VNode | string | undefined | null,
+  context: RenderContext = {}
+): Node => {
+  if (vnode == null) {
+    return document.createTextNode('');
+  }
+  if (typeof vnode === 'string') {
+    return document.createTextNode(vnode);
+  }
+  return renderVNode(vnode, context);
 }
 
 export default render;
