@@ -1,8 +1,7 @@
 import { knownTags, isKnownTags } from './known-tags.js';
 import { pipe } from './util.js';
-import { signal, Cancel, combineCancels } from '@commontools/common-frp';
-
-export type Signal<T> = signal.Signal<T>;
+import { Cancel, combineCancels } from '@commontools/common-frp';
+import { Signal, effect } from '@commontools/common-frp/signal';
 
 export type Type = string;
 
@@ -86,7 +85,7 @@ export const render = (
   for (const [key, value] of Object.entries(vnode.props)) {
     if (isBinding(value)) {
       const boundValue = context[value.name];
-      const cancel = signal.effect([boundValue], (value) => {
+      const cancel = effect([boundValue], (value) => {
         setProp(element, key, value);
       });
       cancels.push(cancel);
