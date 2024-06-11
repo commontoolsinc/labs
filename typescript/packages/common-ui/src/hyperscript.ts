@@ -1,4 +1,4 @@
-import { knownTags, isKnownTags } from './known-tags.js';
+import { KNOWN_TAGS, isKnownTag } from './known-tags.js';
 import { pipe } from './util.js';
 import { Cancel, combineCancels } from '@commontools/common-frp';
 import { Signal, effect } from '@commontools/common-frp/signal';
@@ -58,11 +58,12 @@ const vtag = (tag: string): VNodeFactory => (
   ...children: Array<VNode | string>
 ): VNode => vh(tag, props, ...children);
 
-export const tags: Record<string, VNodeFactory> = pipe(
-  knownTags(),
-  Array.from,
-  (tags) => tags.map((tag: string) => [tag, vtag(tag)]),
-  Object.fromEntries
+export const tags: Readonly<Record<string, VNodeFactory>> = pipe(
+  KNOWN_TAGS,
+  Object.entries,
+  tags => tags.map(([tag, factory]) => [factory, vtag(tag)]),
+  Object.fromEntries,
+  Object.freeze
 );
 
 export type RenderContext = Record<string, Signal<any>>
@@ -74,7 +75,7 @@ export const render = (
   vnode: VNode,
   context: RenderContext
 ) => {
-  if (!isKnownTags(vnode.tag)) {
+  if (!isKnownTag(vnode.tag)) {
     throw new TypeError(`Unknown tag: ${vnode.tag}`);
   }
 

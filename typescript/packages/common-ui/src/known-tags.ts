@@ -1,12 +1,12 @@
-/** Whitelisted component tags */
-const KNOWN_TAGS = new Set([
-  'com-navpanel',
-  'com-navstack',
-  'com-hstack',
-  'com-vstack',
-])
+/**
+ * Whitelisted component tags map.
+ * Maps tag name to factory name.
+ */
+export const KNOWN_TAGS = Object.freeze({
+  'com-navpanel': 'navpanel',
+  'com-navstack': 'navstack',
+  'com-hstack': 'hstack',
+  'com-vstack': 'vstack',
+})
 
-export const knownTags = () => KNOWN_TAGS.values()
-export default knownTags
-
-export const isKnownTags = (tag: string) => KNOWN_TAGS.has(tag)
+export const isKnownTag = (tag: string) => Object.hasOwn(KNOWN_TAGS, tag)
