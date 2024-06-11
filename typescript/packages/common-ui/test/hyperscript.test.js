@@ -1,6 +1,8 @@
-import { assert, equal, throws } from './assert.js';
+import { equal, throws } from './assert.js';
 import { state } from '@commontools/common-frp/signal';
-import { tags, signal, render } from '../lib/hyperscript.js';
+import tags from '../lib/hyperscript/tags.js';
+import { signal } from '../lib/hyperscript/view.js';
+import render from '../lib/hyperscript/render.js';
 
 const { hstack } = tags;
 

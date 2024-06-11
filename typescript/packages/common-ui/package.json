@@ -9,7 +9,7 @@
   "scripts": {
     "build": "wireit",
     "clean": "wireit",
-    "test": "web-test-runner \"test/**/*.test.js\" --node-resolve",
+    "test": "npm run build && web-test-runner \"test/**/*.test.js\" --node-resolve",
     "watch": "web-test-runner test/**/*.test.js --node-resolve --watch",
     "dev": "vite"
   },
@@ -26,6 +26,7 @@
     "./lib/index.js"
   ],
   "dependencies": {
+    "@cfworker/json-schema": "^1.12.8",
     "@shoelace-style/shoelace": "^2.15.1",
     "@types/node": "^20.14.2",
     "lit": "^3.1.4"
