@@ -6,7 +6,7 @@ const styles = css``;
 
 @customElement("com-module-shader")
 export class ComModuleShader extends LitElement {
-  static styles = [styles];
+  static override styles = [styles];
 
   @property() node: RecipeNode | null = null;
   @property() value: any = null;
@@ -16,7 +16,9 @@ export class ComModuleShader extends LitElement {
       return html`<pre>loading...</pre>`;
     }
 
-    const codeChanged = (ev) => {
+    const codeChanged = (ev: CustomEvent) => {
+      if (!this.node) return;
+
       this.node.body = ev.detail.code;
       const event = new CustomEvent("updated", {
         detail: {

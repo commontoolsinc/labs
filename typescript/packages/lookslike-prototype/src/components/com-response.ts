@@ -1,11 +1,19 @@
 import { LitElement, html, css } from "lit-element";
 import { customElement, property, state } from "lit/decorators.js";
-import { base } from "../styles";
+import { base } from "../styles.js";
 import { RecipeNode } from "../data.js";
 import { SignalSubject } from "../../../common-frp/lib/signal.js";
 import { signal } from "@commontools/common-frp";
+import {
+  CONTENT_TYPE_FETCH,
+  CONTENT_TYPE_GLSL,
+  CONTENT_TYPE_IMAGE,
+  CONTENT_TYPE_JAVASCRIPT,
+  CONTENT_TYPE_LLM,
+  CONTENT_TYPE_UI
+} from "../contentType.js";
 
-function definitionToHtml(
+function renderNode(
   node: RecipeNode,
   value: any,
   dispatch: (event: CustomEvent) => void
@@ -24,45 +32,39 @@ function definitionToHtml(
     );
   };
 
-  if (node.contentType === "text/javascript") {
-    return html`<com-module-code
-      .node=${node}
-      .value=${value}
-      @updated=${relay}
-    ></com-module-code>`;
-  }
-
-  if (node.contentType === "application/json+vnd.common.ui") {
-    return html`<com-module-ui .node=${node} .value=${value}></com-module-ui>`;
-  }
-
-  if (node.contentType === "application/json+vnd.common.fetch") {
-    return html`<com-module-fetch
-      .node=${node}
-      .value=${value}
-    ></com-module-fetch>`;
-  }
-
-  if (node.contentType === "application/json+vnd.common.llm") {
-    return html`<com-module-llm
-      .node=${node}
-      .value=${value}
-    ></com-module-llm>`;
-  }
-
-  if (node.contentType === "application/json+vnd.common.image") {
-    return html`<com-module-image
-      .node=${node}
-      .value=${value}
-    ></com-module-image>`;
-  }
-
-  if (node.contentType === "text/glsl") {
-    return html`<com-module-shader
-      .node=${node}
-      .value=${value}
-      @updated=${relay}
-    ></com-module-shader>`;
+  switch (node.contentType) {
+    case CONTENT_TYPE_JAVASCRIPT:
+      return html`<com-module-code
+        .node=${node}
+        .value=${value}
+        @updated=${relay}
+      ></com-module-code>`;
+    case CONTENT_TYPE_UI:
+      return html`<com-module-ui
+        .node=${node}
+        .value=${value}
+      ></com-module-ui>`;
+    case CONTENT_TYPE_FETCH:
+      return html`<com-module-fetch
+        .node=${node}
+        .value=${value}
+      ></com-module-fetch>`;
+    case CONTENT_TYPE_LLM:
+      return html`<com-module-llm
+        .node=${node}
+        .value=${value}
+      ></com-module-llm>`;
+    case CONTENT_TYPE_IMAGE:
+      return html`<com-module-image
+        .node=${node}
+        .value=${value}
+      ></com-module-image>`;
+    case CONTENT_TYPE_GLSL:
+      return html`<com-module-shader
+        .node=${node}
+        .value=${value}
+        @updated=${relay}
+      ></com-module-shader>`;
   }
 
   return html`<pre>${JSON.stringify(node, null, 2)}</pre>`;
@@ -85,9 +87,9 @@ const styles = css`
 
 @customElement("com-response")
 export class ComResponse extends LitElement {
-  static styles = [base, styles];
+  static override styles = [base, styles];
 
-  @property({ type: Object }) node: RecipeNode | null;
+  @property({ type: Object }) node: RecipeNode | null = null;
   @property({ type: Object }) output: SignalSubject<any> = signal.state(null);
   onCancel: () => void = () => {};
   @state() value: any = {};
@@ -116,7 +118,7 @@ export class ComResponse extends LitElement {
     }
 
     console.log("re-render", this.node.id, this.value);
-    const definition = definitionToHtml(
+    const definition = renderNode(
       this.node,
       this.value,
       this.dispatchEvent.bind(this)

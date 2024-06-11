@@ -187,19 +187,6 @@ export const toolSpec: ChatCompletionTool[] = [
         }
       }
     }
-  },
-  {
-    type: "function",
-    function: {
-      name: "getNodeOutputValue",
-      description: "Snapshot the current value of node from the graph.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" }
-        }
-      }
-    }
   }
 ];
 

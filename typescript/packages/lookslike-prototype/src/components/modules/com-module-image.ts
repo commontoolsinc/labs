@@ -6,14 +6,25 @@ const styles = css``;
 
 @customElement("com-module-image")
 export class ComModuleImage extends LitElement {
-  static styles = [styles];
+  static override styles = [styles];
 
   @property() node: RecipeNode | null = null;
   @property() value: any = null;
   @state() history: any[] = [];
 
+  override firstUpdated() {
+    this.history = [];
+    if (this.value) {
+      this.history.push(this.value);
+    }
+  }
+
   override updated(changedProperties: Map<string | number | symbol, unknown>) {
-    if (changedProperties.has("value")) {
+    if (
+      changedProperties.has("value") &&
+      this.value &&
+      !this.history.includes(this.value)
+    ) {
       this.history.push(this.value);
     }
   }

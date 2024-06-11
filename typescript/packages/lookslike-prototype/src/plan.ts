@@ -279,7 +279,7 @@ export function prepareSteps(userInput: string) {
 
     To declare a constant value, return it from a code node as a literal.
 
-    Be extremely concise, using pseudocode to sketch the technical approach. Write as concisely and accurately as possible without introducing assumptions.`,
+    Plan at a high level and be extremely concise, use pseudocode to sketch the technical approach. Write as concisely and accurately as possible without introducing assumptions or full specifying the details.`,
     `
     <user-request>${userInput}</user-request>
 
@@ -293,7 +293,7 @@ export function prepareSteps(userInput: string) {
     `Reflect on the plan, does it make sense for a incredibly small immediately useful application?
 
     Ensure all node are created in a logical order, so that the dependencies always exist. Start with fetching data, then processing, filtering, mapping and rendering.
-    You must create a code node to declare constant values but ONLY IF they are required. For static data you may inline constants into the code/shader nodes.
+    You must create a code node to declare constant values for code but NOT for shader uniforms. For static data you may inline constants into the code/shader nodes.
 
     Adjust the plan to make sure the user will be happy with the request: ${userInput}`
     // `With the requirements specified, create a user interface using the following UI components:

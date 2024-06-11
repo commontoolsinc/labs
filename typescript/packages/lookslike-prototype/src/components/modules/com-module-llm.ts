@@ -6,7 +6,7 @@ const styles = css``;
 
 @customElement("com-module-llm")
 export class ComModuleLlm extends LitElement {
-  static styles = [styles];
+  static override styles = [styles];
 
   @property() node: RecipeNode | null = null;
   @property() value: any = null;

@@ -6,7 +6,7 @@ const styles = css``;
 
 @customElement("com-module-code")
 export class ComModuleCode extends LitElement {
-  static styles = [styles];
+  static override styles = [styles];
 
   @property() node: RecipeNode | null = null;
   @property() value: any = null;
@@ -16,7 +16,9 @@ export class ComModuleCode extends LitElement {
       return html`<pre>loading...</pre>`;
     }
 
-    const codeChanged = (ev) => {
+    const codeChanged = (ev: CustomEvent) => {
+      if (!this.node) return;
+
       this.node.body = ev.detail.code;
       const event = new CustomEvent("updated", {
         detail: {
@@ -26,7 +28,7 @@ export class ComModuleCode extends LitElement {
       this.dispatchEvent(event);
     };
 
-    const dataChanged = (ev) => {
+    const dataChanged = (ev: CustomEvent) => {
       const event = new CustomEvent("overriden", {
         detail: {
           data: ev.detail.data,
