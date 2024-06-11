@@ -7,6 +7,7 @@ import {
   Input,
   LocalStorage,
   WASM_SANDBOX,
+  SES_SANDBOX,
 } from '@commontools/runtime';
 
 const EXAMPLE_MODULE_JS = `
@@ -53,7 +54,7 @@ export const demo = async () => {
 
   const module = await rt.eval(
     'example',
-    WASM_SANDBOX,
+    SES_SANDBOX,
     'text/javascript',
     EXAMPLE_MODULE_JS,
     new Input(storage, ['foo', 'baz'])

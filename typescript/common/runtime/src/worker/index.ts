@@ -117,7 +117,7 @@ export class RuntimeContext {
 
   #handleRPCEvent = (async (event, detail) => {
     switch (event) {
-      case 'runtime:eval':
+      case 'runtime:eval': {
         const { id, contentType, sourceCode, inputKeys, port } =
           detail as RuntimeRequests['runtime:eval'];
 
@@ -138,6 +138,7 @@ export class RuntimeContext {
         }
 
         return {};
+      }
     }
 
     return assertNever(event as never);

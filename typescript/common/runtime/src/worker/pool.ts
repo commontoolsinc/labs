@@ -1,5 +1,5 @@
 import { assertNever } from '../helpers.js';
-import { Sandbox, WASM_SANDBOX } from '../index.js';
+import { Sandbox, WASM_SANDBOX, SES_SANDBOX } from '../index.js';
 import { HostWorkerEventHandler } from '../rpc/host.js';
 import { HostToRuntimeRPC, HANDSHAKE_EVENT } from '../rpc/index.js';
 
@@ -13,7 +13,7 @@ export class WorkerPool {
   // of policy-based compartmentalization for them
   #categories = new Map<Sandbox, Promise<WorkerContext>>();
 
-  async get(sandbox: Sandbox): Promise<WorkerContext> {
+  get(sandbox: Sandbox): Promise<WorkerContext> {
     // TODO: Handle worker failure cases
     if (!this.#categories.has(sandbox)) {
       console.log(`Creating new worker for '${sandbox}' modules`);
@@ -53,6 +53,10 @@ export class WorkerPool {
     switch (sandbox) {
       case WASM_SANDBOX:
         return new Worker(new URL('./wasm/index.js', import.meta.url), {
+          type: 'module',
+        });
+      case SES_SANDBOX:
+        return new Worker(new URL('./ses/index.js', import.meta.url), {
           type: 'module',
         });
       default:

@@ -1,8 +1,8 @@
 {
-  "name": "@commontools/runtime",
+  "name": "@commontools/usuba-ses",
   "author": "The Common Authors",
   "version": "0.0.1",
-  "description": "A Module Runtime with Common Tools APIs baked in",
+  "description": "A bundled re-export of SES for Usuba use cases",
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
@@ -20,34 +20,25 @@
   "homepage": "https://github.com/commontoolsinc/labs#readme",
   "exports": {
     ".": {
-      "types": "./lib/index.d.ts",
-      "default": "./lib/index.js"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/usuba-ses.js"
     }
   },
   "files": [
-    "./lib/*.js"
+    "./dist/*.js"
   ],
   "dependencies": {
-    "@commontools/data": "^0.0.1",
-    "@commontools/io": "^0.0.1",
-    "@commontools/module": "^0.0.1",
-    "@commontools/usuba-rt": "^0.0.1",
-    "@commontools/usuba-ses": "^0.0.1"
+    "@endo/static-module-record": "^1.1.2",
+    "ses": "^1.5.0"
   },
   "devDependencies": {
     "tslib": "^2.6.2",
     "typescript": "^5.2.2",
+    "vite-plugin-dts": "^3.9.1",
     "wireit": "^0.14.4"
   },
   "wireit": {
-    "build": {
-      "dependencies": [
-        "../../packages/usuba-rt:build",
-        "../../packages/usuba-ses:build",
-        "../data:build",
-        "../io:build",
-        "../module:build"
-      ],
+    "build:tsc": {
       "files": [
         "./src/**/*"
       ],
@@ -56,15 +47,20 @@
       ],
       "command": "tsc --build -f"
     },
-    "clean": {
+    "build": {
       "dependencies": [
-        "../../packages/usuba-rt:clean",
-        "../../packages/usuba-ses:clean",
-        "../data:clean",
-        "../io:clean",
-        "../module:clean"
+        "build:tsc"
       ],
-      "command": "rm -rf ./lib ./.wireit"
+      "files": [
+        "./lib/**/*"
+      ],
+      "output": [
+        "./dist/*"
+      ],
+      "command": "vite build"
+    },
+    "clean": {
+      "command": "rm -rf ./lib ./dist ./.wireit"
     }
   }
 }
