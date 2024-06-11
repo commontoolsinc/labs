@@ -23,15 +23,15 @@
       "default": "./lib/index.js",
       "types": "./lib/index.d.ts"
     },
-    "signal": {
+    "./signal": {
       "default": "./lib/signal.js",
       "types": "./lib/signal.d.ts"
     },
-    "stream": {
+    "./stream": {
       "default": "./lib/stream.js",
       "types": "./lib/stream.d.ts"
     },
-    "operators": {
+    "./operators": {
       "default": "./lib/operators.js",
       "types": "./lib/operators.d.ts"
     }
