@@ -4,6 +4,9 @@ import { demo as demoThree } from './demo3.js';
 import { demo as demoFour } from './demo4.js';
 import { demo as demoFive } from './demo5.js';
 import { demo as demoSix } from './demo6.js';
+import { activateServiceWorker } from '@commontools/usuba-rt';
+
+await activateServiceWorker();
 
 (self as any).demoOne = demoOne;
 (self as any).demoTwo = demoTwo;

@@ -34,7 +34,7 @@ const FILE_EXTENSIONS: ContentTypeFileExtensions = {
   'text/x-python': 'py',
 };
 
-const serviceWorkerActivates = (async () => {
+export const activateServiceWorker = async () => {
   if (typeof navigator.serviceWorker == 'undefined') {
     throw new Error(
       'Service Worker is not supported in this browser; Usuba will not work here.'
@@ -78,7 +78,7 @@ const serviceWorkerActivates = (async () => {
   } catch (error) {
     console.error(`Registration failed with ${error}`);
   }
-})();
+};
 
 /**
  * A Runtime embodies:
@@ -93,13 +93,12 @@ const serviceWorkerActivates = (async () => {
  * definitions or promises that resolve to WIT definitions.
  */
 export class Runtime {
-  #serviceWorkerActivates: Promise<void> = serviceWorkerActivates;
   #library: Promise<File[]>;
   #usubaHost: URL;
 
   constructor(
     library: PendingSourceCode[],
-    usubaHost: URL = new URL(window.location.origin)
+    usubaHost: URL = new URL(new URL(import.meta.url).origin)
   ) {
     this.#library = Promise.all(library).then((library) =>
       library.map(
@@ -126,11 +125,10 @@ export class Runtime {
   async defineModule<T>(
     definition: ModuleDefinition
   ): Promise<PreparedModule<T>> {
-    const [library, wit, sourceCode, _] = await Promise.all([
+    const [library, wit, sourceCode] = await Promise.all([
       this.#library,
       definition.wit,
       definition.sourceCode,
-      this.#serviceWorkerActivates,
     ]);
 
     apiClient.OpenAPI.BASE = this.#usubaHost.origin;
@@ -154,6 +152,7 @@ export class Runtime {
     );
 
     return new PreparedModule(
+      id,
       instantiate as (imports: ImportMap) => Promise<T>
     );
   }
@@ -170,9 +169,15 @@ export class Runtime {
  * always an implementation of the interface defined by the Module's WIT.
  */
 export class PreparedModule<T> {
+  #id;
   #instantiate: (imports: ImportMap) => Promise<T>;
 
-  constructor(instantiate: any) {
+  id() {
+    return this.#id;
+  }
+
+  constructor(id: string, instantiate: any) {
+    this.#id = id;
     this.#instantiate = instantiate;
   }
 
@@ -213,6 +218,8 @@ export class PreparedModule<T> {
       map[key] = imported;
       return map;
     }, {} as ImportMap);
+
+    console.log('Invoking instantiate on the module');
 
     return await this.#instantiate(imports);
   }
