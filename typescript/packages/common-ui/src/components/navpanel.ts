@@ -2,7 +2,6 @@ import { LitElement, html, css } from 'lit-element';
 import { customElement, property } from 'lit-element/decorators.js';
 import { VNode, view } from '../hyperscript/view.js';
 import { render, RenderContext } from '../hyperscript/render.js';
-import { div } from '../hyperscript/tags.js';
 
 export const navpanel = view('co-navpanel', {});
 
@@ -47,10 +46,10 @@ export class NavPanelElement extends LitElement {
   `;
 
   @property({ type: Object })
-  accessor content: VNode = div();
+  accessor content: VNode | string = '';
 
   @property({ type: Object })
-  accessor props: RenderContext;
+  accessor props: RenderContext = {};
 
   #onClickBackButton(event: MouseEvent) {
     event.preventDefault();
