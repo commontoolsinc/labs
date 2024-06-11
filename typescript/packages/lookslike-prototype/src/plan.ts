@@ -3,6 +3,7 @@ import {
   ChatCompletionTool
 } from "openai/resources/index.mjs";
 import { client, model, toolSpec } from "./llm.js";
+import { recordThought } from "./model.js";
 
 type Conversation = ChatCompletionMessageParam[];
 
@@ -19,6 +20,9 @@ export async function plan(userInput: string, steps: string[]) {
     { role: "user", content: steps[1] }
   ];
 
+  await recordThought(messages[0]);
+  await recordThought(messages[1]);
+
   let msgIdx = 1;
 
   let running = true;
@@ -32,18 +36,22 @@ export async function plan(userInput: string, steps: string[]) {
     const latest = response.choices[0].message;
     console.log(`[${userInput}] response`, latest);
     messages.push(latest);
+    await recordThought(latest);
 
     if (msgIdx >= steps.length - 1) {
       running = false;
       break;
     }
 
-    messages.push({ role: "user", content: steps[++msgIdx] });
+    const nextStep: ChatCompletionMessageParam = {
+      role: "user",
+      content: steps[++msgIdx]
+    };
+    messages.push(nextStep);
+    await recordThought(nextStep);
   }
 
-  suggest(userInput, messages).then((suggestions) => {
-    console.log(`[${userInput}] suggestions`, suggestions);
-  });
+  suggest(userInput, messages);
 
   return messages;
 }
@@ -54,13 +62,14 @@ export async function suggest(input: string, fullPlan: Conversation) {
       ...fullPlan,
       {
         role: "user",
-        content:
-          "Based on the original user request and the plan to service it, suggest 3 similar or related tasks the user might like to explore next. This could include tweaks to the existing UI, reusing the data in another context or a mix of both. Be concise, use a numbered list with no more than 7 words per item."
+        content: `Based on the original user request (${input}) and the plan to service it, suggest 3 similar or related tasks the user might like to explore next. This could include tweaks to the existing UI, reusing the data in another context or a mix of both. Be concise, use a numbered list with no more than 7 words per item.`
       }
     ],
     model,
     temperature: 0
   });
+
+  recordThought(response.choices[0].message);
 
   return response.choices[0].message;
 }

@@ -75,7 +75,7 @@ function definitionToHtml(
   if (node.contentType === "application/json+vnd.common.image") {
     return html`
       <com-data .data=${JSON.stringify(value, null, 2)}></com-data>
-      <img src=${value}></img>
+      <img src=${value} style="max-width: 100%"></img>
     `;
   }
 

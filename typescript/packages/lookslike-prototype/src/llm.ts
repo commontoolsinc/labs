@@ -6,6 +6,7 @@ import {
   ChatCompletionMessageParam,
   ChatCompletionTool
 } from "openai/resources";
+import { recordThought } from "./model.js";
 
 export let model = "gpt-4o";
 export const apiKey = fetchApiKey() as string;
@@ -211,6 +212,9 @@ export async function processUserInput(
     { role: "user", content: input }
   ];
 
+  await recordThought(messages[0]);
+  await recordThought(messages[1]);
+
   let running = true;
   while (running) {
     console.log("messages", messages);
@@ -227,6 +231,7 @@ export async function processUserInput(
     }
 
     const latest = response.choices[0].message;
+    await recordThought(latest);
     messages.push(latest);
 
     const toolCalls = latest.tool_calls;
@@ -241,11 +246,13 @@ export async function processUserInput(
         );
         const functionResponse = functionToCall(functionArgs);
         console.log("response", toolCall.id, functionResponse);
-        messages.push({
+        const toolResponse = {
           tool_call_id: toolCall.id,
           role: "tool",
           content: functionResponse
-        });
+        };
+        messages.push(toolResponse);
+        await recordThought(toolResponse);
       }
     }
   }
@@ -260,11 +267,13 @@ export async function doLLM(
     console.log("input", input);
     console.log("system", system);
 
+    const messages: ChatCompletionMessageParam[] = [
+      { role: "system", content: system },
+      { role: "user", content: input }
+    ];
+
     return await client.chat.completions.create({
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: input }
-      ],
+      messages,
       model
     });
   } catch (error) {

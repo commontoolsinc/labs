@@ -6,8 +6,10 @@ import { Recipe, emptyGraph, todoAppMockup, RecipeNode } from "../data";
 import { doLLM, grabJson, processUserInput } from "../llm";
 import { collectSymbols } from "../graph";
 import { Context, snapshot } from "../state";
+import { watch } from "@commontools/common-frp-lit";
 import { SignalSubject } from "../../../common-frp/lib/signal.js";
 import { plan, prepareSteps } from "../plan.js";
+import { thoughtLog } from "../model.js";
 
 const codePrompt = `
   Your task is to take a user description or request and produce a series of nodes for a computation graph. Nodes can be code blocks or UI components and they communicate with named ports.
@@ -397,7 +399,9 @@ export class ComApp extends LitElement {
             </com-unibox>
           </div>
         </com-chat>
-        <div slot="sidebar"></div>
+        <div slot="sidebar">
+          <com-thought-log .thoughts=${watch(thoughtLog)}></com-thought-log>
+        </div>
       </com-app-grid>
     `;
   }

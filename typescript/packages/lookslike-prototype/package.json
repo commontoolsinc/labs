@@ -19,19 +19,6 @@
   },
   "homepage": "https://github.com/commontoolsinc/labs#readme",
   "devDependencies": {
-    "@commontools/data": "^0.0.1",
-    "@commontools/io": "^0.0.1",
-    "@commontools/module": "^0.0.1",
-    "@commontools/runtime": "^0.0.1",
-    "@commontools/usuba-rt": "^0.0.1",
-    "@commontools/common-frp": "^0.0.1",
-    "@instructor-ai/instructor": "^1.3.0",
-    "@shoelace-style/shoelace": "^2.15.1",
-    "@types/pretty": "^2.0.3",
-    "lit": "^3.1.3",
-    "openai": "^4.47.2",
-    "pretty": "^2.0.0",
-    "rxjs": "^7.8.1",
     "typescript": "^5.2.2",
     "vite": "^5.2.0",
     "wireit": "^0.14.4"
@@ -44,7 +31,8 @@
         "../../common/io:build",
         "../../common/runtime:build",
         "../usuba-rt:build",
-        "../common-frp:build"
+        "../common-frp:build",
+        "../common-frp-lit:build"
       ],
       "command": "vite build"
     },
@@ -53,6 +41,19 @@
     }
   },
   "dependencies": {
+    "@commontools/common-frp": "^0.0.1",
+    "@commontools/data": "^0.0.1",
+    "@commontools/io": "^0.0.1",
+    "@commontools/module": "^0.0.1",
+    "@commontools/runtime": "^0.0.1",
+    "@commontools/usuba-rt": "^0.0.1",
+    "@instructor-ai/instructor": "^1.3.0",
+    "@shoelace-style/shoelace": "^2.15.1",
+    "@types/pretty": "^2.0.3",
+    "lit": "^3.1.3",
+    "openai": "^4.47.2",
+    "pretty": "^2.0.0",
+    "rxjs": "^7.8.1",
     "@babel/parser": "^7.24.6",
     "@codemirror/basic-setup": "^0.20.0",
     "@codemirror/lang-javascript": "^6.2.2",
@@ -60,6 +61,7 @@
     "@codemirror/language": "^6.10.2",
     "@codemirror/state": "^6.4.1",
     "@codemirror/view": "^6.27.0",
+    "@commontools/common-frp-lit": "^0.0.1",
     "@types/json-schema": "^7.0.15",
     "codemirror": "^6.0.1",
     "idb-keyval": "^6.2.1",

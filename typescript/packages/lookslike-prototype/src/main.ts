@@ -11,7 +11,9 @@ export * as ComEditor from "./components/com-editor.js";
 export * as ComToggle from "./components/com-toggle.js";
 export * as ComCode from "./components/com-code.js";
 export * as ComData from "./components/com-data.js";
+export * as ComThoughtLog from "./components/com-thought-log.js";
 export * as ComApp from "./components/com-app.js";
+
 import { activateServiceWorker } from "@commontools/usuba-rt";
 
 await activateServiceWorker();
