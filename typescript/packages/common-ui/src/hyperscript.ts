@@ -97,10 +97,12 @@ export const render = (
   for (const [key, value] of Object.entries(vnode.props)) {
     if (isSignalBinding(value)) {
       const boundValue = context[value.name];
-      const cancel = effect([boundValue], (value) => {
-        setProp(element, key, value);
-      });
-      cancels.push(cancel);
+      if (boundValue != null) {
+        const cancel = effect([boundValue], (value) => {
+          setProp(element, key, value);
+        });
+        cancels.push(cancel);
+      }
     } else {
       setProp(element, key, value);
     }

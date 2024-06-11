@@ -2,7 +2,7 @@ export const assert = (value, msg = "") => {
   console.assert(value, msg);
 }
 
-export const equals = (a, b, msg = "") => {
+export const equal = (a, b, msg = "") => {
   console.assert(a === b, `${msg} ${a} !== ${b}`);
 }
 
