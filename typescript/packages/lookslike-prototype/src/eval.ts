@@ -5,7 +5,8 @@ import {
   infer,
   Input,
   LocalStorage,
-  WASM_SANDBOX
+  WASM_SANDBOX,
+  SES_SANDBOX
 } from "@commontools/runtime";
 
 export function prepare(code: string) {
@@ -34,7 +35,7 @@ export async function run(
 
   const module = await rt.eval(
     id,
-    WASM_SANDBOX,
+    SES_SANDBOX,
     "text/javascript",
     code(src),
     new Input(storage, Object.keys(inputs))
