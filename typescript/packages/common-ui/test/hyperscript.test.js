@@ -26,6 +26,21 @@ describe("it does not create tags that aren't whitelisted", () => {
   });
 });
 
+describe("it creates an element, substituting template context constants", () => {
+  const className = state('foo');
+
+  const vnode = hstack(
+    {'className': 'foo'},
+    'Hello'
+  );
+
+  const element = render(vnode, {className});
+
+  equal(element.tagName, 'COM-HSTACK');
+  equal(element.className, 'foo');
+  equal(element.textContent, 'Hello');
+});
+
 describe("it binds signals", () => {
   const className = state('foo');
 
@@ -37,6 +52,10 @@ describe("it binds signals", () => {
   const element = render(vnode, {className});
 
   equal(element.tagName, 'COM-HSTACK');
-  assert(element.classList.contains('foo'));
+  equal(element.className, 'foo');
   equal(element.textContent, 'Hello');
+
+  className.send('bar');
+
+  equal(element.className, 'bar');
 });
