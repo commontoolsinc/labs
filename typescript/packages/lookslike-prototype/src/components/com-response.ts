@@ -29,7 +29,8 @@ function definitionToHtml(
     const dataChanged = (ev) => {
       const event = new CustomEvent("overriden", {
         detail: {
-          data: ev.detail.data
+          data: ev.detail.data,
+          json: true
         }
       });
       dispatch(event);
@@ -75,6 +76,23 @@ function definitionToHtml(
     return html`
       <com-data .data=${JSON.stringify(value, null, 2)}></com-data>
       <img src=${value} style="max-width: 100%"></img>
+    `;
+  }
+
+  if (node.contentType === "text/glsl") {
+    const codeChanged = (ev) => {
+      node.body = ev.detail.code;
+      const event = new CustomEvent("updated", {
+        detail: {
+          body: node.body
+        }
+      });
+      dispatch(event);
+    };
+
+    return html`
+      <com-code .code=${node.body} @updated=${codeChanged}></com-code>
+      <com-shader .fragmentShader=${node.body}></com-shader>
     `;
   }
 

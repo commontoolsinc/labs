@@ -19,6 +19,7 @@
   },
   "homepage": "https://github.com/commontoolsinc/labs#readme",
   "devDependencies": {
+    "@types/three": "^0.165.0",
     "typescript": "^5.2.2",
     "vite": "^5.2.0",
     "wireit": "^0.14.4"
@@ -67,6 +68,7 @@
     "openai": "^4.47.2",
     "prettier": "^3.3.0",
     "pretty": "^2.0.0",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "three": "^0.165.0"
   }
 }

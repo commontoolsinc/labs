@@ -2,8 +2,8 @@ import { LitElement, html } from "lit-element";
 import { customElement, state } from "lit/decorators.js";
 import { base } from "../styles.js";
 
-import { Recipe, emptyGraph, todoAppMockup, RecipeNode } from "../data";
-import { doLLM, grabJson, processUserInput } from "../llm";
+import { Recipe, emptyGraph } from "../data";
+import { processUserInput } from "../llm";
 import { collectSymbols } from "../graph";
 import { Context, snapshot } from "../state";
 import { watch } from "@commontools/common-frp-lit";
@@ -67,6 +67,18 @@ export class ComApp extends LitElement {
           in: {},
           ...node,
           body
+        });
+        this.graph = JSON.parse(JSON.stringify(newGraph));
+        this.requestUpdate();
+        return `Added node: ${id}`;
+      },
+      addGlslShaderNode: ({ id, shaderToyCode }) => {
+        console.log("addGlslShaderNode", id, shaderToyCode);
+        newGraph.push({
+          id,
+          contentType: "text/glsl",
+          in: {},
+          body: shaderToyCode
         });
         this.graph = JSON.parse(JSON.stringify(newGraph));
         this.requestUpdate();

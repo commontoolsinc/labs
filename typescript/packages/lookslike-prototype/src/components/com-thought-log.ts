@@ -29,14 +29,12 @@ export class ComThoughtLog extends LitElement {
     }
 
     .content {
-      font-family: monospace;
       font-size: 0.8rem;
       line-height: 0.8rem;
       white-space: pre-wrap;
     }
 
     .preview {
-      font-family: monospace;
       font-size: 0.5rem;
       line-height: 0.5rem;
       white-space: nowrap;
@@ -59,12 +57,17 @@ export class ComThoughtLog extends LitElement {
         const truncatedContent = thought.content?.slice(0, 100) + "...";
         return html`<div class="thought">
           <div class="role">${thought.role}</div>
-          ${last &&
-          html`<markdown-element
-            markdown=${thought.content}
-          ></markdown-element>`}
+          ${last
+            ? html`<markdown-element
+                class="preview"
+                markdown=${thought.content}
+              ></markdown-element>`
+            : ""}
           <com-toggle>
-            <markdown-element markdown=${thought.content}></markdown-element>
+            <markdown-element
+              class="content"
+              markdown=${thought.content}
+            ></markdown-element>
           </com-toggle>
         </div>`;
       })}

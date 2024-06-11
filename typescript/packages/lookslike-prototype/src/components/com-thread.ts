@@ -54,10 +54,6 @@ export class ComThread extends LitElement {
   localScope: { [k: string]: any } = {};
 
   response(node: RecipeNode) {
-    const onUpdated = (e: CustomEvent) => {
-      node.body = e.detail.body;
-    };
-
     const onOverriden = (e: CustomEvent) => {
       console.log(node.id, "override", e.detail);
       this.context.outputs[node.id].send(JSON.parse(e.detail.data));
@@ -65,6 +61,11 @@ export class ComThread extends LitElement {
 
     const onRefresh = () => {
       this.graph = JSON.parse(JSON.stringify(this.graph));
+    };
+
+    const onUpdated = (e: CustomEvent) => {
+      node.body = e.detail.body;
+      onRefresh();
     };
 
     return html`<com-response

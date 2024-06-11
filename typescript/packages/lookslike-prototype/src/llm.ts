@@ -87,6 +87,21 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "addGlslShaderNode",
+      description:
+        "Adds a new GLSL shader node to the graph written in ShaderToy format. You may not use any iChannels, only iTime, iResolution, and iMouse and these are already defined. Do not re-define them.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          shaderToyCode: { type: "string" }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "addLanguageModelNode",
       description:
         "Adds a new LLM node to the graph to get a response in text format.",
@@ -306,7 +321,8 @@ export async function doLLM(
 
     return await client.chat.completions.create({
       messages,
-      model
+      model,
+      temperature: 0
     });
   } catch (error) {
     console.error("Error analyzing text:", error);
@@ -331,6 +347,7 @@ export async function streamLlm(
     const response = await client.chat.completions.create({
       messages,
       model,
+      temperature: 0,
       stream: true
     });
 
