@@ -7,7 +7,7 @@ export const tags: Record<string, View> = Object.freeze({
 
 export default tags
 
-/** Index of factory functions by HTML tag name (lowercase) */
+/** Index of factory functions by HTML tag name */
 const viewByTag = Object.fromEntries(
   Object.values(tags).map((factory) => [factory.tag, factory])
 )

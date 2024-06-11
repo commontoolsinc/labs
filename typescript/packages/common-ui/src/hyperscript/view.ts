@@ -64,17 +64,19 @@ export type View = Factory & {
 
 /**
  * Create a tag factory that validates props against a schema.
- * @param tag - HTML tag name
+ * @param tagName - HTML tag name
  * @param props - JSON schema for props
  */
 export const view = (
-  tag: string,
+  tagName: string,
   props: AnyJSONSchema
 ): View => {
+  // Normalize tag name
+  const tag = tagName.toLowerCase();
   // Compile props validator for fast validation at runtime.
   const validateProps = schema.compile(props);
 
-  /** Create an element from a view, validating props,  */
+  /** Create an element from a view, validating props  */
   const create = (
     props: Props = {},
     ...children: Array<VNode | string>
