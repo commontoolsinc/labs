@@ -15,15 +15,7 @@ const openai = new OpenAI({
   dangerouslyAllowBrowser: true
 });
 
-const toolSpec: ChatCompletionTool[] = [
-  {
-    type: "function",
-    function: {
-      name: "listNodes",
-      description: "Lists all nodes in the graph.",
-      parameters: {}
-    }
-  },
+export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
@@ -86,6 +78,44 @@ const toolSpec: ChatCompletionTool[] = [
         properties: {
           id: { type: "string" },
           url: { type: "string" }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "addLanguageModelNode",
+      description:
+        "Adds a new LLM node to the graph to get a response in text format.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          promptSource: {
+            type: "string",
+            description:
+              "Name of the node who's output should be used as the prompt"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "addImageGenerationNode",
+      description:
+        "Adds a new Image Model node to the graph to generate an image based on a description. The output is the URL.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          promptSource: {
+            type: "string",
+            description:
+              "Name of the node who's output should be used as the prompt"
+          }
         }
       }
     }

@@ -7,7 +7,7 @@ import { doLLM, grabJson, processUserInput } from "../llm";
 import { collectSymbols } from "../graph";
 import { Context, snapshot } from "../state";
 import { SignalSubject } from "../../../common-frp/lib/signal.js";
-import { plan } from "../plan.js";
+import { plan, prepareSteps } from "../plan.js";
 
 const codePrompt = `
   Your task is to take a user description or request and produce a series of nodes for a computation graph. Nodes can be code blocks or UI components and they communicate with named ports.
@@ -198,59 +198,12 @@ export class ComApp extends LitElement {
   @state() userInput = "";
   @state() snapshot: Context<SignalSubject<any>>;
 
-  prepareSteps(userInput: string) {
-    return [
-      `Assist a user in dynamically generating software to solve their problems using a reactive graph data model. Modules, acting as nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules:
-
-      - Last.fm album search (searchMusic)
-      - Weather forecast (getWeather)
-      - Maps-based point of interest search (searchMaps)
-      - Wikipedia article search (searchWiki)
-      - GET request from arbitrary URL (fetch)
-      - Pure function (code)
-      - LLM Prompt (askLlm)
-      - User data query block (query)
-
-      Be extremely concise, using code or pseudocode as needed. Do not worry about the plan being human readable.`,
-      `
-      <user-request>${userInput}</user-request>
-
-      Based on the request and available modules, list requirements for a simple mobile app:
-
-      - Dynamic software generation using a reactive graph data model
-      - Connectable modules with output/input relationships
-      - Composition of well-known modules to solve manifold user problems
-
-      Identify additional features or limitations:
-
-      - Viewing additional information
-      - Filtering, browsing, editing data
-      - Consider user needs and potential challenges in implementation.
-      `,
-      `With the requirements specified, create a user interface using the following UI components:
-
-      - **Input box (\`input\`)**: Collect basic user input (text, number).
-      - **Data table (\`data\`)**: Display sortable and filterable rows of records with optional actions.
-      - **List (\`list\`)**: Display a list of items with optional actions.
-      - **Calendar (\`calendar\`)**: Show a calendar with items on each day.
-      - **Detail card (\`card\`)**: Show an information card for a document/item with appropriate data rendering.
-      - **Card pile (\`pile\`)**: Display a z-stacked set of media items with optional actions.
-      - **Text/code/data editor (\`editor\`)**: Provide a basic editor for unformatted text.
-
-      For the MVP, use the most appropriate components to present the interface:
-
-      1. **Input Box**: Collect user input.
-      2. **Data Table**: Display and manage records.
-      3. **Detail Card**: Show detailed information for selected items.
-
-      Keep the interface simple to gradually build towards a complete application.`
-    ];
-  }
-
   async appendMessage() {
     const newGraph = [...this.graph];
-    const input = `${this.userInput}`;
-    const spec = await plan(input, this.prepareSteps(input));
+    const spec = await plan(this.userInput, prepareSteps(this.userInput));
+    const finalPlan = spec?.[spec?.length - 1];
+    console.log("finalPlan", finalPlan);
+    const input = `Implement the following plan using the available tools: ${finalPlan?.content} --- Current graph: \`\`\`json${JSON.stringify(this.graph)}\`\`\``;
 
     const symbols = collectSymbols(this.graph);
     symbols.reverse();
@@ -258,12 +211,7 @@ export class ComApp extends LitElement {
     this.graph = newGraph;
     this.userInput = "";
 
-    const systemContext = `
-      Ensure you list the current state of the graph and make a detailed step-by-step plan for updating the graph to match the user's request.'
-
-      Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.
-    `;
-
+    const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
     const lastFmKey = "0060ba224307ff9f787deb837f4be376";
 
     const availableFunctions = {
@@ -276,6 +224,7 @@ export class ComApp extends LitElement {
         newGraph.push({
           id,
           contentType: "text/javascript",
+          in: {},
           ...node,
           body: code
         });
@@ -288,6 +237,7 @@ export class ComApp extends LitElement {
         newGraph.push({
           id,
           contentType: "application/json+vnd.common.ui",
+          in: {},
           ...node,
           body
         });
@@ -299,7 +249,7 @@ export class ComApp extends LitElement {
         console.log("addFetchNode", id, url);
         newGraph.push({
           id,
-          contentType: "application/json",
+          contentType: "application/json+vnd.common.fetch",
           in: {},
           outputType: {
             type: "object"
@@ -310,11 +260,45 @@ export class ComApp extends LitElement {
         this.requestUpdate();
         return `Added node: ${id}`;
       },
+      addLanguageModelNode: ({ id, promptSource }) => {
+        console.log("addLanguageModelNode", id, prompt);
+        newGraph.push({
+          id,
+          contentType: "application/json+vnd.common.llm",
+          in: {
+            prompt: [".", promptSource]
+          },
+          outputType: {
+            type: "string"
+          },
+          body: ""
+        });
+        this.graph = JSON.parse(JSON.stringify(newGraph));
+        this.requestUpdate();
+        return `Added node: ${id}`;
+      },
+      addImageGenerationNode: ({ id, promptSource }) => {
+        console.log("addImageGenerationNode", id, prompt);
+        newGraph.push({
+          id,
+          contentType: "application/json+vnd.common.image",
+          in: {
+            prompt: [".", promptSource]
+          },
+          outputType: {
+            type: "string"
+          },
+          body: ""
+        });
+        this.graph = JSON.parse(JSON.stringify(newGraph));
+        this.requestUpdate();
+        return `Added node: ${id}`;
+      },
       addMusicSearchNode: ({ id, query }) => {
         console.log("addMusicSearchNode", id, query);
         newGraph.push({
           id,
-          contentType: "application/json",
+          contentType: "application/json+vnd.common.fetch",
           in: {},
           outputType: {
             type: "object",
@@ -349,6 +333,7 @@ export class ComApp extends LitElement {
         newGraph[index] = {
           id,
           contentType: "application/json+vnd.common.ui",
+          in: {},
           ...node,
           body
         };
@@ -376,16 +361,6 @@ export class ComApp extends LitElement {
       availableFunctions
     );
     console.log("result", result);
-
-    // const result = await doLLM(input + localContext, codePrompt + systemContext, null)
-    // const message = result?.choices[0]?.message
-    // if (message) {
-    //   const data = grabJson(message?.content)
-    //   for (const node of data) {
-    //     node.messages = []
-    //     newGraph.push(node)
-    //   }
-    // }
 
     this.graph = JSON.parse(JSON.stringify(newGraph));
     console.log("graph updated", this.graph);

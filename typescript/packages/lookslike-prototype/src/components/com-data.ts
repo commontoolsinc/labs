@@ -8,28 +8,25 @@ import { foldAll } from "@codemirror/language";
 export class CodeMirrorDataViewer extends LitElement {
   @property({ type: String }) data = "";
 
-  static styles = css`
-    :host {
-      display: block;
-    }
-    .editor {
-      border: 1px solid #ccc;
-      border-radius: 4px;
-    }
-  `;
   state: EditorState;
   editor: EditorView;
+
+  #lastData = "";
 
   firstUpdated() {
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
-        console.log("updated");
-        const event = new CustomEvent("updated", {
-          detail: {
-            data: this.editor.state.doc.toString()
-          }
-        });
-        this.dispatchEvent(event);
+        const content = this.editor.state.doc.toString();
+        if (content !== this.#lastData) {
+          console.log("updated");
+          const event = new CustomEvent("updated", {
+            detail: {
+              data: this.editor.state.doc.toString()
+            }
+          });
+          this.#lastData = content;
+          this.dispatchEvent(event);
+        }
       }
     });
     const editorContainer = this.shadowRoot?.getElementById("editor");

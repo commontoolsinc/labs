@@ -59,10 +59,23 @@ function definitionToHtml(
       </com-toggle>`;
   }
 
-  if (node.contentType === "application/json") {
+  if (node.contentType === "application/json+vnd.common.fetch") {
     return html`
       <com-data .data=${node.body}></com-data>
       <com-data .data=${JSON.stringify(value, null, 2)}></com-data>
+    `;
+  }
+
+  if (node.contentType === "application/json+vnd.common.llm") {
+    return html`
+      <com-data .data=${JSON.stringify(value, null, 2)}></com-data>
+    `;
+  }
+
+  if (node.contentType === "application/json+vnd.common.image") {
+    return html`
+      <com-data .data=${JSON.stringify(value, null, 2)}></com-data>
+      <img src=${value}></img>
     `;
   }
 
@@ -99,9 +112,10 @@ export class ComResponse extends LitElement {
   ) {
     if (changedProperties.has("output")) {
       console.log("output changed", this.node?.id, this.output);
+      this.cancel();
       // trigger a re-render if any output changes
       this.cancel = signal.effect([this.output], (value) => {
-        // if (!value) return
+        if (!value || this.value === value) return;
         this.value = value;
         console.log("updated value", this.node?.id, value);
       });
@@ -109,20 +123,22 @@ export class ComResponse extends LitElement {
   }
 
   override render() {
+    super.render();
+
     if (!this.node) {
       return html`<pre>loading...</pre>`;
     }
 
-    const defintion = definitionToHtml(
+    console.log("re-render", this.node.id, this.value);
+    const definition = definitionToHtml(
       this.node,
       this.value,
       this.dispatchEvent.bind(this)
     );
-    console.log("value", this.node.id, this.value);
 
     return html`
       <div class="main">
-        ${defintion}
+        ${definition}
         <slot></slot>
       </div>
     `;

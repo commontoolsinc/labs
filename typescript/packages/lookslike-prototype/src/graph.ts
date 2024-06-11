@@ -4,6 +4,7 @@ import { Recipe, RecipeNode } from "./data.js";
 
 import { signal, config } from "@commontools/common-frp";
 import { Context } from "./state.js";
+import { doLLM, generateImage } from "./llm.js";
 type Signal<T> = signal.SignalSubject<T>;
 
 config.debug = true;
@@ -52,6 +53,13 @@ export function createRxJSNetworkFromJson(
         const source = context.outputs[sourceNode];
         const target = context.inputs[node.id][inputName];
 
+        if (!source || !target) {
+          debugger;
+          throw Error(
+            `source or target not found: ${sourceNode} -> ${node.id}.${inputName}`
+          );
+        }
+
         const cancel = signal.effect([source], (value) => {
           target.send(value);
         });
@@ -63,7 +71,6 @@ export function createRxJSNetworkFromJson(
 
   // process node definitions and set up reactive logic
   recipe.forEach(async (node) => {
-    if (!node.body) return;
     const inputObservables: Signal<any>[] = [];
     // const inputs = {} as { [key: string]: Signal<any> };
 
@@ -97,10 +104,14 @@ export function createRxJSNetworkFromJson(
       return inputs;
     });
 
+    console.log("BOUND INPUTS", node.id, node.in, allInputs);
+
     const cancel = signal.effect([allInputs], async (values) => {
       // do not execute if any of the inputs are null
       // TODO: this is a symptom of modelling some invalid states
-      if (Object.values(values).some((v) => v === null)) return;
+      if (Object.values(values).some((v) => v === null)) {
+        return;
+      }
 
       await executeNode(node, values, context.outputs);
     });
@@ -119,6 +130,7 @@ async function executeNode(
   inputs: { [key: string]: any },
   outputs: { [key: string]: SignalSubject<any> }
 ) {
+  console.log("EXECUTE NODE", node.id, inputs);
   const { contentType } = node;
   if (contentType === "text/javascript" && typeof node.body === "string") {
     const result = await run(node.id, node.body, inputs);
@@ -127,12 +139,19 @@ async function executeNode(
     const renderedTemplate = createElement(node.body, inputs);
     outputs[node.id].send(renderedTemplate);
   } else if (
-    contentType === "application/json" &&
+    contentType === "application/json+vnd.common.fetch" &&
     typeof node.body === "string"
   ) {
     const url = node.body;
     const response = await fetch(url);
     const data = await response.json();
     outputs[node.id].send(data);
+  } else if (contentType === "application/json+vnd.common.llm") {
+    const response = await doLLM(inputs.prompt, "", undefined);
+    const data = response?.choices[0].message.content;
+    outputs[node.id].send(data);
+  } else if (contentType === "application/json+vnd.common.image") {
+    const response = await generateImage(inputs.prompt);
+    outputs[node.id].send(response);
   }
 }

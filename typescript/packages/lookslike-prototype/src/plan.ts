@@ -1,5 +1,8 @@
-import { ChatCompletionMessageParam } from "openai/resources/index.mjs";
-import { client, model } from "./llm.js";
+import {
+  ChatCompletionMessageParam,
+  ChatCompletionTool
+} from "openai/resources/index.mjs";
+import { client, model, toolSpec } from "./llm.js";
 
 type Conversation = ChatCompletionMessageParam[];
 
@@ -60,4 +63,57 @@ export async function suggest(input: string, fullPlan: Conversation) {
   });
 
   return response.choices[0].message;
+}
+
+export function describeTools(tools: ChatCompletionTool[]) {
+  return tools
+    .map((tool) => {
+      return `- ${tool.function.name}: ${tool.function.description}`;
+    })
+    .join("\n");
+}
+
+export function prepareSteps(userInput: string) {
+  return [
+    `Assist a user in dynamically generating software to solve their problems using a reactive graph data model. Modules, acting as nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules:
+
+    ${describeTools(toolSpec)}
+
+    To declare a constant value, return it from a code node as a literal.
+
+    Be extremely concise, using code or pseudocode as needed. Do not worry about the plan being human readable.`,
+    `
+    <user-request>${userInput}</user-request>
+
+    Based on the request and available modules, list requirements for a simple piece of ephemeral software:
+    - Retrieve, map, filter and render using a reactive graph data model
+    - Connect modules with output/input relationships`,
+    `At a high level, plan which nodes and connections you will create in the reactive graph to service an MVP version of this request.
+      Give each node an ID and describe its purpose. Each node can have several named inputs which can be mapped to the outputs of other node ID.
+      The output of all nodes must be used and all inputs must be mapped to valid outputs.
+    `,
+    `Reflect on the plan, does it make sense for a incredibly small immediately useful application?
+
+    Ensure all node are created in a logical order, so that the dependencies always exist. Start with fetching data, then processing, filtering, mapping and rendering.
+    You must create a code node to declare any constant values. Do this before anything else.
+
+    Adjust the plan to make sure the user will be happy with the request: ${userInput}`
+    // `With the requirements specified, create a user interface using the following UI components:
+
+    // - **Input box (\`input\`)**: Collect basic user input (text, number).
+    // - **Data table (\`data\`)**: Display sortable and filterable rows of records with optional actions.
+    // - **List (\`list\`)**: Display a list of items with optional actions.
+    // - **Calendar (\`calendar\`)**: Show a calendar with items on each day.
+    // - **Detail card (\`card\`)**: Show an information card for a document/item with appropriate data rendering.
+    // - **Card pile (\`pile\`)**: Display a z-stacked set of media items with optional actions.
+    // - **Text/code/data editor (\`editor\`)**: Provide a basic editor for unformatted text.
+
+    // For the MVP, use the most appropriate components to present the interface:
+
+    // 1. **Input Box**: Collect user input.
+    // 2. **Data Table**: Display and manage records.
+    // 3. **Detail Card**: Show detailed information for selected items.
+
+    // Keep the interface simple to gradually build towards a complete application.`
+  ];
 }
