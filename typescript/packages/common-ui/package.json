@@ -9,7 +9,8 @@
   "scripts": {
     "build": "wireit",
     "clean": "wireit",
-    "test": "npm run build && node --test ./lib/test",
+    "test": "web-test-runner \"test/**/*.test.js\" --node-resolve",
+    "watch": "web-test-runner test/**/*.test.js --node-resolve --watch",
     "dev": "vite"
   },
   "repository": {
@@ -30,6 +31,8 @@
     "lit": "^3.1.4"
   },
   "devDependencies": {
+    "@web/test-runner": "^0.18.2",
+    "mocha": "^10.4.0",
     "tslib": "^2.6.2",
     "typescript": "^5.2.2",
     "wireit": "^0.14.4"

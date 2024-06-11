@@ -5,25 +5,32 @@ import { Signal, effect } from '@commontools/common-frp/signal';
 
 export type Type = string;
 
-export type Binding = {
-  "@type": "binding";
+export type SignalBinding = {
+  "@type": "signal";
   type: Type;
   name: string;
 }
 
 /** Is value a binding to a reactive value? */
-export const isBinding = (value: any): value is Binding => {
+export const isSignalBinding = (value: any): value is SignalBinding => {
   return (
     value &&
-    value["@type"] === "binding" &&
+    value["@type"] === "signal" &&
     typeof value.name === "string" &&
     typeof value.name === "string"
   );
 }
 
+/** Create a signal binding */
+export const signal = (type: Type, name: string): SignalBinding => ({
+  "@type": "signal",
+  type,
+  name
+});
+
 export type Value = string | number | boolean | null | object;
 
-export type ReactiveValue = Binding | Value;
+export type ReactiveValue = SignalBinding | Value;
 
 export type Props = {
   [key: string]: ReactiveValue;
@@ -58,6 +65,10 @@ const vtag = (tag: string): VNodeFactory => (
   ...children: Array<VNode | string>
 ): VNode => vh(tag, props, ...children);
 
+/**
+ * Hyperscript factory functions for component tags.
+ * Each tag function generates a vnode.
+ */
 export const tags: Readonly<Record<string, VNodeFactory>> = pipe(
   KNOWN_TAGS,
   Object.entries,
@@ -84,7 +95,7 @@ export const render = (
   // Bind each prop to a reactive value (if any) and collect cancels
   const cancels: Array<Cancel> = [];
   for (const [key, value] of Object.entries(vnode.props)) {
-    if (isBinding(value)) {
+    if (isSignalBinding(value)) {
       const boundValue = context[value.name];
       const cancel = effect([boundValue], (value) => {
         setProp(element, key, value);
