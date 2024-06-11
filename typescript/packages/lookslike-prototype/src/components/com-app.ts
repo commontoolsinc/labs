@@ -2,20 +2,22 @@ import { LitElement, html } from "lit-element";
 import { customElement, state } from "lit/decorators.js";
 import { base } from "../styles.js";
 
-import { Recipe, emptyGraph } from "../data";
-import { processUserInput } from "../llm";
-import { collectSymbols } from "../graph";
-import { Context, snapshot } from "../state";
+import { Recipe, RecipeNode, emptyGraph } from "../data.js";
+import { processUserInput } from "../llm.js";
+import { collectSymbols } from "../graph.js";
+import { Context, snapshot } from "../state.js";
 import { watch } from "@commontools/common-frp-lit";
 import { SignalSubject } from "../../../common-frp/lib/signal.js";
 import { codePrompt, plan, prepareSteps } from "../plan.js";
 import { thoughtLog } from "../model.js";
 
+const lastFmKey = "0060ba224307ff9f787deb837f4be376";
+
 @customElement("com-app")
 export class ComApp extends LitElement {
-  static styles = [base];
+  static override styles = [base];
 
-  static properties = {
+  static override properties = {
     graph: { type: Object },
     userInput: { type: String },
     snapshot: { type: Object }
@@ -23,70 +25,84 @@ export class ComApp extends LitElement {
 
   @state() graph: Recipe = emptyGraph;
   @state() userInput = "";
-  @state() snapshot: Context<SignalSubject<any>>;
+  @state() snapshot: Context<SignalSubject<any>> = {
+    inputs: {},
+    outputs: {},
+    cancellation: []
+  };
 
-  async appendMessage() {
-    const userInput = this.userInput;
-    this.userInput = "";
-    const newGraph = [...this.graph];
-
-    const symbols = collectSymbols(this.graph);
-    symbols.reverse();
-
-    const spec = await plan(this.userInput, prepareSteps(userInput));
-    const finalPlan = spec?.[spec?.length - 1];
-    console.log("finalPlan", finalPlan);
-    const input = `Implement the following plan using the available tools: ${finalPlan?.content} --- Current graph: \`\`\`json${JSON.stringify(this.graph)}\`\`\``;
-
-    const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
-    const lastFmKey = "0060ba224307ff9f787deb837f4be376";
-
-    const availableFunctions = {
+  availableFunctions(graph: Recipe) {
+    return {
       listNodes: () => {
         console.log("listNodes", this.graph);
         return JSON.stringify(this.graph);
       },
-      addCodeNode: ({ id, node, code }) => {
+      addCodeNode: ({
+        id,
+        node,
+        code
+      }: {
+        id: string;
+        node: Partial<RecipeNode>;
+        code: string;
+      }) => {
         console.log("addCodeNode", id, node, code);
-        newGraph.push({
+        graph.push({
           id,
           contentType: "text/javascript",
           in: {},
+          outputType: {},
           ...node,
           body: code
         });
-        this.graph = JSON.parse(JSON.stringify(newGraph));
+        this.graph = JSON.parse(JSON.stringify(graph));
         this.requestUpdate();
-        return `Added node: ${id}`;
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addUiNode: ({ id, node, body }) => {
+      addUiNode: ({
+        id,
+        node,
+        body
+      }: {
+        id: string;
+        node: Partial<RecipeNode>;
+        body: string;
+      }) => {
         console.log("addUiNode", id, node, body);
-        newGraph.push({
+        graph.push({
           id,
           contentType: "application/json+vnd.common.ui",
           in: {},
+          outputType: {},
           ...node,
           body
         });
-        this.graph = JSON.parse(JSON.stringify(newGraph));
+        this.graph = JSON.parse(JSON.stringify(graph));
         this.requestUpdate();
-        return `Added node: ${id}`;
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addGlslShaderNode: ({ id, shaderToyCode }) => {
+      addGlslShaderNode: ({
+        id,
+        shaderToyCode
+      }: {
+        id: string;
+        shaderToyCode: string;
+      }) => {
         console.log("addGlslShaderNode", id, shaderToyCode);
-        newGraph.push({
+        graph.push({
           id,
           contentType: "text/glsl",
           in: {},
+          outputType: {},
           body: shaderToyCode
         });
-        this.graph = JSON.parse(JSON.stringify(newGraph));
+        this.graph = JSON.parse(JSON.stringify(graph));
         this.requestUpdate();
-        return `Added node: ${id}`;
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addFetchNode: ({ id, url }) => {
+      addFetchNode: ({ id, url }: { id: string; url: string }) => {
         console.log("addFetchNode", id, url);
-        newGraph.push({
+        graph.push({
           id,
           contentType: "application/json+vnd.common.fetch",
           in: {},
@@ -95,13 +111,19 @@ export class ComApp extends LitElement {
           },
           body: url
         });
-        this.graph = JSON.parse(JSON.stringify(newGraph));
+        this.graph = JSON.parse(JSON.stringify(graph));
         this.requestUpdate();
-        return `Added node: ${id}`;
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addLanguageModelNode: ({ id, promptSource }) => {
+      addLanguageModelNode: ({
+        id,
+        promptSource
+      }: {
+        id: string;
+        promptSource: string;
+      }) => {
         console.log("addLanguageModelNode", id, prompt);
-        newGraph.push({
+        graph.push({
           id,
           contentType: "application/json+vnd.common.llm",
           in: {
@@ -112,13 +134,19 @@ export class ComApp extends LitElement {
           },
           body: ""
         });
-        this.graph = JSON.parse(JSON.stringify(newGraph));
+        this.graph = JSON.parse(JSON.stringify(graph));
         this.requestUpdate();
-        return `Added node: ${id}`;
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addImageGenerationNode: ({ id, promptSource }) => {
+      addImageGenerationNode: ({
+        id,
+        promptSource
+      }: {
+        id: string;
+        promptSource: string;
+      }) => {
         console.log("addImageGenerationNode", id, prompt);
-        newGraph.push({
+        graph.push({
           id,
           contentType: "application/json+vnd.common.image",
           in: {
@@ -129,13 +157,13 @@ export class ComApp extends LitElement {
           },
           body: ""
         });
-        this.graph = JSON.parse(JSON.stringify(newGraph));
+        this.graph = JSON.parse(JSON.stringify(graph));
         this.requestUpdate();
-        return `Added node: ${id}`;
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addMusicSearchNode: ({ id, query }) => {
+      addMusicSearchNode: ({ id, query }: { id: string; query: string }) => {
         console.log("addMusicSearchNode", id, query);
-        newGraph.push({
+        graph.push({
           id,
           contentType: "application/json+vnd.common.fetch",
           in: {},
@@ -162,45 +190,69 @@ export class ComApp extends LitElement {
           },
           body: `https://ws.audioscrobbler.com/2.0/?method=album.search&album=${query}&api_key=${lastFmKey}&format=json`
         });
-        this.graph = JSON.parse(JSON.stringify(newGraph));
+        this.graph = JSON.parse(JSON.stringify(graph));
         this.requestUpdate();
-        return `Added node: ${id}`;
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      replaceNode: ({ id, node, body }) => {
+      replaceNode: ({
+        id,
+        node,
+        body
+      }: {
+        id: string;
+        node: Partial<RecipeNode>;
+        body: string;
+      }) => {
         console.log("replaceNode", id, node, body);
-        const index = newGraph.findIndex((n) => n.id === id);
-        newGraph[index] = {
+        const index = graph.findIndex((n) => n.id === id);
+        graph[index] = {
           id,
           contentType: "application/json+vnd.common.ui",
           in: {},
+          outputType: {},
           ...node,
           body
         };
-        this.graph = JSON.parse(JSON.stringify(newGraph));
+        this.graph = JSON.parse(JSON.stringify(graph));
         this.requestUpdate();
-        return `Replaced node: ${id}`;
+        return `Replaced node: ${id}.\n${this.graphSnapshot()}`;
       },
-      deleteNode: ({ id }) => {
+      deleteNode: ({ id }: { id: string }) => {
         console.log("deleteNode", id);
-        const index = newGraph.findIndex((n) => n.id === id);
-        newGraph.splice(index, 1);
-        this.graph = JSON.parse(JSON.stringify(newGraph));
+        const index = graph.findIndex((n) => n.id === id);
+        graph.splice(index, 1);
+        this.graph = JSON.parse(JSON.stringify(graph));
         this.requestUpdate();
-        return `Deleted node: ${id}`;
-      },
-      getNodeOutputValue: ({ id }) => {
-        const val = this.snapshot.outputs?.[id];
-        console.log("getNodeOutputValue", id, val);
-        return JSON.stringify(val);
+        return `Deleted node: ${id}.\n${this.graphSnapshot()}`;
       }
     };
+  }
+
+  graphSnapshot() {
+    return `\`\`\`json${JSON.stringify(this.graph)}\`\`\``;
+  }
+
+  async appendMessage() {
+    const userInput = this.userInput;
+    this.userInput = "";
+
+    const newGraph = [...this.graph];
+    const symbols = collectSymbols(this.graph);
+    symbols.reverse();
+
+    const spec = await plan(userInput, prepareSteps(userInput));
+    const finalPlan = spec?.[spec?.length - 1];
+    console.log("finalPlan", finalPlan);
+    const input = `Implement the following plan using the available tools: ${finalPlan?.content} --- Current graph: ${this.graphSnapshot()}`;
+
+    const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
 
     this.graph = newGraph;
 
     const result = await processUserInput(
       input,
       codePrompt + systemContext,
-      availableFunctions
+      this.availableFunctions(newGraph)
     );
     console.log("result", result);
 
@@ -208,14 +260,13 @@ export class ComApp extends LitElement {
     console.log("graph updated", this.graph);
   }
 
-  render() {
+  override render() {
     const setUserInput = (input: string) => {
       this.userInput = input;
     };
 
-    const setContext = (context: Context) => {
+    const setContext = (context: Context<any>) => {
       this.snapshot = snapshot(context);
-      console.log("SNAPSHOT", this.snapshot);
     };
 
     return html`

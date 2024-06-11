@@ -13,6 +13,13 @@ export * as ComCode from "./components/com-code.js";
 export * as ComData from "./components/com-data.js";
 export * as ComThoughtLog from "./components/com-thought-log.js";
 export * as ComShader from "./components/com-shader.js";
+export * as ComModuleCode from "./components/modules/com-module-code.js";
+export * as ComModuleUi from "./components/modules/com-module-ui.js";
+export * as ComModuleFetch from "./components/modules/com-module-fetch.js";
+export * as ComModuleLlm from "./components/modules/com-module-llm.js";
+export * as ComModuleImage from "./components/modules/com-module-image.js";
+export * as ComModuleShader from "./components/modules/com-module-shader.js";
+
 export * as ComApp from "./components/com-app.js";
 
 import "@intcreator/markdown-element";

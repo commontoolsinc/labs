@@ -247,6 +247,9 @@ export async function processUserInput(
   system: string,
   availableFunctions: { [key: string]: Function }
 ) {
+  const logId = `process(${input}, ${system})`;
+  console.group(logId);
+
   let messages: ChatCompletionMessageParam[] = [
     { role: "system", content: system },
     { role: "user", content: input }
@@ -303,6 +306,8 @@ export async function processUserInput(
       }
     }
   }
+
+  console.groupEnd();
 }
 
 export async function doLLM(
@@ -310,6 +315,7 @@ export async function doLLM(
   system: string,
   response_model: any
 ) {
+  console.group("doLLM");
   try {
     console.log("input", input);
     console.log("system", system);
@@ -319,12 +325,14 @@ export async function doLLM(
       { role: "user", content: input }
     ];
 
+    console.groupEnd();
     return await client.chat.completions.create({
       messages,
       model,
       temperature: 0
     });
   } catch (error) {
+    console.groupEnd();
     console.error("Error analyzing text:", error);
     return null;
   }
@@ -335,6 +343,7 @@ export async function streamLlm(
   system: string,
   respond: (response: any) => void
 ) {
+  console.group("streamLlm");
   try {
     console.log("input", input);
     console.log("system", system);
@@ -359,9 +368,11 @@ export async function streamLlm(
       respond(responses.join(""));
     }
 
+    console.groupEnd();
     return responses.join("");
   } catch (error) {
     console.error("Error analyzing text:", error);
+    console.groupEnd();
     return null;
   }
 }

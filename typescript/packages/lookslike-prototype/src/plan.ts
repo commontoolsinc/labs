@@ -184,12 +184,15 @@ export const codePrompt = `
 type Conversation = ChatCompletionMessageParam[];
 
 export async function plan(userInput: string, steps: string[]) {
+  const logId = `plan[${userInput}]`;
+  console.group(logId);
+
   if (steps.length === 0) {
     console.warn("No steps in plan");
     return;
   }
 
-  console.log(`[${userInput}] plan`, steps);
+  console.log(steps);
 
   let messages: ChatCompletionMessageParam[] = [
     { role: "system", content: steps[0] },
@@ -220,7 +223,7 @@ export async function plan(userInput: string, steps: string[]) {
     }
 
     const latest = message;
-    console.log(`[${userInput}] response`, latest);
+    console.log("response", latest);
     messages.push(latest);
 
     if (msgIdx >= steps.length - 1) {
@@ -238,6 +241,7 @@ export async function plan(userInput: string, steps: string[]) {
 
   suggest(userInput, messages);
 
+  console.groupEnd(logId);
   return messages;
 }
 

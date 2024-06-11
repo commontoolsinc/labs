@@ -28,6 +28,7 @@ export async function run(
   src: string,
   inputs: { [key: string]: any }
 ) {
+  console.group("eval(" + id + ")");
   const rt = new Runtime();
   const storage = new LocalStorage();
 
@@ -53,6 +54,7 @@ export async function run(
   await module.run();
   const output = module.output(["__result__"]);
   const returnValue = await output.read("__result__");
+  console.groupEnd();
   return JSON.parse(returnValue.value.val);
 }
 

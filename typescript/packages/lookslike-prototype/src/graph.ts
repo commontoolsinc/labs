@@ -4,7 +4,15 @@ import { Recipe, RecipeNode } from "./data.js";
 
 import { signal, config } from "@commontools/common-frp";
 import { Context } from "./state.js";
-import { doLLM, generateImage, streamLlm } from "./llm.js";
+import { generateImage, streamLlm } from "./llm.js";
+import {
+  CONTENT_TYPE_FETCH,
+  CONTENT_TYPE_IMAGE,
+  CONTENT_TYPE_JAVASCRIPT,
+  CONTENT_TYPE_LLM,
+  CONTENT_TYPE_UI
+} from "./contentType.js";
+import { SignalSubject } from "../../common-frp/lib/signal.js";
 type Signal<T> = signal.SignalSubject<T>;
 
 config.debug = true;
@@ -72,23 +80,17 @@ export function createRxJSNetworkFromJson(
   // process node definitions and set up reactive logic
   recipe.forEach(async (node) => {
     const inputObservables: Signal<any>[] = [];
-    // const inputs = {} as { [key: string]: Signal<any> };
 
     for (const inputName in node.in) {
       const outputName = node.in[inputName][1];
       if (context.outputs[outputName]) {
         inputObservables.push(context.outputs[outputName]);
-        // inputs[inputName] = context.outputs[outputName];
       }
     }
 
-    // const initial = Object.entries(inputs).map(([k, v]) => [k, v.get()])
-    // if (initial.every(([_k, v]) => v !== null)) {
-    //   await executeNode(node, Object.fromEntries(initial), context.outputs)
-    // }
-
     if (inputObservables.length === 0) {
       await executeNode(node, {}, context.outputs);
+      return;
     }
 
     const allInputs = signal.computed(inputObservables, (...values) => {
@@ -132,27 +134,42 @@ async function executeNode(
 ) {
   console.log("EXECUTE NODE", node.id, inputs);
   const { contentType } = node;
-  if (contentType === "text/javascript" && typeof node.body === "string") {
-    const result = await run(node.id, node.body, inputs);
-    outputs[node.id].send(result);
-  } else if (contentType === "application/json+vnd.common.ui") {
-    const renderedTemplate = createElement(node.body, inputs);
-    outputs[node.id].send(renderedTemplate);
-  } else if (
-    contentType === "application/json+vnd.common.fetch" &&
-    typeof node.body === "string"
-  ) {
-    const url = node.body;
-    const response = await fetch(url);
-    const data = await response.json();
-    outputs[node.id].send(data);
-  } else if (contentType === "application/json+vnd.common.llm") {
-    const response = await streamLlm(inputs.prompt, "", (preview) => {
-      outputs[node.id].send(preview);
-    });
-    outputs[node.id].send(response);
-  } else if (contentType === "application/json+vnd.common.image") {
-    const response = await generateImage(inputs.prompt);
-    outputs[node.id].send(response);
+
+  switch (contentType) {
+    case CONTENT_TYPE_JAVASCRIPT: {
+      if (typeof node.body !== "string") {
+        throw new Error("Expected a string");
+      }
+      const result = await run(node.id, node.body, inputs);
+      outputs[node.id].send(result);
+      break;
+    }
+    case CONTENT_TYPE_UI: {
+      const renderedTemplate = createElement(node.body, inputs);
+      outputs[node.id].send(renderedTemplate);
+      break;
+    }
+    case CONTENT_TYPE_FETCH: {
+      if (typeof node.body !== "string") {
+        throw new Error("Expected a string");
+      }
+      const url = node.body;
+      const response = await fetch(url);
+      const data = await response.json();
+      outputs[node.id].send(data);
+      break;
+    }
+    case CONTENT_TYPE_LLM: {
+      const response = await streamLlm(inputs.prompt, "", (preview) => {
+        outputs[node.id].send(preview);
+      });
+      outputs[node.id].send(response);
+      break;
+    }
+    case CONTENT_TYPE_IMAGE: {
+      const response = await generateImage(inputs.prompt);
+      outputs[node.id].send(response);
+      break;
+    }
   }
 }

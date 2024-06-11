@@ -1,7 +1,6 @@
 import { LitElement, html, css } from "lit-element";
 import { customElement, property, state } from "lit/decorators.js";
 import { base } from "../styles";
-import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { RecipeNode } from "../data.js";
 import { SignalSubject } from "../../../common-frp/lib/signal.js";
 import { signal } from "@commontools/common-frp";
@@ -15,85 +14,55 @@ function definitionToHtml(
     return html`<pre>loading...</pre>`;
   }
 
+  const relay = (ev: CustomEvent) => {
+    dispatch(
+      new CustomEvent("updated", {
+        detail: {
+          body: ev.detail.body
+        }
+      })
+    );
+  };
+
   if (node.contentType === "text/javascript") {
-    const codeChanged = (ev) => {
-      node.body = ev.detail.code;
-      const event = new CustomEvent("updated", {
-        detail: {
-          body: node.body
-        }
-      });
-      dispatch(event);
-    };
-
-    const dataChanged = (ev) => {
-      const event = new CustomEvent("overriden", {
-        detail: {
-          data: ev.detail.data,
-          json: true
-        }
-      });
-      dispatch(event);
-    };
-
-    return html`
-      <com-code .code=${node.body} @updated=${codeChanged}></com-code>
-      <com-data
-        .data=${JSON.stringify(value, null, 2)}
-        @updated=${dataChanged}
-      ></com-data>
-    `;
+    return html`<com-module-code
+      .node=${node}
+      .value=${value}
+      @updated=${relay}
+    ></com-module-code>`;
   }
 
   if (node.contentType === "application/json+vnd.common.ui") {
-    if (!value) {
-      return html`<pre>loading...</pre>`;
-    }
-    // const el = createElement(node.body, context || {})
-    const sourceHtml = value.outerHTML;
-
-    console.log("sourceHtml", sourceHtml);
-    return html`<div>${unsafeHTML(sourceHtml)}</div>
-      <com-toggle>
-        <com-data .data=${sourceHtml}></com-data>
-        <com-data .data=${JSON.stringify(node.body, null, 2)}></com-data>
-      </com-toggle>`;
+    return html`<com-module-ui .node=${node} .value=${value}></com-module-ui>`;
   }
 
   if (node.contentType === "application/json+vnd.common.fetch") {
-    return html`
-      <com-data .data=${node.body}></com-data>
-      <com-data .data=${JSON.stringify(value, null, 2)}></com-data>
-    `;
+    return html`<com-module-fetch
+      .node=${node}
+      .value=${value}
+    ></com-module-fetch>`;
   }
 
   if (node.contentType === "application/json+vnd.common.llm") {
-    return html`
-      <markdown-element .markdown=${value}></markdown>`;
+    return html`<com-module-llm
+      .node=${node}
+      .value=${value}
+    ></com-module-llm>`;
   }
 
   if (node.contentType === "application/json+vnd.common.image") {
-    return html`
-      <com-data .data=${JSON.stringify(value, null, 2)}></com-data>
-      <img src=${value} style="max-width: 100%"></img>
-    `;
+    return html`<com-module-image
+      .node=${node}
+      .value=${value}
+    ></com-module-image>`;
   }
 
   if (node.contentType === "text/glsl") {
-    const codeChanged = (ev) => {
-      node.body = ev.detail.code;
-      const event = new CustomEvent("updated", {
-        detail: {
-          body: node.body
-        }
-      });
-      dispatch(event);
-    };
-
-    return html`
-      <com-code .code=${node.body} @updated=${codeChanged}></com-code>
-      <com-shader .fragmentShader=${node.body}></com-shader>
-    `;
+    return html`<com-module-shader
+      .node=${node}
+      .value=${value}
+      @updated=${relay}
+    ></com-module-shader>`;
   }
 
   return html`<pre>${JSON.stringify(node, null, 2)}</pre>`;
