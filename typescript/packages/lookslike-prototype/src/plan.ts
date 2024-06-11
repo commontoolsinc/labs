@@ -1,9 +1,10 @@
 import {
+  ChatCompletionMessage,
   ChatCompletionMessageParam,
   ChatCompletionTool
 } from "openai/resources/index.mjs";
-import { client, model, toolSpec } from "./llm.js";
-import { recordThought } from "./model.js";
+import { client, messageReducer, model, toolSpec } from "./llm.js";
+import { recordThought, updateThought } from "./model.js";
 
 export const codePrompt = `
   Your task is to take a user description or request and produce a series of nodes for a computation graph. Nodes can be code blocks or UI components and they communicate with named ports.
@@ -205,13 +206,22 @@ export async function plan(userInput: string, steps: string[]) {
     const response = await client.chat.completions.create({
       messages,
       model,
-      temperature: 0
+      temperature: 0,
+      stream: true
     });
 
-    const latest = response.choices[0].message;
+    let message = {} as ChatCompletionMessage;
+    const thoughtId = await recordThought(message);
+    let finishReason = null as string | null;
+    for await (const chunk of response) {
+      finishReason ||= chunk.choices[0].finish_reason;
+      message = messageReducer(message, chunk);
+      await updateThought(thoughtId, message);
+    }
+
+    const latest = message;
     console.log(`[${userInput}] response`, latest);
     messages.push(latest);
-    await recordThought(latest);
 
     if (msgIdx >= steps.length - 1) {
       running = false;

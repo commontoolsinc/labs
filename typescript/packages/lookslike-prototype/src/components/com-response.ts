@@ -68,8 +68,7 @@ function definitionToHtml(
 
   if (node.contentType === "application/json+vnd.common.llm") {
     return html`
-      <com-data .data=${JSON.stringify(value, null, 2)}></com-data>
-    `;
+      <markdown-element .markdown=${value}></markdown>`;
   }
 
   if (node.contentType === "application/json+vnd.common.image") {

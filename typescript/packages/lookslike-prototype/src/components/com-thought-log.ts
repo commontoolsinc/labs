@@ -44,16 +44,25 @@ export class ComThoughtLog extends LitElement {
     }
   `;
 
-  @property({ type: Array }) thoughts: ChatCompletionMessageParam[] = [];
+  @property({ type: Array }) thoughts: {
+    [id: number]: ChatCompletionMessageParam;
+  } = {};
 
   render() {
+    const thoughts = Object.entries(this.thoughts)
+      .toSorted((a, b) => a[0] - b[0])
+      .map(([, thought]) => thought);
+
     return html`<div class="thought-log">
-      ${this.thoughts.map((thought, idx) => {
-        const last = idx === this.thoughts.length - 1;
+      ${thoughts.map((thought, idx) => {
+        const last = idx === thoughts.length - 1;
         const truncatedContent = thought.content?.slice(0, 100) + "...";
         return html`<div class="thought">
           <div class="role">${thought.role}</div>
-          <pre class="preview">${last ? "" : truncatedContent}</pre>
+          ${last &&
+          html`<markdown-element
+            markdown=${thought.content}
+          ></markdown-element>`}
           <com-toggle>
             <markdown-element markdown=${thought.content}></markdown-element>
           </com-toggle>

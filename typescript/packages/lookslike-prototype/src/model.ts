@@ -3,8 +3,11 @@ import { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 const { state, effect } = signal;
 const { generate, scan } = stream;
 
-const subscribers = [] as Function[];
-function subscribe(cb: Function) {
+export type Thought = { id: number; message: ChatCompletionMessageParam };
+type Sub = (thought: Thought) => void;
+
+const subscribers = [] as Sub[];
+function subscribe(cb: Sub) {
   subscribers.push(cb);
   return () => {
     const idx = subscribers.indexOf(cb);
@@ -14,19 +17,35 @@ function subscribe(cb: Function) {
   };
 }
 
-const thoughts = generate<ChatCompletionMessageParam>((send) =>
-  subscribe(send)
-);
+const thoughts = generate<Thought>((send) => subscribe(send));
 export const thoughtLog = scan(
   thoughts,
-  (state, v) => [...state, v],
-  [] as ChatCompletionMessageParam[]
+  (state, v) => {
+    return {
+      ...state,
+      [v.id]: v.message
+    };
+  },
+  {} as { [id: number]: ChatCompletionMessageParam }
 );
+
+let thoughtId = 0;
+
+export async function updateThought(
+  id: number,
+  message: ChatCompletionMessageParam
+) {
+  for (const sub of subscribers) {
+    sub({ id: id, message });
+  }
+}
 
 export async function recordThought(message: ChatCompletionMessageParam) {
   for (const sub of subscribers) {
-    sub(message);
+    sub({ id: thoughtId, message });
   }
+
+  return thoughtId++;
 
   // const val = thinkingLog.get();
   // val.push(message);

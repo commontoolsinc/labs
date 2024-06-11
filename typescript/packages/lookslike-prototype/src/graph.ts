@@ -4,7 +4,7 @@ import { Recipe, RecipeNode } from "./data.js";
 
 import { signal, config } from "@commontools/common-frp";
 import { Context } from "./state.js";
-import { doLLM, generateImage } from "./llm.js";
+import { doLLM, generateImage, streamLlm } from "./llm.js";
 type Signal<T> = signal.SignalSubject<T>;
 
 config.debug = true;
@@ -147,9 +147,10 @@ async function executeNode(
     const data = await response.json();
     outputs[node.id].send(data);
   } else if (contentType === "application/json+vnd.common.llm") {
-    const response = await doLLM(inputs.prompt, "", undefined);
-    const data = response?.choices[0].message.content;
-    outputs[node.id].send(data);
+    const response = await streamLlm(inputs.prompt, "", (preview) => {
+      outputs[node.id].send(preview);
+    });
+    outputs[node.id].send(response);
   } else if (contentType === "application/json+vnd.common.image") {
     const response = await generateImage(inputs.prompt);
     outputs[node.id].send(response);
