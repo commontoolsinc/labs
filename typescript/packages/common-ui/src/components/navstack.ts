@@ -71,10 +71,15 @@ export class NavStack extends LitElement {
     const panels = repeat(
       Object.values(this.panels),
       (panel: PanelModel) => {
+        const className = this.active === panel.id ?
+          'panel-active' : 'panel-inactive';
+
         return html`
-        <com-navpanel class="${this.active === panel.id ? 'panel-active' : 'panel-inactive'}" content="${panel.content}">
+        <com-navpanel
+          class="${className}"
+          content="${panel.content}">
         </com-navpanel>
-        `
+        `;
       }
     )
 

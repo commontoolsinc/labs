@@ -1,15 +1,18 @@
-import * as Tags from './tags.js';
 import { View } from './view.js';
 
-const {freeze, values, fromEntries} = Object;
+const registry = () => {
+  const viewByName = new Map<string, View>();
+  const viewByTag = new Map<string, View>();
 
-const viewByName: Record<string, View> = freeze({...Tags});
+  const getViewByTag = (tag: string) => viewByTag.get(tag);
+  const getViewByName = (name: string) => viewByName.get(name);
 
-/** Index of factory functions by HTML tag name */
-const viewByTag = freeze(
-  fromEntries(
-    values(viewByName).map((factory) => [factory.tag, factory])
-  )
-);
+  const register = (view: View) => {
+    viewByName.set(view.name, view);
+    viewByTag.set(view.tag, view);
+  }
 
-export const getViewByTag = (tag: string) => viewByTag[tag];
+  return {getViewByTag, getViewByName, register};
+}
+
+export const {getViewByTag, getViewByName, register} = registry();

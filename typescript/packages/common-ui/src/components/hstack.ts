@@ -1,8 +1,11 @@
 import { LitElement, html, css } from 'lit-element';
 import { customElement } from 'lit-element/decorators.js';
 import { view } from '../hyperscript/view.js';
+import { register as registerView } from '../hyperscript/known-tags.js';
 
 export const hstack = view('co-hstack', {});
+
+registerView(hstack);
 
 @customElement('co-hstack')
 export class HStackElement extends LitElement {

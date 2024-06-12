@@ -2,13 +2,10 @@ import { LitElement, html, css } from 'lit-element';
 import { customElement, property } from 'lit-element/decorators.js';
 import { VNode, view } from '../hyperscript/view.js';
 import { render, RenderContext } from '../hyperscript/render.js';
+import { register as registerView } from '../hyperscript/known-tags.js';
 
 export const navpanel = view('co-navpanel', {});
-
-export type PanelModel = {
-  id: string;
-  content: VNode;
-}
+registerView(navpanel);
 
 @customElement('co-navpanel')
 export class NavPanelElement extends LitElement {
