@@ -1,6 +1,6 @@
-import { signal, stream } from "@commontools/common-frp";
+import { stream } from "@commontools/common-frp";
 import { ChatCompletionMessageParam } from "openai/resources/index.mjs";
-const { state, effect } = signal;
+import { Signal } from "../../common-frp/lib/signal.js";
 const { generate, scan } = stream;
 
 export type Thought = { id: number; message: ChatCompletionMessageParam };
@@ -18,16 +18,17 @@ function subscribe(cb: Sub) {
 }
 
 const thoughts = generate<Thought>((send) => subscribe(send));
-export const thoughtLog = scan(
-  thoughts,
-  (state, v) => {
-    return {
-      ...state,
-      [v.id]: v.message
-    };
-  },
-  {} as { [id: number]: ChatCompletionMessageParam }
-);
+export const thoughtLog: Signal<{ [id: number]: ChatCompletionMessageParam }> =
+  scan(
+    thoughts,
+    (state, v) => {
+      return {
+        ...state,
+        [v.id]: v.message
+      };
+    },
+    {} as { [id: number]: ChatCompletionMessageParam }
+  );
 
 let thoughtId = 0;
 
@@ -46,8 +47,4 @@ export async function recordThought(message: ChatCompletionMessageParam) {
   }
 
   return thoughtId++;
-
-  // const val = thinkingLog.get();
-  // val.push(message);
-  // thinkingLog.send(val);
 }

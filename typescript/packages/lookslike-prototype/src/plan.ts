@@ -5,6 +5,7 @@ import {
 } from "openai/resources/index.mjs";
 import { client, messageReducer, model, toolSpec } from "./llm.js";
 import { recordThought, updateThought } from "./model.js";
+import { Recipe } from "./data.js";
 
 export const codePrompt = `
   Your task is to take a user description or request and produce a series of nodes for a computation graph. Nodes can be code blocks or UI components and they communicate with named ports.
@@ -16,19 +17,6 @@ export const codePrompt = `
 
   addCodeNode({
     "id": "todos",
-    "node": {
-      "in": {},
-      "outputType": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "label": { "type": "string" },
-            "checked": { "type": "boolean" }
-          }
-        }
-      },
-    },
     "code": "return [{ label: 'Water my plants', checked: false }, { label: 'Buy milk', checked: true }];"
   })
 
@@ -41,19 +29,6 @@ export const codePrompt = `
 
   addCodeNode({
     "id": "addReminder",
-    "node": {
-      "in": {},
-      "outputType": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "label": { "type": "string" },
-            "checked": { "type": "boolean" }
-          }
-        }
-      },
-    },
     "code": "const todos = input('todos');\nconst newTodo = { label: 'water the plants', checked: false };\nconst newTodos = [...todos, newTodo];\nreturn newTodos;"
   })
 
@@ -66,21 +41,6 @@ export const codePrompt = `
 
   addCodeNode({
     "id": "filteredTodos",
-    "node": {
-      "in": {
-        "todos": [".", "todos"]
-      },
-      "outputType": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "label": { "type": "string" },
-            "checked": { "type": "boolean" }
-          }
-        }
-      },
-    },
     "code": "const todos = input('todos');\nreturn todos.filter(todo => todo.checked);"
   })
 
@@ -91,19 +51,11 @@ export const codePrompt = `
   ---
 
   "render each image by url" ->
-  images is an array of strings (URLs)
+  The output of a code node will be bound to the input named 'images'
 
   addUiNode({
     "id": "imageUi",
-    "node": {
-      "in": {
-        "images": [".", "images"]
-      },
-      "outputType": {
-        "$id": "https://common.tools/ui.schema.json"
-      },
-    },
-    "body": {
+    "uiTree": {
       "tag": "ul",
       "props": {
         "className": "image"
@@ -132,18 +84,11 @@ export const codePrompt = `
   ---
 
   "render my todos" ->
+  The output of a code node will be bound to the input named 'todos'
 
   addUiNode({
     "id": "todoUi",
-    "node": {
-      "in": {
-        "todos": [".", "todos"]
-      },
-      "outputType": {
-        "$id": "https://common.tools/ui.schema.json"
-      },
-    },
-    "body": {
+    "uiTree": {
       "tag": "ul",
       "props": {
         "className": "todo"
@@ -241,7 +186,7 @@ export async function plan(userInput: string, steps: string[]) {
 
   suggest(userInput, messages);
 
-  console.groupEnd(logId);
+  console.groupEnd();
   return messages;
 }
 
@@ -263,55 +208,77 @@ export async function suggest(input: string, fullPlan: Conversation) {
   return response.choices[0].message;
 }
 
-export function describeTools(tools: ChatCompletionTool[]) {
+export function describeTools(
+  tools: ChatCompletionTool[],
+  includeParameters: boolean = false
+) {
   return tools
     .map((tool) => {
-      return `- ${tool.function.name}: ${tool.function.description}`;
+      const description = `- ${tool.function.name}: ${tool.function.description}`;
+      const properties = Object.entries(
+        tool.function.parameters?.properties || {}
+      )
+        .map(([name, { type, description }]) => {
+          return `  - ${name} (${type}): ${description}`;
+        })
+        .join("\n");
+      if (!includeParameters) {
+        return description;
+      }
+      return `${description}\n${properties}`;
     })
     .join("\n");
 }
 
-export function prepareSteps(userInput: string) {
-  return [
-    `Assist a user in dynamically generating software to solve their problems using a reactive graph data model. Modules, acting as nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules:
+export function prepareSteps(userInput: string, recipe: Recipe) {
+  if (recipe.length === 0) {
+    return [
+      `Assist a user in dynamically generating software to solve their problems using a reactive graph data model. Modules, acting as nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules:
 
-    ${describeTools(toolSpec)}
+      ${describeTools(toolSpec, false)}
 
-    To declare a constant value, return it from a code node as a literal.
+      To declare a constant value, return it from a code node as a literal.
 
-    Plan at a high level and be extremely concise, use pseudocode to sketch the technical approach. Write as concisely and accurately as possible without introducing assumptions or full specifying the details.`,
-    `
+      Plan your approach at a high level and be extremely concise, use pseudocode to sketch the technical approach. Write as concisely and accurately as possible without introducing assumptions or full specifying the details. Code nodes cannot mutate state, they are pure functions only. Do not attempt to model them as having side effects.`,
+      `
     <user-request>${userInput}</user-request>
 
-    Based on the request and available modules, list requirements for a simple piece of ephemeral software:
-    - Retrieve, map, filter and render using a reactive graph data model
-    - Connect modules with output/input relationships`,
-    `At a high level, plan which nodes and connections you will create in the reactive graph to service an MVP version of this request.
-      Give each node an ID and describe its purpose. Each node can have several named inputs which can be mapped to the outputs of other node ID.
-      The output of all nodes must be used and all inputs must be mapped to valid outputs.
+    Based on the available modules imagine what the user would be delighted by, based on their input. Do not overcomplicate it or add superfluous features.
+
+    <refined-request>
     `,
-    `Reflect on the plan, does it make sense for a incredibly small immediately useful application?
+      `Service an MVP version of this request.
+    Give each node an ID and describe its purpose. Each node can have several named inputs which can be mapped to the outputs of other node ID.
+    The output of all nodes must be used and all inputs must be mapped to valid outputs.
+    `,
+      `Reflect on the plan, does it make sense for a incredibly small immediately useful application? Can you implement it with these tools?
+
+      ${describeTools(toolSpec, true)}
 
     Ensure all node are created in a logical order, so that the dependencies always exist. Start with fetching data, then processing, filtering, mapping and rendering.
     You must create a code node to declare constant values for code but NOT for shader uniforms. For static data you may inline constants into the code/shader nodes.
 
     Adjust the plan to make sure the user will be happy with the request: ${userInput}`
-    // `With the requirements specified, create a user interface using the following UI components:
+    ];
+  } else {
+    return [
+      `Assist a user in modifying a dynamic piece of software to solve their problems using a reactive graph data model. Modules, acting as nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules:
 
-    // - **Input box (\`input\`)**: Collect basic user input (text, number).
-    // - **Data table (\`data\`)**: Display sortable and filterable rows of records with optional actions.
-    // - **List (\`list\`)**: Display a list of items with optional actions.
-    // - **Calendar (\`calendar\`)**: Show a calendar with items on each day.
-    // - **Detail card (\`card\`)**: Show an information card for a document/item with appropriate data rendering.
-    // - **Card pile (\`pile\`)**: Display a z-stacked set of media items with optional actions.
-    // - **Text/code/data editor (\`editor\`)**: Provide a basic editor for unformatted text.
+      <user-request>${userInput}</user-request>
 
-    // For the MVP, use the most appropriate components to present the interface:
+    ${describeTools(toolSpec, true)}
 
-    // 1. **Input Box**: Collect user input.
-    // 2. **Data Table**: Display and manage records.
-    // 3. **Detail Card**: Show detailed information for selected items.
+    The current graph is:
 
-    // Keep the interface simple to gradually build towards a complete application.`
-  ];
+    \`\`\`json
+    ${JSON.stringify(recipe, null, 2)}
+    \`\`\`
+    Explain which nodes will be altered, added or removed. Do not repeat the entire graph.
+    Code nodes cannot mutate state, they are pure functions only.
+    Do not attempt to model them as having side effects`,
+      `Reflect on the plan. The user has requested a specific change. Do not overcomplicate it or add superfluous features. Just make the change.
+
+      <user-request>${userInput}</user-request>`
+    ];
+  }
 }

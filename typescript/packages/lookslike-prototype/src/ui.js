@@ -68,6 +68,9 @@ export function createElement(node, context) {
         element.addEventListener(key, context[value.name]);
       }
     } else {
+      if (key === "style") {
+        Object.assign(element.style, value);
+      }
       element[key] = value;
     }
   }

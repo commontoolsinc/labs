@@ -4,10 +4,10 @@ import { fetchApiKey } from "./apiKey.js";
 import {
   ChatCompletionMessage,
   ChatCompletionMessageParam,
-  ChatCompletionTool
-} from "openai/resources";
+  ChatCompletionTool,
+  ChatCompletionChunk
+} from "openai/resources/index.mjs";
 import { recordThought } from "./model.js";
-import { ChatCompletionChunk } from "openai/resources/index.mjs";
 
 export let model = "gpt-4o";
 export const apiKey = fetchApiKey() as string;
@@ -21,25 +21,38 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "addConnection",
+      description: "Adds a connection between two existing nodes.",
+      parameters: {
+        type: "object",
+        properties: {
+          fromOutput: {
+            type: "string",
+            description: "The ID of the output node in the graph"
+          },
+          toInput: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Path to the node + port to connect to, e.g. ['nodeId', 'portName']"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "addCodeNode",
-      description: "Adds a new code node to the graph written in javascript.",
+      description:
+        "Add a data transformation node to the graph written in javascript, write only the function body.",
       parameters: {
         type: "object",
         properties: {
           id: { type: "string" },
-          node: {
-            type: "object",
-            properties: {
-              in: {
-                type: "object"
-              },
-              outputType: {
-                type: "object"
-              }
-            }
-          },
           code: { type: "string" }
-        }
+        },
+        required: ["id", "code"]
       }
     }
   },
@@ -47,25 +60,14 @@ export const toolSpec: ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "addUiNode",
-      description:
-        "Adds a new ui node to the graph written using a hyperscript style.",
+      description: "Adds a UI node written using a hyperscript tree.",
       parameters: {
         type: "object",
         properties: {
           id: { type: "string" },
-          node: {
-            type: "object",
-            properties: {
-              in: {
-                type: "object"
-              },
-              outputType: {
-                type: "object"
-              }
-            }
-          },
-          body: { type: "object" }
-        }
+          uiTree: { type: "object", description: "The UI tree." }
+        },
+        required: ["id", "uiTree"]
       }
     }
   },
@@ -73,8 +75,7 @@ export const toolSpec: ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "addFetchNode",
-      description:
-        "Adds a new fetch node to the graph to retrieve (GET) data from the web.",
+      description: "Fetch node to retrieve (GET) data from the web.",
       parameters: {
         type: "object",
         properties: {
@@ -89,7 +90,7 @@ export const toolSpec: ChatCompletionTool[] = [
     function: {
       name: "addGlslShaderNode",
       description:
-        "Adds a new GLSL shader node to the graph written in ShaderToy format. You may not use any iChannels, only iTime, iResolution, and iMouse and these are already defined. Do not re-define them.",
+        "Shader node in ShaderToy format. You may not use any iChannels, only iTime, iResolution, and iMouse. Do not re-define them.",
       parameters: {
         type: "object",
         properties: {
@@ -103,8 +104,7 @@ export const toolSpec: ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "addLanguageModelNode",
-      description:
-        "Adds a new LLM node to the graph to get a response in text format.",
+      description: "LLM node to the graph, responds in text format.",
       parameters: {
         type: "object",
         properties: {
@@ -123,7 +123,7 @@ export const toolSpec: ChatCompletionTool[] = [
     function: {
       name: "addImageGenerationNode",
       description:
-        "Adds a new Image Model node to the graph to generate an image based on a description. The output is the URL.",
+        "Generate an image from a prompt/description. The output is the URL.",
       parameters: {
         type: "object",
         properties: {
@@ -132,44 +132,6 @@ export const toolSpec: ChatCompletionTool[] = [
             type: "string",
             description:
               "Name of the node who's output should be used as the prompt"
-          }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "addMusicSearchNode",
-      description: `Adds a new fetch node to the graph to search last.fm.
-
-      The response is an object where the JSON path to the albums array is \`results.albumsmatches.album\`
-      `,
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          query: { type: "string" }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "replaceNode",
-      description: "Replaces an existing node in the graph.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          newNode: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              data: { type: "object" }
-            },
-            required: ["id", "data"]
           }
         }
       }
@@ -234,8 +196,7 @@ export async function processUserInput(
   system: string,
   availableFunctions: { [key: string]: Function }
 ) {
-  const logId = `process(${input}, ${system})`;
-  console.group(logId);
+  console.group(`process`);
 
   let messages: ChatCompletionMessageParam[] = [
     { role: "system", content: system },
@@ -265,7 +226,7 @@ export async function processUserInput(
     }
 
     if (finishReason === "stop") {
-      return response;
+      return message;
     }
 
     const latest = message;
@@ -286,7 +247,7 @@ export async function processUserInput(
         console.log("response", toolCall.id, functionResponse);
         const toolResponse = {
           tool_call_id: toolCall.id,
-          role: "tool",
+          role: "tool" as const,
           content: functionResponse
         };
         messages.push(toolResponse);
@@ -295,13 +256,10 @@ export async function processUserInput(
   }
 
   console.groupEnd();
+  return null;
 }
 
-export async function doLLM(
-  input: string,
-  system: string,
-  response_model: any
-) {
+export async function doLLM(input: string, system: string, _: any = undefined) {
   console.group("doLLM");
   try {
     console.log("input", input);
@@ -369,7 +327,12 @@ export function grabViewTemplate(txt: string) {
 }
 
 export function grabJson(txt: string) {
-  return JSON.parse(txt.match(/```json\n([\s\S]+?)```/)[1]);
+  const json = txt.match(/```json\n([\s\S]+?)```/)?.[1];
+  if (!json) {
+    console.error("No JSON found in text", txt);
+    return {};
+  }
+  return JSON.parse(json);
 }
 
 export function extractResponse(data: any) {

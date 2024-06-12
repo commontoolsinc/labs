@@ -41,7 +41,7 @@ const styles = css`
 
 @customElement("com-thread")
 export class ComThread extends LitElement {
-  static styles = [base, styles];
+  static override styles = [base, styles];
 
   @property({ type: Object }) graph = {} as Recipe;
   @state() context = {} as Context<SignalSubject<any>>;

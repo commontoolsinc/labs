@@ -15,7 +15,7 @@ import {
 import { SignalSubject } from "../../common-frp/lib/signal.js";
 type Signal<T> = signal.SignalSubject<T>;
 
-config.debug = true;
+// config.debug = true;
 
 export function collectSymbols(recipe: Recipe) {
   const symbols = [] as { symbol: string; type: any }[];
@@ -90,7 +90,6 @@ export function createRxJSNetworkFromJson(
 
     if (inputObservables.length === 0) {
       await executeNode(node, {}, context.outputs);
-      return;
     }
 
     const allInputs = signal.computed(inputObservables, (...values) => {
@@ -121,10 +120,6 @@ export function createRxJSNetworkFromJson(
   });
 
   return context;
-}
-
-async function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function executeNode(
@@ -160,14 +155,18 @@ async function executeNode(
       break;
     }
     case CONTENT_TYPE_LLM: {
-      const response = await streamLlm(inputs.prompt, "", (preview) => {
-        outputs[node.id].send(preview);
-      });
+      const response = await streamLlm(
+        JSON.stringify(inputs.prompt),
+        "",
+        (preview) => {
+          outputs[node.id].send(preview);
+        }
+      );
       outputs[node.id].send(response);
       break;
     }
     case CONTENT_TYPE_IMAGE: {
-      const response = await generateImage(inputs.prompt);
+      const response = await generateImage(JSON.stringify(inputs.prompt));
       outputs[node.id].send(response);
       break;
     }
