@@ -66,14 +66,82 @@
  *    here means any term on the right can be absorbed by terms on the left.
  *
  *
- *  Next we need to model declassification, which is removing confidentiality
- *  terms that appear as integrity. TODO: Spell out
+ *  Next we need to model declassification, which we model as removing
+ *  confidentiality constraints when the data has the corresponding integrity.
+ *  Effectively, the JoinExpression of integrity says that our data is trusted
+ *  by any of the individual principals in the join. So we can remove any
+ *  individual ones that appear in a join expressoin of declassifiers.
+ *
+ *  Note:
+ *  - Flow principals shouldn't be "trusted" by module outputs (unless we really
+ *    mean declassification to public). But it seems tempting to say this
+ *    "module Foo is trusted by trustedAPIaccess".
+ *
  *
  *  Next we consider restrictions on the flow provided by module manifests. Note
  *  that these don't require trust, they are voluntary restrictions on the flow,
  *  usually so that their output can be trusted by others, or to get the ability
- *  to use a sensitive capability (which restricts what data it would ever see).
- *  TODO: Spell out
+ *  to use a sensitive capability (which restricts what data it would ever see):
+ *
+ *  - Constraints on the output data, based on the input data:
+ *    - Required output, captured in the schema as non-optional field: The
+ *      confidentiality of the field name (not the data) is the confidentiality
+ *      of all required inputs, but not influenced by the confidentiality of the
+ *      values. This should be fairly common.
+ *    - Only reading a subset of the input data: The provided schema still
+ *      constraints what input is allowed, even if only a subset is actually
+ *      read.
+ *    - Exact copy of some input data
+ *      - Often combined with marking input data as opaque. The module can pass
+ *        the reference along, but not read the data, hence not taint the
+ *        outputs with the other input data.
+ *        - It's possible to express "original input plus this field" as output.
+ *          That is passing through an object with the original input and adding
+ *          or changing a field.
+ *      - For lists:
+ *        - All entries come from an input list, same length, no duplicates
+ *        - Subset of the input list
+ *        - Single entry from the input list
+ *        - Same length as input list, but otherwise transformed
+ *  - Maximum confidentiality of some input data (this is usually derived from a
+ *    capability the module requests, e.g. network access to a specific domain).
+ *  - Minimum integrity of some input data
+ *  - Selective declassification of some input data: If the module can
+ *    declassify data, it'll only declassify the marked data and not the rest
+ *    (e.g. a specific sensitive input like an API key that it declassifies
+ *    while not allowing data sensitive data to come in through other input
+ *    parameters)
+ *  - Maximum integrity of some output data: The module only endorses part of
+ *    the output data. Can be stated as a function of input integrity. E.g. a
+ *    fetch module can say that T integrity is only guaranteed if the input url
+ *    has `URLTrustedFor<T>`, where T is e.g. "no prompt injection".
+ *  - Minimum confidentiality of some output data: The module raises output
+ *    confidentiality, typically expressed as a guardrail principal. E.g. a
+ *    module that fetches data with an auth key would raise the confidentiality
+ *    of the output to the level of the auth key (and also declassify the auth
+ *    key, see above).
+ *
+ * Implementation-wise the first class ("copy over" and partial reads) mean that
+ * the rules above are applied more selectively. We have to translate the paths
+ * to subset of the state space and manage labels accordingly. Note:
+ *  - Field names can have different values than the values. With lists we also
+ *    maintain a label for the length and the order. E.g. a module that just
+ *    ranks input entries only taints the order and nothing else. A trusted
+ *    module that sorts the list then declassifies the order and replaces it
+ *    with just the sort criteria's confidentiality. TODO: Can we get set
+ *    semantics, i.e. the order is irrelevant?
+ *  - Integrity is expressed over a group of values and the same values
+ *    independently don't have the same integrity. Consider lat & long and a
+ *    module that reads two pairs and swaps them. We'll have to write that as
+ *    four subsets of the original integrity, and don't recombine them
+ *    automatically afterwards.
+ *
+ * The label constraints should all directly translate to constraints as above.
+ * The trickiest one is output integrity, because now we have to consider the
+ * meet of `ModuleOutput<Foo, ..>` and the extra constraint. TODO: Maybe instead
+ * such cases are actually an expressin that replaces the ModuleOutput default?
+ * We still need to model the trust in the module here though, it's essentially
+ * a meet between that and this claim.
  */
 
 import { Recipe } from "./recipe.ts";
@@ -88,7 +156,6 @@ import {
   BOTTOM,
 } from "./principals.ts";
 import { ModuleDefinition, ConstraintOnData, Path } from "./module.ts";
-import { Guardrail } from "./guardrail.ts";
 
 export class ValidationError extends Error {}
 

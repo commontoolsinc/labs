@@ -1,9 +1,6 @@
 // IFC examples, expressed as tests
 
-import {
-  assertEquals,
-  assert,
-} from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 
 import { TrustStatements, makeLattice } from "./lattice.ts";
 import { Recipe } from "./recipe.ts";
