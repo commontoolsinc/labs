@@ -1,4 +1,4 @@
-import { stream } from "@commontools/common-frp";
+import { stream, signal } from "@commontools/common-frp";
 import { ChatCompletionMessageParam } from "openai/resources/index.mjs";
 import { Signal } from "../../common-frp/lib/signal.js";
 const { generate, scan } = stream;

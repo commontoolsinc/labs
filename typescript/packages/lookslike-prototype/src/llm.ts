@@ -7,7 +7,7 @@ import {
   ChatCompletionTool,
   ChatCompletionChunk
 } from "openai/resources/index.mjs";
-import { recordThought } from "./model.js";
+import { currentlyWorking, recordThought } from "./model.js";
 
 export let model = "gpt-4o";
 export const apiKey = fetchApiKey() as string;
@@ -104,7 +104,8 @@ export const toolSpec: ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "addLanguageModelNode",
-      description: "LLM node to the graph, responds in text format.",
+      description:
+        "LLM node to the graph, responds in text format. Prompt must be calculated using a code node.",
       parameters: {
         type: "object",
         properties: {

@@ -86,10 +86,15 @@ export class ComThread extends LitElement {
   }
 
   override willUpdate(changedAttributes: Map<string, any>): void {
-    if (changedAttributes.has("graph")) {
+    if (
+      changedAttributes.has("graph") &&
+      JSON.stringify(this.graph) !== JSON.stringify(this.lastGraph)
+    ) {
       console.log("rebuilding graph");
       this.context.cancellation?.forEach((cancel) => cancel());
+
       this.context = createRxJSNetworkFromJson(this.graph);
+      this.lastGraph = this.graph;
     }
   }
 

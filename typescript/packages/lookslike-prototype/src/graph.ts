@@ -77,6 +77,7 @@ export function createRxJSNetworkFromJson(
     }
   });
 
+  console.log("EXECUTE NODE about to re-run entire graph");
   // process node definitions and set up reactive logic
   recipe.forEach(async (node) => {
     const inputObservables: Signal<any>[] = [];
@@ -89,7 +90,9 @@ export function createRxJSNetworkFromJson(
     }
 
     if (inputObservables.length === 0) {
+      console.log("EXECUTE NODE Running node on mount", node.id);
       await executeNode(node, {}, context.outputs);
+      return;
     }
 
     const allInputs = signal.computed(inputObservables, (...values) => {
@@ -114,6 +117,11 @@ export function createRxJSNetworkFromJson(
         return;
       }
 
+      console.log(
+        "EXECUTE NODE Re-running node because inputs changed",
+        node.id,
+        values
+      );
       await executeNode(node, values, context.outputs);
     });
     context.cancellation.push(cancel);
