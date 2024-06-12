@@ -1,68 +1,66 @@
-import { LitElement, html, css } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
-import { EditorView, basicSetup } from "codemirror"
-import { javascript } from "@codemirror/lang-javascript"
-import { json } from "@codemirror/lang-json"
-import { EditorState } from '@codemirror/state';
-import { format } from '../format'
-import { foldGutter, foldService, foldAll, foldEffect, foldedRanges } from "@codemirror/language";
+import { LitElement, html, css } from "lit";
+import { customElement, property } from "lit/decorators.js";
+import { EditorView, basicSetup } from "codemirror";
+import { EditorState } from "@codemirror/state";
+import { foldAll } from "@codemirror/language";
 
-@customElement('com-data')
-class CodeMirrorDataViewer extends LitElement {
-  @property({ type: String }) data = '';
+@customElement("com-data")
+export class CodeMirrorDataViewer extends LitElement {
+  @property({ type: String }) data = "";
 
-  static styles = css`
-    :host {
-      display: block;
-    }
-    .editor {
-      border: 1px solid #ccc;
-      border-radius: 4px;
-    }
-  `;
   state: EditorState;
   editor: EditorView;
 
+  #lastData = "";
+
   firstUpdated() {
-    const editorContainer = this.shadowRoot?.getElementById('editor');
+    const updateListener = EditorView.updateListener.of((update) => {
+      if (update.docChanged) {
+        const content = this.editor.state.doc.toString();
+        if (content !== this.#lastData) {
+          console.log("updated");
+          const event = new CustomEvent("updated", {
+            detail: {
+              data: this.editor.state.doc.toString()
+            }
+          });
+          this.#lastData = content;
+          this.dispatchEvent(event);
+        }
+      }
+    });
+    const editorContainer = this.shadowRoot?.getElementById("editor");
     if (editorContainer) {
       this.state = EditorState.create({
         doc: this.data,
-        extensions: [basicSetup, json()]
-      })
+        extensions: [basicSetup, updateListener]
+      });
       this.editor = new EditorView({
         state: this.state,
         parent: editorContainer
-      })
+      });
     }
   }
 
   foldAll() {
     const view = this.editor;
-    foldAll(view)
-    view.dispatch({});
+    foldAll(view);
   }
 
   updated() {
-    this.state = EditorState.create({
-      doc: this.data,
-      extensions: [basicSetup, json()]
-    })
-
-    // replace contents
-    this.editor.dispatch({
-      changes: {
-        from: 0,
-        to: this.editor.state.doc.length,
-        insert: this.data
-      }
-    });
-    this.foldAll();
+    // replace contents if editor is not focused
+    if (!this.editor.hasFocus) {
+      this.editor.dispatch({
+        changes: {
+          from: 0,
+          to: this.editor.state.doc.length,
+          insert: this.data
+        }
+      });
+    }
   }
 
   render() {
-    return html`
-      <div id="editor" class="editor"></div>
-    `;
+    return html` <div id="editor" class="editor"></div> `;
   }
 }

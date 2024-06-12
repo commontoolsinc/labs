@@ -1,12 +1,15 @@
 // vite.config.js
-import { resolve } from 'path'
-import { defineConfig } from 'vite'
+import { resolve } from "path";
+import { defineConfig } from "vite";
 
 export default defineConfig({
   build: {
-    target: 'esnext'
+    target: "esnext"
   },
   resolve: {
     preserveSymlinks: true
+  },
+  optimizeDeps: {
+    noDiscovery: true
   }
-})
+});

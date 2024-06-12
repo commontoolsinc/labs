@@ -1,283 +1,207 @@
-import { LitElement, html } from 'lit-element'
-import { customElement, state } from 'lit/decorators.js'
-import { base } from '../styles'
+import { LitElement, html } from "lit-element";
+import { customElement, state } from "lit/decorators.js";
+import { base } from "../styles.js";
 
-import { Recipe, emptyGraph, todoAppMockup, RecipeNode } from '../data'
-import { doLLM, grabJson, processUserInput } from '../llm'
-import { collectSymbols } from '../graph'
-import { Context, snapshot } from '../state'
+import { NodePath, Recipe, RecipeNode, emptyGraph } from "../data.js";
+import { processUserInput } from "../llm.js";
+import { collectSymbols } from "../graph.js";
+import { Context, snapshot } from "../state.js";
+import { watch } from "@commontools/common-frp-lit";
+import { SignalSubject } from "../../../common-frp/lib/signal.js";
+import { codePrompt, plan, prepareSteps } from "../plan.js";
+import { thoughtLog } from "../model.js";
+import {
+  CONTENT_TYPE_FETCH,
+  CONTENT_TYPE_GLSL,
+  CONTENT_TYPE_JAVASCRIPT,
+  CONTENT_TYPE_LLM,
+  CONTENT_TYPE_UI
+} from "../contentType.js";
 
-const codePrompt = `
-  Your task is to take a user description or request and produce a series of nodes for a computation graph. Nodes can be code blocks or UI components and they communicate with named ports.
+const lastFmKey = "0060ba224307ff9f787deb837f4be376";
 
-  You will construct the graph using the available tools to add, remove, replace and list nodes.
-  You will provide the required edges to connect data from the environment to the inputs of the node. The keys of \`in\` are the names of local inputs and the values are NodePaths (of the form [context, nodeId], where context is typically '.' meaning local namespace).
-
-  "Imagine some todos" ->
-
-  addCodeNode({
-    "id": "todos",
-    "node": {
-      "in": {},
-      "outputType": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "label": { "type": "string" },
-            "checked": { "type": "boolean" }
-          }
-        }
-      },
-    },
-    "code": "return [{ label: 'Water my plants', checked: false }, { label: 'Buy milk', checked: true }];"
-  })
-
-  Tasks that take no inputs require no edges.
-  All function bodies must take zero parameters. Inputs can be accessed via 'read' and 'deref'.
-
-  ---
-
-  "Remind me to water the plants" ->
-
-  addCodeNode({
-    "id": "addReminder",
-    "node": {
-      "in": {},
-      "outputType": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "label": { "type": "string" },
-            "checked": { "type": "boolean" }
-          }
-        }
-      },
-    },
-    "code": "const todos = input('todos');\nconst newTodo = { label: 'water the plants', checked: false };\nconst newTodos = [...todos, newTodo];\nreturn newTodos;"
-  })
-
-  Tasks that take no inputs require no edges.
-
-  ---
-
-
-  "Take the existing todos and filter to unchecked" ->
-
-  addCodeNode({
-    "id": "filteredTodos",
-    "node": {
-      "in": {
-        "todos": [".", "todos"]
-      },
-      "outputType": {
-        "type": "array",
-        "items": {
-          "type": "object",
-          "properties": {
-            "label": { "type": "string" },
-            "checked": { "type": "boolean" }
-          }
-        }
-      },
-    },
-    "code": "const todos = input('todos');\nreturn todos.filter(todo => todo.checked);"
-  })
-
-  Tasks that filter other data must pipe the data through the edges.
-  All function bodies must take zero parameters. Inputs can be accessed via 'input()', values may be null.
-  Always respond with code, even for static data. Wrap your response in a json block. Respond with nothing else.
-
-  ---
-
-  "render each image by url" ->
-  images is an array of strings (URLs)
-
-  addUiNode({
-    "id": "imageUi",
-    "node": {
-      "in": {
-        "images": [".", "images"]
-      },
-      "outputType": {
-        "$id": "https://common.tools/ui.schema.json"
-      },
-    },
-    "body": {
-      "tag": "ul",
-      "props": {
-        "className": "image"
-      },
-      "children": [
-        "type": "repeat",
-        "binding": "images",
-        "template": {
-          "tag": "li",
-          "props": {},
-          "children": [
-            {
-              "tag": "img",
-              "props": {
-                "src": { type: 'string', binding: null },
-              }
-            }
-          ],
-        }
-      ]
-    }
-  })
-
-  Raw values can be passed through by setting binding to null.
-
-  ---
-
-  "render my todos" ->
-
-  addUiNode({
-    "id": "todoUi",
-    "node": {
-      "in": {
-        "todos": [".", "todos"]
-      },
-      "outputType": {
-        "$id": "https://common.tools/ui.schema.json"
-      },
-    },
-    "body": {
-      "tag": "ul",
-      "props": {
-        "className": "todo"
-      },
-      "children": {
-        "type": "repeat",
-        "binding": "todos",
-        "template": {
-          "tag": "li",
-          "props": {},
-          "children": [
-            {
-              "tag": "input",
-              "props": {
-                "type": "checkbox",
-                "checked": { type: 'boolean', binding: 'checked' }
-              }
-            },
-            {
-              "tag": "span",
-              "props": {
-                "className": "todo-label"
-              },
-              "children": [
-                { type: 'string', binding: 'label' }
-              ]
-            }
-          ]
-        }
-      }
-    }
-  })
-
-  UI trees cannot use any javascript methods, code blocks must prepare the data for the UI to consume.
-  notalk;justgo
-`
-
-@customElement('com-app')
+@customElement("com-app")
 export class ComApp extends LitElement {
-  static styles = [base]
+  static override styles = [base];
 
-  @state() graph: Recipe = emptyGraph
-  @state() userInput = ''
-  @state() snapshot: Context
+  static override properties = {
+    graph: { type: Object },
+    userInput: { type: String },
+    snapshot: { type: Object }
+  };
 
-  async appendMessage() {
-    const newGraph = [...this.graph]
-    // TODO: let GPT name the node
-    const id = 'new' + (Math.floor(Math.random() * 1000))
-    const input = `${this.userInput}`
+  @state() graph: Recipe = emptyGraph;
+  @state() userInput = "";
+  @state() snapshot: Context<SignalSubject<any>> = {
+    inputs: {},
+    outputs: {},
+    cancellation: []
+  };
 
-    const newNode: RecipeNode = {
-      id,
-      messages: [
-        {
-          role: 'user',
-          content: input
-        }
-      ],
-      // TODO: generate these
-      in: {},
-      outputType: {},
-      contentType: 'text/javascript',
-      body: ''
-    }
+  availableFunctions(graph: Recipe) {
+    const updateGraph = this.updateGraph.bind(this);
 
-    const symbols = collectSymbols(this.graph);
-    symbols.reverse();
-
-    this.graph = newGraph;
-    this.userInput = '';
-
-    const systemContext = `
-      Ensure you list the current state of the graph and make a detailed step-by-step plan for updating the graph to match the user's request.'
-
-      Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.
-    `
-
-    const lastFmKey = '0060ba224307ff9f787deb837f4be376'
-
-    const availableFunctions = {
+    return {
       listNodes: () => {
-        console.log('listNodes', this.graph)
-        return JSON.stringify(this.graph)
+        console.log("listNodes", this.graph);
+        return JSON.stringify(this.graph);
       },
-      addCodeNode: ({ id, node, code }) => {
-        console.log('addCodeNode', id, node, code)
-        newGraph.push({ id, contentType: 'text/javascript', ...node, body: code })
-        this.graph = JSON.parse(JSON.stringify(newGraph));
-        this.requestUpdate();
-        return `Added node: ${id}`
+      addConnection: ({
+        fromOutput,
+        toInput
+      }: {
+        fromOutput: string;
+        toInput: NodePath;
+      }) => {
+        console.log("addConnection", fromOutput, toInput);
+        const [toNodeId, toInputKey] = toInput;
+        const fromNode = graph.find((node) => node.id === fromOutput);
+        if (!fromNode) {
+          return `Node ${fromOutput} not found.\n${this.graphSnapshot()}`;
+        }
+        const toNode = graph.find((node) => node.id === toNodeId);
+        if (!toNode) {
+          return `Node ${toNode} not found.\n${this.graphSnapshot()}`;
+        }
+
+        toNode.in[toInputKey] = [".", fromOutput];
+        updateGraph(graph);
+        return `Added connection from ${fromOutput} to ${toInput}.\n${this.graphSnapshot()}`;
       },
-      addUiNode: ({ id, node, body }) => {
-        console.log('addUiNode', id, node, body)
-        newGraph.push({ id, contentType: 'application/json+vnd.common.ui', ...node, body })
-        this.graph = JSON.parse(JSON.stringify(newGraph));
-        this.requestUpdate();
-        return `Added node: ${id}`
+      addCodeNode: (props: { id: string; code: string }) => {
+        console.log("addCodeNode", props);
+        const { id, code } = props;
+
+        const existingNode = graph.find((node) => node.id === id);
+        if (existingNode) {
+          existingNode.body = code;
+        } else {
+          graph.push({
+            id,
+            contentType: CONTENT_TYPE_JAVASCRIPT,
+            in: {},
+            outputType: {},
+            body: code
+          });
+        }
+
+        updateGraph(graph);
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addFetchNode: ({ id, url }) => {
-        console.log('addFetchNode', id, url)
-        newGraph.push({
+      addUiNode: (props: { id: string; uiTree: object }) => {
+        console.log("addUiNode", props);
+        const { id, uiTree } = props;
+
+        const existingNode = graph.find((node) => node.id === id);
+        if (existingNode) {
+          existingNode.body = uiTree;
+        } else {
+          graph.push({
+            id,
+            contentType: CONTENT_TYPE_UI,
+            in: {},
+            outputType: {},
+            body: uiTree
+          });
+        }
+        updateGraph(graph);
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      },
+      addGlslShaderNode: ({
+        id,
+        shaderToyCode
+      }: {
+        id: string;
+        shaderToyCode: string;
+      }) => {
+        console.log("addGlslShaderNode", id, shaderToyCode);
+        graph.push({
           id,
-          contentType: 'application/json',
+          contentType: CONTENT_TYPE_GLSL,
+          in: {},
+          outputType: {},
+          body: shaderToyCode
+        });
+        updateGraph(graph);
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      },
+      addFetchNode: ({ id, url }: { id: string; url: string }) => {
+        console.log("addFetchNode", id, url);
+        graph.push({
+          id,
+          contentType: CONTENT_TYPE_FETCH,
           in: {},
           outputType: {
-            type: 'object',
+            type: "object"
           },
           body: url
-        })
-        this.graph = JSON.parse(JSON.stringify(newGraph));
-        this.requestUpdate();
-        return `Added node: ${id}`
+        });
+        updateGraph(graph);
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addMusicSearchNode: ({ id, query }) => {
-        console.log('addMusicSearchNode', id, query)
-        newGraph.push({
+      addLanguageModelNode: ({
+        id,
+        promptSource
+      }: {
+        id: string;
+        promptSource: string;
+      }) => {
+        console.log("addLanguageModelNode", id, prompt);
+        graph.push({
           id,
-          contentType: 'application/json',
+          contentType: CONTENT_TYPE_LLM,
+          in: {
+            prompt: [".", promptSource]
+          },
+          outputType: {
+            type: "string"
+          },
+          body: ""
+        });
+        updateGraph(graph);
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      },
+      addImageGenerationNode: ({
+        id,
+        promptSource
+      }: {
+        id: string;
+        promptSource: string;
+      }) => {
+        console.log("addImageGenerationNode", id, prompt);
+        graph.push({
+          id,
+          contentType: "application/json+vnd.common.image",
+          in: {
+            prompt: [".", promptSource]
+          },
+          outputType: {
+            type: "string"
+          },
+          body: ""
+        });
+        updateGraph(graph);
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      },
+      addMusicSearchNode: ({ id, query }: { id: string; query: string }) => {
+        console.log("addMusicSearchNode", id, query);
+        graph.push({
+          id,
+          contentType: "application/json+vnd.common.fetch",
           in: {},
           outputType: {
-            type: 'object',
-            "properties": {
-              "results": {
-                "type": "object",
-                "properties": {
-                  "albummatches": {
-                    "type": "object",
-                    "properties": {
-                      "albums": {
-                        "type": "array",
-                        "items": {
-                          "type": "object"
+            type: "object",
+            properties: {
+              results: {
+                type: "object",
+                properties: {
+                  albummatches: {
+                    type: "object",
+                    properties: {
+                      albums: {
+                        type: "array",
+                        items: {
+                          type: "object"
                         }
                       }
                     }
@@ -287,75 +211,103 @@ export class ComApp extends LitElement {
             }
           },
           body: `https://ws.audioscrobbler.com/2.0/?method=album.search&album=${query}&api_key=${lastFmKey}&format=json`
-        })
-        this.graph = JSON.parse(JSON.stringify(newGraph));
-        this.requestUpdate();
-        return `Added node: ${id}`
+        });
+        updateGraph(graph);
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      replaceNode: ({ id, node, body }) => {
-        console.log('replaceNode', id, node, body)
-        const index = newGraph.findIndex(n => n.id === id)
-        newGraph[index] = { id, contentType: 'application/json+vnd.common.ui', ...node, body }
-        this.graph = JSON.parse(JSON.stringify(newGraph));
-        this.requestUpdate();
-        return `Replaced node: ${id}`
-      },
-      deleteNode: ({ id }) => {
-        console.log('deleteNode', id)
-        const index = newGraph.findIndex(n => n.id === id)
-        newGraph.splice(index, 1)
-        this.graph = JSON.parse(JSON.stringify(newGraph));
-        this.requestUpdate();
-        return `Deleted node: ${id}`
-      },
-      getNodeOutputValue: ({ id }) => {
-        const val = this.snapshot.outputs?.[id]
-        console.log('getNodeOutputValue', id, val)
-        return JSON.stringify(val)
+      deleteNode: ({ id }: { id: string }) => {
+        console.log("deleteNode", id);
+        const index = graph.findIndex((n) => n.id === id);
+        graph.splice(index, 1);
+        updateGraph(graph);
+        return `Deleted node: ${id}.\n${this.graphSnapshot()}`;
       }
     };
-    const result = await processUserInput(input, codePrompt + systemContext, availableFunctions);
-    console.log('result', result);
-
-    // const result = await doLLM(input + localContext, codePrompt + systemContext, null)
-    // const message = result?.choices[0]?.message
-    // if (message) {
-    //   const data = grabJson(message?.content)
-    //   for (const node of data) {
-    //     node.messages = []
-    //     newGraph.push(node)
-    //   }
-    // }
-
-    this.graph = JSON.parse(JSON.stringify(newGraph));
-    console.log('graph updated', this.graph);
   }
 
-  render() {
-    const setUserInput = (input: string) => {
-      this.userInput = input
-    }
+  updateGraph(graph: Recipe) {
+    // loop over graph and dedupe and repeated IDs, preferring the last one
+    // preserve the original ordering
+    console.log("deduping", graph);
+    const deduped = graph.reduce((acc, node) => {
+      const index = acc.findIndex((n) => n.id === node.id);
+      if (index !== -1) {
+        acc[index] = node;
+      } else {
+        acc.push(node);
+      }
+      return acc;
+    }, [] as Recipe);
 
-    const setContext = (context: Context) => {
-      this.snapshot = snapshot(context)
-      console.log('SNAPSHOT', this.snapshot)
-    }
+    console.log("deduped graph", deduped);
+
+    this.graph = JSON.parse(JSON.stringify(deduped));
+    this.requestUpdate();
+  }
+
+  graphSnapshot() {
+    return `\`\`\`json${JSON.stringify(this.graph)}\`\`\``;
+  }
+
+  async appendMessage() {
+    const userInput = this.userInput;
+    this.userInput = "";
+
+    const newGraph = [...this.graph];
+    const symbols = collectSymbols(this.graph);
+    symbols.reverse();
+
+    const spec = await plan(userInput, prepareSteps(userInput, this.graph));
+    const finalPlan = spec?.[spec?.length - 1];
+    console.log("finalPlan", finalPlan);
+    const input = `Implement the following plan using the available tools: ${finalPlan?.content} --- Current graph: ${this.graphSnapshot()}`;
+
+    const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
+
+    this.graph = newGraph;
+
+    const result = await processUserInput(
+      input,
+      codePrompt + systemContext,
+      this.availableFunctions(newGraph)
+    );
+    console.log("result", result);
+  }
+
+  override render() {
+    const setUserInput = (input: string) => {
+      this.userInput = input;
+    };
+
+    const setContext = (context: Context<any>) => {
+      this.snapshot = snapshot(context);
+    };
 
     return html`
       <com-app-grid>
         <com-chat slot="main">
-            <com-thread slot="main" .graph=${this.graph} .setContext=${setContext}></com-thread>
-            <div slot="footer">
-                <com-unibox>
-                    <com-editor slot="main" .value=${this.userInput} .setValue=${setUserInput}></com-editor>
-                    <com-button slot="end" .action=${() => this.appendMessage()}>Send</com-button>
-                </com-unibox>
-            </div>
+          <com-thread
+            slot="main"
+            .graph=${this.graph}
+            .setContext=${setContext}
+          ></com-thread>
+          <div slot="footer">
+            <com-unibox>
+              <com-editor
+                slot="main"
+                .value=${this.userInput}
+                .setValue=${setUserInput}
+              ></com-editor>
+              <com-button slot="end" .action=${() => this.appendMessage()}
+                >Send</com-button
+              >
+            </com-unibox>
+          </div>
         </com-chat>
         <div slot="sidebar">
-
+          <com-thought-log .thoughts=${watch(thoughtLog)}></com-thought-log>
         </div>
-    </com-app-grid>
-    `
+      </com-app-grid>
+    `;
   }
 }

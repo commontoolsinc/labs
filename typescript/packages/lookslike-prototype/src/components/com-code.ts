@@ -1,41 +1,51 @@
-import { LitElement, html, css } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
-import { EditorView, basicSetup } from "codemirror"
-import { javascript } from "@codemirror/lang-javascript"
-import { EditorState } from '@codemirror/state';
-import { format } from '../format'
+import { LitElement, html } from "lit";
+import { customElement, property } from "lit/decorators.js";
+import { EditorView, basicSetup } from "codemirror";
+import { EditorState } from "@codemirror/state";
 
-@customElement('com-code')
+@customElement("com-code")
 class CodeMirrorCodeViewer extends LitElement {
-  @property({ type: String }) code = '';
+  @property({ type: String }) code = "";
+  editor: EditorView;
 
-  static styles = css`
-    :host {
-      display: block;
-    }
-    .editor {
-      border: 1px solid #ccc;
-      border-radius: 4px;
-    }
-  `;
-
-  async firstUpdated() {
-    const editorContainer = this.shadowRoot?.getElementById('editor');
+  override firstUpdated() {
+    const editorContainer = this.shadowRoot?.getElementById("editor");
     if (editorContainer) {
+      const updateListener = EditorView.updateListener.of((update) => {
+        if (update.docChanged) {
+          const event = new CustomEvent("updated", {
+            detail: {
+              code: this.editor.state.doc.toString()
+            }
+          });
+          this.dispatchEvent(event);
+        }
+      });
       const state = EditorState.create({
-        doc: await format(this.code),
-        extensions: [basicSetup, javascript()]
-      })
-      const editor = new EditorView({
+        doc: this.code,
+        extensions: [basicSetup, updateListener]
+      });
+      this.editor = new EditorView({
         state,
         parent: editorContainer
-      })
+      });
     }
   }
 
-  render() {
-    return html`
-      <div id="editor" class="editor"></div>
-    `;
+  override updated() {
+    // replace contents if editor is not focused
+    if (!this.editor.hasFocus) {
+      this.editor.dispatch({
+        changes: {
+          from: 0,
+          to: this.editor.state.doc.length,
+          insert: this.code
+        }
+      });
+    }
+  }
+
+  override render() {
+    return html` <div id="editor" class="editor"></div> `;
   }
 }
