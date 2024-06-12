@@ -1,56 +1,95 @@
-import { Runtime as UsubaRuntime } from '@commontools/usuba-rt';
-import { wit as commonDataWit } from '@commontools/data';
-import { wit as commonIoWit } from '@commontools/io';
-import { wit as commonModuleWit } from '@commontools/module';
-import type { Value } from '@commontools/data/interfaces/common-data-types.js';
-import type { IO } from './io.js';
-import { Reference } from './reference.js';
-import { Dictionary } from './dictionary.js';
+import { WorkerPool } from './worker/pool.js';
+import { Input } from './state/input.js';
+import { HostToModuleRPC } from './rpc/index.js';
+import { Output } from './state/output.js';
+import { assertNever, throwIfError } from './helpers.js';
+import { HostModuleEventHandler } from './rpc/host.js';
 
 export type { Value } from '@commontools/data/interfaces/common-data-types.js';
 
-export * from './io.js';
-export * from './dictionary.js';
-export * from './reference.js';
-export * from './infer.js';
+export * from './state/io/index.js';
+export * from './state/input.js';
+export * from './state/output.js';
+export * from './state/storage/index.js';
+export * from './state/storage/localstorage.js';
+export * from './common/data/dictionary.js';
+export * from './common/data/reference.js';
+export * from './common/data/infer.js';
 
 export type ContentType = 'text/javascript';
 
-export interface Module {
-  run: () => void;
+export const SES_SANDBOX = 'ses';
+export const WASM_SANDBOX = 'wasm';
+export const CONFIDENTIAL_COMPUTE_SANDBOX = 'confidential-compute';
+
+export type Sandbox =
+  | typeof SES_SANDBOX
+  | typeof WASM_SANDBOX
+  | typeof CONFIDENTIAL_COMPUTE_SANDBOX;
+
+export class Module {
+  #rpc;
+  #input;
+
+  constructor(port: MessagePort, input: Input) {
+    this.#rpc = new HostToModuleRPC(port, this.#handleModuleRPCEvent);
+    this.#input = input;
+  }
+
+  async run(): Promise<void> {
+    throwIfError(await this.#rpc.send('module:run', undefined));
+  }
+
+  output(keys: string[]) {
+    return new Output(this.#rpc, keys);
+  }
+
+  #handleModuleRPCEvent = (async (event, detail) => {
+    switch (event) {
+      case 'host:storage:read':
+        try {
+          return {
+            value: await this.#input.read(detail.key),
+          };
+        } catch (error) {
+          return {
+            error: `${error}`,
+          };
+        }
+    }
+
+    return assertNever(event as never);
+  }) as HostModuleEventHandler;
 }
 
 export class Runtime {
-  #inner = new UsubaRuntime([commonDataWit, commonIoWit]);
+  #workerPool = new WorkerPool();
 
   async eval(
-    contentType: ContentType,
+    id: string,
+    sandbox: Sandbox,
+    contentType: 'text/javascript',
     sourceCode: string,
-    io: IO
+    input: Input
   ): Promise<Module> {
-    const blueprint = await this.#inner.defineModule<{
-      module: { create(): { run: () => void } };
-    }>({
-      contentType,
-      sourceCode,
-      wit: commonModuleWit,
-    });
+    const { rpc: runtimeRpc } = await this.#workerPool.get(sandbox);
+    const { port1: moduleTx, port2: moduleRx } = new MessageChannel();
+    const module = new Module(moduleTx, input);
 
-    const { module } = await blueprint.instantiate({
-      'common:data/types': {
-        Reference,
-        Dictionary,
-      },
-      'common:io/state': {
-        read(name: string) {
-          return new Reference(io, name);
+    throwIfError(
+      await runtimeRpc.send(
+        'runtime:eval',
+        {
+          id,
+          contentType,
+          sourceCode,
+          inputKeys: input.keys,
+          port: moduleRx,
         },
-        write(name: string, value: Value) {
-          io.write(name, value);
-        },
-      },
-    });
+        [moduleRx]
+      )
+    );
 
-    return module.create();
+    return module;
   }
 }
