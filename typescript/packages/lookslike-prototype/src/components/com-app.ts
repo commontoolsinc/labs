@@ -71,26 +71,39 @@ export class ComApp extends LitElement {
       addCodeNode: (props: { id: string; code: string }) => {
         console.log("addCodeNode", props);
         const { id, code } = props;
-        graph.push({
-          id,
-          contentType: CONTENT_TYPE_JAVASCRIPT,
-          in: {},
-          outputType: {},
-          body: code
-        });
+
+        const existingNode = graph.find((node) => node.id === id);
+        if (existingNode) {
+          existingNode.body = code;
+        } else {
+          graph.push({
+            id,
+            contentType: CONTENT_TYPE_JAVASCRIPT,
+            in: {},
+            outputType: {},
+            body: code
+          });
+        }
+
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       addUiNode: (props: { id: string; uiTree: object }) => {
         console.log("addUiNode", props);
         const { id, uiTree } = props;
-        graph.push({
-          id,
-          contentType: CONTENT_TYPE_UI,
-          in: {},
-          outputType: {},
-          body: uiTree
-        });
+
+        const existingNode = graph.find((node) => node.id === id);
+        if (existingNode) {
+          existingNode.body = uiTree;
+        } else {
+          graph.push({
+            id,
+            contentType: CONTENT_TYPE_UI,
+            in: {},
+            outputType: {},
+            body: uiTree
+          });
+        }
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },

@@ -69,7 +69,9 @@ export function createElement(node, context) {
       }
     } else {
       if (key === "style") {
-        Object.assign(element.style, value);
+        Object.keys(value).forEach((style) => {
+          element.style[style] = value[style];
+        });
       }
       element[key] = value;
     }

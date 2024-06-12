@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { EditorView, basicSetup } from "codemirror";
 import { EditorState } from "@codemirror/state";
@@ -6,15 +6,16 @@ import { EditorState } from "@codemirror/state";
 @customElement("com-code")
 class CodeMirrorCodeViewer extends LitElement {
   @property({ type: String }) code = "";
+  editor: EditorView;
 
-  firstUpdated() {
+  override firstUpdated() {
     const editorContainer = this.shadowRoot?.getElementById("editor");
     if (editorContainer) {
       const updateListener = EditorView.updateListener.of((update) => {
         if (update.docChanged) {
           const event = new CustomEvent("updated", {
             detail: {
-              code: editor.state.doc.toString()
+              code: this.editor.state.doc.toString()
             }
           });
           this.dispatchEvent(event);
@@ -24,9 +25,22 @@ class CodeMirrorCodeViewer extends LitElement {
         doc: this.code,
         extensions: [basicSetup, updateListener]
       });
-      const editor = new EditorView({
+      this.editor = new EditorView({
         state,
         parent: editorContainer
+      });
+    }
+  }
+
+  override updated() {
+    // replace contents if editor is not focused
+    if (!this.editor.hasFocus) {
+      this.editor.dispatch({
+        changes: {
+          from: 0,
+          to: this.editor.state.doc.length,
+          insert: this.code
+        }
       });
     }
   }

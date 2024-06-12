@@ -2,6 +2,7 @@ import {
   Runtime,
   Input,
   LocalStorage,
+  WASM_SANDBOX,
   SES_SANDBOX
 } from "@commontools/runtime";
 

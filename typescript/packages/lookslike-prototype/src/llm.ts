@@ -214,18 +214,11 @@ export async function processUserInput(
       model,
       tools: toolSpec,
       tool_choice: "auto",
-      temperature: 0,
-      stream: true
+      temperature: 0
     });
 
-    let message = {} as ChatCompletionMessage;
-    let finishReason = null as string | null;
-    for await (const chunk of response) {
-      finishReason ||= chunk.choices[0].finish_reason;
-      message = messageReducer(message, chunk);
-    }
-
-    if (finishReason === "stop") {
+    const message = response.choices[0].message;
+    if (response.choices[0].finish_reason === "stop") {
       return message;
     }
 

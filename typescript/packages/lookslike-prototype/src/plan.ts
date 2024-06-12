@@ -233,38 +233,37 @@ export function describeTools(
 export function prepareSteps(userInput: string, recipe: Recipe) {
   if (recipe.length === 0) {
     return [
-      `Assist a user in dynamically generating software to solve their problems using a reactive graph data model. Modules, acting as nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules:
+      `You will create and modify software to solve a user's problems using a reactive graph computation model. Modules, a.k.a nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules:
 
       ${describeTools(toolSpec, false)}
 
       To declare a constant value, return it from a code node as a literal.
 
-      Plan your approach at a high level and be extremely concise, use pseudocode to sketch the technical approach. Write as concisely and accurately as possible without introducing assumptions or full specifying the details. Code nodes cannot mutate state, they are pure functions only. Do not attempt to model them as having side effects.`,
-      `
-    <user-request>${userInput}</user-request>
+      Plan your approach at a high-level dot-point level of detail and be extremely concise using technical terms.`,
+      `Service the minimal useful version of this request: <user-request>${userInput}</user-request>.
 
-    Based on the available modules imagine what the user would be delighted by, based on their input. Do not overcomplicate it or add superfluous features.
-
-    <refined-request>
-    `,
-      `Service an MVP version of this request.
-    Give each node an ID and describe its purpose. Each node can have several named inputs which can be mapped to the outputs of other node ID.
+    Give each node an ID and describe its purpose without writing the full code. Each node can have several named inputs which can be mapped to the outputs of other node ID.
     The output of all nodes must be used and all inputs must be mapped to valid outputs.
+
+    Provide your plan as a list of tool actions you intend to take on the graph.
     `,
       `Reflect on the plan, does it make sense for a incredibly small immediately useful application? Can you implement it with these tools?
 
       ${describeTools(toolSpec, true)}
 
+    Use pseudocode to sketch the technical approach. Write as concisely and accurately as possible without introducing assumptions or full specifying the details. Code nodes cannot mutate state, they are pure functions only. Do not attempt to model them as having side effects.
     Ensure all node are created in a logical order, so that the dependencies always exist. Start with fetching data, then processing, filtering, mapping and rendering.
     You must create a code node to declare constant values for code but NOT for shader uniforms. For static data you may inline constants into the code/shader nodes.
 
-    Adjust the plan to make sure the user will be happy with the request: ${userInput}`
+    Review the plan and make sure the user will be happy with the request: ${userInput}`
     ];
   } else {
     return [
-      `Assist a user in modifying a dynamic piece of software to solve their problems using a reactive graph data model. Modules, acting as nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules:
+      `Modify a reactive graph based application based on a user request.
+      Modules, acting as nodes, connect with each other, where the output of one or more nodes serves as the input to another.
 
-      <user-request>${userInput}</user-request>
+      Available modules:
+
 
     ${describeTools(toolSpec, true)}
 
@@ -273,12 +272,15 @@ export function prepareSteps(userInput: string, recipe: Recipe) {
     \`\`\`json
     ${JSON.stringify(recipe, null, 2)}
     \`\`\`
+
+    <user-request>${userInput}</user-request>
+
     Explain which nodes will be altered, added or removed. Do not repeat the entire graph.
     Code nodes cannot mutate state, they are pure functions only.
     Do not attempt to model them as having side effects`,
       `Reflect on the plan. The user has requested a specific change. Do not overcomplicate it or add superfluous features. Just make the change.
 
-      <user-request>${userInput}</user-request>`
+      Recall the request: <user-request>${userInput}</user-request>`
     ];
   }
 }
