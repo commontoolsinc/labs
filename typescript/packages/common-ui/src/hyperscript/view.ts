@@ -4,7 +4,6 @@ export type AnyJSONSchema = object;
 
 export type SignalBinding = {
   "@type": "signal";
-  type: AnyJSONSchema;
   name: string;
 }
 
@@ -19,9 +18,8 @@ export const isSignalBinding = (value: any): value is SignalBinding => {
 }
 
 /** Create a signal binding */
-export const signal = (type: AnyJSONSchema, name: string): SignalBinding => ({
+export const signal = (name: string): SignalBinding => ({
   "@type": "signal",
-  type,
   name
 });
 
