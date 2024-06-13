@@ -70,7 +70,7 @@ export const codePrompt = `
             {
               "tag": "img",
               "props": {
-                "src": { "@type": 'signal', "name": 'src' },
+                "src": { "@type": 'binding', "name": 'src' },
               },
               "children": []
             }
@@ -90,7 +90,7 @@ export const codePrompt = `
     "uiTree": {
       "tag": "span",
       "props": {
-        "innerText": { "@type": "signal", "name": "text" }
+        "innerText": { "@type": "binding", "name": "text" }
       },
       "children": []
     }
@@ -120,7 +120,7 @@ export const codePrompt = `
                 "tag": "input",
                 "props": {
                   "type": "checkbox",
-                  "checked": { "@type": "signal", "name": "checked" }
+                  "checked": { "@type": "binding", "name": "checked" }
                 },
                 "children": []
               },
@@ -128,7 +128,7 @@ export const codePrompt = `
                 "tag": "span",
                 "props": {
                   "className": "todo-label",
-                  "innerText": { "@type": "signal", "name": "label" }
+                  "innerText": { "@type": "binding", "name": "label" }
                 },
                 "children": []
               }
@@ -283,7 +283,8 @@ export function prepareSteps(userInput: string, recipe: Recipe) {
 
     Be creative in your examination of the tools, e.g. "show me myself" could be a shader using the webcam.
 
-    Review the plan and make sure the user will be happy with the request: ${userInput}`
+    Review the plan and make sure the user will be happy with the request: <user-request>${userInput}</user-request>
+    notalk;justgo`
     ];
   } else {
     return [

@@ -1,5 +1,4 @@
-import { view } from "../hyperscript/view.js";
-import { register as registerView } from "../hyperscript/known-tags.js";
+import { view } from "../hyperscript/render.js";
 
 export const p = view("p", {
   type: "object",
@@ -7,5 +6,3 @@ export const p = view("p", {
     id: { type: "string" },
   },
 });
-
-registerView(p);

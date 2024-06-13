@@ -14,8 +14,9 @@ export class ComToggle extends LitElement {
     label {
       display: block;
       cursor: pointer;
-      border: 1px solid #ccc;
       font-size: 0.5rem;
+      line-height: 0.5rem;
+      padding: 0.25rem;
       font-family: monospace;
     }
 
@@ -32,7 +33,7 @@ export class ComToggle extends LitElement {
     return html`
       <div class="expander">
         <input type="checkbox" id="toggle" />
-        <label for="toggle"><slot name="label">Expand</slot></label>
+        <label for="toggle"><slot name="label">▶ toggle</slot></label>
         <div class="content">
           <slot></slot>
         </div>
