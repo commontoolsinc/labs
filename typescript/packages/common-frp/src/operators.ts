@@ -118,7 +118,7 @@ export const filter = <T>(
  */
 export const join = <T>(
   right: Stream<T>,
-  choose: (left: T, right: T) => T,
+  choose: (left: T, right: T) => T = chooseLeft,
 ) => (
   left: Stream<T>,
 ) => joinStreams(
