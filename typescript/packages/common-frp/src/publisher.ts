@@ -8,6 +8,11 @@ export type Cancellable = {
 
 export type Send<T> = (value: T) => void
 
+/** A sendable is a type that can receive values via a send method */
+export type Sendable<T> = {
+  send: Send<T>
+}
+
 /** Low-level pub-sub channel used under the hood. */
 export const publisher = <T>() => {
   const subscribers = new Set<Send<T>>()
@@ -32,7 +37,12 @@ export const publisher = <T>() => {
     }
   }
 
-  return { pub, sub }
+  return {
+    // Allow iterating over subscribers
+    [Symbol.iterator]: () => subscribers.values(),
+    pub,
+    sub
+  }
 }
 
 /** Combine multiple unsubscribe functions into a single unsubscribe function */
