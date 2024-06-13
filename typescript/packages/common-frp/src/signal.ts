@@ -2,6 +2,7 @@ import { debug } from './shared.js'
 import {
   publisher,
   Send,
+  Sendable,
   Cancel,
   Cancellable,
   combineCancels
@@ -67,10 +68,6 @@ export type Updates<T> = {
   [__updates__]: (subscriber: Send<T>) => Cancel
 }
 
-export type Subject<T> = {
-  send: (value: T) => void
-}
-
 const isEqual = Object.is
 
 export type Gettable<T> = {
@@ -80,7 +77,7 @@ export type Gettable<T> = {
 const sample = <T>(container: Gettable<T>) => container.get()
 
 export type Signal<T> = Gettable<T> & Updates<void> & Cancellable
-export type SignalSubject<T> = Gettable<T> & Updates<void> & Subject<T>
+export type WriteableSignal<T> = Gettable<T> & Updates<void> & Sendable<T>
 
 export type Effect = {
   <A>(

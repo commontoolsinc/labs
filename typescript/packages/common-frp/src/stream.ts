@@ -1,13 +1,23 @@
 import { debug } from "./shared.js"
-import { publisher, Send, Cancel, combineCancels } from "./publisher.js"
+import {
+  publisher,
+  Send,
+  Sendable,
+  Cancel,
+  Cancellable,
+  combineCancels
+} from "./publisher.js"
 import { state, Signal, __updates__ } from "./signal.js"
 
 const __sink__ = Symbol('sink')
 
-export type Stream<T> = {
+/** A sink is an observable that delivers new values */
+export type Sink<T> = {
   [__sink__]: (subscriber: Send<T>) => Cancel
-  cancel?: Cancel
 }
+
+/** A stream is a sink that can be cancelled */
+export type Stream<T> = Sink<T> & Cancellable
 
 /**
  * Subscribe to a stream, receiving all updates after the point of subscription.
@@ -18,11 +28,13 @@ export const sink = <T>(
   subscriber: Send<T>
 ) => upstream[__sink__](subscriber)
 
+export type WriteableStream<T> = Sendable<T> & Sink<T>
+
 /**
  * Create a stream subject - a source for a stream that has a send method
  * for publishing new items to stream.
  */
-export const subject = <T>() => {
+export const subject = <T>(): WriteableStream<T> => {
   const { pub, sub } = publisher<T>()
   return { [__sink__]: sub, send: pub }
 }
