@@ -123,6 +123,7 @@ export const codePrompt = `
   })
 
   UI trees cannot use any javascript methods, code blocks must prepare the data for the UI to consume.
+  GLSL shaders cannot declare uniforms other than iTime, iResolution, iMouse and iChannel0 (the user's webcam).
   notalk;justgo
 `;
 
@@ -244,13 +245,15 @@ export function prepareSteps(userInput: string, recipe: Recipe) {
 
       To declare a constant value, return it from a code node as a literal.
 
-      Plan your approach at a high-level dot-point level of detail and be extremely concise using technical terms.`,
+      Plan your approach at a high-level dot-point level of detail and be extremely concise using technical terms.
+      notalk;justgo`,
       `Service the minimal useful version of this request: <user-request>${userInput}</user-request>.
 
     Give each node an ID and describe its purpose without writing the full code. Each node can have several named inputs which can be mapped to the outputs of other node ID.
     The output of all nodes must be used and all inputs must be mapped to valid outputs.
 
     Provide your plan as a list of tool actions you intend to take on the graph.
+    notalk;justgo
     `,
       `Reflect on the plan, does it make sense for a incredibly small immediately useful application? Can you implement it with these tools?
 
@@ -259,6 +262,8 @@ export function prepareSteps(userInput: string, recipe: Recipe) {
     Use pseudocode to sketch the technical approach. Write as concisely and accurately as possible without introducing assumptions or full specifying the details. Code nodes cannot mutate state, they are pure functions only. Do not attempt to model them as having side effects.
     Ensure all node are created in a logical order, so that the dependencies always exist. Start with fetching data, then processing, filtering, mapping and rendering.
     You must create a code node to declare constant values for code but NOT for shader uniforms. For static data you may inline constants into the code/shader nodes.
+
+    Be creative in your examination of the tools, e.g. "show me myself" could be a shader using the webcam.
 
     Review the plan and make sure the user will be happy with the request: ${userInput}`
     ];
@@ -282,7 +287,8 @@ export function prepareSteps(userInput: string, recipe: Recipe) {
 
     Explain which nodes will be altered, added or removed. Do not repeat the entire graph.
     Code nodes cannot mutate state, they are pure functions only.
-    Do not attempt to model them as having side effects`,
+    Do not attempt to model them as having side effects.
+    notalk;justgo`,
       `Reflect on the plan. The user has requested a specific change. Do not overcomplicate it or add superfluous features. Just make the change.
 
       Recall the request: <user-request>${userInput}</user-request>`

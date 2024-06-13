@@ -90,7 +90,7 @@ export const toolSpec: ChatCompletionTool[] = [
     function: {
       name: "addGlslShaderNode",
       description:
-        "Shader node in ShaderToy format. You may not use any iChannels, only iTime, iResolution, and iMouse. Do not re-define them.",
+        "Shader node in ShaderToy format. iTime, iResolution, iMouse and iChannel0 (the user's webcam). Do not re-define them.",
       parameters: {
         type: "object",
         properties: {
