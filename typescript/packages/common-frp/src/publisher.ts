@@ -13,13 +13,19 @@ export type Sendable<T> = {
   send: Send<T>
 }
 
-/** Low-level pub-sub channel used under the hood. */
-export const publisher = <T>() => {
-  const subscribers = new Set<Send<T>>()
+export type Publisher<T> = {
+  [Symbol.iterator]: () => Iterator<Sendable<T>>;
+  send: (value: T) => void;
+  sink: (subscriber: Sendable<T>) => Cancel;
+}
 
-  const pub = (value: T) => {
+/** Low-level pub-sub channel used under the hood. */
+export const publisher = <T>(): Publisher<T> => {
+  const subscribers = new Set<Sendable<T>>()
+
+  const send = (value: T) => {
     for (const subscriber of subscribers) {
-      subscriber(value)
+      subscriber.send(value)
     }
   }
 
@@ -28,7 +34,7 @@ export const publisher = <T>() => {
    * @param subscriber the function to call when a new value is published
    * @returns Unsubscribe function
    */
-  const sub = (subscriber: Send<T>): Cancel => {
+  const sink = (subscriber: Sendable<T>): Cancel => {
     debug('sub', 'subscribing', subscriber)
     subscribers.add(subscriber)
     return () => {
@@ -40,8 +46,8 @@ export const publisher = <T>() => {
   return {
     // Allow iterating over subscribers
     [Symbol.iterator]: () => subscribers.values(),
-    pub,
-    sub
+    send,
+    sink
   }
 }
 

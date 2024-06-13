@@ -1,7 +1,6 @@
 import { debug } from './shared.js'
 import {
   publisher,
-  Send,
   Sendable,
   Cancel,
   Cancellable,
@@ -65,7 +64,7 @@ const { withUpdates, withReads } = createTransactionManager()
 export const __updates__ = Symbol('updates')
 
 export type Updates<T> = {
-  [__updates__]: (subscriber: Send<T>) => Cancel
+  [__updates__]: (subscriber: Sendable<T>) => Cancel
 }
 
 const isEqual = Object.is
@@ -160,8 +159,10 @@ export const effect: Effect = (
 
   job()
 
+  const subscriber = { send: schedule }
+
   return combineCancels(
-    upstreams.map(signal => signal[__updates__](schedule))
+    upstreams.map(signal => signal[__updates__](subscriber))
   )
 }
 
@@ -177,7 +178,7 @@ export const state = <T>(initial: T) => {
     if (!isEqual(state, value)) {
       state = value
       debug('state', 'value updated', state)
-      updates.pub()
+      updates.send()
     }
   }
 
@@ -186,7 +187,7 @@ export const state = <T>(initial: T) => {
   return {
     get,
     send,
-    [__updates__]: updates.sub
+    [__updates__]: updates.sink
   }
 }
 
@@ -280,11 +281,13 @@ export const computed: Computed = (
   const performUpdate = () => {
     debug('computed', 'mark dirty')
     isDirty = true
-    updates.pub()
+    updates.send()
   }
 
+  const subscriber = { send: performUpdate }
+
   const cancel = combineCancels(
-    upstreams.map(signal => signal[__updates__](performUpdate))
+    upstreams.map(signal => signal[__updates__](subscriber))
   )
 
   const get = () => {
@@ -298,7 +301,7 @@ export const computed: Computed = (
 
   return {
     get,
-    [__updates__]: updates.sub,
+    [__updates__]: updates.sink,
     cancel
   }
 }

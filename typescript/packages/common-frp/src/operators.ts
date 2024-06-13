@@ -1,6 +1,5 @@
 import {
   map as mapStream,
-  select as selectStream,
   filter as filterStream,
   join as joinStreams,
   chooseLeft,
@@ -98,12 +97,6 @@ export const map = <T, U>(
 ) => (
   stream: Stream<T>
 ) => mapStream(stream, transform)
-
-export const select = <T extends object, U extends keyof T & string>(
-  key: U
-) => (
-  stream: Stream<T>
-) => selectStream(stream, key)
 
 /** Filter a stream of values using a predicate function. */
 export const filter = <T>(
