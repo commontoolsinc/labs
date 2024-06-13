@@ -1,7 +1,6 @@
 import { debug } from "./shared.js"
 import {
   publisher,
-  Send,
   Sendable,
   Cancel,
   Cancellable,
@@ -9,11 +8,11 @@ import {
 } from "./publisher.js"
 import { state, Signal, __updates__ } from "./signal.js"
 
-const __sink__ = Symbol('sink')
+export const __sink__ = Symbol('sink')
 
 /** A sink is an observable that delivers new values */
 export type Sink<T> = {
-  [__sink__]: (subscriber: Send<T>) => Cancel
+  [__sink__]: (subscriber: Sendable<T>) => Cancel
 }
 
 /** A stream is a sink that can be cancelled */
@@ -25,64 +24,79 @@ export type Stream<T> = Sink<T> & Cancellable
  */
 export const sink = <T>(
   upstream: Stream<T>,
-  subscriber: Send<T>
+  subscriber: Sendable<T>
 ) => upstream[__sink__](subscriber)
 
 export type WriteableStream<T> = Sendable<T> & Sink<T>
+
+export type ReadableStream<T> = Sink<T> & Cancellable
+
+/**
+ * Box up a signal, making it readonly by exposing only the stream sink
+ * and optional cancel
+ */
+export const readonly = <T>(
+  {
+    [__sink__]: sink,
+    cancel = undefined
+  }: Sink<T> & Cancellable
+): ReadableStream<T> => ({
+  [__sink__]: sink,
+  cancel
+})
 
 /**
  * Create a stream subject - a source for a stream that has a send method
  * for publishing new items to stream.
  */
 export const subject = <T>(): WriteableStream<T> => {
-  const { pub, sub } = publisher<T>()
-  return { [__sink__]: sub, send: pub }
-}
-
-/**
- * Create a new stream source using a closure to publish new items to stream
- * Closure receives a single argument, a send function to publish new items,
- * and may return a cancel function to stop generation and clean up resources.
- */
-export const generate = <T>(
-  generate: (send: Send<T>) => Cancel | undefined
-): Stream<T> => {
-  const { [__sink__]: sink, send } = subject<T>()
-  const cancel = generate(send)
-  return { [__sink__]: sink, cancel }
+  const { send, sink } = publisher<T>()
+  return { [__sink__]: sink, send }
 }
 
 /** Map a stream of values */
 export const map = <T, U>(
   upstream: Stream<T>,
   transform: (value: T) => U
-) => generate<U>(send => {
-  return sink(upstream, value => send(transform(value)))
-})
+): ReadableStream<U> => {
+  const downstreams = publisher<U>()
 
-/** Get a key from an object */
-const getKey = <T extends object, U extends keyof T & string>(
-  obj: T,
-  key: U
-) => obj[key];
+  const subscriber = {
+    "@type": "map",
+    transform,
+    downstreams: downstreams[Symbol.iterator],
+    send: (value: T) => downstreams.send(transform(value))
+  }
 
-/** Select a key from an object */
-export const select = <T extends object, U extends keyof T & string>(
-  upstream: Stream<T>,
-  key: U
-) => map(upstream, (o: T) => getKey(o, key))
+  return {
+    [__sink__]: downstreams.sink,
+    cancel: sink(upstream, subscriber)
+  }
+}
 
 /** Filter a stream of values using a predicate function. */
 export const filter = <T>(
   upstream: Stream<T>,
   predicate: (value: T) => boolean
-) => generate<T>(send => {
-  return sink(upstream, value => {
-    if (predicate(value)) {
-      send(value)
+): ReadableStream<T> => {
+  const downstreams = publisher<T>()
+
+  const subscriber = {
+    "@type": "filter",
+    predicate,
+    downstreams: downstreams[Symbol.iterator],
+    send: (value: T) => {
+      if (predicate(value)) {
+        downstreams.send(value)
+      }
     }
-  })
-})
+  }
+
+  return {
+    [__sink__]: downstreams.sink,
+    cancel: sink(upstream, subscriber)
+  }
+}
 
 const throttled = (job: () => void) => {
   let isScheduled = false
@@ -112,7 +126,9 @@ export const join = <T>(
   left: Stream<T>,
   right: Stream<T>,
   choose: (left: T, right: T) => T = chooseLeft
-) => generate<T>(send => {
+): ReadableStream<T> => {
+  const downstreams = publisher<T>()
+
   let leftState: T | undefined = undefined
   let rightState: T | undefined = undefined
 
@@ -126,30 +142,49 @@ export const join = <T>(
   const forward = throttled(() => {
     if (leftState !== undefined && rightState !== undefined) {
       const value = choose(leftState, rightState)
-      send(value)
+      downstreams.send(value)
     } else if (leftState !== undefined) {
-      send(leftState)
+      downstreams.send(leftState)
     } else if (rightState !== undefined) {
-      send(rightState)
+      downstreams.send(rightState)
     }
     leftState = undefined
     rightState = undefined
   })
 
-  const cancelLeft = sink(left, value => {
-    debug('zip', 'queue left value', value)
-    leftState = value
-    forward()
-  })
+  const leftSubscriber = {
+    "@type": "join",
+    side: "left",
+    choose,
+    downstreams: downstreams[Symbol.iterator],
+    send: (value: T) => {
+      debug('join', 'set left value', value)
+      leftState = value
+      forward()
+    }
+  }
 
-  const cancelRight = sink(right, value => {
-    debug('zip', 'queue right value', value)
-    rightState = value
-    forward()
-  })
+  const cancelLeft = sink(left, leftSubscriber)
 
-  return combineCancels([cancelLeft, cancelRight])
-})
+  const rightSubscriber = {
+    "@type": "join",
+    side: "left",
+    choose,
+    downstreams: downstreams[Symbol.iterator],
+    send: (value: T) => {
+      debug('join', 'set right value', value)
+      rightState = value
+      forward()
+    }
+  }
+
+  const cancelRight = sink(right, rightSubscriber)
+
+  return {
+    [__sink__]: downstreams.sink,
+    cancel: combineCancels([cancelLeft, cancelRight])
+  }
+}
 
 /** Scan a stream, accumulating step state in a signal */
 export const scan = <T, U>(
@@ -157,17 +192,29 @@ export const scan = <T, U>(
   step: (state: U, value: T) => U,
   initial: U
 ): Signal<U> => {
+  const downstreams = publisher<U>()
   const { get, [__updates__]: updates, send } = state(initial)
+
   // We track the current reduction state for the scan in a closure variable
   // instead of using the signal state directly. That's because signal state
   // has a last-write-wins semantics. It could skip events while scanning.
   // Tracking the reduction separately and setting it as the signal state
   // after each step ensures we process every event.
   let reduction = initial
-  const cancel = sink(upstream, (value: T) => {
-    reduction = step(reduction, value)
-    send(reduction)
-  })
+
+  const subscriber = {
+    "@type": "scan",
+    step,
+    initial,
+    downstreams: downstreams[Symbol.iterator],
+    send: (value: T) => {
+      reduction = step(reduction, value)
+      send(reduction)
+    }
+  }
+
+  const cancel = sink(upstream, subscriber)
+
   return { get, [__updates__]: updates, cancel }
 }
 

@@ -1,9 +1,13 @@
-import { generate } from './stream.js'
+import { subject, readonly, __sink__ } from './stream.js'
 
 export const events = (
   element: HTMLElement,
   name: string
-) => generate((send: (value: Event) => void) => {
-  element.addEventListener(name, send)
-  return () => element.removeEventListener(name, send)
-})
+) => {
+  const event = subject()
+  element.addEventListener(name, event.send)
+  return readonly({
+    ...event,
+    cancel: () => element.removeEventListener(name, event.send)
+  })
+}
