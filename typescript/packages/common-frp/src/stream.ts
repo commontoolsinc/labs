@@ -116,8 +116,15 @@ export const scan = <T, U>(
   initial: U
 ): Signal<U> => {
   const { get, [__updates__]: updates, send } = state(initial)
+  // We track the current reduction state for the scan in a closure variable
+  // instead of using the signal state directly. That's because signal state
+  // has a last-write-wins semantics. It could skip events while scanning.
+  // Tracking the reduction separately and setting it as the signal state
+  // after each step ensures we process every event.
+  let reduction = initial
   const cancel = sink(upstream, (value: T) => {
-    send(step(get(), value))
+    reduction = step(reduction, value)
+    send(reduction)
   })
   return { get, [__updates__]: updates, cancel }
 }
