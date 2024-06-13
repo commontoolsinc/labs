@@ -1,13 +1,23 @@
 import { debug } from "./shared.js"
-import { publisher, Send, Cancel, combineCancels } from "./publisher.js"
+import {
+  publisher,
+  Send,
+  Sendable,
+  Cancel,
+  Cancellable,
+  combineCancels
+} from "./publisher.js"
 import { state, Signal, __updates__ } from "./signal.js"
 
 const __sink__ = Symbol('sink')
 
-export type Stream<T> = {
+/** A sink is an observable that delivers new values */
+export type Sink<T> = {
   [__sink__]: (subscriber: Send<T>) => Cancel
-  cancel?: Cancel
 }
+
+/** A stream is a sink that can be cancelled */
+export type Stream<T> = Sink<T> & Cancellable
 
 /**
  * Subscribe to a stream, receiving all updates after the point of subscription.
@@ -18,11 +28,13 @@ export const sink = <T>(
   subscriber: Send<T>
 ) => upstream[__sink__](subscriber)
 
+export type WriteableStream<T> = Sendable<T> & Sink<T>
+
 /**
  * Create a stream subject - a source for a stream that has a send method
  * for publishing new items to stream.
  */
-export const subject = <T>() => {
+export const subject = <T>(): WriteableStream<T> => {
   const { pub, sub } = publisher<T>()
   return { [__sink__]: sub, send: pub }
 }
@@ -72,37 +84,67 @@ export const filter = <T>(
   })
 })
 
-/**
- * Zip two streams together.
- * Will buffer left and right values until both are available.
- */
-export const zip = <T, U, V>(
-  left: Stream<T>,
-  right: Stream<U>,
-  combine: (left: T, right: U) => V
-) => generate<V>(send => {
-  const leftQueue: Array<T> = []
-  const rightQueue: Array<U> = []
+const throttled = (job: () => void) => {
+  let isScheduled = false
 
-  const forward = () => {
-    if (leftQueue.length > 0 && rightQueue.length > 0) {
-      const leftValue = leftQueue.shift()!
-      const rightValue = rightQueue.shift()!
-      const value = combine(leftValue, rightValue)
-      debug('zip', 'dispatching value', value)
-      send(value)
-    }
+  const perform = () => {
+    isScheduled = false
+    job()
   }
 
+  return () => {
+    if (!isScheduled) {
+      isScheduled = true
+      queueMicrotask(perform)
+    }
+  }
+}
+
+export const chooseLeft = <T>(left: T, _: T) => left
+
+/**
+ * Join two streams together.
+ * Uses throttling/batching on microtask to ensure upstreams that emitted
+ * during same tick are processed together during the same moment. E.g.
+ * prevents the diamond problem.
+ */
+export const join = <T>(
+  left: Stream<T>,
+  right: Stream<T>,
+  choose: (left: T, right: T) => T = chooseLeft
+) => generate<T>(send => {
+  let leftState: T | undefined = undefined
+  let rightState: T | undefined = undefined
+
+  // NOTE: we are currently using the microtask queue to batch and solve the
+  // diamond problem. This works as long as events in the stream are values.
+  // 
+  // If we want to support promises as values but maintain this kind of
+  // moment-by-moment batching, we will need to create a transaction system
+  // with a logical clock that waits for all promises to resolve before moving
+  // on to the next transaction.
+  const forward = throttled(() => {
+    if (leftState !== undefined && rightState !== undefined) {
+      const value = choose(leftState, rightState)
+      send(value)
+    } else if (leftState !== undefined) {
+      send(leftState)
+    } else if (rightState !== undefined) {
+      send(rightState)
+    }
+    leftState = undefined
+    rightState = undefined
+  })
+
   const cancelLeft = sink(left, value => {
-    debug('zip', 'queue value', value)
-    leftQueue.push(value)
+    debug('zip', 'queue left value', value)
+    leftState = value
     forward()
   })
 
   const cancelRight = sink(right, value => {
-    debug('zip', 'queue value', value)
-    rightQueue.push(value)
+    debug('zip', 'queue right value', value)
+    rightState = value
     forward()
   })
 

@@ -2,7 +2,8 @@ import {
   map as mapStream,
   select as selectStream,
   filter as filterStream,
-  zip as zipStreams,
+  join as joinStreams,
+  chooseLeft,
   scan as scanStream,
   hold as holdStream,
   Stream
@@ -115,15 +116,15 @@ export const filter = <T>(
  * Zip two streams together.
  * Will buffer left and right values until both are available.
  */
-export const zip = <T, U, V>(
-  right: Stream<U>
+export const join = <T>(
+  right: Stream<T>,
+  choose: (left: T, right: T) => T,
 ) => (
   left: Stream<T>,
-  combine: (left: T, right: U) => V,
-) => zipStreams(
+) => joinStreams(
   left,
   right,
-  combine
+  choose
 )
 
 /** Scan a stream, accumulating step state in a signal */
