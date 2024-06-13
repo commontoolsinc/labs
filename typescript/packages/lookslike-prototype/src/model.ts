@@ -1,10 +1,15 @@
 import { stream, signal } from "@commontools/common-frp";
 import { ChatCompletionMessageParam } from "openai/resources/index.mjs";
-import { Signal } from "../../common-frp/lib/signal.js";
+import { Signal, SignalSubject } from "../../common-frp/lib/signal.js";
 const { generate, scan } = stream;
 
 export type Thought = { id: number; message: ChatCompletionMessageParam };
 type Sub = (thought: Thought) => void;
+export const suggestions = signal.state([
+  "flip a coin",
+  "imagine 3 todos and show them",
+  "make me an image of a dog"
+] as string[]);
 
 const subscribers = [] as Sub[];
 function subscribe(cb: Sub) {

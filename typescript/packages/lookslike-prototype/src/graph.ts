@@ -92,7 +92,9 @@ export function createRxJSNetworkFromJson(
     if (inputObservables.length === 0) {
       console.log("EXECUTE NODE Running node on mount", node.id);
       await executeNode(node, {}, context.outputs);
-      return;
+      if (node.contentType !== CONTENT_TYPE_JAVASCRIPT) {
+        return;
+      }
     }
 
     const allInputs = signal.computed(inputObservables, (...values) => {

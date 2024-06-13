@@ -1,6 +1,6 @@
-import {LitElement, html, css} from 'lit-element'
-import {customElement} from 'lit/decorators.js'
-import {base} from '../styles'
+import { LitElement, html, css } from "lit-element";
+import { customElement, property } from "lit/decorators.js";
+import { base } from "../styles";
 
 const styles = css`
   :host {
@@ -28,23 +28,60 @@ const styles = css`
   .unibox-end {
     grid-area: end;
   }
-`
 
-@customElement('com-unibox')
+  .suggestions {
+    display: flex;
+    /* expand to fill */
+    flex-grow: 1;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--gap);
+    padding: calc(var(--unit) * 2);
+
+    font-size: 0.8rem;
+  }
+
+  .suggestions li {
+    cursor: pointer;
+    opacity: 0.5;
+  }
+
+  .suggestions li:hover {
+    text-decoration: underline;
+    opacity: 1;
+  }
+`;
+
+@customElement("com-unibox")
 export class ComUnibox extends LitElement {
-  static styles = [base, styles]
+  static styles = [base, styles];
+
+  @property() suggestions: string[] = [];
 
   render() {
+    const clicked = (suggestion: string) => {
+      const ev = new CustomEvent("suggested", {
+        detail: { suggestion }
+      });
+      this.dispatchEvent(ev);
+    };
+
     return html`
-    <div class="unibox">
-      <div class="unibox-main">
-        <slot name="main"></slot>
+      <ul class="suggestions">
+        ${this.suggestions.map(
+          (suggestion) =>
+            html`<li @click=${() => clicked(suggestion)}>${suggestion}</li> `
+        )}
+      </ul>
+      <div class="unibox">
+        <div class="unibox-main">
+          <slot name="main"></slot>
+        </div>
+        <div class="unibox-end">
+          <slot name="end"></slot>
+        </div>
       </div>
-      <div class="unibox-end">
-        <slot name="end"></slot>
-      </div>
-    </div>
-    `
+    `;
   }
 }
-

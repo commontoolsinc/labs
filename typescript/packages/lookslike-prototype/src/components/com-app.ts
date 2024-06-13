@@ -9,7 +9,7 @@ import { Context, snapshot } from "../state.js";
 import { watch } from "@commontools/common-frp-lit";
 import { SignalSubject } from "../../../common-frp/lib/signal.js";
 import { codePrompt, plan, prepareSteps } from "../plan.js";
-import { thoughtLog } from "../model.js";
+import { suggestions, thoughtLog } from "../model.js";
 import {
   CONTENT_TYPE_FETCH,
   CONTENT_TYPE_GLSL,
@@ -292,7 +292,14 @@ export class ComApp extends LitElement {
             .setContext=${setContext}
           ></com-thread>
           <div slot="footer">
-            <com-unibox>
+            <com-unibox
+              .suggestions=${watch(suggestions)}
+              @suggested=${(ev) => {
+                this.userInput = ev.detail.suggestion;
+                this.appendMessage();
+                suggestions.send([]);
+              }}
+            >
               <com-editor
                 slot="main"
                 .value=${this.userInput}

@@ -3,8 +3,8 @@ import {
   ChatCompletionMessageParam,
   ChatCompletionTool
 } from "openai/resources/index.mjs";
-import { client, messageReducer, model, toolSpec } from "./llm.js";
-import { recordThought, updateThought } from "./model.js";
+import { client, grabJson, messageReducer, model, toolSpec } from "./llm.js";
+import { recordThought, suggestions, updateThought } from "./model.js";
 import { Recipe } from "./data.js";
 
 export const codePrompt = `
@@ -196,7 +196,7 @@ export async function suggest(input: string, fullPlan: Conversation) {
       ...fullPlan,
       {
         role: "user",
-        content: `Based on the original user request (${input}) and the plan to service it, suggest 3 similar or related tasks the user might like to explore next. This could include tweaks to the existing UI, reusing the data in another context or a mix of both. Be concise, use a numbered list with no more than 7 words per item.`
+        content: `Based on the original user request (${input}) and the plan to service it, suggest 3 similar or related tasks the user might like to explore next. This could include tweaks to the existing UI, reusing the data in another context or a mix of both. Be concise, return a JSON array of strings with no more than 7 words per item.`
       }
     ],
     model,
@@ -204,6 +204,11 @@ export async function suggest(input: string, fullPlan: Conversation) {
   });
 
   recordThought(response.choices[0].message);
+  const suggestionsText = response.choices[0].message.content;
+  if (suggestionsText) {
+    const data = grabJson(suggestionsText);
+    suggestions.send(data);
+  }
 
   return response.choices[0].message;
 }
