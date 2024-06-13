@@ -2,30 +2,30 @@ import * as schema from '../schema.js';
 
 export type AnyJSONSchema = object;
 
-export type SignalBinding = {
-  "@type": "signal";
+export type Binding = {
+  "@type": "binding";
   name: string;
 }
 
 /** Is value a binding to a reactive value? */
-export const isSignalBinding = (value: any): value is SignalBinding => {
+export const isBinding = (value: any): value is Binding => {
   return (
     value &&
-    value["@type"] === "signal" &&
+    value["@type"] === "binding" &&
     typeof value.name === "string" &&
     typeof value.name === "string"
   );
 }
 
-/** Create a signal binding */
-export const signal = (name: string): SignalBinding => ({
-  "@type": "signal",
+/** Create a template binding */
+export const binding = (name: string): Binding => ({
+  "@type": "binding",
   name
 });
 
 export type Value = string | number | boolean | null | object;
 
-export type ReactiveValue = SignalBinding | Value;
+export type ReactiveValue = Binding | Value;
 
 export type Props = {
   [key: string]: ReactiveValue;
