@@ -70,8 +70,9 @@ export const codePrompt = `
             {
               "tag": "img",
               "props": {
-                "src": { type: 'string', binding: null },
-              }
+                "src": { "@type": 'signal', "name": 'src' },
+              },
+              "children": []
             }
           ],
         }
@@ -79,7 +80,21 @@ export const codePrompt = `
     }
   })
 
-  Raw values can be passed through by setting binding to null.
+  ---
+
+  "show some text" ->
+  The output of a code node will be bound to the input named 'text'
+
+  addUiNode({
+    "id": "imageUi",
+    "uiTree": {
+      "tag": "span",
+      "props": {
+        "innerText": { "@type": "signal", "name": "text" }
+      },
+      "children": []
+    }
+  })
 
   ---
 
@@ -93,36 +108,39 @@ export const codePrompt = `
       "props": {
         "className": "todo"
       },
-      "children": {
-        "type": "repeat",
-        "binding": "todos",
-        "template": {
-          "tag": "li",
-          "props": {},
-          "children": [
-            {
-              "tag": "input",
-              "props": {
-                "type": "checkbox",
-                "checked": { type: 'boolean', binding: 'checked' }
-              }
-            },
-            {
-              "tag": "span",
-              "props": {
-                "className": "todo-label"
+      "children": [
+        {
+          "@type": "repeat",
+          "name": "todos",
+          "template": {
+            "tag": "li",
+            "props": {},
+            "children": [
+              {
+                "tag": "input",
+                "props": {
+                  "type": "checkbox",
+                  "checked": { "@type": "signal", "name": "checked" }
+                },
+                "children": []
               },
-              "children": [
-                { type: 'string', binding: 'label' }
-              ]
-            }
-          ]
+              {
+                "tag": "span",
+                "props": {
+                  "className": "todo-label",
+                  "innerText": { "@type": "signal", "name": "label" }
+                },
+                "children": []
+              }
+            ]
+          }
         }
-      }
+      ]
     }
   })
 
   UI trees cannot use any javascript methods, code blocks must prepare the data for the UI to consume.
+  Plain text nodes MUST be applied using the innerText prop in a span, you cannot use a raw string.
   GLSL shaders cannot declare uniforms other than iTime, iResolution, iMouse and iChannel0 (the user's webcam).
   notalk;justgo
 `;

@@ -81,17 +81,19 @@ export function createRxJSNetworkFromJson(
   // process node definitions and set up reactive logic
   recipe.forEach(async (node) => {
     const inputObservables: Signal<any>[] = [];
+    const inputSignals: { [key: string]: Signal<any> } = {};
 
     for (const inputName in node.in) {
       const outputName = node.in[inputName][1];
       if (context.outputs[outputName]) {
         inputObservables.push(context.outputs[outputName]);
+        inputSignals[inputName] = context.outputs[outputName];
       }
     }
 
     if (inputObservables.length === 0) {
       console.log("EXECUTE NODE Running node on mount", node.id);
-      await executeNode(node, {}, context.outputs);
+      await executeNode(node, {}, context.outputs, inputSignals);
       if (node.contentType !== CONTENT_TYPE_JAVASCRIPT) {
         return;
       }
@@ -124,7 +126,7 @@ export function createRxJSNetworkFromJson(
         node.id,
         values
       );
-      await executeNode(node, values, context.outputs);
+      await executeNode(node, values, context.outputs, inputSignals);
     });
     context.cancellation.push(cancel);
   });
@@ -135,7 +137,8 @@ export function createRxJSNetworkFromJson(
 async function executeNode(
   node: RecipeNode,
   inputs: { [key: string]: any },
-  outputs: { [key: string]: SignalSubject<any> }
+  outputs: { [key: string]: SignalSubject<any> },
+  inputSignals: { [key: string]: Signal<any> }
 ) {
   console.log("EXECUTE NODE", node.id, inputs);
   const { contentType } = node;
@@ -150,8 +153,8 @@ async function executeNode(
       break;
     }
     case CONTENT_TYPE_UI: {
-      const renderedTemplate = createElement(node.body, inputs);
-      outputs[node.id].send(renderedTemplate);
+      const template = createElement(node.body, inputSignals);
+      outputs[node.id].send(template);
       break;
     }
     case CONTENT_TYPE_FETCH: {

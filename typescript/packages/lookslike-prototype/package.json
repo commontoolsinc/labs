@@ -33,7 +33,8 @@
         "../../common/runtime:build",
         "../usuba-rt:build",
         "../common-frp:build",
-        "../common-frp-lit:build"
+        "../common-frp-lit:build",
+        "../common-ui:build"
       ],
       "command": "vite build"
     },
@@ -51,6 +52,7 @@
     "@codemirror/view": "^6.27.0",
     "@commontools/common-frp": "^0.0.1",
     "@commontools/common-frp-lit": "^0.0.1",
+    "@commontools/common-ui": "^0.0.1",
     "@commontools/data": "^0.0.1",
     "@commontools/io": "^0.0.1",
     "@commontools/module": "^0.0.1",

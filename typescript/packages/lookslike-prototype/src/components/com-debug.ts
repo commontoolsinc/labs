@@ -120,7 +120,6 @@ export default class DebugWindow extends LitElement {
 
     this.style.left = `${left}px`;
     this.style.top = `${top}px`;
-    console.log("dragging", left, top);
   };
 
   private stopDrag = () => {
