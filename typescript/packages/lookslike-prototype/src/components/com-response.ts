@@ -75,8 +75,8 @@ const styles = css`
     display: block;
   }
 
-  .main {
-    background-color: var(--color-secondary-background);
+  .response {
+    background-color: var(--color-card);
     padding: var(--gap);
 
     &:focus {
@@ -125,7 +125,7 @@ export class ComResponse extends LitElement {
     );
 
     return html`
-      <div class="main">
+      <div class="response">
         ${definition}
         <slot></slot>
       </div>

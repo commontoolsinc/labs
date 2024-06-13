@@ -284,7 +284,7 @@ export class ComApp extends LitElement {
     };
 
     return html`
-      <com-app-grid>
+      <main>
         <com-chat slot="main">
           <com-thread
             slot="main"
@@ -311,10 +311,10 @@ export class ComApp extends LitElement {
             </com-unibox>
           </div>
         </com-chat>
-      </com-app-grid>
-      <com-debug>
-        <com-thought-log .thoughts=${watch(thoughtLog)}></com-thought-log>
-      </com-debug>
+        <com-debug>
+          <com-thought-log .thoughts=${watch(thoughtLog)}></com-thought-log>
+        </com-debug>
+      </main>
     `;
   }
 }

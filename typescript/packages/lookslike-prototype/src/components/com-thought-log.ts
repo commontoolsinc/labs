@@ -7,10 +7,9 @@ export class ComThoughtLog extends LitElement {
   static styles = css`
     .thought-log {
       display: flex;
-      flex-direction: column;
+      flex-direction: column-reverse;
       gap: 1rem;
       max-height: 100vh;
-      overflow-y: auto;
     }
 
     .thought {

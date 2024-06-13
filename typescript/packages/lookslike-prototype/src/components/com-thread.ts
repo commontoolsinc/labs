@@ -9,8 +9,9 @@ import { SignalSubject } from "../../../common-frp/lib/signal.js";
 
 const styles = css`
   :host {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+
     gap: var(--gap);
   }
 
@@ -75,7 +76,6 @@ export class ComThread extends LitElement {
       @updated=${onUpdated}
       @overriden=${onOverriden}
     >
-      <button @click=${onRefresh}>Refresh</button>
       <code class="local-variable">${node.id}</code>
       ${repeat(
         Object.entries(node.in),

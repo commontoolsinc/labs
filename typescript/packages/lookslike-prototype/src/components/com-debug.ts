@@ -1,5 +1,5 @@
 import { html, css, LitElement } from "lit";
-import { customElement, state } from "lit/decorators.js";
+import { customElement, query, state } from "lit/decorators.js";
 
 @customElement("com-debug")
 export default class DebugWindow extends LitElement {
@@ -11,6 +11,9 @@ export default class DebugWindow extends LitElement {
 
   @state()
   private height: number = 400;
+
+  @query(".content")
+  private content!: HTMLElement;
 
   private offsetX: number = 0;
   private offsetY: number = 0;
@@ -26,7 +29,7 @@ export default class DebugWindow extends LitElement {
       top: 10px;
       right: 10px;
       min-width: 256px;
-      min-height: 64px;
+      min-height: 128px;
       background: rgba(0, 0, 0, 0.8);
       color: white;
       font-size: 8px;
@@ -38,7 +41,6 @@ export default class DebugWindow extends LitElement {
       flex-direction: column;
       box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
       resize: both;
-      overflow-y: auto;
     }
     header {
       background: #222;
@@ -61,14 +63,15 @@ export default class DebugWindow extends LitElement {
       cursor: pointer;
     }
     .content {
-      flex: 1;
       overflow-y: auto;
+      max-height: 100%;
       padding: 8px;
     }
     .minimized {
       display: none;
     }
   `;
+  interval: NodeJS.Timeout;
 
   constructor() {
     super();
@@ -79,11 +82,6 @@ export default class DebugWindow extends LitElement {
     super.connectedCallback();
     this.resizeObserver.observe(this);
     this.resizeWindow();
-
-    // interval to scroll to bottom
-    setInterval(() => {
-      this.scrollTop = this.scrollHeight;
-    }, 100);
   }
 
   disconnectedCallback() {
@@ -95,7 +93,7 @@ export default class DebugWindow extends LitElement {
     this.minimized = !this.minimized;
     if (this.minimized) {
       this.style.width = "256px";
-      this.style.height = "32px";
+      this.style.height = "128px";
       this.style.top = "10px";
       this.style.right = "10px";
     } else {
