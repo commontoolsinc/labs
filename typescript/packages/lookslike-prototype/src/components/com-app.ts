@@ -311,10 +311,10 @@ export class ComApp extends LitElement {
             </com-unibox>
           </div>
         </com-chat>
-        <div slot="sidebar">
-          <com-thought-log .thoughts=${watch(thoughtLog)}></com-thought-log>
-        </div>
       </com-app-grid>
+      <com-debug>
+        <com-thought-log .thoughts=${watch(thoughtLog)}></com-thought-log>
+      </com-debug>
     `;
   }
 }

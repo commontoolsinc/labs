@@ -16,7 +16,6 @@ export class ComModuleLlm extends LitElement {
       return html`<pre>loading...</pre>`;
     }
 
-    return html`
-      <markdown-element .markdown=${this.value}></markdown>`;
+    return html`<com-markdown .markdown=${this.value}></com-markdown>`;
   }
 }
