@@ -1,7 +1,37 @@
 import { Cancel, combineCancels } from '@commontools/common-frp';
 import { Signal, effect } from '@commontools/common-frp/signal';
-import { isSignalBinding, VNode } from './view.js';
-import { getViewByTag } from './known-tags.js';
+import {
+  isBinding,
+  VNode,
+  AnyJSONSchema,
+  View,
+  view as createView
+} from './view.js';
+
+/** Registry for tags that are allowed to be rendered */
+const registry = () => {
+  const viewByTag = new Map<string, View>();
+
+  const getViewByTag = (tag: string) => viewByTag.get(tag);
+
+  const register = (view: View) => {
+    viewByTag.set(view.tag, view);
+  }
+
+  return {getViewByTag, register};
+}
+
+export const {getViewByTag, register} = registry();
+
+/** Define and register a view factory function */
+export const view = (
+  tagName: string,
+  propsSchema: AnyJSONSchema = {}
+): View => {
+  const factory = createView(tagName, propsSchema);
+  register(factory);
+  return factory;
+}
 
 export type RenderContext = Record<string, Signal<any>>
 
@@ -31,10 +61,10 @@ const renderVNode = (
   // Bind each prop to a reactive value (if any) and collect cancels
   const cancels: Array<Cancel> = [];
   for (const [key, value] of Object.entries(vnode.props)) {
-    if (isSignalBinding(value)) {
+    if (isBinding(value)) {
       const boundValue = context[value.name];
       if (boundValue != null) {
-        const cancel = effect([boundValue], (value) => {
+        const cancel = effect([boundValue], value => {
           setProp(element, key, value);
         });
         cancels.push(cancel);

@@ -1,7 +1,7 @@
 import { equal, throws } from './assert.js';
 import { state } from '@commontools/common-frp/signal';
 import { hstack } from '../lib/hyperscript/tags.js';
-import { signal } from '../lib/hyperscript/view.js';
+import { binding } from '../lib/hyperscript/view.js';
 import render from '../lib/hyperscript/render.js';
 
 describe('vnode factory functions', () => {
@@ -45,7 +45,7 @@ describe("it binds signals", () => {
   const className = state('foo');
 
   const vnode = hstack(
-    {'className': signal('string', 'className')},
+    {'className': binding('string', 'className')},
     'Hello'
   );
 
