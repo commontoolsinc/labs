@@ -31,14 +31,16 @@ export type WriteableStream<T> = Sendable<T> & Sink<T>
 
 export type ReadableStream<T> = Sink<T> & Cancellable
 
-/** Box up a derived signal, exposing only the stream sink and cancel */
-export const readonly = <T>({
-  sink,
-  cancel = undefined
-}: {
-  sink: (subscriber: Sendable<T>) => Cancel,
-  cancel: Cancel | undefined
-}): ReadableStream<T> => ({
+/**
+ * Box up a signal, making it readonly by exposing only the stream sink
+ * and optional cancel
+ */
+export const readonly = <T>(
+  {
+    [__sink__]: sink,
+    cancel = undefined
+  }: Sink<T> & Cancellable
+): ReadableStream<T> => ({
   [__sink__]: sink,
   cancel
 })
@@ -178,10 +180,10 @@ export const join = <T>(
 
   const cancelRight = sink(right, rightSubscriber)
 
-  return readonly({
-    sink: downstreams.sink,
+  return {
+    [__sink__]: downstreams.sink,
     cancel: combineCancels([cancelLeft, cancelRight])
-  })
+  }
 }
 
 /** Scan a stream, accumulating step state in a signal */

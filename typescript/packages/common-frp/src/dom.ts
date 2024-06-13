@@ -7,7 +7,7 @@ export const events = (
   const event = subject()
   element.addEventListener(name, event.send)
   return readonly({
-    sink: event[__sink__],
+    ...event,
     cancel: () => element.removeEventListener(name, event.send)
   })
 }
