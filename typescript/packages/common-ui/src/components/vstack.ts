@@ -9,11 +9,13 @@ export class VStackElement extends LitElement {
   static override styles = css`
     :host {
       display: block;
+      --gap: 16px;
     }
 
     .stack {
       display: flex;
       flex-direction: column;
+      gap: var(--gap);
     }
   `;
 
