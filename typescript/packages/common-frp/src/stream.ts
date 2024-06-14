@@ -6,13 +6,11 @@ import {
   Cancellable,
   combineCancels
 } from "./publisher.js"
-import { state, Signal, __updates__ } from "./signal.js"
-
-export const __sink__ = Symbol('sink')
+import { state, Signal } from "./signal.js"
 
 /** A sink is an observable that delivers new values */
 export type Sink<T> = {
-  [__sink__]: (subscriber: Sendable<T>) => Cancel
+  sink: (subscriber: Sendable<T>) => Cancel
 }
 
 /** A stream is a sink that can be cancelled */
@@ -25,7 +23,7 @@ export type Stream<T> = Sink<T> & Cancellable
 export const sink = <T>(
   upstream: Stream<T>,
   subscriber: Sendable<T>
-) => upstream[__sink__](subscriber)
+) => upstream.sink(subscriber)
 
 export type WriteableStream<T> = Sendable<T> & Sink<T>
 
@@ -37,11 +35,11 @@ export type ReadableStream<T> = Sink<T> & Cancellable
  */
 export const readonly = <T>(
   {
-    [__sink__]: sink,
+    sink,
     cancel = undefined
   }: Sink<T> & Cancellable
 ): ReadableStream<T> => ({
-  [__sink__]: sink,
+  sink,
   cancel
 })
 
@@ -51,7 +49,7 @@ export const readonly = <T>(
  */
 export const subject = <T>(): WriteableStream<T> => {
   const { send, sink } = publisher<T>()
-  return { [__sink__]: sink, send }
+  return { send, sink }
 }
 
 /** Map a stream of values */
@@ -68,9 +66,11 @@ export const map = <T, U>(
     send: (value: T) => downstreams.send(transform(value))
   }
 
+  const cancel = sink(upstream, subscriber)
+
   return {
-    [__sink__]: downstreams.sink,
-    cancel: sink(upstream, subscriber)
+    sink: downstreams.sink,
+    cancel
   }
 }
 
@@ -92,9 +92,11 @@ export const filter = <T>(
     }
   }
 
+  const cancel = sink(upstream, subscriber)
+
   return {
-    [__sink__]: downstreams.sink,
-    cancel: sink(upstream, subscriber)
+    sink: downstreams.sink,
+    cancel
   }
 }
 
@@ -180,9 +182,11 @@ export const join = <T>(
 
   const cancelRight = sink(right, rightSubscriber)
 
+  const cancel = combineCancels([cancelLeft, cancelRight])
+
   return {
-    [__sink__]: downstreams.sink,
-    cancel: combineCancels([cancelLeft, cancelRight])
+    sink: downstreams.sink,
+    cancel
   }
 }
 
@@ -193,7 +197,7 @@ export const scan = <T, U>(
   initial: U
 ): Signal<U> => {
   const downstreams = publisher<U>()
-  const { get, [__updates__]: updates, send } = state(initial)
+  const { get, updates, send } = state(initial)
 
   // We track the current reduction state for the scan in a closure variable
   // instead of using the signal state directly. That's because signal state
@@ -215,7 +219,7 @@ export const scan = <T, U>(
 
   const cancel = sink(upstream, subscriber)
 
-  return { get, [__updates__]: updates, cancel }
+  return { get, updates, cancel }
 }
 
 /** Hold the latest value of a stream in a signal */
