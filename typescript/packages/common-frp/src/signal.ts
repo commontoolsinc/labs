@@ -60,11 +60,8 @@ const createTransactionManager = () => {
 
 const { withUpdates, withReads } = createTransactionManager()
 
-/** Symbol for updates subscribe method */
-export const __updates__ = Symbol('updates')
-
-export type Updates<T> = {
-  [__updates__]: (subscriber: Sendable<T>) => Cancel
+export type Updates = {
+  updates: (subscriber: Sendable<void>) => Cancel
 }
 
 const isEqual = Object.is
@@ -75,8 +72,8 @@ export type Gettable<T> = {
 
 const sample = <T>(container: Gettable<T>) => container.get()
 
-export type Signal<T> = Gettable<T> & Updates<void> & Cancellable
-export type WriteableSignal<T> = Gettable<T> & Updates<void> & Sendable<T>
+export type Signal<T> = Gettable<T> & Updates & Cancellable
+export type WriteableSignal<T> = Gettable<T> & Updates & Sendable<T>
 
 export type Effect = {
   <A>(
@@ -162,7 +159,7 @@ export const effect: Effect = (
   const subscriber = { send: schedule }
 
   return combineCancels(
-    upstreams.map(signal => signal[__updates__](subscriber))
+    upstreams.map(signal => signal.updates(subscriber))
   )
 }
 
@@ -187,7 +184,7 @@ export const state = <T>(initial: T) => {
   return {
     get,
     send,
-    [__updates__]: updates.sink
+    updates: updates.sink
   }
 }
 
@@ -287,7 +284,7 @@ export const computed: Computed = (
   const subscriber = { send: performUpdate }
 
   const cancel = combineCancels(
-    upstreams.map(signal => signal[__updates__](subscriber))
+    upstreams.map(signal => signal.updates(subscriber))
   )
 
   const get = () => {
@@ -301,7 +298,7 @@ export const computed: Computed = (
 
   return {
     get,
-    [__updates__]: updates.sink,
+    updates: updates.sink,
     cancel
   }
 }

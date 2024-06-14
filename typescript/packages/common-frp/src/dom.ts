@@ -1,4 +1,4 @@
-import { subject, readonly, __sink__ } from './stream.js'
+import { subject, readonly } from './stream.js'
 
 export const events = (
   element: HTMLElement,
