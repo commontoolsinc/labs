@@ -9,11 +9,13 @@ export class HStackElement extends LitElement {
   static override styles = css`
     :host {
       display: block;
+      --gap: 16px;
     }
 
     .stack {
       display: flex;
       flex-direction: row;
+      gap: var(--gap);
     }
   `;
 
