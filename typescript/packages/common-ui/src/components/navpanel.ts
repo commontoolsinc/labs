@@ -3,9 +3,9 @@ import { customElement, property } from 'lit-element/decorators.js';
 import { VNode } from '../hyperscript/view.js';
 import { render, RenderContext, view } from '../hyperscript/render.js';
 
-export const navpanel = view('co-navpanel', {});
+export const navpanel = view('common-navpanel', {});
 
-@customElement('co-navpanel')
+@customElement('common-navpanel')
 export class NavPanelElement extends LitElement {
   static override styles = css`
   :host {

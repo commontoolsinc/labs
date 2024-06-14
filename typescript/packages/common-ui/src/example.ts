@@ -1,12 +1,16 @@
-import { div, navpanel } from './hyperscript/tags.js';
+import { dict } from './hyperscript/tags.js';
 import render from './hyperscript/render.js';
 
-const panel = render(
-  navpanel(
-    {
-      content: div({id: 'hello'}, 'Hello, world!')
-    }
-  )
-);
+const tree = dict({
+  records: {
+    'one': '1',
+    'two': '2',
+    'three': '3'
+  }
+});
 
-document.body.appendChild(panel);
+const element = render(tree, {
+  
+});
+
+document.body.appendChild(element);
