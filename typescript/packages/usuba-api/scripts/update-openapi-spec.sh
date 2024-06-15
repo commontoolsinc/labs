@@ -6,7 +6,7 @@ set -euo pipefail
 
 pushd $SCRIPT_DIR/../../../
 
-docker compose up -d
+docker compose up -d --build
 
 popd
 pushd $SCRIPT_DIR/../

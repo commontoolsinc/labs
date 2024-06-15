@@ -32,6 +32,7 @@
     "@commontools/io": "^0.0.1",
     "@commontools/module": "^0.0.1",
     "@commontools/usuba-rt": "^0.0.1",
+    "@commontools/usuba-api": "^0.0.1",
     "@commontools/usuba-ses": "^0.0.1"
   },
   "devDependencies": {
@@ -43,6 +44,7 @@
     "build": {
       "dependencies": [
         "../../packages/usuba-rt:build",
+        "../../packages/usuba-api:build",
         "../../packages/usuba-ses:build",
         "../data:build",
         "../io:build",
@@ -59,6 +61,7 @@
     "clean": {
       "dependencies": [
         "../../packages/usuba-rt:clean",
+        "../../packages/usuba-api:build",
         "../../packages/usuba-ses:clean",
         "../data:clean",
         "../io:clean",

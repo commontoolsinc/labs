@@ -18,7 +18,7 @@ use utoipa_swagger_ui::SwaggerUi;
 use crate::{
     error::UsubaError,
     openapi::OpenApiDocs,
-    routes::{build_module, retrieve_module, ui_file, ui_index, upstream_index},
+    routes::{build_module, bundle_javascript, retrieve_module, ui_file, ui_index, upstream_index},
     PersistedHashStorage,
 };
 
@@ -43,6 +43,7 @@ pub async fn serve(listener: TcpListener, upstream: Option<Uri>) -> Result<(), U
 
     let app = Router::new()
         .merge(SwaggerUi::new("/swagger-ui").url("/openapi.json", OpenApiDocs::openapi()))
+        .route("/api/v0/bundle", post(bundle_javascript))
         .route("/api/v0/module", post(build_module))
         .route("/api/v0/module/:id", get(retrieve_module))
         .route("/", get(upstream_index))

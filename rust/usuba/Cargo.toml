@@ -1,6 +1,6 @@
 [package]
 name = "usuba"
-description = "An anything-to-Common-Wasm build server"
+description = "A Common server"
 version = "0.1.0"
 edition = "2021"
 
@@ -24,6 +24,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "io-util", "process",
 tower-http = { workspace = true, features = ["cors"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+usuba-bundle = { workspace = true }
 utoipa = { workspace = true, features = ["axum_extras"] }
 utoipa-swagger-ui = { workspace = true, features = ["axum"] }
 wit-parser = { workspace = true }
