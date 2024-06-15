@@ -1,7 +1,8 @@
 [workspace]
 members = [
   "rust/usuba",
-  "rust/usuba-compat"
+  "rust/usuba-compat",
+  "rust/usuba-bundle"
 ]
 
 # See: https://github.com/rust-lang/rust/issues/90148#issuecomment-949194352
@@ -13,11 +14,16 @@ async-trait = { version = "0.1" }
 axum = { version = "0.7" }
 blake3 = { version = "1.5" }
 bytes = { version = "1" }
+deno_emit = { version = "0.42" }
+deno_graph = { version = "0.78" }
+http = { version = "1.1" }
+http-body-util = { version = "0.1" }
 hyper-util = { version = "0.1", features = ["client", "client-legacy"] }
 js-component-bindgen = { version = "1", features = ["transpile-bindgen"] }
 js-sys = { version = "0.3" }
 mime_guess = { version = "2" }
 redb = { version = "2" }
+reqwest = { version = "0.12", default-features = false  }
 rust-embed = { version = "8.4" }
 serde = { version = "1" }
 serde_json = { version = "1" }
@@ -28,6 +34,8 @@ tower-http = { version = "0.5" }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "tracing-log", "json"] }
 tracing-web = { version = "0.1" }
+url = { version = "2" }
+usuba-bundle = { path = "./rust/usuba-bundle" }
 utoipa = { version = "4" }
 utoipa-swagger-ui = { version = "7" }
 wasm-bindgen = { version = "0.2" }

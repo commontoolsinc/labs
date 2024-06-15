@@ -3,14 +3,13 @@ extern crate tracing;
 
 use std::net::SocketAddr;
 
-use tracing::Level;
-use tracing_subscriber::{fmt::Layer, layer::SubscriberExt, FmtSubscriber};
+use tracing_subscriber::{fmt::Layer, layer::SubscriberExt, EnvFilter, FmtSubscriber};
 use usuba::{serve, UsubaError};
 
 #[tokio::main]
 pub async fn main() -> Result<(), UsubaError> {
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::TRACE)
+        .with_env_filter(EnvFilter::from_default_env())
         .finish();
     tracing::subscriber::set_global_default(subscriber.with(Layer::default().pretty()))?;
 

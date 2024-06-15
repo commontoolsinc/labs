@@ -1,0 +1,18 @@
+[package]
+name = "usuba-bundle"
+description = "Code preparation steps for Common modules"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+bytes = { workspace = true }
+deno_emit = { workspace = true }
+deno_graph = { workspace = true }
+reqwest = { workspace = true, default-features = false, features = ["rustls-tls", "charset", "http2", "macos-system-configuration"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "io-util", "process", "fs"] }
+tracing = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }

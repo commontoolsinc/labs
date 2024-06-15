@@ -7,6 +7,7 @@ use tempfile::TempDir;
 
 use tokio::process::Command;
 use tokio::task::JoinSet;
+use usuba_bundle::JavaScriptBundler;
 
 use crate::write_file;
 
@@ -18,7 +19,7 @@ impl Bake for JavaScriptBaker {
     #[instrument]
     async fn bake(
         &self,
-        world: &str,
+        _world: &str,
         wit: Vec<Bytes>,
         source_code: Bytes,
         library: Vec<Bytes>,
@@ -28,6 +29,12 @@ impl Bake for JavaScriptBaker {
             "Created temporary workspace in {}",
             workspace.path().display()
         );
+
+        let bundled_source_code = tokio::task::spawn_blocking(move || {
+            tokio::runtime::Handle::current()
+                .block_on(JavaScriptBundler::bundle_module(source_code))
+        })
+        .await??;
 
         let wasm_path = workspace.path().join("module.wasm");
         let js_path = workspace.path().join("module.js");
@@ -44,7 +51,10 @@ impl Bake for JavaScriptBaker {
         wit.into_iter()
             .enumerate()
             .map(|(i, wit)| write_file(wit_path.join(format!("module{}.wit", i)), wit))
-            .chain([write_file(js_path.clone(), source_code)])
+            .chain([write_file(
+                js_path.clone(),
+                Bytes::from(bundled_source_code),
+            )])
             .chain(
                 library.into_iter().enumerate().map(|(i, wit)| {
                     write_file(wit_deps_path.join(format!("library{}.wit", i)), wit)

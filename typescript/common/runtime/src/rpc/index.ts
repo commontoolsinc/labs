@@ -8,7 +8,7 @@ import {
   HostWorkerResponses,
 } from './host.js';
 import { ModuleEvents, ModuleRequests, ModuleResponses } from './module.js';
-import { EventMap } from '../helpers.js';
+import { EventMap, logger as console } from '../helpers.js';
 
 export const HANDSHAKE_EVENT = 'rpc:handshake';
 
@@ -27,11 +27,11 @@ export const isRPCEvent = (candidate: unknown): candidate is RPCEvent =>
 export type RPCEventHandler<
   Events extends string,
   Requests extends EventMap<Events>,
-  Responses extends EventMap<Events>
+  Responses extends EventMap<Events>,
 > = <
   E extends Events & keyof Requests & keyof Responses,
   Req extends Requests[E] = Requests[E],
-  Res extends Responses[E] = Responses[E]
+  Res extends Responses[E] = Responses[E],
 >(
   event: E,
   detail: Req
@@ -43,7 +43,7 @@ export abstract class RPCClient<
   RxResponses extends EventMap<RxEvents>,
   TxEvents extends string,
   TxRequests extends EventMap<TxEvents>,
-  TxResponses extends EventMap<TxEvents>
+  TxResponses extends EventMap<TxEvents>,
 > {
   #port;
 
@@ -64,7 +64,7 @@ export abstract class RPCClient<
       keyof EventMap<TxRequests> &
       keyof EventMap<TxResponses>,
     D = TxRequests[E],
-    R = TxResponses[E]
+    R = TxResponses[E],
   >(event: E, detail: D, transfer: Transferable[] = []): Promise<R> {
     console.log(
       `[RPC] [sender] Sending ${event}:`,
@@ -77,7 +77,7 @@ export abstract class RPCClient<
         rx.removeEventListener('message', handler);
 
         console.log(
-          `[RPC] [sender] Received ${event} response:`,
+          `[rpc] [sender] Received ${event} response:`,
           responseEvent.data || '(empty response)'
         );
 

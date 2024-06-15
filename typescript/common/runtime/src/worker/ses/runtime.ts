@@ -7,12 +7,16 @@ import { LocalRuntime, ThreadLocalModule } from '../index.js';
 import { IO } from '../../state/io/index.js';
 import type { Value } from '../../index.js';
 import { Reference } from '../../common/data/reference.js';
+import { logger as console } from '../../helpers.js';
+import * as api from '@commontools/usuba-api';
+
+console.log(api);
 
 export class RuntimeSESWorker implements LocalRuntime {
   constructor() {
-    console.log('LOCKING DOWN');
+    console.log('SES locking down...');
     lockdown();
-    console.log('LOCKED DOWN OKAY');
+    console.log('SES locked down!');
   }
 
   async eval(
@@ -29,6 +33,17 @@ export class RuntimeSESWorker implements LocalRuntime {
       },
     });
 
+    const bundledSourceCode = await api.bundleJavascript({
+      formData: {
+        source: [
+          new File(
+            [new Blob([sourceCode], { type: 'text/javascript' })],
+            'interior.js'
+          ),
+        ],
+      },
+    });
+
     const commonIOCompartment = new Compartment(
       {
         io: commonIO,
@@ -36,7 +51,7 @@ export class RuntimeSESWorker implements LocalRuntime {
       {},
       {
         importHook: async (specifier: string) => {
-          console.warn('IMPORT HOOK:', specifier);
+          console.log('Importing:', specifier);
           if (specifier == 'common:io/state@0.0.1') {
             return new StaticModuleRecord(
               'export const read = io.read; export const write = io.write;',
@@ -48,7 +63,7 @@ export class RuntimeSESWorker implements LocalRuntime {
           );
         },
         resolveHook: (specifier: string) => {
-          console.warn('RESOLVE HOOK:', specifier);
+          console.log('Resolving:', specifier);
           if (specifier == 'common:io/state@0.0.1') {
             return 'common:io/state@0.0.1';
           }
@@ -70,17 +85,30 @@ export class RuntimeSESWorker implements LocalRuntime {
       },
       {
         importHook: async (specifier: string) => {
-          console.warn('IMPORT HOOK:', specifier);
+          console.log('Importing:', specifier);
           if (specifier == 'interior') {
-            return new StaticModuleRecord(sourceCode, 'interior');
+            return new StaticModuleRecord(bundledSourceCode, specifier);
           }
+
+          if (specifier.startsWith('https://')) {
+            // yolo dont do this
+            return new StaticModuleRecord(
+              await (await fetch(specifier)).text(),
+              specifier
+            );
+          }
+
           throw new Error(
             `Attempt to import unrecognized module '${specifier}'`
           );
         },
         resolveHook: (specifier: string) => {
-          console.warn('RESOLVE HOOK:', specifier);
-          if (specifier == 'interior' || specifier == 'common:io/state@0.0.1') {
+          console.warn('Resolving:', specifier);
+          if (
+            specifier == 'interior' ||
+            specifier == 'common:io/state@0.0.1' ||
+            specifier.startsWith('https://')
+          ) {
             return specifier;
           }
           throw new Error(

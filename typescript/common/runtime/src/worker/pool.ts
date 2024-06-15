@@ -1,4 +1,4 @@
-import { assertNever } from '../helpers.js';
+import { assertNever, logger as console } from '../helpers.js';
 import { Sandbox, WASM_SANDBOX, SES_SANDBOX } from '../index.js';
 import { HostWorkerEventHandler } from '../rpc/host.js';
 import { HostToRuntimeRPC, HANDSHAKE_EVENT } from '../rpc/index.js';

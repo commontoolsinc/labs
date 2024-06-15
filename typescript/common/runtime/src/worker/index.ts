@@ -13,7 +13,7 @@ import {
   ModuleRequests,
   ModuleResponses,
 } from '../rpc/module.js';
-import { assertNever } from '../helpers.js';
+import { assertNever, logger as console } from '../helpers.js';
 import { HostStorage } from '../state/storage/hoststorage.js';
 
 export interface ThreadLocalModule {

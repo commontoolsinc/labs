@@ -5,6 +5,7 @@ import type {
 import { IO as CommonIO } from '../../state/io/index.js';
 import { infer } from './infer.js';
 import { Reference } from './reference.js';
+import { logger as console } from '../../helpers.js';
 
 export class Dictionary implements CommonDictionary, CommonIO {
   #inner: any;
