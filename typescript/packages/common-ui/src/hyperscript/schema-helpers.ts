@@ -19,7 +19,7 @@ export const eventProps = () => ({
   "@click": binding(),
   "@change": binding(),
   "@focus": binding(),
-  "blur": binding(),
+  "@blur": binding(),
   "@focusin": binding(),
   "@focusout": binding(),
   "@input": binding(),
