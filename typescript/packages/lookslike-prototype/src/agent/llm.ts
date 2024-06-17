@@ -1,13 +1,13 @@
 import Instructor from "@instructor-ai/instructor";
 import OpenAI from "openai";
-import { fetchApiKey } from "./apiKey.js";
+import { fetchApiKey } from "../apiKey.js";
 import {
   ChatCompletionMessage,
   ChatCompletionMessageParam,
-  ChatCompletionTool,
   ChatCompletionChunk
 } from "openai/resources/index.mjs";
-import { currentlyWorking, recordThought } from "./model.js";
+import { recordThought } from "./model.js";
+import { toolSpec } from "./tools.js";
 
 export let model = "gpt-4o";
 export const apiKey = fetchApiKey() as string;
@@ -16,170 +16,6 @@ const openai = new OpenAI({
   apiKey: apiKey,
   dangerouslyAllowBrowser: true
 });
-
-export const toolSpec: ChatCompletionTool[] = [
-  {
-    type: "function",
-    function: {
-      name: "addConnection",
-      description: "Adds a connection between two existing nodes.",
-      parameters: {
-        type: "object",
-        properties: {
-          fromOutput: {
-            type: "string",
-            description: "The ID of the output node in the graph"
-          },
-          toInput: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Path to the node + port to connect to, e.g. ['nodeId', 'portName']"
-          }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "addCodeNode",
-      description:
-        "Add a data transformation node to the graph written in javascript, write only the function body.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          code: { type: "string" }
-        },
-        required: ["id", "code"]
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "addUiNode",
-      description: "Adds a UI node written using a hyperscript tree.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          uiTree: { type: "object", description: "The UI tree." }
-        },
-        required: ["id", "uiTree"]
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "addEventNode",
-      description:
-        "A node that will be bound to a user-input event from a UI node.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "addClockNode",
-      description:
-        "A node that emit an incrementing value every second, starting from 0.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "addFetchNode",
-      description: "Fetch node to retrieve (GET) data from the web.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          url: { type: "string" }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "addGlslShaderNode",
-      description:
-        "Shader node in ShaderToy format. iTime, iResolution, iMouse and iChannel0 (the user's webcam). Do not re-define them.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          shaderToyCode: { type: "string" }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "addLanguageModelNode",
-      description:
-        "LLM node to the graph, responds in text format. Prompt must be calculated using a code node.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          promptSource: {
-            type: "string",
-            description:
-              "Name of the node who's output should be used as the prompt"
-          }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "addImageGenerationNode",
-      description:
-        "Generate an image from a prompt/description. The output is the URL.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          promptSource: {
-            type: "string",
-            description:
-              "Name of the node who's output should be used as the prompt"
-          }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "deleteNode",
-      description: "Deletes a node from the graph.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" }
-        }
-      }
-    }
-  }
-];
 
 export const client = Instructor({
   client: openai,

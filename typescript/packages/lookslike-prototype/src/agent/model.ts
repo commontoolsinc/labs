@@ -1,6 +1,6 @@
 import { stream, signal } from "@commontools/common-frp";
 import { ChatCompletionMessageParam } from "openai/resources/index.mjs";
-import { Signal, SignalSubject } from "../../common-frp/lib/signal.js";
+import { Signal } from "../../common-frp/lib/signal.js";
 const { subject, scan } = stream;
 
 export type Thought = { id: number; message: ChatCompletionMessageParam };

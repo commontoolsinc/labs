@@ -2,14 +2,10 @@ import { LitElement, html } from "lit-element";
 import { customElement, state } from "lit/decorators.js";
 import { base } from "../styles.js";
 
-import { NodePath, Recipe, RecipeNode, emptyGraph } from "../data.js";
-import { processUserInput, toolSpec } from "../llm.js";
+import { NodePath, Recipe, emptyGraph } from "../data.js";
 import { collectSymbols } from "../graph.js";
 import { Context, snapshot } from "../state.js";
 import { watch } from "@commontools/common-frp-lit";
-import { SignalSubject } from "../../../common-frp/lib/signal.js";
-import { codePrompt, describeTools, plan, prepareSteps } from "../plan.js";
-import { suggestions, thoughtLog } from "../model.js";
 import {
   CONTENT_TYPE_CLOCK,
   CONTENT_TYPE_EVENT,
@@ -19,6 +15,10 @@ import {
   CONTENT_TYPE_LLM,
   CONTENT_TYPE_UI
 } from "../contentType.js";
+import { plan, prepareSteps } from "../agent/plan.js";
+import { processUserInput } from "../agent/llm.js";
+import { codePrompt } from "../agent/implement.js";
+import { suggestions, thoughtLog } from "../agent/model.js";
 
 const lastFmKey = "0060ba224307ff9f787deb837f4be376";
 
@@ -305,21 +305,6 @@ export class ComApp extends LitElement {
     );
 
     console.log("result", result);
-
-    // const review = await processUserInput(
-    //   `Review the graph and fix any nonsensical elements. Add missing connections, remove redundant blocks.
-
-    //   ${describeTools(toolSpec, false)}
-
-    //   ---
-    //   Current graph:
-
-    //   \`\`\`json${this.graphSnapshot()}\`\`\``,
-    //   systemContext,
-    //   this.availableFunctions(newGraph)
-    // );
-
-    // console.log("review", review);
   }
 
   override render() {
