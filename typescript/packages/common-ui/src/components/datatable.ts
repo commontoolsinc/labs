@@ -2,8 +2,10 @@ import { LitElement, html, css } from 'lit-element';
 import { customElement, property } from 'lit-element/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
 import { view } from '../hyperscript/render.js';
+import { eventProps } from '../hyperscript/schema-helpers.js';
 
 export const datatable = view('common-datatable', {
+  ...eventProps(),
   cols: { type: 'array' },
   rows: { type: 'array' },
 });
@@ -47,7 +49,6 @@ export class DatatableElement extends LitElement {
       const cells = repeat(
         this.cols,
         (col) => {
-          console.log(row[col], col, row);
           return html`<td class="cell">${row[col]}</td>`
         }
       );
