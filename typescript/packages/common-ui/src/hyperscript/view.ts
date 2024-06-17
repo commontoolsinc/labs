@@ -97,15 +97,6 @@ const vh = (
   children
 });
 
-/** Decorate the props JSON schema object with additional JSON schema flags */
-const decoratePropsSchema = (
-  properties: JSONSchemaRecord
-): AnyJSONObjectSchema => ({
-  type: "object",
-  properties,
-  additionalProperties: true,
-});
-
 export type Factory = {
   (): VNode
 
@@ -123,7 +114,7 @@ export type PropsDescription = {
 export type View = Factory & {
   tag: Tag;
   props: PropsDescription;
-}
+};
 
 /**
  * Create a tag factory that validates props against a schema.
@@ -132,15 +123,22 @@ export type View = Factory & {
  */
 export const view = (
   tagName: string,
-  props: JSONSchemaRecord = {}
+  properties: JSONSchemaRecord = {}
 ): View => {
   // Normalize tag name
   const tag = tagName.toLowerCase();
 
-  const schema = decoratePropsSchema(props);
+  const schema: AnyJSONObjectSchema = {
+    type: "object",
+    properties
+  };
 
   // Compile props validator for fast validation at runtime.
-  const validate = Schema.compile(schema);
+  const validate = Schema.compile({
+    ...schema,
+    // Allow additional properties when validating props.
+    additionalProperties: true
+  });
 
   /** Create an element from a view, validating props  */
   const create = (
