@@ -4,10 +4,7 @@ import { repeat } from 'lit/directives/repeat.js';
 import { view } from '../hyperscript/render.js';
 
 export const dict = view('common-dict', {
-  type: 'object',
-  properties: {
-    records: { type: 'object' },
-  }
+  records: { type: 'object' },
 });
 
 @customElement('common-dict')

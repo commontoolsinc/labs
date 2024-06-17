@@ -1,6 +1,15 @@
-import * as schema from '../schema.js';
+import * as Schema from '../schema.js';
+import deepFreeze from '../deep-freeze.js';
 
 export type AnyJSONSchema = object;
+
+export type JSONSchemaRecord = Record<string, AnyJSONSchema>;
+
+export type AnyJSONObjectSchema = {
+  type: "object";
+  properties: Record<string, AnyJSONSchema>;
+  additionalProperties?: boolean;
+};
 
 export type Binding = {
   "@type": "binding";
@@ -75,7 +84,7 @@ export const VNodeSchema = {
 }
 
 /** Is object a VNode? */
-export const isVNode = schema.compile(VNodeSchema)
+export const isVNode = Schema.compile(VNodeSchema)
 
 /** Internal helper for creating VNodes */
 const vh = (
@@ -97,38 +106,55 @@ export type Factory = {
   ): VNode
 };
 
+export type PropsDescription = {
+  schema: AnyJSONObjectSchema;
+  validate: (data: any) => boolean;
+}
+
 export type View = Factory & {
   tag: Tag;
-  validateProps: (data: any) => boolean;
-}
+  props: PropsDescription;
+};
 
 /**
  * Create a tag factory that validates props against a schema.
  * @param tagName - HTML tag name
- * @param propsSchema - JSON schema for props
+ * @param props - the properties section of a JSON schema
  */
 export const view = (
   tagName: string,
-  propsSchema: AnyJSONSchema = {}
+  properties: JSONSchemaRecord = {}
 ): View => {
   // Normalize tag name
   const tag = tagName.toLowerCase();
+
+  const schema: AnyJSONObjectSchema = {
+    type: "object",
+    properties
+  };
+
   // Compile props validator for fast validation at runtime.
-  const validateProps = schema.compile(propsSchema);
+  const validate = Schema.compile({
+    ...schema,
+    // Allow additional properties when validating props.
+    additionalProperties: true
+  });
 
   /** Create an element from a view, validating props  */
   const create = (
     props: Props = {},
     ...children: Array<VNode | string>
   ) => {
-    if (!validateProps(props)) {
-      throw new TypeError(`Invalid props for ${tag}`);
+    if (!validate(props)) {
+      throw new TypeError(`Invalid props for ${tag}.
+        Props: ${JSON.stringify(props)}
+        Schema: ${JSON.stringify(schema)}`);
     }
     return vh(tag, props, ...children);
   }
 
   create.tag = tag;
-  create.validateProps = validateProps;
+  create.props = {validate, schema};
 
-  return Object.freeze(create);
+  return deepFreeze(create);
 };
