@@ -135,4 +135,4 @@ export default render;
 const setProp = (element: HTMLElement, key: string, value: any) => {
   // @ts-ignore
   element[key] = value;
-};
+}

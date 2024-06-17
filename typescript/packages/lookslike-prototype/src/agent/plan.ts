@@ -1,10 +1,10 @@
 import {
   ChatCompletionMessage,
-  ChatCompletionMessageParam,
-  ChatCompletionTool
+  ChatCompletionMessageParam
 } from "openai/resources/index.mjs";
-import { client, grabJson, messageReducer, model, toolSpec } from "./llm.js";
+import { client, grabJson, messageReducer, model } from "./llm.js";
 import { recordThought, suggestions, updateThought } from "./model.js";
+<<<<<<< HEAD:typescript/packages/lookslike-prototype/src/plan.ts
 import { Recipe } from "./data.js";
 
 export const codePrompt = `
@@ -169,6 +169,11 @@ export const codePrompt = `
   GLSL shaders cannot declare uniforms other than iTime, iResolution, iMouse and iChannel0 (the user's webcam).
   notalk;justgo
 `;
+=======
+import { Recipe } from "../data.js";
+import { codePrompt } from "./implement.js";
+import { describeTools, toolSpec } from "./tools.js";
+>>>>>>> origin/main:typescript/packages/lookslike-prototype/src/agent/plan.ts
 
 type Conversation = ChatCompletionMessageParam[];
 
@@ -256,28 +261,6 @@ export async function suggest(input: string, fullPlan: Conversation) {
   }
 
   return response.choices[0].message;
-}
-
-export function describeTools(
-  tools: ChatCompletionTool[],
-  includeParameters: boolean = false
-) {
-  return tools
-    .map((tool) => {
-      const description = `- ${tool.function.name}: ${tool.function.description}`;
-      const properties = Object.entries(
-        tool.function.parameters?.properties || {}
-      )
-        .map(([name, { type, description }]) => {
-          return `  - ${name} (${type}): ${description}`;
-        })
-        .join("\n");
-      if (!includeParameters) {
-        return description;
-      }
-      return `${description}\n${properties}`;
-    })
-    .join("\n");
 }
 
 export function prepareSteps(userInput: string, recipe: Recipe) {

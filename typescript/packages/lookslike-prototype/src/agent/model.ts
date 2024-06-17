@@ -1,6 +1,10 @@
 import { stream, signal } from "@commontools/common-frp";
 import { ChatCompletionMessageParam } from "openai/resources/index.mjs";
+<<<<<<< HEAD:typescript/packages/lookslike-prototype/src/model.ts
 import { Signal, SignalSubject } from "../../common-frp/lib/signal.js";
+=======
+import { Signal } from "../../common-frp/lib/signal.js";
+>>>>>>> origin/main:typescript/packages/lookslike-prototype/src/agent/model.ts
 const { subject, scan } = stream;
 
 export type Thought = { id: number; message: ChatCompletionMessageParam };

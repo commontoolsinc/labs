@@ -1,13 +1,13 @@
 import Instructor from "@instructor-ai/instructor";
 import OpenAI from "openai";
-import { fetchApiKey } from "./apiKey.js";
+import { fetchApiKey } from "../apiKey.js";
 import {
   ChatCompletionMessage,
   ChatCompletionMessageParam,
-  ChatCompletionTool,
   ChatCompletionChunk
 } from "openai/resources/index.mjs";
-import { currentlyWorking, recordThought } from "./model.js";
+import { recordThought } from "./model.js";
+import { toolSpec } from "./tools.js";
 
 export let model = "gpt-4o";
 export const apiKey = fetchApiKey() as string;
@@ -17,6 +17,7 @@ const openai = new OpenAI({
   dangerouslyAllowBrowser: true
 });
 
+<<<<<<< HEAD:typescript/packages/lookslike-prototype/src/llm.ts
 export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
@@ -181,6 +182,8 @@ export const toolSpec: ChatCompletionTool[] = [
   }
 ];
 
+=======
+>>>>>>> origin/main:typescript/packages/lookslike-prototype/src/agent/llm.ts
 export const client = Instructor({
   client: openai,
   mode: "JSON"
