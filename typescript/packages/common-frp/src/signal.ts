@@ -73,6 +73,16 @@ export type Gettable<T> = {
 const sample = <T>(container: Gettable<T>) => container.get()
 
 export type Signal<T> = Gettable<T> & Updates & Cancellable
+
+/** Is value a signal? */
+export const isSignal = <T>(value: any): value is Signal<T> => {
+  return (
+    value != null &&
+    typeof value.get === 'function' &&
+    typeof value.updates === 'function'
+  )
+}
+
 export type WriteableSignal<T> = Gettable<T> & Updates & Sendable<T>
 
 export type Effect = {

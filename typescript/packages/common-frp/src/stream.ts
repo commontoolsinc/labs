@@ -16,6 +16,13 @@ export type Sink<T> = {
 /** A stream is a sink that can be cancelled */
 export type Stream<T> = Sink<T> & Cancellable
 
+export const isStream = <T>(value: any): value is Stream<T> => {
+  return (
+    value != null &&
+    typeof value.sink === "function"
+  )
+}
+
 /**
  * Subscribe to a stream, receiving all updates after the point of subscription.
  * @return a function to cancel the subscription.
