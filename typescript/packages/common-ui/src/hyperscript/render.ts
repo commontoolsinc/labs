@@ -1,5 +1,17 @@
-import { Cancel, combineCancels } from "@commontools/common-frp";
-import { Signal, effect } from "@commontools/common-frp/signal";
+import {
+  Cancel,
+  combineCancels,
+  isSendable
+} from "@commontools/common-frp";
+import {
+  Signal,
+  WriteableSignal,
+  effect
+} from "@commontools/common-frp/signal";
+import {
+  Stream,
+  WriteableStream
+} from "@commontools/common-frp/stream";
 import {
   isBinding,
   VNode,
@@ -35,9 +47,42 @@ export const view = (
   return factory;
 };
 
-export type RenderContext = Record<string, Signal<any>>;
+export type BindableValue = (
+  Signal<any> |
+  WriteableSignal<any> |
+  Stream<any> |
+  WriteableStream<any> |
+  any
+);
+
+export type RenderContext = Record<string, BindableValue>;
 
 export const __cancel__ = Symbol("cancel");
+
+/** Bind an event listener, and return a Cancel function */
+const listen = (
+  element: HTMLElement,
+  event: string,
+  listener: EventListener,
+  options?: AddEventListenerOptions
+): Cancel => {
+  element.addEventListener(event, listener, options);
+  return () => {
+    element.removeEventListener(event, listener, options);
+  };
+}
+
+/** Read an event, returning a safe description object */
+const readEvent = (event: Event) => {
+  switch (event.type) {
+    case "click":
+      return {
+        type: "click",
+      };
+    default:
+      return { type: event.type };
+  }
+}
 
 /** Render a VNode tree, binding reactive data sources.  */
 const renderVNode = (vnode: VNode, context: RenderContext): Node => {
@@ -60,34 +105,24 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
 
   // Bind each prop to a reactive value (if any) and collect cancels
   const cancels: Array<Cancel> = [];
-  const snapshot = { ...context };
+
   for (const [key, value] of Object.entries(vnode.props)) {
     // Don't bind properties that aren't whitelisted in the schema.
     if (!Object.hasOwn(view.props.schema.properties, key)) {
       continue;
     }
 
-    if (key == "@click" || key == "onclick") {
-      if (isBinding(value)) {
-        console.log("onclick bind", snapshot);
-        const bound = snapshot[(value as any).name];
-        if (!bound) continue;
-
-        // IMPORTANT: we cannot close over a reference to a signal reference without lit-html dropping it
-        // so we need to extract the send function from the signal and use that directly.
-        const send = (bound as any).send;
-        console.log("onclick bind 2", bound);
-        element.addEventListener("click", (ev: MouseEvent) => {
-          const event = { type: "click", target: ev.target, button: ev.button };
-          console.log("onlick", value, send, event);
-          send(event);
+    if (isEventKey(key) && isBinding(value)) {
+      const bound = context[value.name];
+      if (isSendable(bound)) {
+        const { send } = bound;
+        const event = readEventNameFromEventKey(key);
+        const cancel = listen(element, event, (event: Event) => {
+          send(readEvent(event));
         });
+        cancels.push(cancel);
       }
-
-      continue;
-    }
-
-    if (isBinding(value)) {
+    } else if (isBinding(value)) {
       const boundValue = context[value.name];
       if (boundValue != null) {
         const cancel = effect([boundValue], (value) => {
@@ -131,6 +166,16 @@ export const render = (
 };
 
 export default render;
+
+const isEventKey = (key: string) => key.startsWith("@");
+
+/** Extract the event name from the event key */
+const readEventNameFromEventKey = (key: string) => {
+  if (!isEventKey(key)) {
+    throw new TypeError(`Invalid event key: ${key}. Event keys must start with "@".`);
+  }
+  return key.slice(1);
+}
 
 const setProp = (element: HTMLElement, key: string, value: any) => {
   // @ts-ignore
