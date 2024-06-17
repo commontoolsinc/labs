@@ -3,7 +3,7 @@ import { Signal, effect } from "@commontools/common-frp/signal";
 import {
   isBinding,
   VNode,
-  AnyJSONSchema,
+  JSONSchemaRecord,
   View,
   view as createView,
 } from "./view.js";
@@ -12,24 +12,26 @@ import {
 const registry = () => {
   const viewByTag = new Map<string, View>();
 
+  const listViews = () => Array.from(viewByTag.values());
+
   const getViewByTag = (tag: string) => viewByTag.get(tag);
 
-  const register = (view: View) => {
+  const registerView = (view: View) => {
     viewByTag.set(view.tag, view);
   };
 
-  return { getViewByTag, register };
+  return { getViewByTag, listViews, registerView };
 };
 
-export const { getViewByTag, register } = registry();
+export const { getViewByTag, listViews, registerView } = registry();
 
 /** Define and register a view factory function */
 export const view = (
   tagName: string,
-  propsSchema: AnyJSONSchema = {},
+  props: JSONSchemaRecord = {},
 ): View => {
-  const factory = createView(tagName, propsSchema);
-  register(factory);
+  const factory = createView(tagName, props);
+  registerView(factory);
   return factory;
 };
 
@@ -47,9 +49,10 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
   }
 
   // Validate props against the view's schema.
-  if (!view.validateProps(vnode.props)) {
+  if (!view.props.validate(vnode.props)) {
     throw new TypeError(`Invalid props for tag: ${vnode.tag}.
-      Props: ${JSON.stringify(vnode.props)}`);
+      Props: ${JSON.stringify(vnode.props)}
+      Schema: ${JSON.stringify(view.props.schema)}`);
   }
 
   // Create the element
@@ -59,6 +62,11 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
   const cancels: Array<Cancel> = [];
   const snapshot = { ...context };
   for (const [key, value] of Object.entries(vnode.props)) {
+    // Don't bind properties that aren't whitelisted in the schema.
+    if (!Object.hasOwn(view.props.schema.properties, key)) {
+      continue;
+    }
+
     if (key == "@click" || key == "onclick") {
       if (isBinding(value)) {
         console.log("onclick bind", snapshot);
