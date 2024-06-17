@@ -21,7 +21,6 @@ export const isBinding = (value: any): value is Binding => {
   return (
     value &&
     value["@type"] === "binding" &&
-    typeof value.name === "string" &&
     typeof value.name === "string"
   );
 }
@@ -32,9 +31,34 @@ export const binding = (name: string): Binding => ({
   name
 });
 
+export type BlockBinding = {
+  "@type": "block";
+  name: string;
+  body: VNode;
+}
+
+/** Is value a binding to a reactive value? */
+export const isBlockBinding = (value: any): value is BlockBinding => {
+  return (
+    value &&
+    value["@type"] === "block" &&
+    typeof value.name === "string"
+  );
+}
+
+/** Create a template binding */
+export const block = (
+  name: string,
+  body: VNode
+): BlockBinding => ({
+  "@type": "block",
+  name,
+  body
+});
+
 export type Value = string | number | boolean | null | object;
 
-export type ReactiveValue = Binding | Value;
+export type ReactiveValue = Binding | BlockBinding | Value;
 
 export type Props = {
   [key: string]: ReactiveValue;
