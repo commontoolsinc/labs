@@ -1,0 +1,41 @@
+{
+  "name": "@commontools/lookslike-high-level",
+  "author": "The Common Authors",
+  "version": "0.0.1",
+  "description": "High level UI experiments.",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wireit",
+    "clean": "wireit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/commontoolsinc/labs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/commontoolsinc/labs/issues"
+  },
+  "homepage": "https://github.com/commontoolsinc/labs#readme",
+  "devDependencies": {
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0",
+    "wireit": "^0.14.4"
+  },
+  "wireit": {
+    "build": {
+      "dependencies": [
+        "../common-ui:build"
+      ],
+      "command": "vite build"
+    },
+    "clean": {
+      "command": "rm -rf ./lib ./dist ./.wireit ./node_modules"
+    }
+  },
+  "dependencies": {
+    "@commontools/common-ui": "^0.0.1",
+    "@commontools/common-frp": "^0.0.1"
+  }
+}
