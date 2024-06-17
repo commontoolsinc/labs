@@ -2,21 +2,24 @@ import { LitElement, html } from "lit-element";
 import { customElement, state } from "lit/decorators.js";
 import { base } from "../styles.js";
 
-import { NodePath, Recipe, RecipeNode, emptyGraph } from "../data.js";
-import { processUserInput } from "../llm.js";
+import { NodePath, Recipe, emptyGraph } from "../data.js";
 import { collectSymbols } from "../graph.js";
 import { Context, snapshot } from "../state.js";
 import { watch } from "@commontools/common-frp-lit";
-import { SignalSubject } from "../../../common-frp/lib/signal.js";
-import { codePrompt, plan, prepareSteps } from "../plan.js";
-import { suggestions, thoughtLog } from "../model.js";
 import {
+  CONTENT_TYPE_CLOCK,
+  CONTENT_TYPE_EVENT,
   CONTENT_TYPE_FETCH,
   CONTENT_TYPE_GLSL,
   CONTENT_TYPE_JAVASCRIPT,
   CONTENT_TYPE_LLM,
+  CONTENT_TYPE_STORAGE,
   CONTENT_TYPE_UI
 } from "../contentType.js";
+import { plan, prepareSteps } from "../agent/plan.js";
+import { processUserInput } from "../agent/llm.js";
+import { codePrompt } from "../agent/implement.js";
+import { suggestions, thoughtLog } from "../agent/model.js";
 
 const lastFmKey = "0060ba224307ff9f787deb837f4be376";
 
@@ -135,6 +138,48 @@ export class ComApp extends LitElement {
             type: "object"
           },
           body: url
+        });
+        updateGraph(graph);
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      },
+      addEventNode: ({ id }: { id: string }) => {
+        console.log("addEventNode", id);
+        graph.push({
+          id,
+          contentType: CONTENT_TYPE_EVENT,
+          in: {},
+          outputType: {
+            type: "object"
+          },
+          body: ""
+        });
+        updateGraph(graph);
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      },
+      addStorageNode: ({ id, address }: { id: string; address: string }) => {
+        console.log("addStorageNode", id);
+        graph.push({
+          id,
+          contentType: CONTENT_TYPE_STORAGE,
+          in: {},
+          outputType: {
+            type: "object"
+          },
+          body: address
+        });
+        updateGraph(graph);
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      },
+      addClockNode: ({ id }: { id: string }) => {
+        console.log("addEventNode", id);
+        graph.push({
+          id,
+          contentType: CONTENT_TYPE_CLOCK,
+          in: {},
+          outputType: {
+            type: "object"
+          },
+          body: ""
         });
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
@@ -260,7 +305,9 @@ export class ComApp extends LitElement {
     const spec = await plan(userInput, prepareSteps(userInput, this.graph));
     const finalPlan = spec?.[spec?.length - 1];
     console.log("finalPlan", finalPlan);
-    const input = `Implement the following plan using the available tools: ${finalPlan?.content} --- Current graph: ${this.graphSnapshot()}`;
+    const input = `Implement the following plan using the available tools: ${finalPlan?.content}
+    ---
+    Current graph: ${this.graphSnapshot()}`;
 
     const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
 
@@ -271,6 +318,7 @@ export class ComApp extends LitElement {
       codePrompt + systemContext,
       this.availableFunctions(newGraph)
     );
+
     console.log("result", result);
   }
 
@@ -284,7 +332,7 @@ export class ComApp extends LitElement {
     };
 
     return html`
-      <com-app-grid>
+      <main>
         <com-chat slot="main">
           <com-thread
             slot="main"
@@ -311,10 +359,10 @@ export class ComApp extends LitElement {
             </com-unibox>
           </div>
         </com-chat>
-        <div slot="sidebar">
+        <com-debug>
           <com-thought-log .thoughts=${watch(thoughtLog)}></com-thought-log>
-        </div>
-      </com-app-grid>
+        </com-debug>
+      </main>
     `;
   }
 }

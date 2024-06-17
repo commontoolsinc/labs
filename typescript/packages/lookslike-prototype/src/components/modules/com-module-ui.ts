@@ -1,7 +1,6 @@
 import { LitElement, html, css } from "lit-element";
 import { customElement, property } from "lit/decorators.js";
 import { RecipeNode } from "../../data.js";
-import { unsafeHTML } from "lit/directives/unsafe-html.js";
 
 const styles = css``;
 
@@ -18,7 +17,7 @@ export class ComModuleUi extends LitElement {
     }
     const sourceHtml = this.value.outerHTML;
 
-    return html`<div>${unsafeHTML(sourceHtml)}</div>
+    return html`<div>${this.value}</div>
       <com-toggle>
         <com-data .data=${sourceHtml}></com-data>
         <com-data .data=${JSON.stringify(this.node.body, null, 2)}></com-data>

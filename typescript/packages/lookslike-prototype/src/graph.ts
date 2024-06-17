@@ -3,13 +3,15 @@ import { run } from "./eval.js";
 import { Recipe, RecipeNode } from "./data.js";
 
 import { signal, config } from "@commontools/common-frp";
-import { Context } from "./state.js";
-import { generateImage, streamLlm } from "./llm.js";
+import { Context, storage } from "./state.js";
 import {
+  CONTENT_TYPE_CLOCK,
+  CONTENT_TYPE_EVENT,
   CONTENT_TYPE_FETCH,
   CONTENT_TYPE_IMAGE,
   CONTENT_TYPE_JAVASCRIPT,
   CONTENT_TYPE_LLM,
+  CONTENT_TYPE_STORAGE,
   CONTENT_TYPE_UI
 } from "./contentType.js";
 import { SignalSubject } from "../../common-frp/lib/signal.js";
@@ -81,17 +83,19 @@ export function createRxJSNetworkFromJson(
   // process node definitions and set up reactive logic
   recipe.forEach(async (node) => {
     const inputObservables: Signal<any>[] = [];
+    const inputSignals: { [key: string]: Signal<any> } = {};
 
     for (const inputName in node.in) {
       const outputName = node.in[inputName][1];
       if (context.outputs[outputName]) {
         inputObservables.push(context.outputs[outputName]);
+        inputSignals[inputName] = context.outputs[outputName];
       }
     }
 
     if (inputObservables.length === 0) {
       console.log("EXECUTE NODE Running node on mount", node.id);
-      await executeNode(node, {}, context.outputs);
+      await executeNode(node, {}, context.outputs, inputSignals);
       if (node.contentType !== CONTENT_TYPE_JAVASCRIPT) {
         return;
       }
@@ -124,7 +128,7 @@ export function createRxJSNetworkFromJson(
         node.id,
         values
       );
-      await executeNode(node, values, context.outputs);
+      await executeNode(node, values, context.outputs, inputSignals);
     });
     context.cancellation.push(cancel);
   });
@@ -132,10 +136,13 @@ export function createRxJSNetworkFromJson(
   return context;
 }
 
+const intervals = {} as { [key: string]: NodeJS.Timeout };
+
 async function executeNode(
   node: RecipeNode,
   inputs: { [key: string]: any },
-  outputs: { [key: string]: SignalSubject<any> }
+  outputs: { [key: string]: SignalSubject<any> },
+  inputSignals: { [key: string]: Signal<any> }
 ) {
   console.log("EXECUTE NODE", node.id, inputs);
   const { contentType } = node;
@@ -150,8 +157,8 @@ async function executeNode(
       break;
     }
     case CONTENT_TYPE_UI: {
-      const renderedTemplate = createElement(node.body, inputs);
-      outputs[node.id].send(renderedTemplate);
+      const template = createElement(node.body, inputSignals);
+      outputs[node.id].send(template);
       break;
     }
     case CONTENT_TYPE_FETCH: {
@@ -162,6 +169,19 @@ async function executeNode(
       const response = await fetch(url);
       const data = await response.json();
       outputs[node.id].send(data);
+      break;
+    }
+    case CONTENT_TYPE_EVENT: {
+      outputs[node.id].send(inputs);
+      break;
+    }
+    case CONTENT_TYPE_CLOCK: {
+      clearInterval(intervals[node.id]);
+      let x = 0;
+      intervals[node.id] = setInterval(() => {
+        x++;
+        outputs[node.id].send(x);
+      }, 1000);
       break;
     }
     case CONTENT_TYPE_LLM: {
@@ -178,6 +198,23 @@ async function executeNode(
     case CONTENT_TYPE_IMAGE: {
       const response = await generateImage(JSON.stringify(inputs.prompt));
       outputs[node.id].send(response);
+      break;
+    }
+    case CONTENT_TYPE_STORAGE: {
+      // iterate over all values in inputs and pick first non-null value in functional style
+      let value = Object.values(inputs).find((v) => v !== null);
+      if (typeof node.body !== "string" || node.body.length === 0) {
+        console.error("Invalid storage key", node.body);
+        break;
+      }
+
+      if (value) {
+        await storage.set(node.body, value);
+      } else {
+        value = await storage.get(node.body);
+      }
+
+      outputs[node.id].send(value);
       break;
     }
   }

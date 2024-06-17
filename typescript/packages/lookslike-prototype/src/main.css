@@ -8,7 +8,7 @@
 :root {
     --unit: 4px;
     --gap: calc(var(--unit) * 5);
-    --content-width: 800px;
+    --content-width: 80vw;
     --family-sans: "Helvetica Neue", "Helvetica", sans-serif;
     --family-serif: "Times New Roman", "Times", serif;
     --color-white: #fff;
