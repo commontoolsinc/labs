@@ -1,6 +1,8 @@
 import { LitElement, html, css } from "lit-element";
 import { customElement, property } from "lit/decorators.js";
 import { RecipeNode } from "../../data.js";
+import { webcamVideoTexture } from "../../webcam.js";
+import { watch } from "@commontools/common-frp-lit";
 
 const styles = css``;
 
@@ -30,7 +32,10 @@ export class ComModuleShader extends LitElement {
 
     return html`
       <com-code .code=${this.node.body} @updated=${codeChanged}></com-code>
-      <com-shader .fragmentShader=${this.node.body}></com-shader>
+      <com-shader
+        .fragmentShader=${this.node.body}
+        .webcam=${watch(webcamVideoTexture)}
+      ></com-shader>
     `;
   }
 }

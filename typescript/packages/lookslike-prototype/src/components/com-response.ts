@@ -10,7 +10,10 @@ import {
   CONTENT_TYPE_IMAGE,
   CONTENT_TYPE_JAVASCRIPT,
   CONTENT_TYPE_LLM,
-  CONTENT_TYPE_UI
+  CONTENT_TYPE_UI,
+  CONTENT_TYPE_EVENT,
+  CONTENT_TYPE_CLOCK,
+  CONTENT_TYPE_STORAGE
 } from "../contentType.js";
 
 function renderNode(
@@ -24,9 +27,9 @@ function renderNode(
 
   const relay = (ev: CustomEvent) => {
     dispatch(
-      new CustomEvent("updated", {
+      new CustomEvent(ev.type, {
         detail: {
-          body: ev.detail.body
+          body: ev.detail?.body
         }
       })
     );
@@ -65,6 +68,18 @@ function renderNode(
         .value=${value}
         @updated=${relay}
       ></com-module-shader>`;
+    case CONTENT_TYPE_EVENT:
+    case CONTENT_TYPE_CLOCK:
+      return html`<com-module-event
+        .node=${node}
+        .value=${value}
+        @run=${relay}
+      ></com-module-event>`;
+    case CONTENT_TYPE_STORAGE:
+      return html`<com-module-storage
+        .node=${node}
+        .value=${value}
+      ></com-module-storage>`;
   }
 
   return html`<pre>${JSON.stringify(node, null, 2)}</pre>`;
@@ -75,8 +90,8 @@ const styles = css`
     display: block;
   }
 
-  .main {
-    background-color: var(--color-secondary-background);
+  .response {
+    background-color: var(--color-card);
     padding: var(--gap);
 
     &:focus {
@@ -125,7 +140,7 @@ export class ComResponse extends LitElement {
     );
 
     return html`
-      <div class="main">
+      <div class="response">
         ${definition}
         <slot></slot>
       </div>

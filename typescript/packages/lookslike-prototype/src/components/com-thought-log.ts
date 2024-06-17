@@ -7,18 +7,14 @@ export class ComThoughtLog extends LitElement {
   static styles = css`
     .thought-log {
       display: flex;
-      flex-direction: column;
+      flex-direction: column-reverse;
       gap: 1rem;
       max-height: 100vh;
-      overflow-y: auto;
-      padding: 1rem;
     }
 
     .thought {
       display: flex;
       flex-direction: column;
-      border-radius: 0.5rem;
-      background: white;
     }
 
     .role {
@@ -58,17 +54,16 @@ export class ComThoughtLog extends LitElement {
         return html`<div class="thought">
           <div class="role">${thought.role}</div>
           ${last
-            ? html`<markdown-element
+            ? html`<com-markdown
                 class="preview"
                 markdown=${thought.content}
-              ></markdown-element>`
-            : ""}
-          <com-toggle>
-            <markdown-element
-              class="content"
-              markdown=${thought.content}
-            ></markdown-element>
-          </com-toggle>
+              ></com-markdown>`
+            : html`<com-toggle>
+                <com-markdown
+                  class="preview"
+                  markdown=${thought.content}
+                ></com-markdown>
+              </com-toggle>`}
         </div>`;
       })}
     </div>`;

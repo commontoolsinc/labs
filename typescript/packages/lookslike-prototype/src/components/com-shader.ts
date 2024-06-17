@@ -2,10 +2,26 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import * as THREE from "three";
 
+const defaultShader = `
+  void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+      // Normalized pixel coordinates (from 0 to 1)
+      vec2 uv = fragCoord / iResolution.xy;
+
+      // Sample the texture from iChannel0
+      vec4 texColor = texture(iChannel0, uv);
+
+      // Output the color
+      fragColor = vec4(texColor.rgb, 1.0);
+  }
+
+  `;
+
 @customElement("com-shader")
 export class ShaderElement extends LitElement {
-  @property({ type: String }) fragmentShader = "";
+  @property({ type: String }) fragmentShader = "defaultShader";
   @property({ type: Number }) bpm = 60;
+  @property() webcam: THREE.VideoTexture | null = null;
+
   private containerRef: HTMLDivElement | null = null;
   private rendererRef: THREE.WebGLRenderer | null = null;
   private material: THREE.ShaderMaterial | null = null;
@@ -79,7 +95,8 @@ export class ShaderElement extends LitElement {
           1
         )
       },
-      iMouse: { value: new THREE.Vector2() }
+      iMouse: { value: new THREE.Vector2() },
+      iChannel0: { value: this.webcam }
     };
 
     this.material = new THREE.ShaderMaterial({
@@ -103,7 +120,9 @@ export class ShaderElement extends LitElement {
   updateShaderMaterial() {
     if (this.material) {
       this.material.fragmentShader = this.getFragmentShader();
+      this.material.uniforms.iChannel0.value = this.webcam;
       this.material.needsUpdate = true;
+      this.material.uniformsNeedUpdate = true;
     }
   }
 
@@ -112,6 +131,7 @@ export class ShaderElement extends LitElement {
       uniform float iTrueTime;
       uniform vec3 iResolution;
       uniform vec2 iMouse;
+      uniform sampler2D iChannel0;
 
       float iTime;
       float alt, lt, atr, tr;
@@ -132,6 +152,7 @@ export class ShaderElement extends LitElement {
         settime(iTrueTime * bpm / 60.);
         iTime = iTrueTime;
         mainImage(gl_FragColor, gl_FragCoord.xy);
+        gl_FragColor.a = 1.0;
       }
     `;
   }
