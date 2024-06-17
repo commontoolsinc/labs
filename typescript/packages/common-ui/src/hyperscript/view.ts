@@ -58,7 +58,7 @@ export const block = (
 
 export type Value = string | number | boolean | null | object;
 
-export type ReactiveValue = Binding | BlockBinding | Value;
+export type ReactiveValue = Binding | Value;
 
 export type Props = {
   [key: string]: ReactiveValue;
@@ -69,7 +69,7 @@ export type Tag = string;
 export type VNode = {
   tag: Tag;
   props: Props;
-  children: Array<VNode | string>;
+  children: BlockBinding | Array<VNode | string>;
 }
 
 // NOTE: don't freeze this object, since the validator will want to mutate it.
