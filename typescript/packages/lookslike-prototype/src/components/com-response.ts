@@ -12,7 +12,8 @@ import {
   CONTENT_TYPE_LLM,
   CONTENT_TYPE_UI,
   CONTENT_TYPE_EVENT,
-  CONTENT_TYPE_CLOCK
+  CONTENT_TYPE_CLOCK,
+  CONTENT_TYPE_STORAGE
 } from "../contentType.js";
 
 function renderNode(
@@ -74,6 +75,11 @@ function renderNode(
         .value=${value}
         @run=${relay}
       ></com-module-event>`;
+    case CONTENT_TYPE_STORAGE:
+      return html`<com-module-storage
+        .node=${node}
+        .value=${value}
+      ></com-module-storage>`;
   }
 
   return html`<pre>${JSON.stringify(node, null, 2)}</pre>`;

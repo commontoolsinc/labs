@@ -3,7 +3,7 @@ import { run } from "./eval.js";
 import { Recipe, RecipeNode } from "./data.js";
 
 import { signal, config } from "@commontools/common-frp";
-import { Context } from "./state.js";
+import { Context, storage } from "./state.js";
 import {
   CONTENT_TYPE_CLOCK,
   CONTENT_TYPE_EVENT,
@@ -11,6 +11,7 @@ import {
   CONTENT_TYPE_IMAGE,
   CONTENT_TYPE_JAVASCRIPT,
   CONTENT_TYPE_LLM,
+  CONTENT_TYPE_STORAGE,
   CONTENT_TYPE_UI
 } from "./contentType.js";
 import { SignalSubject } from "../../common-frp/lib/signal.js";
@@ -197,6 +198,23 @@ async function executeNode(
     case CONTENT_TYPE_IMAGE: {
       const response = await generateImage(JSON.stringify(inputs.prompt));
       outputs[node.id].send(response);
+      break;
+    }
+    case CONTENT_TYPE_STORAGE: {
+      // iterate over all values in inputs and pick first non-null value in functional style
+      let value = Object.values(inputs).find((v) => v !== null);
+      if (typeof node.body !== "string" || node.body.length === 0) {
+        console.error("Invalid storage key", node.body);
+        break;
+      }
+
+      if (value) {
+        await storage.set(node.body, value);
+      } else {
+        value = await storage.get(node.body);
+      }
+
+      outputs[node.id].send(value);
       break;
     }
   }

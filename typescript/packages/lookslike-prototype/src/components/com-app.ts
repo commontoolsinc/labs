@@ -13,6 +13,7 @@ import {
   CONTENT_TYPE_GLSL,
   CONTENT_TYPE_JAVASCRIPT,
   CONTENT_TYPE_LLM,
+  CONTENT_TYPE_STORAGE,
   CONTENT_TYPE_UI
 } from "../contentType.js";
 import { plan, prepareSteps } from "../agent/plan.js";
@@ -151,6 +152,20 @@ export class ComApp extends LitElement {
             type: "object"
           },
           body: ""
+        });
+        updateGraph(graph);
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      },
+      addStorageNode: ({ id, address }: { id: string; address: string }) => {
+        console.log("addStorageNode", id);
+        graph.push({
+          id,
+          contentType: CONTENT_TYPE_STORAGE,
+          in: {},
+          outputType: {
+            type: "object"
+          },
+          body: address
         });
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
