@@ -13,6 +13,11 @@ export type Sendable<T> = {
   send: Send<T>
 }
 
+/** Check if a value is sendable */
+export const isSendable = <T>(value: any): value is Sendable<T> => {
+  return value && typeof value.send === "function"
+}
+
 export type Publisher<T> = {
   [Symbol.iterator]: () => Iterator<Sendable<T>>;
   send: (value: T) => void;

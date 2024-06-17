@@ -1,9 +1,7 @@
 import { view } from "../hyperscript/render.js";
+import { eventProps } from '../hyperscript/schema-helpers.js';
 
 export const button = view("button", {
+  ...eventProps(),
   id: { type: "string" },
-  "@click": {
-    type: "object",
-    properties: { "@type": { type: "string" }, name: { type: "string" } },
-  },
 });

@@ -1,11 +1,14 @@
+import { subject } from '@commontools/common-frp/stream';
 import {
   dict,
   datatable,
   vstack
 } from './hyperscript/tags.js';
+import { binding } from './hyperscript/view.js';
 import render from './hyperscript/render.js';
 
 const datatableNode = datatable({
+  "@click": binding('clicks'),
   cols: ['title', 'day', 'time', 'location', 'address', 'description', 'level', 'price', 'email', 'reservation'],
   rows: [
     {
@@ -61,6 +64,16 @@ const tree = vstack(
   dictNode
 )
 
-const element = render(tree, {});
+const clicks = subject()
+
+clicks.sink({
+  send: clicks => {
+    console.log('clicks', clicks);  
+  }
+})
+
+const element = render(tree, {
+  clicks
+});
 
 document.body.appendChild(element);
