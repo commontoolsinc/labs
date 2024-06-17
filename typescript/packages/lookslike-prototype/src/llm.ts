@@ -74,6 +74,34 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "addEventNode",
+      description:
+        "A node that will be bound to a user-input event from a UI node.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "addClockNode",
+      description:
+        "A node that emit an incrementing value every second, starting from 0.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
       name: "addFetchNode",
       description: "Fetch node to retrieve (GET) data from the web.",
       parameters: {

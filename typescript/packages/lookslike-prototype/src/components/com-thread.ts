@@ -69,12 +69,18 @@ export class ComThread extends LitElement {
       onRefresh();
     };
 
+    const onRun = () => {
+      const val = this.context.outputs[node.id].get();
+      this.context.outputs[node.id].send(val);
+    };
+
     return html`<com-response
       slot="response"
       .node=${node}
       .output=${this.context.outputs[node.id]}
       @updated=${onUpdated}
       @overriden=${onOverriden}
+      @run=${onRun}
     >
       <code class="local-variable">${node.id}</code>
       ${repeat(

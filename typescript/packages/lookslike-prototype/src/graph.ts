@@ -6,6 +6,8 @@ import { signal, config } from "@commontools/common-frp";
 import { Context } from "./state.js";
 import { generateImage, streamLlm } from "./llm.js";
 import {
+  CONTENT_TYPE_CLOCK,
+  CONTENT_TYPE_EVENT,
   CONTENT_TYPE_FETCH,
   CONTENT_TYPE_IMAGE,
   CONTENT_TYPE_JAVASCRIPT,
@@ -134,6 +136,8 @@ export function createRxJSNetworkFromJson(
   return context;
 }
 
+const intervals = {} as { [key: string]: NodeJS.Timeout };
+
 async function executeNode(
   node: RecipeNode,
   inputs: { [key: string]: any },
@@ -165,6 +169,19 @@ async function executeNode(
       const response = await fetch(url);
       const data = await response.json();
       outputs[node.id].send(data);
+      break;
+    }
+    case CONTENT_TYPE_EVENT: {
+      outputs[node.id].send(inputs);
+      break;
+    }
+    case CONTENT_TYPE_CLOCK: {
+      clearInterval(intervals[node.id]);
+      let x = 0;
+      intervals[node.id] = setInterval(() => {
+        x++;
+        outputs[node.id].send(x);
+      }, 1000);
       break;
     }
     case CONTENT_TYPE_LLM: {

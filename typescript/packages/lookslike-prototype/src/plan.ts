@@ -98,6 +98,31 @@ export const codePrompt = `
 
   ---
 
+  "make a clickable button" ->
+
+  addEventNode({
+    "id": "clickEvent"
+  })
+
+  addUiNode({
+    "id": "buttonUi",
+    "uiTree": {
+      "tag": "button",
+      "props": {
+        "innerText": "Click me",
+        "@click": { "@type": "binding", "name": "onClicked"}
+      },
+      "children": []
+    }
+  })
+
+  addConnection({
+    "from": "clickEvent",
+    "to": ["buttonUi", "onClicked"]
+  })
+
+  ---
+
   "render my todos" ->
   The output of a code node will be bound to the input named 'todos'
 
@@ -159,6 +184,7 @@ export async function plan(userInput: string, steps: string[]) {
   console.log(steps);
 
   let messages: ChatCompletionMessageParam[] = [
+    { role: "system", content: codePrompt },
     { role: "system", content: steps[0] },
     { role: "user", content: steps[1] }
   ];
@@ -262,9 +288,9 @@ export function prepareSteps(userInput: string, recipe: Recipe) {
       ${describeTools(toolSpec, false)}
 
       To declare a constant value, return it from a code node as a literal.
+      Declare event nodes and refer to them BY NAME from within UI template event bindings (i.e. "@click": "clickEvent").
 
-      Plan your approach at a high-level dot-point level of detail and be extremely concise using technical terms.
-      notalk;justgo`,
+      Plan your approach at a high-level dot-point level of detail and be extremely concise using technical terms.`,
       `Service the minimal useful version of this request: <user-request>${userInput}</user-request>.
 
     Give each node an ID and describe its purpose without writing the full code. Each node can have several named inputs which can be mapped to the outputs of other node ID.

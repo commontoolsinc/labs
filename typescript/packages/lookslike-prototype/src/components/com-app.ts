@@ -3,14 +3,16 @@ import { customElement, state } from "lit/decorators.js";
 import { base } from "../styles.js";
 
 import { NodePath, Recipe, RecipeNode, emptyGraph } from "../data.js";
-import { processUserInput } from "../llm.js";
+import { processUserInput, toolSpec } from "../llm.js";
 import { collectSymbols } from "../graph.js";
 import { Context, snapshot } from "../state.js";
 import { watch } from "@commontools/common-frp-lit";
 import { SignalSubject } from "../../../common-frp/lib/signal.js";
-import { codePrompt, plan, prepareSteps } from "../plan.js";
+import { codePrompt, describeTools, plan, prepareSteps } from "../plan.js";
 import { suggestions, thoughtLog } from "../model.js";
 import {
+  CONTENT_TYPE_CLOCK,
+  CONTENT_TYPE_EVENT,
   CONTENT_TYPE_FETCH,
   CONTENT_TYPE_GLSL,
   CONTENT_TYPE_JAVASCRIPT,
@@ -139,6 +141,34 @@ export class ComApp extends LitElement {
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
+      addEventNode: ({ id }: { id: string }) => {
+        console.log("addEventNode", id);
+        graph.push({
+          id,
+          contentType: CONTENT_TYPE_EVENT,
+          in: {},
+          outputType: {
+            type: "object"
+          },
+          body: ""
+        });
+        updateGraph(graph);
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      },
+      addClockNode: ({ id }: { id: string }) => {
+        console.log("addEventNode", id);
+        graph.push({
+          id,
+          contentType: CONTENT_TYPE_CLOCK,
+          in: {},
+          outputType: {
+            type: "object"
+          },
+          body: ""
+        });
+        updateGraph(graph);
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      },
       addLanguageModelNode: ({
         id,
         promptSource
@@ -260,7 +290,9 @@ export class ComApp extends LitElement {
     const spec = await plan(userInput, prepareSteps(userInput, this.graph));
     const finalPlan = spec?.[spec?.length - 1];
     console.log("finalPlan", finalPlan);
-    const input = `Implement the following plan using the available tools: ${finalPlan?.content} --- Current graph: ${this.graphSnapshot()}`;
+    const input = `Implement the following plan using the available tools: ${finalPlan?.content}
+    ---
+    Current graph: ${this.graphSnapshot()}`;
 
     const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
 
@@ -271,7 +303,23 @@ export class ComApp extends LitElement {
       codePrompt + systemContext,
       this.availableFunctions(newGraph)
     );
+
     console.log("result", result);
+
+    // const review = await processUserInput(
+    //   `Review the graph and fix any nonsensical elements. Add missing connections, remove redundant blocks.
+
+    //   ${describeTools(toolSpec, false)}
+
+    //   ---
+    //   Current graph:
+
+    //   \`\`\`json${this.graphSnapshot()}\`\`\``,
+    //   systemContext,
+    //   this.availableFunctions(newGraph)
+    // );
+
+    // console.log("review", review);
   }
 
   override render() {
