@@ -1,5 +1,5 @@
 import { view, tags, render } from "@commontools/common-ui";
-const { dict, datatable, vstack } = tags;
+const { dict, datatable, vstack, hstack, checkbox, div } = tags;
 
 const datatableNode = datatable({
   cols: [
@@ -63,7 +63,18 @@ const dictNode = dict({
   },
 });
 
-const tree = vstack({}, datatableNode, dictNode);
+const todoItems = [
+  { title: "Buy groceries", done: false },
+  { title: "Walk the dog", done: true },
+  { title: "Wash the car", done: false },
+];
+
+const todos = vstack(
+  {},
+  ...todoItems.map((item) => hstack({}, checkbox({}), div({}, item.title)))
+);
+
+const tree = vstack({}, todos, datatableNode, dictNode);
 
 const element = render.render(tree, {});
 
