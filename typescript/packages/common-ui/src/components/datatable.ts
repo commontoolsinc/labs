@@ -4,11 +4,8 @@ import { repeat } from 'lit/directives/repeat.js';
 import { view } from '../hyperscript/render.js';
 
 export const datatable = view('common-datatable', {
-  type: 'object',
-  properties: {
-    cols: { type: 'array' },
-    rows: { type: 'array' },
-  }
+  cols: { type: 'array' },
+  rows: { type: 'array' },
 });
 
 @customElement('common-datatable')
