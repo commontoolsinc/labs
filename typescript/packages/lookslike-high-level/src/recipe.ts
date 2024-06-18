@@ -1,7 +1,9 @@
 import { signal, stream } from "@commontools/common-frp";
 import { isSignal } from "@commontools/common-frp/signal";
 
-export const ID = Symbol("ID");
+// Should be Symbol("ID") or so, but this makes repeat() use these when
+// iterating over recipes.
+export const ID = "id";
 
 export type RecipeInputs = {
   [key: string]: any;
