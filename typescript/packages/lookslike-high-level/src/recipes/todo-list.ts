@@ -1,58 +1,68 @@
-import { view as viewImport, tags, render } from "@commontools/common-ui";
-import { signal, stream } from "@commontools/common-frp";
-import { suggestion } from "../suggestion.js";
-import { recipe, Bindings } from "../recipe.js";
+import { view, tags } from "@commontools/common-ui";
+import { stream } from "@commontools/common-frp";
+import { recipe } from "../recipe.js";
+const { binding, repeat } = view;
 const { vstack, hstack, checkbox, div, include, sendInput } = tags;
-const { state, computed } = signal;
-const { subject, sink } = stream;
-const { view, binding } = viewImport;
+const { subject } = stream;
 
-export const todoTask = recipe(({ title, done }) => {
-  return {
-    itemUI: state([
-      vstack(
-        {},
-        hstack(
-          {},
-          checkbox({ checked: binding("done") }),
-          div({} /*binding("title")*/)
-        ),
-        suggestion({ for: binding("title") })
-      ),
-      { done, title },
-    ]),
-    done,
-    title,
-  };
-});
-
-export const todoList = recipe(({ items }: Binding) => {
-  const newTasks = subject<{ type: "input"; data: string }>();
+export const todoList = recipe(({ items }) => {
+  const newTasks = subject<{
+    type: "messageSend";
+    detail: { message: string };
+  }>();
 
   newTasks.sink({
-    send: (event: { data: string }) => {
-      items.update((items: any[]) => [
-        ...items,
-        todoTask({ title: event.data, done: false }),
+    send: (event) => {
+      console.log("event", event);
+      items.send([
+        ...items.get(),
+        { id: items.get().length, title: event.detail.message, done: false },
       ]);
     },
   });
 
   return {
     UI: [
-      vstack(
-        {},
-        ...items
-          .get()
-          .map((item: { itemUI: object }) => include({ content: item.itemUI })),
+      vstack({}, [
+        vstack(
+          {},
+          repeat(
+            "items",
+            hstack({}, [
+              checkbox({ checked: binding("done") }),
+              div({}, binding("title")),
+            ])
+          )
+        ),
         sendInput({
           name: "Add",
           placeholder: "New task",
-          "@input": binding("newTasks"),
-        })
-      ),
+          "@messageSend": binding("newTasks"),
+        }),
+      ]),
       { items, newTasks },
     ],
     items,
   };
 });
+
+/*
+export const todoTask = recipe(({ title, done }) => {
+  return {
+    itemUI: [
+      vstack(
+        {},
+        hstack(
+          {},
+          checkbox({ checked: binding("done") }),
+          div({}, binding("title"))
+        ),
+        suggestion({ for: binding("title") })
+      ),
+      { done, title },
+    ],
+    done,
+    title,
+  };
+});
+*/

@@ -19,20 +19,18 @@ export const binding = () => ({
   type: "object",
   properties: {
     "@type": { type: "string" },
-    name: { type: "string" }
+    name: { type: "string" },
   },
-  required: ["@type", "name"]
+  required: ["@type", "name"],
 });
 
 export const bindable = (schema: AnyJSONSchema) => ({
-  anyOf: [
-    schema,
-    binding()
-  ]
+  anyOf: [schema, binding()],
 });
 
 /** Mixin for list of allowed basic events */
 export const eventProps = () => ({
+  // Basic events
   "@click": binding(),
   "@change": binding(),
   "@focus": binding(),
@@ -48,5 +46,8 @@ export const eventProps = () => ({
   "@mousemove": binding(),
   "@mouseout": binding(),
   "@mouseover": binding(),
-  "@mouseup": binding()
+  "@mouseup": binding(),
+
+  // Custom events
+  "@messageSend": binding(),
 });

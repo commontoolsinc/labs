@@ -1,43 +1,17 @@
-import { view as viewImport, tags, render } from "@commontools/common-ui";
-import { signal, stream } from "@commontools/common-frp";
-import { suggestion } from "./suggestion.js";
-import { recipe } from "./recipe.js";
-const { dict, datatable, vstack, hstack, checkbox, div, include } = tags;
-const { isSignal, state, computed } = signal;
-const { view, binding } = viewImport;
-
-const task = recipe(({ title, done }: viewImport.Bindings) => {
-  return {
-    itemVDom: [
-      vstack(
-        {},
-        hstack(
-          {},
-          checkbox({ checked: binding("done") }),
-          div({} /*binding("title")*/)
-        ),
-        suggestion({})
-      ),
-      { done, title },
-    ],
-    done,
-    title,
-  };
-});
+import { render } from "@commontools/common-ui";
+import { todoList } from "./recipes/todo-list.js";
 
 const todoItems = [
-  { title: "Buy groceries", done: false },
-  { title: "Walk the dog", done: true },
-  { title: "Wash the car", done: false },
+  { id: 1, title: "Buy groceries", done: false },
+  { id: 2, title: "Walk the dog", done: true },
+  { id: 3, title: "Wash the car", done: false },
 ];
 
-const todos = vstack(
-  {},
-  ...todoItems.map((item) => hstack({}, checkbox({}), div({}, item.title)))
-);
+const todos = todoList({ items: todoItems });
 
-const tree = vstack({}, todos, datatableNode, dictNode);
+console.log("todos.UI", todos.UI);
+console.log("todos.items", todos.items.get());
 
-const element = render.render(tree, {});
+const element = render.render(todos.UI[0], todos.UI[1]);
 
 document.body.appendChild(element);

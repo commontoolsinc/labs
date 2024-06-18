@@ -7,8 +7,10 @@ export type RecipeInputs = {
   [key: string]: any;
 };
 
+// TODO: `any` is here to support returning constant vdoms. Let's capture that
+// as proper constant values in the future & disallow this on the inputs.
 export type Bindings = {
-  [key: string]: signal.Signal<any> | stream.Stream<any>;
+  [key: string]: signal.Signal<any> | stream.Stream<any> | any;
 };
 
 export type InstantiatedRecipe = {
@@ -18,6 +20,7 @@ export type InstantiatedRecipe = {
 // Readwrite signals are inputs that are passed through to the output
 export type Recipe = (inputs: RecipeInputs) => InstantiatedRecipe;
 
+// TODO: Should be uuid.
 let id = 0;
 
 export const recipe = (impl: (inputs: Bindings) => Bindings): Recipe => {

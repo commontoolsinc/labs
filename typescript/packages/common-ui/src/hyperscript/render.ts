@@ -1,17 +1,10 @@
-import {
-  Cancel,
-  combineCancels,
-  isSendable
-} from "@commontools/common-frp";
+import { Cancel, combineCancels, isSendable } from "@commontools/common-frp";
 import {
   Signal,
   WriteableSignal,
-  effect
+  effect,
 } from "@commontools/common-frp/signal";
-import {
-  Stream,
-  WriteableStream
-} from "@commontools/common-frp/stream";
+import { Stream, WriteableStream } from "@commontools/common-frp/stream";
 import {
   isBinding,
   VNode,
@@ -40,22 +33,18 @@ const registry = () => {
 export const { getViewByTag, listViews, registerView } = registry();
 
 /** Define and register a view factory function */
-export const view = (
-  tagName: string,
-  props: JSONSchemaRecord = {},
-): View => {
+export const view = (tagName: string, props: JSONSchemaRecord = {}): View => {
   const factory = createView(tagName, props);
   registerView(factory);
   return factory;
 };
 
-export type BindableValue = (
-  Signal<any> |
-  WriteableSignal<any> |
-  Stream<any> |
-  WriteableStream<any> |
-  any
-);
+export type BindableValue =
+  | Signal<any>
+  | WriteableSignal<any>
+  | Stream<any>
+  | WriteableStream<any>
+  | any;
 
 export type RenderContext = Record<string, BindableValue>;
 
@@ -72,7 +61,7 @@ const listen = (
   return () => {
     element.removeEventListener(event, listener, options);
   };
-}
+};
 
 /** Read an event, returning a safe description object */
 const readEvent = (event: Event) => {
@@ -80,20 +69,16 @@ const readEvent = (event: Event) => {
     case "click":
       return {
         type: "click",
-        id: (event.target as Element).id
-      };
-    case "input":
-      return {
-        type: "input",
-        data: (event as InputEvent).data,
+        id: (event.target as Element).id,
       };
     default:
       return {
         type: event.type,
-        id: (event.target as Element).id
+        id: (event.target as Element).id,
+        detail: (event as CustomEvent).detail,
       };
   }
-}
+};
 
 /** Render a VNode tree, binding reactive data sources.  */
 const renderVNode = (vnode: VNode, context: RenderContext): Node => {
@@ -169,7 +154,7 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
 /** Render a view tree, binding reactive data sources.  */
 export const render = (
   vnode: VNode | string | undefined | null,
-  context: RenderContext = {},
+  context: RenderContext = {}
 ): Node => {
   if (vnode == null) {
     return document.createTextNode("");
@@ -187,10 +172,12 @@ const isEventKey = (key: string) => key.startsWith("@");
 /** Extract the event name from the event key */
 const readEventNameFromEventKey = (key: string) => {
   if (!isEventKey(key)) {
-    throw new TypeError(`Invalid event key: ${key}. Event keys must start with "@".`);
+    throw new TypeError(
+      `Invalid event key: ${key}. Event keys must start with "@".`
+    );
   }
   return key.slice(1);
-}
+};
 
 const setProp = (element: Element, key: string, value: any) => {
   // @ts-ignore
@@ -210,19 +197,17 @@ const renderStaticChildren = (
       element.appendChild(render(child, context));
     }
   }
-}
+};
 
-const renderText = (
-  element: Element,
-  value: any
-): Cancel => effect([value], (value) => {
-  if (value != null) {
-    element.textContent = value as string;
-  }
-});
+const renderText = (element: Element, value: any): Cancel =>
+  effect([value], (value) => {
+    if (value != null) {
+      element.textContent = value as string;
+    }
+  });
 
 /** Symbol for list item key */
-const __id__ = Symbol('list item key');
+const __id__ = Symbol("list item key");
 
 /**
  * An element with an id symbol used for efficient rendering of dynamic lists.
@@ -234,16 +219,14 @@ export const renderDynamicChildren = (
   template: VNode,
   states: Signal<unknown> | any
 ) => {
-  return effect([states], states => {
+  return effect([states], (states) => {
     // If states is not iterable, do nothing.
     if (!isIterable(states)) {
       return;
     }
 
     // Build a map of states by id for quick lookup
-    const statesById = new Map(
-      gmap(states, (state) => [state.id, state])
-    );
+    const statesById = new Map(gmap(states, (state) => [state.id, state]));
 
     // Build an index of children and a list of children to remove.
     // Note that we must build a list of children to remove, since
@@ -264,10 +247,10 @@ export const renderDynamicChildren = (
       parent.removeChild(child);
     }
 
-    let i = 0
+    let i = 0;
     for (const id of statesById.keys()) {
-      const index = i++
-      const child = children.get(id)
+      const index = i++;
+      const child = children.get(id);
       if (child != null) {
         insertElementAt(parent, child, index);
       } else {
