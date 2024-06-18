@@ -38,8 +38,9 @@ url = { version = "2" }
 usuba-bundle = { path = "./rust/usuba-bundle" }
 utoipa = { version = "4" }
 utoipa-swagger-ui = { version = "7" }
+wasmtime = { version = "21" }
 wasm-bindgen = { version = "0.2" }
-wasmtime-environ = { version = "20" }
+wasmtime-environ = { version = "21" }
 web-sys = { version = "0.3" }
 wit-bindgen = { version = "0.25" }
 wit-parser = { version = "0.208" }

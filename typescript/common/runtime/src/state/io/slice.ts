@@ -1,12 +1,26 @@
 import { Value } from '@commontools/data/interfaces/common-data-types.js';
-import { IO } from './index.js';
+import { FiniteIO } from './index.js';
 import { Storage } from '../storage/index.js';
 
-export class StateSlice implements IO {
+export class StateSlice implements FiniteIO {
   #table;
 
   constructor(table: Map<string, Value>) {
     this.#table = table;
+  }
+
+  get keys(): string[] {
+    return Array.from(this.#table.keys());
+  }
+
+  serialize(): { [index: string]: Value } {
+    let serialized: { [index: string]: Value } = {};
+
+    for (const [key, value] of this.#table.entries()) {
+      serialized[key] = value;
+    }
+
+    return serialized;
   }
 
   table(): Map<string, Value> {
