@@ -31,29 +31,31 @@ export const binding = (name: string): Binding => ({
   name
 });
 
-export type BlockBinding = {
-  "@type": "block";
+/** A repeat binding repeats items in a dynamic list using a template */
+export type RepeatBinding = {
+  "@type": "repeat";
   name: string;
-  body: VNode;
+  template: VNode;
 }
 
 /** Is value a binding to a reactive value? */
-export const isBlockBinding = (value: any): value is BlockBinding => {
+export const isRepeatBinding = (value: any): value is RepeatBinding => {
   return (
     value &&
-    value["@type"] === "block" &&
-    typeof value.name === "string"
+    value["@type"] === "repeat" &&
+    typeof value.name === "string" &&
+    isVNode(value.template)
   );
 }
 
 /** Create a template binding */
-export const block = (
+export const repeat = (
   name: string,
-  body: VNode
-): BlockBinding => ({
-  "@type": "block",
+  template: VNode
+): RepeatBinding => ({
+  "@type": "repeat",
   name,
-  body
+  template
 });
 
 export type Value = string | number | boolean | null | object;
@@ -69,7 +71,7 @@ export type Tag = string;
 export type VNode = {
   tag: Tag;
   props: Props;
-  children: BlockBinding | Array<VNode | string>;
+  children: RepeatBinding | Array<VNode | string>;
 }
 
 // NOTE: don't freeze this object, since the validator will want to mutate it.

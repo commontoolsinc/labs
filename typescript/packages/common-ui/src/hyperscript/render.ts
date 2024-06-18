@@ -19,7 +19,7 @@ import {
   JSONSchemaRecord,
   View,
   view as createView,
-  isBlockBinding,
+  isRepeatBinding,
 } from "./view.js";
 import { gmap, isIterable } from "../shared/generator.js";
 
@@ -143,11 +143,11 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
   // @ts-ignore
   element[__cancel__] = cancel;
 
-  if (isBlockBinding(vnode.children)) {
-    const { name, body } = vnode.children
+  if (isRepeatBinding(vnode.children)) {
+    const { name, template } = vnode.children
     const scopedContext = context[name]
     if (isSignal(scopedContext)) {
-      renderDynamicChildren(element, body, scopedContext);
+      renderDynamicChildren(element, template, scopedContext);
     }
   } else {
     renderStaticChildren(element, vnode.children, context);
