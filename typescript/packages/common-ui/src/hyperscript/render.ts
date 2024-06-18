@@ -6,8 +6,7 @@ import {
 import {
   Signal,
   WriteableSignal,
-  effect,
-  isSignal
+  effect
 } from "@commontools/common-frp/signal";
 import {
   Stream,
@@ -16,11 +15,11 @@ import {
 import {
   isBinding,
   VNode,
-  JSONSchemaRecord,
   View,
   view as createView,
   isRepeatBinding,
 } from "./view.js";
+import { JSONSchemaRecord } from "./schema-helpers.js";
 import { gmap, isIterable } from "../shared/generator.js";
 
 /** Registry for tags that are allowed to be rendered */
@@ -154,8 +153,7 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
     cancels.push(cancel);
   } else if (isBinding(vnode.children)) {
     const { name } = vnode.children;
-    const value = context[name];
-    renderText(element, value);
+    renderText(element, context[name]);
   } else {
     renderStaticChildren(element, vnode.children, context);
   }
@@ -229,7 +227,7 @@ export type IdentifiedChild = Element & { [__id__]?: any };
 export const renderDynamicChildren = (
   parent: Element,
   template: VNode,
-  states: Signal<unknown>
+  states: Signal<unknown> | any
 ) => {
   return effect([states], states => {
     // If states is not iterable, do nothing.
@@ -241,11 +239,12 @@ export const renderDynamicChildren = (
     const statesById = new Map(
       gmap(states, (state) => [state.id, state])
     );
+
     // Build an index of children and a list of children to remove.
     // Note that we must build a list of children to remove, since
     // removing in-place would change the live node list and bork iteration.
-    const children = new Map();
-    const removes = [];
+    const children = new Map<any, Element>();
+    const removes: Array<Element> = [];
 
     for (const child of parent.children) {
       const keyedChild = child as IdentifiedChild;
@@ -265,12 +264,12 @@ export const renderDynamicChildren = (
       const index = i++
       const child = children.get(id)
       if (child != null) {
-        insertElementAt(parent, child, index)
+        insertElementAt(parent, child, index);
       } else {
         const childContext = statesById.get(id);
         const keyedChild = render(template, childContext) as IdentifiedChild;
         keyedChild[__id__] = id;
-        insertElementAt(parent, child, index);
+        insertElementAt(parent, keyedChild, index);
       }
     }
   });

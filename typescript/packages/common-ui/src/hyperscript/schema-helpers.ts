@@ -1,5 +1,15 @@
 /** Schema helpers */
 
+export type AnyJSONSchema = object;
+
+export type JSONSchemaRecord = Record<string, AnyJSONSchema>;
+
+export type AnyJSONObjectSchema = {
+  type: "object";
+  properties: Record<string, AnyJSONSchema>;
+  additionalProperties?: boolean;
+};
+
 // NOTE: these are written as factories for JSONSchema objects, rather than
 // frozen schema objects because the JSONSchema validator mutates the object
 // to add metadata about the schema.
@@ -12,6 +22,13 @@ export const binding = () => ({
     name: { type: "string" }
   },
   required: ["@type", "name"]
+});
+
+export const bindable = (schema: AnyJSONSchema) => ({
+  anyOf: [
+    schema,
+    binding()
+  ]
 });
 
 /** Mixin for list of allowed basic events */

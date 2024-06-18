@@ -1,15 +1,10 @@
 import * as Schema from '../shared/schema.js';
+import {
+  AnyJSONObjectSchema,
+  JSONSchemaRecord,
+  bindable
+} from './schema-helpers.js';
 import {deepFreeze} from '../shared/deep-freeze.js';
-
-export type AnyJSONSchema = object;
-
-export type JSONSchemaRecord = Record<string, AnyJSONSchema>;
-
-export type AnyJSONObjectSchema = {
-  type: "object";
-  properties: Record<string, AnyJSONSchema>;
-  additionalProperties?: boolean;
-};
 
 export type Binding = {
   "@type": "binding";
@@ -160,14 +155,18 @@ export type View = Factory & {
  */
 export const view = (
   tagName: string,
-  properties: JSONSchemaRecord = {}
+  propertySchema: JSONSchemaRecord = {}
 ): View => {
   // Normalize tag name
   const tag = tagName.toLowerCase();
 
   const schema: AnyJSONObjectSchema = {
     type: "object",
-    properties
+    properties: Object.fromEntries(
+      Object.entries(propertySchema).map(([key, value]) => {
+        return [key, bindable(value)]
+      })
+    )
   };
 
   // Compile props validator for fast validation at runtime.

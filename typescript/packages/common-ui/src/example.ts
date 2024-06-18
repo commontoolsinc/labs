@@ -1,4 +1,5 @@
 import { subject } from '@commontools/common-frp/stream';
+import { state } from '@commontools/common-frp/signal';
 import {
   dict,
   datatable,
@@ -64,7 +65,7 @@ const listNode = vstack(
     '@click': binding('listClicks')
   },
   repeat(
-    'listItems',
+    'items',
     div(
       {id: binding('id')},
       binding('value')
@@ -91,7 +92,12 @@ clicks.sink({
 })
 
 const element = render(tree, {
-  clicks
+  clicks,
+  items: [
+    {id: '1', value: state('One')},
+    {id: '2', value: state('Two')},
+    {id: '3', value: 'Three'}
+  ]
 });
 
 document.body.appendChild(element);
