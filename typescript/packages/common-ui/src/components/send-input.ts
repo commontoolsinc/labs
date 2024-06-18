@@ -1,6 +1,5 @@
 import { LitElement, html, css } from "lit-element";
 import { customElement, property } from "lit-element/decorators.js";
-import { repeat } from "lit/directives/repeat.js";
 import { view } from "../hyperscript/render.js";
 import { eventProps } from "../hyperscript/schema-helpers.js";
 
@@ -56,10 +55,23 @@ export class DatatableElement extends LitElement {
     );
   }
 
+  keyDown(event: KeyboardEvent) {
+    event.preventDefault();
+
+    if (event.key === "Enter") {
+      this.send(event);
+    }
+  }
+
   override render() {
     return html`
       <div>
-        <input type="text" id="input" placeholder=${this.placeholder} />
+        <input
+          type="text"
+          id="input"
+          placeholder=${this.placeholder}
+          @keydown=${this.keyDown}
+        />
         <button @click=${this.send}>${this.name}</button>
       </div>
     `;
