@@ -166,18 +166,17 @@ export const view = (
     additionalProperties: true
   });
 
-  /** Create an element from a view, validating props  */
+  /**
+   * Create a VNode for tag
+   * Note: props are not validated. Validation happens later, during render.
+   * @param props - properties for the tag
+   * @param children - child nodes
+   * @returns VNode
+   */
   const create = (
     props: Props = {},
     ...children: Array<VNode | string>
-  ) => {
-    if (!validate(props)) {
-      throw new TypeError(`Invalid props for ${tag}.
-        Props: ${JSON.stringify(props)}
-        Schema: ${JSON.stringify(schema)}`);
-    }
-    return vh(tag, props, ...children);
-  }
+  ) => vh(tag, props, ...children);
 
   create.tag = tag;
   create.props = {validate, schema};
