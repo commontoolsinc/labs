@@ -224,6 +224,9 @@ const renderText = (
 /** Symbol for list item key */
 const __id__ = Symbol('list item key');
 
+let _cid = 0;
+const cid = () => `cid${_cid++}`
+
 /**
  * An element with an id symbol used for efficient rendering of dynamic lists.
  */
@@ -240,9 +243,18 @@ export const renderDynamicChildren = (
       return;
     }
 
-    // Build a map of states by id for quick lookup
+    // Build a map of states by id for quick lookup.
+    // If model doesn't have an ID, generate one. Generated ID will mean the
+    // item will not be efficiently re-rendered by identity, but it will
+    // still work.
     const statesById = new Map(
-      gmap(states, (state) => [state.id, state])
+      gmap(
+        states,
+        (state) => [
+          state.id ?? cid(),
+          state
+        ]
+      )
     );
 
     // Build an index of children and a list of children to remove.
@@ -252,11 +264,11 @@ export const renderDynamicChildren = (
     const removes: Array<Element> = [];
 
     for (const child of parent.children) {
-      const keyedChild = child as IdentifiedChild;
-      const childId = keyedChild[__id__];
+      const identifiedChild = child as IdentifiedChild;
+      const childId = identifiedChild[__id__];
       children.set(childId, child);
       if (!statesById.has(childId)) {
-        removes.push(child);
+        removes.push(identifiedChild);
       }
     }
 
