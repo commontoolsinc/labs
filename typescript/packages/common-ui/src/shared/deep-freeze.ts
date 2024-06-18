@@ -1,3 +1,5 @@
+export const freeze = Object.freeze;
+
 /** Deep freeze an object */
 export const deepFreeze = <T extends object>(obj: T): T => {
   // Retrieve the property names defined on object
@@ -13,7 +15,7 @@ export const deepFreeze = <T extends object>(obj: T): T => {
     }
   }
 
-  return Object.freeze(obj);
+  return freeze(obj);
 }
 
 export default deepFreeze;

@@ -81,9 +81,13 @@ const readEvent = (event: Event) => {
     case "click":
       return {
         type: "click",
+        id: (event.target as Element).id
       };
     default:
-      return { type: event.type };
+      return {
+        type: event.type,
+        id: (event.target as Element).id
+      };
   }
 }
 
@@ -144,12 +148,14 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
   element[__cancel__] = cancel;
 
   if (isRepeatBinding(vnode.children)) {
-    const { name, template } = vnode.children
-    const scopedContext = context[name]
-    if (isSignal(scopedContext)) {
-      const cancel = renderDynamicChildren(element, template, scopedContext);
-      cancels.push(cancel);
-    }
+    const { name, template } = vnode.children;
+    const scopedContext = context[name];
+    const cancel = renderDynamicChildren(element, template, scopedContext);
+    cancels.push(cancel);
+  } else if (isBinding(vnode.children)) {
+    const { name } = vnode.children;
+    const value = context[name];
+    renderText(element, value);
   } else {
     renderStaticChildren(element, vnode.children, context);
   }
@@ -203,6 +209,15 @@ const renderStaticChildren = (
   }
 }
 
+const renderText = (
+  element: Element,
+  value: any
+): Cancel => effect([value], (value) => {
+  if (value != null) {
+    element.textContent = value as string;
+  }
+});
+
 /** Symbol for list item key */
 const __id__ = Symbol('list item key');
 
@@ -216,7 +231,7 @@ export const renderDynamicChildren = (
   template: VNode,
   states: Signal<unknown>
 ) => {
-  const cancel = effect([states], states => {
+  return effect([states], states => {
     // If states is not iterable, do nothing.
     if (!isIterable(states)) {
       return;
@@ -259,7 +274,6 @@ export const renderDynamicChildren = (
       }
     }
   });
-  return cancel;
 };
 
 /**

@@ -1,5 +1,5 @@
 import * as Schema from '../shared/schema.js';
-import deepFreeze from '../shared/deep-freeze.js';
+import {deepFreeze} from '../shared/deep-freeze.js';
 
 export type AnyJSONSchema = object;
 
@@ -41,7 +41,7 @@ export type RepeatBinding = {
 /** Is value a binding to a reactive value? */
 export const isRepeatBinding = (value: any): value is RepeatBinding => {
   return (
-    value &&
+    value != null &&
     value["@type"] === "repeat" &&
     typeof value.name === "string" &&
     isVNode(value.template)
@@ -68,10 +68,12 @@ export type Props = {
 
 export type Tag = string;
 
+export type Children = RepeatBinding | Binding | Array<VNode | string>;
+
 export type VNode = {
   tag: Tag;
   props: Props;
-  children: RepeatBinding | Array<VNode | string>;
+  children: Children;
 }
 
 // NOTE: don't freeze this object, since the validator will want to mutate it.
@@ -109,26 +111,35 @@ export const VNodeSchema = {
   required: ["tag", "props", "children"]
 }
 
-/** Is object a VNode? */
-export const isVNode = Schema.compile(VNodeSchema)
-
 /** Internal helper for creating VNodes */
-const vh = (
+const vnode = (
   tag: string,
   props: Props = {},
-  ...children: Array<VNode | string>
+  children: Children
 ): VNode  => ({
   tag,
   props,
   children
 });
 
+/** Is object a VNode? */
+export const isVNode = (value: any): value is VNode => {
+  return (
+    value != null &&
+    typeof value.tag === "string" &&
+    typeof value.props === "object" &&
+    value.children != null
+  );
+}
+
 export type Factory = {
   (): VNode
 
+  (props: Props): VNode
+
   (
     props: Props,
-    ...children: Array<VNode | string>
+    children: Children
   ): VNode
 };
 
@@ -175,8 +186,8 @@ export const view = (
    */
   const create = (
     props: Props = {},
-    ...children: Array<VNode | string>
-  ) => vh(tag, props, ...children);
+    children: Children = []
+  ) => vnode(tag, props, children);
 
   create.tag = tag;
   create.props = {validate, schema};

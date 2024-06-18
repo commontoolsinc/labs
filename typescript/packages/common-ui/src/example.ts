@@ -2,9 +2,10 @@ import { subject } from '@commontools/common-frp/stream';
 import {
   dict,
   datatable,
-  vstack
+  vstack,
+  div
 } from './hyperscript/tags.js';
-import { binding } from './hyperscript/view.js';
+import { binding, repeat } from './hyperscript/view.js';
 import render from './hyperscript/render.js';
 
 const datatableNode = datatable({
@@ -58,11 +59,28 @@ const dictNode = dict({
   }
 });
 
+const listNode = vstack(
+  {
+    '@click': binding('listClicks')
+  },
+  repeat(
+    'listItems',
+    div(
+      {id: binding('id')},
+      binding('value')
+    )
+  )
+);
+
 const tree = vstack(
   {},
-  datatableNode,
-  dictNode
+  [
+    datatableNode,
+    dictNode,
+    listNode
+  ]
 )
+ 
 
 const clicks = subject()
 
