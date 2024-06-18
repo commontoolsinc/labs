@@ -1,7 +1,10 @@
 use utoipa::OpenApi;
 
 use crate::{
-    routes::{BuildModuleRequest, BuildModuleResponse, BundleRequest},
+    routes::{
+        BuildModuleRequest, BuildModuleResponse, BundleRequest, EvalRecipeRequest,
+        EvalRecipeResponse, JsonValue,
+    },
     ErrorResponse,
 };
 
@@ -10,13 +13,17 @@ use crate::{
     paths(
         crate::routes::build_module,
         crate::routes::retrieve_module,
-        crate::routes::bundle_javascript
+        crate::routes::bundle_javascript,
+        crate::routes::eval_recipe
     ),
     components(
         schemas(BuildModuleResponse),
         schemas(ErrorResponse),
         schemas(BuildModuleRequest),
-        schemas(BundleRequest)
+        schemas(BundleRequest),
+        schemas(EvalRecipeRequest),
+        schemas(EvalRecipeResponse),
+        schemas(JsonValue)
     )
 )]
 pub struct OpenApiDocs;

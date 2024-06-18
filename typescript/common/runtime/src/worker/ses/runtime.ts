@@ -4,13 +4,11 @@ import {
   Compartment,
 } from '@commontools/usuba-ses';
 import { LocalRuntime, ThreadLocalModule } from '../index.js';
-import { IO } from '../../state/io/index.js';
 import type { Value } from '../../index.js';
 import { Reference } from '../../common/data/reference.js';
 import { logger as console } from '../../helpers.js';
 import * as api from '@commontools/usuba-api';
-
-console.log(api);
+import { DuplexState } from '../../state/io/duplex.js';
 
 export class RuntimeSESWorker implements LocalRuntime {
   constructor() {
@@ -22,7 +20,7 @@ export class RuntimeSESWorker implements LocalRuntime {
   async eval(
     _contentType: 'text/javascript',
     sourceCode: string,
-    io: IO
+    io: DuplexState
   ): Promise<ThreadLocalModule> {
     const commonIO = harden({
       read(name: string) {

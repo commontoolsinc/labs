@@ -6,3 +6,6 @@ pub use bundle::*;
 
 mod ui;
 pub use ui::*;
+
+mod recipe;
+pub use recipe::*;

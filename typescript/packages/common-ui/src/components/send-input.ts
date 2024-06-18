@@ -46,9 +46,10 @@ export class DatatableElement extends LitElement {
     const value = inputEl.value;
     inputEl.value = "";
 
+    console.log("send", value);
     this.dispatchEvent(
-      new InputEvent("input", {
-        data: value,
+      new CustomEvent("messageSend", {
+        detail: { message: value },
         bubbles: true,
         composed: true,
       })
@@ -56,11 +57,7 @@ export class DatatableElement extends LitElement {
   }
 
   keyDown(event: KeyboardEvent) {
-    event.preventDefault();
-
-    if (event.key === "Enter") {
-      this.send(event);
-    }
+    if (event.key === "Enter") this.send(event);
   }
 
   override render() {
