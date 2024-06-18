@@ -1,7 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["es2022", "DOM"],
+    "lib": ["es2022", "dom", "dom.iterable"],
     "outDir": "./lib",
     "rootDir": "./src",
     "strict": false,

@@ -70,7 +70,14 @@ export type Gettable<T> = {
   get(): T
 }
 
-const sample = <T>(container: Gettable<T>) => container.get()
+/** Does type implement get method? */
+export const isGettable = <T>(value: any): value is Gettable<T> => {
+  return (value != null && typeof value.get === 'function')
+}
+
+const sample = <T>(
+  container: Gettable<T> | T
+) => isGettable(container) ? container.get() : container
 
 export type Signal<T> = Gettable<T> & Updates & Cancellable
 
@@ -156,9 +163,14 @@ export type Effect = {
   ): Cancel
 }
 
-/** React to a signal, producing an effect any time it changes */
+const noOp = () => {}
+
+/**
+ * React to an array of signals or constant values, producing an effect any
+ * time any of them changes
+ */
 export const effect: Effect = (
-  upstreams: Array<Signal<any>>,
+  upstreams: Array<Signal<any> | any>,
   perform: (...values: Array<any>) => void
 ) => {
   const job = () => perform(...upstreams.map(sample))
@@ -168,9 +180,14 @@ export const effect: Effect = (
 
   const subscriber = { send: schedule }
 
-  return combineCancels(
-    upstreams.map(signal => signal.updates(subscriber))
-  )
+  const cancels = upstreams.map(signal => {
+    if (isSignal(signal)) {
+      return signal.updates(subscriber)
+    }
+    return noOp
+  })
+
+  return combineCancels(cancels)
 }
 
 export const state = <T>(initial: T) => {

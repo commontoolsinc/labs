@@ -15,10 +15,12 @@ import {
 import {
   isBinding,
   VNode,
-  JSONSchemaRecord,
   View,
   view as createView,
+  isRepeatBinding,
 } from "./view.js";
+import { JSONSchemaRecord } from "./schema-helpers.js";
+import { gmap, isIterable } from "../shared/generator.js";
 
 /** Registry for tags that are allowed to be rendered */
 const registry = () => {
@@ -61,7 +63,7 @@ export const __cancel__ = Symbol("cancel");
 
 /** Bind an event listener, and return a Cancel function */
 const listen = (
-  element: HTMLElement,
+  element: Element,
   event: string,
   listener: EventListener,
   options?: AddEventListenerOptions
@@ -78,9 +80,13 @@ const readEvent = (event: Event) => {
     case "click":
       return {
         type: "click",
+        id: (event.target as Element).id
       };
     default:
-      return { type: event.type };
+      return {
+        type: event.type,
+        id: (event.target as Element).id
+      };
   }
 }
 
@@ -140,12 +146,16 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
   // @ts-ignore
   element[__cancel__] = cancel;
 
-  for (const child of vnode.children) {
-    if (typeof child === "string") {
-      element.appendChild(document.createTextNode(child));
-    } else {
-      element.appendChild(render(child, context));
-    }
+  if (isRepeatBinding(vnode.children)) {
+    const { name, template } = vnode.children;
+    const scopedContext = context[name];
+    const cancel = renderDynamicChildren(element, template, scopedContext);
+    cancels.push(cancel);
+  } else if (isBinding(vnode.children)) {
+    const { name } = vnode.children;
+    renderText(element, context[name]);
+  } else {
+    renderStaticChildren(element, vnode.children, context);
   }
 
   return element;
@@ -177,7 +187,109 @@ const readEventNameFromEventKey = (key: string) => {
   return key.slice(1);
 }
 
-const setProp = (element: HTMLElement, key: string, value: any) => {
+const setProp = (element: Element, key: string, value: any) => {
   // @ts-ignore
   element[key] = value;
+};
+
+/** Render a static list of VNode children to an element */
+const renderStaticChildren = (
+  element: Element,
+  children: Array<VNode | string>,
+  context: RenderContext
+) => {
+  for (const child of children) {
+    if (typeof child === "string") {
+      element.appendChild(document.createTextNode(child));
+    } else {
+      element.appendChild(render(child, context));
+    }
+  }
+}
+
+const renderText = (
+  element: Element,
+  value: any
+): Cancel => effect([value], (value) => {
+  if (value != null) {
+    element.textContent = value as string;
+  }
+});
+
+/** Symbol for list item key */
+const __id__ = Symbol('list item key');
+
+/**
+ * An element with an id symbol used for efficient rendering of dynamic lists.
+ */
+export type IdentifiedChild = Element & { [__id__]?: any };
+
+export const renderDynamicChildren = (
+  parent: Element,
+  template: VNode,
+  states: Signal<unknown> | any
+) => {
+  return effect([states], states => {
+    // If states is not iterable, do nothing.
+    if (!isIterable(states)) {
+      return;
+    }
+
+    // Build a map of states by id for quick lookup
+    const statesById = new Map(
+      gmap(states, (state) => [state.id, state])
+    );
+
+    // Build an index of children and a list of children to remove.
+    // Note that we must build a list of children to remove, since
+    // removing in-place would change the live node list and bork iteration.
+    const children = new Map<any, Element>();
+    const removes: Array<Element> = [];
+
+    for (const child of parent.children) {
+      const keyedChild = child as IdentifiedChild;
+      const childId = keyedChild[__id__];
+      children.set(childId, child);
+      if (!statesById.has(childId)) {
+        removes.push(child);
+      }
+    }
+
+    for (const child of removes) {
+      parent.removeChild(child);
+    }
+
+    let i = 0
+    for (const id of statesById.keys()) {
+      const index = i++
+      const child = children.get(id)
+      if (child != null) {
+        insertElementAt(parent, child, index);
+      } else {
+        const childContext = statesById.get(id);
+        const keyedChild = render(template, childContext) as IdentifiedChild;
+        keyedChild[__id__] = id;
+        insertElementAt(parent, keyedChild, index);
+      }
+    }
+  });
+};
+
+/**
+ * Insert element at index.
+ * If element is already at index, this function is a no-op
+ * (it doesn't remove-and-then-add element). By avoiding moving the element
+ * unless needed, we preserve focus and selection state for elements that
+ * don't move.
+ */
+export const insertElementAt = (
+  parent: Element,
+  element: Element,
+  index: number
+) => {
+  const elementAtIndex = parent.children[index];
+  if (elementAtIndex === element) {
+    return;
+  }
+  parent.insertBefore(element, elementAtIndex);
 };
