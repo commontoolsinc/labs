@@ -10,3 +10,4 @@ export { h1 } from "../components/h1.js";
 export { p } from "../components/p.js";
 export { button } from "../components/button.js";
 export { include } from "../components/include.js";
+export { input, textInput, checkbox, radio } from "../components/input.js";
