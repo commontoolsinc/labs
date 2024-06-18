@@ -82,6 +82,11 @@ const readEvent = (event: Event) => {
         type: "click",
         id: (event.target as Element).id
       };
+    case "input":
+      return {
+        type: "input",
+        data: (event as InputEvent).data,
+      };
     default:
       return {
         type: event.type,
