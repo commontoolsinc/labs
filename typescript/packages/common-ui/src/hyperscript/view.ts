@@ -1,5 +1,5 @@
-import * as Schema from '../schema.js';
-import deepFreeze from '../deep-freeze.js';
+import * as Schema from '../shared/schema.js';
+import deepFreeze from '../shared/deep-freeze.js';
 
 export type AnyJSONSchema = object;
 
