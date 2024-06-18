@@ -93,11 +93,11 @@ clicks.sink({
 
 const element = render(tree, {
   clicks,
-  items: [
+  items: state([
     {id: '1', value: state('One')},
     {id: '2', value: state('Two')},
     {id: '3', value: 'Three'}
-  ]
+  ])
 });
 
 document.body.appendChild(element);
