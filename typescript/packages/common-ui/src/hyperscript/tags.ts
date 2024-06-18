@@ -9,3 +9,5 @@ export { span } from "../components/span.js";
 export { h1 } from "../components/h1.js";
 export { p } from "../components/p.js";
 export { button } from "../components/button.js";
+export { checkbox } from "../components/checkbox.js";
+export { textInput } from "../components/text-input.js";

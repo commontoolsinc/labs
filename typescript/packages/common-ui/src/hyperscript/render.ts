@@ -1,23 +1,17 @@
-import {
-  Cancel,
-  combineCancels,
-  isSendable
-} from "@commontools/common-frp";
+import { Cancel, combineCancels, isSendable } from "@commontools/common-frp";
 import {
   Signal,
   WriteableSignal,
-  effect
+  effect,
 } from "@commontools/common-frp/signal";
-import {
-  Stream,
-  WriteableStream
-} from "@commontools/common-frp/stream";
+import { Stream, WriteableStream } from "@commontools/common-frp/stream";
 import {
   isBinding,
   VNode,
   JSONSchemaRecord,
   View,
   view as createView,
+  Props,
 } from "./view.js";
 
 /** Registry for tags that are allowed to be rendered */
@@ -41,19 +35,19 @@ export const { getViewByTag, listViews, registerView } = registry();
 export const view = (
   tagName: string,
   props: JSONSchemaRecord = {},
+  constantProps: Props = {}
 ): View => {
-  const factory = createView(tagName, props);
+  const factory = createView(tagName, props, constantProps);
   registerView(factory);
   return factory;
 };
 
-export type BindableValue = (
-  Signal<any> |
-  WriteableSignal<any> |
-  Stream<any> |
-  WriteableStream<any> |
-  any
-);
+export type BindableValue =
+  | Signal<any>
+  | WriteableSignal<any>
+  | Stream<any>
+  | WriteableStream<any>
+  | any;
 
 export type RenderContext = Record<string, BindableValue>;
 
@@ -70,7 +64,7 @@ const listen = (
   return () => {
     element.removeEventListener(event, listener, options);
   };
-}
+};
 
 /** Read an event, returning a safe description object */
 const readEvent = (event: Event) => {
@@ -82,7 +76,7 @@ const readEvent = (event: Event) => {
     default:
       return { type: event.type };
   }
-}
+};
 
 /** Render a VNode tree, binding reactive data sources.  */
 const renderVNode = (vnode: VNode, context: RenderContext): Node => {
@@ -154,7 +148,7 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
 /** Render a view tree, binding reactive data sources.  */
 export const render = (
   vnode: VNode | string | undefined | null,
-  context: RenderContext = {},
+  context: RenderContext = {}
 ): Node => {
   if (vnode == null) {
     return document.createTextNode("");
@@ -172,10 +166,12 @@ const isEventKey = (key: string) => key.startsWith("@");
 /** Extract the event name from the event key */
 const readEventNameFromEventKey = (key: string) => {
   if (!isEventKey(key)) {
-    throw new TypeError(`Invalid event key: ${key}. Event keys must start with "@".`);
+    throw new TypeError(
+      `Invalid event key: ${key}. Event keys must start with "@".`
+    );
   }
   return key.slice(1);
-}
+};
 
 const setProp = (element: HTMLElement, key: string, value: any) => {
   // @ts-ignore
