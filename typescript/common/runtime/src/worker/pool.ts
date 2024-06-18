@@ -1,5 +1,10 @@
 import { assertNever, logger as console } from '../helpers.js';
-import { Sandbox, WASM_SANDBOX, SES_SANDBOX } from '../index.js';
+import {
+  Sandbox,
+  WASM_SANDBOX,
+  SES_SANDBOX,
+  CONFIDENTIAL_COMPUTE_SANDBOX,
+} from '../index.js';
 import { HostWorkerEventHandler } from '../rpc/host.js';
 import { HostToRuntimeRPC, HANDSHAKE_EVENT } from '../rpc/index.js';
 
@@ -57,6 +62,10 @@ export class WorkerPool {
         });
       case SES_SANDBOX:
         return new Worker(new URL('./ses/index.js', import.meta.url), {
+          type: 'module',
+        });
+      case CONFIDENTIAL_COMPUTE_SANDBOX:
+        return new Worker(new URL('./remote/index.js', import.meta.url), {
           type: 'module',
         });
       default:

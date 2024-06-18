@@ -9,7 +9,7 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-axum = { workspace = true, features = ["multipart"] }
+axum = { workspace = true, features = ["multipart", "macros"] }
 blake3 = { workspace = true }
 bytes = { workspace = true }
 hyper-util = { workspace = true }
@@ -27,6 +27,8 @@ tracing-subscriber = { workspace = true }
 usuba-bundle = { workspace = true }
 utoipa = { workspace = true, features = ["axum_extras"] }
 utoipa-swagger-ui = { workspace = true, features = ["axum"] }
+wasmtime = { workspace = true }
+wasmtime-wasi = { version = "21" }
 wit-parser = { workspace = true }
 # gcloud-sdk = { version = "0.24.6", features = ["google-cloud-aiplatform-v1"] }
 

@@ -1,5 +1,5 @@
 import { Value } from '@commontools/data/interfaces/common-data-types.js';
-import { IO } from './index.js';
+import { FiniteIO, IO } from './index.js';
 
 export class DuplexState implements IO {
   #i;
@@ -13,7 +13,7 @@ export class DuplexState implements IO {
     return this.#o;
   }
 
-  constructor(i: IO, o: IO) {
+  constructor(i: FiniteIO, o: IO) {
     this.#i = i;
     this.#o = o;
   }

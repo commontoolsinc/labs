@@ -6,7 +6,6 @@ import {
   RuntimeToHostRPC,
 } from '../rpc/index.js';
 import { DuplexState } from '../state/io/duplex.js';
-import { IO } from '../state/io/index.js';
 import { StateSlice } from '../state/io/slice.js';
 import {
   ModuleEventHandler,
@@ -60,7 +59,7 @@ export class ModuleInstance {
         try {
           const module = await this.#moduleInitializes;
           await this.#input.populateFrom(this.#storage, this.#inputKeys);
-          module.run();
+          await module.run();
         } catch (error) {
           return {
             error: `${error}`,
@@ -85,7 +84,7 @@ export interface LocalRuntime {
   eval(
     contentType: ContentType,
     sourceCode: string,
-    io: IO
+    io: DuplexState
   ): Promise<ThreadLocalModule>;
 }
 
