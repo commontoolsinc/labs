@@ -147,7 +147,8 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
     const { name, template } = vnode.children
     const scopedContext = context[name]
     if (isSignal(scopedContext)) {
-      renderDynamicChildren(element, template, scopedContext);
+      const cancel = renderDynamicChildren(element, template, scopedContext);
+      cancels.push(cancel);
     }
   } else {
     renderStaticChildren(element, vnode.children, context);
