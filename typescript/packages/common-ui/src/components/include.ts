@@ -4,7 +4,7 @@ import { view, render, RenderContext } from "../hyperscript/render.js";
 import { VNode } from "../hyperscript/view.js";
 import { eventProps } from "../hyperscript/schema-helpers.js";
 
-export const datatable = view("common-include", {
+export const include = view("common-include", {
   ...eventProps(),
   content: { type: "array" },
 });

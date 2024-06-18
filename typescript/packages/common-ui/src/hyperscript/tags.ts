@@ -9,3 +9,4 @@ export { span } from "../components/span.js";
 export { h1 } from "../components/h1.js";
 export { p } from "../components/p.js";
 export { button } from "../components/button.js";
+export { include } from "../components/include.js";
