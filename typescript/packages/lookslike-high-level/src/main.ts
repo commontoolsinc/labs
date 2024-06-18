@@ -1,66 +1,28 @@
-import { view, tags, render } from "@commontools/common-ui";
-const { dict, datatable, vstack, hstack, checkbox, div } = tags;
+import { view as viewImport, tags, render } from "@commontools/common-ui";
+import { signal, stream } from "@commontools/common-frp";
+import { suggestion } from "./suggestion.js";
+import { recipe } from "./recipe.js";
+const { dict, datatable, vstack, hstack, checkbox, div, include } = tags;
+const { isSignal, state, computed } = signal;
+const { view, binding } = viewImport;
 
-const datatableNode = datatable({
-  cols: [
-    "title",
-    "day",
-    "time",
-    "location",
-    "address",
-    "description",
-    "level",
-    "price",
-    "email",
-    "reservation",
-  ],
-  rows: [
-    {
-      title: "Power Yoga",
-      day: "Monday",
-      time: "8:00am",
-      location: "Studio 1 & 2 (combined)",
-      description:
-        "Stretch and relax with yoga practice at the studio. All levels welcome. Bring your own mat. Namaste. 🧘‍♂️",
-      level: "Beginner to Advanced",
-      price: "$10",
-      address: "1234 Elm St, Springfield, IL 62701",
-      email: "yogazon124@example.com",
-      reservation: "https://example.com/reserve/power-yoga",
-    },
-    {
-      title: "Pilates",
-      day: "Wednesday",
-      time: "8:00am",
-      location: "Studio",
-      description: "Strengthen and tone",
-      level: "Intermediate",
-      price: "$15",
-      address: "1234 Elm St, Springfield, IL 62701",
-      email: "pilates14asdf@example.com",
-      reservation: "https://example.com/reserve/pilates",
-    },
-    {
-      title: "Zumba",
-      day: "Friday",
-      time: "8:00am",
-      location: "Studio",
-      description: "Dance and have fun",
-      level: "Advanced",
-      price: "$20",
-      address: "1234 Elm St, Springfield, IL 62701",
-      email: "zumba@example.com",
-      reservation: "https://example.com/reserve/zumba",
-    },
-  ],
-});
-
-const dictNode = dict({
-  records: {
-    one: "1",
-    two: "2",
-    three: "3",
-  },
+const task = recipe(({ title, done }: viewImport.Bindings) => {
+  return {
+    itemVDom: [
+      vstack(
+        {},
+        hstack(
+          {},
+          checkbox({ checked: binding("done") }),
+          div({} /*binding("title")*/)
+        ),
+        suggestion({})
+      ),
+      { done, title },
+    ],
+    done,
+    title,
+  };
 });
 
 const todoItems = [
