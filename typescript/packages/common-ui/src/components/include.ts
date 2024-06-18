@@ -6,6 +6,7 @@ import { eventProps } from "../hyperscript/schema-helpers.js";
 
 export const include = view("common-include", {
   ...eventProps(),
+  // TODO; This should be split into two properties, vdom and context
   content: { type: "array" },
 });
 
