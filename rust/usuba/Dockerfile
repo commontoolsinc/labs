@@ -15,9 +15,9 @@ COPY ./rust ./rust
 COPY ./typescript ./typescript
 
 RUN rustup target add wasm32-wasi
-RUN cargo install wasm-tools
+RUN cargo install wasm-tools wit-deps-cli
 
-WORKDIR /build-root/typescript/packages/usuba-ui
+WORKDIR /build-root/typescript
 
 RUN npm install -g @bytecodealliance/jco
 RUN npm ci

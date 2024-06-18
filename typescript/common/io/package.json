@@ -14,6 +14,7 @@
   "scripts": {
     "build": "wireit",
     "clean": "wireit",
+    "prepare": "wireit",
     "update:wit": "wireit",
     "lint:wit": "wireit",
     "build:wit:inline": "wireit"
@@ -33,6 +34,11 @@
     "wireit": "^0.14.4"
   },
   "wireit": {
+    "prepare": {
+      "dependencies": [
+        "install:wit"
+      ]
+    },
     "install:wit": {
       "command": "wit-deps",
       "files": [
@@ -106,7 +112,7 @@
       ]
     },
     "clean": {
-      "command": "rm -rf ./src ./lib ./.wireit"
+      "command": "rm -rf ./src ./lib ./.wireit ./wit/deps"
     }
   }
 }
