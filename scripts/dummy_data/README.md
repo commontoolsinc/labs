@@ -37,11 +37,12 @@ Example: `cat target/files/2024-06-19_15-55-23/files.txt | python3 generate.py p
 
 A more complex multi-line example for generating multiple schemas:
 
-
+`ls target/schema/2024-06-19_16-16-29/ | grep -v "^_" | sed 's/^/target\/schema\/2024-06-19_16-16-29\//' | python3 generate.py prompts/data.txt`
 
 ### TODO
 - A debug mode to print out the raw prompts as returned from compile
 - Figure out a pattern for saving a multi-item golden (e.g. the schema.txt, which is a map of filenames to contents)
 - When a sub-prompt is executed that has multi-mode output, put the downstream thing in multi-line output as well.
 - Create a @latest alias to the most recent run in a target output dir
+- Make it so the output when running the grep example above don't get long weird mangled output names.
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)
