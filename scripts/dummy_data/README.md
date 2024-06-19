@@ -11,3 +11,23 @@ llm keys set claude
 ```
 
 The run: `./generate.sh` . This will blow away anything currently in `out/` and overwrite it.
+
+### Design
+
+A generate.py that is passed a prompt (a filename) to execute.
+
+The prompt is executed by using `llm` under the covers and then puts the output in a folder like this: `./out/${base_filename}/DATESTRING/result.txt`
+
+Prompts can also have named references, like `${name}` that need to be expanded before the prompt can be executed.
+
+The rules of a reference like `${name}` is, in priority order:
+- An input to generate.py that sets name=VAL
+- A file in `golden/` that has a filname like `$name.*`
+- A file in `prompts/` that has a filename like `$name.*`
+- A file in `out/$name/`, the named directory that is most recent, its `result.txt`.
+
+This process is recursive. When a name is found it is printed out which version it uses.
+
+In the future, the name reference can define whether it wants the output to be executed by running through to llm.
+
+A `generate_multi.sh` that does the same thing as it does today, to allow running multiple items.
