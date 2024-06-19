@@ -1,9 +1,47 @@
 import sys
 import os
 import subprocess
+import re
 from datetime import datetime
 
-def execute_prompt(name, prompt):
+def fetch_placeholder(name):
+    value = input(f"Enter the value for {name}: ")
+    return value
+
+def compile_prompt(name, raw_prompt):
+
+    print(f"Compiling prompt for {name}...")
+
+    # Identify any placeholders in the prompt that match ${name}, ignoring any whitespace in the placeholder
+    placeholders = re.findall(r"\${\s*(\w+)\s*}", raw_prompt)
+
+    if len(placeholders) == 0:
+        print("No placeholders found in the prompt.")
+        return raw_prompt
+
+    # create a dictionary to store the values of the placeholders
+    placeholder_values = {}
+
+    # Iterate over the placeholders
+    for placeholder in placeholders:
+        print(f"Getting value for {placeholder}...")
+        # Store the value in the dictionary
+        placeholder_values[placeholder] = fetch_placeholder(placeholder)
+
+    # Replace the placeholders with the values
+    prompt = raw_prompt
+    for placeholder, value in placeholder_values.items():
+        prompt = prompt.replace(f"${{{placeholder}}}", value)
+
+    # Return the compiled prompt
+    return prompt
+
+
+def execute_prompt(name, raw_prompt):
+
+    # Compile the prompt
+    prompt = compile_prompt(name, raw_prompt)
+
     try:
         print(f"Running llm command for {name}...")
 
