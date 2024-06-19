@@ -1,6 +1,6 @@
 import { view, tags, render } from "@commontools/common-ui";
 import { signal, Cancel } from "@commontools/common-frp";
-import { InstantiatedRecipe, recipe } from "../recipe.js";
+import { Gem, recipe, description, addSuggestion } from "../recipe.js";
 const { binding } = view;
 const { include } = tags;
 const { state, effect, computed } = signal;
@@ -56,7 +56,7 @@ export const todoListAsTask = recipe("todo list as task", ({ list, done }) => {
     }
   );
 
-  const fullUI = computed([list], (list: InstantiatedRecipe) => list["UI"]);
+  const fullUI = computed([list], (list: Gem) => list["UI"]);
 
   const UI = [
     details({}, [
@@ -71,4 +71,13 @@ export const todoListAsTask = recipe("todo list as task", ({ list, done }) => {
     list,
     done,
   };
+});
+
+addSuggestion({
+  description: description`Add ${"list"} as sub tasks`,
+  recipe: todoListAsTask,
+  bindings: { done: "done" },
+  dataGems: {
+    list: "todo list",
+  },
 });
