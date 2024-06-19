@@ -16,7 +16,7 @@ The run: `./generate.sh` . This will blow away anything currently in `out/` and 
 
 A generate.py that is passed a prompt (a filename) to execute.
 
-The prompt is executed by using `llm` under the covers and then puts the output in a folder like this: `./out/${base_filename}/DATESTRING/result.txt`
+The prompt is executed by using `llm` under the covers and then puts the output in a folder like this: `./out/${base_filename}/DATESTRING.txt`
 
 Prompts can also have named references, like `${name}` that need to be expanded before the prompt can be executed.
 
