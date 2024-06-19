@@ -1,0 +1,43 @@
+{
+  "name": "@commontools/lookslike-sagas",
+  "author": "The Common Authors",
+  "version": "0.0.1",
+  "description": "Testbed for saga UI.",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "wireit",
+    "clean": "wireit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/commontoolsinc/labs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/commontoolsinc/labs/issues"
+  },
+  "homepage": "https://github.com/commontoolsinc/labs#readme",
+  "devDependencies": {
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0",
+    "wireit": "^0.14.4"
+  },
+  "wireit": {
+    "build": {
+      "dependencies": [
+        "../common-frp:build",
+        "../common-frp-lit:build",
+        "../common-ui:build"
+      ],
+      "command": "vite build"
+    },
+    "clean": {
+      "command": "rm -rf ./lib ./dist ./.wireit ./node_modules"
+    }
+  },
+  "dependencies": {
+    "lit": "^3.1.4"
+  }
+}
