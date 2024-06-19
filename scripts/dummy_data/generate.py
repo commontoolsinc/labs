@@ -6,9 +6,6 @@ import argparse
 from datetime import datetime
 from typing import List, Dict, Optional
 
-# TODO: store placeholder values provided from the command line here
-placeholder_overrides: Dict[str, str] = {}
-
 def fetch_most_recent_target(name: str) -> Optional[str]:
     # looks for the file with the most recent name in /target/${name}/ and returns the contents
     if not os.path.exists(f"./target/{name}"):
@@ -64,7 +61,7 @@ def fetch_raw_prompt(name: str) -> Optional[str]:
     
     return None
 
-def fetch_prompt(name: str, parent_names: List[str]) -> Optional[str]:
+def fetch_prompt(name: str, overrides : Dict[str, str], parent_names: List[str]) -> Optional[str]:
     # Fetch the raw prompt and compile it
     raw_prompt = fetch_raw_prompt(name)
 
@@ -72,12 +69,12 @@ def fetch_prompt(name: str, parent_names: List[str]) -> Optional[str]:
         return None
     
     print(f"Executing prompt for {name}...")
-    execute_prompt(name, raw_prompt, parent_names)
+    execute_prompt(name, raw_prompt, overrides, parent_names)
 
     return fetch_most_recent_target(name)
 
 
-def fetch_placeholder(name: str, parent_names: List[str]) -> str:
+def fetch_placeholder(name: str, overrides: Dict[str, str], parent_names: List[str]) -> str:
 
     # Override order:
     # 1. Explicitly provided placeholder_override
@@ -86,9 +83,9 @@ def fetch_placeholder(name: str, parent_names: List[str]) -> str:
     # 4. A matching file from `includes/`
     # 5. A matching file from `prompts/` (which will be compiled and executed)
 
-    if name in placeholder_overrides:
+    if name in overrides:
         print(f"Using placeholder override for {name}...")
-        return placeholder_overrides[name]
+        return overrides[name]
 
     value = fetch_golden(name)
     if value:
@@ -105,7 +102,7 @@ def fetch_placeholder(name: str, parent_names: List[str]) -> str:
         print(f"Using include file for {name}...")
         return value
 
-    value = fetch_prompt(name, parent_names)
+    value = fetch_prompt(name, overrides, parent_names)
     if value:
         # TODO: if this had to be compiled, this message comes after the compilation.
         print(f"Using prompt file for {name}...")
@@ -113,7 +110,7 @@ def fetch_placeholder(name: str, parent_names: List[str]) -> str:
         
     raise Exception(f"Could not find value for placeholder {name}")
 
-def compile_prompt(name: str, raw_prompt: str, parent_names: List[str]) -> str:
+def compile_prompt(name: str, raw_prompt: str, overrides : Dict[str, str], parent_names: List[str]) -> str:
 
     # Identify any placeholders in the prompt that match ${name}, ignoring any whitespace in the placeholder
     placeholders = re.findall(r"\${\s*(\w+)\s*}", raw_prompt)
@@ -141,8 +138,8 @@ def compile_prompt(name: str, raw_prompt: str, parent_names: List[str]) -> str:
 
         print(f"Getting value for {placeholder}...")
         # Store the value in the dictionary
-        value = fetch_placeholder(placeholder, parent_names + [name])
-        placeholder_values[placeholder] = compile_prompt(placeholder, value, parent_names + [name])
+        value = fetch_placeholder(placeholder, overrides, parent_names + [name])
+        placeholder_values[placeholder] = compile_prompt(placeholder, value, overrides, parent_names + [name])
 
     # Replace the placeholders with the values
     prompt = raw_prompt
@@ -153,13 +150,13 @@ def compile_prompt(name: str, raw_prompt: str, parent_names: List[str]) -> str:
     return prompt
 
 
-def execute_prompt(name: str, raw_prompt: str, parent_names: Optional[List[str]] = None) -> None:
+def execute_prompt(name: str, raw_prompt: str, overrides: Dict[str, str], parent_names: Optional[List[str]] = None) -> None:
 
     if parent_names is None:
         parent_names = []
 
     # Compile the prompt
-    prompt = compile_prompt(name, raw_prompt, parent_names)
+    prompt = compile_prompt(name, raw_prompt, overrides, parent_names)
 
     try:
         print(f"Running llm command for {name}...")
@@ -201,6 +198,8 @@ def main() -> None:
     prompt_file = args.prompt_file
     prompt_base_filename = os.path.splitext(os.path.basename(prompt_file))[0]
 
+    overrides : Dict[str, str] = {}
+
     if args.overrides:
         # We'll populate the global placeholder_overrides dictionary with the named arguments
         for arg_pair in args.overrides:
@@ -210,14 +209,14 @@ def main() -> None:
             for i in range(0, len(arg_pair), 2):
                 arg_name = arg_pair[i]
                 arg_value = arg_pair[i + 1]
-                placeholder_overrides[arg_name] = arg_value.strip('"')
+                overrides[arg_name] = arg_value.strip('"')
 
     # Read the contents of the prompt file
     with open(prompt_file, 'r') as file:
         prompt_contents = file.read()
 
     # Execute the prompt
-    execute_prompt(prompt_base_filename, prompt_contents)
+    execute_prompt(prompt_base_filename, prompt_contents, overrides)
 
 if __name__ == '__main__':
     main()
