@@ -1,3 +1,3 @@
 #!/bin/bash
 
-./generate_multi.sh
+./generate_multi.sh prompts/schema.txt

@@ -1,12 +1,24 @@
 #!/bin/bash
 
-# Verify out/schema/ directory exists
-if [ ! -d "out/schema/" ]; then
-  mkdir -p "out/schema/"
+# Set default value for schema_file
+schema_file="prompts/schema.txt"
+
+# Check if an argument is provided
+if [ $# -eq 1 ]; then
+    schema_file=$1
+    echo "Using schema file: $schema_file"
 fi
 
-# Empty out/schema/ directory
-rm -rf out/schema/*
+# Get the basename of the schema file without the extension
+output_dir="out/$(basename "$schema_file" .txt)"
+
+# Verify output directory exists
+if [ ! -d "$output_dir" ]; then
+  mkdir -p "$output_dir"
+fi
+
+# Empty output directory
+rm -rf "$output_dir"/*
 
 # Read the files.csv file line by line
 while IFS= read -r line || [[ -n "$line" ]]; do
@@ -16,8 +28,8 @@ while IFS= read -r line || [[ -n "$line" ]]; do
         continue
     fi
 
-    echo "Running schema.txt for $line"
+    echo "Running schema file for $line"
     # Run the llm command with the current line as the filename
-    cat prompts/schema.txt | sed "s/\$filename/$line/g" | llm -m claude-3-opus > out/schema/$line.txt
+    cat "$schema_file" | sed "s/\$filename/$line/g" | llm -m claude-3-opus > "$output_dir/$line.txt"
 
 done < files.csv
