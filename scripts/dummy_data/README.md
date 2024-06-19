@@ -10,7 +10,7 @@ llm install llm-claude-3
 llm keys set claude
 ```
 
-The run: `./generate.sh` . This will blow away anything currently in `out/` and overwrite it.
+You can then generate outputs from a prompt via: `python3 generate.py prompts/backstory.txt`
 
 ### Design
 
@@ -26,7 +26,7 @@ The rules of a reference like `${name}` is, in priority order:
 - A file in `out/$name/`, the named directory that is most recent, its `result.txt`
 - A file in `prompts/` that has a filename like `$name.*`
 
-This order means that prompt output will be used if they exist, otherwise the raw, unexecuted prompt.
+This order means that prompt output will be used if they exist, otherwise the raw, unexecuted prompt. It also means that if you like a given output, you can pin it easily to be used in the future instead of the most recent output.
 
 This process is recursive. When a name is found it is printed out which version it uses.
 
