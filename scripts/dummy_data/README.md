@@ -10,4 +10,4 @@ llm install llm-claude-3
 llm keys set claude
 ```
 
-The run: `./generate.sh` . This will blow away anything currently in `out/` and overwrite it. You can pass an integer number of max lines to process if you want.
+The run: `./generate.sh` . This will blow away anything currently in `out/` and overwrite it.
