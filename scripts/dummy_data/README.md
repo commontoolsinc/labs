@@ -33,10 +33,15 @@ This process is recursive. When a name is found it is printed out which version 
 
 If you pipe in a file to the generate.py command, then it will call the given prompt once for each non-empty line, where each invocation will set that line's values to ${_input}, and, if the input denotes a valid filename, ${_input_content}. In this multi-mode, the output in target will be separate files.
 
-Example: cat target/files/2024-06-19_15-55-23/files.txt | python3 generate.py prompts/schema.txt
+Example: `cat target/files/2024-06-19_15-55-23/files.txt | python3 generate.py prompts/schema.txt`
+
+A more complex multi-line example for generating multiple schemas:
+
+
 
 ### TODO
 - A debug mode to print out the raw prompts as returned from compile
+- Figure out a pattern for saving a multi-item golden (e.g. the schema.txt, which is a map of filenames to contents)
 - When a sub-prompt is executed that has multi-mode output, put the downstream thing in multi-line output as well.
 - Create a @latest alias to the most recent run in a target output dir
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)

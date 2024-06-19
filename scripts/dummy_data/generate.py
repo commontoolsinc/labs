@@ -206,6 +206,9 @@ def execute_prompt(name: str, raw_prompt: str, timestamp : str, overrides: Dict[
         print(f"Error running llm command for {name}: {e}")
         sys.exit(1)
 
+def sanitize_string(input_string : str) -> str:
+    return re.sub(r'[^a-zA-Z0-9_-]', '_', input_string)
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='Process a prompt file.\nBy default, a single prompt is executed. If stdin is provided, then it will execute the template once for each line, piping that line\'s input as the override variable "_input"')
     parser.add_argument('prompt_file', help='Path to the prompt file')
@@ -257,7 +260,7 @@ def main() -> None:
                 with open(line, 'r') as file:
                     content = file.read()
             print(f"Executing prompt with input override: {line}")
-            overrides[INPUT_OVERRIDE_NAME] = line
+            overrides[INPUT_OVERRIDE_NAME] = sanitize_string(line)
             overrides[INPUT_CONTENTS_OVERRIDE_NAME] = content
             execute_prompt(prompt_base_filename, prompt_contents, timestamp, overrides)
 
