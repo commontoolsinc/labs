@@ -6,7 +6,7 @@ export class ScreenElement extends LitElement {
   static override styles = css`
   :host {
     display: block;
-    container-type: inline-size;
+    container-type: size;
     container-name: screen;
     width: 100vw;
     height: 100vh;

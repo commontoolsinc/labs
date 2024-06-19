@@ -2,8 +2,8 @@ import { LitElement, html, css } from "lit";
 import { customElement } from "lit/decorators.js";
 import { baseStyles } from "../style.js";
 
-@customElement("common-scroll")
-export class ScrollElement extends LitElement {
+@customElement("common-vstack")
+export class VstackElement extends LitElement {
   static override styles = [
     baseStyles,
     css`
@@ -11,19 +11,17 @@ export class ScrollElement extends LitElement {
       display: block;
     }
 
-    .scroll {
-      overflow-y: auto;
-      overflow-x: hidden;
-      height: 100cqh;
-      container-type: size;
-      container-name: scroll;
+    .stack {
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap);
     }
     `
   ];
 
   override render() {
     return html`
-    <div class="scroll">
+    <div class="stack">
       <slot></slot>
     </div>`;
   }
