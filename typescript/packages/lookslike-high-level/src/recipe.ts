@@ -4,6 +4,7 @@ import { isSignal } from "@commontools/common-frp/signal";
 // Should be Symbol("ID") or so, but this makes repeat() use these when
 // iterating over recipes.
 export const ID = "id";
+export const TYPE = Symbol("type");
 
 export type RecipeInputs = {
   [key: string]: any;
@@ -17,6 +18,7 @@ export type Bindings = {
 
 export type InstantiatedRecipe = {
   [ID]: number;
+  [TYPE]: string;
 } & Bindings;
 
 // Readwrite signals are inputs that are passed through to the output
@@ -25,7 +27,10 @@ export type Recipe = (inputs: RecipeInputs) => InstantiatedRecipe;
 // TODO: Should be uuid.
 let id = 0;
 
-export const recipe = (impl: (inputs: Bindings) => Bindings): Recipe => {
+export const recipe = (
+  name: string,
+  impl: (inputs: Bindings) => Bindings
+): Recipe => {
   return (inputs: Bindings) => {
     const inputsAsSignals = Object.fromEntries(
       Object.entries(inputs).map(([key, value]) => [
@@ -34,6 +39,6 @@ export const recipe = (impl: (inputs: Bindings) => Bindings): Recipe => {
       ])
     );
     const outputs = impl(inputsAsSignals);
-    return { [ID]: id++, ...outputs };
+    return { [ID]: id++, [TYPE]: name, ...outputs };
   };
 };

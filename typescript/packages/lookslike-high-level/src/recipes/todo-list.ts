@@ -1,12 +1,13 @@
 import { view, tags } from "@commontools/common-ui";
-import { stream } from "@commontools/common-frp";
+import { signal, stream } from "@commontools/common-frp";
 import { recipe } from "../recipe.js";
-import { suggestion } from "../suggestion.js";
+import { annotation } from "../components/annotation.js";
 const { binding, repeat } = view;
 const { vstack, hstack, checkbox, div, include, sendInput } = tags;
+const { state } = signal;
 const { subject } = stream;
 
-export const todoList = recipe(({ items }) => {
+export const todoList = recipe("todo list", ({ items }) => {
   const newTasks = subject<{
     type: "messageSend";
     detail: { message: string };
@@ -14,11 +15,9 @@ export const todoList = recipe(({ items }) => {
 
   newTasks.sink({
     send: (event) => {
-      console.log("event", event);
-      items.send([
-        ...items.get(),
-        todoTask({ title: event.detail.message, done: false }),
-      ]);
+      const task = event.detail?.message?.trim();
+      if (!task) return;
+      items.send([...items.get(), todoTask({ title: task, done: false })]);
     },
   });
 
@@ -38,19 +37,23 @@ export const todoList = recipe(({ items }) => {
   };
 });
 
-export const todoTask = recipe(({ title, done }) => {
+export const todoTask = recipe("todo task", ({ title, done, detailUI }) => {
   return {
-    itemUI: [
+    itemUI: state([
       vstack({}, [
         hstack({}, [
           checkbox({ checked: binding("done") }),
           div({}, binding("title")),
         ]),
-        suggestion({ for: binding("title") }),
+        annotation({
+          query: title,
+          data: { done, title },
+        }),
       ]),
-      { done, title },
-    ],
+      { done, title, detailUI },
+    ]),
     done,
     title,
+    detailUI,
   };
 });

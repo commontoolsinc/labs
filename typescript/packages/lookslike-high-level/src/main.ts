@@ -1,8 +1,20 @@
-import { render } from "@commontools/common-ui";
+import { view, tags, render } from "@commontools/common-ui";
+import { signal } from "@commontools/common-frp";
 import { dataGems } from "./data.js";
+const { binding } = view;
+const { include } = tags;
+const { computed, isSignal } = signal;
 
-const [vdom, bindings] = dataGems["todo list"].UI;
+// Hard coded todo list as UI to show
+const UI = computed([dataGems], (dataGems) => {
+  let UI = dataGems["todo list"]?.UI;
+  if (isSignal(UI)) UI = UI.get();
+  return UI;
+});
 
-const element = render.render(vdom, bindings);
+// Render the UI by including the recipe's UI
+const element = render.render(include({ content: binding("UI") }), {
+  UI,
+});
 
 document.body.appendChild(element);
