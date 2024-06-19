@@ -1,6 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement } from "lit/decorators.js";
-import { baseStyles } from "../style.js";
+import { baseStyles } from "./style.js";
 
 @customElement("common-app")
 export class AppElement extends LitElement {
@@ -12,7 +12,7 @@ export class AppElement extends LitElement {
     }
 
     .app {
-      height: 100cqw;
+      height: 100cqh;
       display: grid;
       grid-template-columns: 1fr;
       grid-template-rows: 1fr 300px 80px;

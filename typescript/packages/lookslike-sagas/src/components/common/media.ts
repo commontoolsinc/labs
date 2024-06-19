@@ -1,6 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "../style.js";
 
 @customElement("common-media")
 export class MediaElement extends LitElement {
@@ -30,6 +30,7 @@ export class MediaElement extends LitElement {
     }
 
     .media > .media-content {
+      align-self: center;
       grid-area: content;
     }
     `
