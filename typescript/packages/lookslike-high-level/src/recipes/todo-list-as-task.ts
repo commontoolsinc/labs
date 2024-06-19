@@ -1,6 +1,6 @@
 import { view, tags, render } from "@commontools/common-ui";
 import { signal, Cancel } from "@commontools/common-frp";
-import { Gem, recipe, description, addSuggestion } from "../recipe.js";
+import { Gem, recipe, description, addSuggestion, NAME } from "../recipe.js";
 const { binding } = view;
 const { include } = tags;
 const { state, effect, computed } = signal;
@@ -22,6 +22,7 @@ export const todoListAsTask = recipe("todo list as task", ({ list, done }) => {
   effect(
     [list],
     (list: {
+      [NAME]: string;
       items: signal.Signal<
         {
           title: signal.Signal<string>;
@@ -42,6 +43,8 @@ export const todoListAsTask = recipe("todo list as task", ({ list, done }) => {
             item.done ? [] : [item.title]
           );
           const newSummary =
+            list[NAME] +
+            ": " +
             items.length +
             " items. " +
             (notDoneTitles.length
