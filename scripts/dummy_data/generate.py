@@ -35,6 +35,18 @@ def fetch_golden(name):
     
     return None
 
+def fetch_prompt(name):
+    # Check for a file in `prompts/` with the basename ${name} (any extension) and returns the contents
+    if not os.path.exists('prompts'):
+        return None
+    
+    prompt_files = [f for f in os.listdir('prompts') if os.path.isfile(os.path.join('prompts', f))]
+    for file in prompt_files:
+        if os.path.splitext(file)[0] == name:
+            with open(f"prompts/{file}", 'r') as file:
+                return file.read()
+    
+    return None
 
 
 def fetch_placeholder(name):
@@ -43,6 +55,7 @@ def fetch_placeholder(name):
     # 1. Explicitly provided placeholder_override
     # 2. A matching output file from golden/
     # 3. Most recent target output
+    # 4. A matching file from `prompts/`
 
     if name in placeholder_overrides:
         print(f"Using placeholder override for {name}...")
@@ -56,6 +69,11 @@ def fetch_placeholder(name):
     value = fetch_most_recent_target(name)
     if value:
         print(f"Using most recent target for {name}...")
+        return value
+    
+    value = fetch_prompt(name)
+    if value:
+        print(f"Using prompt file for {name}...")
         return value
         
     raise Exception(f"Could not find value for placeholder {name}")

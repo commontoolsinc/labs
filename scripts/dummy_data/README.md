@@ -35,9 +35,6 @@ In the future, the name reference can define whether it wants the output to be e
 A `generate_multi.sh` that does the same thing as it does today, to allow running multiple items.
 
 ### TODO
-- Allow specifying named replacements of output
-- Allow specifying named replacements of prompts
-- Allow specifying golden replacements
 - Allow passing named parameters at command line for replacements
 - Make generate_multi use generate.py under the covers
 - Figure out a way to allow transcludes of raw prompt text without executing them
