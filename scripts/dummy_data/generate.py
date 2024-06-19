@@ -113,6 +113,9 @@ def fetch_placeholder(name: str, timestamp : str, overrides: Dict[str, str], par
         print(f"Using prompt file for {name}...")
         return value
         
+    if name is INPUT_OVERRIDE_NAME:
+        print("The _input placeholder only works in multi-line mode. Try piping lines of input into the script.")
+    
     raise Exception(f"Could not find value for placeholder {name}")
 
 def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Dict[str, str], parent_names: List[str]) -> str:
