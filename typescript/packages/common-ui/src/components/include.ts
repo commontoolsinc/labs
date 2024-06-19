@@ -16,7 +16,7 @@ export class IncludeElement extends LitElement {
   content: [VNode, RenderContext];
 
   override render() {
-    const element = render(...this.content);
+    const element = this.content ? render(...this.content) : "";
 
     return html`${element}`;
   }

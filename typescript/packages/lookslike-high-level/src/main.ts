@@ -1,17 +1,20 @@
-import { render } from "@commontools/common-ui";
-import { todoList } from "./recipes/todo-list.js";
+import { view, tags, render } from "@commontools/common-ui";
+import { signal } from "@commontools/common-frp";
+import { dataGems } from "./data.js";
+const { binding } = view;
+const { include } = tags;
+const { computed, isSignal } = signal;
 
-const todoItems = [
-  { id: 1, title: "Buy groceries", done: false },
-  { id: 2, title: "Walk the dog", done: true },
-  { id: 3, title: "Wash the car", done: false },
-];
+// Hard coded todo list as UI to show
+const UI = computed([dataGems], (dataGems) => {
+  let UI = dataGems["todo list"]?.UI;
+  if (isSignal(UI)) UI = UI.get();
+  return UI;
+});
 
-const todos = todoList({ items: todoItems });
-
-console.log("todos.UI", todos.UI);
-console.log("todos.items", todos.items.get());
-
-const element = render.render(todos.UI[0], todos.UI[1]);
+// Render the UI by including the recipe's UI
+const element = render.render(include({ content: binding("UI") }), {
+  UI,
+});
 
 document.body.appendChild(element);

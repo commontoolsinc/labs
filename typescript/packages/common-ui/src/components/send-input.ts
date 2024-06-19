@@ -46,7 +46,6 @@ export class DatatableElement extends LitElement {
     const value = inputEl.value;
     inputEl.value = "";
 
-    console.log("send", value);
     this.dispatchEvent(
       new CustomEvent("messageSend", {
         detail: { message: value },
