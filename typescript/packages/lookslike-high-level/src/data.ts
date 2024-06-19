@@ -1,6 +1,6 @@
 // This file is setting up example data
 import { signal } from "@commontools/common-frp";
-import { Gem } from "./recipe.js";
+import { Gem, NAME } from "./recipe.js";
 const { state } = signal;
 
 import { todoList, todoTask } from "./recipes/todo-list.js";
@@ -11,7 +11,13 @@ export const keywords: { [key: string]: string[] } = {
 };
 
 export const dataGems = state<{ [key: string]: Gem }>({});
-dataGems.send({
+
+export function addGems(gems: { [key: string]: Gem }) {
+  Object.entries(gems).forEach(([name, gem]) => (gem[NAME] = name));
+  dataGems.send({ ...dataGems.get(), ...gems });
+}
+
+addGems({
   "todo list": todoList({
     items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) =>
       todoTask({

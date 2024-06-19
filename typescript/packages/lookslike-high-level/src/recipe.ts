@@ -5,6 +5,7 @@ import { isSignal } from "@commontools/common-frp/signal";
 // iterating over recipes.
 export const ID = "id";
 export const TYPE = Symbol("type");
+export const NAME = Symbol("name");
 
 export type RecipeInputs = {
   [key: string]: any;
@@ -19,6 +20,7 @@ export type Bindings = {
 export type Gem = {
   [ID]: number;
   [TYPE]: string;
+  [NAME]?: string;
 } & Bindings;
 
 // Readwrite signals are inputs that are passed through to the output
