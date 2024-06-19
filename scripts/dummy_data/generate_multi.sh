@@ -32,4 +32,4 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     # Run the llm command with the current line as the filename
     cat "$schema_file" | sed "s/\$filename/$line/g" | llm -m claude-3-opus > "$output_dir/$line.txt"
 
-done < files.csv
+done
