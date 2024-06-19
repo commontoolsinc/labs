@@ -37,12 +37,19 @@ export const todoList = recipe("todo list", ({ items }) => {
   };
 });
 
-export const todoTask = recipe("todo task", ({ title, done, detailUI }) => {
+export const todoTask = recipe("todo task", ({ title, done }) => {
+  const toggle = subject<any>();
+
+  toggle.sink({
+    send: () => {
+      done.send(!done.get());
+    },
+  });
   return {
     itemUI: state([
       vstack({}, [
         hstack({}, [
-          checkbox({ checked: binding("done") }),
+          checkbox({ "@change": binding("toggle"), checked: binding("done") }),
           div({}, binding("title")),
         ]),
         annotation({
@@ -50,10 +57,9 @@ export const todoTask = recipe("todo task", ({ title, done, detailUI }) => {
           data: { done, title },
         }),
       ]),
-      { done, title, detailUI },
+      { done, title, toggle },
     ]),
     done,
     title,
-    detailUI,
   };
 });

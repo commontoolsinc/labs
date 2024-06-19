@@ -1,14 +1,17 @@
-import { view, tags } from "@commontools/common-ui";
+import { view, tags, render } from "@commontools/common-ui";
 import { signal, Cancel } from "@commontools/common-frp";
-import { recipe } from "../recipe.js";
+import { InstantiatedRecipe, recipe } from "../recipe.js";
 const { binding } = view;
-const { div } = tags;
-const { state, effect } = signal;
+const { include } = tags;
+const { state, effect, computed } = signal;
+
+const details = render.view("details", {});
+const summary = render.view("summary", {});
 
 // TODO: detailUI as input is so we can overwrite it, but it should be an output
 // that is then replacing another signal in the caller.
 export const todoListAsTask = recipe("todo list as task", ({ list, done }) => {
-  const summary = state("no summary");
+  const listSummary = state("no summary");
 
   let todoItemsListenerCancel: Cancel;
   const todoTasksListenerCancel: Cancel[] = [];
@@ -38,20 +41,30 @@ export const todoListAsTask = recipe("todo list as task", ({ list, done }) => {
               titles.splice(0, 3).join(", ") +
               (titles.length > 0 ? ", ..." : "");
             // TODO: setTimeout shouldn't be necessary
-            setTimeout(() => summary.send(newSummary));
+            setTimeout(() => listSummary.send(newSummary));
           })
         );
         todoTasksListenerCancel.push(
           effect(allDones, (...dones) => {
+            const allDone = dones.every((done: boolean) => done);
+            console.log("allDone", allDone, dones);
             // TODO: setTimeout shouldn't be necessary
-            setTimeout(() => done.send(dones.every((done: boolean) => done)));
+            setTimeout(() => done.send(allDone));
           })
         );
       });
     }
   );
 
-  const UI = [div({}, binding("summary")), { summary }];
+  const fullUI = computed([list], (list: InstantiatedRecipe) => list["UI"]);
+
+  const UI = [
+    details({}, [
+      summary({}, binding("listSummary")),
+      include({ content: binding("fullUI") }),
+    ]),
+    { listSummary, fullUI },
+  ];
 
   return {
     UI,
