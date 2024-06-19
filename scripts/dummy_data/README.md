@@ -37,5 +37,7 @@ Example: cat target/files/2024-06-19_15-55-23/files.txt | python3 generate.py pr
 
 ### TODO
 - A debug mode to print out the raw prompts as returned from compile
+- When a sub-prompt is executed that has multi-mode output, put the downstream thing in multi-line output as well.
+- Allow a `_input_contents` special plaecholder that, if `_input` is set and points to a valid file, will be the contents of that file.
 - Create a @latest alias to the most recent run in a target output dir
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)
