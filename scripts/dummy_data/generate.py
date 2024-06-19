@@ -4,9 +4,40 @@ import subprocess
 import re
 from datetime import datetime
 
+# TODO: store placeholder values provided from the command line here
+placeholder_overrides = {}
+
+def fetch_most_recent_target(name):
+    # looks for the file with the most recent name in /target/${name}/ and returns the contents
+    if not os.path.exists(f"./target/{name}"):
+        return None
+
+    files = os.listdir(f"./target/{name}")
+    if len(files) == 0:
+        return None
+    files.sort(reverse=True)
+    most_recent_file = files[0]
+
+    with open(f"./target/{name}/{most_recent_file}", 'r') as file:
+        return file.read()
+    
+
 def fetch_placeholder(name):
-    value = input(f"Enter the value for {name}: ")
-    return value
+
+    # Override order:
+    # 1. Explicitly provided placeholder_override
+    # 2. Most recent target output
+
+    if name in placeholder_overrides:
+        print(f"Using placeholder override for {name}...")
+        return placeholder_overrides[name]
+
+    value = fetch_most_recent_target(name)
+    if value:
+        print(f"Using most recent target for {name}...")
+        return value
+    
+    raise Exception(f"Could not find value for placeholder {name}")
 
 def compile_prompt(name, raw_prompt):
 
