@@ -153,7 +153,7 @@ def compile_prompt(name: str, raw_prompt: str, parent_names: List[str]) -> str:
     return prompt
 
 
-def execute_prompt(name: str, raw_prompt: str, parent_names: List[str] = None) -> None:
+def execute_prompt(name: str, raw_prompt: str, parent_names: Optional[List[str]] = None) -> None:
 
     if parent_names is None:
         parent_names = []
