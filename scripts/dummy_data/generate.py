@@ -117,7 +117,9 @@ def compile_prompt(name, raw_prompt, parent_names):
     placeholders = re.findall(r"\${\s*(\w+)\s*}", raw_prompt)
 
     if len(placeholders) == 0:
-        print("No placeholders found in the prompt.")
+        if len(parent_names) == 0:
+            # Don't bother printing this message if we're in a recursive call
+            print("No placeholders found in the prompt.")
         return raw_prompt
     
     print(f"Compiling prompt for {name}...")
