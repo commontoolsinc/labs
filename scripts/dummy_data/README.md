@@ -23,8 +23,10 @@ Prompts can also have named references, like `${name}` that need to be expanded 
 The rules of a reference like `${name}` is, in priority order:
 - An input to generate.py that sets name=VAL
 - A file in `golden/` that has a filname like `$name.*`
+- A file in `out/$name/`, the named directory that is most recent, its `result.txt`
 - A file in `prompts/` that has a filename like `$name.*`
-- A file in `out/$name/`, the named directory that is most recent, its `result.txt`.
+
+This order means that prompt output will be used if they exist, otherwise the raw, unexecuted prompt.
 
 This process is recursive. When a name is found it is printed out which version it uses.
 
