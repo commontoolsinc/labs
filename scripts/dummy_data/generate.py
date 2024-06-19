@@ -192,8 +192,8 @@ def main():
     prompt_file = args.prompt_file
     prompt_base_filename = os.path.splitext(os.path.basename(prompt_file))[0]
 
-    named_args = {}
     if args.args:
+        # We'll populate the global placeholder_overrides dictionary with the named arguments
         for arg_pair in args.args:
             if len(arg_pair) % 2 != 0:
                 print("Invalid named arguments. Each argument should have a corresponding value.")
@@ -201,10 +201,7 @@ def main():
             for i in range(0, len(arg_pair), 2):
                 arg_name = arg_pair[i]
                 arg_value = arg_pair[i + 1]
-                named_args[arg_name] = arg_value.strip('"')
-
-    # TODO: actually use these in the precedence order
-    print(named_args)
+                placeholder_overrides[arg_name] = arg_value.strip('"')
 
     # Read the contents of the prompt file
     with open(prompt_file, 'r') as file:
