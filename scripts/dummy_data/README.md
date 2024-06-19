@@ -40,3 +40,5 @@ A `generate_multi.sh` that does the same thing as it does today, to allow runnin
 - Allow specifying golden replacements
 - Allow passing named parameters at command line for replacements
 - Make generate_multi use generate.py under the covers
+- Figure out a way to allow transcludes of raw prompt text without executing them
+- Figure out a way to allow prompts to run a for each on output from a file
