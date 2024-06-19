@@ -82,7 +82,7 @@ def fetch_placeholder(name, parent_names):
     # 2. A matching output file from golden/
     # 3. Most recent target output
     # 4. A matching file from `includes/`
-    # 4. A matching file from `prompts/`
+    # 5. A matching file from `prompts/` (which will be compiled and executed)
 
     if name in placeholder_overrides:
         print(f"Using placeholder override for {name}...")
