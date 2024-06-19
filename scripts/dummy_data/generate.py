@@ -2,6 +2,7 @@ import sys
 import os
 import subprocess
 import re
+import argparse
 from datetime import datetime
 
 # TODO: store placeholder values provided from the command line here
@@ -182,12 +183,28 @@ def execute_prompt(name, raw_prompt, parent_names = None):
         sys.exit(1)
 
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: python script.py <prompt_file>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description='Process a prompt file.')
+    parser.add_argument('prompt_file', help='Path to the prompt file')
+    parser.add_argument('--args', nargs='+', action='append', help='Named override placeholders in the format ARG_1 VAL_1 ARG_2 VAL_2')
 
-    prompt_file = sys.argv[1]
+    args = parser.parse_args()
+
+    prompt_file = args.prompt_file
     prompt_base_filename = os.path.splitext(os.path.basename(prompt_file))[0]
+
+    named_args = {}
+    if args.args:
+        for arg_pair in args.args:
+            if len(arg_pair) % 2 != 0:
+                print("Invalid named arguments. Each argument should have a corresponding value.")
+                sys.exit(1)
+            for i in range(0, len(arg_pair), 2):
+                arg_name = arg_pair[i]
+                arg_value = arg_pair[i + 1]
+                named_args[arg_name] = arg_value.strip('"')
+
+    # TODO: actually use these in the precedence order
+    print(named_args)
 
     # Read the contents of the prompt file
     with open(prompt_file, 'r') as file:
