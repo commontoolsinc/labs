@@ -7,8 +7,9 @@ from datetime import datetime
 from typing import List, Dict, Optional
 
 INPUT_OVERRIDE_NAME = '_input'
+INPUT_CONTENTS_OVERRIDE_NAME = '_input_contents'
 
-SPECIAL_PLACEHOLDERS = [INPUT_OVERRIDE_NAME]
+SPECIAL_PLACEHOLDERS = [INPUT_OVERRIDE_NAME, INPUT_CONTENTS_OVERRIDE_NAME]
 
 def fetch_most_recent_target(name: str) -> Optional[str]:
     # looks for the file with the most recent name in /target/${name}/ and returns the contents
@@ -250,8 +251,14 @@ def main() -> None:
             line = line.strip()
             if not line:
                 continue
+            content = ''
+            # if the line is a valid filename, read the file contents
+            if os.path.exists(line):
+                with open(line, 'r') as file:
+                    content = file.read()
             print(f"Executing prompt with input override: {line}")
             overrides[INPUT_OVERRIDE_NAME] = line
+            overrides[INPUT_CONTENTS_OVERRIDE_NAME] = content
             execute_prompt(prompt_base_filename, prompt_contents, timestamp, overrides)
 
 if __name__ == '__main__':
