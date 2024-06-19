@@ -6,6 +6,10 @@ import argparse
 from datetime import datetime
 from typing import List, Dict, Optional
 
+INPUT_OVERRIDE_NAME = '_input'
+
+SPECIAL_PLACEHOLDERS = [INPUT_OVERRIDE_NAME]
+
 def fetch_most_recent_target(name: str) -> Optional[str]:
     # looks for the file with the most recent name in /target/${name}/ and returns the contents
     if not os.path.exists(f"./target/{name}"):
@@ -133,8 +137,14 @@ def compile_prompt(name: str, raw_prompt: str, overrides : Dict[str, str], paren
             raise Exception(f"Circular dependency detected: {parent_names} -> {placeholder}")
         
         # check that placeholder matches [a-zA-Z][a-zA-Z0-9_]*
-        if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", placeholder):
+        if not re.match(r"^[_a-zA-Z][a-zA-Z0-9_]*$", placeholder):
             raise Exception(f"Invalid placeholder name {placeholder}")
+        
+        #check if first charactter of placeholder is _
+        if placeholder[0] == '_':
+            # throw if it's not in special placeholders
+            if placeholder not in SPECIAL_PLACEHOLDERS:
+                raise Exception(f"Invalid special placeholder name {placeholder}")
 
         print(f"Getting value for {placeholder}...")
         # Store the value in the dictionary
@@ -158,6 +168,12 @@ def execute_prompt(name: str, raw_prompt: str, overrides: Dict[str, str], parent
     # Compile the prompt
     prompt = compile_prompt(name, raw_prompt, overrides, parent_names)
 
+    output_base_name = name
+    output_prompt_base_name = "_prompt"
+    if overrides.get(INPUT_OVERRIDE_NAME):
+        output_base_name = overrides[INPUT_OVERRIDE_NAME]
+        output_prompt_base_name = f"{output_prompt_base_name}_{output_base_name}"
+
     try:
         print(f"Running llm command for {name}...")
 
@@ -172,13 +188,13 @@ def execute_prompt(name: str, raw_prompt: str, overrides: Dict[str, str], parent
         os.makedirs(output_dir, exist_ok=True)
 
         # Generate the output file path
-        output_file = f"{output_dir}/{name}.txt"
+        output_file = f"{output_dir}/{output_base_name}.txt"
 
         # Save the output to the file
         with open(output_file, 'w') as file:
             file.write(output)
 
-        prompt_output_file = f"{output_dir}/_prompt.txt"
+        prompt_output_file = f"{output_dir}/{output_prompt_base_name}.txt"
         with open(prompt_output_file, 'w') as file:
             file.write(prompt)
 
@@ -209,6 +225,9 @@ def main() -> None:
             for i in range(0, len(arg_pair), 2):
                 arg_name = arg_pair[i]
                 arg_value = arg_pair[i + 1]
+                if arg_name in SPECIAL_PLACEHOLDERS:
+                    print(f"Cannot override special placeholder {arg_name}")
+                    sys.exit(1)
                 overrides[arg_name] = arg_value.strip('"')
 
     # Read the contents of the prompt file
