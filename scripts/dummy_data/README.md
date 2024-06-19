@@ -21,7 +21,7 @@ The prompt is executed by using `llm` under the covers and then puts the output 
 Prompts can also have named references, like `${name}` that need to be expanded before the prompt can be executed.
 
 The rules of a reference like `${name}` is, in priority order:
-- An input to generate.py that sets name=VAL
+- An input to generate.py of `--overrides name val`
 - A file in `golden/` that has a filname like `$name.*`
 - A file in `target/$name/`, the named directory that is most recent, its `result.txt`
 - A file in `includes/` that has a filename like `$name.*`
@@ -37,5 +37,7 @@ A `generate_multi.sh` that does the same thing as it does today, to allow runnin
 
 ### TODO
 - A debug mode to print out the raw prompts as returned from compile
+- Verify placeholders have a name like [a-zA-Z][a-zA-Z0-9-_]*
+- Store the fully rendered prompt in the target output
 - Make generate_multi use generate.py under the covers
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)
