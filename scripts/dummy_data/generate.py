@@ -66,7 +66,7 @@ def fetch_raw_prompt(name: str) -> Optional[str]:
     
     return None
 
-def fetch_prompt(name: str, overrides : Dict[str, str], parent_names: List[str]) -> Optional[str]:
+def fetch_prompt(name: str, timestamp : str, overrides : Dict[str, str], parent_names: List[str]) -> Optional[str]:
     # Fetch the raw prompt and compile it
     raw_prompt = fetch_raw_prompt(name)
 
@@ -74,12 +74,12 @@ def fetch_prompt(name: str, overrides : Dict[str, str], parent_names: List[str])
         return None
     
     print(f"Executing prompt for {name}...")
-    execute_prompt(name, raw_prompt, overrides, parent_names)
+    execute_prompt(name, raw_prompt, timestamp, overrides, parent_names)
 
     return fetch_most_recent_target(name)
 
 
-def fetch_placeholder(name: str, overrides: Dict[str, str], parent_names: List[str]) -> str:
+def fetch_placeholder(name: str, timestamp : str, overrides: Dict[str, str], parent_names: List[str]) -> str:
 
     # Override order:
     # 1. Explicitly provided placeholder_override
@@ -107,7 +107,7 @@ def fetch_placeholder(name: str, overrides: Dict[str, str], parent_names: List[s
         print(f"Using include file for {name}...")
         return value
 
-    value = fetch_prompt(name, overrides, parent_names)
+    value = fetch_prompt(name, timestamp, overrides, parent_names)
     if value:
         # TODO: if this had to be compiled, this message comes after the compilation.
         print(f"Using prompt file for {name}...")
@@ -115,7 +115,7 @@ def fetch_placeholder(name: str, overrides: Dict[str, str], parent_names: List[s
         
     raise Exception(f"Could not find value for placeholder {name}")
 
-def compile_prompt(name: str, raw_prompt: str, overrides : Dict[str, str], parent_names: List[str]) -> str:
+def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Dict[str, str], parent_names: List[str]) -> str:
 
     # Identify any placeholders in the prompt that match ${name}, ignoring any whitespace in the placeholder
     placeholders = re.findall(r"\${\s*(\w+)\s*}", raw_prompt)
@@ -149,8 +149,8 @@ def compile_prompt(name: str, raw_prompt: str, overrides : Dict[str, str], paren
 
         print(f"Getting value for {placeholder}...")
         # Store the value in the dictionary
-        value = fetch_placeholder(placeholder, overrides, parent_names + [name])
-        placeholder_values[placeholder] = compile_prompt(placeholder, value, overrides, parent_names + [name])
+        value = fetch_placeholder(placeholder, timestamp, overrides, parent_names + [name])
+        placeholder_values[placeholder] = compile_prompt(placeholder, value, timestamp, overrides, parent_names + [name])
 
     # Replace the placeholders with the values
     prompt = raw_prompt
@@ -161,13 +161,13 @@ def compile_prompt(name: str, raw_prompt: str, overrides : Dict[str, str], paren
     return prompt
 
 
-def execute_prompt(name: str, raw_prompt: str, overrides: Dict[str, str], parent_names: Optional[List[str]] = None) -> None:
+def execute_prompt(name: str, raw_prompt: str, timestamp : str, overrides: Dict[str, str], parent_names: Optional[List[str]] = None) -> None:
 
     if parent_names is None:
         parent_names = []
 
     # Compile the prompt
-    prompt = compile_prompt(name, raw_prompt, overrides, parent_names)
+    prompt = compile_prompt(name, raw_prompt, timestamp, overrides, parent_names)
 
     output_base_name = name
     output_prompt_base_name = "_prompt"
@@ -180,9 +180,6 @@ def execute_prompt(name: str, raw_prompt: str, overrides: Dict[str, str], parent
 
         # Pipe the prompt contents to the llm command
         output = subprocess.check_output(['llm'], input=prompt, universal_newlines=True)
-
-        # Generate the timestamp string in a human-readable format
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
         # Generate the output directory path
         output_dir = f"./target/{name}/{timestamp}"
@@ -235,10 +232,13 @@ def main() -> None:
     with open(prompt_file, 'r') as file:
         prompt_contents = file.read()
 
+    # Generate a timestamp, do it now so we'll use the same one in multiple runs in multi-mode.
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
     if sys.stdin.isatty():
         # normal mode, nothing being piped.
         # Execute the prompt
-        execute_prompt(prompt_base_filename, prompt_contents, overrides)
+        execute_prompt(prompt_base_filename, prompt_contents, timestamp, overrides)
     else:
         print("Entering multi-line mode (reading from stdin)...")
         # multi-line mode, something being piped.
@@ -249,7 +249,7 @@ def main() -> None:
                 continue
             print(f"Executing prompt with input override: {line}")
             overrides[INPUT_OVERRIDE_NAME] = line
-            execute_prompt(prompt_base_filename, prompt_contents, overrides)
+            execute_prompt(prompt_base_filename, prompt_contents, timestamp, overrides)
 
 if __name__ == '__main__':
     main()
