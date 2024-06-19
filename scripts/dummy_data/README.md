@@ -24,6 +24,7 @@ The rules of a reference like `${name}` is, in priority order:
 - An input to generate.py that sets name=VAL
 - A file in `golden/` that has a filname like `$name.*`
 - A file in `target/$name/`, the named directory that is most recent, its `result.txt`
+- A file in `includes/` that has a filename like `$name.*`
 - A file in `prompts/` that has a filename like `$name.*`
 
 This order means that prompt output will be used if they exist, otherwise the raw, unexecuted prompt. It also means that if you like a given output, you can pin it easily to be used in the future instead of the most recent output.
@@ -35,6 +36,7 @@ In the future, the name reference can define whether it wants the output to be e
 A `generate_multi.sh` that does the same thing as it does today, to allow running multiple items.
 
 ### TODO
+- Files in prompts are compiled and executed.
 - Allow passing named parameters at command line for replacements
 - Make generate_multi use generate.py under the covers
 - Figure out a way to allow transcludes of raw prompt text without executing them

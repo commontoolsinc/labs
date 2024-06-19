@@ -35,6 +35,20 @@ def fetch_golden(name):
     
     return None
 
+def fetch_include(name):
+    # Check for a file in `includes/` with the basename ${name} (any extension) and returns the contents
+
+    if not os.path.exists('includes'):
+        return None
+    
+    include_files = [f for f in os.listdir('includes') if os.path.isfile(os.path.join('includes', f))]
+    for file in include_files:
+        if os.path.splitext(file)[0] == name:
+            with open(f"includes/{file}", 'r') as file:
+                return file.read()
+        
+    return None
+
 def fetch_prompt(name):
     # Check for a file in `prompts/` with the basename ${name} (any extension) and returns the contents
     if not os.path.exists('prompts'):
@@ -55,6 +69,7 @@ def fetch_placeholder(name):
     # 1. Explicitly provided placeholder_override
     # 2. A matching output file from golden/
     # 3. Most recent target output
+    # 4. A matching file from `includes/`
     # 4. A matching file from `prompts/`
 
     if name in placeholder_overrides:
@@ -71,6 +86,11 @@ def fetch_placeholder(name):
         print(f"Using most recent target for {name}...")
         return value
     
+    value = fetch_include(name)
+    if value:
+        print(f"Using include file for {name}...")
+        return value
+
     value = fetch_prompt(name)
     if value:
         print(f"Using prompt file for {name}...")
