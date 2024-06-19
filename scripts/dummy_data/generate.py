@@ -185,16 +185,16 @@ def execute_prompt(name, raw_prompt, parent_names = None):
 def main():
     parser = argparse.ArgumentParser(description='Process a prompt file.')
     parser.add_argument('prompt_file', help='Path to the prompt file')
-    parser.add_argument('--args', nargs='+', action='append', help='Named override placeholders in the format ARG_1 VAL_1 ARG_2 VAL_2')
+    parser.add_argument('--overrides', nargs='+', action='append', help='Named override placeholders in the format ARG_1 VAL_1 ARG_2 VAL_2')
 
     args = parser.parse_args()
 
     prompt_file = args.prompt_file
     prompt_base_filename = os.path.splitext(os.path.basename(prompt_file))[0]
 
-    if args.args:
+    if args.overrides:
         # We'll populate the global placeholder_overrides dictionary with the named arguments
-        for arg_pair in args.args:
+        for arg_pair in args.overrides:
             if len(arg_pair) % 2 != 0:
                 print("Invalid named arguments. Each argument should have a corresponding value.")
                 sys.exit(1)
