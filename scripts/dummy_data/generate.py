@@ -176,6 +176,10 @@ def execute_prompt(name, raw_prompt, parent_names = None):
         with open(output_file, 'w') as file:
             file.write(output)
 
+        prompt_output_file = f"{output_dir}/_prompt.txt"
+        with open(prompt_output_file, 'w') as file:
+            file.write(prompt)
+
         print(f"Output saved to {output_file}")
 
     except subprocess.CalledProcessError as e:
