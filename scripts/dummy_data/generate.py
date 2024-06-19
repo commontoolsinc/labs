@@ -49,7 +49,7 @@ def fetch_include(name):
         
     return None
 
-def fetch_prompt(name):
+def fetch_raw_prompt(name):
     # Check for a file in `prompts/` with the basename ${name} (any extension) and returns the contents
     if not os.path.exists('prompts'):
         return None
@@ -61,6 +61,18 @@ def fetch_prompt(name):
                 return file.read()
     
     return None
+
+def fetch_prompt(name):
+    # Fetch the raw prompt and compile it
+    raw_prompt = fetch_raw_prompt(name)
+
+    if not raw_prompt:
+        return None
+    
+    print(f"Executing prompt for {name}...")
+    execute_prompt(name, raw_prompt)
+
+    return fetch_most_recent_target(name)
 
 
 def fetch_placeholder(name):
@@ -93,6 +105,7 @@ def fetch_placeholder(name):
 
     value = fetch_prompt(name)
     if value:
+        # TODO: if this had to be compiled, this message comes after the compilation.
         print(f"Using prompt file for {name}...")
         return value
         

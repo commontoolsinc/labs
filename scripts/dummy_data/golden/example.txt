@@ -1,0 +1,1 @@
+If this file were used, it would shadow any actual target outputs for ${ example }
