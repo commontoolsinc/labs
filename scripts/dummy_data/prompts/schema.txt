@@ -4,4 +4,8 @@ This means that it's possible to have significantly more private data in the sys
 
 As part of prototyping it, we want to create a lot of dummy data for a fictional person that we could use to prototype and play around with. This dummy data should be kind of cheeky and clever, because it will be open source examples that in the future the ecosystem will likely rely on when building their experiences.
 
-Please describe the schema of $filename.
+Please generate dummy JSON data for what would be included in the file with name $filename.
+
+The JSON data should be about a fictional but realistic person and not include words that make it clear the data is not for a real person. The data should be comprehensive and in depth.
+
+Output ONLY JSON and no other content.
