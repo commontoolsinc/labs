@@ -30,7 +30,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 
     echo "Running schema.txt for $line"
     # Run the llm command with the current line as the filename
-    cat prompts/schema.txt | sed "s/\$filename/$line/g" | llm -m claude-3-haiku > out/schema/$line.txt
+    cat prompts/schema.txt | sed "s/\$filename/$line/g" | llm -m claude-3-opus > out/schema/$line.txt
 
     # Increment line counter
     line_count=$((line_count + 1))
