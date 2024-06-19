@@ -1,0 +1,16 @@
+import { defineConfig } from 'vite'
+
+export default defineConfig({
+  build: {
+    target: 'esnext'
+  },
+  resolve: {
+    preserveSymlinks: true
+  },
+  worker: {
+    format: 'es'
+  },
+  optimizeDeps: {
+    noDiscovery: true
+  }
+})
