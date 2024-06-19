@@ -206,7 +206,7 @@ def execute_prompt(name: str, raw_prompt: str, overrides: Dict[str, str], parent
         sys.exit(1)
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description='Process a prompt file.')
+    parser = argparse.ArgumentParser(description='Process a prompt file.\nBy default, a single prompt is executed. If stdin is provided, then it will execute the template once for each line, piping that line\'s input as the override variable "_input"')
     parser.add_argument('prompt_file', help='Path to the prompt file')
     parser.add_argument('--overrides', nargs='+', action='append', help='Named override placeholders in the format ARG_1 VAL_1 ARG_2 VAL_2')
 
@@ -235,8 +235,21 @@ def main() -> None:
     with open(prompt_file, 'r') as file:
         prompt_contents = file.read()
 
-    # Execute the prompt
-    execute_prompt(prompt_base_filename, prompt_contents, overrides)
+    if sys.stdin.isatty():
+        # normal mode, nothing being piped.
+        # Execute the prompt
+        execute_prompt(prompt_base_filename, prompt_contents, overrides)
+    else:
+        print("Entering multi-line mode (reading from stdin)...")
+        # multi-line mode, something being piped.
+        # for each line in stdin, execute the prompt with that line as the input override
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            print(f"Executing prompt with input override: {line}")
+            overrides[INPUT_OVERRIDE_NAME] = line
+            execute_prompt(prompt_base_filename, prompt_contents, overrides)
 
 if __name__ == '__main__':
     main()

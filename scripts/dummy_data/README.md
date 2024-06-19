@@ -31,11 +31,11 @@ This order means that prompt output will be used if they exist, falling back on 
 
 This process is recursive. When a name is found it is printed out which version it uses.
 
-In the future, the name reference can define whether it wants the output to be executed by running through to llm.
+If you pipe in a file to the generate.py command, then it will call the given prompt once for each non-empty line, where each invocation will set that line's values to ${_input}. In this multi-mode, the output in target will be separate files.
 
-A `generate_multi.sh` that does the same thing as it does today, to allow running multiple items.
+Example: cat target/files/2024-06-19_15-55-23/files.txt | python3 generate.py prompts/schema.txt
 
 ### TODO
 - A debug mode to print out the raw prompts as returned from compile
-- Make generate_multi use generate.py under the covers
+- Create a @latest alias to the most recent run in a target output dir
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)

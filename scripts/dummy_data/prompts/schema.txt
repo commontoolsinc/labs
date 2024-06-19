@@ -1,6 +1,6 @@
 ${preamble}
 
-Please generate dummy JSON data for what would be included in the file with name $filename.
+Please generate dummy JSON data for what would be included in the file with name ${_input}.
 
 The JSON data should be about a fictional but realistic person and not include words that make it clear the data is not for a real person. The data should be comprehensive and in depth.
 
