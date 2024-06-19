@@ -113,14 +113,14 @@ def fetch_placeholder(name):
 
 def compile_prompt(name, raw_prompt):
 
-    print(f"Compiling prompt for {name}...")
-
     # Identify any placeholders in the prompt that match ${name}, ignoring any whitespace in the placeholder
     placeholders = re.findall(r"\${\s*(\w+)\s*}", raw_prompt)
 
     if len(placeholders) == 0:
         print("No placeholders found in the prompt.")
         return raw_prompt
+    
+    print(f"Compiling prompt for {name}...")
 
     # create a dictionary to store the values of the placeholders
     placeholder_values = {}
@@ -129,7 +129,8 @@ def compile_prompt(name, raw_prompt):
     for placeholder in placeholders:
         print(f"Getting value for {placeholder}...")
         # Store the value in the dictionary
-        placeholder_values[placeholder] = fetch_placeholder(placeholder)
+        value = fetch_placeholder(placeholder)
+        placeholder_values[placeholder] = compile_prompt(placeholder, value)
 
     # Replace the placeholders with the values
     prompt = raw_prompt
