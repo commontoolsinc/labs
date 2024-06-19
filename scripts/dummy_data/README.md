@@ -37,6 +37,5 @@ A `generate_multi.sh` that does the same thing as it does today, to allow runnin
 
 ### TODO
 - A debug mode to print out the raw prompts as returned from compile
-- Verify placeholders have a name like [a-zA-Z][a-zA-Z0-9-_]*
 - Make generate_multi use generate.py under the covers
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)

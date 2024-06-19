@@ -133,6 +133,10 @@ def compile_prompt(name, raw_prompt, parent_names):
 
         if placeholder in parent_names:
             raise Exception(f"Circular dependency detected: {parent_names} -> {placeholder}")
+        
+        # check that placeholder matches [a-zA-Z][a-zA-Z0-9_]*
+        if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", placeholder):
+            raise Exception(f"Invalid placeholder name {placeholder}")
 
         print(f"Getting value for {placeholder}...")
         # Store the value in the dictionary
