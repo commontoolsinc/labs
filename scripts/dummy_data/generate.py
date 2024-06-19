@@ -4,11 +4,12 @@ import subprocess
 import re
 import argparse
 from datetime import datetime
+from typing import List, Dict, Optional
 
 # TODO: store placeholder values provided from the command line here
-placeholder_overrides = {}
+placeholder_overrides: Dict[str, str] = {}
 
-def fetch_most_recent_target(name):
+def fetch_most_recent_target(name: str) -> Optional[str]:
     # looks for the file with the most recent name in /target/${name}/ and returns the contents
     if not os.path.exists(f"./target/{name}"):
         return None
@@ -22,7 +23,7 @@ def fetch_most_recent_target(name):
     with open(f"./target/{name}/{most_recent_directory}/{name}.txt", 'r') as file:
         return file.read()
     
-def fetch_golden(name):
+def fetch_golden(name: str) -> Optional[str]:
     # check the golden directory exists
     if not os.path.exists('golden'):
         return None
@@ -36,7 +37,7 @@ def fetch_golden(name):
     
     return None
 
-def fetch_include(name):
+def fetch_include(name: str) -> Optional[str]:
     # Check for a file in `includes/` with the basename ${name} (any extension) and returns the contents
 
     if not os.path.exists('includes'):
@@ -50,7 +51,7 @@ def fetch_include(name):
         
     return None
 
-def fetch_raw_prompt(name):
+def fetch_raw_prompt(name: str) -> Optional[str]:
     # Check for a file in `prompts/` with the basename ${name} (any extension) and returns the contents
     if not os.path.exists('prompts'):
         return None
@@ -63,7 +64,7 @@ def fetch_raw_prompt(name):
     
     return None
 
-def fetch_prompt(name, parent_names):
+def fetch_prompt(name: str, parent_names: List[str]) -> Optional[str]:
     # Fetch the raw prompt and compile it
     raw_prompt = fetch_raw_prompt(name)
 
@@ -76,7 +77,7 @@ def fetch_prompt(name, parent_names):
     return fetch_most_recent_target(name)
 
 
-def fetch_placeholder(name, parent_names):
+def fetch_placeholder(name: str, parent_names: List[str]) -> str:
 
     # Override order:
     # 1. Explicitly provided placeholder_override
@@ -112,7 +113,7 @@ def fetch_placeholder(name, parent_names):
         
     raise Exception(f"Could not find value for placeholder {name}")
 
-def compile_prompt(name, raw_prompt, parent_names):
+def compile_prompt(name: str, raw_prompt: str, parent_names: List[str]) -> str:
 
     # Identify any placeholders in the prompt that match ${name}, ignoring any whitespace in the placeholder
     placeholders = re.findall(r"\${\s*(\w+)\s*}", raw_prompt)
@@ -126,7 +127,7 @@ def compile_prompt(name, raw_prompt, parent_names):
     print(f"Compiling prompt for {name}...")
 
     # create a dictionary to store the values of the placeholders
-    placeholder_values = {}
+    placeholder_values: Dict[str, str] = {}
 
     # Iterate over the placeholders
     for placeholder in placeholders:
@@ -152,7 +153,7 @@ def compile_prompt(name, raw_prompt, parent_names):
     return prompt
 
 
-def execute_prompt(name, raw_prompt, parent_names = None):
+def execute_prompt(name: str, raw_prompt: str, parent_names: List[str] = None) -> None:
 
     if parent_names is None:
         parent_names = []
@@ -190,7 +191,7 @@ def execute_prompt(name, raw_prompt, parent_names = None):
         print(f"Error running llm command for {name}: {e}")
         sys.exit(1)
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description='Process a prompt file.')
     parser.add_argument('prompt_file', help='Path to the prompt file')
     parser.add_argument('--overrides', nargs='+', action='append', help='Named override placeholders in the format ARG_1 VAL_1 ARG_2 VAL_2')
