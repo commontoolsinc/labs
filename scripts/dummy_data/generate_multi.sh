@@ -10,7 +10,7 @@ if [ $# -eq 1 ]; then
 fi
 
 # Get the basename of the schema file without the extension
-output_dir="out/$(basename "$schema_file" .txt)"
+output_dir="target/$(basename "$schema_file" .txt)"
 
 # Verify output directory exists
 if [ ! -d "$output_dir" ]; then

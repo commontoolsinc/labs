@@ -22,7 +22,7 @@ def main():
         output = subprocess.check_output(['llm'], input=prompt_contents, universal_newlines=True)
 
         # Generate the output directory path
-        output_dir = f"./out/{prompt_base_filename}"
+        output_dir = f"./target/{prompt_base_filename}"
         os.makedirs(output_dir, exist_ok=True)
 
         # Generate the timestamp string

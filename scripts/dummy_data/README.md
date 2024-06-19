@@ -16,14 +16,14 @@ You can then generate outputs from a prompt via: `python3 generate.py prompts/ba
 
 A generate.py that is passed a prompt (a filename) to execute.
 
-The prompt is executed by using `llm` under the covers and then puts the output in a folder like this: `./out/${base_filename}/DATESTRING.txt`
+The prompt is executed by using `llm` under the covers and then puts the output in a folder like this: `./target/${base_filename}/DATESTRING.txt`
 
 Prompts can also have named references, like `${name}` that need to be expanded before the prompt can be executed.
 
 The rules of a reference like `${name}` is, in priority order:
 - An input to generate.py that sets name=VAL
 - A file in `golden/` that has a filname like `$name.*`
-- A file in `out/$name/`, the named directory that is most recent, its `result.txt`
+- A file in `target/$name/`, the named directory that is most recent, its `result.txt`
 - A file in `prompts/` that has a filename like `$name.*`
 
 This order means that prompt output will be used if they exist, otherwise the raw, unexecuted prompt. It also means that if you like a given output, you can pin it easily to be used in the future instead of the most recent output.
