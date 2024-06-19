@@ -21,6 +21,7 @@ def fetch_most_recent_target(name: str) -> Optional[str]:
     files.sort(reverse=True)
     most_recent_directory = files[0]
 
+    # TODO: better error message if you try to include a target that was output in multi-mode (where there isn't a single output but multiple)
     with open(f"./target/{name}/{most_recent_directory}/{name}.txt", 'r') as file:
         return file.read()
     
