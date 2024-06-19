@@ -21,22 +21,43 @@ def fetch_most_recent_target(name):
     with open(f"./target/{name}/{most_recent_file}", 'r') as file:
         return file.read()
     
+def fetch_golden(name):
+    # check the golden directory exists
+    if not os.path.exists('golden'):
+        return None
+
+    # Looks for the file in `golden/` with the basename ${name} (any extension) and returns the contents
+    golden_files = [f for f in os.listdir('golden') if os.path.isfile(os.path.join('golden', f))]
+    for file in golden_files:
+        if os.path.splitext(file)[0] == name:
+            with open(f"golden/{file}", 'r') as file:
+                return file.read()
+    
+    return None
+
+
 
 def fetch_placeholder(name):
 
     # Override order:
     # 1. Explicitly provided placeholder_override
-    # 2. Most recent target output
+    # 2. A matching output file from golden/
+    # 3. Most recent target output
 
     if name in placeholder_overrides:
         print(f"Using placeholder override for {name}...")
         return placeholder_overrides[name]
 
+    value = fetch_golden(name)
+    if value:
+        print(f"Using golden file for {name}...")
+        return value
+
     value = fetch_most_recent_target(name)
     if value:
         print(f"Using most recent target for {name}...")
         return value
-    
+        
     raise Exception(f"Could not find value for placeholder {name}")
 
 def compile_prompt(name, raw_prompt):
