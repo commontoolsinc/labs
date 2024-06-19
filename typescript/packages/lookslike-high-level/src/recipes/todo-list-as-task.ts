@@ -14,7 +14,7 @@ export const todoListAsTask = recipe("todo list as task", ({ list, done }) => {
   const listSummary = state("no summary");
 
   let todoItemsListenerCancel: Cancel;
-  const todoTasksListenerCancel: Cancel[] = [];
+  let todoTasksListenerCancel: Cancel;
 
   // TODO: The signal machinery should take care of cleaning up listeners.
   // Maybe we should be able to express inputs as paths and have the system
@@ -31,27 +31,31 @@ export const todoListAsTask = recipe("todo list as task", ({ list, done }) => {
     }) => {
       if (todoItemsListenerCancel) todoItemsListenerCancel();
       todoItemsListenerCancel = effect([list.items], (items) => {
-        while (todoTasksListenerCancel.length) todoTasksListenerCancel.pop()!();
+        if (todoTasksListenerCancel) todoTasksListenerCancel;
 
-        const allTitles = items.map((item) => item.title);
-        const allDones = items.map((item) => item.done);
-        todoTasksListenerCancel.push(
-          effect(allTitles, (...titles) => {
-            const newSummary =
-              titles.splice(0, 3).join(", ") +
-              (titles.length > 0 ? ", ..." : "");
-            // TODO: setTimeout shouldn't be necessary
-            setTimeout(() => listSummary.send(newSummary));
-          })
-        );
-        todoTasksListenerCancel.push(
-          effect(allDones, (...dones) => {
-            const allDone = dones.every((done: boolean) => done);
-            console.log("allDone", allDone, dones);
-            // TODO: setTimeout shouldn't be necessary
-            setTimeout(() => done.send(allDone));
-          })
-        );
+        const allItems = items.flatMap((item) => [item.title, item.done]);
+        todoTasksListenerCancel = effect(allItems, (...allItems) => {
+          const items = [];
+          while (allItems.length)
+            items.push({ title: allItems.shift(), done: allItems.shift() });
+          const notDoneTitles = items.flatMap((item) =>
+            item.done ? [] : [item.title]
+          );
+          const newSummary =
+            items.length +
+            " items. " +
+            (notDoneTitles.length
+              ? "Open tasks: " +
+                notDoneTitles.splice(0, 3).join(", ") +
+                (notDoneTitles.length > 0 ? ", ..." : "")
+              : "All done.");
+
+          const allDone = items.every((item) => item.done);
+
+          // TODO: setTimeout shouldn't be necessary
+          setTimeout(() => listSummary.send(newSummary));
+          setTimeout(() => done.send(allDone));
+        });
       });
     }
   );
