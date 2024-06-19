@@ -200,6 +200,12 @@ def execute_prompt(name: str, raw_prompt: str, timestamp : str, overrides: Dict[
         with open(prompt_output_file, 'w') as file:
             file.write(prompt)
 
+        # Create the soft link '_latest' pointing to the timestamp directory
+        latest_link = f"./target/{name}/_latest"
+        if os.path.exists(latest_link):
+            os.unlink(latest_link)
+        os.symlink(timestamp, latest_link, target_is_directory=True)
+
         print(f"Output saved to {output_file}")
 
     except subprocess.CalledProcessError as e:

@@ -16,7 +16,7 @@ You can then generate outputs from a prompt via: `python3 generate.py prompts/ba
 
 A generate.py that is passed a prompt (a filename) to execute.
 
-The prompt is executed by using `llm` under the covers and then puts the output in a folder like this: `./target/${base_filename}/DATESTRING/{base_filename}.txt`
+The prompt is executed by using `llm` under the covers and then puts the output in a folder like this: `./target/${base_filename}/DATESTRING/{base_filename}.txt` . It also adds a symlink in the `./target/${base_filename}/_latest` that is updated whenever a new item is saved in that directory.
 
 Prompts can also have named references, like `${name}` that need to be expanded before the prompt can be executed.
 
@@ -33,16 +33,15 @@ This process is recursive. When a name is found it is printed out which version 
 
 If you pipe in a file to the generate.py command, then it will call the given prompt once for each non-empty line, where each invocation will set that line's values to ${_input}, and, if the input denotes a valid filename, ${_input_content}. In this multi-mode, the output in target will be separate files.
 
-Example: `cat target/files/2024-06-19_15-55-23/files.txt | python3 generate.py prompts/schema.txt`
+Example: `cat target/files/_latest/files.txt | python3 generate.py prompts/schema.txt`
 
 A more complex multi-line example for generating multiple schemas:
 
-`ls target/schema/2024-06-19_16-16-29/ | grep -v "^_" | sed 's/^/target\/schema\/2024-06-19_16-16-29\//' | python3 generate.py prompts/data.txt`
+`ls target/schema/_latest/ | grep -v "^_" | sed 's/^/target\/schema\/_latest\//' | python3 generate.py prompts/data.txt`
 
 ### TODO
 - A debug mode to print out the raw prompts as returned from compile
 - Figure out a pattern for saving a multi-item golden (e.g. the schema.txt, which is a map of filenames to contents)
 - When a sub-prompt is executed that has multi-mode output, put the downstream thing in multi-line output as well.
-- Create a @latest alias to the most recent run in a target output dir
 - Make it so the output when running the grep example above don't get long weird mangled output names.
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)
