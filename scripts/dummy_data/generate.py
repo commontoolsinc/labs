@@ -62,7 +62,7 @@ def fetch_raw_prompt(name):
     
     return None
 
-def fetch_prompt(name):
+def fetch_prompt(name, parent_names):
     # Fetch the raw prompt and compile it
     raw_prompt = fetch_raw_prompt(name)
 
@@ -70,12 +70,12 @@ def fetch_prompt(name):
         return None
     
     print(f"Executing prompt for {name}...")
-    execute_prompt(name, raw_prompt)
+    execute_prompt(name, raw_prompt, parent_names)
 
     return fetch_most_recent_target(name)
 
 
-def fetch_placeholder(name):
+def fetch_placeholder(name, parent_names):
 
     # Override order:
     # 1. Explicitly provided placeholder_override
@@ -103,7 +103,7 @@ def fetch_placeholder(name):
         print(f"Using include file for {name}...")
         return value
 
-    value = fetch_prompt(name)
+    value = fetch_prompt(name, parent_names)
     if value:
         # TODO: if this had to be compiled, this message comes after the compilation.
         print(f"Using prompt file for {name}...")
@@ -111,7 +111,7 @@ def fetch_placeholder(name):
         
     raise Exception(f"Could not find value for placeholder {name}")
 
-def compile_prompt(name, raw_prompt):
+def compile_prompt(name, raw_prompt, parent_names):
 
     # Identify any placeholders in the prompt that match ${name}, ignoring any whitespace in the placeholder
     placeholders = re.findall(r"\${\s*(\w+)\s*}", raw_prompt)
@@ -127,10 +127,14 @@ def compile_prompt(name, raw_prompt):
 
     # Iterate over the placeholders
     for placeholder in placeholders:
+
+        if placeholder in parent_names:
+            raise Exception(f"Circular dependency detected: {parent_names} -> {placeholder}")
+
         print(f"Getting value for {placeholder}...")
         # Store the value in the dictionary
-        value = fetch_placeholder(placeholder)
-        placeholder_values[placeholder] = compile_prompt(placeholder, value)
+        value = fetch_placeholder(placeholder, parent_names + [name])
+        placeholder_values[placeholder] = compile_prompt(placeholder, value, parent_names + [name])
 
     # Replace the placeholders with the values
     prompt = raw_prompt
@@ -141,10 +145,13 @@ def compile_prompt(name, raw_prompt):
     return prompt
 
 
-def execute_prompt(name, raw_prompt):
+def execute_prompt(name, raw_prompt, parent_names = None):
+
+    if parent_names is None:
+        parent_names = []
 
     # Compile the prompt
-    prompt = compile_prompt(name, raw_prompt)
+    prompt = compile_prompt(name, raw_prompt, parent_names)
 
     try:
         print(f"Running llm command for {name}...")
