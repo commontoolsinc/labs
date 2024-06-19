@@ -33,3 +33,10 @@ This process is recursive. When a name is found it is printed out which version 
 In the future, the name reference can define whether it wants the output to be executed by running through to llm.
 
 A `generate_multi.sh` that does the same thing as it does today, to allow running multiple items.
+
+### TODO
+- Allow specifying named replacements of output
+- Allow specifying named replacements of prompts
+- Allow specifying golden replacements
+- Allow passing named parameters at command line for replacements
+- Make generate_multi use generate.py under the covers
