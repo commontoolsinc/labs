@@ -5,6 +5,7 @@ import { isSignal } from "@commontools/common-frp/signal";
 // iterating over recipes.
 export const ID = "id";
 export const TYPE = Symbol("type");
+export const NAME = Symbol("name");
 
 export type RecipeInputs = {
   [key: string]: any;
@@ -16,13 +17,14 @@ export type Bindings = {
   [key: string]: signal.Signal<any> | stream.Stream<any> | any;
 };
 
-export type InstantiatedRecipe = {
+export type Gem = {
   [ID]: number;
   [TYPE]: string;
+  [NAME]?: string;
 } & Bindings;
 
 // Readwrite signals are inputs that are passed through to the output
-export type Recipe = (inputs: RecipeInputs) => InstantiatedRecipe;
+export type Recipe = (inputs: RecipeInputs) => Gem;
 
 // TODO: Should be uuid.
 let id = 0;
@@ -42,3 +44,27 @@ export const recipe = (
     return { [ID]: id++, [TYPE]: name, ...outputs };
   };
 };
+
+export type Suggestion = {
+  // Description of the suggestion
+  description: string[];
+
+  // Recipe to run when the suggestion is clicked
+  recipe: Recipe;
+
+  // Map from locally available data to recipe input:
+  bindings: { [key: string]: string };
+
+  // Map from recipe input to globally available data gem type:
+  dataGems: { [key: string]: string };
+};
+
+export const suggestions = signal.state<Suggestion[]>([]);
+
+export function description(strings: TemplateStringsArray, ...values: any[]) {
+  return strings.map((string, i) => [string, values[i]]).flat();
+}
+
+export function addSuggestion(suggestion: Suggestion) {
+  setTimeout(() => suggestions.send([...suggestions.get(), suggestion]));
+}

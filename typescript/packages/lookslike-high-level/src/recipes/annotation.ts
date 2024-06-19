@@ -1,7 +1,14 @@
 import { view, tags } from "@commontools/common-ui";
 import { signal, stream } from "@commontools/common-frp";
-import { dataGems, keywords, suggestions, type Suggestion } from "../data.js";
-import { recipe, InstantiatedRecipe, TYPE } from "../recipe.js";
+import { dataGems, keywords } from "../data.js";
+import {
+  recipe,
+  Recipe,
+  Gem,
+  TYPE,
+  suggestions,
+  type Suggestion,
+} from "../recipe.js";
 const { button, include } = tags;
 const { state, computed } = signal;
 const { subject } = stream;
@@ -23,31 +30,14 @@ const { binding } = view;
  */
 
 export const annotation = recipe("annotation", ({ "?": query, ...data }) => {
-  const suggestion = computed([dataGems, query], (dataGems, query: string) =>
-    findSuggestion(dataGems, query, Object.keys(data))
-  );
-  const suggestionDescription = computed(
-    [suggestion],
-    (suggestion: [Suggestion, [string, InstantiatedRecipe]]) => {
-      if (!suggestion) return undefined;
-      const parts = suggestion[0].description;
-      const bindings = Object.fromEntries(
-        Object.entries(suggestion[0].dataGems).map(([_type, key]) => [
-          key,
-          suggestion[1][0],
-        ])
-      );
-      if (!parts) return undefined;
-      return parts
-        .map((part, i) => (i % 2 === 0 ? part : bindings[part]))
-        .join("");
-    }
+  const suggestion = computed(
+    [dataGems, suggestions, query],
+    (dataGems, suggestions, query: string) =>
+      findSuggestion(dataGems, suggestions, query, Object.keys(data))
   );
 
   const acceptSuggestion = subject<any>();
-  const acceptedSuggestion = state<
-    [Suggestion, [string, InstantiatedRecipe]] | undefined
-  >(undefined);
+  const acceptedSuggestion = state<Result | undefined>(undefined);
   acceptSuggestion.sink({
     send: () => {
       acceptedSuggestion.send(suggestion.get());
@@ -55,23 +45,22 @@ export const annotation = recipe("annotation", ({ "?": query, ...data }) => {
   });
 
   const UI = computed(
-    [suggestionDescription, acceptedSuggestion],
-    (suggestionDescription, acceptedSuggestion) => {
+    [suggestion, acceptedSuggestion],
+    (suggestion, acceptedSuggestion) => {
       if (acceptedSuggestion) {
-        const suggestion = acceptedSuggestion[0];
-        const acceptedRecipe = suggestion.recipe;
-        const gem = acceptedSuggestion[1][1];
-        const gemBinding = suggestion.dataGems[gem[TYPE]];
-        const accepted = acceptedRecipe({ ...data, [gemBinding]: gem });
-        console.log("accepted", accepted);
+        const acceptedRecipe = acceptedSuggestion.recipe;
+        const accepted = acceptedRecipe({
+          ...data,
+          ...acceptedSuggestion.boundGems,
+        });
         return [
           include({ content: binding("acceptedUI") }),
           { acceptedUI: accepted.UI },
         ];
-      } else if (suggestionDescription) {
+      } else if (suggestion) {
         return [
           button({ "@click": binding("acceptSuggestion") }, [
-            suggestionDescription,
+            suggestion.description,
           ]),
           { acceptSuggestion },
         ];
@@ -84,11 +73,18 @@ export const annotation = recipe("annotation", ({ "?": query, ...data }) => {
   return { UI };
 });
 
+type Result = {
+  recipe: Recipe;
+  description: string;
+  boundGems: { [key: string]: Gem };
+};
+
 function findSuggestion(
-  dataGems: { [key: string]: InstantiatedRecipe },
+  dataGems: { [key: string]: Gem },
+  suggestions: Suggestion[],
   query: string,
   data: string[]
-): [Suggestion, [string, InstantiatedRecipe]] | undefined {
+): Result | undefined {
   // Step 1: Find candidate data gems by doing a dumb keyword seach
   const parts: string[] = query
     .toLowerCase()
@@ -106,14 +102,9 @@ function findSuggestion(
 
   const aliases = words.flatMap((word) => keywords[word] ?? []);
 
-  const gem = Object.entries(dataGems).find(
+  const gems = Object.entries(dataGems).filter(
     ([name]) => words.includes(name) || aliases.includes(name)
   );
-
-  console.log(words, aliases, dataGems, "-->", gem);
-  if (!gem) return undefined;
-
-  const type = gem[1][TYPE];
 
   // Step 2: Find suggestions that bridge matching gems to recipes:
   //  - Binds to the found gem
@@ -123,12 +114,34 @@ function findSuggestion(
   // can be useful!)
   const suggestion = suggestions.find(
     (suggestion) =>
-      type in suggestion.dataGems &&
+      Object.values(suggestion.dataGems).every((type) =>
+        gems.find(([_, gem]) => gem[TYPE] === type)
+      ) &&
       Object.values(suggestion.bindings).every((binding) =>
         data.includes(binding)
       )
   );
 
-  console.log("suggestion", suggestion);
-  return suggestion ? [suggestion, gem] : undefined;
+  console.log("suggestion", suggestion, suggestions);
+
+  if (suggestion) {
+    const bindings = Object.entries(suggestion.dataGems).map(([key, type]) => [
+      key,
+      gems.find(([_, gem]) => gem[TYPE] === type)!,
+    ]);
+
+    const nameBindings = Object.fromEntries(
+      bindings.map(([key, [name, _gem]]) => [key, name])
+    );
+    const gemBindings = Object.fromEntries(
+      bindings.map(([key, [_name, gem]]) => [key, gem])
+    );
+    const description = suggestion.description
+      .map((part, i) => (i % 2 === 0 ? part : nameBindings[part]))
+      .join("");
+
+    return { recipe: suggestion.recipe, description, boundGems: gemBindings };
+  } else {
+    return undefined;
+  }
 }
