@@ -16,9 +16,9 @@ def fetch_most_recent_target(name):
     if len(files) == 0:
         return None
     files.sort(reverse=True)
-    most_recent_file = files[0]
+    most_recent_directory = files[0]
 
-    with open(f"./target/{name}/{most_recent_file}", 'r') as file:
+    with open(f"./target/{name}/{most_recent_directory}/{name}.txt", 'r') as file:
         return file.read()
     
 def fetch_golden(name):
@@ -159,15 +159,15 @@ def execute_prompt(name, raw_prompt, parent_names = None):
         # Pipe the prompt contents to the llm command
         output = subprocess.check_output(['llm'], input=prompt, universal_newlines=True)
 
+        # Generate the timestamp string in a human-readable format
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
         # Generate the output directory path
-        output_dir = f"./target/{name}"
+        output_dir = f"./target/{name}/{timestamp}"
         os.makedirs(output_dir, exist_ok=True)
 
-        # Generate the timestamp string
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
         # Generate the output file path
-        output_file = f"{output_dir}/{timestamp}.txt"
+        output_file = f"{output_dir}/{name}.txt"
 
         # Save the output to the file
         with open(output_file, 'w') as file:

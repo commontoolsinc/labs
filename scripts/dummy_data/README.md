@@ -36,8 +36,6 @@ In the future, the name reference can define whether it wants the output to be e
 A `generate_multi.sh` that does the same thing as it does today, to allow running multiple items.
 
 ### TODO
-- More human readable naming scheme for timestamps
-- Make target naming scheme `target/name/timestamp/name.txt`. This makes the common case of moving a golden as easy as mv ing a file.
 - Allow passing named parameters at command line for replacements
 - Make generate_multi use generate.py under the covers
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)
