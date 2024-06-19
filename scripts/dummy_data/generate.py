@@ -3,26 +3,15 @@ import os
 import subprocess
 from datetime import datetime
 
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python script.py <prompt_file>")
-        sys.exit(1)
-
-    prompt_file = sys.argv[1]
-    prompt_base_filename = os.path.splitext(os.path.basename(prompt_file))[0]
-
-    # Read the contents of the prompt file
-    with open(prompt_file, 'r') as file:
-        prompt_contents = file.read()
-
+def execute_prompt(name, prompt):
     try:
-        print("Running llm command...")
+        print(f"Running llm command for {name}...")
 
         # Pipe the prompt contents to the llm command
-        output = subprocess.check_output(['llm'], input=prompt_contents, universal_newlines=True)
+        output = subprocess.check_output(['llm'], input=prompt, universal_newlines=True)
 
         # Generate the output directory path
-        output_dir = f"./target/{prompt_base_filename}"
+        output_dir = f"./target/{name}"
         os.makedirs(output_dir, exist_ok=True)
 
         # Generate the timestamp string
@@ -38,8 +27,23 @@ def main():
         print(f"Output saved to {output_file}")
 
     except subprocess.CalledProcessError as e:
-        print(f"Error running llm command: {e}")
+        print(f"Error running llm command for {name}: {e}")
         sys.exit(1)
+
+def main():
+    if len(sys.argv) != 2:
+        print("Usage: python script.py <prompt_file>")
+        sys.exit(1)
+
+    prompt_file = sys.argv[1]
+    prompt_base_filename = os.path.splitext(os.path.basename(prompt_file))[0]
+
+    # Read the contents of the prompt file
+    with open(prompt_file, 'r') as file:
+        prompt_contents = file.read()
+
+    # Execute the prompt
+    execute_prompt(prompt_base_filename, prompt_contents)
 
 if __name__ == '__main__':
     main()
