@@ -9,6 +9,10 @@ from typing import List, Dict, Optional, TypeAlias
 INPUT_OVERRIDE_NAME = '_input'
 INPUT_CONTENTS_OVERRIDE_NAME = '_input_contents'
 
+GOLDEN_DIR = 'golden'
+INCLUDES_DIR = 'includes'
+PROMPTS_DIR = 'prompts'
+
 SPECIAL_PLACEHOLDERS = [INPUT_OVERRIDE_NAME, INPUT_CONTENTS_OVERRIDE_NAME]
 
 OverridesDict: TypeAlias = Dict[str, str]
@@ -28,51 +32,24 @@ def fetch_most_recent_target(name: str) -> Optional[PlaceholderValue]:
     # TODO: better error message if you try to include a target that was output in multi-mode (where there isn't a single output but multiple)
     with open(f"./target/{name}/{most_recent_directory}/{name}.txt", 'r') as file:
         return file.read()
-    
-def fetch_golden(name: str) -> Optional[PlaceholderValue]:
-    # check the golden directory exists
-    if not os.path.exists('golden'):
+
+def fetch_folder(folder : str, name: str) -> Optional[PlaceholderValue]:
+    # check the folder exists
+    if not os.path.exists(folder):
         return None
 
-    # Looks for the file in `golden/` with the basename ${name} (any extension) and returns the contents
-    golden_files = [f for f in os.listdir('golden') if os.path.isfile(os.path.join('golden', f))]
-    for file in golden_files:
+    # Looks for the file in ${folder}/ with the basename ${name} (any extension) and returns the contents
+    files = [f for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))]
+    for file in files:
         if os.path.splitext(file)[0] == name:
-            with open(f"golden/{file}", 'r') as file:
-                return file.read()
-    
-    return None
-
-def fetch_include(name: str) -> Optional[PlaceholderValue]:
-    # Check for a file in `includes/` with the basename ${name} (any extension) and returns the contents
-
-    if not os.path.exists('includes'):
-        return None
-    
-    include_files = [f for f in os.listdir('includes') if os.path.isfile(os.path.join('includes', f))]
-    for file in include_files:
-        if os.path.splitext(file)[0] == name:
-            with open(f"includes/{file}", 'r') as file:
-                return file.read()
-        
-    return None
-
-def fetch_raw_prompt(name: str) -> Optional[PlaceholderValue]:
-    # Check for a file in `prompts/` with the basename ${name} (any extension) and returns the contents
-    if not os.path.exists('prompts'):
-        return None
-    
-    prompt_files = [f for f in os.listdir('prompts') if os.path.isfile(os.path.join('prompts', f))]
-    for file in prompt_files:
-        if os.path.splitext(file)[0] == name:
-            with open(f"prompts/{file}", 'r') as file:
+            with open(f"{folder}/{file}", 'r') as file:
                 return file.read()
     
     return None
 
 def fetch_prompt(name: str, timestamp : str, overrides : OverridesDict, parent_names: List[str]) -> Optional[PlaceholderValue]:
     # Fetch the raw prompt and compile it
-    raw_prompt = fetch_raw_prompt(name)
+    raw_prompt = fetch_folder(name, PROMPTS_DIR)
 
     if not raw_prompt:
         return None
@@ -96,7 +73,7 @@ def fetch_placeholder(name: str, timestamp : str, overrides: OverridesDict, pare
         print(f"Using placeholder override for {name}...")
         return overrides[name]
 
-    value = fetch_golden(name)
+    value = fetch_folder(name, GOLDEN_DIR)
     if value:
         print(f"Using golden file for {name}...")
         return value
@@ -106,7 +83,7 @@ def fetch_placeholder(name: str, timestamp : str, overrides: OverridesDict, pare
         print(f"Using most recent target for {name}...")
         return value
     
-    value = fetch_include(name)
+    value = fetch_folder(name, INCLUDES_DIR)
     if value:
         print(f"Using include file for {name}...")
         return value
