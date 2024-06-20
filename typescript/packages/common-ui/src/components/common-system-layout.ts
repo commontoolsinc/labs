@@ -1,11 +1,9 @@
 import { LitElement, html, css } from "lit";
 import { customElement } from "lit/decorators.js";
-import { style } from "@commontools/common-ui/components.js";
+import { baseStyles } from "./style.js";
 
-const { baseStyles } = style;
-
-@customElement("common-app")
-export class CommonAppElement extends LitElement {
+@customElement("common-system-layout")
+export class CommonSystemLayoutElement extends LitElement {
   static override styles = [
     baseStyles,
     css`
@@ -30,19 +28,15 @@ export class CommonAppElement extends LitElement {
 
     .app-primary {
       grid-area: primary;
-      overflow: auto;
-      container-type: size;
-      container-name: app-primary;
+      overflow: hidden;
     }
     
     .app-secondary {
       grid-area: secondary;  
-      container-type: inline-size;
     }
     
     .app-search {
       grid-area: search;
-      container-type: inline-size;
       background-color: var(--secondary-background);
       display: block;
       padding: var(--gap);

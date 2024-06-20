@@ -8,7 +8,7 @@
   "type": "module",
   "exports": "./lib/index.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "npm run build && vite",
     "build": "wireit",
     "clean": "wireit"
   },

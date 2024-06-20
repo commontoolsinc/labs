@@ -27,6 +27,7 @@ export class CommonUniboxElement extends LitElement {
     return html`
     <div class="unibox">
       <common-input
+        appearance="rounded"
         class="unibox-input"
         .placeholder="${this.placeholder}"
         .value="${this.value}">
