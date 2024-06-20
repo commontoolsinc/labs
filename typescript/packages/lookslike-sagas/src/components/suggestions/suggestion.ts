@@ -1,6 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "../style.js";
+import { Identifiable } from "../../identifiable.js";
 
 @customElement("common-suggestion")
 export class CommonSuggestionElement extends LitElement {
@@ -36,3 +37,24 @@ export class CommonSuggestionElement extends LitElement {
     `;
   }
 }
+
+/** Read suggestion element to Suggestion record */
+export const readSuggestion = (
+  element: any
+): Suggestion | null => {
+  if (!(element instanceof CommonSuggestionElement)) {
+    return null;
+  }
+  const id = element.id;
+  const title = element.textContent ?? "";
+  return { id, title };
+}
+
+export type Suggestion = Identifiable & {
+  title: string;
+};
+
+export const suggestion = (suggestion: Suggestion) => html`
+  <common-suggestion id="${suggestion.id}">
+    ${suggestion.title}
+  </common-suggestion>`
