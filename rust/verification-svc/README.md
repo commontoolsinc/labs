@@ -12,6 +12,6 @@ $ verification-svc /path/to/constellation_dir
 ```
 
 ```sh
-$ curl http://localhost:30125/api/v0/verify
+$ curl -H "Content-Type: application/json" -d '{"origin":"50.0.0.20"}' http://0.0.0.0:30125/api/v0/verify
 {"success":true}
 ```

@@ -1,44 +1,45 @@
-use std::path::{Path, PathBuf};
-
 use super::routes::verify;
+use crate::cluster::ClusterMeasurements;
 use anyhow::Result;
-use axum::{http::Method, routing::get, Router};
+use axum::{http::Method, routing::post, Router};
 use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::info;
 
 #[derive(Clone)]
 pub struct ServerState {
-    config_dir: PathBuf,
+    cluster: ClusterMeasurements,
 }
 
 impl ServerState {
-    pub fn config_dir(&self) -> &Path {
-        &self.config_dir
-    }
-}
-
-impl From<&Path> for ServerState {
-    fn from(value: &Path) -> Self {
-        ServerState {
-            config_dir: value.to_owned(),
+    pub fn get_measurements(&self, origin: &str) -> Option<&ClusterMeasurements> {
+        if origin == self.cluster.origin() {
+            Some(&self.cluster)
+        } else {
+            None
         }
     }
 }
 
-pub async fn serve(listener: TcpListener, config_dir: &Path) -> Result<()> {
+impl From<ClusterMeasurements> for ServerState {
+    fn from(cluster: ClusterMeasurements) -> Self {
+        ServerState { cluster }
+    }
+}
+
+pub async fn serve(listener: TcpListener, cluster: ClusterMeasurements) -> Result<()> {
     info!(
         "Running on {:#?} using configurations at {:#?}",
         listener.local_addr(),
-        config_dir
+        cluster.measurements_dir(),
     );
     let cors = CorsLayer::new()
-        .allow_methods([Method::GET])
+        .allow_methods([Method::POST])
         .allow_origin(Any);
 
     let app = Router::new()
-        .route("/api/v0/verify", get(verify))
-        .with_state(ServerState::from(config_dir))
+        .route("/api/v0/verify", post(verify))
+        .with_state(ServerState::from(cluster))
         .layer(cors);
 
     axum::serve(listener, app.into_make_service()).await?;

@@ -1,12 +1,13 @@
 mod cli;
+mod cluster;
 mod error;
 mod server;
-mod verification;
 
 use anyhow::Result;
 use clap::Parser;
 use cli::Cli;
-use std::net::SocketAddr;
+use cluster::ClusterMeasurements;
+use std::{net::SocketAddr, process::Command};
 use tracing_subscriber::{fmt::Layer, layer::SubscriberExt, EnvFilter, FmtSubscriber};
 
 #[tokio::main]
@@ -16,11 +17,20 @@ pub async fn main() -> Result<()> {
         .finish();
     tracing::subscriber::set_global_default(subscriber.with(Layer::default().pretty()))?;
 
+    check_env()?;
     let cli = Cli::parse();
-    verification::check_env(&cli.config_dir)?;
-
+    let cluster = ClusterMeasurements::try_from(cli.config_dir.as_path())?;
     let socket_address: SocketAddr = format!("0.0.0.0:{}", cli.port).parse()?;
     let listener = tokio::net::TcpListener::bind(socket_address).await?;
-    server::serve(listener, &cli.config_dir).await?;
+    server::serve(listener, cluster).await?;
+    Ok(())
+}
+
+/// Ensure necessary tools are available in the environment
+/// to verify.
+fn check_env() -> Result<()> {
+    if !Command::new("constellation").output()?.status.success() {
+        return Err(anyhow::anyhow!("`constellation` not found."));
+    }
     Ok(())
 }

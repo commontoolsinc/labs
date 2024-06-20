@@ -4,14 +4,14 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{error::VerificationError, server::ServerState, verification};
+use crate::{error::VerificationError, server::ServerState};
 
 /// Currently, the request is "hard coded" based on
 /// the constellation configuration directory given
 /// on startup.
 #[derive(Deserialize)]
 pub struct VerificationRequest {
-    //   url: String,
+    origin: String,
     //   cluster_id: String,
 }
 
@@ -34,7 +34,11 @@ impl IntoResponse for VerificationResponse {
 
 pub async fn verify(
     State(state): State<ServerState>,
-    //Json(payload): Json<VerificationRequest>,
+    Json(payload): Json<VerificationRequest>,
 ) -> Result<VerificationResponse, VerificationError> {
-    Ok(verification::verify(state.config_dir())?.into())
+    let cluster = state
+        .get_measurements(&payload.origin)
+        .ok_or_else(|| VerificationError::UnknownOrigin(payload.origin.to_owned()))?;
+
+    Ok(cluster.verify()?.into())
 }

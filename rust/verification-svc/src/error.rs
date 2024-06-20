@@ -5,6 +5,8 @@ use tracing::error;
 
 #[derive(Debug, Error)]
 pub enum VerificationError {
+    #[error("Unknown cluster origin {0}")]
+    UnknownOrigin(String),
     #[error("Bad request body")]
     BadRequest(String),
     #[error("An internal error occurred")]
@@ -28,6 +30,7 @@ impl From<anyhow::Error> for VerificationError {
 impl IntoResponse for VerificationError {
     fn into_response(self) -> axum::response::Response {
         let status = match self {
+            VerificationError::UnknownOrigin(_) => StatusCode::BAD_REQUEST,
             VerificationError::BadRequest(_) => StatusCode::BAD_REQUEST,
             VerificationError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
