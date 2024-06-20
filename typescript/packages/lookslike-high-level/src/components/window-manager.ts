@@ -56,24 +56,20 @@ export class CommonWindowManager extends LitElement {
   @property({ type: Array })
   sagas: Gem[] = [];
 
-  private renderedSagas: { [key: string]: HTMLElement } = {};
-
   override render() {
+    const idCounts: { [key: string]: number } = {};
     return html`
       ${this.sagas.map((saga) => {
-        if (!this.renderedSagas[saga[ID]])
-          this.renderedSagas[saga[ID]] = render.render(
-            include({ content: binding("UI") }),
-            {
-              UI: saga.UI,
-            }
-          ) as HTMLElement;
+        idCounts[saga[ID]] ??= 0;
+        const id = saga[ID] + "#" + idCounts[saga[ID]]++;
 
         return html`
-          <div class="window" id="${saga[ID]}">
+          <div class="window" id="${id}">
             <button class="close-button" @click="${this.onClose}">×</button>
             <common-screen-element>
-              ${this.renderedSagas[saga[ID]]}
+              ${render.render(include({ content: binding("UI") }), {
+                UI: saga.UI,
+              })}
             </common-screen-element>
           </div>
         `;
@@ -98,7 +94,13 @@ export class CommonWindowManager extends LitElement {
   onClose(e: Event) {
     const id = (e.currentTarget as HTMLElement).parentElement?.id;
     if (id) {
-      this.sagas = this.sagas.filter((saga) => saga[ID] + "" !== id);
+      const idCounts: { [key: string]: number } = {};
+
+      this.sagas = this.sagas.filter((saga) => {
+        idCounts[saga[ID]] ??= 0;
+        const sagaID = saga[ID] + "#" + idCounts[saga[ID]]++;
+        return sagaID !== id;
+      });
     }
   }
 
