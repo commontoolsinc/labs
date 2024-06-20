@@ -38,14 +38,21 @@ def name_for_variation(variation : Dict[str, str], nested_keys : List[str]) -> s
     return "_".join([f"{v}" for k, v in variation.items() if k in nested_keys])
 
 def fetch_most_recent_target(name: str) -> Optional[PlaceholderValue]:
-    return fetch_folder(f"./{TARGET_DIR}/{name}/{LATEST_LINK}", name)
+    return fetch_folder(f"./{TARGET_DIR}/{name}/{LATEST_LINK}", name, True)
 
-def fetch_folder(folder : str, name: str) -> Optional[PlaceholderValue]:
+def fetch_folder(folder : str, name: str, folder_is_specific : bool = False) -> Optional[PlaceholderValue]:
     # check the folder exists
     if not os.path.exists(folder):
         return None
 
-    filename = os.path.join(folder, name)
+    # Looks for the file in ${folder}/ with the basename ${name} (any extension) and returns the contents
+    files = [f for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))]
+    for file in files:
+        if os.path.splitext(file)[0] == name:
+            with open(f"{folder}/{file}", 'r') as file:
+                return file.read()
+
+    filename = os.path.join(folder, name) if not folder_is_specific else folder
 
     # if the filename is a directory:
     if os.path.isdir(filename):
@@ -56,13 +63,6 @@ def fetch_folder(folder : str, name: str) -> Optional[PlaceholderValue]:
             with open(f"{filename}/{file}", 'r') as file:
                 result[str(file)] = file.read()
         return result
-
-    # Looks for the file in ${folder}/ with the basename ${name} (any extension) and returns the contents
-    files = [f for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))]
-    for file in files:
-        if os.path.splitext(file)[0] == name:
-            with open(f"{folder}/{file}", 'r') as file:
-                return file.read()
     
     return None
 
