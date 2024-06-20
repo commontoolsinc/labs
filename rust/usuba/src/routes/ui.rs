@@ -8,7 +8,7 @@ use rust_embed::Embed;
 use crate::{UsubaError, UsubaState};
 
 #[derive(Embed)]
-#[folder = "../../typescript/packages/usuba-ui/dist"]
+#[folder = "../../typescript/packages/lookslike-prototype/dist"]
 struct Asset;
 
 pub struct StaticFile<T>(pub T);
@@ -70,5 +70,5 @@ pub async fn upstream_index(state: State<UsubaState>, request: Request) -> impl 
 }
 
 pub async fn ui_index(state: State<UsubaState>, request: Request) -> impl IntoResponse {
-    ui_file("/$.html".parse::<Uri>().unwrap(), state, request).await
+    ui_file("/index.html".parse::<Uri>().unwrap(), state, request).await
 }
