@@ -386,7 +386,9 @@ const tools: Anthropic.Messages.Tool[] = [
   },
 ];
 
+const OPUS = "claude-3-5-opus-20240307";
 const HAIKU = "claude-3-haiku-20240307";
+const SONNET = "claude-3-5-sonnet-20240620";
 
 const toolImpls: { [id: string]: Function } = {
   rhyme: async (input: { word: string }) => {
@@ -559,10 +561,7 @@ const toolImpls: { [id: string]: Function } = {
 
 const MAX_TOKENS = 4096;
 
-async function single(
-  text: string,
-  model: string = "claude-3-5-sonnet-20240620"
-) {
+async function single(text: string, model: string = SONNET) {
   let response = "";
   const stream = await anthropic.messages.stream({
     max_tokens: MAX_TOKENS,
@@ -604,11 +603,11 @@ async function main() {
     const stream = await anthropic.messages.stream({
       max_tokens: MAX_TOKENS,
       messages: conversation,
-      model: "claude-3-5-sonnet-20240620",
+      model: SONNET,
       tools: tools,
     });
 
-    let currentMessage: Anthropic.Messages.ContentBlock[] = [];
+    const currentMessage: Anthropic.Messages.ContentBlock[] = [];
     let stopReason: string | undefined;
     let currentToolUse: Partial<Anthropic.Messages.ToolUseBlock> | null = null;
     let accumulatedJson = "";
