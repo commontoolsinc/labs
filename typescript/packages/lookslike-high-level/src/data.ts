@@ -5,7 +5,7 @@ const { state } = signal;
 
 import { todoList, todoTask } from "./recipes/todo-list.js";
 import "./recipes/todo-list-as-task.js"; // Necessary, so that suggestions are indexed.
-import { recipeItem, recipeList } from "./recipes/recipe-list.js";
+import { sagaList } from "./recipes/saga-list.js";
 
 export const keywords: { [key: string]: string[] } = {
   groceries: ["grocery list"],
@@ -16,6 +16,10 @@ export const dataGems = state<{ [key: string]: Gem }>({});
 export function addGems(gems: { [key: string]: Gem }) {
   Object.entries(gems).forEach(([name, gem]) => (gem[NAME] = name));
   dataGems.send({ ...dataGems.get(), ...gems });
+}
+
+export function getGemByName(name: string): Gem | undefined {
+  return dataGems.get()[name];
 }
 
 const recipes: { [name: string]: Gem } = {
@@ -35,14 +39,7 @@ const recipes: { [name: string]: Gem } = {
       })
     ),
   }),
+  home: sagaList({ sagas: dataGems }),
 };
-
-recipes["recipe list"] = recipeList({
-  items: Object.keys(recipes).map((name) =>
-    recipeItem({
-      title: name,
-    })
-  ),
-});
 
 addGems(recipes);
