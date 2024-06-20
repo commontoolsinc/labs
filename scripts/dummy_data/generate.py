@@ -207,7 +207,8 @@ def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Over
             # include other commands. e.g. the placeholder "input" might need to
             # match "${input:multi}"
             pattern = re.compile(rf'\${{{re.escape(placeholder)}(?::[^}}]*)?}}')
-            prompt = pattern.sub(value, prompt)
+            escaped_value = escape_backslashes(value)
+            prompt = pattern.sub(escaped_value, prompt)
         variation_name = name_for_variation(variation, nested_keys)
         result[variation_name] = prompt
 
@@ -272,6 +273,9 @@ def execute_prompt(name: str, raw_prompt: str, timestamp : str, overrides: Overr
 
 def sanitize_string(input_string : str) -> str:
     return re.sub(r'[^a-zA-Z0-9_-]', '_', input_string)
+
+def escape_backslashes(s : str) -> str:
+    return s.replace('\\', '\\\\')
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Process a prompt file.\nBy default, a single prompt is executed. If stdin is provided, then it will execute the template once for each line, piping that line\'s input as the override variable "_input"')
