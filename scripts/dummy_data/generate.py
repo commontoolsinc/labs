@@ -16,23 +16,26 @@ LATEST_LINK = '_latest'
 OverridesDict: TypeAlias = Dict[str, str]
 PlaceholderValue : TypeAlias = Union[str, Dict[str, str]]
 
-def value_variations(input : Dict[str, PlaceholderValue]) -> List[Dict[str, str]] :
+# returns all the variations, as well as the keys that varied.
+def value_variations(input : Dict[str, PlaceholderValue]) -> Tuple[List[Dict[str, str]], List[str]] :
     variations : List[Dict[str, str]] = []
     nested_keys = [k for k, v in input.items() if isinstance(v, dict)]
     
     if not nested_keys:
-        return cast(List[Dict[str, str]],[input.copy()])
+        return (cast(List[Dict[str, str]],[input.copy()]), [])
 
     nested_values: List[List[Tuple[str, str, str]]] = [[(k, vk, vv) for vk, vv in input[k].items()] for k in nested_keys] # type: ignore
     
     for combination in itertools.product(*nested_values):
         variation = {k: v for k, v in input.items() if not isinstance(v, dict)}
         for orig_key, nested_key, nested_value in combination: # type: ignore
-            variation[orig_key] = nested_value
+            variation[orig_key] = nested_key
         variations.append(variation)
     
-    return variations
+    return (variations, nested_keys)
         
+def name_for_variation(variation : Dict[str, str], nested_keys : List[str]) -> str:
+    return "_".join([f"{v}" for k, v in variation.items() if k in nested_keys])
 
 def fetch_most_recent_target(name: str) -> Optional[PlaceholderValue]:
     # looks for the file with the most recent name in /target/${name}/ and returns the contents
@@ -169,7 +172,7 @@ def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Over
                     if os.path.exists(filename):
                         with open(filename, 'r') as file:
                             content = file.read()
-                    key = sanitize_string(line)
+                    key = line
                     new_value[key] = content
             value = new_value
 
@@ -187,16 +190,18 @@ def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Over
 
     result : Dict[str, str] = {}
 
+    (variations, nested_keys) = value_variations(placeholder_values)
+
     # Iterate over every combination of placeholder values. If there are no
     # multi values, this will run once. If there are multiple multi values with
     # length m and n, this will run m * n times. And so on.
-    for variation in value_variations(placeholder_values):
+    for variation in variations:
         # Replace the placeholders with the values
         prompt = raw_prompt
         for placeholder, value in variation.items():
             prompt = prompt.replace(f"${{{placeholder}}}", value)
-        #TODO: a better naming scheme for the variations
-        result[str(variation)] = prompt
+        variation_name = name_for_variation(variation, nested_keys)
+        result[variation_name] = prompt
 
     # if it's a single prompt, return the only value.        
     keys = list(result.keys())

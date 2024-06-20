@@ -42,3 +42,4 @@ As a special case, if your include has the `:multi` directive, it says 'load up 
 - allow the various fetch_* that operate on a directory to return multiple items if the named thing is a directory.
 - Allow a way to specify `{files|multi-load:schema}
 - switch ':' in multi directive to '|'
+- The replacement machinery doesn't match items with commands (it only matches precise matches), so ${files:multi} is not repalced with the filename.
