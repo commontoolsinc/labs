@@ -225,6 +225,12 @@ def execute_prompt(name: str, raw_prompt: str, timestamp : str, overrides: Overr
     output_dir = f"./target/{name}/{timestamp}"
     os.makedirs(output_dir, exist_ok=True)
 
+    # Create the soft link '_latest' pointing to the timestamp directory
+    latest_link = f"./target/{name}/{LATEST_LINK}"
+    if os.path.exists(latest_link):
+        os.unlink(latest_link)
+    os.symlink(timestamp, latest_link, target_is_directory=True)
+
     # Compile the prompt
     prompt = compile_prompt(name, raw_prompt, timestamp, overrides, parent_names)
     
@@ -257,12 +263,6 @@ def execute_prompt(name: str, raw_prompt: str, timestamp : str, overrides: Overr
         except subprocess.CalledProcessError as e:
             print(f"Error running llm command for {name}: {e}")
             sys.exit(1)
-        
-    # Create the soft link '_latest' pointing to the timestamp directory
-    latest_link = f"./target/{name}/{LATEST_LINK}"
-    if os.path.exists(latest_link):
-        os.unlink(latest_link)
-    os.symlink(timestamp, latest_link, target_is_directory=True)
 
 def sanitize_string(input_string : str) -> str:
     return re.sub(r'[^a-zA-Z0-9_-]', '_', input_string)
