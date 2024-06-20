@@ -61,8 +61,8 @@ def fetch_folder(folder : str, name: str, folder_is_specific : bool = False) -> 
         files = [f for f in os.listdir(filename) if os.path.isfile(os.path.join(filename, f))]
         result : Dict[str, str] = {}
         for file in files:
-            with open(f"{filename}/{file}", 'r') as file:
-                result[str(file)] = file.read()
+            with open(f"{filename}/{file}", 'r') as file_obj:
+                result[file] = file_obj.read()
         return result
     
     return None
