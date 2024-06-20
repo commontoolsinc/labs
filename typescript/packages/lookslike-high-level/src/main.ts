@@ -1,7 +1,8 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { view, tags, render } from "@commontools/common-ui";
-// import "@commontools/lookslike-sagas";
+export { CommonScreenElement } from "./saga-ui/layout/screen.js";
+export { CommonAppElement } from "./saga-ui/app.js";
 import { dataGems } from "./data.js";
 import { isGem, Gem, ID } from "./recipe.js";
 const { binding } = view;
@@ -11,6 +12,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const windowManager = document.getElementById(
     "window-manager"
   )! as CommonWindowManager;
+  console.log(dataGems.get()["recipe list"]);
   windowManager.openGem(dataGems.get()["recipe list"]!);
 });
 
@@ -88,83 +90,5 @@ export class CommonWindowManager extends LitElement {
     if (isGem(gem)) {
       this.openGem(gem);
     }
-  }
-}
-
-@customElement("common-screen")
-export class CommonScreenElement extends LitElement {
-  static override styles = css`
-    :host {
-      display: block;
-      container-type: size;
-      container-name: screen;
-      width: 100vw;
-      height: 100vh;
-    }
-  `;
-
-  override render() {
-    return html`<slot></slot>`;
-  }
-}
-
-@customElement("common-app")
-export class CommonAppElement extends LitElement {
-  static override styles = [
-    css`
-      :host {
-        display: block;
-        height: 100%;
-        width: 100%;
-      }
-
-      .app {
-        display: grid;
-        height: 100%;
-        width: 100%;
-        grid-template-columns: 1fr;
-        grid-template-rows: 1fr min-content min-content;
-        grid-template-areas:
-          "primary"
-          "secondary"
-          "search";
-      }
-
-      .app-primary {
-        grid-area: primary;
-        overflow: auto;
-        container-type: size;
-        container-name: app-primary;
-      }
-
-      .app-secondary {
-        grid-area: secondary;
-        container-type: inline-size;
-      }
-
-      .app-search {
-        grid-area: search;
-        container-type: inline-size;
-        background-color: var(--secondary-background);
-        display: block;
-        padding: var(--gap);
-      }
-    `,
-  ];
-
-  override render() {
-    return html`
-      <div class="app">
-        <main class="app-primary">
-          <slot></slot>
-        </main>
-        <nav class="app-secondary">
-          <slot name="secondary"></slot>
-        </nav>
-        <nav class="app-search">
-          <slot name="search"></slot>
-        </nav>
-      </div>
-    `;
   }
 }
