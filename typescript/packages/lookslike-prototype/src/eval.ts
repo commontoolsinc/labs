@@ -5,6 +5,7 @@ import {
   WASM_SANDBOX,
   SES_SANDBOX
 } from "@commontools/runtime";
+import { EvalMode } from "./data.js";
 
 export function prepare(code: string) {
   const func = new Function(
@@ -23,7 +24,8 @@ export function serializationBoundary(obj: any) {
 export async function run(
   id: string,
   src: string,
-  inputs: { [key: string]: any }
+  inputs: { [key: string]: any },
+  evalMode: EvalMode = "ses"
 ) {
   console.group("eval(" + id + ")");
   const rt = new Runtime();
@@ -33,7 +35,7 @@ export async function run(
 
   const module = await rt.eval(
     id,
-    SES_SANDBOX,
+    evalMode,
     "text/javascript",
     code(src),
     new Input(storage, Object.keys(inputs))
