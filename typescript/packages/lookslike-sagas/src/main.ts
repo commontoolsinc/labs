@@ -7,6 +7,7 @@ export { CommonMediaElement } from './components/common/media.js';
 export { CommonImgElement } from './components/common/img.js';
 export { CommonButtonElement as ButtonElement } from './components/common/button.js';
 export { CommonInputElement } from './components/common/input.js';
-export { CommonSuggestionElement } from './components/suggestion.js';
+export { CommonSuggestionElement } from './components/suggestions/suggestion.js';
+export { CommonSuggestionsElement } from './components/suggestions/suggestions.js';
 export { CommonAppElement } from './components/app.js';
 export { CommonUniboxElement } from './components/unibox.js';

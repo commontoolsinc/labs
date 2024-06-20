@@ -32,7 +32,13 @@
         "../common-frp-lit:build",
         "../common-ui:build"
       ],
-      "command": "vite build"
+      "files": [
+        "./src/**/*"
+      ],
+      "output": [
+        "./lib/**/*"
+      ],    
+      "command": "tsc --build -f"
     },
     "clean": {
       "command": "rm -rf ./lib ./dist ./.wireit ./node_modules"
