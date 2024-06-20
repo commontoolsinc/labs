@@ -9,11 +9,14 @@ export class AppElement extends LitElement {
     css`
     :host {
       display: block;
+      height: 100%;
+      width: 100%;
     }
 
     .app {
-      height: 100cqh;
       display: grid;
+      height: 100%;
+      width: 100%;
       grid-template-columns: 1fr;
       grid-template-rows: 1fr min-content min-content;
       grid-template-areas:
@@ -32,10 +35,12 @@ export class AppElement extends LitElement {
     
     .app-secondary {
       grid-area: secondary;  
+      container-type: inline-size;
     }
     
     .app-search {
       grid-area: search;
+      container-type: inline-size;
       background-color: var(--secondary-background);
       display: block;
       padding: var(--gap);
@@ -47,9 +52,7 @@ export class AppElement extends LitElement {
     return html`
     <div class="app">
       <main class="app-primary">
-        <common-scroll>
-          <slot></slot>
-        </common-scroll>
+        <slot></slot>
       </main>
       <nav class="app-secondary">
         <slot name="secondary"></slot>
