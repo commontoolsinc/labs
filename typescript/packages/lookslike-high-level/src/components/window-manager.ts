@@ -12,12 +12,44 @@ export class CommonWindowManager extends LitElement {
       display: flex;
       overflow-x: auto;
       width: 100%;
+      padding: 20px 0; /* Add vertical padding */
     }
     .window {
       flex: 0 0 auto;
       width: 300px;
-      margin-right: 10px;
-      border: 1px solid #ccc;
+      margin-left: 20px;
+      padding: 10px;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      background-color: rgba(255, 255, 255, 0.8);
+      backdrop-filter: blur(10px);
+      box-shadow:
+        0 10px 20px rgba(0, 0, 0, 0.1),
+        0 6px 6px rgba(0, 0, 0, 0.1),
+        0 0 0 1px rgba(0, 0, 0, 0.05);
+      transition: all 0.3s ease;
+    }
+    .close-button {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background-color: rgba(0, 0, 0, 0.1);
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: rgba(0, 0, 0, 0.4);
+      font-weight: bold;
+      transition: all 0.2s ease;
+    }
+    .close-button:hover {
+      background-color: rgba(0, 0, 0, 0.15);
+      color: rgba(0, 0, 0, 0.6);
     }
   `;
 
@@ -39,6 +71,7 @@ export class CommonWindowManager extends LitElement {
 
         return html`
           <div class="window" id="${saga[ID]}">
+            <button class="close-button" @click="${this.onClose}">×</button>
             <common-screen-element>
               ${this.renderedSagas[saga[ID]]}
             </common-screen-element>
@@ -60,6 +93,13 @@ export class CommonWindowManager extends LitElement {
         });
       }
     });
+  }
+
+  onClose(e: Event) {
+    const id = (e.currentTarget as HTMLElement).parentElement?.id;
+    if (id) {
+      this.sagas = this.sagas.filter((saga) => saga[ID] + "" !== id);
+    }
   }
 
   override connectedCallback() {
