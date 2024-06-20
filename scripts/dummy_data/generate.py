@@ -38,19 +38,7 @@ def name_for_variation(variation : Dict[str, str], nested_keys : List[str]) -> s
     return "_".join([f"{v}" for k, v in variation.items() if k in nested_keys])
 
 def fetch_most_recent_target(name: str) -> Optional[PlaceholderValue]:
-    # looks for the file with the most recent name in /target/${name}/ and returns the contents
-    if not os.path.exists(f"./{TARGET_DIR}/{name}"):
-        return None
-
-    files = os.listdir(f"./{TARGET_DIR}/{name}")
-    if len(files) == 0:
-        return None
-    files.sort(reverse=True)
-    most_recent_directory = files[0]
-
-    # TODO: better error message if you try to include a target that was output in multi-mode (where there isn't a single output but multiple)
-    with open(f"./{TARGET_DIR}/{name}/{most_recent_directory}/{name}.txt", 'r') as file:
-        return file.read()
+    return fetch_folder(f"./{TARGET_DIR}/{name}/{LATEST_LINK}", name)
 
 def fetch_folder(folder : str, name: str) -> Optional[PlaceholderValue]:
     # check the folder exists

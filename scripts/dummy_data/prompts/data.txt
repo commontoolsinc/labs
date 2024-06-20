@@ -4,6 +4,6 @@ Here is backstory:
 ${backstory}
 
 Here is a schema:
-${_input_contents}
+${schema}
 
 Please generate dummy data in JSON that matches this schema. The data should be comprehensive and believably fit in the backstory. Output only JSON, no other surrounding text or formatting.
