@@ -6,6 +6,7 @@
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
+  "exports": "./lib/index.js",
   "scripts": {
     "dev": "vite",
     "build": "wireit",

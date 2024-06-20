@@ -2,7 +2,7 @@ import { LitElement, html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
 @customElement("common-img")
-export class ImgElement extends LitElement {
+export class CommonImgElement extends LitElement {
   static override styles = css`
   :host {
     display: block;

@@ -3,7 +3,7 @@ import { customElement } from "lit/decorators.js";
 import { baseStyles } from "../style.js";
 
 @customElement("common-hstack")
-export class HstackElement extends LitElement {
+export class CommonHstackElement extends LitElement {
   static override styles = [
     baseStyles,
     css`

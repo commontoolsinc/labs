@@ -3,7 +3,7 @@ import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 
 @customElement("common-unibox")
-export class UniboxElement extends LitElement {
+export class CommonUniboxElement extends LitElement {
   static override styles = [
     baseStyles,
     css`

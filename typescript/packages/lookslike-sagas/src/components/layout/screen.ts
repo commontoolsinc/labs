@@ -2,7 +2,7 @@ import { LitElement, html, css } from "lit";
 import {customElement} from "lit/decorators.js";
 
 @customElement("common-screen")
-export class ScreenElement extends LitElement {
+export class CommonScreenElement extends LitElement {
   static override styles = css`
   :host {
     display: block;
