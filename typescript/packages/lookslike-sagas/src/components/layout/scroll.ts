@@ -3,7 +3,7 @@ import { customElement } from "lit/decorators.js";
 import { baseStyles } from "../style.js";
 
 @customElement("common-scroll")
-export class ScrollElement extends LitElement {
+export class CommonScrollElement extends LitElement {
   static override styles = [
     baseStyles,
     css`

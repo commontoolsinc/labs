@@ -3,7 +3,7 @@ import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "../style.js";
 
 @customElement("common-media")
-export class MediaElement extends LitElement {
+export class CommonMediaElement extends LitElement {
   static override styles = [
     baseStyles,
     css`

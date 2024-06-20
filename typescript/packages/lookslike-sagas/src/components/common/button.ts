@@ -3,7 +3,7 @@ import { customElement } from "lit/decorators.js";
 import { baseStyles } from "../style.js";
 
 @customElement("common-button")
-export class ButtonElement extends LitElement {
+export class CommonButtonElement extends LitElement {
   static override styles = [
     baseStyles,
     css`
