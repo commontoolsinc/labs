@@ -8,7 +8,7 @@ export const dict = view('common-dict', {
 });
 
 @customElement('common-dict')
-export class DictElement extends LitElement {
+export class CommonDictElement extends LitElement {
   static override styles = css`
     :host {
       display: block;

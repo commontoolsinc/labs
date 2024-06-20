@@ -1,6 +1,8 @@
 import { LitElement, html, css } from "lit";
 import { customElement } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { style } from "@commontools/common-ui/components.js";
+
+const { baseStyles } = style;
 
 @customElement("common-app")
 export class CommonAppElement extends LitElement {

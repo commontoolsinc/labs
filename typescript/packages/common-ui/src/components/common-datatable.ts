@@ -11,7 +11,7 @@ export const datatable = view('common-datatable', {
 });
 
 @customElement('common-datatable')
-export class DatatableElement extends LitElement {
+export class CommonDatatableElement extends LitElement {
   static override styles = css`
   :host {
     display: block;

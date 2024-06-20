@@ -21,10 +21,28 @@
     "url": "https://github.com/commontoolsinc/labs/issues"
   },
   "homepage": "https://github.com/commontoolsinc/labs#readme",
-  "exports": "./lib/index.js",
-  "files": [
-    "./lib/index.js"
-  ],
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./view.js": {
+      "types": "./lib/hyperscript/view.d.ts",
+      "default": "./lib/hyperscript/view.js"
+    },
+    "./render.js": {
+      "types": "./lib/hyperscript/render.d.ts",
+      "default": "./lib/hyperscript/render.js"
+    },
+    "./tags.js": {
+      "types": "./lib/hyperscript/tags.d.ts",
+      "default": "./lib/hyperscript/tags.js"
+    },
+    "./components.js": {
+      "types": "./lib/components/index.d.ts",
+      "default": "./lib/components/index.js"
+    }
+  },
   "dependencies": {
     "@cfworker/json-schema": "^1.12.8",
     "@shoelace-style/shoelace": "^2.15.1",

@@ -1,7 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement } from "lit/decorators.js";
-import { baseStyles } from "../style.js";
-import { Identifiable } from "../../identifiable.js";
+import { baseStyles } from "./style.js";
+import { Identifiable } from "./identifiable.js";
 
 @customElement("common-suggestion")
 export class CommonSuggestionElement extends LitElement {

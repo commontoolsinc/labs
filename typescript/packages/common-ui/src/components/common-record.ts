@@ -5,7 +5,7 @@ import { view } from '../hyperscript/render.js';
 export const record = view('common-record', {});
 
 @customElement('common-record')
-export class RecordElement extends LitElement {
+export class CommonRecordElement extends LitElement {
   static override styles = css`
   :host {
     display: block;

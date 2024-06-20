@@ -1,6 +1,9 @@
 import { LitElement, html, css } from "lit";
 import { customElement } from "lit/decorators.js";
-import { baseStyles } from "../style.js";
+import { view } from '../hyperscript/render.js';
+import { baseStyles } from "./style.js";
+
+export const hstack = view('common-hstack', {});
 
 @customElement("common-hstack")
 export class CommonHstackElement extends LitElement {
@@ -14,7 +17,14 @@ export class CommonHstackElement extends LitElement {
     .stack {
       display: flex;
       flex-direction: row;
+    }
+
+    :host-context([gap="md"]) .stack {
       gap: var(--gap);
+    }
+
+    :host-context([pad="md"]) .stack {
+      padding: var(--gap);
     }
     `
   ];
