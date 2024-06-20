@@ -78,7 +78,7 @@ def fetch_prompt(name: str, timestamp : str, overrides : OverridesDict, parent_n
         return None
     
     print(f"Executing prompt for {name}...")
-    execute_prompt(name, raw_prompt, timestamp, overrides, parent_names)
+    execute_prompt(name, None, raw_prompt, timestamp, overrides, parent_names)
 
     return fetch_most_recent_target(name)
 
@@ -168,52 +168,56 @@ def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Over
     return prompt
 
 
-def execute_prompt(name: str, raw_prompt: str, timestamp : str, overrides: OverridesDict, parent_names: Optional[List[str]] = None) -> None:
+def execute_prompt(name: str, variations : Optional[Dict[str, str]], raw_prompt: str, timestamp : str, overrides: OverridesDict, parent_names: Optional[List[str]] = None) -> None:
 
     if parent_names is None:
         parent_names = []
 
-    # Compile the prompt
-    prompt = compile_prompt(name, raw_prompt, timestamp, overrides, parent_names)
+    if not variations:
+        variations = {}
+        variations[name] = raw_prompt
 
-    output_base_name = name
-    output_prompt_base_name = "_prompt"
-    if overrides.get(INPUT_OVERRIDE_NAME):
-        output_base_name = overrides[INPUT_OVERRIDE_NAME]
-        output_prompt_base_name = f"{output_prompt_base_name}_{output_base_name}"
+    # Generate the output directory path
+    output_dir = f"./target/{name}/{timestamp}"
+    os.makedirs(output_dir, exist_ok=True)
 
-    try:
-        print(f"Running llm command for {name}...")
+    for variation_name, variation_content in variations.items():
 
-        # Pipe the prompt contents to the llm command
-        output = subprocess.check_output(['llm'], input=prompt, universal_newlines=True)
+        overrides[INPUT_OVERRIDE_NAME] = variation_name
+        overrides[INPUT_CONTENTS_OVERRIDE_NAME] = variation_content
 
-        # Generate the output directory path
-        output_dir = f"./target/{name}/{timestamp}"
-        os.makedirs(output_dir, exist_ok=True)
+        # Compile the prompt
+        prompt = compile_prompt(name, raw_prompt, timestamp, overrides, parent_names)
 
-        # Generate the output file path
-        output_file = f"{output_dir}/{output_base_name}.txt"
+        try:
+            # TODO: don't double print names in single mode
+            print(f"Running llm command for {name} / {variation_name}...")
 
-        # Save the output to the file
-        with open(output_file, 'w') as file:
-            file.write(output)
+            # Pipe the prompt contents to the llm command
+            output = subprocess.check_output(['llm'], input=prompt, universal_newlines=True)
 
-        prompt_output_file = f"{output_dir}/{output_prompt_base_name}.txt"
-        with open(prompt_output_file, 'w') as file:
-            file.write(prompt)
+            # Generate the output file path
+            output_file = f"{output_dir}/{variation_name}.txt"
 
+            # Save the output to the file
+            with open(output_file, 'w') as file:
+                file.write(output)
+
+            prompt_output_file = f"{output_dir}/_prompt_{variation_name}.txt"
+            with open(prompt_output_file, 'w') as file:
+                file.write(prompt)
+
+            print(f"Output saved to {output_file}")
+
+        except subprocess.CalledProcessError as e:
+            print(f"Error running llm command for {name}: {e}")
+            sys.exit(1)
+        
         # Create the soft link '_latest' pointing to the timestamp directory
         latest_link = f"./target/{name}/_latest"
         if os.path.exists(latest_link):
             os.unlink(latest_link)
         os.symlink(timestamp, latest_link, target_is_directory=True)
-
-        print(f"Output saved to {output_file}")
-
-    except subprocess.CalledProcessError as e:
-        print(f"Error running llm command for {name}: {e}")
-        sys.exit(1)
 
 def sanitize_string(input_string : str) -> str:
     return re.sub(r'[^a-zA-Z0-9_-]', '_', input_string)
@@ -254,9 +258,10 @@ def main() -> None:
     if sys.stdin.isatty():
         # normal mode, nothing being piped.
         # Execute the prompt
-        execute_prompt(prompt_base_filename, prompt_contents, timestamp, overrides)
+        execute_prompt(prompt_base_filename, None, prompt_contents, timestamp, overrides)
     else:
         print("Entering multi-line mode (reading from stdin)...")
+        variations : Dict[str, str] = {}
         # multi-line mode, something being piped.
         # for each line in stdin, execute the prompt with that line as the input override
         for line in sys.stdin:
@@ -268,10 +273,10 @@ def main() -> None:
             if os.path.exists(line):
                 with open(line, 'r') as file:
                     content = file.read()
-            print(f"Executing prompt with input override: {line}")
-            overrides[INPUT_OVERRIDE_NAME] = sanitize_string(line)
-            overrides[INPUT_CONTENTS_OVERRIDE_NAME] = content
-            execute_prompt(prompt_base_filename, prompt_contents, timestamp, overrides)
+
+            key = sanitize_string(line)
+            variations[key] = content
+        execute_prompt(prompt_base_filename, variations, prompt_contents, timestamp, overrides)
 
 if __name__ == '__main__':
     main()
