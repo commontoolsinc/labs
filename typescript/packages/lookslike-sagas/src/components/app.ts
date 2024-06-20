@@ -15,7 +15,7 @@ export class AppElement extends LitElement {
       height: 100cqh;
       display: grid;
       grid-template-columns: 1fr;
-      grid-template-rows: 1fr 300px 80px;
+      grid-template-rows: 1fr 300px min-content;
       grid-template-areas:
         "primary"
         "secondary"
@@ -37,6 +37,8 @@ export class AppElement extends LitElement {
     .app-search {
       grid-area: search;
       background-color: var(--secondary-background);
+      display: block;
+      padding: var(--gap);
     }
     `
   ];
