@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["es2022", "DOM"],
+    "outDir": "./public/js",
+    "rootDir": "./src",
+  },
+  "include": [
+    "src/**/*",
+    "../../node_modules/@types/serviceworker/*.d.ts",
+    "../../node_modules/@types/chrome/*.d.ts"
+  ]
+}
