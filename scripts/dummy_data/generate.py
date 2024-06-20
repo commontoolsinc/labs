@@ -62,7 +62,8 @@ def fetch_folder(folder : str, name: str, folder_is_specific : bool = False) -> 
         result : Dict[str, str] = {}
         for file in files:
             with open(f"{filename}/{file}", 'r') as file_obj:
-                result[file] = file_obj.read()
+                # remove the extension from the filename
+                result[os.path.splitext(file)[0]] = file_obj.read()
         return result
     
     return None
