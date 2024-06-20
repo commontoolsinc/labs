@@ -199,7 +199,11 @@ def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Over
         # Replace the placeholders with the values
         prompt = raw_prompt
         for placeholder, value in variation.items():
-            prompt = prompt.replace(f"${{{placeholder}}}", value)
+            # we can't do a naive match because the placeholder tag might
+            # include other commands. e.g. the placeholder "input" might need to
+            # match "${input:multi}"
+            pattern = re.compile(rf'\${{{re.escape(placeholder)}(?::[^}}]*)?}}')
+            prompt = pattern.sub(value, prompt)
         variation_name = name_for_variation(variation, nested_keys)
         result[variation_name] = prompt
 
