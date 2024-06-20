@@ -4,12 +4,14 @@ import subprocess
 import re
 import argparse
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TypeAlias
 
 INPUT_OVERRIDE_NAME = '_input'
 INPUT_CONTENTS_OVERRIDE_NAME = '_input_contents'
 
 SPECIAL_PLACEHOLDERS = [INPUT_OVERRIDE_NAME, INPUT_CONTENTS_OVERRIDE_NAME]
+
+OverridesDict: TypeAlias = Dict[str, str]
 
 def fetch_most_recent_target(name: str) -> Optional[str]:
     # looks for the file with the most recent name in /target/${name}/ and returns the contents
@@ -67,7 +69,7 @@ def fetch_raw_prompt(name: str) -> Optional[str]:
     
     return None
 
-def fetch_prompt(name: str, timestamp : str, overrides : Dict[str, str], parent_names: List[str]) -> Optional[str]:
+def fetch_prompt(name: str, timestamp : str, overrides : OverridesDict, parent_names: List[str]) -> Optional[str]:
     # Fetch the raw prompt and compile it
     raw_prompt = fetch_raw_prompt(name)
 
@@ -80,7 +82,7 @@ def fetch_prompt(name: str, timestamp : str, overrides : Dict[str, str], parent_
     return fetch_most_recent_target(name)
 
 
-def fetch_placeholder(name: str, timestamp : str, overrides: Dict[str, str], parent_names: List[str]) -> str:
+def fetch_placeholder(name: str, timestamp : str, overrides: OverridesDict, parent_names: List[str]) -> str:
 
     # Override order:
     # 1. Explicitly provided placeholder_override
@@ -119,7 +121,7 @@ def fetch_placeholder(name: str, timestamp : str, overrides: Dict[str, str], par
     
     raise Exception(f"Could not find value for placeholder {name}")
 
-def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Dict[str, str], parent_names: List[str]) -> str:
+def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : OverridesDict, parent_names: List[str]) -> str:
 
     # Identify any placeholders in the prompt that match ${name}, ignoring any whitespace in the placeholder
     placeholders = re.findall(r"\${\s*(\w+)\s*}", raw_prompt)
@@ -165,7 +167,7 @@ def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Dict
     return prompt
 
 
-def execute_prompt(name: str, raw_prompt: str, timestamp : str, overrides: Dict[str, str], parent_names: Optional[List[str]] = None) -> None:
+def execute_prompt(name: str, raw_prompt: str, timestamp : str, overrides: OverridesDict, parent_names: Optional[List[str]] = None) -> None:
 
     if parent_names is None:
         parent_names = []
@@ -225,7 +227,7 @@ def main() -> None:
     prompt_file = args.prompt_file
     prompt_base_filename = os.path.splitext(os.path.basename(prompt_file))[0]
 
-    overrides : Dict[str, str] = {}
+    overrides : OverridesDict = {}
 
     if args.overrides:
         # We'll populate the global placeholder_overrides dictionary with the named arguments
