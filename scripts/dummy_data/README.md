@@ -31,7 +31,7 @@ This order means that prompt output will be used if they exist, falling back on 
 
 This process is recursive. When a name is found it is printed out which version it uses.
 
-As a special case, if your include has the `:multi` directive, it says 'load up the named placeholder, and then interpet each line as a separate value and call this template once for each file'. You can see prompts/schema.txt for an example
+As a special case, if your include has the `:multi` directive, it says 'load up the named placeholder, and then interpet each line as a separate value and call this template once for each file'. You can see prompts/schema.txt for an example. Instead of outputting one result, it will output as many results as non-empty lines in that file, named for the lines. Later, other templates that load up that named placeholder, if they find multiple outputs (instead of one file) will also go into multi-output mode.
 
 ### TODO
 - A debug mode to print out the raw prompts as returned from compile
@@ -42,3 +42,4 @@ As a special case, if your include has the `:multi` directive, it says 'load up 
 - allow the various fetch_* that operate on a directory to return multiple items if the named thing is a directory.
 - Allow a way to specify `{files|multi-load:schema}
 - switch ':' in multi directive to '|'
+- Put prompts in _info (so it's easy to ignore, and will automatically be ignored as a directory)

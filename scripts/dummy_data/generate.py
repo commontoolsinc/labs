@@ -45,6 +45,18 @@ def fetch_folder(folder : str, name: str) -> Optional[PlaceholderValue]:
     if not os.path.exists(folder):
         return None
 
+    filename = os.path.join(folder, name)
+
+    # if the filename is a directory:
+    if os.path.isdir(filename):
+        # return the contents of each file in the directory as long as it doesn't start with "_"
+        files = [f for f in os.listdir(filename) if os.path.isfile(os.path.join(filename, f)) and not f.startswith("_")]
+        result : Dict[str, str] = {}
+        for file in files:
+            with open(f"{filename}/{file}", 'r') as file:
+                result[str(file)] = file.read()
+        return result
+
     # Looks for the file in ${folder}/ with the basename ${name} (any extension) and returns the contents
     files = [f for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))]
     for file in files:
