@@ -17,30 +17,34 @@ INFO_DIR = '_info'
 OverridesDict: TypeAlias = Dict[str, str]
 PlaceholderValue : TypeAlias = Union[str, Dict[str, str]]
 
-# returns all the variations, as well as the keys that varied.
-def value_variations(input : Dict[str, PlaceholderValue]) -> Tuple[List[Dict[str, str]], List[str]] :
+# returns all the variations, as well as the keys that varied. as well as a map from value to shortname
+def value_variations(input : Dict[str, PlaceholderValue]) -> Tuple[List[Dict[str, str]], List[str], Dict[str, str]] :
     variations : List[Dict[str, str]] = []
     nested_keys = [k for k, v in input.items() if isinstance(v, dict)]
     
     if not nested_keys:
-        return (cast(List[Dict[str, str]],[input.copy()]), [])
+        return (cast(List[Dict[str, str]],[input.copy()]), [], {})
 
     nested_values: List[List[Tuple[str, str, str]]] = [[(k, vk, vv) for vk, vv in input[k].items()] for k in nested_keys] # type: ignore
     
+    short_names : Dict[str, str] = {}
+
     for combination in itertools.product(*nested_values):
         variation = {k: v for k, v in input.items() if not isinstance(v, dict)}
         for orig_key, nested_key, nested_value in combination: # type: ignore
             variation[orig_key] = nested_value
+            short_names[nested_value] = nested_key
         variations.append(variation)
     
-    return (variations, nested_keys)
+    return (variations, nested_keys, short_names)
         
-def name_for_variation(variation : Dict[str, str], nested_keys : List[str]) -> str:
+def name_for_variation(variation : Dict[str, str], nested_keys : List[str], short_names : Dict[str, str]) -> str:
     result : List[str] = []
     for k, v in variation.items():
         if k not in nested_keys:
             continue
-        str_v = sanitize_string(f"{v}")
+        short = short_names.get(v, v)
+        str_v = sanitize_string(f"{short}")
         if len(str_v) > 32:
             #create a md5 hash of the string and render it in a positive hex number
             str_v = f"{hash(v) & 0xFFFFFFFF:08x}"
@@ -194,7 +198,7 @@ def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Over
 
     result : Dict[str, str] = {}
 
-    (variations, nested_keys) = value_variations(placeholder_values)
+    (variations, nested_keys, short_names) = value_variations(placeholder_values)
 
     # Iterate over every combination of placeholder values. If there are no
     # multi values, this will run once. If there are multiple multi values with
@@ -209,7 +213,7 @@ def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Over
             pattern = re.compile(rf'\${{{re.escape(placeholder)}(?::[^}}]*)?}}')
             escaped_value = escape_backslashes(value)
             prompt = pattern.sub(escaped_value, prompt)
-        variation_name = name_for_variation(variation, nested_keys)
+        variation_name = name_for_variation(variation, nested_keys, short_names)
         result[variation_name] = prompt
 
     # if it's a single prompt, return the only value.        

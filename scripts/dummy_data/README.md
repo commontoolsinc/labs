@@ -44,5 +44,4 @@ As a special case, if your include has the `:multi` directive, it says 'load up 
 - switch ':' in multi directive to '|'
 - make sure that a multi-golden folder works.
 - remove the fetch_placeholder directory and just return the value (we no longer need the directory)
-- for the `prompts/data.txt` case, figure out a way to maintain the filename to name the variant (currently it uses a hash of the very long value)
 - If a template references the same placeholder that is a multi, only do the multi one time (this might already work). This sets us up for a use case that allows using the name or value of the multi file, so you could say: 'A file named ${schema|name} with content ${schema}' and ahve it replaced.
