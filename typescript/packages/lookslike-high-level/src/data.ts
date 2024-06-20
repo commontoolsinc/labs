@@ -6,7 +6,6 @@ const { state } = signal;
 import { todoList, todoTask } from "./recipes/todo-list.js";
 import "./recipes/todo-list-as-task.js"; // Necessary, so that suggestions are indexed.
 import { recipeItem, recipeList } from "./recipes/recipe-list.js";
-import { Recipe } from "./recipe.js";
 
 export const keywords: { [key: string]: string[] } = {
   groceries: ["grocery list"],
@@ -19,13 +18,13 @@ export function addGems(gems: { [key: string]: Gem }) {
   dataGems.send({ ...dataGems.get(), ...gems });
 }
 
-const recipes: { [name: string]: Recipe } = {
+const recipes: { [name: string]: Gem } = {
   "todo list": todoList({
     items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) =>
       todoTask({
         title: item,
         done: false,
-      }),
+      })
     ),
   }),
   "grocery list": todoList({
@@ -33,7 +32,7 @@ const recipes: { [name: string]: Recipe } = {
       todoTask({
         title: item,
         done: false,
-      }),
+      })
     ),
   }),
 };
@@ -42,7 +41,7 @@ recipes["recipe list"] = recipeList({
   items: Object.keys(recipes).map((name) =>
     recipeItem({
       title: name,
-    }),
+    })
   ),
 });
 

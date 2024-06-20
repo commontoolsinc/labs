@@ -7,8 +7,6 @@ const { computed, isSignal } = signal;
 
 // Hard coded todo list as UI to show
 const UI = computed([dataGems], (dataGems) => {
-  if (dataGems.length === 0) return null;
-
   let UI = dataGems["recipe list"]?.UI;
   if (isSignal(UI)) UI = UI.get();
   return UI;
