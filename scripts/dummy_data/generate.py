@@ -49,7 +49,7 @@ def fetch_folder(folder : str, name: str) -> Optional[PlaceholderValue]:
 
 def fetch_prompt(name: str, timestamp : str, overrides : OverridesDict, parent_names: List[str]) -> Optional[PlaceholderValue]:
     # Fetch the raw prompt and compile it
-    raw_prompt = fetch_folder(name, PROMPTS_DIR)
+    raw_prompt = fetch_folder(PROMPTS_DIR, name)
 
     if not raw_prompt:
         return None
@@ -73,7 +73,7 @@ def fetch_placeholder(name: str, timestamp : str, overrides: OverridesDict, pare
         print(f"Using placeholder override for {name}...")
         return overrides[name]
 
-    value = fetch_folder(name, GOLDEN_DIR)
+    value = fetch_folder(GOLDEN_DIR, name)
     if value:
         print(f"Using golden file for {name}...")
         return value
@@ -83,7 +83,7 @@ def fetch_placeholder(name: str, timestamp : str, overrides: OverridesDict, pare
         print(f"Using most recent target for {name}...")
         return value
     
-    value = fetch_folder(name, INCLUDES_DIR)
+    value = fetch_folder(INCLUDES_DIR, name)
     if value:
         print(f"Using include file for {name}...")
         return value
