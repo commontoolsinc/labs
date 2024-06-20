@@ -1,8 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { view, tags, render } from "@commontools/common-ui";
-export { CommonScreenElement } from "./saga-ui/layout/screen.js";
-export { CommonAppElement } from "./saga-ui/app.js";
+export { components } from "@commontools/common-ui";
 import { dataGems } from "./data.js";
 import { isGem, Gem, ID } from "./recipe.js";
 const { binding } = view;
@@ -51,9 +50,7 @@ export class CommonWindowManager extends LitElement {
         return html`
           <div class="window" id="${gem[ID]}">
             <common-screen-element>
-              <common-app-element>
-                ${this.renderedGems[gem[ID]]}
-              </common-app-element>
+              ${this.renderedGems[gem[ID]]}
             </common-screen-element>
           </div>
         `;
