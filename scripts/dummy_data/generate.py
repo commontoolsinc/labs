@@ -12,6 +12,7 @@ INCLUDES_DIR = 'includes'
 PROMPTS_DIR = 'prompts'
 TARGET_DIR = 'target'
 LATEST_LINK = '_latest'
+INFO_DIR = '_info'
 
 OverridesDict: TypeAlias = Dict[str, str]
 PlaceholderValue : TypeAlias = Union[str, Dict[str, str]]
@@ -56,8 +57,8 @@ def fetch_folder(folder : str, name: str, folder_is_specific : bool = False) -> 
 
     # if the filename is a directory:
     if os.path.isdir(filename):
-        # return the contents of each file in the directory as long as it doesn't start with "_"
-        files = [f for f in os.listdir(filename) if os.path.isfile(os.path.join(filename, f)) and not f.startswith("_")]
+        # return the contents of each file in the directory. By skipping directories, we naturally skip INFO_DIR
+        files = [f for f in os.listdir(filename) if os.path.isfile(os.path.join(filename, f))]
         result : Dict[str, str] = {}
         for file in files:
             with open(f"{filename}/{file}", 'r') as file:
@@ -223,7 +224,9 @@ def execute_prompt(name: str, raw_prompt: str, timestamp : str, overrides: Overr
 
     # Generate the output directory path
     output_dir = f"./target/{name}/{timestamp}"
-    os.makedirs(output_dir, exist_ok=True)
+    prompts_dir = os.path.join(output_dir, INFO_DIR, PROMPTS_DIR)
+    # This will also make the output_dir implicitly
+    os.makedirs(prompts_dir, exist_ok=True)
 
     # Create the soft link '_latest' pointing to the timestamp directory
     latest_link = f"./target/{name}/{LATEST_LINK}"
@@ -254,7 +257,7 @@ def execute_prompt(name: str, raw_prompt: str, timestamp : str, overrides: Overr
             with open(output_file, 'w') as file:
                 file.write(output)
 
-            prompt_output_file = f"{output_dir}/_prompt_{variation_name}.txt"
+            prompt_output_file = f"{prompts_dir}/{variation_name}.txt"
             with open(prompt_output_file, 'w') as file:
                 file.write(prompt)
 

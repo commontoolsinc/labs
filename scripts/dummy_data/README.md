@@ -42,4 +42,4 @@ As a special case, if your include has the `:multi` directive, it says 'load up 
 - allow the various fetch_* that operate on a directory to return multiple items if the named thing is a directory.
 - Allow a way to specify `{files|multi-load:schema}
 - switch ':' in multi directive to '|'
-- Put prompts in _info (so it's easy to ignore, and will automatically be ignored as a directory)
+- make sure that a multi-golden folder works.
