@@ -23,7 +23,8 @@ const tools: Anthropic.Messages.Tool[] = [
 ];
 
 async function single(text: string) {
-  const message = await anthropic.messages.create({
+  let response = "";
+  const stream = await anthropic.messages.stream({
     max_tokens: 1024,
     messages: [
       {
@@ -34,7 +35,14 @@ async function single(text: string) {
     model: "claude-3-5-sonnet-20240620",
   });
 
-  return message.content[0].text;
+  for await (const event of stream) {
+    if (event.type === "content_block_delta") {
+      response += event.delta.text;
+      Deno.stdout.writeSync(new TextEncoder().encode(event.delta.text));
+    }
+  }
+
+  return response;
 }
 
 async function main() {
@@ -49,33 +57,59 @@ async function main() {
   let running = true;
   while (running) {
     console.log("Conversation", conversation);
-    const message = await anthropic.messages.create({
+    const stream = await anthropic.messages.stream({
       max_tokens: 1024,
       messages: conversation,
       model: "claude-3-5-sonnet-20240620",
       tools: tools,
     });
 
+    let currentMessage: Anthropic.Messages.ContentBlock[] = [];
+    let stopReason: string | undefined;
+
+    for await (const event of stream) {
+      if (event.type === "content_block_start") {
+        if (
+          event.content_block.type === "text" ||
+          event.content_block.type === "tool_use"
+        ) {
+          currentMessage.push({ ...event.content_block, text: "" });
+        }
+      } else if (event.type === "content_block_delta") {
+        const lastBlock = currentMessage[currentMessage.length - 1];
+        if (lastBlock && lastBlock.type === "text") {
+          lastBlock.text += event.delta.text;
+          Deno.stdout.writeSync(new TextEncoder().encode(event.delta.text));
+        } else if (lastBlock && lastBlock.type === "tool_use") {
+          Object.assign(lastBlock, event.delta);
+        }
+      } else if (event.type === "message_delta") {
+        if (event.delta.stop_reason) {
+          stopReason = event.delta.stop_reason;
+        }
+      }
+    }
+
     conversation.push({
       role: "assistant",
-      content: message.content,
+      content: currentMessage,
     });
 
-    console.log("Message", message.stop_reason);
+    console.log("\nMessage", stopReason);
     if (
-      message.stop_reason == "stop_sequence" ||
-      message.stop_reason == "end_turn" ||
-      message.stop_reason == "max_tokens"
+      stopReason === "stop_sequence" ||
+      stopReason === "end_turn" ||
+      stopReason === "max_tokens"
     ) {
-      console.log("Stopping conversation", message.stop_reason);
+      console.log("Stopping conversation", stopReason);
       running = false;
       return conversation;
     }
 
-    if (message.stop_reason == "tool_use") {
-      const toolCalls = message.content.filter(
-        (msg) => msg.type === "tool_use"
-      ) as Anthropic.Messages.ToolUseBlock[];
+    if (stopReason === "tool_use") {
+      const toolCalls = currentMessage.filter(
+        (msg): msg is Anthropic.Messages.ToolUseBlock => msg.type === "tool_use"
+      );
       const calls = toolCalls.map(async (tool) => {
         const input = tool.input as any;
         console.log("Tool call", tool);
