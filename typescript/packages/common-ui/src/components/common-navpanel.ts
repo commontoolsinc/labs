@@ -6,7 +6,7 @@ import { render, RenderContext, view } from '../hyperscript/render.js';
 export const navpanel = view('common-navpanel', {});
 
 @customElement('common-navpanel')
-export class NavPanelElement extends LitElement {
+export class CommonNavPanelElement extends LitElement {
   static override styles = css`
   :host {
     --background: #fff;

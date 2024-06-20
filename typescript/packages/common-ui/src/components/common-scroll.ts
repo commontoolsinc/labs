@@ -1,6 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement } from "lit/decorators.js";
-import { baseStyles } from "../style.js";
+import { baseStyles } from "./style.js";
 
 @customElement("common-scroll")
 export class CommonScrollElement extends LitElement {

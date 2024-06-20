@@ -1,6 +1,9 @@
 import { LitElement, html, css } from "lit";
 import { customElement } from "lit/decorators.js";
-import { baseStyles } from "../style.js";
+import { baseStyles } from "./style.js";
+import { view } from '../hyperscript/render.js';
+
+export const vstack = view('common-vstack', {});
 
 @customElement("common-vstack")
 export class CommonVstackElement extends LitElement {
