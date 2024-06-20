@@ -20,7 +20,348 @@ const tools: Anthropic.Messages.Tool[] = [
       required: ["word"],
     },
   },
+  {
+    name: "summarize",
+    description: "Summarize a given text",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "sentimentAnalysis",
+    description: "Analyze the sentiment of a given text",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "exaggerate",
+    description: "Exaggerate the given text",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "makeSadder",
+    description: "Make the given text sadder",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "makeHappier",
+    description: "Make the given text happier",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "capitalize",
+    description: "Capitalize all words in the given text",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "translateToFrench",
+    description: "Translate the given text to French",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "countWords",
+    description: "Count the number of words in the given text",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "reverseText",
+    description: "Reverse the characters in the given text",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "removeVowels",
+    description: "Remove all vowels from the given text",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "convertToPigLatin",
+    description: "Convert the given text to Pig Latin",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "addEmojis",
+    description: "Add relevant emojis to the given text",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "convertToLeetSpeak",
+    description: "Convert the given text to Leet Speak",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "generateAcronym",
+    description: "Generate an acronym from the given text",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "shuffleWords",
+    description: "Randomly shuffle the words in the given text",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "convertToMorseCode",
+    description: "Convert the given text to Morse code",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "emphasizeKeywords",
+    description: "Emphasize important keywords in the given text",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "generateHashtags",
+    description: "Generate relevant hashtags for the given text",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "convertToCamelCase",
+    description: "Convert the given text to camelCase",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
 ];
+
+const toolImpls: { [id: string]: Function } = {
+  rhyme: async (input: { word: string }) => {
+    return await single(`what rhymes with ${input.word}?`);
+  },
+  summarize: async (input: { text: string }) => {
+    return await single(`Summarize the following text: ${input.text}`);
+  },
+  sentimentAnalysis: async (input: { text: string }) => {
+    return await single(
+      `Analyze the sentiment of the following text: ${input.text}`
+    );
+  },
+  exaggerate: async (input: { text: string }) => {
+    return await single(`Exaggerate the following text: ${input.text}`);
+  },
+  makeSadder: async (input: { text: string }) => {
+    return await single(`Make the following text sadder: ${input.text}`);
+  },
+  makeHappier: async (input: { text: string }) => {
+    return await single(`Make the following text happier: ${input.text}`);
+  },
+  capitalize: async (input: { text: string }) => {
+    return input.text
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  },
+  translateToFrench: async (input: { text: string }) => {
+    return await single(
+      `Translate the following text to French: ${input.text}`
+    );
+  },
+  countWords: async (input: { text: string }) => {
+    return input.text.split(/\s+/).filter((word) => word.length > 0).length;
+  },
+  reverseText: async (input: { text: string }) => {
+    return input.text.split("").reverse().join("");
+  },
+  removeVowels: async (input: { text: string }) => {
+    return input.text.replace(/[aeiou]/gi, "");
+  },
+  convertToPigLatin: async (input: { text: string }) => {
+    return await single(
+      `Convert the following text to Pig Latin: ${input.text}`
+    );
+  },
+  addEmojis: async (input: { text: string }) => {
+    return await single(
+      `Add relevant emojis to the following text: ${input.text}`
+    );
+  },
+  convertToLeetSpeak: async (input: { text: string }) => {
+    return await single(
+      `Convert the following text to Leet Speak: ${input.text}`
+    );
+  },
+  generateAcronym: async (input: { text: string }) => {
+    return input.text
+      .split(/\s+/)
+      .map((word) => word[0].toUpperCase())
+      .join("");
+  },
+  shuffleWords: async (input: { text: string }) => {
+    const words = input.text.split(/\s+/);
+    for (let i = words.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [words[i], words[j]] = [words[j], words[i]];
+    }
+    return words.join(" ");
+  },
+  convertToMorseCode: async (input: { text: string }) => {
+    return await single(
+      `Convert the following text to Morse code: ${input.text}`
+    );
+  },
+  emphasizeKeywords: async (input: { text: string }) => {
+    return await single(
+      `Emphasize important keywords in the following text: ${input.text}`
+    );
+  },
+  generateHashtags: async (input: { text: string }) => {
+    return await single(
+      `Generate relevant hashtags for the following text: ${input.text}`
+    );
+  },
+  convertToCamelCase: async (input: { text: string }) => {
+    return input.text
+      .replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) =>
+        index === 0 ? word.toLowerCase() : word.toUpperCase()
+      )
+      .replace(/\s+/g, "");
+  },
+};
 
 async function single(text: string) {
   let response = "";
@@ -45,12 +386,19 @@ async function single(text: string) {
   return response;
 }
 
+// get cli argument
+const args = Deno.args;
+if (args.length === 0) {
+  console.error("Please provide a question to ask.");
+  Deno.exit(1);
+}
+const question = args.join(" ");
+
 async function main() {
   let conversation: Anthropic.Messages.MessageParam[] = [
     {
       role: "user",
-      content:
-        "Find words that rhyme with 'orange' and 'purple'. Respond with a dot point list.",
+      content: question,
     },
   ];
 
@@ -66,22 +414,42 @@ async function main() {
 
     let currentMessage: Anthropic.Messages.ContentBlock[] = [];
     let stopReason: string | undefined;
+    let currentToolUse: Partial<Anthropic.Messages.ToolUseBlock> | null = null;
+    let accumulatedJson = "";
 
     for await (const event of stream) {
       if (event.type === "content_block_start") {
-        if (
-          event.content_block.type === "text" ||
-          event.content_block.type === "tool_use"
-        ) {
+        if (event.content_block.type === "text") {
           currentMessage.push({ ...event.content_block, text: "" });
+        } else if (event.content_block.type === "tool_use") {
+          currentToolUse = { ...event.content_block, input: {} };
         }
       } else if (event.type === "content_block_delta") {
-        const lastBlock = currentMessage[currentMessage.length - 1];
-        if (lastBlock && lastBlock.type === "text") {
-          lastBlock.text += event.delta.text;
-          Deno.stdout.writeSync(new TextEncoder().encode(event.delta.text));
-        } else if (lastBlock && lastBlock.type === "tool_use") {
-          Object.assign(lastBlock, event.delta);
+        if ("text" in event.delta) {
+          const lastBlock = currentMessage[currentMessage.length - 1];
+          if (lastBlock && lastBlock.type === "text") {
+            lastBlock.text += event.delta.text;
+            Deno.stdout.writeSync(new TextEncoder().encode(event.delta.text));
+          }
+        } else if ("partial_json" in event.delta && currentToolUse) {
+          // Accumulate partial JSON for tool use
+          accumulatedJson += event.delta.partial_json;
+          try {
+            const parsedJson = JSON.parse(accumulatedJson);
+            if (!currentToolUse.input) currentToolUse.input = {};
+            Object.assign(currentToolUse.input, parsedJson);
+            accumulatedJson = ""; // Reset accumulated JSON
+          } catch (error) {
+            // If parsing fails, continue accumulating
+          }
+        }
+      } else if (event.type === "content_block_stop") {
+        if (currentToolUse) {
+          currentMessage.push(
+            currentToolUse as Anthropic.Messages.ToolUseBlock
+          );
+          currentToolUse = null;
+          accumulatedJson = ""; // Reset accumulated JSON
         }
       } else if (event.type === "message_delta") {
         if (event.delta.stop_reason) {
@@ -113,17 +481,14 @@ async function main() {
       const calls = toolCalls.map(async (tool) => {
         const input = tool.input as any;
         console.log("Tool call", tool);
-        switch (tool.name) {
-          case "rhyme":
-            return [
-              tool.id,
-              await single(`what rhymes with ${input.word}?`),
-            ] as const;
-          default:
-            return [
-              tool.id,
-              await new Promise<string>((resolve) => resolve("")),
-            ] as const;
+        if (toolImpls[tool.name] === undefined) {
+          console.error(`Tool implementation not found for ${tool.name}`);
+          return [
+            tool.id,
+            await new Promise<string>((resolve) => resolve("")),
+          ] as const;
+        } else {
+          return [tool.id, await toolImpls[tool.name](input)] as const;
         }
       });
 
