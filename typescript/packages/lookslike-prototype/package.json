@@ -33,6 +33,7 @@
         "../../common/io:build",
         "../../common/runtime:build",
         "../usuba-rt:build",
+        "../usuba-sw:build",
         "../common-frp:build",
         "../common-frp-lit:build",
         "../common-ui:build"
@@ -60,6 +61,7 @@
     "@commontools/module": "^0.0.1",
     "@commontools/runtime": "^0.0.1",
     "@commontools/usuba-rt": "^0.0.1",
+    "@commontools/usuba-sw": "^0.0.1",
     "@instructor-ai/instructor": "^1.3.0",
     "@intcreator/markdown-element": "^0.3.3",
     "@shoelace-style/shoelace": "^2.15.1",
