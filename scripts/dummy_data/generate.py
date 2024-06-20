@@ -30,13 +30,22 @@ def value_variations(input : Dict[str, PlaceholderValue]) -> Tuple[List[Dict[str
     for combination in itertools.product(*nested_values):
         variation = {k: v for k, v in input.items() if not isinstance(v, dict)}
         for orig_key, nested_key, nested_value in combination: # type: ignore
-            variation[orig_key] = nested_key
+            variation[orig_key] = nested_value
         variations.append(variation)
     
     return (variations, nested_keys)
         
 def name_for_variation(variation : Dict[str, str], nested_keys : List[str]) -> str:
-    return "_".join([f"{v}" for k, v in variation.items() if k in nested_keys])
+    result : List[str] = []
+    for k, v in variation.items():
+        if k not in nested_keys:
+            continue
+        str_v = sanitize_string(f"{v}")
+        if len(str_v) > 32:
+            #create a md5 hash of the string and render it in a positive hex number
+            str_v = f"{hash(v) & 0xFFFFFFFF:08x}"
+        result.append(str_v)
+    return "_".join(result)
 
 def fetch_most_recent_target(name: str) -> Optional[PlaceholderValue]:
     return fetch_folder(f"./{TARGET_DIR}/{name}/{LATEST_LINK}", name, True)
@@ -163,19 +172,12 @@ def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Over
 
         print(f"Getting value for {placeholder}...")
         # Store the value in the dictionary
-        (value, directory) = fetch_placeholder(placeholder, timestamp, overrides, parent_names + [name])
+        (value, _) = fetch_placeholder(placeholder, timestamp, overrides, parent_names + [name])
         if multi and isinstance(value, str):
             new_value = {}
             for line in value.splitlines():
                 if line:
-                    content = ''
-                    filename = os.path.join(directory, line)
-                    # if the line is a valid filename, read the file contents
-                    if os.path.exists(filename):
-                        with open(filename, 'r') as file:
-                            content = file.read()
-                    key = line
-                    new_value[key] = content
+                    new_value[line] = line
             value = new_value
 
         if isinstance(value, dict):
