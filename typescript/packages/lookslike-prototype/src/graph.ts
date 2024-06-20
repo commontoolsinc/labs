@@ -152,7 +152,7 @@ async function executeNode(
       if (typeof node.body !== "string") {
         throw new Error("Expected a string");
       }
-      const result = await run(node.id, node.body, inputs);
+      const result = await run(node.id, node.body, inputs, node.evalMode);
       outputs[node.id].send(result);
       break;
     }
