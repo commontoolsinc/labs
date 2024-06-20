@@ -26,7 +26,9 @@
   "wireit": {
     "build": {
       "dependencies": [
-        "../common-ui:build"
+        "../common-ui:build",
+        "../common-frp:build",
+        "../lookslike-sagas:build"
       ],
       "command": "vite build"
     },
@@ -36,6 +38,7 @@
   },
   "dependencies": {
     "@commontools/common-ui": "^0.0.1",
-    "@commontools/common-frp": "^0.0.1"
+    "@commontools/common-frp": "^0.0.1",
+    "@commontools/lookslike-sagas": "^0.0.1"
   }
 }

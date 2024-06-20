@@ -1,22 +1,12 @@
-import { view, tags, render } from "@commontools/common-ui";
-import { signal } from "@commontools/common-frp";
-import { dataGems } from "./data.js";
-const { binding } = view;
-const { include } = tags;
-const { computed, isSignal } = signal;
+export { components } from "@commontools/common-ui";
+import { CommonWindowManager } from "./components/window-manager.js";
+export { components as myComponents } from "./components.js";
+import { getGemByName } from "./data.js";
 
-// Hard coded todo list as UI to show
-const UI = computed([dataGems], (dataGems) => {
-  if (dataGems.length === 0) return null;
-
-  let UI = dataGems["recipe list"]?.UI;
-  if (isSignal(UI)) UI = UI.get();
-  return UI;
+document.addEventListener("DOMContentLoaded", () => {
+  const windowManager = document.getElementById(
+    "window-manager"
+  )! as CommonWindowManager;
+  console.log(getGemByName("home"));
+  windowManager.openSaga(getGemByName("home")!);
 });
-
-// Render the UI by including the recipe's UI
-const element = render.render(include({ content: binding("UI") }), {
-  UI,
-});
-
-document.body.appendChild(element);

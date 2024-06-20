@@ -2,18 +2,11 @@
   "extends": "../../tsconfig.base.json",
   "moduleResolution": "nodenext",
   "compilerOptions": {
-    "lib": [
-      "es2022",
-      "esnext.array",
-      "esnext",
-      "dom"
-    ],
+    "lib": ["es2022", "esnext.array", "esnext", "dom"],
     "outDir": "./",
     "experimentalDecorators": true,
     "useDefineForClassFields": false
   },
-  "include": [
-    "src/**/*.ts"
-  ],
+  "include": ["src/**/*.ts"],
   "exclude": []
 }

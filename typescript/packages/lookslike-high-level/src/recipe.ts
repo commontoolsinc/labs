@@ -23,6 +23,10 @@ export type Gem = {
   [NAME]?: string;
 } & Bindings;
 
+export function isGem(value: any): value is Gem {
+  return typeof value === "object" && ID in value && TYPE in value;
+}
+
 // Readwrite signals are inputs that are passed through to the output
 export type Recipe = (inputs: RecipeInputs) => Gem;
 
