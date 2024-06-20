@@ -1,0 +1,5 @@
+{
+  "name": "Elara Evergreen",
+  "skills": ["Jewelry Making", "Invention Tinkering", "Puzzle Solving"],
+  "abilities": ["Quick Wit", "Keen Eye for Detail", "Curiosity"]
+}

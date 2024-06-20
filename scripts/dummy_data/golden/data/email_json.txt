@@ -1,0 +1,12 @@
+{
+  "firstName": "Elara",
+  "lastName": "Evergreen",
+  "email": "elara.evergreen@example.com",
+  "phone": "555-123-4567",
+  "address": {
+    "street": "123 Starlight Avenue",
+    "city": "Metropolis",
+    "state": "Wonderland",
+    "zipcode": "54321"
+  }
+}

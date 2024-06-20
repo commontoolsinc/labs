@@ -1,0 +1,11 @@
+{
+  "name": "Elara Evergreen",
+  "dob": "03/15/1990",
+  "blood_type": "AB+",
+  "height": 165,
+  "weight": 55,
+  "allergies": ["Pollen", "Peanuts"],
+  "medications": ["Antihistamines"],
+  "conditions": ["Seasonal Allergies"],
+  "last_checkup_date": "06/20/2021"
+}

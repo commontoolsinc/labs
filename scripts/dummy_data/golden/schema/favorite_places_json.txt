@@ -1,0 +1,33 @@
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "favorite_places": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "place_name": {
+            "type": "string"
+          },
+          "location": {
+            "type": "object",
+            "properties": {
+              "latitude": {
+                "type": "number"
+              },
+              "longitude": {
+                "type": "number"
+              }
+            },
+            "required": ["latitude", "longitude"]
+          }
+        },
+        "required": ["place_name", "location"]
+      }
+    }
+  },
+  "required": ["name", "favorite_places"]
+}

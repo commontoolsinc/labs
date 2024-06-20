@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "properties": {
+    "sleep_quality": {
+      "type": "string",
+      "description": "The quality of sleep experienced by the person (e.g. good, bad, okay)"
+    },
+    "hours_slept": {
+      "type": "number",
+      "description": "The number of hours the person slept"
+    },
+    "dream_description": {
+      "type": "string",
+      "description": "A description of the dreams experienced by the person during sleep"
+    }
+  },
+  "required": ["sleep_quality", "hours_slept"]
+}

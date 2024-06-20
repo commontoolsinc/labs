@@ -1,0 +1,25 @@
+{
+  "name": "Elara Evergreen",
+  "events": [
+    {
+      "title": "Invention Expo",
+      "date": "2023-08-15T14:00:00",
+      "location": "Metropolis Convention Center"
+    },
+    {
+      "title": "Jewelry Fashion Show",
+      "date": "2023-09-20T18:30:00",
+      "location": "Crystal Palace"
+    },
+    {
+      "title": "Secret Society of Sleuths Meeting",
+      "date": "2023-10-05T19:00:00",
+      "location": "Hidden Library"
+    },
+    {
+      "title": "Enchanted Forest Exploration",
+      "date": "2023-11-12T10:00:00",
+      "location": "Wonderland Woods"
+    }
+  ]
+}

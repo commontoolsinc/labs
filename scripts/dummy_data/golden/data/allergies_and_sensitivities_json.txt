@@ -1,0 +1,5 @@
+{
+  "name": "Elara Evergreen",
+  "allergies": ["pollen", "peanuts"],
+  "sensitivities": ["loud noises", "bright lights"]
+}

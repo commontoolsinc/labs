@@ -1,0 +1,15 @@
+{
+  "employment_history": [
+    {
+      "company_name": "Cosmic Cat Cafe",
+      "position": "Inventor-in-Residence",
+      "start_date": "2018-06-15",
+      "end_date": "2021-09-30"
+    },
+    {
+      "company_name": "Jewel Queen Creations",
+      "position": "Founder and Lead Designer",
+      "start_date": "2021-10-15"
+    }
+  ]
+}

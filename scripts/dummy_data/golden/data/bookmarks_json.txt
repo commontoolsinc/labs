@@ -1,0 +1,6 @@
+{
+  "name": "Elara Evergreen",
+  "url": "https://example.com/elara-evergreen",
+  "description": "A mischievous maven with a flair for the fantastical, born under a bewitching full moon in the bustling metropolis of Metropolis. Known as the Jewel Queen of Metropolis for her intricate and dazzling jewelry creations. Member of the Secret Society of Sleuths, solving perplexing cases with her keen eye for detail and quick wit. Enjoys exploring enchanted forests with her pet parrot, Pablo.",
+  "tags": ["mischievous", "maven", "fantastical", "jewelry maker", "Secret Society of Sleuths", "enchanted forests", "pet parrot"]
+}

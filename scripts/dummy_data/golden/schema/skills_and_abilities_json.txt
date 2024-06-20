@@ -1,0 +1,22 @@
+{
+  "title": "Skills and Abilities",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "abilities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["name", "skills", "abilities"]
+}

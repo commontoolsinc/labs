@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for the todo item"
+    },
+    "task": {
+      "type": "string",
+      "description": "Description of the task to be completed"
+    },
+    "completed": {
+      "type": "boolean",
+      "description": "Indicates whether the task has been completed or not"
+    },
+    "dueDate": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Date by which the task should be completed"
+    }
+  },
+  "required": ["id", "task", "completed", "dueDate"]
+}

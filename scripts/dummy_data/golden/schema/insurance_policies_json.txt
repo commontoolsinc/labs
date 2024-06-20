@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "policy_number": {
+      "type": "string"
+    },
+    "policy_type": {
+      "type": "string"
+    },
+    "coverage_amount": {
+      "type": "number"
+    },
+    "premium_amount": {
+      "type": "number"
+    },
+    "beneficiary": {
+      "type": "string"
+    },
+    "start_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "end_date": {
+      "type": "string",
+      "format": "date"
+    }
+  },
+  "required": ["policy_number", "policy_type", "coverage_amount", "premium_amount", "beneficiary", "start_date", "end_date"]
+}

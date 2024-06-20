@@ -1,0 +1,33 @@
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "age": {
+      "type": "integer"
+    },
+    "gender": {
+      "type": "string",
+      "enum": ["male", "female", "non-binary"]
+    },
+    "height": {
+      "type": "number"
+    },
+    "weight": {
+      "type": "number"
+    },
+    "exercise_frequency": {
+      "type": "string",
+      "enum": ["daily", "weekly", "monthly", "never"]
+    },
+    "exercise_intensity": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "favorite_fitness_activity": {
+      "type": "string"
+    }
+  },
+  "required": ["name", "age", "gender", "height", "weight", "exercise_frequency", "exercise_intensity", "favorite_fitness_activity"]
+}

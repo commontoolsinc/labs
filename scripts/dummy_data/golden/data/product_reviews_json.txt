@@ -1,0 +1,9 @@
+{
+  "product_id": 12345,
+  "product_name": "Wonderland Watch",
+  "user_id": 67890,
+  "user_name": "Elara Evergreen",
+  "rating": 4.5,
+  "review": "Absolutely enchanted with this watch! It's like wearing a piece of magic on my wrist.",
+  "date": "2022-07-15T10:30:00Z"
+}

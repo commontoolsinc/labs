@@ -1,0 +1,16 @@
+{
+  "person_name": "Elara Evergreen",
+  "date_of_birth": "1990-07-15T00:00:00Z",
+  "vaccination_records": [
+    {
+      "vaccine_name": "COVID-19 Vaccine",
+      "date_administered": "2021-05-10T08:00:00Z",
+      "vaccination_location": "Metropolis Health Clinic"
+    },
+    {
+      "vaccine_name": "Flu Vaccine",
+      "date_administered": "2020-10-25T10:30:00Z",
+      "vaccination_location": "Cosmic Cat Pharmacy"
+    }
+  ]
+}

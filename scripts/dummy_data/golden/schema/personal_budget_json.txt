@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "age": {
+      "type": "integer"
+    },
+    "income": {
+      "type": "number"
+    },
+    "expenses": {
+      "type": "object",
+      "properties": {
+        "rent": {
+          "type": "number"
+        },
+        "utilities": {
+          "type": "number"
+        },
+        "food": {
+          "type": "number"
+        },
+        "entertainment": {
+          "type": "number"
+        }
+      },
+      "required": ["rent", "utilities", "food"]
+    },
+    "savings": {
+      "type": "number"
+    }
+  },
+  "required": ["name", "age", "income", "expenses", "savings"]
+}

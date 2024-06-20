@@ -1,0 +1,29 @@
+{
+  "transactions": [
+    {
+      "date": "2022-10-15T08:00:00Z",
+      "description": "Stardust coffee at Cosmic Cat cafe",
+      "amount": 5.75
+    },
+    {
+      "date": "2022-10-16T12:30:00Z",
+      "description": "Purchase of rare gemstones for jewelry making",
+      "amount": 150.00
+    },
+    {
+      "date": "2022-10-17T18:45:00Z",
+      "description": "Membership fee for Secret Society of Sleuths",
+      "amount": 20.00
+    },
+    {
+      "date": "2022-10-18T10:00:00Z",
+      "description": "Purchase of new puzzle box for mystery solving",
+      "amount": 30.99
+    },
+    {
+      "date": "2022-10-19T16:20:00Z",
+      "description": "Visit to the enchanted forest with Pablo",
+      "amount": 0.00
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "Elara Evergreen",
+  "age": 27,
+  "gender": "female",
+  "occupation": "Jewel Queen of Metropolis",
+  "location": {
+    "city": "Metropolis",
+    "country": "Wonderland"
+  },
+  "interests": [
+    "technology",
+    "jewelry making",
+    "solving mysteries",
+    "adventures"
+  ],
+  "favorite_colors": [
+    "shiny",
+    "sparkly",
+    "neon"
+  ]
+}

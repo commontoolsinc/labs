@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "properties": {
+    "education": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "school": {
+            "type": "string"
+          },
+          "degree": {
+            "type": "string"
+          },
+          "year_graduated": {
+            "type": "integer"
+          }
+        },
+        "required": ["school", "degree", "year_graduated"]
+      }
+    }
+  },
+  "required": ["education"]
+}

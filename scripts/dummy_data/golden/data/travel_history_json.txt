@@ -1,0 +1,7 @@
+{
+  "name": "Elara Evergreen",
+  "passport_number": "AA1234567",
+  "countries_visited": ["Wonderland", "Metropolis", "Enchanted Forest"],
+  "dates_visited": ["2021-01-15", "2021-02-20", "2021-03-10"],
+  "mode_of_transport": "plane"
+}

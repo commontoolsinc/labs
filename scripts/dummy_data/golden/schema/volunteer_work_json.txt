@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "properties": {
+    "organization": {
+      "type": "string"
+    },
+    "position": {
+      "type": "string"
+    },
+    "duration": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    }
+  },
+  "required": ["organization", "position", "duration", "description"]
+}

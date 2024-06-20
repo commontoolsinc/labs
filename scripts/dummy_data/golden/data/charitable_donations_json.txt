@@ -1,0 +1,6 @@
+{
+  "donor_name": "Elara Evergreen",
+  "donation_amount": 500,
+  "charity_name": "Wonderland Wildlife Foundation",
+  "donation_date": "2022-07-15"
+}
