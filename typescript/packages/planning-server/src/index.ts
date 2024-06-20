@@ -267,14 +267,136 @@ const tools: Anthropic.Messages.Tool[] = [
       required: ["text"],
     },
   },
+  {
+    name: "getCurrentDate",
+    description: "Get the current date and time",
+    input_schema: {
+      type: "object",
+      properties: {
+        timezone: {
+          type: "string",
+        },
+      },
+      required: ["timezone"],
+    },
+  },
+  {
+    name: "getSystemMemoryUsage",
+    description: "Get the current system memory usage",
+    input_schema: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "getRandomNumber",
+    description: "Generate a random number within a given range",
+    input_schema: {
+      type: "object",
+      properties: {
+        min: {
+          type: "number",
+        },
+        max: {
+          type: "number",
+        },
+      },
+      required: ["min", "max"],
+    },
+  },
+  {
+    name: "getEnvironmentVariable",
+    description: "Get the value of an environment variable",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+        },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "getFileContents",
+    description: "Get the contents of a file",
+    input_schema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+        },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "listDirectoryContents",
+    description: "List the contents of a directory",
+    input_schema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+        },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    name: "getNetworkInterfaces",
+    description: "Get information about network interfaces",
+    input_schema: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "getDiskSpace",
+    description: "Get available disk space",
+    input_schema: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "getOSInfo",
+    description: "Get information about the operating system",
+    input_schema: {
+      type: "object",
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "checkWebsiteStatus",
+    description: "Check if a website is up and running",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+        },
+      },
+      required: ["url"],
+    },
+  },
 ];
+
+const HAIKU = "claude-3-haiku-20240307";
 
 const toolImpls: { [id: string]: Function } = {
   rhyme: async (input: { word: string }) => {
     return await single(`what rhymes with ${input.word}?`);
   },
   summarize: async (input: { text: string }) => {
-    return await single(`Summarize the following text: ${input.text}`);
+    return await single(
+      `Summarize the following text in a single paragraph: ${input.text}`,
+      HAIKU
+    );
   },
   sentimentAnalysis: async (input: { text: string }) => {
     return await single(
@@ -285,10 +407,13 @@ const toolImpls: { [id: string]: Function } = {
     return await single(`Exaggerate the following text: ${input.text}`);
   },
   makeSadder: async (input: { text: string }) => {
-    return await single(`Make the following text sadder: ${input.text}`);
+    return await single(`Make the following text sadder: ${input.text}`, HAIKU);
   },
   makeHappier: async (input: { text: string }) => {
-    return await single(`Make the following text happier: ${input.text}`);
+    return await single(
+      `Make the following text happier: ${input.text}`,
+      HAIKU
+    );
   },
   capitalize: async (input: { text: string }) => {
     return input.text
@@ -322,7 +447,8 @@ const toolImpls: { [id: string]: Function } = {
   },
   convertToLeetSpeak: async (input: { text: string }) => {
     return await single(
-      `Convert the following text to Leet Speak: ${input.text}`
+      `Convert the following text to Leet Speak: ${input.text}`,
+      HAIKU
     );
   },
   generateAcronym: async (input: { text: string }) => {
@@ -351,7 +477,8 @@ const toolImpls: { [id: string]: Function } = {
   },
   generateHashtags: async (input: { text: string }) => {
     return await single(
-      `Generate relevant hashtags for the following text: ${input.text}`
+      `Generate relevant hashtags for the following text: ${input.text}`,
+      HAIKU
     );
   },
   convertToCamelCase: async (input: { text: string }) => {
@@ -361,19 +488,91 @@ const toolImpls: { [id: string]: Function } = {
       )
       .replace(/\s+/g, "");
   },
+  getCurrentDate: async (input: { timezone: string }) => {
+    return new Date().toLocaleString("en-US", { timeZone: input.timezone });
+  },
+  getSystemMemoryUsage: async () => {
+    const memoryUsage = Deno.memoryUsage();
+    return {
+      rss: memoryUsage.rss,
+      heapTotal: memoryUsage.heapTotal,
+      heapUsed: memoryUsage.heapUsed,
+      external: memoryUsage.external,
+    };
+  },
+  getRandomNumber: async (input: { min: number; max: number }) => {
+    return Math.floor(Math.random() * (input.max - input.min + 1)) + input.min;
+  },
+  getEnvironmentVariable: async (input: { name: string }) => {
+    return Deno.env.get(input.name) || "Environment variable not found";
+  },
+  getFileContents: async (input: { path: string }) => {
+    try {
+      return await Deno.readTextFile(input.path);
+    } catch (error) {
+      return `Error reading file: ${error.message}`;
+    }
+  },
+  listDirectoryContents: async (input: { path: string }) => {
+    try {
+      const entries = [];
+      for await (const entry of Deno.readDir(input.path)) {
+        entries.push(entry.name);
+      }
+      return entries;
+    } catch (error) {
+      return `Error listing directory: ${error.message}`;
+    }
+  },
+  getNetworkInterfaces: async () => {
+    const networkInterfaces = Deno.networkInterfaces();
+    return JSON.stringify(networkInterfaces, null, 2);
+  },
+  getDiskSpace: async () => {
+    // Note: Deno doesn't have a built-in way to get disk space.
+    // This is a placeholder that returns a mock result.
+    return {
+      total: "1000GB",
+      free: "500GB",
+      used: "500GB",
+    };
+  },
+  getOSInfo: async () => {
+    return {
+      os: Deno.build.os,
+      arch: Deno.build.arch,
+    };
+  },
+  checkWebsiteStatus: async (input: { url: string }) => {
+    try {
+      const response = await fetch(input.url);
+      return {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+      };
+    } catch (error) {
+      return `Error checking website: ${error.message}`;
+    }
+  },
 };
 
-async function single(text: string) {
+const MAX_TOKENS = 4096;
+
+async function single(
+  text: string,
+  model: string = "claude-3-5-sonnet-20240620"
+) {
   let response = "";
   const stream = await anthropic.messages.stream({
-    max_tokens: 1024,
+    max_tokens: MAX_TOKENS,
     messages: [
       {
         role: "user",
         content: text,
       },
     ],
-    model: "claude-3-5-sonnet-20240620",
+    model,
   });
 
   for await (const event of stream) {
@@ -386,13 +585,10 @@ async function single(text: string) {
   return response;
 }
 
-// get cli argument
-const args = Deno.args;
-if (args.length === 0) {
-  console.error("Please provide a question to ask.");
-  Deno.exit(1);
-}
-const question = args.join(" ");
+// read question from stdin
+const buf = new Uint8Array(4096);
+const n = Deno.stdin.readSync(buf);
+const question = new TextDecoder().decode(buf.subarray(0, n)).trim();
 
 async function main() {
   let conversation: Anthropic.Messages.MessageParam[] = [
@@ -406,7 +602,7 @@ async function main() {
   while (running) {
     console.log("Conversation", conversation);
     const stream = await anthropic.messages.stream({
-      max_tokens: 1024,
+      max_tokens: MAX_TOKENS,
       messages: conversation,
       model: "claude-3-5-sonnet-20240620",
       tools: tools,
@@ -501,7 +697,7 @@ async function main() {
           content: [
             {
               type: "text",
-              text: result,
+              text: `${result}`,
             },
           ],
         };
