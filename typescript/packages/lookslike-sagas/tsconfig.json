@@ -1,19 +1,23 @@
 {
   "extends": "../../tsconfig.base.json",
-  "moduleResolution": "nodenext",
   "compilerOptions": {
-    "lib": [
-      "es2022",
-      "esnext.array",
-      "esnext",
-      "dom"
-    ],
-    "outDir": "./",
+    "lib": ["ESNext", "ESNext.Array", "dom", "dom.iterable"],
+    "outDir": "./lib",
+    "rootDir": "./src",
+    "strict": false,
     "experimentalDecorators": true,
-    "useDefineForClassFields": false
+    "useDefineForClassFields": false,
+    "paths": {
+      "common:module/module@0.0.1": [
+        "../../node_modules/@commontools/module/lib/index.d.ts"
+      ],
+      "common:io/state@0.0.1": [
+        "../../node_modules/@commontools/io/lib/index.d.ts"
+      ]
+    },
+    "types": ["node"]
   },
   "include": [
-    "src/**/*.ts"
-  ],
-  "exclude": []
+    "src/**/*",
+  ]
 }
