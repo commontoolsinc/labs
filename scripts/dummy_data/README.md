@@ -31,13 +31,7 @@ This order means that prompt output will be used if they exist, falling back on 
 
 This process is recursive. When a name is found it is printed out which version it uses.
 
-If you pipe in a file to the generate.py command, then it will call the given prompt once for each non-empty line, where each invocation will set that line's values to ${_input}, and, if the input denotes a valid filename, ${_input_content}. In this multi-mode, the output in target will be separate files.
-
-Example: `cat target/files/_latest/files.txt | python3 generate.py prompts/schema.txt`
-
-A more complex multi-line example for generating multiple schemas:
-
-`ls target/schema/_latest/ | grep -v "^_" | sed 's/^/target\/schema\/_latest\//' | python3 generate.py prompts/data.txt`
+As a special case, if your include has the `:multi` directive, it says 'load up the named placeholder, and then interpet each line as a separate value and call this template once for each file'
 
 ### TODO
 - A debug mode to print out the raw prompts as returned from compile
@@ -45,3 +39,5 @@ A more complex multi-line example for generating multiple schemas:
 - When a sub-prompt is executed that has multi-mode output, put the downstream thing in multi-line output as well.
 - Make it so the output when running the grep example above don't get long weird mangled output names.
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)
+- allow the various fetch_* that operate on a directory to return multiple items if the named thing is a directory.
+- switch ':' in multi directive to '|'
