@@ -10,7 +10,7 @@
 <body class="theme">
     <common-screen>
         <common-app>
-            <common-vstack>
+            <common-vstack pad="md" gap="md">
                 <common-media src="example/mitchell-orr-jQqR2xGkesc-unsplash.jpg">
                     Hello!
                 </common-media>
@@ -30,7 +30,15 @@
                     Hello!
                 </common-media>
             </common-vstack>
-            <common-unibox placeholder="Imagine..." slot="search"></common-unibox>
+            <div slot="secondary">
+                <common-suggestion>
+                    Buy milk
+                </common-suggestion>
+                <common-suggestion>
+                    Floop the pig
+                </common-suggestion>
+            </div>
+            <common-unibox slot="search" placeholder="Imagine..."></common-unibox>
         </common-app>
     </common-screen>
 </body>

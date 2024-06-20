@@ -15,7 +15,7 @@ export class AppElement extends LitElement {
       height: 100cqh;
       display: grid;
       grid-template-columns: 1fr;
-      grid-template-rows: 1fr 300px min-content;
+      grid-template-rows: 1fr min-content min-content;
       grid-template-areas:
         "primary"
         "secondary"

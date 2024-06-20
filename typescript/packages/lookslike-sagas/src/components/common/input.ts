@@ -12,14 +12,15 @@ export class CommonInputElement extends LitElement {
     }
     
     .input {
+      appearance: none;
       background-color: var(--input-background);
       border: 0;
+      border-radius: calc(var(--height) / 2);
       box-sizing: border-box;
-      appearance: none;
+      font-size: var(--body-size);
       width: 100%;
       height: 100%;
       padding: 8px 16px;
-      border-radius: calc(var(--height) / 2);
       height: var(--height);
     }
     `

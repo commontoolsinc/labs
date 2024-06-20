@@ -14,7 +14,14 @@ export class VstackElement extends LitElement {
     .stack {
       display: flex;
       flex-direction: column;
+    }
+
+    :host-context([gap="md"]) .stack {
       gap: var(--gap);
+    }
+
+    :host-context([pad="md"]) .stack {
+      padding: var(--gap);
     }
     `
   ];
