@@ -50,8 +50,7 @@ pub async fn serve(listener: TcpListener, upstream: Option<Uri>) -> Result<(), U
         .route("/api/v0/module", post(build_module))
         .route("/api/v0/module/:id", get(retrieve_module))
         .route("/api/v0/recipe/eval", post(eval_recipe))
-        .route("/", get(upstream_index))
-        .route("/$", get(ui_index))
+        .route("/", get(ui_index))
         .route("/*file", get(ui_file))
         .with_state(UsubaState {
             storage,
