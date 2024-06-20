@@ -12,8 +12,9 @@ INPUT_CONTENTS_OVERRIDE_NAME = '_input_contents'
 SPECIAL_PLACEHOLDERS = [INPUT_OVERRIDE_NAME, INPUT_CONTENTS_OVERRIDE_NAME]
 
 OverridesDict: TypeAlias = Dict[str, str]
+PlaceholderValue : TypeAlias = str
 
-def fetch_most_recent_target(name: str) -> Optional[str]:
+def fetch_most_recent_target(name: str) -> Optional[PlaceholderValue]:
     # looks for the file with the most recent name in /target/${name}/ and returns the contents
     if not os.path.exists(f"./target/{name}"):
         return None
@@ -28,7 +29,7 @@ def fetch_most_recent_target(name: str) -> Optional[str]:
     with open(f"./target/{name}/{most_recent_directory}/{name}.txt", 'r') as file:
         return file.read()
     
-def fetch_golden(name: str) -> Optional[str]:
+def fetch_golden(name: str) -> Optional[PlaceholderValue]:
     # check the golden directory exists
     if not os.path.exists('golden'):
         return None
@@ -42,7 +43,7 @@ def fetch_golden(name: str) -> Optional[str]:
     
     return None
 
-def fetch_include(name: str) -> Optional[str]:
+def fetch_include(name: str) -> Optional[PlaceholderValue]:
     # Check for a file in `includes/` with the basename ${name} (any extension) and returns the contents
 
     if not os.path.exists('includes'):
@@ -56,7 +57,7 @@ def fetch_include(name: str) -> Optional[str]:
         
     return None
 
-def fetch_raw_prompt(name: str) -> Optional[str]:
+def fetch_raw_prompt(name: str) -> Optional[PlaceholderValue]:
     # Check for a file in `prompts/` with the basename ${name} (any extension) and returns the contents
     if not os.path.exists('prompts'):
         return None
@@ -69,7 +70,7 @@ def fetch_raw_prompt(name: str) -> Optional[str]:
     
     return None
 
-def fetch_prompt(name: str, timestamp : str, overrides : OverridesDict, parent_names: List[str]) -> Optional[str]:
+def fetch_prompt(name: str, timestamp : str, overrides : OverridesDict, parent_names: List[str]) -> Optional[PlaceholderValue]:
     # Fetch the raw prompt and compile it
     raw_prompt = fetch_raw_prompt(name)
 
@@ -82,7 +83,7 @@ def fetch_prompt(name: str, timestamp : str, overrides : OverridesDict, parent_n
     return fetch_most_recent_target(name)
 
 
-def fetch_placeholder(name: str, timestamp : str, overrides: OverridesDict, parent_names: List[str]) -> str:
+def fetch_placeholder(name: str, timestamp : str, overrides: OverridesDict, parent_names: List[str]) -> PlaceholderValue:
 
     # Override order:
     # 1. Explicitly provided placeholder_override
