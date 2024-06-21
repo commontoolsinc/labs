@@ -5,14 +5,9 @@ import re
 import argparse
 import itertools
 from datetime import datetime
-from typing import List, Dict, Optional, TypeAlias, Union, Tuple, cast
+from typing import List, Dict, Optional, TypeAlias, Union, Tuple, cast, Literal, get_args
 
 from dataclasses import dataclass
-
-@dataclass
-class ExecutionContext:
-    overrides: Dict[str, str]
-    timestamp: str
 
 GOLDEN_DIR = 'golden'
 INCLUDES_DIR = 'includes'
@@ -23,6 +18,14 @@ INFO_DIR = '_info'
 
 OverridesDict: TypeAlias = Dict[str, str]
 PlaceholderValue : TypeAlias = Union[str, Dict[str, str]]
+IgnoreType = Literal['golden', 'target', 'includes', 'prompts', 'overrides']
+
+@dataclass
+class ExecutionContext:
+    overrides: Dict[str, str]
+    timestamp: str
+    # an array of names, which must be 'golden', 'target', 'includes', or 'prompts'
+    ignore: List[IgnoreType]
 
 # returns all the variations, as well as the keys that varied. as well as a map from value to shortname
 def value_variations(input : Dict[str, PlaceholderValue]) -> Tuple[List[Dict[str, str]], List[str], Dict[str, str]] :
@@ -115,29 +118,45 @@ def fetch_placeholder(name: str, context : ExecutionContext, parent_names: List[
     # 5. A matching file from `prompts/` (which will be compiled and executed)
 
     if name in context.overrides:
-        print(f"Using placeholder override for {name}...")
-        return context.overrides[name]
+        if 'overrides' in context.ignore:
+            print(f"Would have used placeholder override for {name} but --ignore overrides was specified.")
+        else: 
+            print(f"Using placeholder override for {name}...")
+            return context.overrides[name]
 
     value = fetch_folder(GOLDEN_DIR, name)
     if value:
-        print(f"Using golden file for {name}...")
-        return value
+        if 'golden' in context.ignore:
+            print(f"Would have used golden file for {name} but --ignore golden was specified.")
+        else:
+            print(f"Using golden file for {name}...")
+            return value
 
     value = fetch_most_recent_target(name)
     if value:
-        print(f"Using most recent target for {name}...")
-        return value
+        if 'target' in context.ignore:
+            print(f"Would have used most recent target for {name} but --ignore target was specified.")
+        else:
+            print(f"Using most recent target for {name}...")
+            return value
     
     value = fetch_folder(INCLUDES_DIR, name)
     if value:
-        print(f"Using include file for {name}...")
-        return value
+        if 'includes' in context.ignore:
+            print(f"Would have used include file for {name} but --ignore includes was specified.")
+        else:
+            print(f"Using include file for {name}...")
+            return value
 
     value = fetch_prompt(name, context, parent_names)
     if value:
-        # TODO: if this had to be compiled, this message comes after the compilation.
-        print(f"Using prompt file for {name}...")
-        return value
+        if 'prompts' in context.ignore:
+            # TODO: isn't it weird that even if we were told to ignore prompts we still execute them?
+            print(f"Would have used prompt file for {name} but --ignore prompts was specified.")
+        else: 
+            # TODO: if this had to be compiled, this message comes after the compilation.
+            print(f"Using prompt file for {name}...")
+            return value
 
     raise Exception(f"Could not find value for placeholder {name}")
 
@@ -294,6 +313,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='Process a prompt file.\nBy default, a single prompt is executed. If stdin is provided, then it will execute the template once for each line, piping that line\'s input as the override variable "_input"')
     parser.add_argument('prompt_file', help='Path to the prompt file')
     parser.add_argument('--overrides', nargs='+', action='append', help='Named override placeholders in the format ARG_1 VAL_1 ARG_2 VAL_2')
+    #TODO : enable specificying only specific named placeholders for a given type (e.g. includes:files,prompt, where includes:* mean all includes, and `includes` is sugar for 'includes:*')
+    parser.add_argument('--ignore', nargs='+', help='Ignore specific folders', choices=get_args(IgnoreType))
 
     args = parser.parse_args()
 
@@ -320,7 +341,9 @@ def main() -> None:
     # Generate a timestamp, do it now so we'll use the same one in multiple runs in multi-mode.
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    context = ExecutionContext(overrides, timestamp)
+    ignore : List[IgnoreType] = args.ignore or []
+
+    context = ExecutionContext(overrides, timestamp, ignore)
 
     execute_prompt(prompt_base_filename, prompt_contents, context)
 
