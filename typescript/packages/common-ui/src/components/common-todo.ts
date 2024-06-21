@@ -42,21 +42,40 @@ export class CommonTodoElement extends LitElement {
     baseStyles,
     css`
       :host {
+        --todo-height: 40px;
         display: block;
       }
 
       .todo {
         display: grid;
         grid-template-columns: min-content 1fr;
-        align-items: center;
         column-gap: var(--pad);
-        min-height: 40px;
       }
 
       .todo-ctl {
         display: flex;
         gap: var(--gap);
         align-items: center;
+        height: var(--todo-height);
+      }
+
+      .todo-main {
+        display: flex;
+        flex-direction: column;
+        gap: var(--pad);
+        min-height: var(--todo-height);
+      }
+      
+      .todo-value {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        height: var(--todo-height);
+      }
+      
+      .todo-input {
+        --height: var(--todo-height);
+        height: var(--todo-height);
       }
 
       .todo-checkbox {
@@ -92,29 +111,33 @@ export class CommonTodoElement extends LitElement {
         new CommonTodoInputEvent({
           id: this.id,
           value: this.value,
-          checked: this.checked,
+          checked: this.checked
         })
       );
     };
 
     return html`
-      <div class="todo">
-        <div class="todo-ctl">
-          <input
-            class="todo-checkbox"
-            type="checkbox"
-            @change="${oncheck}"
-            .checked="${this.checked}"
-          />
-        </div>
-        <common-input
-          class="unibox-input"
-          @input="${oninput}"
-          .placeholder="${this.placeholder}"
-          .value="${this.value}"
-        >
-        </common-input>
+    <div class="todo">
+      <div class="todo-ctl">
+        <input
+          class="todo-checkbox"
+          type="checkbox"
+          @change="${oncheck}"
+          .checked="${this.checked}"
+        />
       </div>
+      <div class="todo-main">
+        <div class="todo-value">
+          <common-input
+            class="todo-input"
+            @input="${oninput}"
+            .placeholder="${this.placeholder}"
+            .value="${this.value}">
+          </common-input>
+        </div>
+        <slot></slot>
+      </div>
+    </div>
     `;
   }
 }
