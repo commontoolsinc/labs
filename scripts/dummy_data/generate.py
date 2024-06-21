@@ -22,13 +22,12 @@ OverridesDict: TypeAlias = Dict[str, str]
 PlaceholderValue : TypeAlias = Union[str, Dict[str, str]]
 
 # When adding a value, also change IgnoreDict.
-IgnoreType = Literal['golden', 'target', 'includes', 'prompts', 'overrides']
+IgnoreType = Literal['golden', 'target', 'includes', 'overrides']
 wildcard_ignores : List[IgnoreType] = ['overrides', 'includes']
 class IgnoreDict(TypedDict, total=False):
     golden: List[str]
     target: List[str]
     includes: List[str]
-    prompts: List[str]
     overrides: List[str]
 
 @dataclass
@@ -223,13 +222,9 @@ def fetch_placeholder(name: str, context : ExecutionContext, parent_names: List[
 
     value = fetch_prompt(name, context, parent_names)
     if value:
-        if should_ignore('prompts', name, context.ignore):
-            # TODO: isn't it weird that even if we were told to ignore prompts we still execute them?
-            print(f"Would have used prompt file for {name} but --ignore prompts was specified.")
-        else: 
-            # TODO: if this had to be compiled, this message comes after the compilation.
-            print(f"Using prompt file for {name}...")
-            return value
+        # TODO: if this had to be compiled, this message comes after the compilation.
+        print(f"Using prompt file for {name}...")
+        return value
 
     raise Exception(f"Could not find value for placeholder {name}")
 
