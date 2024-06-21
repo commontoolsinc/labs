@@ -1,16 +1,17 @@
 import { view, tags } from "@commontools/common-ui";
 import { signal, stream } from "@commontools/common-frp";
-import { dataGems, keywords } from "../data.js";
+import { dataGems } from "../data.js";
 import {
   recipe,
   Recipe,
   Gem,
   TYPE,
+  NAME,
   suggestions,
   type Suggestion,
 } from "../recipe.js";
 const { include } = tags;
-const { state, computed } = signal;
+const { state, computed, isSignal } = signal;
 const { subject } = stream;
 const { binding } = view;
 
@@ -30,10 +31,8 @@ const { binding } = view;
  */
 
 export const annotation = recipe("annotation", ({ "?": query, ...data }) => {
-  const suggestion = computed(
-    [dataGems, suggestions, query],
-    (dataGems, suggestions, query: string) =>
-      findSuggestion(dataGems, suggestions, query, Object.keys(data))
+  const suggestion = computed([dataGems, query], (dataGems, query: string) =>
+    findSuggestion(dataGems, suggestions, query, Object.keys(data))
   );
 
   const acceptSuggestion = subject<any>();
@@ -81,30 +80,16 @@ type Result = {
 };
 
 function findSuggestion(
-  dataGems: { [key: string]: Gem },
+  dataGems: Gem[],
   suggestions: Suggestion[],
   query: string,
   data: string[]
 ): Result | undefined {
   // Step 1: Find candidate data gems by doing a dumb keyword seach
-  const parts: string[] = query
-    .toLowerCase()
-    .split(/ +/)
-    .map((word) => word.trim())
-    .filter((word) => word.length > 0);
+  const terms = queryToTerms(query);
 
-  const words = parts.flatMap((word, i) => {
-    const w = [word];
-    if (i < parts.length - 1) w.push(word + " " + parts[i + 1]);
-    if (i < parts.length - 2)
-      w.push(word + " " + parts[i + 1] + " " + parts[i + 2]);
-    return w;
-  });
-
-  const aliases = words.flatMap((word) => keywords[word] ?? []);
-
-  const gems = Object.entries(dataGems).filter(
-    ([name]) => words.includes(name) || aliases.includes(name)
+  const gems = dataGems.filter((gem) =>
+    queryToTerms(getNameFromGem(gem)).some((term) => terms.includes(term))
   );
 
   // Step 2: Find suggestions that bridge matching gems to recipes:
@@ -116,27 +101,26 @@ function findSuggestion(
   const suggestion = suggestions.find(
     (suggestion) =>
       Object.values(suggestion.dataGems).every((type) =>
-        gems.find(([_, gem]) => gem[TYPE] === type)
+        gems.find((gem) => gem[TYPE] === type)
       ) &&
       Object.values(suggestion.bindings).every((binding) =>
         data.includes(binding)
       )
   );
 
-  console.log("suggestion", suggestion, suggestions);
+  console.log("suggestion", suggestion, query, gems, suggestions);
 
   if (suggestion) {
     const bindings = Object.entries(suggestion.dataGems).map(([key, type]) => [
       key,
-      gems.find(([_, gem]) => gem[TYPE] === type)!,
-    ]);
+      gems.find((gem) => gem[TYPE] === type),
+    ]) as [[string, Gem]];
 
     const nameBindings = Object.fromEntries(
-      bindings.map(([key, [name, _gem]]) => [key, name])
+      bindings.map(([key, gem]) => [key, getNameFromGem(gem)])
     );
-    const gemBindings = Object.fromEntries(
-      bindings.map(([key, [_name, gem]]) => [key, gem])
-    );
+    const gemBindings = Object.fromEntries(bindings);
+
     const description = suggestion.description
       .map((part, i) => (i % 2 === 0 ? part : nameBindings[part]))
       .join("");
@@ -145,4 +129,32 @@ function findSuggestion(
   } else {
     return undefined;
   }
+}
+
+function getNameFromGem(gem: Gem): string {
+  return (isSignal(gem[NAME]) ? gem[NAME].get() : gem[NAME]) as string;
+}
+
+const keywords: { [key: string]: string[] } = {
+  groceries: ["grocery"],
+};
+
+function queryToTerms(query: string): string[] {
+  const parts: string[] = query
+    .toLowerCase()
+    .split(/ +/)
+    .map((word) => word.trim())
+    .filter((word) => word.length > 0);
+
+  const aliases = parts.flatMap((word) => keywords[word] ?? []);
+
+  const words = [...parts, ...aliases].flatMap((word, i) => {
+    const w = [word];
+    if (i < parts.length - 1) w.push(word + " " + parts[i + 1]);
+    if (i < parts.length - 2)
+      w.push(word + " " + parts[i + 1] + " " + parts[i + 2]);
+    return w;
+  });
+
+  return words;
 }

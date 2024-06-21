@@ -1,18 +1,23 @@
 import { view, tags } from "@commontools/common-ui";
 import { signal, stream } from "@commontools/common-frp";
-import { recipe } from "../recipe.js";
+import { recipe, NAME } from "../recipe.js";
 import { annotation } from "../components/annotation.js";
 const { binding, repeat } = view;
-const { list, vstack, hstack, checkbox, div, include, sendInput, todo } = tags;
+const { list, vstack, include, sendInput, todo, commonInput } = tags;
 const { state } = signal;
 const { subject } = stream;
 
-export const todoList = recipe("todo list", ({ items }) => {
-  const newTasks = subject<{
-    type: "messageSend";
-    detail: { message: string };
-  }>();
+export const todoList = recipe("todo list", ({ title, items }) => {
+  const newTitle = subject<{ detail: { value: string } }>();
+  newTitle.sink({
+    send: (event) => {
+      const updatedTitle = event.detail?.value?.trim();
+      if (!updatedTitle) return;
+      title.send(updatedTitle);
+    },
+  });
 
+  const newTasks = subject<{ detail: { message: string } }>();
   newTasks.sink({
     send: (event) => {
       const task = event.detail?.message?.trim();
@@ -24,6 +29,11 @@ export const todoList = recipe("todo list", ({ items }) => {
   return {
     UI: [
       list({}, [
+        commonInput({
+          value: binding("title"),
+          placeholder: "List title",
+          "@common-input": binding("newTitle"),
+        }),
         vstack({}, repeat("items", include({ content: binding("itemUI") }))),
         sendInput({
           name: "Add",
@@ -31,9 +41,11 @@ export const todoList = recipe("todo list", ({ items }) => {
           "@messageSend": binding("newTasks"),
         }),
       ]),
-      { items, newTasks },
+      { items, title, newTitle, newTasks },
     ],
+    title,
     items,
+    [NAME]: title,
   };
 });
 
@@ -52,16 +64,20 @@ export const todoTask = recipe("todo task", ({ title, done }) => {
   return {
     itemUI: state([
       vstack({}, [
-        todo({
-          checked: binding("done"),
-          value: binding("title"),
-          "@todo-checked": binding("update"),
-          "@todo-input": binding("update"),
-        }),
-        annotation({
-          query: title,
-          data: { done, title },
-        }),
+        todo(
+          {
+            checked: binding("done"),
+            value: binding("title"),
+            "@todo-checked": binding("update"),
+            "@todo-input": binding("update"),
+          },
+          [
+            annotation({
+              query: title,
+              data: { done, title },
+            }),
+          ]
+        ),
       ]),
       { done, title, update },
     ]),

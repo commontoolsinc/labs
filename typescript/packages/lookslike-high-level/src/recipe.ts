@@ -34,7 +34,7 @@ export type Recipe = (inputs: RecipeInputs) => Gem;
 let id = 0;
 
 export const recipe = (
-  name: string,
+  type: string,
   impl: (inputs: Bindings) => Bindings
 ): Recipe => {
   return (inputs: Bindings) => {
@@ -45,7 +45,7 @@ export const recipe = (
       ])
     );
     const outputs = impl(inputsAsSignals);
-    return { [ID]: id++, [TYPE]: name, ...outputs };
+    return { [ID]: id++, [TYPE]: type, ...outputs };
   };
 };
 
@@ -63,12 +63,11 @@ export type Suggestion = {
   dataGems: { [key: string]: string };
 };
 
-export const suggestions = signal.state<Suggestion[]>([]);
+export const suggestions: Suggestion[] = [];
+export function addSuggestion(suggestion: Suggestion) {
+  suggestions.push(suggestion);
+}
 
 export function description(strings: TemplateStringsArray, ...values: any[]) {
   return strings.map((string, i) => [string, values[i]]).flat();
-}
-
-export function addSuggestion(suggestion: Suggestion) {
-  setTimeout(() => suggestions.send([...suggestions.get(), suggestion]));
 }

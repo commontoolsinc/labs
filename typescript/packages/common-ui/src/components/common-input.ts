@@ -1,11 +1,20 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
+import { view } from "../hyperscript/render.js";
+import { eventProps } from "../hyperscript/schema-helpers.js";
+
+export const commonInput = view("common-input", {
+  ...eventProps(),
+  value: { type: "string" },
+  placeholder: { type: "string" },
+  appearance: { type: "string" },
+});
 
 export type CommonInput = {
   id: string;
   value: string;
-}
+};
 
 export class CommonInputEvent extends Event {
   detail: CommonInput;
@@ -21,35 +30,35 @@ export class CommonInputElement extends LitElement {
   static override styles = [
     baseStyles,
     css`
-    :host {
-      display: block;
-      --height: 24px;
-    }
-    
-    .input-wrapper {
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-    }
+      :host {
+        display: block;
+        --height: 24px;
+      }
 
-    .input {
-      appearance: none;
-      border: 0;
-      outline: 0;
-      box-sizing: border-box;
-      font-size: var(--body-size);
-      width: 100%;
-      height: var(--height);
-    }
+      .input-wrapper {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
 
-    :host([appearance="rounded"]) .input {
-      --height: 40px;
-      background-color: var(--input-background);
-      border-radius: calc(var(--height) / 2);
-      padding: 8px 16px;
-      height: var(--height);
-    }
-    `
+      .input {
+        appearance: none;
+        border: 0;
+        outline: 0;
+        box-sizing: border-box;
+        font-size: var(--body-size);
+        width: 100%;
+        height: var(--height);
+      }
+
+      :host([appearance="rounded"]) .input {
+        --height: 40px;
+        background-color: var(--input-background);
+        border-radius: calc(var(--height) / 2);
+        padding: 8px 16px;
+        height: var(--height);
+      }
+    `,
   ];
 
   @property({ type: String }) value = "";
@@ -61,20 +70,19 @@ export class CommonInputElement extends LitElement {
       const value = (event.target as HTMLInputElement).value;
       this.value = value;
 
-      this.dispatchEvent(
-        new CommonInputEvent({ id: this.id, value })
-      );
-    }
+      this.dispatchEvent(new CommonInputEvent({ id: this.id, value }));
+    };
 
     return html`
-    <div class="input-wrapper">
-      <input
-        class="input"
-        @input="${oninput}"
-        .value="${this.value}"
-        .placeholder="${this.placeholder}"
-        type="text" />
-    </div>
+      <div class="input-wrapper">
+        <input
+          class="input"
+          @input="${oninput}"
+          .value="${this.value}"
+          .placeholder="${this.placeholder}"
+          type="text"
+        />
+      </div>
     `;
   }
 }
