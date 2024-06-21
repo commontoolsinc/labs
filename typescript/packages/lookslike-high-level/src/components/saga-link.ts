@@ -71,6 +71,36 @@ export class CommonSagaLink extends LitElement {
     );
   }
 
+  override connectedCallback() {
+    super.connectedCallback();
+    this.maybeListenToName();
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    this.nameEffect?.();
+  }
+
+  override updated(changedProperties: Map<string | number | symbol, unknown>) {
+    super.updated(changedProperties);
+    if (changedProperties.has("saga")) {
+      this.maybeListenToName(true);
+    }
+  }
+
+  private maybeListenToName(skipUpdate = false) {
+    if (signal.isSignal(this.saga?.[NAME])) {
+      this.nameEffect = signal.effect([this.saga[NAME]], (name: string) => {
+        this.nameFromGem = name;
+        if (!skipUpdate) this.requestUpdate();
+        skipUpdate = false;
+      });
+    } else {
+      this.nameEffect?.();
+      this.nameFromGem = this.saga?.[NAME];
+    }
+  }
+
   override render() {
     if (!this.saga) return html``;
     const name = this.name ?? this.nameFromGem;
