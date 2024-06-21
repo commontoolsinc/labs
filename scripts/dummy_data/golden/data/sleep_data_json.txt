@@ -1,5 +1,0 @@
-{
-  "sleep_quality": "good",
-  "hours_slept": 8,
-  "dream_description": "Elara dreamt of flying through the starlit sky on the back of a majestic phoenix, exploring hidden galaxies and discovering ancient secrets. The air was filled with the sweet scent of celestial flowers, and the constellations danced in shimmering patterns around her. She felt a sense of wonder and awe unlike anything she had ever experienced before."
-}

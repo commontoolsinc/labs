@@ -1,9 +1,0 @@
-{
-  "policy_number": "AA123456",
-  "policy_type": "Life Insurance",
-  "coverage_amount": 500000,
-  "premium_amount": 1000,
-  "beneficiary": "Pablo the Parrot",
-  "start_date": "2023-01-01",
-  "end_date": "2043-01-01"
-}

@@ -1,0 +1,104 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "reviews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "productId": {
+            "type": "string"
+          },
+          "productName": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "rating": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "reviewTitle": {
+            "type": "string"
+          },
+          "reviewText": {
+            "type": "string"
+          },
+          "reviewDate": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "verifiedPurchase": {
+            "type": "boolean"
+          },
+          "helpfulVotes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          "pros": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "userMood": {
+            "type": "string",
+            "enum": ["happy", "neutral", "disappointed", "sarcastic", "excited"]
+          },
+          "purchaseContext": {
+            "type": "string"
+          },
+          "funnyQuote": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "productId",
+          "productName",
+          "category",
+          "rating",
+          "reviewTitle",
+          "reviewText",
+          "reviewDate",
+          "verifiedPurchase"
+        ]
+      }
+    },
+    "totalReviews": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "averageRating": {
+      "type": "number",
+      "minimum": 1,
+      "maximum": 5
+    },
+    "lastUpdated": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": ["reviews", "totalReviews", "averageRating", "lastUpdated"]
+}

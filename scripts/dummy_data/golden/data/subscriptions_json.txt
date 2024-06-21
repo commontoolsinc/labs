@@ -1,7 +1,0 @@
-{
-  "name": "Elara Evergreen",
-  "email": "elara.evergreen@example.com",
-  "subscriptionType": "premium",
-  "startDate": "2022-01-01",
-  "endDate": "2023-01-01"
-}

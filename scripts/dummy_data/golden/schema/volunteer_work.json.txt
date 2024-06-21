@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "volunteerExperiences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "organization": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "startDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "endDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "description": {
+            "type": "string"
+          },
+          "hours": {
+            "type": "number"
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "impact": {
+            "type": "string"
+          },
+          "funnyMoment": {
+            "type": "string"
+          },
+          "volunteerBuddies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["organization", "role", "startDate", "endDate", "description"]
+      }
+    },
+    "totalVolunteerHours": {
+      "type": "number"
+    },
+    "favoriteExperience": {
+      "type": "string"
+    },
+    "motivationQuote": {
+      "type": "string"
+    },
+    "impactMetrics": {
+      "type": "object",
+      "properties": {
+        "livesImpacted": {
+          "type": "number"
+        },
+        "treesPlanted": {
+          "type": "number"
+        },
+        "mealsServed": {
+          "type": "number"
+        },
+        "petsAdopted": {
+          "type": "number"
+        }
+      }
+    },
+    "volunteerGoals": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "secretSuperpower": {
+      "type": "string"
+    }
+  },
+  "required": ["volunteerExperiences", "totalVolunteerHours"]
+}

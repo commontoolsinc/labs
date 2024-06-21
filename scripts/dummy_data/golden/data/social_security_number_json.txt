@@ -1,9 +1,0 @@
-{
-  "name": "Elara Evergreen",
-  "age": 25,
-  "gender": "female",
-  "address": "123 Enchanted Way, Metropolis",
-  "email": "elara.evergreen@example.com",
-  "phone_number": "555-123-4567",
-  "social_security_number": "123-45-6789"
-}

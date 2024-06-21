@@ -1,7 +1,0 @@
-{
-  "name": "Elara Evergreen",
-  "age": 27,
-  "location": "Metropolis",
-  "goals": ["Inventing new gadgets", "Exploring hidden treasures", "Solving mysteries"],
-  "aspirations": ["Becoming renowned as the 'Jewel Queen of Metropolis'", "Uncovering the truth in all mysteries", "Creating a device that can translate animal languages"]
-}

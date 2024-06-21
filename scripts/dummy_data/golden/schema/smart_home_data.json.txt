@@ -1,0 +1,208 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "homeId": {
+      "type": "string",
+      "description": "Unique identifier for the smart home"
+    },
+    "ownerName": {
+      "type": "string",
+      "description": "Name of the fictional home owner"
+    },
+    "devices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["thermostat", "light", "lock", "camera", "speaker", "refrigerator"]
+          },
+          "name": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "lastUpdate": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": ["id", "type", "name", "location", "status", "lastUpdate"]
+      }
+    },
+    "routines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "trigger": {
+            "type": "string"
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["id", "name", "trigger", "actions"]
+      }
+    },
+    "energyUsage": {
+      "type": "object",
+      "properties": {
+        "daily": {
+          "type": "number"
+        },
+        "weekly": {
+          "type": "number"
+        },
+        "monthly": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string"
+        }
+      },
+      "required": ["daily", "weekly", "monthly", "unit"]
+    },
+    "securityLogs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "event": {
+            "type": "string"
+          },
+          "deviceId": {
+            "type": "string"
+          }
+        },
+        "required": ["timestamp", "event", "deviceId"]
+      }
+    },
+    "voiceCommands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "command": {
+            "type": "string"
+          },
+          "response": {
+            "type": "string"
+          }
+        },
+        "required": ["timestamp", "command", "response"]
+      }
+    },
+    "occupancy": {
+      "type": "object",
+      "properties": {
+        "currentOccupants": {
+          "type": "integer"
+        },
+        "occupancyHistory": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "timestamp": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "count": {
+                "type": "integer"
+              }
+            },
+            "required": ["timestamp", "count"]
+          }
+        }
+      },
+      "required": ["currentOccupants", "occupancyHistory"]
+    },
+    "shoppingList": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "item": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "addedBy": {
+            "type": "string"
+          },
+          "addedOn": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": ["item", "quantity", "addedBy", "addedOn"]
+      }
+    },
+    "mediaPreferences": {
+      "type": "object",
+      "properties": {
+        "favoriteGenres": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "favoriteArtists": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "recentlyPlayed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "artist": {
+                "type": "string"
+              },
+              "playedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": ["title", "artist", "playedAt"]
+          }
+        }
+      },
+      "required": ["favoriteGenres", "favoriteArtists", "recentlyPlayed"]
+    }
+  },
+  "required": ["homeId", "ownerName", "devices", "routines", "energyUsage", "securityLogs", "voiceCommands", "occupancy", "shoppingList", "mediaPreferences"]
+}

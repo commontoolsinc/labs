@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "address": {
+      "type": "object",
+      "properties": {
+        "street": { "type": "string" },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "zipCode": { "type": "string" },
+        "country": { "type": "string" }
+      },
+      "required": ["street", "city", "state", "zipCode", "country"]
+    },
+    "type": {
+      "type": "string",
+      "enum": ["house", "apartment", "condo", "treehouse", "spaceship", "underwater lair"]
+    },
+    "size": {
+      "type": "object",
+      "properties": {
+        "squareFootage": { "type": "number" },
+        "numberOfRooms": { "type": "integer" },
+        "numberOfBathrooms": { "type": "number" }
+      },
+      "required": ["squareFootage", "numberOfRooms", "numberOfBathrooms"]
+    },
+    "yearBuilt": { "type": "integer" },
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "secretPassages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "activationMechanism": { "type": "string" }
+        },
+        "required": ["from", "to", "activationMechanism"]
+      }
+    },
+    "hauntedBy": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "yearOfDeath": { "type": "integer" },
+          "favoriteHauntingSpot": { "type": "string" }
+        },
+        "required": ["name", "yearOfDeath", "favoriteHauntingSpot"]
+      }
+    },
+    "neighborhoodQuirks": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "hiddenTreasures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "item": { "type": "string" },
+          "location": { "type": "string" },
+          "estimatedValue": { "type": "number" }
+        },
+        "required": ["item", "location", "estimatedValue"]
+      }
+    },
+    "timePortals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "location": { "type": "string" },
+          "destination": {
+            "type": "object",
+            "properties": {
+              "place": { "type": "string" },
+              "year": { "type": "integer" }
+            },
+            "required": ["place", "year"]
+          }
+        },
+        "required": ["location", "destination"]
+      }
+    },
+    "dimensionalAnomalies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "room": { "type": "string" },
+          "effect": { "type": "string" }
+        },
+        "required": ["room", "effect"]
+      }
+    }
+  },
+  "required": ["address", "type", "size", "yearBuilt", "features"]
+}

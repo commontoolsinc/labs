@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "personalInfo": {
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string" },
+        "ssn": { "type": "string" },
+        "dateOfBirth": { "type": "string", "format": "date" },
+        "occupation": { "type": "string" }
+      },
+      "required": ["fullName", "ssn", "dateOfBirth", "occupation"]
+    },
+    "taxYears": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "year": { "type": "integer" },
+          "filingStatus": { "type": "string", "enum": ["single", "married_joint", "married_separate", "head_of_household"] },
+          "income": {
+            "type": "object",
+            "properties": {
+              "wages": { "type": "number" },
+              "interest": { "type": "number" },
+              "dividends": { "type": "number" },
+              "capitalGains": { "type": "number" },
+              "businessIncome": { "type": "number" },
+              "cryptoEarnings": { "type": "number" },
+              "memeStockProfits": { "type": "number" }
+            }
+          },
+          "deductions": {
+            "type": "object",
+            "properties": {
+              "standardDeduction": { "type": "number" },
+              "itemizedDeductions": {
+                "type": "object",
+                "properties": {
+                  "mortgageInterest": { "type": "number" },
+                  "charitableDonations": { "type": "number" },
+                  "avocadoToastExpenses": { "type": "number" },
+                  "dogWalkingServices": { "type": "number" }
+                }
+              }
+            }
+          },
+          "credits": {
+            "type": "object",
+            "properties": {
+              "childTaxCredit": { "type": "number" },
+              "educationCredit": { "type": "number" },
+              "electricVehicleCredit": { "type": "number" },
+              "memeCreationCredit": { "type": "number" }
+            }
+          },
+          "taxLiability": { "type": "number" },
+          "paymentsAndRefunds": {
+            "type": "object",
+            "properties": {
+              "withheld": { "type": "number" },
+              "estimatedPayments": { "type": "number" },
+              "refund": { "type": "number" }
+            }
+          },
+          "funnyAuditFlags": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "required": ["year", "filingStatus", "income", "deductions", "credits", "taxLiability", "paymentsAndRefunds"]
+      }
+    }
+  },
+  "required": ["personalInfo", "taxYears"]
+}

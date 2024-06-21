@@ -1,8 +1,0 @@
-{
-  "name": "Elara Evergreen",
-  "address": "123 Moonbeam Lane",
-  "city": "Metropolis",
-  "state": "Wonderland",
-  "zip_code": "98765",
-  "country": "Enchanted Kingdom"
-}

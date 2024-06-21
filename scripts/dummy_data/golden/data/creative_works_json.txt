@@ -1,8 +1,0 @@
-{
-  "name": "The Enigmatic Adventures of Elara Evergreen",
-  "author": "Mystic Moonbeam",
-  "genre": "Fantasy",
-  "description": "Follow the whimsical journey of Elara Evergreen as she navigates through the vibrant city of Metropolis, solving mysteries, creating dazzling jewelry, and uncovering hidden treasures.",
-  "publication_date": "2022-03-15",
-  "rating": 4.5
-}

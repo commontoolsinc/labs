@@ -1,0 +1,120 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "lifeGoals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "targetDate": { "type": "string", "format": "date" },
+          "progress": { "type": "number", "minimum": 0, "maximum": 100 },
+          "priority": { "type": "integer", "minimum": 1, "maximum": 10 }
+        },
+        "required": ["title", "description"]
+      }
+    },
+    "shortTermGoals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "deadline": { "type": "string", "format": "date" },
+          "steps": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "status": {
+            "type": "string",
+            "enum": ["Not Started", "In Progress", "Completed"]
+          }
+        },
+        "required": ["title", "deadline", "status"]
+      }
+    },
+    "bucketList": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "personalValues": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "careerAspirations": {
+      "type": "object",
+      "properties": {
+        "desiredPosition": { "type": "string" },
+        "desiredIndustry": { "type": "string" },
+        "skillsToAcquire": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "salaryGoal": { "type": "number" }
+      }
+    },
+    "personalDevelopment": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "area": { "type": "string" },
+          "goals": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "resources": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "required": ["area", "goals"]
+      }
+    },
+    "dreamVacations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "destination": { "type": "string" },
+          "activities": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "estimatedCost": { "type": "number" }
+        },
+        "required": ["destination"]
+      }
+    },
+    "philanthropicGoals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "cause": { "type": "string" },
+          "actionPlan": { "type": "string" },
+          "targetImpact": { "type": "string" }
+        },
+        "required": ["cause"]
+      }
+    },
+    "quirkyChallenges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "challenge": { "type": "string" },
+          "reason": { "type": "string" },
+          "difficulty": {
+            "type": "string",
+            "enum": ["Easy", "Medium", "Hard", "Impossible"]
+          }
+        },
+        "required": ["challenge", "difficulty"]
+      }
+    }
+  },
+  "required": ["lifeGoals", "shortTermGoals", "bucketList", "personalValues"]
+}

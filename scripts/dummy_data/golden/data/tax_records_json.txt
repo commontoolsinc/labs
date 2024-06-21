@@ -1,7 +1,0 @@
-{
-  "name": "Elara Evergreen",
-  "social_security_number": "123-45-6789",
-  "income": 75000,
-  "deductions": 10000,
-  "taxes_paid": 15000
-}

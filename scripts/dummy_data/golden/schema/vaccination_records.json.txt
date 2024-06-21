@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "person": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "dateOfBirth": { "type": "string", "format": "date" },
+        "id": { "type": "string" }
+      },
+      "required": ["name", "dateOfBirth", "id"]
+    },
+    "vaccinations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "vaccineName": { "type": "string" },
+          "manufacturer": { "type": "string" },
+          "batchNumber": { "type": "string" },
+          "dateAdministered": { "type": "string", "format": "date" },
+          "administeredBy": { "type": "string" },
+          "location": { "type": "string" },
+          "nextDoseDate": { "type": "string", "format": "date" },
+          "sideEffects": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "effectiveness": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "funFact": { "type": "string" }
+        },
+        "required": ["vaccineName", "manufacturer", "dateAdministered", "administeredBy", "location"]
+      }
+    },
+    "immunityStatus": {
+      "type": "object",
+      "properties": {
+        "overallImmunity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "lastUpdated": { "type": "string", "format": "date-time" },
+        "superPowers": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["overallImmunity", "lastUpdated"]
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["person", "vaccinations", "immunityStatus"]
+}

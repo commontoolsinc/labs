@@ -1,0 +1,109 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "creations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {"type": "string"},
+          "type": {"type": "string", "enum": ["book", "song", "artwork", "invention", "software", "other"]},
+          "description": {"type": "string"},
+          "dateCreated": {"type": "string", "format": "date"},
+          "status": {"type": "string", "enum": ["draft", "completed", "published", "patented", "abandoned"]},
+          "collaborators": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "tags": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "copyrightInfo": {
+            "type": "object",
+            "properties": {
+              "holder": {"type": "string"},
+              "year": {"type": "integer"},
+              "registrationNumber": {"type": "string"}
+            }
+          },
+          "patentInfo": {
+            "type": "object",
+            "properties": {
+              "patentNumber": {"type": "string"},
+              "filingDate": {"type": "string", "format": "date"},
+              "issuanceDate": {"type": "string", "format": "date"},
+              "expirationDate": {"type": "string", "format": "date"}
+            }
+          },
+          "monetization": {
+            "type": "object",
+            "properties": {
+              "method": {"type": "string", "enum": ["licensing", "sale", "subscription", "donation", "other"]},
+              "revenue": {"type": "number"},
+              "currency": {"type": "string"}
+            }
+          },
+          "inspirations": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "notes": {"type": "string"}
+        },
+        "required": ["title", "type", "description", "dateCreated", "status"]
+      }
+    },
+    "ideas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {"type": "string"},
+          "description": {"type": "string"},
+          "dateConceived": {"type": "string", "format": "date"},
+          "category": {"type": "string"},
+          "potentialUses": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "stage": {"type": "string", "enum": ["initial", "developing", "refined", "prototyping", "abandoned"]},
+          "collaborators": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "inspirations": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "notes": {"type": "string"}
+        },
+        "required": ["title", "description", "dateConceived", "category"]
+      }
+    },
+    "tradeSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "dateAcquired": {"type": "string", "format": "date"},
+          "value": {"type": "number"},
+          "currency": {"type": "string"},
+          "protectionMeasures": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "authorizedPersonnel": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "notes": {"type": "string"}
+        },
+        "required": ["name", "description", "dateAcquired", "protectionMeasures"]
+      }
+    }
+  },
+  "required": ["creations", "ideas", "tradeSecrets"]
+}

@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": ["Facebook", "Twitter", "Instagram", "LinkedIn", "TikTok", "Snapchat", "Pinterest", "Reddit"]
+          },
+          "username": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "bio": {
+            "type": "string"
+          },
+          "followers": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "following": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "posts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "content": {
+                  "type": "string"
+                },
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "likes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "comments": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "author": {
+                        "type": "string"
+                      },
+                      "content": {
+                        "type": "string"
+                      },
+                      "timestamp": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": ["author", "content", "timestamp"]
+                  }
+                }
+              },
+              "required": ["content", "timestamp", "likes"]
+            }
+          },
+          "privacySettings": {
+            "type": "object",
+            "properties": {
+              "profileVisibility": {
+                "type": "string",
+                "enum": ["public", "friends", "private"]
+              },
+              "postVisibility": {
+                "type": "string",
+                "enum": ["public", "friends", "private"]
+              },
+              "allowTagging": {
+                "type": "boolean"
+              },
+              "allowDirectMessages": {
+                "type": "boolean"
+              }
+            },
+            "required": ["profileVisibility", "postVisibility", "allowTagging", "allowDirectMessages"]
+          }
+        },
+        "required": ["platform", "username", "displayName", "bio", "followers", "following", "posts", "privacySettings"]
+      }
+    }
+  },
+  "required": ["profiles"]
+}

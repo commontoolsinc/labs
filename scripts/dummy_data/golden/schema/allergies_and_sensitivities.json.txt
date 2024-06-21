@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "allergies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "severity": {
+            "type": "string",
+            "enum": ["mild", "moderate", "severe", "life-threatening"]
+          },
+          "symptoms": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "triggers": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "diagnosed": {"type": "boolean"},
+          "diagnosisDate": {"type": "string", "format": "date"},
+          "treatment": {"type": "string"}
+        },
+        "required": ["name", "severity", "symptoms"]
+      }
+    },
+    "sensitivities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "type": {
+            "type": "string",
+            "enum": ["food", "environmental", "chemical", "other"]
+          },
+          "description": {"type": "string"},
+          "reactions": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "avoidanceStrategy": {"type": "string"}
+        },
+        "required": ["name", "type", "reactions"]
+      }
+    },
+    "emergencyContacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "relationship": {"type": "string"},
+          "phoneNumber": {"type": "string"},
+          "isAwareOfAllergies": {"type": "boolean"}
+        },
+        "required": ["name", "phoneNumber"]
+      }
+    },
+    "medicationList": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "dosage": {"type": "string"},
+          "frequency": {"type": "string"},
+          "purpose": {"type": "string"}
+        },
+        "required": ["name", "dosage", "frequency"]
+      }
+    },
+    "lastUpdated": {"type": "string", "format": "date-time"}
+  },
+  "required": ["allergies", "sensitivities", "lastUpdated"]
+}

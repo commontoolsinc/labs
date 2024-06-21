@@ -1,6 +1,0 @@
-{
-  "credit_card_number": "1234567890123456",
-  "expiration_date": "12/23",
-  "cvv": "123",
-  "card_holder_name": "Elara Evergreen"
-}

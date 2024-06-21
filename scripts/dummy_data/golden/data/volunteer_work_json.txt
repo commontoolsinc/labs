@@ -1,6 +1,0 @@
-{
-  "organization": "Cosmic Cat Cafe",
-  "position": "Inventor-in-Residence",
-  "duration": "3 years",
-  "description": "Worked on creating innovative gadgets and gizmos while sipping stardust coffee and sketching out ideas."
-}

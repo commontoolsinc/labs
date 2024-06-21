@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "medications": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "dosage": {
+            "type": "string"
+          },
+          "frequency": {
+            "type": "string"
+          },
+          "startDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "endDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "prescribedBy": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "sideEffects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notes": {
+            "type": "string"
+          },
+          "funnyNickname": {
+            "type": "string"
+          },
+          "interactionsWithChocolate": {
+            "type": "string",
+            "enum": ["safe", "risky", "explosive"]
+          },
+          "tasteRating": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "superPower": {
+            "type": "string"
+          }
+        },
+        "required": ["name", "dosage", "frequency", "startDate", "prescribedBy", "reason"]
+      }
+    },
+    "lastUpdated": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "pillBoxColor": {
+      "type": "string"
+    },
+    "favoritePharmacy": {
+      "type": "string"
+    },
+    "medicationMantra": {
+      "type": "string"
+    }
+  },
+  "required": ["medications", "lastUpdated"]
+}

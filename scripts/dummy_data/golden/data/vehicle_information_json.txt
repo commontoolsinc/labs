@@ -1,7 +1,0 @@
-{
-  "make": "Stardust",
-  "model": "Nebula",
-  "year": 2025,
-  "color": "Galactic Blue",
-  "license_plate": "AST-789"
-}
