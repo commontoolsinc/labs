@@ -6,3 +6,4 @@ lib
 *.tsbuildinfo
 .DS_Store
 .vscode
+__pycache__
