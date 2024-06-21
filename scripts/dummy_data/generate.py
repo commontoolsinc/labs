@@ -251,6 +251,8 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
     # Iterate over the placeholders
     for raw_placeholder in placeholders:
 
+        raw_placeholder = raw_placeholder.strip()
+
         # split at the colon to get the placeholder name and the format
         placeholder_parts = raw_placeholder.split("|")
         placeholder = placeholder_parts[0].strip()
@@ -312,8 +314,8 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
         for raw_placeholder, value in variation.items():
             # we can't do a naive match because the placeholder tag might
             # include other commands. e.g. the placeholder "input" might need to
-            # match "${input|split}"
-            pattern = re.compile(rf'\${{{re.escape(raw_placeholder)}(?::[^}}]*)?}}')
+            # match "${input|split}". We also need to support whitespace.
+            pattern = re.compile(rf'\$\{{\s*({re.escape(raw_placeholder).replace("\\ ", "\\s+")})\s*(?::[^}}]*)?\s*\}}')
             escaped_value = escape_backslashes(value)
             prompt = pattern.sub(escaped_value, prompt)
         variation_name = name_for_variation(variation, nested_keys, short_names)
