@@ -34,7 +34,7 @@ export type Recipe = (inputs: RecipeInputs) => Gem;
 let id = 0;
 
 export const recipe = (
-  name: string,
+  type: string,
   impl: (inputs: Bindings) => Bindings
 ): Recipe => {
   return (inputs: Bindings) => {
@@ -45,7 +45,7 @@ export const recipe = (
       ])
     );
     const outputs = impl(inputsAsSignals);
-    return { [ID]: id++, [TYPE]: name, ...outputs };
+    return { [ID]: id++, [TYPE]: type, ...outputs };
   };
 };
 

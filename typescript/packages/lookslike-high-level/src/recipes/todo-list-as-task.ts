@@ -81,7 +81,7 @@ export const todoListAsTask = recipe("todo list as task", ({ list, done }) => {
 });
 
 addSuggestion({
-  description: description`Add ${"list"} as sub tasks`,
+  description: description`Add 💎${"list"} as sub tasks`,
   recipe: todoListAsTask,
   bindings: { done: "done" },
   dataGems: {
