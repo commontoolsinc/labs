@@ -252,6 +252,13 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
         placeholder_parts = raw_placeholder.split("|")
         placeholder = placeholder_parts[0].strip()
 
+        if placeholder in parent_names:
+            raise Exception(f"Circular dependency detected: {parent_names} -> {placeholder}")
+        
+        # check that placeholder matches [a-zA-Z][a-zA-Z0-9_]*
+        if not re.match(r"^[_a-zA-Z][a-zA-Z0-9_]*$", placeholder):
+            raise Exception(f"Invalid placeholder name {placeholder}")
+
         multi = False
 
         if len(placeholder_parts) > 1:
@@ -260,13 +267,6 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
                 multi = True
             else:
                 raise Exception(f"Invalid command {command} in placeholder {raw_placeholder}")
-
-        if placeholder in parent_names:
-            raise Exception(f"Circular dependency detected: {parent_names} -> {placeholder}")
-        
-        # check that placeholder matches [a-zA-Z][a-zA-Z0-9_]*
-        if not re.match(r"^[_a-zA-Z][a-zA-Z0-9_]*$", placeholder):
-            raise Exception(f"Invalid placeholder name {placeholder}")
 
         print(f"Getting value for {placeholder}...")
         # Store the value in the dictionary
