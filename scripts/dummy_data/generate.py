@@ -248,7 +248,7 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
     for raw_placeholder in placeholders:
 
         # split at the colon to get the placeholder name and the format
-        placeholder_parts = raw_placeholder.split(":")
+        placeholder_parts = raw_placeholder.split("|")
         placeholder = placeholder_parts[0].strip()
 
         multi = False

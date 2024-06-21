@@ -33,7 +33,7 @@ This process is recursive. When a name is found it is printed out which version 
 
 ## Multi-Mode
 
-As a special case, if your include has the `:multi` directive, it says 'load up the named placeholder, and then interpet each line as a separate value and call this template once for each file'. You can see prompts/schema.txt for an example. Instead of outputting one result, it will output as many results as non-empty lines in that file, named for the lines. Later, other templates that load up that named placeholder, if they find multiple outputs (instead of one file) will also go into multi-output mode.
+As a special case, if your include has the `|multi` directive, it says 'load up the named placeholder, and then interpet each line as a separate value and call this template once for each file'. You can see prompts/schema.txt for an example. Instead of outputting one result, it will output as many results as non-empty lines in that file, named for the lines. Later, other templates that load up that named placeholder, if they find multiple outputs (instead of one file) will also go into multi-output mode.
 
 ## Caching
 
@@ -54,7 +54,6 @@ Example: `python3 pin_golden.py schema`
 ### TODO
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)
 - Allow a way to specify `{files|multi-load:schema}
-- switch ':' in multi directive to '|'
 - remove the fetch_placeholder directory and just return the value (we no longer need the directory)
 - If a template references the same placeholder that is a multi, only do the multi one time (this might already work). This sets us up for a use case that allows using the name or value of the multi file, so you could say: 'A file named ${schema|name} with content ${schema}' and ahve it replaced.
 - Parallelize multi-generation
