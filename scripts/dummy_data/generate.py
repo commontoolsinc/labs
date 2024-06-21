@@ -233,7 +233,7 @@ def fetch_placeholder(name: str, context : ExecutionContext, parent_names: List[
 def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, parent_names: List[str]) -> PlaceholderValue:
 
     # Identify any placeholders in the prompt that match ${name}, ignoring any whitespace in the placeholder
-    placeholders = re.findall(r"\${\s*([a-zA-Z0-9_:]+)\s*}", raw_prompt)
+    placeholders = re.findall(r"\${\s*([a-zA-Z0-9_|:]+)\s*}", raw_prompt)
 
     if len(placeholders) == 0:
         if len(parent_names) == 0:
