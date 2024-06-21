@@ -98,8 +98,7 @@ def fetch_prompt(name: str, timestamp : str, overrides : OverridesDict, parent_n
 
     return fetch_most_recent_target(name)
 
-# Returns a tuple of the placeholder, and the directory it was found in
-def fetch_placeholder(name: str, timestamp : str, overrides: OverridesDict, parent_names: List[str]) -> Tuple[PlaceholderValue, str]:
+def fetch_placeholder(name: str, timestamp : str, overrides: OverridesDict, parent_names: List[str]) -> PlaceholderValue:
 
     # Override order:
     # 1. Explicitly provided placeholder_override
@@ -110,28 +109,28 @@ def fetch_placeholder(name: str, timestamp : str, overrides: OverridesDict, pare
 
     if name in overrides:
         print(f"Using placeholder override for {name}...")
-        return (overrides[name], "")
+        return overrides[name]
 
     value = fetch_folder(GOLDEN_DIR, name)
     if value:
         print(f"Using golden file for {name}...")
-        return (value, GOLDEN_DIR)
+        return value
 
     value = fetch_most_recent_target(name)
     if value:
         print(f"Using most recent target for {name}...")
-        return (value, f"./{TARGET_DIR}/{name}/{LATEST_LINK}")
+        return value
     
     value = fetch_folder(INCLUDES_DIR, name)
     if value:
         print(f"Using include file for {name}...")
-        return (value, INCLUDES_DIR)
+        return value
 
     value = fetch_prompt(name, timestamp, overrides, parent_names)
     if value:
         # TODO: if this had to be compiled, this message comes after the compilation.
         print(f"Using prompt file for {name}...")
-        return (value, f"./{TARGET_DIR}/{name}/{LATEST_LINK}")
+        return value
 
     raise Exception(f"Could not find value for placeholder {name}")
 
@@ -176,7 +175,7 @@ def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Over
 
         print(f"Getting value for {placeholder}...")
         # Store the value in the dictionary
-        (value, _) = fetch_placeholder(placeholder, timestamp, overrides, parent_names + [name])
+        value = fetch_placeholder(placeholder, timestamp, overrides, parent_names + [name])
         if multi and isinstance(value, str):
             new_value = {}
             for line in value.splitlines():

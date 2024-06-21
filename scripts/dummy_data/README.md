@@ -34,12 +34,7 @@ This process is recursive. When a name is found it is printed out which version 
 As a special case, if your include has the `:multi` directive, it says 'load up the named placeholder, and then interpet each line as a separate value and call this template once for each file'. You can see prompts/schema.txt for an example. Instead of outputting one result, it will output as many results as non-empty lines in that file, named for the lines. Later, other templates that load up that named placeholder, if they find multiple outputs (instead of one file) will also go into multi-output mode.
 
 ### TODO
-- A debug mode to print out the raw prompts as returned from compile
-- Figure out a pattern for saving a multi-item golden (e.g. the schema.txt, which is a map of filenames to contents)
-- When a sub-prompt is executed that has multi-mode output, put the downstream thing in multi-line output as well.
-- Make it so the output when running the grep example above don't get long weird mangled output names.
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)
-- allow the various fetch_* that operate on a directory to return multiple items if the named thing is a directory.
 - Allow a way to specify `{files|multi-load:schema}
 - switch ':' in multi directive to '|'
 - remove the fetch_placeholder directory and just return the value (we no longer need the directory)
