@@ -33,7 +33,7 @@ class IgnoreDict(TypedDict, total=False):
     includes: List[str]
     overrides: List[str]
 
-JoinArgs = Literal['', 'name', 'content']
+JoinArgs = Literal['', 'name', 'content', 'both']
 
 @dataclass
 class ExecutionContext:
@@ -317,6 +317,8 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
         if join and isinstance(value, dict):
             if join == 'name':
                 value = "\n".join(value.keys())
+            elif join == 'both':
+                value = "\n".join(f"{k}\n{v}" for k, v in value.items())
             else:
                 value = "\n".join(value.values())
 

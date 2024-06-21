@@ -1,6 +1,4 @@
 ${preamble}
 
-Here is a schema named:
-${schema|join:name}
-Content:
-${schema|join:content}
+Here is a schema:
+//${schema|join:both}
