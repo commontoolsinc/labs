@@ -7,6 +7,13 @@ import itertools
 from datetime import datetime
 from typing import List, Dict, Optional, TypeAlias, Union, Tuple, cast
 
+from dataclasses import dataclass
+
+@dataclass
+class ExecutionContext:
+    overrides: Dict[str, str]
+    timestamp: str
+
 GOLDEN_DIR = 'golden'
 INCLUDES_DIR = 'includes'
 PROMPTS_DIR = 'prompts'
@@ -81,7 +88,7 @@ def fetch_folder(folder : str, name: str, folder_is_specific : bool = False) -> 
     
     return None
 
-def fetch_prompt(name: str, timestamp : str, overrides : OverridesDict, parent_names: List[str]) -> Optional[PlaceholderValue]:
+def fetch_prompt(name: str, context : ExecutionContext, parent_names: List[str]) -> Optional[PlaceholderValue]:
     # Fetch the raw prompt and compile it
     raw_prompt = fetch_folder(PROMPTS_DIR, name)
 
@@ -94,11 +101,11 @@ def fetch_prompt(name: str, timestamp : str, overrides : OverridesDict, parent_n
         # TODO: figure out how to support this
         raise Exception(f"Nested multi not supported for {name}")
 
-    execute_prompt(name, raw_prompt, timestamp, overrides, parent_names)
+    execute_prompt(name, raw_prompt, context, parent_names)
 
     return fetch_most_recent_target(name)
 
-def fetch_placeholder(name: str, timestamp : str, overrides: OverridesDict, parent_names: List[str]) -> PlaceholderValue:
+def fetch_placeholder(name: str, context : ExecutionContext, parent_names: List[str]) -> PlaceholderValue:
 
     # Override order:
     # 1. Explicitly provided placeholder_override
@@ -107,9 +114,9 @@ def fetch_placeholder(name: str, timestamp : str, overrides: OverridesDict, pare
     # 4. A matching file from `includes/`
     # 5. A matching file from `prompts/` (which will be compiled and executed)
 
-    if name in overrides:
+    if name in context.overrides:
         print(f"Using placeholder override for {name}...")
-        return overrides[name]
+        return context.overrides[name]
 
     value = fetch_folder(GOLDEN_DIR, name)
     if value:
@@ -126,7 +133,7 @@ def fetch_placeholder(name: str, timestamp : str, overrides: OverridesDict, pare
         print(f"Using include file for {name}...")
         return value
 
-    value = fetch_prompt(name, timestamp, overrides, parent_names)
+    value = fetch_prompt(name, context, parent_names)
     if value:
         # TODO: if this had to be compiled, this message comes after the compilation.
         print(f"Using prompt file for {name}...")
@@ -134,7 +141,7 @@ def fetch_placeholder(name: str, timestamp : str, overrides: OverridesDict, pare
 
     raise Exception(f"Could not find value for placeholder {name}")
 
-def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : OverridesDict, parent_names: List[str]) -> PlaceholderValue:
+def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, parent_names: List[str]) -> PlaceholderValue:
 
     # Identify any placeholders in the prompt that match ${name}, ignoring any whitespace in the placeholder
     placeholders = re.findall(r"\${\s*([a-zA-Z0-9_:]+)\s*}", raw_prompt)
@@ -175,7 +182,7 @@ def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Over
 
         print(f"Getting value for {placeholder}...")
         # Store the value in the dictionary
-        value = fetch_placeholder(placeholder, timestamp, overrides, parent_names + [name])
+        value = fetch_placeholder(placeholder, context, parent_names + [name])
         if multi and isinstance(value, str):
             new_value = {}
             for line in value.splitlines():
@@ -186,14 +193,14 @@ def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Over
         if isinstance(value, dict):
             result : Dict[str, str] = {}
             for key, val in value.items():
-                temp = compile_prompt(placeholder, val, timestamp, overrides, parent_names + [name])
+                temp = compile_prompt(placeholder, val, context, parent_names + [name])
                 if isinstance(temp, dict):
                     # TODO: figure out how to support this case
                     raise Exception(f"Nested multi not supported for {placeholder}")
                 result[key] = temp
             placeholder_values[placeholder] = result
         else:
-            placeholder_values[placeholder] = compile_prompt(placeholder, value, timestamp, overrides, parent_names + [name])
+            placeholder_values[placeholder] = compile_prompt(placeholder, value, context, parent_names + [name])
 
     result : Dict[str, str] = {}
 
@@ -224,10 +231,12 @@ def compile_prompt(name: str, raw_prompt: str, timestamp : str, overrides : Over
     return result
 
 
-def execute_prompt(name: str, raw_prompt: str, timestamp : str, overrides: OverridesDict, parent_names: Optional[List[str]] = None) -> None:
+def execute_prompt(name: str, raw_prompt: str, context : ExecutionContext, parent_names: Optional[List[str]] = None) -> None:
 
     if parent_names is None:
         parent_names = []
+
+    timestamp = context.timestamp
 
     # Generate the output directory path
     output_dir = f"./target/{name}/{timestamp}"
@@ -242,7 +251,7 @@ def execute_prompt(name: str, raw_prompt: str, timestamp : str, overrides: Overr
     os.symlink(timestamp, latest_link, target_is_directory=True)
 
     # Compile the prompt
-    prompt = compile_prompt(name, raw_prompt, timestamp, overrides, parent_names)
+    prompt = compile_prompt(name, raw_prompt, context, parent_names)
     
     if isinstance(prompt, str):
         new_prompt = {}
@@ -310,7 +319,9 @@ def main() -> None:
     # Generate a timestamp, do it now so we'll use the same one in multiple runs in multi-mode.
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    execute_prompt(prompt_base_filename, prompt_contents, timestamp, overrides)
+    context = ExecutionContext(overrides, timestamp)
+
+    execute_prompt(prompt_base_filename, prompt_contents, context)
 
 
 if __name__ == '__main__':
