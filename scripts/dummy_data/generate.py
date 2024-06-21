@@ -16,12 +16,14 @@ TARGET_DIR = 'target'
 LATEST_LINK = '_latest'
 INFO_DIR = '_info'
 WILDCARD = '*'
+DEFAULT_IGNORES = 'default'
 
 OverridesDict: TypeAlias = Dict[str, str]
 PlaceholderValue : TypeAlias = Union[str, Dict[str, str]]
 
 # When adding a value, also change IgnoreDict.
 IgnoreType = Literal['golden', 'target', 'includes', 'prompts', 'overrides']
+wildcard_ignores : List[IgnoreType] = ['overrides', 'includes']
 class IgnoreDict(TypedDict, total=False):
     golden: List[str]
     target: List[str]
@@ -360,20 +362,27 @@ def main() -> None:
     # Generate a timestamp, do it now so we'll use the same one in multiple runs in multi-mode.
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
+    
+    ignore_args : List[str] = args.ignore or []
+    # We use DEFAULT_IGNORES, not WILDCARD, because wildcard will be replaced by shell script to include files
+    if len(ignore_args) == 1 and ignore_args[0] == DEFAULT_IGNORES:
+        # Replace ignores with all the types that are default included.
+        ignore_args = [k for k in cast(List[str], get_args(IgnoreType)) if k not in wildcard_ignores]
+
     ignore = IgnoreDict()
-    if args.ignore:
-        for arg in args.ignore:
-            parts = arg.split(':')
-            for key in parts[0].split(','):
-                key = key.strip()
-                if key not in get_args(IgnoreType):
-                    print(f"Invalid ignore type {key}. Valid types are {get_args(IgnoreType)}")
-                    sys.exit(1)
-                if len(parts) == 1:
-                    ignore[key] = [WILDCARD]
-                else:
-                    # split and trim the placeholders
-                    ignore[key] = [p.strip() for p in parts[1].split(',')]
+
+    for arg in ignore_args:
+        parts = arg.split(':')
+        for key in parts[0].split(','):
+            key = key.strip()
+            if key not in get_args(IgnoreType):
+                print(f"Skipping invalid ignore type {key}. Valid types are {get_args(IgnoreType)}")
+                continue
+            if len(parts) == 1:
+                ignore[key] = [WILDCARD]
+            else:
+                # split and trim the placeholders
+                ignore[key] = [p.strip() for p in parts[1].split(',')]
 
     context = ExecutionContext(overrides, timestamp, ignore)
 

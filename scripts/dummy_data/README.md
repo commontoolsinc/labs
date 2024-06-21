@@ -39,6 +39,7 @@ If you want to override which placeholder to use, you can pass the `--ignore` fl
 - `target:files` - ignores the pre-computed target for the placeholder named files
 - `target:files,backstory` - ignore the pre-computed target for the placeholders named files and backstory
 - `target,golden:files,backstory` - ignore the pre-computed target and the golden for the placeholders named files and backstory.
+- `default` - equivalent to 'golden,target,prompts:*'
 
 ### TODO
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)
@@ -48,4 +49,3 @@ If you want to override which placeholder to use, you can pass the `--ignore` fl
 - If a template references the same placeholder that is a multi, only do the multi one time (this might already work). This sets us up for a use case that allows using the name or value of the multi file, so you could say: 'A file named ${schema|name} with content ${schema}' and ahve it replaced.
 - Leave dots in names un-sanitized
 - A simple utility to copy over new goldens
-- Allow a `--ignore *`
