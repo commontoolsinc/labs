@@ -48,6 +48,7 @@ export async function ask(
   let running = true;
   while (running) {
     // console.log("Conversation", conversation);
+    // console.log("activeTools", activeTools);
     const stream = await anthropic.messages.stream({
       max_tokens: MAX_TOKENS,
       messages: conversation,
@@ -63,7 +64,7 @@ export async function ask(
       content: message,
     });
 
-    console.log("\nMessage", stopReason);
+    // console.log("\nMessage", stopReason);
     if (
       stopReason === "stop_sequence" ||
       stopReason === "end_turn" ||

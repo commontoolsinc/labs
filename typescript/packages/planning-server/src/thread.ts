@@ -56,7 +56,7 @@ export class InMemoryThreadManager implements ThreadManager {
     const thread = this.threads.get(id);
     if (thread) {
       thread.conversation = [...thread.conversation, ...newMessages];
-      console.log("Updated thread", thread);
+      // console.log("Updated thread", thread);
       thread.pendingToolCalls = null;
     }
   }

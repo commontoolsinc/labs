@@ -1,10 +1,117 @@
-// client.ts
+// llm_client.ts
 
 import { Anthropic } from "./deps.ts";
 
-const SERVER_URL = "http://localhost:8000";
+type Tool = Anthropic.Messages.Tool & {
+  implementation: (input: any) => Promise<string> | string;
+};
 
-// Request Types
+export interface ClientConfig {
+  serverUrl: string;
+  tools: Tool[];
+  system?: string;
+}
+
+export class LLMClient {
+  private serverUrl: string;
+  private tools: Tool[];
+  private system: string;
+
+  constructor(config: ClientConfig) {
+    this.serverUrl = config.serverUrl;
+    this.tools = config.tools;
+    this.system =
+      config.system ||
+      "You are a helpful assistant that uses the provided tools to create effect.";
+  }
+
+  private async sendRequest(body: any): Promise<any> {
+    const response = await fetch(this.serverUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    return await response.json();
+  }
+
+  async createThread(message: string): Promise<CreateThreadResponse> {
+    const request: CreateThreadRequest = {
+      action: "create",
+      system: this.system,
+      message,
+      activeTools: this.tools.map(({ implementation, ...tool }) => ({
+        ...tool,
+      })),
+    };
+
+    return await this.sendRequest(request);
+  }
+
+  async continueThread(
+    threadId: string,
+    toolResponses: ToolResponse[]
+  ): Promise<AppendThreadResponse> {
+    const request: AppendThreadRequest = {
+      action: "append",
+      threadId,
+      toolResponses,
+    };
+
+    return await this.sendRequest(request);
+  }
+
+  async executeTool(
+    toolCall: Anthropic.Messages.ToolUseBlockParam
+  ): Promise<string> {
+    const tool = this.tools.find((t) => t.name === toolCall.name);
+    console.log("Tool call:", toolCall.name, toolCall.input);
+
+    if (!tool) {
+      throw new Error(`Tool not found: ${toolCall.name}`);
+    }
+    const result = await tool.implementation(toolCall.input);
+    console.log("Tool result:", result);
+    return result;
+  }
+
+  async handleConversation(initialMessage: string): Promise<string[]> {
+    const conversation: string[] = [];
+    conversation.push(`User: ${initialMessage}`);
+
+    let thread: CreateThreadResponse | AppendThreadResponse =
+      await this.createThread(initialMessage);
+    conversation.push(
+      `Assistant: ${(thread.assistantResponse.content[0] as { text: string }).text}`
+    );
+
+    while (thread.pendingToolCalls && thread.pendingToolCalls.length > 0) {
+      const toolResponses: ToolResponse[] = await Promise.all(
+        thread.pendingToolCalls.map(async (toolCall) => ({
+          type: "tool_result",
+          tool_use_id: toolCall.id,
+          content: [{ type: "text", text: await this.executeTool(toolCall) }],
+        }))
+      );
+
+      // console.info("Tool responses", toolResponses);
+      thread = await this.continueThread(thread.threadId, toolResponses);
+
+      if (thread.output) {
+        conversation.push(`Assistant: ${thread.output}`);
+        break;
+      }
+    }
+
+    return conversation;
+  }
+}
+
+// Types (you can move these to a separate file if desired)
 interface CreateThreadRequest {
   action: "create";
   system: string;
@@ -15,14 +122,12 @@ interface CreateThreadRequest {
 interface AppendThreadRequest {
   action: "append";
   threadId: string;
-  system?: string;
   toolResponses: ToolResponse[];
 }
 
-// Response Types
 interface CreateThreadResponse {
   threadId: string;
-  pendingToolCalls?: Anthropic.Messages.ToolUseBlockParam[];
+  pendingToolCalls: Anthropic.Messages.ToolUseBlockParam[];
   assistantResponse: Anthropic.Messages.MessageParam;
   conversation: Anthropic.Messages.MessageParam[];
 }
@@ -35,104 +140,38 @@ interface AppendThreadResponse {
   conversation: Anthropic.Messages.MessageParam[];
 }
 
-// Tool Response Type
 interface ToolResponse {
   type: "tool_result";
   tool_use_id: string;
   content: { type: "text"; text: string }[];
 }
 
-// Simulated local tool
-const localTool: Anthropic.Messages.Tool = {
-  name: "capitalize",
-  description: "Capitalize all words in the given text",
-  input_schema: {
-    type: "object",
-    properties: {
-      text: { type: "string" },
+const client = new LLMClient({
+  serverUrl: "http://localhost:8000",
+  tools: [
+    {
+      name: "calculator",
+      input_schema: {
+        type: "object",
+        properties: {
+          expression: {
+            type: "string",
+            description: "A mathematical expression to evaluate",
+          },
+        },
+        required: ["expression"],
+      },
+      implementation: async ({ expression }) => {
+        return `${await eval(expression)}`;
+      },
     },
-    required: ["text"],
-  },
-};
+  ],
+});
 
-// Simulated tool execution
-function executeTool(toolCall: Anthropic.Messages.ToolUseBlockParam): string {
-  console.log("Executing tool:", toolCall);
-  const { input } = toolCall;
-  return (input as { text: string }).text.toUpperCase() + "!";
-}
+// get input from args
+const input = Deno.args.join(" ");
+console.log(`Input: ${input}`);
 
-async function createThread(
-  initialMessage: string
-): Promise<CreateThreadResponse> {
-  const request: CreateThreadRequest = {
-    action: "create",
-    system:
-      "You are a helpful assistant that uses the provided tools to create effect.",
-    message: initialMessage,
-    activeTools: [localTool],
-  };
-
-  const response = await fetch(SERVER_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-
-  return await response.json();
-}
-
-async function continueThread(
-  threadId: string,
-  toolResponses: ToolResponse[]
-): Promise<AppendThreadResponse> {
-  const request: AppendThreadRequest = {
-    action: "append",
-    threadId,
-    system: "You are a helpful assistant that gives single word responses.",
-    toolResponses,
-  };
-
-  const response = await fetch(SERVER_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-
-  return await response.json();
-}
-
-async function handleConversation(initialMessage: string) {
-  console.log("User: " + initialMessage);
-  let thread = await createThread(initialMessage);
-  console.log("Assistant: " + thread.assistantResponse.content[0].text);
-
-  while (thread.pendingToolCalls && thread.pendingToolCalls.length > 0) {
-    const toolResponses: ToolResponse[] = thread.pendingToolCalls.map(
-      (toolCall) => ({
-        type: "tool_result",
-        tool_use_id: toolCall.id,
-        content: [{ type: "text", text: executeTool(toolCall) }],
-      })
-    );
-
-    thread = await continueThread(thread.threadId, toolResponses);
-
-    if ((thread as AppendThreadResponse).output) {
-      console.log("Assistant: " + (thread as AppendThreadResponse).output);
-      break; // End the conversation as there are no more pending tool calls
-    }
-  }
-}
-
-// Start the conversation
-const initialMessage = "add emojis and then make this uppercase: henlo world";
-handleConversation(initialMessage);
+client.handleConversation(input).then((conversation) => {
+  console.log(conversation);
+});
