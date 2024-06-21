@@ -390,16 +390,16 @@ def execute_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
             # Pipe the prompt contents to the llm command with the option -m claude-3.5-sonnet
             output = subprocess.check_output(['llm', '-m', 'claude-3.5-sonnet'], input=prompt, universal_newlines=True)
 
+            prompt_output_file = f"{prompts_dir}/{variation_name}.txt"
+            with open(prompt_output_file, 'w') as file:
+                file.write(prompt)
+
             # Generate the output file path
             output_file = f"{output_dir}/{variation_name}.txt"
 
             # Save the output to the file
             with open(output_file, 'w') as file:
                 file.write(output)
-
-            prompt_output_file = f"{prompts_dir}/{variation_name}.txt"
-            with open(prompt_output_file, 'w') as file:
-                file.write(prompt)
 
             print(f"Output saved to {output_file}")
 
