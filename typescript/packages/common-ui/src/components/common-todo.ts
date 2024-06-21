@@ -92,29 +92,30 @@ export class CommonTodoElement extends LitElement {
         new CommonTodoInputEvent({
           id: this.id,
           value: this.value,
-          checked: this.checked,
+          checked: this.checked
         })
       );
     };
 
     return html`
-      <div class="todo">
-        <div class="todo-ctl">
-          <input
-            class="todo-checkbox"
-            type="checkbox"
-            @change="${oncheck}"
-            .checked="${this.checked}"
-          />
-        </div>
+    <div class="todo">
+      <div class="todo-ctl">
+        <input
+          class="todo-checkbox"
+          type="checkbox"
+          @change="${oncheck}"
+          .checked="${this.checked}"
+        />
+      </div>
+      <div class="todo-main">
         <common-input
           class="unibox-input"
           @input="${oninput}"
           .placeholder="${this.placeholder}"
-          .value="${this.value}"
-        >
+          .value="${this.value}">
         </common-input>
       </div>
+    </div>
     `;
   }
 }
