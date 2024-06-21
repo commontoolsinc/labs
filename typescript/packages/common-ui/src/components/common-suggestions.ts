@@ -1,14 +1,27 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import {repeat} from "lit/directives/repeat.js";
-import { readSuggestion, Suggestion, suggestion } from "./common-suggestion.js";
+import { repeat } from "lit/directives/repeat.js";
+import {
+  readSuggestion,
+  Suggestion,
+  suggestionTemplate,
+} from "./common-suggestion.js";
 import { getId } from "./identifiable.js";
+import { view } from "../hyperscript/render.js";
+import { eventProps } from "../hyperscript/schema-helpers.js";
+
+export const suggestions = view("common-suggestions", {
+  ...eventProps(),
+  id: { type: "string" },
+  suggestions: { type: "array" },
+  limit: { type: "number" },
+});
 
 export class SelectSuggestionEvent extends Event {
   detail: Suggestion;
 
   constructor(suggestion: Suggestion) {
-    super('select-suggestion', {bubbles: true, composed: true});
+    super("select-suggestion", { bubbles: true, composed: true });
     this.detail = suggestion;
   }
 }
@@ -28,18 +41,16 @@ export class CommonSuggestionsElement extends LitElement {
     const onclick = (event: Event) => {
       const suggestion = readSuggestion(event.target);
       if (suggestion) {
-        this.dispatchEvent(
-          new SelectSuggestionEvent(suggestion)
-        );
+        this.dispatchEvent(new SelectSuggestionEvent(suggestion));
       }
-    }
+    };
 
     const suggestions = this.suggestions.slice(0, this.limit);
 
     return html`
-    <common-vstack @click="${onclick}">
-      ${repeat(suggestions, getId, suggestion)}
-    </common-vstack>
+      <common-vstack @click="${onclick}">
+        ${repeat(suggestions, getId, suggestionTemplate)}
+      </common-vstack>
     `;
   }
 }

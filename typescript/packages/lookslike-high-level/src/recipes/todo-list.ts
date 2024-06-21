@@ -3,7 +3,7 @@ import { signal, stream } from "@commontools/common-frp";
 import { recipe } from "../recipe.js";
 import { annotation } from "../components/annotation.js";
 const { binding, repeat } = view;
-const { vstack, hstack, checkbox, div, include, sendInput } = tags;
+const { list, vstack, hstack, checkbox, div, include, sendInput } = tags;
 const { state } = signal;
 const { subject } = stream;
 
@@ -23,7 +23,7 @@ export const todoList = recipe("todo list", ({ items }) => {
 
   return {
     UI: [
-      vstack({}, [
+      list({}, [
         vstack({}, repeat("items", include({ content: binding("itemUI") }))),
         sendInput({
           name: "Add",

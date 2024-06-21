@@ -1,37 +1,31 @@
 import { LitElement, html, css } from "lit-element";
 import { customElement, property } from "lit-element/decorators.js";
+import { baseStyles } from "./style.js";
 import { view } from "../hyperscript/render.js";
 import { eventProps } from "../hyperscript/schema-helpers.js";
 
-export const sendInput = view("common-send-input", {
+export const sendInput = view("common-send-message", {
   ...eventProps(),
   name: { type: "string" },
   placeholder: { type: "string" },
 });
 
-@customElement("common-send-input")
-export class DatatableElement extends LitElement {
-  static override styles = css`
-    :host {
-      display: block;
-      --cell-padding: 8px;
-    }
+@customElement("common-send-message")
+export class SendMessageElement extends LitElement {
+  static override styles = [
+    baseStyles,
+    css`
+      :host {
+        display: block;
+      }
 
-    .table {
-      border-collapse: collapse;
-      border: 1px solid #ddd;
-      table-layout: fixed;
-      min-width: 100%;
-    }
-
-    .cell {
-      padding: var(--cell-padding);
-      border: 1px solid #ddd;
-      min-width: 12em;
-      max-width: 24em;
-      vertical-align: top;
-    }
-  `;
+      .unibox {
+        display: grid;
+        grid-template-columns: 1fr min-content;
+        column-gap: var(--gap);
+      }
+    `,
+  ];
 
   @property({ type: String })
   name: string;
@@ -61,14 +55,18 @@ export class DatatableElement extends LitElement {
 
   override render() {
     return html`
-      <div>
-        <input
-          type="text"
+      <div class="unibox">
+        <common-input
+          appearance="rounded"
+          class="unibox-input"
           id="input"
-          placeholder=${this.placeholder}
+          .placeholder=${this.placeholder}
           @keydown=${this.keyDown}
-        />
-        <button @click=${this.send}>${this.name}</button>
+        >
+        </common-input>
+        <common-button class="unibox-button" @click=${this.send}
+          >${this.name}</common-button
+        >
       </div>
     `;
   }

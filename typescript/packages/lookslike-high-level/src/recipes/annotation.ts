@@ -59,9 +59,10 @@ export const annotation = recipe("annotation", ({ "?": query, ...data }) => {
         ];
       } else if (suggestion) {
         return [
-          button({ "@click": binding("acceptSuggestion") }, [
-            suggestion.description,
-          ]),
+          tags.suggestions({
+            suggestions: [{ id: 1, title: suggestion.description }],
+            "@select-suggestion": binding("acceptSuggestion"),
+          }),
           { acceptSuggestion },
         ];
       } else {
