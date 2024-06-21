@@ -134,5 +134,5 @@ async function handleConversation(initialMessage: string) {
 }
 
 // Start the conversation
-const initialMessage = "make me uppercase";
+const initialMessage = "add emojis and then make this uppercase: henlo world";
 handleConversation(initialMessage);

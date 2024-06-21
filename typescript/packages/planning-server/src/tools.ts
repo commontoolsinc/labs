@@ -3,11 +3,9 @@ import { Anthropic } from "./deps.ts";
 
 export async function processTools(
   message: Anthropic.Messages.ContentBlock[],
-  toolImpls: ToolImpls
+  toolImpls: ToolImpls,
+  toolCalls: Anthropic.Messages.ToolUseBlock[]
 ) {
-  const toolCalls = message.filter(
-    (msg): msg is Anthropic.Messages.ToolUseBlock => msg.type === "tool_use"
-  );
   const calls = toolCalls.map(async (tool) => {
     const input = tool.input as any;
     console.log("Tool call", tool);
@@ -131,19 +129,6 @@ export const tools: Anthropic.Messages.Tool[] = [
   {
     name: "makeHappier",
     description: "Make the given text happier",
-    input_schema: {
-      type: "object",
-      properties: {
-        text: {
-          type: "string",
-        },
-      },
-      required: ["text"],
-    },
-  },
-  {
-    name: "capitalize",
-    description: "Capitalize all words in the given text",
     input_schema: {
       type: "object",
       properties: {
@@ -519,12 +504,6 @@ export const toolImpls: ToolImpls = {
       `Make the following text happier: ${input.text}`,
       HAIKU
     );
-  },
-  capitalize: async (input: { text: string }) => {
-    return input.text
-      .split(" ")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ");
   },
   translateToFrench: async (input: { text: string }) => {
     return await single(

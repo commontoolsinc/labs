@@ -39,7 +39,7 @@ export async function single(text: string, model: string = SONNET) {
 export async function ask(
   initialConversation: Anthropic.Messages.MessageParam[] = [],
   systemPrompt: string = "",
-  activeTools: Anthropic.Messages.Tool[],
+  activeTools: Anthropic.Messages.Tool[]
 ) {
   const conversation: Anthropic.Messages.MessageParam[] = [
     ...initialConversation,
@@ -47,13 +47,13 @@ export async function ask(
 
   let running = true;
   while (running) {
-    console.log("Conversation", conversation);
+    // console.log("Conversation", conversation);
     const stream = await anthropic.messages.stream({
       max_tokens: MAX_TOKENS,
       messages: conversation,
       system: systemPrompt,
       model: SONNET,
-      tools: activeTools,
+      tools: [...activeTools, ...tools],
     });
 
     const { message, stopReason } = await processStream(stream);
@@ -75,21 +75,39 @@ export async function ask(
     }
 
     if (stopReason === "tool_use") {
-      const clientTool = activeTools.find(
-        (tool) => tool.id === message[0].tool,
+      const toolCalls = message.filter(
+        (msg): msg is Anthropic.Messages.ToolUseBlock => msg.type === "tool_use"
       );
-      if (clientTool) {
-        console.log("Client tool", clientTool);
-        console.log("Let the client answer this one");
-        return conversation;
-      }
 
-      const result = await processTools(message, toolImpls);
+      // split out the tool calls that are for the client from those for the server
+      const [clientToolCalls, serverToolCalls] = toolCalls.reduce(
+        (acc, toolCall) => {
+          if (activeTools.find((tool) => tool.name === toolCall.name)) {
+            acc[0].push(toolCall);
+          } else {
+            acc[1].push(toolCall);
+          }
+          return acc;
+        },
+        [[], []] as [
+          Anthropic.Messages.ToolUseBlock[],
+          Anthropic.Messages.ToolUseBlock[],
+        ]
+      );
+
+      console.log("Server tools", serverToolCalls);
+      const result = await processTools(message, toolImpls, serverToolCalls);
       if (result) {
         conversation.push(result);
       }
-    }
 
-    return conversation;
+      if (clientToolCalls.length > 0) {
+        console.log("Client tools", clientToolCalls);
+        return conversation;
+      }
+
+      console.log("Continuing conversation");
+    }
   }
+  return conversation;
 }
