@@ -53,4 +53,5 @@ export const eventProps = () => ({
   "@todo-checked": binding(),
   "@todo-input": binding(),
   "@select-suggestion": binding(),
+  "@common-input": binding(),
 });
