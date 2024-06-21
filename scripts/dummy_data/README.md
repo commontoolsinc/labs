@@ -12,7 +12,7 @@ llm keys set claude
 
 You can then generate outputs from a prompt via: `python3 generate.py prompts/backstory.txt`
 
-### Design
+## Basic usage
 
 A generate.py that is passed a prompt (a filename) to execute.
 
@@ -27,11 +27,15 @@ The rules of a reference like `${name}` is, in priority order:
 - A file in `includes/` that has a filename like `$name.*`
 - A file in `prompts/` that has a filename like `$name.*` which will be executed and use its result
 
-This order means that prompt output will be used if they exist, falling back on generating new output for a prompt as a last resort. The output naming scheme also means that if you find good output you want to pin in place, you can use `cp` to move the file directly into the golden folder.
+This order means that prompt output will be used if they exist, falling back on generating new output for a prompt as a last resort. The output naming scheme also means that if you find good output you want to pin in place, you can use `cp` to move the file directly into the golden folder. You can also use `pin_golden.py` (see below)
 
 This process is recursive. When a name is found it is printed out which version it uses.
 
+## Multi-Mode
+
 As a special case, if your include has the `:multi` directive, it says 'load up the named placeholder, and then interpet each line as a separate value and call this template once for each file'. You can see prompts/schema.txt for an example. Instead of outputting one result, it will output as many results as non-empty lines in that file, named for the lines. Later, other templates that load up that named placeholder, if they find multiple outputs (instead of one file) will also go into multi-output mode.
+
+## Caching
 
 If you want to override which placeholder to use, you can pass the `--ignore` flag. The legal classes of cached values to ignore: 'golden', 'cache', 'includes', 'overrides'. All of the following are valid:
 - `cache` - ignores all pre-computed targets for all placeholders
@@ -56,4 +60,5 @@ Example: `python3 pin_golden.py schema`
 - Parallelize multi-generation
 - Allow pinning a not-most-recent version (perhaps via an interactive UI?)
 - What happens if you add the multi modifier on a value type that is already in multi-mode? Does it work?
-- Add a `join` modifier that combines a multi-mode back together in one prompt
+- Add a `join` modifier that combines a multi-mode back together in one prompt by concatenating. Perhaps with options about whether to output the name too
+- Rename `multi` modifier to be `split`?
