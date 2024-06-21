@@ -3,7 +3,7 @@ import { signal } from "@commontools/common-frp";
 import { recipe, Gem, ID } from "../recipe.js";
 import { sagaLink } from "../components/saga-link.js";
 const { binding, repeat } = view;
-const { vstack, list } = tags;
+const { list } = tags;
 
 export const sagaList = recipe("saga list", ({ sagas }) => {
   const sagasWithIDs = signal.computed(

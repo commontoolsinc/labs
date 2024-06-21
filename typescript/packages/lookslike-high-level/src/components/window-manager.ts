@@ -35,6 +35,7 @@ export class CommonWindowManager extends LitElement {
       transition: all 0.3s ease;
     }
     .close-button {
+      z-index: 1;
       position: absolute;
       top: 8px;
       right: 8px;

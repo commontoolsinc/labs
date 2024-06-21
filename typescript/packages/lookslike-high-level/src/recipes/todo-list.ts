@@ -3,7 +3,7 @@ import { signal, stream } from "@commontools/common-frp";
 import { recipe } from "../recipe.js";
 import { annotation } from "../components/annotation.js";
 const { binding, repeat } = view;
-const { list, vstack, hstack, checkbox, div, include, sendInput } = tags;
+const { list, vstack, hstack, checkbox, div, include, sendInput, todo } = tags;
 const { state } = signal;
 const { subject } = stream;
 
@@ -38,16 +38,26 @@ export const todoList = recipe("todo list", ({ items }) => {
 });
 
 export const todoTask = recipe("todo task", ({ title, done }) => {
-  const toggle = subject<any>();
+  const update = subject<any>();
 
-  toggle.sink({
-    send: () => {
-      done.send(!done.get());
+  update.sink({
+    send: (event) => {
+      done.send(!!event.detail?.checked);
+      const newTitle = event.detail?.value?.trim();
+      if (newTitle === undefined) return;
+      title.send(newTitle);
     },
   });
+
   return {
     itemUI: state([
       vstack({}, [
+        todo({
+          checked: binding("done"),
+          value: binding("title"),
+          "@todo-checked": binding("update"),
+          "@todo-input": binding("update"),
+        }),
         hstack({}, [
           checkbox({ "@change": binding("toggle"), checked: binding("done") }),
           div({}, binding("title")),
@@ -57,7 +67,7 @@ export const todoTask = recipe("todo task", ({ title, done }) => {
           data: { done, title },
         }),
       ]),
-      { done, title, toggle },
+      { done, title, update },
     ]),
     done,
     title,
