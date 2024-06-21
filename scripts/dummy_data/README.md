@@ -53,3 +53,5 @@ Example: `python3 pin_golden.py schema`
 - switch ':' in multi directive to '|'
 - remove the fetch_placeholder directory and just return the value (we no longer need the directory)
 - If a template references the same placeholder that is a multi, only do the multi one time (this might already work). This sets us up for a use case that allows using the name or value of the multi file, so you could say: 'A file named ${schema|name} with content ${schema}' and ahve it replaced.
+- Parallelize multi-generation
+- Rename `target` to something more descriptive like `cache` and add to gitignore.
