@@ -30,17 +30,6 @@ export class CommonSagaLink extends LitElement {
   private nameEffect: Cancel | undefined;
   private nameFromGem: string | undefined;
 
-  handleClick(e: Event) {
-    e.preventDefault();
-    this.dispatchEvent(
-      new CustomEvent("open-saga", {
-        detail: { saga: this.saga },
-        bubbles: true,
-        composed: true,
-      })
-    );
-  }
-
   override connectedCallback() {
     super.connectedCallback();
     this.maybeListenToName();
@@ -69,6 +58,17 @@ export class CommonSagaLink extends LitElement {
       this.nameEffect?.();
       this.nameFromGem = this.saga?.[NAME];
     }
+  }
+
+  handleClick(e: Event) {
+    e.preventDefault();
+    this.dispatchEvent(
+      new CustomEvent("open-saga", {
+        detail: { saga: this.saga },
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
   override render() {
