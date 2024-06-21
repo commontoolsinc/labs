@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "documents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["resume", "contract", "letter", "report", "journal", "recipe", "to-do list", "bucket list", "manifesto"]
+          },
+          "content": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_modified": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string"
+              },
+              "word_count": {
+                "type": "integer"
+              },
+              "language": {
+                "type": "string"
+              },
+              "sentiment": {
+                "type": "string",
+                "enum": ["positive", "neutral", "negative"]
+              }
+            }
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "filename": {
+                  "type": "string"
+                },
+                "file_type": {
+                  "type": "string"
+                },
+                "file_size": {
+                  "type": "integer"
+                },
+                "file_url": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              },
+              "required": ["filename", "file_type", "file_size", "file_url"]
+            }
+          }
+        },
+        "required": ["id", "title", "type", "content", "created_at", "last_modified"]
+      }
+    }
+  },
+  "required": ["documents"]
+}

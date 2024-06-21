@@ -1,0 +1,426 @@
+{
+  "contacts": [
+    {
+      "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+      "firstName": "Piper",
+      "lastName": "Paracosm",
+      "nickname": "Pattern Perceiver",
+      "phoneNumbers": [
+        {
+          "type": "mobile",
+          "number": "+1-510-555-1234"
+        },
+        {
+          "type": "other",
+          "number": "+1-510-555-5678"
+        }
+      ],
+      "emails": [
+        {
+          "type": "personal",
+          "address": "piper@paracosmcommons.net"
+        },
+        {
+          "type": "work",
+          "address": "piper@emergentendeavorsconsulting.com"
+        }
+      ],
+      "addresses": [
+        {
+          "type": "home",
+          "street": "2242 Haste Street",
+          "city": "Berkeley",
+          "state": "CA",
+          "postalCode": "94704",
+          "country": "USA"
+        }
+      ],
+      "birthday": "2000-02-29",
+      "company": "Emergent Endeavors Consulting",
+      "jobTitle": "Chief Pattern Officer",
+      "notes": "Remembers birthdays based on their prime factorization. Allergic to linear thinking.",
+      "groups": ["Collaborative Conjurers", "Mycelial Network", "Berkeley Burning Man Camp"],
+      "socialProfiles": [
+        {
+          "platform": "Twitter",
+          "username": "@PiperParacosm",
+          "url": "https://twitter.com/PiperParacosm"
+        },
+        {
+          "platform": "LinkedIn",
+          "username": "piperparacosm",
+          "url": "https://www.linkedin.com/in/piperparacosm"
+        }
+      ],
+      "relationship": "Self",
+      "lastContactDate": "2023-06-15T09:30:00Z",
+      "favorite": true,
+      "tags": ["systems thinker", "urban planner", "origami enthusiast"]
+    },
+    {
+      "id": "7d793789-22b3-4cf6-9363-85d3cf8954b1",
+      "firstName": "Myra",
+      "lastName": "Mycelium",
+      "nickname": "Fungi Whisperer",
+      "phoneNumbers": [
+        {
+          "type": "mobile",
+          "number": "+1-510-555-9876"
+        }
+      ],
+      "emails": [
+        {
+          "type": "personal",
+          "address": "myra@mushroom.network"
+        }
+      ],
+      "addresses": [
+        {
+          "type": "home",
+          "street": "1984 Shroom Street",
+          "city": "Berkeley",
+          "state": "CA",
+          "postalCode": "94709",
+          "country": "USA"
+        }
+      ],
+      "birthday": "1965-09-15",
+      "company": "UC Berkeley",
+      "jobTitle": "Professor of Mycology",
+      "notes": "Piper's mother. Can communicate with fungi. Or so she claims.",
+      "groups": ["Family", "Mycelial Network"],
+      "socialProfiles": [
+        {
+          "platform": "ResearchGate",
+          "username": "MyraMycelium",
+          "url": "https://www.researchgate.net/profile/Myra_Mycelium"
+        }
+      ],
+      "relationship": "Mother",
+      "lastContactDate": "2023-06-10T18:45:00Z",
+      "favorite": true,
+      "tags": ["mycologist", "academic", "gardener"]
+    },
+    {
+      "id": "3a7e14d5-eb45-4744-80a3-6f8f35da9f30",
+      "firstName": "Chaos",
+      "lastName": "Paracosm",
+      "nickname": "The Butterfly Effect",
+      "phoneNumbers": [
+        {
+          "type": "work",
+          "number": "+1-510-555-4321"
+        }
+      ],
+      "emails": [
+        {
+          "type": "work",
+          "address": "chaos@complexityu.edu"
+        }
+      ],
+      "addresses": [
+        {
+          "type": "work",
+          "street": "101 Fractal Avenue",
+          "city": "Berkeley",
+          "state": "CA",
+          "postalCode": "94720",
+          "country": "USA"
+        }
+      ],
+      "birthday": "1963-11-23",
+      "company": "Complexity University",
+      "jobTitle": "Professor of Chaos Theory",
+      "notes": "Piper's father. Believes in 'organized chaos' as a lifestyle.",
+      "groups": ["Family", "Collaborative Conjurers"],
+      "socialProfiles": [
+        {
+          "platform": "Academia.edu",
+          "username": "ChaosParacosm",
+          "url": "https://complexityu.academia.edu/ChaosParacosm"
+        }
+      ],
+      "relationship": "Father",
+      "lastContactDate": "2023-06-12T20:30:00Z",
+      "favorite": true,
+      "tags": ["chaos theorist", "academic", "butterfly collector"]
+    },
+    {
+      "id": "b6d8dd3c-86e6-4fb5-8853-7a57c6f9ef7a",
+      "firstName": "Lyra",
+      "lastName": "Bookwhisper",
+      "nickname": "The Aura Reader",
+      "phoneNumbers": [
+        {
+          "type": "work",
+          "number": "+1-510-555-7890"
+        }
+      ],
+      "emails": [
+        {
+          "type": "work",
+          "address": "lyra@berkeleylib.org"
+        }
+      ],
+      "addresses": [
+        {
+          "type": "work",
+          "street": "2090 Kittredge Street",
+          "city": "Berkeley",
+          "state": "CA",
+          "postalCode": "94704",
+          "country": "USA"
+        }
+      ],
+      "birthday": "1985-07-07",
+      "company": "Berkeley Public Library",
+      "jobTitle": "Aura-Based Book Recommender",
+      "notes": "Piper's best friend. Claims to see book auras. Excellent at recommending books regardless.",
+      "groups": ["Collaborative Conjurers", "Book Club Rebels"],
+      "socialProfiles": [
+        {
+          "platform": "Goodreads",
+          "username": "LyraBookwhisper",
+          "url": "https://www.goodreads.com/user/show/LyraBookwhisper"
+        }
+      ],
+      "relationship": "Best Friend",
+      "lastContactDate": "2023-06-14T15:20:00Z",
+      "favorite": true,
+      "tags": ["librarian", "aura reader", "book lover"]
+    },
+    {
+      "id": "1f20d50d-d9c4-4a7e-8f7b-60c3b9e10d59",
+      "firstName": "Zephyr",
+      "lastName": "Bitstream",
+      "nickname": "The Digital Nomad",
+      "phoneNumbers": [
+        {
+          "type": "mobile",
+          "number": "+1-415-555-2468"
+        }
+      ],
+      "emails": [
+        {
+          "type": "personal",
+          "address": "zephyr@quantumcloud.io"
+        }
+      ],
+      "addresses": [
+        {
+          "type": "other",
+          "street": "42 Binary Road",
+          "city": "San Francisco",
+          "state": "CA",
+          "postalCode": "94105",
+          "country": "USA"
+        }
+      ],
+      "birthday": "1990-01-01",
+      "company": "Quantum Cloud Solutions",
+      "jobTitle": "AI Whisperer",
+      "notes": "Piper's ex. May or may not be an AI. Location changes weekly.",
+      "groups": ["Silicon Valley Disruptors"],
+      "socialProfiles": [
+        {
+          "platform": "GitHub",
+          "username": "ZephyrBitstream",
+          "url": "https://github.com/ZephyrBitstream"
+        }
+      ],
+      "relationship": "Ex-partner",
+      "lastContactDate": "2023-05-01T10:00:00Z",
+      "favorite": false,
+      "tags": ["digital nomad", "AI enthusiast", "quantum computing"]
+    },
+    {
+      "id": "c5f2d65a-90b9-4a2f-8b0c-3d7c10d4a8a1",
+      "firstName": "Echo",
+      "lastName": "Resonance",
+      "nickname": "The Pattern Amplifier",
+      "phoneNumbers": [
+        {
+          "type": "work",
+          "number": "+1-510-555-3698"
+        }
+      ],
+      "emails": [
+        {
+          "type": "work",
+          "address": "echo@emergentendeavorsconsulting.com"
+        }
+      ],
+      "addresses": [
+        {
+          "type": "work",
+          "street": "2100 Shattuck Ave",
+          "city": "Berkeley",
+          "state": "CA",
+          "postalCode": "94704",
+          "country": "USA"
+        }
+      ],
+      "birthday": "1988-04-12",
+      "company": "Emergent Endeavors Consulting",
+      "jobTitle": "Complexity Cartographer",
+      "notes": "Piper's business partner. Can find patterns in anything, including static.",
+      "groups": ["Emergent Endeavors Team", "Collaborative Conjurers"],
+      "socialProfiles": [
+        {
+          "platform": "LinkedIn",
+          "username": "echoresonance",
+          "url": "https://www.linkedin.com/in/echoresonance"
+        }
+      ],
+      "relationship": "Colleague",
+      "lastContactDate": "2023-06-15T11:30:00Z",
+      "favorite": true,
+      "tags": ["systems thinker", "data visualizer", "pattern finder"]
+    },
+    {
+      "id": "9e8bd2f4-613c-4853-9980-d60da8a956b1",
+      "firstName": "Fern",
+      "lastName": "Chlorophyll",
+      "nickname": "The Green Thumb Guru",
+      "phoneNumbers": [
+        {
+          "type": "mobile",
+          "number": "+1-510-555-8765"
+        }
+      ],
+      "emails": [
+        {
+          "type": "personal",
+          "address": "fern@urbanjungle.green"
+        }
+      ],
+      "addresses": [
+        {
+          "type": "home",
+          "street": "1710 Spruce Street",
+          "city": "Berkeley",
+          "state": "CA",
+          "postalCode": "94709",
+          "country": "USA"
+        }
+      ],
+      "birthday": "1982-03-21",
+      "company": "Urban Jungle Designs",
+      "jobTitle": "Ecological Space Harmonizer",
+      "notes": "Helps maintain Piper's rooftop garden. Convinced plants have feelings.",
+      "groups": ["Mycelial Network", "Rooftop Gardeners United"],
+      "socialProfiles": [
+        {
+          "platform": "Instagram",
+          "username": "@FernChlorophyll",
+          "url": "https://www.instagram.com/FernChlorophyll"
+        }
+      ],
+      "relationship": "Friend",
+      "lastContactDate": "2023-06-13T16:45:00Z",
+      "favorite": false,
+      "tags": ["gardener", "plant whisperer", "ecological designer"]
+    },
+    {
+      "id": "2c3f7e6d-1a2b-4c5d-8e9f-0a1b2c3d4e5f",
+      "firstName": "Nova",
+      "lastName": "Lightweaver",
+      "nickname": "The Illuminated One",
+      "phoneNumbers": [
+        {
+          "type": "mobile",
+          "number": "+1-510-555-9513"
+        }
+      ],
+      "emails": [
+        {
+          "type": "personal",
+          "address": "nova@cosmicilluminations.art"
+        }
+      ],
+      "addresses": [
+        {
+          "type": "studio",
+          "street": "1800 Allston Way",
+          "city": "Berkeley",
+          "state": "CA",
+          "postalCode": "94703",
+          "country": "USA"
+        }
+      ],
+      "birthday": "1991-12-21",
+      "company": "Cosmic Illuminations",
+      "jobTitle": "Bioluminescent Artist",
+      "notes": "Creates living light installations. Helped with Piper's backyard firefly project.",
+      "groups": ["Burning Man Illuminati", "Bioluminescent Art Collective"],
+      "socialProfiles": [
+        {
+          "platform": "DeviantArt",
+          "username": "NovaLightweaver",
+          "url": "https://www.deviantart.com/NovaLightweaver"
+        }
+      ],
+      "relationship": "Collaborator",
+      "lastContactDate": "2023-06-11T22:15:00Z",
+      "favorite": false,
+      "tags": ["artist", "bioluminescence expert", "night owl"]
+    },
+    {
+      "id": "7f8e9d6c-5a4b-3c2d-1e0f-9a8b7c6d5e4f",
+      "firstName": "Quantum",
+      "lastName": "Qubert",
+      "nickname": "The Superposition Surfer",
+      "phoneNumbers": [
+        {
+          "type": "other",
+          "number": "+1-510-555-1337"
+        }
+      ],
+      "emails": [
+        {
+          "type": "work",
+          "address": "quantum@schrodingerscode.com"
+        }
+      ],
+      "addresses": [
+        {
+          "type": "work",
+          "street": "2150 Shattuck Ave",
+          "city": "Berkeley",
+          "state": "CA",
+          "postalCode": "94704",
+          "country": "USA"
+        }
+      ],
+      "birthday": "1987-06-06",
+      "company": "Schrödinger's Code",
+      "jobTitle": "Quantum Software Engineer",
+      "notes": "Claims to be simultaneously employed and unemployed. Piper's go-to for tech advice.",
+      "groups": ["Quantum Computing Club", "Collaborative Conjurers"],
+      "socialProfiles": [
+        {
+          "platform": "Stack Overflow",
+          "username": "QuantumQubert",
+          "url": "https://stackoverflow.com/users/QuantumQubert"
+        }
+      ],
+      "relationship": "Friend",
+      "lastContactDate": "2023-06-09T14:00:00Z",
+      "favorite": false,
+      "tags": ["quantum computing", "programmer", "cat person"]
+    },
+    {
+      "id": "4d5e6f7g-8h9i-0j1k-2l3m-4n5o6p7q8r9s",
+      "firstName": "Sage",
+      "lastName": "Chronos",
+      "nickname": "The Temporal Tailor",
+      "phoneNumbers": [
+        {
+          "type": "other",
+          "number": "+1-510-555-2468"
+        }
+      ],
+      "emails": [
+        {
+          "type": "personal",
+          "address": "sage@timestitchers

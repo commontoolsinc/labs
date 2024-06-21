@@ -1,0 +1,132 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "politicalAffiliations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "party": {
+            "type": "string"
+          },
+          "alignment": {
+            "type": "string",
+            "enum": ["left", "center-left", "center", "center-right", "right"]
+          },
+          "joinDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "endDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string",
+            "enum": ["casual supporter", "active member", "local organizer", "regional leader", "national figure"]
+          },
+          "keyIssues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "donations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "amount": {
+                  "type": "number"
+                },
+                "date": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "campaign": {
+                  "type": "string"
+                }
+              },
+              "required": ["amount", "date", "campaign"]
+            }
+          },
+          "votingHistory": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "election": {
+                  "type": "string"
+                },
+                "date": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "voted": {
+                  "type": "boolean"
+                },
+                "candidate": {
+                  "type": "string"
+                }
+              },
+              "required": ["election", "date", "voted"]
+            }
+          },
+          "quirks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["party", "alignment", "joinDate", "level", "keyIssues"]
+      }
+    },
+    "independentViews": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string"
+          },
+          "stance": {
+            "type": "string"
+          },
+          "reasoning": {
+            "type": "string"
+          }
+        },
+        "required": ["topic", "stance"]
+      }
+    },
+    "politicalMemes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "memeUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "caption": {
+            "type": "string"
+          },
+          "dateShared": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "platform": {
+            "type": "string"
+          }
+        },
+        "required": ["memeUrl", "caption", "dateShared"]
+      }
+    }
+  },
+  "required": ["politicalAffiliations"]
+}

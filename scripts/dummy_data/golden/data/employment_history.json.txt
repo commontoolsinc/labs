@@ -1,0 +1,187 @@
+{
+  "employmentHistory": [
+    {
+      "company": "Emergent Endeavors",
+      "position": "Founder and Chief Pattern Perceiver",
+      "startDate": "2018-03-01",
+      "endDate": "present",
+      "responsibilities": [
+        "Apply complex adaptive systems thinking to client problems",
+        "Design and facilitate workshops on emergent strategy",
+        "Develop custom algorithmic origami models for team-building exercises",
+        "Cultivate a mycelial network of industry contacts"
+      ],
+      "achievements": [
+        "Increased client creativity by 42% (measured in 'aha' moments per brainstorming session)",
+        "Successfully reframed a Fortune 500 company's org chart as a living ecosystem",
+        "Published a well-received paper on 'The Fractal Nature of Office Politics' in the Journal of Organizational Whimsy"
+      ],
+      "salary": {
+        "currency": "USD",
+        "amount": 80000,
+        "frequency": "yearly"
+      },
+      "location": {
+        "city": "Berkeley",
+        "country": "USA",
+        "remote": true
+      },
+      "skills": [
+        "Systems thinking",
+        "Pattern recognition",
+        "Workshop facilitation",
+        "Algorithmic origami",
+        "Mycological metaphors"
+      ],
+      "references": [
+        {
+          "name": "Fern Rootsystem",
+          "position": "Chief Gardener at TechGrowth Inc.",
+          "contact": "fern@techgrowth.com"
+        }
+      ],
+      "funnyAnecdotes": [
+        "Once convinced a client that their product roadmap was actually a treasure map in disguise. They found their 'X marks the spot' and pivoted successfully.",
+        "Accidentally started a office-wide butterfly effect when I suggested replacing all chairs with yoga balls. The resulting chaos led to three promotions and a new product line."
+      ]
+    },
+    {
+      "company": "NeuroDreams Inc.",
+      "position": "Professional Daydreamer",
+      "startDate": "2017-06-15",
+      "endDate": "2018-02-28",
+      "responsibilities": [
+        "Generate outlandish yet plausible product ideas",
+        "Facilitate 'lucid brainstorming' sessions",
+        "Maintain the company's 'Wall of Wild Ideas'",
+        "Translate abstract concepts into actionable prototypes"
+      ],
+      "achievements": [
+        "Conceptualized a 'quantum lemonade stand' which became the company's most successful April Fools' product",
+        "Increased team creativity scores by 37% through implementation of mandatory 'daydream breaks'",
+        "Co-authored a patent for a 'Schrödinger's Cat Carrier' (patent pending)"
+      ],
+      "reasonForLeaving": "The dream job became too lucid",
+      "salary": {
+        "currency": "USD",
+        "amount": 95000,
+        "frequency": "yearly"
+      },
+      "location": {
+        "city": "San Francisco",
+        "country": "USA",
+        "remote": false
+      },
+      "skills": [
+        "Ideation",
+        "Conceptual thinking",
+        "Dream interpretation",
+        "Rapid prototyping",
+        "Nap optimization"
+      ],
+      "references": [
+        {
+          "name": "Luna Sandman",
+          "position": "Chief Dream Officer at NeuroDreams Inc.",
+          "contact": "luna.sandman@neurodreams.com"
+        }
+      ],
+      "funnyAnecdotes": [
+        "Once submitted an expense report for a 'dream dictionary' and 'cloud-watching binoculars'. It was approved.",
+        "Accidentally fell asleep during a board meeting and woke up to find my sleep-talking had solved a major product design issue."
+      ]
+    },
+    {
+      "company": "Ludic Landscapes",
+      "position": "Game Designer and Urban Playfulness Consultant",
+      "startDate": "2015-09-01",
+      "endDate": "2017-06-14",
+      "responsibilities": [
+        "Design urban games that transform city spaces into playgrounds",
+        "Consult with city planners on integrating playfulness into urban design",
+        "Organize 'urban game jams' to crowdsource new ideas for city engagement",
+        "Develop augmented reality experiences that layer game elements onto city infrastructure"
+      ],
+      "achievements": [
+        "Created 'Sidewalk Symphonies', a city-wide game that turned crosswalks into musical keyboards, increasing pedestrian rule-following by 26%",
+        "Designed 'Pigeon Parley', an AR game that got people talking to (virtual) pigeons, inadvertently creating a citizen-led urban cleanliness initiative",
+        "Won 'Most Whimsical Urban Intervention' at the International Playable Cities Conference"
+      ],
+      "reasonForLeaving": "Accepted an offer to professionally daydream",
+      "salary": {
+        "currency": "USD",
+        "amount": 72000,
+        "frequency": "yearly"
+      },
+      "location": {
+        "city": "Berkeley",
+        "country": "USA",
+        "remote": false
+      },
+      "skills": [
+        "Game design",
+        "Urban planning",
+        "Augmented reality development",
+        "Public engagement strategies",
+        "Playfulness optimization"
+      ],
+      "references": [
+        {
+          "name": "Hop Scotch",
+          "position": "Mayor of Funville (aka Berkeley's Director of Public Works)",
+          "contact": "hop.scotch@berkeley.gov"
+        }
+      ],
+      "funnyAnecdotes": [
+        "Once convinced the city council to approve a budget for 'tactical whimsy deployment'. It was mostly spent on bubble machines and chalk.",
+        "Accidentally started a city-wide craze for 'extreme hopscotch' that briefly overtook skateboarding in popularity among local teens."
+      ]
+    },
+    {
+      "company": "Berkeley Department of City Planning",
+      "position": "Junior Urban Planner and Chaos Theorist",
+      "startDate": "2013-07-01",
+      "endDate": "2015-08-31",
+      "responsibilities": [
+        "Analyze urban patterns using chaos theory and fractal geometry",
+        "Develop models to predict and enhance 'happy accidents' in city design",
+        "Consult on the city's 'Random Acts of Urban Delight' initiative",
+        "Organize community workshops on 'Embracing Uncertainty in Neighborhood Development'"
+      ],
+      "achievements": [
+        "Implemented a 'Butterfly Effect' model for traffic light timing, reducing congestion by 18% and increasing reported 'serendipitous encounters' by 24%",
+        "Designed a fractal-based park layout that maximized 'cozy spaces' while maintaining open areas, increasing park usage by 37%",
+        "Won 'Most Innovative Use of Chaos Theory in Civic Planning' at the Annual Urbanists Unconference"
+      ],
+      "reasonForLeaving": "To pursue a more playful approach to urban design",
+      "salary": {
+        "currency": "USD",
+        "amount": 58000,
+        "frequency": "yearly"
+      },
+      "location": {
+        "city": "Berkeley",
+        "country": "USA",
+        "remote": false
+      },
+      "skills": [
+        "Urban planning",
+        "Chaos theory application",
+        "Fractal geometry",
+        "Community engagement",
+        "Predictive modeling"
+      ],
+      "references": [
+        {
+          "name": "Ursula Uncertainty",
+          "position": "Head of Non-Linear Urban Dynamics, Berkeley City Planning",
+          "contact": "u.uncertainty@berkeley.gov"
+        }
+      ],
+      "funnyAnecdotes": [
+        "Once justified a crooked bicycle lane as a 'practical application of strange attractor theory'. It became a local landmark.",
+        "Accidentally created a 'pocket dimension' in the city archives while organizing files using a fractal-based system. We still occasionally find misplaced documents from alternate timelines."
+      ]
+    }
+  ]
+}

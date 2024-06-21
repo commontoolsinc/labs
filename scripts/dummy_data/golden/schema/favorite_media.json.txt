@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "movies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "director": { "type": "string" },
+          "year": { "type": "integer" },
+          "genre": { "type": "string" },
+          "rating": { "type": "number", "minimum": 0, "maximum": 10 },
+          "personalNote": { "type": "string" }
+        },
+        "required": ["title", "director", "year", "genre", "rating"]
+      }
+    },
+    "tvShows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "creator": { "type": "string" },
+          "startYear": { "type": "integer" },
+          "endYear": { "type": "integer" },
+          "genre": { "type": "string" },
+          "rating": { "type": "number", "minimum": 0, "maximum": 10 },
+          "favoriteEpisode": { "type": "string" },
+          "personalNote": { "type": "string" }
+        },
+        "required": ["title", "creator", "startYear", "genre", "rating"]
+      }
+    },
+    "books": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "author": { "type": "string" },
+          "year": { "type": "integer" },
+          "genre": { "type": "string" },
+          "rating": { "type": "number", "minimum": 0, "maximum": 10 },
+          "favoriteQuote": { "type": "string" },
+          "personalNote": { "type": "string" }
+        },
+        "required": ["title", "author", "year", "genre", "rating"]
+      }
+    },
+    "music": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "artist": { "type": "string" },
+          "album": { "type": "string" },
+          "year": { "type": "integer" },
+          "genre": { "type": "string" },
+          "rating": { "type": "number", "minimum": 0, "maximum": 10 },
+          "personalNote": { "type": "string" }
+        },
+        "required": ["title", "artist", "album", "year", "genre", "rating"]
+      }
+    },
+    "podcasts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "host": { "type": "string" },
+          "genre": { "type": "string" },
+          "rating": { "type": "number", "minimum": 0, "maximum": 10 },
+          "favoriteEpisode": { "type": "string" },
+          "personalNote": { "type": "string" }
+        },
+        "required": ["title", "host", "genre", "rating"]
+      }
+    },
+    "videogames": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "developer": { "type": "string" },
+          "year": { "type": "integer" },
+          "genre": { "type": "string" },
+          "platform": { "type": "string" },
+          "rating": { "type": "number", "minimum": 0, "maximum": 10 },
+          "personalNote": { "type": "string" }
+        },
+        "required": ["title", "developer", "year", "genre", "platform", "rating"]
+      }
+    }
+  },
+  "required": ["movies", "tvShows", "books", "music", "podcasts", "videogames"]
+}

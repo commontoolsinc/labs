@@ -1,0 +1,19 @@
+${preamble}
+
+I want to come up with a list of dozens of JSON files containing things that a user might want to have in their datastore. It should be a comprehensive slice of lots of different things they might operate over.
+
+Here's an example list of a few:
+* mailing_addresses.json
+* social_security_number.json
+* location_history.json
+* favorite_media.json
+* family.json
+* reservations.json
+* calendar.json
+* email.json
+* banking_transactions.json
+* todo.json
+
+Can you extend this list with a few dozen more JSON files? Output the list I gave you and extend it with additional items.
+
+Output plaintext with one filename per line and no additional formatting or markdown.

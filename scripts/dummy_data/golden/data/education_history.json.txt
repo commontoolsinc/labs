@@ -1,0 +1,108 @@
+{
+  "educationHistory": [
+    {
+      "institution": "Berkeley Backyard Academy",
+      "degree": "Self-Directed Diploma",
+      "field": "Mycelial Network Studies",
+      "startDate": "2000-09-01",
+      "endDate": "2012-06-15",
+      "gpa": 4.2,
+      "achievements": [
+        "Cultivated a sentient slime mold",
+        "Mapped the secret tunnels of Berkeley using echolocation",
+        "Invented a new form of hieroglyphics based on ant trails"
+      ],
+      "extracurricularActivities": [
+        "Founder of the Midnight Firefly Observation Club",
+        "Captain of the Competitive Daydreaming Team"
+      ],
+      "funFacts": [
+        "Once convinced the entire student body that the school was actually a simulation",
+        "Wrote a thesis on the sociopolitical structure of the local squirrel population"
+      ],
+      "secretTalent": "Can communicate with houseplants through interpretive dance",
+      "favoriteHidingSpot": "Inside a hollow tree that's bigger on the inside",
+      "numberOfNapsInLibrary": 42,
+      "coffeeConsumedInLiters": 0.001,
+      "procrastinationLevel": 3
+    },
+    {
+      "institution": "Miskatonic University",
+      "degree": "Bachelor of Unconventional Arts",
+      "field": "Theoretical Whimsics",
+      "startDate": "2012-09-01",
+      "endDate": "2016-05-30",
+      "gpa": 3.14159,
+      "achievements": [
+        "Proved the existence of quantum entanglement between jokes and laughter",
+        "Developed a working model of a perpetual motion machine (only functions on Tuesdays)",
+        "Published a paper on the fractal nature of procrastination"
+      ],
+      "extracurricularActivities": [
+        "President of the Non-Euclidean Architecture Society",
+        "Time Traveler's Chess Club (met every other yesterday)"
+      ],
+      "funFacts": [
+        "Accidentally created a minor temporal paradox during finals week",
+        "Thesis defense involved a live demonstration of parallel universe theory"
+      ],
+      "secretTalent": "Can fold origami in four-dimensional space",
+      "favoriteHidingSpot": "The space between moments",
+      "numberOfNapsInLibrary": 1337,
+      "coffeeConsumedInLiters": 42.0,
+      "procrastinationLevel": 8
+    },
+    {
+      "institution": "The Invisible College",
+      "degree": "Master of Pattern Recognition",
+      "field": "Applied Serendipity",
+      "startDate": "2017-01-01",
+      "endDate": "2019-12-31",
+      "gpa": 5.0,
+      "achievements": [
+        "Discovered a new prime number hiding in plain sight",
+        "Successfully predicted 7 consecutive butterfly effects",
+        "Composed a symphony based on the rhythm of falling leaves"
+      ],
+      "extracurricularActivities": [
+        "Founder of the Backwards Walking Forward-Thinking Society",
+        "Apprentice to the last living Mathemagician"
+      ],
+      "funFacts": [
+        "Entire course of study was conducted through lucid dreaming",
+        "Submitted thesis telepathically"
+      ],
+      "secretTalent": "Can see the Matrix, but only out of the corner of her eye",
+      "favoriteHidingSpot": "In plain sight, disguised as a potted plant",
+      "numberOfNapsInLibrary": 0,
+      "coffeeConsumedInLiters": 3.141592653589793,
+      "procrastinationLevel": 1
+    },
+    {
+      "institution": "Cosmic Sabbatical University",
+      "degree": "Doctorate in Existential Improvisation",
+      "field": "Multiversal Anthropology",
+      "startDate": "2020-02-29",
+      "endDate": "2024-02-29",
+      "gpa": 42.0,
+      "achievements": [
+        "Successfully defended dissertation to a panel of alternate universe selves",
+        "Pioneered the field of quantum archaeology",
+        "Translated 'The Hitchhiker's Guide to the Galaxy' into interpretive dance"
+      ],
+      "extracurricularActivities": [
+        "Captain of the Interdimensional Quidditch Team",
+        "Lead Designer for the University's Klein Bottle Architecture Project"
+      ],
+      "funFacts": [
+        "Entire degree took place during a single 'leap second'",
+        "Submitted the same dissertation to infinite parallel institutions simultaneously"
+      ],
+      "secretTalent": "Can perceive and navigate the multiverse through smell",
+      "favoriteHidingSpot": "The drawer where single socks go missing",
+      "numberOfNapsInLibrary": 3.14e159,
+      "coffeeConsumedInLiters": 0,
+      "procrastinationLevel": 10
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "address": {
+    "street": "2242 Haste Street",
+    "city": "Berkeley",
+    "state": "CA",
+    "zipCode": "94704",
+    "country": "USA"
+  },
+  "type": "treehouse",
+  "size": {
+    "squareFootage": 1234.56,
+    "numberOfRooms": 7,
+    "numberOfBathrooms": 1.5
+  },
+  "yearBuilt": 1967,
+  "features": [
+    "Rooftop garden",
+    "Mushroom cultivation lab",
+    "Firefly habitat",
+    "Library of obscure systems theory books",
+    "Origami folding station",
+    "Chaos theory-inspired wall mural",
+    "Ant farm observation deck",
+    "Beehive communication interface",
+    "Mycelial network monitoring system",
+    "Non-Euclidean geometry playroom",
+    "Time-bending meditation nook",
+    "Emergent pattern recognition chamber"
+  ],
+  "secretPassages": [
+    {
+      "from": "Library",
+      "to": "Rooftop garden",
+      "activationMechanism": "Pull the book 'A Pattern Language' halfway out"
+    },
+    {
+      "from": "Mushroom lab",
+      "to": "Kitchen",
+      "activationMechanism": "Knock on the wall in the rhythm of the Fibonacci sequence"
+    },
+    {
+      "from": "Living room",
+      "to": "Firefly habitat",
+      "activationMechanism": "Arrange coasters to form the golden ratio spiral"
+    }
+  ],
+  "hauntedBy": [
+    {
+      "name": "Ada Lovelace",
+      "yearOfDeath": 1852,
+      "favoriteHauntingSpot": "The library's vintage computer corner"
+    },
+    {
+      "name": "Buckminster Fuller",
+      "yearOfDeath": 1983,
+      "favoriteHauntingSpot": "The geodesic dome greenhouse"
+    }
+  ],
+  "neighborhoodQuirks": [
+    "Weekly 'Silent Disco' flash mobs",
+    "Yearly 'Bring Your Own Biome' block party",
+    "Spontaneous lectures on street corners by visiting professors",
+    "Quantum entanglement-powered community Wi-Fi",
+    "Neighborhood-wide game of live-action Pac-Man every full moon"
+  ],
+  "hiddenTreasures": [
+    {
+      "item": "First edition of 'Gödel, Escher, Bach'",
+      "location": "Behind a false panel in the library",
+      "estimatedValue": 1729.00
+    },
+    {
+      "item": "Alan Turing's original Enigma machine",
+      "location": "Disguised as a modern art sculpture in the living room",
+      "estimatedValue": 314159.26
+    },
+    {
+      "item": "Map of Berkeley's underground mycelial network",
+      "location": "Encoded in the pattern of knots in the treehouse's supporting branches",
+      "estimatedValue": 42000.00
+    }
+  ],
+  "timePortals": [
+    {
+      "location": "Inside the grandfather clock in the hallway",
+      "destination": {
+        "place": "Ancient Library of Alexandria",
+        "year": -300
+      }
+    },
+    {
+      "location": "Through the mirror in the bathroom",
+      "destination": {
+        "place": "Cognitive Science Department, UC Berkeley",
+        "year": 2101
+      }
+    }
+  ],
+  "dimensionalAnomalies": [
+    {
+      "room": "Closet",
+      "effect": "Infinite space for storing books and gadgets"
+    },
+    {
+      "room": "Kitchen",
+      "effect": "Food cooked here sometimes becomes sentient and engages in philosophical debates"
+    },
+    {
+      "room": "Bathroom",
+      "effect": "Water from the tap occasionally flows upwards"
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "creativeWorks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["story", "poem", "song", "drawing", "painting", "sculpture", "photograph", "film", "animation", "digital_art", "meme", "other"]
+          },
+          "dateCreated": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastModified": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "description": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "inspiration": {
+            "type": "string"
+          },
+          "mood": {
+            "type": "string"
+          },
+          "collaborators": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "location": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "coordinates": {
+                "type": "object",
+                "properties": {
+                  "latitude": {
+                    "type": "number"
+                  },
+                  "longitude": {
+                    "type": "number"
+                  }
+                },
+                "required": ["latitude", "longitude"]
+              }
+            },
+            "required": ["name"]
+          },
+          "fileUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "thumbnailUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "privateNotes": {
+            "type": "string"
+          },
+          "isPublic": {
+            "type": "boolean"
+          },
+          "copyrightInfo": {
+            "type": "string"
+          },
+          "relatedWorks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["id", "title", "type", "dateCreated", "content"]
+      }
+    }
+  },
+  "required": ["creativeWorks"]
+}

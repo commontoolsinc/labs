@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "shopping_history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "transaction_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "store": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "location": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["online", "physical"]
+              }
+            },
+            "required": ["name", "type"]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "category": {
+                  "type": "string"
+                },
+                "price": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "quantity": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "brand": {
+                  "type": "string"
+                },
+                "cheeky_description": {
+                  "type": "string"
+                }
+              },
+              "required": ["name", "price", "quantity", "cheeky_description"]
+            }
+          },
+          "total_amount": {
+            "type": "number",
+            "minimum": 0
+          },
+          "payment_method": {
+            "type": "string",
+            "enum": ["credit_card", "debit_card", "cash", "cryptocurrency", "barter", "iou"]
+          },
+          "mood_while_shopping": {
+            "type": "string",
+            "enum": ["excited", "impulsive", "regretful", "hangry", "zen", "confused"]
+          },
+          "shopping_companions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "impulse_buy_excuse": {
+            "type": "string"
+          },
+          "buyer_remorse_level": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10
+          }
+        },
+        "required": ["transaction_id", "date", "store", "items", "total_amount", "payment_method"]
+      }
+    }
+  },
+  "required": ["user_id", "shopping_history"]
+}

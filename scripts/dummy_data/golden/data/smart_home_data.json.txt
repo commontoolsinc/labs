@@ -1,0 +1,228 @@
+{
+  "homeId": "paracosm-commons-1",
+  "ownerName": "Piper Paracosm",
+  "devices": [
+    {
+      "id": "therm-01",
+      "type": "thermostat",
+      "name": "Entropy Equalizer",
+      "location": "Living Room",
+      "status": "Set to 68°F",
+      "lastUpdate": "2023-06-15T08:30:00Z"
+    },
+    {
+      "id": "light-01",
+      "type": "light",
+      "name": "Firefly Emulator",
+      "location": "Backyard",
+      "status": "On - Bioluminescent Mode",
+      "lastUpdate": "2023-06-15T20:45:00Z"
+    },
+    {
+      "id": "lock-01",
+      "type": "lock",
+      "name": "Quantum Entangler",
+      "location": "Front Door",
+      "status": "Locked",
+      "lastUpdate": "2023-06-15T22:00:00Z"
+    },
+    {
+      "id": "cam-01",
+      "type": "camera",
+      "name": "Panopticon Lite",
+      "location": "Rooftop Garden",
+      "status": "Recording",
+      "lastUpdate": "2023-06-15T23:15:00Z"
+    },
+    {
+      "id": "speak-01",
+      "type": "speaker",
+      "name": "Cacophony Coordinator",
+      "location": "Study",
+      "status": "Playing 'Sounds of the Mycelial Network'",
+      "lastUpdate": "2023-06-15T19:20:00Z"
+    },
+    {
+      "id": "fridge-01",
+      "type": "refrigerator",
+      "name": "Entropy Reverser",
+      "location": "Kitchen",
+      "status": "37°F, 80% Full",
+      "lastUpdate": "2023-06-15T21:00:00Z"
+    }
+  ],
+  "routines": [
+    {
+      "id": "routine-01",
+      "name": "Cosmic Sabbatical Prep",
+      "trigger": "February 28th, 11:59 PM",
+      "actions": [
+        "Set Entropy Equalizer to 'Suspended Animation'",
+        "Activate Firefly Emulator 'Aurora Borealis' mode",
+        "Lock Quantum Entangler",
+        "Set Panopticon Lite to 'Time-Lapse' mode",
+        "Play 'Sounds of the Multiverse' on Cacophony Coordinator"
+      ]
+    },
+    {
+      "id": "routine-02",
+      "name": "Collaborative Conjuring Setup",
+      "trigger": "First Friday of the month, 7:00 PM",
+      "actions": [
+        "Set Entropy Equalizer to 'Cozy Mystical'",
+        "Activate Firefly Emulator 'Séance' mode",
+        "Unlock Quantum Entangler",
+        "Play 'Ethereal Echoes' playlist on Cacophony Coordinator"
+      ]
+    },
+    {
+      "id": "routine-03",
+      "name": "Mycelial Network Communion",
+      "trigger": "Every day at sunrise",
+      "actions": [
+        "Open rooftop garden skylight",
+        "Activate Panopticon Lite 'Spore Spotter' mode",
+        "Play 'Fungal Frequencies' on Cacophony Coordinator"
+      ]
+    }
+  ],
+  "energyUsage": {
+    "daily": 12.5,
+    "weekly": 87.5,
+    "monthly": 375,
+    "unit": "kWh"
+  },
+  "securityLogs": [
+    {
+      "timestamp": "2023-06-15T07:30:00Z",
+      "event": "Quantum Entangler disengaged",
+      "deviceId": "lock-01"
+    },
+    {
+      "timestamp": "2023-06-15T08:45:00Z",
+      "event": "Unidentified lifeform detected in rooftop garden",
+      "deviceId": "cam-01"
+    },
+    {
+      "timestamp": "2023-06-15T14:20:00Z",
+      "event": "Attempted access with invalid quantum signature",
+      "deviceId": "lock-01"
+    },
+    {
+      "timestamp": "2023-06-15T22:00:00Z",
+      "event": "Quantum Entangler engaged",
+      "deviceId": "lock-01"
+    }
+  ],
+  "voiceCommands": [
+    {
+      "timestamp": "2023-06-15T08:00:00Z",
+      "command": "Hey Paracosm, what's the current state of the multiverse?",
+      "response": "The multiverse is currently in a state of quantum superposition. Would you like me to collapse the wave function?"
+    },
+    {
+      "timestamp": "2023-06-15T12:30:00Z",
+      "command": "Hey Paracosm, set a reminder for the next ant colony meeting",
+      "response": "Reminder set for the next ant colony meeting on June 17th at 2 PM in the backyard."
+    },
+    {
+      "timestamp": "2023-06-15T18:45:00Z",
+      "command": "Hey Paracosm, what's the current mycelial network activity level?",
+      "response": "The mycelial network activity is currently at 78%, with a spike in communication between the rooftop garden and the park three blocks away."
+    }
+  ],
+  "occupancy": {
+    "currentOccupants": 1,
+    "occupancyHistory": [
+      {
+        "timestamp": "2023-06-15T00:00:00Z",
+        "count": 1
+      },
+      {
+        "timestamp": "2023-06-15T08:00:00Z",
+        "count": 1
+      },
+      {
+        "timestamp": "2023-06-15T12:00:00Z",
+        "count": 3
+      },
+      {
+        "timestamp": "2023-06-15T16:00:00Z",
+        "count": 1
+      },
+      {
+        "timestamp": "2023-06-15T20:00:00Z",
+        "count": 1
+      }
+    ]
+  },
+  "shoppingList": [
+    {
+      "item": "Non-Euclidean graph paper",
+      "quantity": 2,
+      "addedBy": "Piper",
+      "addedOn": "2023-06-14T09:30:00Z"
+    },
+    {
+      "item": "Quantum-entangled tea leaves",
+      "quantity": 1,
+      "addedBy": "Piper",
+      "addedOn": "2023-06-14T15:45:00Z"
+    },
+    {
+      "item": "Mycelium growth medium",
+      "quantity": 3,
+      "addedBy": "Piper",
+      "addedOn": "2023-06-15T11:20:00Z"
+    },
+    {
+      "item": "Emergent pattern recognition goggles",
+      "quantity": 1,
+      "addedBy": "Piper",
+      "addedOn": "2023-06-15T14:00:00Z"
+    }
+  ],
+  "mediaPreferences": {
+    "favoriteGenres": [
+      "Algorithmic Ambient",
+      "Chaos Theory Jazz",
+      "Mycological Meditation",
+      "Urban Planning ASMR",
+      "Quantum Folklore"
+    ],
+    "favoriteArtists": [
+      "The Emegrent Order",
+      "Mycelial Network",
+      "Quantum Superposition",
+      "Jane Jacobs' Ghost",
+      "The Collaborative Conjurers"
+    ],
+    "recentlyPlayed": [
+      {
+        "title": "Rhizomes in A Minor",
+        "artist": "Mycelial Network",
+        "playedAt": "2023-06-15T19:30:00Z"
+      },
+      {
+        "title": "Sidewalk Ballet",
+        "artist": "Jane Jacobs' Ghost",
+        "playedAt": "2023-06-15T16:45:00Z"
+      },
+      {
+        "title": "Schrödinger's Lullaby",
+        "artist": "Quantum Superposition",
+        "playedAt": "2023-06-15T22:15:00Z"
+      },
+      {
+        "title": "Patterns of Infinitude",
+        "artist": "The Emergent Order",
+        "playedAt": "2023-06-15T10:20:00Z"
+      },
+      {
+        "title": "Fibonacci's Dream",
+        "artist": "The Collaborative Conjurers",
+        "playedAt": "2023-06-15T14:30:00Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "subscriptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": ["streaming", "news", "software", "food", "lifestyle", "education", "fitness", "gaming", "other"]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "cost": {
+            "type": "object",
+            "properties": {
+              "amount": {
+                "type": "number"
+              },
+              "currency": {
+                "type": "string"
+              },
+              "frequency": {
+                "type": "string",
+                "enum": ["daily", "weekly", "monthly", "yearly"]
+              }
+            },
+            "required": ["amount", "currency", "frequency"]
+          },
+          "startDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "nextBillingDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["active", "paused", "cancelled"]
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "usageStats": {
+            "type": "object",
+            "properties": {
+              "lastUsed": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "frequencyOfUse": {
+                "type": "string",
+                "enum": ["daily", "weekly", "monthly", "rarely", "never"]
+              },
+              "totalTimeSpent": {
+                "type": "number"
+              }
+            }
+          },
+          "notes": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["id", "name", "category", "provider", "cost", "startDate", "status"]
+      }
+    },
+    "totalMonthlySpend": {
+      "type": "number"
+    },
+    "mostUsedCategory": {
+      "type": "string"
+    },
+    "leastUsedSubscription": {
+      "type": "string"
+    }
+  },
+  "required": ["subscriptions", "totalMonthlySpend"]
+}

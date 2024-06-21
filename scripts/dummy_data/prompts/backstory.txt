@@ -1,0 +1,32 @@
+${preamble}
+
+Please generate an extensive backstory for a fictional person. It should be clever and make winking references to the person not being real. The backstory should include things like their history, likes, family, hobbies, places they've lived, etc. Use alliteration and interesting details, similar to what Rowling or Gaiman might do.
+
+Here are some basic background facts and references to weave in in subtle ways.
+
+Location: Berkeley
+
+Favorite Books:
+- Christopher Alexander / A Pattern Language
+- Jane Jacobs / Life and Death of Great American Cities
+- Donella Meadows / Thinking in Systems
+- James Carse / Fininite and Infinite Games
+- Ted Chiang / Exhalation
+- Becky Chambers / A Psalm For the Wild-Built
+- Elinor Ostrom / Governing the Commons
+- James Scott / Seeing Like a State
+- Kevin Kelly / What Technology Wants
+
+Interests:
+- Complex Adaptive Systems
+- Novelty Search
+- Generative Systems
+- Emergence
+- Gardening
+- Swarms
+- Lichen
+- Mycelium
+- Agent Based Modelling
+- Convivial tools
+- Collaborative agency
+- Magic

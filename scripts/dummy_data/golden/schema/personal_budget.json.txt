@@ -1,0 +1,149 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "monthlyIncome": {
+      "type": "number",
+      "description": "Total monthly income in dollars"
+    },
+    "savingsGoal": {
+      "type": "number",
+      "description": "Monthly savings goal in dollars"
+    },
+    "expenses": {
+      "type": "object",
+      "properties": {
+        "housing": {
+          "type": "number",
+          "description": "Monthly housing expenses in dollars"
+        },
+        "utilities": {
+          "type": "number",
+          "description": "Monthly utilities expenses in dollars"
+        },
+        "groceries": {
+          "type": "number",
+          "description": "Monthly groceries expenses in dollars"
+        },
+        "transportation": {
+          "type": "number",
+          "description": "Monthly transportation expenses in dollars"
+        },
+        "healthcare": {
+          "type": "number",
+          "description": "Monthly healthcare expenses in dollars"
+        },
+        "entertainment": {
+          "type": "number",
+          "description": "Monthly entertainment expenses in dollars"
+        },
+        "subscriptions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Name of the subscription"
+              },
+              "cost": {
+                "type": "number",
+                "description": "Monthly cost of the subscription in dollars"
+              }
+            },
+            "required": ["name", "cost"]
+          }
+        },
+        "miscellaneous": {
+          "type": "number",
+          "description": "Monthly miscellaneous expenses in dollars"
+        }
+      },
+      "required": ["housing", "utilities", "groceries", "transportation", "healthcare", "entertainment", "subscriptions", "miscellaneous"]
+    },
+    "debts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the debt"
+          },
+          "totalAmount": {
+            "type": "number",
+            "description": "Total amount of debt in dollars"
+          },
+          "interestRate": {
+            "type": "number",
+            "description": "Annual interest rate as a percentage"
+          },
+          "minimumPayment": {
+            "type": "number",
+            "description": "Minimum monthly payment in dollars"
+          }
+        },
+        "required": ["name", "totalAmount", "interestRate", "minimumPayment"]
+      }
+    },
+    "financialGoals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the financial goal"
+          },
+          "targetAmount": {
+            "type": "number",
+            "description": "Target amount for the goal in dollars"
+          },
+          "currentAmount": {
+            "type": "number",
+            "description": "Current amount saved towards the goal in dollars"
+          },
+          "targetDate": {
+            "type": "string",
+            "format": "date",
+            "description": "Target date to achieve the goal"
+          }
+        },
+        "required": ["name", "targetAmount", "currentAmount", "targetDate"]
+      }
+    },
+    "investments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the investment"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["stocks", "bonds", "real estate", "cryptocurrency", "other"],
+            "description": "Type of investment"
+          },
+          "currentValue": {
+            "type": "number",
+            "description": "Current value of the investment in dollars"
+          },
+          "purchaseDate": {
+            "type": "string",
+            "format": "date",
+            "description": "Date the investment was purchased"
+          }
+        },
+        "required": ["name", "type", "currentValue", "purchaseDate"]
+      }
+    },
+    "lastUpdated": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Date and time the budget was last updated"
+    }
+  },
+  "required": ["monthlyIncome", "savingsGoal", "expenses", "debts", "financialGoals", "investments", "lastUpdated"]
+}

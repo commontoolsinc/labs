@@ -1,0 +1,138 @@
+{
+  "portfolioName": "Piper's Paracosmic Patterns",
+  "lastUpdated": "2023-06-15T09:23:42Z",
+  "totalValue": 314159.26,
+  "currency": "USD",
+  "riskTolerance": "YOLO",
+  "investments": [
+    {
+      "type": "Stock",
+      "name": "Mycelial Networks Inc.",
+      "ticker": "MYCEL",
+      "quantity": 420,
+      "purchasePrice": 42.00,
+      "currentPrice": 69.42,
+      "purchaseDate": "2020-02-29"
+    },
+    {
+      "type": "Stock",
+      "name": "Emergent Systems Ltd.",
+      "ticker": "EMRG",
+      "quantity": 314,
+      "purchasePrice": 31.41,
+      "currentPrice": 59.26,
+      "purchaseDate": "2021-03-14"
+    },
+    {
+      "type": "Cryptocurrency",
+      "name": "PatternCoin",
+      "ticker": "PTRN",
+      "quantity": 1618,
+      "purchasePrice": 2.718,
+      "currentPrice": 3.141,
+      "purchaseDate": "2022-01-01"
+    },
+    {
+      "type": "Real Estate",
+      "name": "Berkeley Treehouse Co-living Space",
+      "ticker": "N/A",
+      "quantity": 1,
+      "purchasePrice": 500000,
+      "currentPrice": 750000,
+      "purchaseDate": "2019-09-09"
+    },
+    {
+      "type": "Bond",
+      "name": "City of Berkeley Urban Planning Initiative",
+      "ticker": "BERK23",
+      "quantity": 10000,
+      "purchasePrice": 1.00,
+      "currentPrice": 1.05,
+      "purchaseDate": "2023-01-23"
+    },
+    {
+      "type": "Meme Stocks",
+      "name": "GameStop",
+      "ticker": "GME",
+      "quantity": 42,
+      "purchasePrice": 4.20,
+      "currentPrice": 142.00,
+      "purchaseDate": "2021-01-28"
+    },
+    {
+      "type": "Beanie Babies",
+      "name": "Cosmic the Cat (Leap Year Edition)",
+      "ticker": "N/A",
+      "quantity": 4,
+      "purchasePrice": 29.00,
+      "currentPrice": 290.00,
+      "purchaseDate": "2000-02-29"
+    },
+    {
+      "type": "Stock",
+      "name": "Ostrom's Commons Management Solutions",
+      "ticker": "OCMS",
+      "quantity": 271,
+      "purchasePrice": 28.18,
+      "currentPrice": 82.81,
+      "purchaseDate": "2022-06-12"
+    },
+    {
+      "type": "Cryptocurrency",
+      "name": "Non-Linear TimeCoin",
+      "ticker": "NLTC",
+      "quantity": 2048,
+      "purchasePrice": 0.5,
+      "currentPrice": 2.0,
+      "purchaseDate": "2024-02-29"
+    },
+    {
+      "type": "Stock",
+      "name": "Collaborative Conjuring Technologies",
+      "ticker": "CNJR",
+      "quantity": 187,
+      "purchasePrice": 17.32,
+      "currentPrice": 50.91,
+      "purchaseDate": "2022-11-11"
+    }
+  ],
+  "goals": [
+    {
+      "description": "Fund the Paracosm Commons project",
+      "targetAmount": 1000000,
+      "targetDate": "2026-02-29",
+      "progress": 31.4
+    },
+    {
+      "description": "Acquire a decommissioned lighthouse for 'meta-novelty search' experiments",
+      "targetAmount": 500000,
+      "targetDate": "2025-07-07",
+      "progress": 15.9
+    },
+    {
+      "description": "Develop a city-wide mycelial communication network",
+      "targetAmount": 250000,
+      "targetDate": "2024-12-21",
+      "progress": 42.0
+    },
+    {
+      "description": "Launch a 'generative system for generating generative systems' startup",
+      "targetAmount": 750000,
+      "targetDate": "2027-03-14",
+      "progress": 10.1
+    },
+    {
+      "description": "Create an endowment for the 'Berkeley School of Convivial Magic'",
+      "targetAmount": 1500000,
+      "targetDate": "2030-01-01",
+      "progress": 5.5
+    }
+  ],
+  "performanceMetrics": {
+    "overallReturn": 73.58,
+    "annualizedReturn": 23.14,
+    "sharpeRatio": 1.618,
+    "alphaPlusPlus": 3.14,
+    "moonShotPotential": 87
+  }
+}

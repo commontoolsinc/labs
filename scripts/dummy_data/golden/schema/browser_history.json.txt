@@ -1,0 +1,130 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "user": {
+      "type": "string"
+    },
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "referrer": {
+            "type": "string",
+            "format": "uri"
+          },
+          "deviceType": {
+            "type": "string",
+            "enum": ["desktop", "mobile", "tablet"]
+          },
+          "browserName": {
+            "type": "string"
+          },
+          "osName": {
+            "type": "string"
+          },
+          "ipAddress": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "privateMode": {
+            "type": "boolean"
+          }
+        },
+        "required": ["timestamp", "url", "title"]
+      }
+    },
+    "bookmarks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": {
+            "type": "string"
+          },
+          "dateAdded": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "folder": {
+            "type": "string"
+          }
+        },
+        "required": ["url", "title", "dateAdded"]
+      }
+    },
+    "searchHistory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "query": {
+            "type": "string"
+          },
+          "engine": {
+            "type": "string"
+          }
+        },
+        "required": ["timestamp", "query", "engine"]
+      }
+    },
+    "downloadHistory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "fileSize": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "mimeType": {
+            "type": "string"
+          }
+        },
+        "required": ["timestamp", "url", "filename"]
+      }
+    }
+  },
+  "required": ["user", "history"]
+}
