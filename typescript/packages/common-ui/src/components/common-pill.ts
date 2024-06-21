@@ -1,26 +1,34 @@
-import { LitElement, html, css } from "lit";
-import { customElement } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { LitElement, html, css } from 'lit-element';
+import { customElement } from 'lit-element/decorators.js';
+import { view } from '../hyperscript/render.js';
+import { baseStyles } from './style.js';
+import { eventProps } from '../hyperscript/schema-helpers.js';
 
-@customElement("common-button")
+export const pill = view('common-pill', {
+  ...eventProps(),
+});
+
+@customElement("common-pill")
 export class CommonButtonElement extends LitElement {
   static override styles = [
     baseStyles,
     css`
     :host {
-      --button-background: #000;
-      --button-color: #fff;
-      --button-height: 40px;
+      --pill-background: #000;
+      --pill-color: #fff;
+      --pill-height: 40px;
+      --pill-width: min-content;
       display: block;
+      width: var(--pill-width);
     }
 
-    .button {
+    .pill {
       align-items: center;
       appearance: none;
       background-color: var(--button-background);
       border: 0;
       box-sizing: border-box;
-      border-radius: calc(var(--button-height) / 2);
+      border-radius: var(--radius);
       color: var(--button-color);
       display: flex;
       font-size: var(--body-size);
@@ -38,7 +46,7 @@ export class CommonButtonElement extends LitElement {
 
   override render() {
     return html`
-    <button class="button">
+    <button class="pill">
       <slot></slot>
     </button>
     `;
