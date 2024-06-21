@@ -8,6 +8,19 @@ const anthropic = new Anthropic({
 
 const tools: Anthropic.Messages.Tool[] = [
   {
+    name: "extractSemanticTriples",
+    description: "Extract RDF triples from a given text",
+    input_schema: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  {
     name: "rhyme",
     description: "Generate rhyming words",
     input_schema: {
@@ -391,6 +404,55 @@ const HAIKU = "claude-3-haiku-20240307";
 const SONNET = "claude-3-5-sonnet-20240620";
 
 const toolImpls: { [id: string]: Function } = {
+  extractSemanticTriples: async (input: { text: string }) => {
+    return await single(
+      `You specialize in extracting semantic RDF triples, right?
+      You've done this before. Here's an example of your work:
+
+      <input_example>
+        timestamp: 2024-06-20 5:16PM (PST)
+        location: Berkely, California
+        weather: 18C, Sunny
+        scope: work
+        author: user
+        tags: #work #demoscene #vega-lite
+
+        created a UI for rendering 2D grids using vega-lite
+        tied it to a clock for realtime graphics
+
+        CONNECTION: user enjoys computer graphics demos
+        QUESTION: how can we achieve other interesting animations?
+
+        {
+          “dimensions”: [10, 10],
+          “request”: “create a clock node, pipe it into a code node to make a 2d grid of values based on Math.sin of the current tick value and then visualize it as a heatmap using vega-lite (declare the spec in a code node)”
+        }
+      </input_example>
+
+      <response_example>
+        { ':db/id': -1,
+          'note/timestamp': new Date("2024-06-20T17:16:00-07:00"),
+          'note/location': "Berkely, California",
+          'note/weather': "18C, Sunny",
+          'note/scope': "work",
+          'note/author': "user",
+          'note/tag': ["work", "demoscene", "vega-lite"],
+          'note/content': [
+            "created a UI for rendering 2D grids using vega-lite",
+            "tied it to a clock for realtime graphics"
+          ],
+          'note/connection': "user enjoys computer graphics demos",
+          'note/question': "how can we achieve other interesting animations?",
+          'note/dimensions': [10, 10],
+          'note/request': "create a clock node, pipe it into a code node to make a 2d grid of values based on Math.sin of the current tick value and then visualize it as a heatmap using vega-lite (declare the spec in a code node)"
+        }
+      </response_example>
+      
+      Now, extract and format RDF triples from the following text: 
+      
+      <input>${input.text}</input> for use in the javascript client of https://github.com/tonsky/datascript.`
+    );
+  },
   rhyme: async (input: { word: string }) => {
     return await single(`what rhymes with ${input.word}?`);
   },
@@ -589,12 +651,11 @@ const buf = new Uint8Array(4096);
 const n = Deno.stdin.readSync(buf);
 const question = new TextDecoder().decode(buf.subarray(0, n)).trim();
 
-async function main() {
+async function ask(
+  initialConversation: Anthropic.Messages.MessageParam[] = []
+) {
   let conversation: Anthropic.Messages.MessageParam[] = [
-    {
-      role: "user",
-      content: question,
-    },
+    ...initialConversation,
   ];
 
   let running = true;
@@ -717,9 +778,53 @@ async function main() {
   return conversation;
 }
 
-const result = await main();
-console.log("Final Result", result);
-const last = result[result.length - 1];
+// const result = await main();
+// console.log("Final Result", result);
+
+const spell = [
+  `Decompose the following note into a set of semantic triples using your tool:
+
+<note>
+timestamp: 2024-09-02 9:07AM (JST)
+location: Tokyo, Japan
+weather: 30C, Humid
+scope: hobby
+author: user
+tags: #bonsai #horticulture #miniature-landscapes
+created a miniature forest scene using five Shimpaku junipers
+struggling with scale representation of distant trees
+CONNECTION: user is passionate about bonsai art
+QUESTION: what techniques can improve depth perception in miniature landscapes?
+{
+"trees": ["Shimpaku juniper", "Japanese maple", "Chinese elm"],
+"request": "research advanced bonsai techniques for creating depth illusion in small spaces, focus on foliage density manipulation and strategic placement of accent plants"
+}
+</note>
+
+Respond with only the final document to insert.
+`,
+];
+
+let bigConversation: Anthropic.Messages.MessageParam[] = [];
+
+for (const s of spell) {
+  console.log("Incantation", s);
+  const result = await ask([
+    ...bigConversation,
+    {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: s,
+        },
+      ],
+    },
+  ]);
+  bigConversation = [...bigConversation, ...result];
+}
+
+const last = bigConversation[bigConversation.length - 1];
 const output = (last.content as any[]).map((msg) => msg.text);
 for (const msg of output) {
   Deno.stdout.write(
