@@ -16,7 +16,7 @@ TARGET_DIR = 'target'
 LATEST_LINK = '_latest'
 INFO_DIR = '_info'
 WILDCARD = '*'
-DEFAULT_IGNORES = 'default'
+DEFAULT_IGNORES = 'existing'
 
 OverridesDict: TypeAlias = Dict[str, str]
 PlaceholderValue : TypeAlias = Union[str, Dict[str, str]]
@@ -386,7 +386,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='Process a prompt file.\nBy default, a single prompt is executed. If stdin is provided, then it will execute the template once for each line, piping that line\'s input as the override variable "_input"')
     parser.add_argument('prompt_file', help='Path to the prompt file')
     parser.add_argument('--overrides', nargs='+', action='append', help='Named override placeholders in the format ARG_1 VAL_1 ARG_2 VAL_2')
-    parser.add_argument('--ignore', nargs='+', help=f"Ignore specific types of inputs. Types include {get_args(IgnoreType)}. You can also add a ':placeholder_1,placeholder_2' to specify only those placeholders. You can also do multiple named types in front of the colon: 'golden,target:backstory'. '*' means all of that type", )
+    parser.add_argument('--ignore', nargs='+', help=f"Ignore specific types of inputs. Types include {get_args(IgnoreType)}. You can also add a ':placeholder_1,placeholder_2' to specify only those placeholders. You can also do multiple named types in front of the colon: 'golden,target:backstory'. '*' means all of that type. Can also pass 'existing'", )
 
     args = parser.parse_args()
 

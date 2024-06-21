@@ -39,7 +39,7 @@ If you want to override which placeholder to use, you can pass the `--ignore` fl
 - `target:files` - ignores the pre-computed target for the placeholder named files
 - `target:files,backstory` - ignore the pre-computed target for the placeholders named files and backstory
 - `target,golden:files,backstory` - ignore the pre-computed target and the golden for the placeholders named files and backstory.
-- `default` - equivalent to 'golden,target,prompts:*'
+- `existing` - equivalent to 'golden,target,prompts:*'
 
 ## pin_golden.py
 
