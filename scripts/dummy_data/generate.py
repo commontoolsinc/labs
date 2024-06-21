@@ -38,6 +38,54 @@ class ExecutionContext:
     # an array of names, which must be 'golden', 'target', 'includes', or 'prompts'
     ignore: IgnoreDict
 
+def pin(placeholder : str) -> None:
+    # print the word and the word with the word "golden" appended to it
+    value = fetch_most_recent_target(placeholder)
+    if not value:
+        print(f"Could not find a value for {placeholder}")
+        return
+    
+    # We clear out an existing one, because for example if it's a folder and
+    # there are some old items in it, we don't want to interleave new and old.
+    # TODO: make this an option to not do.
+    clear_golden(placeholder)
+
+    if isinstance(value, dict):
+        for filename, value in value.items():
+            write_golden(placeholder, filename, value)
+    else:
+        # Simple content.
+        write_golden(placeholder, None, value)
+
+def clear_golden(name : str) -> None:
+    # Generate the output directory path
+    output_dir = f"./{GOLDEN_DIR}/{name}"
+    if os.path.exists(output_dir):
+        print(f"Clearing golden subdirectory for {name}")
+        for file in os.listdir(output_dir):
+            os.remove(f"{output_dir}/{file}")
+    if os.path.exists(f"./{GOLDEN_DIR}/{name}.txt"):
+        print(f"Clearing golden file for {name}")
+        os.remove(f"./{GOLDEN_DIR}/{name}.txt")
+
+def write_golden(name : str, subName : Optional[str], contents : str) -> None:
+    # Generate the output directory path
+    output_dir = f"./{GOLDEN_DIR}"
+    if subName:
+        output_dir = f"{output_dir}/{name}"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Generate the output file path
+    output_file = f"{output_dir}/{name}.txt"
+    if subName:
+        output_file = f"{output_dir}/{subName}.txt"
+
+    # Save the output to the file
+    with open(output_file, 'w') as file:
+        file.write(contents)
+
+    print(f"Pinned {name}:{subName} to goldens")
+
 # returns all the variations, as well as the keys that varied. as well as a map from value to shortname
 def value_variations(input : Dict[str, PlaceholderValue]) -> Tuple[List[Dict[str, str]], List[str], Dict[str, str]] :
     variations : List[Dict[str, str]] = []
@@ -72,8 +120,11 @@ def name_for_variation(variation : Dict[str, str], nested_keys : List[str], shor
         result.append(str_v)
     return "_".join(result)
 
+def most_recent_target_dir(name : str) -> str:
+    return f"./{TARGET_DIR}/{name}/{LATEST_LINK}"
+
 def fetch_most_recent_target(name: str) -> Optional[PlaceholderValue]:
-    return fetch_folder(f"./{TARGET_DIR}/{name}/{LATEST_LINK}", name, True)
+    return fetch_folder(most_recent_target_dir(name), name, True)
 
 def fetch_folder(folder : str, name: str, folder_is_specific : bool = False) -> Optional[PlaceholderValue]:
     # check the folder exists

@@ -41,11 +41,15 @@ If you want to override which placeholder to use, you can pass the `--ignore` fl
 - `target,golden:files,backstory` - ignore the pre-computed target and the golden for the placeholders named files and backstory.
 - `default` - equivalent to 'golden,target,prompts:*'
 
+## pin_golden.py
+
+It's possible to manually copy over goldens you like. There's also a simple command, `pin_golden.py` that takes a space-delimited list of placeholder names, and then copies over the most recent result from `target` into the appropriate place in `golden`, overwriting anything that was already there.
+
+Example: `python3 pin_golden.py schema`
+
 ### TODO
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)
 - Allow a way to specify `{files|multi-load:schema}
 - switch ':' in multi directive to '|'
 - remove the fetch_placeholder directory and just return the value (we no longer need the directory)
 - If a template references the same placeholder that is a multi, only do the multi one time (this might already work). This sets us up for a use case that allows using the name or value of the multi file, so you could say: 'A file named ${schema|name} with content ${schema}' and ahve it replaced.
-- Leave dots in names un-sanitized
-- A simple utility to copy over new goldens
