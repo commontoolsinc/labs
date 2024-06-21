@@ -33,7 +33,11 @@ This process is recursive. When a name is found it is printed out which version 
 
 ## Multi-Mode
 
-As a special case, if your include has the `|multi` directive, it says 'load up the named placeholder, and then interpet each line as a separate value and call this template once for each file'. You can see prompts/schema.txt for an example. Instead of outputting one result, it will output as many results as non-empty lines in that file, named for the lines. Later, other templates that load up that named placeholder, if they find multiple outputs (instead of one file) will also go into multi-output mode.
+Most placeholders are a single reference to a single value. However, it's also possible to go into multi-mode, which operates on multiple placeholders in parallel.
+
+This happens if you read a placeholder that was in multi-mode (which puts your result in multi-mode), or if you use a special operator on the placeholder reference to put it into multi mode.
+
+The main way to put a placeholder into multi mode is to use the `multi` directive in your prompt, like this: `Here is the schema: ${schema|multi}`. This will load up the value at schema according to the rules, and then split it so the prompt is run once per non-empty line in the schema input. The output for each line will be named on the content of that line. Downstream templates that rely on that output will be in multi-mode by default.
 
 ## Caching
 
