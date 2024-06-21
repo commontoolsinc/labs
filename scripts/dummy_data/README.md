@@ -33,6 +33,13 @@ This process is recursive. When a name is found it is printed out which version 
 
 As a special case, if your include has the `:multi` directive, it says 'load up the named placeholder, and then interpet each line as a separate value and call this template once for each file'. You can see prompts/schema.txt for an example. Instead of outputting one result, it will output as many results as non-empty lines in that file, named for the lines. Later, other templates that load up that named placeholder, if they find multiple outputs (instead of one file) will also go into multi-output mode.
 
+If you want to override which placeholder to use, you can pass the `--ignore` flag. The legal classes of cached values to ignore: 'golden', 'target', 'includes', 'prompts', 'overrides'. All of the following are valid:
+- `target` - ignores all pre-computed targets for all placeholders
+- `target:*` - the same semantics as the line above
+- `target:files` - ignores the pre-computed target for the placeholder named files
+- `target:files,backstory` - ignore the pre-computed target for the placeholders named files and backstory
+- `target,golden:files,backstory` - ignore the pre-computed target and the golden for the placeholders named files and backstory.
+
 ### TODO
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)
 - Allow a way to specify `{files|multi-load:schema}
