@@ -11,13 +11,18 @@ export class CommonWindowManager extends LitElement {
     :host {
       display: flex;
       overflow-x: auto;
+      overflow-y: visible;
       width: 100%;
+      height: 95vh;
       padding: 20px 0; /* Add vertical padding */
     }
     .window {
       flex: 0 0 auto;
-      width: 300px;
+      width: 25%;
+      min-width: 300px;
+      height: 95%; /* Make the window full height */
       margin-left: 20px;
+      margin-bottom: 20px;
       padding: 10px;
       border: 1px solid #e0e0e0;
       border-radius: 8px;
@@ -30,6 +35,7 @@ export class CommonWindowManager extends LitElement {
       transition: all 0.3s ease;
     }
     .close-button {
+      z-index: 1;
       position: absolute;
       top: 8px;
       right: 8px;
@@ -67,9 +73,12 @@ export class CommonWindowManager extends LitElement {
           <div class="window" id="${id}">
             <button class="close-button" @click="${this.onClose}">×</button>
             <common-screen-element>
-              ${render.render(include({ content: binding("UI") }), {
-                UI: saga.UI,
-              })}
+              <common-system-layout>
+                ${render.render(include({ content: binding("UI") }), {
+                  UI: saga.UI,
+                })}
+                  <common-unibox slot="search" value="" placeholder="" label=">">
+              </common-system-layout>
             </common-screen-element>
           </div>
         `;
