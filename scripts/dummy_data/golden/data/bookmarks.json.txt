@@ -1,0 +1,229 @@
+{
+  "bookmarks": [
+    {
+      "id": "b001",
+      "url": "https://www.santafe.edu/",
+      "title": "Santa Fe Institute",
+      "description": "Exploring complex adaptive systems and emergent phenomena",
+      "dateAdded": "2023-03-01T09:15:30Z",
+      "lastVisited": "2023-06-15T14:22:45Z",
+      "tags": ["complexity", "science", "interdisciplinary"],
+      "folder": "complexity_studies",
+      "favicon": "https://www.santafe.edu/favicon.ico",
+      "notes": "Potential collaboration for Emergent Endeavors?",
+      "visitCount": 42,
+      "isPrivate": false,
+      "customFields": {
+        "relevanceScore": 9.5
+      }
+    },
+    {
+      "id": "b002",
+      "url": "https://www.patternlanguage.com/",
+      "title": "A Pattern Language",
+      "description": "Christopher Alexander's seminal work on architecture and urban design",
+      "dateAdded": "2022-11-12T18:30:00Z",
+      "lastVisited": "2023-06-20T10:05:12Z",
+      "tags": ["architecture", "design", "patterns"],
+      "folder": "inspirations",
+      "favicon": "https://www.patternlanguage.com/favicon.ico",
+      "notes": "Re-read for office redesign project",
+      "visitCount": 87,
+      "isPrivate": false,
+      "customFields": {
+        "personalRating": 5
+      }
+    },
+    {
+      "id": "b003",
+      "url": "https://www.fungi.com/",
+      "title": "Fungi Perfecti",
+      "description": "Paul Stamets' hub for all things mycological",
+      "dateAdded": "2023-01-05T11:20:15Z",
+      "lastVisited": "2023-06-18T20:30:00Z",
+      "tags": ["mycology", "ecology", "sustainability"],
+      "folder": "rooftop_garden",
+      "favicon": "https://www.fungi.com/favicon.ico",
+      "notes": "Order new spores for garden experiment",
+      "visitCount": 28,
+      "isPrivate": false,
+      "customFields": {
+        "gardenProjectPhase": 2
+      }
+    },
+    {
+      "id": "b004",
+      "url": "https://ncase.me/loopy/",
+      "title": "Loopy: a tool for thinking in systems",
+      "description": "Interactive tool for creating causal loop diagrams",
+      "dateAdded": "2023-02-14T15:45:30Z",
+      "lastVisited": "2023-06-22T09:10:20Z",
+      "tags": ["systems thinking", "visualization", "tools"],
+      "folder": "work_resources",
+      "favicon": "https://ncase.me/favicon.ico",
+      "notes": "Use for next Emergent Endeavors workshop",
+      "visitCount": 56,
+      "isPrivate": false,
+      "customFields": {
+        "workshopDate": "2023-07-15"
+      }
+    },
+    {
+      "id": "b005",
+      "url": "https://www.goodreads.com/book/show/26156469-exhalation",
+      "title": "Exhalation by Ted Chiang",
+      "description": "Collection of mind-bending short stories",
+      "dateAdded": "2023-04-02T22:10:00Z",
+      "lastVisited": "2023-06-10T23:15:30Z",
+      "tags": ["science fiction", "philosophy", "time"],
+      "folder": "reading_list",
+      "favicon": "https://www.goodreads.com/favicon.ico",
+      "notes": "Inspiration for non-linear journal entries",
+      "visitCount": 12,
+      "isPrivate": false,
+      "customFields": {
+        "favoriteStory": "The Lifecycle of Software Objects"
+      }
+    },
+    {
+      "id": "b006",
+      "url": "https://www.britannica.com/biography/Jane-Jacobs",
+      "title": "Jane Jacobs | Biography, Books, & Facts",
+      "description": "Overview of Jane Jacobs' life and work",
+      "dateAdded": "2022-09-20T14:25:00Z",
+      "lastVisited": "2023-06-05T11:30:45Z",
+      "tags": ["urban planning", "sociology", "economics"],
+      "folder": "urban_studies",
+      "favicon": "https://www.britannica.com/favicon.ico",
+      "notes": "Revisit for Berkeley community project",
+      "visitCount": 31,
+      "isPrivate": false,
+      "customFields": {
+        "relatedProject": "Berkeley Neighborhood Watch"
+      }
+    },
+    {
+      "id": "b007",
+      "url": "https://www.origami-resource-center.com/",
+      "title": "Origami Resource Center",
+      "description": "Comprehensive resource for origami enthusiasts",
+      "dateAdded": "2023-05-01T16:40:20Z",
+      "lastVisited": "2023-06-23T19:05:10Z",
+      "tags": ["origami", "art", "mathematics"],
+      "folder": "hobbies",
+      "favicon": "https://www.origami-resource-center.com/favicon.ico",
+      "notes": "Find new patterns for algorithmic origami project",
+      "visitCount": 18,
+      "isPrivate": false,
+      "customFields": {
+        "currentProject": "Fractal Crane"
+      }
+    },
+    {
+      "id": "b008",
+      "url": "https://www.nobleprog.com/cc/system-thinking",
+      "title": "Systems Thinking Training",
+      "description": "Professional development courses in systems thinking",
+      "dateAdded": "2023-03-18T10:55:30Z",
+      "lastVisited": "2023-06-19T14:20:00Z",
+      "tags": ["education", "systems thinking", "professional development"],
+      "folder": "work_resources",
+      "favicon": "https://www.nobleprog.com/favicon.ico",
+      "notes": "Potential resource for Emergent Endeavors team training",
+      "visitCount": 7,
+      "isPrivate": false,
+      "customFields": {
+        "budgetAllocation": 1500
+      }
+    },
+    {
+      "id": "b009",
+      "url": "https://www.nightcafe.studio/",
+      "title": "NightCafe Creator",
+      "description": "AI Art Generator",
+      "dateAdded": "2023-05-10T20:30:15Z",
+      "lastVisited": "2023-06-21T22:45:30Z",
+      "tags": ["AI", "art", "creativity"],
+      "folder": "digital_art",
+      "favicon": "https://www.nightcafe.studio/favicon.ico",
+      "notes": "Experiment with AI-generated patterns for origami",
+      "visitCount": 23,
+      "isPrivate": false,
+      "customFields": {
+        "favoriteStyle": "Fractal Expressionism"
+      }
+    },
+    {
+      "id": "b010",
+      "url": "https://www.iftf.org/",
+      "title": "Institute for the Future",
+      "description": "Forecasting and future studies organization",
+      "dateAdded": "2023-01-22T11:10:00Z",
+      "lastVisited": "2023-06-17T16:30:20Z",
+      "tags": ["futurism", "research", "innovation"],
+      "folder": "inspirations",
+      "favicon": "https://www.iftf.org/favicon.ico",
+      "notes": "Look into internship opportunities",
+      "visitCount": 15,
+      "isPrivate": false,
+      "customFields": {
+        "eventReminder": "2023-09-15 Future of Work Symposium"
+      }
+    }
+  ],
+  "folders": [
+    {
+      "id": "f001",
+      "name": "complexity_studies",
+      "parentId": null,
+      "dateCreated": "2022-12-01T10:00:00Z"
+    },
+    {
+      "id": "f002",
+      "name": "inspirations",
+      "parentId": null,
+      "dateCreated": "2022-11-15T14:30:00Z"
+    },
+    {
+      "id": "f003",
+      "name": "rooftop_garden",
+      "parentId": null,
+      "dateCreated": "2023-01-02T09:15:00Z"
+    },
+    {
+      "id": "f004",
+      "name": "work_resources",
+      "parentId": null,
+      "dateCreated": "2023-02-10T11:45:00Z"
+    },
+    {
+      "id": "f005",
+      "name": "reading_list",
+      "parentId": null,
+      "dateCreated": "2023-03-20T16:20:00Z"
+    },
+    {
+      "id": "f006",
+      "name": "urban_studies",
+      "parentId": null,
+      "dateCreated": "2022-09-15T13:00:00Z"
+    },
+    {
+      "id": "f007",
+      "name": "hobbies",
+      "parentId": null,
+      "dateCreated": "2023-04-30T18:30:00Z"
+    },
+    {
+      "id": "f008",
+      "name": "digital_art",
+      "parentId": "f007",
+      "dateCreated": "2023-05-05T20:45:00Z"
+    }
+  ],
+  "meta": {
+    "lastSync": "2023-06-23T23:59:59Z",
+    "version": "1.0.5",
+    "totalBookmarks": 10
+  }
+}

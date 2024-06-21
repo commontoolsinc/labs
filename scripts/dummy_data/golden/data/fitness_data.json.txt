@@ -1,0 +1,355 @@
+{
+  "user_id": "7b4e3f8c-9d2a-4e80-8e5f-8c1d9a7b3f6e",
+  "daily_activities": [
+    {
+      "date": "2023-06-01",
+      "steps": 12345,
+      "calories_burned": 2567,
+      "active_minutes": 187,
+      "distance_km": 9.8,
+      "floors_climbed": 15
+    },
+    {
+      "date": "2023-06-02",
+      "steps": 9876,
+      "calories_burned": 2098,
+      "active_minutes": 145,
+      "distance_km": 7.9,
+      "floors_climbed": 12
+    },
+    {
+      "date": "2023-06-03",
+      "steps": 15432,
+      "calories_burned": 3012,
+      "active_minutes": 210,
+      "distance_km": 12.3,
+      "floors_climbed": 20
+    },
+    {
+      "date": "2023-06-04",
+      "steps": 7654,
+      "calories_burned": 1876,
+      "active_minutes": 120,
+      "distance_km": 6.1,
+      "floors_climbed": 8
+    },
+    {
+      "date": "2023-06-05",
+      "steps": 11111,
+      "calories_burned": 2345,
+      "active_minutes": 165,
+      "distance_km": 8.9,
+      "floors_climbed": 14
+    }
+  ],
+  "workouts": [
+    {
+      "date": "2023-06-01T07:30:00Z",
+      "type": "yoga",
+      "duration_minutes": 60,
+      "calories_burned": 180,
+      "heart_rate_avg": 95,
+      "heart_rate_max": 110,
+      "notes": "Practiced 'Algorithmic Asanas' - each pose determined by a cellular automaton pattern"
+    },
+    {
+      "date": "2023-06-02T18:00:00Z",
+      "type": "running",
+      "duration_minutes": 45,
+      "calories_burned": 450,
+      "heart_rate_avg": 140,
+      "heart_rate_max": 165,
+      "notes": "Ran fractal patterns through Berkeley streets, ended up accidentally creating a map of the Mandelbrot set"
+    },
+    {
+      "date": "2023-06-04T10:00:00Z",
+      "type": "other",
+      "duration_minutes": 90,
+      "calories_burned": 300,
+      "heart_rate_avg": 110,
+      "heart_rate_max": 130,
+      "notes": "Urban foraging expedition turned into impromptu parkour session"
+    },
+    {
+      "date": "2023-06-05T16:00:00Z",
+      "type": "cycling",
+      "duration_minutes": 75,
+      "calories_burned": 525,
+      "heart_rate_avg": 135,
+      "heart_rate_max": 160,
+      "notes": "Biked to neighboring cities following the Fibonacci sequence"
+    }
+  ],
+  "body_measurements": [
+    {
+      "date": "2023-06-01",
+      "weight_kg": 63.5,
+      "height_cm": 170,
+      "body_fat_percentage": 22,
+      "muscle_mass_kg": 45.2,
+      "bmi": 22.0
+    },
+    {
+      "date": "2023-06-05",
+      "weight_kg": 63.2,
+      "height_cm": 170,
+      "body_fat_percentage": 21.8,
+      "muscle_mass_kg": 45.3,
+      "bmi": 21.9
+    }
+  ],
+  "sleep_data": [
+    {
+      "date": "2023-06-01",
+      "sleep_duration_hours": 7.5,
+      "sleep_quality": "good",
+      "deep_sleep_percentage": 20,
+      "rem_sleep_percentage": 25,
+      "light_sleep_percentage": 50,
+      "awake_time_minutes": 15
+    },
+    {
+      "date": "2023-06-02",
+      "sleep_duration_hours": 6.8,
+      "sleep_quality": "fair",
+      "deep_sleep_percentage": 18,
+      "rem_sleep_percentage": 22,
+      "light_sleep_percentage": 55,
+      "awake_time_minutes": 25
+    },
+    {
+      "date": "2023-06-03",
+      "sleep_duration_hours": 8.2,
+      "sleep_quality": "excellent",
+      "deep_sleep_percentage": 23,
+      "rem_sleep_percentage": 28,
+      "light_sleep_percentage": 46,
+      "awake_time_minutes": 10
+    },
+    {
+      "date": "2023-06-04",
+      "sleep_duration_hours": 7.0,
+      "sleep_quality": "good",
+      "deep_sleep_percentage": 19,
+      "rem_sleep_percentage": 24,
+      "light_sleep_percentage": 52,
+      "awake_time_minutes": 20
+    },
+    {
+      "date": "2023-06-05",
+      "sleep_duration_hours": 7.8,
+      "sleep_quality": "good",
+      "deep_sleep_percentage": 21,
+      "rem_sleep_percentage": 26,
+      "light_sleep_percentage": 49,
+      "awake_time_minutes": 18
+    }
+  ],
+  "nutrition_logs": [
+    {
+      "date": "2023-06-01",
+      "meals": [
+        {
+          "name": "Mycelium-infused smoothie bowl",
+          "calories": 350,
+          "protein_g": 15,
+          "carbs_g": 45,
+          "fat_g": 12
+        },
+        {
+          "name": "Fractal salad with chaos theory dressing",
+          "calories": 280,
+          "protein_g": 8,
+          "carbs_g": 20,
+          "fat_g": 18
+        },
+        {
+          "name": "Emergent pattern protein bar",
+          "calories": 200,
+          "protein_g": 20,
+          "carbs_g": 25,
+          "fat_g": 5
+        },
+        {
+          "name": "Complex systems stir-fry",
+          "calories": 450,
+          "protein_g": 25,
+          "carbs_g": 40,
+          "fat_g": 22
+        }
+      ],
+      "total_water_ml": 2500,
+      "supplements": ["Nootropic blend", "Adaptogenic mushroom complex"]
+    },
+    {
+      "date": "2023-06-02",
+      "meals": [
+        {
+          "name": "Quantum uncertainty toast",
+          "calories": 220,
+          "protein_g": 10,
+          "carbs_g": 30,
+          "fat_g": 8
+        },
+        {
+          "name": "Nonlinear dynamics noodle soup",
+          "calories": 380,
+          "protein_g": 18,
+          "carbs_g": 50,
+          "fat_g": 12
+        },
+        {
+          "name": "Collaborative conjuring energy balls",
+          "calories": 150,
+          "protein_g": 5,
+          "carbs_g": 20,
+          "fat_g": 8
+        },
+        {
+          "name": "Emergent flavor tacos",
+          "calories": 520,
+          "protein_g": 28,
+          "carbs_g": 45,
+          "fat_g": 26
+        }
+      ],
+      "total_water_ml": 2200,
+      "supplements": ["Cognitive enhancement blend", "Probiotic ecosystem booster"]
+    },
+    {
+      "date": "2023-06-03",
+      "meals": [
+        {
+          "name": "Fibonacci sequence flapjacks",
+          "calories": 400,
+          "protein_g": 12,
+          "carbs_g": 60,
+          "fat_g": 15
+        },
+        {
+          "name": "Self-organizing systems salad",
+          "calories": 250,
+          "protein_g": 10,
+          "carbs_g": 25,
+          "fat_g": 16
+        },
+        {
+          "name": "Convivial magic trail mix",
+          "calories": 180,
+          "protein_g": 6,
+          "carbs_g": 22,
+          "fat_g": 10
+        },
+        {
+          "name": "Paracosm commons casserole",
+          "calories": 480,
+          "protein_g": 30,
+          "carbs_g": 35,
+          "fat_g": 24
+        }
+      ],
+      "total_water_ml": 2400,
+      "supplements": ["Lucid dreaming support", "Mycorrhizal network booster"]
+    },
+    {
+      "date": "2023-06-04",
+      "meals": [
+        {
+          "name": "Ant colony optimization oatmeal",
+          "calories": 320,
+          "protein_g": 14,
+          "carbs_g": 50,
+          "fat_g": 10
+        },
+        {
+          "name": "Swarm intelligence sushi rolls",
+          "calories": 420,
+          "protein_g": 22,
+          "carbs_g": 55,
+          "fat_g": 14
+        },
+        {
+          "name": "Emergence theory energy bar",
+          "calories": 200,
+          "protein_g": 15,
+          "carbs_g": 25,
+          "fat_g": 8
+        },
+        {
+          "name": "Pattern language pizza",
+          "calories": 550,
+          "protein_g": 24,
+          "carbs_g": 65,
+          "fat_g": 22
+        }
+      ],
+      "total_water_ml": 2600,
+      "supplements": ["Creativity boost blend", "Gut-brain axis support"]
+    },
+    {
+      "date": "2023-06-05",
+      "meals": [
+        {
+          "name": "Biomimicry breakfast bowl",
+          "calories": 380,
+          "protein_g": 18,
+          "carbs_g": 45,
+          "fat_g": 16
+        },
+        {
+          "name": "Urban planning inspired udon",
+          "calories": 450,
+          "protein_g": 20,
+      "carbs_g": 70,
+      "fat_g": 10
+    },
+    {
+      "name": "Generative system granola bar",
+      "calories": 220,
+      "protein_g": 8,
+      "carbs_g": 28,
+      "fat_g": 12
+    },
+    {
+      "name": "Meta-novelty search moussaka",
+      "calories": 500,
+      "protein_g": 26,
+      "carbs_g": 35,
+      "fat_g": 30
+    }
+  ],
+  "total_water_ml": 2300,
+  "supplements": ["Neuroplasticity enhancer", "Circadian rhythm regulator"]
+}
+  ],
+  "fitness_goals": [
+    {
+      "goal_type": "overall_health",
+      "target_value": 90,
+      "target_date": "2023-12-31",
+      "progress": 65,
+      "notes": "Aiming to achieve perfect harmony between physical, mental, and mycorrhizal health"
+    },
+    {
+      "goal_type": "flexibility",
+      "target_value": 100,
+      "target_date": "2023-09-30",
+      "progress": 70,
+      "notes": "Working towards being able to fold myself into a Klein bottle shape"
+    },
+    {
+      "goal_type": "endurance",
+      "target_value": 120,
+      "target_date": "2023-10-31",
+      "progress": 55,
+      "notes": "Training to complete a marathon through 4-dimensional space"
+    },
+    {
+      "goal_type": "muscle_gain",
+      "target_value": 3,
+      "target_date": "2023-11-30",
+      "progress": 40,
+      "notes": "Focusing on strengthening my 'idea muscles' through conceptual weightlifting"
+    }
+  ]
+}

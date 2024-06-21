@@ -1,0 +1,224 @@
+{
+  "lifeGoals": [
+    {
+      "title": "Create a Generative System for Generating Generative Systems",
+      "description": "Develop a meta-framework that can create new generative systems, pushing the boundaries of emergence and complexity.",
+      "targetDate": "2030-12-31",
+      "progress": 15,
+      "priority": 9
+    },
+    {
+      "title": "Pioneer the Field of Meta-Novelty Search",
+      "description": "Establish a new academic discipline that explores methods for finding novel ways to search for novelty.",
+      "targetDate": "2035-06-15",
+      "progress": 5,
+      "priority": 8
+    },
+    {
+      "title": "Create the Paracosm Commons",
+      "description": "Develop a shared imaginary world governed by principles of collective creativity and emergent storytelling, inspired by Elinor Ostrom's work.",
+      "targetDate": "2028-03-01",
+      "progress": 30,
+      "priority": 10
+    },
+    {
+      "title": "Master the Art of Succulent Care",
+      "description": "Finally figure out why my succulents keep dying and become an expert in their care and propagation.",
+      "targetDate": "2024-09-30",
+      "progress": 20,
+      "priority": 6
+    },
+    {
+      "title": "Achieve Quantum Coherence with Fireflies",
+      "description": "Organize a citywide firefly light show that demonstrates quantum entanglement principles.",
+      "targetDate": "2032-07-15",
+      "progress": 2,
+      "priority": 7
+    }
+  ],
+  "shortTermGoals": [
+    {
+      "title": "Publish 'The Mycorrhizal Network of Urban Planning'",
+      "deadline": "2023-12-31",
+      "steps": [
+        "Finish research on fungal communication",
+        "Interview 5 more urban planners",
+        "Complete first draft",
+        "Get feedback from mom (the mycologist)",
+        "Revise and submit to publishers"
+      ],
+      "status": "In Progress"
+    },
+    {
+      "title": "Host a Ted Chiang-inspired Time Loop Party",
+      "deadline": "2023-09-21",
+      "steps": [
+        "Design invitations that arrive 'yesterday'",
+        "Create a menu of time-twisted snacks",
+        "Set up a 'temporal photography' booth",
+        "Prepare 'future memory' party favors"
+      ],
+      "status": "Not Started"
+    },
+    {
+      "title": "Develop an Ant Colony Optimization Algorithm for Office Layout",
+      "deadline": "2023-11-30",
+      "steps": [
+        "Study ant pheromone trails",
+        "Map office social dynamics",
+        "Code the algorithm",
+        "Test on Emergent Endeavors office",
+        "Present findings at next Collaborative Conjuring session"
+      ],
+      "status": "In Progress"
+    }
+  ],
+  "bucketList": [
+    "Attend a lecture by Santa Fe Institute faculty",
+    "Fold a time-traveling origami crane",
+    "Plant a garden on Mars (or a convincing simulation)",
+    "Write a book using only patterns found in nature",
+    "Teach a crow to play chess",
+    "Develop a programming language based on mycorrhizal networks",
+    "Create a fully functional zoetrope using only found objects from Berkeley streets",
+    "Compose a symphony using sounds from beehives",
+    "Solve a Millennium Prize Problem using only intuition and interpretive dance",
+    "Discover a new prime number and name it after my favorite lichen"
+  ],
+  "personalValues": [
+    "Emergent complexity",
+    "Collaborative creativity",
+    "Intellectual playfulness",
+    "Ecological harmony",
+    "Systemic thinking",
+    "Convivial technology",
+    "Infinite play",
+    "Cognitive diversity",
+    "Adaptive resilience",
+    "Whimsical wisdom"
+  ],
+  "careerAspirations": {
+    "desiredPosition": "Chief Emergence Officer",
+    "desiredIndustry": "Meta-Innovation Consultancy",
+    "skillsToAcquire": [
+      "Quantum computing",
+      "Biomimicry design",
+      "Collective intelligence facilitation",
+      "Non-linear forecasting",
+      "Algorithmic gardening"
+    ],
+    "salaryGoal": 142857.14
+  },
+  "personalDevelopment": [
+    {
+      "area": "Cognitive Flexibility",
+      "goals": [
+        "Master at least 3 new mental models",
+        "Develop a personal notation system for complex ideas",
+        "Practice daily perspective-shifting exercises"
+      ],
+      "resources": [
+        "Farnam Street Mental Models blog",
+        "Douglas Hofstadter's 'Gödel, Escher, Bach'",
+        "Oblique Strategies deck by Brian Eno"
+      ]
+    },
+    {
+      "area": "Embodied Cognition",
+      "goals": [
+        "Integrate movement practices into problem-solving routines",
+        "Develop a 'kinesthetic thesaurus' for physical expressions of abstract concepts"
+      ],
+      "resources": [
+        "TED talk on embodied cognition",
+        "Contact improvisation workshops",
+        "The Feldenkrais Method"
+      ]
+    },
+    {
+      "area": "Integrative Complexity",
+      "goals": [
+        "Improve ability to synthesize disparate fields of knowledge",
+        "Create visual maps of interdisciplinary connections"
+      ],
+      "resources": [
+        "James Burke's 'Connections' series",
+        "Neri Oxman's work on material ecology",
+        "Edward Tufte's books on information design"
+      ]
+    }
+  ],
+  "dreamVacations": [
+    {
+      "destination": "Svalbard Global Seed Vault",
+      "activities": [
+        "Contemplate the future of biodiversity",
+        "Compose a seed-inspired musical piece",
+        "Sketch designs for a whimsical apocalypse-proof treehouse"
+      ],
+      "estimatedCost": 15000
+    },
+    {
+      "destination": "CERN, Switzerland",
+      "activities": [
+        "Attend a particle physics workshop",
+        "Create 'quantum origami' inspired by collision patterns",
+        "Host an 'Entangled Thoughts' dinner party with physicists"
+      ],
+      "estimatedCost": 8500
+    },
+    {
+      "destination": "Arecibo Observatory, Puerto Rico",
+      "activities": [
+        "Stargaze and contemplate extraterrestrial life",
+        "Develop a 'cosmic eavesdropping' meditation technique",
+        "Design a board game based on the Drake equation"
+      ],
+      "estimatedCost": 6000
+    }
+  ],
+  "philanthropicGoals": [
+    {
+      "cause": "Urban Biodiversity",
+      "actionPlan": "Create a citywide network of 'Pocket Prairies' in unused urban spaces",
+      "targetImpact": "Increase local insect and bird populations by 30% in 5 years"
+    },
+    {
+      "cause": "Accessible Systems Thinking Education",
+      "actionPlan": "Develop a free, gamified online course on complex adaptive systems",
+      "targetImpact": "Reach 100,000 learners globally and improve their decision-making skills"
+    },
+    {
+      "cause": "Intergenerational Wisdom Transfer",
+      "actionPlan": "Establish a 'Living Library' program pairing elders with youth for knowledge exchange",
+      "targetImpact": "Facilitate 1,000 meaningful intergenerational connections annually"
+    }
+  ],
+  "quirkyChallenges": [
+    {
+      "challenge": "Go an entire week speaking only in haiku",
+      "reason": "To explore the impact of constrained communication on cognitive patterns",
+      "difficulty": "Medium"
+    },
+    {
+      "challenge": "Redesign my daily routine based on slime mold behavior",
+      "reason": "To test the applicability of biological optimization to personal productivity",
+      "difficulty": "Hard"
+    },
+    {
+      "challenge": "Conduct all personal planning using only tarot cards for a month",
+      "reason": "To examine the role of guided randomness in decision-making processes",
+      "difficulty": "Medium"
+    },
+    {
+      "challenge": "Create a working computer using only materials found in nature",
+      "reason": "To deepen understanding of computation and natural systems",
+      "difficulty": "Impossible"
+    },
+    {
+      "challenge": "Translate 'A Pattern Language' into interpretive dance",
+      "reason": "To explore embodied representations of architectural and social patterns",
+      "difficulty": "Hard"
+    }
+  ]
+}

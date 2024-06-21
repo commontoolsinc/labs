@@ -1,0 +1,117 @@
+{
+  "medications": [
+    {
+      "name": "Patternix",
+      "dosage": "250mg",
+      "frequency": "Twice daily, or when reality seems too linear",
+      "startDate": "2023-02-29",
+      "endDate": "2027-02-28",
+      "prescribedBy": "Dr. Fractalia Mandelbrot",
+      "reason": "Chronic pattern blindness and acute linearity",
+      "sideEffects": [
+        "Spontaneous tessellation",
+        "Fractal dreaming",
+        "Compulsive doodling"
+      ],
+      "notes": "Take with a glass of non-Euclidean water for best results",
+      "funnyNickname": "Reality Remixers",
+      "interactionsWithChocolate": "explosive",
+      "tasteRating": 7,
+      "superPower": "Ability to see hidden patterns in cloud formations"
+    },
+    {
+      "name": "Mycelium Mind Meld",
+      "dosage": "1 spore capsule",
+      "frequency": "Weekly, preferably during a full moon",
+      "startDate": "2022-09-21",
+      "prescribedBy": "Dr. Fungi Sagan",
+      "reason": "To enhance communication with the underground fungal network",
+      "sideEffects": [
+        "Occasional bioluminescence",
+        "Increased empathy towards mushrooms",
+        "Sudden cravings for decaying matter"
+      ],
+      "notes": "Best taken while standing barefoot in the backyard garden",
+      "funnyNickname": "Shroom Zoom",
+      "interactionsWithChocolate": "safe",
+      "tasteRating": 3,
+      "superPower": "Ability to sense upcoming rainstorms through tingling toes"
+    },
+    {
+      "name": "Emergent Elixir",
+      "dosage": "5 drops",
+      "frequency": "Daily, or when feeling too deterministic",
+      "startDate": "2023-04-01",
+      "prescribedBy": "Dr. Complexia Adaptive",
+      "reason": "To promote spontaneous order in daily life",
+      "sideEffects": [
+        "Occasional swarm behavior",
+        "Heightened sensitivity to butterfly effects",
+        "Tendency to self-organize while sleeping"
+      ],
+      "notes": "Shake well before use, but not too well – we don't want to over-determine the mixture",
+      "funnyNickname": "Chaos Juice",
+      "interactionsWithChocolate": "risky",
+      "tasteRating": 8,
+      "superPower": "Ability to predict flash mobs before they form"
+    },
+    {
+      "name": "Origami Optimizer",
+      "dosage": "1 paper crane pill",
+      "frequency": "As needed, when facing stubborn flat surfaces",
+      "startDate": "2024-01-01",
+      "prescribedBy": "Dr. Folds McCrease",
+      "reason": "To enhance spatial reasoning and paper manipulation skills",
+      "sideEffects": [
+        "Irresistible urge to fold napkins at restaurants",
+        "Paper cuts heal in fractal patterns",
+        "Dreams become pop-up books"
+      ],
+      "notes": "Do not take with smoothing iron supplements",
+      "funnyNickname": "Crease Lightning",
+      "interactionsWithChocolate": "safe",
+      "tasteRating": 6,
+      "superPower": "Ability to fold theoretical spacetime models into pocket universes"
+    },
+    {
+      "name": "Ostrom's Order",
+      "dosage": "1 commons capsule",
+      "frequency": "Before attending any community meeting or potluck",
+      "startDate": "2023-11-12",
+      "prescribedBy": "Dr. Collective A. Ction",
+      "reason": "To optimize governance of shared resources and enhance cooperation",
+      "sideEffects": [
+        "Sudden outbursts of equitable solutions",
+        "Increased urge to create nested institutions",
+        "Polycentric governance daydreams"
+      ],
+      "notes": "Effects amplified when taken in groups of 8",
+      "funnyNickname": "Cooperative Capsules",
+      "interactionsWithChocolate": "safe",
+      "tasteRating": 9,
+      "superPower": "Ability to resolve tragedy of the commons scenarios in record time"
+    },
+    {
+      "name": "Paracosm Pixels",
+      "dosage": "42 micro-cubes",
+      "frequency": "Daily, preferably while daydreaming",
+      "startDate": "2025-06-15",
+      "prescribedBy": "Dr. Imaginaria Worldbuilder",
+      "reason": "To maintain and expand the Paracosm Commons",
+      "sideEffects": [
+        "Occasionally blurred lines between reality and imagination",
+        "Spontaneous worldbuilding",
+        "Increased population of imaginary friends"
+      ],
+      "notes": "Keep in a cool, dark place, away from harsh reality",
+      "funnyNickname": "Reality Remix Cubes",
+      "interactionsWithChocolate": "explosive",
+      "tasteRating": 10,
+      "superPower": "Ability to make imaginary worlds tangible for up to 5 minutes"
+    }
+  ],
+  "lastUpdated": "2025-07-04T20:23:42Z",
+  "pillBoxColor": "Schrödinger's Cat Grey (simultaneously all colors and no color)",
+  "favoritePharmacy": "The Apothecary of Serendipity & Emergence",
+  "medicationMantra": "In pills we trust, but in patterns we must"
+}

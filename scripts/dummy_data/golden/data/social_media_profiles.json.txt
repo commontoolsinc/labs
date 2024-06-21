@@ -1,0 +1,306 @@
+{
+  "profiles": [
+    {
+      "platform": "Twitter",
+      "username": "@PiperParacosm",
+      "displayName": "Piper Paracosm 🌿🦋",
+      "bio": "Pattern perceiver. Emergent enthusiast. Professional daydreamer. Exploring the intersection of mycelium and metacognition. Berkeley, CA",
+      "followers": 3287,
+      "following": 1024,
+      "posts": [
+        {
+          "content": "Just finished reading 'Finite and Infinite Games' for the 42nd time. Each read is a new game in itself. #InfinitePlay",
+          "timestamp": "2023-06-15T14:23:17Z",
+          "likes": 89,
+          "comments": [
+            {
+              "author": "@ComplexityFan",
+              "content": "Have you tried reading it backwards? It's like a whole new book!",
+              "timestamp": "2023-06-15T14:45:22Z"
+            },
+            {
+              "author": "@BookwormBee",
+              "content": "I still can't get past chapter 3. Any tips?",
+              "timestamp": "2023-06-15T15:01:38Z"
+            }
+          ]
+        },
+        {
+          "content": "Hypothesis: My succulents are actually thriving in a parallel universe. This one's just for show. 🌵👀 #QuantumGardening",
+          "timestamp": "2023-06-14T10:17:33Z",
+          "likes": 134,
+          "comments": []
+        },
+        {
+          "content": "Tonight's 'Collaborative Conjuring' theme: Ostrom's principles meet Houdini's secrets. Let's govern this magical commons! 🎩✨ #ConvivialMagic",
+          "timestamp": "2023-06-13T18:45:02Z",
+          "likes": 76,
+          "comments": [
+            {
+              "author": "@MagicMike",
+              "content": "Can't wait! Bringing my invisible deck and a copy of 'Governing the Commons'!",
+              "timestamp": "2023-06-13T19:01:15Z"
+            }
+          ]
+        },
+        {
+          "content": "Just observed an ant colony solve the Traveling Salesman problem faster than my computer. Nature, you sneaky algorithm! 🐜💻 #BiomimeticComputing",
+          "timestamp": "2023-06-12T09:34:56Z",
+          "likes": 211,
+          "comments": []
+        },
+        {
+          "content": "Updated my 'future self' journal. Apparently, I invent time travel next Thursday. Busy week ahead! ⏳🔮 #NonlinearPlanning",
+          "timestamp": "2023-06-11T22:07:41Z",
+          "likes": 98,
+          "comments": [
+            {
+              "author": "@TimeTravelerTom",
+              "content": "Careful with those paradoxes, Piper!",
+              "timestamp": "2023-06-11T22:15:33Z"
+            }
+          ]
+        }
+      ],
+      "privacySettings": {
+        "profileVisibility": "public",
+        "postVisibility": "public",
+        "allowTagging": true,
+        "allowDirectMessages": true
+      }
+    },
+    {
+      "platform": "Instagram",
+      "username": "piperparacosm",
+      "displayName": "Piper Paracosm",
+      "bio": "📚 Bookworm | 🌿 Urban Gardener | 🧠 Complexity Thinker | 📐 Algorithmic Origamist | Berkeley's Resident Dreamer",
+      "followers": 5672,
+      "following": 834,
+      "posts": [
+        {
+          "content": "Today's algorithmic origami creation: a fractal butterfly that grows more detailed the closer you look. Inspired by Benoit Mandelbrot's 'The Fractal Geometry of Nature'. #AlgorithmicArt #Fractals",
+          "timestamp": "2023-06-16T11:28:39Z",
+          "likes": 432,
+          "comments": [
+            {
+              "author": "fractal_fanatic",
+              "content": "This is incredible! How long did it take you?",
+              "timestamp": "2023-06-16T11:45:22Z"
+            },
+            {
+              "author": "origami_master",
+              "content": "Your creations never cease to amaze me, Piper!",
+              "timestamp": "2023-06-16T12:03:17Z"
+            }
+          ]
+        },
+        {
+          "content": "Rooftop garden update: The tomatoes have formed a union and are demanding better soil conditions. Time to break out Ostrom's principles! #UrbanGardening #PlantPolitics",
+          "timestamp": "2023-06-14T16:52:11Z",
+          "likes": 287,
+          "comments": []
+        },
+        {
+          "content": "New addition to the bookshelf: 'Gödel, Escher, Bach' by Douglas Hofstadter. My brain is ready for some strange loops! #BookwormLife",
+          "timestamp": "2023-06-12T20:15:47Z",
+          "likes": 189,
+          "comments": [
+            {
+              "author": "meta_reader",
+              "content": "One of my all-time favorites! Enjoy the journey!",
+              "timestamp": "2023-06-12T20:33:29Z"
+            }
+          ]
+        },
+        {
+          "content": "Spotted in Berkeley: A flock of pigeons performing what looked suspiciously like a Turing machine. The city never ceases to amaze! #UrbanNature #ComputationalBiology",
+          "timestamp": "2023-06-10T14:09:23Z",
+          "likes": 376,
+          "comments": []
+        },
+        {
+          "content": "Just finished setting up my new 'idea incubator' - a cozy corner where random thoughts can collide and evolve. Featuring a wall-sized whiteboard, a collection of Oblique Strategies cards, and a comfy beanbag for contemplation. #CreativeSpace #IdeaGeneration",
+          "timestamp": "2023-06-08T19:37:56Z",
+          "likes": 521,
+          "comments": [
+            {
+              "author": "creative_carl",
+              "content": "Love the Oblique Strategies inclusion! Brian Eno would be proud.",
+              "timestamp": "2023-06-08T20:01:12Z"
+            },
+            {
+              "author": "design_diva",
+              "content": "Can we see more pics of this space? Sounds amazing!",
+              "timestamp": "2023-06-08T20:15:43Z"
+            }
+          ]
+        }
+      ],
+      "privacySettings": {
+        "profileVisibility": "public",
+        "postVisibility": "public",
+        "allowTagging": true,
+        "allowDirectMessages": false
+      }
+    },
+    {
+      "platform": "LinkedIn",
+      "username": "piper-paracosm",
+      "displayName": "Piper Paracosm",
+      "bio": "Founder of Emergent Endeavors | Complex Systems Consultant | Urban Planner | Game Designer | Exploring the frontiers of collaborative creativity and systems thinking",
+      "followers": 2156,
+      "following": 573,
+      "posts": [
+        {
+          "content": "Excited to announce that Emergent Endeavors is partnering with Berkeley City Council to reimagine public spaces using principles from complexity science and Jane Jacobs' urban theories. Looking forward to creating more vibrant, adaptive urban environments! #UrbanPlanning #ComplexSystems",
+          "timestamp": "2023-06-17T09:12:34Z",
+          "likes": 178,
+          "comments": [
+            {
+              "author": "Jane Smith",
+              "content": "This sounds fascinating, Piper! Would love to hear more about how you're applying complexity science to urban planning.",
+              "timestamp": "2023-06-17T10:05:22Z"
+            },
+            {
+              "author": "Urban Visionary",
+              "content": "Congratulations on the partnership! This is exactly the kind of innovative thinking our cities need.",
+              "timestamp": "2023-06-17T11:30:15Z"
+            }
+          ]
+        },
+        {
+          "content": "Just wrapped up a workshop on 'Gamifying Organizational Dynamics' for a Fortune 500 company. It's amazing how principles from game design can transform workplace culture and productivity. Key takeaway: Play is a powerful tool for learning and adaptation. #GameDesign #OrganizationalBehavior",
+          "timestamp": "2023-06-15T16:45:29Z",
+          "likes": 92,
+          "comments": []
+        },
+        {
+          "content": "Reflecting on the interconnectedness of ideas after re-reading Kevin Kelly's 'What Technology Wants'. In our hyperconnected world, innovation is increasingly about recognizing and recombining existing patterns. How are you fostering serendipitous connections in your work? #Innovation #SystemsThinking",
+          "timestamp": "2023-06-13T11:23:17Z",
+          "likes": 134,
+          "comments": [
+            {
+              "author": "Tech Philosopher",
+              "content": "Great point, Piper. I find that interdisciplinary collaboration is key to fostering those connections.",
+              "timestamp": "2023-06-13T12:01:45Z"
+            }
+          ]
+        },
+        {
+          "content": "Emergent Endeavors is hiring! Looking for a 'Narrative Ecologist' to help clients craft and nurture organizational stories that evolve with their company culture. Must be comfortable with both Joseph Campbell and complex adaptive systems. #JobOpening #OrganizationalStorytelling",
+          "timestamp": "2023-06-11T14:09:56Z",
+          "likes": 67,
+          "comments": []
+        },
+        {
+          "content": "Just published a white paper on 'The Ecology of Innovation: Applying Permaculture Principles to Idea Generation'. Exploring how we can create more sustainable and generative ideation processes by mimicking natural systems. Link in comments! #Permaculture #Innovation",
+          "timestamp": "2023-06-09T10:37:22Z",
+          "likes": 215,
+          "comments": [
+            {
+              "author": "Green Thinker",
+              "content": "This is brilliant, Piper! The intersection of permaculture and innovation is so underexplored.",
+              "timestamp": "2023-06-09T11:15:33Z"
+            },
+            {
+              "author": "Innovation Consultant",
+              "content": "Just read the paper - fascinating ideas! Would love to discuss further.",
+              "timestamp": "2023-06-09T13:42:19Z"
+            }
+          ]
+        }
+      ],
+      "privacySettings": {
+        "profileVisibility": "public",
+        "postVisibility": "public",
+        "allowTagging": true,
+        "allowDirectMessages": true
+      }
+    },
+    {
+      "platform": "Reddit",
+      "username": "PiperParacosm",
+      "displayName": "Piper Paracosm",
+      "bio": "Complexity enthusiast, urban dreamer, and professional pattern perceiver. AMA about systems thinking, creative problem-solving, or the secret lives of succulents.",
+      "followers": 1893,
+      "following": 342,
+      "posts": [
+        {
+          "content": "TIL that slime molds can solve mazes and even recreate efficient transport networks. Nature's been doing systems optimization way longer than we have! Anyone know of other cool examples of natural problem-solving?",
+          "timestamp": "2023-06-18T18:23:45Z",
+          "likes": 2456,
+          "comments": [
+            {
+              "author": "BiomimeticBob",
+              "content": "Check out how bees optimize their hive structures. It's basically organic linear programming!",
+              "timestamp": "2023-06-18T18:45:22Z"
+            },
+            {
+              "author": "NatureTechNerd",
+              "content": "Ants are amazing at finding shortest paths. There's even an optimization algorithm based on their behavior called Ant Colony Optimization.",
+              "timestamp": "2023-06-18T19:01:38Z"
+            }
+          ]
+        },
+        {
+          "content": "[OC] I created a generative art piece based on the patterns of mycorrhizal networks in my garden. Each line represents a connection between plants, with thickness indicating the strength of the connection. Thought you folks in r/DataIsBeautiful might appreciate it!",
+          "timestamp": "2023-06-16T21:17:33Z",
+          "likes": 8765,
+          "comments": [
+            {
+              "author": "DataVizWizard",
+              "content": "This is stunning! What tools did you use to create this?",
+              "timestamp": "2023-06-16T21:30:15Z"
+            },
+            {
+              "author": "FungiFanatic",
+              "content": "As a mycologist, I'm blown away by how accurately you've captured these networks. Beautiful work!",
+              "timestamp": "2023-06-16T22:05:41Z"
+            }
+          ]
+        },
+        {
+          "content": "Has anyone here read 'Finite and Infinite Games' by James Carse? Just finished it and my mind is blown. Looking to discuss some of the ideas - especially how they might apply to community building and governance.",
+          "timestamp": "2023-06-14T15:45:02Z",
+          "likes": 326,
+          "comments": [
+            {
+              "author": "PhilosophicalGamer",
+              "content": "One of my favorite books! I think the concept of infinite games is super relevant to how we approach long-term challenges like climate change.",
+              "timestamp": "2023-06-14T16:01:15Z"
+            }
+          ]
+        },
+        {
+          "content": "Showerthought: If you think about it, cities are just really complicated Conway's Game of Life simulations.",
+          "timestamp": "2023-06-12T09:34:56Z",
+          "likes": 1543,
+          "comments": []
+        },
+        {
+          "content": "IAMA professional 'pattern perceiver' and complexity consultant. I help organizations and communities apply insights from complex adaptive systems to solve problems. AMA!",
+          "timestamp": "2023-06-10T14:07:41Z",
+          "likes": 3298,
+          "comments": [
+            {
+              "author": "CuriousCase",
+              "content": "What's the most surprising pattern you've ever perceived?",
+              "timestamp": "2023-06-10T14:15:33Z"
+            },
+            {
+              "author": "SystemsThinker",
+              "content": "How did you get into this field? Any advice for someone looking to follow a similar path?",
+              "timestamp": "2023-06-10T14:30:22Z"
+            }
+          ]
+        }
+      ],
+      "privacySettings": {
+        "profileVisibility": "public",
+        "postVisibility": "public",
+        "allowTagging": true,
+        "allowDirectMessages": true
+      }
+    }
+  ]
+}

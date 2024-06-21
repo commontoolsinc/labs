@@ -1,0 +1,143 @@
+{
+  "vehicles": [
+    {
+      "type": "bicycle",
+      "make": "Brompton",
+      "model": "P6R",
+      "year": 2019,
+      "color": "Lagoon Blue",
+      "nickname": "The Folding Philosopher",
+      "licensePlate": "THINK-N-RIDE",
+      "mileage": 1234.5,
+      "fuelType": "imagination",
+      "features": [
+        "Folding frame",
+        "Brooks leather saddle",
+        "Dynamo lighting",
+        "Custom-painted quotes from Jane Jacobs",
+        "Basket for collecting urban flora samples"
+      ],
+      "maintenanceHistory": [
+        {
+          "date": "2022-05-12",
+          "description": "Replaced chain with one made of recycled plastic",
+          "cost": 89.99
+        },
+        {
+          "date": "2023-01-30",
+          "description": "Installed 'chaos theory' paint job",
+          "cost": 250.00
+        }
+      ],
+      "insuranceInfo": {
+        "provider": "Pedal Protectors Co-op",
+        "policyNumber": "CYCLE-42-PI",
+        "coverage": "Theft, Damage, Interdimensional Loss",
+        "expirationDate": "2024-03-15"
+      },
+      "timesTraveledThroughTime": 3
+    },
+    {
+      "type": "car",
+      "make": "Tesla",
+      "model": "Cybertruck",
+      "year": 2024,
+      "color": "Brushed Steel",
+      "nickname": "The Geometric Glider",
+      "licensePlate": "POLY-GON",
+      "mileage": 42042,
+      "fuelType": "electric",
+      "features": [
+        "Self-driving mode",
+        "Origami-inspired fold-out camping setup",
+        "Mycelium-based air purification system",
+        "Holographic HUD with real-time urban flow visualization",
+        "Emergency ant farm for impromptu complexity studies"
+      ],
+      "maintenanceHistory": [
+        {
+          "date": "2024-11-11",
+          "description": "Firmware update: Added 'Emergence' driving mode",
+          "cost": 0
+        },
+        {
+          "date": "2025-06-20",
+          "description": "Replaced windshield with smart glass displaying live cellular automata",
+          "cost": 1500.00
+        }
+      ],
+      "insuranceInfo": {
+        "provider": "Quantum State Farm",
+        "policyNumber": "SCHRO-CAT-2024",
+        "coverage": "Full Coverage + Multiverse Incident Protection",
+        "expirationDate": "2026-02-29"
+      },
+      "timesTraveledThroughTime": 0
+    },
+    {
+      "type": "teleporter",
+      "make": "Paracosm Industries",
+      "model": "Quantum Leap Pro",
+      "year": 2052,
+      "color": "Iridescent",
+      "nickname": "The Probability Hopper",
+      "licensePlate": "ENTANGLE-ME",
+      "mileage": 9999999,
+      "fuelType": "antimatter",
+      "features": [
+        "Instantaneous travel",
+        "Built-in probability calculator",
+        "Schrödinger's cat carrier",
+        "Multiverse GPS",
+        "Emergency time-loop escape hatch"
+      ],
+      "maintenanceHistory": [
+        {
+          "date": "2053-04-01",
+          "description": "Recalibrated quantum flux capacitor",
+          "cost": 7500.00
+        },
+        {
+          "date": "2054-09-15",
+          "description": "Upgraded to Heisenberg-compliant uncertainty principle",
+          "cost": 12000.00
+        }
+      ],
+      "insuranceInfo": {
+        "provider": "Multiversal Mutual",
+        "policyNumber": "PARADOX-42-Ω",
+        "coverage": "Infinite parallel universe coverage",
+        "expirationDate": "2099-12-31"
+      },
+      "timesTraveledThroughTime": 42
+    }
+  ],
+  "drivingPreferences": {
+    "favoriteRoute": "The scenic route through Berkeley's hidden community gardens",
+    "preferredSpeed": "Just fast enough to generate interesting traffic patterns",
+    "musicChoice": "Generative algorithmic compositions based on real-time traffic flow data",
+    "snackOfChoice": "Homemade granola infused with 'idea-enhancing' herbs from the rooftop garden"
+  },
+  "parkingSpots": [
+    {
+      "location": "Secret underground parking beneath the Berkeley Bowl",
+      "type": "garage",
+      "favorite": true
+    },
+    {
+      "location": "Rooftop of the Center for New Music",
+      "type": "lot",
+      "favorite": false
+    },
+    {
+      "location": "Pocket dimension accessible only during full moons",
+      "type": "interdimensional",
+      "favorite": true
+    },
+    {
+      "location": "Nano-parking space inside a giant sequoia in Tilden Park",
+      "type": "street",
+      "favorite": false
+    }
+  ]
+}

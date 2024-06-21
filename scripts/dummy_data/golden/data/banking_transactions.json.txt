@@ -1,0 +1,244 @@
+{
+  "account_info": {
+    "account_number": "314159265358979323846",
+    "bank_name": "Emergent Credit Union",
+    "account_type": "checking",
+    "currency": "USD"
+  },
+  "transactions": [
+    {
+      "id": "tx_1001",
+      "date": "2023-06-15T09:30:00Z",
+      "amount": -42.00,
+      "type": "debit",
+      "description": "Mycological Supplies Co.",
+      "category": "Hobbies",
+      "merchant": "FungiFinder",
+      "location": {
+        "city": "Berkeley",
+        "country": "USA"
+      },
+      "tags": ["mushrooms", "experiments", "mom's birthday"],
+      "emoji": "🍄"
+    },
+    {
+      "id": "tx_1002",
+      "date": "2023-06-14T14:15:00Z",
+      "amount": -23.50,
+      "type": "debit",
+      "description": "Chaos Coffee",
+      "category": "Food & Drink",
+      "merchant": "Fractal Brew",
+      "location": {
+        "city": "Berkeley",
+        "country": "USA"
+      },
+      "tags": ["caffeine", "work", "inspiration"],
+      "emoji": "☕"
+    },
+    {
+      "id": "tx_1003",
+      "date": "2023-06-13T11:00:00Z",
+      "amount": -89.99,
+      "type": "debit",
+      "description": "Emergent Bookstore",
+      "category": "Education",
+      "merchant": "Complexity Corner",
+      "location": {
+        "city": "Berkeley",
+        "country": "USA"
+      },
+      "tags": ["books", "systems thinking", "donella meadows"],
+      "emoji": "📚"
+    },
+    {
+      "id": "tx_1004",
+      "date": "2023-06-12T19:45:00Z",
+      "amount": -35.00,
+      "type": "debit",
+      "description": "Urban Jungle Nursery",
+      "category": "Home & Garden",
+      "merchant": "Gaia's Gifts",
+      "location": {
+        "city": "Berkeley",
+        "country": "USA"
+      },
+      "tags": ["plants", "rooftop garden", "succulents"],
+      "emoji": "🌱"
+    },
+    {
+      "id": "tx_1005",
+      "date": "2023-06-11T13:30:00Z",
+      "amount": 750.00,
+      "type": "credit",
+      "description": "Consulting Payment - Emergent Endeavors",
+      "category": "Income",
+      "merchant": "TechTopia Inc.",
+      "location": {
+        "city": "San Francisco",
+        "country": "USA"
+      },
+      "tags": ["work", "consulting", "systems thinking"],
+      "emoji": "💼"
+    },
+    {
+      "id": "tx_1006",
+      "date": "2023-06-10T16:20:00Z",
+      "amount": -65.50,
+      "type": "debit",
+      "description": "Pattern Paper Emporium",
+      "category": "Hobbies",
+      "merchant": "Origami Outfitters",
+      "location": {
+        "city": "Berkeley",
+        "country": "USA"
+      },
+      "tags": ["origami", "art supplies", "algorithms"],
+      "emoji": "🦢"
+    },
+    {
+      "id": "tx_1007",
+      "date": "2023-06-09T20:00:00Z",
+      "amount": -85.00,
+      "type": "debit",
+      "description": "Firefly Fields",
+      "category": "Entertainment",
+      "merchant": "Bioluminescent Bonanza",
+      "location": {
+        "city": "Oakland",
+        "country": "USA"
+      },
+      "tags": ["nature", "light show", "inspiration"],
+      "emoji": "🦋"
+    },
+    {
+      "id": "tx_1008",
+      "date": "2023-06-08T12:45:00Z",
+      "amount": -28.50,
+      "type": "debit",
+      "description": "Quantum Quesadillas",
+      "category": "Food & Drink",
+      "merchant": "Schrödinger's Snacks",
+      "location": {
+        "city": "Berkeley",
+        "country": "USA"
+      },
+      "tags": ["lunch", "physics jokes", "comfort food"],
+      "emoji": "🌯"
+    },
+    {
+      "id": "tx_1009",
+      "date": "2023-06-07T09:15:00Z",
+      "amount": -120.00,
+      "type": "debit",
+      "description": "City of Berkeley",
+      "category": "Transportation",
+      "merchant": "Parking & Transportation",
+      "location": {
+        "city": "Berkeley",
+        "country": "USA"
+      },
+      "tags": ["parking permit", "urban planning", "necessary evil"],
+      "emoji": "🚗"
+    },
+    {
+      "id": "tx_1010",
+      "date": "2023-06-06T17:30:00Z",
+      "amount": -42.00,
+      "type": "debit",
+      "description": "Collaborative Conjuring Supplies",
+      "category": "Entertainment",
+      "merchant": "Magic & Mayhem",
+      "location": {
+        "city": "Berkeley",
+        "country": "USA"
+      },
+      "tags": ["magic tricks", "group activities", "convivial"],
+      "emoji": "🎩"
+    },
+    {
+      "id": "tx_1011",
+      "date": "2023-06-05T14:00:00Z",
+      "amount": 500.00,
+      "type": "credit",
+      "description": "Honorarium - Guest Lecture",
+      "category": "Income",
+      "merchant": "UC Berkeley",
+      "location": {
+        "city": "Berkeley",
+        "country": "USA"
+      },
+      "tags": ["speaking", "complexity theory", "academia"],
+      "emoji": "🎓"
+    },
+    {
+      "id": "tx_1012",
+      "date": "2023-06-04T11:30:00Z",
+      "amount": -55.00,
+      "type": "debit",
+      "description": "Sustainable Sushi",
+      "category": "Food & Drink",
+      "merchant": "Oceanic Harmony",
+      "location": {
+        "city": "Berkeley",
+        "country": "USA"
+      },
+      "tags": ["dinner", "eco-friendly", "treat yourself"],
+      "emoji": "🍣"
+    },
+    {
+      "id": "tx_1013",
+      "date": "2023-06-03T16:45:00Z",
+      "amount": -32.50,
+      "type": "debit",
+      "description": "Berkeley Bowl",
+      "category": "Groceries",
+      "merchant": "Organic Oasis",
+      "location": {
+        "city": "Berkeley",
+        "country": "USA"
+      },
+      "tags": ["food", "local", "health"],
+      "emoji": "🥕"
+    },
+    {
+      "id": "tx_1014",
+      "date": "2023-06-02T10:00:00Z",
+      "amount": -75.00,
+      "type": "debit",
+      "description": "Systemic Solutions Workshop",
+      "category": "Education",
+      "merchant": "Holistic Learning Hub",
+      "location": {
+        "city": "San Francisco",
+        "country": "USA"
+      },
+      "tags": ["workshop", "professional development", "networking"],
+      "emoji": "🧠"
+    },
+    {
+      "id": "tx_1015",
+      "date": "2023-06-01T19:30:00Z",
+      "amount": -18.50,
+      "type": "debit",
+      "description": "Emergent Cinema",
+      "category": "Entertainment",
+      "merchant": "Fractal Films",
+      "location": {
+        "city": "Berkeley",
+        "country": "USA"
+      },
+      "tags": ["movies", "relaxation", "inspiration"],
+      "emoji": "🎬"
+    }
+  ],
+  "balance": {
+    "current": 2537.51,
+    "available": 2517.51,
+    "last_updated": "2023-06-15T23:59:59Z"
+  },
+  "metadata": {
+    "last_sync": "2023-06-16T00:00:01Z",
+    "data_version": "1.0.0"
+  }
+}

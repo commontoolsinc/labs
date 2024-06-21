@@ -1,0 +1,128 @@
+{
+  "cards": [
+    {
+      "cardType": "Visa",
+      "cardNumber": "4539789012345678",
+      "cardholderName": "Piper Paracosm",
+      "expirationDate": "09/25",
+      "cvv": "423",
+      "billingAddress": {
+        "street": "2242 Fractal Lane",
+        "city": "Berkeley",
+        "state": "CA",
+        "zipCode": "94704",
+        "country": "USA"
+      },
+      "lastFourDigits": "5678",
+      "issuingBank": "Emergent Systems Credit Union",
+      "cardNickname": "Pattern Perceiver Prime",
+      "creditLimit": 15000,
+      "currentBalance": 3254.87,
+      "rewardsProgram": "Complexity Points",
+      "fraudAlerts": [
+        {
+          "date": "2023-03-14T15:92:65Z",
+          "description": "Unusual purchase at 'Quantum Bookstore' flagged and approved"
+        }
+      ]
+    },
+    {
+      "cardType": "MasterCard",
+      "cardNumber": "5412345678901234",
+      "cardholderName": "Piper Paracosm",
+      "expirationDate": "02/24",
+      "cvv": "210",
+      "billingAddress": {
+        "street": "2242 Fractal Lane",
+        "city": "Berkeley",
+        "state": "CA",
+        "zipCode": "94704",
+        "country": "USA"
+      },
+      "lastFourDigits": "1234",
+      "issuingBank": "Mycelial Network Bank",
+      "cardNickname": "Fungal Finance",
+      "creditLimit": 10000,
+      "currentBalance": 789.23,
+      "rewardsProgram": "Spore Score",
+      "fraudAlerts": []
+    },
+    {
+      "cardType": "American Express",
+      "cardNumber": "371449635398431",
+      "cardholderName": "Piper Paracosm",
+      "expirationDate": "11/26",
+      "cvv": "3456",
+      "billingAddress": {
+        "street": "2242 Fractal Lane",
+        "city": "Berkeley",
+        "state": "CA",
+        "zipCode": "94704",
+        "country": "USA"
+      },
+      "lastFourDigits": "8431",
+      "issuingBank": "Infinite Game Financial",
+      "cardNickname": "Cosmic Sabbatical Splurge",
+      "creditLimit": 25000,
+      "currentBalance": 12345.67,
+      "rewardsProgram": "Reality Bending Rewards",
+      "fraudAlerts": [
+        {
+          "date": "2023-02-29T00:00:00Z",
+          "description": "Leap year anomaly detected, time-space purchase approved"
+        }
+      ]
+    },
+    {
+      "cardType": "Discover",
+      "cardNumber": "6011123456789012",
+      "cardholderName": "Piper Paracosm",
+      "expirationDate": "07/24",
+      "cvv": "901",
+      "billingAddress": {
+        "street": "2242 Fractal Lane",
+        "city": "Berkeley",
+        "state": "CA",
+        "zipCode": "94704",
+        "country": "USA"
+      },
+      "lastFourDigits": "9012",
+      "issuingBank": "Emergent Patterns Credit",
+      "cardNickname": "Urban Planner's Plastic",
+      "creditLimit": 8000,
+      "currentBalance": 2718.28,
+      "rewardsProgram": "City Synergy Points",
+      "fraudAlerts": []
+    },
+    {
+      "cardType": "Diners Club",
+      "cardNumber": "3056930009020004",
+      "cardholderName": "Piper Paracosm",
+      "expirationDate": "04/25",
+      "cvv": "337",
+      "billingAddress": {
+        "street": "2242 Fractal Lane",
+        "city": "Berkeley",
+        "state": "CA",
+        "zipCode": "94704",
+        "country": "USA"
+      },
+      "lastFourDigits": "0004",
+      "issuingBank": "Collaborative Conjuring Credit",
+      "cardNickname": "Convivial Magic Money",
+      "creditLimit": 12000,
+      "currentBalance": 1618.03,
+      "rewardsProgram": "Sleight of Hand Savings",
+      "fraudAlerts": [
+        {
+          "date": "2023-05-01T20:23:14Z",
+          "description": "Unusual sequence of purchases forming a Fibonacci series, approved"
+        }
+      ]
+    }
+  ],
+  "preferredCard": "Pattern Perceiver Prime",
+  "totalCreditLimit": 70000,
+  "totalCurrentBalance": 20726.08,
+  "lastUpdated": "2023-06-15T08:42:17Z"
+}
