@@ -20,4 +20,5 @@ export * as CommonSystemLayout from './common-system-layout.js';
 export * as CommonNavstack from './common-navstack.js';
 export * as CommonTodo from './common-todo.js';
 export * as CommonPill from './common-pill.js';
+export * as CommonHscroll from './common-hscroll.js';
 export * as style from './style.js';
