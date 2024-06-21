@@ -1,5 +1,5 @@
 import { ask } from "./anthropic.ts";
-import { Anthropic, config, serve } from "./deps.ts";
+import { Anthropic, serve } from "./deps.ts";
 
 const handler = async (request: Request): Promise<Response> => {
   if (request.method === "POST") {
@@ -29,6 +29,15 @@ const handler = async (request: Request): Promise<Response> => {
           system,
           activeTools
         );
+        if (!result) {
+          return new Response(
+            JSON.stringify({ error: "No response from Anthropic" }),
+            {
+              status: 400,
+              headers: { "Content-Type": "application/json" },
+            }
+          );
+        }
         bigConversation = [...bigConversation, ...result];
       }
 

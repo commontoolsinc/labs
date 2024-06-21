@@ -1,3 +1,4 @@
+import { HAIKU, single } from "./anthropic.ts";
 import { Anthropic } from "./deps.ts";
 
 export const tools: Anthropic.Messages.Tool[] = [
