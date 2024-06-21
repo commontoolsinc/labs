@@ -243,7 +243,9 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
     
     print(f"Compiling prompt for {name}...")
 
-    # create a dictionary to store the values of the placeholders
+    # create a dictionary to store the values of the placeholders. we'll key off
+    # the raw placeholder string because different ones will be modified in
+    # different ways and those should be distinct.
     placeholder_values: Dict[str, PlaceholderValue] = {}
 
     # Iterate over the placeholders
@@ -293,9 +295,9 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
                     # TODO: figure out how to support this case
                     raise Exception(f"Nested multi not supported for {placeholder}")
                 result[key] = temp
-            placeholder_values[placeholder] = result
+            placeholder_values[raw_placeholder] = result
         else:
-            placeholder_values[placeholder] = compile_prompt(placeholder, value, context, parent_names + [name])
+            placeholder_values[raw_placeholder] = compile_prompt(placeholder, value, context, parent_names + [name])
 
     result : Dict[str, str] = {}
 
@@ -307,11 +309,11 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
     for variation in variations:
         # Replace the placeholders with the values
         prompt = raw_prompt
-        for placeholder, value in variation.items():
+        for raw_placeholder, value in variation.items():
             # we can't do a naive match because the placeholder tag might
             # include other commands. e.g. the placeholder "input" might need to
             # match "${input|split}"
-            pattern = re.compile(rf'\${{{re.escape(placeholder)}(?::[^}}]*)?}}')
+            pattern = re.compile(rf'\${{{re.escape(raw_placeholder)}(?::[^}}]*)?}}')
             escaped_value = escape_backslashes(value)
             prompt = pattern.sub(escaped_value, prompt)
         variation_name = name_for_variation(variation, nested_keys, short_names)
