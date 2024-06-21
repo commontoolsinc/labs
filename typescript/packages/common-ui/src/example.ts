@@ -4,7 +4,9 @@ import {
   dict,
   datatable,
   vstack,
-  div
+  navstack,
+  div,
+  h1
 } from './hyperscript/tags.js';
 import { binding, repeat } from './hyperscript/view.js';
 import render from './hyperscript/render.js';
@@ -67,36 +69,43 @@ const listNode = vstack(
   repeat(
     'items',
     div(
-      {id: binding('id')},
+      { id: binding('id') },
       binding('value')
     )
   )
 );
+
+const navstackNode = navstack({}, [
+  div({}, [h1({}, ["You've reached the bottom."])]),
+  div({}, [h1({}, ["  Once More.."])]),
+  div({}, [h1({}, ["Swipe Right For More Content"])]),
+]);
 
 const tree = vstack(
   {},
   [
     datatableNode,
     dictNode,
-    listNode
+    listNode,
+    navstackNode,
   ]
 )
- 
+
 
 const clicks = subject()
 
 clicks.sink({
   send: clicks => {
-    console.log('clicks', clicks);  
+    console.log('clicks', clicks);
   }
 })
 
 const element = render(tree, {
   clicks,
   items: state([
-    {id: '1', value: state('One')},
-    {id: '2', value: state('Two')},
-    {id: '3', value: 'Three'}
+    { id: '1', value: state('One') },
+    { id: '2', value: state('Two') },
+    { id: '3', value: 'Three' }
   ])
 });
 

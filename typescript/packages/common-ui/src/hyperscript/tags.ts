@@ -2,6 +2,7 @@ export { hstack } from "../components/common-hstack.js";
 export { vstack } from "../components/common-vstack.js";
 export { div } from "../components/div.js";
 export { navpanel } from "../components/common-navpanel.js";
+export { navstack } from "../components/common-navstack.js";
 export { record } from "../components/common-record.js";
 export { dict } from "../components/common-dict.js";
 export { datatable } from "../components/common-datatable.js";
