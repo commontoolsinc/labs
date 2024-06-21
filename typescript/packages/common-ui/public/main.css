@@ -1,0 +1,7 @@
+@import url(material-symbols-outlined/material-icons.css);
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+}

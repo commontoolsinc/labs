@@ -21,4 +21,6 @@ export * as CommonNavstack from './common-navstack.js';
 export * as CommonTodo from './common-todo.js';
 export * as CommonPill from './common-pill.js';
 export * as CommonHscroll from './common-hscroll.js';
+export * as CommonWindow from './common-window.js';
+export * as CommonIcon from './common-icon.js';
 export * as style from './style.js';

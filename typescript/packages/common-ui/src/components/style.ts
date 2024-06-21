@@ -4,6 +4,8 @@ export const baseStyles = css`
 :host {
   --unit: 4px;
   --radius: calc(var(--unit) * 1);
+  --radius-lg: calc(var(--unit) * 4);
+  --background: #fff;
   --secondary-background: #f5f5f5;
   --input-background: #fff;
   --input-color: #000;
@@ -24,5 +26,23 @@ export const baseStyles = css`
 .body {
   font-size: var(--body-size);
   line-height: var(--body-line);
+}
+`;
+
+export const iconStyles = css`
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
 }
 `;

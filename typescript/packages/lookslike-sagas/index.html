@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <title></title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
     <link rel="stylesheet" href="src/main.css">
     <script type="module" src="src/index.ts"></script>
 </head>
@@ -60,6 +61,23 @@
                     Hello!
                 </common-media>
             </common-list>
+            <div slot="secondary">
+                <common-suggestions suggestions='[{"id": "a", "title": "Buy Milk"}, {"id": "b", "title": "Buy Eggs"}, {"id": "c", "title": "Brush teeth"}, {"id": "d", "title": "Eat hot chip"}]'>
+                </common-suggestions>
+            </div>
+            <common-unibox slot="search" placeholder="Imagine..."></common-unibox>
+        </common-system-layout>
+    </common-screen>
+    <hr />
+    <common-screen>
+        <common-system-layout>
+            <common-window>
+                <h1>Hello</h1>
+                <aside slot="sidebar">
+                    <common-icon>home</common-icon>
+                </aside>
+            </common-window>
+            </common-window>
             <div slot="secondary">
                 <common-suggestions suggestions='[{"id": "a", "title": "Buy Milk"}, {"id": "b", "title": "Buy Eggs"}, {"id": "c", "title": "Brush teeth"}, {"id": "d", "title": "Eat hot chip"}]'>
                 </common-suggestions>
