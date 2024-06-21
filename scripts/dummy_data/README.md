@@ -60,9 +60,6 @@ Example: `python3 pin_golden.py schema`
 ### TODO
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)
 - Allow a way to specify `{files|multi-load:schema}
-- remove the fetch_placeholder directory and just return the value (we no longer need the directory)
-- If a template references the same placeholder that is a multi, only do the multi one time (this might already work). This sets us up for a use case that allows using the name or value of the multi file, so you could say: 'A file named ${schema|name} with content ${schema}' and ahve it replaced.
 - Parallelize multi-generation
 - Allow pinning a not-most-recent version (perhaps via an interactive UI?)
 - What happens if you add the multi modifier on a value type that is already in multi-mode? Does it work?
-- Allow interleaving names and values in join
