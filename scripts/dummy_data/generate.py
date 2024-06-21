@@ -33,6 +33,8 @@ class IgnoreDict(TypedDict, total=False):
     includes: List[str]
     overrides: List[str]
 
+JoinArgs = Literal['', 'name', 'content']
+
 @dataclass
 class ExecutionContext:
     overrides: Dict[str, str]
@@ -285,14 +287,20 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
             raise Exception(f"Invalid placeholder name {placeholder}")
 
         multi = False
-        join = False
+        join : JoinArgs = ''
 
         if len(placeholder_parts) > 1:
-            command = placeholder_parts[1].strip()
+            whole_command = placeholder_parts[1].strip()
+            command_parts = whole_command.split(':')
+            command = command_parts[0].strip()
+            command_arguments = command_parts[1:]
             if command == SPLIT_COMMAND:
                 multi = True
             elif command == JOIN_COMMAND:
-                join = True
+                join_arg = command_arguments[0].strip() if command_arguments else 'content'
+                if (join_arg not in get_args(JoinArgs)):
+                    raise Exception(f"Invalid join argument {join_arg} in placeholder {raw_placeholder}")
+                join = join_arg
             else:
                 raise Exception(f"Invalid command {command} in placeholder {raw_placeholder}")
 
@@ -307,7 +315,10 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
             value = new_value
 
         if join and isinstance(value, dict):
-            value = "\n".join(value.values())
+            if join == 'name':
+                value = "\n".join(value.keys())
+            else:
+                value = "\n".join(value.values())
 
         if isinstance(value, dict):
             result : Dict[str, str] = {}

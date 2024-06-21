@@ -1,0 +1,6 @@
+${preamble}
+
+Here is a schema named:
+${schema|join:name}
+Content:
+${schema|join:content}
