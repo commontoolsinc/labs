@@ -310,7 +310,7 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
         for placeholder, value in variation.items():
             # we can't do a naive match because the placeholder tag might
             # include other commands. e.g. the placeholder "input" might need to
-            # match "${input:multi}"
+            # match "${input|split}"
             pattern = re.compile(rf'\${{{re.escape(placeholder)}(?::[^}}]*)?}}')
             escaped_value = escape_backslashes(value)
             prompt = pattern.sub(escaped_value, prompt)
