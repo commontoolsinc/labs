@@ -1,6 +1,4 @@
-// llm_client.ts
-
-import { Anthropic } from "./deps.ts";
+import { Anthropic } from "@anthropic-ai/sdk";
 
 type Tool = Anthropic.Messages.Tool & {
   implementation: (input: any) => Promise<string> | string;
@@ -54,7 +52,7 @@ export class LLMClient {
 
   async continueThread(
     threadId: string,
-    toolResponses: ToolResponse[]
+    toolResponses: ToolResponse[],
   ): Promise<AppendThreadResponse> {
     const request: AppendThreadRequest = {
       action: "append",
@@ -66,7 +64,7 @@ export class LLMClient {
   }
 
   async executeTool(
-    toolCall: Anthropic.Messages.ToolUseBlockParam
+    toolCall: Anthropic.Messages.ToolUseBlockParam,
   ): Promise<string> {
     const tool = this.tools.find((t) => t.name === toolCall.name);
     console.log("Tool call:", toolCall.name, toolCall.input);
@@ -86,7 +84,7 @@ export class LLMClient {
     let thread: CreateThreadResponse | AppendThreadResponse =
       await this.createThread(initialMessage);
     conversation.push(
-      `Assistant: ${(thread.assistantResponse.content[0] as { text: string }).text}`
+      `Assistant: ${(thread.assistantResponse.content[0] as { text: string }).text}`,
     );
 
     while (thread.pendingToolCalls && thread.pendingToolCalls.length > 0) {
@@ -95,7 +93,7 @@ export class LLMClient {
           type: "tool_result",
           tool_use_id: toolCall.id,
           content: [{ type: "text", text: await this.executeTool(toolCall) }],
-        }))
+        })),
       );
 
       // console.info("Tool responses", toolResponses);
@@ -145,33 +143,3 @@ interface ToolResponse {
   tool_use_id: string;
   content: { type: "text"; text: string }[];
 }
-
-const client = new LLMClient({
-  serverUrl: "http://localhost:8000",
-  tools: [
-    {
-      name: "calculator",
-      input_schema: {
-        type: "object",
-        properties: {
-          expression: {
-            type: "string",
-            description: "A mathematical expression to evaluate",
-          },
-        },
-        required: ["expression"],
-      },
-      implementation: async ({ expression }) => {
-        return `${await eval(expression)}`;
-      },
-    },
-  ],
-});
-
-// get input from args
-const input = Deno.args.join(" ");
-console.log(`Input: ${input}`);
-
-client.handleConversation(input).then((conversation) => {
-  console.log(conversation);
-});
