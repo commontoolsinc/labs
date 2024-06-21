@@ -39,7 +39,7 @@ export async function single(text: string, model: string = SONNET) {
 export async function ask(
   initialConversation: Anthropic.Messages.MessageParam[] = [],
   systemPrompt: string = "",
-  activeTools: string[]
+  activeTools: Anthropic.Messages.Tool[],
 ) {
   const conversation: Anthropic.Messages.MessageParam[] = [
     ...initialConversation,
@@ -53,7 +53,7 @@ export async function ask(
       messages: conversation,
       system: systemPrompt,
       model: SONNET,
-      tools: tools.filter((tool) => activeTools.includes(tool.name)),
+      tools: activeTools,
     });
 
     const { message, stopReason } = await processStream(stream);
@@ -75,6 +75,15 @@ export async function ask(
     }
 
     if (stopReason === "tool_use") {
+      const clientTool = activeTools.find(
+        (tool) => tool.id === message[0].tool,
+      );
+      if (clientTool) {
+        console.log("Client tool", clientTool);
+        console.log("Let the client answer this one");
+        return conversation;
+      }
+
       const result = await processTools(message, toolImpls);
       if (result) {
         conversation.push(result);
