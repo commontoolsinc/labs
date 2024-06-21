@@ -33,9 +33,16 @@ addGems([
   }),
 ]);
 
-export const recipes = {
-  "Create a new TODO list": {
+export type RecipeManifest = {
+  name: string;
+  recipe: (inputs: Record<string, any>) => Gem;
+  inputs: Record<string, any>;
+};
+
+export const recipes: RecipeManifest[] = [
+  {
+    name: "Create a new TODO list",
     recipe: todoList,
     inputs: { title: "", items: [] },
   },
-};
+];
