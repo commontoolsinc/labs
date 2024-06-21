@@ -19,6 +19,7 @@ export class CommonButtonElement extends LitElement {
       display: flex;
       font-size: var(--body-size);
       height: var(--height);
+      text-align: center;
       line-height: 20px;
       padding: 8px 20px;
     }

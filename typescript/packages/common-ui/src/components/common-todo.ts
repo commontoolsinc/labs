@@ -2,6 +2,34 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 
+export type Todo = {
+  id: string;
+  checked: boolean;
+  value: string;
+}
+
+export class CommonTodoCheckedEvent extends Event {
+  detail: Todo;
+
+  constructor(
+    detail: Todo
+  ) {
+    super("todo-checked", { bubbles: true, composed: true });
+    this.detail = detail;
+  }
+}
+
+export class CommonTodoInputEvent extends Event {
+  detail: Todo;
+
+  constructor(
+    detail: Todo
+  ) {
+    super("todo-input", { bubbles: true, composed: true });
+    this.detail = detail;
+  }
+}
+
 @customElement("common-todo")
 export class CommonTodoElement extends LitElement {
   static override styles = [
@@ -40,11 +68,27 @@ export class CommonTodoElement extends LitElement {
     const oncheck = (event: Event) => {
       const checked = (event.target as HTMLInputElement).checked;
       this.checked = checked;
+
+      this.dispatchEvent(
+        new CommonTodoCheckedEvent({
+          id: this.id,
+          value: this.value,
+          checked
+        })
+      );
     }
 
     const oninput = (event: Event) => {
       const value = (event.target as HTMLInputElement).value;
       this.value = value;
+
+      this.dispatchEvent(
+        new CommonTodoInputEvent({
+          id: this.id,
+          value: this.value,
+          checked: this.checked
+        })
+      );
     }
 
     return html`
