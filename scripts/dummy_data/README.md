@@ -55,3 +55,5 @@ Example: `python3 pin_golden.py schema`
 - If a template references the same placeholder that is a multi, only do the multi one time (this might already work). This sets us up for a use case that allows using the name or value of the multi file, so you could say: 'A file named ${schema|name} with content ${schema}' and ahve it replaced.
 - Parallelize multi-generation
 - Allow pinning a not-most-recent version (perhaps via an interactive UI?)
+- What happens if you add the multi modifier on a value type that is already in multi-mode? Does it work?
+- Add a `join` modifier that combines a multi-mode back together in one prompt
