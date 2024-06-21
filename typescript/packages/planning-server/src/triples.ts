@@ -138,3 +138,177 @@ console.log(getNotesByTag("work"));
 // New query execution
 console.log("\nNotes from the past 7 days:");
 console.log(getNotesFromPastDays(7));
+
+function findRelatedMemories(tags: string[]) {
+  const query = `
+    [:find ?e ?tag
+     :in $ [?searchTags ...]
+     :where
+     [?e "note/tag" ?tag]
+     [(contains? ?searchTags ?tag)]]
+  `;
+  const result = datascript.q(query, datascript.db(conn), tags);
+  console.log("Query result:", result);
+  console.log("Search tags:", tags);
+  return result;
+}
+
+function getAllTags() {
+  const query = `
+    [:find ?tag
+     :where
+     [_ "note/tag" ?tag]]
+  `;
+  return datascript.q(query, datascript.db(conn));
+}
+
+function getAllNotesWithTags() {
+  const query = `
+    [:find ?e ?timestamp (pull ?e ["note/tag"])
+     :where
+     [?e "note/timestamp" ?timestamp]]
+  `;
+  return datascript.q(query, datascript.db(conn));
+}
+
+async function storeMemoryWithConnections(newMemory: any) {
+  // Step 1: Query for related memories
+  const relatedMemoriesQuery = `
+    [:find ?e ?tag
+     :in $ [?searchTags ...]
+     :where
+     [?e "note/tag" ?tag]
+     [(contains? ?searchTags ?tag)]]
+  `;
+
+  const relatedMemories = datascript.q(
+    relatedMemoriesQuery,
+    datascript.db(conn),
+    newMemory["note/tag"]
+  );
+
+  console.log("Related Memories:", relatedMemories);
+
+  // Step 2: Store the new memory
+  const txReport = datascript.transact(conn, [newMemory]);
+
+  // Query for the ID of the newly inserted entity
+  const newMemoryIdQuery = `
+    [:find ?e .
+     :in $ ?timestamp
+     :where 
+     [?e "note/timestamp" ?timestamp]]
+  `;
+  const newMemoryId = datascript.q(
+    newMemoryIdQuery,
+    datascript.db(conn),
+    newMemory["note/timestamp"]
+  );
+
+  console.log("New Memory ID:", newMemoryId);
+
+  // Step 3: Create connections
+  const connections = relatedMemories.map(([relatedId, matchingTag]) => ({
+    "connection/from": newMemoryId,
+    "connection/to": relatedId,
+    "connection/type": "tag",
+    "connection/tag": matchingTag,
+  }));
+
+  console.log("Connections to be created:", connections);
+
+  if (connections.length > 0) {
+    datascript.transact(conn, connections);
+  } else {
+    console.log("No connections created.");
+  }
+
+  return newMemoryId;
+}
+
+const newDoc = {
+  "note/timestamp": new Date("2025-07-08T14:30:00+10:00"),
+  "note/location": "Sydney, Australia",
+  "note/weather": "22C, Partly cloudy",
+  "note/scope": "professional",
+  "note/author": "user",
+  "note/tag": [
+    "marine-biology",
+    "coral-restoration",
+    "great-barrier-reef",
+    "bonsai",
+  ],
+  "note/content": [
+    "successfully transplanted lab-grown coral fragments onto damaged reef sections",
+    "concerned about the long-term survival rate of transplanted corals",
+  ],
+  "note/question":
+    "what are the most effective methods for monitoring and improving coral transplant survival rates?",
+  "note/coral_species": [
+    "Acropora cervicornis",
+    "Pocillopora damicornis",
+    "Porites lobata",
+  ],
+  "note/request":
+    "compile recent research on coral transplantation techniques, focusing on methods to improve long-term survival rates and adaptation to changing ocean conditions",
+};
+
+await storeMemoryWithConnections(newDoc);
+
+// Query to find connections
+function getAllMemoriesWithConnections() {
+  const query = `
+    [:find ?e ?timestamp ?tag ?connFrom ?connTo ?connTag
+     :where
+     [?e "note/timestamp" ?timestamp]
+     [?e "note/tag" ?tag]
+     (or
+       [?conn "connection/from" ?e]
+       [?conn "connection/to" ?e])
+     [?conn "connection/from" ?connFrom]
+     [?conn "connection/to" ?connTo]
+     [?conn "connection/tag" ?connTag]]
+  `;
+  return datascript.q(query, datascript.db(conn));
+}
+
+function getConnections() {
+  const query = `
+    [:find ?from ?to ?tag
+     :where
+     [?c "connection/from" ?from]
+     [?c "connection/to" ?to]
+     [?c "connection/tag" ?tag]]
+  `;
+  return datascript.q(query, datascript.db(conn));
+}
+
+// console.log("Connections:", getConnections());
+
+// console.log("All Notes:");
+// console.log(getAllNotes());
+
+// console.log("\nAll Memories with Connections:");
+// console.log(getAllMemoriesWithConnections());
+
+console.log("All tags in the database:");
+console.log(getAllTags());
+
+console.log("\nAll notes with their tags:");
+console.log(getAllNotesWithTags());
+
+const newDocTags = ["bonsai"];
+console.log("\nSearching for related memories with tags:", newDocTags);
+const relatedMemories = findRelatedMemories(newDocTags);
+console.log("Related memories:", relatedMemories);
+
+// Now insert the new document
+const newMemoryId = await storeMemoryWithConnections(newDoc);
+console.log("\nNew memory stored with ID:", newMemoryId);
+
+console.log("\nAll notes with their tags after insertion:");
+console.log(getAllNotesWithTags());
+
+console.log("\nSearching for related memories again with tags:", newDocTags);
+const relatedMemoriesAfter = findRelatedMemories(newDocTags);
+console.log("Related memories after insertion:", relatedMemoriesAfter);

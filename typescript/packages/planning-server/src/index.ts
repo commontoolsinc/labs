@@ -1,5 +1,6 @@
 import Anthropic from "npm:@anthropic-ai/sdk";
 import { config } from "https://deno.land/x/dotenv/mod.ts";
+import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
 await config({ export: true });
 
 const anthropic = new Anthropic({
@@ -647,12 +648,14 @@ async function single(text: string, model: string = SONNET) {
 }
 
 // read question from stdin
-const buf = new Uint8Array(4096);
-const n = Deno.stdin.readSync(buf);
-const question = new TextDecoder().decode(buf.subarray(0, n)).trim();
+// const buf = new Uint8Array(4096);
+// const n = Deno.stdin.readSync(buf);
+// const question = new TextDecoder().decode(buf.subarray(0, n)).trim();
 
 async function ask(
-  initialConversation: Anthropic.Messages.MessageParam[] = []
+  initialConversation: Anthropic.Messages.MessageParam[] = [],
+  systemPrompt: string = "",
+  activeTools: string[]
 ) {
   let conversation: Anthropic.Messages.MessageParam[] = [
     ...initialConversation,
@@ -664,8 +667,9 @@ async function ask(
     const stream = await anthropic.messages.stream({
       max_tokens: MAX_TOKENS,
       messages: conversation,
+      system: systemPrompt,
       model: SONNET,
-      tools: tools,
+      tools: tools.filter((tool) => activeTools.includes(tool.name)),
     });
 
     const currentMessage: Anthropic.Messages.ContentBlock[] = [];
@@ -781,53 +785,83 @@ async function ask(
 // const result = await main();
 // console.log("Final Result", result);
 
-const spell = [
-  `Decompose the following note into a set of semantic triples using your tool:
+// const spell = [` `];
 
-<note>
-timestamp: 2024-09-02 9:07AM (JST)
-location: Tokyo, Japan
-weather: 30C, Humid
-scope: hobby
-author: user
-tags: #bonsai #horticulture #miniature-landscapes
-created a miniature forest scene using five Shimpaku junipers
-struggling with scale representation of distant trees
-CONNECTION: user is passionate about bonsai art
-QUESTION: what techniques can improve depth perception in miniature landscapes?
-{
-"trees": ["Shimpaku juniper", "Japanese maple", "Chinese elm"],
-"request": "research advanced bonsai techniques for creating depth illusion in small spaces, focus on foliage density manipulation and strategic placement of accent plants"
-}
-</note>
+// let bigConversation: Anthropic.Messages.MessageParam[] = [];
 
-Respond with only the final document to insert.
-`,
-];
+// for (const s of spell) {
+//   console.log("Incantation", s);
+//   const result = await ask([
+//     ...bigConversation,
+//     {
+//       role: "user",
+//       content: [
+//         {
+//           type: "text",
+//           text: s,
+//         },
+//       ],
+//     },
+//   ]);
+//   bigConversation = [...bigConversation, ...result];
+// }
 
-let bigConversation: Anthropic.Messages.MessageParam[] = [];
+// const last = bigConversation[bigConversation.length - 1];
+// const output = (last.content as any[]).map((msg) => msg.text);
+// for (const msg of output) {
+//   Deno.stdout.write(
+//     new TextEncoder().encode(`[${output.indexOf(msg)}] ${msg}`)
+//   );
+// }
 
-for (const s of spell) {
-  console.log("Incantation", s);
-  const result = await ask([
-    ...bigConversation,
-    {
-      role: "user",
-      content: [
-        {
-          type: "text",
-          text: s,
-        },
-      ],
-    },
-  ]);
-  bigConversation = [...bigConversation, ...result];
-}
+const handler = async (request: Request): Promise<Response> => {
+  if (request.method === "POST") {
+    try {
+      const body = await request.json();
+      const spell = body.spell || [];
+      const system = body.system || "";
+      const activeTools = body.activeTools || [];
 
-const last = bigConversation[bigConversation.length - 1];
-const output = (last.content as any[]).map((msg) => msg.text);
-for (const msg of output) {
-  Deno.stdout.write(
-    new TextEncoder().encode(`[${output.indexOf(msg)}] ${msg}`)
-  );
-}
+      let bigConversation: Anthropic.Messages.MessageParam[] = [];
+
+      for (const s of spell) {
+        console.log("Incantation", s);
+        const result = await ask(
+          [
+            ...bigConversation,
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: s,
+                },
+              ],
+            },
+          ],
+          system,
+          activeTools
+        );
+        bigConversation = [...bigConversation, ...result];
+      }
+
+      const last = bigConversation[bigConversation.length - 1];
+      const output = (last.content as any[]).map((msg) => msg.text);
+
+      return new Response(JSON.stringify({ output }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (error) {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  } else {
+    return new Response("Please send a POST request", { status: 405 });
+  }
+};
+
+const port = 8000;
+console.log(`HTTP webserver running. Access it at: http://localhost:${port}/`);
+await serve(handler, { port });
