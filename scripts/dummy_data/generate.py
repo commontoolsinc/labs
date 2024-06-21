@@ -19,6 +19,7 @@ WILDCARD = '*'
 DEFAULT_IGNORES = 'existing'
 SPLIT_COMMAND = 'split'
 JOIN_COMMAND = 'join'
+MODIFIER_DELIMITER = '|'
 
 OverridesDict: TypeAlias = Dict[str, str]
 PlaceholderValue : TypeAlias = Union[str, Dict[str, str]]
@@ -88,25 +89,44 @@ def write_golden(name : str, subName : Optional[str], contents : str) -> None:
     print(f"Pinned {name}:{subName} to goldens")
 
 # returns all the variations, as well as the keys that varied. as well as a map from value to shortname
-def value_variations(input : Dict[str, PlaceholderValue]) -> Tuple[List[Dict[str, str]], List[str], Dict[str, str]] :
-    variations : List[Dict[str, str]] = []
+def value_variations(input: Dict[str, PlaceholderValue]) -> Tuple[List[Dict[str, str]], List[str], Dict[str, str]]:
+    variations: List[Dict[str, str]] = []
     nested_keys = [k for k, v in input.items() if isinstance(v, dict)]
     
     if not nested_keys:
-        return (cast(List[Dict[str, str]],[input.copy()]), [], {})
+        return (cast(List[Dict[str, str]], [input.copy()]), [], {})
 
-    nested_values: List[List[Tuple[str, str, str]]] = [[(k, vk, vv) for vk, vv in input[k].items()] for k in nested_keys] # type: ignore
-    
-    short_names : Dict[str, str] = {}
+    # Group keys by their base name (before '|'). We'll treat all of them in the
+    # same group as the same and they'll co-vary.
+    key_groups: Dict[str, List[str]] = {}
+    for k in nested_keys:
+        base_key = k.split(MODIFIER_DELIMITER)[0]
+        if base_key not in key_groups:
+            key_groups[base_key] = []
+        key_groups[base_key].append(k)
+
+    # Prepare nested values, combining values for keys in the same group
+    nested_values: List[List[Tuple[str, str, str]]] = []
+    for base_key, keys in key_groups.items():
+        combined_values: Dict[str, str] = {}
+        for k in keys:
+            combined_values.update(cast(Dict[str, str], input[k]))
+        nested_values.append([(base_key, vk, vv) for vk, vv in combined_values.items()])
+
+    short_names: Dict[str, str] = {}
 
     for combination in itertools.product(*nested_values):
         variation = {k: v for k, v in input.items() if not isinstance(v, dict)}
-        for orig_key, nested_key, nested_value in combination: # type: ignore
-            variation[orig_key] = nested_value
+        for base_key, nested_key, nested_value in combination:
+            for full_key in key_groups[base_key]:
+                variation[full_key] = nested_value
             short_names[nested_value] = nested_key
         variations.append(variation)
+
+    #keep only the first key of each group so we don't get duplicate names
+    deduped_nested_keys = [v[0] for v in key_groups.values()]
     
-    return (variations, nested_keys, short_names)
+    return (variations, deduped_nested_keys, short_names)
         
 def name_for_variation(variation : Dict[str, str], nested_keys : List[str], short_names : Dict[str, str]) -> str:
     result : List[str] = []
@@ -254,7 +274,7 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
         raw_placeholder = raw_placeholder.strip()
 
         # split at the colon to get the placeholder name and the format
-        placeholder_parts = raw_placeholder.split("|")
+        placeholder_parts = raw_placeholder.split(MODIFIER_DELIMITER)
         placeholder = placeholder_parts[0].strip()
 
         if placeholder in parent_names:
