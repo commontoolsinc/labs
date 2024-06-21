@@ -28,7 +28,7 @@ export class CommonInputElement extends LitElement {
       height: var(--height);
     }
 
-    :host-context([appearance="rounded"]) .input {
+    :host([appearance="rounded"]) .input {
       --height: 40px;
       background-color: var(--input-background);
       border-radius: calc(var(--height) / 2);

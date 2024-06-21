@@ -19,11 +19,11 @@ export class CommonHstackElement extends LitElement {
       flex-direction: row;
     }
 
-    :host-context([gap="md"]) .stack {
+    :host([gap="md"]) .stack {
       gap: var(--gap);
     }
 
-    :host-context([pad="md"]) .stack {
+    :host([pad="md"]) .stack {
       padding: var(--gap);
     }
     `
