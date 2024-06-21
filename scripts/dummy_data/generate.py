@@ -12,7 +12,7 @@ from dataclasses import dataclass
 GOLDEN_DIR = 'golden'
 INCLUDES_DIR = 'includes'
 PROMPTS_DIR = 'prompts'
-TARGET_DIR = 'target'
+TARGET_DIR = 'cache'
 LATEST_LINK = '_latest'
 INFO_DIR = '_info'
 WILDCARD = '*'
@@ -22,11 +22,11 @@ OverridesDict: TypeAlias = Dict[str, str]
 PlaceholderValue : TypeAlias = Union[str, Dict[str, str]]
 
 # When adding a value, also change IgnoreDict.
-IgnoreType = Literal['golden', 'target', 'includes', 'overrides']
+IgnoreType = Literal['golden', 'cache', 'includes', 'overrides']
 wildcard_ignores : List[IgnoreType] = ['overrides', 'includes']
 class IgnoreDict(TypedDict, total=False):
     golden: List[str]
-    target: List[str]
+    cache: List[str]
     includes: List[str]
     overrides: List[str]
 
@@ -34,7 +34,7 @@ class IgnoreDict(TypedDict, total=False):
 class ExecutionContext:
     overrides: Dict[str, str]
     timestamp: str
-    # an array of names, which must be 'golden', 'target', 'includes', or 'prompts'
+    # an array of names, which must be 'golden', 'cache', 'includes', or 'prompts'
     ignore: IgnoreDict
 
 def pin(placeholder : str) -> None:
@@ -185,7 +185,7 @@ def fetch_placeholder(name: str, context : ExecutionContext, parent_names: List[
     # Override order:
     # 1. Explicitly provided placeholder_override
     # 2. A matching output file from golden/
-    # 3. Most recent target output
+    # 3. Most recent cache output
     # 4. A matching file from `includes/`
     # 5. A matching file from `prompts/` (which will be compiled and executed)
 
@@ -206,10 +206,10 @@ def fetch_placeholder(name: str, context : ExecutionContext, parent_names: List[
 
     value = fetch_most_recent_target(name)
     if value:
-        if should_ignore('target', name, context.ignore):
-            print(f"Would have used most recent target for {name} but --ignore target was specified.")
+        if should_ignore('cache', name, context.ignore):
+            print(f"Would have used most recent cache for {name} but --ignore cache was specified.")
         else:
-            print(f"Using most recent target for {name}...")
+            print(f"Using most recent cache for {name}...")
             return value
     
     value = fetch_folder(INCLUDES_DIR, name)
@@ -326,7 +326,7 @@ def execute_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
     timestamp = context.timestamp
 
     # Generate the output directory path
-    output_dir = f"./target/{name}/{timestamp}"
+    output_dir = f"./{TARGET_DIR}/{name}/{timestamp}"
     prompts_dir = os.path.join(output_dir, INFO_DIR, PROMPTS_DIR)
     # This will also make the output_dir implicitly
     os.makedirs(prompts_dir, exist_ok=True)
@@ -366,7 +366,7 @@ def execute_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
 
     # Create the soft link '_latest' pointing to the timestamp directory
     # We wait until here, so that we don't create a pointer to an incomplete run
-    latest_link = f"./target/{name}/{LATEST_LINK}"
+    latest_link = most_recent_target_dir(name)
     if os.path.exists(latest_link):
         os.unlink(latest_link)
     os.symlink(timestamp, latest_link, target_is_directory=True)
@@ -381,7 +381,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='Process a prompt file.\nBy default, a single prompt is executed. If stdin is provided, then it will execute the template once for each line, piping that line\'s input as the override variable "_input"')
     parser.add_argument('prompt_file', help='Path to the prompt file')
     parser.add_argument('--overrides', nargs='+', action='append', help='Named override placeholders in the format ARG_1 VAL_1 ARG_2 VAL_2')
-    parser.add_argument('--ignore', nargs='+', help=f"Ignore specific types of inputs. Types include {get_args(IgnoreType)}. You can also add a ':placeholder_1,placeholder_2' to specify only those placeholders. You can also do multiple named types in front of the colon: 'golden,target:backstory'. '*' means all of that type. Can also pass 'existing'", )
+    parser.add_argument('--ignore', nargs='+', help=f"Ignore specific types of inputs. Types include {get_args(IgnoreType)}. You can also add a ':placeholder_1,placeholder_2' to specify only those placeholders. You can also do multiple named types in front of the colon: 'golden,cache:backstory'. '*' means all of that type. Can also pass 'existing'", )
 
     args = parser.parse_args()
 
