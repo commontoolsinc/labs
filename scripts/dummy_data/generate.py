@@ -17,6 +17,7 @@ LATEST_LINK = '_latest'
 INFO_DIR = '_info'
 WILDCARD = '*'
 DEFAULT_IGNORES = 'existing'
+SPLIT_COMMAND = 'split'
 
 OverridesDict: TypeAlias = Dict[str, str]
 PlaceholderValue : TypeAlias = Union[str, Dict[str, str]]
@@ -255,7 +256,7 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
 
         if len(placeholder_parts) > 1:
             command = placeholder_parts[1].strip()
-            if command == "multi":
+            if command == SPLIT_COMMAND:
                 multi = True
             else:
                 raise Exception(f"Invalid command {command} in placeholder {raw_placeholder}")

@@ -37,7 +37,7 @@ Most placeholders are a single reference to a single value. However, it's also p
 
 This happens if you read a placeholder that was in multi-mode (which puts your result in multi-mode), or if you use a special operator on the placeholder reference to put it into multi mode.
 
-The main way to put a placeholder into multi mode is to use the `multi` directive in your prompt, like this: `Here is the schema: ${schema|multi}`. This will load up the value at schema according to the rules, and then split it so the prompt is run once per non-empty line in the schema input. The output for each line will be named on the content of that line. Downstream templates that rely on that output will be in multi-mode by default.
+The main way to put a placeholder into multi mode is to use the `split` directive in your prompt, like this: `Here is the schema: ${schema|split}`. This will load up the value at schema according to the rules, and then split it so the prompt is run once per non-empty line in the schema input. The output for each line will be named on the content of that line. Downstream templates that rely on that output will be in multi-mode by default.
 
 ## Caching
 
@@ -64,4 +64,3 @@ Example: `python3 pin_golden.py schema`
 - Allow pinning a not-most-recent version (perhaps via an interactive UI?)
 - What happens if you add the multi modifier on a value type that is already in multi-mode? Does it work?
 - Add a `join` modifier that combines a multi-mode back together in one prompt by concatenating. Perhaps with options about whether to output the name too
-- Rename `multi` modifier to be `split`?
