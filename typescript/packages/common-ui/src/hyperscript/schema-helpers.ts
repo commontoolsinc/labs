@@ -50,4 +50,6 @@ export const eventProps = () => ({
 
   // Custom events
   "@messageSend": binding(),
+  "@todo-checked": binding(),
+  "@todo-input": binding(),
 });
