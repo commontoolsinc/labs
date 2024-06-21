@@ -254,8 +254,8 @@ def execute_prompt(name: str, raw_prompt: str, timestamp : str, overrides: Overr
             # TODO: don't double print names in single mode
             print(f"Running llm command for {name} / {variation_name}...")
 
-            # Pipe the prompt contents to the llm command
-            output = subprocess.check_output(['llm'], input=prompt, universal_newlines=True)
+            # Pipe the prompt contents to the llm command with the option -m claude-3.5-sonnet
+            output = subprocess.check_output(['llm', '-m', 'claude-3.5-sonnet'], input=prompt, universal_newlines=True)
 
             # Generate the output file path
             output_file = f"{output_dir}/{variation_name}.txt"
