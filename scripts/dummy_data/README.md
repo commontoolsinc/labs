@@ -42,7 +42,6 @@ As a special case, if your include has the `:multi` directive, it says 'load up 
 - allow the various fetch_* that operate on a directory to return multiple items if the named thing is a directory.
 - Allow a way to specify `{files|multi-load:schema}
 - switch ':' in multi directive to '|'
-- make sure that a multi-golden folder works (e.g. golden/schema/foo.txt)
 - remove the fetch_placeholder directory and just return the value (we no longer need the directory)
 - If a template references the same placeholder that is a multi, only do the multi one time (this might already work). This sets us up for a use case that allows using the name or value of the multi file, so you could say: 'A file named ${schema|name} with content ${schema}' and ahve it replaced.
 - Allow a way to skip goldens or cached answers of all or specific replacements
