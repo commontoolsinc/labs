@@ -1,6 +1,54 @@
 import { HAIKU, single } from "./anthropic.ts";
 import { Anthropic } from "./deps.ts";
 
+export async function processTools(
+  message: Anthropic.Messages.ContentBlock[],
+  toolImpls: ToolImpls
+) {
+  const toolCalls = message.filter(
+    (msg): msg is Anthropic.Messages.ToolUseBlock => msg.type === "tool_use"
+  );
+  const calls = toolCalls.map(async (tool) => {
+    const input = tool.input as any;
+    console.log("Tool call", tool);
+    if (toolImpls[tool.name] === undefined) {
+      console.error(`Tool implementation not found for ${tool.name}`);
+      return [
+        tool.id,
+        await new Promise<string>((resolve) => resolve("")),
+      ] as const;
+    } else {
+      return [tool.id, await toolImpls[tool.name](input)] as const;
+    }
+  });
+
+  const results = await Promise.all(calls);
+  let toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
+  for (const [id, result] of results) {
+    const toolResult: Anthropic.Messages.ToolResultBlockParam = {
+      type: "tool_result",
+      tool_use_id: id,
+      content: [
+        {
+          type: "text",
+          text: `${result}`,
+        },
+      ],
+    };
+    console.log("Tool result", toolResult);
+    toolResults.push(toolResult);
+  }
+
+  if (toolResults.length > 0) {
+    const msg: Anthropic.Messages.MessageParam = {
+      role: "user",
+      content: [...toolResults],
+    };
+    return msg;
+  }
+  return undefined;
+}
+
 export const tools: Anthropic.Messages.Tool[] = [
   {
     name: "extractSemanticTriples",
@@ -394,7 +442,9 @@ export const tools: Anthropic.Messages.Tool[] = [
   },
 ];
 
-export const toolImpls: { [id: string]: Function } = {
+export type ToolImpl = (input: { text: string }) => Promise<string>;
+export type ToolImpls = { [id: string]: ToolImpl };
+export const toolImpls: ToolImpls = {
   extractSemanticTriples: async (input: { text: string }) => {
     return await single(
       `You specialize in extracting semantic RDF triples, right?

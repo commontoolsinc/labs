@@ -1,6 +1,7 @@
 import { Anthropic } from "./deps.ts";
 import { processStream } from "./stream.ts";
-import { tools, toolImpls } from "./tools.ts";
+import { toolImpls } from "./tools.ts";
+import { tools, ToolImpls, processTools } from "./tools.ts";
 
 const anthropic = new Anthropic({
   apiKey: Deno.env.get("ANTHROPIC_API_KEY"),
@@ -74,56 +75,12 @@ export async function ask(
     }
 
     if (stopReason === "tool_use") {
-      const result = await processTools(message);
-      conversation.push(...result);
+      const result = await processTools(message, toolImpls);
+      if (result) {
+        conversation.push(result);
+      }
     }
 
     return conversation;
   }
-}
-
-async function processTools(message: Anthropic.Messages.ContentBlock[]) {
-  const outputMessage = [];
-  const toolCalls = message.filter(
-    (msg): msg is Anthropic.Messages.ToolUseBlock => msg.type === "tool_use"
-  );
-  const calls = toolCalls.map(async (tool) => {
-    const input = tool.input as any;
-    console.log("Tool call", tool);
-    if (toolImpls[tool.name] === undefined) {
-      console.error(`Tool implementation not found for ${tool.name}`);
-      return [
-        tool.id,
-        await new Promise<string>((resolve) => resolve("")),
-      ] as const;
-    } else {
-      return [tool.id, await toolImpls[tool.name](input)] as const;
-    }
-  });
-
-  const results = await Promise.all(calls);
-  let toolResults: Anthropic.Messages.ToolResultBlockParam[] = [];
-  for (const [id, result] of results) {
-    const toolResult: Anthropic.Messages.ToolResultBlockParam = {
-      type: "tool_result",
-      tool_use_id: id,
-      content: [
-        {
-          type: "text",
-          text: `${result}`,
-        },
-      ],
-    };
-    console.log("Tool result", toolResult);
-    toolResults.push(toolResult);
-  }
-
-  if (toolResults.length > 0) {
-    const msg: Anthropic.Messages.MessageParam = {
-      role: "user",
-      content: [...toolResults],
-    };
-    outputMessage.push(msg);
-  }
-  return outputMessage;
 }
