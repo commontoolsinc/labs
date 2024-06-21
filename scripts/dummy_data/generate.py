@@ -324,7 +324,7 @@ def execute_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
     os.symlink(timestamp, latest_link, target_is_directory=True)
 
 def sanitize_string(input_string : str) -> str:
-    return re.sub(r'[^a-zA-Z0-9_-]', '_', input_string)
+    return re.sub(r'[^a-zA-Z0-9._-]', '_', input_string)
 
 def escape_backslashes(s : str) -> str:
     return s.replace('\\', '\\\\')
