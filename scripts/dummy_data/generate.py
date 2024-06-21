@@ -244,12 +244,6 @@ def execute_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
     # This will also make the output_dir implicitly
     os.makedirs(prompts_dir, exist_ok=True)
 
-    # Create the soft link '_latest' pointing to the timestamp directory
-    latest_link = f"./target/{name}/{LATEST_LINK}"
-    if os.path.exists(latest_link):
-        os.unlink(latest_link)
-    os.symlink(timestamp, latest_link, target_is_directory=True)
-
     # Compile the prompt
     prompt = compile_prompt(name, raw_prompt, context, parent_names)
     
@@ -282,6 +276,13 @@ def execute_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
         except subprocess.CalledProcessError as e:
             print(f"Error running llm command for {name}: {e}")
             sys.exit(1)
+
+    # Create the soft link '_latest' pointing to the timestamp directory
+    # We wait until here, so that we don't create a pointer to an incomplete run
+    latest_link = f"./target/{name}/{LATEST_LINK}"
+    if os.path.exists(latest_link):
+        os.unlink(latest_link)
+    os.symlink(timestamp, latest_link, target_is_directory=True)
 
 def sanitize_string(input_string : str) -> str:
     return re.sub(r'[^a-zA-Z0-9_-]', '_', input_string)
