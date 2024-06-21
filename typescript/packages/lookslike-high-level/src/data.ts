@@ -5,11 +5,6 @@ const { state } = signal;
 
 import { todoList, todoTask } from "./recipes/todo-list.js";
 import "./recipes/todo-list-as-task.js"; // Necessary, so that suggestions are indexed.
-import { todo } from "@commontools/common-ui/tags.js";
-
-export const keywords: { [key: string]: string[] } = {
-  groceries: ["grocery list"],
-};
 
 export const dataGems = state<Gem[]>([]);
 

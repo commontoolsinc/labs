@@ -63,12 +63,11 @@ export type Suggestion = {
   dataGems: { [key: string]: string };
 };
 
-export const suggestions = signal.state<Suggestion[]>([]);
+export const suggestions: Suggestion[] = [];
+export function addSuggestion(suggestion: Suggestion) {
+  suggestions.push(suggestion);
+}
 
 export function description(strings: TemplateStringsArray, ...values: any[]) {
   return strings.map((string, i) => [string, values[i]]).flat();
-}
-
-export function addSuggestion(suggestion: Suggestion) {
-  setTimeout(() => suggestions.send([...suggestions.get(), suggestion]));
 }

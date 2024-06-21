@@ -54,16 +54,16 @@ export class CommonSagaLink extends LitElement {
   override updated(changedProperties: Map<string | number | symbol, unknown>) {
     super.updated(changedProperties);
     if (changedProperties.has("saga")) {
-      this.maybeListenToName();
+      this.maybeListenToName(true);
     }
   }
 
-  private maybeListenToName() {
+  private maybeListenToName(skipUpdate = false) {
     if (signal.isSignal(this.saga?.[NAME])) {
-      console.log("listening to name", this.saga[NAME]);
       this.nameEffect = signal.effect([this.saga[NAME]], (name: string) => {
         this.nameFromGem = name;
-        this.requestUpdate();
+        if (!skipUpdate) this.requestUpdate();
+        skipUpdate = false;
       });
     } else {
       this.nameEffect?.();
@@ -72,10 +72,8 @@ export class CommonSagaLink extends LitElement {
   }
 
   override render() {
-    console.log("rendering saga link", this.saga, this.name);
     if (!this.saga) return html``;
     const name = this.name ?? this.nameFromGem;
-    console.log("rendering saga link", name, this.saga[NAME]);
     return html`
       <a href="#${this.saga[ID]}" @click="${this.handleClick}">🔮 ${name}</a>
     `;
