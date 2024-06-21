@@ -18,6 +18,7 @@ INFO_DIR = '_info'
 WILDCARD = '*'
 DEFAULT_IGNORES = 'existing'
 SPLIT_COMMAND = 'split'
+JOIN_COMMAND = 'join'
 
 OverridesDict: TypeAlias = Dict[str, str]
 PlaceholderValue : TypeAlias = Union[str, Dict[str, str]]
@@ -260,11 +261,14 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
             raise Exception(f"Invalid placeholder name {placeholder}")
 
         multi = False
+        join = False
 
         if len(placeholder_parts) > 1:
             command = placeholder_parts[1].strip()
             if command == SPLIT_COMMAND:
                 multi = True
+            elif command == JOIN_COMMAND:
+                join = True
             else:
                 raise Exception(f"Invalid command {command} in placeholder {raw_placeholder}")
 
@@ -277,6 +281,9 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
                 if line:
                     new_value[line] = line
             value = new_value
+
+        if join and isinstance(value, dict):
+            value = "\n".join(value.values())
 
         if isinstance(value, dict):
             result : Dict[str, str] = {}

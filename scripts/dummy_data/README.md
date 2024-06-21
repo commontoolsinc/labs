@@ -39,6 +39,8 @@ This happens if you read a placeholder that was in multi-mode (which puts your r
 
 The main way to put a placeholder into multi mode is to use the `split` directive in your prompt, like this: `Here is the schema: ${schema|split}`. This will load up the value at schema according to the rules, and then split it so the prompt is run once per non-empty line in the schema input. The output for each line will be named on the content of that line. Downstream templates that rely on that output will be in multi-mode by default.
 
+You can also take a multi-mode placeholder and join it into a single placeholder with `join`: `Here is the schema: ${schema|join}`.
+
 ## Caching
 
 If you want to override which placeholder to use, you can pass the `--ignore` flag. The legal classes of cached values to ignore: 'golden', 'cache', 'includes', 'overrides'. All of the following are valid:
@@ -63,4 +65,4 @@ Example: `python3 pin_golden.py schema`
 - Parallelize multi-generation
 - Allow pinning a not-most-recent version (perhaps via an interactive UI?)
 - What happens if you add the multi modifier on a value type that is already in multi-mode? Does it work?
-- Add a `join` modifier that combines a multi-mode back together in one prompt by concatenating. Perhaps with options about whether to output the name too
+- Add modifiers to `join` command to allow it to include names not values
