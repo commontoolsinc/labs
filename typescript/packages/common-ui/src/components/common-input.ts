@@ -2,6 +2,20 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 
+export type CommonInput = {
+  id: string;
+  value: string;
+}
+
+export class CommonInputEvent extends Event {
+  detail: CommonInput;
+
+  constructor(detail: CommonInput) {
+    super("common-input", { bubbles: true, composed: true });
+    this.detail = detail;
+  }
+}
+
 @customElement("common-input")
 export class CommonInputElement extends LitElement {
   static override styles = [
@@ -28,7 +42,7 @@ export class CommonInputElement extends LitElement {
       height: var(--height);
     }
 
-    :host-context([appearance="rounded"]) .input {
+    :host([appearance="rounded"]) .input {
       --height: 40px;
       background-color: var(--input-background);
       border-radius: calc(var(--height) / 2);
@@ -46,6 +60,10 @@ export class CommonInputElement extends LitElement {
     const oninput = (event: Event) => {
       const value = (event.target as HTMLInputElement).value;
       this.value = value;
+
+      this.dispatchEvent(
+        new CommonInputEvent({ id: this.id, value })
+      );
     }
 
     return html`
