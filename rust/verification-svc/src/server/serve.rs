@@ -3,7 +3,10 @@ use crate::cluster::ClusterMeasurements;
 use anyhow::Result;
 use axum::{http::Method, routing::post, Router};
 use tokio::net::TcpListener;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::{
+    cors::{Any, CorsLayer},
+    trace::TraceLayer,
+};
 use tracing::info;
 
 #[derive(Clone)]
@@ -35,12 +38,14 @@ pub async fn serve(listener: TcpListener, cluster: ClusterMeasurements) -> Resul
     );
     let cors = CorsLayer::new()
         .allow_methods([Method::POST])
+        .allow_headers(Any)
         .allow_origin(Any);
 
     let app = Router::new()
         .route("/api/v0/verify", post(verify))
-        .with_state(ServerState::from(cluster))
-        .layer(cors);
+        .layer(cors)
+        .layer(TraceLayer::new_for_http())
+        .with_state(ServerState::from(cluster));
 
     axum::serve(listener, app.into_make_service()).await?;
 
