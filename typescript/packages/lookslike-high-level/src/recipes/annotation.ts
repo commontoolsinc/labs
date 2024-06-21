@@ -9,7 +9,7 @@ import {
   suggestions,
   type Suggestion,
 } from "../recipe.js";
-const { button, include } = tags;
+const { include } = tags;
 const { state, computed } = signal;
 const { subject } = stream;
 const { binding } = view;
