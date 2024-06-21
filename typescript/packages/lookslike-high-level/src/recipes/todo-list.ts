@@ -58,10 +58,6 @@ export const todoTask = recipe("todo task", ({ title, done }) => {
           "@todo-checked": binding("update"),
           "@todo-input": binding("update"),
         }),
-        hstack({}, [
-          checkbox({ "@change": binding("toggle"), checked: binding("done") }),
-          div({}, binding("title")),
-        ]),
         annotation({
           query: title,
           data: { done, title },
