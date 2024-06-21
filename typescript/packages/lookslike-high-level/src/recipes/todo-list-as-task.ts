@@ -1,8 +1,9 @@
 import { view, tags, render } from "@commontools/common-ui";
 import { signal, Cancel } from "@commontools/common-frp";
 import { Gem, recipe, description, addSuggestion, NAME } from "../recipe.js";
+import { sagaLink } from "../components/saga-link.js";
 const { binding } = view;
-const { include } = tags;
+const { include, vstack, span } = tags;
 const { state, effect, computed } = signal;
 
 const details = render.view("details", {});
@@ -43,8 +44,6 @@ export const todoListAsTask = recipe("todo list as task", ({ list, done }) => {
             item.done ? [] : [item.title]
           );
           const newSummary =
-            list[NAME] +
-            ": " +
             items.length +
             " items. " +
             (notDoneTitles.length
@@ -67,10 +66,15 @@ export const todoListAsTask = recipe("todo list as task", ({ list, done }) => {
 
   const UI = [
     details({}, [
-      summary({}, binding("listSummary")),
+      summary({}, [
+        vstack({}, [
+          sagaLink({ saga: binding("list") }),
+          span({}, binding("listSummary")),
+        ]),
+      ]),
       include({ content: binding("fullUI") }),
     ]),
-    { listSummary, fullUI },
+    { list, listSummary, fullUI },
   ];
 
   return {

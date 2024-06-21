@@ -1,6 +1,6 @@
 // This file is setting up example data
 import { signal } from "@commontools/common-frp";
-import { Gem, NAME } from "./recipe.js";
+import { Gem } from "./recipe.js";
 const { state } = signal;
 
 import { todoList, todoTask } from "./recipes/todo-list.js";

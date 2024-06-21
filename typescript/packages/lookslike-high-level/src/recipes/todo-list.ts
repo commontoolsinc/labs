@@ -4,7 +4,7 @@ import { recipe, NAME } from "../recipe.js";
 import { annotation } from "../components/annotation.js";
 const { binding, repeat } = view;
 const { list, vstack, include, sendInput, todo, commonInput } = tags;
-const { state } = signal;
+const { state, computed } = signal;
 const { subject } = stream;
 
 export const todoList = recipe("todo list", ({ title, items }) => {
@@ -12,7 +12,7 @@ export const todoList = recipe("todo list", ({ title, items }) => {
   newTitle.sink({
     send: (event) => {
       const updatedTitle = event.detail?.value?.trim();
-      if (!updatedTitle) return;
+      if (updatedTitle === undefined) return;
       title.send(updatedTitle);
     },
   });
@@ -45,7 +45,7 @@ export const todoList = recipe("todo list", ({ title, items }) => {
     ],
     title,
     items,
-    [NAME]: title,
+    [NAME]: computed([title], (title) => title || "untitled"),
   };
 });
 
