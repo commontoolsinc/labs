@@ -12,6 +12,12 @@ export class CommonInputElement extends LitElement {
       --height: 24px;
     }
     
+    .input-wrapper {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
     .input {
       appearance: none;
       border: 0;
@@ -43,11 +49,14 @@ export class CommonInputElement extends LitElement {
     }
 
     return html`
-    <input
-      class="input"
-      @input="${oninput}"
-      .value="${this.value}"
-      .placeholder="${this.placeholder}"
-      type="text" />`;
+    <div class="input-wrapper">
+      <input
+        class="input"
+        @input="${oninput}"
+        .value="${this.value}"
+        .placeholder="${this.placeholder}"
+        type="text" />
+    </div>
+    `;
   }
 }
