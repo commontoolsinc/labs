@@ -61,7 +61,7 @@ export type Cancellable = {
 
 export type AnyCell<T> = {
   content: T;
-  subscribe(propagator: Task): Cancel;
+  connect(task: Task): Cancellable;
 }
 
 export const isCell = (
@@ -74,19 +74,39 @@ export const isCell = (
   );
 }
 
-export const subscribeAll = (
-  cells: Array<AnyCell<any>>,
-  propagator: Task
-): Cancel => {
-  const cancels = cells.map(cell => cell.subscribe(propagator));
-  return () => {
-    for (const cancel of cancels) {
-      cancel();
+/**
+ * Create a bag to hold cancel functions
+ * Returns a cancellable.
+ */
+export const cancellable = (
+  ...cancellables: Array<Cancellable>
+): Cancellable => {
+  const cancel = () => {
+    for (const cancellable of cancellables) {
+      cancellable.cancel();
     }
   }
+  return {cancel};
+};
+
+export const connectAll = (
+  cells: Array<AnyCell<any>>,
+  task: Task
+): Cancellable => {
+  const cancels = cells.map(cell => cell.connect(task));
+  return cancellable(...cancels);
 }
 
+let _cid = 0;
+
+/**
+ * Create a unique client ID using a client-side counter.
+ * DO NOT persist cids. They are only unique for the script lifetime.
+ */
+export const cid = () => `cid${_cid++}`;
+
 export class Cell<T> implements AnyCell<T> {
+  cid = cid();
   #neighbors: Set<Task> = new Set();
   #content: T;
 
@@ -106,12 +126,13 @@ export class Cell<T> implements AnyCell<T> {
     }  
   }
 
-  subscribe(propagator: Task) {
+  connect(propagator: Task) {
     this.#neighbors.add(propagator);
     scheduler.enqueue([propagator]);
-    return () => {
+    const cancel = () => {
       this.#neighbors.delete(propagator);
     }
+    return {cancel};
   }
 }
 
@@ -119,6 +140,7 @@ export const cell = <T>(initial: T) => new Cell(initial);
 
 /** A read-only view over a cell */
 export class CellView<T> implements AnyCell<T> {
+  cid = cid();
   #cell: Cell<T>;
 
   constructor(cell: Cell<T>) {
@@ -129,8 +151,8 @@ export class CellView<T> implements AnyCell<T> {
     return this.#cell.content;
   }
 
-  subscribe(propagator: Task) {
-    return this.#cell.subscribe(propagator);
+  connect(propagator: Task) {
+    return this.#cell.connect(propagator);
   }
 }
 
@@ -144,9 +166,15 @@ export const getContent = <T>(
 
 export const task = (poll: () => void) => ({poll});
 
+export type AnyPropagator = Cancellable & {
+  cid: string;
+}
+
 const lift = (
   fn: (...args: Array<any>) => any,
-) => (...cells: Array<AnyCell<any>>): Cancellable => {
+) => (
+  ...cells: Array<AnyCell<any>>
+): AnyPropagator => {
   const output = cells.pop();
   if (!(output instanceof Cell)) {
     throw new TypeError("Last argument must be a writeable cell");
@@ -159,9 +187,12 @@ const lift = (
 
   scheduler.enqueue([lifted]);
 
-  const cancel = subscribeAll(cells, lifted);
+  const {cancel} = connectAll(cells, lifted);
 
-  return {cancel};
+  return {
+    cid: cid(),
+    cancel
+  };
 }
 
 export const add = lift((a: number, b: number) => a + b); 
@@ -169,11 +200,12 @@ export const sub = lift((a: number, b: number) => a - b);
 export const mul = lift((a: number, b: number) => a * b);
 export const div = lift((a: number, b: number) => a / b);
 
+/** Call a callback whenever cell contents changes */
 export const sink = <T>(
   cell: AnyCell<T>,
   callback: (value: T) => void
 ) => {
-  return cell.subscribe(task(() => {
+  return cell.connect(task(() => {
     callback(cell.content);
   }));
 }
