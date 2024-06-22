@@ -1,3 +1,13 @@
+export const config = {
+  debug: false
+}
+
+export const debug = (...args: Array<any>) => {
+  if (config.debug) {
+    console.debug(...args);
+  }
+}
+
 export type Task = {
   poll(): void;
 };
@@ -105,13 +115,43 @@ let _cid = 0;
  */
 export const cid = () => `cid${_cid++}`;
 
+const noOp = () => {};
+
+const batcher = (
+  schedule: (job: () => void) => void
+) => {
+  const id = cid()
+  let scheduledJob = noOp;
+  let isScheduled = false;
+
+  const perform = () => {
+    isScheduled = false;
+    debug(`[batcher#${id}]`, "performing job");
+    scheduledJob();
+  }
+
+  return (job: () => void) => {
+    scheduledJob = job;
+    debug(`[batcher#${id}]`, "set job");
+    if (!isScheduled) {
+      isScheduled = true;
+      debug(`[batcher#${id}]`, "scheduling job");
+      schedule(perform);
+    }
+  }
+}
+
+const taskBatcher = () => batcher(queueMicrotask);
+
 export class Cell<T> implements AnyCell<T> {
   cid = cid();
+  #batch = taskBatcher();
   #neighbors: Set<Task> = new Set();
   #content: T;
 
   constructor(initial: T) {
     this.#content = initial
+    debug(`[cell#${this.cid}]`, 'created', this.#content);
   }
 
   get() {
@@ -119,18 +159,24 @@ export class Cell<T> implements AnyCell<T> {
   }
 
   send(next: T) {
-    const merged = merge(this.#content, next);
-    if (this.#content !== merged) {
-      this.#content = merged;
-      scheduler.enqueue(this.#neighbors);
-    }  
+    debug(`[cell#${this.cid}]`, 'send', next);
+    this.#batch(() => {
+      const merged = merge(this.#content, next);
+      if (this.#content !== merged) {
+        this.#content = merged;
+        debug(`[cell#${this.cid}]`, 'updated', this.#content);
+        scheduler.enqueue(this.#neighbors);
+      }
+    })
   }
 
-  connect(propagator: Task) {
-    this.#neighbors.add(propagator);
-    scheduler.enqueue([propagator]);
+  connect(task: Task) {
+    this.#neighbors.add(task);
+    scheduler.enqueue([task]);
+    debug(`[cell#${this.cid}]`, 'add neighbor');
     const cancel = () => {
-      this.#neighbors.delete(propagator);
+      debug(`[cell#${this.cid}]`, 'cancel');
+      this.#neighbors.delete(task);
     }
     return {cancel};
   }
@@ -210,33 +256,14 @@ export const sink = <T>(
   }));
 }
 
-const batched = (
-  job: () => void,
-  schedule: (job: () => void) => void
-) => {
-  let isScheduled = false;
-
-  const perform = () => {
-    isScheduled = false;
-    job();
-  }
-
-  return () => {
-    if (!isScheduled) {
-      isScheduled = true;
-      schedule(perform);
-    }
-  }
-}
+const frameBatcher = () => batcher(requestAnimationFrame);
 
 /** Render changes froma  cell on next frame */
 export const render = <T>(
   cell: AnyCell<T>,
   callback: (value: T) => void
 ) => {
-  const batchedRender = batched(
-    () => callback(cell.get()),
-    requestAnimationFrame
-  )
-  return sink(cell, batchedRender);
+  const batch = frameBatcher();
+  const perform = () => callback(cell.get())
+  return sink(cell, () => batch(perform));
 }

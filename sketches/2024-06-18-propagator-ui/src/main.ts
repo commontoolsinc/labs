@@ -1,4 +1,5 @@
 import {
+  config,
   Cell,
   cell,
   constant,
@@ -6,8 +7,11 @@ import {
   sink,
   mul,
   sub,
-  div
+  div,
+  AnyCell
 } from './propagators.js';
+
+config.debug = true;
 
 function fahrenheitToCelsius(f: Cell<number>, c: Cell<number>) {
   const thirtyTwo = constant(32);
@@ -32,5 +36,25 @@ fahrenheitToCelsius(
 );
 
 sink(output, value => {
+  console.log(value);
+});
+
+export const diamond = (input: AnyCell<number>, output: Cell<number>) => {
+  const l = cell(0);
+  const r = cell(0);
+  
+  return cancellable(
+    mul(input, constant(10), l),
+    div(input, constant(2), r),
+    mul(l, r, output)
+  );
+}
+
+const input2 = cell(3);
+const output2 = cell(0);
+
+diamond(input2, output2);
+
+sink(output2, value => {
   console.log(value);
 });
