@@ -60,7 +60,7 @@ export type Cancellable = {
 }
 
 export type AnyCell<T> = {
-  content: T;
+  get(): T;
   connect(task: Task): Cancellable;
 }
 
@@ -69,7 +69,7 @@ export const isCell = (
 ): value is AnyCell<any> => {
   return (
     value !== null &&
-    Object.hasOwn(value, "content") &&
+    typeof value.get === "function" &&
     typeof value.subscribe === "function"
   );
 }
@@ -114,7 +114,7 @@ export class Cell<T> implements AnyCell<T> {
     this.#content = initial
   }
 
-  get content() {
+  get() {
     return this.#content;
   }
 
@@ -147,8 +147,8 @@ export class CellView<T> implements AnyCell<T> {
     this.#cell = cell;
   }
 
-  get content() {
-    return this.#cell.content;
+  get() {
+    return this.#cell.get();
   }
 
   connect(propagator: Task) {
@@ -162,7 +162,7 @@ export const constant = <T>(value: T): CellView<T> => cellView(cell(value));
 
 export const getContent = <T>(
   cell: AnyCell<T>
-): T => cell.content;
+): T => cell.get();
 
 export const task = (poll: () => void) => ({poll});
 
@@ -206,7 +206,7 @@ export const sink = <T>(
   callback: (value: T) => void
 ) => {
   return cell.connect(task(() => {
-    callback(cell.content);
+    callback(cell.get());
   }));
 }
 
@@ -235,7 +235,7 @@ export const render = <T>(
   callback: (value: T) => void
 ) => {
   const batchedRender = batched(
-    () => callback(cell.content),
+    () => callback(cell.get()),
     requestAnimationFrame
   )
   return sink(cell, batchedRender);
