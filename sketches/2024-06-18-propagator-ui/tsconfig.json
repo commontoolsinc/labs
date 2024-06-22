@@ -1,0 +1,18 @@
+{
+    "extends": "../../typescript/tsconfig.base.json",
+    "compilerOptions": {
+      "lib": ["ESNext", "dom", "dom.iterable"],
+      "target": "ESNext",
+      "outDir": "./lib",
+      "rootDir": "./src",
+      "strict": false,
+      "useDefineForClassFields": false,
+      "paths": {
+      },
+      "types": []
+    },
+    "include": [
+      "src/**/*",
+    ]
+  }
+  
