@@ -1,0 +1,40 @@
+{
+  "name": "@commontools/lookslike-gems",
+  "author": "The Common Authors",
+  "version": "0.0.1",
+  "description": "Lookslike prototype of reactive \"Data Gems\"",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wireit",
+    "clean": "wireit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/commontoolsinc/labs.git"
+  },
+  "bugs": {
+    "url": "https://github.com/commontoolsinc/labs/issues"
+  },
+  "homepage": "https://github.com/commontoolsinc/labs#readme",
+  "devDependencies": {
+    "typescript": "^5.5.2",
+    "vite": "^5.3.1",
+    "wireit": "^0.14.4"
+  },
+  "wireit": {
+    "build": {
+      "dependencies": [],
+      "command": "vite build"
+    },
+    "clean": {
+      "command": "rm -rf ./lib ./dist ./.wireit ./node_modules"
+    }
+  },
+  "dependencies": {
+    "lit-html": "^3.1.4",
+    "rxdb": "^15.24.0",
+    "rxjs": "^7.8.1"
+  }
+}
