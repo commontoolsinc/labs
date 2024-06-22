@@ -3,7 +3,9 @@ import { getRxStorageMemory } from "rxdb/plugins/storage-memory";
 import { RxDBDevModePlugin } from "rxdb/plugins/dev-mode";
 import { html, render } from "lit-html";
 import { RxDBStatePlugin } from "rxdb/plugins/state";
-import { Observable } from "rxjs";
+import { Observable, Subscription } from "rxjs";
+import { LitElement, css } from "lit-element";
+import { customElement, property, state } from "lit-element/decorators.js";
 
 addRxPlugin(RxDBStatePlugin);
 // addRxPlugin(RxDBDevModePlugin);
@@ -41,14 +43,191 @@ async function createDatabase() {
   return db;
 }
 
-// Create a data orb component
-function DataOrb(props: { id: string; value: any }) {
-  return html`
-    <div class="data-orb">
-      <h3>${props.id}</h3>
-      <p>${JSON.stringify(props.value)}</p>
-    </div>
+@customElement("data-gem")
+class DataGem extends LitElement {
+  @property({ type: String }) key!: string;
+  @property({ type: String }) path!: string;
+
+  @state() private value: any;
+  @state() private wobble: boolean = false;
+  @state() private showTooltip: boolean = false;
+  @state() private tooltipX: number = 0;
+  @state() private tooltipY: number = 0;
+
+  static styles = css`
+    :host {
+      display: block;
+      position: relative;
+      aspect-ratio: 1 / 1;
+    }
+    .data-orb {
+      background-color: rgba(0, 100, 200, 0.7);
+      border-radius: 50%;
+      padding: 20px;
+      text-align: center;
+      color: white;
+      transition: transform 0.3s ease;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      box-sizing: border-box;
+    }
+    .data-orb.navigable {
+      cursor: pointer;
+    }
+    .data-orb:hover {
+      transform: scale(1.1);
+    }
+    .data-orb.animate {
+      animation: wobble 0.3s ease-in-out;
+    }
+    @keyframes wobble {
+      0% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.1);
+      }
+      100% {
+        transform: scale(1);
+      }
+    }
+    .tooltip {
+      position: fixed;
+      display: block;
+      background-color: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      font-family: monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      z-index: 1000;
+      max-width: 300px;
+      pointer-events: none;
+      text-align: left;
+    }
+
+    .tooltip-content {
+      margin: 0;
+      padding: 0;
+    }
+
+    .navigate {
+      cursor: pointer;
+      text-decoration: underline;
+      color: blue;
+    }
   `;
+  subscription: Subscription | null = null;
+
+  private bindValue() {
+    if (this.subscription) {
+      this.subscription.unsubscribe();
+      this.subscription = null;
+    }
+
+    const value$ = appState.get$(this.path);
+    this.subscription = value$.subscribe((newValue) => {
+      const path = `${this.path}`;
+      console.log("New value for", path, newValue);
+      this.value = newValue;
+      this.wobble = true;
+      this.requestUpdate();
+      setTimeout(() => {
+        this.wobble = false;
+        this.requestUpdate();
+      }, 300);
+    });
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this.bindValue();
+  }
+
+  override updated(changedProperties: Map<string | number | symbol, unknown>) {
+    if (changedProperties.has("path")) {
+      this.bindValue();
+    }
+  }
+
+  override render() {
+    return html`
+      <div
+        class="data-orb ${this.wobble ? "animate" : ""} ${this.isNavigable()
+          ? "navigable"
+          : ""}"
+        @mousemove="${this.handleMouseMove}"
+        @mouseenter="${this.handleMouseEnter}"
+        @mouseleave="${this.handleMouseLeave}"
+        @click="${this.handleNavigate}"
+      >
+        <h3>${this.key}</h3>
+        <p>${this.getShortValue()}</p>
+      </div>
+      ${this.showTooltip ? this.renderTooltip() : ""}
+    `;
+  }
+
+  isNavigable() {
+    return typeof this.value === "object" && this.value !== null;
+  }
+
+  handleNavigate() {
+    if (!this.isNavigable()) {
+      return;
+    }
+
+    this.dispatchEvent(
+      new CustomEvent("navigate", {
+        detail: { key: this.key, value: this.value },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  renderTooltip() {
+    return html`
+      <div
+        class="tooltip"
+        style="left: ${this.tooltipX}px; top: ${this.tooltipY}px"
+      >
+        <div class="tooltip-content">${this.getPrettyPrintedValue()}</div>
+      </div>
+    `;
+  }
+
+  handleMouseMove(e: MouseEvent) {
+    this.tooltipX = e.clientX + 10; // Offset from cursor
+    this.tooltipY = e.clientY + 10;
+    this.requestUpdate();
+  }
+
+  handleMouseEnter() {
+    this.showTooltip = true;
+  }
+
+  handleMouseLeave() {
+    this.showTooltip = false;
+  }
+
+  getShortValue(): string {
+    if (typeof this.value === "object" && this.value !== null) {
+      return Array.isArray(this.value)
+        ? `[${this.value.length} items]`
+        : "{...}";
+    }
+    return String(this.value);
+  }
+
+  getPrettyPrintedValue(): string {
+    return JSON.stringify(this.value, null, 2).trim();
+  }
 }
 
 const initial = {
@@ -67,55 +246,114 @@ const initial = {
 
 type Inventory = typeof initial;
 
-// Main application
-async function main() {
-  const db = await createDatabase();
-  const state = await db.addState();
+type NavigationItem = {
+  key: string;
+};
 
-  // Insert some initial data
-  await state.set("inventory", (_) => initial);
-  const inventory = state.get$("inventory") as Observable<Inventory | null>;
+@customElement("inventory-view")
+class InventoryView extends LitElement {
+  @state() private navigationStack: NavigationItem[] = [];
 
-  // Subscribe to changes
-  inventory.subscribe((stateData) => {
-    const app = html`
-      <style>
-        .inventory-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-          gap: 20px;
-          padding: 20px;
-        }
-        .data-orb {
-          background-color: rgba(0, 100, 200, 0.7);
-          border-radius: 50%;
-          padding: 20px;
-          text-align: center;
-          color: white;
-          transition: transform 0.3s ease;
-        }
-        .data-orb:hover {
-          transform: scale(1.1);
-        }
-      </style>
-      <h1>Inventory Data Orbs</h1>
-      <div class="inventory-grid">
-        ${!stateData
-          ? html`<p>Loading...</p>`
-          : Object.entries(stateData).map(([key, value]) =>
-              DataOrb({ id: key, value }),
-            )}
+  static styles = css`
+    .inventory-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 20px;
+      padding: 20px;
+    }
+    .breadcrumb {
+      margin-bottom: 10px;
+    }
+    .breadcrumb-item {
+      cursor: pointer;
+      color: blue;
+      text-decoration: underline;
+    }
+  `;
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this.navigateTo({ key: "inventory" });
+  }
+
+  navigateTo(item: NavigationItem) {
+    this.navigationStack = [...this.navigationStack, item];
+  }
+
+  navigateBack(index: number) {
+    this.navigationStack = this.navigationStack.slice(0, index + 1);
+  }
+
+  renderBreadcrumbs() {
+    return html`
+      <div class="breadcrumb">
+        ${this.navigationStack.map(
+          (item, index) => html`
+            <span
+              class="breadcrumb-item"
+              @click=${() => this.navigateBack(index)}
+            >
+              ${item.key}
+            </span>
+            ${index < this.navigationStack.length - 1 ? " > " : ""}
+          `,
+        )}
       </div>
     `;
-    render(app, document.body);
-  });
+  }
+
+  override render() {
+    const currentItem = this.navigationStack[this.navigationStack.length - 1];
+    const path = this.navigationStack.map((item) => item.key).join(".");
+    const currentValue = appState.get(path);
+
+    return html`
+      ${this.renderBreadcrumbs()}
+      <div class="inventory-grid">
+        ${Object.entries(currentValue).map(([key, value]) => {
+          const fullPath = isNaN(key) ? `${path}.${key}` : `${path}[${key}]`;
+          return html`
+            <data-gem
+              .key=${key}
+              .path=${fullPath}
+              @navigate=${(e: CustomEvent) => this.navigateTo(e.detail)}
+            ></data-gem>
+          `;
+        })}
+      </div>
+    `;
+  }
+}
+
+// Main application
+async function main(state: any) {
+  // Initial render
+  render(html`<inventory-view></inventory-view>`, document.body);
 
   // Example of updating state
   setInterval(() => {
-    state.set("inventory.health", (v) => v - 10);
+    state.set("inventory.health", (v) => Math.max(0, v - 10));
   }, 1000);
+
+  setInterval(() => {
+    state.set("inventory.gold", (v) => v + 50);
+  }, 2000);
+
+  setInterval(() => {
+    state.set("inventory.skills.intelligence", (v) =>
+      Math.round(Math.random() * 20),
+    );
+  }, 500);
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  main().catch(console.error);
+let appState = null;
+
+document.addEventListener("DOMContentLoaded", async () => {
+  const db = await createDatabase();
+  appState = await db.addState();
+
+  // Insert some initial data
+  await appState.set("inventory", (_) => initial);
+
+  main(appState).catch(console.error);
 });

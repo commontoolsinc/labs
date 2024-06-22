@@ -33,6 +33,7 @@
     }
   },
   "dependencies": {
+    "lit-element": "^4.0.6",
     "lit-html": "^3.1.4",
     "rxdb": "^15.24.0",
     "rxjs": "^7.8.1"
