@@ -3,7 +3,7 @@ import { signal, stream } from "@commontools/common-frp";
 import { recipe, NAME } from "../recipe.js";
 import { annotation } from "../components/annotation.js";
 const { binding, repeat } = view;
-const { list, vstack, include, sendInput, todo, commonInput } = tags;
+const { vstack, include, sendInput, todo, commonInput } = tags;
 const { state, computed } = signal;
 const { subject } = stream;
 

@@ -65,6 +65,7 @@ const listen = (
 
 /** Read an event, returning a safe description object */
 const readEvent = (event: Event) => {
+  event.stopPropagation();
   switch (event.type) {
     case "click":
       return {
@@ -210,7 +211,7 @@ const renderText = (element: Element, value: any): Cancel =>
 const __id__ = Symbol("list item key");
 
 let _cid = 0;
-const cid = () => `cid${_cid++}`
+const cid = () => `cid${_cid++}`;
 
 /**
  * An element with an id symbol used for efficient rendering of dynamic lists.
@@ -233,13 +234,7 @@ export const renderDynamicChildren = (
     // item will not be efficiently re-rendered by identity, but it will
     // still work.
     const statesById = new Map(
-      gmap(
-        states,
-        (state) => [
-          state.id ?? cid(),
-          state
-        ]
-      )
+      gmap(states, (state) => [state.id ?? cid(), state])
     );
 
     // Build an index of children and a list of children to remove.
