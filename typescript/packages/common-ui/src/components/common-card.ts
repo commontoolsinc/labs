@@ -1,5 +1,5 @@
 import { LitElement, html, css } from 'lit-element';
-import { customElement, property } from 'lit-element/decorators.js';
+import { customElement } from 'lit-element/decorators.js';
 import { view } from '../hyperscript/render.js';
 import { baseStyles } from './style.js';
 import { eventProps } from '../hyperscript/schema-helpers.js';

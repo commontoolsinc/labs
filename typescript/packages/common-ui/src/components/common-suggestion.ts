@@ -9,21 +9,24 @@ export class CommonSuggestionElement extends LitElement {
     baseStyles,
     css`
       :host {
-        --button-background: #000;
-        --button-color: #fff;
-        --height: var(--min-touch-size);
+        --min-height: var(--min-touch-size);
+        --width: fit-content;
         display: block;
+        width: var(--width);
       }
 
       .suggestion {
-        align-items: center;
-        border-top: 1px solid #e0e0e0;
-        box-sizing: border-box;
+        background: var(--secondary-background);
+        border-radius: calc(var(--min-height) / 2);
+        cursor: pointer;
         display: flex;
+        align-items: center;
+        box-sizing: border-box;
         font-size: var(--body-size);
-        height: var(--height);
         line-height: 20px;
-        padding: 8px 20px;
+        min-height: var(--min-height);
+        padding: 12px 20px;
+        width: var(--width);
         gap: var(--gap, 16px);
       }
     `,

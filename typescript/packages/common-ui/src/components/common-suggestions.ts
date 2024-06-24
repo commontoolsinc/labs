@@ -36,6 +36,8 @@ export class CommonSuggestionsElement extends LitElement {
 
   @property({ type: Array }) suggestions: Array<Suggestion> = [];
   @property({ type: Number }) limit = 3;
+  @property({ type: String }) gap = "sm";
+  @property({ type: String }) pad = "md";
 
   override render() {
     const onclick = (event: Event) => {
@@ -48,7 +50,7 @@ export class CommonSuggestionsElement extends LitElement {
     const suggestions = this.suggestions.slice(0, this.limit);
 
     return html`
-      <common-vstack @click="${onclick}">
+      <common-vstack gap="${this.gap}" pad="${this.pad}" @click="${onclick}">
         ${repeat(suggestions, getId, suggestionTemplate)}
       </common-vstack>
     `;
