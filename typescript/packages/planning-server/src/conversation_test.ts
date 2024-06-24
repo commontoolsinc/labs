@@ -1,8 +1,8 @@
 import { assertEquals } from "https://deno.land/std/testing/asserts.ts";
-import { InMemoryThreadManager } from "./thread.ts";
+import { InMemoryConversationThreadManager } from "./conversation.ts";
 
 Deno.test("ThreadManager - Create and Get Thread", () => {
-  const manager = new InMemoryThreadManager();
+  const manager = new InMemoryConversationThreadManager();
   const thread = manager.create("system prompt", "initial message", []);
 
   assertEquals(thread.system, "system prompt");
@@ -15,7 +15,7 @@ Deno.test("ThreadManager - Create and Get Thread", () => {
 });
 
 Deno.test("ThreadManager - Update Thread", () => {
-  const manager = new InMemoryThreadManager();
+  const manager = new InMemoryConversationThreadManager();
   const thread = manager.create("system prompt", "initial message", []);
 
   manager.update(thread.id, [
@@ -30,12 +30,12 @@ Deno.test("ThreadManager - Update Thread", () => {
   assertEquals(updatedThread?.conversation[1].role, "assistant");
   assertEquals(
     updatedThread?.conversation[1].content[0].text,
-    "Hello! How can I help you?"
+    "Hello! How can I help you?",
   );
 });
 
 Deno.test("ThreadManager - Set Pending Tool Calls", () => {
-  const manager = new InMemoryThreadManager();
+  const manager = new InMemoryConversationThreadManager();
   const thread = manager.create("system prompt", "initial message", []);
 
   const toolCalls = [
@@ -48,7 +48,7 @@ Deno.test("ThreadManager - Set Pending Tool Calls", () => {
 });
 
 Deno.test("ThreadManager - Delete Thread", () => {
-  const manager = new InMemoryThreadManager();
+  const manager = new InMemoryConversationThreadManager();
   const thread = manager.create("system prompt", "initial message", []);
 
   manager.delete(thread.id);
