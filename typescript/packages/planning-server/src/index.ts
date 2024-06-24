@@ -1,21 +1,49 @@
 import { ask } from "./anthropic.ts";
 import { Anthropic, serve } from "./deps.ts";
-import { InMemoryThreadManager, Thread } from "./thread.ts";
+import {
+  InMemoryConversationThreadManager,
+  ConversationThread,
+} from "./conversation.ts";
 
-const threadManager = new InMemoryThreadManager();
+const threadManager = new InMemoryConversationThreadManager();
+
+type CreateConversationThreadRequest = {
+  action: "create";
+  message: string;
+  system: string;
+  activeTools: Anthropic.Messages.Tool[];
+};
+
+type AppendToConversationThreadRequest = {
+  action: "append";
+  threadId: string;
+  message?: string;
+  toolResponses?: Anthropic.Messages.ToolUseBlock[];
+};
+
+type ConversationThreadRequest =
+  | CreateConversationThreadRequest
+  | AppendToConversationThreadRequest;
 
 const handler = async (request: Request): Promise<Response> => {
   if (request.method === "POST") {
     try {
-      const body = await request.json();
-      const { action, threadId, message, toolResponses, system, activeTools } =
-        body;
+      const body: ConversationThreadRequest = await request.json();
+      const { action } = body;
 
       switch (action) {
-        case "create":
-          return handleCreateThread(system, message, activeTools);
-        case "append":
-          return handleAppendThread(threadId, message, toolResponses);
+        case "create": {
+          const { message, system, activeTools } = body;
+          return handleCreateConversationThread(system, message, activeTools);
+        }
+        case "append": {
+          const { threadId, message, toolResponses } = body;
+          return handleAppendToConversationThread(
+            threadId,
+            message,
+            toolResponses,
+          );
+        }
         default:
           return new Response(JSON.stringify({ error: "Invalid action" }), {
             status: 400,
@@ -33,27 +61,46 @@ const handler = async (request: Request): Promise<Response> => {
   }
 };
 
-async function handleCreateThread(
+const cache: Record<string, any> = {};
+
+async function handleCreateConversationThread(
   system: string,
   message: string,
-  activeTools: Anthropic.Messages.Tool[]
+  activeTools: Anthropic.Messages.Tool[],
 ): Promise<Response> {
+  const cacheKey = `${system}:${message}`;
+
+  if (cache[cacheKey]) {
+    console.log(
+      "Cache hit!",
+      (cacheKey.slice(0, 20) + "..." + cacheKey.slice(-20)).replaceAll(
+        "\n",
+        "",
+      ),
+    );
+    return new Response(JSON.stringify(cache[cacheKey]), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const thread = threadManager.create(system, message, activeTools);
-  const result = await processThread(thread);
+  const result = await processConversationThread(thread);
 
   if (result.assistantResponse) {
     threadManager.update(thread.id, [result.assistantResponse]);
   }
+
+  cache[cacheKey] = result;
 
   return new Response(JSON.stringify(result), {
     headers: { "Content-Type": "application/json" },
   });
 }
 
-async function handleAppendThread(
+async function handleAppendToConversationThread(
   threadId: string,
-  message: string | null,
-  toolResponses: Anthropic.Messages.ToolResultBlockParam[] | null
+  message?: string,
+  toolResponses?: Anthropic.Messages.ToolResultBlockParam[],
 ): Promise<Response> {
   const thread = threadManager.get(threadId);
   if (!thread) {
@@ -81,7 +128,7 @@ async function handleAppendThread(
     },
   ]);
 
-  const result = await processThread(thread);
+  const result = await processConversationThread(thread);
 
   // Update the thread with the assistant's response
   if (result.assistantResponse) {
@@ -96,13 +143,15 @@ async function handleAppendThread(
   });
 }
 
-async function processThread(thread: Thread): Promise<any> {
+async function processConversationThread(
+  thread: ConversationThread,
+): Promise<any> {
   console.log("Thread", thread);
 
   const result = await ask(
     thread.conversation,
     thread.system,
-    thread.activeTools
+    thread.activeTools,
   );
   if (!result) {
     return { error: "No response from Anthropic" };
@@ -116,7 +165,7 @@ async function processThread(thread: Thread): Promise<any> {
 
   if (assistantResponse.content && Array.isArray(assistantResponse.content)) {
     const toolCalls = assistantResponse.content.filter(
-      (item) => item.type === "tool_use"
+      (item) => item.type === "tool_use",
     ) as Anthropic.Messages.ToolUseBlockParam[];
     if (toolCalls.length > 0) {
       return {

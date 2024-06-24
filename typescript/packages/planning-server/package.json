@@ -7,6 +7,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "deno run --allow-env --allow-read --allow-net src/index.ts",
+    "test": "deno test --no-check",
     "build": "wireit",
     "clean": "wireit"
   },
@@ -19,9 +21,7 @@
   },
   "homepage": "https://github.com/commontoolsinc/labs#readme",
   "exports": "./lib/index.js",
-  "files": [
-    "./lib/*.js"
-  ],
+  "files": ["./lib/*.js"],
   "dependencies": {},
   "devDependencies": {
     "tslib": "^2.6.2",
@@ -31,12 +31,8 @@
   "wireit": {
     "build": {
       "dependencies": [],
-      "files": [
-        "./src/**/*"
-      ],
-      "output": [
-        "./lib/**/*"
-      ],
+      "files": ["./src/**/*"],
+      "output": ["./lib/**/*"],
       "command": "tsc --build -f"
     },
     "clean": {

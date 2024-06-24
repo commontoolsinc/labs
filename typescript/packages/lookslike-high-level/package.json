@@ -7,6 +7,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "npx vite",
     "build": "wireit",
     "clean": "wireit"
   },
@@ -28,7 +29,8 @@
       "dependencies": [
         "../common-ui:build",
         "../common-frp:build",
-        "../lookslike-sagas:build"
+        "../lookslike-sagas:build",
+        "../llm-client:build"
       ],
       "command": "vite build"
     },
@@ -39,6 +41,7 @@
   "dependencies": {
     "@commontools/common-ui": "^0.0.1",
     "@commontools/common-frp": "^0.0.1",
-    "@commontools/lookslike-sagas": "^0.0.1"
+    "@commontools/lookslike-sagas": "^0.0.1",
+    "@commontools/llm-client": "^0.0.1"
   }
 }

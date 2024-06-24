@@ -1,6 +1,6 @@
 import { Anthropic } from "./deps.ts";
 
-export interface Thread {
+export interface ConversationThread {
   id: string;
   conversation: Anthropic.Messages.MessageParam[];
   system: string;
@@ -8,31 +8,33 @@ export interface Thread {
   pendingToolCalls: Anthropic.Messages.ToolUseBlockParam[] | null;
 }
 
-export interface ThreadManager {
+export interface ConversationThreadManager {
   create(
     system: string,
     initialMessage: string,
-    activeTools: Anthropic.Messages.Tool[]
-  ): Thread;
-  get(id: string): Thread | undefined;
+    activeTools: Anthropic.Messages.Tool[],
+  ): ConversationThread;
+  get(id: string): ConversationThread | undefined;
   update(id: string, newMessages: Anthropic.Messages.MessageParam[]): void;
   setPendingToolCalls(
     id: string,
-    toolCalls: Anthropic.Messages.ToolUseBlock[]
+    toolCalls: Anthropic.Messages.ToolUseBlock[],
   ): void;
   delete(id: string): void;
 }
 
-export class InMemoryThreadManager implements ThreadManager {
-  private threads: Map<string, Thread> = new Map();
+export class InMemoryConversationThreadManager
+  implements ConversationThreadManager
+{
+  private threads: Map<string, ConversationThread> = new Map();
 
   create(
     system: string,
     initialMessage: string,
-    activeTools: Anthropic.Messages.Tool[]
-  ): Thread {
+    activeTools: Anthropic.Messages.Tool[],
+  ): ConversationThread {
     const id = crypto.randomUUID();
-    const thread: Thread = {
+    const thread: ConversationThread = {
       id,
       conversation: [
         {
@@ -48,7 +50,7 @@ export class InMemoryThreadManager implements ThreadManager {
     return thread;
   }
 
-  get(id: string): Thread | undefined {
+  get(id: string): ConversationThread | undefined {
     return this.threads.get(id);
   }
 
@@ -63,7 +65,7 @@ export class InMemoryThreadManager implements ThreadManager {
 
   setPendingToolCalls(
     id: string,
-    toolCalls: Anthropic.Messages.ToolUseBlockParam[]
+    toolCalls: Anthropic.Messages.ToolUseBlockParam[],
   ): void {
     const thread = this.threads.get(id);
     if (thread) {
