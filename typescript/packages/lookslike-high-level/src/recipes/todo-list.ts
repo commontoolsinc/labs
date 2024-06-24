@@ -34,7 +34,7 @@ export const todoList = recipe("todo list", ({ title, items }) => {
           placeholder: "List title",
           "@common-input": binding("newTitle"),
         }),
-        vstack({}, repeat("items", include({ content: binding("itemUI") }))),
+        vstack({}, repeat("items", include({ content: binding("UI") }))),
         sendInput({
           name: "Add",
           placeholder: "New task",
@@ -62,7 +62,7 @@ export const todoTask = recipe("todo task", ({ title, done }) => {
   });
 
   return {
-    itemUI: state([
+    UI: state([
       vstack({}, [
         todo(
           {
