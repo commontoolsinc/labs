@@ -32,6 +32,9 @@ export class CommonMediaElement extends LitElement {
     .media > .media-content {
       align-self: center;
       grid-area: content;
+      display: flex;
+      flex-direction: column;
+      gap: var(--gap-sm);
     }
     `
   ];

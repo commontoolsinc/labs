@@ -1,5 +1,5 @@
 import { LitElement, html, css } from "lit";
-import { customElement } from "lit/decorators.js";
+import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 import { view } from "../hyperscript/render.js";
 
@@ -18,10 +18,13 @@ export class CommonListElement extends LitElement {
     `,
   ];
 
+  @property({ type: String }) gap: string = "md";
+  @property({ type: String }) pad: string = "md";
+
   override render() {
     return html`
       <common-scroll>
-        <common-vstack gap="md" pad="md">
+        <common-vstack gap="${this.gap}" pad="${this.pad}">
           <slot></slot>
         </common-vstack>
       </common-scroll>

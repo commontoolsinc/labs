@@ -38,19 +38,23 @@ export class CommonHscrollElement extends LitElement {
       display: flex;
       flex-direction: row;
       flex-wrap: nowrap;
-      gap: var(--gap)
+      gap: var(--pad-sm)
     }
 
     :host([gap="none"]) .scroll-body {
       gap: 0;
     }
 
+    :host([gap="sm"]) .scroll-body {
+      gap: var(--pad-sm);
+    }
+
     :host([gap="md"]) .scroll-body {
-      gap: var(--gap);
+      gap: var(--pad);
     }
 
     :host([pad="md"]) .scroll-body {
-      padding: var(--gap);
+      padding: var(--pad);
     }
     `
   ];
