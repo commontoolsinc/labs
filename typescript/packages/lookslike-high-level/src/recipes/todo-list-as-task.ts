@@ -1,8 +1,7 @@
-import { view, tags, render } from "@commontools/common-ui";
+import { tags, render } from "@commontools/common-ui";
 import { signal, Cancel } from "@commontools/common-frp";
 import { Gem, recipe, description, addSuggestion, NAME } from "../recipe.js";
 import { sagaLink } from "../components/saga-link.js";
-const { binding } = view;
 const { include, vstack, span } = tags;
 const { state, effect, computed } = signal;
 
@@ -64,19 +63,12 @@ export const todoListAsTask = recipe("todo list as task", ({ list, done }) => {
 
   const fullUI = computed([list], (list: Gem) => list["UI"]);
 
-  const UI = [
-    details({}, [
-      summary({}, [
-        vstack({}, [
-          sagaLink({ saga: binding("list") }),
-          span({}, binding("listSummary")),
-        ]),
-      ]),
-      include({ content: binding("fullUI") }),
+  const UI = details({}, [
+    summary({}, [
+      vstack({}, [sagaLink({ saga: list }), span({}, listSummary)]),
     ]),
-    { list, listSummary, fullUI },
-  ];
-
+    include({ content: fullUI }),
+  ]);
   return {
     UI,
     list,

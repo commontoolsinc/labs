@@ -26,15 +26,12 @@ export const home = recipe("home screen", ({ sagas, recipes }) => {
   );
 
   return {
-    UI: [
-      list({}, [
-        vstack({}, repeat("sagas", sagaLink({ saga: binding("saga") }))),
-        vstack(
-          {},
-          repeat("recipes", recipeLink({ recipe: binding("recipe") }))
-        ),
-      ]),
-      { sagas: sagasWithIDs, recipes: recipesWithIDs },
-    ],
+    UI: list({}, [
+      vstack({}, repeat(sagasWithIDs, sagaLink({ saga: binding("saga") }))),
+      vstack(
+        {},
+        repeat(recipesWithIDs, recipeLink({ recipe: binding("recipe") }))
+      ),
+    ]),
   };
 });
