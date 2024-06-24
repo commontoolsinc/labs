@@ -1,6 +1,5 @@
 import { view, tags } from "@commontools/common-ui";
 import { signal, stream } from "@commontools/common-frp";
-import { LLMClient } from "@commontools/llm-client";
 import { dataGems } from "../data.js";
 import {
   recipe,
@@ -12,6 +11,7 @@ import {
   type Suggestion,
 } from "../recipe.js";
 import { effect } from "@commontools/common-frp/signal";
+import { suggestionClient } from "../llm-client.js";
 const { include } = tags;
 const { state, computed, isSignal } = signal;
 const { subject } = stream;
@@ -89,13 +89,6 @@ type Result = {
   description: string;
   boundGems: { [key: string]: Gem };
 };
-
-const client = new LLMClient({
-  serverUrl: "http://localhost:8000",
-  system:
-    "You are an assistant that helps match user queries to relevant data gems based on their names and types.",
-  tools: [],
-});
 
 async function findSuggestion(
   dataGems: Gem[],
@@ -177,7 +170,7 @@ Respond with only JSON array of suggestions, e.g.
 notalk;justgo
 `;
 
-  const response = await client.handleConversation(prompt);
+  const response = await suggestionClient.handleConversation(prompt);
 
   let matchedIndices: LLMSuggestion[] = [];
   try {

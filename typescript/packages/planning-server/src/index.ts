@@ -33,17 +33,36 @@ const handler = async (request: Request): Promise<Response> => {
   }
 };
 
+const cache: Record<string, any> = {};
+
 async function handleCreateThread(
   system: string,
   message: string,
-  activeTools: Anthropic.Messages.Tool[]
+  activeTools: Anthropic.Messages.Tool[],
 ): Promise<Response> {
+  const cacheKey = `${system}:${message}`;
+
+  if (cache[cacheKey]) {
+    console.log(
+      "Cache hit!",
+      (cacheKey.slice(0, 20) + "..." + cacheKey.slice(-20)).replaceAll(
+        "\n",
+        "",
+      ),
+    );
+    return new Response(JSON.stringify(cache[cacheKey]), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const thread = threadManager.create(system, message, activeTools);
   const result = await processThread(thread);
 
   if (result.assistantResponse) {
     threadManager.update(thread.id, [result.assistantResponse]);
   }
+
+  cache[cacheKey] = result;
 
   return new Response(JSON.stringify(result), {
     headers: { "Content-Type": "application/json" },
@@ -53,7 +72,7 @@ async function handleCreateThread(
 async function handleAppendThread(
   threadId: string,
   message: string | null,
-  toolResponses: Anthropic.Messages.ToolResultBlockParam[] | null
+  toolResponses: Anthropic.Messages.ToolResultBlockParam[] | null,
 ): Promise<Response> {
   const thread = threadManager.get(threadId);
   if (!thread) {
@@ -102,7 +121,7 @@ async function processThread(thread: Thread): Promise<any> {
   const result = await ask(
     thread.conversation,
     thread.system,
-    thread.activeTools
+    thread.activeTools,
   );
   if (!result) {
     return { error: "No response from Anthropic" };
@@ -116,7 +135,7 @@ async function processThread(thread: Thread): Promise<any> {
 
   if (assistantResponse.content && Array.isArray(assistantResponse.content)) {
     const toolCalls = assistantResponse.content.filter(
-      (item) => item.type === "tool_use"
+      (item) => item.type === "tool_use",
     ) as Anthropic.Messages.ToolUseBlockParam[];
     if (toolCalls.length > 0) {
       return {
