@@ -5,9 +5,11 @@ import { customElement, property, state } from "lit/decorators.js";
 export class CommonImgElement extends LitElement {
   static override styles = css`
   :host {
+    border-radius: var(--radius);
     display: block;
-    width: 100%;
-    height: 100%;
+    width: 180px;
+    height: 120px;
+    overflow: hidden;
   }
 
   .img {

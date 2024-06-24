@@ -7,46 +7,92 @@ export class CommonMediaElement extends LitElement {
   static override styles = [
     baseStyles,
     css`
-    .media {
+    .media-has-sm {
+      --img-width: 40px;
+      --img-height: 40px;
+      display: grid;
+      grid-template-columns: var(--img-width) 1fr;
+      grid-template-areas: "image content";
+      gap: var(--gap);
+
+      & .media-img {
+        width: var(--img-width);
+        height: var(--img-height);
+      }
+
+      & .media-content {
+        align-self: center;
+      }
+    }
+
+    .media-has-md {
       --img-width: 80px;
       --img-height: 80px;
       display: grid;
       grid-template-columns: var(--img-width) 1fr;
       grid-template-areas: "image content";
       gap: var(--gap);
-    }
 
-    .media-has-sm {
-      --img-width: 40px;
-      --img-height: 40px;
+      & .media-img {
+        width: var(--img-width);
+        height: var(--img-height);
+      }
+
+      & .media-content {
+        align-self: center;
+      }
     }
 
     .media-has-lg {
       --img-width: 180px;
       --img-height: 120px;
+      display: grid;
+      grid-template-columns: var(--img-width) 1fr;
+      grid-template-areas: "image content";
+      gap: var(--gap);
+
+      & .media-img {
+        width: var(--img-width);
+        height: var(--img-height);
+      }
+
+      & .media-content {
+        align-self: center;
+      }
     }
 
-    .media > .media-img {
+    .media-has-hero {
+      display: grid;
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto;
+      grid-template-areas:
+        "image"
+        "content";
+      gap: var(--gap);
+
+      & .media-img {
+        width: auto;
+        aspect-ratio: 16/9;
+      }
+    }
+
+    .media > .media-media {
       grid-area: image;
       overflow: hidden;
     }
 
-    .media-img > common-img {
-      background-color: var(--secondary-background);
-      display: block;
-      height: var(--img-height);
-      width: var(--img-width);
-      border-radius: var(--radius);
-      overflow: hidden;
-      object-fit: cover;
-    }
-
     .media > .media-content {
-      align-self: center;
       grid-area: content;
       display: flex;
       flex-direction: column;
       gap: var(--pad-sm);
+    }
+
+    .media-img {
+      background-color: var(--secondary-background);
+      display: block;
+      height: var(--img-height);
+      width: var(--img-width);
     }
     `
   ];
@@ -56,12 +102,18 @@ export class CommonMediaElement extends LitElement {
 
   #renderClassNames() {
     const classNames = ['media'];
-    if (this.thumbsize === 'md' || this.thumbsize === '') {
-      classNames.push('media-has-md')
-    } else if (this.thumbsize === 'lg') {
-      classNames.push('media-has-lg')
-    } else if (this.thumbsize === 'sm') {
-      classNames.push('media-has-sm')
+    switch (this.thumbsize) {
+      case 'sm':
+        classNames.push('media-has-sm');
+        break;
+      case 'lg':
+        classNames.push('media-has-lg');
+        break;
+      case 'hero':
+        classNames.push('media-has-hero');
+        break;
+      default:
+        classNames.push('media-has-md');
     }
     return classNames.join(' ');
   }
@@ -69,8 +121,8 @@ export class CommonMediaElement extends LitElement {
   override render() {
     return html`
     <article class="${this.#renderClassNames()}">
-      <div class="media-img">
-        <common-img src="${this.src}" /></common-img>
+      <div class="media-media">
+        <common-img class="media-img" src="${this.src}" /></common-img>
       </div>
       <div class="media-content">
         <slot></slot>
