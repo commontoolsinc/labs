@@ -1,21 +1,49 @@
 import { ask } from "./anthropic.ts";
 import { Anthropic, serve } from "./deps.ts";
-import { InMemoryThreadManager, Thread } from "./thread.ts";
+import {
+  InMemoryConversationThreadManager,
+  ConversationThread,
+} from "./conversation.ts";
 
-const threadManager = new InMemoryThreadManager();
+const threadManager = new InMemoryConversationThreadManager();
+
+type CreateConversationThreadRequest = {
+  action: "create";
+  message: string;
+  system: string;
+  activeTools: Anthropic.Messages.Tool[];
+};
+
+type AppendToConversationThreadRequest = {
+  action: "append";
+  threadId: string;
+  message?: string;
+  toolResponses?: Anthropic.Messages.ToolUseBlock[];
+};
+
+type ConversationThreadRequest =
+  | CreateConversationThreadRequest
+  | AppendToConversationThreadRequest;
 
 const handler = async (request: Request): Promise<Response> => {
   if (request.method === "POST") {
     try {
-      const body = await request.json();
-      const { action, threadId, message, toolResponses, system, activeTools } =
-        body;
+      const body: ConversationThreadRequest = await request.json();
+      const { action } = body;
 
       switch (action) {
-        case "create":
-          return handleCreateThread(system, message, activeTools);
-        case "append":
-          return handleAppendThread(threadId, message, toolResponses);
+        case "create": {
+          const { message, system, activeTools } = body;
+          return handleCreateConversationThread(system, message, activeTools);
+        }
+        case "append": {
+          const { threadId, message, toolResponses } = body;
+          return handleAppendToConversationThread(
+            threadId,
+            message,
+            toolResponses,
+          );
+        }
         default:
           return new Response(JSON.stringify({ error: "Invalid action" }), {
             status: 400,
@@ -35,7 +63,7 @@ const handler = async (request: Request): Promise<Response> => {
 
 const cache: Record<string, any> = {};
 
-async function handleCreateThread(
+async function handleCreateConversationThread(
   system: string,
   message: string,
   activeTools: Anthropic.Messages.Tool[],
@@ -56,7 +84,7 @@ async function handleCreateThread(
   }
 
   const thread = threadManager.create(system, message, activeTools);
-  const result = await processThread(thread);
+  const result = await processConversationThread(thread);
 
   if (result.assistantResponse) {
     threadManager.update(thread.id, [result.assistantResponse]);
@@ -69,10 +97,10 @@ async function handleCreateThread(
   });
 }
 
-async function handleAppendThread(
+async function handleAppendToConversationThread(
   threadId: string,
-  message: string | null,
-  toolResponses: Anthropic.Messages.ToolResultBlockParam[] | null,
+  message?: string,
+  toolResponses?: Anthropic.Messages.ToolResultBlockParam[],
 ): Promise<Response> {
   const thread = threadManager.get(threadId);
   if (!thread) {
@@ -100,7 +128,7 @@ async function handleAppendThread(
     },
   ]);
 
-  const result = await processThread(thread);
+  const result = await processConversationThread(thread);
 
   // Update the thread with the assistant's response
   if (result.assistantResponse) {
@@ -115,7 +143,9 @@ async function handleAppendThread(
   });
 }
 
-async function processThread(thread: Thread): Promise<any> {
+async function processConversationThread(
+  thread: ConversationThread,
+): Promise<any> {
   console.log("Thread", thread);
 
   const result = await ask(
