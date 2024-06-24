@@ -11,7 +11,6 @@ import {
   isStream,
 } from "@commontools/common-frp/stream";
 import {
-  binding,
   isBinding,
   VNode,
   View,
@@ -87,14 +86,12 @@ const readEvent = (event: Event) => {
   }
 };
 
-const modifyPropsForSchemaValidation = (props: object) => {
-  return Object.fromEntries(
-    Object.entries(props).map(([key, value]) => [
-      key.split("#")[0],
-      isSignal(value) || isStream(value) ? binding("dummy") : value,
-    ])
+const modifyPropsForSchemaValidation = (props: object) =>
+  Object.fromEntries(
+    Object.entries(props).filter(
+      ([_, value]) => !isSignal(value) && !isStream(value) && !isBinding(value)
+    )
   );
-};
 
 /** Render a VNode tree, binding reactive data sources.  */
 const renderVNode = (vnode: VNode, context: RenderContext): Node => {
