@@ -50,9 +50,12 @@ const client = new LLMClient({
 
 ```ts
 
-const thread = await client.createThread("can you exaggerate this: I am having a _day_");
+const thread = await client.createThread("what is 2+2*3?");
 
-console.log(thread.conversation);
+console.log(thread.conversation[1]);
+// Tool called: calculator (2+2*3)
+// Tool result: 8
+// Assistant: The answer is 8
 ```
 
 ## Append to Thread
