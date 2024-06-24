@@ -54,7 +54,7 @@ export class CommonTodoElement extends LitElement {
 
       .todo-ctl {
         display: flex;
-        gap: var(--gap);
+        gap: var(--pad);
         align-items: center;
         height: var(--todo-height);
       }
@@ -62,7 +62,7 @@ export class CommonTodoElement extends LitElement {
       .todo-main {
         display: flex;
         flex-direction: column;
-        gap: var(--pad);
+        gap: var(--pad-sm);
         min-height: var(--todo-height);
       }
       
