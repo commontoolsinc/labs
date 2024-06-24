@@ -99,7 +99,7 @@ async function findSuggestion(
   // Use LLM to match query to data gems
   const matchedGems = await matchGemsWithLLM(dataGems, query);
 
-  // The rest of the function remains largely the same
+  // Filter to only compatible suggestions
   const suggestion = suggestions.find(
     (suggestion) =>
       Object.values(suggestion.dataGems).every((type) =>
@@ -170,7 +170,8 @@ Respond with only JSON array of suggestions, e.g.
 notalk;justgo
 `;
 
-  const response = await suggestionClient.handleConversation(prompt);
+  const thread = await suggestionClient.createThread(prompt);
+  const response = thread.conversation;
 
   let matchedIndices: LLMSuggestion[] = [];
   try {
@@ -192,86 +193,10 @@ notalk;justgo
     .filter((gem) => gem !== undefined);
 }
 
-export function grabJson(txt) {
-  return JSON.parse(txt.match(/```json\n([\s\S]+?)```/)[1]);
-}
-
-function findSuggestion_old(
-  dataGems: Gem[],
-  suggestions: Suggestion[],
-  query: string,
-  data: string[],
-): Result | undefined {
-  // Step 1: Find candidate data gems by doing a dumb keyword seach
-  const terms = queryToTerms(query);
-
-  const gems = dataGems.filter((gem) =>
-    queryToTerms(getNameFromGem(gem)).some((term) => terms.includes(term)),
-  );
-
-  // Step 2: Find suggestions that bridge matching gems to recipes:
-  //  - Binds to the found gem
-  //  - Context has all the bindings needed
-  //
-  // (TODO: It looks like this should be a property of recipes, all the ways it
-  // can be useful!)
-  const suggestion = suggestions.find(
-    (suggestion) =>
-      Object.values(suggestion.dataGems).every((type) =>
-        gems.find((gem) => gem[TYPE] === type),
-      ) &&
-      Object.values(suggestion.bindings).every((binding) =>
-        data.includes(binding),
-      ),
-  );
-
-  console.log("suggestion", suggestion, query, gems, suggestions);
-
-  if (suggestion) {
-    const bindings = Object.entries(suggestion.dataGems).map(([key, type]) => [
-      key,
-      gems.find((gem) => gem[TYPE] === type),
-    ]) as [[string, Gem]];
-
-    const nameBindings = Object.fromEntries(
-      bindings.map(([key, gem]) => [key, getNameFromGem(gem)]),
-    );
-    const gemBindings = Object.fromEntries(bindings);
-
-    const description = suggestion.description
-      .map((part, i) => (i % 2 === 0 ? part : nameBindings[part]))
-      .join("");
-
-    return { recipe: suggestion.recipe, description, boundGems: gemBindings };
-  } else {
-    return undefined;
-  }
+export function grabJson(txt: string) {
+  return JSON.parse(txt.match(/```json\n([\s\S]+?)```/)?.[1] ?? "{}");
 }
 
 function getNameFromGem(gem: Gem): string {
   return (isSignal(gem[NAME]) ? gem[NAME].get() : gem[NAME]) as string;
-}
-
-const keywords: { [key: string]: string[] } = {
-  groceries: ["grocery"],
-};
-
-function queryToTerms(query: string): string[] {
-  const parts: string[] = query
-    .toLowerCase()
-    .split(/ +/)
-    .map((word) => word.trim())
-    .filter((word) => word.length > 0);
-
-  const aliases = parts.flatMap((word) => keywords[word] ?? []);
-
-  const words = [...parts, ...aliases].flatMap((word, i) => {
-    const w = [word];
-    if (i < parts.length - 1) w.push(word + " " + parts[i + 1]);
-    if (i < parts.length - 2)
-      w.push(word + " " + parts[i + 1] + " " + parts[i + 2]);
-    return w;
-  });
-
-  return words;
 }

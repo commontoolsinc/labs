@@ -10,6 +10,69 @@ export interface ClientConfig {
   system?: string;
 }
 
+export class ConversationThread {
+  private pendingToolCalls: Anthropic.Messages.ToolUseBlockParam[] = [];
+
+  constructor(
+    private client: LLMClient,
+    public id: string,
+    public conversation: string[] = [],
+  ) {
+    this.client = client;
+    this.id = id;
+    this.conversation = conversation;
+  }
+
+  async sendMessage(message: string): Promise<string> {
+    let response: AppendThreadResponse;
+
+    if (this.pendingToolCalls) {
+      const toolResponses = await this.handleToolCalls(this.pendingToolCalls);
+      response = await this.client.continueThread(
+        this.id,
+        undefined,
+        toolResponses,
+      );
+    } else {
+      response = await this.client.continueThread(this.id, message);
+    }
+
+    this.conversation.push(`User: ${message}`);
+    let assistantResponse = "";
+
+    if (response.pendingToolCalls && response.pendingToolCalls.length > 0) {
+      this.pendingToolCalls = response.pendingToolCalls;
+      assistantResponse = (
+        response.assistantResponse?.content[0] as { text: string }
+      ).text;
+    } else {
+      assistantResponse = response.output || "";
+      this.pendingToolCalls = [];
+    }
+
+    this.conversation.push(`Assistant: ${assistantResponse}`);
+    return assistantResponse;
+  }
+
+  private async handleToolCalls(
+    toolCalls: Anthropic.Messages.ToolUseBlockParam[],
+  ): Promise<ToolResponse[]> {
+    return await Promise.all(
+      toolCalls.map(async (toolCall) => ({
+        type: "tool_result",
+        tool_use_id: toolCall.id,
+        content: [
+          { type: "text", text: await this.client.executeTool(toolCall) },
+        ],
+      })),
+    );
+  }
+
+  hasPendingToolCalls(): boolean {
+    return this.pendingToolCalls !== null;
+  }
+}
+
 export class LLMClient {
   private serverUrl: string;
   private tools: Tool[];
@@ -31,32 +94,49 @@ export class LLMClient {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(
+        `HTTP error! status: ${response.status}, body: ${errorText}`,
+      );
     }
 
     return await response.json();
   }
 
-  async createThread(message: string): Promise<CreateThreadResponse> {
+  async createThread(message: string): Promise<ConversationThread> {
     const request: CreateThreadRequest = {
       action: "create",
       system: this.system,
       message,
-      activeTools: this.tools.map(({ implementation, ...tool }) => ({
-        ...tool,
-      })),
+      activeTools: this.tools.map(({ implementation, ...tool }) => tool),
     };
 
-    return await this.sendRequest(request);
+    const response: CreateThreadResponse = await this.sendRequest(request);
+    const thread = new ConversationThread(this, response.threadId);
+
+    const initialAssistantResponse = (
+      response.assistantResponse.content[0] as { text: string }
+    ).text;
+    thread.conversation.push(`User: ${message}`);
+    thread.conversation.push(`Assistant: ${initialAssistantResponse}`);
+
+    if (response.pendingToolCalls && response.pendingToolCalls.length > 0) {
+      // Instead of handling tool calls here, we set them as pending in the Thread
+      (thread as any).pendingToolCalls = response.pendingToolCalls;
+    }
+
+    return thread;
   }
 
   async continueThread(
     threadId: string,
-    toolResponses: ToolResponse[],
+    message?: string,
+    toolResponses: ToolResponse[] = [],
   ): Promise<AppendThreadResponse> {
     const request: AppendThreadRequest = {
       action: "append",
       threadId,
+      message,
       toolResponses,
     };
 
@@ -67,45 +147,10 @@ export class LLMClient {
     toolCall: Anthropic.Messages.ToolUseBlockParam,
   ): Promise<string> {
     const tool = this.tools.find((t) => t.name === toolCall.name);
-    console.log("Tool call:", toolCall.name, toolCall.input);
-
     if (!tool) {
       throw new Error(`Tool not found: ${toolCall.name}`);
     }
-    const result = await tool.implementation(toolCall.input);
-    console.log("Tool result:", result);
-    return result;
-  }
-
-  async handleConversation(initialMessage: string): Promise<string[]> {
-    const conversation: string[] = [];
-    conversation.push(`User: ${initialMessage}`);
-
-    let thread: CreateThreadResponse | AppendThreadResponse =
-      await this.createThread(initialMessage);
-    conversation.push(
-      `Assistant: ${(thread.assistantResponse.content[0] as { text: string }).text}`,
-    );
-
-    while (thread.pendingToolCalls && thread.pendingToolCalls.length > 0) {
-      const toolResponses: ToolResponse[] = await Promise.all(
-        thread.pendingToolCalls.map(async (toolCall) => ({
-          type: "tool_result",
-          tool_use_id: toolCall.id,
-          content: [{ type: "text", text: await this.executeTool(toolCall) }],
-        })),
-      );
-
-      // console.info("Tool responses", toolResponses);
-      thread = await this.continueThread(thread.threadId, toolResponses);
-
-      if (thread.output) {
-        conversation.push(`Assistant: ${thread.output}`);
-        break;
-      }
-    }
-
-    return conversation;
+    return await tool.implementation(toolCall.input);
   }
 }
 
@@ -120,6 +165,7 @@ interface CreateThreadRequest {
 interface AppendThreadRequest {
   action: "append";
   threadId: string;
+  message?: string;
   toolResponses: ToolResponse[];
 }
 
