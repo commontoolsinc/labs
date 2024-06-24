@@ -8,10 +8,22 @@ export class CommonMediaElement extends LitElement {
     baseStyles,
     css`
     .media {
+      --img-width: 80px;
+      --img-height: 80px;
       display: grid;
-      grid-template-columns: 80px 1fr;
+      grid-template-columns: var(--img-width) 1fr;
       grid-template-areas: "image content";
       gap: var(--gap);
+    }
+
+    .media-has-sm {
+      --img-width: 40px;
+      --img-height: 40px;
+    }
+
+    .media-has-lg {
+      --img-width: 180px;
+      --img-height: 120px;
     }
 
     .media > .media-img {
@@ -22,9 +34,9 @@ export class CommonMediaElement extends LitElement {
     .media-img > common-img {
       background-color: var(--secondary-background);
       display: block;
-      height: 80px;
-      width: 80px;
-      border-radius: 4px;
+      height: var(--img-height);
+      width: var(--img-width);
+      border-radius: var(--radius);
       overflow: hidden;
       object-fit: cover;
     }
@@ -40,10 +52,23 @@ export class CommonMediaElement extends LitElement {
   ];
 
   @property({ type: String }) src = "";
+  @property({ type: String }) thumbsize = "md";
+
+  #renderClassNames() {
+    const classNames = ['media'];
+    if (this.thumbsize === 'md' || this.thumbsize === '') {
+      classNames.push('media-has-md')
+    } else if (this.thumbsize === 'lg') {
+      classNames.push('media-has-lg')
+    } else if (this.thumbsize === 'sm') {
+      classNames.push('media-has-sm')
+    }
+    return classNames.join(' ');
+  }
 
   override render() {
     return html`
-    <article class="media">
+    <article class="${this.#renderClassNames()}">
       <div class="media-img">
         <common-img src="${this.src}" /></common-img>
       </div>
