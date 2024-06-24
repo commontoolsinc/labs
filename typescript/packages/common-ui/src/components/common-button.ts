@@ -22,6 +22,7 @@ export class CommonButtonElement extends LitElement {
       box-sizing: border-box;
       border-radius: calc(var(--button-height) / 2);
       color: var(--button-color);
+      cursor: pointer;
       display: flex;
       font-size: var(--body-size);
       height: var(--button-height);

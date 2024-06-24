@@ -14,7 +14,8 @@ export class CommonButtonElement extends LitElement {
     baseStyles,
     css`
     :host {
-      --pill-background: #000;
+      --pill-background: transparent;
+      --pill-border: var(--button-background);
       --pill-color: #fff;
       --pill-height: 40px;
       --pill-width: min-content;
@@ -25,11 +26,11 @@ export class CommonButtonElement extends LitElement {
     .pill {
       align-items: center;
       appearance: none;
-      background-color: var(--button-background);
-      border: 0;
+      background-color: var(--pill-background);
+      border: 1px solid var(--pill-border);
       box-sizing: border-box;
-      border-radius: var(--radius);
-      color: var(--button-color);
+      border-radius: calc(var(--pill-height) / 2);
+      cursor: pointer;
       display: flex;
       font-size: var(--body-size);
       height: var(--button-height);
