@@ -1,3 +1,4 @@
+import { isSignal, Signal } from "@commontools/common-frp/signal";
 import * as Schema from "../shared/schema.js";
 import {
   AnyJSONObjectSchema,
@@ -28,7 +29,7 @@ export const binding = (name: string): Binding => ({
 export type RepeatBinding = {
   "@type": "repeat";
   name: string;
-  signal?: object; // Should be signal, but don't want to import it here
+  signal?: Signal<any>;
   template: VNode;
 };
 
@@ -44,13 +45,13 @@ export const isRepeatBinding = (value: any): value is RepeatBinding => {
 
 /** Create a template binding */
 export const repeat = (
-  name: string | object,
+  name: string | Signal<any>,
   template: VNode
 ): RepeatBinding => ({
   "@type": "repeat",
   name: typeof name === "string" ? name : "signal",
   template,
-  ...(typeof name === "object" ? { signal: name } : {}),
+  ...(isSignal(name) ? { signal: name } : {}),
 });
 
 export type Value = string | number | boolean | null | object;
