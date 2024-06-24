@@ -34,7 +34,7 @@ export class CommonMediaElement extends LitElement {
       grid-area: content;
       display: flex;
       flex-direction: column;
-      gap: var(--gap-sm);
+      gap: var(--pad-sm);
     }
     `
   ];
