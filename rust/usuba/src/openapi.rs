@@ -14,7 +14,8 @@ use crate::{
         crate::routes::build_module,
         crate::routes::retrieve_module,
         crate::routes::bundle_javascript,
-        crate::routes::eval_recipe
+        crate::routes::eval_recipe,
+        crate::routes::verify
     ),
     components(
         schemas(BuildModuleResponse),

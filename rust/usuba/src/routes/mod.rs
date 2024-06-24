@@ -9,3 +9,6 @@ pub use ui::*;
 
 mod recipe;
 pub use recipe::*;
+
+mod verify;
+pub use verify::*;

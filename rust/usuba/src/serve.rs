@@ -20,7 +20,7 @@ use crate::{
     openapi::OpenApiDocs,
     routes::{
         build_module, bundle_javascript, eval_recipe, retrieve_module, ui_file, ui_index,
-        upstream_index,
+        upstream_index, verify,
     },
     PersistedHashStorage,
 };
@@ -41,7 +41,7 @@ pub async fn serve(listener: TcpListener, upstream: Option<Uri>) -> Result<(), U
         .build_http();
 
     let cors = CorsLayer::new()
-        .allow_methods([Method::GET, Method::POST])
+        .allow_methods([Method::HEAD, Method::GET, Method::POST])
         .allow_origin(Any);
 
     let app = Router::new()
@@ -50,6 +50,7 @@ pub async fn serve(listener: TcpListener, upstream: Option<Uri>) -> Result<(), U
         .route("/api/v0/module", post(build_module))
         .route("/api/v0/module/:id", get(retrieve_module))
         .route("/api/v0/recipe/eval", post(eval_recipe))
+        .route("/api/v0/verify", get(verify))
         .route("/", get(ui_index))
         .route("/*file", get(ui_file))
         .with_state(UsubaState {
