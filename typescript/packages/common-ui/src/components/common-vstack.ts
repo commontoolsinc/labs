@@ -17,10 +17,12 @@ export class CommonVstackElement extends LitElement {
     .stack {
       display: flex;
       flex-direction: column;
+      gap: var(--pad);
+
     }
 
-    :host([gap="md"]) .stack {
-      gap: var(--pad);
+    :host([gap="none"]) .stack {
+      gap: 0;
     }
 
     :host([gap="sm"]) .stack {
