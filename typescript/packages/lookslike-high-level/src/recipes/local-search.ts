@@ -60,7 +60,7 @@ export const localSearch = recipe("local search", ({ query, location }) => {
           )
         ),
       ]),
-      { query, location, results },
+      {},
     ],
     query,
     location,
