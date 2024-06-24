@@ -64,7 +64,11 @@ export type Props = {
 
 export type Tag = string;
 
-export type Children = RepeatBinding | Binding | Array<VNode | string>;
+export type Children =
+  | RepeatBinding
+  | Binding
+  | Signal<any>
+  | Array<VNode | string>;
 
 export type VNode = {
   tag: Tag;

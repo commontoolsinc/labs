@@ -1,4 +1,4 @@
-import { view, tags } from "@commontools/common-ui";
+import { tags } from "@commontools/common-ui";
 import { signal, stream } from "@commontools/common-frp";
 import { dataGems } from "../data.js";
 import {
@@ -13,7 +13,6 @@ import {
 const { include } = tags;
 const { state, computed, isSignal } = signal;
 const { subject } = stream;
-const { binding } = view;
 
 /**
  * Strategy:
@@ -52,20 +51,14 @@ export const annotation = recipe("annotation", ({ "?": query, ...data }) => {
           ...data,
           ...acceptedSuggestion.boundGems,
         });
-        return [
-          include({ content: binding("acceptedUI") }),
-          { acceptedUI: accepted.UI },
-        ];
+        return include({ content: accepted.UI });
       } else if (suggestion) {
-        return [
-          tags.suggestions({
-            suggestions: [{ id: 1, title: suggestion.description }],
-            "@select-suggestion": binding("acceptSuggestion"),
-          }),
-          { acceptSuggestion },
-        ];
+        return tags.suggestions({
+          suggestions: [{ id: 1, title: suggestion.description }],
+          "@select-suggestion": acceptSuggestion,
+        });
       } else {
-        return [undefined, {}];
+        return undefined;
       }
     }
   );

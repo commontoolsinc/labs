@@ -15,6 +15,7 @@ import {
   VNode,
   View,
   view as createView,
+  Children,
   isRepeatBinding,
 } from "./view.js";
 import { JSONSchemaRecord } from "./schema-helpers.js";
@@ -166,7 +167,11 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
     const signal = vnode.children;
     renderText(element, signal);
   } else {
-    renderStaticChildren(element, vnode.children, context);
+    renderStaticChildren(
+      element,
+      vnode.children as Exclude<Signal<any>, Children>,
+      context
+    );
   }
 
   return element;
