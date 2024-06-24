@@ -21,7 +21,8 @@ export class CommonCardElement extends LitElement {
     }
 
     .card {
-      background-color: var(--card-background);
+      background-color: var(--background);
+      border: 1px solid #ddd;
       color: var(--card-color);
       border-radius: var(--radius);
       padding: var(--pad);
