@@ -11,6 +11,11 @@ export class CommonHgroup extends LitElement {
       display: block;
     }
 
+    .hgroup {
+      display: flex;
+      flex-direction: column;
+    }
+
     .hgroup-heading {
       font-weight: bold;
       font-size: var(--title-size);
@@ -27,22 +32,11 @@ export class CommonHgroup extends LitElement {
     `
   ];
 
-  @property({ type: String }) heading: string = '';
-  @property({ type: String }) subheading: string = '';
-  
-  #renderSubheading() {
-    if (this.subheading === '') {
-      return '';
-    } else {
-      return html`<p class="hgroup-subheading">${this.subheading}</p>`
-    }
-  }
-
   override render() {
     return html`
     <hgroup class="hgroup">
-      <h1 class="hgroup-heading">${this.heading}</h1>
-      ${this.#renderSubheading()}
+      <div class="hgroup-heading" part="heading"><slot></slot></div>
+      <div class="hgroup-subheading" part="subheading"><slot name="subheading"></slot></div>
     </hgroup>
     `;
   }

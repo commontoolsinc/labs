@@ -4,7 +4,7 @@ import { view } from '../hyperscript/render.js';
 import { baseStyles } from './style.js';
 import { eventProps } from '../hyperscript/schema-helpers.js';
 
-export const pill = view('common-card', {
+export const cardContainer = view('common-card-container', {
   background: { type: 'string' },
   ...eventProps(),
 });
@@ -16,25 +16,18 @@ export class CommonCardElement extends LitElement {
     css`
     :host {
       display: block;
-      --card-background: var(--secondary-background);
-      --card-color: var(--color);
     }
 
     .card {
-      background-color: var(--background);
       border: 1px solid #ddd;
-      color: var(--card-color);
       border-radius: var(--radius);
-      padding: var(--pad);
     }
     `
   ];
 
-  @property({ type: String }) background: string = 'var(--secondary-background)';
-
   override render() {
     return html`
-    <article class="card" style="--card-background: ${this.background};">
+    <article class="card">
       <slot></slot>
     </article>
     `;
