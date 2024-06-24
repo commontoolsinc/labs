@@ -13,12 +13,20 @@ export type Task = {
 };
 
 class Scheduler {
-  #transaction = new Set<Task>();
+  #writes = new Set<Task>();
+  #reads = new Set<Task>();
   #isRunning = false;
  
-  enqueue(propagators: Iterable<Task>) {
-    for (const propagator of propagators) {
-      this.#transaction.add(propagator);
+  withWrites(...tasks: Array<Task>) {
+    for (const task of tasks) {
+      this.#writes.add(task);
+    }
+    this.#wake();
+  }
+
+  withReads(...tasks: Array<Task>) {
+    for (const task of tasks) {
+      this.#writes.add(task);
     }
     this.#wake();
   }
@@ -26,9 +34,18 @@ class Scheduler {
   #wake() {
     if (!this.#isRunning) {
       this.#isRunning = true;
-      const current = this.#transaction;
-      this.#transaction = new Set();
-      for (const task of current) {
+      const writes = this.#writes;
+      this.#writes = new Set();
+      for (const task of writes) {
+        try {
+          task.poll();
+        } catch (error) {
+          console.error(error);
+        }
+      }
+      const reads = this.#writes;
+      this.#reads = new Set();
+      for (const task of reads) {
         try {
           task.poll();
         } catch (error) {
@@ -115,6 +132,126 @@ let _cid = 0;
  */
 export const cid = () => `cid${_cid++}`;
 
+export class Cell<T> implements AnyCell<T> {
+  cid = cid();
+  #neighbors: Set<Task> = new Set();
+  #isDirty: boolean;
+  #content: T
+  #source: () => T;
+
+  constructor(initial: () => T) {
+    this.#source = initial
+    this.#content = initial();
+    this.#isDirty = false;
+    debug(`[cell#${this.cid}]`, 'created', this.#content);
+  }
+
+  get() {
+    if (!this.#isDirty) {
+      return this.#content;
+    } else {
+      this.#isDirty = false;
+      this.#content = merge(this.#content, this.#source());
+      return this.#content;
+    }
+  }
+
+  send(next: () => T) {
+    debug(`[cell#${this.cid}]`, 'send', next);
+    if (this.#source !== next) {
+      this.#source = next;
+      debug(`[cell#${this.cid}]`, 'updated', this.#source);
+      scheduler.withWrites(...this.#neighbors);
+    }
+  }
+
+  connect(task: Task) {
+    this.#neighbors.add(task);
+    scheduler.withWrites(task);
+    debug(`[cell#${this.cid}]`, 'add neighbor');
+    const cancel = () => {
+      debug(`[cell#${this.cid}]`, 'cancel');
+      this.#neighbors.delete(task);
+    }
+    return {cancel};
+  }
+}
+
+export const cell = <T>(initial: () => T) => new Cell(initial);
+
+/** A read-only view over a cell */
+export class CellView<T> implements AnyCell<T> {
+  cid = cid();
+  #cell: Cell<T>;
+
+  constructor(cell: Cell<T>) {
+    this.#cell = cell;
+  }
+
+  get() {
+    return this.#cell.get();
+  }
+
+  connect(propagator: Task) {
+    return this.#cell.connect(propagator);
+  }
+}
+
+export const cellView = <T>(cell: Cell<T>) => new CellView(cell);
+
+export const constant = <T>(
+  value: T
+): CellView<T> => cellView(cell(() => value));
+
+export const get = <T>(
+  cell: AnyCell<T>
+): T => cell.get();
+
+export const task = (poll: () => void) => ({poll});
+
+export type AnyPropagator = Cancellable & {
+  cid: string;
+}
+
+const lift = (
+  fn: (...args: Array<any>) => any,
+) => (
+  ...cells: Array<AnyCell<any>>
+): AnyPropagator => {
+  const output = cells.pop();
+  if (!(output instanceof Cell)) {
+    throw new TypeError("Last argument must be a writeable cell");
+  }
+
+  const lifted = task(() => {
+    output.send(() => fn(...cells.map(get)));
+  });
+
+  scheduler.withWrites(lifted);
+
+  const {cancel} = connectAll(cells, lifted);
+
+  return {
+    cid: cid(),
+    cancel
+  };
+}
+
+export const add = lift((a: number, b: number) => a + b); 
+export const sub = lift((a: number, b: number) => a - b);
+export const mul = lift((a: number, b: number) => a * b);
+export const div = lift((a: number, b: number) => a / b);
+
+/** Call a callback whenever cell contents changes */
+export const sink = <T>(
+  cell: AnyCell<T>,
+  callback: (value: T) => void
+) => {
+  return cell.connect(task(() => {
+    scheduler.withReads(task(() => callback(cell.get())));
+  }));
+}
+
 const noOp = () => {};
 
 const batcher = (
@@ -139,121 +276,6 @@ const batcher = (
       schedule(perform);
     }
   }
-}
-
-const taskBatcher = () => batcher(queueMicrotask);
-
-export class Cell<T> implements AnyCell<T> {
-  cid = cid();
-  #batch = taskBatcher();
-  #neighbors: Set<Task> = new Set();
-  #content: T;
-
-  constructor(initial: T) {
-    this.#content = initial
-    debug(`[cell#${this.cid}]`, 'created', this.#content);
-  }
-
-  get() {
-    return this.#content;
-  }
-
-  send(next: T) {
-    debug(`[cell#${this.cid}]`, 'send', next);
-    this.#batch(() => {
-      const merged = merge(this.#content, next);
-      if (this.#content !== merged) {
-        this.#content = merged;
-        debug(`[cell#${this.cid}]`, 'updated', this.#content);
-        scheduler.enqueue(this.#neighbors);
-      }
-    })
-  }
-
-  connect(task: Task) {
-    this.#neighbors.add(task);
-    scheduler.enqueue([task]);
-    debug(`[cell#${this.cid}]`, 'add neighbor');
-    const cancel = () => {
-      debug(`[cell#${this.cid}]`, 'cancel');
-      this.#neighbors.delete(task);
-    }
-    return {cancel};
-  }
-}
-
-export const cell = <T>(initial: T) => new Cell(initial);
-
-/** A read-only view over a cell */
-export class CellView<T> implements AnyCell<T> {
-  cid = cid();
-  #cell: Cell<T>;
-
-  constructor(cell: Cell<T>) {
-    this.#cell = cell;
-  }
-
-  get() {
-    return this.#cell.get();
-  }
-
-  connect(propagator: Task) {
-    return this.#cell.connect(propagator);
-  }
-}
-
-export const cellView = <T>(cell: Cell<T>) => new CellView(cell);
-
-export const constant = <T>(value: T): CellView<T> => cellView(cell(value));
-
-export const getContent = <T>(
-  cell: AnyCell<T>
-): T => cell.get();
-
-export const task = (poll: () => void) => ({poll});
-
-export type AnyPropagator = Cancellable & {
-  cid: string;
-}
-
-const lift = (
-  fn: (...args: Array<any>) => any,
-) => (
-  ...cells: Array<AnyCell<any>>
-): AnyPropagator => {
-  const output = cells.pop();
-  if (!(output instanceof Cell)) {
-    throw new TypeError("Last argument must be a writeable cell");
-  }
-
-  const lifted = task(() => {
-    const result = fn(...cells.map(getContent))
-    output.send(result);
-  });
-
-  scheduler.enqueue([lifted]);
-
-  const {cancel} = connectAll(cells, lifted);
-
-  return {
-    cid: cid(),
-    cancel
-  };
-}
-
-export const add = lift((a: number, b: number) => a + b); 
-export const sub = lift((a: number, b: number) => a - b);
-export const mul = lift((a: number, b: number) => a * b);
-export const div = lift((a: number, b: number) => a / b);
-
-/** Call a callback whenever cell contents changes */
-export const sink = <T>(
-  cell: AnyCell<T>,
-  callback: (value: T) => void
-) => {
-  return cell.connect(task(() => {
-    callback(cell.get());
-  }));
 }
 
 const frameBatcher = () => batcher(requestAnimationFrame);
