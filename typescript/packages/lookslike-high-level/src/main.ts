@@ -6,7 +6,7 @@ import { home } from "./recipes/home.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   const windowManager = document.getElementById(
-    "window-manager"
+    "window-manager",
   )! as CommonWindowManager;
   windowManager.openSaga(home({ sagas: dataGems, recipes }));
 });
