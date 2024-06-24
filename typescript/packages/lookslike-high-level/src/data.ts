@@ -3,7 +3,7 @@ import { signal } from "@commontools/common-frp";
 import { Gem } from "./recipe.js";
 const { state } = signal;
 
-import { todoList, todoTask } from "./recipes/todo-list.js";
+import { todoList, makeTodoItem } from "./recipes/todo-list.js";
 import { localSearch } from "./recipes/local-search.js";
 
 import "./recipes/todo-list-as-task.js"; // Necessary, so that suggestions are indexed.
@@ -18,20 +18,12 @@ addGems([
   todoList({
     title: "My TODOs",
     items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) =>
-      todoTask({
-        title: item,
-        done: false,
-      })
+      makeTodoItem(item)
     ),
   }),
   todoList({
     title: "My grocery shopping list",
-    items: ["milk", "eggs", "bread"].map((item) =>
-      todoTask({
-        title: item,
-        done: false,
-      })
-    ),
+    items: ["milk", "eggs", "bread"].map((item) => makeTodoItem(item)),
   }),
 ]);
 

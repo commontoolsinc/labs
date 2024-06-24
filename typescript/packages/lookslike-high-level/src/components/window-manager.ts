@@ -74,9 +74,7 @@ export class CommonWindowManager extends LitElement {
             <button class="close-button" @click="${this.onClose}">×</button>
             <common-screen-element>
               <common-system-layout>
-                ${render.render(include({ content: binding("UI") }), {
-                  UI: saga.UI,
-                })}
+                ${render.render(include({ content: saga.UI }))}
                   <common-unibox slot="search" value="" placeholder="" label=">">
               </common-system-layout>
             </common-screen-element>
