@@ -1,7 +1,5 @@
 console.log('Hello, SW');
 
-const VERIFIER_URL = "http://127.0.0.1:30125/api/v0/verify";
-
 async function updateIcon(verified: boolean, tabId: number) {
   let icon = verified ?
     '/icon-verified-128.png' :
@@ -13,27 +11,23 @@ async function updateIcon(verified: boolean, tabId: number) {
   });
 }
 
-async function verify(hostname: string): Promise<boolean> {
-  console.log(`Verifying origin: ${hostname}`);
-  let res = await fetch(VERIFIER_URL, {
+async function verify(origin: string): Promise<boolean> {
+  console.log(`Verifying origin: ${origin}`);
+  let res = await fetch(`${origin}/api/v0/verify`, {
     mode: 'cors',
     cache: 'no-cache',
-    headers: {
-      'Accept': 'application/json',
-      'Content-Type': 'application/json'
-    },
-    method: 'POST',
-    body: JSON.stringify({
-      origin: hostname,
-    }),
+    method: 'HEAD',
   });
 
+  return !!res.ok;
+  /*
   if (res.ok) {
     let json = await res.json();
     console.log(`JSON from verification service: ${JSON.stringify(json)}`);
     return json.success && json.success === true;
   }
   return false;
+  */
 }
 
 chrome.tabs.onActivated.addListener(async (info) => {
@@ -46,8 +40,12 @@ chrome.tabs.onActivated.addListener(async (info) => {
   if (!url?.startsWith('chrome') &&
     url != undefined &&
     url.length > 0) {
-    let hostname = new URL(url).hostname;
-    verified = await verify(hostname);
+    let origin = new URL(url).origin;
+    try {
+      verified = await verify(origin);
+    } catch (e) {
+      verified = false;
+    }
   }
 
   console.log(`Updating icon -- verified status: ${verified}`);
