@@ -65,6 +65,7 @@ const listen = (
 
 /** Read an event, returning a safe description object */
 const readEvent = (event: Event) => {
+  event.stopPropagation();
   switch (event.type) {
     case "click":
       return {
