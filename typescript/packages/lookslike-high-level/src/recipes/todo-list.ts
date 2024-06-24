@@ -2,10 +2,22 @@ import { view, tags } from "@commontools/common-ui";
 import { signal, stream } from "@commontools/common-frp";
 import { recipe, NAME } from "../recipe.js";
 import { annotation } from "../components/annotation.js";
-const { binding, repeat } = view;
-const { vstack, include, sendInput, todo, commonInput } = tags;
+const { repeat } = view;
+const { vstack, sendInput, todo, commonInput } = tags;
 const { state, computed } = signal;
 const { subject } = stream;
+
+export interface TodoItem {
+  title: signal.Signal<string>;
+  done: signal.Signal<boolean>;
+}
+
+export function makeTodoItem(title: string, done: boolean = false): TodoItem {
+  return {
+    title: typeof title === "string" ? state(title) : title,
+    done: typeof done === "boolean" ? state(done) : done,
+  };
+}
 
 export const todoList = recipe("todo list", ({ title, items }) => {
   const newTasks = subject<{ detail: { message: string } }>();
@@ -13,7 +25,7 @@ export const todoList = recipe("todo list", ({ title, items }) => {
     send: (event) => {
       const task = event.detail?.message?.trim();
       if (!task) return;
-      items.send([...items.get(), todoTask({ title: task, done: false })]);
+      items.send([...items.get(), makeTodoItem(task)]);
     },
   });
 
@@ -24,7 +36,27 @@ export const todoList = recipe("todo list", ({ title, items }) => {
         placeholder: "List title",
         "@common-input#value": title,
       }),
-      vstack({}, repeat(items, include({ content: binding("UI") }))),
+      vstack(
+        {},
+        repeat(items, (item: TodoItem) =>
+          vstack({}, [
+            todo(
+              {
+                checked: item.done,
+                value: item.title,
+                "@todo-checked#checked": item.done,
+                "@todo-input#value": item.title,
+              },
+              [
+                annotation({
+                  query: item.title,
+                  data: { items, done: item.done, title: item.title },
+                }),
+              ]
+            ),
+          ])
+        )
+      ),
       sendInput({
         name: "Add",
         placeholder: "New task",
@@ -34,41 +66,5 @@ export const todoList = recipe("todo list", ({ title, items }) => {
     title,
     items,
     [NAME]: computed([title], (title) => title || "untitled"),
-  };
-});
-
-export const todoTask = recipe("todo task", ({ title, done }) => {
-  const update = subject<any>();
-
-  update.sink({
-    send: (event) => {
-      done.send(!!event.detail?.checked);
-      const newTitle = event.detail?.value?.trim();
-      if (newTitle === undefined) return;
-      title.send(newTitle);
-    },
-  });
-
-  return {
-    UI: state(
-      vstack({}, [
-        todo(
-          {
-            checked: done,
-            value: title,
-            "@todo-checked#checked": done,
-            "@todo-input#value": title,
-          },
-          [
-            annotation({
-              query: title,
-              data: { done, title },
-            }),
-          ]
-        ),
-      ])
-    ),
-    done,
-    title,
   };
 });
