@@ -19,10 +19,6 @@ export class CommonVstackElement extends LitElement {
       flex-direction: column;
     }
 
-    :host([pad="md"]) .stack {
-      padding: var(--pad);
-    }
-
     :host([gap="md"]) .stack {
       gap: var(--pad);
     }
