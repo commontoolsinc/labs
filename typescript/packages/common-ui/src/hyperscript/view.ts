@@ -1,37 +1,36 @@
-import * as Schema from '../shared/schema.js';
+import * as Schema from "../shared/schema.js";
 import {
   AnyJSONObjectSchema,
   JSONSchemaRecord,
-  bindable
-} from './schema-helpers.js';
-import {deepFreeze} from '../shared/deep-freeze.js';
+  bindable,
+} from "./schema-helpers.js";
+import { deepFreeze } from "../shared/deep-freeze.js";
 
 export type Binding = {
   "@type": "binding";
   name: string;
-}
+};
 
 /** Is value a binding to a reactive value? */
 export const isBinding = (value: any): value is Binding => {
   return (
-    value &&
-    value["@type"] === "binding" &&
-    typeof value.name === "string"
+    value && value["@type"] === "binding" && typeof value.name === "string"
   );
-}
+};
 
 /** Create a template binding */
 export const binding = (name: string): Binding => ({
   "@type": "binding",
-  name
+  name,
 });
 
 /** A repeat binding repeats items in a dynamic list using a template */
 export type RepeatBinding = {
   "@type": "repeat";
   name: string;
+  signal?: object; // Should be signal, but don't want to import it here
   template: VNode;
-}
+};
 
 /** Is value a binding to a reactive value? */
 export const isRepeatBinding = (value: any): value is RepeatBinding => {
@@ -41,16 +40,17 @@ export const isRepeatBinding = (value: any): value is RepeatBinding => {
     typeof value.name === "string" &&
     isVNode(value.template)
   );
-}
+};
 
 /** Create a template binding */
 export const repeat = (
-  name: string,
+  name: string | object,
   template: VNode
 ): RepeatBinding => ({
   "@type": "repeat",
-  name,
-  template
+  name: typeof name === "string" ? name : "signal",
+  template,
+  ...(typeof name === "object" ? { signal: name } : {}),
 });
 
 export type Value = string | number | boolean | null | object;
@@ -59,7 +59,7 @@ export type ReactiveValue = Binding | Value;
 
 export type Props = {
   [key: string]: ReactiveValue;
-}
+};
 
 export type Tag = string;
 
@@ -69,7 +69,7 @@ export type VNode = {
   tag: Tag;
   props: Props;
   children: Children;
-}
+};
 
 // NOTE: don't freeze this object, since the validator will want to mutate it.
 export const VNodeSchema = {
@@ -89,32 +89,25 @@ export const VNodeSchema = {
           { type: "null" },
           { type: "object" },
           { type: "array" },
-          { type: "signal" }
-        ]
-      }
+          { type: "signal" },
+        ],
+      },
     },
     children: {
       type: "array",
       items: {
-        oneOf: [
-          { type: "string" },
-          { $ref: "#" }
-        ]
-      }
-    }
+        oneOf: [{ type: "string" }, { $ref: "#" }],
+      },
+    },
   },
-  required: ["tag", "props", "children"]
-}
+  required: ["tag", "props", "children"],
+};
 
 /** Internal helper for creating VNodes */
-const vnode = (
-  tag: string,
-  props: Props = {},
-  children: Children
-): VNode  => ({
+const vnode = (tag: string, props: Props = {}, children: Children): VNode => ({
   tag,
   props,
-  children
+  children,
 });
 
 /** Is object a VNode? */
@@ -125,23 +118,20 @@ export const isVNode = (value: any): value is VNode => {
     typeof value.props === "object" &&
     value.children != null
   );
-}
+};
 
 export type Factory = {
-  (): VNode
+  (): VNode;
 
-  (props: Props): VNode
+  (props: Props): VNode;
 
-  (
-    props: Props,
-    children: Children
-  ): VNode
+  (props: Props, children: Children): VNode;
 };
 
 export type PropsDescription = {
   schema: AnyJSONObjectSchema;
   validate: (data: any) => boolean;
-}
+};
 
 export type View = Factory & {
   tag: Tag;
@@ -164,16 +154,16 @@ export const view = (
     type: "object",
     properties: Object.fromEntries(
       Object.entries(propertySchema).map(([key, value]) => {
-        return [key, bindable(value)]
+        return [key, bindable(value)];
       })
-    )
+    ),
   };
 
   // Compile props validator for fast validation at runtime.
   const validate = Schema.compile({
     ...schema,
     // Allow additional properties when validating props.
-    additionalProperties: true
+    additionalProperties: true,
   });
 
   /**
@@ -183,13 +173,11 @@ export const view = (
    * @param children - child nodes
    * @returns VNode
    */
-  const create = (
-    props: Props = {},
-    children: Children = []
-  ) => vnode(tag, props, children);
+  const create = (props: Props = {}, children: Children = []) =>
+    vnode(tag, props, children);
 
   create.tag = tag;
-  create.props = {validate, schema};
+  create.props = { validate, schema };
 
   return deepFreeze(create);
 };

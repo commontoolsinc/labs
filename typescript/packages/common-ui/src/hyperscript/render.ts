@@ -3,9 +3,15 @@ import {
   Signal,
   WriteableSignal,
   effect,
+  isSignal,
 } from "@commontools/common-frp/signal";
-import { Stream, WriteableStream } from "@commontools/common-frp/stream";
 import {
+  Stream,
+  WriteableStream,
+  isStream,
+} from "@commontools/common-frp/stream";
+import {
+  binding,
   isBinding,
   VNode,
   View,
@@ -81,6 +87,15 @@ const readEvent = (event: Event) => {
   }
 };
 
+const modifyPropsForSchemaValidation = (props: object) => {
+  return Object.fromEntries(
+    Object.entries(props).map(([key, value]) => [
+      key.split("#")[0],
+      isSignal(value) || isStream(value) ? binding("dummy") : value,
+    ])
+  );
+};
+
 /** Render a VNode tree, binding reactive data sources.  */
 const renderVNode = (vnode: VNode, context: RenderContext): Node => {
   // Make sure we have a view for this tag. If we don't it is not whitelisted.
@@ -91,10 +106,10 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
   }
 
   // Validate props against the view's schema.
-  if (!view.props.validate(vnode.props)) {
+  if (!view.props.validate(modifyPropsForSchemaValidation(vnode.props))) {
     throw new TypeError(`Invalid props for tag: ${vnode.tag}.
-      Props: ${JSON.stringify(vnode.props)}
-      Schema: ${JSON.stringify(view.props.schema)}`);
+      Props: ${JSON.stringify(vnode.props)}, ${JSON.stringify(modifyPropsForSchemaValidation(vnode.props), undefined, 2)}
+      Schema: ${JSON.stringify(view.props.schema, undefined, 2)}`);
   }
 
   // Create the element
@@ -103,29 +118,34 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
   // Bind each prop to a reactive value (if any) and collect cancels
   const cancels: Array<Cancel> = [];
 
-  for (const [key, value] of Object.entries(vnode.props)) {
+  for (const [prop, value] of Object.entries(vnode.props)) {
+    const [key, detail] = prop.split("#", 2);
     // Don't bind properties that aren't whitelisted in the schema.
     if (!Object.hasOwn(view.props.schema.properties, key)) {
       continue;
     }
 
-    if (isEventKey(key) && isBinding(value)) {
-      const bound = context[value.name];
-      if (isSendable(bound)) {
-        const { send } = bound;
-        const event = readEventNameFromEventKey(key);
-        const cancel = listen(element, event, (event: Event) => {
-          send(readEvent(event));
-        });
-        cancels.push(cancel);
-      }
-    } else if (isBinding(value)) {
-      const boundValue = context[value.name];
-      if (boundValue != null) {
-        const cancel = effect([boundValue], (value) => {
-          setProp(element, key, value);
-        });
-        cancels.push(cancel);
+    if (isBinding(value) || isSignal(value) || isStream(value)) {
+      const bound =
+        isSignal(value) || isStream(value) ? value : context[value.name];
+      if (isEventKey(key)) {
+        if (isSendable(bound)) {
+          const { send } = bound;
+          const event = readEventNameFromEventKey(key);
+          const cancel = listen(element, event, (event: Event) => {
+            let vdomEvent = readEvent(event);
+            if (detail) vdomEvent = vdomEvent.detail[detail];
+            send(vdomEvent);
+          });
+          cancels.push(cancel);
+        }
+      } else {
+        if (bound) {
+          const cancel = effect([bound], (value) => {
+            setProp(element, key, value);
+          });
+          cancels.push(cancel);
+        }
       }
     } else {
       setProp(element, key, value);
@@ -138,13 +158,16 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
   element[__cancel__] = cancel;
 
   if (isRepeatBinding(vnode.children)) {
-    const { name, template } = vnode.children;
-    const scopedContext = context[name];
+    const { name, template, signal } = vnode.children;
+    const scopedContext = signal ? signal : context[name];
     const cancel = renderDynamicChildren(element, template, scopedContext);
     cancels.push(cancel);
   } else if (isBinding(vnode.children)) {
     const { name } = vnode.children;
     renderText(element, context[name]);
+  } else if (isSignal(vnode.children)) {
+    const signal = vnode.children;
+    renderText(element, signal);
   } else {
     renderStaticChildren(element, vnode.children, context);
   }
