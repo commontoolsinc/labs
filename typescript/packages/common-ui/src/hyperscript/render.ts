@@ -245,7 +245,7 @@ export type IdentifiedChild = Element & { [__id__]?: any };
 
 export const renderDynamicChildren = (
   parent: Element,
-  template: VNode,
+  template: VNode | Function,
   states: Signal<unknown> | any
 ) => {
   return effect([states], (states) => {
@@ -289,7 +289,10 @@ export const renderDynamicChildren = (
         insertElementAt(parent, child, index);
       } else {
         const childContext = statesById.get(id);
-        const keyedChild = render(template, childContext) as IdentifiedChild;
+        const keyedChild = render(
+          typeof template === "function" ? template(childContext) : template,
+          childContext
+        ) as IdentifiedChild;
         keyedChild[__id__] = id;
         insertElementAt(parent, keyedChild, index);
       }

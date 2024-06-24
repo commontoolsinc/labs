@@ -30,7 +30,7 @@ export type RepeatBinding = {
   "@type": "repeat";
   name: string;
   signal?: Signal<any>;
-  template: VNode;
+  template: VNode | Function;
 };
 
 /** Is value a binding to a reactive value? */
@@ -39,14 +39,14 @@ export const isRepeatBinding = (value: any): value is RepeatBinding => {
     value != null &&
     value["@type"] === "repeat" &&
     typeof value.name === "string" &&
-    isVNode(value.template)
+    (isVNode(value.template) || typeof value.template === "function")
   );
 };
 
 /** Create a template binding */
 export const repeat = (
   name: string | Signal<any>,
-  template: VNode
+  template: VNode | Function
 ): RepeatBinding => ({
   "@type": "repeat",
   name: typeof name === "string" ? name : "signal",
