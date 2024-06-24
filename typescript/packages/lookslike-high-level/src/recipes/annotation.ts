@@ -175,6 +175,7 @@ notalk;justgo
 
   let matchedIndices: LLMSuggestion[] = [];
   try {
+    // TODO: use `zod` to actually validate the shape of the result
     matchedIndices = grabJson(response[response.length - 1]);
     console.log(
       "Suggestion",
