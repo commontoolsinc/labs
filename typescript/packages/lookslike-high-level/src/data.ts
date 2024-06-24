@@ -4,6 +4,8 @@ import { Gem } from "./recipe.js";
 const { state } = signal;
 
 import { todoList, todoTask } from "./recipes/todo-list.js";
+import { localSearch } from "./recipes/local-search.js";
+
 import "./recipes/todo-list-as-task.js"; // Necessary, so that suggestions are indexed.
 
 export const dataGems = state<Gem[]>([]);
@@ -44,5 +46,10 @@ export const recipes: RecipeManifest[] = [
     name: "Create a new TODO list",
     recipe: todoList,
     inputs: { title: "", items: [] },
+  },
+  {
+    name: "Find places",
+    recipe: localSearch,
+    inputs: { query: "", location: "" },
   },
 ];
