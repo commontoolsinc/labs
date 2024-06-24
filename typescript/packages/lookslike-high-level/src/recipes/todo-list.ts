@@ -28,7 +28,7 @@ export const todoList = recipe("todo list", ({ title, items }) => {
 
   return {
     UI: [
-      list({}, [
+      vstack({}, [
         commonInput({
           value: binding("title"),
           placeholder: "List title",
