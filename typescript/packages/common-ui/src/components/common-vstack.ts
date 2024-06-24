@@ -23,6 +23,10 @@ export class CommonVstackElement extends LitElement {
       gap: var(--gap);
     }
 
+    :host([gap="sm"]) .stack {
+      gap: var(--gap-sm);
+    }
+
     :host([pad="md"]) .stack {
       padding: var(--gap);
     }
