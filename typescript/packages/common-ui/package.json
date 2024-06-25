@@ -41,6 +41,10 @@
     "./components.js": {
       "types": "./lib/components/index.d.ts",
       "default": "./lib/components/index.js"
+    },
+    "./style.js": {
+      "types": "./lib/components/style.d.ts",
+      "default": "./lib/components/style.js"
     }
   },
   "dependencies": {

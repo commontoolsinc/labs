@@ -54,6 +54,7 @@ export class CommonInputElement extends LitElement {
       :host([appearance="rounded"]) .input {
         --height: 40px;
         background-color: var(--input-background);
+        border: 1px solid var(--border-color);
         border-radius: calc(var(--height) / 2);
         padding: 8px 16px;
         height: var(--height);

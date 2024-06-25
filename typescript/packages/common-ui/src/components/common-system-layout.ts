@@ -28,9 +28,15 @@ export class CommonSystemLayoutElement extends LitElement {
 
     .app-primary {
       grid-area: primary;
-      overflow: hidden;
+      overflow-x: hidden;
+      overflow-y: auto;
+      container-type: size;
     }
     
+    .app-primary-inner {
+      padding: var(--pad);
+    }
+
     .app-secondary {
       grid-area: secondary;  
     }
@@ -48,7 +54,9 @@ export class CommonSystemLayoutElement extends LitElement {
     return html`
     <div class="app">
       <main class="app-primary">
-        <slot></slot>
+        <div class="app-primary-inner">
+          <slot></slot>
+        </div>
       </main>
       <nav class="app-secondary">
         <slot name="secondary"></slot>

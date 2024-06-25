@@ -30,16 +30,16 @@ export const todoList = recipe("todo list", ({ id, title, items }) => {
   });
 
   return {
-    UI: vstack({}, [
+    UI: vstack({gap: "sm"}, [
       commonInput({
         value: title,
         placeholder: "List title",
         "@common-input#value": title,
       }),
       vstack(
-        {},
+        {gap: "sm"},
         repeat(items, (item: TodoItem) =>
-          vstack({}, [
+          vstack({gap: "sm"}, [
             todo(
               {
                 checked: item.done,
@@ -61,6 +61,7 @@ export const todoList = recipe("todo list", ({ id, title, items }) => {
       sendInput({
         name: "Add",
         placeholder: "New task",
+        appearance: "rounded",
         "@messageSend": newTasks,
       }),
     ]),

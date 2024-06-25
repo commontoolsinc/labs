@@ -2,8 +2,13 @@ import { LitElement, html, css } from "lit";
 import { customElement } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 import { view } from '../hyperscript/render.js';
+import { eventProps } from "../hyperscript/schema-helpers.js";
 
-export const vstack = view('common-vstack', {});
+export const vstack = view('common-vstack', {
+  ...eventProps(),
+  gap: { type: 'string' },
+  pad: { type: 'string' }
+});
 
 @customElement("common-vstack")
 export class CommonVstackElement extends LitElement {
@@ -17,14 +22,12 @@ export class CommonVstackElement extends LitElement {
     .stack {
       display: flex;
       flex-direction: column;
-    }
-
-    :host([pad="md"]) .stack {
-      padding: var(--pad);
-    }
-
-    :host([gap="md"]) .stack {
       gap: var(--pad);
+
+    }
+
+    :host([gap="none"]) .stack {
+      gap: 0;
     }
 
     :host([gap="sm"]) .stack {

@@ -8,6 +8,7 @@ export const sendInput = view("common-send-message", {
   ...eventProps(),
   name: { type: "string" },
   placeholder: { type: "string" },
+  appearance: { type: "string" },
 });
 
 @customElement("common-send-message")

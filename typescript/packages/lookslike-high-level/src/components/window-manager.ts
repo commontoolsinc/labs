@@ -1,12 +1,14 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { view, tags, render } from "@commontools/common-ui";
+import { view, tags, render, style } from "@commontools/common-ui";
 import { isGem, Gem, ID } from "../recipe.js";
 const { include } = tags;
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
-  static override styles = css`
+  static override styles = [
+    style.baseStyles,
+    css`
     :host {
       display: flex;
       overflow-x: auto;
@@ -22,9 +24,8 @@ export class CommonWindowManager extends LitElement {
       height: 95%; /* Make the window full height */
       margin-left: 20px;
       margin-bottom: 20px;
-      padding: 10px;
       border: 1px solid #e0e0e0;
-      border-radius: 8px;
+      border-radius: var(--radius);
       background-color: rgba(255, 255, 255, 0.8);
       backdrop-filter: blur(10px);
       box-shadow:
@@ -32,6 +33,7 @@ export class CommonWindowManager extends LitElement {
         0 6px 6px rgba(0, 0, 0, 0.1),
         0 0 0 1px rgba(0, 0, 0, 0.05);
       transition: all 0.3s ease;
+      overflow: hidden;
     }
     .close-button {
       z-index: 1;
@@ -56,7 +58,8 @@ export class CommonWindowManager extends LitElement {
       background-color: rgba(0, 0, 0, 0.15);
       color: rgba(0, 0, 0, 0.6);
     }
-  `;
+    `
+  ];
 
   @property({ type: Array })
   sagas: Gem[] = [];
