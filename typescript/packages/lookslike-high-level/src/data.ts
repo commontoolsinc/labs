@@ -9,7 +9,9 @@ import { luftBnBSearch } from "./recipes/luft-bnb-search.js";
 import { ticket } from "./recipes/ticket.js";
 import { routine } from "./recipes/routine.js";
 
-import "./recipes/todo-list-as-task.js"; // Necessary, so that suggestions are indexed.
+// Necessary, so that suggestions are indexed.
+import "./recipes/todo-list-as-task.js";
+import "./recipes/playlist.js";
 
 export const dataGems = state<Gem[]>([]);
 
@@ -30,6 +32,7 @@ addGems([
   }),
   ticket({
     title: "Reservation for 'Counterstrike the Musical'",
+    show: "Counterstrike the Musical",
     date: "2021-07-07",
     location: "New York",
   }),
@@ -85,3 +88,10 @@ function getFridayAndMondayDateStrings() {
     endDate: formatDate(followingMonday),
   };
 }
+
+// Terrible hack to open a saga from a recipe
+let openSagaOpener: (saga: Gem) => void = () => {};
+export const openSaga = (saga: Gem) => openSagaOpener(saga);
+openSaga.set = (opener: (saga: Gem) => void) => {
+  openSagaOpener = opener;
+};
