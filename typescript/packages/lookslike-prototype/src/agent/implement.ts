@@ -78,13 +78,11 @@ export const codePrompt = `
   The output of a code node will be bound to the input named 'text'
 
   addUiNode({
-    "id": "imageUi",
+    "id": "dataUi",
     "uiTree": {
       "tag": "span",
-      "props": {
-        "innerText": { "@type": "binding", "name": "text" }
-      },
-      "children": []
+      "props": { "innerText": { "@type": "binding", "name": "text" } },
+      "children": [ ]
     }
   })
 
@@ -101,10 +99,11 @@ export const codePrompt = `
     "uiTree": {
       "tag": "button",
       "props": {
-        "innerText": "Click me",
         "@click": { "@type": "binding", "name": "onClicked"}
       },
-      "children": []
+      "children": [
+        "Click me"
+      ]
     }
   })
 
@@ -147,7 +146,7 @@ export const codePrompt = `
                   "className": "todo-label",
                   "innerText": { "@type": "binding", "name": "label" }
                 },
-                "children": []
+                "children": [ ]
               }
             ]
           }
@@ -157,7 +156,7 @@ export const codePrompt = `
   })
 
   UI trees cannot use any javascript methods, code blocks must prepare the data for the UI to consume.
-  Plain text nodes MUST be applied using the innerText prop in a span, you cannot use a raw string.
+  Bindings for text nodes MUST be applied using the innerText prop.
   GLSL shaders cannot declare uniforms other than iTime, iResolution, iMouse and iChannel0 (the user's webcam).
   notalk;justgo
 `;
