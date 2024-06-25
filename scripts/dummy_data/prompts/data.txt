@@ -6,4 +6,4 @@ ${backstory}
 Here is a schema:
 ${schema}
 
-Please generate dummy data in JSON that matches this schema. The data should be comprehensive and believably fit in the backstory. Please provide a significant length of data. Output only JSON, no other surrounding text or formatting.
+Please generate dummy data in JSON that matches this schema. The data should be comprehensive and believably fit in the backstory, but be realistic data for a real person and not be overly tied to the backstory--just that it's plausible data for a real person with a given backstory. Please provide a significant length of data. Output only JSON, no other surrounding text or formatting.

@@ -17,6 +17,9 @@ LATEST_LINK = '_latest'
 INFO_DIR = '_info'
 WILDCARD = '*'
 DEFAULT_IGNORES = 'existing'
+SPLIT_COMMAND = 'split'
+JOIN_COMMAND = 'join'
+MODIFIER_DELIMITER = '|'
 
 OverridesDict: TypeAlias = Dict[str, str]
 PlaceholderValue : TypeAlias = Union[str, Dict[str, str]]
@@ -29,6 +32,8 @@ class IgnoreDict(TypedDict, total=False):
     cache: List[str]
     includes: List[str]
     overrides: List[str]
+
+JoinArgs = Literal['', 'name', 'content', 'both']
 
 @dataclass
 class ExecutionContext:
@@ -86,25 +91,44 @@ def write_golden(name : str, subName : Optional[str], contents : str) -> None:
     print(f"Pinned {name}:{subName} to goldens")
 
 # returns all the variations, as well as the keys that varied. as well as a map from value to shortname
-def value_variations(input : Dict[str, PlaceholderValue]) -> Tuple[List[Dict[str, str]], List[str], Dict[str, str]] :
-    variations : List[Dict[str, str]] = []
+def value_variations(input: Dict[str, PlaceholderValue]) -> Tuple[List[Dict[str, str]], List[str], Dict[str, str]]:
+    variations: List[Dict[str, str]] = []
     nested_keys = [k for k, v in input.items() if isinstance(v, dict)]
     
     if not nested_keys:
-        return (cast(List[Dict[str, str]],[input.copy()]), [], {})
+        return (cast(List[Dict[str, str]], [input.copy()]), [], {})
 
-    nested_values: List[List[Tuple[str, str, str]]] = [[(k, vk, vv) for vk, vv in input[k].items()] for k in nested_keys] # type: ignore
-    
-    short_names : Dict[str, str] = {}
+    # Group keys by their base name (before '|'). We'll treat all of them in the
+    # same group as the same and they'll co-vary.
+    key_groups: Dict[str, List[str]] = {}
+    for k in nested_keys:
+        base_key = k.split(MODIFIER_DELIMITER)[0]
+        if base_key not in key_groups:
+            key_groups[base_key] = []
+        key_groups[base_key].append(k)
+
+    # Prepare nested values, combining values for keys in the same group
+    nested_values: List[List[Tuple[str, str, str]]] = []
+    for base_key, keys in key_groups.items():
+        combined_values: Dict[str, str] = {}
+        for k in keys:
+            combined_values.update(cast(Dict[str, str], input[k]))
+        nested_values.append([(base_key, vk, vv) for vk, vv in combined_values.items()])
+
+    short_names: Dict[str, str] = {}
 
     for combination in itertools.product(*nested_values):
         variation = {k: v for k, v in input.items() if not isinstance(v, dict)}
-        for orig_key, nested_key, nested_value in combination: # type: ignore
-            variation[orig_key] = nested_value
+        for base_key, nested_key, nested_value in combination:
+            for full_key in key_groups[base_key]:
+                variation[full_key] = nested_value
             short_names[nested_value] = nested_key
         variations.append(variation)
+
+    #keep only the first key of each group so we don't get duplicate names
+    deduped_nested_keys = [v[0] for v in key_groups.values()]
     
-    return (variations, nested_keys, short_names)
+    return (variations, deduped_nested_keys, short_names)
         
 def name_for_variation(variation : Dict[str, str], nested_keys : List[str], short_names : Dict[str, str]) -> str:
     result : List[str] = []
@@ -231,7 +255,7 @@ def fetch_placeholder(name: str, context : ExecutionContext, parent_names: List[
 def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, parent_names: List[str]) -> PlaceholderValue:
 
     # Identify any placeholders in the prompt that match ${name}, ignoring any whitespace in the placeholder
-    placeholders = re.findall(r"\${\s*([a-zA-Z0-9_:]+)\s*}", raw_prompt)
+    placeholders = re.findall(r"\${\s*([a-zA-Z0-9_|:]+)\s*}", raw_prompt)
 
     if len(placeholders) == 0:
         if len(parent_names) == 0:
@@ -241,24 +265,19 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
     
     print(f"Compiling prompt for {name}...")
 
-    # create a dictionary to store the values of the placeholders
+    # create a dictionary to store the values of the placeholders. we'll key off
+    # the raw placeholder string because different ones will be modified in
+    # different ways and those should be distinct.
     placeholder_values: Dict[str, PlaceholderValue] = {}
 
     # Iterate over the placeholders
     for raw_placeholder in placeholders:
 
+        raw_placeholder = raw_placeholder.strip()
+
         # split at the colon to get the placeholder name and the format
-        placeholder_parts = raw_placeholder.split(":")
+        placeholder_parts = raw_placeholder.split(MODIFIER_DELIMITER)
         placeholder = placeholder_parts[0].strip()
-
-        multi = False
-
-        if len(placeholder_parts) > 1:
-            command = placeholder_parts[1].strip()
-            if command == "multi":
-                multi = True
-            else:
-                raise Exception(f"Invalid command {command} in placeholder {raw_placeholder}")
 
         if placeholder in parent_names:
             raise Exception(f"Circular dependency detected: {parent_names} -> {placeholder}")
@@ -266,6 +285,24 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
         # check that placeholder matches [a-zA-Z][a-zA-Z0-9_]*
         if not re.match(r"^[_a-zA-Z][a-zA-Z0-9_]*$", placeholder):
             raise Exception(f"Invalid placeholder name {placeholder}")
+
+        multi = False
+        join : JoinArgs = ''
+
+        if len(placeholder_parts) > 1:
+            whole_command = placeholder_parts[1].strip()
+            command_parts = whole_command.split(':')
+            command = command_parts[0].strip()
+            command_arguments = command_parts[1:]
+            if command == SPLIT_COMMAND:
+                multi = True
+            elif command == JOIN_COMMAND:
+                join_arg = command_arguments[0].strip() if command_arguments else 'content'
+                if (join_arg not in get_args(JoinArgs)):
+                    raise Exception(f"Invalid join argument {join_arg} in placeholder {raw_placeholder}")
+                join = join_arg
+            else:
+                raise Exception(f"Invalid command {command} in placeholder {raw_placeholder}")
 
         print(f"Getting value for {placeholder}...")
         # Store the value in the dictionary
@@ -277,6 +314,14 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
                     new_value[line] = line
             value = new_value
 
+        if join and isinstance(value, dict):
+            if join == 'name':
+                value = "\n".join(value.keys())
+            elif join == 'both':
+                value = "\n".join(f"{k}\n{v}" for k, v in value.items())
+            else:
+                value = "\n".join(value.values())
+
         if isinstance(value, dict):
             result : Dict[str, str] = {}
             for key, val in value.items():
@@ -285,9 +330,9 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
                     # TODO: figure out how to support this case
                     raise Exception(f"Nested multi not supported for {placeholder}")
                 result[key] = temp
-            placeholder_values[placeholder] = result
+            placeholder_values[raw_placeholder] = result
         else:
-            placeholder_values[placeholder] = compile_prompt(placeholder, value, context, parent_names + [name])
+            placeholder_values[raw_placeholder] = compile_prompt(placeholder, value, context, parent_names + [name])
 
     result : Dict[str, str] = {}
 
@@ -299,11 +344,11 @@ def compile_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
     for variation in variations:
         # Replace the placeholders with the values
         prompt = raw_prompt
-        for placeholder, value in variation.items():
+        for raw_placeholder, value in variation.items():
             # we can't do a naive match because the placeholder tag might
             # include other commands. e.g. the placeholder "input" might need to
-            # match "${input:multi}"
-            pattern = re.compile(rf'\${{{re.escape(placeholder)}(?::[^}}]*)?}}')
+            # match "${input|split}". We also need to support whitespace.
+            pattern = re.compile(rf'\$\{{\s*({re.escape(raw_placeholder).replace("\\ ", "\\s+")})\s*(?::[^}}]*)?\s*\}}')
             escaped_value = escape_backslashes(value)
             prompt = pattern.sub(escaped_value, prompt)
         variation_name = name_for_variation(variation, nested_keys, short_names)
@@ -347,16 +392,16 @@ def execute_prompt(name: str, raw_prompt: str, context : ExecutionContext, paren
             # Pipe the prompt contents to the llm command with the option -m claude-3.5-sonnet
             output = subprocess.check_output(['llm', '-m', 'claude-3.5-sonnet'], input=prompt, universal_newlines=True)
 
+            prompt_output_file = f"{prompts_dir}/{variation_name}.txt"
+            with open(prompt_output_file, 'w') as file:
+                file.write(prompt)
+
             # Generate the output file path
             output_file = f"{output_dir}/{variation_name}.txt"
 
             # Save the output to the file
             with open(output_file, 'w') as file:
                 file.write(output)
-
-            prompt_output_file = f"{prompts_dir}/{variation_name}.txt"
-            with open(prompt_output_file, 'w') as file:
-                file.write(prompt)
 
             print(f"Output saved to {output_file}")
 

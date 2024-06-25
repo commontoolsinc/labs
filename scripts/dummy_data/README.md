@@ -12,7 +12,7 @@ llm keys set claude
 
 You can then generate outputs from a prompt via: `python3 generate.py prompts/backstory.txt`
 
-### Design
+## Basic usage
 
 A generate.py that is passed a prompt (a filename) to execute.
 
@@ -27,11 +27,21 @@ The rules of a reference like `${name}` is, in priority order:
 - A file in `includes/` that has a filename like `$name.*`
 - A file in `prompts/` that has a filename like `$name.*` which will be executed and use its result
 
-This order means that prompt output will be used if they exist, falling back on generating new output for a prompt as a last resort. The output naming scheme also means that if you find good output you want to pin in place, you can use `cp` to move the file directly into the golden folder.
+This order means that prompt output will be used if they exist, falling back on generating new output for a prompt as a last resort. The output naming scheme also means that if you find good output you want to pin in place, you can use `cp` to move the file directly into the golden folder. You can also use `pin_golden.py` (see below)
 
 This process is recursive. When a name is found it is printed out which version it uses.
 
-As a special case, if your include has the `:multi` directive, it says 'load up the named placeholder, and then interpet each line as a separate value and call this template once for each file'. You can see prompts/schema.txt for an example. Instead of outputting one result, it will output as many results as non-empty lines in that file, named for the lines. Later, other templates that load up that named placeholder, if they find multiple outputs (instead of one file) will also go into multi-output mode.
+## Multi-Mode
+
+Most placeholders are a single reference to a single value. However, it's also possible to go into multi-mode, which operates on multiple placeholders in parallel.
+
+This happens if you read a placeholder that was in multi-mode (which puts your result in multi-mode), or if you use a special operator on the placeholder reference to put it into multi mode.
+
+The main way to put a placeholder into multi mode is to use the `split` directive in your prompt, like this: `Here is the schema: ${schema|split}`. This will load up the value at schema according to the rules, and then split it so the prompt is run once per non-empty line in the schema input. The output for each line will be named on the content of that line. Downstream templates that rely on that output will be in multi-mode by default.
+
+You can also take a multi-mode placeholder and join it into a single placeholder with `join`: `Here is the schema: ${schema|join}`. Join can join the names of the items, or the content (default). You can choose one or the other with an argument like: `${schema|join:name}`, or `${schema|join:both}` to do the name, a newline, and the value. See `prompts/joined_schema.txt` for an example.
+
+## Caching
 
 If you want to override which placeholder to use, you can pass the `--ignore` flag. The legal classes of cached values to ignore: 'golden', 'cache', 'includes', 'overrides'. All of the following are valid:
 - `cache` - ignores all pre-computed targets for all placeholders
@@ -50,8 +60,6 @@ Example: `python3 pin_golden.py schema`
 ### TODO
 - Figure out a way to allow prompts to run a for each on output from a file (so no need for a separate multi command)
 - Allow a way to specify `{files|multi-load:schema}
-- switch ':' in multi directive to '|'
-- remove the fetch_placeholder directory and just return the value (we no longer need the directory)
-- If a template references the same placeholder that is a multi, only do the multi one time (this might already work). This sets us up for a use case that allows using the name or value of the multi file, so you could say: 'A file named ${schema|name} with content ${schema}' and ahve it replaced.
 - Parallelize multi-generation
 - Allow pinning a not-most-recent version (perhaps via an interactive UI?)
+- What happens if you add the multi modifier on a value type that is already in multi-mode? Does it work?
