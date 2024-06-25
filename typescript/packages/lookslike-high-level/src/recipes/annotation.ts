@@ -112,6 +112,14 @@ async function findSuggestion(
       )
   );
 
+  console.log(
+    "Suggestion:",
+    query,
+    "suggestion:",
+    suggestion,
+    "gems:",
+    matchedGems
+  );
   if (suggestion) {
     const bindings = Object.entries(suggestion.dataGems).map(([key, type]) => [
       key,
@@ -182,19 +190,14 @@ notalk;justgo
   try {
     // TODO: use `zod` to actually validate the shape of the result
     matchedIndices = grabJson(response[response.length - 1]);
-    console.log(
-      "Suggestion",
-      query,
-      matchedIndices,
-      matchedIndices.map((item) => dataGems[item.index])
-    );
   } catch (error) {
     console.error("Failed to parse LLM response:", error);
     return [];
   }
+  console.log("LLM response:", matchedIndices);
 
   return matchedIndices
-    .filter((item) => item.confidence > 0.8)
+    .filter((item) => item.confidence > 0.7)
     .map((item) => dataGems[item.index])
     .filter((gem) => gem !== undefined);
 }

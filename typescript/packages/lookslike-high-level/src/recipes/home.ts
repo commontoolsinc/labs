@@ -10,10 +10,12 @@ export const home = recipe("home screen", ({ sagas, recipes }) => {
   const sagasWithIDs = signal.computed(
     [sagas],
     (sagas: { [key: string]: Gem }) =>
-      Object.values(sagas).map((saga) => ({
-        id: saga[ID],
-        saga,
-      }))
+      Object.values(sagas)
+        .filter((saga) => saga.UI) // Only show sagas with UI
+        .map((saga) => ({
+          id: saga[ID],
+          saga,
+        }))
   );
 
   const recipesWithIDs = signal.computed(
