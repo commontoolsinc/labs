@@ -2,7 +2,6 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { view, tags, render } from "@commontools/common-ui";
 import { isGem, Gem, ID } from "../recipe.js";
-const { binding } = view;
 const { include } = tags;
 
 @customElement("common-window-manager")

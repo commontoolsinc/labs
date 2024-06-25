@@ -19,7 +19,7 @@ export function makeTodoItem(title: string, done: boolean = false): TodoItem {
   };
 }
 
-export const todoList = recipe("todo list", ({ title, items }) => {
+export const todoList = recipe("todo list", ({ id, title, items }) => {
   const newTasks = subject<{ detail: { message: string } }>();
   newTasks.sink({
     send: (event) => {
@@ -50,6 +50,7 @@ export const todoList = recipe("todo list", ({ title, items }) => {
               [
                 annotation({
                   query: item.title,
+                  target: id,
                   data: { items, done: item.done, title: item.title },
                 }),
               ]
