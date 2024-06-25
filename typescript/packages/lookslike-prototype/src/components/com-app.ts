@@ -50,26 +50,26 @@ export class ComApp extends LitElement {
         return JSON.stringify(this.graph);
       },
       addConnection: ({
-        fromOutput,
-        toInput
+        from,
+        to
       }: {
-        fromOutput: string;
-        toInput: NodePath;
+        from: string;
+        to: NodePath;
       }) => {
-        console.log("addConnection", fromOutput, toInput);
-        const [toNodeId, toInputKey] = toInput;
-        const fromNode = graph.find((node) => node.id === fromOutput);
+        console.log("addConnection", from, to);
+        const [toNodeId, toInputKey] = to;
+        const fromNode = graph.find((node) => node.id === from);
         if (!fromNode) {
-          return `Node ${fromOutput} not found.\n${this.graphSnapshot()}`;
+          return `Node ${from} not found.\n${this.graphSnapshot()}`;
         }
         const toNode = graph.find((node) => node.id === toNodeId);
         if (!toNode) {
           return `Node ${toNode} not found.\n${this.graphSnapshot()}`;
         }
 
-        toNode.in[toInputKey] = [".", fromOutput];
+        toNode.in[toInputKey] = [".", from];
         updateGraph(graph);
-        return `Added connection from ${fromOutput} to ${toInput}.\n${this.graphSnapshot()}`;
+        return `Added connection from ${from} to ${to}.\n${this.graphSnapshot()}`;
       },
       addCodeNode: (props: { id: string; code: string }) => {
         console.log("addCodeNode", props);
@@ -343,10 +343,10 @@ export class ComApp extends LitElement {
             <com-unibox
               .suggestions=${watch(suggestions)}
               @suggested=${(ev) => {
-                this.userInput = ev.detail.suggestion;
-                this.appendMessage();
-                suggestions.send([]);
-              }}
+        this.userInput = ev.detail.suggestion;
+        this.appendMessage();
+        suggestions.send([]);
+      }}
             >
               <com-editor
                 slot="main"
