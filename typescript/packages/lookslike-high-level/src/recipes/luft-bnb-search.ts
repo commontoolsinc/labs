@@ -1,12 +1,12 @@
 import { view, tags } from "@commontools/common-ui";
-import { signal, stream } from "@commontools/common-frp";
+import { signal, stream, Sendable } from "@commontools/common-frp";
 import { generateData } from "@commontools/llm-client";
 import { Gem, recipe, NAME, addSuggestion, description } from "../recipe.js";
 import { sagaLink } from "../components/saga-link.js";
 import { mockResultClient } from "../llm-client.js";
 const { binding, repeat } = view;
 const { vstack, hstack, div, commonInput, button, input, include } = tags;
-const { state, computed } = signal;
+const { state, computed, effect } = signal;
 const { subject } = stream;
 
 export interface LuftBnBPlace {
@@ -21,6 +21,7 @@ export interface LuftBnBPlace {
   latitude: number;
   longitude: number;
   rating: number;
+  annotationUI: Sendable<view.VNode>;
 }
 
 export const luftBnBSearch = recipe(
@@ -49,6 +50,7 @@ export const luftBnBSearch = recipe(
         location: place.location,
         rating: `${"⭐⭐⭐⭐⭐".slice(0, place.rating)} (${place.rating})`,
         bookFor: `Book for $${place.pricePerNight} per night`,
+        annotationUI: place.annotationUI,
       }))
     );
 
@@ -107,6 +109,7 @@ export const luftBnBSearch = recipe(
               div({}, binding("description")),
               div({}, binding("location")),
               div({}, binding("rating")),
+              include({ content: binding("annotationUI") }),
               button({ "@click": book, id: binding("id") }, binding("bookFor")),
             ])
           )
@@ -116,7 +119,7 @@ export const luftBnBSearch = recipe(
       startDate,
       endDate,
       location,
-      luftbnbs: places,
+      places,
       [NAME]: computed(
         [location, startDate, endDate],
         (location, startDate: string, endDate: string) =>
@@ -128,7 +131,7 @@ export const luftBnBSearch = recipe(
 
 async function performLuftBnBSearch(location: string): Promise<LuftBnBPlace[]> {
   if (!location) return [];
-  const result = await generateData(
+  const result = (await generateData(
     mockResultClient,
     `generate 10 places for private home short-term rentals in ${location}`,
     [],
@@ -186,8 +189,11 @@ async function performLuftBnBSearch(location: string): Promise<LuftBnBPlace[]> {
         ],
       },
     }
-  );
-  return result as LuftBnBPlace[];
+  )) as LuftBnBPlace[];
+  return result.map((result) => ({
+    ...result,
+    annotationUI: state<view.VNode>(div({}, [""])),
+  }));
 }
 
 const makeLuftBnBSearch = recipe(
@@ -196,7 +202,6 @@ const makeLuftBnBSearch = recipe(
     const luftBnB: signal.Signal<Gem> = computed(
       [reservation],
       ({ date, location }) => {
-        console.log("Making LuftBnB search for", date.get(), location.get());
         const startDate = computed(
           [date],
           (date: string) =>
@@ -222,11 +227,12 @@ const makeLuftBnBSearch = recipe(
 
     return {
       UI: vstack({}, [
-        sagaLink({ saga: luftBnB }),
         include({
           // TODO: This should be a computed, but we can't yet flatten computed values
           content: luftBnB.get().summaryUI,
         }),
+        "Or search for other places:",
+        sagaLink({ saga: luftBnB }),
       ]),
       reservation,
       luftBnBSearch: luftBnB,
@@ -237,8 +243,89 @@ const makeLuftBnBSearch = recipe(
 addSuggestion({
   description: description`Book LuftBnB for ${"reservation"}`,
   recipe: makeLuftBnBSearch,
-  bindings: {},
+  bindings: { done: "done" },
   dataGems: {
-    reservation: "reservation",
+    reservation: "ticket",
+  },
+});
+
+const nearbyPlacesForRoutine = recipe(
+  "annotate places for routine",
+  ({ routine, places }) => {
+    effect(
+      [places, routine],
+      (
+        places: LuftBnBPlace[],
+        routine: { locations: signal.Signal<string[]> }
+      ) => {
+        // 1. Extract the requested locations from the routine
+        // TODO: Should be a path above, or a nested effect..
+        const locationType = routine.locations.get()[0];
+
+        // 2. Extact places to annotate
+        const initialData = places.map((place) => ({
+          location: place.location,
+        }));
+
+        // 3. Query LLM to annotate these places with requested locations
+        const resultPromise = generateData(
+          mockResultClient,
+          `generate ${initialData.length} ${locationType} with pun names`,
+          initialData,
+          {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: {
+                  type: "string",
+                  description: "Unique identifier for the listing",
+                },
+                name: {
+                  type: "string",
+                  description: `Name of the ${locationType}`,
+                },
+                location: {
+                  type: "string",
+                  description:
+                    "Street corner, Neighborhood and city of the ${locationType}",
+                },
+                walkingDistance: {
+                  type: "number",
+                  description: "Walking distance in minutes",
+                },
+              },
+            },
+          }
+        );
+
+        // 4. Annotate the places by setting the annotationUI state
+        resultPromise.then((result) => {
+          console.log("Annotated places", result);
+          const annotatedPlaces = result as {
+            name: string;
+            walkingDistance: number;
+          }[];
+          places.forEach((place, i) => {
+            place.annotationUI.send(
+              div({}, [
+                `${annotatedPlaces[i].name} is ${annotatedPlaces[i].walkingDistance} min away`,
+              ])
+            );
+          });
+        });
+      }
+    );
+
+    return { UI: div({}) };
+  }
+);
+
+addSuggestion({
+  description: description`Find nearby places for ${"routine"}`,
+  recipe: nearbyPlacesForRoutine,
+  bindings: { places: "places" },
+  dataGems: {
+    routine: "routine",
   },
 });

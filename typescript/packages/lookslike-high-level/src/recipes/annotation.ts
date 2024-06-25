@@ -17,6 +17,8 @@ const { include } = tags;
 const { state, computed, isSignal } = signal;
 const { subject } = stream;
 
+const MINIMUM_CONFIDENCE = -1.0;
+
 /**
  * Strategy:
  *
@@ -112,14 +114,8 @@ async function findSuggestion(
       )
   );
 
-  console.log(
-    "Suggestion:",
-    query,
-    "suggestion:",
-    suggestion,
-    "gems:",
-    matchedGems
-  );
+  console.log("Suggestion:", query, matchedGems, suggestion);
+
   if (suggestion) {
     const bindings = Object.entries(suggestion.dataGems).map(([key, type]) => [
       key,
@@ -168,6 +164,7 @@ async function matchGemsWithLLM(
   const prompt = `
 Given the following user query and list of data gems, return the indices of the gems that are most relevant to the query.
 Consider both the names and types of the gems when making your selection.
+Think broadly, e.g. a stay in a hotel could match a gem called "morning routine", as the user would want to pick a hotel that supports their morning routine.
 
 User query: "${query}"
 
@@ -190,6 +187,10 @@ notalk;justgo
   try {
     // TODO: use `zod` to actually validate the shape of the result
     matchedIndices = grabJson(response[response.length - 1]);
+    if (!Array.isArray(matchedIndices)) {
+      console.log("Invalid LLM response", matchedIndices);
+      return [];
+    }
   } catch (error) {
     console.error("Failed to parse LLM response:", error);
     return [];
@@ -197,7 +198,7 @@ notalk;justgo
   console.log("LLM response:", matchedIndices);
 
   return matchedIndices
-    .filter((item) => item.confidence > 0.7)
+    .filter((item) => item.confidence > MINIMUM_CONFIDENCE)
     .map((item) => dataGems[item.index])
     .filter((gem) => gem !== undefined);
 }

@@ -6,7 +6,8 @@ const { state } = signal;
 import { todoList, makeTodoItem } from "./recipes/todo-list.js";
 import { localSearch } from "./recipes/local-search.js";
 import { luftBnBSearch } from "./recipes/luft-bnb-search.js";
-import { reservation } from "./recipes/reservation.js";
+import { ticket } from "./recipes/ticket.js";
+import { routine } from "./recipes/routine.js";
 
 import "./recipes/todo-list-as-task.js"; // Necessary, so that suggestions are indexed.
 
@@ -27,10 +28,15 @@ addGems([
     title: "My grocery shopping list",
     items: ["milk", "eggs", "bread"].map((item) => makeTodoItem(item)),
   }),
-  reservation({
-    title: "Reservation for 'Back to the future' on Broadway",
+  ticket({
+    title: "Reservation for 'Counterstrike the Musical'",
     date: "2021-07-07",
     location: "New York",
+  }),
+  routine({
+    title: "Morning routine",
+    // TODO: A lot more missing here, this is just to drive the suggestion.
+    locations: ["coffee shop with great baristas"],
   }),
 ]);
 
