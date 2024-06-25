@@ -41,11 +41,12 @@ export const luftBnBSearch = recipe(
 
     const summaries = computed([places], (places: LuftBnBPlace[]) =>
       places.map((place) => ({
+        id: place.id,
         name: place.title,
         description:
           place.propertyType + `, ${place.numberOfGuests} max guests`,
         location: place.location,
-        rating: "⭐⭐⭐⭐⭐".slice(0, place.rating) + ` (${place.rating})`,
+        rating: `${"⭐⭐⭐⭐⭐".slice(0, place.rating)} (${place.rating})`,
         bookFor: `Book for $${place.pricePerNight} per night`,
       }))
     );
@@ -53,8 +54,26 @@ export const luftBnBSearch = recipe(
     const book = subject<{ id: string }>();
     book.sink({
       send: ({ id }) =>
-        console.log(`Booked ${places.get().find((place) => place.id === id)}`),
+        console.log(
+          "Booked",
+          places.get().find((place) => place.id === id)
+        ),
     });
+
+    const summaryUI = computed(
+      [places, startDate, endDate],
+      (places: LuftBnBPlace[], startDate, endDate) => {
+        if (!places.length) return div({}, ["Calculating..."]);
+        const place = places[0];
+        return vstack({}, [
+          `${place.propertyType}, ${startDate}-${endDate} in ${place.location}. ` +
+            `${"⭐⭐⭐⭐⭐".slice(0, place.rating)} (${place.rating})`,
+          button({ "@click": book, id: place.id }, [
+            `Book for $${place.pricePerNight} per night`,
+          ]),
+        ]);
+      }
+    );
 
     return {
       UI: vstack({}, [
@@ -92,13 +111,15 @@ export const luftBnBSearch = recipe(
           )
         ),
       ]),
+      summaryUI: summaryUI,
       startDate,
       endDate,
       location,
-      places,
+      luftbnbs: places,
       [NAME]: computed(
-        [location],
-        (location: string) => `LuftBnB in ${location || "anywhere"}`
+        [location, startDate, endDate],
+        (location, startDate: string, endDate: string) =>
+          `LuftBnB ${startDate.slice(5)} - ${endDate.slice(5)} in ${location || "anywhere"}`
       ),
     };
   }
