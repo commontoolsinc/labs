@@ -61,7 +61,7 @@ const listen = (
   element: Element,
   event: string,
   listener: EventListener,
-  options?: AddEventListenerOptions
+  options?: AddEventListenerOptions,
 ): Cancel => {
   element.addEventListener(event, listener, options);
   return () => {
@@ -87,28 +87,28 @@ const readEvent = (event: Event) => {
   }
 };
 
-const modifyPropsForSchemaValidation = (props: object) =>
-  Object.fromEntries(
-    Object.entries(props).filter(
-      ([_, value]) => !isSignal(value) && !isStream(value) && !isBinding(value)
-    )
-  );
+// const modifyPropsForSchemaValidation = (props: object) =>
+//   Object.fromEntries(
+//     Object.entries(props).filter(
+//       ([_, value]) => !isSignal(value) && !isStream(value) && !isBinding(value),
+//     ),
+//   );
 
 /** Render a VNode tree, binding reactive data sources.  */
 const renderVNode = (vnode: VNode, context: RenderContext): Node => {
   // Make sure we have a view for this tag. If we don't it is not whitelisted.
-  const view = getViewByTag(vnode.tag);
+  // const view = getViewByTag(vnode.tag);
 
-  if (typeof view !== "function") {
-    throw new TypeError(`Unknown tag: ${vnode.tag}`);
-  }
+  // if (typeof view !== "function") {
+  //   throw new TypeError(`Unknown tag: ${vnode.tag}`);
+  // }
 
-  // Validate props against the view's schema.
-  if (!view.props.validate(modifyPropsForSchemaValidation(vnode.props))) {
-    throw new TypeError(`Invalid props for tag: ${vnode.tag}.
-      Props: ${JSON.stringify(vnode.props)}, ${JSON.stringify(modifyPropsForSchemaValidation(vnode.props), undefined, 2)}
-      Schema: ${JSON.stringify(view.props.schema, undefined, 2)}`);
-  }
+  // // Validate props against the view's schema.
+  // if (!view.props.validate(modifyPropsForSchemaValidation(vnode.props))) {
+  //   throw new TypeError(`Invalid props for tag: ${vnode.tag}.
+  //     Props: ${JSON.stringify(vnode.props)}, ${JSON.stringify(modifyPropsForSchemaValidation(vnode.props), undefined, 2)}
+  //     Schema: ${JSON.stringify(view.props.schema, undefined, 2)}`);
+  // }
 
   // Create the element
   const element = document.createElement(vnode.tag);
@@ -116,12 +116,12 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
   // Bind each prop to a reactive value (if any) and collect cancels
   const cancels: Array<Cancel> = [];
 
-  for (const [prop, value] of Object.entries(vnode.props)) {
+  for (const [prop, value] of Object.entries(vnode.props || {})) {
     const [key, detail] = prop.split("#", 2);
     // Don't bind properties that aren't whitelisted in the schema.
-    if (!Object.hasOwn(view.props.schema.properties, key)) {
-      continue;
-    }
+    // if (!Object.hasOwn(view.props.schema.properties, key)) {
+    //   continue;
+    // }
 
     if (isBinding(value) || isSignal(value) || isStream(value)) {
       const bound =
@@ -139,6 +139,7 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
         }
       } else {
         if (bound) {
+          console.log("setting binding", element, key, value);
           const cancel = effect([bound], (value) => {
             setProp(element, key, value);
           });
@@ -146,6 +147,7 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
         }
       }
     } else {
+      console.log("setting prop", element, key, value);
       setProp(element, key, value);
     }
   }
@@ -170,7 +172,7 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
     renderStaticChildren(
       element,
       vnode.children as Exclude<Signal<any>, Children>,
-      context
+      context,
     );
   }
 
@@ -180,7 +182,7 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
 /** Render a view tree, binding reactive data sources.  */
 export const render = (
   vnode: VNode | string | undefined | null,
-  context: RenderContext = {}
+  context: RenderContext = {},
 ): Node => {
   if (vnode == null) {
     return document.createTextNode("");
@@ -199,7 +201,7 @@ const isEventKey = (key: string) => key.startsWith("@");
 const readEventNameFromEventKey = (key: string) => {
   if (!isEventKey(key)) {
     throw new TypeError(
-      `Invalid event key: ${key}. Event keys must start with "@".`
+      `Invalid event key: ${key}. Event keys must start with "@".`,
     );
   }
   return key.slice(1);
@@ -214,9 +216,9 @@ const setProp = (element: Element, key: string, value: any) => {
 const renderStaticChildren = (
   element: Element,
   children: Array<VNode | string>,
-  context: RenderContext
+  context: RenderContext,
 ) => {
-  for (const child of children) {
+  for (const child of children || []) {
     if (typeof child === "string") {
       element.appendChild(document.createTextNode(child));
     } else {
@@ -246,7 +248,7 @@ export type IdentifiedChild = Element & { [__id__]?: any };
 export const renderDynamicChildren = (
   parent: Element,
   template: VNode | Function,
-  states: Signal<unknown> | any
+  states: Signal<unknown> | any,
 ) => {
   return effect([states], (states) => {
     // If states is not iterable, do nothing.
@@ -259,7 +261,7 @@ export const renderDynamicChildren = (
     // item will not be efficiently re-rendered by identity, but it will
     // still work.
     const statesById = new Map(
-      gmap(states, (state) => [state.id ?? cid(), state])
+      gmap(states, (state) => [state.id ?? cid(), state]),
     );
 
     // Build an index of children and a list of children to remove.
@@ -291,7 +293,7 @@ export const renderDynamicChildren = (
         const childContext = statesById.get(id);
         const keyedChild = render(
           typeof template === "function" ? template(childContext) : template,
-          childContext
+          childContext,
         ) as IdentifiedChild;
         keyedChild[__id__] = id;
         insertElementAt(parent, keyedChild, index);
@@ -310,7 +312,7 @@ export const renderDynamicChildren = (
 export const insertElementAt = (
   parent: Element,
   element: Element,
-  index: number
+  index: number,
 ) => {
   const elementAtIndex = parent.children[index];
   if (elementAtIndex === element) {
