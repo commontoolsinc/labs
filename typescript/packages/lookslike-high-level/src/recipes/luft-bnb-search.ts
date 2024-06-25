@@ -1,10 +1,11 @@
 import { view, tags } from "@commontools/common-ui";
 import { signal, stream } from "@commontools/common-frp";
 import { generateData } from "@commontools/llm-client";
-import { recipe, NAME } from "../recipe.js";
+import { Gem, recipe, NAME, addSuggestion, description } from "../recipe.js";
+import { sagaLink } from "../components/saga-link.js";
 import { mockResultClient } from "../llm-client.js";
 const { binding, repeat } = view;
-const { vstack, hstack, div, commonInput, button, input } = tags;
+const { vstack, hstack, div, commonInput, button, input, include } = tags;
 const { state, computed } = signal;
 const { subject } = stream;
 
@@ -63,7 +64,7 @@ export const luftBnBSearch = recipe(
     const summaryUI = computed(
       [places, startDate, endDate],
       (places: LuftBnBPlace[], startDate, endDate) => {
-        if (!places.length) return div({}, ["Calculating..."]);
+        if (!places.length) return div({}, ["Searching..."]);
         const place = places[0];
         return vstack({}, [
           `${place.propertyType}, ${startDate}-${endDate} in ${place.location}. ` +
@@ -188,3 +189,56 @@ async function performLuftBnBSearch(location: string): Promise<LuftBnBPlace[]> {
   );
   return result as LuftBnBPlace[];
 }
+
+const makeLuftBnBSearch = recipe(
+  "book luftBnB for reservation",
+  ({ reservation }) => {
+    const luftBnB: signal.Signal<Gem> = computed(
+      [reservation],
+      ({ date, location }) => {
+        console.log("Making LuftBnB search for", date.get(), location.get());
+        const startDate = computed(
+          [date],
+          (date: string) =>
+            new Date(new Date(date).getTime() - 86400)
+              .toISOString()
+              .split("T")[0]
+        );
+        const endDate = computed(
+          [date],
+          (date: string) =>
+            new Date(new Date(date).getTime() + 86400)
+              .toISOString()
+              .split("T")[0]
+        );
+
+        return luftBnBSearch({
+          startDate,
+          endDate,
+          location,
+        });
+      }
+    );
+
+    return {
+      UI: vstack({}, [
+        sagaLink({ saga: luftBnB }),
+        include({
+          // TODO: This should be a computed, but we can't yet flatten computed values
+          content: luftBnB.get().summaryUI,
+        }),
+      ]),
+      reservation,
+      luftBnBSearch: luftBnB,
+    };
+  }
+);
+
+addSuggestion({
+  description: description`Book LuftBnB for ${"reservation"}`,
+  recipe: makeLuftBnBSearch,
+  bindings: {},
+  dataGems: {
+    reservation: "reservation",
+  },
+});
