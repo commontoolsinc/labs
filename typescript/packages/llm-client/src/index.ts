@@ -1,4 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk";
+export * from './dummy-data.js'
 
 type Tool = Anthropic.Messages.Tool & {
   implementation: (input: any) => Promise<string> | string;
