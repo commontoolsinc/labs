@@ -44,8 +44,9 @@ export const recipe = (
         isSignal(value) ? value : signal.state(value),
       ])
     );
-    const outputs = impl(inputsAsSignals);
-    return { [ID]: id++, [TYPE]: type, ...outputs };
+    const newId = id++;
+    const outputs = impl({ ...inputsAsSignals, id: newId });
+    return { [ID]: newId, [TYPE]: type, ...outputs };
   };
 };
 
