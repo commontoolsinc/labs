@@ -195,6 +195,7 @@ notalk;justgo
     console.error("Failed to parse LLM response:", error);
     return [];
   }
+  console.log("LLM response:", matchedIndices);
 
   return matchedIndices
     .filter((item) => item.confidence > MINIMUM_CONFIDENCE)
