@@ -28,7 +28,7 @@ export const toolSpec: ChatCompletionTool[] = [
     function: {
       name: "addCodeNode",
       description:
-        "Add a data transformation node to the graph written in javascript, write only the function body.",
+        "Add a data transformation node to the graph written in javascript, write only the function body. No comments.",
       parameters: {
         type: "object",
         properties: {
