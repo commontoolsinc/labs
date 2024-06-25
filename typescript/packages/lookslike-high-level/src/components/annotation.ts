@@ -8,7 +8,7 @@ export const annotation = ({
   target,
   data,
 }: {
-  query: signal.Signal<string>;
+  query: signal.Signal<string> | string;
   target: number;
   data: { [key: string]: signal.Signal<any> };
 }) => {

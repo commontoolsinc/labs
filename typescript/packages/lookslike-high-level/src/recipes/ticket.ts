@@ -1,6 +1,6 @@
 import { recipe, NAME } from "../recipe.js";
 
-export const reservation = recipe("reservation", (bindings) => ({
+export const ticket = recipe("ticket", (bindings) => ({
   [NAME]: bindings.title,
   ...bindings,
 }));
