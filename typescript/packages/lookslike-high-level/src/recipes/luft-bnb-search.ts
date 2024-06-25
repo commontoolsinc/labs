@@ -3,6 +3,7 @@ import { signal, stream, Sendable } from "@commontools/common-frp";
 import { generateData } from "@commontools/llm-client";
 import { Gem, recipe, NAME, addSuggestion, description } from "../recipe.js";
 import { sagaLink } from "../components/saga-link.js";
+import { addGems } from "../data.js";
 import { mockResultClient } from "../llm-client.js";
 const { binding, repeat } = view;
 const { vstack, hstack, div, commonInput, button, input, include } = tags;
@@ -55,17 +56,21 @@ export const luftBnBSearch = recipe(
     );
 
     const book = subject<{ id: string }>();
+    const booking = state<Gem | undefined>(undefined);
     book.sink({
-      send: ({ id }) =>
-        console.log(
-          "Booked",
-          places.get().find((place) => place.id === id)
-        ),
+      send: ({ id }) => {
+        const place = places.get().find((place) => place.id === id);
+        const newBooking = luftBnBBooking({ place, startDate, endDate });
+        addGems([newBooking]);
+        booking.send(newBooking);
+        console.log("Booked", place);
+      },
     });
 
     const summaryUI = computed(
-      [places, startDate, endDate],
-      (places: LuftBnBPlace[], startDate, endDate) => {
+      [booking, places, startDate, endDate],
+      (booking, places: LuftBnBPlace[], startDate, endDate) => {
+        if (booking) return booking.UI;
         if (!places.length) return div({}, ["Searching..."]);
         const place = places[0];
         return vstack({}, [
@@ -79,53 +84,77 @@ export const luftBnBSearch = recipe(
     );
 
     return {
-      UI: vstack({}, [
-        hstack({}, [
-          input({
-            type: "date",
-            value: startDate,
-            placeholder: "Type of place",
-            "@common-input#value": startDate,
-          }),
-          input({
-            type: "date",
-            value: endDate,
-            placeholder: "Type of place",
-            "@common-input#value": endDate,
-          }),
-        ]),
-        commonInput({
-          value: location,
-          placeholder: "Location",
-          "@common-input#value": location,
-        }),
-        button({ "@click": search }, ["Search"]),
-        vstack(
-          {},
-          repeat(
-            summaries,
-            vstack({}, [
-              div({}, binding("name")),
-              div({}, binding("description")),
-              div({}, binding("location")),
-              div({}, binding("rating")),
-              include({ content: binding("annotationUI") }),
-              button({ "@click": book, id: binding("id") }, binding("bookFor")),
+      UI: computed([booking], (booking) =>
+        booking
+          ? include({ content: booking.UI })
+          : vstack({}, [
+              hstack({}, [
+                input({
+                  type: "date",
+                  value: startDate,
+                  placeholder: "Type of place",
+                  "@common-input#value": startDate,
+                }),
+                input({
+                  type: "date",
+                  value: endDate,
+                  placeholder: "Type of place",
+                  "@common-input#value": endDate,
+                }),
+              ]),
+              commonInput({
+                value: location,
+                placeholder: "Location",
+                "@common-input#value": location,
+              }),
+              button({ "@click": search }, ["Search"]),
+              vstack(
+                {},
+                repeat(
+                  summaries,
+                  vstack({}, [
+                    div({}, binding("name")),
+                    div({}, binding("description")),
+                    div({}, binding("location")),
+                    div({}, binding("rating")),
+                    include({ content: binding("annotationUI") }),
+                    button(
+                      { "@click": book, id: binding("id") },
+                      binding("bookFor")
+                    ),
+                  ])
+                )
+              ),
             ])
-          )
-        ),
-      ]),
+      ),
       summaryUI: summaryUI,
       startDate,
       endDate,
       location,
       places,
+      booking,
       [NAME]: computed(
         [location, startDate, endDate],
         (location, startDate: string, endDate: string) =>
           `LuftBnB ${startDate.slice(5)} - ${endDate.slice(5)} in ${location || "anywhere"}`
       ),
     };
+  }
+);
+
+export const luftBnBBooking = recipe(
+  "LuftBnB booking",
+  ({ place, startDate, endDate }) => {
+    const text = computed(
+      [place, startDate, endDate],
+      (place: LuftBnBPlace, startDate, endDate) =>
+        `Booked ${place.title} LuftBnB from ${startDate} to ${endDate} for $${place.pricePerNight} per night`
+    );
+    const name = computed(
+      [place],
+      (place: LuftBnBPlace) => `Booking for LuftBnB in ${place.location}`
+    );
+    return { UI: div({}, text), [NAME]: name, place, startDate, endDate };
   }
 );
 
