@@ -143,7 +143,7 @@ export const luftBnBSearch = recipe(
 );
 
 export const luftBnBBooking = recipe(
-  "LuftBnB booking",
+  "booking",
   ({ place, startDate, endDate }) => {
     const text = computed(
       [place, startDate, endDate],

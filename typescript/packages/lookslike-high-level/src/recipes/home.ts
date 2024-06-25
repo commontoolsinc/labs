@@ -3,6 +3,7 @@ import { signal } from "@commontools/common-frp";
 import { recipe, Gem, ID } from "../recipe.js";
 import { sagaLink } from "../components/saga-link.js";
 import { recipeLink } from "../components/recipe-link.js";
+import { annotation } from "../components/annotation.js";
 const { binding, repeat } = view;
 const { vstack } = tags;
 
@@ -34,6 +35,11 @@ export const home = recipe("home screen", ({ sagas, recipes }) => {
         {},
         repeat(recipesWithIDs, recipeLink({ recipe: binding("recipe") }))
       ),
+      annotation({
+        query: "dream fun things to explore",
+        target: -1,
+        data: { sagas, recipes },
+      }),
     ]),
   };
 });
