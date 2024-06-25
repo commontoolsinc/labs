@@ -5,6 +5,7 @@ import {
   recipe,
   Recipe,
   Gem,
+  ID,
   TYPE,
   NAME,
   suggestions,
@@ -31,51 +32,58 @@ const { subject } = stream;
  * supplied data.
  */
 
-export const annotation = recipe("annotation", ({ "?": query, ...data }) => {
-  const suggestion: Signal<Result | undefined> = state(undefined);
+export const annotation = recipe(
+  "annotation",
+  ({ "?": query, ".": target, ...data }) => {
+    const suggestion = state<Result | undefined>(undefined);
 
-  effect([dataGems, query], async (dataGems, query: string) => {
-    if (dataGems.length === 0) return;
-    const guess = await findSuggestion(
-      dataGems,
-      suggestions,
-      query,
-      Object.keys(data),
-    );
-    suggestion.send(guess);
-  });
-
-  const acceptSuggestion = subject<any>();
-  const acceptedSuggestion = state<Result | undefined>(undefined);
-  acceptSuggestion.sink({
-    send: () => {
-      acceptedSuggestion.send(suggestion.get());
-    },
-  });
-
-  const UI = computed(
-    [suggestion, acceptedSuggestion],
-    (suggestion, acceptedSuggestion) => {
-      if (acceptedSuggestion) {
-        const acceptedRecipe = acceptedSuggestion.recipe;
-        const accepted = acceptedRecipe({
-          ...data,
-          ...acceptedSuggestion.boundGems,
-        });
-        return include({ content: accepted.UI });
-      } else if (suggestion) {
-        return tags.suggestions({
-          suggestions: [{ id: 1, title: suggestion.description }],
-          "@select-suggestion": acceptSuggestion,
-        });
-      } else {
-        return undefined;
+    effect(
+      [dataGems, query, target],
+      async (dataGems, query: string, target: number) => {
+        if (dataGems.length === 0) return;
+        const guess = await findSuggestion(
+          dataGems,
+          suggestions,
+          query,
+          Object.keys(data),
+          [target]
+        );
+        suggestion.send(guess);
       }
-    },
-  );
+    );
 
-  return { UI };
-});
+    const acceptSuggestion = subject<any>();
+    const acceptedSuggestion = state<Result | undefined>(undefined);
+    acceptSuggestion.sink({
+      send: () => {
+        acceptedSuggestion.send(suggestion.get());
+      },
+    });
+
+    const UI = computed(
+      [suggestion, acceptedSuggestion],
+      (suggestion, acceptedSuggestion) => {
+        if (acceptedSuggestion) {
+          const acceptedRecipe = acceptedSuggestion.recipe;
+          const accepted = acceptedRecipe({
+            ...data,
+            ...acceptedSuggestion.boundGems,
+          });
+          return include({ content: accepted.UI });
+        } else if (suggestion) {
+          return tags.suggestions({
+            suggestions: [{ id: 1, title: suggestion.description }],
+            "@select-suggestion": acceptSuggestion,
+          });
+        } else {
+          return undefined;
+        }
+      }
+    );
+
+    return { UI };
+  }
+);
 
 type Result = {
   recipe: Recipe;
@@ -88,19 +96,20 @@ async function findSuggestion(
   suggestions: Suggestion[],
   query: string,
   data: string[],
+  ignoreList: number[]
 ): Promise<Result | undefined> {
   // Use LLM to match query to data gems
-  const matchedGems = await matchGemsWithLLM(dataGems, query);
+  const matchedGems = await matchGemsWithLLM(dataGems, query, ignoreList);
 
   // Filter to only compatible suggestions
   const suggestion = suggestions.find(
     (suggestion) =>
       Object.values(suggestion.dataGems).every((type) =>
-        matchedGems.find((gem) => gem[TYPE] === type),
+        matchedGems.find((gem) => gem[TYPE] === type)
       ) &&
       Object.values(suggestion.bindings).every((binding) =>
-        data.includes(binding),
-      ),
+        data.includes(binding)
+      )
   );
 
   if (suggestion) {
@@ -110,7 +119,7 @@ async function findSuggestion(
     ]) as [[string, Gem]];
 
     const nameBindings = Object.fromEntries(
-      bindings.map(([key, gem]) => [key, getNameFromGem(gem)]),
+      bindings.map(([key, gem]) => [key, getNameFromGem(gem)])
     );
     const gemBindings = Object.fromEntries(bindings);
 
@@ -134,7 +143,10 @@ type LLMSuggestion = {
 async function matchGemsWithLLM(
   dataGems: Gem[],
   query: string,
+  ignoreList: number[] = []
 ): Promise<Gem[]> {
+  dataGems = dataGems.filter((gem) => !ignoreList.includes(gem[ID]));
+
   const gemInfo = dataGems.map((gem) => ({
     name: getNameFromGem(gem),
     type: gem[TYPE],
@@ -174,7 +186,7 @@ notalk;justgo
       "Suggestion",
       query,
       matchedIndices,
-      matchedIndices.map((item) => dataGems[item.index]),
+      matchedIndices.map((item) => dataGems[item.index])
     );
   } catch (error) {
     console.error("Failed to parse LLM response:", error);
