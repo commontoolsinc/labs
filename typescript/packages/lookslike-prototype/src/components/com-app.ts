@@ -20,6 +20,10 @@ import { plan, prepareSteps } from "../agent/plan.js";
 import { processUserInput } from "../agent/llm.js";
 import { codePrompt } from "../agent/implement.js";
 import { suggestions, thoughtLog } from "../agent/model.js";
+import { LLMClient, LlmTool } from "@commontools/llm-client";
+import { LLM_SERVER_URL } from "../llm-client.js";
+import { ChatCompletionTool } from "openai/resources/index.mjs";
+import { toolSpec } from "../agent/tools.js";
 
 const lastFmKey = "0060ba224307ff9f787deb837f4be376";
 
@@ -41,15 +45,38 @@ export class ComApp extends LitElement {
     cancellation: []
   };
 
+  generateToolSpec(
+    toolSpec: ChatCompletionTool[],
+    implementations: { [key: string]: (...inputs: any) => Promise<string> }
+  ): LlmTool[] {
+    return toolSpec.map(tool => {
+      const functionName = tool.function.name;
+      const implementation = implementations[functionName];
+
+      const { parameters, ...rest } = tool.function;
+
+      if (implementation) {
+        return {
+          ...rest,
+          input_schema: parameters as any,
+          implementation
+        };
+      } else {
+        console.warn(`No implementation found for function: ${functionName}`);
+        return null;
+      }
+    }).filter(v => v !== null);
+  }
+
   availableFunctions(graph: Recipe) {
     const updateGraph = this.updateGraph.bind(this);
 
     return {
-      listNodes: () => {
+      listNodes: async () => {
         console.log("listNodes", this.graph);
         return JSON.stringify(this.graph);
       },
-      addConnection: ({
+      addConnection: async ({
         from,
         to
       }: {
@@ -71,7 +98,7 @@ export class ComApp extends LitElement {
         updateGraph(graph);
         return `Added connection from ${from} to ${to}.\n${this.graphSnapshot()}`;
       },
-      addCodeNode: (props: { id: string; code: string }) => {
+      addCodeNode: async (props: { id: string; code: string }) => {
         console.log("addCodeNode", props);
         const { id, code } = props;
 
@@ -91,7 +118,7 @@ export class ComApp extends LitElement {
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addUiNode: (props: { id: string; uiTree: object }) => {
+      addUiNode: async (props: { id: string; uiTree: object }) => {
         console.log("addUiNode", props);
         const { id, uiTree } = props;
 
@@ -110,7 +137,7 @@ export class ComApp extends LitElement {
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addGlslShaderNode: ({
+      addGlslShaderNode: async ({
         id,
         shaderToyCode
       }: {
@@ -128,7 +155,7 @@ export class ComApp extends LitElement {
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addFetchNode: ({ id, url }: { id: string; url: string }) => {
+      addFetchNode: async ({ id, url }: { id: string; url: string }) => {
         console.log("addFetchNode", id, url);
         graph.push({
           id,
@@ -142,7 +169,7 @@ export class ComApp extends LitElement {
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addEventNode: ({ id }: { id: string }) => {
+      addEventNode: async ({ id }: { id: string }) => {
         console.log("addEventNode", id);
         graph.push({
           id,
@@ -156,7 +183,7 @@ export class ComApp extends LitElement {
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addStorageNode: ({ id, address }: { id: string; address: string }) => {
+      addStorageNode: async ({ id, address }: { id: string; address: string }) => {
         console.log("addStorageNode", id);
         graph.push({
           id,
@@ -170,7 +197,7 @@ export class ComApp extends LitElement {
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addClockNode: ({ id }: { id: string }) => {
+      addClockNode: async ({ id }: { id: string }) => {
         console.log("addEventNode", id);
         graph.push({
           id,
@@ -184,7 +211,7 @@ export class ComApp extends LitElement {
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addLanguageModelNode: ({
+      addLanguageModelNode: async ({
         id,
         promptSource
       }: {
@@ -206,7 +233,7 @@ export class ComApp extends LitElement {
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addImageGenerationNode: ({
+      addImageGenerationNode: async ({
         id,
         promptSource
       }: {
@@ -228,7 +255,7 @@ export class ComApp extends LitElement {
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addMusicSearchNode: ({ id, query }: { id: string; query: string }) => {
+      addMusicSearchNode: async ({ id, query }: { id: string; query: string }) => {
         console.log("addMusicSearchNode", id, query);
         graph.push({
           id,
@@ -260,7 +287,7 @@ export class ComApp extends LitElement {
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      deleteNode: ({ id }: { id: string }) => {
+      deleteNode: async ({ id }: { id: string }) => {
         console.log("deleteNode", id);
         const index = graph.findIndex((n) => n.id === id);
         graph.splice(index, 1);
@@ -305,19 +332,23 @@ export class ComApp extends LitElement {
     const spec = await plan(userInput, prepareSteps(userInput, this.graph));
     const finalPlan = spec?.[spec?.length - 1];
     console.log("finalPlan", finalPlan);
-    const input = `Implement the following plan using the available tools: ${finalPlan?.content}
+    const input = `Implement the following plan using the available tools: ${finalPlan}
     ---
-    Current graph: ${this.graphSnapshot()}`;
+    Current graph (may be empty): ${this.graphSnapshot()}`;
 
     const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
+    // const systemContext = ``
 
     this.graph = newGraph;
 
-    const result = await processUserInput(
-      input,
-      codePrompt + systemContext,
-      this.availableFunctions(newGraph)
-    );
+    const client = new LLMClient({
+      serverUrl: LLM_SERVER_URL,
+      tools: this.generateToolSpec(toolSpec, this.availableFunctions(this.graph)),
+      system: codePrompt + systemContext
+    });
+
+    const thread = await client.createThread(input)
+    const result = thread.conversation[thread.conversation.length - 1];
 
     console.log("result", result);
   }

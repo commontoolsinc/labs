@@ -43,7 +43,7 @@ export const toolSpec: ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "addUiNode",
-      description: "Adds a UI node written using a hyperscript tree.",
+      description: "Adds a UI node written using a hyperscript tree. Only use span, ul, button and h1 elements for now.",
       parameters: {
         type: "object",
         properties: {

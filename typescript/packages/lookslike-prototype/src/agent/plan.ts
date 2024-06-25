@@ -7,10 +7,50 @@ import { recordThought, suggestions, updateThought } from "./model.js";
 import { Recipe } from "../data.js";
 import { codePrompt } from "./implement.js";
 import { describeTools, toolSpec } from "./tools.js";
+import { LLMClient } from '@commontools/llm-client'
+import { LLM_SERVER_URL } from "../llm-client.js";
 
 type Conversation = ChatCompletionMessageParam[];
 
 export async function plan(userInput: string, steps: string[]) {
+  const logId = `plan[${userInput}]`;
+  console.group(logId);
+
+  if (steps.length === 0) {
+    console.warn("No steps in plan");
+    return;
+  }
+  const client = new LLMClient({
+    serverUrl: LLM_SERVER_URL,
+    tools: [],
+    system: `${codePrompt} ${steps[0]}`
+  });
+
+  await recordThought({ role: "system", content: client.system });
+  await recordThought({ role: "user", content: steps[1] });
+  const thread = await client.createThread(steps[1]);
+  await recordThought({ role: "assistant", content: thread.conversation[thread.conversation.length - 1] });
+
+  let idx = 2;
+
+  let running = true;
+  while (running) {
+    const step = steps[idx]
+    console.log('run step', idx, step)
+    if (idx >= steps.length - 1) {
+      running = false;
+      break;
+    }
+    await recordThought({ role: "user", content: step });
+    const message = await thread.sendMessage(step);
+    await recordThought({ role: "assistant", content: message });
+    idx++;
+  }
+
+  return thread.conversation;
+}
+
+export async function planGpt(userInput: string, steps: string[]) {
   const logId = `plan[${userInput}]`;
   console.group(logId);
 
