@@ -33,31 +33,36 @@ export async function run(
 
   console.log("Instantiating the module");
 
-  const module = await rt.eval(
-    id,
-    evalMode,
-    "text/javascript",
-    code(src),
-    new Input(storage, Object.keys(inputs))
-  );
+  try {
+    const module = await rt.eval(
+      id,
+      evalMode,
+      "text/javascript",
+      code(src),
+      new Input(storage, Object.keys(inputs))
+    );
 
-  for (const key in inputs) {
-    const value = inputs[key];
-    if (value === null || value === undefined) {
-      throw new Error(`Input ${key} is null or undefined`);
+    for (const key in inputs) {
+      const value = inputs[key];
+      if (value === null || value === undefined) {
+        throw new Error(`Input ${key} is null or undefined`);
+      }
+      await storage.write(key, { tag: "string", val: JSON.stringify(value) });
     }
-    await storage.write(key, { tag: "string", val: JSON.stringify(value) });
-  }
 
-  console.log("Running the module:");
-  await module.run();
-  const output = module.output(["__result__"]);
-  console.groupEnd();
-  const returnValue = await output.read("__result__");
-  if (!returnValue) {
-    return null;
+    console.log("Running the module:");
+    await module.run();
+    const output = module.output(["__result__"]);
+    console.groupEnd();
+    const returnValue = await output.read("__result__");
+    if (!returnValue) {
+      return null;
+    }
+    return JSON.parse(returnValue.value.val);
+  } catch (e) {
+    console.warn('eval failed', e);
+    return 0
   }
-  return JSON.parse(returnValue.value.val);
 }
 
 const code = (src: string) => `

@@ -4,7 +4,7 @@ import { Anthropic } from "./deps.ts";
 export async function processTools(
   message: Anthropic.Messages.ContentBlock[],
   toolImpls: ToolImpls,
-  toolCalls: Anthropic.Messages.ToolUseBlock[]
+  toolCalls: Anthropic.Messages.ToolUseBlock[],
 ) {
   const calls = toolCalls.map(async (tool) => {
     const input = tool.input as any;
@@ -47,7 +47,9 @@ export async function processTools(
   return undefined;
 }
 
-export const tools: Anthropic.Messages.Tool[] = [
+export const serverTools: Anthropic.Messages.Tool[] = [];
+
+export const debugTools: Anthropic.Messages.Tool[] = [
   {
     name: "extractSemanticTriples",
     description: "Extract RDF triples from a given text",
@@ -476,7 +478,7 @@ export const toolImpls: ToolImpls = {
 
       Now, extract and format RDF triples from the following text:
 
-      <input>${input.text}</input> for use in the javascript client of https://github.com/tonsky/datascript.`
+      <input>${input.text}</input> for use in the javascript client of https://github.com/tonsky/datascript.`,
     );
   },
   rhyme: async (input: { word: string }) => {
@@ -485,12 +487,12 @@ export const toolImpls: ToolImpls = {
   summarize: async (input: { text: string }) => {
     return await single(
       `Summarize the following text in a single paragraph: ${input.text}`,
-      HAIKU
+      HAIKU,
     );
   },
   sentimentAnalysis: async (input: { text: string }) => {
     return await single(
-      `Analyze the sentiment of the following text: ${input.text}`
+      `Analyze the sentiment of the following text: ${input.text}`,
     );
   },
   exaggerate: async (input: { text: string }) => {
@@ -502,12 +504,12 @@ export const toolImpls: ToolImpls = {
   makeHappier: async (input: { text: string }) => {
     return await single(
       `Make the following text happier: ${input.text}`,
-      HAIKU
+      HAIKU,
     );
   },
   translateToFrench: async (input: { text: string }) => {
     return await single(
-      `Translate the following text to French: ${input.text}`
+      `Translate the following text to French: ${input.text}`,
     );
   },
   countWords: async (input: { text: string }) => {
@@ -521,18 +523,18 @@ export const toolImpls: ToolImpls = {
   },
   convertToPigLatin: async (input: { text: string }) => {
     return await single(
-      `Convert the following text to Pig Latin: ${input.text}`
+      `Convert the following text to Pig Latin: ${input.text}`,
     );
   },
   addEmojis: async (input: { text: string }) => {
     return await single(
-      `Add relevant emojis to the following text: ${input.text}`
+      `Add relevant emojis to the following text: ${input.text}`,
     );
   },
   convertToLeetSpeak: async (input: { text: string }) => {
     return await single(
       `Convert the following text to Leet Speak: ${input.text}`,
-      HAIKU
+      HAIKU,
     );
   },
   generateAcronym: async (input: { text: string }) => {
@@ -551,24 +553,24 @@ export const toolImpls: ToolImpls = {
   },
   convertToMorseCode: async (input: { text: string }) => {
     return await single(
-      `Convert the following text to Morse code: ${input.text}`
+      `Convert the following text to Morse code: ${input.text}`,
     );
   },
   emphasizeKeywords: async (input: { text: string }) => {
     return await single(
-      `Emphasize important keywords in the following text: ${input.text}`
+      `Emphasize important keywords in the following text: ${input.text}`,
     );
   },
   generateHashtags: async (input: { text: string }) => {
     return await single(
       `Generate relevant hashtags for the following text: ${input.text}`,
-      HAIKU
+      HAIKU,
     );
   },
   convertToCamelCase: async (input: { text: string }) => {
     return input.text
       .replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) =>
-        index === 0 ? word.toLowerCase() : word.toUpperCase()
+        index === 0 ? word.toLowerCase() : word.toUpperCase(),
       )
       .replace(/\s+/g, "");
   },

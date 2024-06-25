@@ -1,7 +1,7 @@
 import { Anthropic } from "./deps.ts";
 import { processStream } from "./stream.ts";
 import { toolImpls } from "./tools.ts";
-import { tools, ToolImpls, processTools } from "./tools.ts";
+import { serverTools, ToolImpls, processTools } from "./tools.ts";
 
 const anthropic = new Anthropic({
   apiKey: Deno.env.get("ANTHROPIC_API_KEY"),
@@ -39,7 +39,7 @@ export async function single(text: string, model: string = SONNET) {
 export async function ask(
   initialConversation: Anthropic.Messages.MessageParam[] = [],
   systemPrompt: string = "",
-  activeTools: Anthropic.Messages.Tool[]
+  activeTools: Anthropic.Messages.Tool[],
 ) {
   const conversation: Anthropic.Messages.MessageParam[] = [
     ...initialConversation,
@@ -54,7 +54,7 @@ export async function ask(
       messages: conversation,
       system: systemPrompt,
       model: SONNET,
-      tools: [...activeTools, ...tools],
+      tools: [...activeTools, ...serverTools],
     });
 
     const { message, stopReason } = await processStream(stream);
@@ -77,7 +77,8 @@ export async function ask(
 
     if (stopReason === "tool_use") {
       const toolCalls = message.filter(
-        (msg): msg is Anthropic.Messages.ToolUseBlock => msg.type === "tool_use"
+        (msg): msg is Anthropic.Messages.ToolUseBlock =>
+          msg.type === "tool_use",
       );
 
       // split out the tool calls that are for the client from those for the server
@@ -93,7 +94,7 @@ export async function ask(
         [[], []] as [
           Anthropic.Messages.ToolUseBlock[],
           Anthropic.Messages.ToolUseBlock[],
-        ]
+        ],
       );
 
       console.log("Server tools", serverToolCalls);

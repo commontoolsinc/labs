@@ -26,6 +26,18 @@ export * as ComModuleStorage from "./components/modules/com-module-storage.js";
 
 export * as ComApp from "./components/com-app.js";
 
+import { LLMClient } from "@commontools/llm-client";
 import { activateServiceWorker } from "@commontools/usuba-rt";
+import { LLM_SERVER_URL } from "./llm-client.js";
 
 await activateServiceWorker();
+
+// const client = new LLMClient({
+//   serverUrl: LLM_SERVER_URL,
+//   tools: [],
+//   system: "",
+// });
+
+// const thread = await client.createThread("Hello, world!");
+// await thread.sendMessage("What is the meaning of life?");
+// await thread.sendMessage("Woah, really?");

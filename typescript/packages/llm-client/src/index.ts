@@ -1,13 +1,13 @@
 import { Anthropic } from "@anthropic-ai/sdk";
 export * from './dummy-data.js'
 
-type Tool = Anthropic.Messages.Tool & {
+export type LlmTool = Anthropic.Messages.Tool & {
   implementation: (input: any) => Promise<string> | string;
 };
 
 export interface ClientConfig {
   serverUrl: string;
-  tools: Tool[];
+  tools: LlmTool[];
   system?: string;
 }
 
@@ -24,19 +24,24 @@ export class ConversationThread {
     this.conversation = conversation;
   }
 
-  async sendMessage(message: string): Promise<string> {
-    let response: AppendThreadResponse;
-
-    if (this.pendingToolCalls) {
-      const toolResponses = await this.handleToolCalls(this.pendingToolCalls);
-      response = await this.client.continueThread(
-        this.id,
-        undefined,
-        toolResponses,
-      );
-    } else {
-      response = await this.client.continueThread(this.id, message);
+  async processQueuedToolCalls() {
+    if (!this.pendingToolCalls || this.pendingToolCalls.length === 0) {
+      return;
     }
+    const toolResponses = await this.handleToolCalls(this.pendingToolCalls);
+    const response = await this.client.continueThread(
+      this.id,
+      undefined,
+      toolResponses,
+    );
+    return response;
+  }
+
+  async sendMessage(message: string): Promise<string> {
+    const response: AppendThreadResponse = await this.client.continueThread(
+      this.id,
+      message,
+    );
 
     this.conversation.push(`User: ${message}`);
     let assistantResponse = "";
@@ -51,6 +56,8 @@ export class ConversationThread {
       this.pendingToolCalls = [];
     }
 
+    await this.processQueuedToolCalls();
+
     this.conversation.push(`Assistant: ${assistantResponse}`);
     return assistantResponse;
   }
@@ -58,6 +65,8 @@ export class ConversationThread {
   private async handleToolCalls(
     toolCalls: Anthropic.Messages.ToolUseBlockParam[],
   ): Promise<ToolResponse[]> {
+    console.log("Handling tool calls", toolCalls);
+
     return await Promise.all(
       toolCalls.map(async (toolCall) => ({
         type: "tool_result",
@@ -76,7 +85,7 @@ export class ConversationThread {
 
 export class LLMClient {
   private serverUrl: string;
-  private tools: Tool[];
+  private tools: LlmTool[];
   private system: string;
 
   constructor(config: ClientConfig) {
@@ -124,6 +133,24 @@ export class LLMClient {
     if (response.pendingToolCalls && response.pendingToolCalls.length > 0) {
       // Instead of handling tool calls here, we set them as pending in the Thread
       (thread as any).pendingToolCalls = response.pendingToolCalls;
+    }
+
+    let toolResponse: AppendThreadResponse | undefined;
+    let running = true;
+
+    while (running) {
+      toolResponse = await thread.processQueuedToolCalls();
+
+      if (toolResponse) {
+        thread.conversation.push(
+          `Assistant: ${toolResponse.assistantResponse}`,
+        );
+
+        (thread as any).pendingToolCalls = toolResponse.pendingToolCalls;
+      } else {
+        running = false;
+        break;
+      }
     }
 
     return thread;
