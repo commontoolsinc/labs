@@ -5,6 +5,7 @@ const { state } = signal;
 
 import { todoList, makeTodoItem } from "./recipes/todo-list.js";
 import { localSearch } from "./recipes/local-search.js";
+import { luftBnBSearch } from "./recipes/luft-bnb-search.js";
 
 import "./recipes/todo-list-as-task.js"; // Necessary, so that suggestions are indexed.
 
@@ -44,4 +45,31 @@ export const recipes: RecipeManifest[] = [
     recipe: localSearch,
     inputs: { query: "", location: "" },
   },
+  {
+    name: "Find a LuftBnB place to stay",
+    recipe: luftBnBSearch,
+    inputs: { ...getFridayAndMondayDateStrings(), location: "" },
+  },
 ];
+
+// Helper for mock data
+function getFridayAndMondayDateStrings() {
+  const today = new Date();
+  const daysUntilFriday = (5 - today.getDay() + 7) % 7;
+
+  const nextFriday = new Date(
+    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000
+  );
+  const followingMonday = new Date(
+    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000
+  );
+
+  const formatDate = (date: Date): string => {
+    return date.toISOString().split("T")[0];
+  };
+
+  return {
+    startDate: formatDate(nextFriday),
+    endDate: formatDate(followingMonday),
+  };
+}
