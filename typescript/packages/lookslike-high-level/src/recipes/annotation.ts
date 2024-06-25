@@ -1,6 +1,6 @@
 import { tags } from "@commontools/common-ui";
 import { signal, stream } from "@commontools/common-frp";
-import { dataGems } from "../data.js";
+import { dataGems, openSaga } from "../data.js";
 import {
   recipe,
   Recipe,
@@ -13,7 +13,7 @@ import {
 } from "../recipe.js";
 import { effect } from "@commontools/common-frp/signal";
 import { suggestionClient } from "../llm-client.js";
-const { include } = tags;
+const { include, div } = tags;
 const { state, computed, isSignal } = signal;
 const { subject } = stream;
 
@@ -63,14 +63,19 @@ export const annotation = recipe(
     });
 
     const UI = computed(
-      [suggestion, acceptedSuggestion],
-      (suggestion, acceptedSuggestion) => {
+      [suggestion, acceptedSuggestion, target],
+      (suggestion, acceptedSuggestion, target) => {
         if (acceptedSuggestion) {
           const acceptedRecipe = acceptedSuggestion.recipe;
           const accepted = acceptedRecipe({
             ...data,
             ...acceptedSuggestion.boundGems,
           });
+          // HACK: -1 is home screen and so let's open a new tab
+          if (target === -1) {
+            openSaga(accepted);
+            return div({});
+          }
           return include({ content: accepted.UI });
         } else if (suggestion) {
           return tags.suggestions({
