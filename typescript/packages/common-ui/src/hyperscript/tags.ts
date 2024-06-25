@@ -6,7 +6,6 @@ export { record } from "../components/common-record.js";
 export { dict } from "../components/common-dict.js";
 export { datatable } from "../components/common-datatable.js";
 export { commonInput } from "../components/common-input.js";
-export { list } from "../components/common-list.js";
 export { suggestions } from "../components/common-suggestions.js";
 export { unibox } from "../components/common-unibox.js";
 export { todo } from "../components/common-todo.js";

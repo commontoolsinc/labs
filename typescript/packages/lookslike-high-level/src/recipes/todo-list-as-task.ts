@@ -65,7 +65,7 @@ export const todoListAsTask = recipe("todo list as task", ({ list, done }) => {
 
   const UI = details({}, [
     summary({}, [
-      vstack({}, [sagaLink({ saga: list }), span({}, listSummary)]),
+      vstack({gap: 'sm'}, [sagaLink({ saga: list }), span({}, listSummary)]),
     ]),
     include({ content: fullUI }),
   ]);

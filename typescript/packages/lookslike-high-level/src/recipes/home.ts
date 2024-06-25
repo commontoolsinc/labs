@@ -4,7 +4,7 @@ import { recipe, Gem, ID } from "../recipe.js";
 import { sagaLink } from "../components/saga-link.js";
 import { recipeLink } from "../components/recipe-link.js";
 const { binding, repeat } = view;
-const { list, vstack } = tags;
+const { vstack } = tags;
 
 export const home = recipe("home screen", ({ sagas, recipes }) => {
   const sagasWithIDs = signal.computed(
@@ -26,7 +26,7 @@ export const home = recipe("home screen", ({ sagas, recipes }) => {
   );
 
   return {
-    UI: list({}, [
+    UI: vstack({}, [
       vstack({}, repeat(sagasWithIDs, sagaLink({ saga: binding("saga") }))),
       vstack(
         {},
