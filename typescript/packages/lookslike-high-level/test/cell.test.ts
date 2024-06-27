@@ -35,6 +35,22 @@ describe("cell", () => {
     expect(b.get()).toBe(2);
   });
 
+  it("should work with get or send in the path", async () => {
+    const c = cell({ get: { send: 1 } });
+    expect(c.get.send.get()).toBe(1);
+    c.get.send.send(2);
+    await flushMicrotasks();
+    expect(c.get.send.get()).toBe(2);
+  });
+
+  it("should work for arrays as well", async () => {
+    const c = cell([1, 2, 3]);
+    expect(c[0].get()).toBe(1);
+    c[1].send(4);
+    await flushMicrotasks();
+    expect(c.get()).toStrictEqual([1, 4, 3]);
+  });
+
   it("should subscribe to updates", async () => {
     const c = cell<number>(1);
     let updated = false;

@@ -1,6 +1,13 @@
 import { state, WriteableSignal } from "@commontools/common-frp/signal";
 import { Sendable } from "@commontools/common-frp";
 
+/**
+ * A cell is a container for updatable state.
+ *
+ * Cell<T> is a proxy that allows direct access to members of T, returning
+ * scoped Cell<subset of T> instances, while still allowing .get(), .send() and
+ * .updates() on every element. Even foo.get.bar.get() works.
+ */
 export type Cell<T> = T extends (infer U)[]
   ? CellArray<U>
   : T extends object
