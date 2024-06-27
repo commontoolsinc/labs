@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { cell } from "../src/cell.js";
+import { isSignal, WriteableSignal } from "@commontools/common-frp/signal";
 
 // Utility function to flush microtasks
 function flushMicrotasks() {
@@ -60,5 +61,10 @@ describe("cell", () => {
     c.send(2);
     await flushMicrotasks();
     expect(updated).toEqual(true);
+  });
+
+  it("is still a signal", () => {
+    const c: WriteableSignal<number> = cell<number>(1);
+    expect(isSignal(c)).toBe(true);
   });
 });

@@ -1,5 +1,5 @@
 import { state, WriteableSignal } from "@commontools/common-frp/signal";
-import { Sendable } from "@commontools/common-frp";
+import { Sendable, Cancel } from "@commontools/common-frp";
 
 /**
  * A cell is a container for updatable state.
@@ -19,7 +19,7 @@ export type Cell<T> = T extends (infer U)[]
 type CellMethods<T> = {
   get: (() => T) & Cell<T>;
   send: ((value: T) => void) & Cell<T>;
-  updates: ((subscriber: Sendable<void>) => void) & Cell<T>;
+  updates: ((subscriber: Sendable<void>) => Cancel) & Cell<T>;
 };
 
 interface CellArray<T> extends Array<Cell<T>>, CellMethods<T[]> {}
