@@ -30,6 +30,9 @@ describe("cell", () => {
     b.send(2);
     await flushMicrotasks();
     expect(c.get()).toStrictEqual({ a: { b: 2 } });
+    expect(c.a.get()).toStrictEqual({ b: 2 });
+    expect(c.a.b.get()).toBe(2);
+    expect(b.get()).toBe(2);
   });
 
   it("should subscribe to updates", async () => {

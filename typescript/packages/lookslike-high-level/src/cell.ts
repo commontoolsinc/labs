@@ -31,6 +31,7 @@ function getProp(target: any, path: Path): any {
 
 function setProp(target: any, path: Path, value: any): any {
   if (path.length === 0) return value;
+  path = [...path];
   const last = path.pop() as string;
   const parent = path.reduce((acc, prop) => acc[prop], target);
   parent[last] = value;
