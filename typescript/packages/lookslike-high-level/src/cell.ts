@@ -1,4 +1,4 @@
-import { state, WriteableSignal } from "@commontools/common-frp/signal";
+import { WriteableSignal } from "@commontools/common-frp/signal";
 import { Sendable, Cancel } from "@commontools/common-frp";
 
 /**
@@ -7,9 +7,11 @@ import { Sendable, Cancel } from "@commontools/common-frp";
  * Cell<T> is a proxy that allows direct access to members of T, returning
  * scoped Cell<subset of T> instances, while still allowing .get(), .send() and
  * .updates() on every element. Even foo.get.bar.get() works.
+ *
+ * Cell<T> is compatible with WriteableSignal<T>, i.e. a signal from common-frp.
  */
 export type Cell<T> = T extends (infer U)[]
-  ? CellArray<U>
+  ? Array<Cell<U>> & CellMethods<T>
   : T extends object
   ? {
       [K in keyof T]: Cell<T[K]>;
@@ -22,15 +24,27 @@ type CellMethods<T> = {
   updates: ((subscriber: Sendable<void>) => Cancel) & Cell<T>;
 };
 
-interface CellArray<T> extends Array<Cell<T>>, CellMethods<T[]> {}
+export const cell = <T>(value: T): Cell<T> => {
+  const subscribers = new Set<Sendable<void>>();
 
-export type Path = (string | number | symbol)[];
+  const state = {
+    get: () => value,
+    send: (newValue: T) => {
+      value = newValue;
+      for (const subscriber of subscribers) {
+        subscriber.send();
+      }
+    },
+    updates: (subscriber: Sendable<void>) => {
+      subscribers.add(subscriber);
+      return () => subscribers.delete(subscriber);
+    },
+  } satisfies WriteableSignal<T>;
 
-export const cell = <T>(initialValue: T): Cell<T> => {
-  const signal = state(initialValue);
-
-  return createCellProxy({}, signal, []) as Cell<T>;
+  return createCellProxy({}, state, []) as Cell<T>;
 };
+
+type Path = (string | number | symbol)[];
 
 function getProp(target: any, path: Path): any {
   return path.reduce((acc, prop) => acc[prop], target);
@@ -47,34 +61,17 @@ function setProp(target: any, path: Path, value: any): any {
 
 function createCellProxy(
   target: object | Function,
-  signal: WriteableSignal<any>,
+  state: WriteableSignal<any>,
   path: Path
 ): Cell<any> {
+  const methods: { [key: string | symbol]: any } = {
+    get: () => getProp(state.get(), path),
+    send: (value: any) => state.send(setProp(state.get(), path, value)),
+    updates: (subscriber: Sendable<void>) => state.updates(subscriber),
+  } satisfies CellMethods<any>;
   return new Proxy(target, {
     get(_target, prop: string | symbol) {
-      const newPath = [...path, prop];
-      switch (prop) {
-        case "get":
-          return createCellProxy(
-            () => getProp(signal.get(), path),
-            signal,
-            newPath
-          );
-        case "send":
-          return createCellProxy(
-            (value: any) => signal.send(setProp(signal.get(), path, value)),
-            signal,
-            newPath
-          );
-        case "updates":
-          return createCellProxy(
-            (subscriber: Sendable<void>) => signal.updates(subscriber),
-            signal,
-            newPath
-          );
-        default:
-          return createCellProxy({}, signal, newPath);
-      }
+      return createCellProxy(methods[prop] ?? {}, state, [...path, prop]);
     },
     set(_target, _prop: string | symbol, _value: any) {
       return false;
