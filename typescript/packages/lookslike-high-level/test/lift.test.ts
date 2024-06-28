@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { cell, Cell } from "../src/cell.js";
-import { lift, curry, propagator } from "../src/lift.js";
+import { lift, curry, asHandler, handler, propagator } from "../src/lift.js";
 
 // Utility function to flush microtasks
 function flushMicrotasks() {
@@ -107,6 +107,25 @@ describe("lift with writeable cells", () => {
     a.send(2);
     await flushMicrotasks();
     expect(c.get()).toStrictEqual({ result: 4 });
+  });
+});
+
+describe("handler", () => {
+  it("create handler with asHandler and use it", async () => {
+    const a = cell({ value: 1 });
+    const h = asHandler((e: number, a: { value: number }) => (a.value += e));
+    const s = h(a);
+    s.send(2);
+    await flushMicrotasks();
+    expect(a.get()).toStrictEqual({ value: 3 });
+  });
+
+  it("create handler with handler and use it", async () => {
+    const a = cell({ value: 1 });
+    const s = handler([a], (e: number, a: { value: number }) => (a.value += e));
+    s.send(2);
+    await flushMicrotasks();
+    expect(a.get()).toStrictEqual({ value: 3 });
   });
 });
 

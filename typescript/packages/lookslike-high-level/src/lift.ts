@@ -1,9 +1,11 @@
+import { Sendable } from "@commontools/common-frp";
 import { cell, Cell } from "./cell.js";
 
 type CellsFor<T extends any[]> = {
   [K in keyof T]: Cell<T[K]>;
 };
 
+// Creates a node factory for the given function.
 export function lift<T extends any[], R>(
   fn: (...args: T) => R
 ): {
@@ -48,6 +50,7 @@ export function lift<T extends any[], R>(
   return lifted;
 }
 
+// Creates a node factory with some cells already bound.
 export function curry<T extends any[], U extends any[], V>(
   values: CellsFor<T>,
   fn: (...args: [...T, ...U]) => V
@@ -66,6 +69,24 @@ export function curry<T extends any[], U extends any[], V>(
   return curried;
 }
 
+// Creates a handler factory. Call it with cells to bind.
+export function asHandler<E, T extends any[]>(
+  fn: (e: E, ...args: T) => void
+): (...args: [...CellsFor<T>]) => Sendable<E> {
+  return (...args: [...CellsFor<T>]) => ({
+    send: (e: E) => fn(e, ...(args.map((arg) => arg.get()) as T)),
+  });
+}
+
+// Shorthand for the common case of directly creating an event handler.
+export function handler<E, T extends any[]>(
+  args: [...CellsFor<T>],
+  fn: (e: E, ...args: T) => void
+): Sendable<E> {
+  return asHandler(fn)(...args);
+}
+
+// Creates a propagator factory. Call with cells to bind.
 export function propagator<T extends any[]>(
   fn: (...args: [...CellsFor<T>]) => void
 ): (...args: [...CellsFor<T>]) => void {
