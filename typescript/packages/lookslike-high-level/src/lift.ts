@@ -15,9 +15,9 @@ export function lift<T extends any[], R>(
         return fn(...values);
       };
 
-      // If no returnCell was passed, create a new cell with the result of the
-      // function as initial value
-      returnCell ??= cell<R>(call());
+      // Compute initial value. Create new cell if no returnCell was passed.
+      if (returnCell) returnCell.send(call());
+      else returnCell = cell<R>(call());
 
       // Subscribe to updates of all cells and call function when any updates
       args.forEach((arg) => {
@@ -34,4 +34,22 @@ export function lift<T extends any[], R>(
   lifted.bind = bind;
 
   return lifted;
+}
+
+export function curry<T extends any[], U extends any[], V>(
+  values: CellsFor<T>,
+  fn: (...args: [...T, ...U]) => V
+): (...args: CellsFor<U>) => Cell<V> {
+  const lifted = lift(fn);
+
+  const curried = (...remainingArgs: CellsFor<U>) => {
+    return lifted(...values, ...remainingArgs);
+  };
+  curried.bind = (returnCell: Cell<V>) => {
+    return (...remainingArgs: CellsFor<U>) => {
+      return lifted.bind(returnCell)(...values, ...remainingArgs);
+    };
+  };
+
+  return curried;
 }
