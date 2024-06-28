@@ -51,6 +51,17 @@ describe("lift", () => {
     await flushMicrotasks();
     expect(c.get()).toBe(4);
   });
+
+  it("should work with destructing assignment", async () => {
+    const nameSplit = lift((name: string) => {
+      const [first, last] = name.split(" ", 2);
+      return { first, last };
+    });
+    const name = cell("John Doe");
+    const { first, last } = nameSplit(name);
+    expect(first.get()).toBe("John");
+    expect(last.get()).toBe("Doe");
+  });
 });
 
 describe("lift.apply", () => {
