@@ -65,3 +65,20 @@ export function curry<T extends any[], U extends any[], V>(
 
   return curried;
 }
+
+export function propagator<T extends any[]>(
+  fn: (...args: [...CellsFor<T>]) => void
+): (...args: [...CellsFor<T>]) => void {
+  return (...args: [...CellsFor<T>]) => {
+    const computeResult = () => {
+      return fn(...args);
+    };
+
+    computeResult();
+
+    // TODO: This will immediately call the function again. This is merely
+    // inefficient if the function is idempotent, but could be problematic if it
+    // isn't.
+    args.forEach((arg) => arg.updates({ send: computeResult }));
+  };
+}

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { cell } from "../src/cell.js";
-import { lift, curry } from "../src/lift.js";
+import { cell, Cell } from "../src/cell.js";
+import { lift, curry, propagator } from "../src/lift.js";
 
 // Utility function to flush microtasks
 function flushMicrotasks() {
@@ -91,5 +91,38 @@ describe("curry", () => {
     a.send(5);
     await flushMicrotasks();
     expect(c.get()).toBe(8);
+  });
+});
+
+describe("lift with writeable cells", () => {
+  it("can be used as a propagator", async () => {
+    const add = lift(
+      (a: number, b: number, c: { result: number }) => (c.result = a + b)
+    );
+    const a = cell<number>(1);
+    const b = cell<number>(2);
+    const c = cell({ result: 0 });
+    add(a, b, c);
+    expect(c.get()).toStrictEqual({ result: 3 });
+    a.send(2);
+    await flushMicrotasks();
+    expect(c.get()).toStrictEqual({ result: 4 });
+  });
+});
+
+describe("propagator", () => {
+  it("should propagate changes", async () => {
+    const a = cell<number>(1);
+    const b = cell<number>(2);
+    const c = cell(0);
+    const add = propagator(
+      (a: Cell<number>, b: Cell<number>, c: Cell<number>) =>
+        c.send(a.get() + b.get())
+    );
+    add(a, b, c);
+    expect(c.get()).toBe(3);
+    a.send(2);
+    await flushMicrotasks();
+    expect(c.get()).toBe(4);
   });
 });

@@ -30,10 +30,10 @@ export const cell = <T>(value: T): Cell<T> => {
   const state = {
     get: () => value,
     send: (newValue: T) => {
+      console.log("send", value, newValue);
+      if (deepEqual(value, newValue)) return;
       value = newValue;
-      for (const subscriber of subscribers) {
-        subscriber.send();
-      }
+      for (const subscriber of subscribers) subscriber.send();
     },
     updates: (subscriber: Sendable<void>) => {
       subscribers.add(subscriber);
@@ -52,11 +52,26 @@ function getProp(target: any, path: Path): any {
 
 function setProp(target: any, path: Path, value: any): any {
   if (path.length === 0) return value;
+  if (typeof target !== "object" && !Array.isArray(target))
+    throw new Error("Can't use path on non-object or non-array.");
   path = [...path];
-  const last = path.pop() as string;
-  const parent = path.reduce((acc, prop) => acc[prop], target);
-  parent[last] = value;
-  return target;
+  const last = path.pop()!;
+  const root = Array.isArray(target) ? [...target] : { ...target };
+  const parent = path.reduce(
+    (
+      acc: { [key: string | symbol]: any } | any[],
+      prop: string | number | symbol
+    ) =>
+      typeof acc === "object" && !Array.isArray(acc)
+        ? { ...acc }[prop]
+        : [...acc][Number(prop)],
+    root
+  );
+
+  if (Array.isArray(parent)) parent[Number(last)] = value;
+  else parent[last] = value;
+
+  return root;
 }
 
 function createCellProxy(
@@ -65,7 +80,7 @@ function createCellProxy(
   path: Path
 ): Cell<any> {
   const methods: { [key: string | symbol]: any } = {
-    get: () => getProp(state.get(), path),
+    get: () => createCellValueProxy(getProp(state.get(), path), state, path),
     send: (value: any) => state.send(setProp(state.get(), path, value)),
     updates: (subscriber: Sendable<void>) => state.updates(subscriber),
   } satisfies CellMethods<any>;
@@ -77,4 +92,44 @@ function createCellProxy(
       return false;
     },
   }) as Cell<any>;
+}
+
+function createCellValueProxy(
+  target: any,
+  state: WriteableSignal<any>,
+  path: Path
+): any {
+  if (typeof target !== "object") return target;
+  return new Proxy(target, {
+    get(_target, prop: string | symbol) {
+      return createCellValueProxy(
+        getProp(state.get(), [...path, prop]),
+        state,
+        [...path, prop]
+      );
+    },
+    set(_target, prop: string | symbol, value: any) {
+      state.send(setProp(state.get(), [...path, prop], value));
+      return true;
+    },
+  });
+}
+
+function deepEqual(a: any, b: any): boolean {
+  return (
+    a === b ||
+    (a &&
+      b &&
+      typeof a === "object" &&
+      typeof b === "object" &&
+      (Array.isArray(a)
+        ? Array.isArray(b) &&
+          a.length === b.length &&
+          a.every((v, i) => deepEqual(v, b[i]))
+        : !Array.isArray(b) &&
+          Object.keys(a).length === Object.keys(b).length &&
+          Object.keys(a).every(
+            (k) => k in b && deepEqual((a as any)[k], (b as any)[k])
+          )))
+  );
 }
