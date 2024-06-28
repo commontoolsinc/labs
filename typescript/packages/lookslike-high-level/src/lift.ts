@@ -1,5 +1,5 @@
 import { Sendable } from "@commontools/common-frp";
-import { cell, Cell } from "./cell.js";
+import { cell, Cell, toValue, isCell } from "./cell.js";
 
 type CellsFor<T extends any[]> = {
   [K in keyof T]: Cell<T[K]>;
@@ -20,7 +20,7 @@ export function lift<T extends any[], R>(
 
     // Function to compute the result
     const computeResult = (): R => {
-      const values = inputCells.map((arg) => arg.get()) as T;
+      const values = inputCells.map((arg) => toValue(arg)) as T;
       return fn(...values);
     };
 
@@ -35,7 +35,8 @@ export function lift<T extends any[], R>(
 
     // Subscribe to updates of all input cells
     inputCells.forEach((arg) => {
-      arg.updates({ send: () => returnCell.send(computeResult()) });
+      if (isCell(arg))
+        arg.updates({ send: () => returnCell.send(computeResult()) });
     });
 
     if (lastArg === undefined) {
@@ -74,7 +75,7 @@ export function asHandler<E, T extends any[]>(
   fn: (e: E, ...args: T) => void
 ): (...args: [...CellsFor<T>]) => Sendable<E> {
   return (...args: [...CellsFor<T>]) => ({
-    send: (e: E) => fn(e, ...(args.map((arg) => arg.get()) as T)),
+    send: (e: E) => fn(e, ...(args.map((arg) => toValue(arg)) as T)),
   });
 }
 
@@ -91,8 +92,11 @@ export function propagator<T extends any[]>(
   fn: (...args: [...CellsFor<T>]) => void
 ): (...args: [...CellsFor<T>]) => void {
   return (...args: [...CellsFor<T>]) => {
+    const argsAsCells = args.map((arg) =>
+      isCell(arg) ? arg : cell(arg)
+    ) as CellsFor<T>;
     const computeResult = () => {
-      return fn(...args);
+      return fn(...argsAsCells);
     };
 
     computeResult();
@@ -100,6 +104,6 @@ export function propagator<T extends any[]>(
     // TODO: This will immediately call the function again. This is merely
     // inefficient if the function is idempotent, but could be problematic if it
     // isn't.
-    args.forEach((arg) => arg.updates({ send: computeResult }));
+    argsAsCells.forEach((arg) => arg.updates({ send: computeResult }));
   };
 }

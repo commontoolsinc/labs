@@ -1,4 +1,4 @@
-import { WriteableSignal } from "@commontools/common-frp/signal";
+import { WriteableSignal, isSignal } from "@commontools/common-frp/signal";
 import { Sendable, Cancel } from "@commontools/common-frp";
 
 /**
@@ -42,6 +42,27 @@ export const cell = <T>(value: T): Cell<T> => {
   } satisfies WriteableSignal<T>;
 
   return createCellProxy({}, state, []) as Cell<T>;
+};
+
+export const isCell = <T>(value: any): value is Cell<T> => isSignal<T>(value);
+
+type MaybeCellFor<T extends any> =
+  | {
+      [K in keyof T]: Cell<T[K]> | MaybeCellFor<T[K]>;
+    }
+  | T;
+
+export const toValue = <T>(cell: MaybeCellFor<T>): T => {
+  if (isSignal<T>(cell)) return cell.get();
+  if (Array.isArray(cell)) return cell.map(toValue) as T;
+  if (typeof cell === "object")
+    return Object.fromEntries(
+      Object.entries(cell as object).map(([key, value]) => [
+        key,
+        toValue(value),
+      ])
+    ) as T;
+  return cell as T;
 };
 
 type Path = (string | number | symbol)[];

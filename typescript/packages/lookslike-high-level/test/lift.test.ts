@@ -62,6 +62,17 @@ describe("lift", () => {
     expect(first.get()).toBe("John");
     expect(last.get()).toBe("Doe");
   });
+
+  it("should work with structured arguments", async () => {
+    const nameSplit = lift(({ name }) => {
+      const [first, last] = name.split(" ", 2);
+      return { first, last };
+    });
+    const name = cell("John Doe");
+    const { first, last } = nameSplit({ name });
+    expect(first.get()).toBe("John");
+    expect(last.get()).toBe("Doe");
+  });
 });
 
 describe("lift.apply", () => {
