@@ -53,13 +53,13 @@ describe("lift", () => {
   });
 });
 
-describe("lift.bind", () => {
-  it("should lift a function with bind", async () => {
+describe("lift.apply", () => {
+  it("should lift a function and support apply", async () => {
     const add = lift((a: number, b: number) => a + b);
     const a = cell<number>(1);
     const b = cell(2);
     const c = cell(0);
-    add.bind(c)(a, b);
+    add.apply(a, b, c);
     expect(c.get()).toBe(3);
     a.send(2);
     await flushMicrotasks();
@@ -80,12 +80,12 @@ describe("curry", () => {
     expect(c.get()).toBe(8);
   });
 
-  it("should curry a function with bind", async () => {
+  it("should curry a function and support apply", async () => {
     const a = cell<number>(1);
     const add = curry([a], (a: number, b: number) => a + b);
     const b = cell<number>(2);
     const c = cell(0);
-    add.bind(c)(b);
+    add.apply(b, c);
     expect(c.get()).toBe(3);
     b.send(3);
     a.send(5);
