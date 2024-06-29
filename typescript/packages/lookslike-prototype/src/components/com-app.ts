@@ -20,6 +20,7 @@ import { plan, prepareSteps } from "../agent/plan.js";
 import { processUserInput } from "../agent/llm.js";
 import { codePrompt } from "../agent/implement.js";
 import { suggestions, thoughtLog } from "../agent/model.js";
+import { Gem } from "../gems.js";
 
 const lastFmKey = "0060ba224307ff9f787deb837f4be376";
 
@@ -35,7 +36,7 @@ export class ComApp extends LitElement {
 
   @state() graph: Recipe = emptyGraph;
   @state() userInput = "";
-  @state() snapshot: Context<SignalSubject<any>> = {
+  @state() snapshot: Context<Gem<any>> = {
     inputs: {},
     outputs: {},
     cancellation: []
@@ -49,13 +50,7 @@ export class ComApp extends LitElement {
         console.log("listNodes", this.graph);
         return JSON.stringify(this.graph);
       },
-      addConnection: ({
-        from,
-        to
-      }: {
-        from: string;
-        to: NodePath;
-      }) => {
+      addConnection: ({ from, to }: { from: string; to: NodePath }) => {
         console.log("addConnection", from, to);
         const [toNodeId, toInputKey] = to;
         const fromNode = graph.find((node) => node.id === from);
@@ -343,10 +338,10 @@ export class ComApp extends LitElement {
             <com-unibox
               .suggestions=${watch(suggestions)}
               @suggested=${(ev) => {
-        this.userInput = ev.detail.suggestion;
-        this.appendMessage();
-        suggestions.send([]);
-      }}
+                this.userInput = ev.detail.suggestion;
+                this.appendMessage();
+                suggestions.send([]);
+              }}
             >
               <com-editor
                 slot="main"

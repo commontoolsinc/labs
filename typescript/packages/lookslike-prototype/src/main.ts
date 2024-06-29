@@ -23,6 +23,7 @@ export * as ComModuleImage from "./components/modules/com-module-image.js";
 export * as ComModuleShader from "./components/modules/com-module-shader.js";
 export * as ComModuleEvent from "./components/modules/com-module-event.js";
 export * as ComModuleStorage from "./components/modules/com-module-storage.js";
+export * as GemUi from "./components/gems.js";
 
 export * as ComApp from "./components/com-app.js";
 

@@ -15,6 +15,7 @@ import {
   CONTENT_TYPE_CLOCK,
   CONTENT_TYPE_STORAGE
 } from "../contentType.js";
+import { Gem } from "../gems.js";
 
 function renderNode(
   node: RecipeNode,
@@ -105,7 +106,7 @@ export class ComResponse extends LitElement {
   static override styles = [base, styles];
 
   @property({ type: Object }) node: RecipeNode | null = null;
-  @property({ type: Object }) output: SignalSubject<any> = signal.state(null);
+  @property({ type: Object }) output!: Gem<any>;
   onCancel: () => void = () => {};
   @state() value: any = {};
   cancel: () => void = () => {};
@@ -117,11 +118,12 @@ export class ComResponse extends LitElement {
       console.log("output changed", this.node?.id, this.output);
       this.cancel();
       // trigger a re-render if any output changes
-      this.cancel = signal.effect([this.output], (value) => {
+      const sub = this.output.data.subscribe((value) => {
         if (!value || this.value === value) return;
         this.value = value;
         console.log("updated value", this.node?.id, value);
       });
+      this.cancel = sub.unsubscribe;
     }
   }
 

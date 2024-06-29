@@ -6,6 +6,7 @@ import { createRxJSNetworkFromJson } from "../graph.js";
 import { Recipe, RecipeNode } from "../data.js";
 import { Context } from "../state.js";
 import { SignalSubject } from "../../../common-frp/lib/signal.js";
+import { Gem, read, write } from "../gems.js";
 
 const styles = css`
   :host {
@@ -45,19 +46,17 @@ export class ComThread extends LitElement {
   static override styles = [base, styles];
 
   @property({ type: Object }) graph = {} as Recipe;
-  @state() context = {} as Context<SignalSubject<any>>;
+  @state() context = {} as Context<Gem<any>>;
 
-  @property({ type: Function }) setContext = (
-    _: Context<SignalSubject<any>>
-  ) => {};
+  @property({ type: Function }) setContext = (_: Context<Gem<any>>) => {};
 
   lastGraph: Recipe = [];
   localScope: { [k: string]: any } = {};
 
   response(node: RecipeNode) {
-    const onOverriden = (e: CustomEvent) => {
+    const onOverriden = async (e: CustomEvent) => {
       console.log(node.id, "override", e.detail);
-      this.context.outputs[node.id].send(JSON.parse(e.detail.data));
+      await write(this.context.outputs[node.id], JSON.parse(e.detail.data));
     };
 
     const onRefresh = () => {
@@ -69,10 +68,12 @@ export class ComThread extends LitElement {
       onRefresh();
     };
 
-    const onRun = () => {
-      const val = this.context.outputs[node.id].get();
-      this.context.outputs[node.id].send(val);
+    const onRun = async () => {
+      const val = await read(this.context.outputs[node.id]);
+      await write(this.context.outputs[node.id], val);
     };
+
+    if (!this.context?.outputs?.[node.id]) return html`<pre>wait</pre>`;
 
     return html`<com-response
       slot="response"
@@ -91,7 +92,9 @@ export class ComThread extends LitElement {
     </com-response>`;
   }
 
-  override willUpdate(changedAttributes: Map<string, any>): void {
+  override async willUpdate(
+    changedAttributes: Map<string, any>
+  ): Promise<void> {
     if (
       changedAttributes.has("graph") &&
       JSON.stringify(this.graph) !== JSON.stringify(this.lastGraph)
@@ -99,7 +102,7 @@ export class ComThread extends LitElement {
       console.log("rebuilding graph");
       this.context.cancellation?.forEach((cancel) => cancel());
 
-      this.context = createRxJSNetworkFromJson(this.graph);
+      this.context = await createRxJSNetworkFromJson(this.graph);
       this.lastGraph = this.graph;
     }
   }

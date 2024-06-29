@@ -1,27 +1,10 @@
-import { createRxDatabase, addRxPlugin } from "rxdb";
-import { getRxStorageMemory } from "rxdb/plugins/storage-memory";
-import { RxDBDevModePlugin } from "rxdb/plugins/dev-mode";
-import { html, render } from "lit-html";
-import { RxDBStatePlugin } from "rxdb/plugins/state";
+import { css, html, LitElement } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
 import { Subscription } from "rxjs";
-import { LitElement, css } from "lit-element";
-import { customElement, property, state } from "lit-element/decorators.js";
-
-addRxPlugin(RxDBStatePlugin);
-addRxPlugin(RxDBDevModePlugin);
-
-// Create the database
-async function createDatabase() {
-  const db = await createRxDatabase({
-    name: "inventorydb",
-    storage: getRxStorageMemory(),
-  });
-
-  return db;
-}
+import { graphState } from "../gems.js";
 
 @customElement("data-gem")
-class DataGem extends LitElement {
+export class DataGem extends LitElement {
   @property({ type: String }) key!: string;
   @property({ type: String }) path!: string;
 
@@ -31,7 +14,7 @@ class DataGem extends LitElement {
   @state() private tooltipX: number = 0;
   @state() private tooltipY: number = 0;
 
-  static styles = css`
+  static override styles = css`
     :host {
       display: block;
       position: relative;
@@ -40,8 +23,9 @@ class DataGem extends LitElement {
     .data-orb {
       background-color: rgba(0, 100, 200, 0.7);
       border-radius: 50%;
-      padding: 20px;
+      padding: 10px;
       text-align: center;
+      font-size: 12px;
       color: white;
       transition: transform 0.3s ease;
       width: 100%;
@@ -52,6 +36,11 @@ class DataGem extends LitElement {
       align-items: center;
       box-sizing: border-box;
     }
+
+    .data-orb * {
+      padding: 0;
+    }
+
     .data-orb.navigable {
       cursor: pointer;
     }
@@ -107,7 +96,7 @@ class DataGem extends LitElement {
       this.subscription = null;
     }
 
-    const value$ = appState.get$(this.path);
+    const value$ = graphState.get$(this.path);
     this.subscription = value$.subscribe((newValue) => {
       const path = `${this.path}`;
       console.log("New value for", path, newValue);
@@ -143,8 +132,8 @@ class DataGem extends LitElement {
         @mouseleave="${this.handleMouseLeave}"
         @click="${this.handleNavigate}"
       >
-        <h3>${this.key}</h3>
-        <p>${this.getShortValue()}</p>
+        <strong><code>${this.key}</code></strong>
+        <code>${this.getShortValue()}</code>
       </div>
       ${this.showTooltip ? this.renderTooltip() : ""}
     `;
@@ -163,8 +152,8 @@ class DataGem extends LitElement {
       new CustomEvent("navigate", {
         detail: { key: this.key, value: this.value },
         bubbles: true,
-        composed: true,
-      }),
+        composed: true
+      })
     );
   }
 
@@ -174,7 +163,7 @@ class DataGem extends LitElement {
         class="tooltip"
         style="left: ${this.tooltipX}px; top: ${this.tooltipY}px"
       >
-        <div class="tooltip-content">${this.getPrettyPrintedValue()}</div>
+        <code class="tooltip-content">${this.getPrettyPrintedValue()}</code>
       </div>
     `;
   }
@@ -208,33 +197,21 @@ class DataGem extends LitElement {
 }
 
 const initial = {
-  health: 100,
-  mana: 50,
-  gold: 1000,
-  items: ["sword", "shield"],
-  skills: {
-    strength: 10,
-    agility: 8,
-    intelligence: 12,
-  },
-  quests: ["Defeat the dragon", "Find the treasure"],
-  level: 5,
+  test: "hello"
 };
-
-type Inventory = typeof initial;
 
 type NavigationItem = {
   key: string;
 };
 
 @customElement("inventory-view")
-class InventoryView extends LitElement {
+export class InventoryView extends LitElement {
   @state() private navigationStack: NavigationItem[] = [];
 
-  static styles = css`
+  static override styles = css`
     .inventory-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
       gap: 20px;
       padding: 20px;
     }
@@ -250,7 +227,7 @@ class InventoryView extends LitElement {
 
   override connectedCallback() {
     super.connectedCallback();
-    this.navigateTo({ key: "inventory" });
+    this.navigateTo({ key: "state" });
   }
 
   navigateTo(item: NavigationItem) {
@@ -273,22 +250,29 @@ class InventoryView extends LitElement {
               ${item.key}
             </span>
             ${index < this.navigationStack.length - 1 ? " > " : ""}
-          `,
+          `
         )}
       </div>
     `;
   }
 
   override render() {
-    const currentItem = this.navigationStack[this.navigationStack.length - 1];
     const path = this.navigationStack.map((item) => item.key).join(".");
-    const currentValue = appState.get(path);
+    const currentValue = graphState.get(path);
+    console.log("Current value", currentValue);
+
+    const onRefresh = () => {
+      this.requestUpdate();
+    };
 
     return html`
       ${this.renderBreadcrumbs()}
+      <button @click=${onRefresh}>Refresh</button>
       <div class="inventory-grid">
-        ${Object.entries(currentValue).map(([key, value]) => {
-          const fullPath = isNaN(key) ? `${path}.${key}` : `${path}[${key}]`;
+        ${Object.entries(currentValue).map(([key, _value]) => {
+          const fullPath = isNaN(Number(key))
+            ? `${path}.${key}`
+            : `${path}[${key}]`;
           return html`
             <data-gem
               .key=${key}
@@ -301,36 +285,3 @@ class InventoryView extends LitElement {
     `;
   }
 }
-
-// Main application
-async function main(state: any) {
-  // Initial render
-  render(html`<inventory-view></inventory-view>`, document.body);
-
-  // Example of updating state
-  setInterval(() => {
-    state.set("inventory.health", (v) => Math.max(0, v - 10));
-  }, 1000);
-
-  setInterval(() => {
-    state.set("inventory.gold", (v) => v + 50);
-  }, 2000);
-
-  setInterval(() => {
-    state.set("inventory.skills.intelligence", (v) =>
-      Math.round(Math.random() * 20),
-    );
-  }, 500);
-}
-
-let appState = null;
-
-document.addEventListener("DOMContentLoaded", async () => {
-  const db = await createDatabase();
-  appState = await db.addState();
-
-  // Insert some initial data
-  await appState.set("inventory", (_) => initial);
-
-  main(appState).catch(console.error);
-});
