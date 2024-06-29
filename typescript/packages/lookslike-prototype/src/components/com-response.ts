@@ -13,7 +13,8 @@ import {
   CONTENT_TYPE_UI,
   CONTENT_TYPE_EVENT,
   CONTENT_TYPE_CLOCK,
-  CONTENT_TYPE_STORAGE
+  CONTENT_TYPE_STORAGE,
+  CONTENT_TYPE_SCENE
 } from "../contentType.js";
 
 function renderNode(
@@ -80,6 +81,11 @@ function renderNode(
         .node=${node}
         .value=${value}
       ></com-module-storage>`;
+    case CONTENT_TYPE_SCENE:
+      return html`<com-module-scene
+        .node=${node}
+        .value=${value}
+      ></com-module-scene>`;
   }
 
   return html`<pre>${JSON.stringify(node, null, 2)}</pre>`;
@@ -139,10 +145,15 @@ export class ComResponse extends LitElement {
       this.dispatchEvent.bind(this)
     );
 
+    const onRun = () => {
+      this.dispatchEvent(new CustomEvent("run"));
+    };
+
     return html`
       <div class="response">
         ${definition}
         <slot></slot>
+        <button @click=${onRun}>Run</button>
       </div>
     `;
   }

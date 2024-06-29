@@ -11,6 +11,7 @@ import {
   CONTENT_TYPE_IMAGE,
   CONTENT_TYPE_JAVASCRIPT,
   CONTENT_TYPE_LLM,
+  CONTENT_TYPE_SCENE,
   CONTENT_TYPE_STORAGE,
   CONTENT_TYPE_UI
 } from "./contentType.js";
@@ -175,6 +176,12 @@ async function executeNode(
       outputs[node.id].send(inputs);
       break;
     }
+
+    case CONTENT_TYPE_SCENE: {
+      outputs[node.id].send(inputs.data);
+      break;
+    }
+
     case CONTENT_TYPE_CLOCK: {
       clearInterval(intervals[node.id]);
       let x = 0;
