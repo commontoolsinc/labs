@@ -40,6 +40,7 @@ export class CodeMirrorDataViewer extends LitElement {
         parent: editorContainer
       });
     }
+    this.foldAll();
   }
 
   foldAll() {
@@ -57,6 +58,7 @@ export class CodeMirrorDataViewer extends LitElement {
           insert: this.data
         }
       });
+      this.foldAll();
     }
   }
 

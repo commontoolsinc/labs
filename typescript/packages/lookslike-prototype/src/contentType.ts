@@ -7,3 +7,4 @@ export const CONTENT_TYPE_GLSL = "text/glsl";
 export const CONTENT_TYPE_EVENT = "application/json+vnd.common.event";
 export const CONTENT_TYPE_CLOCK = "application/json+vnd.common.clock";
 export const CONTENT_TYPE_STORAGE = "application/json+vnd.common.storage";
+export const CONTENT_TYPE_SCENE = "application/json+vnd.common.scene";

@@ -11,7 +11,7 @@ export function describeTools(
         tool.function.parameters?.properties || {}
       )
         .map(([name, { type, description }]) => {
-          return `  - ${name} (${type}): ${description}`;
+          return `  - ${name} (${type}): ${description || ""}`;
         })
         .join("\n");
       if (!includeParameters) {
@@ -43,7 +43,8 @@ export const toolSpec: ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "addUiNode",
-      description: "Adds a UI node written using a hyperscript tree. Only use span, ul, button and h1 elements for now.",
+      description:
+        "Adds a UI node written using a hyperscript tree. Only use span, ul, button and h1 elements for now.",
       parameters: {
         type: "object",
         properties: {
@@ -64,6 +65,23 @@ export const toolSpec: ChatCompletionTool[] = [
         type: "object",
         properties: {
           id: { type: "string" }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "add3dVoxelSceneNode",
+      description: `Render a simple pannable, zoomable, rotatable 3D scene using voxels in a list format e.g. [{ "position": [1, 1, 1], "color": 0x808080 }...]`,
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          dataSource: {
+            type: "string",
+            description: "Path of the source data in the graph"
+          }
         }
       }
     }

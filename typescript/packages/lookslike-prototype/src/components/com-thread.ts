@@ -72,6 +72,7 @@ export class ComThread extends LitElement {
     const onRun = () => {
       const val = this.context.outputs[node.id].get();
       this.context.outputs[node.id].send(val);
+      onRefresh();
     };
 
     return html`<com-response

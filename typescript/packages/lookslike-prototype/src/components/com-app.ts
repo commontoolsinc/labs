@@ -13,6 +13,7 @@ import {
   CONTENT_TYPE_GLSL,
   CONTENT_TYPE_JAVASCRIPT,
   CONTENT_TYPE_LLM,
+  CONTENT_TYPE_SCENE,
   CONTENT_TYPE_STORAGE,
   CONTENT_TYPE_UI
 } from "../contentType.js";
@@ -49,23 +50,25 @@ export class ComApp extends LitElement {
     toolSpec: ChatCompletionTool[],
     implementations: { [key: string]: (...inputs: any) => Promise<string> }
   ): LlmTool[] {
-    return toolSpec.map(tool => {
-      const functionName = tool.function.name;
-      const implementation = implementations[functionName];
+    return toolSpec
+      .map((tool) => {
+        const functionName = tool.function.name;
+        const implementation = implementations[functionName];
 
-      const { parameters, ...rest } = tool.function;
+        const { parameters, ...rest } = tool.function;
 
-      if (implementation) {
-        return {
-          ...rest,
-          input_schema: parameters as any,
-          implementation
-        };
-      } else {
-        console.warn(`No implementation found for function: ${functionName}`);
-        return null;
-      }
-    }).filter(v => v !== null);
+        if (implementation) {
+          return {
+            ...rest,
+            input_schema: parameters as any,
+            implementation
+          };
+        } else {
+          console.warn(`No implementation found for function: ${functionName}`);
+          return null;
+        }
+      })
+      .filter((v) => v !== null);
   }
 
   availableFunctions(graph: Recipe) {
@@ -76,13 +79,7 @@ export class ComApp extends LitElement {
         console.log("listNodes", this.graph);
         return JSON.stringify(this.graph);
       },
-      addConnection: async ({
-        from,
-        to
-      }: {
-        from: string;
-        to: NodePath;
-      }) => {
+      addConnection: async ({ from, to }: { from: string; to: NodePath }) => {
         console.log("addConnection", from, to);
         const [toNodeId, toInputKey] = to;
         const fromNode = graph.find((node) => node.id === from);
@@ -137,6 +134,26 @@ export class ComApp extends LitElement {
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
+      add3dVoxelSceneNode: async ({
+        id,
+        dataSource
+      }: {
+        id: string;
+        dataSource: string;
+      }) => {
+        console.log("add3dVoxelSceneNode", id, dataSource);
+        graph.push({
+          id,
+          contentType: CONTENT_TYPE_SCENE,
+          in: {
+            data: [".", dataSource]
+          },
+          outputType: {},
+          body: {}
+        });
+        updateGraph(graph);
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      },
       addGlslShaderNode: async ({
         id,
         shaderToyCode
@@ -183,7 +200,13 @@ export class ComApp extends LitElement {
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addStorageNode: async ({ id, address }: { id: string; address: string }) => {
+      addStorageNode: async ({
+        id,
+        address
+      }: {
+        id: string;
+        address: string;
+      }) => {
         console.log("addStorageNode", id);
         graph.push({
           id,
@@ -255,38 +278,6 @@ export class ComApp extends LitElement {
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addMusicSearchNode: async ({ id, query }: { id: string; query: string }) => {
-        console.log("addMusicSearchNode", id, query);
-        graph.push({
-          id,
-          contentType: "application/json+vnd.common.fetch",
-          in: {},
-          outputType: {
-            type: "object",
-            properties: {
-              results: {
-                type: "object",
-                properties: {
-                  albummatches: {
-                    type: "object",
-                    properties: {
-                      albums: {
-                        type: "array",
-                        items: {
-                          type: "object"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          body: `https://ws.audioscrobbler.com/2.0/?method=album.search&album=${query}&api_key=${lastFmKey}&format=json`
-        });
-        updateGraph(graph);
-        return `Added node: ${id}.\n${this.graphSnapshot()}`;
-      },
       deleteNode: async ({ id }: { id: string }) => {
         console.log("deleteNode", id);
         const index = graph.findIndex((n) => n.id === id);
@@ -336,18 +327,21 @@ export class ComApp extends LitElement {
     ---
     Current graph (may be empty): ${this.graphSnapshot()}`;
 
-    const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
-    // const systemContext = ``
+    // const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
+    const systemContext = ``;
 
     this.graph = newGraph;
 
     const client = new LLMClient({
       serverUrl: LLM_SERVER_URL,
-      tools: this.generateToolSpec(toolSpec, this.availableFunctions(this.graph)),
+      tools: this.generateToolSpec(
+        toolSpec,
+        this.availableFunctions(this.graph)
+      ),
       system: codePrompt + systemContext
     });
 
-    const thread = await client.createThread(input)
+    const thread = await client.createThread(input);
     const result = thread.conversation[thread.conversation.length - 1];
 
     console.log("result", result);
@@ -374,10 +368,10 @@ export class ComApp extends LitElement {
             <com-unibox
               .suggestions=${watch(suggestions)}
               @suggested=${(ev) => {
-        this.userInput = ev.detail.suggestion;
-        this.appendMessage();
-        suggestions.send([]);
-      }}
+                this.userInput = ev.detail.suggestion;
+                this.appendMessage();
+                suggestions.send([]);
+              }}
             >
               <com-editor
                 slot="main"
