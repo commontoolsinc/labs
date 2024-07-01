@@ -99,4 +99,17 @@ describe("nested cells", async () => {
     expect(a.get()).toStrictEqual({ value: 2 });
     expect(c.get()).toStrictEqual({ a: { value: 2 } });
   });
+
+  it("set should work with assigning different cells", async () => {
+    const a = cell({ value: 1 });
+    const b = cell({ value: 2 });
+    const c = cell({ a });
+    expect(c.a.get()).toStrictEqual({ value: 1 });
+    c.a.send(b);
+    await flushMicrotasks();
+    expect(a.get()).toStrictEqual({ value: 1 });
+    expect(b.get()).toStrictEqual({ value: 2 });
+    expect(c.get()).toStrictEqual({ a: { value: 2 } });
+    expect(c.a.get()).toStrictEqual({ value: 2 });
+  });
 });

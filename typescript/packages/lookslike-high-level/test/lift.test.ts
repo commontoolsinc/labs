@@ -11,7 +11,7 @@ describe("lift", () => {
   it("should lift a function", async () => {
     const add = lift((a: number, b: number) => a + b);
     const a = cell<number>(1);
-    const b = cell(2);
+    const b = cell<number>(2);
     const c = add(a, b);
     expect(c.get()).toBe(3);
     a.send(2);
@@ -22,7 +22,7 @@ describe("lift", () => {
   it("should lift a function with a path", async () => {
     const add = lift((a: { b: number }, b: number) => a.b + b);
     const a = cell({ b: 1 });
-    const b = cell(2);
+    const b = cell<number>(2);
     const c = add(a, b);
     expect(c.get()).toBe(3);
     a.b.send(2);
@@ -46,9 +46,11 @@ describe("lift", () => {
     const a = cell({ b: 1 });
     const b = cell([2]);
     const c = add(a.b, b[0]);
+    expect(b[0].get()).toBe(2);
     expect(c.get()).toBe(3);
     b[0].send(3);
     await flushMicrotasks();
+    console.log(c.get());
     expect(c.get()).toBe(4);
   });
 
@@ -57,7 +59,7 @@ describe("lift", () => {
       const [first, last] = name.split(" ", 2);
       return { first, last };
     });
-    const name = cell("John Doe");
+    const name = cell<string>("John Doe");
     const { first, last } = nameSplit(name);
     expect(first.get()).toBe("John");
     expect(last.get()).toBe("Doe");
@@ -79,8 +81,8 @@ describe("lift.apply", () => {
   it("should lift a function and support apply", async () => {
     const add = lift((a: number, b: number) => a + b);
     const a = cell<number>(1);
-    const b = cell(2);
-    const c = cell(0);
+    const b = cell<number>(2);
+    const c = cell<number>(0);
     add.apply(a, b, c);
     expect(c.get()).toBe(3);
     a.send(2);
@@ -106,7 +108,7 @@ describe("curry", () => {
     const a = cell<number>(1);
     const add = curry([a], (a: number, b: number) => a + b);
     const b = cell<number>(2);
-    const c = cell(0);
+    const c = cell<number>(0);
     add.apply(b, c);
     expect(c.get()).toBe(3);
     b.send(3);
@@ -155,7 +157,7 @@ describe("propagator", () => {
   it("should propagate changes", async () => {
     const a = cell<number>(1);
     const b = cell<number>(2);
-    const c = cell(0);
+    const c = cell<number>(0);
     const add = propagator(
       (a: Cell<number>, b: Cell<number>, c: Cell<number>) =>
         c.send(a.get() + b.get())
