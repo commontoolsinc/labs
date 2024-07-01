@@ -23,7 +23,7 @@ export type Cell<T> = T extends (infer U)[]
 const getCell = Symbol("getCell"); // Internal API for proxies only
 
 type CellMethods<T> = {
-  get: (() => T) & Cell<T>;
+  get: ((log?: SourcesLog) => T) & Cell<T>;
   send: ((value: T | UnwrapCell<T>, path?: Path) => void) & Cell<T>;
   updates: ((subscriber: Sendable<void>) => Cancel) & Cell<T>;
   [getCell]: () => [WriteableSignal<T>, Path];
@@ -60,14 +60,16 @@ type MaybeCellFor<T extends any> =
     }
   | T;
 
-export const toValue = <T>(cell: MaybeCellFor<T>): T => {
-  if (isCell<T>(cell)) return cell.get();
-  if (Array.isArray(cell)) return cell.map(toValue) as T;
+export type SourcesLog = Set<Cell<any>>;
+
+export const toValue = <T>(cell: MaybeCellFor<T>, log?: SourcesLog): T => {
+  if (isCell<T>(cell)) return cell.get(log);
+  if (Array.isArray(cell)) return cell.map((cell) => toValue(cell, log)) as T;
   if (typeof cell === "object")
     return Object.fromEntries(
       Object.entries(cell as object).map(([key, value]) => [
         key,
-        toValue(value),
+        toValue(value, log),
       ])
     ) as T;
   return cell as T;
@@ -114,7 +116,7 @@ function createCellProxy(
   path: Path
 ): Cell<any> {
   const methods: { [key: string | symbol]: any } = {
-    get: () => createCellValueProxy(cell, path),
+    get: (log?: SourcesLog) => createCellValueProxy(cell, path, log),
     send: (value: any, extraPath: Path = []) =>
       setProp(cell, [...path, ...extraPath], value),
     updates: (subscriber: Sendable<void>) => cell.updates(subscriber),
@@ -132,14 +134,18 @@ function createCellProxy(
 
 function createCellValueProxy(
   cell: WriteableSignal<any>,
-  valuePath: Path
+  valuePath: Path,
+  log?: SourcesLog
 ): any {
+  log?.add(cell as Cell<any>);
+
   let target = cell.get();
   let path: Path = [];
   for (const prop of valuePath) {
     path.push(prop);
     if (isCell(target[prop])) {
       [cell, path] = target[prop][getCell]();
+      log?.add(cell as Cell<any>);
       target = cell.get();
     } else {
       target = target[prop];
@@ -150,10 +156,10 @@ function createCellValueProxy(
 
   return new Proxy(target, {
     get(_target, prop: string | symbol) {
-      return createCellValueProxy(cell, [...path, prop]);
+      return createCellValueProxy(cell, [...path, prop], log);
     },
     set(_target, prop: string | symbol, value: any) {
-      createCellProxy({}, cell, [...path, prop]).send(value);
+      setProp(cell, [...path, prop], value);
       return true;
     },
   });

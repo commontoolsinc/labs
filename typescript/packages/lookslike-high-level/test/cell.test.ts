@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cell } from "../src/cell.js";
+import { cell, isCell, toValue, SourcesLog } from "../src/cell.js";
 import { isSignal, WriteableSignal } from "@commontools/common-frp/signal";
 
 // Utility function to flush microtasks
@@ -124,5 +124,31 @@ describe("nested cells", async () => {
     expect(b.get()).toStrictEqual({ a: { value: 2 } });
     expect(c.get()).toStrictEqual({ b: { a: { value: 2 } } });
     expect(c.b.a.get()).toStrictEqual({ value: 2 });
+  });
+});
+
+describe("toValue logging", async () => {
+  it("should log accessing a single cell", async () => {
+    const c = cell(1);
+    const log: SourcesLog = new Set();
+    const value = toValue(c, log);
+    expect(value).toBe(1);
+    expect(log.size).toBe(1);
+    log.forEach((source) => expect(source.get()).toBe(1));
+  });
+
+  it("should log accessing nested, structured cells", async () => {
+    const c = cell({ a: cell({ b: 1 }) });
+    const log: SourcesLog = new Set();
+    const value = toValue(c, log);
+    expect(value).toStrictEqual({ a: { b: 1 } });
+    expect(log.size).toBe(2);
+
+    // Log has the actual cell, not the proxy, so we need to compare the values
+    log.forEach((source) => {
+      const v = source.get();
+      console.log(v);
+      expect(v.b === 1 || (isCell(v.a) && v.a.get().b === 1)).toBe(true);
+    });
   });
 });
