@@ -54,10 +54,6 @@ export class ComModuleCode extends LitElement {
 
     return html`
       <com-code .code=${this.node.body} @updated=${codeChanged}></com-code>
-      <com-data
-        .data=${JSON.stringify(this.value, null, 2)}
-        @updated=${dataChanged}
-      ></com-data>
       <select
         name="evalMode"
         @change=${onChangeEvalMode}

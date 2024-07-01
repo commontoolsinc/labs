@@ -8,6 +8,7 @@ import { Context, snapshot } from "../state.js";
 import { watch } from "@commontools/common-frp-lit";
 import {
   CONTENT_TYPE_CLOCK,
+  CONTENT_TYPE_DATA,
   CONTENT_TYPE_EVENT,
   CONTENT_TYPE_FETCH,
   CONTENT_TYPE_GLSL,
@@ -94,6 +95,16 @@ export class ComApp extends LitElement {
         toNode.in[toInputKey] = [".", from];
         updateGraph(graph);
         return `Added connection from ${from} to ${to}.\n${this.graphSnapshot()}`;
+      },
+      declareDataNode: async ({ id, data }: { id: string; data: any }) => {
+        console.log("declareDataNode", id, data);
+        graph.push({
+          id,
+          contentType: CONTENT_TYPE_DATA,
+          in: {},
+          outputType: {},
+          body: data
+        });
       },
       addCodeNode: async (props: { id: string; code: string }) => {
         console.log("addCodeNode", props);
@@ -182,40 +193,6 @@ export class ComApp extends LitElement {
             type: "object"
           },
           body: url
-        });
-        updateGraph(graph);
-        return `Added node: ${id}.\n${this.graphSnapshot()}`;
-      },
-      addEventNode: async ({ id }: { id: string }) => {
-        console.log("addEventNode", id);
-        graph.push({
-          id,
-          contentType: CONTENT_TYPE_EVENT,
-          in: {},
-          outputType: {
-            type: "object"
-          },
-          body: ""
-        });
-        updateGraph(graph);
-        return `Added node: ${id}.\n${this.graphSnapshot()}`;
-      },
-      addStorageNode: async ({
-        id,
-        address
-      }: {
-        id: string;
-        address: string;
-      }) => {
-        console.log("addStorageNode", id);
-        graph.push({
-          id,
-          contentType: CONTENT_TYPE_STORAGE,
-          in: {},
-          outputType: {
-            type: "object"
-          },
-          body: address
         });
         updateGraph(graph);
         return `Added node: ${id}.\n${this.graphSnapshot()}`;

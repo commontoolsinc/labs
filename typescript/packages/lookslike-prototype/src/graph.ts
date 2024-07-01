@@ -6,6 +6,7 @@ import { signal, config } from "@commontools/common-frp";
 import { Context, storage } from "./state.js";
 import {
   CONTENT_TYPE_CLOCK,
+  CONTENT_TYPE_DATA,
   CONTENT_TYPE_EVENT,
   CONTENT_TYPE_FETCH,
   CONTENT_TYPE_IMAGE,
@@ -207,8 +208,16 @@ async function executeNode(
       outputs[node.id].send(response);
       break;
     }
+    case CONTENT_TYPE_DATA: {
+      let value = Object.values(inputs).find((v) => v !== null);
+      if (typeof node.body !== "string" || node.body.length === 0) {
+        console.error("Invalid storage key", node.body);
+        break;
+      }
+      outputs[node.id].send(value);
+      break;
+    }
     case CONTENT_TYPE_STORAGE: {
-      // iterate over all values in inputs and pick first non-null value in functional style
       let value = Object.values(inputs).find((v) => v !== null);
       if (typeof node.body !== "string" || node.body.length === 0) {
         console.error("Invalid storage key", node.body);

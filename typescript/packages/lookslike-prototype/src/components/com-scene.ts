@@ -76,7 +76,13 @@ export class SceneElement extends LitElement {
     );
     this.camera.position.z = 5;
 
+    // add light
+    const light = new THREE.PointLight(0xffffff, 10);
+    light.position.set(1, 1, 1).normalize();
+    this.sceneRef.add(light);
+
     const renderer = new THREE.WebGLRenderer();
+    renderer.setClearColor(0x00000000);
     this.rendererRef = renderer;
     renderer.setSize(
       this.containerRef.clientWidth,

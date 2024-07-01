@@ -58,13 +58,14 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "addEventNode",
+      name: "declareDataNode",
       description:
-        "A node that will be bound to a user-input event from a UI node.",
+        "A node that will store data that can be changed and accessed by other nodes. For state, events, input etc.",
       parameters: {
         type: "object",
         properties: {
-          id: { type: "string" }
+          id: { type: "string" },
+          data: { type: "object", description: "Default value" }
         }
       }
     }
@@ -73,7 +74,7 @@ export const toolSpec: ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "add3dVoxelSceneNode",
-      description: `Render a simple pannable, zoomable, rotatable 3D scene using voxels in a list format e.g. [{ "position": [1, 1, 1], "color": 0x808080 }...]`,
+      description: `Render a simple pannable, zoomable, rotatable 3D scene using voxels in a flattened list format e.g. [{ "position": [1, 1, 1], "color": "#FFFFFFFF" }...]`,
       parameters: {
         type: "object",
         properties: {
@@ -82,21 +83,6 @@ export const toolSpec: ChatCompletionTool[] = [
             type: "string",
             description: "Path of the source data in the graph"
           }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "addStorageNode",
-      description:
-        "A node that will persist data to the passed address, for retrieval later.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          address: { type: "string" }
         }
       }
     }

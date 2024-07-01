@@ -14,7 +14,8 @@ import {
   CONTENT_TYPE_EVENT,
   CONTENT_TYPE_CLOCK,
   CONTENT_TYPE_STORAGE,
-  CONTENT_TYPE_SCENE
+  CONTENT_TYPE_SCENE,
+  CONTENT_TYPE_DATA
 } from "../contentType.js";
 
 function renderNode(
@@ -86,6 +87,11 @@ function renderNode(
         .node=${node}
         .value=${value}
       ></com-module-scene>`;
+    case CONTENT_TYPE_DATA:
+      return html`<com-module-data
+        .node=${node}
+        .value=${value}
+      ></com-module-data>`;
   }
 
   return html`<pre>${JSON.stringify(node, null, 2)}</pre>`;
