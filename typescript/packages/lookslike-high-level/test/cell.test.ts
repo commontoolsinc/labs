@@ -68,3 +68,35 @@ describe("cell", () => {
     expect(isSignal(c)).toBe(true);
   });
 });
+
+describe("nested cells", async () => {
+  it("get should work with nested cells", async () => {
+    const a = cell<number>(1);
+    const c = cell({ a });
+    expect(c.a.get()).toBe(1);
+    a.send(2);
+    await flushMicrotasks();
+    expect(a.get()).toStrictEqual(2);
+    expect(c.get()).toStrictEqual({ a: 2 });
+  });
+
+  it("set should work with nested cells", async () => {
+    const a = cell<number>(1);
+    const c = cell({ a });
+    expect(c.a.get()).toBe(1);
+    c.a.send(2);
+    await flushMicrotasks();
+    expect(a.get()).toStrictEqual(2);
+    expect(c.get()).toStrictEqual({ a: 2 });
+  });
+
+  it("set should work with nested cells that are complex", async () => {
+    const a = cell({ value: 1 });
+    const c = cell({ a });
+    expect(c.a.get()).toStrictEqual({ value: 1 });
+    c.a.send({ value: 2 });
+    await flushMicrotasks();
+    expect(a.get()).toStrictEqual({ value: 2 });
+    expect(c.get()).toStrictEqual({ a: { value: 2 } });
+  });
+});

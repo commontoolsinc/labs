@@ -20,17 +20,16 @@ export type Cell<T> = T extends (infer U)[]
 
 type CellMethods<T> = {
   get: (() => T) & Cell<T>;
-  send: ((value: T) => void) & Cell<T>;
+  send: ((value: T, path?: Path) => void) & Cell<T>;
   updates: ((subscriber: Sendable<void>) => Cancel) & Cell<T>;
 };
 
-export const cell = <T>(value: T): Cell<T> => {
+export function cell<T>(value: T): Cell<T> {
   const subscribers = new Set<Sendable<void>>();
 
   const state = {
     get: () => value,
     send: (newValue: T) => {
-      console.log("send", value, newValue);
       if (deepEqual(value, newValue)) return;
       value = newValue;
       for (const subscriber of subscribers) subscriber.send();
@@ -42,7 +41,7 @@ export const cell = <T>(value: T): Cell<T> => {
   } satisfies WriteableSignal<T>;
 
   return createCellProxy({}, state, []) as Cell<T>;
-};
+}
 
 export const isCell = <T>(value: any): value is Cell<T> => isSignal<T>(value);
 
@@ -67,32 +66,34 @@ export const toValue = <T>(cell: MaybeCellFor<T>): T => {
 
 type Path = (string | number | symbol)[];
 
-function getProp(target: any, path: Path): any {
-  return path.reduce((acc, prop) => acc[prop], target);
-}
+// Set a property on a cell, given a path to the property. If there are nested
+// cells on the path, call setProp with those cells for the rest of the path.
+function setProp(cell: Cell<any>, path: Path, value: any) {
+  let root = cell.get();
+  if (isCell(root)) return root.send(value, path);
 
-function setProp(target: any, path: Path, value: any): any {
-  if (path.length === 0) return value;
-  if (typeof target !== "object" && !Array.isArray(target))
+  if (path.length === 0) return cell.send(value);
+
+  if (typeof root !== "object" && !Array.isArray(root))
     throw new Error("Can't use path on non-object or non-array.");
-  path = [...path];
+  root = Array.isArray(root) ? [...root] : { ...root };
+
+  let parent = root;
   const last = path.pop()!;
-  const root = Array.isArray(target) ? [...target] : { ...target };
-  const parent = path.reduce(
-    (
-      acc: { [key: string | symbol]: any } | any[],
-      prop: string | number | symbol
-    ) =>
-      typeof acc === "object" && !Array.isArray(acc)
-        ? { ...acc }[prop]
-        : [...acc][Number(prop)],
-    root
-  );
+  while (path.length > 0) {
+    const prop = path.shift()!;
+    let next = parent[prop];
+    if (isCell(next)) return next.send(value, path);
+    if (typeof next !== "object" && !Array.isArray(next))
+      throw new Error("Can't use path on non-object or non-array.");
+    parent[prop] = Array.isArray(next) ? [...next] : { ...next };
+    parent = parent[prop];
+  }
 
-  if (Array.isArray(parent)) parent[Number(last)] = value;
-  else parent[last] = value;
+  if (isCell(parent[last])) return parent[last].send(value, []);
 
-  return root;
+  parent[last] = value;
+  return cell.send(root);
 }
 
 function createCellProxy(
@@ -101,8 +102,9 @@ function createCellProxy(
   path: Path
 ): Cell<any> {
   const methods: { [key: string | symbol]: any } = {
-    get: () => createCellValueProxy(getProp(state.get(), path), state, path),
-    send: (value: any) => state.send(setProp(state.get(), path, value)),
+    get: () => createCellValueProxy(state, path),
+    send: (value: any, extraPath: Path = []) =>
+      setProp(state, [...path, ...extraPath], value),
     updates: (subscriber: Sendable<void>) => state.updates(subscriber),
   } satisfies CellMethods<any>;
   return new Proxy(target, {
@@ -116,21 +118,32 @@ function createCellProxy(
 }
 
 function createCellValueProxy(
-  target: any,
   state: WriteableSignal<any>,
-  path: Path
+  valuePath: Path
 ): any {
+  let target = state.get();
+  while (isCell(target)) {
+    state = target;
+    target = state.get();
+  }
+  let path: Path = [];
+  target = valuePath.reduce((acc, prop) => {
+    path.push(prop);
+    let next = acc[prop];
+    while (isCell(next)) {
+      state = next;
+      next = state.get();
+      path = [];
+    }
+    return next;
+  }, target);
   if (typeof target !== "object") return target;
   return new Proxy(target, {
     get(_target, prop: string | symbol) {
-      return createCellValueProxy(
-        getProp(state.get(), [...path, prop]),
-        state,
-        [...path, prop]
-      );
+      return createCellValueProxy(state, [...path, prop]);
     },
     set(_target, prop: string | symbol, value: any) {
-      state.send(setProp(state.get(), [...path, prop], value));
+      createCellProxy({}, state, [...path, prop]).send(value);
       return true;
     },
   });
