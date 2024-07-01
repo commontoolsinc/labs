@@ -70,7 +70,7 @@ export const isCell = (
   return (
     value !== null &&
     typeof value.get === "function" &&
-    typeof value.subscribe === "function"
+    typeof value.connect === "function"
   );
 }
 
