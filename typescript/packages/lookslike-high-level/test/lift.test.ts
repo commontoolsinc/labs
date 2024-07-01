@@ -10,8 +10,8 @@ function flushMicrotasks() {
 describe("lift", () => {
   it("should lift a function", async () => {
     const add = lift((a: number, b: number) => a + b);
-    const a = cell<number>(1);
-    const b = cell<number>(2);
+    const a = cell(1);
+    const b = cell(2);
     const c = add(a, b);
     expect(c.get()).toBe(3);
     a.send(2);
@@ -22,7 +22,7 @@ describe("lift", () => {
   it("should lift a function with a path", async () => {
     const add = lift((a: { b: number }, b: number) => a.b + b);
     const a = cell({ b: 1 });
-    const b = cell<number>(2);
+    const b = cell(2);
     const c = add(a, b);
     expect(c.get()).toBe(3);
     a.b.send(2);
@@ -59,7 +59,7 @@ describe("lift", () => {
       const [first, last] = name.split(" ", 2);
       return { first, last };
     });
-    const name = cell<string>("John Doe");
+    const name = cell("John Doe");
     const { first, last } = nameSplit(name);
     expect(first.get()).toBe("John");
     expect(last.get()).toBe("Doe");
@@ -80,9 +80,9 @@ describe("lift", () => {
 describe("lift.apply", () => {
   it("should lift a function and support apply", async () => {
     const add = lift((a: number, b: number) => a + b);
-    const a = cell<number>(1);
-    const b = cell<number>(2);
-    const c = cell<number>(0);
+    const a = cell(1);
+    const b = cell(2);
+    const c = cell(0);
     add.apply(a, b, c);
     expect(c.get()).toBe(3);
     a.send(2);
@@ -93,9 +93,9 @@ describe("lift.apply", () => {
 
 describe("curry", () => {
   it("should curry a function", async () => {
-    const a = cell<number>(1);
+    const a = cell(1);
     const add = curry([a], (a: number, b: number) => a + b);
-    const b = cell<number>(2);
+    const b = cell(2);
     const c = add(b);
     expect(c.get()).toBe(3);
     b.send(3);
@@ -105,10 +105,10 @@ describe("curry", () => {
   });
 
   it("should curry a function and support apply", async () => {
-    const a = cell<number>(1);
+    const a = cell(1);
     const add = curry([a], (a: number, b: number) => a + b);
-    const b = cell<number>(2);
-    const c = cell<number>(0);
+    const b = cell(2);
+    const c = cell(0);
     add.apply(b, c);
     expect(c.get()).toBe(3);
     b.send(3);
@@ -123,8 +123,8 @@ describe("lift with writeable cells", () => {
     const add = lift(
       (a: number, b: number, c: { result: number }) => (c.result = a + b)
     );
-    const a = cell<number>(1);
-    const b = cell<number>(2);
+    const a = cell(1);
+    const b = cell(2);
     const c = cell({ result: 0 });
     add(a, b, c);
     expect(c.get()).toStrictEqual({ result: 3 });
@@ -155,9 +155,9 @@ describe("handler", () => {
 
 describe("propagator", () => {
   it("should propagate changes", async () => {
-    const a = cell<number>(1);
-    const b = cell<number>(2);
-    const c = cell<number>(0);
+    const a = cell(1);
+    const b = cell(2);
+    const c = cell(0);
     const add = propagator(
       (a: Cell<number>, b: Cell<number>, c: Cell<number>) =>
         c.send(a.get() + b.get())

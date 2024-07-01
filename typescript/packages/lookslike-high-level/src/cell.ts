@@ -1,7 +1,5 @@
 import { WriteableSignal, isSignal } from "@commontools/common-frp/signal";
 import { Sendable, Cancel } from "@commontools/common-frp";
-import { get } from "idb-keyval";
-import { navpanel } from "../../common-ui/src/components/common-navpanel";
 
 /**
  * A cell is a container for updatable state.
@@ -18,9 +16,11 @@ export type Cell<T> = T extends (infer U)[]
   ? {
       [K in keyof T]: Cell<T[K]>;
     } & CellMethods<T>
-  : T & CellMethods<T>;
+  : T extends number | string | boolean | symbol
+  ? T & CellMethods<T>
+  : CellMethods<T>;
 
-const getCell = Symbol("getCell"); // Internal API to proxies only
+const getCell = Symbol("getCell"); // Internal API for proxies only
 
 type CellMethods<T> = {
   get: (() => T) & Cell<T>;
@@ -29,6 +29,8 @@ type CellMethods<T> = {
   [getCell]: () => [WriteableSignal<T>, Path];
 };
 
+// This makes it so that we can set a new value on a cell, even if the original
+// value was given as a cell. e.g. so that cell(cell(2)).send(3) works.
 type UnwrapCell<T> = T extends Cell<infer U> ? U : T;
 
 export function cell<T>(value: T): Cell<T> {
