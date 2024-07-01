@@ -20,9 +20,11 @@ export type Cell<T> = T extends (infer U)[]
 
 type CellMethods<T> = {
   get: (() => T) & Cell<T>;
-  send: ((value: T, path?: Path) => void) & Cell<T>;
+  send: ((value: T | UnwrapCell<T>, path?: Path) => void) & Cell<T>;
   updates: ((subscriber: Sendable<void>) => Cancel) & Cell<T>;
 };
+
+type UnwrapCell<T> = T extends Cell<infer U> ? U : T;
 
 export function cell<T>(value: T): Cell<T> {
   const subscribers = new Set<Sendable<void>>();
