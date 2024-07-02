@@ -1,11 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { cell, Cell } from "../src/cell.js";
 import { lift, curry, asHandler, handler, propagator } from "../src/lift.js";
-
-// Utility function to flush microtasks
-function flushMicrotasks() {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
+import { idle } from "../src/scheduler.js";
 
 describe("lift", () => {
   it("should lift a function", async () => {
@@ -15,7 +11,7 @@ describe("lift", () => {
     const c = add(a, b);
     expect(c.get()).toBe(3);
     a.send(2);
-    await flushMicrotasks();
+    await idle();
     expect(c.get()).toBe(4);
   });
 
@@ -26,7 +22,7 @@ describe("lift", () => {
     const c = add(a, b);
     expect(c.get()).toBe(3);
     a.b.send(2);
-    await flushMicrotasks();
+    await idle();
     expect(c.get()).toBe(4);
   });
 
@@ -37,7 +33,7 @@ describe("lift", () => {
     const c = add(a, b);
     expect(c.get()).toBe(3);
     b[0].send(3);
-    await flushMicrotasks();
+    await idle();
     expect(c.get()).toBe(4);
   });
 
@@ -49,7 +45,7 @@ describe("lift", () => {
     expect(b[0].get()).toBe(2);
     expect(c.get()).toBe(3);
     b[0].send(3);
-    await flushMicrotasks();
+    await idle();
     expect(c.get()).toBe(4);
   });
 
@@ -85,7 +81,7 @@ describe("lift.apply", () => {
     add.apply(a, b, c);
     expect(c.get()).toBe(3);
     a.send(2);
-    await flushMicrotasks();
+    await idle();
     expect(c.get()).toBe(4);
   });
 });
@@ -99,7 +95,7 @@ describe("curry", () => {
     expect(c.get()).toBe(3);
     b.send(3);
     a.send(5);
-    await flushMicrotasks();
+    await idle();
     expect(c.get()).toBe(8);
   });
 
@@ -112,7 +108,7 @@ describe("curry", () => {
     expect(c.get()).toBe(3);
     b.send(3);
     a.send(5);
-    await flushMicrotasks();
+    await idle();
     expect(c.get()).toBe(8);
   });
 });
@@ -128,7 +124,7 @@ describe("lift with writeable cells", () => {
     add(a, b, c);
     expect(c.get()).toStrictEqual({ result: 3 });
     a.send(2);
-    await flushMicrotasks();
+    await idle();
     expect(c.get()).toStrictEqual({ result: 4 });
   });
 });
@@ -145,10 +141,10 @@ describe("lift with partial reads and so partial updates", () => {
     expect(a.get()).toBe(1);
     expect(runCount).toBe(1);
     c.b.send(3);
-    await flushMicrotasks();
+    await idle();
     expect(runCount).toBe(1);
     c.a.send(4);
-    await flushMicrotasks();
+    await idle();
     expect(a.get()).toBe(4);
     expect(runCount).toBe(2);
   });
@@ -160,7 +156,7 @@ describe("handler", () => {
     const h = asHandler((e: number, a: { value: number }) => (a.value += e));
     const s = h(a);
     s.send(2);
-    await flushMicrotasks();
+    await idle();
     expect(a.get()).toStrictEqual({ value: 3 });
   });
 
@@ -168,7 +164,7 @@ describe("handler", () => {
     const a = cell({ value: 1 });
     const s = handler([a], (e: number, a: { value: number }) => (a.value += e));
     s.send(2);
-    await flushMicrotasks();
+    await idle();
     expect(a.get()).toStrictEqual({ value: 3 });
   });
 });
@@ -185,7 +181,7 @@ describe("propagator", () => {
     add(a, b, c);
     expect(c.get()).toBe(3);
     a.send(2);
-    await flushMicrotasks();
+    await idle();
     expect(c.get()).toBe(4);
   });
 });

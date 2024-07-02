@@ -7,6 +7,11 @@ const pending = new Set<Action>();
 const dirty = new Set<Cell<any>>();
 const dependencies = new WeakMap<Action, ReactivityLog>();
 const cancels = new WeakMap<Action, Cancel[]>();
+const idlePromises: (() => void)[] = [];
+let loopCounter = new WeakMap<Action, number>();
+const errorHandlers = new Set<(error: Error) => void>();
+
+const MAX_ITERATIONS_PER_RUN = 100;
 
 export function run(fn: Action): void {
   const log = { reads: new Set<Cell<any>>(), writes: new Set<Cell<any>>() };
@@ -14,7 +19,29 @@ export function run(fn: Action): void {
   cancels.set(fn, schedule(fn, log));
 }
 
-export function schedule(fn: Action, log: ReactivityLog): Cancel[] {
+export function remove(fn: Action): void {
+  cancels.get(fn)?.forEach((cancel) => cancel());
+  cancels.delete(fn);
+  dependencies.delete(fn);
+}
+
+export async function idle() {
+  return new Promise<void>((resolve) => {
+    if (pending.size === 0) resolve();
+    idlePromises.push(resolve);
+  });
+}
+
+export function onError(fn: (error: Error) => void) {
+  errorHandlers.add(fn);
+}
+
+function handleError(error: Error) {
+  if (errorHandlers.size === 0) throw error;
+  for (const handler of errorHandlers) handler(error);
+}
+
+function schedule(fn: Action, log: ReactivityLog): Cancel[] {
   dependencies.set(fn, log);
   const cancels = Array.from(log.reads).map((cell) =>
     cell.updates({
@@ -46,7 +73,23 @@ function execute() {
   // It will also mark cells as dirty that were both read and written by the
   // same action, but without that alone triggering a new run. This ensures that
   // they run whenever the next runs are scheduled.
-  for (const fn of order) run(fn);
+  for (const fn of order) {
+    loopCounter.set(fn, (loopCounter.get(fn) || 0) + 1);
+    console.log(loopCounter.get(fn));
+    if (loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN)
+      handleError(new Error("Too many iterations"));
+    else run(fn);
+  }
+
+  if (pending.size === 0) {
+    const promises = idlePromises;
+    for (const resolve of promises) resolve();
+    idlePromises.length = 0;
+
+    loopCounter = new WeakMap();
+  } else {
+    queueMicrotask(execute);
+  }
 }
 
 function topologicalSort(
