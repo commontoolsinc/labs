@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cell, Cell } from "../src/cell.js";
+import { cell, Cell } from "../src/runtime/cell.js";
 import {
   lift,
   apply,
@@ -7,8 +7,8 @@ import {
   asHandler,
   handler,
   propagator,
-} from "../src/lift.js";
-import { idle } from "../src/scheduler.js";
+} from "../src/runtime/lift.js";
+import { idle } from "../src/runtime/scheduler.js";
 
 describe("lift", () => {
   it("should lift a function", async () => {

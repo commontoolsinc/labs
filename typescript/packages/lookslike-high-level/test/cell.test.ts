@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { cell, isCell, toValue, ReactivityLog } from "../src/cell.js";
+import { cell, isCell, toValue, ReactivityLog } from "../src/runtime/cell.js";
 import { isSignal, WriteableSignal } from "@commontools/common-frp/signal";
-import { idle } from "../src/scheduler.js";
+import { idle } from "../src/runtime/scheduler.js";
 
 describe("cell", () => {
   it("should create a cell", () => {

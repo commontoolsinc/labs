@@ -1,6 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
-import { cell, toValue } from "../src/cell.js";
-import { Action, run, idle, remove, onError } from "../src/scheduler.js";
+import { cell, toValue } from "../src/runtime/cell.js";
+import {
+  Action,
+  run,
+  idle,
+  remove,
+  onError,
+} from "../src/runtime/scheduler.js";
 
 describe("scheduler", () => {
   it("should run actions when cells change", async () => {
