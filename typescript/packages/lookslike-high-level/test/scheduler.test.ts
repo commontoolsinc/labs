@@ -9,7 +9,6 @@ describe("scheduler", () => {
     const b = cell(2);
     const c = cell(0);
     const adder: Action = (log) => {
-      console.log("adder");
       runCount++;
       c.withLog(log).send(toValue(a, log) + toValue(b, log));
     };
@@ -18,7 +17,6 @@ describe("scheduler", () => {
     expect(c.get()).toBe(3);
     a.send(2); // No log, simulate external change
     await idle();
-    console.log("awaited");
     expect(runCount).toBe(2);
     expect(c.get()).toBe(4);
   });
@@ -111,5 +109,26 @@ describe("scheduler", () => {
     await idle();
     expect(stopped).toHaveBeenCalled();
     expect(maxRuns).toBeGreaterThan(0);
+  });
+
+  it("should not loop on r/w changes on its own output", async () => {
+    const counter = cell(0);
+    const by = cell(1);
+    const inc: Action = (log) =>
+      counter.withLog(log).send(toValue(counter, log) + toValue(by, log));
+
+    const stopped = vi.fn();
+    onError(() => stopped());
+
+    run(inc);
+    expect(counter.get()).toBe(1);
+    await idle();
+    expect(counter.get()).toBe(1);
+
+    by.send(2);
+    await idle();
+    expect(counter.get()).toBe(3);
+
+    expect(stopped).not.toHaveBeenCalled();
   });
 });

@@ -15,8 +15,25 @@ const MAX_ITERATIONS_PER_RUN = 100;
 
 export function run(fn: Action): void {
   const log = { reads: new Set<Cell<any>>(), writes: new Set<Cell<any>>() };
+
   fn(log);
-  cancels.set(fn, schedule(fn, log));
+
+  // Note: By adding the listeners after the call we avoid triggering a re-run
+  // of the action if it changed a r/w cell. Note that this also means that
+  // those actions can't loop on themselves until reaching a fixed point.
+  dependencies.set(fn, log);
+  cancels.set(
+    fn,
+    Array.from(log.reads).map((cell) =>
+      cell.updates({
+        send: () => {
+          dirty.add(cell);
+          if (pending.size === 0) queueMicrotask(execute);
+          pending.add(fn);
+        },
+      })
+    )
+  );
 }
 
 export function remove(fn: Action): void {
@@ -41,23 +58,6 @@ function handleError(error: Error) {
   for (const handler of errorHandlers) handler(error);
 }
 
-function schedule(fn: Action, log: ReactivityLog): Cancel[] {
-  dependencies.set(fn, log);
-  const cancels = Array.from(log.reads).map((cell) =>
-    cell.updates({
-      send: () => {
-        dirty.add(cell);
-        if (pending.size === 0) queueMicrotask(execute);
-        pending.add(fn);
-      },
-    })
-  );
-  log.writes.forEach((cell) => {
-    if (log.reads.has(cell)) dirty.add(cell);
-  });
-  return cancels;
-}
-
 function execute() {
   const order = topologicalSort(pending, dependencies, dirty);
 
@@ -69,13 +69,8 @@ function execute() {
 
   // Now run all functions. This will create new listeners to mark cells dirty
   // and schedule the next run.
-  //
-  // It will also mark cells as dirty that were both read and written by the
-  // same action, but without that alone triggering a new run. This ensures that
-  // they run whenever the next runs are scheduled.
   for (const fn of order) {
     loopCounter.set(fn, (loopCounter.get(fn) || 0) + 1);
-    console.log(loopCounter.get(fn));
     if (loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN)
       handleError(new Error("Too many iterations"));
     else run(fn);
