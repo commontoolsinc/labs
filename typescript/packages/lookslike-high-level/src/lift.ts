@@ -9,20 +9,12 @@ type CellsFor<T extends any[]> = {
 // Creates a node factory for the given function.
 export function lift<T extends any[], R>(
   fn: (...args: T) => R
-): {
-  (...args: [...CellsFor<T>]): Cell<R>;
-  apply: (...args: [...CellsFor<T>, Cell<R>]) => void;
-} {
-  const apply = (
-    ...args: [...CellsFor<T>, Cell<R> | undefined]
-  ): Cell<R> | void => {
-    const lastArg = args.pop() as Cell<R> | undefined;
-    const inputCells = args as CellsFor<T>;
-
-    let returnCell = lastArg ? lastArg : cell<R>(undefined as R);
+): (...args: [...CellsFor<T>]) => Cell<R> {
+  const lifted = (...args: [...CellsFor<T>]): Cell<R> => {
+    const returnCell = cell<R>(undefined as R);
 
     const action: Action = (log) => {
-      const values = inputCells.map((arg) => toValue(arg, log)) as T;
+      const values = args.map((arg) => toValue(arg, log)) as T;
       const result = fn(...values);
       returnCell.withLog(log).send(result);
     };
@@ -30,33 +22,28 @@ export function lift<T extends any[], R>(
     // Compute initial value
     run(action);
 
-    if (lastArg === undefined) {
-      return returnCell;
-    }
+    return returnCell;
   };
 
-  const lifted = (...args: [...CellsFor<T>]) =>
-    apply(...args, undefined) as Cell<R>;
-  lifted.apply = apply as (...args: [...CellsFor<T>, Cell<R>]) => void;
+  return (...args: [...CellsFor<T>]) => lifted(...args);
+}
 
-  return lifted;
+export function apply<T extends any[], R>(
+  args: [...CellsFor<T>],
+  fn: (...args: T) => R
+): Cell<R> {
+  return lift(fn)(...args);
 }
 
 // Creates a node factory with some cells already bound.
-export function curry<T extends any[], U extends any[], V>(
+export function curry<T extends any[], U extends any[], R>(
   values: CellsFor<T>,
-  fn: (...args: [...T, ...U]) => V
-): {
-  (...args: CellsFor<U>): Cell<V>;
-  apply: (...args: [...CellsFor<U>, Cell<V>]) => void;
-} {
+  fn: (...args: [...T, ...U]) => R
+): (...args: CellsFor<U>) => Cell<R> {
   const lifted = lift(fn);
 
-  const curried = (...remainingArgs: CellsFor<U>) => {
-    return lifted(...values, ...remainingArgs);
-  };
-  curried.apply = (...args: [...CellsFor<U>, Cell<V>]) =>
-    lifted.apply(...values, ...args);
+  const curried = (...remainingArgs: CellsFor<U>) =>
+    lifted(...values, ...remainingArgs);
 
   return curried;
 }

@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { cell, Cell } from "../src/cell.js";
-import { lift, curry, asHandler, handler, propagator } from "../src/lift.js";
+import {
+  lift,
+  apply,
+  curry,
+  asHandler,
+  handler,
+  propagator,
+} from "../src/lift.js";
 import { idle } from "../src/scheduler.js";
 
 describe("lift", () => {
@@ -72,13 +79,11 @@ describe("lift", () => {
   });
 });
 
-describe("lift.apply", () => {
-  it("should lift a function and support apply", async () => {
-    const add = lift((a: number, b: number) => a + b);
+describe("apply", () => {
+  it("apply as an alternate syntax to lift", async () => {
     const a = cell(1);
     const b = cell(2);
-    const c = cell(0);
-    add.apply(a, b, c);
+    const c = apply([a, b], (a, b) => a + b);
     expect(c.get()).toBe(3);
     a.send(2);
     await idle();
@@ -92,19 +97,6 @@ describe("curry", () => {
     const add = curry([a], (a: number, b: number) => a + b);
     const b = cell(2);
     const c = add(b);
-    expect(c.get()).toBe(3);
-    b.send(3);
-    a.send(5);
-    await idle();
-    expect(c.get()).toBe(8);
-  });
-
-  it("should curry a function and support apply", async () => {
-    const a = cell(1);
-    const add = curry([a], (a: number, b: number) => a + b);
-    const b = cell(2);
-    const c = cell(0);
-    add.apply(b, c);
     expect(c.get()).toBe(3);
     b.send(3);
     a.send(5);
