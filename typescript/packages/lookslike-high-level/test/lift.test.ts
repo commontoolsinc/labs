@@ -50,7 +50,6 @@ describe("lift", () => {
     expect(c.get()).toBe(3);
     b[0].send(3);
     await flushMicrotasks();
-    console.log(c.get());
     expect(c.get()).toBe(4);
   });
 
@@ -131,6 +130,27 @@ describe("lift with writeable cells", () => {
     a.send(2);
     await flushMicrotasks();
     expect(c.get()).toStrictEqual({ result: 4 });
+  });
+});
+
+describe("lift with partial reads and so partial updates", () => {
+  it("shouldn't be called again if the value wasn't read", async () => {
+    let runCount = 0;
+    const c = cell({ a: cell(1), b: cell(2) });
+    const justA = lift((input) => {
+      runCount++;
+      return input.a;
+    });
+    const a = justA(c);
+    expect(a.get()).toBe(1);
+    expect(runCount).toBe(1);
+    c.b.send(3);
+    await flushMicrotasks();
+    expect(runCount).toBe(1);
+    c.a.send(4);
+    await flushMicrotasks();
+    expect(a.get()).toBe(4);
+    expect(runCount).toBe(2);
   });
 });
 

@@ -1,23 +1,10 @@
-import { Sendable, Cancel } from "@commontools/common-frp";
-import { cell, Cell, toValue, ReactivityLog, isCell } from "./cell.js";
+import { Sendable } from "@commontools/common-frp";
+import { cell, Cell, toValue, isCell } from "./cell.js";
+import { Action, run } from "./scheduler.js";
 
 type CellsFor<T extends any[]> = {
   [K in keyof T]: Cell<T[K]>;
 };
-
-const pending = new Set<() => void>();
-
-function schedule(fn: () => void) {
-  if (pending.size === 0) {
-    queueMicrotask(() => {
-      for (const fn of pending) {
-        fn();
-      }
-      pending.clear();
-    });
-  }
-  pending.add(fn);
-}
 
 // Creates a node factory for the given function.
 export function lift<T extends any[], R>(
@@ -34,22 +21,14 @@ export function lift<T extends any[], R>(
 
     let returnCell = lastArg ? lastArg : cell<R>(undefined as R);
 
-    // Function to compute the result. Subscribes to all used input cells.
-    const log: ReactivityLog = { reads: new Set(), writes: new Set() };
-    let cancels: Cancel[] = [];
-
-    const computeResult = () => {
-      cancels.forEach((cancel) => cancel());
+    const action: Action = (log) => {
       const values = inputCells.map((arg) => toValue(arg, log)) as T;
       const result = fn(...values);
-      cancels = Array.from(log.reads).map((cell) =>
-        cell.updates({ send: () => schedule(computeResult) })
-      );
-      returnCell.send(result);
+      returnCell.withLog(log).send(result);
     };
 
     // Compute initial value
-    computeResult();
+    run(action);
 
     if (lastArg === undefined) {
       return returnCell;
@@ -107,15 +86,11 @@ export function propagator<T extends any[]>(
     const argsAsCells = args.map((arg) =>
       isCell(arg) ? arg : cell(arg)
     ) as CellsFor<T>;
-    const computeResult = () => {
-      return fn(...argsAsCells);
+
+    const action: Action = (log) => {
+      fn(...(argsAsCells.map((cell) => cell.withLog(log)) as CellsFor<T>));
     };
 
-    computeResult();
-
-    // TODO: This will immediately call the function again. This is merely
-    // inefficient if the function is idempotent, but could be problematic if it
-    // isn't.
-    argsAsCells.forEach((arg) => arg.updates({ send: computeResult }));
+    run(action);
   };
 }
