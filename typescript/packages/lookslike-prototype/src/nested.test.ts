@@ -1,159 +1,245 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
-import { ReactiveGraph, Graph } from "./nested.js";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { GraphRuntime } from "./nested.js";
 import { firstValueFrom } from "rxjs";
 
-describe("ReactiveGraph", () => {
-  let serializedGraph: Graph;
+describe("GraphRuntime", () => {
+  let runtime: GraphRuntime;
+
+  const basicGraph = {
+    id: "root",
+    type: "scope",
+    nodes: [
+      { id: "input", type: "variable", default: 1 },
+      {
+        id: "double",
+        type: "function",
+        inputs: { x: { type: "number" } },
+        body: "x => x * 2"
+      },
+      {
+        id: "render",
+        type: "render",
+        contentType: "text"
+      }
+    ],
+    connections: [
+      { bind: "input", toNode: { node: "double", port: "x" } },
+      { bind: "double", toNode: { node: "render" } }
+    ]
+  };
 
   beforeEach(() => {
-    serializedGraph = {
-      id: "root",
-      type: "scope",
-      nodes: [
-        { id: "input1", type: "variable", default: 0 },
-        { id: "input2", type: "variable", default: 0 },
-        {
-          id: "process1",
-          type: "function",
-          inputs: {
-            a: { type: "number" },
-            b: { type: "number" }
-          },
-          body: "(a, b) => a + b"
-        },
-        {
-          id: "subgraph",
-          type: "scope",
-          nodes: [
-            { id: "subInput", type: "variable", default: 0 },
-            {
-              id: "subProcess",
-              type: "function",
-              inputs: { x: { type: "number" } },
-              body: "x => x * 2"
-            }
-          ],
-          connections: [
-            {
-              bind: "subInput",
-              toNode: {
-                node: "subProcess",
-                port: "x"
-              }
-            }
-          ]
-        }
-      ],
-      connections: [
-        { bind: "input1", toNode: { node: "process1", port: "a" } },
-        { bind: "input2", toVariable: "subgraph.subInput" },
-        { bind: "subgraph.subProcess", toNode: { node: "process1", port: "b" } }
-      ]
-    };
+    runtime = new GraphRuntime(basicGraph);
   });
 
-  test("Graph construction", () => {
-    const graph = new ReactiveGraph(serializedGraph);
-    expect(graph).toBeDefined();
+  it("should create a GraphRuntime instance", () => {
+    expect(runtime).toBeInstanceOf(GraphRuntime);
   });
 
-  function dumpDebugDataForGraph(graph: ReactiveGraph) {
-    console.log("graph._nodes", graph["nodes"]);
-  }
-
-  test("Input propagation", async () => {
-    const graph = new ReactiveGraph(serializedGraph);
-    graph.logGraphState();
-
+  it("should execute the graph", async () => {
     vi.useFakeTimers();
+    const spy = vi.fn();
 
-    const output = graph.getNodeOutput("root.output1");
-    output?.subscribe({
-      next: (value) => {
-        console.log("output", value);
-        // expect(value).toBe(11); // 5 + (2 * 2)
-      }
+    runtime.subscribeToNode("render").subscribe((output) => {
+      console.log("output", output);
+      expect(output).toBe(0);
     });
 
-    graph.setNodeInput("root", "input1", 5);
-    graph.setNodeInput("root", "input2", 2);
-    // graph.setNodeInput("root.subgraph.subInput", 3);
+    runtime.subscribeToNode("double").subscribe((double) => {
+      console.log("double", double);
+      spy(double);
+    });
+
+    runtime.subscribeToNode("input").subscribe((input) => {
+      console.log("input", input);
+    });
+
+    expect(spy).toBeCalledTimes(0);
+
+    runtime.execute();
 
     await vi.runAllTimersAsync();
 
-    graph.logGraphState();
-
-    // dumpDebugDataForGraph(graph);
+    expect(spy).toHaveBeenCalledWith(2);
   });
 
-  test("Subgraph execution", async () => {
-    const graph = new ReactiveGraph(serializedGraph);
+  it("should update a variable value", async () => {
+    vi.useFakeTimers();
+    const spy = vi.fn();
 
-    graph.setNodeInput("root.subgraph.subInput", 4);
+    runtime.execute();
+    runtime.setValue("input", 2);
 
-    const subgraphOutput = await firstValueFrom(
-      graph.getNodeOutput("root.subgraph.subOutput")!
-    );
-    expect(subgraphOutput).toBe(8); // 4 * 2
+    runtime.subscribeToNode("render").subscribe((render) => {
+      console.log("render", render);
+      spy(render);
+    });
+    expect(spy).toBeCalledTimes(0);
+
+    runtime.setValue("input", 5);
+
+    await vi.runAllTimersAsync();
+    expect(spy).toHaveBeenCalledWith(10);
   });
 
-  test("Multiple input updates", async () => {
-    const graph = new ReactiveGraph(serializedGraph);
-
-    graph.setNodeInput("root.input1", 10);
-    graph.setNodeInput("root.subgraph.subInput", 5);
-
-    let output = await firstValueFrom(graph.getNodeOutput("root.output1")!);
-    expect(output).toBe(20); // 10 + (5 * 2)
-
-    graph.setNodeInput("root.input1", 7);
-
-    output = await firstValueFrom(graph.getNodeOutput("root.output1")!);
-    expect(output).toBe(17); // 7 + (5 * 2)
-  });
-
-  test("Non-existent node handling", () => {
-    const graph = new ReactiveGraph(serializedGraph);
-
-    expect(graph.getNodeOutput("non.existent.node")).toBeUndefined();
-    expect(() => graph.setNodeInput("non.existent.node", 10)).not.toThrow();
-  });
-
-  test("Cyclic dependency handling", async () => {
-    const cyclicGraph: SerializedGraph = {
-      root: {
-        id: "root",
-        type: "namespace",
-        ports: [],
-        nodes: [
-          {
-            id: "node1",
-            type: "process",
-            ports: [{ id: "x", contentType: "number" }],
-            contentType: "javascript",
-            body: "x => x + 1"
-          },
-          {
-            id: "node2",
-            type: "process",
-            ports: [{ id: "x", contentType: "number" }],
-            contentType: "javascript",
-            body: "x => x * 2"
-          }
-        ],
-        connections: [
-          { from: "node1", to: "node2", port: "x" },
-          { from: "node2", to: "node1", port: "x" }
-        ]
-      }
+  it("should handle nested scopes", async () => {
+    const nestedGraph = {
+      id: "root",
+      type: "scope",
+      nodes: [
+        {
+          id: "nested",
+          type: "scope",
+          nodes: [
+            { id: "input", type: "variable", default: 2 },
+            {
+              id: "multiply",
+              type: "function",
+              inputs: { x: { type: "number" } },
+              body: "x => x * 4"
+            }
+          ],
+          connections: [
+            { bind: "input", toNode: { node: "multiply", port: "x" } }
+          ]
+        },
+        {
+          id: "render",
+          type: "render",
+          contentType: "text"
+        }
+      ],
+      connections: [{ bind: "nested.multiply", toNode: { node: "render" } }]
     };
 
-    const graph = new ReactiveGraph(cyclicGraph);
+    vi.useFakeTimers();
+    const spy = vi.fn();
 
-    // This should not cause an infinite loop
-    graph.setNodeInput("root.node1", 1);
+    const nestedRuntime = new GraphRuntime(nestedGraph);
 
-    const output = await firstValueFrom(graph.getNodeOutput("root.node2")!);
-    expect(output).toBeDefined();
+    nestedRuntime.subscribeToNode("render").subscribe((render) => {
+      console.log("render", render);
+      spy(render);
+    });
+    expect(spy).toBeCalledTimes(0);
+
+    await vi.runAllTimersAsync();
+    nestedRuntime.execute();
+
+    expect(spy).toHaveBeenCalledWith(8);
+  });
+
+  it("should handle nested scopes 2", async () => {
+    const nestedGraph = {
+      id: "root",
+      type: "scope",
+      nodes: [
+        { id: "input", type: "variable", default: 2 },
+        {
+          id: "nested",
+          type: "scope",
+          nodes: [
+            {
+              id: "multiply",
+              type: "function",
+              inputs: { x: { type: "number" } },
+              body: "x => x * 4"
+            }
+          ],
+          connections: []
+        },
+        {
+          id: "render",
+          type: "render",
+          contentType: "text"
+        }
+      ],
+      connections: [
+        { bind: "input", toNode: { node: "nested.multiply", port: "x" } },
+        { bind: "nested.multiply", toNode: { node: "render" } }
+      ]
+    };
+
+    vi.useFakeTimers();
+    const spy = vi.fn();
+
+    const nestedRuntime = new GraphRuntime(nestedGraph);
+
+    nestedRuntime.subscribeToNode("render").subscribe((render) => {
+      console.log("render", render);
+      spy(render);
+    });
+    expect(spy).toBeCalledTimes(0);
+
+    nestedRuntime.execute();
+    await vi.runAllTimersAsync();
+
+    nestedRuntime.setValue("input", 3);
+
+    await vi.runAllTimersAsync();
+
+    expect(spy).toHaveBeenCalledWith(12);
+  });
+
+  it("should handle deeply nested scopes", async () => {
+    const deeplyNestedGraph = {
+      id: "root",
+      type: "scope",
+      nodes: [
+        { id: "input", type: "variable", default: 2 },
+        {
+          id: "level1",
+          type: "scope",
+          nodes: [
+            {
+              id: "level2",
+              type: "scope",
+              nodes: [
+                {
+                  id: "multiply",
+                  type: "function",
+                  inputs: { x: { type: "number" } },
+                  body: "x => x * 3"
+                }
+              ],
+              connections: []
+            }
+          ],
+          connections: []
+        },
+        {
+          id: "render",
+          type: "render",
+          contentType: "text"
+        }
+      ],
+      connections: [
+        {
+          bind: "input",
+          toNode: { node: "level1.level2.multiply", port: "x" }
+        },
+        { bind: "level1.level2.multiply", toNode: { node: "render" } }
+      ]
+    };
+
+    vi.useFakeTimers();
+    const spy = vi.fn();
+
+    const deeplyNestedRuntime = new GraphRuntime(deeplyNestedGraph);
+
+    deeplyNestedRuntime.subscribeToNode("render").subscribe((render) => {
+      console.log("render", render);
+      spy(render);
+    });
+    expect(spy).toBeCalledTimes(0);
+
+    await vi.runAllTimersAsync();
+    deeplyNestedRuntime.execute();
+
+    deeplyNestedRuntime.setValue("input", 4);
+
+    await vi.runAllTimersAsync();
+
+    expect(spy).toHaveBeenCalledWith(12);
   });
 });

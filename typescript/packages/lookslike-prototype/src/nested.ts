@@ -21,7 +21,7 @@ import {
 type Id = string;
 type Port = string;
 
-type Scope = {
+export type Graph = {
   id: Id;
   type: "scope";
   nodes: Node[];
@@ -46,7 +46,7 @@ type Node =
       contentType: "html";
       source: Id;
     }
-  | Scope;
+  | Graph;
 
 type Connection =
   | {
@@ -60,8 +60,6 @@ type Connection =
       bind: Id;
       toVariable: Id;
     };
-
-export type Graph = Scope;
 
 const serializedGraph: Graph = {
   id: "root",
@@ -162,338 +160,312 @@ const serializedGraph: Graph = {
   ]
 };
 
-export interface ReactiveNode {
+type NodeType = "variable" | "function" | "render" | "scope";
+
+interface INode {
   id: string;
-  type: "input" | "output" | "process" | "namespace";
-  contentType: string;
-  body: string | object;
-  children: Map<string, ReactiveNode>;
-  inputs: Map<string, BehaviorSubject<any>>;
-  output: BehaviorSubject<any>;
-  subscription?: Subscription;
+  type: NodeType;
+  setup(): void;
+  dispose(): void;
 }
 
-export class ReactiveGraph {
-  private nodes: Map<string, ReactiveNode> = new Map();
-  private subscriptions: Subscription = new Subscription();
+class Variable implements INode {
+  private valueSubject: BehaviorSubject<any>;
 
-  constructor(serialized: SerializedGraph) {
-    this.buildGraph(serialized.root);
+  constructor(
+    public id: string,
+    public type: "variable",
+    private defaultValue: any
+  ) {
+    this.valueSubject = new BehaviorSubject(defaultValue);
   }
 
-  private buildGraph(
-    namespace: SerializedNamespaceNode,
-    prefix: string = ""
-  ): ReactiveNode {
-    const fullPath = prefix ? `${prefix}.${namespace.id}` : namespace.id;
+  setup() {}
 
-    const node: ReactiveNode = {
-      id: namespace.id,
-      type: "namespace",
-      contentType: "namespace",
-      body: {},
-      children: new Map(),
-      inputs: new Map(),
-      output: new BehaviorSubject<any>(null)
-    };
+  dispose() {
+    this.valueSubject.complete();
+  }
 
-    this.nodes.set(fullPath, node);
+  getValue(): Observable<any> {
+    return this.valueSubject.asObservable();
+  }
 
-    for (const port of namespace.ports) {
-      node.inputs.set(port.id, new BehaviorSubject(port.default));
+  setValue(value: any) {
+    this.valueSubject.next(value);
+  }
+}
+
+class FunctionNode implements INode {
+  private inputSubjects: Map<string, Subject<any>> = new Map();
+  private outputSubject: Subject<any> = new Subject();
+  private subscription: Subscription | null = null;
+
+  constructor(
+    public id: string,
+    public type: "function",
+    private inputs: { [port: string]: any },
+    private body: string
+  ) {
+    for (const port of Object.keys(inputs)) {
+      this.inputSubjects.set(port, new Subject());
+    }
+  }
+
+  setup() {
+    const func = new Function(
+      ...Object.keys(this.inputs),
+      `return ((${this.body})(...arguments))`
+    );
+    const b = this.body;
+    const inputObservables = Array.from(this.inputSubjects.values());
+
+    if (this.subscription) {
+      this.subscription.unsubscribe();
     }
 
-    for (const childNode of namespace.nodes) {
-      const childPath = `${fullPath}.${childNode.id}`;
-      if (childNode.type === "namespace") {
-        const child = this.buildGraph(
-          childNode as SerializedNamespaceNode,
-          fullPath
+    this.subscription = combineLatest(inputObservables).subscribe(
+      (inputValues) => {
+        console.log("Function input values:", inputValues, b);
+        const result = func(...inputValues);
+        this.outputSubject.next(result);
+      }
+    );
+  }
+
+  dispose() {
+    this.inputSubjects.forEach((subject) => subject.complete());
+    this.outputSubject.complete();
+  }
+
+  getInput(port: string): Subject<any> {
+    return this.inputSubjects.get(port)!;
+  }
+
+  getOutput(): Observable<any> {
+    return this.outputSubject.asObservable();
+  }
+}
+
+class RenderNode implements INode {
+  private sourceSubject: Subject<any> = new Subject();
+  private outputSubject: Subject<any> = new Subject();
+  private subscription: Subscription | null = null;
+
+  constructor(
+    public id: string,
+    public type: "render",
+    private contentType: string
+  ) {}
+
+  setup() {
+    if (this.subscription) {
+      this.subscription.unsubscribe();
+    }
+
+    this.subscription = this.sourceSubject.subscribe((content) => {
+      // In a real implementation, this would render the content
+      console.log(`Rendering ${this.contentType} content:`, content);
+      this.outputSubject.next(content);
+    });
+  }
+
+  dispose() {
+    this.sourceSubject.complete();
+    this.outputSubject.complete();
+  }
+
+  setSource(source: Observable<any>) {
+    source.subscribe(this.sourceSubject);
+  }
+
+  getOutput(): Observable<any> {
+    return this.outputSubject.asObservable();
+  }
+}
+
+class Scope implements INode {
+  nodes: Map<string, INode> = new Map();
+  connections: Array<{ from: string; to: string; port?: string }> = [];
+
+  constructor(
+    public id: string,
+    public type: "scope"
+  ) {}
+
+  setup() {
+    this.nodes.forEach((node) => node.setup());
+  }
+
+  dispose() {
+    this.nodes.forEach((node) => node.dispose());
+  }
+
+  addNode(node: INode) {
+    this.nodes.set(node.id, node);
+  }
+
+  removeNode(id: string) {
+    const node = this.nodes.get(id);
+    if (node) {
+      node.dispose();
+      this.nodes.delete(id);
+    }
+  }
+
+  addConnection(from: string, to: string, port?: string) {
+    this.connections.push({ from, to, port });
+  }
+
+  removeConnection(from: string, to: string, port?: string) {
+    this.connections = this.connections.filter(
+      (conn) => !(conn.from === from && conn.to === to && conn.port === port)
+    );
+  }
+
+  getNode(id: string): INode | undefined {
+    return this.nodes.get(id);
+  }
+
+  getConnections() {
+    return this.connections;
+  }
+}
+
+export class GraphRuntime {
+  private rootScope: Scope;
+  private nodeValues: Map<string, any> = new Map();
+
+  constructor(private graph: any) {
+    this.rootScope = this.createScope(graph);
+  }
+
+  private createNode(nodeData: any): INode {
+    switch (nodeData.type) {
+      case "variable":
+        return new Variable(nodeData.id, nodeData.type, nodeData.default);
+      case "function":
+        return new FunctionNode(
+          nodeData.id,
+          nodeData.type,
+          nodeData.inputs,
+          nodeData.body
         );
-        node.children.set(childNode.id, child);
-      } else {
-        const child: ReactiveNode = {
-          ...childNode,
-          children: new Map(),
-          inputs: new Map(),
-          output: new BehaviorSubject<any>(null)
-        };
-        for (const port of childNode.ports) {
-          child.inputs.set(port.id, new BehaviorSubject(port.default));
+      case "render":
+        return new RenderNode(nodeData.id, nodeData.type, nodeData.contentType);
+      case "scope":
+        return this.createScope(nodeData);
+      default:
+        throw new Error(`Unknown node type: ${nodeData.type}`);
+    }
+  }
+
+  private createScope(scopeData: any): Scope {
+    const scope = new Scope(scopeData.id, "scope");
+
+    scopeData.nodes.forEach((nodeData: any) => {
+      const node = this.createNode(nodeData);
+      scope.addNode(node);
+    });
+
+    scopeData.connections.forEach((conn: any) => {
+      if (conn.toNode) {
+        scope.addConnection(conn.bind, conn.toNode.node, conn.toNode.port);
+      } else if (conn.toVariable) {
+        scope.addConnection(conn.bind, conn.toVariable);
+      }
+    });
+
+    return scope;
+  }
+
+  private setupConnections(scope: Scope) {
+    const sub = new Subscription();
+    scope.getConnections().forEach(({ from, to, port }) => {
+      const fromNode = this.resolveNodePath(scope, from);
+      const toNode = this.resolveNodePath(scope, to);
+
+      console.log("connecting", from, to, port);
+      if (fromNode instanceof Variable) {
+        if (toNode instanceof FunctionNode && port) {
+          sub.add(
+            fromNode
+              .getValue()
+              .pipe(tap((x) => console.log(from, "variable changed", x)))
+              .subscribe(toNode.getInput(port))
+          );
+        } else if (toNode instanceof Variable) {
+          sub.add(fromNode.getValue().subscribe(toNode.setValue.bind(toNode)));
         }
-        node.children.set(childNode.id, child);
-        this.nodes.set(childPath, child);
-        this.setupNodeExecution(child);
+      } else if (fromNode instanceof FunctionNode) {
+        if (toNode instanceof FunctionNode && port) {
+          sub.add(fromNode.getOutput().subscribe(toNode.getInput(port)));
+        } else if (toNode instanceof Variable) {
+          sub.add(fromNode.getOutput().subscribe(toNode.setValue.bind(toNode)));
+        } else if (toNode instanceof RenderNode) {
+          sub.add(toNode.setSource(fromNode.getOutput()));
+        }
+      }
+    });
+
+    scope.nodes.forEach((node) => {
+      if (node instanceof Scope) {
+        this.setupConnections(node);
+      }
+    });
+  }
+
+  private resolveNodePath(scope: Scope, path: string): INode {
+    const parts = path.split(".");
+    console.log("resolving", path, parts);
+    let currentScope: Scope = scope;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const node = currentScope.getNode(parts[i]);
+      if (node instanceof Scope) {
+        console.log("entered scope", parts[i]);
+        currentScope = node;
+      } else {
+        throw new Error(`Invalid path: ${path}`);
       }
     }
 
-    this.applyConnections(namespace.connections, fullPath);
-
+    const leaf = parts[parts.length - 1];
+    const node = currentScope.getNode(leaf);
+    console.log(currentScope.id, leaf);
+    if (!node) {
+      throw new Error(`Node not found: '${leaf}' in ${currentScope.id}`);
+    }
     return node;
   }
 
-  public logGraphState() {
-    for (const [path, node] of this.nodes) {
-      console.log(`Node: ${path}`);
-      console.log("  Inputs:");
-      for (const [port, subject] of node.inputs) {
-        console.log(`    ${port}: ${subject.value}`);
-      }
-      console.log(`  Output: ${node.output.value}`);
-      console.log("---");
+  execute() {
+    this.rootScope.setup();
+    this.setupConnections(this.rootScope);
+  }
+
+  setValue(nodeId: string, value: any) {
+    const node = this.resolveNodePath(this.rootScope, nodeId);
+    if (node instanceof Variable) {
+      node.setValue(value);
+    } else {
+      throw new Error(`Cannot set value for non-variable node: ${nodeId}`);
     }
   }
 
-  private wouldCreateCircularDependency(
-    fromNodePath: string,
-    toNodePath: string
-  ): boolean {
-    // Allow connections within the same namespace
-    if (
-      fromNodePath.split(".").slice(0, -1).join(".") ===
-      toNodePath.split(".").slice(0, -1).join(".")
-    ) {
-      return false;
+  subscribeToNode(nodeId: string): Observable<any> {
+    const node = this.resolveNodePath(this.rootScope, nodeId);
+    if (node instanceof Variable) {
+      return node.getValue();
+    } else if (node instanceof FunctionNode || node instanceof RenderNode) {
+      return node.getOutput();
     }
-
-    const visited = new Set<string>();
-    const dfs = (nodePath: string): boolean => {
-      if (nodePath === fromNodePath) return true;
-      if (visited.has(nodePath)) return false;
-      visited.add(nodePath);
-
-      const node = this.getNodeByPath(nodePath);
-      if (node && node.inputs) {
-        for (const [, inputObservable] of node.inputs) {
-          for (const [path, otherNode] of this.nodes) {
-            if (otherNode.output === inputObservable && dfs(path)) {
-              return true;
-            }
-          }
-        }
-      }
-      return false;
-    };
-    return dfs(toNodePath);
+    throw new Error(`Cannot subscribe to node ${nodeId}`);
   }
 
-  private applyConnections(
-    connections: SerializedConnection[],
-    prefix: string
-  ) {
-    for (const connection of connections) {
-      console.log("Applying connection", connection);
-      const fromNodePath = prefix + "." + connection.from;
-      const toNodePath = prefix + "." + connection.to;
-      const toNodePort = connection.port;
-
-      const fromInput = this.getNodeByPath(prefix)?.inputs.get(connection.from);
-      const fromNode = this.getNodeByPath(fromNodePath);
-      const toNode = this.getNodeByPath(toNodePath);
-
-      const source = fromNode?.output || fromInput;
-
-      console.log("Connecting", fromNodePath, toNodePath, toNodePort);
-      if (source && toNode) {
-        if (this.wouldCreateCircularDependency(fromNodePath, toNodePath)) {
-          throw new Error(
-            `Circular dependency detected: ${fromNodePath} -> ${toNodePath}:${toNodePort}`
-          );
-        }
-
-        const inputSubject = toNode.inputs.get(toNodePort);
-        if (inputSubject) {
-          source.subscribe((value) => {
-            console.log(
-              `Propagating value from ${fromNodePath} to ${toNodePath}:${toNodePort}`,
-              value
-            );
-            inputSubject.next(value);
-          });
-        }
-      } else {
-        console.error(
-          `Connection failed: ${fromNodePath} -> ${toNodePath}:${toNodePort}`
-        );
-      }
-    }
-  }
-
-  private resolvePath(path: string): [string, string | null] {
-    const parts = path.split(".");
-    if (parts.length > 1 && this.nodes.has(parts.slice(0, -1).join("."))) {
-      return [parts.slice(0, -1).join("."), parts[parts.length - 1]];
-    }
-    return [path, null];
-  }
-
-  private setupNodeExecution(node: ReactiveNode) {
-    if (node.type === "process" || node.type === "output") {
-      node.subscription?.unsubscribe();
-
-      const inputObservables = Array.from(node.inputs.values());
-      console.log("Setting up node execution for", node.id, [
-        ...node.inputs.keys()
-      ]);
-
-      if (inputObservables.length === 0) {
-        // For nodes with no inputs, execute immediately
-        this.executeNode(node, {}).then((result) => {
-          if (result !== null) {
-            node.output.next(result);
-          }
-        });
-      } else {
-        node.subscription = combineLatest(inputObservables)
-          .pipe(
-            debounceTime(0),
-            switchMap((inputValues) => {
-              const inputObject = Object.fromEntries(
-                Array.from(node.inputs.keys()).map((key, index) => [
-                  key,
-                  inputValues[index]
-                ])
-              );
-              return from(this.executeNode(node, inputObject)).pipe(
-                catchError((error) => {
-                  console.error(`Error executing node ${node.id}:`, error);
-                  return of(null);
-                })
-              );
-            })
-          )
-          .subscribe((result) => {
-            if (result !== null) {
-              console.log(`Node ${node.id} emitted`, result);
-              node.output.next(result);
-            }
-          });
-
-        this.subscriptions.add(node.subscription);
-      }
-    }
-  }
-
-  private async executeNode(
-    node: ReactiveNode,
-    inputs: Record<string, any>
-  ): Promise<any> {
-    console.log(`Executing node ${node.id} with inputs`, inputs);
-    switch (node.contentType) {
-      case "javascript":
-        const func = new Function(
-          ...Object.keys(inputs),
-          `return (${node.body})(...arguments)`
-        );
-        return await func(...Object.values(inputs));
-      case "text":
-      case "view":
-        return node.body;
-      default:
-        throw new Error(`Unsupported content type: ${node.contentType}`);
-    }
-  }
-
-  public getNodeOutput(path: string): Observable<any> | undefined {
-    const node = this.getNodeByPath(path);
-    return node?.output.asObservable();
-  }
-
-  public setNodeInput(path: string, port: string, value: any) {
-    console.log(`Setting input ${port} of ${path} to`, value);
-    const node = this.getNodeByPath(path);
-    if (node && node.inputs.has(port)) {
-      const inputSubject = node.inputs.get(port);
-      if (inputSubject && !Object.is(inputSubject.value, value)) {
-        console.log("Triggering update for", port, "of", path, "to", value);
-        inputSubject.next(value);
-      }
-    }
-  }
-  private triggerDownstreamUpdates(node: ReactiveNode) {
-    for (const [path, otherNode] of this.nodes) {
-      for (const [, input] of otherNode.inputs) {
-        if (input === node.output) {
-          this.setupNodeExecution(otherNode);
-          this.triggerDownstreamUpdates(otherNode);
-        }
-      }
-    }
-  }
-
-  public extractSubtree(path: string): SerializedNamespaceNode {
-    const node = this.getNodeByPath(path);
-    if (!node || node.type !== "namespace") {
-      throw new Error(`Invalid path or node is not a namespace: ${path}`);
-    }
-
-    const serializeNode = (
-      node: ReactiveNode,
-      currentPath: string
-    ): SerializedNode | SerializedNamespaceNode => {
-      const base = {
-        id: node.id,
-        type: node.type,
-        ports: Array.from(node.inputs.entries()).map(([id, subject]) => ({
-          id,
-          contentType: "any", // You might want to store and retrieve the actual content type
-          default: (subject as BehaviorSubject<any>).getValue()
-        })),
-        contentType: node.contentType
-      };
-
-      if (node.type === "namespace") {
-        return {
-          ...base,
-          nodes: Array.from(node.children.values()).map((child) =>
-            serializeNode(child, `${currentPath}.${child.id}`)
-          ),
-          connections: this.extractConnections(node, currentPath)
-        } as SerializedNamespaceNode;
-      } else {
-        return {
-          ...base,
-          body: node.body
-        } as SerializedNode;
-      }
-    };
-
-    return serializeNode(node, path) as SerializedNamespaceNode;
-  }
-
-  private extractConnections(
-    node: ReactiveNode,
-    currentPath: string
-  ): SerializedConnection[] {
-    const connections: SerializedConnection[] = [];
-
-    const addConnections = (node: ReactiveNode, nodePath: string) => {
-      for (const [port, observable] of node.inputs.entries()) {
-        for (const [otherNodePath, otherNode] of this.nodes.entries()) {
-          if (otherNode.output === observable) {
-            connections.push({
-              from: otherNodePath.replace(`${currentPath}.`, ""),
-              to: nodePath.replace(`${currentPath}.`, ""),
-              port
-            });
-          }
-        }
-      }
-
-      for (const [childId, childNode] of node.children.entries()) {
-        addConnections(childNode, `${nodePath}.${childId}`);
-      }
-    };
-
-    addConnections(node, currentPath);
-    return connections;
-  }
-
-  private getNodeByPath(path: string): ReactiveNode | undefined {
-    return this.nodes.get(path);
-  }
-
-  public dispose() {
-    this.subscriptions.unsubscribe();
+  updateGraph(newGraph: any) {
+    // Implement graph diffing and updating logic here
+    // This would involve comparing the old and new graph structures,
+    // adding/removing nodes and connections as necessary
+    // After updating, call setupConnections again
+    throw new Error("Graph updating not implemented yet");
   }
 }
