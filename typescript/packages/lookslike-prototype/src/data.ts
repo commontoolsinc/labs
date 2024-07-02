@@ -19,6 +19,7 @@ import {
   switchMap,
   take
 } from "rxjs/operators";
+import { CONTENT_TYPE_JAVASCRIPT } from "./contentType.js";
 
 export type EvalMode =
   | typeof WASM_SANDBOX
@@ -30,7 +31,7 @@ export type RecipeTree = {
   content: string[];
   children: RecipeTree[];
 };
-export type ConnectionMap = { [port: string]: string[] };
+export type ConnectionMap = { [port: string]: string };
 export type RecipeConnectionMap = { [nodeId: string]: ConnectionMap };
 
 export type RecipeNode = {
@@ -52,19 +53,25 @@ async function executeNode(
   inputs: { [key: string]: NodeValue }
 ): Promise<NodeValue> {
   switch (node.contentType) {
-    case "javascript":
-      // Execute JavaScript code
-      const func = new Function(
-        ...Object.keys(inputs),
-        `return ((${node.body})(...arguments))`
-      );
-      return func(...Object.values(inputs));
+    case CONTENT_TYPE_JAVASCRIPT:
+      try {
+        // Execute JavaScript code
+        const func = new Function(
+          ...Object.keys(inputs),
+          `return ((${node.body})(...arguments))`
+        );
+        return func(...Object.values(inputs));
+      } catch (e) {
+        console.error(`Error executing node ${node.id}: ${e}`);
+        return null;
+      }
     case "text":
       // Return text content
       return node.body;
     // Add more content types as needed
     default:
-      throw new Error(`Unsupported content type: ${node.contentType}`);
+      console.warn(`Unsupported content type: ${node.contentType}`);
+    // throw new Error(`Unsupported content type: ${node.contentType}`);
   }
 }
 
@@ -91,7 +98,7 @@ export class ReactiveNode {
     this.setupExecution();
   }
 
-  removeInput(name: string, sourceId: string) {
+  removeInput(name: string) {
     console.log(`Removing input ${name} from node ${this.id}`);
     if (this.inputs[name]) {
       delete this.inputs[name];
@@ -169,9 +176,19 @@ export class ReactiveNode {
   }
 }
 
+export class GraphSnapshot {
+  recipeTree: RecipeTree;
+  connectionMap: RecipeConnectionMap;
+  constructor(recipeTree: RecipeTree, connectionMap: RecipeConnectionMap) {
+    this.recipeTree = recipeTree;
+    this.connectionMap = connectionMap;
+  }
+}
+
 export class ReactiveGraph {
-  private nodes: Map<string, ReactiveNode> = new Map();
+  nodes: Map<string, ReactiveNode> = new Map();
   private executionOrder: string[] = [];
+  readonly changes: Subject<GraphSnapshot> = new Subject();
 
   constructor(
     private recipeTree: RecipeTree,
@@ -183,6 +200,24 @@ export class ReactiveGraph {
     this.connectNodes();
     this.calculateExecutionOrder();
     this.initializeNodes();
+
+    this.changes.next(new GraphSnapshot(this.recipeTree, this.connectionMap));
+  }
+
+  listInputsForNode(nodeId: string): [string, string][] {
+    return Object.entries(this.connectionMap[nodeId] || {});
+  }
+
+  listNodes(): [string, ReactiveNode][] {
+    return Object.entries(this.nodes);
+  }
+
+  snapshot() {
+    return JSON.stringify(
+      new GraphSnapshot(this.recipeTree, this.connectionMap),
+      null,
+      2
+    );
   }
 
   private createNodes(tree: RecipeTree) {
@@ -202,17 +237,15 @@ export class ReactiveGraph {
         continue;
       }
 
-      for (const [inputName, sourceIds] of Object.entries(connections)) {
-        for (const sourceId of sourceIds) {
-          const sourceNode = this.nodes.get(sourceId);
-          if (!sourceNode) {
-            console.warn(
-              `Source node ${sourceId} not found for input ${inputName} of node ${nodeId}.`
-            );
-            continue;
-          }
-          node.addInput(inputName, sourceNode.getValue());
+      for (const [inputName, sourceId] of Object.entries(connections)) {
+        const sourceNode = this.nodes.get(sourceId);
+        if (!sourceNode) {
+          console.warn(
+            `Source node ${sourceId} not found for input ${inputName} of node ${nodeId}.`
+          );
+          continue;
         }
+        node.addInput(inputName, sourceNode.getValue());
       }
     }
   }
@@ -233,10 +266,8 @@ export class ReactiveGraph {
       tempVisited.add(nodeId);
 
       const connections = this.connectionMap[nodeId] || {};
-      for (const sourceIds of Object.values(connections)) {
-        for (const sourceId of sourceIds) {
-          visit(sourceId);
-        }
+      for (const sourceId of Object.values(connections)) {
+        visit(sourceId);
       }
 
       tempVisited.delete(nodeId);
@@ -256,6 +287,57 @@ export class ReactiveGraph {
         node["executeNode"]({}); // Trigger initial execution
       }
     }
+  }
+
+  addConnection(fromNode: string, toNode: string, portName: string) {
+    const newConnectionMap = { ...this.connectionMap };
+    if (!newConnectionMap[toNode]) {
+      newConnectionMap[toNode] = {};
+    }
+    newConnectionMap[toNode][portName] = fromNode;
+    this.updateGraph(this.recipeTree, newConnectionMap);
+  }
+
+  addNode(node: RecipeNode, content: string[], parentId: string) {
+    const newRecipeTree = { ...this.recipeTree };
+
+    // walk tree and insert in correct spot
+    const insertNode = (tree: RecipeTree) => {
+      if (tree.node.id === parentId) {
+        const newNode = { node, content, children: [] };
+        tree.children.push(newNode);
+        return;
+      }
+      for (const child of tree.children) {
+        insertNode(child);
+      }
+    };
+
+    insertNode(newRecipeTree);
+    this.updateGraph(newRecipeTree, this.connectionMap);
+  }
+
+  removeNode(nodeId: string) {
+    const newRecipeTree = { ...this.recipeTree };
+
+    // walk tree and remove node
+    const removeNode = (tree: RecipeTree) => {
+      tree.children = tree.children.filter((child) => {
+        if (child.node.id === nodeId) {
+          return false;
+        }
+        removeNode(child);
+        return true;
+      });
+    };
+
+    removeNode(newRecipeTree);
+    const newConnectionMap = { ...this.connectionMap };
+    delete newConnectionMap[nodeId];
+    for (const connections of Object.values(newConnectionMap)) {
+      delete connections[nodeId];
+    }
+    this.updateGraph(newRecipeTree, newConnectionMap);
   }
 
   updateGraph(
@@ -286,6 +368,7 @@ export class ReactiveGraph {
 
     this.recipeTree = newRecipeTree;
     this.connectionMap = newConnectionMap;
+    this.changes.next(new GraphSnapshot(this.recipeTree, this.connectionMap));
   }
 
   private updateNodes(
@@ -324,29 +407,21 @@ export class ReactiveGraph {
       const oldConnections = this.connectionMap[nodeId] || {};
 
       // Remove old connections that are no longer present
-      for (const [inputName, oldSourceIds] of Object.entries(oldConnections)) {
-        const newSourceIds = newConnections[inputName] || [];
-        for (const oldSourceId of oldSourceIds) {
-          if (!newSourceIds.includes(oldSourceId)) {
-            node.removeInput(inputName, oldSourceId);
-          }
+      for (const [inputName, oldSourceId] of Object.entries(oldConnections)) {
+        if (!newConnections[inputName]) {
+          node.removeInput(inputName);
         }
       }
 
       // Add new connections
-      for (const [inputName, newSourceIds] of Object.entries(newConnections)) {
-        const oldSourceIds = oldConnections[inputName] || [];
-        for (const newSourceId of newSourceIds) {
-          if (!oldSourceIds.includes(newSourceId)) {
-            const sourceNode = this.nodes.get(newSourceId);
-            if (sourceNode) {
-              node.addInput(inputName, sourceNode.getValue());
-            } else {
-              console.warn(
-                `Source node ${newSourceId} not found for input ${inputName} of node ${nodeId}.`
-              );
-            }
-          }
+      for (const [inputName, newSourceId] of Object.entries(newConnections)) {
+        const sourceNode = this.nodes.get(newSourceId);
+        if (sourceNode) {
+          node.addInput(inputName, sourceNode.getValue());
+        } else {
+          console.warn(
+            `Source node ${newSourceId} not found for input ${inputName} of node ${nodeId}.`
+          );
         }
       }
     }

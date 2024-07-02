@@ -2,10 +2,9 @@ import { LitElement, html, css } from "lit-element";
 import { customElement, property, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { base } from "../styles.js";
-import { createRxJSNetworkFromJson } from "../graph.js";
-import { Recipe, RecipeNode } from "../data.js";
+import { GraphSnapshot, Recipe, RecipeNode, RecipeTree } from "../data.js";
 import { Context } from "../state.js";
-import { SignalSubject } from "../../../common-frp/lib/signal.js";
+import { appGraph } from "./com-app.js";
 
 const styles = css`
   :host {
@@ -36,6 +35,11 @@ const styles = css`
     padding: 0 0.5rem;
     background-color: #f0f0f0;
   }
+
+  li {
+    list-style-type: disc;
+    margin-left: 1rem;
+  }
 `;
 
 // foreach node, re-render it only when the output changes?
@@ -44,75 +48,53 @@ const styles = css`
 export class ComThread extends LitElement {
   static override styles = [base, styles];
 
-  @property({ type: Object }) graph = {} as Recipe;
-  @state() context = {} as Context<SignalSubject<any>>;
-
-  @property({ type: Function }) setContext = (
-    _: Context<SignalSubject<any>>
-  ) => {};
-
-  lastGraph: Recipe = [];
-  localScope: { [k: string]: any } = {};
+  @state() graphSnapshot: GraphSnapshot = null;
 
   response(node: RecipeNode) {
-    const onOverriden = (e: CustomEvent) => {
-      console.log(node.id, "override", e.detail);
-      this.context.outputs[node.id].send(JSON.parse(e.detail.data));
-    };
-
-    const onRefresh = () => {
-      this.graph = JSON.parse(JSON.stringify(this.graph));
-    };
-
-    const onUpdated = (e: CustomEvent) => {
-      node.body = e.detail.body;
-      onRefresh();
-    };
-
-    const onRun = () => {
-      const val = this.context.outputs[node.id].get();
-      this.context.outputs[node.id].send(val);
-      onRefresh();
-    };
-
-    return html`<com-response
-      slot="response"
-      .node=${node}
-      .output=${this.context.outputs[node.id]}
-      @updated=${onUpdated}
-      @overriden=${onOverriden}
-      @run=${onRun}
-    >
+    return html`<com-response slot="response" .node=${node}>
       <code class="local-variable">${node.id}</code>
       ${repeat(
-        Object.entries(node.in),
+        appGraph.listInputsForNode(node.id),
         ([key, value]) =>
           html`<code class="local-variable">${key}: ${value}</code>`
       )}
     </com-response>`;
   }
 
-  override willUpdate(changedAttributes: Map<string, any>): void {
-    if (
-      changedAttributes.has("graph") &&
-      JSON.stringify(this.graph) !== JSON.stringify(this.lastGraph)
-    ) {
-      console.log("rebuilding graph");
-      this.context.cancellation?.forEach((cancel) => cancel());
-
-      this.context = createRxJSNetworkFromJson(this.graph);
-      this.lastGraph = this.graph;
-    }
+  override connectedCallback() {
+    super.connectedCallback();
+    appGraph.changes.subscribe((g) => {
+      console.log("graph changed", g);
+      this.graphSnapshot = g;
+    });
   }
 
   override render() {
-    return html`
-      ${repeat(
-        this.graph,
-        (node) => html`
-          <com-thread-group> ${this.response(node)} </com-thread-group>
-        `
-      )}
-    `;
+    if (this.graphSnapshot == null) {
+      return html`<pre>empty...</pre>`;
+    }
+    const tree: RecipeTree = this.graphSnapshot.recipeTree || [];
+    const connections = this.graphSnapshot.connectionMap;
+
+    // walk tree and render as nested <ul> tags
+    function renderTree(tree: RecipeTree[]) {
+      return html`<ul>
+        ${tree.map((node) => {
+          return html`<li>
+            <strong><code>${node.node.id}</code></strong>
+            <em><pre>${node.content.join("\n")}</pre></em>
+            <pre>${JSON.stringify(node.node.body, null, 2)}</pre>
+            ${repeat(
+              Object.entries(connections[node.node.id] || {}),
+              ([key, value]) =>
+                html`<code class="local-variable">${key}: ${value}</code>`
+            )}
+            ${node.children.length > 0 ? renderTree(node.children) : ""}
+          </li>`;
+        })}
+      </ul>`;
+    }
+
+    return html`<div>${renderTree([tree])}</div>`;
   }
 }

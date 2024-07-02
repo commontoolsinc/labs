@@ -4,11 +4,12 @@ import {
 } from "openai/resources/index.mjs";
 import { client, grabJson, messageReducer, model } from "./llm.js";
 import { recordThought, suggestions, updateThought } from "./model.js";
-import { Recipe } from "../data.js";
+import { ReactiveGraph, Recipe } from "../data.js";
 import { codePrompt } from "./implement.js";
 import { describeTools, toolSpec } from "./tools.js";
-import { LLMClient } from '@commontools/llm-client'
+import { LLMClient } from "@commontools/llm-client";
 import { LLM_SERVER_URL } from "../llm-client.js";
+import { appGraph } from "../components/com-app.js";
 
 type Conversation = ChatCompletionMessageParam[];
 
@@ -29,14 +30,17 @@ export async function plan(userInput: string, steps: string[]) {
   await recordThought({ role: "system", content: client.system });
   await recordThought({ role: "user", content: steps[1] });
   const thread = await client.createThread(steps[1]);
-  await recordThought({ role: "assistant", content: thread.conversation[thread.conversation.length - 1] });
+  await recordThought({
+    role: "assistant",
+    content: thread.conversation[thread.conversation.length - 1]
+  });
 
   let idx = 2;
 
   let running = true;
   while (running) {
-    const step = steps[idx]
-    console.log('run step', idx, step)
+    const step = steps[idx];
+    console.log("run step", idx, step);
     if (idx >= steps.length - 1) {
       running = false;
       break;
@@ -136,8 +140,8 @@ export async function suggest(input: string, fullPlan: Conversation) {
   return response.choices[0].message;
 }
 
-export function prepareSteps(userInput: string, recipe: Recipe) {
-  if (recipe.length === 0) {
+export function prepareSteps(userInput: string, graph: ReactiveGraph) {
+  if (graph.listNodes().length === 0) {
     return [
       `You will create and modify software to solve a user's problems using a reactive graph computation model. Modules, a.k.a nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules:
 
@@ -181,7 +185,7 @@ export function prepareSteps(userInput: string, recipe: Recipe) {
     The current graph is:
 
     \`\`\`json
-    ${JSON.stringify(recipe, null, 2)}
+    ${appGraph.snapshot()}
     \`\`\`
 
     <user-request>${userInput}</user-request>

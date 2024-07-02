@@ -2,7 +2,6 @@ import { LitElement, html } from "lit-element";
 import { customElement, state } from "lit/decorators.js";
 import { base } from "../styles.js";
 
-import { NodePath, Recipe, emptyGraph } from "../data.js";
 import { collectSymbols } from "../graph.js";
 import { Context, snapshot } from "../state.js";
 import { watch } from "@commontools/common-frp-lit";
@@ -12,6 +11,7 @@ import {
   CONTENT_TYPE_EVENT,
   CONTENT_TYPE_FETCH,
   CONTENT_TYPE_GLSL,
+  CONTENT_TYPE_IMAGE,
   CONTENT_TYPE_JAVASCRIPT,
   CONTENT_TYPE_LLM,
   CONTENT_TYPE_SCENE,
@@ -19,33 +19,36 @@ import {
   CONTENT_TYPE_UI
 } from "../contentType.js";
 import { plan, prepareSteps } from "../agent/plan.js";
-import { processUserInput } from "../agent/llm.js";
 import { codePrompt } from "../agent/implement.js";
 import { suggestions, thoughtLog } from "../agent/model.js";
 import { LLMClient, LlmTool } from "@commontools/llm-client";
 import { LLM_SERVER_URL } from "../llm-client.js";
 import { ChatCompletionTool } from "openai/resources/index.mjs";
 import { toolSpec } from "../agent/tools.js";
+import { ReactiveGraph } from "../data.js";
 
-const lastFmKey = "0060ba224307ff9f787deb837f4be376";
+export const appGraph = new ReactiveGraph(
+  {
+    node: {
+      id: "root",
+      body: "() => 1 + 1",
+      contentType: CONTENT_TYPE_JAVASCRIPT
+    },
+    children: [],
+    content: ["hello world"]
+  },
+  {}
+);
 
 @customElement("com-app")
 export class ComApp extends LitElement {
   static override styles = [base];
 
   static override properties = {
-    graph: { type: Object },
-    userInput: { type: String },
-    snapshot: { type: Object }
+    userInput: { type: String }
   };
 
-  @state() graph: Recipe = emptyGraph;
   @state() userInput = "";
-  @state() snapshot: Context<SignalSubject<any>> = {
-    inputs: {},
-    outputs: {},
-    cancellation: []
-  };
 
   generateToolSpec(
     toolSpec: ChatCompletionTool[],
@@ -72,77 +75,73 @@ export class ComApp extends LitElement {
       .filter((v) => v !== null);
   }
 
-  availableFunctions(graph: Recipe) {
-    const updateGraph = this.updateGraph.bind(this);
-
+  availableFunctions(graph: ReactiveGraph) {
     return {
       listNodes: async () => {
-        console.log("listNodes", this.graph);
-        return JSON.stringify(this.graph);
+        console.log("listNodes", graph);
+        return JSON.stringify(graph);
       },
-      addConnection: async ({ from, to }: { from: string; to: NodePath }) => {
-        console.log("addConnection", from, to);
-        const [toNodeId, toInputKey] = to;
-        const fromNode = graph.find((node) => node.id === from);
-        if (!fromNode) {
-          return `Node ${from} not found.\n${this.graphSnapshot()}`;
-        }
-        const toNode = graph.find((node) => node.id === toNodeId);
-        if (!toNode) {
-          return `Node ${toNode} not found.\n${this.graphSnapshot()}`;
-        }
-
-        toNode.in[toInputKey] = [".", from];
-        updateGraph(graph);
+      addConnection: async ({
+        from,
+        to,
+        portName
+      }: {
+        from: string;
+        to: string;
+        portName: string;
+      }) => {
+        console.log("addConnection", from, to, portName);
+        graph.addConnection(from, to, portName);
         return `Added connection from ${from} to ${to}.\n${this.graphSnapshot()}`;
       },
       declareDataNode: async ({ id, data }: { id: string; data: any }) => {
         console.log("declareDataNode", id, data);
-        graph.push({
-          id,
-          contentType: CONTENT_TYPE_DATA,
-          in: {},
-          outputType: {},
-          body: data
-        });
-      },
-      addCodeNode: async (props: { id: string; code: string }) => {
-        console.log("addCodeNode", props);
-        const { id, code } = props;
+        graph.addNode(
+          {
+            id,
+            contentType: CONTENT_TYPE_DATA,
+            body: data
+          },
+          [],
+          "root"
+        );
 
-        const existingNode = graph.find((node) => node.id === id);
-        if (existingNode) {
-          existingNode.body = code;
-        } else {
-          graph.push({
+        return `Added data node: ${id}.\n${this.graphSnapshot()}`;
+      },
+      addCodeNode: async (props: {
+        id: string;
+        code: string;
+        documentatedReasoning: string;
+      }) => {
+        console.log("addCodeNode", props);
+        const { id, code, documentatedReasoning } = props;
+        graph.addNode(
+          {
             id,
             contentType: CONTENT_TYPE_JAVASCRIPT,
-            in: {},
-            outputType: {},
             body: code
-          });
-        }
-
-        updateGraph(graph);
+          },
+          [documentatedReasoning],
+          "root"
+        );
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addUiNode: async (props: { id: string; uiTree: object }) => {
+      addUiNode: async (props: {
+        id: string;
+        uiTree: object;
+        documentatedReasoning: string;
+      }) => {
         console.log("addUiNode", props);
-        const { id, uiTree } = props;
-
-        const existingNode = graph.find((node) => node.id === id);
-        if (existingNode) {
-          existingNode.body = uiTree;
-        } else {
-          graph.push({
+        const { id, uiTree, documentatedReasoning } = props;
+        graph.addNode(
+          {
             id,
             contentType: CONTENT_TYPE_UI,
-            in: {},
-            outputType: {},
             body: uiTree
-          });
-        }
-        updateGraph(graph);
+          },
+          [documentatedReasoning],
+          "root"
+        );
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       add3dVoxelSceneNode: async ({
@@ -153,16 +152,17 @@ export class ComApp extends LitElement {
         dataSource: string;
       }) => {
         console.log("add3dVoxelSceneNode", id, dataSource);
-        graph.push({
-          id,
-          contentType: CONTENT_TYPE_SCENE,
-          in: {
-            data: [".", dataSource]
+        graph.addNode(
+          {
+            id,
+            contentType: CONTENT_TYPE_SCENE,
+            body: {}
           },
-          outputType: {},
-          body: {}
-        });
-        updateGraph(graph);
+          [],
+          "root"
+        );
+
+        graph.addConnection(dataSource, id, "data");
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       addGlslShaderNode: async ({
@@ -173,42 +173,41 @@ export class ComApp extends LitElement {
         shaderToyCode: string;
       }) => {
         console.log("addGlslShaderNode", id, shaderToyCode);
-        graph.push({
-          id,
-          contentType: CONTENT_TYPE_GLSL,
-          in: {},
-          outputType: {},
-          body: shaderToyCode
-        });
-        updateGraph(graph);
+        graph.addNode(
+          {
+            id,
+            contentType: CONTENT_TYPE_GLSL,
+            body: shaderToyCode
+          },
+          [],
+          "root"
+        );
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       addFetchNode: async ({ id, url }: { id: string; url: string }) => {
         console.log("addFetchNode", id, url);
-        graph.push({
-          id,
-          contentType: CONTENT_TYPE_FETCH,
-          in: {},
-          outputType: {
-            type: "object"
+        graph.addNode(
+          {
+            id,
+            contentType: CONTENT_TYPE_FETCH,
+            body: url
           },
-          body: url
-        });
-        updateGraph(graph);
+          [],
+          "root"
+        );
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       addClockNode: async ({ id }: { id: string }) => {
         console.log("addEventNode", id);
-        graph.push({
-          id,
-          contentType: CONTENT_TYPE_CLOCK,
-          in: {},
-          outputType: {
-            type: "object"
+        graph.addNode(
+          {
+            id,
+            contentType: CONTENT_TYPE_CLOCK,
+            body: {}
           },
-          body: ""
-        });
-        updateGraph(graph);
+          [],
+          "root"
+        );
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       addLanguageModelNode: async ({
@@ -219,18 +218,17 @@ export class ComApp extends LitElement {
         promptSource: string;
       }) => {
         console.log("addLanguageModelNode", id, prompt);
-        graph.push({
-          id,
-          contentType: CONTENT_TYPE_LLM,
-          in: {
-            prompt: [".", promptSource]
+        graph.addNode(
+          {
+            id,
+            contentType: CONTENT_TYPE_LLM,
+            body: {}
           },
-          outputType: {
-            type: "string"
-          },
-          body: ""
-        });
-        updateGraph(graph);
+          [],
+          "root"
+        );
+
+        graph.addConnection(promptSource, id, "prompt");
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       addImageGenerationNode: async ({
@@ -241,63 +239,36 @@ export class ComApp extends LitElement {
         promptSource: string;
       }) => {
         console.log("addImageGenerationNode", id, prompt);
-        graph.push({
-          id,
-          contentType: "application/json+vnd.common.image",
-          in: {
-            prompt: [".", promptSource]
+        graph.addNode(
+          {
+            id,
+            contentType: CONTENT_TYPE_IMAGE,
+            body: {}
           },
-          outputType: {
-            type: "string"
-          },
-          body: ""
-        });
-        updateGraph(graph);
+          [],
+          "root"
+        );
+
+        graph.addConnection(promptSource, id, "prompt");
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       deleteNode: async ({ id }: { id: string }) => {
         console.log("deleteNode", id);
-        const index = graph.findIndex((n) => n.id === id);
-        graph.splice(index, 1);
-        updateGraph(graph);
+        graph.removeNode(id);
         return `Deleted node: ${id}.\n${this.graphSnapshot()}`;
       }
     };
   }
 
-  updateGraph(graph: Recipe) {
-    // loop over graph and dedupe and repeated IDs, preferring the last one
-    // preserve the original ordering
-    console.log("deduping", graph);
-    const deduped = graph.reduce((acc, node) => {
-      const index = acc.findIndex((n) => n.id === node.id);
-      if (index !== -1) {
-        acc[index] = node;
-      } else {
-        acc.push(node);
-      }
-      return acc;
-    }, [] as Recipe);
-
-    console.log("deduped graph", deduped);
-
-    this.graph = JSON.parse(JSON.stringify(deduped));
-    this.requestUpdate();
-  }
-
   graphSnapshot() {
-    return `\`\`\`json${JSON.stringify(this.graph)}\`\`\``;
+    return appGraph.snapshot();
   }
 
   async appendMessage() {
     const userInput = this.userInput;
     this.userInput = "";
 
-    const newGraph = [...this.graph];
-    const symbols = collectSymbols(this.graph);
-    symbols.reverse();
-
-    const spec = await plan(userInput, prepareSteps(userInput, this.graph));
+    const spec = await plan(userInput, prepareSteps(userInput, appGraph));
     const finalPlan = spec?.[spec?.length - 1];
     console.log("finalPlan", finalPlan);
     const input = `Implement the following plan using the available tools: ${finalPlan}
@@ -307,14 +278,9 @@ export class ComApp extends LitElement {
     // const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
     const systemContext = ``;
 
-    this.graph = newGraph;
-
     const client = new LLMClient({
       serverUrl: LLM_SERVER_URL,
-      tools: this.generateToolSpec(
-        toolSpec,
-        this.availableFunctions(this.graph)
-      ),
+      tools: this.generateToolSpec(toolSpec, this.availableFunctions(appGraph)),
       system: codePrompt + systemContext
     });
 
@@ -329,18 +295,10 @@ export class ComApp extends LitElement {
       this.userInput = input;
     };
 
-    const setContext = (context: Context<any>) => {
-      this.snapshot = snapshot(context);
-    };
-
     return html`
       <main>
         <com-chat slot="main">
-          <com-thread
-            slot="main"
-            .graph=${this.graph}
-            .setContext=${setContext}
-          ></com-thread>
+          <com-thread slot="main"></com-thread>
           <div slot="footer">
             <com-unibox
               .suggestions=${watch(suggestions)}

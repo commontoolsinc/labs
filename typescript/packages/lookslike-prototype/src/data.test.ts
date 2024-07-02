@@ -7,6 +7,8 @@ import {
   ReactiveNode
 } from "./data.js";
 import { describe, beforeEach, test, expect, it, vi } from "vitest";
+import { aQ } from "vitest/dist/reporters-yx5ZTtEV.js";
+import { CONTENT_TYPE_JAVASCRIPT } from "./contentType.js";
 
 describe("ReactiveGraph", () => {
   let sampleRecipeTree: RecipeTree;
@@ -34,8 +36,8 @@ describe("ReactiveGraph", () => {
     // Set up a sample ConnectionMap
     sampleConnectionMap = {
       root: {
-        input1: ["child1"],
-        input2: ["child2"]
+        input1: "child1",
+        input2: "child2"
       }
     };
   });
@@ -94,7 +96,11 @@ describe("ReactiveGraph", () => {
 
   it("should connect nodes based on the connection map", () => {
     const recipeTree = {
-      node: { id: "root", contentType: "javascript", body: "(a, b) => a + b" },
+      node: {
+        id: "root",
+        contentType: CONTENT_TYPE_JAVASCRIPT,
+        body: "(a, b) => a + b"
+      },
       content: [],
       children: [
         {
@@ -110,7 +116,7 @@ describe("ReactiveGraph", () => {
       ]
     };
     const connectionMap = {
-      root: { a: ["child1"], b: ["child2"] }
+      root: { a: "child1", b: "child2" }
     };
 
     const graph = new ReactiveGraph(recipeTree, connectionMap);
@@ -122,7 +128,11 @@ describe("ReactiveGraph", () => {
 
   it("should calculate the correct execution order", () => {
     const recipeTree = {
-      node: { id: "root", contentType: "javascript", body: "(a, b) => a + b" },
+      node: {
+        id: "root",
+        contentType: CONTENT_TYPE_JAVASCRIPT,
+        body: "(a, b) => a + b"
+      },
       content: [],
       children: [
         {
@@ -138,7 +148,7 @@ describe("ReactiveGraph", () => {
       ]
     };
     const connectionMap = {
-      root: { a: ["child1"], b: ["child2"] }
+      root: { a: "child1", b: "child2" }
     };
 
     const graph = new ReactiveGraph(recipeTree, connectionMap);
@@ -149,19 +159,27 @@ describe("ReactiveGraph", () => {
 
   it("should detect circular dependencies", () => {
     const recipeTree = {
-      node: { id: "node1", contentType: "javascript", body: "a => a + 1" },
+      node: {
+        id: "node1",
+        contentType: CONTENT_TYPE_JAVASCRIPT,
+        body: "a => a + 1"
+      },
       content: [],
       children: [
         {
-          node: { id: "node2", contentType: "javascript", body: "b => b + 2" },
+          node: {
+            id: "node2",
+            contentType: CONTENT_TYPE_JAVASCRIPT,
+            body: "b => b + 2"
+          },
           content: [],
           children: []
         }
       ]
     };
     const connectionMap = {
-      node1: { a: ["node2"] },
-      node2: { b: ["node1"] }
+      node1: { a: "node2" },
+      node2: { b: "node1" }
     };
 
     const graph = new ReactiveGraph(recipeTree, connectionMap);
@@ -174,7 +192,7 @@ describe("ReactiveNode", () => {
     vi.useFakeTimers();
     const node = new ReactiveNode("test", {
       id: "test",
-      contentType: "javascript",
+      contentType: CONTENT_TYPE_JAVASCRIPT,
       body: "(a, b) => a + b"
     });
     const inputA = new BehaviorSubject<number>(0);
@@ -209,7 +227,7 @@ describe("ReactiveGraph", () => {
 
   const createNode = (id: string, body: string): RecipeNode => ({
     id,
-    contentType: "javascript",
+    contentType: CONTENT_TYPE_JAVASCRIPT,
     body
   });
 
@@ -230,8 +248,8 @@ describe("ReactiveGraph", () => {
 
     const initialTree = createRecipeTree(initialNodes);
     const initialConnections: RecipeConnectionMap = {
-      "2": { a: ["1"] },
-      "3": { a: ["1"], b: ["2"] }
+      "2": { a: "1" },
+      "3": { a: "1", b: "2" }
     };
 
     vi.useFakeTimers();
@@ -283,7 +301,7 @@ describe("ReactiveGraph", () => {
     const newTree = createRecipeTree(newNodes);
     const newConnections: RecipeConnectionMap = {
       ...graph["connectionMap"],
-      "4": { a: ["3"] }
+      "4": { a: "3" }
     };
 
     graph.updateGraph(newTree, newConnections);
@@ -302,7 +320,7 @@ describe("ReactiveGraph", () => {
 
     const newTree = createRecipeTree(newNodes);
     const newConnections: RecipeConnectionMap = {
-      "3": { a: ["1"] }
+      "3": { a: "1" }
     };
 
     graph.updateGraph(newTree, newConnections);
@@ -315,8 +333,8 @@ describe("ReactiveGraph", () => {
 
   test("Change connections", async () => {
     const newConnections: RecipeConnectionMap = {
-      "2": { a: ["1"] },
-      "3": { a: ["2"], b: ["1"] } // Changed from {'a': ['1'], 'b': ['2']}
+      "2": { a: "1" },
+      "3": { a: "2", b: "1" } // Changed from {'a': ['1'], 'b': ['2']}
     };
 
     vi.useFakeTimers();
@@ -340,9 +358,9 @@ describe("ReactiveGraph", () => {
 
     const newTree = createRecipeTree(newNodes);
     const newConnections: RecipeConnectionMap = {
-      "2": { a: ["1"] },
-      "3": { a: ["2"], b: ["1"] },
-      "4": { a: ["2"], b: ["3"] }
+      "2": { a: "1" },
+      "3": { a: "2", b: "1" },
+      "4": { a: "2", b: "3" }
     };
 
     graph.updateGraph(newTree, newConnections);
@@ -366,8 +384,8 @@ describe("ReactiveGraph", () => {
 
     const newTree = createRecipeTree(newNodes);
     const newConnections: RecipeConnectionMap = {
-      "2": { a: ["1"] },
-      "3": { a: ["2"] }
+      "2": { a: "1" },
+      "3": { a: "2" }
     };
 
     graph.updateGraph(newTree, newConnections);
@@ -381,8 +399,8 @@ describe("ReactiveGraph", () => {
     ];
     const newNewTree = createRecipeTree(newNewNodes);
     const newNewConnections: RecipeConnectionMap = {
-      "2": { a: ["1"] },
-      "3": { a: ["2"] }
+      "2": { a: "1" },
+      "3": { a: "2" }
     };
 
     graph.updateGraph(newNewTree, newNewConnections);
@@ -392,5 +410,39 @@ describe("ReactiveGraph", () => {
     expect(graph["nodes"].get("1")!.value).toBe("Hello");
     expect(graph["nodes"].get("3")!.value).toBe("olleH world!"); // 10 - 5
     expect(graph["nodes"].get("2")!.value).toBe("olleH");
+  });
+
+  test("Higher level API", async () => {
+    vi.useFakeTimers();
+
+    graph.addNode(
+      { id: "test", contentType: CONTENT_TYPE_JAVASCRIPT, body: "() => 'lol'" },
+      [],
+      "1"
+    );
+
+    graph.addNode(
+      {
+        id: "test2",
+        contentType: CONTENT_TYPE_JAVASCRIPT,
+        body: "() => 'lol'"
+      },
+      [],
+      "1"
+    );
+
+    graph.addConnection("test", "3", "a");
+
+    await vi.runAllTimersAsync();
+
+    expect(graph["nodes"].get("test")!.value).toBe("lol");
+    expect(graph["nodes"].get("3")!.value).toBe("lol2");
+    expect(graph["nodes"].get("test2")!.value).toBe("lol");
+
+    graph.removeNode("test2");
+
+    await vi.runAllTimersAsync();
+
+    expect(graph["nodes"].get("test2")).toBeUndefined();
   });
 });

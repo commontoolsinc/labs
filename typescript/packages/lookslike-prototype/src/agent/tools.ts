@@ -33,9 +33,10 @@ export const toolSpec: ChatCompletionTool[] = [
         type: "object",
         properties: {
           id: { type: "string" },
-          code: { type: "string" }
+          code: { type: "string" },
+          documentatedReasoning: { type: "string" }
         },
-        required: ["id", "code"]
+        required: ["id", "code", "documentatedReasoning"]
       }
     }
   },
@@ -49,9 +50,10 @@ export const toolSpec: ChatCompletionTool[] = [
         type: "object",
         properties: {
           id: { type: "string" },
-          uiTree: { type: "object", description: "The UI tree." }
+          uiTree: { type: "object", description: "The UI tree." },
+          documentatedReasoning: { type: "string" }
         },
-        required: ["id", "uiTree"]
+        required: ["id", "uiTree", "documentatedReasoning"]
       }
     }
   },
@@ -100,10 +102,12 @@ export const toolSpec: ChatCompletionTool[] = [
             description: "Path of the OUTPUT node in the graph"
           },
           to: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Path to the INPUT node + port to connect to, e.g. ['nodeId', 'portName']"
+            type: "string",
+            description: "Path to the INPUT node"
+          },
+          portName: {
+            type: "string",
+            description: "Name of the port to connect to"
           }
         }
       }
