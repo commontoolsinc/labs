@@ -20,13 +20,11 @@ export type Cell<T> = T extends (infer U)[]
   ? T & CellMethods<T>
   : CellMethods<T>;
 
-const getCell = Symbol("getCell"); // Internal API for proxies only
-
 type CellMethods<T> = {
-  get: ((log?: SourcesLog) => T) & Cell<T>;
+  get: (() => T) & Cell<T>;
   send: ((value: T | UnwrapCell<T>, path?: Path) => void) & Cell<T>;
   updates: ((subscriber: Sendable<void>) => Cancel) & Cell<T>;
-  [getCell]: () => [WriteableSignal<T>, Path];
+  withLog: (log?: ReactivityLog) => Cell<T>;
 };
 
 // This makes it so that we can set a new value on a cell, even if the original
@@ -39,7 +37,6 @@ export function cell<T>(value: T): Cell<T> {
   const state = {
     get: () => value,
     send: (newValue: T) => {
-      console.log("send", value, newValue, deepEqualOfCells(value, newValue));
       if (deepEqualOfCells(value, newValue)) return;
       value = newValue;
       for (const subscriber of subscribers) subscriber.send();
@@ -61,10 +58,8 @@ type MaybeCellFor<T extends any> =
     }
   | T;
 
-export type SourcesLog = Set<Cell<any>>;
-
-export const toValue = <T>(cell: MaybeCellFor<T>, log?: SourcesLog): T => {
-  if (isCell<T>(cell)) return cell.get(log);
+export const toValue = <T>(cell: MaybeCellFor<T>, log?: ReactivityLog): T => {
+  if (isCell<T>(cell)) return cell.withLog(log).get() as T;
   if (Array.isArray(cell)) return cell.map((cell) => toValue(cell, log)) as T;
   if (typeof cell === "object")
     return Object.fromEntries(
@@ -76,6 +71,11 @@ export const toValue = <T>(cell: MaybeCellFor<T>, log?: SourcesLog): T => {
   return cell as T;
 };
 
+export interface ReactivityLog {
+  reads: Set<Cell<any>>;
+  writes: Set<Cell<any>>;
+}
+
 type Path = (string | number | symbol)[];
 
 // Set a property on a cell, given a path to the property. If there are nested
@@ -83,10 +83,14 @@ type Path = (string | number | symbol)[];
 // this requires cells to be cell proxies underneath, but that should be the
 // case if cells were created with `cell` only. There is currently no way to
 // expose the underlying cell without the proxy.
-function setProp(cell: Cell<any>, path: Path, value: any) {
+function setProp(cell: Cell<any>, path: Path, value: any, log?: ReactivityLog) {
   if (path.length === 0)
-    if (isCell(value)) throw "Can't overwrite a cell with another cell.";
-    else return cell.send(value, []);
+    if (isCell(value)) {
+      throw "Can't overwrite a cell with another cell.";
+    } else {
+      log?.writes.add(cell);
+      return cell.send(value, []);
+    }
 
   let root = cell.get();
   if (typeof root !== "object" && !Array.isArray(root))
@@ -98,47 +102,64 @@ function setProp(cell: Cell<any>, path: Path, value: any) {
   while (path.length > 0) {
     const prop = path.shift()!;
     let next = parent[prop];
-    if (isCell(next)) return next.send(value, [...path, last]);
-    if (typeof next !== "object" && !Array.isArray(next))
-      throw new Error("Can't use path on non-object or non-array.");
+    if (isCell(next)) return next.withLog(log).send(value, [...path, last]);
+    if (typeof next !== "object")
+      throw new Error(
+        `Can't access ${String(prop)} on a ${typeof next}, need object/array.`
+      );
     parent[prop] = Array.isArray(next) ? [...next] : { ...next };
     parent = parent[prop];
   }
 
   if (isCell(parent[last]) && !isCell(value))
-    return parent[last].send(value, []);
+    return parent[last].withLog(log).send(value, []);
   parent[last] = value;
+  log?.writes.add(cell);
   return cell.send(root);
 }
+
+// Internal API for proxies only
+const getCell = Symbol("getCell");
+
+type ProxyMethods<T> = {
+  [getCell]: () => [WriteableSignal<T>, Path];
+};
 
 function createCellProxy(
   target: object | Function,
   cell: WriteableSignal<any>,
-  path: Path
+  path: Path,
+  log?: ReactivityLog
 ): Cell<any> {
   const methods: { [key: string | symbol]: any } = {
-    get: (log?: SourcesLog) => createCellValueProxy(cell, path, log),
+    get: () => createCellValueProxy(cell, path, log),
     send: (value: any, extraPath: Path = []) =>
-      setProp(cell, [...path, ...extraPath], value),
+      setProp(cell, [...path, ...extraPath], value, log),
     updates: (subscriber: Sendable<void>) => cell.updates(subscriber),
+    withLog: (newLog?: ReactivityLog) => {
+      if (!newLog || newLog === log) return proxy;
+      else if (!log) return createCellProxy(target, cell, path, newLog);
+      else throw "Can't nest logging yet";
+    },
     [getCell]: () => [cell, path],
-  } satisfies CellMethods<any>;
-  return new Proxy(target, {
+  } satisfies CellMethods<any> & ProxyMethods<any>;
+  const proxy: Cell<any> = new Proxy(target, {
     get(_target, prop: string | symbol) {
-      return createCellProxy(methods[prop] ?? {}, cell, [...path, prop]);
+      return createCellProxy(methods[prop] ?? {}, cell, [...path, prop], log);
     },
     set(_target, _prop: string | symbol, _value: any) {
       return false;
     },
-  }) as Cell<any>;
+  });
+  return proxy;
 }
 
 function createCellValueProxy(
   cell: WriteableSignal<any>,
   valuePath: Path,
-  log?: SourcesLog
+  log?: ReactivityLog
 ): any {
-  log?.add(cell as Cell<any>);
+  log?.reads.add(cell as Cell<any>);
 
   let target = cell.get();
   let path: Path = [];
@@ -146,7 +167,8 @@ function createCellValueProxy(
     path.push(prop);
     if (isCell(target[prop])) {
       [cell, path] = target[prop][getCell]();
-      log?.add(cell as Cell<any>);
+      path = [...path];
+      log?.reads.add(cell as Cell<any>);
       target = cell.get();
     } else {
       target = target[prop];
@@ -160,7 +182,7 @@ function createCellValueProxy(
       return createCellValueProxy(cell, [...path, prop], log);
     },
     set(_target, prop: string | symbol, value: any) {
-      setProp(cell, [...path, prop], value);
+      setProp(cell, [...path, prop], value, log);
       return true;
     },
   });

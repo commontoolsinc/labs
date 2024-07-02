@@ -1,5 +1,5 @@
 import { Sendable, Cancel } from "@commontools/common-frp";
-import { cell, Cell, toValue, SourcesLog, isCell } from "./cell.js";
+import { cell, Cell, toValue, ReactivityLog, isCell } from "./cell.js";
 
 type CellsFor<T extends any[]> = {
   [K in keyof T]: Cell<T[K]>;
@@ -35,14 +35,14 @@ export function lift<T extends any[], R>(
     let returnCell = lastArg ? lastArg : cell<R>(undefined as R);
 
     // Function to compute the result. Subscribes to all used input cells.
-    const log: SourcesLog = new Set();
+    const log: ReactivityLog = { reads: new Set(), writes: new Set() };
     let cancels: Cancel[] = [];
 
     const computeResult = () => {
       cancels.forEach((cancel) => cancel());
       const values = inputCells.map((arg) => toValue(arg, log)) as T;
       const result = fn(...values);
-      cancels = Array.from(log).map((cell) =>
+      cancels = Array.from(log.reads).map((cell) =>
         cell.updates({ send: () => schedule(computeResult) })
       );
       returnCell.send(result);

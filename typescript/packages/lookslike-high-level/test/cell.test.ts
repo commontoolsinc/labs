@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cell, isCell, toValue, SourcesLog } from "../src/cell.js";
+import { cell, isCell, toValue, ReactivityLog } from "../src/cell.js";
 import { isSignal, WriteableSignal } from "@commontools/common-frp/signal";
 
 // Utility function to flush microtasks
@@ -130,24 +130,31 @@ describe("nested cells", async () => {
 describe("toValue logging", async () => {
   it("should log accessing a single cell", async () => {
     const c = cell(1);
-    const log: SourcesLog = new Set();
+    const log: ReactivityLog = { reads: new Set(), writes: new Set() };
     const value = toValue(c, log);
+    c.withLog(log).send(2);
+    await flushMicrotasks();
     expect(value).toBe(1);
-    expect(log.size).toBe(1);
-    log.forEach((source) => expect(source.get()).toBe(1));
+    expect(log.reads.size).toBe(1);
+    expect(log.writes.size).toBe(1);
+    log.reads.forEach((source) => expect(source.get()).toBe(2));
+    log.writes.forEach((sink) => expect(sink.get()).toBe(2));
   });
 
   it("should log accessing nested, structured cells", async () => {
     const c = cell({ a: cell({ b: 1 }) });
-    const log: SourcesLog = new Set();
-    const value = toValue(c, log);
-    expect(value).toStrictEqual({ a: { b: 1 } });
-    expect(log.size).toBe(2);
+    const log: ReactivityLog = { reads: new Set(), writes: new Set() };
+    const value = toValue(c.a.b, log);
+    c.withLog(log).a.b.send(2);
+    expect(value).toBe(1); // Number no longer a proxy, so value is unchanged.
+    expect(log.reads.size).toBe(2); // Both cells were read to get to inner one
+    expect(log.writes.size).toBe(1); // Only the inner cell changed
 
     // Log has the actual cell, not the proxy, so we need to compare the values
-    log.forEach((source) => {
+    log.reads.forEach((source) => {
       const v = source.get();
-      expect(v.b === 1 || (isCell(v.a) && v.a.get().b === 1)).toBe(true);
+      expect(v.b === 2 || (isCell(v.a) && v.a.get().b === 2)).toBe(true);
     });
+    log.writes.forEach((sink) => expect(sink.get()).toStrictEqual({ b: 2 }));
   });
 });
