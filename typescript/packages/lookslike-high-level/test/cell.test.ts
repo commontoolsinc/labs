@@ -147,7 +147,6 @@ describe("toValue logging", async () => {
     // Log has the actual cell, not the proxy, so we need to compare the values
     log.forEach((source) => {
       const v = source.get();
-      console.log(v);
       expect(v.b === 1 || (isCell(v.a) && v.a.get().b === 1)).toBe(true);
     });
   });

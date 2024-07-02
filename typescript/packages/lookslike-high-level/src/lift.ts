@@ -1,9 +1,23 @@
-import { Sendable } from "@commontools/common-frp";
-import { cell, Cell, toValue, isCell } from "./cell.js";
+import { Sendable, Cancel } from "@commontools/common-frp";
+import { cell, Cell, toValue, SourcesLog, isCell } from "./cell.js";
 
 type CellsFor<T extends any[]> = {
   [K in keyof T]: Cell<T[K]>;
 };
+
+const pending = new Set<() => void>();
+
+function schedule(fn: () => void) {
+  if (pending.size === 0) {
+    queueMicrotask(() => {
+      for (const fn of pending) {
+        fn();
+      }
+      pending.clear();
+    });
+  }
+  pending.add(fn);
+}
 
 // Creates a node factory for the given function.
 export function lift<T extends any[], R>(
@@ -18,26 +32,24 @@ export function lift<T extends any[], R>(
     const lastArg = args.pop() as Cell<R> | undefined;
     const inputCells = args as CellsFor<T>;
 
-    // Function to compute the result
-    const computeResult = (): R => {
-      const values = inputCells.map((arg) => toValue(arg)) as T;
-      return fn(...values);
+    let returnCell = lastArg ? lastArg : cell<R>(undefined as R);
+
+    // Function to compute the result. Subscribes to all used input cells.
+    const log: SourcesLog = new Set();
+    let cancels: Cancel[] = [];
+
+    const computeResult = () => {
+      cancels.forEach((cancel) => cancel());
+      const values = inputCells.map((arg) => toValue(arg, log)) as T;
+      const result = fn(...values);
+      cancels = Array.from(log).map((cell) =>
+        cell.updates({ send: () => schedule(computeResult) })
+      );
+      returnCell.send(result);
     };
 
     // Compute initial value
-    let returnCell: Cell<R>;
-    if (lastArg === undefined) {
-      returnCell = cell<R>(computeResult());
-    } else {
-      returnCell = lastArg;
-      returnCell.send(computeResult());
-    }
-
-    // Subscribe to updates of all input cells
-    inputCells.forEach((arg) => {
-      if (isCell(arg))
-        arg.updates({ send: () => returnCell.send(computeResult()) });
-    });
+    computeResult();
 
     if (lastArg === undefined) {
       return returnCell;

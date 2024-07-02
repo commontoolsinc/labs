@@ -39,11 +39,12 @@ export function cell<T>(value: T): Cell<T> {
   const state = {
     get: () => value,
     send: (newValue: T) => {
+      console.log("send", value, newValue, deepEqualOfCells(value, newValue));
       if (deepEqualOfCells(value, newValue)) return;
       value = newValue;
       for (const subscriber of subscribers) subscriber.send();
     },
-    updates: (subscriber: Sendable<void>) => {
+    updates: (subscriber: Sendable<void>): Cancel => {
       subscribers.add(subscriber);
       return () => subscribers.delete(subscriber);
     },
@@ -69,7 +70,7 @@ export const toValue = <T>(cell: MaybeCellFor<T>, log?: SourcesLog): T => {
     return Object.fromEntries(
       Object.entries(cell as object).map(([key, value]) => [
         key,
-        toValue(value, log),
+        toValue(value, log) as T,
       ])
     ) as T;
   return cell as T;
