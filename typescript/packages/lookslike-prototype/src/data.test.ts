@@ -1,188 +1,123 @@
 import { BehaviorSubject, Subject } from "rxjs";
 import {
   ReactiveGraph,
-  RecipeTree,
+  Recipe,
   RecipeConnectionMap,
   RecipeNode,
   ReactiveNode
 } from "./data.js";
 import { describe, beforeEach, test, expect, it, vi } from "vitest";
-import { aQ } from "vitest/dist/reporters-yx5ZTtEV.js";
-import { CONTENT_TYPE_JAVASCRIPT } from "./contentType.js";
+import { CONTENT_TYPE_DATA, CONTENT_TYPE_JAVASCRIPT } from "./contentType.js";
+
+const addTree: Recipe = {
+  spec: {
+    history: [{ role: "user", content: "Add two numbers" }],
+    steps: [
+      {
+        description: "Add two numbers",
+        associatedNodes: ["firstNumber", "secondNumber", "add"]
+      }
+    ]
+  },
+  nodes: [
+    {
+      id: "firstNumber",
+      contentType: CONTENT_TYPE_DATA,
+      body: 1
+    },
+    {
+      id: "secondNumber",
+      contentType: CONTENT_TYPE_DATA,
+      body: 2
+    },
+    {
+      id: "add",
+      contentType: CONTENT_TYPE_JAVASCRIPT,
+      body: "(a, b) => a + b"
+    }
+  ],
+  connections: {
+    add: { a: "firstNumber", b: "secondNumber" }
+  },
+  inputs: ["firstNumber", "secondNumber"],
+  outputs: ["add"]
+};
 
 describe("ReactiveGraph", () => {
-  let sampleRecipeTree: RecipeTree;
-  let sampleConnectionMap: RecipeConnectionMap;
+  let sampleRecipeTree: Recipe;
 
   beforeEach(() => {
     // Set up a sample RecipeTree
-    sampleRecipeTree = {
-      node: { id: "root", contentType: "text", body: "Root node" },
-      content: [],
-      children: [
-        {
-          node: { id: "child1", contentType: "text", body: "Child 1" },
-          content: [],
-          children: []
-        },
-        {
-          node: { id: "child2", contentType: "text", body: "Child 2" },
-          content: [],
-          children: []
-        }
-      ]
-    };
-
-    // Set up a sample ConnectionMap
-    sampleConnectionMap = {
-      root: {
-        input1: "child1",
-        input2: "child2"
-      }
-    };
+    sampleRecipeTree = addTree;
   });
 
   test("ReactiveGraph builds without errors", () => {
-    const graph = new ReactiveGraph(sampleRecipeTree, sampleConnectionMap);
+    const graph = new ReactiveGraph(sampleRecipeTree);
     expect(() => graph.build()).not.toThrow();
   });
 
   test("ReactiveGraph creates correct number of nodes", () => {
-    const graph = new ReactiveGraph(sampleRecipeTree, sampleConnectionMap);
+    const graph = new ReactiveGraph(sampleRecipeTree);
     graph.build();
     expect(graph["nodes"].size).toBe(3); // Access private property for testing
   });
 
   test("ReactiveGraph connects nodes correctly", () => {
-    const graph = new ReactiveGraph(sampleRecipeTree, sampleConnectionMap);
+    const graph = new ReactiveGraph(sampleRecipeTree);
     graph.build();
 
-    const rootNode = graph["nodes"].get("root");
-    expect(rootNode).toBeDefined();
-    expect(Object.keys(rootNode!["inputs"]).length).toBe(2);
-    expect(rootNode!["inputs"]["input1"]).toBeDefined();
-    expect(rootNode!["inputs"]["input2"]).toBeDefined();
+    expect(graph.nodes.size).toBe(3);
   });
 });
 
 describe("ReactiveGraph", () => {
-  it("should create nodes from a recipe tree", () => {
-    const recipeTree = {
-      node: { id: "root", contentType: "text", body: "Root" },
-      content: [],
-      children: [
-        {
-          node: { id: "child1", contentType: "text", body: "Child 1" },
-          content: [],
-          children: []
-        },
-        {
-          node: { id: "child2", contentType: "text", body: "Child 2" },
-          content: [],
-          children: []
-        }
-      ]
-    };
-    const connectionMap = {};
-
-    const graph = new ReactiveGraph(recipeTree, connectionMap);
-    graph.build();
-
-    expect(graph["nodes"].size).toBe(3);
-    expect(graph["nodes"].has("root")).toBe(true);
-    expect(graph["nodes"].has("child1")).toBe(true);
-    expect(graph["nodes"].has("child2")).toBe(true);
-  });
-
   it("should connect nodes based on the connection map", () => {
-    const recipeTree = {
-      node: {
-        id: "root",
-        contentType: CONTENT_TYPE_JAVASCRIPT,
-        body: "(a, b) => a + b"
-      },
-      content: [],
-      children: [
-        {
-          node: { id: "child1", contentType: "text", body: "5" },
-          content: [],
-          children: []
-        },
-        {
-          node: { id: "child2", contentType: "text", body: "3" },
-          content: [],
-          children: []
-        }
-      ]
-    };
-    const connectionMap = {
-      root: { a: "child1", b: "child2" }
-    };
-
-    const graph = new ReactiveGraph(recipeTree, connectionMap);
+    const graph = new ReactiveGraph(addTree);
     graph.build();
 
-    const rootNode = graph["nodes"].get("root") as ReactiveNode;
-    expect(Object.keys(rootNode["inputs"])).toEqual(["a", "b"]);
+    const addNode = graph["nodes"].get("add") as ReactiveNode;
+    const firstNumberNode = graph["nodes"].get("firstNumber") as ReactiveNode;
+    const secondNumberNode = graph["nodes"].get("secondNumber") as ReactiveNode;
+    expect(Object.keys(addNode["inputs"])).toEqual(["a", "b"]);
+    expect(addNode["inputs"]["a"]).toEqual(firstNumberNode.getValue());
+    expect(addNode["inputs"]["b"]).toEqual(secondNumberNode.getValue());
   });
 
   it("should calculate the correct execution order", () => {
-    const recipeTree = {
-      node: {
-        id: "root",
-        contentType: CONTENT_TYPE_JAVASCRIPT,
-        body: "(a, b) => a + b"
-      },
-      content: [],
-      children: [
-        {
-          node: { id: "child1", contentType: "text", body: "5" },
-          content: [],
-          children: []
-        },
-        {
-          node: { id: "child2", contentType: "text", body: "3" },
-          content: [],
-          children: []
-        }
-      ]
-    };
-    const connectionMap = {
-      root: { a: "child1", b: "child2" }
-    };
-
-    const graph = new ReactiveGraph(recipeTree, connectionMap);
+    const graph = new ReactiveGraph(addTree);
     graph.build();
 
-    expect(graph["executionOrder"]).toEqual(["child1", "child2", "root"]);
+    expect(graph["executionOrder"]).toEqual([
+      "firstNumber",
+      "secondNumber",
+      "add"
+    ]);
   });
 
   it("should detect circular dependencies", () => {
-    const recipeTree = {
-      node: {
-        id: "node1",
-        contentType: CONTENT_TYPE_JAVASCRIPT,
-        body: "a => a + 1"
-      },
-      content: [],
-      children: [
+    const recipeTree: Recipe = {
+      nodes: [
         {
-          node: {
-            id: "node2",
-            contentType: CONTENT_TYPE_JAVASCRIPT,
-            body: "b => b + 2"
-          },
-          content: [],
-          children: []
+          id: "node1",
+          contentType: CONTENT_TYPE_JAVASCRIPT,
+          body: "a => a + 1"
+        },
+        {
+          id: "node2",
+          contentType: CONTENT_TYPE_JAVASCRIPT,
+          body: "b => b + 2"
         }
-      ]
-    };
-    const connectionMap = {
-      node1: { a: "node2" },
-      node2: { b: "node1" }
+      ],
+      connections: {
+        node1: { a: "node2" },
+        node2: { b: "node1" }
+      },
+      inputs: [],
+      outputs: [],
+      spec: { history: [], steps: [] }
     };
 
-    const graph = new ReactiveGraph(recipeTree, connectionMap);
+    const graph = new ReactiveGraph(recipeTree);
     expect(() => graph.build()).toThrow("Circular dependency detected");
   });
 });
@@ -231,12 +166,15 @@ describe("ReactiveGraph", () => {
     body
   });
 
-  const createRecipeTree = (nodes: RecipeNode[]): RecipeTree => ({
-    node: nodes[0],
-    content: [],
-    children: nodes
-      .slice(1)
-      .map((node) => ({ node, content: [], children: [] }))
+  const createRecipeTree = (
+    nodes: RecipeNode[],
+    connections: RecipeConnectionMap = {}
+  ): Recipe => ({
+    nodes,
+    connections,
+    inputs: [],
+    outputs: [],
+    spec: { history: [], steps: [] }
   });
 
   beforeEach(async () => {
@@ -246,15 +184,15 @@ describe("ReactiveGraph", () => {
       createNode("3", "(a, b) => a + b")
     ];
 
-    const initialTree = createRecipeTree(initialNodes);
     const initialConnections: RecipeConnectionMap = {
       "2": { a: "1" },
       "3": { a: "1", b: "2" }
     };
+    const initialTree = createRecipeTree(initialNodes, initialConnections);
 
     vi.useFakeTimers();
 
-    graph = new ReactiveGraph(initialTree, initialConnections);
+    graph = new ReactiveGraph(initialTree);
     graph.build();
 
     await vi.runAllTimersAsync();
@@ -278,7 +216,7 @@ describe("ReactiveGraph", () => {
     vi.useFakeTimers();
 
     const newTree = createRecipeTree(newNodes);
-    graph.updateGraph(newTree, graph["connectionMap"]);
+    graph.updateGraph(newTree);
     printCurrentStateOfGraph(graph);
 
     await vi.runAllTimersAsync();
@@ -298,13 +236,9 @@ describe("ReactiveGraph", () => {
 
     vi.useFakeTimers();
 
-    const newTree = createRecipeTree(newNodes);
-    const newConnections: RecipeConnectionMap = {
-      ...graph["connectionMap"],
-      "4": { a: "3" }
-    };
+    const newTree = createRecipeTree(newNodes, { "4": { a: "3" } });
 
-    graph.updateGraph(newTree, newConnections);
+    graph.updateGraph(newTree);
 
     await vi.runAllTimersAsync();
 
@@ -318,12 +252,12 @@ describe("ReactiveGraph", () => {
     ];
     vi.useFakeTimers();
 
-    const newTree = createRecipeTree(newNodes);
     const newConnections: RecipeConnectionMap = {
       "3": { a: "1" }
     };
+    const newTree = createRecipeTree(newNodes, newConnections);
 
-    graph.updateGraph(newTree, newConnections);
+    graph.updateGraph(newTree);
 
     await vi.runAllTimersAsync();
 
@@ -339,7 +273,11 @@ describe("ReactiveGraph", () => {
 
     vi.useFakeTimers();
 
-    graph.updateGraph(graph["recipeTree"], newConnections);
+    const newTree = createRecipeTree(
+      graph["recipeTree"]["nodes"],
+      newConnections
+    );
+    graph.updateGraph(newTree);
 
     await vi.runAllTimersAsync();
 
@@ -356,14 +294,14 @@ describe("ReactiveGraph", () => {
 
     vi.useFakeTimers();
 
-    const newTree = createRecipeTree(newNodes);
     const newConnections: RecipeConnectionMap = {
       "2": { a: "1" },
       "3": { a: "2", b: "1" },
       "4": { a: "2", b: "3" }
     };
+    const newTree = createRecipeTree(newNodes, newConnections);
 
-    graph.updateGraph(newTree, newConnections);
+    graph.updateGraph(newTree);
 
     await vi.runAllTimersAsync();
 
@@ -382,13 +320,13 @@ describe("ReactiveGraph", () => {
 
     vi.useFakeTimers();
 
-    const newTree = createRecipeTree(newNodes);
     const newConnections: RecipeConnectionMap = {
       "2": { a: "1" },
       "3": { a: "2" }
     };
+    const newTree = createRecipeTree(newNodes, newConnections);
 
-    graph.updateGraph(newTree, newConnections);
+    graph.updateGraph(newTree);
 
     await vi.runAllTimersAsync();
 
@@ -397,13 +335,13 @@ describe("ReactiveGraph", () => {
       createNode("3", "(a) => `${a} world!`"),
       createNode("2", "(a) => a.split('').reverse().join('')")
     ];
-    const newNewTree = createRecipeTree(newNewNodes);
     const newNewConnections: RecipeConnectionMap = {
       "2": { a: "1" },
       "3": { a: "2" }
     };
+    const newNewTree = createRecipeTree(newNewNodes, newNewConnections);
 
-    graph.updateGraph(newNewTree, newNewConnections);
+    graph.updateGraph(newNewTree);
 
     await vi.runAllTimersAsync();
 
