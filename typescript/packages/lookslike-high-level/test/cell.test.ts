@@ -129,18 +129,18 @@ describe("nested cells", async () => {
   });
 });
 
-describe("toValue", () => {
-  it("should get the value of a cell", () => {
+describe("cellValueProxy", () => {
+  it("should act as the value of a cell", () => {
     const c = cell(1);
     expect(toValue(c)).toBe(1);
   });
 
-  it("should get the value of a nested cell", () => {
+  it("should act as the value of a nested cell", () => {
     const c = cell({ a: cell(2) });
     expect(toValue(c)).toStrictEqual({ a: 2 });
   });
 
-  it("should get the value of a deep nested cell", () => {
+  it("should act as the value of a deep nested cell", () => {
     const c = cell({ a: cell({ b: 2 }) });
     expect(toValue(c)).toStrictEqual({ a: { b: 2 } });
   });
@@ -157,16 +157,115 @@ describe("toValue", () => {
 
   it("should support setting the value of a cell", async () => {
     const c = cell({ a: { b: 1 } });
-    toValue(c).a.b = 2;
+    c.get().a.b = 2;
     await idle();
     expect(c.a.b.get()).toBe(2);
+  });
+
+  it("should support setting the value of a cell to another cell", async () => {
+    const c = cell({ a: { b: 1 } });
+    c.get().a = cell({ b: 2 });
+    await idle();
+    expect(c.get()).toStrictEqual({ a: { b: 2 } });
+  });
+
+  it("should support setting the value of a cell to another cell value", async () => {
+    const c = cell({ a: { b: 1 } });
+    c.get().a = cell({ b: 2 }).get();
+    await idle();
+    expect(c.get()).toStrictEqual({ a: { b: 2 } });
+  });
+
+  it("should support setting the value of a cell to another nested cell", async () => {
+    const c = cell({ a: { b: 1 } });
+    c.get().a = cell({ a: { b: 2 } }).a;
+    await idle();
+    expect(c.get()).toStrictEqual({ a: { b: 2 } });
+  });
+
+  it("should support setting the value of a cell to another nested cell value", async () => {
+    const c = cell({ a: { b: 1 } });
+    c.get().a = cell({ a: { b: 2 } }).a.get();
+    await idle();
+    expect(c.get()).toStrictEqual({ a: { b: 2 } });
   });
 
   it("should allow setting the value via self", async () => {
     const c = cell({ a: 1, b: 0 });
     c.get()[self] = { a: 0, b: 2 };
     await idle();
-    expect(c.b.get()).toBe(2);
+    expect(c.get()).toStrictEqual({ a: 0, b: 2 });
+  });
+
+  it.skip("shouldn't break when setting at different levels", async () => {
+    const b = cell({ b: 2 });
+    const c = cell({ a: { b: 1 } });
+    c.get().a = b;
+    c.get().a.b = b.b;
+    await idle();
+    expect(c.get()).toStrictEqual({ a: { b: 2 } });
+  });
+
+  it("should allow setting the value as a cell, both directions", async () => {
+    const a = cell({ value: 2 });
+    const b = cell({ value: 3 });
+    const c = cell({ nested: { value: 4 } });
+    const d = cell({
+      a: { value: 0 },
+      b: { value: 0 },
+      c: { nested: { value: 0 } },
+    });
+    expect(d.get()).toStrictEqual({
+      a: { value: 0 },
+      b: { value: 0 },
+      c: { nested: { value: 0 } },
+    });
+
+    d.get().a = a; // works for both: cells and ...
+    d.get().b = b.get(); // ... cell values
+    //d.get().c = c;
+    d.get().c.nested = c.nested; // including nested
+    await idle();
+    expect(d.get()).toStrictEqual({
+      a: { value: 2 },
+      b: { value: 3 },
+      c: { nested: { value: 4 } },
+    });
+
+    a.send({ value: 4 });
+    b.send({ value: cell(5) });
+    c.send({ nested: cell({ value: 6 }).get() });
+    await idle();
+    expect(d.get()).toStrictEqual({
+      a: { value: 4 },
+      b: { value: 5 },
+      c: { nested: { value: 6 } },
+    });
+
+    // And now the other direction!
+    d.get().a = { value: 7 };
+    d.get().b = { value: cell(8) };
+    d.get().c.nested.value = 9;
+    await idle();
+    expect(d.get()).toStrictEqual({
+      a: { value: 7 },
+      b: { value: 8 },
+      c: { nested: { value: 9 } },
+    });
+    expect(a.get()).toStrictEqual({ value: 7 });
+    expect(b.get()).toStrictEqual({ value: 8 });
+    expect(c.get()).toStrictEqual({ nested: { value: 9 } });
+
+    // And also use the proxy to set the values
+    a.get().value = 10;
+    b.get().value = cell(11);
+    c.get().nested = cell({ value: 12 }).get();
+    await idle();
+    expect(d.get()).toStrictEqual({
+      a: { value: 10 },
+      b: { value: 11 },
+      c: { nested: { value: 12 } },
+    });
   });
 });
 

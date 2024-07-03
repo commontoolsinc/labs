@@ -46,6 +46,7 @@ type MaybeCellFor<T extends any> =
 // Create a cell with default value of value. If value is already a cell, it
 // just returns it, making sure it's a proxied cell.
 export function cell<T>(value: T): Cell<T> {
+  if (isValueProxy<T>(value)) return value[getCellProxy]();
   if (isCell<T>(value))
     return isProxy<T>(value) ? value : createCellProxy({}, value, []);
 
@@ -69,8 +70,14 @@ export function cell<T>(value: T): Cell<T> {
 
 export const isCell = <T>(value: any): value is Cell<T> => isSignal<T>(value);
 
-const isProxy = <T>(value: any): value is Cell<T> & ProxyMethods<T> =>
-  value && (value as unknown as ProxyMethods<T>)[getCell] !== undefined;
+const isProxy = <T>(value: any): value is Cell<T> & CellProxyMethods<T> =>
+  value &&
+  typeof (value as unknown as CellProxyMethods<T>)[getCell] === "function";
+
+const isValueProxy = <T>(value: any): value is T & CellValueProxyMethods<T> =>
+  value &&
+  typeof (value as unknown as CellValueProxyMethods<T>)[getCellProxy] ===
+    "function";
 
 // Convert a nested object of cells to a nested object of values.
 // As opposed to cell.get(), which does it only one level deep.
@@ -104,6 +111,8 @@ type Path = (string | number | symbol)[];
 // case if cells were created with `cell` only. There is currently no way to
 // expose the underlying cell without the proxy.
 function setProp(cell: Cell<any>, path: Path, value: any, log?: ReactivityLog) {
+  value = unproxyCellValues(value);
+
   if (path.length === 0)
     if (isCell(value)) {
       throw "Can't overwrite a cell with another cell.";
@@ -138,10 +147,21 @@ function setProp(cell: Cell<any>, path: Path, value: any, log?: ReactivityLog) {
   return cell.send(root);
 }
 
+function unproxyCellValues<T>(value: T): T {
+  if (isValueProxy<T>(value)) return value[getCellProxy]() as T;
+  if (isCell(value)) return value;
+  if (Array.isArray(value)) return value.map((v) => unproxyCellValues(v)) as T;
+  if (typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value as object).map(([k, v]) => [k, unproxyCellValues(v)])
+    ) as T;
+  return value;
+}
+
 // Internal API for proxies only
 const getCell = Symbol("getCell");
 
-type ProxyMethods<T> = {
+type CellProxyMethods<T> = {
   [getCell]: () => [WriteableSignal<T>, Path];
 };
 
@@ -162,7 +182,7 @@ function createCellProxy(
       else throw "Can't nest logging yet";
     },
     [getCell]: () => [cell, path],
-  } satisfies CellMethods<any> & ProxyMethods<any>;
+  } satisfies CellMethods<any> & CellProxyMethods<any>;
   const proxy: Cell<any> = new Proxy(target, {
     get(_target, prop: string | symbol) {
       return createCellProxy(methods[prop] ?? {}, cell, [...path, prop], log);
@@ -174,6 +194,13 @@ function createCellProxy(
   return proxy;
 }
 
+// Internal API for proxies only
+const getCellProxy = Symbol("getCellProxy");
+
+type CellValueProxyMethods<T> = {
+  [getCellProxy]: () => Cell<T>;
+};
+
 function createCellValueProxy(
   cell: WriteableSignal<any>,
   valuePath: Path,
@@ -181,6 +208,7 @@ function createCellValueProxy(
 ): any {
   log?.reads.add(cell as Cell<any>);
 
+  // Follow path to actual value, might be across nested cells:
   let target = cell.get();
   let path: Path = [];
   for (const prop of valuePath) {
@@ -190,7 +218,7 @@ function createCellValueProxy(
       [cell, path] = isProxy(value) ? value[getCell]() : [value, []];
       path = [...path];
       log?.reads.add(cell as Cell<any>);
-      target = cell.get();
+      target = value.get();
     } else {
       target = value;
     }
@@ -200,8 +228,14 @@ function createCellValueProxy(
 
   const proxy: any = new Proxy(target, {
     get(_target, prop: string | symbol) {
-      if (prop === self) return proxy;
-      else return createCellValueProxy(cell, [...path, prop], log);
+      switch (prop) {
+        case self:
+          return proxy;
+        case getCellProxy:
+          return () => createCellProxy({}, cell, path, log);
+        default:
+          return createCellValueProxy(cell, [...path, prop], log);
+      }
     },
     set(_target, prop: string | symbol, value: any) {
       if (prop === self) setProp(cell, path, value, log);
