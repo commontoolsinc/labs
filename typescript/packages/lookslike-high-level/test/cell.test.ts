@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cell, isCell, toValue, ReactivityLog } from "../src/runtime/cell.js";
+import { cell, self, isCell, ReactivityLog } from "../src/runtime/cell.js";
 import { isSignal, WriteableSignal } from "@commontools/common-frp/signal";
 import { idle } from "../src/runtime/scheduler.js";
 
@@ -123,11 +123,42 @@ describe("nested cells", async () => {
   });
 });
 
+describe("getAll", () => {
+  it("should get the value of a cell", () => {
+    const c = cell(1);
+    expect(c.getAll()).toBe(1);
+  });
+
+  it("should get the value of a nested cell", () => {
+    const c = cell({ a: cell(2) });
+    expect(c.getAll()).toStrictEqual({ a: 2 });
+  });
+
+  it("should get the value of a deep nested cell", () => {
+    const c = cell({ a: cell({ b: 2 }) });
+    expect(c.getAll()).toStrictEqual({ a: { b: 2 } });
+  });
+
+  it("should support setting the value of a cell", async () => {
+    const c = cell({ a: { b: 1 } });
+    c.getAll().a.b = 2;
+    await idle();
+    expect(c.a.b.get()).toBe(2);
+  });
+
+  it("should allow setting the value via self", async () => {
+    const c = cell({ a: 1, b: 0 });
+    c.getAll()[self] = { a: 0, b: 2 };
+    await idle();
+    expect(c.b.get()).toBe(2);
+  });
+});
+
 describe("toValue logging", async () => {
   it("should log accessing a single cell", async () => {
     const c = cell(1);
     const log: ReactivityLog = { reads: new Set(), writes: new Set() };
-    const value = toValue(c, log);
+    const value = c.withLog(log).getAll();
     c.withLog(log).send(2);
     await idle();
     expect(value).toBe(1);
@@ -140,7 +171,7 @@ describe("toValue logging", async () => {
   it("should log accessing nested, structured cells", async () => {
     const c = cell({ a: cell({ b: 1 }) });
     const log: ReactivityLog = { reads: new Set(), writes: new Set() };
-    const value = toValue(c.a.b, log);
+    const value = c.a.b.withLog(log).getAll();
     c.withLog(log).a.b.send(2);
     expect(value).toBe(1); // Number no longer a proxy, so value is unchanged.
     expect(log.reads.size).toBe(2); // Both cells were read to get to inner one

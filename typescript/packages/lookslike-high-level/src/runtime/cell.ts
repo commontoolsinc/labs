@@ -20,9 +20,16 @@ export type Cell<T> = T extends (infer U)[]
   ? T & CellMethods<T>
   : CellMethods<T>;
 
-type CellMethods<T> = {
+// For use on values to get a reference to self, so you can set it:
+// const array = asValue(cell([1])); array[self] = [2];
+// Useful when passed as parameter to a function.
+export const self = Symbol("self");
+
+export type CellMethods<T> = {
   get: (() => T) & Cell<T>;
-  send: ((value: T | UnwrapCell<T>, path?: Path) => void) & Cell<T>;
+  getAll: (log?: ReactivityLog) => UnwrapCell<T> & { [self]: UnwrapCell<T> };
+  send: ((value: T | UnwrapCell<T> | MaybeCellFor<T>, path?: Path) => void) &
+    Cell<T>;
   updates: ((subscriber: Sendable<void>) => Cancel) & Cell<T>;
   withLog: (log?: ReactivityLog) => Cell<T>;
 };
@@ -31,11 +38,22 @@ type CellMethods<T> = {
 // value was given as a cell. e.g. so that cell(cell(2)).send(3) works.
 type UnwrapCell<T> = T extends Cell<infer U> ? U : T;
 
+type MaybeCellFor<T extends any> =
+  | {
+      [K in keyof T]: Cell<T[K]> | MaybeCellFor<T[K]>;
+    }
+  | T;
+
+// Create a cell with default value of value. If value is already a cell, it
+// just returns it, making sure it's a proxied cell.
 export function cell<T>(value: T): Cell<T> {
+  if (isCell<T>(value))
+    return isProxy<T>(value) ? value : createCellProxy({}, value, []);
+
   const subscribers = new Set<Sendable<void>>();
 
   const state = {
-    get: () => value,
+    get: () => value as T,
     send: (newValue: T) => {
       if (deepEqualOfCells(value, newValue)) return;
       value = newValue;
@@ -52,12 +70,11 @@ export function cell<T>(value: T): Cell<T> {
 
 export const isCell = <T>(value: any): value is Cell<T> => isSignal<T>(value);
 
-type MaybeCellFor<T extends any> =
-  | {
-      [K in keyof T]: Cell<T[K]> | MaybeCellFor<T[K]>;
-    }
-  | T;
+const isProxy = <T>(value: any): value is Cell<T> & ProxyMethods<T> =>
+  value && (value as unknown as ProxyMethods<T>)[getCell] !== undefined;
 
+// Convert a nested object of cells to a nested object of values.
+// As opposed to cell.get(), which does it only one level deep.
 export const toValue = <T>(cell: MaybeCellFor<T>, log?: ReactivityLog): T => {
   if (isCell<T>(cell)) return cell.withLog(log).get() as T;
   if (Array.isArray(cell)) return cell.map((cell) => toValue(cell, log)) as T;
@@ -133,6 +150,7 @@ function createCellProxy(
 ): Cell<any> {
   const methods: { [key: string | symbol]: any } = {
     get: () => createCellValueProxy(cell, path, log),
+    getAll: () => toValue(proxy, log),
     send: (value: any, extraPath: Path = []) =>
       setProp(cell, [...path, ...extraPath], value, log),
     updates: (subscriber: Sendable<void>) => cell.updates(subscriber),
@@ -165,27 +183,32 @@ function createCellValueProxy(
   let path: Path = [];
   for (const prop of valuePath) {
     path.push(prop);
-    if (isCell(target[prop])) {
-      [cell, path] = target[prop][getCell]();
+    const value = target[prop];
+    if (isProxy(value) || isCell(value)) {
+      [cell, path] = isProxy(value) ? value[getCell]() : [value, []];
       path = [...path];
       log?.reads.add(cell as Cell<any>);
       target = cell.get();
     } else {
-      target = target[prop];
+      target = value;
     }
   }
 
   if (typeof target !== "object") return target;
 
-  return new Proxy(target, {
+  const proxy: any = new Proxy(target, {
     get(_target, prop: string | symbol) {
-      return createCellValueProxy(cell, [...path, prop], log);
+      if (prop === self) return proxy;
+      else return createCellValueProxy(cell, [...path, prop], log);
     },
     set(_target, prop: string | symbol, value: any) {
-      setProp(cell, [...path, prop], value, log);
+      if (prop === self) setProp(cell, path, value, log);
+      else setProp(cell, [...path, prop], value, log);
       return true;
     },
   });
+
+  return proxy;
 }
 
 function deepEqualOfCells(a: any, b: any): boolean {

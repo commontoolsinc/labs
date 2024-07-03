@@ -53,7 +53,10 @@ export function asHandler<E, T extends any[]>(
   fn: (e: E, ...args: T) => void
 ): (...args: [...CellsFor<T>]) => Sendable<E> {
   return (...args: [...CellsFor<T>]) => ({
-    send: (e: E) => fn(e, ...(args.map((arg) => toValue(arg)) as T)),
+    send: (e: E) => fn(e, ...(args.map((arg) => arg.getAll()) as T)),
+    sink: () => {
+      throw "Not actually a stream";
+    },
   });
 }
 

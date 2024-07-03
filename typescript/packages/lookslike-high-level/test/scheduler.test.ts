@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { cell, toValue } from "../src/runtime/cell.js";
+import { cell } from "../src/runtime/cell.js";
 import {
   Action,
   run,
@@ -16,7 +16,7 @@ describe("scheduler", () => {
     const c = cell(0);
     const adder: Action = (log) => {
       runCount++;
-      c.withLog(log).send(toValue(a, log) + toValue(b, log));
+      c.withLog(log).send(a.withLog(log).get() + b.withLog(log).get());
     };
     run(adder);
     expect(runCount).toBe(1);
@@ -34,7 +34,7 @@ describe("scheduler", () => {
     const c = cell(0);
     const adder: Action = (log) => {
       runCount++;
-      c.withLog(log).send(toValue(a, log) + toValue(b, log));
+      c.withLog(log).send(a.withLog(log).get() + b.withLog(log).get());
     };
     run(adder);
     expect(runCount).toBe(1);
@@ -61,11 +61,11 @@ describe("scheduler", () => {
     const e = cell(0);
     const adder1: Action = (log) => {
       runs.push("adder1");
-      c.withLog(log).send(toValue(a, log) + toValue(b, log));
+      c.withLog(log).send(a.withLog(log).get() + b.withLog(log).get());
     };
     const adder2: Action = (log) => {
       runs.push("adder2");
-      e.withLog(log).send(toValue(c, log) + toValue(d, log));
+      e.withLog(log).send(c.withLog(log).get() + d.withLog(log).get());
     };
     run(adder1);
     run(adder2);
@@ -94,14 +94,14 @@ describe("scheduler", () => {
     const d = cell(1);
     const e = cell(0);
     const adder1: Action = (log) => {
-      c.withLog(log).send(toValue(a, log) + toValue(b, log));
+      c.withLog(log).send(a.withLog(log).get() + b.withLog(log).get());
     };
     const adder2: Action = (log) => {
-      e.withLog(log).send(toValue(c, log) + toValue(d, log));
+      e.withLog(log).send(c.withLog(log).get() + d.withLog(log).get());
     };
     const adder3: Action = (log) => {
       if (--maxRuns <= 0) return;
-      a.withLog(log).send(toValue(e, log) + toValue(b, log));
+      c.withLog(log).send(e.withLog(log).get() + b.withLog(log).get());
     };
 
     const stopped = vi.fn();
@@ -121,7 +121,9 @@ describe("scheduler", () => {
     const counter = cell(0);
     const by = cell(1);
     const inc: Action = (log) =>
-      counter.withLog(log).send(toValue(counter, log) + toValue(by, log));
+      counter
+        .withLog(log)
+        .send(counter.withLog(log).get() + by.withLog(log).get());
 
     const stopped = vi.fn();
     onError(() => stopped());
