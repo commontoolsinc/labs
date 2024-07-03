@@ -219,8 +219,12 @@ export class ReactiveGraph {
     return Object.entries(this.nodes);
   }
 
+  jsonSnapshot() {
+    return JSON.stringify(this.snapshot(), null, 2);
+  }
+
   snapshot() {
-    return JSON.stringify(new GraphSnapshot(this.recipeTree), null, 2);
+    return new GraphSnapshot(this.recipeTree);
   }
 
   private createNodes(tree: Recipe) {
@@ -292,16 +296,23 @@ export class ReactiveGraph {
   }
 
   addConnection(fromNode: string, toNode: string, portName: string) {
-    const newConnectionMap = { ...this.recipeTree.connections };
-    if (!newConnectionMap[toNode]) {
-      newConnectionMap[toNode] = {};
-    }
-    newConnectionMap[toNode][portName] = fromNode;
-    this.updateGraph(this.recipeTree);
+    console.log(
+      `Adding connection from ${fromNode} to ${toNode}, port ${portName}`
+    );
+    const newRecipeTree = { ...this.recipeTree };
+    newRecipeTree.connections[toNode] ||= {};
+    newRecipeTree.connections[toNode][portName] = fromNode;
+
+    this.updateGraph(newRecipeTree);
   }
 
-  addNode(node: RecipeNode, content: string[], parentId: string) {
+  addNode(node: RecipeNode, description: string) {
     const newRecipeTree = { ...this.recipeTree };
+    newRecipeTree.spec.steps.push({
+      associatedNodes: [node.id],
+      description
+    });
+
     const insertNode = (tree: Recipe) => {
       tree.nodes.push(node);
     };

@@ -34,9 +34,9 @@ export const toolSpec: ChatCompletionTool[] = [
         properties: {
           id: { type: "string" },
           code: { type: "string" },
-          documentatedReasoning: { type: "string" }
+          documentedReasoning: { type: "string" }
         },
-        required: ["id", "code", "documentatedReasoning"]
+        required: ["id", "code", "documentedReasoning"]
       }
     }
   },
@@ -51,9 +51,9 @@ export const toolSpec: ChatCompletionTool[] = [
         properties: {
           id: { type: "string" },
           uiTree: { type: "object", description: "The UI tree." },
-          documentatedReasoning: { type: "string" }
+          documentedReasoning: { type: "string" }
         },
-        required: ["id", "uiTree", "documentatedReasoning"]
+        required: ["id", "uiTree", "documentedReasoning"]
       }
     }
   },
@@ -67,8 +67,10 @@ export const toolSpec: ChatCompletionTool[] = [
         type: "object",
         properties: {
           id: { type: "string" },
-          data: { type: "object", description: "Default value" }
-        }
+          data: { type: "object", description: "Default value" },
+          documentedReasoning: { type: "string" }
+        },
+        required: ["id", "data", "documentedReasoning"]
       }
     }
   },
@@ -84,8 +86,10 @@ export const toolSpec: ChatCompletionTool[] = [
           dataSource: {
             type: "string",
             description: "Path of the source data in the graph"
-          }
-        }
+          },
+          documentedReasoning: { type: "string" }
+        },
+        required: ["id", "dataSource", "documentedReasoning"]
       }
     }
   },
@@ -164,8 +168,10 @@ export const toolSpec: ChatCompletionTool[] = [
         type: "object",
         properties: {
           id: { type: "string" },
-          shaderToyCode: { type: "string" }
-        }
+          shaderToyCode: { type: "string" },
+          documentedReasoning: { type: "string" }
+        },
+        required: ["id", "shaderToyCode", "documentedReasoning"]
       }
     }
   },

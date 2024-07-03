@@ -1,4 +1,3 @@
-
 export const codePrompt = `
   Your task is to take a user description or request and produce a series of nodes for a computation graph. Nodes can be code blocks or UI components and they communicate with named ports.
 
@@ -90,8 +89,9 @@ export const codePrompt = `
 
   "make a clickable button" ->
 
-  addEventNode({
-    "id": "clickEvent"
+  addDataNode({
+    "id": "clicks",
+    "data": 0
   })
 
   addUiNode({
@@ -108,7 +108,7 @@ export const codePrompt = `
   })
 
   addConnection({
-    "from": "clickEvent",
+    "from": "clicks",
     "to": ["buttonUi", "onClicked"]
   })
 

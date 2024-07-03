@@ -2,7 +2,7 @@ import { LitElement, html, css } from "lit-element";
 import { customElement, property, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { base } from "../styles.js";
-import { GraphSnapshot, Recipe, RecipeNode, RecipeTree } from "../data.js";
+import { GraphSnapshot, Recipe, RecipeNode, SpecTree } from "../data.js";
 import { Context } from "../state.js";
 import { appGraph } from "./com-app.js";
 
@@ -26,6 +26,14 @@ const styles = css`
 
   pre {
     white-space: pre-wrap;
+  }
+
+  pre.node-body {
+    background: #f4f4f4;
+    font-size: 0.7rem;
+    line-height: normal;
+    padding: 0.5rem;
+    border-radius: 5px;
   }
 
   .local-variable {
@@ -63,6 +71,7 @@ export class ComThread extends LitElement {
 
   override connectedCallback() {
     super.connectedCallback();
+    this.graphSnapshot = appGraph.snapshot();
     appGraph.changes.subscribe((g) => {
       console.log("graph changed", g);
       this.graphSnapshot = g;
@@ -73,28 +82,46 @@ export class ComThread extends LitElement {
     if (this.graphSnapshot == null) {
       return html`<pre>empty...</pre>`;
     }
-    const tree: RecipeTree = this.graphSnapshot.recipeTree || [];
-    const connections = this.graphSnapshot.connectionMap;
+    const tree: Recipe = this.graphSnapshot.recipeTree;
+    const connections = this.graphSnapshot.recipeTree.connections || {};
 
     // walk tree and render as nested <ul> tags
-    function renderTree(tree: RecipeTree[]) {
+    function renderTree(recipe: Recipe) {
       return html`<ul>
-        ${tree.map((node) => {
+        ${recipe.spec.steps.map((step) => {
           return html`<li>
-            <strong><code>${node.node.id}</code></strong>
-            <em><pre>${node.content.join("\n")}</pre></em>
-            <pre>${JSON.stringify(node.node.body, null, 2)}</pre>
-            ${repeat(
-              Object.entries(connections[node.node.id] || {}),
-              ([key, value]) =>
-                html`<code class="local-variable">${key}: ${value}</code>`
-            )}
-            ${node.children.length > 0 ? renderTree(node.children) : ""}
+            <em><pre>${step.description}</pre></em>
+            <ul>
+              ${step.associatedNodes.map((nodeId) => {
+                const node = tree.nodes.find((node) => node.id === nodeId);
+                if (!node) {
+                  return html`<li>Node not found: ${nodeId}</li>`;
+                }
+
+                return html`<li>
+                  <div>
+                    ${repeat(
+                      Object.entries(connections[node.id] || {}),
+                      ([key, value]) =>
+                        html`<code class="local-variable"
+                          >${key}: ${value}</code
+                        >`
+                    )}
+                  </div>
+                  <strong><code>${node.id}</code></strong>
+                  <pre class="node-body">
+${typeof node.body === "string"
+                      ? node.body
+                      : JSON.stringify(node.body, null, 2)}</pre
+                  >
+                </li>`;
+              })}
+            </ul>
           </li>`;
         })}
       </ul>`;
     }
 
-    return html`<div>${renderTree([tree])}</div>`;
+    return html`<div>${renderTree(tree)}</div>`;
   }
 }

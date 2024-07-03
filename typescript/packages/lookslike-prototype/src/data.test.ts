@@ -355,8 +355,7 @@ describe("ReactiveGraph", () => {
 
     graph.addNode(
       { id: "test", contentType: CONTENT_TYPE_JAVASCRIPT, body: "() => 'lol'" },
-      [],
-      "1"
+      "a node for saying lol"
     );
 
     graph.addNode(
@@ -365,8 +364,7 @@ describe("ReactiveGraph", () => {
         contentType: CONTENT_TYPE_JAVASCRIPT,
         body: "() => 'lol'"
       },
-      [],
-      "1"
+      "a node for saying lol again"
     );
 
     graph.addConnection("test", "3", "a");
