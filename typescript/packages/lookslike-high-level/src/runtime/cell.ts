@@ -26,8 +26,7 @@ export type Cell<T> = T extends (infer U)[]
 export const self = Symbol("self");
 
 export type CellMethods<T> = {
-  get: (() => T) & Cell<T>;
-  getAll: (log?: ReactivityLog) => UnwrapCell<T> & { [self]: UnwrapCell<T> };
+  get: (() => T & { [self]: T }) & Cell<T>;
   send: ((value: T | UnwrapCell<T> | MaybeCellFor<T>, path?: Path) => void) &
     Cell<T>;
   updates: ((subscriber: Sendable<void>) => Cancel) & Cell<T>;
@@ -75,17 +74,21 @@ const isProxy = <T>(value: any): value is Cell<T> & ProxyMethods<T> =>
 
 // Convert a nested object of cells to a nested object of values.
 // As opposed to cell.get(), which does it only one level deep.
-export const toValue = <T>(cell: MaybeCellFor<T>, log?: ReactivityLog): T => {
-  if (isCell<T>(cell)) return cell.withLog(log).get() as T;
-  if (Array.isArray(cell)) return cell.map((cell) => toValue(cell, log)) as T;
+export const toValue = <T>(
+  cell: MaybeCellFor<T>,
+  log?: ReactivityLog
+): UnwrapCell<T> => {
+  if (isCell<T>(cell)) return cell.withLog(log).get() as UnwrapCell<T>;
+  if (Array.isArray(cell))
+    return cell.map((cell) => toValue(cell, log)) as UnwrapCell<T>;
   if (typeof cell === "object")
     return Object.fromEntries(
       Object.entries(cell as object).map(([key, value]) => [
         key,
         toValue(value, log) as T,
       ])
-    ) as T;
-  return cell as T;
+    ) as UnwrapCell<T>;
+  return cell as UnwrapCell<T>;
 };
 
 export interface ReactivityLog {
@@ -150,7 +153,6 @@ function createCellProxy(
 ): Cell<any> {
   const methods: { [key: string | symbol]: any } = {
     get: () => createCellValueProxy(cell, path, log),
-    getAll: () => toValue(proxy, log),
     send: (value: any, extraPath: Path = []) =>
       setProp(cell, [...path, ...extraPath], value, log),
     updates: (subscriber: Sendable<void>) => cell.updates(subscriber),
