@@ -72,6 +72,7 @@
     }
   },
   "dependencies": {
-    "@commontools/runtime": "^0.0.1"
+    "@commontools/runtime": "^0.0.1",
+    "@vue/reactivity": "^3.4.31"
   }
 }

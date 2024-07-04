@@ -109,6 +109,7 @@ export class ComThread extends LitElement {
                     )}
                   </div>
                   <strong><code>${node.id}</code></strong>
+                  <code>${node.contentType}</code>
                   <pre class="node-body">
 ${typeof node.body === "string"
                       ? node.body

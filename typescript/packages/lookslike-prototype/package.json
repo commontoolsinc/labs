@@ -70,6 +70,7 @@
     "@shoelace-style/shoelace": "^2.15.1",
     "@types/json-schema": "^7.0.15",
     "@types/pretty": "^2.0.3",
+    "@vue/reactivity": "^3.4.31",
     "codemirror": "^6.0.1",
     "idb-keyval": "^6.2.1",
     "json-schema": "^0.4.0",

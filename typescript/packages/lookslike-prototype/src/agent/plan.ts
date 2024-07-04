@@ -156,6 +156,8 @@ export function prepareSteps(userInput: string, graph: ReactiveGraph) {
     Give each node an ID and describe its purpose without writing the full code. Each node can have several named inputs which can be mapped to the outputs of other node ID.
     The output of all nodes must be used and all inputs must be mapped to valid outputs.
 
+    When providing documentation and reasoning comments speak in an active voice about what you're accomplishing rather than explaining the nodes or talking about the graph.
+
     Provide your plan as a list of tool actions you intend to take on the graph.
     notalk;justgo
     `,

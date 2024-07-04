@@ -1,0 +1,204 @@
+import { CONTENT_TYPE_DATA, CONTENT_TYPE_JAVASCRIPT } from "../contentType.js";
+import { Recipe, RecipeConnectionMap, RecipeNode } from "../data.js";
+
+import {
+  reactive,
+  computed,
+  ref,
+  effect,
+  ReactiveEffectRunner,
+  stop,
+  pauseTracking,
+  pauseScheduling,
+  enableTracking,
+  resetScheduling,
+  resetTracking
+} from "@vue/reactivity";
+
+async function executeNode(
+  node: RecipeNode,
+  inputs: { [key: string]: any }
+): Promise<any> {
+  console.log("executing", node.id);
+  switch (node.contentType) {
+    case CONTENT_TYPE_JAVASCRIPT:
+      try {
+        // Execute JavaScript code
+        const func = new Function(
+          ...Object.keys(inputs),
+          `return ((${node.body})(...arguments))`
+        );
+        return func(...Object.values(inputs));
+      } catch (e) {
+        console.error(`Error executing node ${node.id}: ${e}`);
+        return null;
+      }
+    case "text":
+      // Return text content
+      return node.body;
+    // Add more content types as needed
+    default:
+      console.warn(`Unsupported content type: ${node.contentType}`);
+    // throw new Error(`Unsupported content type: ${node.contentType}`);
+  }
+}
+
+export class Graph {
+  public nodes: Map<string, Node> = new Map();
+  public history: any[] = [];
+
+  constructor(public db: Db) {}
+
+  load(recipe: Recipe) {
+    this.log("load recipe");
+    recipe.nodes.forEach((node) => {
+      this.add(node.id, node);
+    });
+
+    Object.entries(recipe.connections).forEach(([targetId, connections]) => {
+      Object.entries(connections).forEach(([argument, fromId]) => {
+        this.connect(fromId, targetId, argument);
+      });
+    });
+
+    // remove any leftover nodes not present in the recipe
+    for (const id of this.nodes.keys()) {
+      if (!recipe.nodes.find((node) => node.id === id)) {
+        this.delete(id);
+      }
+    }
+
+    // remove any leftover connections between nodes or to non-existent nodes
+    for (const [targetId, connections] of Object.entries(recipe.connections)) {
+      for (const [argument, fromId] of Object.entries(connections)) {
+        if (!this.nodes.has(fromId) || !this.nodes.has(targetId)) {
+          this.disconnect(targetId, argument);
+        }
+      }
+    }
+  }
+
+  add(id: string, definition: RecipeNode) {
+    // does node exist already?
+    // update it instead
+    let node = this.nodes.get(id);
+    if (node) {
+      node.definition = definition;
+    } else {
+      node = new Node(this.db, id, definition);
+    }
+
+    this.log("adding", id);
+    this.nodes.set(node.id, node);
+    if (definition.contentType === CONTENT_TYPE_DATA) {
+      node.write(definition.body);
+    }
+    node.graph = this;
+  }
+
+  delete(id: string) {
+    const node = this.nodes.get(id);
+    if (!node) return;
+
+    this.log("deleting", id);
+    node.dispose();
+    this.nodes.delete(id);
+  }
+
+  connect(fromId: string, toId: string, toArgument: string) {
+    this.log("connect", fromId, toId, toArgument);
+    this.nodes.get(toId)?.inputs.set(toArgument, fromId);
+  }
+
+  disconnect(id: string, argumentName: string) {
+    this.log("disconnect", id, argumentName);
+    this.nodes.get(id)?.inputs.delete(argumentName);
+  }
+
+  write(id: string, value: any) {
+    this.nodes.get(id)?.write(value);
+  }
+
+  read(id: string) {
+    return this.nodes.get(id)?.read();
+  }
+
+  log(...args: any[]) {
+    console.log(...args);
+    this.history.push(args);
+  }
+
+  async update() {
+    this.log("update graph");
+    pauseTracking();
+    pauseScheduling();
+
+    for (const node of this.nodes.values()) {
+      await node.update();
+    }
+
+    resetTracking();
+    resetScheduling();
+  }
+}
+
+export class Node {
+  private runner?: ReactiveEffectRunner;
+  public inputs: Map<string, string> = new Map();
+  public graph: Graph | undefined;
+
+  constructor(
+    public db: Db,
+    public id: string,
+    public definition: RecipeNode
+  ) {}
+
+  write(value: any) {
+    this.log("write", this.id, value);
+    this.db[this.id] = value;
+  }
+
+  read() {
+    return this.db[this.id];
+  }
+
+  dispose() {
+    if (this.runner) {
+      stop(this.runner);
+      this.runner = undefined;
+    }
+  }
+
+  log(...args: any[]) {
+    console.log(...args);
+    this.graph?.history.push(args);
+  }
+
+  // marked as async to force awaiting, the effect may be async but return instantly so we want to push back a frame
+  async update() {
+    this.dispose();
+
+    this.runner = effect(async () => {
+      this.log("effect ran", this.id, this.inputs);
+
+      if (this.inputs.size > 0) {
+        const args = Array.from(this.inputs.entries()).map(([key, value]) => {
+          return [key, this.db[value]];
+        });
+
+        if (args.some(([name, value]) => value === undefined)) {
+          this.log("skip", this.id, args);
+          return;
+        }
+
+        this.log("recomputing...", this.id, args);
+        const result = await executeNode(
+          this.definition,
+          Object.fromEntries(args)
+        );
+        this.log("result", this.id, result);
+        this.db[this.id] = result;
+      }
+    });
+  }
+}
