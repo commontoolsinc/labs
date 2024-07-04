@@ -10,6 +10,7 @@ import { describeTools, toolSpec } from "./tools.js";
 import { LLMClient } from "@commontools/llm-client";
 import { LLM_SERVER_URL } from "../llm-client.js";
 import { appGraph } from "../components/com-app.js";
+import { Graph } from "../reactivity/runtime.js";
 
 type Conversation = ChatCompletionMessageParam[];
 
@@ -140,8 +141,8 @@ export async function suggest(input: string, fullPlan: Conversation) {
   return response.choices[0].message;
 }
 
-export function prepareSteps(userInput: string, graph: ReactiveGraph) {
-  if (graph.listNodes().length === 0) {
+export function prepareSteps(userInput: string, graph: Graph) {
+  if (graph.nodes.size === 0) {
     return [
       `You will create and modify software to solve a user's problems using a reactive graph computation model. Modules, a.k.a nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules:
 
@@ -187,7 +188,7 @@ export function prepareSteps(userInput: string, graph: ReactiveGraph) {
     The current graph is:
 
     \`\`\`json
-    ${appGraph.snapshot()}
+    ${JSON.stringify(appGraph.save(), null, 2)}
     \`\`\`
 
     <user-request>${userInput}</user-request>

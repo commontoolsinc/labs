@@ -101,7 +101,7 @@ test("Node test", () => {
   resetScheduling();
 });
 
-test("Graph edit API test", () => {
+test("Graph edit API test", async () => {
   const state = reactive({});
   const graph = new Graph(state);
 
@@ -127,7 +127,7 @@ test("Graph edit API test", () => {
   graph.write("inputA", 1);
   graph.write("inputB", 2);
 
-  graph.update();
+  await graph.update();
 
   graph.delete("inputA");
 
@@ -137,7 +137,9 @@ test("Graph edit API test", () => {
     contentType: CONTENT_TYPE_DATA
   });
   graph.write("inputA", 2);
-  graph.update();
+  await graph.update();
+
+  expect(graph.read("sum")).toBe(4);
 });
 
 test("Load recipe JSON", async () => {
@@ -285,4 +287,7 @@ test("Load then replace recipe JSON", async () => {
   await graph.update();
 
   expect(graph.read("multiply")).toBe(8);
+
+  const output = graph.save();
+  console.log(graph.history);
 });

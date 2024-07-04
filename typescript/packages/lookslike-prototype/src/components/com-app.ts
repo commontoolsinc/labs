@@ -25,18 +25,11 @@ import { LLMClient, LlmTool } from "@commontools/llm-client";
 import { LLM_SERVER_URL } from "../llm-client.js";
 import { ChatCompletionTool } from "openai/resources/index.mjs";
 import { toolSpec } from "../agent/tools.js";
-import { ReactiveGraph } from "../data.js";
+import { reactive } from "@vue/reactivity";
+import { Graph } from "../reactivity/runtime.js";
 
-export const appGraph = new ReactiveGraph({
-  nodes: [],
-  connections: {},
-  inputs: [],
-  outputs: [],
-  spec: {
-    history: [],
-    steps: []
-  }
-});
+export const appState = reactive({});
+export const appGraph = new Graph(appState);
 // export const appGraph = new ReactiveGraph({
 //   nodes: [
 //     {
@@ -94,7 +87,7 @@ export class ComApp extends LitElement {
       .filter((v) => v !== null);
   }
 
-  availableFunctions(graph: ReactiveGraph) {
+  availableFunctions(graph: Graph) {
     return {
       listNodes: async () => {
         console.log("listNodes", graph);
@@ -110,7 +103,7 @@ export class ComApp extends LitElement {
         portName: string;
       }) => {
         console.log("addConnection", from, to, portName);
-        graph.addConnection(from, to, portName);
+        graph.connect(from, to, portName);
         return `Added connection from ${from} to ${to}.\n${this.graphSnapshot()}`;
       },
       declareDataNode: async ({
@@ -123,14 +116,11 @@ export class ComApp extends LitElement {
         documentedReasoning: string;
       }) => {
         console.log("declareDataNode", id, data);
-        graph.addNode(
-          {
-            id,
-            contentType: CONTENT_TYPE_DATA,
-            body: data
-          },
-          documentedReasoning
-        );
+        graph.add(id, {
+          id,
+          contentType: CONTENT_TYPE_DATA,
+          body: data
+        });
 
         return `Added data node: ${id}.\n${this.graphSnapshot()}`;
       },
@@ -141,14 +131,11 @@ export class ComApp extends LitElement {
       }) => {
         console.log("addCodeNode", props);
         const { id, code, documentedReasoning } = props;
-        graph.addNode(
-          {
-            id,
-            contentType: CONTENT_TYPE_JAVASCRIPT,
-            body: code
-          },
-          documentedReasoning
-        );
+        graph.add(id, {
+          id,
+          contentType: CONTENT_TYPE_JAVASCRIPT,
+          body: code
+        });
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       addUiNode: async (props: {
@@ -158,14 +145,11 @@ export class ComApp extends LitElement {
       }) => {
         console.log("addUiNode", props);
         const { id, uiTree, documentedReasoning } = props;
-        graph.addNode(
-          {
-            id,
-            contentType: CONTENT_TYPE_UI,
-            body: uiTree
-          },
-          documentedReasoning
-        );
+        graph.add(id, {
+          id,
+          contentType: CONTENT_TYPE_UI,
+          body: uiTree
+        });
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       add3dVoxelSceneNode: async ({
@@ -178,16 +162,13 @@ export class ComApp extends LitElement {
         documentedReasoning: string;
       }) => {
         console.log("add3dVoxelSceneNode", id, dataSource);
-        graph.addNode(
-          {
-            id,
-            contentType: CONTENT_TYPE_SCENE,
-            body: {}
-          },
-          documentedReasoning
-        );
+        graph.add(id, {
+          id,
+          contentType: CONTENT_TYPE_SCENE,
+          body: {}
+        });
 
-        graph.addConnection(dataSource, id, "data");
+        graph.connect(dataSource, id, "data");
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       addGlslShaderNode: async ({
@@ -200,38 +181,29 @@ export class ComApp extends LitElement {
         documentedReasoning: string;
       }) => {
         console.log("addGlslShaderNode", id, shaderToyCode);
-        graph.addNode(
-          {
-            id,
-            contentType: CONTENT_TYPE_GLSL,
-            body: shaderToyCode
-          },
-          documentedReasoning
-        );
+        graph.add(id, {
+          id,
+          contentType: CONTENT_TYPE_GLSL,
+          body: shaderToyCode
+        });
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       addFetchNode: async ({ id, url }: { id: string; url: string }) => {
         console.log("addFetchNode", id, url);
-        graph.addNode(
-          {
-            id,
-            contentType: CONTENT_TYPE_FETCH,
-            body: url
-          },
-          "idk"
-        );
+        graph.add(id, {
+          id,
+          contentType: CONTENT_TYPE_FETCH,
+          body: url
+        });
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       addClockNode: async ({ id }: { id: string }) => {
         console.log("addClockNode", id);
-        graph.addNode(
-          {
-            id,
-            contentType: CONTENT_TYPE_CLOCK,
-            body: {}
-          },
-          "idk"
-        );
+        graph.add(id, {
+          id,
+          contentType: CONTENT_TYPE_CLOCK,
+          body: {}
+        });
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       addLanguageModelNode: async ({
@@ -242,16 +214,13 @@ export class ComApp extends LitElement {
         promptSource: string;
       }) => {
         console.log("addLanguageModelNode", id, prompt);
-        graph.addNode(
-          {
-            id,
-            contentType: CONTENT_TYPE_LLM,
-            body: {}
-          },
-          "idk"
-        );
+        graph.add(id, {
+          id,
+          contentType: CONTENT_TYPE_LLM,
+          body: {}
+        });
 
-        graph.addConnection(promptSource, id, "prompt");
+        graph.connect(promptSource, id, "prompt");
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       addImageGenerationNode: async ({
@@ -262,28 +231,25 @@ export class ComApp extends LitElement {
         promptSource: string;
       }) => {
         console.log("addImageGenerationNode", id, prompt);
-        graph.addNode(
-          {
-            id,
-            contentType: CONTENT_TYPE_IMAGE,
-            body: {}
-          },
-          "idk"
-        );
+        graph.add(id, {
+          id,
+          contentType: CONTENT_TYPE_IMAGE,
+          body: {}
+        });
 
-        graph.addConnection(promptSource, id, "prompt");
+        graph.connect(promptSource, id, "prompt");
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       deleteNode: async ({ id }: { id: string }) => {
         console.log("deleteNode", id);
-        graph.removeNode(id);
+        graph.delete(id);
         return `Deleted node: ${id}.\n${this.graphSnapshot()}`;
       }
     };
   }
 
   graphSnapshot() {
-    return appGraph.snapshot();
+    return JSON.stringify(appGraph.save(), null, 2);
   }
 
   async appendMessage() {
@@ -308,6 +274,7 @@ export class ComApp extends LitElement {
 
     const thread = await client.createThread(input);
     const result = thread.conversation[thread.conversation.length - 1];
+    appGraph.update();
 
     console.log("result", result);
   }

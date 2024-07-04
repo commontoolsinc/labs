@@ -4,7 +4,8 @@ import { repeat } from "lit/directives/repeat.js";
 import { base } from "../styles.js";
 import { GraphSnapshot, Recipe, RecipeNode, SpecTree } from "../data.js";
 import { Context } from "../state.js";
-import { appGraph } from "./com-app.js";
+import { appGraph, appState } from "./com-app.js";
+import { effect } from "@vue/reactivity";
 
 const styles = css`
   :host {
@@ -56,13 +57,13 @@ const styles = css`
 export class ComThread extends LitElement {
   static override styles = [base, styles];
 
-  @state() graphSnapshot: GraphSnapshot = null;
+  @state() graphSnapshot: Recipe | null = null;
 
   response(node: RecipeNode) {
     return html`<com-response slot="response" .node=${node}>
       <code class="local-variable">${node.id}</code>
       ${repeat(
-        appGraph.listInputsForNode(node.id),
+        Object.entries(appGraph.nodes.get(node.id)?.inputs || {}),
         ([key, value]) =>
           html`<code class="local-variable">${key}: ${value}</code>`
       )}
@@ -71,10 +72,10 @@ export class ComThread extends LitElement {
 
   override connectedCallback() {
     super.connectedCallback();
-    this.graphSnapshot = appGraph.snapshot();
-    appGraph.changes.subscribe((g) => {
-      console.log("graph changed", g);
-      this.graphSnapshot = g;
+    this.graphSnapshot = appGraph.save();
+    effect(() => {
+      console.log("graph changed", appGraph, appGraph.version, appState);
+      this.graphSnapshot = appGraph.save();
     });
   }
 
@@ -82,8 +83,8 @@ export class ComThread extends LitElement {
     if (this.graphSnapshot == null) {
       return html`<pre>empty...</pre>`;
     }
-    const tree: Recipe = this.graphSnapshot.recipeTree;
-    const connections = this.graphSnapshot.recipeTree.connections || {};
+    const tree: Recipe = this.graphSnapshot;
+    const connections = this.graphSnapshot.connections || {};
 
     // walk tree and render as nested <ul> tags
     function renderTree(recipe: Recipe) {

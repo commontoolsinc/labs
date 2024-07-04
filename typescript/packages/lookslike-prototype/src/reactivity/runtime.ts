@@ -46,6 +46,7 @@ async function executeNode(
 export class Graph {
   public nodes: Map<string, Node> = new Map();
   public history: any[] = [];
+  public version = ref(0);
 
   constructor(public db: Db) {}
 
@@ -76,6 +77,29 @@ export class Graph {
         }
       }
     }
+  }
+
+  save(): Recipe {
+    const nodes = Array.from(this.nodes.values()).map(
+      (node) => node.definition
+    );
+    const connections: RecipeConnectionMap = {};
+    for (const [targetId, node] of this.nodes) {
+      for (const [argument, fromId] of node.inputs) {
+        if (!connections[targetId]) {
+          connections[targetId] = {};
+        }
+        connections[targetId][argument] = fromId;
+      }
+    }
+
+    return {
+      nodes,
+      connections,
+      spec: { history: this.history, steps: [] },
+      outputs: [],
+      inputs: []
+    };
   }
 
   add(id: string, definition: RecipeNode) {
@@ -130,6 +154,8 @@ export class Graph {
 
   async update() {
     this.log("update graph");
+    this.version.value++;
+
     pauseTracking();
     pauseScheduling();
 
