@@ -95,40 +95,45 @@ type Path = (string | number | symbol)[];
 // expose the underlying cell without the proxy.
 function setProp(cell: Cell<any>, path: Path, value: any, log?: ReactivityLog) {
   value = unproxyCellValues(value);
+
+  if (isCell(value)) {
+    let [valueCell, valuePath]: [Cell<any>, Path] = isProxy(value)
+      ? value[getCell]()
+      : [value, []];
+    valuePath = [...valuePath];
+    while (valuePath.length > 0) {
+      value = valueCell.get()[valuePath.shift()!];
+      if (valuePath.length > 0 && !isCell(value))
+        throw "Expect a cell at non-leaf part of a path. (2)";
+      [valueCell, valuePath] = isProxy(value) ? value[getCell]() : [value, []];
+      if (valuePath.length) throw "Unexpected non-zero path (2)";
+    }
+  }
   value = toNestedCellsBelow(value);
 
-  if (path.length === 0)
+  if (path.length === 0) {
     if (isCell(value)) {
       throw "Can't overwrite a cell with another cell.";
     } else {
       log?.writes.add(cell);
-      return cell.send(value, []);
+      return cell.send(value);
     }
-
-  let root = cell.get();
-  if (typeof root !== "object" && !Array.isArray(root))
-    throw new Error("Can't use path on non-object or non-array.");
-  root = Array.isArray(root) ? [...root] : { ...root };
-
-  let parent = root;
-  const last = path.pop()!;
-  while (path.length > 0) {
-    const prop = path.shift()!;
-    let next = parent[prop];
-    if (isCell(next)) return next.withLog(log).send(value, [...path, last]);
-    if (typeof next !== "object")
-      throw new Error(
-        `Can't access ${String(prop)} on a ${typeof next}, need object/array.`
-      );
-    parent[prop] = Array.isArray(next) ? [...next] : { ...next };
-    parent = parent[prop];
+  } else if (path.length === 1) {
+    let parent = cell.get();
+    parent = Array.isArray(parent) ? [...parent] : { ...parent };
+    if (isCell(parent[path[0]]) && !isCell(value))
+      return parent[path[0]].withLog(log).send(value);
+    parent[path[0]] = value;
+    log?.writes.add(cell);
+    return cell.send(parent);
+  } else {
+    const content = cell.get();
+    if (typeof content !== "object")
+      throw "Can't set a property on a non-object.";
+    if (!isCell(content[path[0]]))
+      throw "Expect a cell at non-leaf part of a path.";
+    setProp(content[path[0]], path.slice(1), value, log);
   }
-
-  if (isCell(parent[last]) && !isCell(value))
-    return parent[last].withLog(log).send(value, []);
-  parent[last] = value;
-  log?.writes.add(cell);
-  return cell.send(root);
 }
 
 function unproxyCellValues<T>(value: T): T {
@@ -249,9 +254,10 @@ function createCellValueProxy(
     const value = target[prop];
     if (isProxy(value) || isCell(value)) {
       [cell, path] = isProxy(value) ? value[getCell]() : [value, []];
+      if (path.length) throw "Unexpected non-zero path";
       path = [...path];
       log?.reads.add(cell as Cell<any>);
-      target = value.get();
+      target = cell.get();
     } else {
       target = value;
     }
