@@ -114,6 +114,7 @@ describe("lift with writeable cells", () => {
     const b = cell(2);
     const c = cell({ result: 0 });
     add(a, b, c);
+    await idle();
     expect(c.get()).toStrictEqual({ result: 3 });
     a.send(2);
     await idle();

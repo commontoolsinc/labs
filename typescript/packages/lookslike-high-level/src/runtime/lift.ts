@@ -1,5 +1,5 @@
 import { Sendable } from "@commontools/common-frp";
-import { cell, Cell, toValue, isCell } from "./cell.js";
+import { cell, Cell, isCell } from "./cell.js";
 import { Action, run } from "./scheduler.js";
 
 type CellsFor<T extends any[]> = {
@@ -9,12 +9,16 @@ type CellsFor<T extends any[]> = {
 // Creates a node factory for the given function.
 export function lift<T extends any[], R>(
   fn: (...args: T) => R
-): (...args: [...CellsFor<T>]) => Cell<R> {
-  const lifted = (...args: [...CellsFor<T>]): Cell<R> => {
+): (...args: CellsFor<T>[]) => Cell<R> {
+  const lifted = (...args: CellsFor<T>[]): Cell<R> => {
     const returnCell = cell<R>(undefined as R);
 
+    const cells = args.map((arg) =>
+      isCell(arg) ? arg : cell(arg)
+    ) as Cell<any>[];
+
     const action: Action = (log) => {
-      const values = args.map((arg) => toValue(arg, log)) as T;
+      const values = cells.map((arg) => arg.withLog(log).get()) as T;
       const result = fn(...values);
       returnCell.withLog(log).send(result);
     };
@@ -25,11 +29,11 @@ export function lift<T extends any[], R>(
     return returnCell;
   };
 
-  return (...args: [...CellsFor<T>]) => lifted(...args);
+  return (...args: CellsFor<T>[]) => lifted(...args);
 }
 
 export function apply<T extends any[], R>(
-  args: [...CellsFor<T>],
+  args: CellsFor<T>,
   fn: (...args: T) => R
 ): Cell<R> {
   return lift(fn)(...args);
@@ -52,12 +56,18 @@ export function curry<T extends any[], U extends any[], R>(
 export function asHandler<E, T extends any[]>(
   fn: (e: E, ...args: T) => void
 ): (...args: [...CellsFor<T>]) => Sendable<E> {
-  return (...args: [...CellsFor<T>]) => ({
-    send: (e: E) => fn(e, ...(args.map((arg) => toValue(arg)) as T)),
-    sink: () => {
-      throw "Not actually a stream";
-    },
-  });
+  return (...args: [...CellsFor<T>]) => {
+    const cells = args.map((arg) =>
+      isCell(arg) ? arg : cell(arg)
+    ) as Cell<any>[];
+
+    return {
+      send: (e: E) => fn(e, ...(cells.map((arg) => arg.get()) as T)),
+      sink: () => {
+        throw "Not actually a stream";
+      },
+    };
+  };
 }
 
 // Shorthand for the common case of directly creating an event handler.

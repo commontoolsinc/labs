@@ -47,11 +47,13 @@ type MaybeCellFor<T extends any> =
 // just returns it, making sure it's a proxied cell.
 export function cell<T>(value: T): Cell<T> {
   if (isValueProxy<T>(value)) return value[getCellProxy]();
+
+  value = toNestedCellsBelow(value);
+
   if (isCell<T>(value))
     return isProxy<T>(value) ? value : createCellProxy({}, value, []);
 
   const subscribers = new Set<Sendable<void>>();
-
   const state = {
     get: () => value as T,
     send: (newValue: T) => {
@@ -79,25 +81,6 @@ const isValueProxy = <T>(value: any): value is T & CellValueProxyMethods<T> =>
   typeof (value as unknown as CellValueProxyMethods<T>)[getCellProxy] ===
     "function";
 
-// Convert a nested object of cells to a nested object of values.
-// As opposed to cell.get(), which does it only one level deep.
-export const toValue = <T>(
-  cell: MaybeCellFor<T>,
-  log?: ReactivityLog
-): UnwrapCell<T> => {
-  if (isCell<T>(cell)) return cell.withLog(log).get() as UnwrapCell<T>;
-  if (Array.isArray(cell))
-    return cell.map((cell) => toValue(cell, log)) as UnwrapCell<T>;
-  if (typeof cell === "object")
-    return Object.fromEntries(
-      Object.entries(cell as object).map(([key, value]) => [
-        key,
-        toValue(value, log) as T,
-      ])
-    ) as UnwrapCell<T>;
-  return cell as UnwrapCell<T>;
-};
-
 export interface ReactivityLog {
   reads: Set<Cell<any>>;
   writes: Set<Cell<any>>;
@@ -112,6 +95,7 @@ type Path = (string | number | symbol)[];
 // expose the underlying cell without the proxy.
 function setProp(cell: Cell<any>, path: Path, value: any, log?: ReactivityLog) {
   value = unproxyCellValues(value);
+  value = toNestedCellsBelow(value);
 
   if (path.length === 0)
     if (isCell(value)) {
@@ -155,6 +139,55 @@ function unproxyCellValues<T>(value: T): T {
     return Object.fromEntries(
       Object.entries(value as object).map(([k, v]) => [k, unproxyCellValues(v)])
     ) as T;
+  return value;
+}
+
+// Ensures that for a nested structure, each layer is a new cell. So in the end,
+// we have either primitive values or cells at every level.
+function toNestedCells<T>(value: T): T {
+  console.log("toNestedCells", value, isCell(value) && value.get());
+  // If it's a cell, apply transformation to its value and update if necessary.
+  if (isCell(value)) {
+    const cellValue = value.get();
+    const newValue = toNestedCellsBelow(cellValue);
+    console.log(
+      "isCell",
+      cellValue,
+      newValue,
+      deepEqualOfCells(newValue, cellValue)
+    );
+    if (!deepEqualOfCells(newValue, cellValue))
+      (isProxy(value) ? value[getCell]()[0] : value).send(newValue);
+    return value;
+  }
+
+  // Arrays or objects: Turn into a cell.
+  if (Array.isArray(value))
+    return cell(value.map((v) => toNestedCells(v))) as T;
+  if (typeof value === "object")
+    return cell(
+      Object.fromEntries(
+        Object.entries(value as object).map(([k, v]) => [k, toNestedCells(v)])
+      )
+    ) as T;
+
+  // Otherwise it's a primitive value, so just return it.
+  return value;
+}
+
+// Same as above, but starting at the next layer down. Useful to transform
+// values that are sent to a cell.
+function toNestedCellsBelow<T>(value: T): T {
+  console.log("toNestedCellsBelow", value, isCell(value) && value.get());
+
+  if (isCell(value)) return toNestedCells(value);
+
+  if (Array.isArray(value)) return value.map((v) => toNestedCells(v)) as T;
+  if (typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value as object).map(([k, v]) => [k, toNestedCells(v)])
+    ) as T;
+
   return value;
 }
 
