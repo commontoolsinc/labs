@@ -109,7 +109,8 @@ export const codePrompt = `
 
   addConnection({
     "from": "clicks",
-    "to": ["buttonUi", "onClicked"]
+    "to": "buttonUi"
+    "portName": "onClicked"
   })
 
   ---

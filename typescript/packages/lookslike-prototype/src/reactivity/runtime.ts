@@ -14,31 +14,39 @@ import {
   resetScheduling,
   resetTracking
 } from "@vue/reactivity";
+import { run } from "../eval.js";
 
 async function executeNode(
-  node: RecipeNode,
+  graph: Graph,
+  node: Node,
   inputs: { [key: string]: any }
 ): Promise<any> {
   console.log("executing", node.id);
-  switch (node.contentType) {
+  switch (node.definition.contentType) {
     case CONTENT_TYPE_JAVASCRIPT:
-      try {
-        // Execute JavaScript code
-        const func = new Function(
-          ...Object.keys(inputs),
-          `return ((${node.body})(...arguments))`
-        );
-        return func(...Object.values(inputs));
-      } catch (e) {
-        console.error(`Error executing node ${node.id}: ${e}`);
-        return null;
-      }
-    case "text":
-      // Return text content
-      return node.body;
+      const result = await run(
+        node.id,
+        node.definition.body,
+        inputs,
+        node.definition.evalMode
+      );
+      return result;
+    // try {
+    //   // Execute JavaScript code
+    //   const func = new Function(
+    //     ...Object.keys(inputs),
+    //     `return ((${node.body})(...arguments))`
+    //   );
+    //   return func(...Object.values(inputs));
+    // } catch (e) {
+    //   console.error(`Error executing node ${node.id}: ${e}`);
+    //   return null;
+    // }
+    case CONTENT_TYPE_DATA:
+      return node.read();
     // Add more content types as needed
     default:
-      console.warn(`Unsupported content type: ${node.contentType}`);
+      console.warn(`Unsupported content type: ${node.definition.contentType}`);
     // throw new Error(`Unsupported content type: ${node.contentType}`);
   }
 }
@@ -205,6 +213,9 @@ export class Node {
     this.dispose();
 
     this.runner = effect(async () => {
+      if (!this.graph) {
+        throw new Error("Node has no graph");
+      }
       this.log("effect ran", this.id, this.inputs);
 
       if (this.inputs.size > 0) {
@@ -218,10 +229,17 @@ export class Node {
         }
 
         this.log("recomputing...", this.id, args);
+
         const result = await executeNode(
-          this.definition,
+          this.graph,
+          this,
           Object.fromEntries(args)
         );
+        this.log("result", this.id, result);
+        this.db[this.id] = result;
+      } else {
+        this.log("recomputing (no args)...", this.id);
+        const result = await executeNode(this.graph, this, {});
         this.log("result", this.id, result);
         this.db[this.id] = result;
       }
