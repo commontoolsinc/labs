@@ -1,4 +1,13 @@
-import { CONTENT_TYPE_DATA, CONTENT_TYPE_JAVASCRIPT } from "../contentType.js";
+import {
+  CONTENT_TYPE_CLOCK,
+  CONTENT_TYPE_DATA,
+  CONTENT_TYPE_FETCH,
+  CONTENT_TYPE_IMAGE,
+  CONTENT_TYPE_JAVASCRIPT,
+  CONTENT_TYPE_LLM,
+  CONTENT_TYPE_SCENE,
+  CONTENT_TYPE_UI
+} from "../contentType.js";
 import { Recipe, RecipeConnectionMap, RecipeNode } from "../data.js";
 
 import {
@@ -15,6 +24,10 @@ import {
   resetTracking
 } from "@vue/reactivity";
 import { run } from "../eval.js";
+import { createElement } from "../ui.js";
+import { generateImage, streamLlm } from "../agent/llm.js";
+
+const intervals = {} as { [key: string]: NodeJS.Timeout };
 
 async function executeNode(
   graph: Graph,
@@ -31,6 +44,36 @@ async function executeNode(
         node.definition.evalMode
       );
       return result;
+    case CONTENT_TYPE_UI: {
+      const template = createElement(node.definition.body, inputs, graph);
+      return template;
+    }
+    case CONTENT_TYPE_SCENE: {
+      return inputs.data;
+    }
+    case CONTENT_TYPE_FETCH: {
+      if (typeof node.definition.body !== "string") {
+        throw new Error("Expected a string");
+      }
+      const url = node.definition.body;
+      const response = await fetch(url);
+      const data = await response.json();
+      return data;
+    }
+    case CONTENT_TYPE_LLM: {
+      const response = await streamLlm(
+        JSON.stringify(inputs.prompt),
+        "",
+        (preview) => {}
+      );
+      return response;
+    }
+    case CONTENT_TYPE_IMAGE: {
+      const response = await generateImage(JSON.stringify(inputs.prompt));
+      return response;
+    }
+    case CONTENT_TYPE_DATA:
+      return node.read();
     // try {
     //   // Execute JavaScript code
     //   const func = new Function(
@@ -42,8 +85,6 @@ async function executeNode(
     //   console.error(`Error executing node ${node.id}: ${e}`);
     //   return null;
     // }
-    case CONTENT_TYPE_DATA:
-      return node.read();
     // Add more content types as needed
     default:
       console.warn(`Unsupported content type: ${node.definition.contentType}`);
