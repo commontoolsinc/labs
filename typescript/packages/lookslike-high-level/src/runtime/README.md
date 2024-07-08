@@ -1,4 +1,88 @@
-# Cells
+# Reactive cells & Native TS DX
+
+## Nodes
+
+Modules can be defined inline (and later referenced from the outside). When
+written in this framework, they are functions that take values as parameters and
+optionally return a value.
+
+Functions can change incoming values and those changes are written to the
+underlying cells at runtime. Returned values, if any, are also written to a
+cell.
+
+`const m = lift(fn)` turns such a module implementation `fn` into a node
+factory. `const c = m(a, b)` then creates a node of that type, with `a` and `b`
+as inputs and with results written to `c`.
+
+Often, we want to create a one-off module and use it right away, and while
+`const c = lift((a, b) => {...})(a, b)` works, it's a little hard to read, so
+there is also `const c = apply([a, b], (a, b) => {...})` that defines a module
+and right away uses it.
+
+TODO: This is very similar to `compute` and `effect`, and so maybe we should use
+these names instead. The main difference is that writing into the passed values
+is allowed.
+
+`const h = handler([a, b], (event, a, b) => { ... })` defines a handler for
+`event` that takes cells `a` and `b` as parameters, often to write into (!). `h`
+can be used as the target of an event source in e.g. the UI. If `handler` is the
+analogue to `apply`, then `asHandler` is the analogue to `lift` and creates a
+handler factory that has to be called with the cells to be bound.
+
+`propagator(fn)` is similar to `lift`, but the function receives the cells as
+parameters, and so the code has to use `.get()` and `.send()` on them, and there
+is no return value. Just a different style. Note that this is not configuring a
+graph, it will be called when one of the read inputs changed. Use `recipe` for
+graph creation (see below)
+
+`const curried = curry([a], (a, b) => {...})` creates a node type with `a`
+already bound. `curried(b)` then creates a node. Useful to configure more
+general purpose modules.
+
+### Structured values
+
+Cells represent nested data, that can be directly referenced. Both of these
+work:
+
+- `const c = m1(a, b); const d = m2(c.foo)`
+- `const { foo } = m1(a, b); const d = m2(foo)`
+
+We can also assign the output of a module to a nested property:
+
+- `otherCell.foo = m1(a, b)`
+
+And the `self` helper allows assigning an output of a cell directly to a value:
+
+- `otherCell[self] = m1(a, b)`
+
+TODO: This is a weird syntax, maybe we want call `.set()` or so. It might also
+be an opportunity to introduce the idea of an explicit `merge` operation, as
+this is commonly the case when there are multiple writers, or when writing into
+a passed input to the recipe (see below).
+
+TODO: Instead of functions with N parameters, we could only have one parameter
+and pass objects with named values around. This makes it compatible with
+`recipe` calls and is pretty much already working. And since recipes can be used
+a modules, this would also make them indistinguishable from code modules when
+written in a recipe, which seems good.
+
+## Recipes
+
+Recipes are graphs, specifically a set of modules bound to a set of cells. Some
+of these cells are inputs and outputs of the recipe, that is, they can be passed
+in from the outside (for inputs) and used by other recipes (for outputs). Cells
+can be both input and output. And cells can have initial values (which for input
+cells act as default values, if they aren't provided).
+
+Recipes are defined by a function. That function is called only once, to create
+the graph. And while cells are passed in, the function can't call `.get()` or
+`.send()` on them: Instead it'll have to define a module (see above) to perform
+computations.
+
+Define a recipe by calling `recipe(fn)`, where `fn` takes a bag of input cells
+and returns a bag of output cells.
+
+## Cells
 
 Three layers:
 
@@ -27,6 +111,7 @@ Most of the time, you'll only need this:
 
 Some internas to note:
 
+- Cells are meant as drop-in replacement of common-frp cells
 - When assigning the a value proxy to a cell, the underlying reference to the
   original cell is kept. This mimics JS semantics when referencing objects.
 - Upon write a nested structure is turned into nested cells. This is to keep
