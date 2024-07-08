@@ -33,6 +33,11 @@ export type CellMethods<T> = {
   withLog: (log?: ReactivityLog) => Cell<T>;
 };
 
+export interface ReactivityLog {
+  reads: Set<Cell<any>>;
+  writes: Set<Cell<any>>;
+}
+
 // This makes it so that we can set a new value on a cell, even if the original
 // value was given as a cell. e.g. so that cell(cell(2)).send(3) works.
 type UnwrapCell<T> = T extends Cell<infer U> ? U : T;
@@ -42,6 +47,8 @@ type MaybeCellFor<T extends any> =
       [K in keyof T]: Cell<T[K]> | MaybeCellFor<T[K]>;
     }
   | T;
+
+export const isCell = <T>(value: any): value is Cell<T> => isSignal<T>(value);
 
 // Create a cell with default value of value. If value is already a cell, it
 // just returns it, making sure it's a proxied cell.
@@ -58,6 +65,102 @@ export function cell<T>(value: T): Cell<T> {
   return createCellProxy({}, cell, []) as Cell<T>;
 }
 
+// Internal API for proxies only
+const getCell = Symbol("getCell");
+
+type CellProxyMethods<T> = {
+  [getCell]: () => [WriteableSignal<T>, Path];
+};
+
+const isProxy = <T>(value: any): value is Cell<T> & CellProxyMethods<T> =>
+  value &&
+  typeof (value as unknown as CellProxyMethods<T>)[getCell] === "function";
+
+function createCellProxy(
+  target: object | Function,
+  cell: WriteableSignal<any>,
+  path: Path,
+  log?: ReactivityLog
+): Cell<any> {
+  const methods: { [key: string | symbol]: any } = {
+    get: () => createCellValueProxy(cell, path, log),
+    send: (value: any, extraPath: Path = []) =>
+      setProp(cell, [...path, ...extraPath], value, log),
+    updates: (subscriber: Sendable<void>) => cell.updates(subscriber),
+    withLog: (newLog?: ReactivityLog) => {
+      if (!newLog || newLog === log) return proxy;
+      else if (!log) return createCellProxy(target, cell, path, newLog);
+      else throw "Can't nest logging yet";
+    },
+    [getCell]: () => [cell, path],
+  } satisfies CellMethods<any> & CellProxyMethods<any>;
+  const proxy: Cell<any> = new Proxy(target, {
+    get(_target, prop: string | symbol) {
+      return createCellProxy(methods[prop] ?? {}, cell, [...path, prop], log);
+    },
+    set(_target, _prop: string | symbol, _value: any) {
+      return false;
+    },
+  });
+  return proxy;
+}
+
+// Internal API for proxies only
+const getCellProxy = Symbol("getCellProxy");
+
+type CellValueProxyMethods<T> = {
+  [getCellProxy]: () => Cell<T>;
+};
+
+const isValueProxy = <T>(value: any): value is T & CellValueProxyMethods<T> =>
+  value &&
+  typeof (value as unknown as CellValueProxyMethods<T>)[getCellProxy] ===
+    "function";
+
+function createCellValueProxy(
+  cell: WriteableSignal<any>,
+  valuePath: Path,
+  log?: ReactivityLog
+): any {
+  log?.reads.add(cell as Cell<any>);
+
+  // Follow path to actual value, might be across nested cells:
+  let target = cell.get();
+  for (const prop of valuePath) {
+    const value = target[prop];
+    if (isCell(value)) {
+      if (isProxy(value)) throw "Unexpected proxy";
+      cell = value;
+      log?.reads.add(cell as Cell<any>);
+      target = cell.get();
+    } else {
+      target = value;
+    }
+  }
+
+  if (typeof target !== "object") return target;
+
+  const proxy: any = new Proxy(target, {
+    get(_target, prop: string | symbol) {
+      switch (prop) {
+        case self:
+          return proxy;
+        case getCellProxy:
+          return () => createCellProxy({}, cell, [], log);
+        default:
+          return createCellValueProxy(cell, [prop], log);
+      }
+    },
+    set(_target, prop: string | symbol, value: any) {
+      if (prop === self) setProp(cell, [], value, log);
+      else setProp(cell, [prop], value, log);
+      return true;
+    },
+  });
+
+  return proxy;
+}
+
 function makeCell<T>(value: T): WriteableSignal<T> {
   const subscribers = new Set<Sendable<void>>();
   return {
@@ -72,22 +175,6 @@ function makeCell<T>(value: T): WriteableSignal<T> {
       return () => subscribers.delete(subscriber);
     },
   } satisfies WriteableSignal<T>;
-}
-
-export const isCell = <T>(value: any): value is Cell<T> => isSignal<T>(value);
-
-const isProxy = <T>(value: any): value is Cell<T> & CellProxyMethods<T> =>
-  value &&
-  typeof (value as unknown as CellProxyMethods<T>)[getCell] === "function";
-
-const isValueProxy = <T>(value: any): value is T & CellValueProxyMethods<T> =>
-  value &&
-  typeof (value as unknown as CellValueProxyMethods<T>)[getCellProxy] ===
-    "function";
-
-export interface ReactivityLog {
-  reads: Set<Cell<any>>;
-  writes: Set<Cell<any>>;
 }
 
 type Path = (string | number | symbol)[];
@@ -214,93 +301,6 @@ function toNestedCellsBelow<T>(value: T): T {
     ) as T;
 
   return value;
-}
-
-// Internal API for proxies only
-const getCell = Symbol("getCell");
-
-type CellProxyMethods<T> = {
-  [getCell]: () => [WriteableSignal<T>, Path];
-};
-
-function createCellProxy(
-  target: object | Function,
-  cell: WriteableSignal<any>,
-  path: Path,
-  log?: ReactivityLog
-): Cell<any> {
-  const methods: { [key: string | symbol]: any } = {
-    get: () => createCellValueProxy(cell, path, log),
-    send: (value: any, extraPath: Path = []) =>
-      setProp(cell, [...path, ...extraPath], value, log),
-    updates: (subscriber: Sendable<void>) => cell.updates(subscriber),
-    withLog: (newLog?: ReactivityLog) => {
-      if (!newLog || newLog === log) return proxy;
-      else if (!log) return createCellProxy(target, cell, path, newLog);
-      else throw "Can't nest logging yet";
-    },
-    [getCell]: () => [cell, path],
-  } satisfies CellMethods<any> & CellProxyMethods<any>;
-  const proxy: Cell<any> = new Proxy(target, {
-    get(_target, prop: string | symbol) {
-      return createCellProxy(methods[prop] ?? {}, cell, [...path, prop], log);
-    },
-    set(_target, _prop: string | symbol, _value: any) {
-      return false;
-    },
-  });
-  return proxy;
-}
-
-// Internal API for proxies only
-const getCellProxy = Symbol("getCellProxy");
-
-type CellValueProxyMethods<T> = {
-  [getCellProxy]: () => Cell<T>;
-};
-
-function createCellValueProxy(
-  cell: WriteableSignal<any>,
-  valuePath: Path,
-  log?: ReactivityLog
-): any {
-  log?.reads.add(cell as Cell<any>);
-
-  // Follow path to actual value, might be across nested cells:
-  let target = cell.get();
-  for (const prop of valuePath) {
-    const value = target[prop];
-    if (isCell(value)) {
-      if (isProxy(value)) throw "Unexpected proxy";
-      cell = value;
-      log?.reads.add(cell as Cell<any>);
-      target = cell.get();
-    } else {
-      target = value;
-    }
-  }
-
-  if (typeof target !== "object") return target;
-
-  const proxy: any = new Proxy(target, {
-    get(_target, prop: string | symbol) {
-      switch (prop) {
-        case self:
-          return proxy;
-        case getCellProxy:
-          return () => createCellProxy({}, cell, [], log);
-        default:
-          return createCellValueProxy(cell, [prop], log);
-      }
-    },
-    set(_target, prop: string | symbol, value: any) {
-      if (prop === self) setProp(cell, [], value, log);
-      else setProp(cell, [prop], value, log);
-      return true;
-    },
-  });
-
-  return proxy;
 }
 
 function deepEqualOfCells(a: any, b: any): boolean {
