@@ -106,7 +106,7 @@ function setProp(cell: Cell<any>, path: Path, value: any, log?: ReactivityLog) {
 
   // If the value is a proxy to a cell, and it has a path, follow the path to
   // the actual value (which can be another cell or a literal).
-  if (isCell(value)) value = getCellFromPath(value);
+  if (isCell(value)) value = getCellFromPath(value, log);
 
   // Now turn all cell proxies to underlying cells, including for nested data
   value = toNestedCellsBelow(value);
@@ -161,39 +161,31 @@ function unproxyCellValues<T>(value: T): T {
   return value;
 }
 
-function getCellFromPath<T>(value: T): T {
-  let [valueCell, valuePath]: [Cell<any>, Path] = isProxy(value)
+function getCellFromPath<T>(value: T, log?: ReactivityLog): T {
+  let [cell, path]: [Cell<any>, Path] = isProxy(value)
     ? value[getCell]()
     : [value, []];
-  valuePath = [...valuePath];
-  if (!valuePath.length) return valueCell;
-  while (valuePath.length > 0) {
-    value = valueCell.get()[valuePath.shift()!];
-    if (valuePath.length > 0 && !isCell(value))
+  path = [...path];
+  while (path.length > 0) {
+    log?.reads.add(cell);
+    cell = cell.get()[path.shift()!];
+    if (path.length > 0 && !isCell(cell))
       throw "Expect a cell at non-leaf part of a path.";
-    [valueCell, valuePath] = isProxy(value) ? value[getCell]() : [value, []];
-    if (valuePath.length) throw "Unexpected non-zero path";
+    if (isProxy(cell)) throw "Unexpected proxy";
   }
-  return value;
+  return cell;
 }
 
 // Ensures that for a nested structure, each layer is a new cell. So in the end,
 // we have either primitive values or cells at every level.
 function toNestedCells<T>(value: T): T {
-  console.log("toNestedCells", value, isCell(value) && value.get());
   // If it's a cell, apply transformation to its value and update if necessary.
   if (isCell(value)) {
-    const cellValue = value.get();
+    const cell = getCellFromPath(value);
+    const cellValue = cell.get();
     const newValue = toNestedCellsBelow(cellValue);
-    console.log(
-      "isCell",
-      cellValue,
-      newValue,
-      deepEqualOfCells(newValue, cellValue)
-    );
-    if (!deepEqualOfCells(newValue, cellValue))
-      (isProxy(value) ? value[getCell]()[0] : value).send(newValue);
-    return getCellFromPath(value);
+    if (!deepEqualOfCells(newValue, cellValue)) cell.send(newValue);
+    return cell as T;
   }
 
   // Arrays or objects: Turn into a cell.
@@ -213,8 +205,6 @@ function toNestedCells<T>(value: T): T {
 // Same as above, but starting at the next layer down. Useful to transform
 // values that are sent to a cell.
 function toNestedCellsBelow<T>(value: T): T {
-  console.log("toNestedCellsBelow", value, isCell(value) && value.get());
-
   if (isCell(value)) return toNestedCells(value);
 
   if (Array.isArray(value)) return value.map((v) => toNestedCells(v)) as T;
@@ -278,14 +268,11 @@ function createCellValueProxy(
 
   // Follow path to actual value, might be across nested cells:
   let target = cell.get();
-  let path: Path = [];
   for (const prop of valuePath) {
-    path.push(prop);
     const value = target[prop];
-    if (isProxy(value) || isCell(value)) {
-      [cell, path] = isProxy(value) ? value[getCell]() : [value, []];
-      if (path.length) throw "Unexpected non-zero path";
-      path = [...path];
+    if (isCell(value)) {
+      if (isProxy(value)) throw "Unexpected proxy";
+      cell = value;
       log?.reads.add(cell as Cell<any>);
       target = cell.get();
     } else {
@@ -301,14 +288,14 @@ function createCellValueProxy(
         case self:
           return proxy;
         case getCellProxy:
-          return () => createCellProxy({}, cell, path, log);
+          return () => createCellProxy({}, cell, [], log);
         default:
-          return createCellValueProxy(cell, [...path, prop], log);
+          return createCellValueProxy(cell, [prop], log);
       }
     },
     set(_target, prop: string | symbol, value: any) {
-      if (prop === self) setProp(cell, path, value, log);
-      else setProp(cell, [...path, prop], value, log);
+      if (prop === self) setProp(cell, [], value, log);
+      else setProp(cell, [prop], value, log);
       return true;
     },
   });
