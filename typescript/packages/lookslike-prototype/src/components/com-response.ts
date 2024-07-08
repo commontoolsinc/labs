@@ -2,7 +2,6 @@ import { LitElement, html, css } from "lit-element";
 import { customElement, property, state } from "lit/decorators.js";
 import { base } from "../styles.js";
 import { RecipeNode } from "../data.js";
-import { SignalSubject } from "../../../common-frp/lib/signal.js";
 import { signal } from "@commontools/common-frp";
 import {
   CONTENT_TYPE_FETCH,
@@ -17,6 +16,8 @@ import {
   CONTENT_TYPE_SCENE,
   CONTENT_TYPE_DATA
 } from "../contentType.js";
+import { appState } from "./com-app.js";
+import { effect } from "@vue/reactivity";
 
 function renderNode(
   node: RecipeNode,
@@ -117,30 +118,23 @@ export class ComResponse extends LitElement {
   static override styles = [base, styles];
 
   @property({ type: Object }) node: RecipeNode | null = null;
-  @property({ type: Object }) output: SignalSubject<any> = signal.state(null);
   onCancel: () => void = () => {};
   @state() value: any = {};
   cancel: () => void = () => {};
 
-  override willUpdate(
-    changedProperties: Map<string | number | symbol, unknown>
-  ) {
-    if (changedProperties.has("output")) {
-      console.log("output changed", this.node?.id, this.output);
-      this.cancel();
-      // trigger a re-render if any output changes
-      this.cancel = signal.effect([this.output], (value) => {
-        if (!value || this.value === value) return;
-        this.value = value;
-        console.log("updated value", this.node?.id, value);
-      });
-    }
+  override connectedCallback(): void {
+    super.connectedCallback();
+
+    effect(() => {
+      if (!this.node) return;
+      this.value = appState[this.node.id];
+    });
   }
 
   override render() {
     super.render();
 
-    if (!this.node) {
+    if (!this.node || !this.value) {
       return html`<pre>loading...</pre>`;
     }
 

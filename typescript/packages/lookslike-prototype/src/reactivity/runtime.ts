@@ -26,6 +26,7 @@ import {
 import { run } from "../eval.js";
 import { createElement } from "../ui.js";
 import { generateImage, streamLlm } from "../agent/llm.js";
+import { truncatedJSON } from "../text.js";
 
 const intervals = {} as { [key: string]: NodeJS.Timeout };
 
@@ -229,7 +230,7 @@ export class Node {
   ) {}
 
   write(value: any) {
-    this.log("write", this.id, value);
+    this.log("write", this.id, truncatedJSON(value));
     this.db[this.id] = value;
   }
 
@@ -265,23 +266,23 @@ export class Node {
         });
 
         if (args.some(([name, value]) => value === undefined)) {
-          this.log("skip", this.id, args);
+          this.log("skip", this.id);
           return;
         }
 
-        this.log("recomputing...", this.id, args);
+        this.log("recomputing...", this.id);
 
         const result = await executeNode(
           this.graph,
           this,
           Object.fromEntries(args)
         );
-        this.log("result", this.id, result);
+        this.log("result", this.id);
         this.db[this.id] = result;
       } else {
         this.log("recomputing (no args)...", this.id);
         const result = await executeNode(this.graph, this, {});
-        this.log("result", this.id, result);
+        this.log("result", this.id);
         this.db[this.id] = result;
       }
     });

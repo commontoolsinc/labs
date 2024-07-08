@@ -1,10 +1,6 @@
 import { LitElement, html } from "lit-element";
 import { customElement, state } from "lit/decorators.js";
 import { base } from "../styles.js";
-
-import { collectSymbols } from "../graph.js";
-import { Context, snapshot } from "../state.js";
-import { watch } from "@commontools/common-frp-lit";
 import {
   CONTENT_TYPE_CLOCK,
   CONTENT_TYPE_DATA,
@@ -20,37 +16,30 @@ import {
 } from "../contentType.js";
 import { plan, prepareSteps } from "../agent/plan.js";
 import { codePrompt } from "../agent/implement.js";
-import { suggestions, thoughtLog } from "../agent/model.js";
+import { suggestions } from "../agent/model.js";
 import { LLMClient, LlmTool } from "@commontools/llm-client";
 import { LLM_SERVER_URL } from "../llm-client.js";
 import { ChatCompletionTool } from "openai/resources/index.mjs";
 import { toolSpec } from "../agent/tools.js";
-import { reactive } from "@vue/reactivity";
+import { computed, reactive } from "@vue/reactivity";
 import { Graph } from "../reactivity/runtime.js";
+import { Recipe, SpecTree } from "../data.js";
+import { cursor } from "../agent/cursor.js";
+import { watch } from "../reactivity/watch.js";
 
-export const appState = reactive({});
+export const appPlan: SpecTree = reactive({
+  history: [
+    {
+      content: "Hello world",
+      role: "user"
+    }
+  ],
+  steps: []
+});
+export const appState = reactive({} as any);
 export const appGraph = new Graph(appState);
-// export const appGraph = new ReactiveGraph({
-//   nodes: [
-//     {
-//       id: "root",
-//       body: "() => 1 + 1",
-//       contentType: CONTENT_TYPE_JAVASCRIPT
-//     }
-//   ],
-//   connections: {},
-//   inputs: [],
-//   outputs: ["root"],
-//   spec: {
-//     history: [],
-//     steps: [
-//       {
-//         description: "Add two numbers",
-//         associatedNodes: ["root"]
-//       }
-//     ]
-//   }
-// });
+
+export const stateSnapshot = computed(() => JSON.stringify(appState, null, 2));
 
 @customElement("com-app")
 export class ComApp extends LitElement {
@@ -93,6 +82,23 @@ export class ComApp extends LitElement {
         console.log("listNodes", graph);
         return JSON.stringify(graph);
       },
+      addStepToSpecification: async ({
+        description,
+        associatedNodes
+      }: {
+        description: string;
+        associatedNodes: string[];
+      }) => {
+        console.log("addStepToSpecification", description, associatedNodes);
+        appPlan.steps = [
+          ...appPlan.steps,
+          {
+            description,
+            associatedNodes
+          }
+        ];
+        return `Added step: ${description}.\n${this.graphSnapshot()}`;
+      },
       addConnection: async ({
         from,
         to,
@@ -122,6 +128,14 @@ export class ComApp extends LitElement {
           body: data
         });
 
+        appPlan.steps = [
+          ...appPlan.steps,
+          {
+            description: documentedReasoning,
+            associatedNodes: [id]
+          }
+        ];
+
         return `Added data node: ${id}.\n${this.graphSnapshot()}`;
       },
       addCodeNode: async (props: {
@@ -136,6 +150,13 @@ export class ComApp extends LitElement {
           contentType: CONTENT_TYPE_JAVASCRIPT,
           body: code
         });
+        appPlan.steps = [
+          ...appPlan.steps,
+          {
+            description: documentedReasoning,
+            associatedNodes: [id]
+          }
+        ];
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       addUiNode: async (props: {
@@ -150,6 +171,13 @@ export class ComApp extends LitElement {
           contentType: CONTENT_TYPE_UI,
           body: uiTree
         });
+        appPlan.steps = [
+          ...appPlan.steps,
+          {
+            description: documentedReasoning,
+            associatedNodes: [id]
+          }
+        ];
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       add3dVoxelSceneNode: async ({
@@ -167,6 +195,13 @@ export class ComApp extends LitElement {
           contentType: CONTENT_TYPE_SCENE,
           body: {}
         });
+        appPlan.steps = [
+          ...appPlan.steps,
+          {
+            description: documentedReasoning,
+            associatedNodes: [id]
+          }
+        ];
 
         graph.connect(dataSource, id, "data");
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
@@ -186,6 +221,13 @@ export class ComApp extends LitElement {
           contentType: CONTENT_TYPE_GLSL,
           body: shaderToyCode
         });
+        appPlan.steps = [
+          ...appPlan.steps,
+          {
+            description: documentedReasoning,
+            associatedNodes: [id]
+          }
+        ];
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       addFetchNode: async ({ id, url }: { id: string; url: string }) => {
@@ -252,9 +294,12 @@ export class ComApp extends LitElement {
     return JSON.stringify(appGraph.save(), null, 2);
   }
 
-  async appendMessage() {
-    const userInput = this.userInput;
-    this.userInput = "";
+  async appendMessage(userInput: string) {
+    cursor.state = "thinking";
+
+    if (cursor.focus.length > 0) {
+      userInput = `<user-selection>[${cursor.focus.map((f) => f.id).join(", ")}</user-selection> \n<user-input>${userInput}</user-input>`;
+    }
 
     const spec = await plan(userInput, prepareSteps(userInput, appGraph));
     const finalPlan = spec?.[spec?.length - 1];
@@ -263,8 +308,8 @@ export class ComApp extends LitElement {
     ---
     Current graph (may be empty): ${this.graphSnapshot()}`;
 
-    // const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
-    const systemContext = ``;
+    const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
+    // const systemContext = ``;
 
     const client = new LLMClient({
       serverUrl: LLM_SERVER_URL,
@@ -272,44 +317,32 @@ export class ComApp extends LitElement {
       system: codePrompt + systemContext
     });
 
+    cursor.state = "working";
     const thread = await client.createThread(input);
     const result = thread.conversation[thread.conversation.length - 1];
     appGraph.update();
+
+    cursor.state = "idle";
 
     console.log("result", result);
   }
 
   override render() {
-    const setUserInput = (input: string) => {
-      this.userInput = input;
+    const onCursorMessage = (ev: CustomEvent) => {
+      this.appendMessage(ev.detail.message);
     };
 
     return html`
       <main>
+        <com-cursor
+          .suggestions=${watch(suggestions)}
+          @message=${onCursorMessage}
+        ></com-cursor>
         <com-chat slot="main">
           <com-thread slot="main"></com-thread>
-          <div slot="footer">
-            <com-unibox
-              .suggestions=${watch(suggestions)}
-              @suggested=${(ev) => {
-                this.userInput = ev.detail.suggestion;
-                this.appendMessage();
-                suggestions.send([]);
-              }}
-            >
-              <com-editor
-                slot="main"
-                .value=${this.userInput}
-                .setValue=${setUserInput}
-              ></com-editor>
-              <com-button slot="end" .action=${() => this.appendMessage()}
-                >Send</com-button
-              >
-            </com-unibox>
-          </div>
         </com-chat>
         <com-debug>
-          <com-thought-log .thoughts=${watch(thoughtLog)}></com-thought-log>
+          <pre>${watch(stateSnapshot)}</pre>
         </com-debug>
       </main>
     `;

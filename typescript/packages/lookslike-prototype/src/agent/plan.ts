@@ -4,7 +4,6 @@ import {
 } from "openai/resources/index.mjs";
 import { client, grabJson, messageReducer, model } from "./llm.js";
 import { recordThought, suggestions, updateThought } from "./model.js";
-import { ReactiveGraph, Recipe } from "../data.js";
 import { codePrompt } from "./implement.js";
 import { describeTools, toolSpec } from "./tools.js";
 import { LLMClient } from "@commontools/llm-client";
@@ -55,69 +54,6 @@ export async function plan(userInput: string, steps: string[]) {
   return thread.conversation;
 }
 
-export async function planGpt(userInput: string, steps: string[]) {
-  const logId = `plan[${userInput}]`;
-  console.group(logId);
-
-  if (steps.length === 0) {
-    console.warn("No steps in plan");
-    return;
-  }
-
-  console.log(steps);
-
-  let messages: ChatCompletionMessageParam[] = [
-    { role: "system", content: codePrompt },
-    { role: "system", content: steps[0] },
-    { role: "user", content: steps[1] }
-  ];
-
-  await recordThought(messages[0]);
-  await recordThought(messages[1]);
-
-  let msgIdx = 1;
-
-  let running = true;
-  while (running) {
-    const response = await client.chat.completions.create({
-      messages,
-      model,
-      temperature: 0,
-      stream: true
-    });
-
-    let message = {} as ChatCompletionMessage;
-    const thoughtId = await recordThought(message);
-    let finishReason = null as string | null;
-    for await (const chunk of response) {
-      finishReason ||= chunk.choices[0].finish_reason;
-      message = messageReducer(message, chunk);
-      await updateThought(thoughtId, message);
-    }
-
-    const latest = message;
-    console.log("response", latest);
-    messages.push(latest);
-
-    if (msgIdx >= steps.length - 1) {
-      running = false;
-      break;
-    }
-
-    const nextStep: ChatCompletionMessageParam = {
-      role: "user",
-      content: steps[++msgIdx]
-    };
-    messages.push(nextStep);
-    await recordThought(nextStep);
-  }
-
-  suggest(userInput, messages);
-
-  console.groupEnd();
-  return messages;
-}
-
 export async function suggest(input: string, fullPlan: Conversation) {
   const response = await client.chat.completions.create({
     messages: [
@@ -131,7 +67,10 @@ export async function suggest(input: string, fullPlan: Conversation) {
     temperature: 0
   });
 
-  recordThought(response.choices[0].message);
+  recordThought({
+    role: "assistant",
+    content: response.choices[0].message.content!
+  });
   const suggestionsText = response.choices[0].message.content;
   if (suggestionsText) {
     const data = grabJson(suggestionsText);
@@ -151,7 +90,7 @@ export function prepareSteps(userInput: string, graph: Graph) {
       To declare a constant value, return it from a code node as a literal.
       Declare event nodes and refer to them BY NAME from within UI template event bindings (i.e. "@click": "clickEvent").
 
-      Plan your approach at a high-level dot-point level of detail and be extremely concise using technical terms.`,
+      Plan your approach at a high-level dot-point level of detail and be extremely concise using technical terms.  Be extremely concise in your language, use technical terse speech with abbreviations. Every word is a wasted moment for the user.`,
       `Service the minimal useful version of this request: <user-request>${userInput}</user-request>.
 
     Give each node an ID and describe its purpose without writing the full code. Each node can have several named inputs which can be mapped to the outputs of other node ID.
@@ -160,6 +99,7 @@ export function prepareSteps(userInput: string, graph: Graph) {
     When providing documentation and reasoning comments speak in an active voice about what you're accomplishing rather than explaining the nodes or talking about the graph.
 
     Provide your plan as a list of tool actions you intend to take on the graph.
+     Be extremely concise in your language, use technical terse speech with abbreviations. Every word is a wasted moment for the user.
     notalk;justgo
     `,
       `Reflect on the plan, does it make sense for a incredibly small immediately useful application? Can you implement it with these tools?
@@ -173,6 +113,7 @@ export function prepareSteps(userInput: string, graph: Graph) {
     Be creative in your examination of the tools, e.g. "show me myself" could be a shader using the webcam.
 
     Review the plan and make sure the user will be happy with the request: <user-request>${userInput}</user-request>
+     Be extremely concise in your language, use technical terse speech with abbreviations. Every word is a wasted moment for the user.
     notalk;justgo`
     ];
   } else {
@@ -196,10 +137,12 @@ export function prepareSteps(userInput: string, graph: Graph) {
     Explain which nodes will be altered, added or removed. Do not repeat the entire graph.
     Code nodes cannot mutate state, they are pure functions only.
     Do not attempt to model them as having side effects.
+     Be extremely concise in your language, use technical terse speech with abbreviations. Every word is a wasted moment for the user.
     notalk;justgo`,
       `Reflect on the plan. The user has requested a specific change. Do not overcomplicate it or add superfluous features. Just make the change.
 
-      Recall the request: <user-request>${userInput}</user-request>`
+      Recall the request: <user-request>${userInput}</user-request>
+       Be extremely concise in your language, use technical terse speech with abbreviations. Every word is a wasted moment for the user.`
     ];
   }
 }

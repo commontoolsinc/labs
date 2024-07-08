@@ -78,7 +78,7 @@ export const toolSpec: ChatCompletionTool[] = [
     type: "function",
     function: {
       name: "add3dVoxelSceneNode",
-      description: `Render a simple pannable, zoomable, rotatable 3D scene using voxels in a flattened list format e.g. [{ "position": [1, 1, 1], "color": "#FFFFFFFF" }...]`,
+      description: `Render a simple pannable, zoomable, rotatable 3D scene using voxels in a flattened list format e.g. [{ "position": [1, 1, 1], "color": "#FFFFFF" }...]`,
       parameters: {
         type: "object",
         properties: {

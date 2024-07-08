@@ -2,10 +2,12 @@ import { LitElement, html, css } from "lit-element";
 import { customElement, property, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { base } from "../styles.js";
-import { GraphSnapshot, Recipe, RecipeNode, SpecTree } from "../data.js";
+import { Recipe, RecipeNode, SpecTree } from "../data.js";
 import { Context } from "../state.js";
-import { appGraph, appState } from "./com-app.js";
+import { appGraph, appPlan, appState } from "./com-app.js";
 import { effect } from "@vue/reactivity";
+import { Graph } from "../reactivity/runtime.js";
+import { cursor } from "../agent/cursor.js";
 
 const styles = css`
   :host {
@@ -57,73 +59,75 @@ const styles = css`
 export class ComThread extends LitElement {
   static override styles = [base, styles];
 
-  @state() graphSnapshot: Recipe | null = null;
+  @state() graph: Graph | null = null;
+  @state() state: any | null = null;
+  @state() plan: SpecTree | null = null;
 
   response(node: RecipeNode) {
-    return html`<com-response slot="response" .node=${node}>
-      <code class="local-variable">${node.id}</code>
-      ${repeat(
-        Object.entries(appGraph.nodes.get(node.id)?.inputs || {}),
-        ([key, value]) =>
-          html`<code class="local-variable">${key}: ${value}</code>`
-      )}
-    </com-response>`;
+    return html`<com-response slot="response" .node=${node}></com-response>`;
   }
 
-  override connectedCallback() {
+  override connectedCallback(): void {
     super.connectedCallback();
-    this.graphSnapshot = appGraph.save();
     effect(() => {
-      console.log("graph changed", appGraph, appGraph.version, appState);
-      this.graphSnapshot = appGraph.save();
+      console.log("com-thread", appGraph, appState, appPlan);
+      this.graph = appGraph;
+      this.state = { ...appState };
+      this.plan = { ...appPlan };
     });
   }
 
   override render() {
-    if (this.graphSnapshot == null) {
+    if (this.graph == null || this.plan == null) {
       return html`<pre>empty...</pre>`;
     }
-    const tree: Recipe = this.graphSnapshot;
-    const connections = this.graphSnapshot.connections || {};
+    const tree: Recipe = this.graph.save();
+    const plan = this.plan;
+    const connections = tree.connections || {};
 
-    // walk tree and render as nested <ul> tags
-    function renderTree(recipe: Recipe) {
-      return html`<ul>
-        ${recipe.spec.steps.map((step) => {
-          return html`<li>
-            <em><pre>${step.description}</pre></em>
-            <ul>
-              ${step.associatedNodes.map((nodeId) => {
-                const node = tree.nodes.find((node) => node.id === nodeId);
-                if (!node) {
-                  return html`<li>Node not found: ${nodeId}</li>`;
-                }
+    console.log("render", this.plan, this.graph);
 
-                return html`<li>
-                  <div>
-                    ${repeat(
-                      Object.entries(connections[node.id] || {}),
-                      ([key, value]) =>
-                        html`<code class="local-variable"
-                          >${key}: ${value}</code
-                        >`
-                    )}
-                  </div>
-                  <strong><code>${node.id}</code></strong>
-                  <code>${node.contentType}</code>
-                  <pre class="node-body">
-${typeof node.body === "string"
-                      ? node.body
-                      : JSON.stringify(node.body, null, 2)}</pre
-                  >
-                </li>`;
-              })}
-            </ul>
-          </li>`;
-        })}
-      </ul>`;
-    }
+    const onSelected = (target: HTMLElement, id: string) => {
+      if (cursor.focus.some((e) => e.id === id)) {
+        cursor.focus = cursor.focus.filter((e) => e.id !== id);
+        return;
+      }
 
-    return html`<div>${renderTree(tree)}</div>`;
+      cursor.focus.push({ id, element: target });
+    };
+
+    return html`<ul>
+      ${plan.steps.map((step) => {
+        return html`<li>
+          <em><pre>${step.description}</pre></em>
+          <ul>
+            ${step.associatedNodes.map((nodeId) => {
+              const node = tree.nodes.find((node) => node.id === nodeId);
+              if (!node) {
+                return html`<li>Node not found: ${nodeId}</li>`;
+              }
+
+              return html`<li data-node-id=${nodeId}>
+                <div>
+                  ${repeat(
+                    Object.entries(connections[node.id] || {}),
+                    ([key, value]) =>
+                      html`<code class="local-variable">${key}: ${value}</code>`
+                  )}
+                </div>
+                <input
+                  type="checkbox"
+                  @change=${(ev: CustomEvent) => onSelected(ev.target, node.id)}
+                />
+                <strong><code>${node.id}</code></strong>
+                <code>${node.contentType}</code>
+
+                ${this.response(node)}
+              </li>`;
+            })}
+          </ul>
+        </li>`;
+      })}
+    </ul>`;
   }
 }

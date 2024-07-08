@@ -26,6 +26,9 @@ export * as ComModuleEvent from "./components/modules/com-module-event.js";
 export * as ComModuleStorage from "./components/modules/com-module-storage.js";
 export * as ComModuleScene from "./components/modules/com-module-scene.js";
 export * as ComModuleData from "./components/modules/com-module-data.js";
+export * as ComCursor from "./components/com-cursor.js";
+export * as ComLoader from "./components/com-loader.js";
+export * as ComTypingPreview from "./components/com-typing-preview.js";
 
 export * as ComApp from "./components/com-app.js";
 

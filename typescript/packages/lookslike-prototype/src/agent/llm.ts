@@ -68,8 +68,8 @@ export async function processUserInput(
     { role: "user", content: input }
   ];
 
-  await recordThought(messages[0]);
-  await recordThought(messages[1]);
+  await recordThought({ role: "system", content: system });
+  await recordThought({ role: "user", content: input });
 
   let running = true;
   while (running) {
@@ -88,7 +88,7 @@ export async function processUserInput(
     }
 
     const latest = message;
-    await recordThought(latest);
+    await recordThought({ role: "assistant", content: message.content! });
     messages.push(latest);
 
     const toolCalls = latest.tool_calls;
