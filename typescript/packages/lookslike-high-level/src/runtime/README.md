@@ -61,10 +61,20 @@ this is commonly the case when there are multiple writers, or when writing into
 a passed input to the recipe (see below).
 
 TODO: Instead of functions with N parameters, we could only have one parameter
-and pass objects with named values around. This makes it compatible with
-`recipe` calls and is pretty much already working. And since recipes can be used
-a modules, this would also make them indistinguishable from code modules when
-written in a recipe, which seems good.
+and pass objects with named values around:
+
+- This makes it compatible with `recipe` calls and is pretty much already
+  working.
+- And since recipes can be used a modules, this would also make them
+  indistinguishable from code modules when written in a recipe, which seems
+  good.
+- And it makes writing into cells for literal values a little better: The issue
+  otherwise is that once `.get()` is called on a literal cell, it's just a
+  literal value and can't be written to. A workaround is to pass `{ value:
+<cell> }`, so that in the code we have a handle for it. If all parameters are
+  passed like this, then that isn't necessary – however destructuring in the
+  function definition undos this again, so we'll have to write `(params) => {
+  const { foo, bar } = params; params.bar = newValue }`.
 
 ## Recipes
 
@@ -81,6 +91,10 @@ computations.
 
 Define a recipe by calling `recipe(fn)`, where `fn` takes a bag of input cells
 and returns a bag of output cells.
+
+TODO: Where should we define the schema?
+
+TODO: Recipes can be used in other recipes, just like the result of `lift`.
 
 ## Cells
 
