@@ -212,7 +212,7 @@ describe("cellValueProxy", () => {
 
     d.get().a = a; // works for both: cells and ...
     d.get().b = b.get(); // ... cell values
-    //d.get().c = c;
+    d.get().c = c;
     d.get().c.nested = c.nested; // including nested
     await idle();
     expect(d.get()).toStrictEqual({
@@ -223,7 +223,7 @@ describe("cellValueProxy", () => {
 
     a.send({ value: 4 });
     b.send({ value: cell(5) });
-    c.send({ nested: cell({ value: 6 }).get() });
+    c.nested.send(cell({ value: 6 }));
     await idle();
     expect(d.get()).toStrictEqual({
       a: { value: 4 },

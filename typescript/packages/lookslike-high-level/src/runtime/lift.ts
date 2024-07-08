@@ -9,7 +9,7 @@ type CellsFor<T extends any[]> = {
 // Creates a node factory for the given function.
 export function lift<T extends any[], R>(
   fn: (...args: T) => R
-): (...args: CellsFor<T>[]) => Cell<R> {
+): (...args: CellsFor<T>) => Cell<R> {
   const lifted = (...args: CellsFor<T>[]): Cell<R> => {
     const returnCell = cell<R>(undefined as R);
 

@@ -53,8 +53,14 @@ export function cell<T>(value: T): Cell<T> {
   if (isCell<T>(value))
     return isProxy<T>(value) ? value : createCellProxy({}, value, []);
 
+  const cell = makeCell(value);
+
+  return createCellProxy({}, cell, []) as Cell<T>;
+}
+
+function makeCell<T>(value: T): WriteableSignal<T> {
   const subscribers = new Set<Sendable<void>>();
-  const state = {
+  return {
     get: () => value as T,
     send: (newValue: T) => {
       if (deepEqualOfCells(value, newValue)) return;
@@ -66,8 +72,6 @@ export function cell<T>(value: T): Cell<T> {
       return () => subscribers.delete(subscriber);
     },
   } satisfies WriteableSignal<T>;
-
-  return createCellProxy({}, state, []) as Cell<T>;
 }
 
 export const isCell = <T>(value: any): value is Cell<T> => isSignal<T>(value);
@@ -94,24 +98,22 @@ type Path = (string | number | symbol)[];
 // case if cells were created with `cell` only. There is currently no way to
 // expose the underlying cell without the proxy.
 function setProp(cell: Cell<any>, path: Path, value: any, log?: ReactivityLog) {
+  // Prepare the value to be set. This means:
+
+  // If the passed value, or parts of it, originally came from cells, map back
+  // to those cells. This is what keeps references to cells intact.
   value = unproxyCellValues(value);
 
-  if (isCell(value)) {
-    let [valueCell, valuePath]: [Cell<any>, Path] = isProxy(value)
-      ? value[getCell]()
-      : [value, []];
-    valuePath = [...valuePath];
-    while (valuePath.length > 0) {
-      value = valueCell.get()[valuePath.shift()!];
-      if (valuePath.length > 0 && !isCell(value))
-        throw "Expect a cell at non-leaf part of a path. (2)";
-      [valueCell, valuePath] = isProxy(value) ? value[getCell]() : [value, []];
-      if (valuePath.length) throw "Unexpected non-zero path (2)";
-    }
-  }
+  // If the value is a proxy to a cell, and it has a path, follow the path to
+  // the actual value (which can be another cell or a literal).
+  if (isCell(value)) value = getCellFromPath(value);
+
+  // Now turn all cell proxies to underlying cells, including for nested data
   value = toNestedCellsBelow(value);
 
   if (path.length === 0) {
+    // No path (i.e. not even a property on the cell): Must be a literal value.
+    // Verify that and set the updated value.
     if (isCell(value)) {
       throw "Can't overwrite a cell with another cell.";
     } else {
@@ -119,20 +121,32 @@ function setProp(cell: Cell<any>, path: Path, value: any, log?: ReactivityLog) {
       return cell.send(value);
     }
   } else if (path.length === 1) {
+    // A property on the current object.
     let parent = cell.get();
-    parent = Array.isArray(parent) ? [...parent] : { ...parent };
-    if (isCell(parent[path[0]]) && !isCell(value))
-      return parent[path[0]].withLog(log).send(value);
-    parent[path[0]] = value;
-    log?.writes.add(cell);
-    return cell.send(parent);
+    if (isCell(parent[path[0]]) && !isCell(value)) {
+      // If the property is a cell, and the new value is not, send the value to
+      // the cell. Same as above, just for properties.
+      if (isProxy(parent[path[0]]))
+        throw `Should be pure cells, but at "${String(
+          path[0]
+        )}" got one with path "${parent[path[0]][getCell]()[1]}"`;
+      log?.writes.add(parent[path[0]]);
+      return parent[path[0]].send(value);
+    } else {
+      // Otherwise, copy the parent object, update the property, and save it.
+      parent = Array.isArray(parent) ? [...parent] : { ...parent };
+      parent[path[0]] = value;
+      log?.writes.add(cell);
+      return cell.send(parent);
+    }
   } else {
+    // A nested property: Follow the path to the actual value and update it.
     const content = cell.get();
     if (typeof content !== "object")
       throw "Can't set a property on a non-object.";
     if (!isCell(content[path[0]]))
       throw "Expect a cell at non-leaf part of a path.";
-    setProp(content[path[0]], path.slice(1), value, log);
+    return setProp(content[path[0]], path.slice(1), value, log);
   }
 }
 
@@ -144,6 +158,22 @@ function unproxyCellValues<T>(value: T): T {
     return Object.fromEntries(
       Object.entries(value as object).map(([k, v]) => [k, unproxyCellValues(v)])
     ) as T;
+  return value;
+}
+
+function getCellFromPath<T>(value: T): T {
+  let [valueCell, valuePath]: [Cell<any>, Path] = isProxy(value)
+    ? value[getCell]()
+    : [value, []];
+  valuePath = [...valuePath];
+  if (!valuePath.length) return valueCell;
+  while (valuePath.length > 0) {
+    value = valueCell.get()[valuePath.shift()!];
+    if (valuePath.length > 0 && !isCell(value))
+      throw "Expect a cell at non-leaf part of a path.";
+    [valueCell, valuePath] = isProxy(value) ? value[getCell]() : [value, []];
+    if (valuePath.length) throw "Unexpected non-zero path";
+  }
   return value;
 }
 
@@ -163,14 +193,14 @@ function toNestedCells<T>(value: T): T {
     );
     if (!deepEqualOfCells(newValue, cellValue))
       (isProxy(value) ? value[getCell]()[0] : value).send(newValue);
-    return value;
+    return getCellFromPath(value);
   }
 
   // Arrays or objects: Turn into a cell.
   if (Array.isArray(value))
-    return cell(value.map((v) => toNestedCells(v))) as T;
+    return makeCell(value.map((v) => toNestedCells(v))) as T;
   if (typeof value === "object")
-    return cell(
+    return makeCell(
       Object.fromEntries(
         Object.entries(value as object).map(([k, v]) => [k, toNestedCells(v)])
       )
