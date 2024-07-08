@@ -7,6 +7,7 @@ import {
   asHandler,
   handler,
   propagator,
+  merge,
 } from "../src/runtime/lift.js";
 import { idle } from "../src/runtime/scheduler.js";
 
@@ -176,5 +177,17 @@ describe("propagator", () => {
     a.send(2);
     await idle();
     expect(c.get()).toBe(4);
+  });
+});
+
+describe("merge", () => {
+  it("should merge cells", async () => {
+    const a = cell(1);
+    const c = cell(0);
+    merge(c, a);
+    expect(c.get()).toBe(1);
+    a.send(2);
+    await idle();
+    expect(c.get()).toBe(2);
   });
 });

@@ -39,6 +39,13 @@ graph creation (see below)
 already bound. `curried(b)` then creates a node. Useful to configure more
 general purpose modules.
 
+### Merging
+
+Sometimes we'd like to write the output of a lifted function into an existing
+cell: `merge(to, from)` is a helper to do that. Under the hood it copies all
+updates to `from` to `to`. It's a one-way LWR "merge". TODO: Build more
+sophisticated ones.
+
 ### Structured values
 
 Cells represent nested data, that can be directly referenced. Both of these
@@ -46,19 +53,6 @@ work:
 
 - `const c = m1(a, b); const d = m2(c.foo)`
 - `const { foo } = m1(a, b); const d = m2(foo)`
-
-We can also assign the output of a module to a nested property:
-
-- `otherCell.foo = m1(a, b)`
-
-And the `self` helper allows assigning an output of a cell directly to a value:
-
-- `otherCell[self] = m1(a, b)`
-
-TODO: This is a weird syntax, maybe we want call `.set()` or so. It might also
-be an opportunity to introduce the idea of an explicit `merge` operation, as
-this is commonly the case when there are multiple writers, or when writing into
-a passed input to the recipe (see below).
 
 TODO: Instead of functions with N parameters, we could only have one parameter
 and pass objects with named values around:

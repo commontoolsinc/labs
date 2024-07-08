@@ -94,3 +94,9 @@ export function propagator<T extends any[]>(
     run(action);
   };
 }
+
+// Shorthand for a simple LWR merge operation on cells: All updates to `from`
+// are copied to `to`.
+export function merge(to: Cell<any>, from: Cell<any>): void {
+  run((log) => to.withLog(log).send(from.withLog(log).get()));
+}
