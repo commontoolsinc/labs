@@ -27,6 +27,7 @@ import { run } from "../eval.js";
 import { createElement } from "../ui.js";
 import { generateImage, streamLlm } from "../agent/llm.js";
 import { truncatedJSON } from "../text.js";
+import { Sendable } from "@commontools/common-frp";
 
 const intervals = {} as { [key: string]: NodeJS.Timeout };
 
@@ -45,8 +46,47 @@ async function executeNode(
         node.definition.evalMode
       );
       return result;
+    case CONTENT_TYPE_DATA: {
+      // read the value from any input key and use that as the new value, if no inputs use the old value
+      const value = Object.values(inputs).filter(
+        (i) => i != null && i != undefined
+      )?.[0];
+      if (value) {
+        return value;
+      }
+
+      return graph.db[node.id];
+    }
     case CONTENT_TYPE_UI: {
-      const template = createElement(node.definition.body, inputs, graph);
+      const fns: { [name: string]: Sendable<any> } = {};
+
+      for (const n of graph.nodes.values()) {
+        if (n.definition.contentType == CONTENT_TYPE_JAVASCRIPT) {
+          const sendable = {
+            send: (_: any) => {
+              // n.update();
+              n.execute();
+            }
+          };
+          fns[n.id] = sendable;
+        }
+
+        if (n.definition.contentType == CONTENT_TYPE_DATA) {
+          const sendable = {
+            send: (value: any) => {
+              graph.db[n.id] = value;
+            }
+          };
+          fns[n.id] = sendable;
+        }
+      }
+
+      const namespace = {
+        ...fns,
+        ...inputs
+      };
+
+      const template = createElement(node.definition.body, namespace, graph);
       return template;
     }
     case CONTENT_TYPE_SCENE: {
@@ -250,41 +290,46 @@ export class Node {
     this.graph?.history.push(args);
   }
 
-  // marked as async to force awaiting, the effect may be async but return instantly so we want to push back a frame
+  public async execute() {
+    if (!this.graph) {
+      throw new Error("Node has no graph");
+    }
+
+    if (this.inputs.size > 0) {
+      const args = Array.from(this.inputs.entries()).map(([key, value]) => {
+        return [key, this.db[value]];
+      });
+
+      if (args.some(([name, value]) => value === undefined)) {
+        if (this.definition.contentType === CONTENT_TYPE_JAVASCRIPT) {
+          this.log("skip", this.id);
+          return;
+        }
+      }
+
+      this.log("recomputing...", this.id);
+
+      const result = await executeNode(
+        this.graph,
+        this,
+        Object.fromEntries(args)
+      );
+      this.log("result", this.id);
+      this.db[this.id] = result;
+    } else {
+      this.log("recomputing (no args)...", this.id);
+      const result = await executeNode(this.graph, this, {});
+      this.log("result", this.id);
+      this.db[this.id] = result;
+    }
+  }
+
   async update() {
     this.dispose();
 
     this.runner = effect(async () => {
-      if (!this.graph) {
-        throw new Error("Node has no graph");
-      }
       this.log("effect ran", this.id, this.inputs);
-
-      if (this.inputs.size > 0) {
-        const args = Array.from(this.inputs.entries()).map(([key, value]) => {
-          return [key, this.db[value]];
-        });
-
-        if (args.some(([name, value]) => value === undefined)) {
-          this.log("skip", this.id);
-          return;
-        }
-
-        this.log("recomputing...", this.id);
-
-        const result = await executeNode(
-          this.graph,
-          this,
-          Object.fromEntries(args)
-        );
-        this.log("result", this.id);
-        this.db[this.id] = result;
-      } else {
-        this.log("recomputing (no args)...", this.id);
-        const result = await executeNode(this.graph, this, {});
-        this.log("result", this.id);
-        this.db[this.id] = result;
-      }
+      this.execute();
     });
   }
 }

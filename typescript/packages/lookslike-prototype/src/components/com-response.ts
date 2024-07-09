@@ -2,7 +2,6 @@ import { LitElement, html, css } from "lit-element";
 import { customElement, property, state } from "lit/decorators.js";
 import { base } from "../styles.js";
 import { RecipeNode } from "../data.js";
-import { signal } from "@commontools/common-frp";
 import {
   CONTENT_TYPE_FETCH,
   CONTENT_TYPE_GLSL,
@@ -134,14 +133,14 @@ export class ComResponse extends LitElement {
   override render() {
     super.render();
 
-    if (!this.node || !this.value) {
+    if (!this.node) {
       return html`<pre>loading...</pre>`;
     }
 
     console.log("re-render", this.node.id, this.value);
     const definition = renderNode(
       this.node,
-      this.value,
+      this.value || "<empty>",
       this.dispatchEvent.bind(this)
     );
 

@@ -26,9 +26,9 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "addCodeNode",
+      name: "func",
       description:
-        "Add a data transformation node to the graph written in javascript, write only the function body. No comments.",
+        "Add a data transformation function to the graph written in javascript, write only the function body. No comments.",
       parameters: {
         type: "object",
         properties: {
@@ -43,7 +43,7 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "addUiNode",
+      name: "ui",
       description:
         "Adds a UI node written using a hyperscript tree. Only use span, ul, button and h1 elements for now.",
       parameters: {
@@ -60,9 +60,9 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "declareDataNode",
+      name: "data",
       description:
-        "A node that will store data that can be changed and accessed by other nodes. For state, events, input etc.",
+        "A node representing a  variable that can be changed and accessed by other nodes. For state, events, input etc.",
       parameters: {
         type: "object",
         properties: {
@@ -77,7 +77,7 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "add3dVoxelSceneNode",
+      name: "voxel3dScene",
       description: `Render a simple pannable, zoomable, rotatable 3D scene using voxels in a flattened list format e.g. [{ "position": [1, 1, 1], "color": "#FFFFFF" }...]`,
       parameters: {
         type: "object",
@@ -96,7 +96,7 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "addConnection",
+      name: "connect",
       description: "Adds a connection between two existing nodes.",
       parameters: {
         type: "object",
@@ -120,7 +120,7 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "deleteNode",
+      name: "delete",
       description: "Deletes a node from the graph.",
       parameters: {
         type: "object",
@@ -133,7 +133,7 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "addClockNode",
+      name: "clock",
       description:
         "A node that emit an incrementing value every second, starting from 0.",
       parameters: {
@@ -147,7 +147,7 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "addFetchNode",
+      name: "fetch",
       description: "Fetch node to retrieve (GET) data from the web.",
       parameters: {
         type: "object",
@@ -161,7 +161,7 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "addGlslShaderNode",
+      name: "glslShader",
       description:
         "Shader node in ShaderToy format. iTime, iResolution, iMouse and iChannel0 (the user's webcam). Do not re-define them.",
       parameters: {
@@ -178,7 +178,7 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "addLanguageModelNode",
+      name: "languageModel",
       description:
         "LLM node to the graph, responds in text format. Prompt must be calculated using a code node.",
       parameters: {
@@ -197,7 +197,7 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "addImageGenerationNode",
+      name: "imageGeneration",
       description:
         "Generate an image from a prompt/description. The output is the URL.",
       parameters: {

@@ -8,6 +8,7 @@ import { appGraph, appPlan, appState } from "./com-app.js";
 import { effect } from "@vue/reactivity";
 import { Graph } from "../reactivity/runtime.js";
 import { cursor } from "../agent/cursor.js";
+import { watch } from "../reactivity/watch.js";
 
 const styles = css`
   :host {
@@ -112,7 +113,9 @@ export class ComThread extends LitElement {
                   ${repeat(
                     Object.entries(connections[node.id] || {}),
                     ([key, value]) =>
-                      html`<code class="local-variable">${key}: ${value}</code>`
+                      html`<code class="local-variable"
+                        >${key}: ${value} = ${watch(appState, value)}</code
+                      >`
                   )}
                 </div>
                 <input

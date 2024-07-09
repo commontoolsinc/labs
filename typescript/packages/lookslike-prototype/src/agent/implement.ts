@@ -6,7 +6,7 @@ export const codePrompt = `
 
   "Imagine some todos" ->
 
-  addCodeNode({
+  map({
     "id": "todos",
     "code": "return [{ label: 'Water my plants', checked: false }, { label: 'Buy milk', checked: true }];"
   })
@@ -18,7 +18,7 @@ export const codePrompt = `
 
   "Remind me to water the plants" ->
 
-  addCodeNode({
+  map({
     "id": "addReminder",
     "code": "const todos = input('todos');\nconst newTodo = { label: 'water the plants', checked: false };\nconst newTodos = [...todos, newTodo];\nreturn newTodos;"
   })
@@ -44,7 +44,7 @@ export const codePrompt = `
   "render each image by url" ->
   The output of a code node will be bound to the input named 'images'
 
-  addUiNode({
+  ui({
     "id": "imageUi",
     "uiTree": {
       "tag": "ul",
@@ -76,7 +76,7 @@ export const codePrompt = `
   "show some text" ->
   The output of a code node will be bound to the input named 'text'
 
-  addUiNode({
+  ui({
     "id": "dataUi",
     "uiTree": {
       "tag": "span",
@@ -89,12 +89,17 @@ export const codePrompt = `
 
   "make a clickable button" ->
 
-  addDataNode({
+  data({
     "id": "clicks",
     "data": 0
   })
 
-  addUiNode({
+  func({
+    "id": "increment",
+    "code": "const clicks = input('clicks');\nreturn clicks + 1;"
+  })
+
+  ui({
     "id": "buttonUi",
     "uiTree": {
       "tag": "button",
@@ -107,10 +112,16 @@ export const codePrompt = `
     }
   })
 
-  addConnection({
-    "from": "clicks",
+  connect({
+    "from": "increment",
     "to": "buttonUi"
     "portName": "onClicked"
+  })
+
+  connect({
+    "from": "increment",
+    "to": "clicks"
+    "portName": "value"
   })
 
   ---
@@ -118,7 +129,7 @@ export const codePrompt = `
   "render my todos" ->
   The output of a code node will be bound to the input named 'todos'
 
-  addUiNode({
+  ui({
     "id": "todoUi",
     "uiTree": {
       "tag": "ul",

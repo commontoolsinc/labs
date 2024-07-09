@@ -256,6 +256,8 @@ export class ComCursor extends LitElement {
   };
 
   private adjustTextareaHeight() {
+    if (!this.textareaElement) return;
+
     if (this.textareaElement.value === "") {
       this.textareaElement.style.height = "auto";
       return;

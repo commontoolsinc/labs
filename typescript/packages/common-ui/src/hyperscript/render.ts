@@ -127,7 +127,9 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
       const bound =
         isSignal(value) || isStream(value) ? value : context[value.name];
       if (isEventKey(key)) {
+        console.log("found event", element, key, value, context);
         if (isSendable(bound)) {
+          console.log("binding event", element, key, bound);
           const { send } = bound;
           const event = readEventNameFromEventKey(key);
           const cancel = listen(element, event, (event: Event) => {

@@ -28,16 +28,74 @@ import { cursor } from "../agent/cursor.js";
 import { watch } from "../reactivity/watch.js";
 
 export const appPlan: SpecTree = reactive({
-  history: [
-    {
-      content: "Hello world",
-      role: "user"
-    }
-  ],
+  history: [],
   steps: []
 });
 export const appState = reactive({} as any);
 export const appGraph = new Graph(appState);
+// appGraph.load({
+//   nodes: [
+//     {
+//       id: "counter",
+//       contentType: "application/json+vnd.common.data",
+//       body: "0"
+//     },
+//     {
+//       id: "increment",
+//       contentType: "text/javascript",
+//       body: "return input('count') + 1;",
+//       evalMode: "ses"
+//     },
+//     {
+//       id: "button",
+//       contentType: "application/json+vnd.common.ui",
+//       body: {
+//         tag: "button",
+//         props: {
+//           "@click": {
+//             "@type": "binding",
+//             name: "increment"
+//           },
+//           innerText: {
+//             "@type": "binding",
+//             name: "count"
+//           }
+//         },
+//         children: []
+//       }
+//     }
+//   ],
+//   connections: {
+//     counter: {
+//       incrementEvent: "increment"
+//     },
+//     increment: {
+//       count: "counter"
+//     },
+//     button: {
+//       count: "counter"
+//     }
+//   },
+//   spec: {
+//     history: [],
+//     steps: [
+//       {
+//         description: "Increment the counter",
+//         associatedNodes: ["increment", "counter"]
+//       },
+//       {
+//         description: "Display the counter",
+//         associatedNodes: ["button", "counter"]
+//       }
+//     ]
+//   },
+//   outputs: [],
+//   inputs: []
+// });
+
+window.__refresh = () => {
+  appGraph.update();
+};
 
 export const stateSnapshot = computed(() => JSON.stringify(appState, null, 2));
 
@@ -99,7 +157,7 @@ export class ComApp extends LitElement {
         ];
         return `Added step: ${description}.\n${this.graphSnapshot()}`;
       },
-      addConnection: async ({
+      connect: async ({
         from,
         to,
         portName
@@ -108,11 +166,11 @@ export class ComApp extends LitElement {
         to: string;
         portName: string;
       }) => {
-        console.log("addConnection", from, to, portName);
+        console.log("connect", from, to, portName);
         graph.connect(from, to, portName);
         return `Added connection from ${from} to ${to}.\n${this.graphSnapshot()}`;
       },
-      declareDataNode: async ({
+      data: async ({
         id,
         data,
         documentedReasoning
@@ -121,7 +179,7 @@ export class ComApp extends LitElement {
         data: any;
         documentedReasoning: string;
       }) => {
-        console.log("declareDataNode", id, data);
+        console.log("data", id, data);
         graph.add(id, {
           id,
           contentType: CONTENT_TYPE_DATA,
@@ -138,7 +196,7 @@ export class ComApp extends LitElement {
 
         return `Added data node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addCodeNode: async (props: {
+      func: async (props: {
         id: string;
         code: string;
         documentedReasoning: string;
@@ -159,7 +217,7 @@ export class ComApp extends LitElement {
         ];
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addUiNode: async (props: {
+      ui: async (props: {
         id: string;
         uiTree: object;
         documentedReasoning: string;
@@ -180,7 +238,7 @@ export class ComApp extends LitElement {
         ];
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      add3dVoxelSceneNode: async ({
+      voxel3dScene: async ({
         id,
         dataSource,
         documentedReasoning
@@ -206,7 +264,7 @@ export class ComApp extends LitElement {
         graph.connect(dataSource, id, "data");
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addGlslShaderNode: async ({
+      glslShader: async ({
         id,
         shaderToyCode,
         documentedReasoning
@@ -230,7 +288,7 @@ export class ComApp extends LitElement {
         ];
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addFetchNode: async ({ id, url }: { id: string; url: string }) => {
+      fetch: async ({ id, url }: { id: string; url: string }) => {
         console.log("addFetchNode", id, url);
         graph.add(id, {
           id,
@@ -239,7 +297,7 @@ export class ComApp extends LitElement {
         });
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addClockNode: async ({ id }: { id: string }) => {
+      clock: async ({ id }: { id: string }) => {
         console.log("addClockNode", id);
         graph.add(id, {
           id,
@@ -248,7 +306,7 @@ export class ComApp extends LitElement {
         });
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addLanguageModelNode: async ({
+      languageModel: async ({
         id,
         promptSource
       }: {
@@ -265,7 +323,7 @@ export class ComApp extends LitElement {
         graph.connect(promptSource, id, "prompt");
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      addImageGenerationNode: async ({
+      imageGeneration: async ({
         id,
         promptSource
       }: {
@@ -282,7 +340,7 @@ export class ComApp extends LitElement {
         graph.connect(promptSource, id, "prompt");
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
-      deleteNode: async ({ id }: { id: string }) => {
+      delete: async ({ id }: { id: string }) => {
         console.log("deleteNode", id);
         graph.delete(id);
         return `Deleted node: ${id}.\n${this.graphSnapshot()}`;
@@ -321,6 +379,7 @@ export class ComApp extends LitElement {
     const thread = await client.createThread(input);
     const result = thread.conversation[thread.conversation.length - 1];
     appGraph.update();
+    window.__snapshot = appGraph.save();
 
     cursor.state = "idle";
 
