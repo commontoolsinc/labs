@@ -7,6 +7,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "mocha lib/test/**/*.test.js",
+    "test-browser": "npm run build && web-test-runner \"lib/test-browser/**/*.test.js\" --node-resolve",
     "build": "wireit",
     "clean": "wireit"
   },
@@ -36,17 +38,17 @@
       "types": "./lib/events.d.ts"
     }
   },
-  "dependencies": {
-  },
   "devDependencies": {
+    "@types/mocha": "^10.0.7",
+    "@web/test-runner": "^0.18.2",
+    "mocha": "^10.6.0",
     "tslib": "^2.6.2",
     "typescript": "^5.2.2",
     "wireit": "^0.14.4"
   },
   "wireit": {
     "build": {
-      "dependencies": [
-      ],
+      "dependencies": [],
       "files": [
         "./src/**/*"
       ],

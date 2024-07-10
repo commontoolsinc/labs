@@ -1,7 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["es2022", "DOM"],
+    "lib": ["ESNext", "DOM"],
     "outDir": "./lib",
     "rootDir": "./src",
     "strict": false,
@@ -12,7 +12,8 @@
       "common:io/state@0.0.1": [
         "../../node_modules/@commontools/io/lib/index.d.ts"
       ]
-    }
+    },
+    "types": ["mocha"],
   },
   "include": [
     "src/**/*",
