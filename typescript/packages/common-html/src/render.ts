@@ -13,6 +13,7 @@ export const render = (tpl: Template) => {
   if (!isTemplate(tpl)) {
     throw new TypeError(`Expected a template object`);
   }
+
   const { template, context } = tpl;
 
   // Create a cancel bag for gathering cancels related to reactive
@@ -20,12 +21,11 @@ export const render = (tpl: Template) => {
   const [cancelAll, addCancel] = useCancelGroup();
 
   // Render cached string to template
-  const fragment = renderCachedTemplate(
-    flattenTemplate(template)
-  ) as CancellableElement;
-  fragment.cancel = cancelAll;
+  const templateElement = getCachedTemplate(flattenTemplate(template));
+  const root = cloneTemplateElement(templateElement) as CancellableElement;
+  root.cancel = cancelAll;
 
-  for (const node of walkElementAndTextNodes(fragment)) {
+  for (const node of walkElementAndTextNodes(root)) {
     if (node.nodeType === Node.ELEMENT_NODE) {
       const element = node as Element;
 
@@ -55,8 +55,8 @@ export const render = (tpl: Template) => {
       addCancel(cancel);
     }
   }
-  debug("Rendered template", fragment);
-  return fragment;
+  debug("Rendered template", root);
+  return root;
 };
 
 export type CancellableElement = Element & Cancellable;
@@ -154,13 +154,20 @@ const flattenTemplate = (templateParts: Readonly<Array<string>>): string => {
   return flattened;
 };
 
-const renderCachedTemplate = memoize((template: string): Element => {
+const getCachedTemplate = memoize((template: string): HTMLTemplateElement => {
   const templateElement = document.createElement("template");
   templateElement.innerHTML = template;
+  return templateElement;
+});
+
+/** Clone template, returning first element child */
+const cloneTemplateElement = (
+  templateElement: HTMLTemplateElement
+): Element => {
   const clone = templateElement.content.cloneNode(true) as DocumentFragment;
   const element = clone.firstElementChild as Element;
   return element;
-});
+};
 
 /**
  * Walk elements and text nodes, and collect them into an array
