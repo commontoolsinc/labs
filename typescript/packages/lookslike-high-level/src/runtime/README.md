@@ -107,15 +107,15 @@ Three layers:
    It also exposes a `.withLog(log: ReactivityLog)` method that returns another
    proxy, whose reads and writes will be logged.
 
-3. Value proxies, returned by `get()` on a cell proxy. Properties expand to
-   further `get()` calls, and setters become `send()` calls.
+3. Value proxies, returned by `getAsValue()` on a cell proxy. Properties expand
+   to further `getAsValue()` calls, and setters become `send()` calls.
 
 Most of the time, you'll only need this:
 
 - `const c = cell(<initial value>)` retuns a cell proxy: Used when constructing
   a graph.
-- `c.withLog(log).get()` returns the value proxy, logging uses. These are passed
-  to code that reads from and writes to cells, via the value proxies.
+- `c.withLog(log).getAsValue()` returns the value proxy, logging uses. These are
+  passed to code that reads from and writes to cells, via the value proxies.
 
 Some internas to note:
 

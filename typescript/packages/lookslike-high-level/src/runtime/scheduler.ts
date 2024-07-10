@@ -1,7 +1,7 @@
 import { Cancel } from "@commontools/common-frp";
 import { Cell, ReactivityLog } from "./cell.js";
 
-export type Action = (log: ReactivityLog) => void;
+export type Action = (log: ReactivityLog) => any;
 
 const pending = new Set<Action>();
 const dirty = new Set<Cell<any>>();
@@ -13,10 +13,10 @@ const errorHandlers = new Set<(error: Error) => void>();
 
 const MAX_ITERATIONS_PER_RUN = 100;
 
-export function run(fn: Action): void {
+export function run(fn: Action): any {
   const log = { reads: new Set<Cell<any>>(), writes: new Set<Cell<any>>() };
 
-  fn(log);
+  const result: any = fn(log);
 
   // Note: By adding the listeners after the call we avoid triggering a re-run
   // of the action if it changed a r/w cell. Note that this also means that
@@ -34,6 +34,9 @@ export function run(fn: Action): void {
       })
     )
   );
+
+  // Usually used for for first run
+  return result;
 }
 
 export function remove(fn: Action): void {

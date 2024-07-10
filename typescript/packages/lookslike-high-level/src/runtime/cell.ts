@@ -27,9 +27,11 @@ export const self = Symbol("self");
 
 export type CellMethods<T> = {
   get: (() => T & { [self]: T }) & Cell<T>;
+  getAsValue: (() => T & { [self]: T }) & Cell<T>;
   send: ((value: T | UnwrapCell<T> | MaybeCellFor<T>, path?: Path) => void) &
     Cell<T>;
   updates: ((subscriber: Sendable<void>) => Cancel) & Cell<T>;
+  raw: (() => Cell<T>) & Cell<T>;
   withLog: (log?: ReactivityLog) => Cell<T>;
 };
 
@@ -83,15 +85,16 @@ function createCellProxy(
   log?: ReactivityLog
 ): Cell<any> {
   const methods: { [key: string | symbol]: any } = {
-    get: () => createCellValueProxy(cell, path, log),
-    send: (value: any, extraPath: Path = []) =>
-      setProp(cell, [...path, ...extraPath], value, log),
+    get: () => getCellFromPath(proxy, log).get(),
+    getAsValue: () => createCellValueProxy(cell, path, log),
+    send: (value: any) => setProp(cell, path, value, log),
     updates: (subscriber: Sendable<void>) => cell.updates(subscriber),
     withLog: (newLog?: ReactivityLog) => {
       if (!newLog || newLog === log) return proxy;
       else if (!log) return createCellProxy(target, cell, path, newLog);
       else throw "Can't nest logging yet";
     },
+    raw: () => getCellFromPath(proxy, log),
     [getCell]: () => [cell, path],
   } satisfies CellMethods<any> & CellProxyMethods<any>;
   const proxy: Cell<any> = new Proxy(target, {

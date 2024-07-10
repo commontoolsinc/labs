@@ -17,10 +17,10 @@ describe("lift", () => {
     const a = cell(1);
     const b = cell(2);
     const c = add(a, b);
-    expect(c.get()).toBe(3);
+    expect(c.getAsValue()).toBe(3);
     a.send(2);
     await idle();
-    expect(c.get()).toBe(4);
+    expect(c.getAsValue()).toBe(4);
   });
 
   it("should lift a function with a path", async () => {
@@ -28,10 +28,10 @@ describe("lift", () => {
     const a = cell({ b: 1 });
     const b = cell(2);
     const c = add(a, b);
-    expect(c.get()).toBe(3);
+    expect(c.getAsValue()).toBe(3);
     a.b.send(2);
     await idle();
-    expect(c.get()).toBe(4);
+    expect(c.getAsValue()).toBe(4);
   });
 
   it("should lift a function with a path and an array in the function", async () => {
@@ -39,10 +39,10 @@ describe("lift", () => {
     const a = cell({ b: 1 });
     const b = cell([2]);
     const c = add(a, b);
-    expect(c.get()).toBe(3);
+    expect(c.getAsValue()).toBe(3);
     b[0].send(3);
     await idle();
-    expect(c.get()).toBe(4);
+    expect(c.getAsValue()).toBe(4);
   });
 
   it("should lift a function with a path and an array outside the function", async () => {
@@ -50,11 +50,11 @@ describe("lift", () => {
     const a = cell({ b: 1 });
     const b = cell([2]);
     const c = add(a.b, b[0]);
-    expect(b[0].get()).toBe(2);
-    expect(c.get()).toBe(3);
+    expect(b[0].getAsValue()).toBe(2);
+    expect(c.getAsValue()).toBe(3);
     b[0].send(3);
     await idle();
-    expect(c.get()).toBe(4);
+    expect(c.getAsValue()).toBe(4);
   });
 
   it("should work with destructing assignment", async () => {
@@ -64,8 +64,8 @@ describe("lift", () => {
     });
     const name = cell("John Doe");
     const { first, last } = nameSplit(name);
-    expect(first.get()).toBe("John");
-    expect(last.get()).toBe("Doe");
+    expect(first.getAsValue()).toBe("John");
+    expect(last.getAsValue()).toBe("Doe");
   });
 
   it("should work with structured arguments", async () => {
@@ -75,8 +75,8 @@ describe("lift", () => {
     });
     const name = cell("John Doe");
     const { first, last } = nameSplit({ name });
-    expect(first.get()).toBe("John");
-    expect(last.get()).toBe("Doe");
+    expect(first.getAsValue()).toBe("John");
+    expect(last.getAsValue()).toBe("Doe");
   });
 });
 
@@ -85,10 +85,10 @@ describe("apply", () => {
     const a = cell(1);
     const b = cell(2);
     const c = apply([a, b], (a, b) => a + b);
-    expect(c.get()).toBe(3);
+    expect(c.getAsValue()).toBe(3);
     a.send(2);
     await idle();
-    expect(c.get()).toBe(4);
+    expect(c.getAsValue()).toBe(4);
   });
 });
 
@@ -98,11 +98,11 @@ describe("curry", () => {
     const add = curry([a], (a: number, b: number) => a + b);
     const b = cell(2);
     const c = add(b);
-    expect(c.get()).toBe(3);
+    expect(c.getAsValue()).toBe(3);
     b.send(3);
     a.send(5);
     await idle();
-    expect(c.get()).toBe(8);
+    expect(c.getAsValue()).toBe(8);
   });
 });
 
@@ -116,10 +116,10 @@ describe("lift with writeable cells", () => {
     const c = cell({ result: 0 });
     add(a, b, c);
     await idle();
-    expect(c.get()).toStrictEqual({ result: 3 });
+    expect(c.getAsValue()).toStrictEqual({ result: 3 });
     a.send(2);
     await idle();
-    expect(c.get()).toStrictEqual({ result: 4 });
+    expect(c.getAsValue()).toStrictEqual({ result: 4 });
   });
 });
 
@@ -151,7 +151,7 @@ describe("handler", () => {
     const s = h(a);
     s.send(2);
     await idle();
-    expect(a.get()).toStrictEqual({ value: 3 });
+    expect(a.getAsValue()).toStrictEqual({ value: 3 });
   });
 
   it("create handler with handler and use it", async () => {
@@ -159,7 +159,7 @@ describe("handler", () => {
     const s = handler([a], (e: number, a: { value: number }) => (a.value += e));
     s.send(2);
     await idle();
-    expect(a.get()).toStrictEqual({ value: 3 });
+    expect(a.getAsValue()).toStrictEqual({ value: 3 });
   });
 });
 
@@ -170,13 +170,13 @@ describe("propagator", () => {
     const c = cell(0);
     const add = propagator(
       (a: Cell<number>, b: Cell<number>, c: Cell<number>) =>
-        c.send(a.get() + b.get())
+        c.send(a.getAsValue() + b.getAsValue())
     );
     add(a, b, c);
-    expect(c.get()).toBe(3);
+    expect(c.getAsValue()).toBe(3);
     a.send(2);
     await idle();
-    expect(c.get()).toBe(4);
+    expect(c.getAsValue()).toBe(4);
   });
 });
 
@@ -185,9 +185,9 @@ describe("merge", () => {
     const a = cell(1);
     const c = cell(0);
     merge(c, a);
-    expect(c.get()).toBe(1);
+    expect(c.getAsValue()).toBe(1);
     a.send(2);
     await idle();
-    expect(c.get()).toBe(2);
+    expect(c.getAsValue()).toBe(2);
   });
 });

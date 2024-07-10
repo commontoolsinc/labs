@@ -18,7 +18,7 @@ export function lift<T extends any[], R>(
     ) as Cell<any>[];
 
     const action: Action = (log) => {
-      const values = cells.map((arg) => arg.withLog(log).get()) as T;
+      const values = cells.map((arg) => arg.withLog(log).getAsValue()) as T;
       const result = fn(...values);
       returnCell.withLog(log).send(result);
     };
@@ -62,7 +62,7 @@ export function asHandler<E, T extends any[]>(
     ) as Cell<any>[];
 
     return {
-      send: (e: E) => fn(e, ...(cells.map((arg) => arg.get()) as T)),
+      send: (e: E) => fn(e, ...(cells.map((arg) => arg.getAsValue()) as T)),
       sink: () => {
         throw "Not actually a stream";
       },
@@ -98,5 +98,5 @@ export function propagator<T extends any[]>(
 // Shorthand for a simple LWR merge operation on cells: All updates to `from`
 // are copied to `to`.
 export function merge(to: Cell<any>, from: Cell<any>): void {
-  run((log) => to.withLog(log).send(from.withLog(log).get()));
+  run((log) => to.withLog(log).send(from.withLog(log).getAsValue()));
 }

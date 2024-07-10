@@ -16,15 +16,17 @@ describe("scheduler", () => {
     const c = cell(0);
     const adder: Action = (log) => {
       runCount++;
-      c.withLog(log).send(a.withLog(log).get() + b.withLog(log).get());
+      c.withLog(log).send(
+        a.withLog(log).getAsValue() + b.withLog(log).getAsValue()
+      );
     };
     run(adder);
     expect(runCount).toBe(1);
-    expect(c.get()).toBe(3);
+    expect(c.getAsValue()).toBe(3);
     a.send(2); // No log, simulate external change
     await idle();
     expect(runCount).toBe(2);
-    expect(c.get()).toBe(4);
+    expect(c.getAsValue()).toBe(4);
   });
 
   it("should remove actions", async () => {
@@ -34,22 +36,24 @@ describe("scheduler", () => {
     const c = cell(0);
     const adder: Action = (log) => {
       runCount++;
-      c.withLog(log).send(a.withLog(log).get() + b.withLog(log).get());
+      c.withLog(log).send(
+        a.withLog(log).getAsValue() + b.withLog(log).getAsValue()
+      );
     };
     run(adder);
     expect(runCount).toBe(1);
-    expect(c.get()).toBe(3);
+    expect(c.getAsValue()).toBe(3);
 
     a.send(2);
     await idle();
     expect(runCount).toBe(2);
-    expect(c.get()).toBe(4);
+    expect(c.getAsValue()).toBe(4);
 
     remove(adder);
     a.send(3);
     await idle();
     expect(runCount).toBe(2);
-    expect(c.get()).toBe(4);
+    expect(c.getAsValue()).toBe(4);
   });
 
   it("should run actions in topological order", async () => {
@@ -61,29 +65,33 @@ describe("scheduler", () => {
     const e = cell(0);
     const adder1: Action = (log) => {
       runs.push("adder1");
-      c.withLog(log).send(a.withLog(log).get() + b.withLog(log).get());
+      c.withLog(log).send(
+        a.withLog(log).getAsValue() + b.withLog(log).getAsValue()
+      );
     };
     const adder2: Action = (log) => {
       runs.push("adder2");
-      e.withLog(log).send(c.withLog(log).get() + d.withLog(log).get());
+      e.withLog(log).send(
+        c.withLog(log).getAsValue() + d.withLog(log).getAsValue()
+      );
     };
     run(adder1);
     run(adder2);
     expect(runs.join(",")).toBe("adder1,adder2");
-    expect(c.get()).toBe(3);
-    expect(e.get()).toBe(4);
+    expect(c.getAsValue()).toBe(3);
+    expect(e.getAsValue()).toBe(4);
 
     d.send(2);
     await idle();
     expect(runs.join(",")).toBe("adder1,adder2,adder2");
-    expect(c.get()).toBe(3);
-    expect(e.get()).toBe(5);
+    expect(c.getAsValue()).toBe(3);
+    expect(e.getAsValue()).toBe(5);
 
     a.send(2);
     await idle();
     expect(runs.join(",")).toBe("adder1,adder2,adder2,adder1,adder2");
-    expect(c.get()).toBe(4);
-    expect(e.get()).toBe(6);
+    expect(c.getAsValue()).toBe(4);
+    expect(e.getAsValue()).toBe(6);
   });
 
   it("should stop eventually when encountering infinite loops", async () => {
@@ -94,14 +102,20 @@ describe("scheduler", () => {
     const d = cell(1);
     const e = cell(0);
     const adder1: Action = (log) => {
-      c.withLog(log).send(a.withLog(log).get() + b.withLog(log).get());
+      c.withLog(log).send(
+        a.withLog(log).getAsValue() + b.withLog(log).getAsValue()
+      );
     };
     const adder2: Action = (log) => {
-      e.withLog(log).send(c.withLog(log).get() + d.withLog(log).get());
+      e.withLog(log).send(
+        c.withLog(log).getAsValue() + d.withLog(log).getAsValue()
+      );
     };
     const adder3: Action = (log) => {
       if (--maxRuns <= 0) return;
-      c.withLog(log).send(e.withLog(log).get() + b.withLog(log).get());
+      c.withLog(log).send(
+        e.withLog(log).getAsValue() + b.withLog(log).getAsValue()
+      );
     };
 
     const stopped = vi.fn();
@@ -123,19 +137,19 @@ describe("scheduler", () => {
     const inc: Action = (log) =>
       counter
         .withLog(log)
-        .send(counter.withLog(log).get() + by.withLog(log).get());
+        .send(counter.withLog(log).getAsValue() + by.withLog(log).getAsValue());
 
     const stopped = vi.fn();
     onError(() => stopped());
 
     run(inc);
-    expect(counter.get()).toBe(1);
+    expect(counter.getAsValue()).toBe(1);
     await idle();
-    expect(counter.get()).toBe(1);
+    expect(counter.getAsValue()).toBe(1);
 
     by.send(2);
     await idle();
-    expect(counter.get()).toBe(3);
+    expect(counter.getAsValue()).toBe(3);
 
     expect(stopped).not.toHaveBeenCalled();
   });
