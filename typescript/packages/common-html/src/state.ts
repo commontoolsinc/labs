@@ -22,3 +22,5 @@ export const state = <T>(value: T) => {
 
   return { get, sink, send };
 };
+
+export default state;
