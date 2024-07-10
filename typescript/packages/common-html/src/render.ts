@@ -225,6 +225,7 @@ const bindContent = (node: Node, context: TemplateContext): Cancel => {
 
   // Don't set null props
   if (i == null) {
+    debug(`Ordinary text node`, node);
     return noOp;
   }
 
