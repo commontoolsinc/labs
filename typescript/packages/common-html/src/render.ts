@@ -4,6 +4,7 @@ import { debug, warn } from "./log.js";
 import { useCancelGroup, Cancel, Cancellable } from "./cancel.js";
 import { Template, TemplateContext, isTemplate } from "./html.js";
 import { effect } from "./reactive.js";
+import { isSendable } from "./sendable.js";
 
 export { setDebug } from "./log.js";
 
@@ -113,9 +114,7 @@ const placeholderRegex = new RegExp(`#hole${salt}-(\\d+)#`);
 
 const placeholder = (i: number) => `#hole${salt}-${i}#`;
 
-const matchPlaceholder = (
-  value: unknown
-): number | null => {
+const matchPlaceholder = (value: unknown): number | null => {
   if (typeof value !== "string") {
     return null;
   }
@@ -143,7 +142,7 @@ const joinWith = (
     }
   }
   return result.join("");
-}
+};
 
 /**
  * Transform template strings array into string template
@@ -214,10 +213,7 @@ const replaceNextSiblingWith = (node: Node, replacement: Node) => {
   replaceWith(node.nextSibling, replacement);
 };
 
-const bindContent = (
-  node: Node,
-  context: TemplateContext
-): Cancel => {
+const bindContent = (node: Node, context: TemplateContext): Cancel => {
   const i = matchPlaceholder(node.nodeValue);
 
   // Don't set null props
@@ -256,7 +252,7 @@ const cleanPropKey = (key: string) => key.replace(/\./, "");
 const setProp = (element: Element, key: string, value: unknown) => {
   // @ts-ignore - this function should always be called with a valid key
   element[key] = value;
-}
+};
 
 const bindProp = (
   element: Element,
@@ -278,10 +274,7 @@ const bindProp = (
 
   // Don't bind events via props
   if (isDomEventKey(key)) {
-    warn(
-      `Events should be set via @event not via property keys.`,
-      key
-    );
+    warn(`Events should be bound via @event not via property keys.`, key);
     return noOp;
   }
 
@@ -305,10 +298,7 @@ const bindDynamicProp = (
 ): Cancel => {
   // Don't set null replacements
   if (replacement == null) {
-    warn(
-      `Template replacement is missing`,
-      key
-    );
+    warn(`Template replacement is missing`, key);
     return noOp;
   }
 
@@ -317,7 +307,7 @@ const bindDynamicProp = (
   return effect(replacement, (replacement) => {
     setProp(element, key, replacement);
   });
-}
+};
 
 const bindAttr = (
   element: Element,
@@ -335,10 +325,7 @@ const bindAttr = (
 
   // Don't bind events via props
   if (isDomEventKey(attrKey)) {
-    warn(
-      `Events should be set via @event not via attribute keys`,
-      attrKey
-    );
+    warn(`Events should be bound via @event not via attribute keys`, attrKey);
     return noOp;
   }
 
@@ -366,7 +353,21 @@ const bindDynamicAttr = (
   return effect(replacement, (replacement) => {
     element.setAttribute(attrKey, `${replacement}`);
   });
-}
+};
+
+/** Bind an event listener, returning a cancel function */
+const listen = (
+  element: Element,
+  key: string,
+  listener: EventListener
+): Cancel => {
+  // Set listener
+  element.addEventListener(key, listener);
+  // Return cancel function for removing listener
+  return () => {
+    element.removeEventListener(key, listener);
+  };
+};
 
 const isEventKey = (key: string) => key.startsWith("@");
 
@@ -393,25 +394,27 @@ const bindEvent = (
   const i = matchPlaceholder(attrValue);
 
   if (i == null) {
-    warn(
-      `No event listener function provided. Removing listener.`,
-      key
-    );
+    warn(`No event listener function provided. Removing listener.`, key);
     return noOp;
   }
 
   const replacement = context[i];
 
-  if (typeof replacement !== "function") {
-    warn(`Event listener is not a function.`, key);
-    return noOp;
+  if (typeof replacement === "function") {
+    const listener = replacement as EventListener;
+    return listen(element, key, listener);
   }
 
-  const listener = replacement as EventListener;
-  // Set listener
-  element.addEventListener(key, listener);
-  // Return cancel function for removing listener
-  return () => {
-    element.removeEventListener(key, listener);
-  };
+  if (isSendable(replacement)) {
+    return listen(element, key, (event: Event) => {
+      replacement.send(event);
+    });
+  }
+
+  warn(
+    `Cannot bind event listener (must be function or sendable)`,
+    key,
+    replacement
+  );
+  return noOp;
 };

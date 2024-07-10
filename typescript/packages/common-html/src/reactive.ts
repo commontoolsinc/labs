@@ -8,13 +8,13 @@ import { Cancel, isCancel } from "./cancel.js";
  *   updated value.
  * - `sink()` must return a `Cancel` function that can be called to unsubscribe.
  */
-export type ReactiveValue<T> = {
+export type Reactive<T> = {
   sink: (callback: (value: T) => void) => Cancel;
 };
 
-export const isReactiveValue = (
+export const isReactive = (
   value: unknown
-): value is ReactiveValue<unknown> => {
+): value is Reactive<unknown> => {
   return isObject(value) && "sink" in value && typeof value.sink === "function";
 };
 
@@ -23,7 +23,7 @@ export const effect = (
   callback: (value: unknown) => Cancel | void
 ) => {
   let cleanup: Cancel = noOp;
-  if (isReactiveValue(value)) {
+  if (isReactive(value)) {
     const cancel = value.sink((value: unknown) => {
       cleanup();
       const next = callback(value);
