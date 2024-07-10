@@ -8,6 +8,10 @@ export default defineConfig({
   },
   resolve: {
     preserveSymlinks: true,
+    alias: {
+      "@commontools/common-frp": resolve(__dirname, "../common-frp/lib/"),
+      "@commontools/common-ui": resolve(__dirname, "../common-ui/lib/"),
+    },
   },
   optimizeDeps: {
     noDiscovery: true,
