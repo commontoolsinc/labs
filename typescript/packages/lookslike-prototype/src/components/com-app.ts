@@ -5,6 +5,7 @@ import {
   CONTENT_TYPE_CLOCK,
   CONTENT_TYPE_DATA,
   CONTENT_TYPE_EVENT,
+  CONTENT_TYPE_EVENT_LISTENER,
   CONTENT_TYPE_FETCH,
   CONTENT_TYPE_GLSL,
   CONTENT_TYPE_IMAGE,
@@ -14,9 +15,15 @@ import {
   CONTENT_TYPE_STORAGE,
   CONTENT_TYPE_UI
 } from "../contentType.js";
-import { plan, prepareSteps } from "../agent/plan.js";
+import {
+  makeConsistent,
+  plan,
+  planIdentifiers,
+  prepareSteps,
+  sketchHighLevelApproachPrompt
+} from "../agent/plan.js";
 import { codePrompt } from "../agent/implement.js";
-import { suggestions } from "../agent/model.js";
+import { recordThought, suggestions } from "../agent/model.js";
 import { LLMClient, LlmTool } from "@commontools/llm-client";
 import { LLM_SERVER_URL } from "../llm-client.js";
 import { ChatCompletionTool } from "openai/resources/index.mjs";
@@ -26,6 +33,7 @@ import { Graph } from "../reactivity/runtime.js";
 import { Recipe, SpecTree } from "../data.js";
 import { cursor } from "../agent/cursor.js";
 import { watch } from "../reactivity/watch.js";
+import { grabAllTags, grabTag } from "../agent/llm.js";
 
 export const appPlan: SpecTree = reactive({
   history: [],
@@ -33,6 +41,11 @@ export const appPlan: SpecTree = reactive({
 });
 export const appState = reactive({} as any);
 export const appGraph = new Graph(appState);
+export const appDocument = reactive({
+  content: `
+   `
+});
+
 // appGraph.load({
 //   nodes: [
 //     {
@@ -108,6 +121,7 @@ export class ComApp extends LitElement {
   };
 
   @state() userInput = "";
+  @state() modifying = false;
 
   generateToolSpec(
     toolSpec: ChatCompletionTool[],
@@ -139,23 +153,6 @@ export class ComApp extends LitElement {
       listNodes: async () => {
         console.log("listNodes", graph);
         return JSON.stringify(graph);
-      },
-      addStepToSpecification: async ({
-        description,
-        associatedNodes
-      }: {
-        description: string;
-        associatedNodes: string[];
-      }) => {
-        console.log("addStepToSpecification", description, associatedNodes);
-        appPlan.steps = [
-          ...appPlan.steps,
-          {
-            description,
-            associatedNodes
-          }
-        ];
-        return `Added step: ${description}.\n${this.graphSnapshot()}`;
       },
       connect: async ({
         from,
@@ -207,6 +204,31 @@ export class ComApp extends LitElement {
           id,
           contentType: CONTENT_TYPE_JAVASCRIPT,
           body: code
+        });
+        appPlan.steps = [
+          ...appPlan.steps,
+          {
+            description: documentedReasoning,
+            associatedNodes: [id]
+          }
+        ];
+        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      },
+      listen: async (props: {
+        event: string;
+        id: string;
+        code: string;
+        documentedReasoning: string;
+      }) => {
+        console.log("addListener", props);
+        const { id, event, code, documentedReasoning } = props;
+        graph.add(id, {
+          id,
+          contentType: CONTENT_TYPE_EVENT_LISTENER,
+          body: {
+            event,
+            code
+          }
         });
         appPlan.steps = [
           ...appPlan.steps,
@@ -352,43 +374,137 @@ export class ComApp extends LitElement {
     return JSON.stringify(appGraph.save(), null, 2);
   }
 
-  async appendMessage(userInput: string) {
-    cursor.state = "thinking";
+  async planResponse(userInput: string) {
+    cursor.state = "sketching";
+    const baseInput = userInput;
 
     if (cursor.focus.length > 0) {
       userInput = `<user-selection>[${cursor.focus.map((f) => f.id).join(", ")}</user-selection> \n<user-input>${userInput}</user-input>`;
     }
 
-    const spec = await plan(userInput, prepareSteps(userInput, appGraph));
-    const finalPlan = spec?.[spec?.length - 1];
-    console.log("finalPlan", finalPlan);
-    const input = `Implement the following plan using the available tools: ${finalPlan}
+    const { system, prompt } = sketchHighLevelApproachPrompt(userInput);
+    const client = new LLMClient({
+      serverUrl: LLM_SERVER_URL,
+      tools: [],
+      system
+    });
+
+    const res = await client.createThread(prompt);
+    const last = res.conversation[res.conversation.length - 1];
+    const plan = grabTag(last, "plan");
+    recordThought({ role: "assistant", content: plan });
+
+    console.log(plan);
+    appDocument.content = plan;
+
+    const steps = grabAllTags(plan, "step");
+
+    cursor.state = "detailing";
+
+    const enrichedSteps = await Promise.all(
+      steps.map(async (step) => {
+        const { system, prompt } = planIdentifiers(step, userInput);
+        const client = new LLMClient({
+          serverUrl: LLM_SERVER_URL,
+          tools: [],
+          system
+        });
+
+        const res = await client.createThread(prompt);
+        const last = res.conversation[res.conversation.length - 1];
+        const enriched = grabTag(last, "result");
+        recordThought({ role: "assistant", content: enriched });
+        return enriched;
+      })
+    );
+
+    appDocument.content = `<plan>
+      <prompt>${baseInput}</prompt>
+      ${enrichedSteps.join("\n")}
+    </plan>`;
+
+    cursor.state = "idle";
+  }
+
+  async modifyGraph() {
+    this.modifying = true;
+
+    async function reflect() {
+      const { system, prompt } = makeConsistent(appDocument.content);
+      const client = new LLMClient({
+        serverUrl: LLM_SERVER_URL,
+        tools: [],
+        system
+      });
+
+      const res = await client.createThread(prompt);
+      const last = res.conversation[res.conversation.length - 1];
+      const plan = grabTag(last, "corrected-plan");
+      recordThought({ role: "assistant", content: plan });
+      appDocument.content = plan;
+      return plan;
+    }
+
+    cursor.state = "reflecting";
+
+    const finalPlan = await reflect();
+
+    // const spec = await plan(userInput, prepareSteps(userInput, appGraph));
+    // const finalPlan = spec?.[spec?.length - 1];
+    // console.log("finalPlan", finalPlan);
+    const input = `Implement the following plan using the available tools:
+
+    <plan>
+      ${finalPlan}
+    </plan>
     ---
     Current graph (may be empty): ${this.graphSnapshot()}`;
 
-    const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
-    // const systemContext = ``;
+    // const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
+    const systemContext = ``;
 
-    const client = new LLMClient({
-      serverUrl: LLM_SERVER_URL,
-      tools: this.generateToolSpec(toolSpec, this.availableFunctions(appGraph)),
-      system: codePrompt + systemContext
-    });
+    const implement = async () => {
+      const client = new LLMClient({
+        serverUrl: LLM_SERVER_URL,
+        tools: this.generateToolSpec(
+          toolSpec,
+          this.availableFunctions(appGraph)
+        ),
+        system: codePrompt + systemContext
+      });
+
+      const thread = await client.createThread(input);
+      const result = thread.conversation[thread.conversation.length - 1];
+      recordThought({ role: "assistant", content: result });
+    };
+
+    if (!this.modifying) {
+      cursor.state = "idle";
+      return;
+    }
 
     cursor.state = "working";
-    const thread = await client.createThread(input);
-    const result = thread.conversation[thread.conversation.length - 1];
+
+    await implement();
+
     appGraph.update();
     window.__snapshot = appGraph.save();
 
     cursor.state = "idle";
-
-    console.log("result", result);
+    this.modifying = false;
   }
 
   override render() {
     const onCursorMessage = (ev: CustomEvent) => {
-      this.appendMessage(ev.detail.message);
+      this.planResponse(ev.detail.message);
+    };
+
+    const onCursorToggled = (ev: CustomEvent) => {
+      if (this.modifying) {
+        this.modifying = false;
+      } else {
+        this.modifyGraph();
+      }
     };
 
     return html`
@@ -396,7 +512,9 @@ export class ComApp extends LitElement {
         <com-cursor
           .suggestions=${watch(suggestions)}
           @message=${onCursorMessage}
+          @toggled=${onCursorToggled}
         ></com-cursor>
+        <com-document-editor></com-document-editor>
         <com-chat slot="main">
           <com-thread slot="main"></com-thread>
         </com-chat>

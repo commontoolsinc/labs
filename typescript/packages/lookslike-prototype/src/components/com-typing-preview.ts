@@ -59,6 +59,7 @@ export class ComTypingPreview extends LitElement {
   }
 
   #animate(timestamp: number) {
+    if (!this.text) return;
     const lines = this.text.split("\n");
     if (this.currentLine < lines.length) {
       if (timestamp - this.lastTimestamp > this.typingSpeed) {

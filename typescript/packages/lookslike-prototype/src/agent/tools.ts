@@ -6,7 +6,7 @@ export function describeTools(
 ) {
   return tools
     .map((tool) => {
-      const description = `- ${tool.function.name}: ${tool.function.description}`;
+      const description = `<module>${tool.function.name}: ${tool.function.description}</module>`;
       const properties = Object.entries(
         tool.function.parameters?.properties || {}
       )
@@ -71,6 +71,24 @@ export const toolSpec: ChatCompletionTool[] = [
           documentedReasoning: { type: "string" }
         },
         required: ["id", "data", "documentedReasoning"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "listen",
+      description:
+        "Add an event listener to the graph with a handler written in javascript, write only the function body. No comments.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          event: { type: "string" },
+          code: { type: "string" },
+          documentedReasoning: { type: "string" }
+        },
+        required: ["id", "event", "code", "documentedReasoning"]
       }
     }
   },

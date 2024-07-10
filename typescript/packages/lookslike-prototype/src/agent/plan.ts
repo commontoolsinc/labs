@@ -80,6 +80,160 @@ export async function suggest(input: string, fullPlan: Conversation) {
   return response.choices[0].message;
 }
 
+export function sketchHighLevelApproachPrompt(userInput: string) {
+  return {
+    system: `You will create a specification for an ephemeral software application. We will start at a high level, natural language sketch of the approach.
+
+      The environment is a reactive graph computation model. Modules, a.k.a nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules include:
+
+      - data nodes to store state
+      - mapping functions to apply pure transformations to data
+      - event listener nodes to respond to user input
+      - UI nodes to render the data (html, svg, vega-lite, voxels, etc.)
+      - effect nodes to access http, language models, databases, etc.
+
+      Each node has one or more inputs and a single output. Plan your approach in a document format like so:
+
+      <user-request>Make a counter with a button</user-request>
+
+      <plan>
+        <prompt>Make a counter with a button</prompt>
+        <step>Declare the counter, default to 0</step>
+        <step>Create a button, label it "increment", on click it dispatches an event named "clicked"</step>
+        <step>Add an event handler to listen for "clicked" and increment the counter</step>
+        <step>Create a text node to display the counter value</step>
+      </plan>
+
+      <user-request>Make a voxel sphere</user-request>
+
+      <plan>
+        <prompt>Make a voxel sphere</prompt>
+        <step>Declare a variable for sphere radius</step>
+        <step>Declare a function to generate the voxels for a sphere</step>
+        <step>Create a UI (voxel) node to display the geometry</step>
+      </plan>
+
+      Be clear but concise, using technical terms. Every word is a wasted moment for the user but they must understand your reasoning.`,
+
+    prompt: `Service the minimal useful version of this request: <user-request>${userInput}</user-request>.`
+  };
+}
+
+export function planIdentifiers(step: string, userInput: string) {
+  return {
+    system: `You will enrich a specification for an ephemeral software application by detailing components needed to implement it.
+
+      The environment is a reactive graph computation model. Modules, a.k.a nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules include:
+
+      ${describeTools(toolSpec, false)}
+
+      Each node has one or more inputs and a single output. You will work step by step and enrich a loose plan, so for an example plan:
+
+      <plan>
+        <prompt>Counter with button</prompt>
+        <step>Declare the counter, default to 0</step>
+        <step>Create a button, label it "increment", on click it dispatches an event named "clicked"</step>
+        <step>Add an event handler to listen for "clicked" and increment the counter</step>
+        <step>Create a text node to display the counter value</step>
+      </plan>
+
+      If we are implementing the first step, you would enrich it with identifiers like so:
+
+      <result>
+        <step>Declare the counter, default to 0</step>
+        <identifier>counter = 0</identifier>
+      </result>
+
+      or, for the second step:
+
+      <result>
+        <step>Create a button, label it "increment", on click it dispatches an event named "clicked"</step>
+        <identifier>button({ label: "increment", "@click": "clicked"})</identifier>
+      </result>
+
+      Another example plan:
+
+      <plan>
+        <prompt>Make a sphere</prompt>
+        <step>Declare a variable for sphere radius</step>
+        <step>Declare a function to generate the voxels for a sphere</step>
+        <step>Create a UI (voxel) node to display the geometry</step>
+      </plan>
+
+      The second step would be enriched like so:
+
+      <result>
+        <step>Declare a function to generate the voxels for a sphere</step>
+        <step>function generateSphereVoxels(radius) {}</step>
+      </result>
+
+      Avoid fully specifying function bodies, but feel free sketch the implementation or leave a clarifying comment for later.
+
+      You will receive a single <step>, return the enriched version within a <result> tag.
+
+      <user-request>${userInput}</user-request>`,
+
+    prompt: step
+  };
+}
+
+export function makeConsistent(plan: string) {
+  return {
+    system: `You will audit and fix a specification for an ephemeral software application. The plan consists of a natural language description of the approach and a psuedocode sketch of the various elements.
+
+      The environment is a reactive graph computation model. Modules, a.k.a nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules include:
+
+      - data nodes to store state
+      - mapping functions to apply pure transformations to data
+      - event listener nodes to respond to user input
+      - UI nodes to render the data (html, svg, vega-lite, voxels, etc.)
+      - effect nodes to access http, language models, databases, etc.
+
+      Each node has one or more inputs and a single output.
+
+      You will receive a <plan> tag.
+
+      It may have inconsistencies, like a missing step, a step out of order, mismatched identifiers or a decoupling of the step from the psuedocode.
+
+      <plan>
+        <prompt>Flip a coin</prompt>
+        <step>Create a data node to store the coin state (heads or tails)</step>
+        <identifier>coinState = "tails"</identifier>
+        <step>Add a button UI node labeled "Flip Coin"</step>
+        <identifier>button({ label: "Do it!", "@click": "flipCoin" })</identifier>
+        <step>Create an event listener for the button click</step>
+        <identifier>on("clicked", () => {})</identifier>
+        <step>On click, use a mapping function to randomly set the coin state</step>
+        <identifier>coinState = map( () => Math.random() < 0.5 ? 'heads' : 'tails', clickEvent )</identifier>
+        <step>Display the current coin state with a text UI node</step>
+        <identifier>text(coin_state)</identifier>
+      </plan>
+
+      You will return a corrected version of the plan within a <corrected-plan> tag:
+
+      <corrected-plan>
+        <prompt>Flip a coin</prompt>
+        <step>Create a data node to store the coin state (heads or tails)</step>
+        <identifier>coinState = "tails"</identifier>
+        <step>Add a button UI node labeled "Do it!"</step>
+        <identifier>addButton = button({ label: "Do it!", "@click": "clicked" })</identifier>
+        <step>Create an event listener for the button click and update the coin state</step>
+        <identifier>flipCoin = on("clicked", () => Math.random() < 0.5 ? 'heads' : 'tails')</identifier>
+        <connection>flipCoin -> coinState</connection>
+        <step>Display the current coin state with a text UI node</step>
+        <identifier>text(coinState)</identifier>
+        <connection>coinState -> text.coinState</connection>
+      </corrected-plan>
+
+      Be clear but concise, using technical terms. Every word is a wasted moment for the user but they must understand your reasoning.
+
+      Take extra care not to bloat the request beyond the original scope, implement the MVP that satisfies the user request.
+      `,
+
+    prompt: plan
+  };
+}
+
 export function prepareSteps(userInput: string, graph: Graph) {
   if (graph.nodes.size === 0) {
     return [
@@ -122,7 +276,6 @@ export function prepareSteps(userInput: string, graph: Graph) {
       Modules, acting as nodes, connect with each other, where the output of one or more nodes serves as the input to another.
 
       Available modules:
-
 
     ${describeTools(toolSpec, true)}
 

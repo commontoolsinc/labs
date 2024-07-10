@@ -70,19 +70,14 @@ function renderNode(
         .value=${value}
         @updated=${relay}
       ></com-module-shader>`;
-    case CONTENT_TYPE_EVENT:
     case CONTENT_TYPE_CLOCK:
       return html`<com-module-event
         .node=${node}
         .value=${value}
         @run=${relay}
       ></com-module-event>`;
-    case CONTENT_TYPE_STORAGE:
-      return html`<com-module-storage
-        .node=${node}
-        .value=${value}
-      ></com-module-storage>`;
     case CONTENT_TYPE_SCENE:
+      if (!value) return html``;
       return html`<com-module-scene
         .node=${node}
         .value=${value}
@@ -140,7 +135,7 @@ export class ComResponse extends LitElement {
     console.log("re-render", this.node.id, this.value);
     const definition = renderNode(
       this.node,
-      this.value || "<empty>",
+      this.value,
       this.dispatchEvent.bind(this)
     );
 

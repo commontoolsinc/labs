@@ -1,6 +1,12 @@
 import { reactive } from "@vue/reactivity";
 
-type CursorMode = "idle" | "thinking" | "working" | "error";
+type CursorMode =
+  | "idle"
+  | "sketching"
+  | "detailing"
+  | "reflecting"
+  | "working"
+  | "error";
 
 type Focus = {
   id: string;
@@ -17,16 +23,4 @@ export const cursor = reactive({
 
 export const anchor = () => {
   return { x: window.innerWidth / 2, y: window.innerHeight - 32 };
-};
-
-window.cursorTestFn = () => {
-  const el = document.createElement("div");
-  el.innerText = "test";
-  el.dataset["nodeId"] = "test";
-  cursor.focus.push({
-    id: "test",
-    element: el
-  });
-
-  document.body.prepend(el);
 };

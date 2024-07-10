@@ -53,7 +53,6 @@ export class ComCursor extends LitElement {
   static override styles = css`
     :host {
       position: absolute;
-      pointer-events: none;
       z-index: 9999;
       transform: translate(-50%, -50%);
     }
@@ -79,8 +78,18 @@ export class ComCursor extends LitElement {
     .cursor-bubble.idle {
       background-color: #fff;
     }
-    .cursor-bubble.thinking {
+    .cursor-bubble.sketching {
       background-color: #efa3f7;
+      width: auto;
+      max-width: 400px;
+    }
+    .cursor-bubble.detailing {
+      background-color: #f7a3de;
+      width: auto;
+      max-width: 400px;
+    }
+    .cursor-bubble.reflecting {
+      background-color: #a3a4f7;
       width: auto;
       max-width: 400px;
     }
@@ -171,7 +180,7 @@ export class ComCursor extends LitElement {
       this.blurInput();
     }
 
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && this.isInputFocused) {
       e.preventDefault();
       this.dispatchEvent(
         new CustomEvent("message", {
@@ -270,12 +279,21 @@ export class ComCursor extends LitElement {
   }
 
   override render() {
+    const onPlayPause = () => {
+      this.dispatchEvent(new CustomEvent("toggled"));
+    };
+
     return html`
       <div
         class="cursor-bubble ${cursor.state} ${this.isAnimating
           ? "bouncing"
           : ""} ${this.isInputFocused ? "expanded" : ""}"
       >
+        ${this.isInputFocused
+          ? html``
+          : html`<button @click=${onPlayPause}>
+              ${cursor.state === "idle" ? "Go" : "Stop"}
+            </button>`}
         ${cursor.state === "idle"
           ? html` <textarea
               rows="1"

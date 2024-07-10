@@ -184,6 +184,43 @@ export function grabViewTemplate(txt: string) {
   return txt.match(/```vue\n([\s\S]+?)```/)?.[1];
 }
 
+function createTagRegex(tagName: string) {
+  // Escape special characters in the tag name
+  const escapedTagName = tagName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  // Create the regular expression
+  return new RegExp(
+    `<${escapedTagName}>([\\s\\S]*?)<\/${escapedTagName}>`,
+    "g"
+  );
+}
+
+export function grabTag(txt: string, tag: string = "plan") {
+  const regex = createTagRegex(tag);
+  const matches = [];
+  let match;
+
+  while ((match = regex.exec(txt)) !== null) {
+    // match[1] contains the content inside the capturing group
+    matches.push(match[1]);
+  }
+
+  return matches[0];
+}
+
+export function grabAllTags(txt: string, tag: string = "plan") {
+  const regex = createTagRegex(tag);
+  const matches = [];
+  let match;
+
+  while ((match = regex.exec(txt)) !== null) {
+    // match[1] contains the content inside the capturing group
+    matches.push(match[1]);
+  }
+
+  return matches;
+}
+
 export function grabJson(txt: string) {
   const json = txt.match(/```json\n([\s\S]+?)```/)?.[1];
   if (!json) {

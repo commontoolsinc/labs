@@ -1,48 +1,57 @@
 export const codePrompt = `
-  Your task is to take a user description or request and produce a series of nodes for a computation graph. Nodes can be code blocks or UI components and they communicate with named ports.
+  Your task is to take a specification produce a series of nodes + connections for a computation graph. Nodes can be code blocks or UI components and they communicate with named ports.
 
-  You will construct the graph using the available tools to add, remove, replace and list nodes.
-  You will provide the required edges to connect data from the environment to the inputs of the node. The keys of \`in\` are the names of local inputs and the values are NodePaths (of the form [context, nodeId], where context is typically '.' meaning local namespace).
+  You will construct the graph using the available tools to add, remove, replace and list nodes to make it consistent with the specification. Make the minimal edits necessary to achieve the desired result.
+
+  Examples of tasks include:
 
   "Imagine some todos" ->
 
-  map({
+  func({
     "id": "todos",
     "code": "return [{ label: 'Water my plants', checked: false }, { label: 'Buy milk', checked: true }];"
   })
 
   Tasks that take no inputs require no edges.
-  All function bodies must take zero parameters. Inputs can be accessed via 'read' and 'deref'.
+  All function bodies must take zero parameters. Inputs can be accessed via 'read'.
 
   ---
 
-  "Remind me to water the plants" ->
+  "Add a button to generate a random number"
 
-  map({
-    "id": "addReminder",
-    "code": "const todos = input('todos');\nconst newTodo = { label: 'water the plants', checked: false };\nconst newTodos = [...todos, newTodo];\nreturn newTodos;"
+  ui({
+    "id": "generateRandom",
+    "uiTree": {
+      "tag": "button",
+      "props": {
+        "@click": "clicked"
+      },
+      "children": [ "Click me" ]
+    }
   })
 
-  Tasks that take no inputs require no edges.
+  listen({
+    "event": "clicked",
+    "id": "generateRandom",
+    "code": "return Math.random()"
+  })
 
   ---
 
+  "Take the existing todos and filter to unchecked"
 
-  "Take the existing todos and filter to unchecked" ->
-
-  addCodeNode({
+  func({
     "id": "filteredTodos",
     "code": "const todos = input('todos');\nreturn todos.filter(todo => todo.checked);"
   })
 
   Tasks that filter other data must pipe the data through the edges.
   All function bodies must take zero parameters. Inputs can be accessed via 'input()', values may be null.
-  Always respond with code, even for static data. Wrap your response in a json block. Respond with nothing else.
 
   ---
 
   "render each image by url" ->
-  The output of a code node will be bound to the input named 'images'
+  Imagine the output of a code node will be bound to the input named 'images'
 
   ui({
     "id": "imageUi",
@@ -87,41 +96,40 @@ export const codePrompt = `
 
   ---
 
-  "make a clickable button" ->
+  "make a nametag with an editable name" ->
+  (this is more complex and would ideally be broken down to more granular steps, but you can deal with this too)
 
   data({
-    "id": "clicks",
-    "data": 0
+    "id": "name",
+    "data": ""
   })
 
-  func({
-    "id": "increment",
-    "code": "const clicks = input('clicks');\nreturn clicks + 1;"
+  listen({
+    "event": "onNameChanged",
+    "id": "updateName",
+    "code": "return input('value')"
   })
 
   ui({
-    "id": "buttonUi",
+    "id": "nameInputUi",
     "uiTree": {
-      "tag": "button",
+      "tag": "input",
       "props": {
-        "@click": { "@type": "binding", "name": "onClicked"}
-      },
-      "children": [
-        "Click me"
-      ]
+        "@change": { "@type": "binding", "name": "onNameChanged"}
+      }
     }
   })
 
   connect({
-    "from": "increment",
-    "to": "buttonUi"
-    "portName": "onClicked"
+    "from": "onNameChanged",
+    "to": "name"
+    "portName": "data"
   })
 
   connect({
-    "from": "increment",
-    "to": "clicks"
-    "portName": "value"
+    "from": "nameInputUi",
+    "to": "onNameChanged"
+    "portName": "target"
   })
 
   ---
