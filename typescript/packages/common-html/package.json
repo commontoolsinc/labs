@@ -7,7 +7,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "mocha lib/test/**/*.test.js",
+    "test": "npm run build && mocha lib/test/**/*.test.js",
     "test-browser": "npm run build && web-test-runner \"lib/test-browser/**/*.test.js\" --node-resolve",
     "build": "wireit",
     "clean": "wireit"
@@ -40,6 +40,7 @@
   },
   "devDependencies": {
     "@types/mocha": "^10.0.7",
+    "@types/node": "^20.14.10",
     "@web/test-runner": "^0.18.2",
     "mocha": "^10.6.0",
     "tslib": "^2.6.2",

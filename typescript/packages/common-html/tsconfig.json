@@ -13,7 +13,7 @@
         "../../node_modules/@commontools/io/lib/index.d.ts"
       ]
     },
-    "types": ["mocha"],
+    "types": ["node", "mocha"],
   },
   "include": [
     "src/**/*",
