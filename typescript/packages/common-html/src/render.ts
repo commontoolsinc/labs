@@ -1,6 +1,6 @@
 import { isNode, Node } from "./node.js";
 import { Renderable, Context, isRenderable } from "./html.js";
-import { isHole } from "./hole.js";
+import { Hole, isHole } from "./hole.js";
 import { effect } from "./reactive.js";
 import { isSendable } from "./sendable.js";
 import { useCancelGroup, Cancel } from "./cancel.js";
@@ -13,7 +13,7 @@ export const render = (renderable: Renderable): HTMLElement => {
   const root = renderNode(
     template,
     context,
-    addCancel
+    addCancel,
   ) as CancellableHTMLElement;
   root.cancel = cancel;
   return root;
@@ -24,7 +24,7 @@ export default render;
 const renderNode = (
   node: Node,
   context: Context,
-  addCancel: (cancel: Cancel) => void
+  addCancel: (cancel: Cancel) => void,
 ): HTMLElement | null => {
   const sanitizedNode = sanitizeNode(node);
   if (!sanitizedNode) {
@@ -38,7 +38,7 @@ const renderNode = (
       if (isEventProp(name)) {
         if (!isSendable(replacement)) {
           throw new TypeError(
-            `Event prop "${name}" does not have a send method`
+            `Event prop "${name}" does not have a send method`,
           );
         }
         const key = cleanEventProp(name);
@@ -102,7 +102,7 @@ const cleanEventProp = (key: string) => {
 const listen = (
   element: HTMLElement,
   key: string,
-  callback: (event: Event) => void
+  callback: (event: Event) => void,
 ) => {
   element.addEventListener(key, callback);
   return () => {

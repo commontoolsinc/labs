@@ -1,7 +1,7 @@
 import render from "../src/render.js";
 import html from "../src/html.js";
 import { state, stream } from "../src/state.js";
-import { setDebug } from "../src/log.js";
+import { setDebug } from "../src/logger.js";
 
 setDebug(true);
 

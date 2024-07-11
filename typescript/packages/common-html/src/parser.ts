@@ -72,7 +72,7 @@ const parseAttrs = (attrs: { [key: string]: string }): Attrs => {
     }
   }
   return result;
-}
+};
 
 export class ParseError extends TypeError {
   constructor(message: string) {
