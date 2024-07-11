@@ -10,7 +10,8 @@
     "test": "npm run build && mocha lib/test/**/*.test.js",
     "test-browser": "npm run build && web-test-runner \"lib/test-browser/**/*.test.js\" --node-resolve",
     "build": "wireit",
-    "clean": "wireit"
+    "clean": "wireit",
+    "dev": "vite example"
   },
   "repository": {
     "type": "git",
@@ -25,7 +26,8 @@
     "./lib/index.js"
   ],
   "dependencies": {
-    "sax": "^1.4.1"
+    "sax": "^1.4.1",
+    "vite": "^5.3.3"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.7",
