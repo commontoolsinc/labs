@@ -2,6 +2,7 @@ import parse from "./parser.js";
 import { Node, isNode } from "./node.js";
 import * as hole from "./hole.js";
 import { NamedReactive } from "./reactive.js";
+import * as logger from "./logger.js";
 
 export const html = (
   strings: TemplateStringsArray,
@@ -21,13 +22,17 @@ export const html = (
     throw TypeError("Template root must be an element");
   }
 
-  const context = Object.freeze(indexContext(values));
+  const context = indexContext(values);
 
-  return Object.freeze({
+  const renderable: Renderable = {
     type: "renderable",
     template,
     context,
-  })
+  };
+
+  logger.debug("Renderable", renderable);
+
+  return renderable;
 };
 
 export default html;
@@ -46,14 +51,16 @@ export type Context = { [key: string]: NamedReactive<unknown> };
 
 const indexContext = (items: Array<NamedReactive<unknown>>): Context => {
   return Object.fromEntries(items.map((item) => [item.name, item]));
-}
+};
 
 const flattenTemplateStrings = (
   strings: TemplateStringsArray,
-  values: Array<NamedReactive<unknown>>
+  values: Array<NamedReactive<unknown>>,
 ): string => {
-  return strings.reduce((result, string, i) => {
+  const templateString = strings.reduce((result, string, i) => {
     const value = values[i];
     return result + string + (value ? hole.markup(value.name) : "");
   }, "");
-}
+  logger.debug("Flattened", templateString);
+  return templateString;
+};

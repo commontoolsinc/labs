@@ -1,9 +1,10 @@
 import { isNode, Node } from "./node.js";
 import { Renderable, Context, isRenderable } from "./html.js";
-import { Hole, isHole } from "./hole.js";
+import { isHole } from "./hole.js";
 import { effect } from "./reactive.js";
 import { isSendable } from "./sendable.js";
 import { useCancelGroup, Cancel } from "./cancel.js";
+import * as logger from "./logger.js";
 
 export type CancellableHTMLElement = HTMLElement & { cancel?: Cancel };
 
@@ -16,6 +17,7 @@ export const render = (renderable: Renderable): HTMLElement => {
     addCancel,
   ) as CancellableHTMLElement;
   root.cancel = cancel;
+  logger.debug("Rendered", root);
   return root;
 };
 

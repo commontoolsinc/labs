@@ -2,6 +2,7 @@ import sax from "sax";
 import parseMustaches from "./stache.js";
 import { isHole } from "./hole.js";
 import { create as createNode, Node, Attrs } from "./node.js";
+import * as logger from "./logger.js";
 
 /** Parse a template into a simple JSON markup representation */
 export const parse = (markup: string): Node => {
@@ -50,6 +51,8 @@ export const parse = (markup: string): Node => {
   if (getTop(stack) !== root) {
     throw new ParseError(`Unexpected root node ${root.tag}`);
   }
+
+  logger.debug("Parsed", root);
 
   return root;
 };

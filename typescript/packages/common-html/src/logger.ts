@@ -12,7 +12,6 @@ export const setDebug = (value: boolean) => {
   isDebug = value;
 };
 
-
 /** Log warning */
 export const warn = (...args: unknown[]) => {
   console.warn(...args);
