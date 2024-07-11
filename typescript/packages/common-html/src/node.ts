@@ -25,9 +25,3 @@ export const create = (
 export const isNode = (value: unknown): value is Node => {
   return (value as Node)?.type === "node";
 };
-
-export const freezeNode = (node: Node): Node => {
-  Object.freeze(node.attrs);
-  Object.freeze(node.children);
-  return Object.freeze(node);
-};

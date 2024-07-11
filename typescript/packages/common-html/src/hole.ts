@@ -4,10 +4,10 @@ export type Hole = {
 };
 
 export const create = (name: string): Hole => {
-  return Object.freeze({
+  return {
     type: "hole",
     name,
-  });
+  };
 };
 
 export const isHole = (value: unknown): value is Hole => {

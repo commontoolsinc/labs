@@ -1,10 +1,11 @@
 import parse from "./parser.js";
 import { Node, isNode } from "./node.js";
 import * as hole from "./hole.js";
+import { NamedReactive } from "./reactive.js";
 
 export const html = (
   strings: TemplateStringsArray,
-  ...values: Named[]
+  ...values: Array<NamedReactive<unknown>>
 ): Renderable => {
   const templateMarkup = flattenTemplateStrings(strings, values);
   const root = parse(templateMarkup);
@@ -36,19 +37,19 @@ export type Renderable = {
   context: Context;
 };
 
-export type Context = { [key: string]: Named };
-
-export type Named = {
-  name: string;
+export const isRenderable = (value: unknown): value is Renderable => {
+  return (value as Renderable)?.type === "renderable";
 };
 
-const indexContext = (items: Named[]): Context => {
+export type Context = { [key: string]: NamedReactive<unknown> };
+
+const indexContext = (items: Array<NamedReactive<unknown>>): Context => {
   return Object.fromEntries(items.map((item) => [item.name, item]));
 }
 
 const flattenTemplateStrings = (
   strings: TemplateStringsArray,
-  values: Named[]
+  values: Array<NamedReactive<unknown>>
 ): string => {
   return strings.reduce((result, string, i) => {
     const value = values[i];
