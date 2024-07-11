@@ -8,7 +8,6 @@ import { Cancel, isCancel } from "./cancel.js";
  * - `sink()` must return a `Cancel` function that can be called to unsubscribe.
  */
 export type Reactive<T> = {
-  get: () => T;
   sink: (callback: (value: T) => void) => Cancel;
 };
 

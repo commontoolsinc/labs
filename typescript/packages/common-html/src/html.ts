@@ -8,6 +8,7 @@ export const html = (
   ...values: Array<NamedReactive<unknown>>
 ): Renderable => {
   const templateMarkup = flattenTemplateStrings(strings, values);
+
   const root = parse(templateMarkup);
 
   if (root.children.length !== 1) {
