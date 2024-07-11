@@ -103,12 +103,12 @@ describe("render", () => {
     assertEqual(called, 3);
   });
 
-  // it("renders children as text nodes", () => {
-  //   const name = "world";
-  //   const template = html`<div>Hello, ${name}</div>`;
-  //   const element = render(template);
-  //   assert(element instanceof HTMLDivElement);
-  //   assertEqual(element.textContent, "Hello, world");
-  //   console.log(element.textContent);
-  // });
+  it("renders children as text nodes", () => {
+    const name = "world";
+    const template = html`<div>Hello, ${name}</div>`;
+    const element = render(template);
+    assert(element instanceof HTMLDivElement);
+    assertEqual(element.textContent, "Hello, world");
+    console.log(element.textContent);
+  });
 });

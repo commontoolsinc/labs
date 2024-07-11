@@ -5,6 +5,7 @@ import { useCancelGroup, Cancel, Cancellable } from "./cancel.js";
 import { Template, TemplateContext, isTemplate } from "./html.js";
 import { effect } from "./reactive.js";
 import { isSendable } from "./sendable.js";
+import { replaceNextSiblingWith, insertAfter } from "./dom.js";
 
 export { setDebug } from "./log.js";
 
@@ -51,7 +52,8 @@ export const render = (tpl: Template) => {
         }
       }
     } else if (node.nodeType === Node.TEXT_NODE) {
-      const cancel = bindContent(node, context);
+      const textNode = node as Text;
+      const cancel = bindContent(textNode, context);
       addCancel(cancel);
     }
   }
@@ -112,6 +114,12 @@ const salt = randomSalt();
 
 const placeholderRegex = new RegExp(`#hole${salt}-(\\d+)#`);
 
+/**
+ * Create a placeholder for an index.
+ * We wrap the placeholder in a comment.
+ * Within attribute position, a comment is treated as plain text.
+ * In content position, it's treated as a comment.
+ */
 const placeholder = (i: number) => `#hole${salt}-${i}#`;
 
 const matchPlaceholder = (value: unknown): number | null => {
@@ -123,6 +131,10 @@ const matchPlaceholder = (value: unknown): number | null => {
     return null;
   }
   return parseInt(match[1], 10);
+};
+
+const stripPlaceholder = (value: string): string => {
+  return value.replace(placeholderRegex, "");
 };
 
 /**
@@ -198,46 +210,29 @@ const walkElementAndTextNodes = (root: Node): Array<Node> => {
   }
 };
 
-const replaceWith = (node: Node, replacement: Node) => {
-  const parentNode = node.parentNode;
-  if (parentNode == null) {
-    warn("Parent node is null, cannot replace node.", node);
-    return;
-  }
-  parentNode.replaceChild(replacement, node);
-};
-
-const replaceNextSiblingWith = (node: Node, replacement: Node) => {
-  if (node.nextSibling == null) {
-    const parentNode = node.parentNode;
-    if (parentNode == null) {
-      warn("Parent node is null, cannot replace node.", node);
-      return;
-    }
-    parentNode.insertBefore(replacement, node.nextSibling);
-    return;
-  }
-  replaceWith(node.nextSibling, replacement);
-};
-
-const bindContent = (node: Node, context: TemplateContext): Cancel => {
+const bindContent = (node: Text, context: TemplateContext): Cancel => {
   const i = matchPlaceholder(node.nodeValue);
 
-  // Don't set null props
+  // No match? Ordinary text. Do nothing.
   if (i == null) {
-    debug(`Ordinary text node`, node);
     return noOp;
   }
 
+  // Strip placeholder from text node
+  const textWithoutPlaceholder = stripPlaceholder(node.nodeValue);
+  node.textContent = textWithoutPlaceholder;
+
   const replacement = context[i];
+
+  // No replacement? Do nothing.
   if (replacement == null) {
     return noOp;
   }
 
-  // We use this comment as a stable anchor in the DOM when doing reactive
-  // re-renders of the content.
-  const anchor = document.createComment("TEMPLATE_ANCHOR") as Comment;
-  replaceWith(node, anchor);
+  // Create a new comment to use as a stable anchor in the DOM when doing
+  // reactive re-renders of the content.
+  const anchor = document.createComment("#anchor#") as Comment;
+  insertAfter(node, anchor);
 
   return effect(replacement, (replacement) => {
     if (isTemplate(replacement)) {
