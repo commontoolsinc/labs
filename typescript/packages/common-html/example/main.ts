@@ -6,6 +6,11 @@ import { setDebug } from "../src/log.js";
 setDebug(true);
 
 const text = state("text", "Hello, world!");
+
+setInterval(() => {
+  text.send(`Hello, world! ${new Date().toLocaleTimeString()}`);
+}, 1000);
+
 const clicks = stream("clicks");
 
 clicks.sink((value) => {
