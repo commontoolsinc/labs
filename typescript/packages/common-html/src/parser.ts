@@ -1,10 +1,10 @@
 import sax from "sax";
 import parseMustaches from "./stache.js";
 import { isHole } from "./hole.js";
-import { create as createNode, Node, Attrs } from "./node.js";
+import { create as createNode, freezeNode, Node, Attrs } from "./node.js";
 
-/** Parse a template into a simple object representation */
-export const parse = (xml: string): Node => {
+/** Parse a template into a simple JSON markup representation */
+export const parse = (markup: string): Node => {
   const strict = false;
   const parser = sax.parser(strict, {
     trim: true,
@@ -32,8 +32,12 @@ export const parse = (xml: string): Node => {
     stack.push(next);
   };
 
-  parser.onclosetag = (_tagName) => {
-    stack.pop();
+  parser.onclosetag = (tagName) => {
+    const node = stack.pop();
+    if (!node) {
+      throw new ParseError(`Unexpected closing tag ${tagName}`);
+    }
+    freezeNode(node);
   };
 
   parser.ontext = (text) => {
@@ -42,13 +46,13 @@ export const parse = (xml: string): Node => {
     top.children.push(...parsed);
   };
 
-  parser.write(xml).close();
+  parser.write(markup).close();
 
   if (getTop(stack) !== root) {
     throw new ParseError(`Unexpected root node ${root.tag}`);
   }
 
-  return root;
+  return freezeNode(root);
 };
 
 export default parse;

@@ -1,7 +1,7 @@
 import { Hole } from "./hole.js";
 
 export type Node = {
-  type: "node",
+  type: "node";
   tag: string;
   attrs: Attrs;
   children: Children;
@@ -21,3 +21,13 @@ export const create = (
   attrs,
   children,
 });
+
+export const isNode = (value: unknown): value is Node => {
+  return (value as Node)?.type === "node";
+};
+
+export const freezeNode = (node: Node): Node => {
+  Object.freeze(node.attrs);
+  Object.freeze(node.children);
+  return Object.freeze(node);
+};

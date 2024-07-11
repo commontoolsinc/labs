@@ -17,3 +17,5 @@ export const isHole = (value: unknown): value is Hole => {
     (value as Hole).type === "hole"
   );
 };
+
+export const markup = (name: string) => `{{${name}}}`
