@@ -80,24 +80,23 @@ export async function suggest(input: string, fullPlan: Conversation) {
   return response.choices[0].message;
 }
 
-export function sketchHighLevelApproachPrompt(userInput: string) {
+export function sketchHighLevelApproachPrompt(
+  userRequests: string[],
+  existingPlan: string,
+  graphSnapshot: string
+) {
   return {
     system: `You will create a specification for an ephemeral software application. We will start at a high level, natural language sketch of the approach.
 
       The environment is a reactive graph computation model. Modules, a.k.a nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules include:
 
-      - data nodes to store state
-      - mapping functions to apply pure transformations to data
-      - event listener nodes to respond to user input
-      - UI nodes to render the data (html, svg, vega-lite, voxels, etc.)
-      - effect nodes to access http, language models, databases, etc.
+      ${describeTools(toolSpec, false)}
 
       Each node has one or more inputs and a single output. Plan your approach in a document format like so:
 
       <user-request>Make a counter with a button</user-request>
 
       <plan>
-        <prompt>Make a counter with a button</prompt>
         <step>Declare the counter, default to 0</step>
         <step>Create a button, label it "increment", on click it dispatches an event named "clicked"</step>
         <step>Add an event handler to listen for "clicked" and increment the counter</step>
@@ -107,30 +106,51 @@ export function sketchHighLevelApproachPrompt(userInput: string) {
       <user-request>Make a voxel sphere</user-request>
 
       <plan>
-        <prompt>Make a voxel sphere</prompt>
         <step>Declare a variable for sphere radius</step>
         <step>Declare a function to generate the voxels for a sphere</step>
         <step>Create a UI (voxel) node to display the geometry</step>
       </plan>
 
-      Be clear but concise, using technical terms. Every word is a wasted moment for the user but they must understand your reasoning.`,
+      Be clear but concise, using technical terms. Every word is a wasted moment for the user but they must understand your reasoning.
 
-    prompt: `Service the minimal useful version of this request: <user-request>${userInput}</user-request>.`
+      The specification may already be partially implemented, see this snapshot of the current state:
+      <graph>
+        ${graphSnapshot}
+      </graph>
+
+      ${
+        existingPlan.length > 0
+          ? `The user and you have already collaborated on a WIP specification:
+
+        <plan>${existingPlan}</plan>
+
+        You should modify the plan retaining as much as possible to service all of the user's requests.`
+          : ``
+      }
+      `,
+
+    prompt: `${userRequests.map((req) => `<user-request>${req}</user-request>`).join("\n")}`
   };
 }
 
-export function planIdentifiers(step: string, userInput: string) {
+export function planIdentifiers(
+  step: string,
+  userRequests: string[],
+  existingPlan: string,
+  graphSnapshot: string
+) {
   return {
     system: `You will enrich a specification for an ephemeral software application by detailing components needed to implement it.
 
       The environment is a reactive graph computation model. Modules, a.k.a nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules include:
 
-      ${describeTools(toolSpec, false)}
+      ${describeTools(toolSpec, true)}
 
       Each node has one or more inputs and a single output. You will work step by step and enrich a loose plan, so for an example plan:
 
+      <user-request>Counter with button</user-request>
+
       <plan>
-        <prompt>Counter with button</prompt>
         <step>Declare the counter, default to 0</step>
         <step>Create a button, label it "increment", on click it dispatches an event named "clicked"</step>
         <step>Add an event handler to listen for "clicked" and increment the counter</step>
@@ -153,8 +173,9 @@ export function planIdentifiers(step: string, userInput: string) {
 
       Another example plan:
 
+      <user-request>Make a sphere</user-request>
+
       <plan>
-        <prompt>Make a sphere</prompt>
         <step>Declare a variable for sphere radius</step>
         <step>Declare a function to generate the voxels for a sphere</step>
         <step>Create a UI (voxel) node to display the geometry</step>
@@ -171,13 +192,28 @@ export function planIdentifiers(step: string, userInput: string) {
 
       You will receive a single <step>, return the enriched version within a <result> tag.
 
-      <user-request>${userInput}</user-request>`,
+      ${userRequests.map((request) => `<user-request>${request}</user-request>`).join("\n")}
+
+      The specification may already be partially implemented, see this snapshot of the current state:
+      <graph>
+        ${graphSnapshot}
+      </graph>
+
+      ${
+        existingPlan.length > 0
+          ? `The user and you have already collaborated on a WIP specification, you should refer to this to inform your enriching, the step may already be correct.
+      <plan>${existingPlan}</plan>`
+          : ``
+      }
+
+      Define all functions as signature stubs, modify the plan to add more detail about the intended implementation as needed.
+      Pay extra attention to connecting all parameters to functions and UI nodes. They cannot access data without explicit connections.`,
 
     prompt: step
   };
 }
 
-export function makeConsistent(plan: string) {
+export function makeConsistent(plan: string, userRequests: string[]) {
   return {
     system: `You will audit and fix a specification for an ephemeral software application. The plan consists of a natural language description of the approach and a psuedocode sketch of the various elements.
 
@@ -195,8 +231,10 @@ export function makeConsistent(plan: string) {
 
       It may have inconsistencies, like a missing step, a step out of order, mismatched identifiers or a decoupling of the step from the psuedocode.
 
+      <user-request>Make a coin flipper</user-request>
+      <user-request>Make the label DO IT!</user-request>
+
       <plan>
-        <prompt>Flip a coin</prompt>
         <step>Create a data node to store the coin state (heads or tails)</step>
         <identifier>coinState = "tails"</identifier>
         <step>Add a button UI node labeled "Flip Coin"</step>
@@ -211,12 +249,14 @@ export function makeConsistent(plan: string) {
 
       You will return a corrected version of the plan within a <corrected-plan> tag:
 
+      <user-request>Make a coin flipper</user-request>
+      <user-request>Make the label DO IT!</user-request>
+
       <corrected-plan>
-        <prompt>Flip a coin</prompt>
         <step>Create a data node to store the coin state (heads or tails)</step>
         <identifier>coinState = "tails"</identifier>
-        <step>Add a button UI node labeled "Do it!"</step>
-        <identifier>addButton = button({ label: "Do it!", "@click": "clicked" })</identifier>
+        <step>Add a button UI node labeled "DO IT!"</step>
+        <identifier>addButton = button({ label: "DOI IT!", "@click": "clicked" })</identifier>
         <step>Create an event listener for the button click and update the coin state</step>
         <identifier>flipCoin = on("clicked", () => Math.random() < 0.5 ? 'heads' : 'tails')</identifier>
         <connection>flipCoin -> coinState</connection>
@@ -225,9 +265,13 @@ export function makeConsistent(plan: string) {
         <connection>coinState -> text.coinState</connection>
       </corrected-plan>
 
+      Avoid fully specifying function bodies, but feel free sketch the implementation or leave a clarifying comment for later.
+      Do not significantly rework the entire document, do not introduce new features.
       Be clear but concise, using technical terms. Every word is a wasted moment for the user but they must understand your reasoning.
 
       Take extra care not to bloat the request beyond the original scope, implement the MVP that satisfies the user request.
+
+      ${userRequests.map((request) => `<user-request>${request}</user-request>`).join("\n")}
       `,
 
     prompt: plan

@@ -1,5 +1,5 @@
 import { ChatCompletionMessageParam } from "openai/resources/index.mjs";
-import { appPlan } from "../components/com-app.js";
+import { session } from "../components/com-app.js";
 import { Message } from "../data.js";
 import { reactive } from "@vue/reactivity";
 
@@ -16,5 +16,5 @@ export async function updateThought(
 ) {}
 
 export async function recordThought(message: Message) {
-  appPlan.history.push(message);
+  session.history.push(message);
 }

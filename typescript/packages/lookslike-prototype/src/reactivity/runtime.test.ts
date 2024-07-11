@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { Recipe, RecipeConnectionMap, RecipeNode } from "../data.js";
-import { Graph, Node } from "./runtime.js";
+import { Graph, RuntimeNode } from "./runtime.js";
 
 import {
   reactive,
@@ -72,21 +72,21 @@ test("Node test", () => {
   pauseScheduling();
   const state = reactive({});
 
-  const a = new Node(state, "inputA", {
+  const a = new RuntimeNode(state, "inputA", {
     id: "inputA",
     body: "1",
     contentType: CONTENT_TYPE_DATA
   });
   a.update();
 
-  const b = new Node(state, "inputB", {
+  const b = new RuntimeNode(state, "inputB", {
     id: "inputB",
     body: "2",
     contentType: CONTENT_TYPE_DATA
   });
   b.update();
 
-  const sum = new Node(state, "sum", {
+  const sum = new RuntimeNode(state, "sum", {
     id: "sum",
     body: "(a, b) => a + b",
     contentType: CONTENT_TYPE_JAVASCRIPT

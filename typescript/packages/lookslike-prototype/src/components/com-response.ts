@@ -13,13 +13,15 @@ import {
   CONTENT_TYPE_CLOCK,
   CONTENT_TYPE_STORAGE,
   CONTENT_TYPE_SCENE,
-  CONTENT_TYPE_DATA
+  CONTENT_TYPE_DATA,
+  CONTENT_TYPE_EVENT_LISTENER
 } from "../contentType.js";
 import { appState } from "./com-app.js";
 import { effect } from "@vue/reactivity";
+import { RuntimeNode } from "../reactivity/runtime.js";
 
 function renderNode(
-  node: RecipeNode,
+  node: RuntimeNode,
   value: any,
   dispatch: (event: CustomEvent) => void
 ) {
@@ -37,8 +39,14 @@ function renderNode(
     );
   };
 
-  switch (node.contentType) {
+  switch (node.definition.contentType) {
     case CONTENT_TYPE_JAVASCRIPT:
+      return html`<com-module-code
+        .node=${node}
+        .value=${value}
+        @updated=${relay}
+      ></com-module-code>`;
+    case CONTENT_TYPE_EVENT_LISTENER:
       return html`<com-module-code
         .node=${node}
         .value=${value}
@@ -111,7 +119,7 @@ const styles = css`
 export class ComResponse extends LitElement {
   static override styles = [base, styles];
 
-  @property({ type: Object }) node: RecipeNode | null = null;
+  @property({ type: Object }) node: RuntimeNode | null = null;
   onCancel: () => void = () => {};
   @state() value: any = {};
   cancel: () => void = () => {};
@@ -121,7 +129,7 @@ export class ComResponse extends LitElement {
 
     effect(() => {
       if (!this.node) return;
-      this.value = appState[this.node.id];
+      this.value = this.node.read();
     });
   }
 
@@ -147,7 +155,6 @@ export class ComResponse extends LitElement {
       <div class="response">
         ${definition}
         <slot></slot>
-        <button @click=${onRun}>Run</button>
       </div>
     `;
   }

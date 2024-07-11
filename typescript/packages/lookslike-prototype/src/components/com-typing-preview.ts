@@ -13,7 +13,7 @@ export class ComTypingPreview extends LitElement {
   `;
 
   @property({ type: String })
-  text = "";
+  text: string | undefined = "";
 
   @property({ type: Number })
   windowSize = 40;

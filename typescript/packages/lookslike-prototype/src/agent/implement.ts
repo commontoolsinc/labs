@@ -1,7 +1,7 @@
 export const codePrompt = `
   Your task is to take a specification produce a series of nodes + connections for a computation graph. Nodes can be code blocks or UI components and they communicate with named ports.
 
-  You will construct the graph using the available tools to add, remove, replace and list nodes to make it consistent with the specification. Make the minimal edits necessary to achieve the desired result.
+  You will construct the graph using the available tools to add, remove, replace and list nodes to make it consistent with the specification. Make the minimal edits necessary to achieve the desired result, pay extra attention to connections.
 
   Examples of tasks include:
 
@@ -178,5 +178,6 @@ export const codePrompt = `
   UI trees cannot use any javascript methods, code blocks must prepare the data for the UI to consume.
   Bindings for text nodes MUST be applied using the innerText prop.
   GLSL shaders cannot declare uniforms other than iTime, iResolution, iMouse and iChannel0 (the user's webcam).
-  notalk;justgo
+
+  Make to check the connections and data flow through the entire graph at each step. Keep commentary to a minimum.
 `;

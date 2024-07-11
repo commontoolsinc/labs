@@ -49,6 +49,7 @@ export type RecipeConnectionMap = { [nodeId: string]: ConnectionMap };
 export type RecipeNode = {
   id: string;
   contentType: string;
+  comment?: string;
   body: any;
   evalMode?: EvalMode;
 };

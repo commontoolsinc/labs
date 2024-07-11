@@ -1,7 +1,9 @@
 import { LitElement, html, css } from "lit-element";
-import { customElement, property } from "lit/decorators.js";
+import { customElement, state, property } from "lit/decorators.js";
 import { RecipeNode } from "../../data.js";
 import * as THREE from "three";
+import { RuntimeNode } from "../../reactivity/runtime.js";
+import { effect } from "@vue/reactivity";
 
 const styles = css``;
 
@@ -77,8 +79,8 @@ class VoxelRenderer {
 export class ComModuleScene extends LitElement {
   static override styles = [styles];
 
-  @property() node: RecipeNode | null = null;
-  @property() value: any = [];
+  @property() node: RuntimeNode | null = null;
+  @state() value: any = [];
   voxelData: { position: [number, number, number]; color: number }[] = [
     { position: [0, 0, 0], color: 0xff0000 },
     { position: [1, 0, 0], color: 0x00ff00 },
@@ -100,22 +102,19 @@ export class ComModuleScene extends LitElement {
     }
   }
 
+  override connectedCallback(): void {
+    super.connectedCallback();
+    effect(() => {
+      if (this.node) {
+        this.value = this.node.read();
+      }
+    });
+  }
+
   override render() {
     if (!this.node || !this.value) {
       return html`<pre>loading...</pre>`;
     }
-
-    const codeChanged = (ev: CustomEvent) => {
-      if (!this.node) return;
-
-      this.node.body = ev.detail.code;
-      const event = new CustomEvent("updated", {
-        detail: {
-          body: this.node.body
-        }
-      });
-      this.dispatchEvent(event);
-    };
 
     const test = (scene: THREE.Scene) => {
       const voxelRenderer = new VoxelRenderer(this.voxelData);
@@ -123,9 +122,6 @@ export class ComModuleScene extends LitElement {
       voxelRenderer.update(scene);
     };
 
-    return html`
-      <com-data .data=${JSON.stringify(this.value)}></com-data>
-      <com-scene .create=${test}></com-scene>
-    `;
+    return html` <com-scene .create=${test}></com-scene> `;
   }
 }

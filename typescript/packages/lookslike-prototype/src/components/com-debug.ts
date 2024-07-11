@@ -26,7 +26,7 @@ export default class DebugWindow extends LitElement {
   static styles = css`
     :host {
       position: fixed;
-      top: 10px;
+      bottom: 10px;
       right: 10px;
       min-width: 256px;
       min-height: 128px;

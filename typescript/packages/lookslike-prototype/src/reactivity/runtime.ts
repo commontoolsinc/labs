@@ -2,6 +2,7 @@ import {
   CONTENT_TYPE_CLOCK,
   CONTENT_TYPE_DATA,
   CONTENT_TYPE_FETCH,
+  CONTENT_TYPE_GLSL,
   CONTENT_TYPE_IMAGE,
   CONTENT_TYPE_JAVASCRIPT,
   CONTENT_TYPE_LLM,
@@ -33,7 +34,7 @@ const intervals = {} as { [key: string]: NodeJS.Timeout };
 
 async function executeNode(
   graph: Graph,
-  node: Node,
+  node: RuntimeNode,
   inputs: { [key: string]: any }
 ): Promise<any> {
   console.log("executing", node.id);
@@ -46,6 +47,8 @@ async function executeNode(
         node.definition.evalMode
       );
       return result;
+    case CONTENT_TYPE_GLSL:
+      return node.definition.body;
     case CONTENT_TYPE_DATA: {
       // read the value from any input key and use that as the new value, if no inputs use the old value
       const value = Object.values(inputs).filter(
@@ -134,7 +137,7 @@ async function executeNode(
 }
 
 export class Graph {
-  public nodes: Map<string, Node> = new Map();
+  public nodes: Map<string, RuntimeNode> = new Map();
   public history: any[] = [];
   public version = ref(0);
 
@@ -199,7 +202,7 @@ export class Graph {
     if (node) {
       node.definition = definition;
     } else {
-      node = new Node(this.db, id, definition);
+      node = new RuntimeNode(this.db, id, definition);
     }
 
     this.log("adding", id);
@@ -258,7 +261,7 @@ export class Graph {
   }
 }
 
-export class Node {
+export class RuntimeNode {
   private runner?: ReactiveEffectRunner;
   public inputs: Map<string, string> = new Map();
   public graph: Graph | undefined;

@@ -4,10 +4,11 @@ import { anchor, cursor } from "../agent/cursor.js";
 import { watch } from "../reactivity/watch.js";
 import { computed, effect } from "@vue/reactivity";
 import { mix } from "../math.js";
-import { appPlan } from "./com-app.js";
+import { session } from "./com-app.js";
 
 const lastHistory = computed(
-  () => appPlan.history[appPlan.history.length - 1].content
+  () =>
+    session.history[session.history.length - 1]?.content as string | undefined
 );
 
 const restingPoint = computed(() => {

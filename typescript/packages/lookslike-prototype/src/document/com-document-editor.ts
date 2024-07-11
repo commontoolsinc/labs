@@ -2,11 +2,41 @@ import { LitElement, html, css, PropertyValues } from "lit";
 import { customElement, property, query } from "lit/decorators.js";
 import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
-import { Schema, DOMParser } from "prosemirror-model";
+import { Schema, DOMParser, DOMSerializer } from "prosemirror-model";
 import { baseKeymap } from "prosemirror-commands";
 import { keymap } from "prosemirror-keymap";
 import { effect } from "@vue/reactivity";
 import { appDocument } from "../components/com-app.js";
+
+const mySchema = new Schema({
+  nodes: {
+    text: {},
+    step: {
+      content: "text*",
+      toDOM() {
+        return ["step", 0];
+      },
+      parseDOM: [{ tag: "step" }]
+    },
+    identifier: {
+      content: "text*",
+      toDOM() {
+        return ["identifier", 0];
+      },
+      parseDOM: [{ tag: "identifier" }]
+    },
+    connection: {
+      content: "text*",
+      toDOM() {
+        return ["connection", 0];
+      },
+      parseDOM: [{ tag: "connection" }]
+    },
+    doc: {
+      content: `(step | identifier | connection)+`
+    }
+  }
+});
 
 @customElement("com-document-editor")
 export class ComDocumentEditor extends LitElement {
@@ -148,43 +178,6 @@ export class ComDocumentEditor extends LitElement {
   }
 
   private initializeProseMirror() {
-    const mySchema = new Schema({
-      nodes: {
-        text: {},
-        prompt: {
-          content: "text*",
-          toDOM() {
-            return ["prompt", 0];
-          },
-          parseDOM: [{ tag: "prompt" }]
-        },
-        step: {
-          content: "text*",
-          toDOM() {
-            return ["step", 0];
-          },
-          parseDOM: [{ tag: "step" }]
-        },
-        identifier: {
-          content: "text*",
-          toDOM() {
-            return ["identifier", 0];
-          },
-          parseDOM: [{ tag: "identifier" }]
-        },
-        connection: {
-          content: "text*",
-          toDOM() {
-            return ["connection", 0];
-          },
-          parseDOM: [{ tag: "connection" }]
-        },
-        doc: {
-          content: `(prompt | step | identifier | connection)+`
-        }
-      }
-    });
-
     const state = EditorState.create({
       doc: DOMParser.fromSchema(mySchema).parse(this.createContentElement()),
       plugins: [keymap(baseKeymap)]
@@ -207,8 +200,23 @@ export class ComDocumentEditor extends LitElement {
   }
 
   private handleDocumentChange(state: EditorState) {
-    const content = state.doc.content.toString();
-    appDocument.content = content;
+    const content = DOMSerializer.fromSchema(mySchema).serializeFragment(
+      state.doc.content
+    );
+
+    console.log("doc changed", content);
+
+    if (content instanceof HTMLElement) {
+      console.log("updating text content");
+      appDocument.content = content.innerHTML;
+    } else if (content instanceof DocumentFragment) {
+      const textVersion = Array.from(content.children)
+        .map((child) => child.outerHTML)
+        .join("\n");
+      appDocument.content = textVersion;
+      console.log("updating text content", textVersion);
+    }
+
     this.dispatchEvent(
       new CustomEvent("document-change", { detail: { content } })
     );

@@ -30,20 +30,21 @@ import { ChatCompletionTool } from "openai/resources/index.mjs";
 import { toolSpec } from "../agent/tools.js";
 import { computed, reactive } from "@vue/reactivity";
 import { Graph } from "../reactivity/runtime.js";
-import { Recipe, SpecTree } from "../data.js";
 import { cursor } from "../agent/cursor.js";
 import { watch } from "../reactivity/watch.js";
 import { grabAllTags, grabTag } from "../agent/llm.js";
+import { css } from "lit";
+import { Message } from "../data.js";
 
-export const appPlan: SpecTree = reactive({
-  history: [],
-  steps: []
+export const session = reactive({
+  history: [] as Message[]
 });
+
 export const appState = reactive({} as any);
 export const appGraph = new Graph(appState);
 export const appDocument = reactive({
-  content: `
-   `
+  content: `<step>Imagine something</step>`,
+  requests: [] as string[]
 });
 
 // appGraph.load({
@@ -111,10 +112,29 @@ window.__refresh = () => {
 };
 
 export const stateSnapshot = computed(() => JSON.stringify(appState, null, 2));
+export const requestsList = computed(
+  () =>
+    html`<ul>
+      ${appDocument.requests.map((r) => html`<li>${r}</li>`)}
+    </ul>`
+);
 
 @customElement("com-app")
 export class ComApp extends LitElement {
-  static override styles = [base];
+  static override styles = [
+    base,
+    css`
+      main {
+        display: flex;
+      }
+
+      main > * {
+        flex: 1;
+        max-width: 50%;
+        overflow-x: auto;
+      }
+    `
+  ];
 
   static override properties = {
     userInput: { type: String }
@@ -180,16 +200,9 @@ export class ComApp extends LitElement {
         graph.add(id, {
           id,
           contentType: CONTENT_TYPE_DATA,
-          body: data
+          body: data,
+          comment: documentedReasoning
         });
-
-        appPlan.steps = [
-          ...appPlan.steps,
-          {
-            description: documentedReasoning,
-            associatedNodes: [id]
-          }
-        ];
 
         return `Added data node: ${id}.\n${this.graphSnapshot()}`;
       },
@@ -203,15 +216,10 @@ export class ComApp extends LitElement {
         graph.add(id, {
           id,
           contentType: CONTENT_TYPE_JAVASCRIPT,
-          body: code
+          body: code,
+          comment: documentedReasoning
         });
-        appPlan.steps = [
-          ...appPlan.steps,
-          {
-            description: documentedReasoning,
-            associatedNodes: [id]
-          }
-        ];
+
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       listen: async (props: {
@@ -228,15 +236,10 @@ export class ComApp extends LitElement {
           body: {
             event,
             code
-          }
+          },
+          comment: documentedReasoning
         });
-        appPlan.steps = [
-          ...appPlan.steps,
-          {
-            description: documentedReasoning,
-            associatedNodes: [id]
-          }
-        ];
+
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       ui: async (props: {
@@ -249,15 +252,10 @@ export class ComApp extends LitElement {
         graph.add(id, {
           id,
           contentType: CONTENT_TYPE_UI,
-          body: uiTree
+          body: uiTree,
+          comment: documentedReasoning
         });
-        appPlan.steps = [
-          ...appPlan.steps,
-          {
-            description: documentedReasoning,
-            associatedNodes: [id]
-          }
-        ];
+
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       voxel3dScene: async ({
@@ -273,15 +271,9 @@ export class ComApp extends LitElement {
         graph.add(id, {
           id,
           contentType: CONTENT_TYPE_SCENE,
-          body: {}
+          body: {},
+          comment: documentedReasoning
         });
-        appPlan.steps = [
-          ...appPlan.steps,
-          {
-            description: documentedReasoning,
-            associatedNodes: [id]
-          }
-        ];
 
         graph.connect(dataSource, id, "data");
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
@@ -299,15 +291,9 @@ export class ComApp extends LitElement {
         graph.add(id, {
           id,
           contentType: CONTENT_TYPE_GLSL,
-          body: shaderToyCode
+          body: shaderToyCode,
+          comment: documentedReasoning
         });
-        appPlan.steps = [
-          ...appPlan.steps,
-          {
-            description: documentedReasoning,
-            associatedNodes: [id]
-          }
-        ];
         return `Added node: ${id}.\n${this.graphSnapshot()}`;
       },
       fetch: async ({ id, url }: { id: string; url: string }) => {
@@ -371,7 +357,13 @@ export class ComApp extends LitElement {
   }
 
   graphSnapshot() {
-    return JSON.stringify(appGraph.save(), null, 2);
+    const g = appGraph.save();
+    const preview = {
+      nodes: g.nodes,
+      connections: g.connections
+    };
+
+    return JSON.stringify(preview, null, 2);
   }
 
   async planResponse(userInput: string) {
@@ -379,10 +371,17 @@ export class ComApp extends LitElement {
     const baseInput = userInput;
 
     if (cursor.focus.length > 0) {
-      userInput = `<user-selection>[${cursor.focus.map((f) => f.id).join(", ")}</user-selection> \n<user-input>${userInput}</user-input>`;
+      userInput = `<user-selection>${cursor.focus.map((f) => f.id).join(", ")}</user-selection> ${userInput}`;
     }
 
-    const { system, prompt } = sketchHighLevelApproachPrompt(userInput);
+    appDocument.requests.push(userInput);
+    const snapshot = this.graphSnapshot();
+
+    const { system, prompt } = sketchHighLevelApproachPrompt(
+      appDocument.requests,
+      appDocument.content,
+      snapshot
+    );
     const client = new LLMClient({
       serverUrl: LLM_SERVER_URL,
       tools: [],
@@ -394,34 +393,40 @@ export class ComApp extends LitElement {
     const plan = grabTag(last, "plan");
     recordThought({ role: "assistant", content: plan });
 
-    console.log(plan);
     appDocument.content = plan;
 
-    const steps = grabAllTags(plan, "step");
+    const identifiers = grabAllTags(plan, "identifier");
+    if (identifiers.length == 0) {
+      const steps = grabAllTags(plan, "step");
 
-    cursor.state = "detailing";
+      cursor.state = "detailing";
 
-    const enrichedSteps = await Promise.all(
-      steps.map(async (step) => {
-        const { system, prompt } = planIdentifiers(step, userInput);
-        const client = new LLMClient({
-          serverUrl: LLM_SERVER_URL,
-          tools: [],
-          system
-        });
+      const enrichedSteps = await Promise.all(
+        steps.map(async (step) => {
+          const { system, prompt } = planIdentifiers(
+            step,
+            appDocument.requests,
+            appDocument.content,
+            snapshot
+          );
+          const client = new LLMClient({
+            serverUrl: LLM_SERVER_URL,
+            tools: [],
+            system
+          });
 
-        const res = await client.createThread(prompt);
-        const last = res.conversation[res.conversation.length - 1];
-        const enriched = grabTag(last, "result");
-        recordThought({ role: "assistant", content: enriched });
-        return enriched;
-      })
-    );
+          const res = await client.createThread(prompt);
+          const last = res.conversation[res.conversation.length - 1];
+          const enriched = grabTag(last, "result");
+          recordThought({ role: "assistant", content: enriched });
+          return enriched;
+        })
+      );
 
-    appDocument.content = `<plan>
-      <prompt>${baseInput}</prompt>
-      ${enrichedSteps.join("\n")}
-    </plan>`;
+      appDocument.content = `<plan>
+        ${enrichedSteps.join("\n")}
+      </plan>`;
+    }
 
     cursor.state = "idle";
   }
@@ -430,7 +435,10 @@ export class ComApp extends LitElement {
     this.modifying = true;
 
     async function reflect() {
-      const { system, prompt } = makeConsistent(appDocument.content);
+      const { system, prompt } = makeConsistent(
+        appDocument.content,
+        appDocument.requests
+      );
       const client = new LLMClient({
         serverUrl: LLM_SERVER_URL,
         tools: [],
@@ -457,8 +465,10 @@ export class ComApp extends LitElement {
     <plan>
       ${finalPlan}
     </plan>
-    ---
-    Current graph (may be empty): ${this.graphSnapshot()}`;
+
+    Current graph (may be empty): ${this.graphSnapshot()}
+
+    Modify or create the graph to make it align with the plan and say nothing in response.`;
 
     // const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
     const systemContext = ``;
@@ -514,8 +524,11 @@ export class ComApp extends LitElement {
           @message=${onCursorMessage}
           @toggled=${onCursorToggled}
         ></com-cursor>
-        <com-document-editor></com-document-editor>
-        <com-chat slot="main">
+        <div>
+          <section>${watch(requestsList)}</section>
+          <com-document-editor></com-document-editor>
+        </div>
+        <com-chat>
           <com-thread slot="main"></com-thread>
         </com-chat>
         <com-debug>
