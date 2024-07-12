@@ -112,9 +112,12 @@ const listen = (
   };
 };
 
-const setProp = (element: HTMLElement, key: string, value: unknown) => {
+const setProp = <T>(target: T, key: string, value: unknown) => {
   // @ts-ignore - we've validated these via runtime checks
-  element[key] = value;
+  if (target[key] !== value) {
+    // @ts-ignore - we've validated these via runtime checks
+    target[key] = value;
+  }
 };
 
 const sanitizeScripts = (node: Node): Node | null => {

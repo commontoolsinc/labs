@@ -9,25 +9,26 @@ setDebug(true);
 // setEventSanitizer(...);
 
 const text = state("text", "Hello, world!");
-const clicks = stream("clicks");
+const input = stream<InputEvent>("clicks");
+
+input.sink((event) => {
+  console.log("input", event);
+  const target = event.target as HTMLInputElement | null;
+  const value = target?.value ?? null;
+  if (value !== null) {
+    text.send(value);
+  }
+});
 
 // Build template
 const renderable = html`
   <div class="container">
     <h1 class="title">${text}</h1>
-    <button onclick=${clicks}>Click me</button>
+    <input type="text" oninput=${input} value=${text} />
   </div>
 `;
 
 // Render
 const dom = render(renderable);
-
-clicks.sink((value) => {
-  console.log("clicks", value);
-});
-
-setInterval(() => {
-  text.send(`Hello, world! ${new Date().toLocaleTimeString()}`);
-}, 1000);
 
 document.body.appendChild(dom);
