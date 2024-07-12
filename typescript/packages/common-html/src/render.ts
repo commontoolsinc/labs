@@ -1,5 +1,5 @@
-import { isNode, Node } from "./node.js";
-import { Renderable, Context, isRenderable } from "./html.js";
+import { isVNode, VNode } from "./vnode.js";
+import { View, Context, isView } from "./view.js";
 import { isHole } from "./hole.js";
 import { effect } from "./reactive.js";
 import { isSendable } from "./sendable.js";
@@ -8,7 +8,7 @@ import * as logger from "./logger.js";
 
 export type CancellableHTMLElement = HTMLElement & { cancel?: Cancel };
 
-export const render = (renderable: Renderable): HTMLElement => {
+export const render = (renderable: View): HTMLElement => {
   const { template, context } = renderable;
   const [cancel, addCancel] = useCancelGroup();
   const root = renderNode(
@@ -24,7 +24,7 @@ export const render = (renderable: Renderable): HTMLElement => {
 export default render;
 
 const renderNode = (
-  node: Node,
+  node: VNode,
   context: Context,
   addCancel: (cancel: Cancel) => void,
 ): HTMLElement | null => {
@@ -64,7 +64,7 @@ const renderNode = (
   for (const childNode of sanitizedNode.children) {
     if (typeof childNode === "string") {
       element.append(childNode);
-    } else if (isNode(childNode)) {
+    } else if (isVNode(childNode)) {
       const childElement = renderNode(childNode, context, addCancel);
       if (childElement) {
         element.append(childElement);
@@ -75,7 +75,7 @@ const renderNode = (
       let anchor: ChildNode = document.createTextNode("");
       element.append(anchor);
       const cancel = effect(replacement, (replacement) => {
-        if (isRenderable(replacement)) {
+        if (isView(replacement)) {
           const childElement = render(replacement);
           anchor.replaceWith(childElement);
           anchor = childElement;
@@ -120,7 +120,7 @@ const setProp = <T>(target: T, key: string, value: unknown) => {
   }
 };
 
-const sanitizeScripts = (node: Node): Node | null => {
+const sanitizeScripts = (node: VNode): VNode | null => {
   if (node.tag === "script") {
     return null;
   }
@@ -129,7 +129,7 @@ const sanitizeScripts = (node: Node): Node | null => {
 
 let sanitizeNode = sanitizeScripts;
 
-export const setNodeSanitizer = (fn: (node: Node) => Node | null) => {
+export const setNodeSanitizer = (fn: (node: VNode) => VNode | null) => {
   sanitizeNode = fn;
 };
 

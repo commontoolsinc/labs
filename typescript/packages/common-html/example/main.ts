@@ -1,4 +1,5 @@
 import render, { setNodeSanitizer, setEventSanitizer } from "../src/render.js";
+import view from "../src/view.js";
 import html from "../src/html.js";
 import { state, stream } from "../src/state.js";
 import { setDebug } from "../src/logger.js";
@@ -21,14 +22,28 @@ input.sink((event) => {
 });
 
 // Build template
-const renderable = html`
+const renderable1 = view(
+  `
+    <div class="container">
+      <h1 class="title">{{text}}</h1>
+      <input type="text" oninput={{input}} value={{text}} />
+    </div>
+  `,
+  { text, input },
+);
+
+// Render
+const dom1 = render(renderable1);
+
+document.body.appendChild(dom1);
+
+const renderable2 = html`
   <div class="container">
     <h1 class="title">${text}</h1>
-    <input type="text" oninput=${input} value=${text} />
+    <input type="text" oninput="${input}" value="${text}" />
   </div>
 `;
 
-// Render
-const dom = render(renderable);
+const dom2 = render(renderable2);
 
-document.body.appendChild(dom);
+document.body.appendChild(dom2);

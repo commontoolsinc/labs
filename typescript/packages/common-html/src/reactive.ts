@@ -11,21 +11,13 @@ export type Reactive<T> = {
   sink: (callback: (value: T) => void) => Cancel;
 };
 
-export type Named = {
-  name: string;
-};
-
-export type NamedReactive<T> = Reactive<T> & Named;
-
-export const isReactive = (
-  value: unknown
-): value is Reactive<unknown> => {
+export const isReactive = (value: unknown): value is Reactive<unknown> => {
   return typeof (value as Reactive<unknown>)?.sink === "function";
 };
 
 export const effect = (
   value: unknown,
-  callback: (value: unknown) => Cancel | void
+  callback: (value: unknown) => Cancel | void,
 ) => {
   if (value == null) {
     return noOp;

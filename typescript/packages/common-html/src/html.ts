@@ -1,72 +1,40 @@
-import parse from "./parser.js";
-import { Node, isNode } from "./node.js";
 import * as hole from "./hole.js";
-import { Named, NamedReactive, Reactive } from "./reactive.js";
+import { Reactive } from "./reactive.js";
 import * as logger from "./logger.js";
 import cid from "./cid.js";
+import { view, View } from "./view.js";
 
 export const html = (
   strings: TemplateStringsArray,
-  ...values: Array<NamedReactive<unknown>>
-): Renderable => {
-  // Create pairs of name/value. Generate name if needed.
+  ...values: Array<Reactive<unknown>>
+): View => {
+  if (values.length > strings.length - 1) {
+    throw TypeError("Too many values provided");
+  }
+
+  // Create pairs of name/value by generating name
   const namedValues: Array<[string, Reactive<unknown>]> = values.map(
     (value) => {
-      const name = (value as NamedReactive<unknown>)?.name ?? cid();
-      return [name, value];
+      return [cid(), value];
     },
   );
 
   // Flatten template string
-  const templateString = strings.reduce((result, string, i) => {
+  const markup = strings.reduce((result, string, i) => {
     const namedValue = namedValues[i];
-    if (namedValue != null) {
-      const [name] = namedValue;
-      return result + string + hole.markup(name);
-    } else {
+    if (namedValue == null) {
       return result + string;
     }
+    const [name] = namedValue;
+    return result + string + hole.markup(name);
   }, "");
 
-  logger.debug("Flattened", templateString);
-
-  // Parse template string to template object
-  const root = parse(templateString);
-
-  if (root.children.length !== 1) {
-    throw TypeError("Template have one root node");
-  }
-
-  const template = root.children[0];
-
-  if (!isNode(template)) {
-    throw TypeError("Template root must be an element");
-  }
+  logger.debug("Flattened", markup);
 
   // Build context object from entries, indexing by name.
   const context = Object.fromEntries(namedValues);
 
-  const renderable: Renderable = {
-    type: "renderable",
-    template,
-    context,
-  };
-
-  logger.debug("Renderable", renderable);
-
-  return renderable;
+  return view(markup, context);
 };
 
 export default html;
-
-export type Context = { [key: string]: Reactive<unknown> };
-
-export type Renderable = {
-  type: "renderable";
-  template: Node;
-  context: Context;
-};
-
-export const isRenderable = (value: unknown): value is Renderable => {
-  return (value as Renderable)?.type === "renderable";
-};
