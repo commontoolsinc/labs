@@ -9,8 +9,8 @@ setDebug(true);
 // setNodeSanitizer(...);
 // setEventSanitizer(...);
 
-const text = state("text", "Hello, world!");
-const input = stream<InputEvent>("clicks");
+const text = state("Hello, world!");
+const input = stream<InputEvent>();
 
 input.sink((event) => {
   console.log("input", event);
@@ -21,10 +21,18 @@ input.sink((event) => {
   }
 });
 
+const time = state(new Date().toLocaleTimeString());
+
+setInterval(() => {
+  time.send(new Date().toLocaleTimeString());
+}, 1000);
+
+const timeView = view(`<div class="time">{{time}}</div>`, { time });
+
 // Build template
-const renderable1 = view(
+const titleGroup = view(
   `
-    <div class="container">
+    <div class="title-group">
       <h1 class="title">{{text}}</h1>
       <input type="text" oninput={{input}} value={{text}} />
     </div>
@@ -32,18 +40,10 @@ const renderable1 = view(
   { text, input },
 );
 
-// Render
-const dom1 = render(renderable1);
-
-document.body.appendChild(dom1);
-
-const renderable2 = html`
-  <div class="container">
-    <h1 class="title">${text}</h1>
-    <input type="text" oninput="${input}" value="${text}" />
-  </div>
+const container = html`
+  <div class="container">${timeView} ${titleGroup}</div>
 `;
 
-const dom2 = render(renderable2);
+const dom = render(container);
 
-document.body.appendChild(dom2);
+document.body.appendChild(dom);

@@ -6,18 +6,16 @@ import { view, View } from "./view.js";
 
 export const html = (
   strings: TemplateStringsArray,
-  ...values: Array<Reactive<unknown>>
+  ...values: Array<unknown>
 ): View => {
   if (values.length > strings.length - 1) {
     throw TypeError("Too many values provided");
   }
 
   // Create pairs of name/value by generating name
-  const namedValues: Array<[string, Reactive<unknown>]> = values.map(
-    (value) => {
-      return [cid(), value];
-    },
-  );
+  const namedValues: Array<[string, unknown]> = values.map((value) => {
+    return [cid(), value];
+  });
 
   // Flatten template string
   const markup = strings.reduce((result, string, i) => {

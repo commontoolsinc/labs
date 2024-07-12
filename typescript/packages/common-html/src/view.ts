@@ -1,9 +1,8 @@
-import { Reactive } from "./reactive.js";
 import { isVNode, VNode } from "./vnode.js";
 import parse from "./parser.js";
 import * as logger from "./logger.js";
 
-export type Context = { [key: string]: Reactive<unknown> };
+export type Context = { [key: string]: unknown };
 
 export type View = {
   type: "view";
