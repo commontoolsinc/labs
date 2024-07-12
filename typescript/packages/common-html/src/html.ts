@@ -1,16 +1,36 @@
 import parse from "./parser.js";
 import { Node, isNode } from "./node.js";
 import * as hole from "./hole.js";
-import { NamedReactive } from "./reactive.js";
+import { Named, NamedReactive, Reactive } from "./reactive.js";
 import * as logger from "./logger.js";
 
 export const html = (
   strings: TemplateStringsArray,
   ...values: Array<NamedReactive<unknown>>
 ): Renderable => {
-  const templateMarkup = flattenTemplateStrings(strings, values);
+  // Create pairs of name/value. Generate name if needed.
+  const namedValues: Array<[string, Reactive<unknown>]> = values.map(
+    (value) => {
+      const name = (value as NamedReactive<unknown>)?.name ?? cid();
+      return [name, value];
+    },
+  );
 
-  const root = parse(templateMarkup);
+  // Flatten template string
+  const templateString = strings.reduce((result, string, i) => {
+    const namedValue = namedValues[i];
+    if (namedValue != null) {
+      const [name] = namedValue;
+      return result + string + hole.markup(name);
+    } else {
+      return result + string;
+    }
+  }, "");
+
+  logger.debug("Flattened", templateString);
+
+  // Parse template string to template object
+  const root = parse(templateString);
 
   if (root.children.length !== 1) {
     throw TypeError("Template have one root node");
@@ -22,7 +42,8 @@ export const html = (
     throw TypeError("Template root must be an element");
   }
 
-  const context = indexContext(values);
+  // Build context object from entries, indexing by name.
+  const context = Object.fromEntries(namedValues);
 
   const renderable: Renderable = {
     type: "renderable",
@@ -37,6 +58,8 @@ export const html = (
 
 export default html;
 
+export type Context = { [key: string]: Reactive<unknown> };
+
 export type Renderable = {
   type: "renderable";
   template: Node;
@@ -47,20 +70,6 @@ export const isRenderable = (value: unknown): value is Renderable => {
   return (value as Renderable)?.type === "renderable";
 };
 
-export type Context = { [key: string]: NamedReactive<unknown> };
-
-const indexContext = (items: Array<NamedReactive<unknown>>): Context => {
-  return Object.fromEntries(items.map((item) => [item.name, item]));
-};
-
-const flattenTemplateStrings = (
-  strings: TemplateStringsArray,
-  values: Array<NamedReactive<unknown>>,
-): string => {
-  const templateString = strings.reduce((result, string, i) => {
-    const value = values[i];
-    return result + string + (value ? hole.markup(value.name) : "");
-  }, "");
-  logger.debug("Flattened", templateString);
-  return templateString;
-};
+let _cid = 0;
+// Generate client ID
+const cid = () => `cid${_cid++}`;
