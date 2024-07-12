@@ -3,6 +3,7 @@ import { Node, isNode } from "./node.js";
 import * as hole from "./hole.js";
 import { Named, NamedReactive, Reactive } from "./reactive.js";
 import * as logger from "./logger.js";
+import cid from "./cid.js";
 
 export const html = (
   strings: TemplateStringsArray,
@@ -69,7 +70,3 @@ export type Renderable = {
 export const isRenderable = (value: unknown): value is Renderable => {
   return (value as Renderable)?.type === "renderable";
 };
-
-let _cid = 0;
-// Generate client ID
-const cid = () => `cid${_cid++}`;
