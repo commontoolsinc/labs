@@ -1,7 +1,7 @@
 import sax from "sax";
 import parseMustaches from "./stache.js";
 import { isHole } from "./hole.js";
-import { create as createVNode, VNode, Attrs } from "./vnode.js";
+import { create as createVNode, VNode, Props } from "./vnode.js";
 import * as logger from "./logger.js";
 
 /** Parse a template into a simple JSON markup representation */
@@ -23,8 +23,8 @@ export const parse = (markup: string): VNode => {
   parser.onopentag = (node) => {
     // We've turned off the namespace feature, so node attributes will
     // contain only string values, not QualifiedAttribute objects.
-    const attrs = parseAttrs(node.attributes as { [key: string]: string });
-    const next = createVNode(node.name, attrs);
+    const props = parseProps(node.attributes as { [key: string]: string });
+    const next = createVNode(node.name, props);
     const top = getTop(stack);
     if (!top) {
       throw new ParseError(`No parent tag for ${node.name}`);
@@ -61,8 +61,8 @@ export default parse;
 
 const getTop = (stack: Array<VNode>): VNode | null => stack.at(-1) ?? null;
 
-const parseAttrs = (attrs: { [key: string]: string }): Attrs => {
-  const result: Attrs = {};
+const parseProps = (attrs: { [key: string]: string }): Props => {
+  const result: Props = {};
   for (const [key, value] of Object.entries(attrs)) {
     const parsed = parseMustaches(value);
     const first = parsed.at(0);

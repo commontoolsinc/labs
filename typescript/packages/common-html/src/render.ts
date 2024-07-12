@@ -33,7 +33,7 @@ const renderNode = (
     return null;
   }
   const element = document.createElement(sanitizedNode.tag);
-  attrs: for (const [name, value] of Object.entries(sanitizedNode.attrs)) {
+  attrs: for (const [name, value] of Object.entries(sanitizedNode.props)) {
     if (isHole(value)) {
       const replacement = context[value.name];
       // If prop is an event, we need to add an event listener

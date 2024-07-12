@@ -3,22 +3,22 @@ import { Hole } from "./hole.js";
 export type VNode = {
   type: "vnode";
   tag: string;
-  attrs: Attrs;
+  props: Props;
   children: Children;
 };
 
-export type Attrs = { [key: string]: string | Hole };
+export type Props = { [key: string]: string | Hole };
 
 export type Children = Array<VNode | Hole | string>;
 
 export const create = (
   tag: string,
-  attrs: Attrs = {},
+  props: Props = {},
   children: Children = [],
 ): VNode => ({
   type: "vnode",
   tag,
-  attrs,
+  props,
   children,
 });
 
