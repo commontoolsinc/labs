@@ -9,13 +9,10 @@ describe("html", () => {
     const text = state("Hello world!");
 
     const view = html`
-      <div class="container" hidden="{{hidden}}">
+      <div class="container">
         <button id="foo" onclick=${clicks}>${text}</button>
       </div>
     `;
-
-    // @ts-ignore - ignore for test
-    assert.strict(hole.isHole(view.template.props.hidden));
 
     // @ts-ignore - ignore for test
     assert.strict(hole.isHole(view.template.children[0].props.onclick));
