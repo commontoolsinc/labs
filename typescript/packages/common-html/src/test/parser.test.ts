@@ -1,6 +1,6 @@
 import { deepStrictEqual } from "node:assert";
 import parse from "../parser.js";
-import * as node from "../node.js";
+import * as vnode from "../vnode.js";
 import * as hole from "../hole.js";
 
 describe("parse", () => {
@@ -15,25 +15,19 @@ describe("parse", () => {
 
     deepStrictEqual(
       root,
-      node.create(
-        "documentfragment",
-        {},
-        [
-          node.create(
-            "div",
-            { class: "container", hidden: hole.create("hidden") },
-            [
-              node.create(
-                "button",
-                { id: "foo", onclick: hole.create("click") },
-                [
-                  "Hello world!",
-                ]
-              ),
-            ]
-          ),
-        ],
-      )
+      vnode.create("documentfragment", {}, [
+        vnode.create(
+          "div",
+          { class: "container", hidden: hole.create("hidden") },
+          [
+            vnode.create(
+              "button",
+              { id: "foo", onclick: hole.create("click") },
+              ["Hello world!"],
+            ),
+          ],
+        ),
+      ]),
     );
   });
 });

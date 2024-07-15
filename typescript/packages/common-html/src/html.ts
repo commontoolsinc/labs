@@ -1,5 +1,4 @@
 import * as hole from "./hole.js";
-import { Reactive } from "./reactive.js";
 import * as logger from "./logger.js";
 import cid from "./cid.js";
 import { view, View } from "./view.js";

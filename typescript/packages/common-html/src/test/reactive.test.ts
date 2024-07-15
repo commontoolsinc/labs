@@ -4,7 +4,7 @@ import { effect, isReactive } from "../reactive.js";
 
 describe("isReactive", () => {
   it("returns true for any object with a sink method", () => {
-    const a = state("value", 0);
+    const a = state(0);
     assertEqual(isReactive(a), true);
 
     class B {
@@ -12,7 +12,7 @@ describe("isReactive", () => {
     }
 
     assertEqual(isReactive(new B()), true);
-  })
+  });
 
   it("returns false for objects without a sink method", () => {
     assertEqual(isReactive({}), false);
@@ -29,7 +29,7 @@ describe("effect", () => {
   });
 
   it("subscribes callback to `sink` for reactive value", () => {
-    const value = state("value", 10);
+    const value = state(10);
 
     let valueMut = 0;
     effect(value, (value: number) => {
@@ -43,13 +43,13 @@ describe("effect", () => {
   });
 
   it("ends subscription to reactive value when cancel is called", () => {
-    const value = state("value", 10);
+    const value = state(10);
 
     let valueMut = 0;
     const cancel = effect(value, (value: number) => {
       valueMut = value;
     });
- 
+
     value.send(11);
     cancel();
     value.send(12);

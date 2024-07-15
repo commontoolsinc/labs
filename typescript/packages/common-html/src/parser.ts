@@ -1,6 +1,5 @@
 import sax from "sax";
-import parseMustaches from "./stache.js";
-import { isHole } from "./hole.js";
+import { parse as parseMustaches, isHole } from "./hole.js";
 import { create as createVNode, VNode, Props } from "./vnode.js";
 import * as logger from "./logger.js";
 

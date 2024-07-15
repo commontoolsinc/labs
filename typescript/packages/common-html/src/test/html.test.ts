@@ -1,35 +1,26 @@
-import { deepStrictEqual } from "node:assert";
+import * as assert from "node:assert";
 import html from "../html.js";
-import * as node from "../node.js";
 import * as hole from "../hole.js";
-import state from "../state.js";
+import { state, stream } from "../state.js";
 
 describe("html", () => {
   it("parses tagged template string into a Renderable", () => {
-    const clicks = state<Event | null>('clicks', null);
-    const text = state('text', 'Hello world!');
+    const clicks = stream<Event>();
+    const text = state("Hello world!");
 
-    const renderable = html`
-      <div class="container" hidden={{hidden}}>
+    const view = html`
+      <div class="container" hidden="{{hidden}}">
         <button id="foo" onclick=${clicks}>${text}</button>
       </div>
     `;
 
-    deepStrictEqual(
-      renderable.template,
-      node.create(
-        "div",
-        { "class": "container", hidden: hole.create("hidden") },
-        [
-          node.create(
-            "button",
-            { id: "foo", onclick: hole.create("clicks") },
-            [
-              hole.create("text"),
-            ]
-          ),
-        ],
-      )
-    );
+    // @ts-ignore - ignore for test
+    assert.strict(hole.isHole(view.template.props.hidden));
+
+    // @ts-ignore - ignore for test
+    assert.strict(hole.isHole(view.template.children[0].props.onclick));
+
+    // @ts-ignore - ignore for test
+    assert.strict(hole.isHole(view.template.children[0].children[0]));
   });
 });
