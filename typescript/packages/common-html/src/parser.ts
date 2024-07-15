@@ -1,6 +1,7 @@
 import { Parser } from "htmlparser2";
-import { parse as parseMustaches, isHole } from "./hole.js";
-import { create as createVNode, VNode, Props } from "./vnode.js";
+import * as hole from "./hole.js";
+import * as vnode from "./vnode.js";
+import { VNode, Props } from "./vnode.js";
 import * as logger from "./logger.js";
 
 export type TagOpenToken = {
@@ -57,7 +58,7 @@ export const tokenize = (markup: string): Array<Token> => {
       },
       onclosetag(tag) {
         const token: TagCloseToken = { type: "tagclose", tag };
-        logger.debug("tagopen", token);
+        logger.debug("tagclose", token);
         tokens.push(token);
       },
       ontext(text) {
@@ -117,7 +118,7 @@ const tokenizeMustaches = (text: string): Array<Token> => {
   if (lastIndex < text.length) {
     const token: TextToken = {
       type: "text",
-      value: text.slice(lastIndex, match.index),
+      value: text.slice(lastIndex),
     };
     logger.debug("text", token);
     tokens.push(token);
@@ -130,14 +131,14 @@ const tokenizeMustaches = (text: string): Array<Token> => {
 
 /** Parse a template into a simple JSON markup representation */
 export const parse = (markup: string): VNode => {
-  let root: VNode = createVNode("documentfragment");
+  let root: VNode = vnode.create("documentfragment");
   let stack: Array<VNode> = [root];
 
   for (const token of tokenize(markup)) {
     const top = getTop(stack);
     switch (token.type) {
       case "tagopen": {
-        const next = createVNode(token.tag, token.props);
+        const next = vnode.create(token.tag, token.props);
         top.children.push(next);
         stack.push(next);
         break;
@@ -154,7 +155,7 @@ export const parse = (markup: string): VNode => {
         break;
       }
       case "var": {
-        top.children.push(token);
+        top.children.push(hole.create(token.name));
         break;
       }
       default: {
@@ -173,11 +174,11 @@ const getTop = (stack: Array<VNode>): VNode | null => stack.at(-1) ?? null;
 const parseProps = (attrs: { [key: string]: string }): Props => {
   const result: Props = {};
   for (const [key, value] of Object.entries(attrs)) {
-    const parsed = parseMustaches(value);
+    const parsed = hole.parse(value);
     const first = parsed.at(0);
     if (parsed.length !== 1) {
       result[key] = "";
-    } else if (isHole(first)) {
+    } else if (hole.isHole(first)) {
       result[key] = first;
     } else {
       result[key] = `${value}`;
