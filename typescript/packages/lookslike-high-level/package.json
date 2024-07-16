@@ -8,6 +8,7 @@
   "type": "module",
   "scripts": {
     "dev": "npm run build && npx vite",
+    "test": "npm run build && vitest",
     "build": "wireit",
     "clean": "wireit"
   },
@@ -22,6 +23,7 @@
   "devDependencies": {
     "typescript": "^5.2.2",
     "vite": "^5.2.0",
+    "vitest": "^1.6.0",
     "wireit": "^0.14.4"
   },
   "wireit": {
@@ -39,9 +41,9 @@
     }
   },
   "dependencies": {
-    "@commontools/common-ui": "^0.0.1",
     "@commontools/common-frp": "^0.0.1",
-    "@commontools/lookslike-sagas": "^0.0.1",
-    "@commontools/llm-client": "^0.0.1"
+    "@commontools/common-ui": "^0.0.1",
+    "@commontools/llm-client": "^0.0.1",
+    "@commontools/lookslike-sagas": "^0.0.1"
   }
 }
