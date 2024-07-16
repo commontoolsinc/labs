@@ -75,10 +75,17 @@ export const isVNode = (value: unknown): value is VNode => {
 export type Binding = {
   type: "binding";
   name: string;
+  path: Array<string>;
 };
 
 export const binding = (name: string): Binding => {
-  return { type: "binding", name };
+  return { type: "binding", name, path: parsePath(name) };
+};
+
+export const parsePath = (pathString: string): Array<string> => {
+  const path = pathString.split(".");
+  logger.debug("parsePath", path);
+  return path;
 };
 
 export const isBinding = (value: unknown): value is Binding => {
@@ -91,11 +98,12 @@ export const markupBinding = (name: string) => `{{${name}}}`;
 export type Section = {
   type: "section";
   name: string;
+  path: Array<string>;
   children: Array<Child>;
 };
 
 export const section = (name: string, children: Array<Child> = []): Section => {
-  return { type: "section", name, children };
+  return { type: "section", name, path: parsePath(name), children };
 };
 
 export const isSection = (value: unknown): value is Section => {
@@ -213,7 +221,7 @@ export const tokenizeMustache = (text: string): Array<Token> => {
       tokens.push(token);
     } else {
       const token: BindingToken = { type: "binding", name: body };
-      logger.debug("var", token);
+      logger.debug("binding", token);
       tokens.push(token);
     }
     lastIndex = MUSTACHE_REGEXP_G.lastIndex;
@@ -294,9 +302,6 @@ export const parse = (markup: string): VNode => {
 /** Get top of stack (last element) */
 const getTop = (stack: Array<VNode | Section>): VNode | Section | null =>
   stack.at(-1) ?? null;
-
-export const parseMustacheBody = (body: string): Array<string> =>
-  body.split(".");
 
 /** Parse a Mustache var if and only if it is the only element in a string */
 export const parseMustacheBinding = (markup: string): Binding | null => {
