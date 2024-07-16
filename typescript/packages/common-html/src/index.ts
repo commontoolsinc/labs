@@ -8,8 +8,8 @@ export {
   VNode,
   binding,
   Binding,
-  block,
-  Block,
+  section,
+  Section,
 } from "./view.js";
 export { html } from "./html.js";
 export { render, setNodeSanitizer, setEventSanitizer } from "./render.js";

@@ -48,7 +48,7 @@ export type Context = { [key: string]: unknown };
 export type Props = { [key: string]: string | Binding };
 
 /** A child in a view can be one of a few things */
-export type Child = VNode | Block | Binding | string;
+export type Child = VNode | Section | Binding | string;
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {
@@ -88,18 +88,18 @@ export const isBinding = (value: unknown): value is Binding => {
 export const markupBinding = (name: string) => `{{${name}}}`;
 
 /** A mustache block `{{#myblock}} ... {{/myblock}}` */
-export type Block = {
-  type: "block";
+export type Section = {
+  type: "section";
   name: string;
   children: Array<Child>;
 };
 
-export const block = (name: string, children: Array<Child> = []): Block => {
-  return { type: "block", name, children };
+export const section = (name: string, children: Array<Child> = []): Section => {
+  return { type: "section", name, children };
 };
 
-export const isBlock = (value: unknown): value is Block => {
-  return (value as Block)?.type === "block";
+export const isSection = (value: unknown): value is Section => {
+  return (value as Section)?.type === "section";
 };
 
 export type TagOpenToken = {
@@ -123,13 +123,13 @@ export type BindingToken = {
   name: string;
 };
 
-export type BlockOpenToken = {
-  type: "blockopen";
+export type SectionOpenToken = {
+  type: "sectionopen";
   name: string;
 };
 
-export type BlockCloseToken = {
-  type: "blockclose";
+export type SectionCloseToken = {
+  type: "sectionclose";
   name: string;
 };
 
@@ -138,8 +138,8 @@ export type Token =
   | TagCloseToken
   | TextToken
   | BindingToken
-  | BlockOpenToken
-  | BlockCloseToken;
+  | SectionOpenToken
+  | SectionCloseToken;
 
 /** Tokenize markup containing HTML and Mustache */
 export const tokenize = (markup: string): Array<Token> => {
@@ -198,15 +198,18 @@ export const tokenizeMustache = (text: string): Array<Token> => {
     }
     const body = match[1];
     if (body.startsWith("#")) {
-      const token: BlockOpenToken = { type: "blockopen", name: body.slice(1) };
-      logger.debug("blockopen", token);
-      tokens.push(token);
-    } else if (body.startsWith("/")) {
-      const token: BlockCloseToken = {
-        type: "blockclose",
+      const token: SectionOpenToken = {
+        type: "sectionopen",
         name: body.slice(1),
       };
-      logger.debug("blockclose", token);
+      logger.debug("sectionopen", token);
+      tokens.push(token);
+    } else if (body.startsWith("/")) {
+      const token: SectionCloseToken = {
+        type: "sectionclose",
+        name: body.slice(1),
+      };
+      logger.debug("sectionclose", token);
       tokens.push(token);
     } else {
       const token: BindingToken = { type: "binding", name: body };
@@ -236,7 +239,7 @@ export const tokenizeMustache = (text: string): Array<Token> => {
  */
 export const parse = (markup: string): VNode => {
   let root: VNode = vnode("documentfragment");
-  let stack: Array<VNode | Block> = [root];
+  let stack: Array<VNode | Section> = [root];
 
   for (const token of tokenize(markup)) {
     const top = getTop(stack);
@@ -256,15 +259,15 @@ export const parse = (markup: string): VNode => {
         }
         break;
       }
-      case "blockopen": {
-        const next = block(token.name);
+      case "sectionopen": {
+        const next = section(token.name);
         top.children.push(next);
         stack.push(next);
         break;
       }
-      case "blockclose": {
+      case "sectionclose": {
         const top = stack.pop();
-        if (!isBlock(top) || top.name !== token.name) {
+        if (!isSection(top) || top.name !== token.name) {
           throw new ParseError(
             `Unexpected closing block ${token.name} in ${top.name}`,
           );
@@ -289,8 +292,11 @@ export const parse = (markup: string): VNode => {
 };
 
 /** Get top of stack (last element) */
-const getTop = (stack: Array<VNode | Block>): VNode | Block | null =>
+const getTop = (stack: Array<VNode | Section>): VNode | Section | null =>
   stack.at(-1) ?? null;
+
+export const parseMustacheBody = (body: string): Array<string> =>
+  body.split(".");
 
 /** Parse a Mustache var if and only if it is the only element in a string */
 export const parseMustacheBinding = (markup: string): Binding | null => {

@@ -1,4 +1,4 @@
-import { view, block, parse, binding, vnode } from "../view.js";
+import { view, section, parse, binding, vnode } from "../view.js";
 import * as assert from "node:assert/strict";
 
 describe("view()", () => {
@@ -64,7 +64,9 @@ describe("parse()", () => {
       root,
       vnode("documentfragment", {}, [
         vnode("div", { class: "container" }, [
-          block("items", [vnode("div", { class: "item" }, [binding("text")])]),
+          section("items", [
+            vnode("div", { class: "item" }, [binding("text")]),
+          ]),
         ]),
       ]),
     );
