@@ -14,7 +14,8 @@ import {
   CONTENT_TYPE_STORAGE,
   CONTENT_TYPE_SCENE,
   CONTENT_TYPE_DATA,
-  CONTENT_TYPE_EVENT_LISTENER
+  CONTENT_TYPE_EVENT_LISTENER,
+  CONTENT_TYPE_PLACEHOLDER
 } from "../contentType.js";
 import { appState } from "./com-app.js";
 import { effect } from "@vue/reactivity";
@@ -47,7 +48,7 @@ function renderNode(
         @updated=${relay}
       ></com-module-code>`;
     case CONTENT_TYPE_EVENT_LISTENER:
-      return html`<com-module-code
+      return html`<com-module-event-listener
         .node=${node}
         .value=${value}
         @updated=${relay}
@@ -95,6 +96,8 @@ function renderNode(
         .node=${node}
         .value=${value}
       ></com-module-data>`;
+    case CONTENT_TYPE_PLACEHOLDER:
+      return html``;
   }
 
   return html`<pre>${JSON.stringify(node, null, 2)}</pre>`;

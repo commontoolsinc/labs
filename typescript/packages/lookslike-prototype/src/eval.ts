@@ -37,7 +37,7 @@ export async function run(
     id,
     evalMode,
     "text/javascript",
-    code(src),
+    code(Object.keys(inputs), src),
     new Input(storage, Object.keys(inputs))
   );
 
@@ -58,10 +58,9 @@ export async function run(
     return null;
   }
   return JSON.parse(returnValue.value.val);
-
 }
 
-const code = (src: string) => `
+const code = (args: string[], src: string) => `
   import { read, write } from 'common:io/state@0.0.1';
 
   export class Body {
@@ -75,8 +74,10 @@ const code = (src: string) => `
           }
 
           console.log('[begin]');
-          const fn = function() { ${src} };
-          const result = fn();
+          const fn = ${src};
+          const args = ${JSON.stringify(args)};
+          const values = args.map(input);
+          const result = fn(...values);
           write('__result__', { tag: 'string', val: JSON.stringify(result) });
           console.log('[end]');
       }

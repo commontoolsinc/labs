@@ -12,6 +12,7 @@ import {
   CONTENT_TYPE_IMAGE,
   CONTENT_TYPE_JAVASCRIPT,
   CONTENT_TYPE_LLM,
+  CONTENT_TYPE_PLACEHOLDER,
   CONTENT_TYPE_SCENE,
   CONTENT_TYPE_STORAGE,
   CONTENT_TYPE_UI
@@ -154,8 +155,15 @@ async function executeNode(
       if (typeof node.body !== "string") {
         throw new Error("Expected a string");
       }
+
+      if (node.body.length == 0) return;
+
       const result = await run(node.id, node.body, inputs, node.evalMode);
       outputs[node.id].send(result);
+      break;
+    }
+    case CONTENT_TYPE_PLACEHOLDER: {
+      outputs[node.id].send(null);
       break;
     }
     case CONTENT_TYPE_UI: {

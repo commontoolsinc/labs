@@ -28,7 +28,7 @@
     "./lib/index.js"
   ],
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.24.0",
+    "@anthropic-ai/sdk": "^0.24.3",
     "@cfworker/json-schema": "^1.12.8"
   },
   "devDependencies": {

@@ -11,41 +11,54 @@ import {
   CONTENT_TYPE_IMAGE,
   CONTENT_TYPE_JAVASCRIPT,
   CONTENT_TYPE_LLM,
+  CONTENT_TYPE_PLACEHOLDER,
   CONTENT_TYPE_SCENE,
   CONTENT_TYPE_STORAGE,
   CONTENT_TYPE_UI
 } from "../contentType.js";
 import {
+  fixGraph,
   makeConsistent,
   plan,
   planIdentifiers,
   prepareSteps,
-  sketchHighLevelApproachPrompt
+  sketchHighLevelApproachPrompt,
+  sketchReactVersion,
+  transformToGraph
 } from "../agent/plan.js";
-import { codePrompt } from "../agent/implement.js";
+import { examples } from "../agent/implement.js";
 import { recordThought, suggestions } from "../agent/model.js";
 import { LLMClient, LlmTool } from "@commontools/llm-client";
 import { LLM_SERVER_URL } from "../llm-client.js";
 import { ChatCompletionTool } from "openai/resources/index.mjs";
-import { toolSpec } from "../agent/tools.js";
+import { planningToolSpec, toolSpec } from "../agent/tools.js";
 import { computed, reactive } from "@vue/reactivity";
 import { Graph } from "../reactivity/runtime.js";
 import { cursor } from "../agent/cursor.js";
 import { watch } from "../reactivity/watch.js";
-import { grabAllTags, grabTag } from "../agent/llm.js";
+import {
+  grabAllTags,
+  grabJavascript,
+  grabJson,
+  grabMarkdown,
+  grabTag
+} from "../agent/llm.js";
 import { css } from "lit";
 import { Message } from "../data.js";
 
 export const session = reactive({
-  history: [] as Message[]
+  history: [] as Message[],
+  requests: [] as string[]
+});
+
+export const idk = reactive({
+  reactCode: "a",
+  speclang: "b",
+  transformed: "c"
 });
 
 export const appState = reactive({} as any);
 export const appGraph = new Graph(appState);
-export const appDocument = reactive({
-  content: `<step>Imagine something</step>`,
-  requests: [] as string[]
-});
 
 // appGraph.load({
 //   nodes: [
@@ -115,7 +128,7 @@ export const stateSnapshot = computed(() => JSON.stringify(appState, null, 2));
 export const requestsList = computed(
   () =>
     html`<ul>
-      ${appDocument.requests.map((r) => html`<li>${r}</li>`)}
+      ${session.requests.map((r) => html`<li>${r}</li>`)}
     </ul>`
 );
 
@@ -126,12 +139,38 @@ export class ComApp extends LitElement {
     css`
       main {
         display: flex;
+        flex-direction: column;
       }
 
-      main > * {
+      .requests {
+        font-size: 1.5em;
+        font-family: "Palatino", "Georgia", serif;
+        padding: 1em;
+      }
+
+      .plan {
+        display: flex;
+        flex-direction: row;
+      }
+
+      .plan > * {
         flex: 1;
-        max-width: 50%;
-        overflow-x: auto;
+        padding: 2rem;
+        overflow: auto;
+        border-right: 1px solid #ccc;
+      }
+
+      .plan > *:last-child {
+        border-right: none;
+      }
+
+      .plan > pre {
+        font-family: monospace;
+        font-size: 0.8rem;
+      }
+
+      .plan com-chat {
+        flex: 3;
       }
     `
   ];
@@ -170,10 +209,6 @@ export class ComApp extends LitElement {
 
   availableFunctions(graph: Graph) {
     return {
-      listNodes: async () => {
-        console.log("listNodes", graph);
-        return JSON.stringify(graph);
-      },
       connect: async ({
         from,
         to,
@@ -185,51 +220,71 @@ export class ComApp extends LitElement {
       }) => {
         console.log("connect", from, to, portName);
         graph.connect(from, to, portName);
-        return `Added connection from ${from} to ${to}.\n${this.graphSnapshot()}`;
+        return `Added connection from ${from} to ${to}.`;
       },
       data: async ({
         id,
         data,
-        documentedReasoning
+        docstring
       }: {
         id: string;
         data: any;
-        documentedReasoning: string;
+        docstring: string;
       }) => {
         console.log("data", id, data);
         graph.add(id, {
           id,
           contentType: CONTENT_TYPE_DATA,
           body: data,
-          comment: documentedReasoning
+          docstring
         });
 
-        return `Added data node: ${id}.\n${this.graphSnapshot()}`;
+        return `Added data node: ${id}.`;
       },
-      func: async (props: {
-        id: string;
-        code: string;
-        documentedReasoning: string;
-      }) => {
+      placeholder: async (props: { id: string; docstring: string }) => {
+        console.log("placeholder", props);
+        const { id, docstring } = props;
+        graph.add(id, {
+          id,
+          contentType: CONTENT_TYPE_PLACEHOLDER,
+          body: "",
+          docstring
+        });
+
+        return `Added node: ${id}.`;
+      },
+      declareFunc: async (props: { id: string; docstring: string }) => {
+        console.log("declareFunc", props);
+        const { id, docstring } = props;
+        graph.add(id, {
+          id,
+          contentType: CONTENT_TYPE_JAVASCRIPT,
+          body: "",
+          docstring
+        });
+
+        return `Added node: ${id}.`;
+      },
+      func: async (props: { id: string; code: string; docstring: string }) => {
         console.log("addCodeNode", props);
-        const { id, code, documentedReasoning } = props;
+        const { id, code, docstring } = props;
         graph.add(id, {
           id,
           contentType: CONTENT_TYPE_JAVASCRIPT,
           body: code,
-          comment: documentedReasoning
+          docstring
         });
 
-        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+        return `Added node: ${id}.`;
       },
       listen: async (props: {
         event: string;
         id: string;
         code: string;
-        documentedReasoning: string;
+        docstring: string;
       }) => {
         console.log("addListener", props);
-        const { id, event, code, documentedReasoning } = props;
+        const { id, event, code, docstring } = props;
         graph.add(id, {
           id,
           contentType: CONTENT_TYPE_EVENT_LISTENER,
@@ -237,117 +292,113 @@ export class ComApp extends LitElement {
             event,
             code
           },
-          comment: documentedReasoning
+          docstring: docstring
         });
 
-        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+        return `Added node: ${id}.`;
       },
-      ui: async (props: {
-        id: string;
-        uiTree: object;
-        documentedReasoning: string;
-      }) => {
+      ui: async (props: { id: string; uiTree: object; docstring: string }) => {
         console.log("addUiNode", props);
-        const { id, uiTree, documentedReasoning } = props;
+        const { id, uiTree, docstring } = props;
         graph.add(id, {
           id,
           contentType: CONTENT_TYPE_UI,
           body: uiTree,
-          comment: documentedReasoning
+          docstring
         });
 
-        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+        return `Added node: ${id}.`;
       },
       voxel3dScene: async ({
         id,
         dataSource,
-        documentedReasoning
+        docstring
       }: {
         id: string;
         dataSource: string;
-        documentedReasoning: string;
+        docstring: string;
       }) => {
         console.log("add3dVoxelSceneNode", id, dataSource);
         graph.add(id, {
           id,
           contentType: CONTENT_TYPE_SCENE,
           body: {},
-          comment: documentedReasoning
+          docstring
         });
 
         graph.connect(dataSource, id, "data");
-        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+        return `Added node: ${id}.`;
       },
       glslShader: async ({
         id,
         shaderToyCode,
-        documentedReasoning
+        docstring
       }: {
         id: string;
         shaderToyCode: string;
-        documentedReasoning: string;
+        docstring: string;
       }) => {
         console.log("addGlslShaderNode", id, shaderToyCode);
         graph.add(id, {
           id,
           contentType: CONTENT_TYPE_GLSL,
           body: shaderToyCode,
-          comment: documentedReasoning
+          docstring
         });
-        return `Added node: ${id}.\n${this.graphSnapshot()}`;
+        return `Added node: ${id}.`;
       },
-      fetch: async ({ id, url }: { id: string; url: string }) => {
-        console.log("addFetchNode", id, url);
-        graph.add(id, {
-          id,
-          contentType: CONTENT_TYPE_FETCH,
-          body: url
-        });
-        return `Added node: ${id}.\n${this.graphSnapshot()}`;
-      },
-      clock: async ({ id }: { id: string }) => {
-        console.log("addClockNode", id);
-        graph.add(id, {
-          id,
-          contentType: CONTENT_TYPE_CLOCK,
-          body: {}
-        });
-        return `Added node: ${id}.\n${this.graphSnapshot()}`;
-      },
-      languageModel: async ({
-        id,
-        promptSource
-      }: {
-        id: string;
-        promptSource: string;
-      }) => {
-        console.log("addLanguageModelNode", id, prompt);
-        graph.add(id, {
-          id,
-          contentType: CONTENT_TYPE_LLM,
-          body: {}
-        });
+      // fetch: async ({ id, url }: { id: string; url: string }) => {
+      //   console.log("addFetchNode", id, url);
+      //   graph.add(id, {
+      //     id,
+      //     contentType: CONTENT_TYPE_FETCH,
+      //     body: url,
+      //   });
+      //   return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      // },
+      // clock: async ({ id }: { id: string }) => {
+      //   console.log("addClockNode", id);
+      //   graph.add(id, {
+      //     id,
+      //     contentType: CONTENT_TYPE_CLOCK,
+      //     body: {}
+      //   });
+      //   return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      // },
+      // languageModel: async ({
+      //   id,
+      //   promptSource
+      // }: {
+      //   id: string;
+      //   promptSource: string;
+      // }) => {
+      //   console.log("addLanguageModelNode", id, prompt);
+      //   graph.add(id, {
+      //     id,
+      //     contentType: CONTENT_TYPE_LLM,
+      //     body: {}
+      //   });
 
-        graph.connect(promptSource, id, "prompt");
-        return `Added node: ${id}.\n${this.graphSnapshot()}`;
-      },
-      imageGeneration: async ({
-        id,
-        promptSource
-      }: {
-        id: string;
-        promptSource: string;
-      }) => {
-        console.log("addImageGenerationNode", id, prompt);
-        graph.add(id, {
-          id,
-          contentType: CONTENT_TYPE_IMAGE,
-          body: {}
-        });
+      //   graph.connect(promptSource, id, "prompt");
+      //   return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      // },
+      // imageGeneration: async ({
+      //   id,
+      //   promptSource
+      // }: {
+      //   id: string;
+      //   promptSource: string;
+      // }) => {
+      //   console.log("addImageGenerationNode", id, prompt);
+      //   graph.add(id, {
+      //     id,
+      //     contentType: CONTENT_TYPE_IMAGE,
+      //     body: {}
+      //   });
 
-        graph.connect(promptSource, id, "prompt");
-        return `Added node: ${id}.\n${this.graphSnapshot()}`;
-      },
+      //   graph.connect(promptSource, id, "prompt");
+      //   return `Added node: ${id}.\n${this.graphSnapshot()}`;
+      // },
       delete: async ({ id }: { id: string }) => {
         console.log("deleteNode", id);
         graph.delete(id);
@@ -374,71 +425,18 @@ export class ComApp extends LitElement {
       userInput = `<user-selection>${cursor.focus.map((f) => f.id).join(", ")}</user-selection> ${userInput}`;
     }
 
-    appDocument.requests.push(userInput);
+    session.requests.push(userInput);
     const snapshot = this.graphSnapshot();
+    const recipe = await appGraph.save();
 
-    const { system, prompt } = sketchHighLevelApproachPrompt(
-      appDocument.requests,
-      appDocument.content,
-      snapshot
+    const planningTools = this.generateToolSpec(
+      planningToolSpec,
+      this.availableFunctions(appGraph)
     );
-    const client = new LLMClient({
-      serverUrl: LLM_SERVER_URL,
-      tools: [],
-      system
-    });
 
-    const res = await client.createThread(prompt);
-    const last = res.conversation[res.conversation.length - 1];
-    const plan = grabTag(last, "plan");
-    recordThought({ role: "assistant", content: plan });
+    async function react() {
+      const { system, prompt } = sketchReactVersion(session.requests);
 
-    appDocument.content = plan;
-
-    const identifiers = grabAllTags(plan, "identifier");
-    if (identifiers.length == 0) {
-      const steps = grabAllTags(plan, "step");
-
-      cursor.state = "detailing";
-
-      const enrichedSteps = await Promise.all(
-        steps.map(async (step) => {
-          const { system, prompt } = planIdentifiers(
-            step,
-            appDocument.requests,
-            appDocument.content,
-            snapshot
-          );
-          const client = new LLMClient({
-            serverUrl: LLM_SERVER_URL,
-            tools: [],
-            system
-          });
-
-          const res = await client.createThread(prompt);
-          const last = res.conversation[res.conversation.length - 1];
-          const enriched = grabTag(last, "result");
-          recordThought({ role: "assistant", content: enriched });
-          return enriched;
-        })
-      );
-
-      appDocument.content = `<plan>
-        ${enrichedSteps.join("\n")}
-      </plan>`;
-    }
-
-    cursor.state = "idle";
-  }
-
-  async modifyGraph() {
-    this.modifying = true;
-
-    async function reflect() {
-      const { system, prompt } = makeConsistent(
-        appDocument.content,
-        appDocument.requests
-      );
       const client = new LLMClient({
         serverUrl: LLM_SERVER_URL,
         tools: [],
@@ -447,26 +445,227 @@ export class ComApp extends LitElement {
 
       const res = await client.createThread(prompt);
       const last = res.conversation[res.conversation.length - 1];
-      const plan = grabTag(last, "corrected-plan");
-      recordThought({ role: "assistant", content: plan });
-      appDocument.content = plan;
-      return plan;
+      recordThought({ role: "assistant", content: last });
+
+      idk.reactCode = last;
+
+      return last;
     }
 
-    cursor.state = "reflecting";
+    const sourceCode = await react();
 
-    const finalPlan = await reflect();
+    cursor.state = "detailing";
+
+    async function transform() {
+      const { system, prompt } = transformToGraph(sourceCode);
+
+      const client = new LLMClient({
+        serverUrl: LLM_SERVER_URL,
+        tools: [],
+        system
+      });
+
+      const res = await client.createThread(prompt);
+      const last = res.conversation[res.conversation.length - 1];
+      recordThought({ role: "assistant", content: last });
+
+      const spec = grabMarkdown(last);
+      const code = grabJavascript(last);
+
+      idk.transformed = code;
+      idk.speclang = spec;
+
+      return last;
+    }
+
+    const transformed = await transform();
+    console.log(transformed);
+
+    cursor.state = "working";
+
+    const refresh = this.requestUpdate.bind(this);
+
+    async function building() {
+      type Id = string;
+      type PortName = string;
+
+      type Bindings = {
+        inputs: [PortName]; // named arguments for this node
+        outputs: { [target: Id]: PortName }; // bindings for the output of this node
+      };
+
+      const code = idk.transformed;
+      let errors = [] as string[];
+      const allBindings = {} as { [id: Id]: Bindings };
+
+      // stub any call to just log
+      try {
+        const context = new Function(
+          "actions",
+          `
+          const { addState, addTransformation, addUi, addEventListener } = actions;
+          ${code};
+        `
+        );
+
+        context({
+          addState(
+            id: Id,
+            explanation: string,
+            initial: any,
+            bindings: Bindings
+          ) {
+            console.log("addState", id, explanation, initial, bindings);
+            appGraph.add(id, {
+              id,
+              contentType: CONTENT_TYPE_DATA,
+              body: initial,
+              docstring: explanation
+            });
+            allBindings[id] = bindings;
+            refresh();
+          },
+          addTransformation(
+            id: Id,
+            explanation: string,
+            code: string,
+            bindings: Bindings
+          ) {
+            console.log("addTransformation", id, explanation, code, bindings);
+            appGraph.add(id, {
+              id,
+              contentType: CONTENT_TYPE_JAVASCRIPT,
+              body: code,
+              docstring: explanation
+            });
+            allBindings[id] = bindings;
+            refresh();
+          },
+          addUi(
+            id: Id,
+            explanation: string,
+            template: string,
+            bindings: Bindings
+          ) {
+            console.log("addUi", id, explanation, template, bindings);
+            appGraph.add(id, {
+              id,
+              contentType: CONTENT_TYPE_UI,
+              body: template,
+              docstring: explanation
+            });
+            allBindings[id] = bindings;
+            refresh();
+          },
+          addEventListener(
+            id: Id,
+            explanation: string,
+            event: string,
+            code: string,
+            bindings: Bindings
+          ) {
+            console.log(
+              "addEventListener",
+              id,
+              explanation,
+              event,
+              code,
+              bindings
+            );
+            appGraph.add(id, {
+              id,
+              contentType: CONTENT_TYPE_EVENT_LISTENER,
+              body: {
+                event,
+                code
+              },
+              docstring: explanation
+            });
+            allBindings[id] = bindings;
+            refresh();
+          }
+        });
+      } catch (e: any) {
+        errors.push(`Creation failed: ${e.message}`);
+      }
+
+      for (const id in allBindings) {
+        const bindings = allBindings[id];
+        for (const target in bindings.outputs) {
+          const port = bindings.outputs[target];
+          appGraph.connect(id, target, port);
+        }
+      }
+
+      // pass over all input bindings and check they have been wired
+      for (const id in allBindings) {
+        const bindings = allBindings[id];
+        for (const input of bindings.inputs) {
+          if (!appGraph.nodes.get(id)?.inputs.get(input)) {
+            errors.push(`Node ${id} is missing input ${input}`);
+            console.error(`Node ${id} is missing input ${input}`);
+          }
+        }
+      }
+
+      if (errors.length > 0) {
+        const { system, prompt } = fixGraph(
+          idk.transformed,
+          idk.speclang,
+          errors
+        );
+
+        const client = new LLMClient({
+          serverUrl: LLM_SERVER_URL,
+          tools: [],
+          system
+        });
+
+        const res = await client.createThread(prompt);
+        const last = res.conversation[res.conversation.length - 1];
+        recordThought({ role: "assistant", content: last });
+
+        const spec = grabMarkdown(last);
+        const code = grabJavascript(last);
+
+        idk.transformed = code;
+        idk.speclang = spec;
+
+        return false;
+      }
+
+      return true;
+    }
+
+    let passedCheck = await building();
+    if (!passedCheck) {
+      passedCheck = await building();
+    }
+
+    cursor.state = "idle";
+
+    appGraph.update();
+    this.requestUpdate();
+  }
+
+  async implementNode(id: string) {
+    this.modifying = true;
 
     // const spec = await plan(userInput, prepareSteps(userInput, appGraph));
     // const finalPlan = spec?.[spec?.length - 1];
     // console.log("finalPlan", finalPlan);
-    const input = `Implement the following plan using the available tools:
+    const input = `You are working with a user to modify a disposable software application. The environment is a reactive graph computation model. Modules, a.k.a nodes, connect with each other, where the output of one or more nodes serves as the input to another.
 
-    <plan>
-      ${finalPlan}
-    </plan>
+      The current program is as follows:
 
-    Current graph (may be empty): ${this.graphSnapshot()}
+      <program>
+      ${this.graphSnapshot()}
+      </program>
+
+      Implementation always looks like: data -> mapping functions -> UI and view nodes -> event listeners -> data. Functions must be pure and self-contained, they cannot reference one another except via connection.
+
+      Your task is to implement the following node: \`${id}\`.
+      You should ensure all inbound connections are correct as part of implementation.
 
     Modify or create the graph to make it align with the plan and say nothing in response.`;
 
@@ -480,7 +679,7 @@ export class ComApp extends LitElement {
           toolSpec,
           this.availableFunctions(appGraph)
         ),
-        system: codePrompt + systemContext
+        system: examples + systemContext
       });
 
       const thread = await client.createThread(input);
@@ -502,6 +701,8 @@ export class ComApp extends LitElement {
 
     cursor.state = "idle";
     this.modifying = false;
+
+    this.requestUpdate();
   }
 
   override render() {
@@ -509,11 +710,18 @@ export class ComApp extends LitElement {
       this.planResponse(ev.detail.message);
     };
 
-    const onCursorToggled = (ev: CustomEvent) => {
-      if (this.modifying) {
-        this.modifying = false;
+    const onImplement = () => {
+      // check for selection
+      if (cursor.focus.length === 0) {
+        // implement all
+        appGraph.nodes.forEach((n) => {
+          this.implementNode(n.id);
+        });
       } else {
-        this.modifyGraph();
+        // implement selection
+        cursor.focus.forEach((f) => {
+          this.implementNode(f.id);
+        });
       }
     };
 
@@ -522,15 +730,22 @@ export class ComApp extends LitElement {
         <com-cursor
           .suggestions=${watch(suggestions)}
           @message=${onCursorMessage}
-          @toggled=${onCursorToggled}
+          @implement=${onImplement}
         ></com-cursor>
         <div>
-          <section>${watch(requestsList)}</section>
-          <com-document-editor></com-document-editor>
+          <section class="requests">${watch(requestsList)}</section>
         </div>
-        <com-chat>
-          <com-thread slot="main"></com-thread>
-        </com-chat>
+        <com-tabs>
+          <pre label="React">${watch(idk, "reactCode")}</pre>
+          <com-markdown
+            label="Spec"
+            .markdown=${watch(idk, "speclang")}
+          ></com-markdown>
+          <pre label="Code">${watch(idk, "transformed")}</pre>
+          <com-chat label="App">
+            <com-thread slot="main"></com-thread>
+          </com-chat>
+        </com-tabs>
         <com-debug>
           <pre>${watch(stateSnapshot)}</pre>
         </com-debug>

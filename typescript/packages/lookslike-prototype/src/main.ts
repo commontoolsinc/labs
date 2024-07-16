@@ -26,10 +26,12 @@ export * as ComModuleEvent from "./components/modules/com-module-event.js";
 export * as ComModuleStorage from "./components/modules/com-module-storage.js";
 export * as ComModuleScene from "./components/modules/com-module-scene.js";
 export * as ComModuleData from "./components/modules/com-module-data.js";
+export * as ComModuleEventListener from "./components/modules/com-module-event-listener.js";
 export * as ComCursor from "./components/com-cursor.js";
 export * as ComLoader from "./components/com-loader.js";
-export * as ComDocumentEditor from "./document/com-document-editor.js";
 export * as ComTypingPreview from "./components/com-typing-preview.js";
+export * as ComTypeout from "./components/com-typeout.js";
+export * as ComTabs from "./components/com-tabs.js";
 
 export * as ComApp from "./components/com-app.js";
 

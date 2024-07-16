@@ -22,38 +22,35 @@ export function describeTools(
     .join("\n");
 }
 
-export const toolSpec: ChatCompletionTool[] = [
+export const planningToolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "func",
+      name: "placeholder",
       description:
-        "Add a data transformation function to the graph written in javascript, write only the function body. No comments.",
+        "Add a node that can be replaced with a different node later. This is useful for planning out the structure of your graph before you have all the details.",
       parameters: {
         type: "object",
         properties: {
           id: { type: "string" },
-          code: { type: "string" },
-          documentedReasoning: { type: "string" }
+          docstring: { type: "string" }
         },
-        required: ["id", "code", "documentedReasoning"]
+        required: ["id", "docstring"]
       }
     }
   },
   {
     type: "function",
     function: {
-      name: "ui",
-      description:
-        "Adds a UI node written using a hyperscript tree. Only use span, ul, button and h1 elements for now.",
+      name: "declareFunc",
+      description: "Create a stub function node to be implemented later.",
       parameters: {
         type: "object",
         properties: {
           id: { type: "string" },
-          uiTree: { type: "object", description: "The UI tree." },
-          documentedReasoning: { type: "string" }
+          docstring: { type: "string" }
         },
-        required: ["id", "uiTree", "documentedReasoning"]
+        required: ["id", "docstring"]
       }
     }
   },
@@ -68,9 +65,9 @@ export const toolSpec: ChatCompletionTool[] = [
         properties: {
           id: { type: "string" },
           data: { type: "object", description: "Default value" },
-          documentedReasoning: { type: "string" }
+          docstring: { type: "string" }
         },
-        required: ["id", "data", "documentedReasoning"]
+        required: ["id", "data", "docstring"]
       }
     }
   },
@@ -86,9 +83,142 @@ export const toolSpec: ChatCompletionTool[] = [
           id: { type: "string" },
           event: { type: "string" },
           code: { type: "string" },
-          documentedReasoning: { type: "string" }
+          docstring: { type: "string" }
         },
-        required: ["id", "event", "code", "documentedReasoning"]
+        required: ["id", "event", "code", "docstring"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "connect",
+      description: "Adds a connection between two existing nodes.",
+      parameters: {
+        type: "object",
+        properties: {
+          from: {
+            type: "string",
+            description: "Path of the OUTPUT node in the graph"
+          },
+          to: {
+            type: "string",
+            description: "Path to the INPUT node"
+          },
+          portName: {
+            type: "string",
+            description: "Name of the port to connect to"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "disconnect",
+      description: "Removes a connection between two existing nodes.",
+      parameters: {
+        type: "object",
+        properties: {
+          from: {
+            type: "string",
+            description: "Path of the OUTPUT node in the graph"
+          },
+          to: {
+            type: "string",
+            description: "Path to the INPUT node"
+          },
+          portName: {
+            type: "string",
+            description: "Name of the port to connect to"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete",
+      description: "Deletes a node from the graph.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" }
+        }
+      }
+    }
+  }
+];
+
+export const toolSpec: ChatCompletionTool[] = [
+  {
+    type: "function",
+    function: {
+      name: "func",
+      description:
+        "Implement (or update) a data transformation function written in javascript, write only the function body. No comments.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          code: { type: "string" },
+          docstring: { type: "string" }
+        },
+        required: ["id", "code", "docstring"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "ui",
+      description:
+        "Adds (or updates) a UI node written using a hyperscript tree. Only use span, ul, button and h1 elements for now.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          uiTree: { type: "object", description: "The UI tree." },
+          docstring: { type: "string" }
+        },
+        required: ["id", "uiTree", "docstring"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "data",
+      description:
+        "Add (or update) a node representing a variable that can be changed and accessed by other nodes. For state, events, input etc.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          data: { type: "object", description: "Default value" },
+          docstring: { type: "string" }
+        },
+        required: ["id", "data", "docstring"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "listen",
+      description:
+        "Add an event listener to the graph with a handler written in javascript, write only the function body. No comments.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          event: { type: "string" },
+          code: { type: "string" },
+          docstring: { type: "string" }
+        },
+        required: ["id", "event", "code", "docstring"]
       }
     }
   },
@@ -105,9 +235,9 @@ export const toolSpec: ChatCompletionTool[] = [
             type: "string",
             description: "Path of the source data in the graph"
           },
-          documentedReasoning: { type: "string" }
+          docstring: { type: "string" }
         },
-        required: ["id", "dataSource", "documentedReasoning"]
+        required: ["id", "dataSource", "docstring"]
       }
     }
   },
@@ -116,6 +246,30 @@ export const toolSpec: ChatCompletionTool[] = [
     function: {
       name: "connect",
       description: "Adds a connection between two existing nodes.",
+      parameters: {
+        type: "object",
+        properties: {
+          from: {
+            type: "string",
+            description: "Path of the OUTPUT node in the graph"
+          },
+          to: {
+            type: "string",
+            description: "Path to the INPUT node"
+          },
+          portName: {
+            type: "string",
+            description: "Name of the port to connect to"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "disconnect",
+      description: "Removes a connection between two existing nodes.",
       parameters: {
         type: "object",
         properties: {
@@ -151,34 +305,6 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "clock",
-      description:
-        "A node that emit an incrementing value every second, starting from 0.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "fetch",
-      description: "Fetch node to retrieve (GET) data from the web.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          url: { type: "string" }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
       name: "glslShader",
       description:
         "Shader node in ShaderToy format. iTime, iResolution, iMouse and iChannel0 (the user's webcam). Do not re-define them.",
@@ -187,47 +313,9 @@ export const toolSpec: ChatCompletionTool[] = [
         properties: {
           id: { type: "string" },
           shaderToyCode: { type: "string" },
-          documentedReasoning: { type: "string" }
+          docstring: { type: "string" }
         },
-        required: ["id", "shaderToyCode", "documentedReasoning"]
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "languageModel",
-      description:
-        "LLM node to the graph, responds in text format. Prompt must be calculated using a code node.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          promptSource: {
-            type: "string",
-            description:
-              "Name of the node who's output should be used as the prompt"
-          }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "imageGeneration",
-      description:
-        "Generate an image from a prompt/description. The output is the URL.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          promptSource: {
-            type: "string",
-            description:
-              "Name of the node who's output should be used as the prompt"
-          }
-        }
+        required: ["id", "shaderToyCode", "docstring"]
       }
     }
   }

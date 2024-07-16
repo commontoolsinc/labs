@@ -1,6 +1,7 @@
 import {
   CONTENT_TYPE_CLOCK,
   CONTENT_TYPE_DATA,
+  CONTENT_TYPE_EVENT_LISTENER,
   CONTENT_TYPE_FETCH,
   CONTENT_TYPE_GLSL,
   CONTENT_TYPE_IMAGE,
@@ -39,7 +40,7 @@ async function executeNode(
 ): Promise<any> {
   console.log("executing", node.id);
   switch (node.definition.contentType) {
-    case CONTENT_TYPE_JAVASCRIPT:
+    case CONTENT_TYPE_JAVASCRIPT: {
       const result = await run(
         node.id,
         node.definition.body,
@@ -47,6 +48,16 @@ async function executeNode(
         node.definition.evalMode
       );
       return result;
+    }
+    case CONTENT_TYPE_EVENT_LISTENER: {
+      const result = await run(
+        node.id,
+        node.definition.body.code,
+        inputs,
+        node.definition.evalMode
+      );
+      return result;
+    }
     case CONTENT_TYPE_GLSL:
       return node.definition.body;
     case CONTENT_TYPE_DATA: {
@@ -63,33 +74,52 @@ async function executeNode(
     case CONTENT_TYPE_UI: {
       const fns: { [name: string]: Sendable<any> } = {};
 
-      for (const n of graph.nodes.values()) {
-        if (n.definition.contentType == CONTENT_TYPE_JAVASCRIPT) {
-          const sendable = {
-            send: (_: any) => {
-              // n.update();
+      const onEvent = {
+        send: ({ name, event }) => {
+          console.log("event", node.id, name, event);
+
+          [...graph.nodes.values()]
+            .filter((n) => {
+              return (
+                n.definition.contentType == CONTENT_TYPE_EVENT_LISTENER &&
+                n.definition.body.event == name
+              );
+            })
+            .forEach((n) => {
+              console.log("executing handler", name, n.id, event);
               n.execute();
-            }
-          };
-          fns[n.id] = sendable;
+            });
         }
-
-        if (n.definition.contentType == CONTENT_TYPE_DATA) {
-          const sendable = {
-            send: (value: any) => {
-              graph.db[n.id] = value;
-            }
-          };
-          fns[n.id] = sendable;
-        }
-      }
-
-      const namespace = {
-        ...fns,
-        ...inputs
       };
 
-      const template = createElement(node.definition.body, namespace, graph);
+      // for (const n of graph.nodes.values()) {
+      //   if (n.definition.contentType == CONTENT_TYPE_JAVASCRIPT) {
+      //     const sendable = {
+      //       send: (_: any) => {
+      //         // n.update();
+      //         n.execute();
+      //       }
+      //     };
+      //     fns[n.id] = sendable;
+      //   }
+
+      //   if (n.definition.contentType == CONTENT_TYPE_DATA) {
+      //     const sendable = {
+      //       send: (value: any) => {
+      //         graph.db[n.id] = value;
+      //       }
+      //     };
+      //     fns[n.id] = sendable;
+      //   }
+      // }
+
+      const namespace = {
+        // ...fns,
+        ...inputs,
+        onEvent
+      };
+
+      const template = createElement(node.definition.body, namespace);
       return template;
     }
     case CONTENT_TYPE_SCENE: {
@@ -329,6 +359,11 @@ export class RuntimeNode {
 
   async update() {
     this.dispose();
+
+    if (this.definition.contentType === CONTENT_TYPE_EVENT_LISTENER) {
+      // event listeners do not bind to their inputs, they are only triggered by uh... events
+      return;
+    }
 
     this.runner = effect(async () => {
       this.log("effect ran", this.id, this.inputs);

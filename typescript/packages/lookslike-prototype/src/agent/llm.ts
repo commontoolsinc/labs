@@ -230,6 +230,24 @@ export function grabJson(txt: string) {
   return JSON.parse(json);
 }
 
+export function grabJavascript(txt: string) {
+  const code = txt.match(/```javascript\n([\s\S]+?)```/)?.[1];
+  if (!code) {
+    console.error("No code found in text", txt);
+    return "";
+  }
+  return code;
+}
+
+export function grabMarkdown(txt: string) {
+  const markdown = txt.match(/```markdown\n([\s\S]+?)```/)?.[1];
+  if (!markdown) {
+    console.error("No markdown found in text", txt);
+    return "";
+  }
+  return markdown;
+}
+
 export function extractResponse(data: any) {
   return data.choices[0].message.content;
 }

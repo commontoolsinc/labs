@@ -49,8 +49,7 @@ const styles = css`
   }
 
   li {
-    list-style-type: disc;
-    margin-left: 1rem;
+    list-style-type: none;
   }
 
   .history {
@@ -61,6 +60,16 @@ const styles = css`
     background: #f0f0f0;
     padding: 0.5rem;
     border-radius: 5px;
+  }
+
+  textarea {
+    background: none;
+    border: none;
+    text-decoration: italic;
+  }
+
+  table.node {
+    padding: 1rem;
   }
 `;
 
@@ -107,6 +116,11 @@ export class ComThread extends LitElement {
       cursor.focus.push({ id, element: target });
     };
 
+    const onDelete = (id: string) => {
+      this.graph?.delete(id);
+      this.requestUpdate();
+    };
+
     return html`<com-debug>
         ${history.map((message) => {
           return html`<pre>${message.content}</pre>`;
@@ -130,11 +144,23 @@ export class ComThread extends LitElement {
             <input
               type="checkbox"
               @change=${(ev: CustomEvent) => onSelected(ev.target, node.id)}
-            />
+            ></input>
+            <button @click=${() => onDelete(node.id)}>🗑️</button>
             <strong><code>${node.id}</code></strong>
             <code>${node.definition.contentType}</code>
-
-            ${this.response(node)}
+            <table class="node">
+              <tr>
+                <td>
+                  <textarea
+                    .value=${node.definition.docstring}
+                    class="docstring"
+                    rows="5"
+                    cols="50"
+                  ></textarea>
+                </td>
+                <td>${this.response(node)}</td>
+              </tr>
+            </table>
           </li>`;
         })}
       </ul>`;

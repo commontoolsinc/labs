@@ -281,7 +281,7 @@ export class ComCursor extends LitElement {
 
   override render() {
     const onPlayPause = () => {
-      this.dispatchEvent(new CustomEvent("toggled"));
+      this.dispatchEvent(new CustomEvent("implement"));
     };
 
     return html`
@@ -290,11 +290,7 @@ export class ComCursor extends LitElement {
           ? "bouncing"
           : ""} ${this.isInputFocused ? "expanded" : ""}"
       >
-        ${this.isInputFocused
-          ? html``
-          : html`<button @click=${onPlayPause}>
-              ${cursor.state === "idle" ? "Go" : "Stop"}
-            </button>`}
+        <button @click=${onPlayPause}>🔨</button>
         ${cursor.state === "idle"
           ? html` <textarea
               rows="1"

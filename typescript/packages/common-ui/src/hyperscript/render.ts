@@ -122,20 +122,28 @@ const renderVNode = (vnode: VNode, context: RenderContext): Node => {
     // if (!Object.hasOwn(view.props.schema.properties, key)) {
     //   continue;
     // }
-
+    console.log(
+      "evaluating prop",
+      key,
+      value,
+      isBinding(value),
+      isSignal(value),
+      isStream(value),
+    );
     if (isBinding(value) || isSignal(value) || isStream(value)) {
       const bound =
         isSignal(value) || isStream(value) ? value : context[value.name];
       if (isEventKey(key)) {
         console.log("found event", element, key, value, context);
-        if (isSendable(bound)) {
-          console.log("binding event", element, key, bound);
-          const { send } = bound;
+        const onEvent = context.onEvent;
+        if (isSendable(onEvent)) {
+          console.log("binding event", element, key, onEvent);
+          const { send } = onEvent;
           const event = readEventNameFromEventKey(key);
           const cancel = listen(element, event, (event: Event) => {
             let vdomEvent = readEvent(event);
             if (detail) vdomEvent = vdomEvent.detail[detail];
-            send(vdomEvent);
+            send({ name: (value as any).name, event: vdomEvent });
           });
           cancels.push(cancel);
         }

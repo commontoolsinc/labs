@@ -37,7 +37,6 @@ export type SpecTree = {
 export type NodeId = string;
 
 export type Recipe = {
-  spec: SpecTree;
   inputs: NodeId[];
   outputs: NodeId[];
   nodes: RecipeNode[];
@@ -49,8 +48,10 @@ export type RecipeConnectionMap = { [nodeId: string]: ConnectionMap };
 export type RecipeNode = {
   id: string;
   contentType: string;
-  comment?: string;
+  docstring: string;
   body: any;
+  staleDocstring?: boolean;
+  staleBody?: boolean;
   evalMode?: EvalMode;
 };
 
