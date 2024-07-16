@@ -45,10 +45,10 @@ export type Context = { [key: string]: unknown };
  * Dynamic properties. Can either be string type (static) or a Mustache
  * variable (dynamic).
  */
-export type Props = { [key: string]: string | Var };
+export type Props = { [key: string]: string | Binding };
 
 /** A child in a view can be one of a few things */
-export type Child = VNode | Block | Var | string;
+export type Child = VNode | Block | Binding | string;
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {
@@ -59,7 +59,7 @@ export type VNode = {
 };
 
 /** Create a vnode */
-export const createVNode = (
+export const vnode = (
   name: string,
   props: Props = {},
   children: Array<Child> = [],
@@ -72,20 +72,20 @@ export const isVNode = (value: unknown): value is VNode => {
 };
 
 /** A mustache variable `{{myvar}}` */
-export type Var = {
-  type: "var";
+export type Binding = {
+  type: "binding";
   name: string;
 };
 
-export const createVar = (name: string): Var => {
-  return { type: "var", name };
+export const binding = (name: string): Binding => {
+  return { type: "binding", name };
 };
 
-export const isVar = (value: unknown): value is Var => {
-  return (value as Var)?.type === "var";
+export const isBinding = (value: unknown): value is Binding => {
+  return (value as Binding)?.type === "binding";
 };
 
-export const markupVar = (name: string) => `{{${name}}}`;
+export const markupBinding = (name: string) => `{{${name}}}`;
 
 /** A mustache block `{{#myblock}} ... {{/myblock}}` */
 export type Block = {
@@ -94,10 +94,7 @@ export type Block = {
   children: Array<Child>;
 };
 
-export const createBlock = (
-  name: string,
-  children: Array<Child> = [],
-): Block => {
+export const block = (name: string, children: Array<Child> = []): Block => {
   return { type: "block", name, children };
 };
 
@@ -237,14 +234,14 @@ export const tokenizeMustache = (text: string): Array<Token> => {
  * markup representation
  */
 export const parse = (markup: string): VNode => {
-  let root: VNode = createVNode("documentfragment");
+  let root: VNode = vnode("documentfragment");
   let stack: Array<VNode | Block> = [root];
 
   for (const token of tokenize(markup)) {
     const top = getTop(stack);
     switch (token.type) {
       case "tagopen": {
-        const next = createVNode(token.name, token.props);
+        const next = vnode(token.name, token.props);
         top.children.push(next);
         stack.push(next);
         break;
@@ -257,7 +254,7 @@ export const parse = (markup: string): VNode => {
         break;
       }
       case "blockopen": {
-        const next = createBlock(token.name);
+        const next = block(token.name);
         top.children.push(next);
         stack.push(next);
         break;
@@ -274,7 +271,7 @@ export const parse = (markup: string): VNode => {
         break;
       }
       case "var": {
-        top.children.push(createVar(token.name));
+        top.children.push(binding(token.name));
         break;
       }
       default: {
@@ -293,13 +290,13 @@ const getTop = (stack: Array<VNode | Block>): VNode | Block | null =>
 const MUSTACHE_VAR_REGEX = /^{{(\w+)}}$/;
 
 /** Parse a Mustache var if and only if it is the only element in a string */
-export const parseMustacheVar = (markup: string): Var | null => {
+export const parseMustacheVar = (markup: string): Binding | null => {
   const match = markup.match(MUSTACHE_VAR_REGEX);
   if (match == null) {
     return null;
   }
   const body = match[1];
-  return createVar(body);
+  return binding(body);
 };
 
 /** Parse view props from attrs */

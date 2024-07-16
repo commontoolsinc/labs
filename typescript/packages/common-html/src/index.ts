@@ -1,4 +1,4 @@
-export { view, View, Context, VNode, Var } from "./view.js";
+export { view, View, Context, VNode, Binding } from "./view.js";
 export { html } from "./html.js";
 export { render, setNodeSanitizer, setEventSanitizer } from "./render.js";
 export { Reactive } from "./reactive.js";

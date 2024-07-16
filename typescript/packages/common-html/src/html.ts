@@ -1,6 +1,6 @@
 import * as logger from "./logger.js";
 import cid from "./cid.js";
-import { view, View, markupVar } from "./view.js";
+import { view, View, markupBinding } from "./view.js";
 
 export const html = (
   strings: TemplateStringsArray,
@@ -22,7 +22,7 @@ export const html = (
       return result + string;
     }
     const [name] = namedValue;
-    return result + string + markupVar(name);
+    return result + string + markupBinding(name);
   }, "");
 
   logger.debug("Flattened", markup);

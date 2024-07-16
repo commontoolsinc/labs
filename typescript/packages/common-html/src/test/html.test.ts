@@ -1,6 +1,6 @@
 import * as assert from "node:assert";
 import html from "../html.js";
-import { isVar } from "../view.js";
+import { isBinding } from "../view.js";
 import { state, stream } from "../state.js";
 
 describe("html", () => {
@@ -15,9 +15,9 @@ describe("html", () => {
     `;
 
     // @ts-ignore - ignore for test
-    assert.strict(isVar(view.template.children[0].props.onclick));
+    assert.strict(isBinding(view.template.children[0].props.onclick));
 
     // @ts-ignore - ignore for test
-    assert.strict(isVar(view.template.children[0].children[0]));
+    assert.strict(isBinding(view.template.children[0].children[0]));
   });
 });

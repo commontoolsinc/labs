@@ -1,4 +1,4 @@
-import { view, parse, createVar, createVNode } from "../view.js";
+import { view, parse, binding, vnode } from "../view.js";
 import * as assert from "node:assert/strict";
 
 describe("view()", () => {
@@ -6,7 +6,7 @@ describe("view()", () => {
     const hello = view("<div>Hello world!</div>", {});
     assert.deepStrictEqual(hello, {
       type: "view",
-      template: createVNode("div", {}, ["Hello world!"]),
+      template: vnode("div", {}, ["Hello world!"]),
       context: {},
     });
   });
@@ -18,9 +18,7 @@ describe("view()", () => {
     });
     assert.deepStrictEqual(hello, {
       type: "view",
-      template: createVNode("div", { hidden: createVar("hidden") }, [
-        createVar("text"),
-      ]),
+      template: vnode("div", { hidden: binding("hidden") }, [binding("text")]),
       context: {
         hidden: false,
         text: "Hello world!",
@@ -41,16 +39,12 @@ describe("parse()", () => {
 
     assert.deepEqual(
       root,
-      createVNode("documentfragment", {}, [
-        createVNode(
-          "div",
-          { class: "container", hidden: createVar("hidden") },
-          [
-            createVNode("button", { id: "foo", onclick: createVar("click") }, [
-              "Hello world!",
-            ]),
-          ],
-        ),
+      vnode("documentfragment", {}, [
+        vnode("div", { class: "container", hidden: binding("hidden") }, [
+          vnode("button", { id: "foo", onclick: binding("click") }, [
+            "Hello world!",
+          ]),
+        ]),
       ]),
     );
   });
