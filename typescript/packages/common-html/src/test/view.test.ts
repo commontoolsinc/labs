@@ -1,4 +1,4 @@
-import { view, section, parse, binding, vnode } from "../view.js";
+import { view, section, parse, binding, vnode, parsePath } from "../view.js";
 import * as assert from "node:assert/strict";
 
 describe("view()", () => {
@@ -70,5 +70,19 @@ describe("parse()", () => {
         ]),
       ]),
     );
+  });
+});
+
+describe("parsePath()", () => {
+  it("parses paths without dots", () => {
+    assert.deepEqual(parsePath("foo"), ["foo"]);
+  });
+
+  it("parses paths with dots", () => {
+    assert.deepEqual(parsePath("foo.bar.baz"), ["foo", "bar", "baz"]);
+  });
+
+  it("parses path with only a dot", () => {
+    assert.deepEqual(parsePath("."), []);
   });
 });

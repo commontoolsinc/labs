@@ -83,6 +83,11 @@ export const binding = (name: string): Binding => {
 };
 
 export const parsePath = (pathString: string): Array<string> => {
+  if (pathString === ".") {
+    const path: Array<string> = [];
+    logger.debug("parsePath", path);
+    return path;
+  }
   const path = pathString.split(".");
   logger.debug("parsePath", path);
   return path;
