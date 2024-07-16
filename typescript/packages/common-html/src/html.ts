@@ -1,7 +1,6 @@
-import * as hole from "./hole.js";
 import * as logger from "./logger.js";
 import cid from "./cid.js";
-import { view, View } from "./view.js";
+import { view, View, markupVar } from "./view.js";
 
 export const html = (
   strings: TemplateStringsArray,
@@ -23,7 +22,7 @@ export const html = (
       return result + string;
     }
     const [name] = namedValue;
-    return result + string + hole.markup(name);
+    return result + string + markupVar(name);
   }, "");
 
   logger.debug("Flattened", markup);

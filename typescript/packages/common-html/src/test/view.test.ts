@@ -1,5 +1,4 @@
-import { view } from "../view.js";
-import * as hole from "../hole.js";
+import { view, parse, createVar, createVNode } from "../view.js";
 import * as assert from "node:assert/strict";
 
 describe("view()", () => {
@@ -7,12 +6,7 @@ describe("view()", () => {
     const hello = view("<div>Hello world!</div>", {});
     assert.deepStrictEqual(hello, {
       type: "view",
-      template: {
-        type: "vnode",
-        tag: "div",
-        props: {},
-        children: ["Hello world!"],
-      },
+      template: createVNode("div", {}, ["Hello world!"]),
       context: {},
     });
   });
@@ -24,18 +18,40 @@ describe("view()", () => {
     });
     assert.deepStrictEqual(hello, {
       type: "view",
-      template: {
-        type: "vnode",
-        tag: "div",
-        props: {
-          hidden: hole.create("hidden"),
-        },
-        children: [hole.create("text")],
-      },
+      template: createVNode("div", { hidden: createVar("hidden") }, [
+        createVar("text"),
+      ]),
       context: {
         hidden: false,
         text: "Hello world!",
       },
     });
+  });
+});
+
+describe("parse()", () => {
+  it("parses", () => {
+    const xml = `
+      <div class="container" hidden={{hidden}}>
+        <button id="foo" onclick={{click}}>Hello world!</button>
+      </div>
+    `;
+
+    const root = parse(xml);
+
+    assert.deepEqual(
+      root,
+      createVNode("documentfragment", {}, [
+        createVNode(
+          "div",
+          { class: "container", hidden: createVar("hidden") },
+          [
+            createVNode("button", { id: "foo", onclick: createVar("click") }, [
+              "Hello world!",
+            ]),
+          ],
+        ),
+      ]),
+    );
   });
 });

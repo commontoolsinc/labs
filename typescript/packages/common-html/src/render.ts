@@ -1,6 +1,4 @@
-import { isVNode, VNode } from "./vnode.js";
-import { View, Context, isView } from "./view.js";
-import { isHole } from "./hole.js";
+import { View, Context, isView, isVNode, VNode, isVar } from "./view.js";
 import { effect } from "./reactive.js";
 import { isSendable } from "./sendable.js";
 import { useCancelGroup, Cancel } from "./cancel.js";
@@ -32,9 +30,9 @@ const renderNode = (
   if (!sanitizedNode) {
     return null;
   }
-  const element = document.createElement(sanitizedNode.tag);
+  const element = document.createElement(sanitizedNode.name);
   attrs: for (const [name, value] of Object.entries(sanitizedNode.props)) {
-    if (isHole(value)) {
+    if (isVar(value)) {
       const replacement = context[value.name];
       // If prop is an event, we need to add an event listener
       if (isEventProp(name)) {
@@ -69,7 +67,7 @@ const renderNode = (
       if (childElement) {
         element.append(childElement);
       }
-    } else if (isHole(childNode)) {
+    } else if (isVar(childNode)) {
       const replacement = context[childNode.name];
       // Anchor for reactive replacement
       let anchor: ChildNode = document.createTextNode("");
@@ -121,7 +119,7 @@ const setProp = <T>(target: T, key: string, value: unknown) => {
 };
 
 const sanitizeScripts = (node: VNode): VNode | null => {
-  if (node.tag === "script") {
+  if (node.name === "script") {
     return null;
   }
   return node;
