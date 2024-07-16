@@ -1,4 +1,12 @@
-import { View, Context, isView, isVNode, VNode, isBinding } from "./view.js";
+import {
+  View,
+  Context,
+  isView,
+  isVNode,
+  VNode,
+  isBinding,
+  Props,
+} from "./view.js";
 import { effect } from "./reactive.js";
 import { isSendable } from "./sendable.js";
 import { useCancelGroup, Cancel } from "./cancel.js";
@@ -31,34 +39,10 @@ const renderNode = (
     return null;
   }
   const element = document.createElement(sanitizedNode.name);
-  attrs: for (const [name, value] of Object.entries(sanitizedNode.props)) {
-    if (isBinding(value)) {
-      const replacement = context[value.name];
-      // If prop is an event, we need to add an event listener
-      if (isEventProp(name)) {
-        if (!isSendable(replacement)) {
-          throw new TypeError(
-            `Event prop "${name}" does not have a send method`,
-          );
-        }
-        const key = cleanEventProp(name);
-        const cancel = listen(element, key, (event) => {
-          const sanitizedEvent = sanitizeEvent(event);
-          replacement.send(sanitizedEvent);
-        });
-        addCancel(cancel);
-      } else {
-        const cancel = effect(replacement, (replacement) => {
-          // Replacements are set as properties not attributes to avoid
-          // string serialization of complex datatypes.
-          setProp(element, name, replacement);
-        });
-        addCancel(cancel);
-      }
-    } else {
-      element.setAttribute(name, value);
-    }
-  }
+
+  const cancel = bindProps(element, sanitizedNode.props, context);
+  addCancel(cancel);
+
   for (const childNode of sanitizedNode.children) {
     if (typeof childNode === "string") {
       element.append(childNode);
@@ -87,6 +71,43 @@ const renderNode = (
     }
   }
   return element;
+};
+
+const bindProps = (
+  element: HTMLElement,
+  props: Props,
+  context: Context,
+): Cancel => {
+  const [cancel, addCancel] = useCancelGroup();
+  for (const [name, value] of Object.entries(props)) {
+    if (isBinding(value)) {
+      const replacement = context[value.name];
+      // If prop is an event, we need to add an event listener
+      if (isEventProp(name)) {
+        if (!isSendable(replacement)) {
+          throw new TypeError(
+            `Event prop "${name}" does not have a send method`,
+          );
+        }
+        const key = cleanEventProp(name);
+        const cancel = listen(element, key, (event) => {
+          const sanitizedEvent = sanitizeEvent(event);
+          replacement.send(sanitizedEvent);
+        });
+        addCancel(cancel);
+      } else {
+        const cancel = effect(replacement, (replacement) => {
+          // Replacements are set as properties not attributes to avoid
+          // string serialization of complex datatypes.
+          setProp(element, name, replacement);
+        });
+        addCancel(cancel);
+      }
+    } else {
+      element.setAttribute(name, value);
+    }
+  }
+  return cancel;
 };
 
 const isEventProp = (key: string) => key.startsWith("on");
