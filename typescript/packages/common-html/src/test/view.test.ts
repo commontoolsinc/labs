@@ -1,4 +1,4 @@
-import { view, parse, binding, vnode } from "../view.js";
+import { view, block, parse, binding, vnode } from "../view.js";
 import * as assert from "node:assert/strict";
 
 describe("view()", () => {
@@ -44,6 +44,27 @@ describe("parse()", () => {
           vnode("button", { id: "foo", onclick: binding("click") }, [
             "Hello world!",
           ]),
+        ]),
+      ]),
+    );
+  });
+
+  it("parses mustache blocks embedded in HTML", () => {
+    const xml = `
+      <div class="container">
+        {{#items}}
+          <div class="item">{{text}}</div>
+        {{/items}}
+      </div>
+    `;
+
+    const root = parse(xml);
+
+    assert.deepEqual(
+      root,
+      vnode("documentfragment", {}, [
+        vnode("div", { class: "container" }, [
+          block("items", [vnode("div", { class: "item" }, [binding("text")])]),
         ]),
       ]),
     );

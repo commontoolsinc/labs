@@ -118,8 +118,8 @@ export type TextToken = {
   value: string;
 };
 
-export type VarToken = {
-  type: "var";
+export type BindingToken = {
+  type: "binding";
   name: string;
 };
 
@@ -137,7 +137,7 @@ export type Token =
   | TagOpenToken
   | TagCloseToken
   | TextToken
-  | VarToken
+  | BindingToken
   | BlockOpenToken
   | BlockCloseToken;
 
@@ -178,15 +178,16 @@ export const tokenize = (markup: string): Array<Token> => {
   return tokens;
 };
 
-const MUSTACHE_REGEX_G = /{{(\w+)}}/g;
+const MUSTACHE_REGEXP = /{{([^\}]+)}}/;
+const MUSTACHE_REGEXP_G = new RegExp(MUSTACHE_REGEXP, "g");
 
 /** Tokenize Mustache */
 export const tokenizeMustache = (text: string): Array<Token> => {
   const tokens: Array<Token> = [];
-  MUSTACHE_REGEX_G.lastIndex = 0;
+  MUSTACHE_REGEXP_G.lastIndex = 0;
   let lastIndex = 0;
   let match: RegExpMatchArray | null = null;
-  while ((match = MUSTACHE_REGEX_G.exec(text)) !== null) {
+  while ((match = MUSTACHE_REGEXP_G.exec(text)) !== null) {
     if (match.index > lastIndex) {
       const token: TextToken = {
         type: "text",
@@ -208,11 +209,11 @@ export const tokenizeMustache = (text: string): Array<Token> => {
       logger.debug("blockclose", token);
       tokens.push(token);
     } else {
-      const token: VarToken = { type: "var", name: body };
+      const token: BindingToken = { type: "binding", name: body };
       logger.debug("var", token);
       tokens.push(token);
     }
-    lastIndex = MUSTACHE_REGEX_G.lastIndex;
+    lastIndex = MUSTACHE_REGEXP_G.lastIndex;
   }
 
   if (lastIndex < text.length) {
@@ -224,7 +225,7 @@ export const tokenizeMustache = (text: string): Array<Token> => {
     tokens.push(token);
   }
 
-  MUSTACHE_REGEX_G.lastIndex = 0;
+  MUSTACHE_REGEXP.lastIndex = 0;
 
   return tokens;
 };
@@ -249,7 +250,9 @@ export const parse = (markup: string): VNode => {
       case "tagclose": {
         const top = stack.pop();
         if (!isVNode(top) || top.name !== token.name) {
-          throw new ParseError(`Unexpected closing tag ${token.name}`);
+          throw new ParseError(
+            `Unexpected closing tag ${token.name} in ${top.name}`,
+          );
         }
         break;
       }
@@ -262,7 +265,9 @@ export const parse = (markup: string): VNode => {
       case "blockclose": {
         const top = stack.pop();
         if (!isBlock(top) || top.name !== token.name) {
-          throw new ParseError(`Unexpected closing block ${token.name}`);
+          throw new ParseError(
+            `Unexpected closing block ${token.name} in ${top.name}`,
+          );
         }
         break;
       }
@@ -270,7 +275,7 @@ export const parse = (markup: string): VNode => {
         top.children.push(token.value);
         break;
       }
-      case "var": {
+      case "binding": {
         top.children.push(binding(token.name));
         break;
       }
@@ -287,15 +292,17 @@ export const parse = (markup: string): VNode => {
 const getTop = (stack: Array<VNode | Block>): VNode | Block | null =>
   stack.at(-1) ?? null;
 
-const MUSTACHE_VAR_REGEX = /^{{(\w+)}}$/;
-
 /** Parse a Mustache var if and only if it is the only element in a string */
-export const parseMustacheVar = (markup: string): Binding | null => {
-  const match = markup.match(MUSTACHE_VAR_REGEX);
+export const parseMustacheBinding = (markup: string): Binding | null => {
+  const match = markup.match(MUSTACHE_REGEXP);
   if (match == null) {
     return null;
   }
   const body = match[1];
+  // Blocks are not allowed
+  if (body.startsWith("#") || body.startsWith("/")) {
+    throw new ParseError(`Unexpected block ${body}`);
+  }
   return binding(body);
 };
 
@@ -303,7 +310,7 @@ export const parseMustacheVar = (markup: string): Binding | null => {
 const parseProps = (attrs: { [key: string]: string }): Props => {
   const result: Props = {};
   for (const [key, value] of Object.entries(attrs)) {
-    const parsed = parseMustacheVar(value);
+    const parsed = parseMustacheBinding(value);
     if (parsed != null) {
       result[key] = parsed;
     } else {
