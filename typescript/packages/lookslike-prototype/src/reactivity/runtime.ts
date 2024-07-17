@@ -30,6 +30,7 @@ import { createElement } from "../ui.js";
 import { generateImage, streamLlm } from "../agent/llm.js";
 import { truncatedJSON } from "../text.js";
 import { Sendable } from "@commontools/common-frp";
+import { gem } from "../state.js";
 
 const intervals = {} as { [key: string]: NodeJS.Timeout };
 
@@ -238,7 +239,13 @@ export class Graph {
     this.log("adding", id);
     this.nodes.set(node.id, node);
     if (definition.contentType === CONTENT_TYPE_DATA) {
-      node.write(definition.body);
+      const saved = localStorage.getItem(id);
+
+      if (saved) {
+        node.write(JSON.parse(saved));
+      } else {
+        node.write(definition.body);
+      }
     }
     node.graph = this;
   }
@@ -304,11 +311,11 @@ export class RuntimeNode {
 
   write(value: any) {
     this.log("write", this.id, truncatedJSON(value));
-    this.db[this.id] = value;
+    gem(this.db, this.id).set(value);
   }
 
   read() {
-    return this.db[this.id];
+    return gem(this.db, this.id).get();
   }
 
   dispose() {
@@ -348,12 +355,12 @@ export class RuntimeNode {
         Object.fromEntries(args)
       );
       this.log("result", this.id);
-      this.db[this.id] = result;
+      gem(this.db, this.id).set(result);
     } else {
       this.log("recomputing (no args)...", this.id);
       const result = await executeNode(this.graph, this, {});
       this.log("result", this.id);
-      this.db[this.id] = result;
+      gem(this.db, this.id).set(result);
     }
   }
 
