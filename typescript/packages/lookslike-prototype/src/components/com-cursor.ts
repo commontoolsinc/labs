@@ -4,7 +4,7 @@ import { anchor, cursor } from "../agent/cursor.js";
 import { watch } from "../reactivity/watch.js";
 import { computed, effect } from "@vue/reactivity";
 import { mix } from "../math.js";
-import { session } from "./com-app.js";
+import { session } from "../state.js";
 
 const lastHistory = computed(
   () =>

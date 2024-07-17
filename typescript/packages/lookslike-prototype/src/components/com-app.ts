@@ -2,127 +2,31 @@ import { LitElement, html } from "lit-element";
 import { customElement, state } from "lit/decorators.js";
 import { base } from "../styles.js";
 import {
-  CONTENT_TYPE_CLOCK,
   CONTENT_TYPE_DATA,
-  CONTENT_TYPE_EVENT,
   CONTENT_TYPE_EVENT_LISTENER,
-  CONTENT_TYPE_FETCH,
   CONTENT_TYPE_GLSL,
-  CONTENT_TYPE_IMAGE,
   CONTENT_TYPE_JAVASCRIPT,
-  CONTENT_TYPE_LLM,
   CONTENT_TYPE_PLACEHOLDER,
   CONTENT_TYPE_SCENE,
-  CONTENT_TYPE_STORAGE,
   CONTENT_TYPE_UI
 } from "../contentType.js";
 import {
   fixGraph,
-  makeConsistent,
-  plan,
-  planIdentifiers,
-  prepareSteps,
-  sketchHighLevelApproachPrompt,
   sketchReactVersion,
   transformToGraph
 } from "../agent/plan.js";
-import { examples } from "../agent/implement.js";
 import { recordThought, suggestions } from "../agent/model.js";
 import { LLMClient, LlmTool } from "@commontools/llm-client";
 import { LLM_SERVER_URL } from "../llm-client.js";
 import { ChatCompletionTool } from "openai/resources/index.mjs";
 import { planningToolSpec, toolSpec } from "../agent/tools.js";
-import { computed, reactive } from "@vue/reactivity";
+import { computed } from "@vue/reactivity";
 import { Graph } from "../reactivity/runtime.js";
 import { cursor } from "../agent/cursor.js";
 import { watch } from "../reactivity/watch.js";
-import {
-  grabAllTags,
-  grabJavascript,
-  grabJson,
-  grabMarkdown,
-  grabTag
-} from "../agent/llm.js";
+import { grabJavascript, grabMarkdown } from "../agent/llm.js";
 import { css } from "lit";
-import { Message } from "../data.js";
-
-export const session = reactive({
-  history: [] as Message[],
-  requests: [] as string[]
-});
-
-export const idk = reactive({
-  reactCode: "a",
-  speclang: "b",
-  transformed: "c"
-});
-
-export const appState = reactive({} as any);
-export const appGraph = new Graph(appState);
-
-// appGraph.load({
-//   nodes: [
-//     {
-//       id: "counter",
-//       contentType: "application/json+vnd.common.data",
-//       body: "0"
-//     },
-//     {
-//       id: "increment",
-//       contentType: "text/javascript",
-//       body: "return input('count') + 1;",
-//       evalMode: "ses"
-//     },
-//     {
-//       id: "button",
-//       contentType: "application/json+vnd.common.ui",
-//       body: {
-//         tag: "button",
-//         props: {
-//           "@click": {
-//             "@type": "binding",
-//             name: "increment"
-//           },
-//           innerText: {
-//             "@type": "binding",
-//             name: "count"
-//           }
-//         },
-//         children: []
-//       }
-//     }
-//   ],
-//   connections: {
-//     counter: {
-//       incrementEvent: "increment"
-//     },
-//     increment: {
-//       count: "counter"
-//     },
-//     button: {
-//       count: "counter"
-//     }
-//   },
-//   spec: {
-//     history: [],
-//     steps: [
-//       {
-//         description: "Increment the counter",
-//         associatedNodes: ["increment", "counter"]
-//       },
-//       {
-//         description: "Display the counter",
-//         associatedNodes: ["button", "counter"]
-//       }
-//     ]
-//   },
-//   outputs: [],
-//   inputs: []
-// });
-
-window.__refresh = () => {
-  appGraph.update();
-};
+import { appGraph, appState, idk, session } from "../state.js";
 
 export const stateSnapshot = computed(() => JSON.stringify(appState, null, 2));
 export const requestsList = computed(
@@ -419,20 +323,12 @@ export class ComApp extends LitElement {
 
   async planResponse(userInput: string) {
     cursor.state = "sketching";
-    const baseInput = userInput;
 
     if (cursor.focus.length > 0) {
       userInput = `<user-selection>${cursor.focus.map((f) => f.id).join(", ")}</user-selection> ${userInput}`;
     }
 
     session.requests.push(userInput);
-    const snapshot = this.graphSnapshot();
-    const recipe = await appGraph.save();
-
-    const planningTools = this.generateToolSpec(
-      planningToolSpec,
-      this.availableFunctions(appGraph)
-    );
 
     async function react() {
       const { system, prompt } = sketchReactVersion(session.requests);

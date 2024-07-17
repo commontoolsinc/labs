@@ -1,14 +1,6 @@
-import { get, set, del, keys } from "idb-keyval";
-import { SignalSubject } from "../../common-frp/lib/signal.js";
-
-// Helper function for serialization boundary (this can be customized as needed)
-const serializationBoundary = (data: any) => {
-  return JSON.stringify(data);
-};
-
-export async function listKeys() {
-  return await keys();
-}
+import { reactive } from "@vue/reactivity";
+import { Message } from "./data.js";
+import { Graph } from "./reactivity/runtime.js";
 
 export type Context<T> = {
   inputs: { [node: string]: { [input: string]: T } };
@@ -16,44 +8,20 @@ export type Context<T> = {
   cancellation: (() => void)[];
 };
 
-export function snapshot(ctx: Context<SignalSubject<any>>) {
-  const snapshot: Context<any> = {
-    inputs: {},
-    outputs: {}
-  };
+export const session = reactive({
+  history: [] as Message[],
+  requests: [] as string[]
+});
 
-  for (const key in ctx.outputs) {
-    const value = ctx.outputs[key].get();
-    snapshot.outputs[key] = value;
-  }
+export const idk = reactive({
+  reactCode: "a",
+  speclang: "b",
+  transformed: "c"
+});
 
-  for (const key in ctx.inputs) {
-    snapshot.inputs[key] = {};
-    for (const inputKey in ctx.inputs[key]) {
-      const value = ctx.inputs[key][inputKey].get();
-      snapshot.inputs[key][inputKey] = value;
-    }
-  }
+export const appState = reactive({} as any);
+export const appGraph = new Graph(appState);
 
-  return snapshot;
-}
-
-// System object that interacts with IndexedDB
-export const storage = {
-  get: async (key: string) => {
-    const data = await get(key);
-    if (data) {
-      return data;
-    }
-
-    return [];
-  },
-
-  set: async (key: string, value: any) => {
-    await set(key, value);
-  },
-
-  delete: async (key: string) => {
-    await del(key);
-  }
+window.__refresh = () => {
+  appGraph.update();
 };

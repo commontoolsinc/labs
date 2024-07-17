@@ -1,7 +1,7 @@
 import { ChatCompletionMessageParam } from "openai/resources/index.mjs";
-import { session } from "../components/com-app.js";
 import { Message } from "../data.js";
 import { reactive } from "@vue/reactivity";
+import { session } from "../state.js";
 
 export type Thought = { id: number; message: ChatCompletionMessageParam };
 export const suggestions = reactive([

@@ -1,14 +1,14 @@
 import { LitElement, html, css } from "lit-element";
-import { customElement, property, state } from "lit/decorators.js";
+import { customElement, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import { base } from "../styles.js";
-import { Message, Recipe, RecipeNode, SpecTree } from "../data.js";
-import { appGraph, appState, session } from "./com-app.js";
+import { Message, Recipe } from "../data.js";
 import { computed, effect } from "@vue/reactivity";
 import { Graph, RuntimeNode } from "../reactivity/runtime.js";
 import { cursor } from "../agent/cursor.js";
 import { watch } from "../reactivity/watch.js";
-import { formatDataForPreview, truncate } from "../text.js";
+import { formatDataForPreview } from "../text.js";
+import { appGraph, appState, session } from "../state.js";
 
 const styles = css`
   :host {
