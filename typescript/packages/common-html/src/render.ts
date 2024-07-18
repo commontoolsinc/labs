@@ -6,25 +6,21 @@ import {
   VNode,
   isBinding,
   Props,
+  Child,
+  isSection,
 } from "./view.js";
 import { effect } from "./reactive.js";
 import { isSendable } from "./sendable.js";
 import { useCancelGroup, Cancel } from "./cancel.js";
 import * as logger from "./logger.js";
 
-export type CancellableHTMLElement = HTMLElement & { cancel?: Cancel };
-
-export const render = (renderable: View): HTMLElement => {
+export const render = (parent: HTMLElement, renderable: View): Cancel => {
   const { template, context } = renderable;
   const [cancel, addCancel] = useCancelGroup();
-  const root = renderNode(
-    template,
-    context,
-    addCancel,
-  ) as CancellableHTMLElement;
-  root.cancel = cancel;
+  const root = renderNode(template, context, addCancel);
+  parent.append(root);
   logger.debug("Rendered", root);
-  return root;
+  return cancel;
 };
 
 export default render;
@@ -38,27 +34,47 @@ const renderNode = (
   if (!sanitizedNode) {
     return null;
   }
+
   const element = document.createElement(sanitizedNode.name);
 
-  const cancel = bindProps(element, sanitizedNode.props, context);
-  addCancel(cancel);
+  const cancelProps = bindProps(element, sanitizedNode.props, context);
+  addCancel(cancelProps);
 
-  for (const childNode of sanitizedNode.children) {
-    if (typeof childNode === "string") {
-      element.append(childNode);
-    } else if (isVNode(childNode)) {
-      const childElement = renderNode(childNode, context, addCancel);
+  const cancelChildren = bindChildren(element, sanitizedNode.children, context);
+  addCancel(cancelChildren);
+
+  return element;
+};
+
+const bindChildren = (
+  element: HTMLElement,
+  children: Array<Child>,
+  context: Context,
+): Cancel => {
+  const [cancel, addCancel] = useCancelGroup();
+  for (const child of children) {
+    if (typeof child === "string") {
+      // Bind static content
+      element.append(child);
+    } else if (isVNode(child)) {
+      // Bind static VNode
+      const childElement = renderNode(child, context, addCancel);
       if (childElement) {
         element.append(childElement);
       }
-    } else if (isBinding(childNode)) {
-      const replacement = context[childNode.name];
+    } else if (isBinding(child)) {
+      // Bind dynamic content
+      const replacement = context[child.name];
       // Anchor for reactive replacement
       let anchor: ChildNode = document.createTextNode("");
       element.append(anchor);
       const cancel = effect(replacement, (replacement) => {
         if (isView(replacement)) {
-          const childElement = render(replacement);
+          const childElement = renderNode(
+            replacement.template,
+            replacement.context,
+            addCancel,
+          );
           anchor.replaceWith(childElement);
           anchor = childElement;
         } else {
@@ -68,9 +84,11 @@ const renderNode = (
         }
       });
       addCancel(cancel);
+    } else if (isSection(child)) {
+      logger.warn("Sections not yet implemented");
     }
   }
-  return element;
+  return cancel;
 };
 
 const bindProps = (

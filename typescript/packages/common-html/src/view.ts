@@ -41,6 +41,30 @@ export const isView = (value: unknown): value is View => {
 
 export type Context = { [key: string]: unknown };
 
+export type Gettable<T> = {
+  get: () => T;
+};
+
+export const get = (value: unknown): unknown => {
+  const subject = value as Gettable<unknown>;
+  if (typeof subject?.get === "function" && subject?.get?.length === 0) {
+    return subject.get();
+  }
+  return subject;
+};
+
+/** Get context item by key */
+export const getContext = (context: Context, path: Array<string>): unknown => {
+  let subject = context as unknown;
+  for (const key of path) {
+    subject = subject[key as keyof typeof subject] as unknown;
+    if (subject == null) {
+      return null;
+    }
+  }
+  return subject;
+};
+
 /**
  * Dynamic properties. Can either be string type (static) or a Mustache
  * variable (dynamic).
