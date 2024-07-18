@@ -174,6 +174,15 @@ export class Graph {
 
   constructor(public db: Db) {}
 
+  clear() {
+    for (const node of this.nodes.values()) {
+      node.dispose();
+    }
+    this.nodes.clear();
+    this.version.value = 0;
+    this.history = [];
+  }
+
   load(recipe: Recipe) {
     this.log("load recipe");
     recipe.nodes.forEach((node) => {

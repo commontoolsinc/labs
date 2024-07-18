@@ -248,6 +248,15 @@ export function grabMarkdown(txt: string) {
   return markdown;
 }
 
+export function grabSpeclang(txt: string) {
+  const markdown = txt.match(/```speclang\n([\s\S]+?)```/)?.[1];
+  if (!markdown) {
+    console.error("No speclang found in text", txt);
+    return "";
+  }
+  return markdown;
+}
+
 export function extractResponse(data: any) {
   return data.choices[0].message.content;
 }

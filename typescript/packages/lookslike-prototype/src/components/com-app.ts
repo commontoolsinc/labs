@@ -24,7 +24,7 @@ import { computed } from "@vue/reactivity";
 import { Graph } from "../reactivity/runtime.js";
 import { cursor } from "../agent/cursor.js";
 import { watch } from "../reactivity/watch.js";
-import { grabJavascript, grabMarkdown } from "../agent/llm.js";
+import { grabJavascript, grabMarkdown, grabSpeclang } from "../agent/llm.js";
 import { css } from "lit";
 import { appGraph, appState, idk, session } from "../state.js";
 
@@ -321,6 +321,210 @@ export class ComApp extends LitElement {
     return JSON.stringify(preview, null, 2);
   }
 
+  async generateReactVersion() {
+    cursor.state = "sketching";
+    const { system, prompt } = sketchReactVersion(session.requests);
+
+    const client = new LLMClient({
+      serverUrl: LLM_SERVER_URL,
+      tools: [],
+      system
+    });
+
+    const res = await client.createThread(prompt);
+    const last = res.conversation[res.conversation.length - 1];
+    recordThought({ role: "assistant", content: last });
+
+    idk.reactCode = last;
+
+    cursor.state = "idle";
+    this.requestUpdate();
+    return last;
+  }
+
+  async translateReactToGraph() {
+    cursor.state = "detailing";
+    const { system, prompt } = transformToGraph(idk.reactCode);
+
+    const client = new LLMClient({
+      serverUrl: LLM_SERVER_URL,
+      tools: [],
+      system
+    });
+
+    const res = await client.createThread(prompt);
+    const last = res.conversation[res.conversation.length - 1];
+    recordThought({ role: "assistant", content: last });
+
+    const spec = grabMarkdown(last);
+    const code = grabJavascript(last);
+
+    idk.transformed = code;
+    idk.speclang = spec;
+
+    this.requestUpdate();
+    cursor.state = "idle";
+    return last;
+  }
+
+  async generateProgram() {
+    const refresh = this.requestUpdate.bind(this);
+
+    type Id = string;
+    type PortName = string;
+
+    type Bindings = {
+      inputs: [PortName]; // named arguments for this node
+      outputs: { [target: Id]: PortName }; // bindings for the output of this node
+    };
+
+    const code = idk.transformed;
+    let errors = [] as string[];
+    const allBindings = {} as { [id: Id]: Bindings };
+
+    appGraph.clear();
+
+    // stub any call to just log
+    try {
+      const context = new Function(
+        "actions",
+        `
+        const { addState, addTransformation, addUi, addEventListener } = actions;
+        ${code};
+      `
+      );
+
+      context({
+        addState(
+          id: Id,
+          explanation: string,
+          initial: any,
+          bindings: Bindings
+        ) {
+          console.log("addState", id, explanation, initial, bindings);
+          appGraph.add(id, {
+            id,
+            contentType: CONTENT_TYPE_DATA,
+            body: initial,
+            docstring: explanation
+          });
+          allBindings[id] = bindings;
+          refresh();
+        },
+        addTransformation(
+          id: Id,
+          explanation: string,
+          code: string,
+          bindings: Bindings
+        ) {
+          console.log("addTransformation", id, explanation, code, bindings);
+          appGraph.add(id, {
+            id,
+            contentType: CONTENT_TYPE_JAVASCRIPT,
+            body: code,
+            docstring: explanation
+          });
+          allBindings[id] = bindings;
+          refresh();
+        },
+        addUi(
+          id: Id,
+          explanation: string,
+          template: string,
+          bindings: Bindings
+        ) {
+          console.log("addUi", id, explanation, template, bindings);
+          appGraph.add(id, {
+            id,
+            contentType: CONTENT_TYPE_UI,
+            body: template,
+            docstring: explanation
+          });
+          allBindings[id] = bindings;
+          refresh();
+        },
+        addEventListener(
+          id: Id,
+          explanation: string,
+          event: string,
+          code: string,
+          bindings: Bindings
+        ) {
+          console.log(
+            "addEventListener",
+            id,
+            explanation,
+            event,
+            code,
+            bindings
+          );
+          appGraph.add(id, {
+            id,
+            contentType: CONTENT_TYPE_EVENT_LISTENER,
+            body: {
+              event,
+              code
+            },
+            docstring: explanation
+          });
+          allBindings[id] = bindings;
+          refresh();
+        }
+      });
+    } catch (e: any) {
+      errors.push(`Creation failed: ${e.message}`);
+    }
+
+    for (const id in allBindings) {
+      const bindings = allBindings[id];
+      for (const target in bindings.outputs) {
+        const port = bindings.outputs[target];
+        appGraph.connect(id, target, port);
+      }
+    }
+
+    // pass over all input bindings and check they have been wired
+    for (const id in allBindings) {
+      const bindings = allBindings[id];
+      for (const input of bindings.inputs) {
+        if (!appGraph.nodes.get(id)?.inputs.get(input)) {
+          errors.push(`Node ${id} is missing input ${input}`);
+          console.error(`Node ${id} is missing input ${input}`);
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      const { system, prompt } = fixGraph(
+        idk.transformed,
+        idk.speclang,
+        errors
+      );
+
+      const client = new LLMClient({
+        serverUrl: LLM_SERVER_URL,
+        tools: [],
+        system
+      });
+
+      const res = await client.createThread(prompt);
+      const last = res.conversation[res.conversation.length - 1];
+      recordThought({ role: "assistant", content: last });
+
+      const spec = grabMarkdown(last) || grabSpeclang(last);
+      const code = grabJavascript(last);
+
+      idk.transformed = code;
+      idk.speclang = spec;
+
+      return false;
+    }
+
+    appGraph.update();
+    this.requestUpdate();
+    return true;
+  }
+
   async planResponse(userInput: string) {
     cursor.state = "sketching";
 
@@ -330,275 +534,9 @@ export class ComApp extends LitElement {
 
     session.requests.push(userInput);
 
-    async function react() {
-      const { system, prompt } = sketchReactVersion(session.requests);
-
-      const client = new LLMClient({
-        serverUrl: LLM_SERVER_URL,
-        tools: [],
-        system
-      });
-
-      const res = await client.createThread(prompt);
-      const last = res.conversation[res.conversation.length - 1];
-      recordThought({ role: "assistant", content: last });
-
-      idk.reactCode = last;
-
-      return last;
-    }
-
-    const sourceCode = await react();
-
-    cursor.state = "detailing";
-
-    async function transform() {
-      const { system, prompt } = transformToGraph(sourceCode);
-
-      const client = new LLMClient({
-        serverUrl: LLM_SERVER_URL,
-        tools: [],
-        system
-      });
-
-      const res = await client.createThread(prompt);
-      const last = res.conversation[res.conversation.length - 1];
-      recordThought({ role: "assistant", content: last });
-
-      const spec = grabMarkdown(last);
-      const code = grabJavascript(last);
-
-      idk.transformed = code;
-      idk.speclang = spec;
-
-      return last;
-    }
-
-    const transformed = await transform();
-    console.log(transformed);
-
-    cursor.state = "working";
-
-    const refresh = this.requestUpdate.bind(this);
-
-    async function building() {
-      type Id = string;
-      type PortName = string;
-
-      type Bindings = {
-        inputs: [PortName]; // named arguments for this node
-        outputs: { [target: Id]: PortName }; // bindings for the output of this node
-      };
-
-      const code = idk.transformed;
-      let errors = [] as string[];
-      const allBindings = {} as { [id: Id]: Bindings };
-
-      // stub any call to just log
-      try {
-        const context = new Function(
-          "actions",
-          `
-          const { addState, addTransformation, addUi, addEventListener } = actions;
-          ${code};
-        `
-        );
-
-        context({
-          addState(
-            id: Id,
-            explanation: string,
-            initial: any,
-            bindings: Bindings
-          ) {
-            console.log("addState", id, explanation, initial, bindings);
-            appGraph.add(id, {
-              id,
-              contentType: CONTENT_TYPE_DATA,
-              body: initial,
-              docstring: explanation
-            });
-            allBindings[id] = bindings;
-            refresh();
-          },
-          addTransformation(
-            id: Id,
-            explanation: string,
-            code: string,
-            bindings: Bindings
-          ) {
-            console.log("addTransformation", id, explanation, code, bindings);
-            appGraph.add(id, {
-              id,
-              contentType: CONTENT_TYPE_JAVASCRIPT,
-              body: code,
-              docstring: explanation
-            });
-            allBindings[id] = bindings;
-            refresh();
-          },
-          addUi(
-            id: Id,
-            explanation: string,
-            template: string,
-            bindings: Bindings
-          ) {
-            console.log("addUi", id, explanation, template, bindings);
-            appGraph.add(id, {
-              id,
-              contentType: CONTENT_TYPE_UI,
-              body: template,
-              docstring: explanation
-            });
-            allBindings[id] = bindings;
-            refresh();
-          },
-          addEventListener(
-            id: Id,
-            explanation: string,
-            event: string,
-            code: string,
-            bindings: Bindings
-          ) {
-            console.log(
-              "addEventListener",
-              id,
-              explanation,
-              event,
-              code,
-              bindings
-            );
-            appGraph.add(id, {
-              id,
-              contentType: CONTENT_TYPE_EVENT_LISTENER,
-              body: {
-                event,
-                code
-              },
-              docstring: explanation
-            });
-            allBindings[id] = bindings;
-            refresh();
-          }
-        });
-      } catch (e: any) {
-        errors.push(`Creation failed: ${e.message}`);
-      }
-
-      for (const id in allBindings) {
-        const bindings = allBindings[id];
-        for (const target in bindings.outputs) {
-          const port = bindings.outputs[target];
-          appGraph.connect(id, target, port);
-        }
-      }
-
-      // pass over all input bindings and check they have been wired
-      for (const id in allBindings) {
-        const bindings = allBindings[id];
-        for (const input of bindings.inputs) {
-          if (!appGraph.nodes.get(id)?.inputs.get(input)) {
-            errors.push(`Node ${id} is missing input ${input}`);
-            console.error(`Node ${id} is missing input ${input}`);
-          }
-        }
-      }
-
-      if (errors.length > 0) {
-        const { system, prompt } = fixGraph(
-          idk.transformed,
-          idk.speclang,
-          errors
-        );
-
-        const client = new LLMClient({
-          serverUrl: LLM_SERVER_URL,
-          tools: [],
-          system
-        });
-
-        const res = await client.createThread(prompt);
-        const last = res.conversation[res.conversation.length - 1];
-        recordThought({ role: "assistant", content: last });
-
-        const spec = grabMarkdown(last);
-        const code = grabJavascript(last);
-
-        idk.transformed = code;
-        idk.speclang = spec;
-
-        return false;
-      }
-
-      return true;
-    }
-
-    let passedCheck = await building();
-    if (!passedCheck) {
-      passedCheck = await building();
-    }
+    await this.generateReactVersion();
 
     cursor.state = "idle";
-
-    appGraph.update();
-    this.requestUpdate();
-  }
-
-  async implementNode(id: string) {
-    this.modifying = true;
-
-    // const spec = await plan(userInput, prepareSteps(userInput, appGraph));
-    // const finalPlan = spec?.[spec?.length - 1];
-    // console.log("finalPlan", finalPlan);
-    const input = `You are working with a user to modify a disposable software application. The environment is a reactive graph computation model. Modules, a.k.a nodes, connect with each other, where the output of one or more nodes serves as the input to another.
-
-      The current program is as follows:
-
-      <program>
-      ${this.graphSnapshot()}
-      </program>
-
-      Implementation always looks like: data -> mapping functions -> UI and view nodes -> event listeners -> data. Functions must be pure and self-contained, they cannot reference one another except via connection.
-
-      Your task is to implement the following node: \`${id}\`.
-      You should ensure all inbound connections are correct as part of implementation.
-
-    Modify or create the graph to make it align with the plan and say nothing in response.`;
-
-    // const systemContext = `Prefer to send tool calls in serial rather than in one large block, this way we can show the user the nodes as they are created.`;
-    const systemContext = ``;
-
-    const implement = async () => {
-      const client = new LLMClient({
-        serverUrl: LLM_SERVER_URL,
-        tools: this.generateToolSpec(
-          toolSpec,
-          this.availableFunctions(appGraph)
-        ),
-        system: examples + systemContext
-      });
-
-      const thread = await client.createThread(input);
-      const result = thread.conversation[thread.conversation.length - 1];
-      recordThought({ role: "assistant", content: result });
-    };
-
-    if (!this.modifying) {
-      cursor.state = "idle";
-      return;
-    }
-
-    cursor.state = "working";
-
-    await implement();
-
-    appGraph.update();
-    window.__snapshot = appGraph.save();
-
-    cursor.state = "idle";
-    this.modifying = false;
-
-    this.requestUpdate();
   }
 
   override render() {
@@ -606,19 +544,22 @@ export class ComApp extends LitElement {
       this.planResponse(ev.detail.message);
     };
 
-    const onImplement = () => {
-      // check for selection
-      if (cursor.focus.length === 0) {
-        // implement all
-        appGraph.nodes.forEach((n) => {
-          this.implementNode(n.id);
-        });
-      } else {
-        // implement selection
-        cursor.focus.forEach((f) => {
-          this.implementNode(f.id);
-        });
-      }
+    const onReactChanged = (ev: CustomEvent) => {
+      idk.reactCode = ev.detail.code;
+    };
+
+    const onCodeChanged = (ev: CustomEvent) => {
+      idk.transformed = ev.detail.code;
+    };
+
+    const onGenerateGraph = async () => {
+      await this.translateReactToGraph();
+    };
+
+    const onGenerateProgram = async () => {
+      cursor.state = "working";
+      let passedCheck = await this.generateProgram();
+      cursor.state = "idle";
     };
 
     return html`
@@ -626,21 +567,34 @@ export class ComApp extends LitElement {
         <com-cursor
           .suggestions=${watch(suggestions)}
           @message=${onCursorMessage}
-          @implement=${onImplement}
         ></com-cursor>
         <div>
           <section class="requests">${watch(requestsList)}</section>
         </div>
         <com-tabs>
-          <pre label="React">${watch(idk, "reactCode")}</pre>
-          <com-markdown
-            label="Spec"
-            .markdown=${watch(idk, "speclang")}
-          ></com-markdown>
-          <pre label="Code">${watch(idk, "transformed")}</pre>
-          <com-chat label="App">
+          <div label="React">
+            <button @click=${onGenerateGraph}>Re-generate Graph</button>
+            <com-code
+              .code=${watch(idk, "reactCode")}
+              @updated=${onReactChanged}
+            ></com-code>
+          </div>
+          <div label="Explanation">
+            <com-markdown .markdown=${watch(idk, "speclang")}></com-markdown>
+          </div>
+          <div label="Graph">
+            <button @click=${onGenerateProgram}>Re-generate Program</button>
+            <com-code
+              .code=${watch(idk, "transformed")}
+              @updated=${onCodeChanged}
+            ></com-code>
+          </div>
+          <com-chat label="Program">
             <com-thread slot="main"></com-thread>
           </com-chat>
+          <div label="View">
+            <com-recipe></com-recipe>
+          </div>
         </com-tabs>
         <com-debug>
           <pre>${watch(stateSnapshot)}</pre>

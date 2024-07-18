@@ -15,9 +15,9 @@ export const session = reactive({
 });
 
 export const idk = reactive({
-  reactCode: "a",
-  speclang: "b",
-  transformed: "c"
+  reactCode: "",
+  speclang: "",
+  transformed: ""
 });
 
 export const appState = reactive({} as any);
@@ -45,7 +45,7 @@ export function gem(db: any, key: string) {
       const plain = JSON.parse(JSON.stringify(value));
       db[key] = value;
       localStorage.setItem(key, JSON.stringify(plain));
-      if (broadcast) {
+      if (broadcast && JSON.stringify(value) !== "{}") {
         syncChannel.postMessage({ type: "write", key, value: plain });
       }
     }

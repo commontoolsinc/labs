@@ -32,6 +32,7 @@ export * as ComLoader from "./components/com-loader.js";
 export * as ComTypingPreview from "./components/com-typing-preview.js";
 export * as ComTypeout from "./components/com-typeout.js";
 export * as ComTabs from "./components/com-tabs.js";
+export * as ComRecipe from "./components/com-recipe.js";
 
 export * as ComApp from "./components/com-app.js";
 
