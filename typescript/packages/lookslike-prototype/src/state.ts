@@ -3,6 +3,16 @@ import { Message } from "./data.js";
 import { Graph } from "./reactivity/runtime.js";
 import { get, set } from "idb-keyval";
 
+import { Reflect } from "@rocicorp/reflect/client";
+import { mutators } from "./reactivity/mutators.js";
+
+export const r = new Reflect({
+  server: "http://localhost:8081",
+  roomID: "myRoom",
+  userID: "myUser",
+  mutators
+});
+
 export type Context<T> = {
   inputs: { [node: string]: { [input: string]: T } };
   outputs: { [node: string]: T };
@@ -46,7 +56,8 @@ export function gem(db: any, key: string) {
       db[key] = value;
       localStorage.setItem(key, JSON.stringify(plain));
       if (broadcast && JSON.stringify(value) !== "{}") {
-        syncChannel.postMessage({ type: "write", key, value: plain });
+        r.mutate.write({ key, data: plain });
+        // syncChannel.postMessage({ type: "write", key, value: plain });
       }
     }
   };

@@ -30,7 +30,7 @@ import { createElement } from "../ui.js";
 import { generateImage, streamLlm } from "../agent/llm.js";
 import { truncatedJSON } from "../text.js";
 import { Sendable } from "@commontools/common-frp";
-import { gem } from "../state.js";
+import { gem, r } from "../state.js";
 
 const intervals = {} as { [key: string]: NodeJS.Timeout };
 
@@ -311,6 +311,7 @@ export class RuntimeNode {
   private runner?: ReactiveEffectRunner;
   public inputs: Map<string, string> = new Map();
   public graph: Graph | undefined;
+  sub?: () => void;
 
   constructor(
     public db: Db,
@@ -331,6 +332,10 @@ export class RuntimeNode {
     if (this.runner) {
       stop(this.runner);
       this.runner = undefined;
+    }
+    if (this.sub) {
+      this.sub();
+      this.sub = undefined;
     }
   }
 
@@ -375,6 +380,14 @@ export class RuntimeNode {
 
   async update() {
     this.dispose();
+
+    this.sub = r.subscribe(
+      (tx) => tx.get(this.id),
+      (v) => {
+        console.log("reflect", this.id, v);
+        this.write(v);
+      }
+    );
 
     if (this.definition.contentType === CONTENT_TYPE_EVENT_LISTENER) {
       // event listeners do not bind to their inputs, they are only triggered by uh... events
