@@ -19,14 +19,21 @@ import { recordThought, suggestions } from "../agent/model.js";
 import { LLMClient, LlmTool } from "@commontools/llm-client";
 import { LLM_SERVER_URL } from "../llm-client.js";
 import { ChatCompletionTool } from "openai/resources/index.mjs";
-import { planningToolSpec, toolSpec } from "../agent/tools.js";
 import { computed } from "@vue/reactivity";
 import { Graph } from "../reactivity/runtime.js";
 import { cursor } from "../agent/cursor.js";
 import { watch } from "../reactivity/watch.js";
 import { grabJavascript, grabMarkdown, grabSpeclang } from "../agent/llm.js";
 import { css } from "lit";
-import { appGraph, appState, idk, session } from "../state.js";
+import {
+  appGraph,
+  appState,
+  listSessions,
+  loadSession,
+  saveSession,
+  session,
+  sessionList
+} from "../state.js";
 
 export const stateSnapshot = computed(() => JSON.stringify(appState, null, 2));
 export const requestsList = computed(
@@ -85,6 +92,7 @@ export class ComApp extends LitElement {
 
   @state() userInput = "";
   @state() modifying = false;
+  @state() selectedSession: string = "";
 
   generateToolSpec(
     toolSpec: ChatCompletionTool[],
@@ -335,7 +343,7 @@ export class ComApp extends LitElement {
     const last = res.conversation[res.conversation.length - 1];
     recordThought({ role: "assistant", content: last });
 
-    idk.reactCode = last;
+    session.reactCode = last;
 
     cursor.state = "idle";
     this.requestUpdate();
@@ -344,7 +352,7 @@ export class ComApp extends LitElement {
 
   async translateReactToGraph() {
     cursor.state = "detailing";
-    const { system, prompt } = transformToGraph(idk.reactCode);
+    const { system, prompt } = transformToGraph(session.reactCode);
 
     const client = new LLMClient({
       serverUrl: LLM_SERVER_URL,
@@ -359,8 +367,8 @@ export class ComApp extends LitElement {
     const spec = grabMarkdown(last);
     const code = grabJavascript(last);
 
-    idk.transformed = code;
-    idk.speclang = spec;
+    session.transformed = code;
+    session.speclang = spec;
 
     this.requestUpdate();
     cursor.state = "idle";
@@ -378,7 +386,7 @@ export class ComApp extends LitElement {
       outputs: { [target: Id]: PortName }; // bindings for the output of this node
     };
 
-    const code = idk.transformed;
+    const code = session.transformed;
     let errors = [] as string[];
     const allBindings = {} as { [id: Id]: Bindings };
 
@@ -496,8 +504,8 @@ export class ComApp extends LitElement {
 
     if (errors.length > 0) {
       const { system, prompt } = fixGraph(
-        idk.transformed,
-        idk.speclang,
+        session.transformed,
+        session.speclang,
         errors
       );
 
@@ -514,8 +522,8 @@ export class ComApp extends LitElement {
       const spec = grabMarkdown(last) || grabSpeclang(last);
       const code = grabJavascript(last);
 
-      idk.transformed = code;
-      idk.speclang = spec;
+      session.transformed = code;
+      session.speclang = spec;
 
       return false;
     }
@@ -545,11 +553,11 @@ export class ComApp extends LitElement {
     };
 
     const onReactChanged = (ev: CustomEvent) => {
-      idk.reactCode = ev.detail.code;
+      session.reactCode = ev.detail.code;
     };
 
     const onCodeChanged = (ev: CustomEvent) => {
-      idk.transformed = ev.detail.code;
+      session.transformed = ev.detail.code;
     };
 
     const onGenerateGraph = async () => {
@@ -562,8 +570,55 @@ export class ComApp extends LitElement {
       cursor.state = "idle";
     };
 
+    const onSaveSession = async () => {
+      if (this.selectedSession.length === 0) {
+        const name = prompt("Name the session");
+        if (!name) return;
+
+        this.selectedSession = name;
+      }
+
+      await saveSession(this.selectedSession);
+    };
+
+    const onLoadSession = async () => {
+      if (this.selectedSession.length > 0) {
+        await loadSession(this.selectedSession);
+        this.requestUpdate();
+      }
+    };
+
+    const onSelectSavedSession = async (event: CustomEvent) => {
+      this.selectedSession = event.target?.value;
+    };
+
+    const onClearSession = async () => {
+      if (confirm("Clear session?")) {
+        session.requests = [];
+        session.transformed = "";
+        session.reactCode = "";
+        session.history = [];
+        session.speclang = "";
+        this.selectedSession = "";
+        this.requestUpdate();
+      }
+    };
+
     return html`
       <main>
+        <button @click=${onClearSession}>Clear</button>
+        <select @change=${onSelectSavedSession} .value=${this.selectedSession}>
+          <option value="">-- New --</option>
+          ${watch(
+            computed(() => {
+              return sessionList.recipes.map(
+                (s) => html`<option value=${s}>${s}</option>`
+              );
+            })
+          )}
+        </select>
+        <button @click=${onLoadSession}>Load</button>
+        <button @click=${onSaveSession}>Save</button>
         <com-cursor
           .suggestions=${watch(suggestions)}
           @message=${onCursorMessage}
@@ -575,17 +630,19 @@ export class ComApp extends LitElement {
           <div label="React">
             <button @click=${onGenerateGraph}>Re-generate Graph</button>
             <com-code
-              .code=${watch(idk, "reactCode")}
+              .code=${watch(session, "reactCode")}
               @updated=${onReactChanged}
             ></com-code>
           </div>
           <div label="Explanation">
-            <com-markdown .markdown=${watch(idk, "speclang")}></com-markdown>
+            <com-markdown
+              .markdown=${watch(session, "speclang")}
+            ></com-markdown>
           </div>
           <div label="Graph">
             <button @click=${onGenerateProgram}>Re-generate Program</button>
             <com-code
-              .code=${watch(idk, "transformed")}
+              .code=${watch(session, "transformed")}
               @updated=${onCodeChanged}
             ></com-code>
           </div>

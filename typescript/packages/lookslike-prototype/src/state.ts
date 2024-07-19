@@ -1,7 +1,7 @@
-import { reactive } from "@vue/reactivity";
+import { computed, reactive } from "@vue/reactivity";
 import { Message } from "./data.js";
 import { Graph } from "./reactivity/runtime.js";
-import { get, set } from "idb-keyval";
+import { get, set, keys } from "idb-keyval";
 
 import { Reflect } from "@rocicorp/reflect/client";
 import { mutators } from "./reactivity/mutators.js";
@@ -21,13 +21,30 @@ export type Context<T> = {
 
 export const session = reactive({
   history: [] as Message[],
-  requests: [] as string[]
-});
-
-export const idk = reactive({
+  requests: [] as string[],
   reactCode: "",
   speclang: "",
   transformed: ""
+});
+
+export async function saveSession(name: IDBValidKey) {
+  await set(name, JSON.parse(JSON.stringify(session)));
+}
+
+export async function loadSession(name: IDBValidKey) {
+  const data = await get(name);
+  if (data) {
+    Object.assign(session, data);
+  }
+}
+
+export async function listSessions() {
+  return await keys();
+}
+
+export const sessionList = reactive({ recipes: [] as IDBValidKey[] });
+listSessions().then((sessions) => {
+  sessionList.recipes = sessions;
 });
 
 export const appState = reactive({} as any);
