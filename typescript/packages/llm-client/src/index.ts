@@ -1,7 +1,7 @@
-import { Anthropic } from "@anthropic-ai/sdk";
+import { CoreMessage, CoreTool } from "ai";
 export * from "./dummy-data.js";
 
-export type LlmTool = Anthropic.Messages.Tool & {
+export type LlmTool = CoreTool & {
   implementation: (input: any) => Promise<string> | string;
 };
 
@@ -98,16 +98,6 @@ export class LLMClient {
 
     return await this.sendRequest(request);
   }
-
-  async executeTool(
-    toolCall: Anthropic.Messages.ToolUseBlockParam,
-  ): Promise<string> {
-    const tool = this.tools.find((t) => t.name === toolCall.name);
-    if (!tool) {
-      throw new Error(`Tool not found: ${toolCall.name}`);
-    }
-    return await tool.implementation(toolCall.input);
-  }
 }
 
 // Types (you can move these to a separate file if desired)
@@ -115,7 +105,7 @@ interface CreateThreadRequest {
   action: "create";
   system: string;
   message: string;
-  activeTools: Anthropic.Messages.Tool[];
+  activeTools: CoreTool[];
 }
 
 interface AppendThreadRequest {
@@ -127,17 +117,16 @@ interface AppendThreadRequest {
 
 interface CreateThreadResponse {
   threadId: string;
-  pendingToolCalls: Anthropic.Messages.ToolUseBlockParam[];
   output: string;
-  assistantResponse: Anthropic.Messages.MessageParam;
-  conversation: Anthropic.Messages.MessageParam[];
+  assistantResponse: CoreMessage;
+  conversation: CoreMessage[];
 }
 
 interface AppendThreadResponse {
   threadId: string;
-  assistantResponse: Anthropic.Messages.MessageParam;
+  assistantResponse: CoreMessage;
   output: string;
-  conversation: Anthropic.Messages.MessageParam[];
+  conversation: CoreMessage[];
 }
 
 interface ToolResponse {
