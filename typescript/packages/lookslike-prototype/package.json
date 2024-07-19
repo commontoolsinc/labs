@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "wireit",
+    "reflect": "reflect dev --port 8081",
     "clean": "wireit"
   },
   "repository": {
