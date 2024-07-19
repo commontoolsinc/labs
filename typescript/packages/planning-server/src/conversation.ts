@@ -1,25 +1,20 @@
-import { Anthropic } from "./deps.ts";
+import { CoreMessage, CoreTool } from "npm:ai";
 
 export interface ConversationThread {
   id: string;
-  conversation: Anthropic.Messages.MessageParam[];
+  conversation: CoreMessage[];
   system: string;
-  activeTools: Anthropic.Messages.Tool[];
-  pendingToolCalls: Anthropic.Messages.ToolUseBlockParam[] | null;
+  activeTools: CoreTool[];
 }
 
 export interface ConversationThreadManager {
   create(
     system: string,
     initialMessage: string,
-    activeTools: Anthropic.Messages.Tool[],
+    activeTools: CoreTool[]
   ): ConversationThread;
   get(id: string): ConversationThread | undefined;
-  update(id: string, newMessages: Anthropic.Messages.MessageParam[]): void;
-  setPendingToolCalls(
-    id: string,
-    toolCalls: Anthropic.Messages.ToolUseBlock[],
-  ): void;
+  update(id: string, newMessages: CoreMessage[]): void;
   delete(id: string): void;
 }
 
@@ -31,7 +26,7 @@ export class InMemoryConversationThreadManager
   create(
     system: string,
     initialMessage: string,
-    activeTools: Anthropic.Messages.Tool[],
+    activeTools: CoreTool[]
   ): ConversationThread {
     const id = crypto.randomUUID();
     const thread: ConversationThread = {
@@ -44,7 +39,6 @@ export class InMemoryConversationThreadManager
       ],
       system,
       activeTools,
-      pendingToolCalls: null,
     };
     this.threads.set(id, thread);
     return thread;
@@ -54,22 +48,10 @@ export class InMemoryConversationThreadManager
     return this.threads.get(id);
   }
 
-  update(id: string, newMessages: Anthropic.Messages.MessageParam[]): void {
+  update(id: string, newMessages: CoreMessage[]): void {
     const thread = this.threads.get(id);
     if (thread) {
       thread.conversation = [...thread.conversation, ...newMessages];
-      // console.log("Updated thread", thread);
-      thread.pendingToolCalls = null;
-    }
-  }
-
-  setPendingToolCalls(
-    id: string,
-    toolCalls: Anthropic.Messages.ToolUseBlockParam[],
-  ): void {
-    const thread = this.threads.get(id);
-    if (thread) {
-      thread.pendingToolCalls = toolCalls;
     }
   }
 
