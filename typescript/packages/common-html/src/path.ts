@@ -46,3 +46,5 @@ export const path = <T>(value: T, keyPath: KeyPath): unknown => {
   }
   return get(value, keyPath);
 };
+
+export default path;

@@ -5,9 +5,8 @@
     "outDir": "./lib",
     "rootDir": "./src",
     "strict": false,
-    "types": ["node", "mocha"]
+    "types": ["node", "mocha"],
+    "strictNullChecks": true
   },
-  "include": [
-    "src/**/*",
-  ]
+  "include": ["src/**/*"]
 }

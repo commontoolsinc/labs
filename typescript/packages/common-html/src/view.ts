@@ -1,5 +1,6 @@
 import { Parser } from "htmlparser2";
 import * as logger from "./logger.js";
+import { path, KeyPath } from "./path.js";
 
 /** Parse a markup string and context into a view */
 export const view = (markup: string, context: Context): View => {
@@ -54,15 +55,8 @@ export const get = (value: unknown): unknown => {
 };
 
 /** Get context item by key */
-export const getContext = (context: Context, path: Array<string>): unknown => {
-  let subject = context as unknown;
-  for (const key of path) {
-    subject = subject[key as keyof typeof subject] as unknown;
-    if (subject == null) {
-      return null;
-    }
-  }
-  return subject;
+export const getContext = (context: Context, keyPath: KeyPath): unknown => {
+  return path(context, keyPath);
 };
 
 /**
@@ -225,7 +219,7 @@ export const tokenizeMustache = (text: string): Array<Token> => {
   let lastIndex = 0;
   let match: RegExpMatchArray | null = null;
   while ((match = MUSTACHE_REGEXP_G.exec(text)) !== null) {
-    if (match.index > lastIndex) {
+    if (match.index! > lastIndex) {
       const token: TextToken = {
         type: "text",
         value: text.slice(lastIndex, match.index),
@@ -279,7 +273,7 @@ export const parse = (markup: string): VNode => {
   let stack: Array<VNode | Section> = [root];
 
   for (const token of tokenize(markup)) {
-    const top = getTop(stack);
+    const top = getTop(stack)!;
     switch (token.type) {
       case "tagopen": {
         const next = vnode(token.name, token.props);
@@ -291,7 +285,7 @@ export const parse = (markup: string): VNode => {
         const top = stack.pop();
         if (!isVNode(top) || top.name !== token.name) {
           throw new ParseError(
-            `Unexpected closing tag ${token.name} in ${top.name}`,
+            `Unexpected closing tag ${token.name} in ${top?.name}`,
           );
         }
         break;
@@ -306,7 +300,7 @@ export const parse = (markup: string): VNode => {
         const top = stack.pop();
         if (!isSection(top) || top.name !== token.name) {
           throw new ParseError(
-            `Unexpected closing block ${token.name} in ${top.name}`,
+            `Unexpected closing block ${token.name} in ${top?.name}`,
           );
         }
         break;

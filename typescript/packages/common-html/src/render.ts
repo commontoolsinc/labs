@@ -14,10 +14,13 @@ import { isSendable } from "./sendable.js";
 import { useCancelGroup, Cancel } from "./cancel.js";
 import * as logger from "./logger.js";
 
-export const render = (parent: HTMLElement, renderable: View): Cancel => {
-  const { template, context } = renderable;
-  const [cancel, addCancel] = useCancelGroup();
-  const root = renderNode(template, context, addCancel);
+export const render = (parent: HTMLElement, view: View): Cancel => {
+  const { template, context } = view;
+  const [root, cancel] = renderNode(template, context);
+  if (!root) {
+    logger.warn("Could not render view", view);
+    return cancel;
+  }
   parent.append(root);
   logger.debug("Rendered", root);
   return cancel;
@@ -28,11 +31,13 @@ export default render;
 const renderNode = (
   node: VNode,
   context: Context,
-  addCancel: (cancel: Cancel) => void,
-): HTMLElement | null => {
+): [HTMLElement | null, Cancel] => {
+  const [cancel, addCancel] = useCancelGroup();
+
   const sanitizedNode = sanitizeNode(node);
+
   if (!sanitizedNode) {
-    return null;
+    return [null, cancel];
   }
 
   const element = document.createElement(sanitizedNode.name);
@@ -43,7 +48,7 @@ const renderNode = (
   const cancelChildren = bindChildren(element, sanitizedNode.children, context);
   addCancel(cancelChildren);
 
-  return element;
+  return [element, cancel];
 };
 
 const bindChildren = (
@@ -52,13 +57,15 @@ const bindChildren = (
   context: Context,
 ): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
+
   for (const child of children) {
     if (typeof child === "string") {
       // Bind static content
       element.append(child);
     } else if (isVNode(child)) {
       // Bind static VNode
-      const childElement = renderNode(child, context, addCancel);
+      const [childElement, cancel] = renderNode(child, context);
+      addCancel(cancel);
       if (childElement) {
         element.append(childElement);
       }
@@ -70,13 +77,17 @@ const bindChildren = (
       element.append(anchor);
       const cancel = effect(replacement, (replacement) => {
         if (isView(replacement)) {
-          const childElement = renderNode(
+          const [childElement, cancel] = renderNode(
             replacement.template,
             replacement.context,
-            addCancel,
           );
-          anchor.replaceWith(childElement);
-          anchor = childElement;
+          addCancel(cancel);
+          if (childElement != null) {
+            anchor.replaceWith(childElement);
+            anchor = childElement;
+          } else {
+            logger.warn("Could not render view", replacement);
+          }
         } else {
           const text = document.createTextNode(`${replacement}`);
           anchor.replaceWith(text);
@@ -108,11 +119,15 @@ const bindProps = (
           );
         }
         const key = cleanEventProp(name);
-        const cancel = listen(element, key, (event) => {
-          const sanitizedEvent = sanitizeEvent(event);
-          replacement.send(sanitizedEvent);
-        });
-        addCancel(cancel);
+        if (key != null) {
+          const cancel = listen(element, key, (event) => {
+            const sanitizedEvent = sanitizeEvent(event);
+            replacement.send(sanitizedEvent);
+          });
+          addCancel(cancel);
+        } else {
+          logger.warn("Could not bind event", name, value);
+        }
       } else {
         const cancel = effect(replacement, (replacement) => {
           // Replacements are set as properties not attributes to avoid
