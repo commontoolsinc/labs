@@ -1,5 +1,0 @@
-
-> @commontools-internal/root@0.0.1 build
-> wireit
-
-src/index.ts(1,28): error TS2307: Cannot find module '@commontools/usuba-api' or its corresponding type declarations.
