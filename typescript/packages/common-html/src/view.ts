@@ -1,6 +1,6 @@
 import { Parser } from "htmlparser2";
 import * as logger from "./logger.js";
-import { path, KeyPath } from "./path.js";
+import { path } from "./path.js";
 
 /** Parse a markup string and context into a view */
 export const view = (markup: string, context: Context): View => {
@@ -55,9 +55,7 @@ export const get = (value: unknown): unknown => {
 };
 
 /** Get context item by key */
-export const getContext = (context: Context, keyPath: KeyPath): unknown => {
-  return path(context, keyPath);
-};
+export const getContext = path;
 
 /**
  * Dynamic properties. Can either be string type (static) or a Mustache

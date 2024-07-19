@@ -11,6 +11,10 @@ export type Reactive<T> = {
   sink: (callback: (value: T) => void) => Cancel;
 };
 
+export type ReactiveValue<T> = Reactive<T> & {
+  get(): T;
+};
+
 export const isReactive = (value: unknown): value is Reactive<unknown> => {
   return typeof (value as Reactive<unknown>)?.sink === "function";
 };

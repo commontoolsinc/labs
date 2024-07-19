@@ -9,14 +9,14 @@ setDebug(true);
 // setNodeSanitizer(...);
 // setEventSanitizer(...);
 
-const text = state("Hello, world!");
-const input = stream<InputEvent>();
+const inputState = state({ text: "Hello, world!" });
+const inputEvents = stream<InputEvent>();
 
-input.sink((event) => {
+inputEvents.sink((event) => {
   const target = event.target as HTMLInputElement | null;
-  const value = target?.value ?? null;
-  if (value !== null) {
-    text.send(value);
+  const value = target?.value;
+  if (value != null) {
+    inputState.send({ text: value });
   }
 });
 
@@ -32,11 +32,11 @@ const timeView = view(`<div class="time">{{time}}</div>`, { time });
 const titleGroup = view(
   `
     <div class="title-group">
-      <h1 class="title">{{text}}</h1>
-      <input type="text" oninput={{input}} value={{text}} />
+      <h1 class="title">{{input.text}}</h1>
+      <input type="text" oninput={{oninput}} value={{input.text}} />
     </div>
   `,
-  { text, input },
+  { input: inputState, oninput: inputEvents },
 );
 
 const container = html`

@@ -1,10 +1,12 @@
-import { isObject } from "./util.js";
+import { isObject } from "./contract.js";
+import * as logger from "./logger.js";
 
 /** A keypath is an array of property keys */
 export type KeyPath = Array<PropertyKey>;
+export type NonEmptyKeyPath = [PropertyKey, ...PropertyKey[]];
 
 export type Pathable = {
-  path(keyPath: KeyPath): unknown;
+  path(keyPath: NonEmptyKeyPath): unknown;
 };
 
 /** Does value have a path method? */
@@ -21,30 +23,27 @@ export const getProp = (value: unknown, key: PropertyKey): unknown => {
 };
 
 /**
- * Get deep value using a key path.
- * Follows property path. Returns undefined if any key is not found.
- */
-export const get = <T>(value: T, keyPath: KeyPath): unknown => {
-  let subject = value as unknown;
-  for (const key of keyPath) {
-    subject = getProp(subject, key);
-    if (subject == null) {
-      return undefined;
-    }
-  }
-  return subject;
-};
-
-/**
  * Get path on value using a keypath.
  * If value is pathable, uses path method.
  * Otherwise, gets properties along path.
  */
-export const path = <T>(value: T, keyPath: KeyPath): unknown => {
-  if (isPathable(value)) {
-    return value.path(keyPath);
+export const path = (value: unknown, keyPath: Array<PropertyKey>): unknown => {
+  if (value == null) {
+    return undefined;
   }
-  return get(value, keyPath);
+  if (keyPath.length === 0) {
+    return value;
+  }
+  if (isPathable(value)) {
+    const part = value.path(keyPath as NonEmptyKeyPath);
+    logger.debug("path: call path()", value, keyPath, part);
+    return part;
+  }
+  const [key, ...restPath] = keyPath;
+  // We checked the length, so we know this is not undefined.
+  const part = getProp(value, key);
+  logger.debug("path: get prop", value, key, part);
+  return path(part, restPath);
 };
 
 export default path;

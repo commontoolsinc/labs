@@ -8,6 +8,7 @@ import {
   Props,
   Child,
   isSection,
+  getContext,
 } from "./view.js";
 import { effect } from "./reactive.js";
 import { isSendable } from "./sendable.js";
@@ -71,7 +72,7 @@ const bindChildren = (
       }
     } else if (isBinding(child)) {
       // Bind dynamic content
-      const replacement = context[child.name];
+      const replacement = getContext(context, child.path);
       // Anchor for reactive replacement
       let anchor: ChildNode = document.createTextNode("");
       element.append(anchor);
@@ -108,17 +109,17 @@ const bindProps = (
   context: Context,
 ): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
-  for (const [name, value] of Object.entries(props)) {
-    if (isBinding(value)) {
-      const replacement = context[value.name];
+  for (const [propKey, propValue] of Object.entries(props)) {
+    if (isBinding(propValue)) {
+      const replacement = getContext(context, propValue.path);
       // If prop is an event, we need to add an event listener
-      if (isEventProp(name)) {
+      if (isEventProp(propKey)) {
         if (!isSendable(replacement)) {
           throw new TypeError(
-            `Event prop "${name}" does not have a send method`,
+            `Event prop "${propKey}" does not have a send method`,
           );
         }
-        const key = cleanEventProp(name);
+        const key = cleanEventProp(propKey);
         if (key != null) {
           const cancel = listen(element, key, (event) => {
             const sanitizedEvent = sanitizeEvent(event);
@@ -126,18 +127,18 @@ const bindProps = (
           });
           addCancel(cancel);
         } else {
-          logger.warn("Could not bind event", name, value);
+          logger.warn("Could not bind event", propKey, propValue);
         }
       } else {
         const cancel = effect(replacement, (replacement) => {
           // Replacements are set as properties not attributes to avoid
           // string serialization of complex datatypes.
-          setProp(element, name, replacement);
+          setProp(element, propKey, replacement);
         });
         addCancel(cancel);
       }
     } else {
-      element.setAttribute(name, value);
+      element.setAttribute(propKey, propValue);
     }
   }
   return cancel;
