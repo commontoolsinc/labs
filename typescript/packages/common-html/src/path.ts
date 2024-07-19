@@ -9,7 +9,7 @@ export type Pathable = {
 
 /** Does value have a path method? */
 export const isPathable = (value: unknown): value is Pathable => {
-  return isObject(value) && "get" in value && typeof value.get === "function";
+  return isObject(value) && "path" in value && typeof value.path === "function";
 };
 
 /** Get value at prop. Returns undefined if key is not accessible. */
