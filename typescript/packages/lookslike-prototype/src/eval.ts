@@ -1,9 +1,10 @@
 import {
   Runtime,
   Input,
-  LocalStorage,
+  Storage,
   WASM_SANDBOX,
-  SES_SANDBOX
+  SES_SANDBOX,
+  Value
 } from "@commontools/runtime";
 import { EvalMode } from "./data.js";
 
@@ -21,6 +22,20 @@ export function serializationBoundary(obj: any) {
   return JSON.parse(JSON.stringify(obj));
 }
 
+export class EphemeralStorage implements Storage {
+  data: { [key: string]: any } = {};
+
+  async read(key: string): Promise<void | Value> {
+    const serialized = this.data[key];
+    return serialized ? JSON.parse(serialized) : undefined;
+  }
+
+  async write(key: string, value: Value): Promise<void> {
+    const serialized = JSON.stringify(value);
+    this.data[key] = serialized;
+  }
+}
+
 export async function run(
   id: string,
   src: string,
@@ -29,7 +44,7 @@ export async function run(
 ) {
   console.group("eval(" + id + ")");
   const rt = new Runtime();
-  const storage = new LocalStorage();
+  const storage = new EphemeralStorage();
 
   console.log("Instantiating the module");
 
@@ -37,7 +52,7 @@ export async function run(
     id,
     evalMode,
     "text/javascript",
-    code(src),
+    code(Object.keys(inputs), src),
     new Input(storage, Object.keys(inputs))
   );
 
@@ -60,7 +75,7 @@ export async function run(
   return JSON.parse(returnValue.value.val);
 }
 
-const code = (src: string) => `
+const code = (args: string[], src: string) => `
   import { read, write } from 'common:io/state@0.0.1';
 
   export class Body {
@@ -74,8 +89,10 @@ const code = (src: string) => `
           }
 
           console.log('[begin]');
-          const fn = function() { ${src} };
-          const result = fn();
+          const fn = ${src};
+          const args = ${JSON.stringify(args)};
+          const values = args.map(input);
+          const result = fn(...values);
           write('__result__', { tag: 'string', val: JSON.stringify(result) });
           console.log('[end]');
       }

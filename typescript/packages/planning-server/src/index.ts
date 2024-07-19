@@ -1,9 +1,11 @@
 import { ask } from "./anthropic.ts";
-import { Anthropic, serve } from "./deps.ts";
+import { serve } from "./deps.ts";
 import {
   InMemoryConversationThreadManager,
   ConversationThread,
 } from "./conversation.ts";
+import { CoreMessage, CoreTool } from "npm:ai";
+import { CoreAssistantMessage } from "npm:ai";
 
 const threadManager = new InMemoryConversationThreadManager();
 
@@ -11,14 +13,13 @@ type CreateConversationThreadRequest = {
   action: "create";
   message: string;
   system: string;
-  activeTools: Anthropic.Messages.Tool[];
+  activeTools: CoreTool[];
 };
 
 type AppendToConversationThreadRequest = {
   action: "append";
   threadId: string;
   message?: string;
-  toolResponses?: Anthropic.Messages.ToolUseBlock[];
 };
 
 type ConversationThreadRequest =
@@ -37,12 +38,8 @@ const handler = async (request: Request): Promise<Response> => {
           return handleCreateConversationThread(system, message, activeTools);
         }
         case "append": {
-          const { threadId, message, toolResponses } = body;
-          return handleAppendToConversationThread(
-            threadId,
-            message,
-            toolResponses,
-          );
+          const { threadId, message } = body;
+          return handleAppendToConversationThread(threadId, message);
         }
         default:
           return new Response(JSON.stringify({ error: "Invalid action" }), {
@@ -66,17 +63,14 @@ const cache: Record<string, any> = {};
 async function handleCreateConversationThread(
   system: string,
   message: string,
-  activeTools: Anthropic.Messages.Tool[],
+  activeTools: CoreTool[]
 ): Promise<Response> {
   const cacheKey = `${system}:${message}`;
 
   if (cache[cacheKey]) {
     console.log(
       "Cache hit!",
-      (cacheKey.slice(0, 20) + "..." + cacheKey.slice(-20)).replaceAll(
-        "\n",
-        "",
-      ),
+      (cacheKey.slice(0, 20) + "..." + cacheKey.slice(-20)).replaceAll("\n", "")
     );
     return new Response(JSON.stringify(cache[cacheKey]), {
       headers: { "Content-Type": "application/json" },
@@ -85,12 +79,18 @@ async function handleCreateConversationThread(
 
   const thread = threadManager.create(system, message, activeTools);
   const result = await processConversationThread(thread);
+  if (result.type === "error") {
+    return new Response(JSON.stringify(result), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 
   if (result.assistantResponse) {
     threadManager.update(thread.id, [result.assistantResponse]);
   }
 
-  cache[cacheKey] = result;
+  // cache[cacheKey] = result;
 
   return new Response(JSON.stringify(result), {
     headers: { "Content-Type": "application/json" },
@@ -99,8 +99,7 @@ async function handleCreateConversationThread(
 
 async function handleAppendToConversationThread(
   threadId: string,
-  message?: string,
-  toolResponses?: Anthropic.Messages.ToolResultBlockParam[],
+  message?: string
 ): Promise<Response> {
   const thread = threadManager.get(threadId);
   if (!thread) {
@@ -110,25 +109,22 @@ async function handleAppendToConversationThread(
     });
   }
 
-  const content: Anthropic.Messages.MessageParam["content"] = [];
-
   if (message) {
-    content.push({ type: "text", text: message });
+    threadManager.update(threadId, [
+      {
+        role: "user",
+        content: message,
+      },
+    ]);
   }
-
-  if (toolResponses) {
-    console.log("Tool responses", toolResponses);
-    content.push(...toolResponses);
-  }
-
-  threadManager.update(threadId, [
-    {
-      role: "user",
-      content,
-    },
-  ]);
 
   const result = await processConversationThread(thread);
+  if (result.type === "error") {
+    return new Response(JSON.stringify(result), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 
   // Update the thread with the assistant's response
   if (result.assistantResponse) {
@@ -143,44 +139,47 @@ async function handleAppendToConversationThread(
   });
 }
 
+type ProcessConversationThreadResult =
+  | {
+      type: "success";
+      threadId: string;
+      output: string;
+      assistantResponse: CoreAssistantMessage;
+      conversation: CoreMessage[];
+    }
+  | { type: "error"; error: string };
+
 async function processConversationThread(
-  thread: ConversationThread,
-): Promise<any> {
+  thread: ConversationThread
+): Promise<ProcessConversationThreadResult> {
   console.log("Thread", thread);
 
   const result = await ask(
     thread.conversation,
     thread.system,
-    thread.activeTools,
+    thread.activeTools
   );
   if (!result) {
-    return { error: "No response from Anthropic" };
+    return { type: "error", error: "No response from Anthropic" };
   }
 
   // Find the new assistant's response (it should be the last message)
   const assistantResponse = result[result.length - 1];
   if (assistantResponse.role !== "assistant") {
-    return { error: "No assistant response found" };
+    return { type: "error", error: "No assistant response found" };
   }
 
-  if (assistantResponse.content && Array.isArray(assistantResponse.content)) {
-    const toolCalls = assistantResponse.content.filter(
-      (item) => item.type === "tool_use",
-    ) as Anthropic.Messages.ToolUseBlockParam[];
-    if (toolCalls.length > 0) {
-      return {
-        threadId: thread.id,
-        pendingToolCalls: toolCalls,
-        assistantResponse,
-        conversation: result,
-      };
-    }
+  if (Array.isArray(assistantResponse.content)) {
+    assistantResponse.content = assistantResponse.content
+      .filter((msg) => msg.type == "text")
+      .map((msg) => msg.text)
+      .join(" ");
   }
 
-  const output = (assistantResponse.content as any[])
-    .map((msg) => msg.text)
-    .join(" ");
+  const output = assistantResponse.content;
+  console.log("Output=", output);
   return {
+    type: "success",
     threadId: thread.id,
     output,
     assistantResponse,

@@ -2,8 +2,6 @@ import { LitElement, html, css } from "lit-element";
 import { customElement, property, state } from "lit/decorators.js";
 import { base } from "../styles.js";
 import { RecipeNode } from "../data.js";
-import { SignalSubject } from "../../../common-frp/lib/signal.js";
-import { signal } from "@commontools/common-frp";
 import {
   CONTENT_TYPE_FETCH,
   CONTENT_TYPE_GLSL,
@@ -13,11 +11,18 @@ import {
   CONTENT_TYPE_UI,
   CONTENT_TYPE_EVENT,
   CONTENT_TYPE_CLOCK,
-  CONTENT_TYPE_STORAGE
+  CONTENT_TYPE_STORAGE,
+  CONTENT_TYPE_SCENE,
+  CONTENT_TYPE_DATA,
+  CONTENT_TYPE_EVENT_LISTENER,
+  CONTENT_TYPE_PLACEHOLDER
 } from "../contentType.js";
+import { appState } from "./com-app.js";
+import { effect } from "@vue/reactivity";
+import { RuntimeNode } from "../reactivity/runtime.js";
 
 function renderNode(
-  node: RecipeNode,
+  node: RuntimeNode,
   value: any,
   dispatch: (event: CustomEvent) => void
 ) {
@@ -35,9 +40,15 @@ function renderNode(
     );
   };
 
-  switch (node.contentType) {
+  switch (node.definition.contentType) {
     case CONTENT_TYPE_JAVASCRIPT:
       return html`<com-module-code
+        .node=${node}
+        .value=${value}
+        @updated=${relay}
+      ></com-module-code>`;
+    case CONTENT_TYPE_EVENT_LISTENER:
+      return html`<com-module-event-listener
         .node=${node}
         .value=${value}
         @updated=${relay}
@@ -68,18 +79,25 @@ function renderNode(
         .value=${value}
         @updated=${relay}
       ></com-module-shader>`;
-    case CONTENT_TYPE_EVENT:
     case CONTENT_TYPE_CLOCK:
       return html`<com-module-event
         .node=${node}
         .value=${value}
         @run=${relay}
       ></com-module-event>`;
-    case CONTENT_TYPE_STORAGE:
-      return html`<com-module-storage
+    case CONTENT_TYPE_SCENE:
+      if (!value) return html``;
+      return html`<com-module-scene
         .node=${node}
         .value=${value}
-      ></com-module-storage>`;
+      ></com-module-scene>`;
+    case CONTENT_TYPE_DATA:
+      return html`<com-module-data
+        .node=${node}
+        .value=${value}
+      ></com-module-data>`;
+    case CONTENT_TYPE_PLACEHOLDER:
+      return html``;
   }
 
   return html`<pre>${JSON.stringify(node, null, 2)}</pre>`;
@@ -104,25 +122,18 @@ const styles = css`
 export class ComResponse extends LitElement {
   static override styles = [base, styles];
 
-  @property({ type: Object }) node: RecipeNode | null = null;
-  @property({ type: Object }) output: SignalSubject<any> = signal.state(null);
+  @property({ type: Object }) node: RuntimeNode | null = null;
   onCancel: () => void = () => {};
   @state() value: any = {};
   cancel: () => void = () => {};
 
-  override willUpdate(
-    changedProperties: Map<string | number | symbol, unknown>
-  ) {
-    if (changedProperties.has("output")) {
-      console.log("output changed", this.node?.id, this.output);
-      this.cancel();
-      // trigger a re-render if any output changes
-      this.cancel = signal.effect([this.output], (value) => {
-        if (!value || this.value === value) return;
-        this.value = value;
-        console.log("updated value", this.node?.id, value);
-      });
-    }
+  override connectedCallback(): void {
+    super.connectedCallback();
+
+    effect(() => {
+      if (!this.node) return;
+      this.value = this.node.read();
+    });
   }
 
   override render() {
@@ -138,6 +149,10 @@ export class ComResponse extends LitElement {
       this.value,
       this.dispatchEvent.bind(this)
     );
+
+    const onRun = () => {
+      this.dispatchEvent(new CustomEvent("run"));
+    };
 
     return html`
       <div class="response">

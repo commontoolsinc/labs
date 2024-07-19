@@ -1,6 +1,8 @@
 import { LitElement, html, css } from "lit-element";
 import { customElement, property } from "lit/decorators.js";
 import { RecipeNode } from "../../data.js";
+import { RuntimeNode } from "../../reactivity/runtime.js";
+import { watch } from "../../reactivity/watch.js";
 
 const styles = css``;
 
@@ -8,16 +10,15 @@ const styles = css``;
 export class ComModuleFetch extends LitElement {
   static override styles = [styles];
 
-  @property() node: RecipeNode | null = null;
-  @property() value: any = null;
+  @property() node: RuntimeNode | null = null;
 
   override render() {
-    if (!this.node || !this.value) {
+    if (!this.node) {
       return html`<pre>loading...</pre>`;
     }
     return html`
-      <com-data .data=${this.node.body}></com-data>
-      <com-data .data=${JSON.stringify(this.value, null, 2)}></com-data>
+      <com-data .data=${this.node.definition.body}></com-data>
+      <com-data .data=${watch(this.node.read())}></com-data>
     `;
   }
 }

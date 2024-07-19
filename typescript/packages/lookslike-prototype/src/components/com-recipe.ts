@@ -76,8 +76,8 @@ const styles = css`
 
 // foreach node, re-render it only when the output changes?
 
-@customElement("com-thread")
-export class ComThread extends LitElement {
+@customElement("com-recipe")
+export class ComRecipe extends LitElement {
   static override styles = [base, styles];
 
   @state() graph: Graph | null = null;
@@ -91,7 +91,7 @@ export class ComThread extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     effect(() => {
-      console.log("com-thread", appGraph, appState, history);
+      console.log("com-recipe", appGraph, appState, history);
       this.graph = appGraph;
       this.history = session.history;
       this.state = { ...appState };
@@ -129,41 +129,14 @@ export class ComThread extends LitElement {
       </com-debug>
       <ul>
         ${[...this.graph.nodes.values()]
-          .filter((v) => v.definition.contentType !== CONTENT_TYPE_UI)
+          .filter((v) => v.definition.contentType === CONTENT_TYPE_UI)
           .map((node) => {
             return html`<li data-node-id=${node.id}>
-            <div>
-              ${repeat(
-                Object.entries(connections[node.id] || {}),
-                ([key, value]) =>
-                  html`<code class="local-variable"
-                    >${key}: ${value} =
-                    ${watch(
-                      computed(() => formatDataForPreview(appState[value]))
-                    )}</code
-                  >`
-              )}
-            </div>
             <input
               type="checkbox"
               @change=${(ev: CustomEvent) => onSelected(ev.target, node.id)}
             ></input>
-            <button @click=${() => onDelete(node.id)}>🗑️</button>
-            <strong><code>${node.id}</code></strong>
-            <code>${node.definition.contentType}</code>
-            <table class="node">
-              <tr>
-                <td>
-                  <textarea
-                    .value=${node.definition.docstring}
-                    class="docstring"
-                    rows="5"
-                    cols="50"
-                  ></textarea>
-                </td>
-                <td>${this.response(node)}</td>
-              </tr>
-            </table>
+            ${this.response(node)}
           </li>`;
           })}
       </ul>`;
