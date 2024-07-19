@@ -13,7 +13,6 @@ const text = state("Hello, world!");
 const input = stream<InputEvent>();
 
 input.sink((event) => {
-  console.log("input", event);
   const target = event.target as HTMLInputElement | null;
   const value = target?.value ?? null;
   if (value !== null) {
@@ -44,6 +43,4 @@ const container = html`
   <div class="container">${timeView} ${titleGroup}</div>
 `;
 
-const dom = render(container);
-
-document.body.appendChild(dom);
+const _cancel = render(document.body, container);
