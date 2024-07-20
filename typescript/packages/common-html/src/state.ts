@@ -50,11 +50,14 @@ class State<T> {
 /** A simple reactive state cell without any scheduling */
 export const state = <T>(value: T) => new State(value);
 
+export default state;
+
 /**
  * A scoped cell that represents some transformation of a state.
  * ScopedState is a "cold" reactive value. It only does work when you subscribe
  * to it with sink. Each sink performs computed transformation of the source
- * state and returns a cancel function to unsubscribe.
+ * state separately, and returns a cancel function to unsubscribe that
+ * particular sink. There are no intermediate subscriptions to cancel.
  */
 export class ScopedState<T, U> {
   #source: ReactiveValue<T>;
@@ -81,7 +84,9 @@ export class ScopedState<T, U> {
   }
 
   path(keyPath: NonEmptyKeyPath) {
-    return scope(this, (value) => path(value, keyPath));
+    return scope(this.#source, (value) =>
+      path(this.#transform(value), keyPath),
+    );
   }
 }
 
@@ -92,5 +97,3 @@ export const scope = <T, U>(
 
 /** A simple reactive event stream without any scheduling */
 export const stream = <T>() => new Publisher<T>();
-
-export default state;
