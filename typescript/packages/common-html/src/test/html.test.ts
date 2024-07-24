@@ -1,11 +1,11 @@
 import * as assert from "node:assert";
 import html from "../html.js";
 import { isBinding } from "../view.js";
-import { state, stream } from "../state.js";
+import { state } from "../propagator.js";
 
 describe("html", () => {
   it("parses tagged template string into a Renderable", () => {
-    const clicks = stream<Event>();
+    const clicks = state<Event | null>(null);
     const text = state("Hello world!");
 
     const view = html`

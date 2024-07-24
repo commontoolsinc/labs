@@ -1,5 +1,5 @@
 import { equal as assertEqual } from "node:assert/strict";
-import state from "../state.js";
+import { state } from "../propagator.js";
 import { effect, render, isReactive } from "../reactive.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

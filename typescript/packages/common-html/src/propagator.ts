@@ -104,9 +104,7 @@ export class Cell<Value> {
   }
 }
 
-/**
- * Create a reactive cell for a value
- */
+/** Create a reactive cell for a value */
 export const cell = <Value>({
   value,
   name = "",
@@ -116,6 +114,11 @@ export const cell = <Value>({
   name?: string;
   update?: (state: Value, next: Value) => Value;
 }) => new Cell({ value, name, update });
+
+export default cell;
+
+/** Create a cell with last-write-wins update semantics */
+export const state = <T>(value: T, name = "") => cell({ value, name });
 
 export type CancellableCell<T> = Cell<T> & Cancellable;
 
