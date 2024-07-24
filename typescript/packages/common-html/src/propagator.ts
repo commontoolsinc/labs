@@ -85,12 +85,14 @@ export class Cell<Value> {
       return this.#time;
     }
 
+    const next = this.#update(this.#value, value);
+
     // We only advance clock if value changes state
-    if (this.#value === value) {
+    if (this.#value === next) {
       logger.debug({
         msg: "Value unchanged. Ignoring.",
         cell: this.id,
-        value,
+        value: next,
         time,
       });
       return this.#time;
@@ -98,7 +100,6 @@ export class Cell<Value> {
 
     this.#time = advanceClock(this.#time, time);
 
-    const next = this.#update(this.#value, value);
     const prev = this.#value;
     this.#value = next;
 
