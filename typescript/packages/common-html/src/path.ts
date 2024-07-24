@@ -5,13 +5,12 @@ import * as logger from "./logger.js";
 export type KeyPath = Array<PropertyKey>;
 export type NonEmptyKeyPath = [PropertyKey, ...PropertyKey[]];
 
-export type Pathable = {
-  path(keyPath: NonEmptyKeyPath): unknown;
+export type Keyable<T, K extends keyof T> = {
+  key(key: K): T[K];
 };
 
-/** Does value have a path method? */
-export const isPathable = (value: unknown): value is Pathable => {
-  return isObject(value) && "path" in value && typeof value.path === "function";
+export const isKeyable = (value: unknown): value is Keyable<any, any> => {
+  return isObject(value) && "key" in value && typeof value.key === "function";
 };
 
 /** Get value at prop. Returns undefined if key is not accessible. */
@@ -27,23 +26,23 @@ export const getProp = (value: unknown, key: PropertyKey): unknown => {
  * If value is pathable, uses path method.
  * Otherwise, gets properties along path.
  */
-export const path = (value: unknown, keyPath: Array<PropertyKey>): unknown => {
-  if (value == null) {
+export const path = <T>(parent: T, keyPath: Array<PropertyKey>): unknown => {
+  if (parent == null) {
     return undefined;
   }
   if (keyPath.length === 0) {
-    return value;
+    return parent;
   }
-  if (isPathable(value)) {
-    const part = value.path(keyPath as NonEmptyKeyPath);
-    logger.debug("path: call path()", value, keyPath, part);
-    return part;
+  const key = keyPath.shift()!;
+  if (isKeyable(parent)) {
+    const child = parent.key(key);
+    logger.debug("path: call .key()", parent, key, child);
+    return path(child, keyPath);
   }
-  const [key, ...restPath] = keyPath;
   // We checked the length, so we know this is not undefined.
-  const part = getProp(value, key);
-  logger.debug("path: get prop", value, key, part);
-  return path(part, restPath);
+  const child = getProp(parent, key);
+  logger.debug("path: get prop", parent, key, child);
+  return path(child, keyPath);
 };
 
 export default path;

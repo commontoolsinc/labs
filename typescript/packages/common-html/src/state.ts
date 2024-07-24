@@ -1,6 +1,3 @@
-import { NonEmptyKeyPath, path } from "./path.js";
-import { ReactiveValue } from "./reactive.js";
-
 /** A one-to-many typed event publisher */
 export class Publisher<T> {
   #listeners = new Set<(value: T) => void>();
@@ -20,7 +17,7 @@ export class Publisher<T> {
   }
 }
 
-class State<T> {
+export class State<T> {
   #publisher = new Publisher<T>();
   #state: T;
 
@@ -42,8 +39,8 @@ class State<T> {
     return this.#publisher.sink(callback);
   }
 
-  path(keyPath: NonEmptyKeyPath) {
-    return scope(this, (value) => path(value, keyPath));
+  key<K extends keyof T>(key: K) {
+    return new ScopedState(this, (value) => value[key]);
   }
 }
 
@@ -60,15 +57,15 @@ export default state;
  * particular sink. There are no intermediate subscriptions to cancel.
  */
 export class ScopedState<T, U> {
-  #source: ReactiveValue<T>;
+  #source: State<T>;
   #transform: (value: T) => U;
 
-  constructor(source: ReactiveValue<T>, transform: (value: T) => U) {
+  constructor(source: State<T>, transform: (value: T) => U) {
     this.#transform = transform;
     this.#source = source;
   }
 
-  get() {
+  get(): U {
     return this.#transform(this.#source.get());
   }
 
@@ -83,17 +80,13 @@ export class ScopedState<T, U> {
     });
   }
 
-  path(keyPath: NonEmptyKeyPath) {
-    return scope(this.#source, (value) =>
-      path(this.#transform(value), keyPath),
-    );
+  key<K extends keyof U>(key: K) {
+    return new ScopedState<T, U[K]>(this.#source, (value) => {
+      const scoped = this.#transform(value);
+      return scoped[key];
+    });
   }
 }
-
-export const scope = <T, U>(
-  source: ReactiveValue<T>,
-  transform: (value: T) => U,
-) => new ScopedState(source, transform);
 
 /** A simple reactive event stream without any scheduling */
 export const stream = <T>() => new Publisher<T>();

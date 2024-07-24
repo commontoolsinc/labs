@@ -1,5 +1,5 @@
 import { equal as assertEqual } from "node:assert/strict";
-import { path, KeyPath, Pathable } from "../path.js";
+import { path } from "../path.js";
 
 describe("path", () => {
   it("gets a deep path from any object", () => {
@@ -15,16 +15,16 @@ describe("path", () => {
     assertEqual(path({}, ["a", "b", 0, "c"]), undefined);
   });
 
-  it("defers to `path()` implementation for Pathable types", () => {
-    class Wrapper<T> implements Pathable {
+  it("defers to `key()` implementation for Keyable types", () => {
+    class Wrapper<T> {
       #subject: T;
 
       constructor(subject: T) {
         this.#subject = subject;
       }
 
-      path(keyPath: KeyPath): unknown {
-        return path(this.#subject, keyPath);
+      key<K extends keyof T>(key: K): T[K] {
+        return this.#subject[key];
       }
     }
 
