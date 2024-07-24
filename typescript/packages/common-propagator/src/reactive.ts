@@ -1,3 +1,4 @@
+import { isObject } from "./contract.js";
 import { Cancel, isCancel } from "./cancel.js";
 
 /**
@@ -11,12 +12,26 @@ export type Reactive<T> = {
   sink: (callback: (value: T) => void) => Cancel;
 };
 
-export type ReactiveValue<T> = Reactive<T> & {
+export const isReactive = (value: unknown): value is Reactive<unknown> => {
+  return isObject(value) && "sink" in value && typeof value.sink === "function";
+};
+
+/** A gettable is any type implementing a `get()` method */
+export type Gettable<T> = {
   get(): T;
 };
 
-export const isReactive = (value: unknown): value is Reactive<unknown> => {
-  return typeof (value as Reactive<unknown>)?.sink === "function";
+export const isGettable = (value: unknown): value is Gettable<unknown> => {
+  return isObject(value) && "get" in value && typeof value.get === "function";
+};
+
+/** A sendable is any type implementing a `send` method */
+export type Sendable<T> = {
+  send: (value: T) => void;
+};
+
+export const isSendable = (value: unknown): value is Sendable<unknown> => {
+  return isObject(value) && "send" in value && typeof value.send === "function";
 };
 
 export const effect = (

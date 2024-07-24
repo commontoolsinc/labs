@@ -10,9 +10,11 @@ import {
   isSection,
   getContext,
 } from "./view.js";
-import { effect } from "./reactive.js";
-import { isSendable } from "./sendable.js";
-import { useCancelGroup, Cancel } from "./cancel.js";
+import { effect, isSendable } from "@commontools/common-propagator/reactive.js";
+import {
+  useCancelGroup,
+  Cancel,
+} from "@commontools/common-propagator/cancel.js";
 import * as logger from "./logger.js";
 
 export const render = (parent: HTMLElement, view: View): Cancel => {

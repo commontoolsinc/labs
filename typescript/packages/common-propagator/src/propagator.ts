@@ -2,34 +2,8 @@ import { Cancel, Cancellable, useCancelGroup } from "./cancel.js";
 import * as logger from "./logger.js";
 import { Lens } from "./lens.js";
 import cid from "./cid.js";
-
-/** A mergeable is a type that knows how to merge itself with itself */
-export interface Mergeable {
-  merge(value: this): this;
-}
-
-export const isMergeable = (value: any): value is Mergeable => {
-  return (
-    typeof value === "object" &&
-    typeof value.merge === "function" &&
-    value.merge.length === 1
-  );
-};
-
-/**
- * Merge will merge prev and curr if they are mergeable, otherwise will
- * return curr.
- */
-const merge = <T>(prev: T, curr: T): T => {
-  if (isMergeable(prev) && isMergeable(curr)) {
-    return prev.merge(curr);
-  }
-  return curr;
-};
-
-export type LamportTime = number;
-
-const advanceClock = (...times: LamportTime[]) => Math.max(...times) + 1;
+import { merge } from "./mergeable.js";
+import { advanceClock, LamportTime } from "./lamport.js";
 
 /**
  * A cell is a reactive value that can be updated and subscribed to.

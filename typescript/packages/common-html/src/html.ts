@@ -1,5 +1,5 @@
 import * as logger from "./logger.js";
-import cid from "./cid.js";
+import tid from "./tid.js";
 import { view, View, markupBinding } from "./view.js";
 
 export const html = (
@@ -12,7 +12,7 @@ export const html = (
 
   // Create pairs of name/value by generating name
   const namedValues: Array<[string, unknown]> = values.map((value) => {
-    return [cid(), value];
+    return [tid(), value];
   });
 
   // Flatten template string

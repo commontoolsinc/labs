@@ -1,7 +1,7 @@
 import * as assert from "node:assert";
 import html from "../html.js";
 import { isBinding } from "../view.js";
-import { cell } from "../propagator.js";
+import { cell } from "@commontools/common-propagator";
 
 describe("html", () => {
   it("parses tagged template string into a Renderable", () => {
