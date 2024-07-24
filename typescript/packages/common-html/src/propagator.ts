@@ -1,5 +1,4 @@
-import cid from "./cid.js";
-import { Cancel, Cancellable, useCancelGroup } from "./cancel.js";
+import { Cancellable, useCancelGroup } from "./cancel.js";
 import * as logger from "./logger.js";
 
 const advanceClock = (a: number, b: number) => Math.max(a, b) + 1;
@@ -8,8 +7,11 @@ export const lww = <T>(_state: T, next: T) => next;
 
 export type LamportTime = number;
 
+/**
+ * A cell is a reactive value that can be updated and subscribed to.
+ */
 export class Cell<Value> {
-  #id = cid();
+  #name: string = "";
   #neighbors = new Set<(value: Value, time: LamportTime) => void>();
   #time: LamportTime = 0;
   #update: (state: Value, next: Value) => Value;
@@ -17,17 +19,20 @@ export class Cell<Value> {
 
   constructor({
     value,
+    name = "",
     update = lww,
   }: {
     value: Value;
+    name?: string;
     update?: (state: Value, next: Value) => Value;
   }) {
+    this.#name = name;
     this.#update = update;
     this.#value = value;
   }
 
-  get id() {
-    return this.#id;
+  get name() {
+    return this.#name;
   }
 
   get() {
@@ -35,12 +40,12 @@ export class Cell<Value> {
   }
 
   send(value: Value, time: LamportTime = this.#time + 1): number {
-    logger.debug(`cell#${this.id}`, "Message", value, time);
+    logger.debug(`cell#${this.name}`, "Message", value, time);
 
     // We ignore old news
     if (this.#time >= time) {
       logger.debug(
-        `cell#${this.id}`,
+        `cell#${this.name}`,
         "Message out of date. Ignoring.",
         value,
         time,
@@ -49,25 +54,29 @@ export class Cell<Value> {
     }
 
     this.#time = advanceClock(this.#time, time);
-    logger.debug(`cell#${this.id}`, "Advanced clock", this.#time);
+    logger.debug(`cell#${this.name}`, "Advanced clock", this.#time);
 
     const next = this.#update(this.#value, value);
 
     // We only advance clock if msg changed state
     if (this.#value === next) {
-      logger.debug(`cell#${this.id}`, "Value unchanged.", this.#value);
+      logger.debug(`cell#${this.name}`, "Value unchanged.", this.#value);
       return this.#time;
     }
 
     const prev = this.#value;
     this.#value = next;
-    logger.debug(`cell#${this.id}`, "Value updated", prev, next);
+    logger.debug(`cell#${this.name}`, "Value updated", prev, next);
 
     // Notify neighbors
     for (const neighbor of this.#neighbors) {
       neighbor(next, this.#time);
     }
-    logger.debug(`cell#${this.id}`, "Notified neighbors", this.#neighbors.size);
+    logger.debug(
+      `cell#${this.name}`,
+      "Notified neighbors",
+      this.#neighbors.size,
+    );
 
     return this.#time;
   }
@@ -76,7 +85,7 @@ export class Cell<Value> {
   disconnect() {
     this.#neighbors.clear();
     logger.debug(
-      `cell#${this.id}`,
+      `cell#${this.name}`,
       "Disconnected all neighbors",
       this.#neighbors.size,
     );
@@ -95,16 +104,18 @@ export class Cell<Value> {
   }
 }
 
-/** A simple reactive state cell without any scheduling */
+/**
+ * Create a reactive cell for a value
+ */
 export const cell = <Value>({
   value,
+  name = "",
   update = lww,
 }: {
   value: Value;
+  name?: string;
   update?: (state: Value, next: Value) => Value;
-}) => new Cell({ value, update });
-
-export default cell;
+}) => new Cell({ value, name, update });
 
 export type CancellableCell<T> = Cell<T> & Cancellable;
 
@@ -150,41 +161,3 @@ export const key = <T, K extends keyof T>(
     get: (big) => big[key],
     update: (big, small) => ({ ...big, [key]: small }),
   });
-
-/** Wrap an effect function so that it batches on microtask */
-const batcher = (queue = queueMicrotask) => {
-  let isScheduled = false;
-  let scheduledJob = () => {};
-
-  const perform = () => {
-    isScheduled = false;
-    scheduledJob();
-  };
-
-  return (job: () => void) => {
-    if (isScheduled) return;
-    scheduledJob = job;
-    isScheduled = true;
-    queue(perform);
-  };
-};
-
-/** Batch updates on animatinoframe */
-export const render = <State>(
-  cell: Cell<State>,
-  callback: (state: State) => Cancel | null,
-) => {
-  const [cancel, addCancel] = useCancelGroup();
-
-  const batch = batcher(requestAnimationFrame);
-
-  const cancelSink = cell.sink((state) => {
-    batch(() => {
-      const cancel = callback(state);
-      addCancel(cancel);
-    });
-  });
-
-  addCancel(cancelSink);
-  return cancel;
-};

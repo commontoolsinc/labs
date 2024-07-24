@@ -2,7 +2,7 @@ import {
   equal as assertEqual,
   deepEqual as assertDeepEqual,
 } from "node:assert/strict";
-import cell, { lens } from "../propagator.js";
+import { cell, lens } from "../propagator.js";
 
 describe("cell()", () => {
   it("synchronously sets the value", () => {
@@ -21,6 +21,11 @@ describe("cell()", () => {
     a.send(2);
 
     assertEqual(state, 2);
+  });
+
+  it("has an optional name", () => {
+    const a = cell({ value: 1, name: "a" });
+    assertEqual(a.name, "a");
   });
 });
 

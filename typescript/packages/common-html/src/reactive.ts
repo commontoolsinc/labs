@@ -45,3 +45,51 @@ export const effect = (
 };
 
 const noOp = () => {};
+
+/** Wrap an effect function so that it batches on microtask */
+const batcher = (queue = queueMicrotask) => {
+  let isScheduled = false;
+  let scheduledJob = () => {};
+
+  const perform = () => {
+    isScheduled = false;
+    scheduledJob();
+  };
+
+  return (job: () => void) => {
+    scheduledJob = job;
+    if (!isScheduled) {
+      isScheduled = true;
+      queue(perform);
+    }
+  };
+};
+
+/** Batch effects on microtask */
+export const render = (
+  value: unknown,
+  callback: (value: unknown) => Cancel | void,
+) => {
+  if (value == null) {
+    return noOp;
+  }
+
+  const queueRender = batcher();
+
+  let cleanup: Cancel = noOp;
+  if (isReactive(value)) {
+    const cancelSink = value.sink((value: unknown) => {
+      queueRender(() => {
+        cleanup();
+        const next = callback(value);
+        cleanup = isCancel(next) ? next : noOp;
+      });
+    });
+    return () => {
+      cancelSink();
+      cleanup();
+    };
+  }
+  const maybeCleanup = callback(value);
+  return isCancel(maybeCleanup) ? maybeCleanup : noOp;
+};
