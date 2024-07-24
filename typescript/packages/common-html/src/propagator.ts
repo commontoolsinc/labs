@@ -3,11 +3,33 @@ import * as logger from "./logger.js";
 import { Lens } from "./lens.js";
 import cid from "./cid.js";
 
+/** A mergeable is a type that knows how to merge itself with itself */
+export interface Mergeable {
+  merge(value: this): this;
+}
+
+export const isMergeable = (value: any): value is Mergeable => {
+  return (
+    typeof value === "object" &&
+    typeof value.merge === "function" &&
+    value.merge.length === 1
+  );
+};
+
+/**
+ * Merge will merge prev and curr if they are mergeable, otherwise will
+ * return curr.
+ */
+const merge = <T>(prev: T, curr: T): T => {
+  if (isMergeable(prev) && isMergeable(curr)) {
+    return prev.merge(curr);
+  }
+  return curr;
+};
+
 export type LamportTime = number;
 
 const advanceClock = (...times: LamportTime[]) => Math.max(...times) + 1;
-
-export const lww = <T>(_state: T, next: T) => next;
 
 /**
  * A cell is a reactive value that can be updated and subscribed to.
@@ -25,20 +47,10 @@ export class Cell<Value> {
   #name = "";
   #neighbors = new Set<(value: Value, time: LamportTime) => void>();
   #time: LamportTime = 0;
-  #update: (state: Value, next: Value) => Value;
   #value: Value;
 
-  constructor({
-    value,
-    name = "",
-    update = lww,
-  }: {
-    value: Value;
-    name?: string;
-    update?: (state: Value, next: Value) => Value;
-  }) {
+  constructor(value: Value, name = "") {
     this.#name = name;
-    this.#update = update;
     this.#value = value;
     logger.debug({
       msg: "Cell created",
@@ -85,7 +97,7 @@ export class Cell<Value> {
       return this.#time;
     }
 
-    const next = this.#update(this.#value, value);
+    const next = merge(this.#value, value);
 
     // We only advance clock if value changes state
     if (this.#value === next) {
@@ -150,20 +162,9 @@ export class Cell<Value> {
 }
 
 /** Create a reactive cell for a value */
-export const cell = <Value>({
-  value,
-  name = "",
-  update = lww,
-}: {
-  value: Value;
-  name?: string;
-  update?: (state: Value, next: Value) => Value;
-}) => new Cell({ value, name, update });
+export const cell = <Value>(value: Value, name = "") => new Cell(value, name);
 
 export default cell;
-
-/** Create a cell with last-write-wins update semantics */
-export const state = <T>(value: T, name = "") => cell({ value, name });
 
 export type CancellableCell<T> = Cell<T> & Cancellable;
 
@@ -176,7 +177,7 @@ export const lens = <B, S>(
 ): CancellableCell<S> => {
   const bigValue = big.get();
 
-  const small = cell<S>({ value: lens.get(bigValue) });
+  const small = cell<S>(lens.get(bigValue));
 
   const [cancel, addCancel] = useCancelGroup();
 

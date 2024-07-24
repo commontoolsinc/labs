@@ -1,12 +1,12 @@
 import { equal as assertEqual } from "node:assert/strict";
-import { state } from "../propagator.js";
+import { cell } from "../propagator.js";
 import { effect, render, isReactive } from "../reactive.js";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("isReactive", () => {
   it("returns true for any object with a sink method", () => {
-    const a = state(0);
+    const a = cell(0);
     assertEqual(isReactive(a), true);
 
     class B {
@@ -31,7 +31,7 @@ describe("effect()", () => {
   });
 
   it("subscribes callback to `sink` for reactive value", () => {
-    const value = state(10);
+    const value = cell(10);
 
     let valueMut = 0;
     effect(value, (value: number) => {
@@ -45,7 +45,7 @@ describe("effect()", () => {
   });
 
   it("ends subscription to reactive value when cancel is called", () => {
-    const value = state(10);
+    const value = cell(10);
 
     let valueMut = 0;
     const cancel = effect(value, (value: number) => {
@@ -86,7 +86,7 @@ describe("render()", () => {
   });
 
   it("subscribes callback to `sink` for reactive value", async () => {
-    const value = state(10);
+    const value = cell(10);
 
     let valueMut = 0;
     render(value, (value: number) => {
@@ -102,7 +102,7 @@ describe("render()", () => {
   });
 
   it("ends subscription to reactive value when cancel is called", async () => {
-    const value = state(10);
+    const value = cell(10);
 
     let valueMut = 0;
     const cancel = render(value, (value: number) => {

@@ -1,12 +1,12 @@
 import * as assert from "node:assert";
 import html from "../html.js";
 import { isBinding } from "../view.js";
-import { state } from "../propagator.js";
+import { cell } from "../propagator.js";
 
 describe("html", () => {
   it("parses tagged template string into a Renderable", () => {
-    const clicks = state<Event | null>(null);
-    const text = state("Hello world!");
+    const clicks = cell<Event | null>(null);
+    const text = cell("Hello world!");
 
     const view = html`
       <div class="container">

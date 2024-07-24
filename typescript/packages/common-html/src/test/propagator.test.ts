@@ -2,17 +2,17 @@ import {
   equal as assertEqual,
   deepEqual as assertDeepEqual,
 } from "node:assert/strict";
-import { cell, state, lens, lift } from "../propagator.js";
+import { cell, lens, lift } from "../propagator.js";
 
 describe("cell()", () => {
   it("synchronously sets the value", () => {
-    const a = cell({ value: 1 });
+    const a = cell(1);
     a.send(2);
     assertEqual(a.get(), 2);
   });
 
   it("reacts synchronously when sent a new value", () => {
-    const a = cell({ value: 1 });
+    const a = cell(1);
 
     let state = 0;
     a.sink((value) => {
@@ -24,14 +24,14 @@ describe("cell()", () => {
   });
 
   it("has an optional name", () => {
-    const a = cell({ value: 1, name: "a" });
+    const a = cell(1, "a");
     assertEqual(a.name, "a");
   });
 });
 
 describe("lens()", () => {
   it("lenses over a cell", () => {
-    const x = cell({ name: "x", value: { a: { b: { c: 10 } } } });
+    const x = cell({ a: { b: { c: 10 } } }, "x");
 
     const c = lens(x, {
       get: (state) => state.a.b.c,
@@ -49,14 +49,14 @@ describe("lens()", () => {
 
 describe("cell.key()", () => {
   it("returns a typesafe cell that reflects the state of the parent", () => {
-    const x = cell({ value: { a: 10 } });
+    const x = cell({ a: 10 });
     const a = x.key("a");
 
     assertEqual(a.get(), 10);
   });
 
   it("reflects updates from parent to child", () => {
-    const x = cell({ value: { a: 10 } });
+    const x = cell({ a: 10 });
     const a = x.key("a");
 
     x.send({ a: 20 });
@@ -65,7 +65,7 @@ describe("cell.key()", () => {
   });
 
   it("reflects updates from child to parent", () => {
-    const x = cell({ value: { a: 10 } });
+    const x = cell({ a: 10 });
     const a = x.key("a");
 
     a.send(20);
@@ -74,7 +74,7 @@ describe("cell.key()", () => {
   });
 
   it("it works for deep derived keys", () => {
-    const x = cell({ value: { a: { b: { c: 10 } } } });
+    const x = cell({ a: { b: { c: 10 } } });
     const a = x.key("a");
     const b = a.key("b");
     const c = b.key("c");
@@ -92,9 +92,9 @@ describe("lift()", () => {
   it("lifts a function into a function that reads from and writes to cells", () => {
     const addCells = lift((a: number, b: number) => a + b);
 
-    const a = state(1, "lift.a");
-    const b = state(2, "lift.b");
-    const out = state(0, "lift.out");
+    const a = cell(1, "lift.a");
+    const b = cell(2, "lift.b");
+    const out = cell(0, "lift.out");
 
     const cancel = addCells(a, b, out);
 
@@ -106,9 +106,9 @@ describe("lift()", () => {
   it("updates the out cell whenever an input cell updates", () => {
     const addCells = lift((a: number, b: number) => a + b);
 
-    const a = state(1, "a");
-    const b = state(1, "b");
-    const out = state(0, "out");
+    const a = cell(1, "a");
+    const b = cell(1, "b");
+    const out = cell(0, "out");
 
     addCells(a, b, out);
     assertEqual(out.get(), 2);
@@ -123,8 +123,8 @@ describe("lift()", () => {
   it("solves the diamond problem", () => {
     const addCells = lift((a: number, b: number) => a + b);
 
-    const a = state(1, "a");
-    const out = state(0, "out");
+    const a = cell(1, "a");
+    const out = cell(0, "out");
 
     addCells(a, a, out);
     assertEqual(out.get(), 2);
@@ -147,9 +147,9 @@ describe("lift()", () => {
   it("solves the diamond problem (2)", () => {
     const add3 = lift((a: number, b: number, c: number) => a + b + c);
 
-    const a = state(1, "a");
-    const b = state(1, "b");
-    const out = state(0, "out");
+    const a = cell(1, "a");
+    const b = cell(1, "b");
+    const out = cell(0, "out");
 
     add3(a, b, b, out);
     assertEqual(out.get(), 3);
