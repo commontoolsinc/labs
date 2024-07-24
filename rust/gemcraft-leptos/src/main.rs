@@ -1,5 +1,7 @@
 use leptos::*;
 use logging::log;
+use serde::{Deserialize, Serialize};
+use serde_wasm_bindgen;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, Response};
@@ -29,6 +31,15 @@ fn App() -> impl IntoView {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug)]
+struct LlmResponse {
+    #[serde(rename = "type")]
+    r#type: String,
+    #[serde(rename = "threadId")]
+    thread_id: String,
+    output: String,
+}
+
 #[component]
 pub fn FormWithPreview() -> impl IntoView {
     let (image_url, set_image_url) = create_signal(String::new());
@@ -47,7 +58,6 @@ pub fn FormWithPreview() -> impl IntoView {
             opts.body(Some(&JsValue::from_str(
                 r#"{"action": "create", "message": "hello"}"#,
             )));
-            opts.co
 
             let request = Request::new_with_str_and_init("http://localhost:8000", &opts).unwrap();
 
@@ -59,6 +69,13 @@ pub fn FormWithPreview() -> impl IntoView {
             let json = JsFuture::from(resp.json().unwrap())
                 .await
                 .expect("failed to get response text");
+
+            let llm_response: LlmResponse =
+                serde_wasm_bindgen::from_value(json).map_err(|_| "Failed to deserialize JSON")?;
+
+            log!("Response: {:?}", llm_response);
+
+            Ok::<LlmResponse, String>(llm_response)
         }
     });
 

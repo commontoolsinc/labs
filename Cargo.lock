@@ -1404,6 +1404,10 @@ version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "leptos",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
 ]
 
