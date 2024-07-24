@@ -1,5 +1,6 @@
 import { Cancellable, useCancelGroup } from "./cancel.js";
 import * as logger from "./logger.js";
+import { Lens } from "./lens.js";
 
 const advanceClock = (a: number, b: number) => Math.max(a, b) + 1;
 
@@ -122,18 +123,16 @@ export const state = <T>(value: T, name = "") => cell({ value, name });
 
 export type CancellableCell<T> = Cell<T> & Cancellable;
 
-export const lens = <B, S>({
-  cell: big,
-  get,
-  update,
-}: {
-  cell: Cell<B>;
-  get: (big: B) => S;
-  update: (big: B, small: S) => B;
-}): CancellableCell<S> => {
+/**
+ * Derive a cell who's contents is transformed by a lens
+ */
+export const lens = <B, S>(
+  big: Cell<B>,
+  lens: Lens<B, S>,
+): CancellableCell<S> => {
   const bigValue = big.get();
 
-  const small = cell<S>({ value: get(bigValue) });
+  const small = cell<S>({ value: lens.get(bigValue) });
 
   const [cancel, addCancel] = useCancelGroup();
 
@@ -145,7 +144,7 @@ export const lens = <B, S>({
 
   // Propagate writes from child to parent
   const cancelSmallToBig = small.sink((value, time) => {
-    big.send(update(big.get(), value), time);
+    big.send(lens.update(big.get(), value), time);
   });
   addCancel(cancelSmallToBig);
 
@@ -159,8 +158,7 @@ export const key = <T, K extends keyof T>(
   big: Cell<T>,
   key: K,
 ): CancellableCell<T[K]> =>
-  lens({
-    cell: big,
+  lens(big, {
     get: (big) => big[key],
     update: (big, small) => ({ ...big, [key]: small }),
   });
