@@ -138,7 +138,7 @@ export const lens = <B, S>(
 
   // Propagate writes from parent to child
   const cancelBigToSmall = big.sink((parentValue, time) => {
-    small.send(get(parentValue), time);
+    small.send(lens.get(parentValue), time);
   });
   addCancel(cancelBigToSmall);
 
