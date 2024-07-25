@@ -1,26 +1,23 @@
-import render, { setNodeSanitizer, setEventSanitizer } from "../src/render.js";
+import { cell } from "@commontools/common-propagator";
 import view from "../src/view.js";
 import html from "../src/html.js";
-import { state, stream } from "../src/state.js";
+import render from "../src/render.js";
 import { setDebug } from "../src/logger.js";
 
 setDebug(true);
 
-// setNodeSanitizer(...);
-// setEventSanitizer(...);
-
-const inputState = state({ text: "Hello, world!" });
-const inputEvents = stream<InputEvent>();
+const inputState = cell({ text: "Hello, world!" });
+const inputEvents = cell<InputEvent | null>(null);
 
 inputEvents.sink((event) => {
-  const target = event.target as HTMLInputElement | null;
+  const target = event?.target as HTMLInputElement | null;
   const value = target?.value;
   if (value != null) {
     inputState.send({ text: value });
   }
 });
 
-const time = state(new Date().toLocaleTimeString());
+const time = cell(new Date().toLocaleTimeString());
 
 setInterval(() => {
   time.send(new Date().toLocaleTimeString());

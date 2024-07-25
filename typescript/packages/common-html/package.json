@@ -11,7 +11,7 @@
     "test-browser": "npm run build && web-test-runner \"lib/test-browser/**/*.test.js\" --node-resolve",
     "build": "wireit",
     "clean": "wireit",
-    "dev": "vite example"
+    "dev": "npm run build && vite example"
   },
   "repository": {
     "type": "git",
