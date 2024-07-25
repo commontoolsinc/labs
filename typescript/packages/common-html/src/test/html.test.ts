@@ -1,12 +1,12 @@
 import * as assert from "node:assert";
 import html from "../html.js";
-import * as hole from "../hole.js";
-import { state, stream } from "../state.js";
+import { isBinding } from "../view.js";
+import { cell } from "@commontools/common-propagator";
 
 describe("html", () => {
   it("parses tagged template string into a Renderable", () => {
-    const clicks = stream<Event>();
-    const text = state("Hello world!");
+    const clicks = cell<Event | null>(null);
+    const text = cell("Hello world!");
 
     const view = html`
       <div class="container">
@@ -15,9 +15,9 @@ describe("html", () => {
     `;
 
     // @ts-ignore - ignore for test
-    assert.strict(hole.isHole(view.template.children[0].props.onclick));
+    assert.strict(isBinding(view.template.children[0].props.onclick));
 
     // @ts-ignore - ignore for test
-    assert.strict(hole.isHole(view.template.children[0].children[0]));
+    assert.strict(isBinding(view.template.children[0].children[0]));
   });
 });

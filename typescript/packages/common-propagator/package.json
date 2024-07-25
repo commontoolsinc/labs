@@ -1,17 +1,15 @@
 {
-  "name": "@commontools/common-html",
+  "name": "@commontools/common-propagator",
   "author": "The Common Authors",
   "version": "0.0.1",
-  "description": "Render DOM from templates",
+  "description": "Reactive cells and propagators",
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm run build && mocha lib/test/**/*.test.js",
-    "test-browser": "npm run build && web-test-runner \"lib/test-browser/**/*.test.js\" --node-resolve",
     "build": "wireit",
     "clean": "wireit",
-    "dev": "npm run build && vite example"
+    "test": "npm run build && mocha lib/test/**/*.test.js"
   },
   "repository": {
     "type": "git",
@@ -21,19 +19,31 @@
     "url": "https://github.com/commontoolsinc/labs/issues"
   },
   "homepage": "https://github.com/commontoolsinc/labs#readme",
-  "exports": "./lib/index.js",
-  "files": [
-    "./lib/index.js"
-  ],
-  "dependencies": {
-    "htmlparser2": "^9.1.0"
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./propagator.js": {
+      "types": "./lib/propagator.d.ts",
+      "default": "./lib/propagator.js"
+    },
+    "./cancel.js": {
+      "types": "./lib/cancel.d.ts",
+      "default": "./lib/cancel.js"
+    },
+    "./path.js": {
+      "types": "./lib/path.d.ts",
+      "default": "./lib/path.js"
+    },
+    "./reactive.js": {
+      "types": "./lib/reactive.d.ts",
+      "default": "./lib/reactive.js"
+    }
   },
   "devDependencies": {
-    "vite": "^5.3.3",
     "@types/mocha": "^10.0.7",
-    "@types/node": "^20.14.10",
-    "@types/sax": "^1.2.7",
-    "@web/test-runner": "^0.18.2",
+    "@types/node": "^20.14.12",
     "mocha": "^10.6.0",
     "tslib": "^2.6.2",
     "typescript": "^5.2.2",
@@ -41,9 +51,7 @@
   },
   "wireit": {
     "build": {
-      "dependencies": [
-        "../common-propagator:build"
-      ],
+      "dependencies": [],
       "files": [
         "./src/**/*"
       ],

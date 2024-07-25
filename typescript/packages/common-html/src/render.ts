@@ -1,24 +1,32 @@
-import { isVNode, VNode } from "./vnode.js";
-import { View, Context, isView } from "./view.js";
-import { isHole } from "./hole.js";
-import { effect } from "./reactive.js";
-import { isSendable } from "./sendable.js";
-import { useCancelGroup, Cancel } from "./cancel.js";
+import {
+  View,
+  Context,
+  isView,
+  isVNode,
+  VNode,
+  isBinding,
+  Props,
+  Child,
+  isSection,
+  getContext,
+} from "./view.js";
+import { effect, isSendable } from "@commontools/common-propagator/reactive.js";
+import {
+  useCancelGroup,
+  Cancel,
+} from "@commontools/common-propagator/cancel.js";
 import * as logger from "./logger.js";
 
-export type CancellableHTMLElement = HTMLElement & { cancel?: Cancel };
-
-export const render = (renderable: View): HTMLElement => {
-  const { template, context } = renderable;
-  const [cancel, addCancel] = useCancelGroup();
-  const root = renderNode(
-    template,
-    context,
-    addCancel,
-  ) as CancellableHTMLElement;
-  root.cancel = cancel;
+export const render = (parent: HTMLElement, view: View): Cancel => {
+  const { template, context } = view;
+  const [root, cancel] = renderNode(template, context);
+  if (!root) {
+    logger.warn("Could not render view", view);
+    return cancel;
+  }
+  parent.append(root);
   logger.debug("Rendered", root);
-  return root;
+  return cancel;
 };
 
 export default render;
@@ -26,59 +34,63 @@ export default render;
 const renderNode = (
   node: VNode,
   context: Context,
-  addCancel: (cancel: Cancel) => void,
-): HTMLElement | null => {
+): [HTMLElement | null, Cancel] => {
+  const [cancel, addCancel] = useCancelGroup();
+
   const sanitizedNode = sanitizeNode(node);
+
   if (!sanitizedNode) {
-    return null;
+    return [null, cancel];
   }
-  const element = document.createElement(sanitizedNode.tag);
-  attrs: for (const [name, value] of Object.entries(sanitizedNode.props)) {
-    if (isHole(value)) {
-      const replacement = context[value.name];
-      // If prop is an event, we need to add an event listener
-      if (isEventProp(name)) {
-        if (!isSendable(replacement)) {
-          throw new TypeError(
-            `Event prop "${name}" does not have a send method`,
-          );
-        }
-        const key = cleanEventProp(name);
-        const cancel = listen(element, key, (event) => {
-          const sanitizedEvent = sanitizeEvent(event);
-          replacement.send(sanitizedEvent);
-        });
-        addCancel(cancel);
-      } else {
-        const cancel = effect(replacement, (replacement) => {
-          // Replacements are set as properties not attributes to avoid
-          // string serialization of complex datatypes.
-          setProp(element, name, replacement);
-        });
-        addCancel(cancel);
-      }
-    } else {
-      element.setAttribute(name, value);
-    }
-  }
-  for (const childNode of sanitizedNode.children) {
-    if (typeof childNode === "string") {
-      element.append(childNode);
-    } else if (isVNode(childNode)) {
-      const childElement = renderNode(childNode, context, addCancel);
+
+  const element = document.createElement(sanitizedNode.name);
+
+  const cancelProps = bindProps(element, sanitizedNode.props, context);
+  addCancel(cancelProps);
+
+  const cancelChildren = bindChildren(element, sanitizedNode.children, context);
+  addCancel(cancelChildren);
+
+  return [element, cancel];
+};
+
+const bindChildren = (
+  element: HTMLElement,
+  children: Array<Child>,
+  context: Context,
+): Cancel => {
+  const [cancel, addCancel] = useCancelGroup();
+
+  for (const child of children) {
+    if (typeof child === "string") {
+      // Bind static content
+      element.append(child);
+    } else if (isVNode(child)) {
+      // Bind static VNode
+      const [childElement, cancel] = renderNode(child, context);
+      addCancel(cancel);
       if (childElement) {
         element.append(childElement);
       }
-    } else if (isHole(childNode)) {
-      const replacement = context[childNode.name];
+    } else if (isBinding(child)) {
+      // Bind dynamic content
+      const replacement = getContext(context, child.path);
       // Anchor for reactive replacement
       let anchor: ChildNode = document.createTextNode("");
       element.append(anchor);
       const cancel = effect(replacement, (replacement) => {
         if (isView(replacement)) {
-          const childElement = render(replacement);
-          anchor.replaceWith(childElement);
-          anchor = childElement;
+          const [childElement, cancel] = renderNode(
+            replacement.template,
+            replacement.context,
+          );
+          addCancel(cancel);
+          if (childElement != null) {
+            anchor.replaceWith(childElement);
+            anchor = childElement;
+          } else {
+            logger.warn("Could not render view", replacement);
+          }
         } else {
           const text = document.createTextNode(`${replacement}`);
           anchor.replaceWith(text);
@@ -86,9 +98,52 @@ const renderNode = (
         }
       });
       addCancel(cancel);
+    } else if (isSection(child)) {
+      logger.warn("Sections not yet implemented");
     }
   }
-  return element;
+  return cancel;
+};
+
+const bindProps = (
+  element: HTMLElement,
+  props: Props,
+  context: Context,
+): Cancel => {
+  const [cancel, addCancel] = useCancelGroup();
+  for (const [propKey, propValue] of Object.entries(props)) {
+    if (isBinding(propValue)) {
+      const replacement = getContext(context, propValue.path);
+      // If prop is an event, we need to add an event listener
+      if (isEventProp(propKey)) {
+        if (!isSendable(replacement)) {
+          throw new TypeError(
+            `Event prop "${propKey}" does not have a send method`,
+          );
+        }
+        const key = cleanEventProp(propKey);
+        if (key != null) {
+          const cancel = listen(element, key, (event) => {
+            const sanitizedEvent = sanitizeEvent(event);
+            replacement.send(sanitizedEvent);
+          });
+          addCancel(cancel);
+        } else {
+          logger.warn("Could not bind event", propKey, propValue);
+        }
+      } else {
+        const cancel = effect(replacement, (replacement) => {
+          // Replacements are set as properties not attributes to avoid
+          // string serialization of complex datatypes.
+          setProp(element, propKey, replacement);
+        });
+        addCancel(cancel);
+      }
+    } else {
+      element.setAttribute(propKey, propValue);
+    }
+  }
+  return cancel;
 };
 
 const isEventProp = (key: string) => key.startsWith("on");
@@ -121,7 +176,7 @@ const setProp = <T>(target: T, key: string, value: unknown) => {
 };
 
 const sanitizeScripts = (node: VNode): VNode | null => {
-  if (node.tag === "script") {
+  if (node.name === "script") {
     return null;
   }
   return node;
