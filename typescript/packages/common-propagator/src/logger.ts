@@ -13,13 +13,13 @@ export const setDebug = (value: boolean) => {
 };
 
 /** Log warning */
-export const warn = (...args: unknown[]) => {
-  console.warn(...args);
+export const warn = (msg: unknown) => {
+  console.warn(msg);
 };
 
 /** Log if debugging is on */
-export const debug = (...args: unknown[]) => {
+export const debug = (msg: object) => {
   if (isDebug) {
-    console.debug(...args);
+    console.debug({ ...msg });
   }
 };

@@ -36,12 +36,24 @@ export const path = <T>(parent: T, keyPath: Array<PropertyKey>): unknown => {
   const key = keyPath.shift()!;
   if (isKeyable(parent)) {
     const child = parent.key(key);
-    logger.debug("path: call .key()", parent, key, child);
+    logger.debug({
+      msg: "call .key()",
+      fn: "path()",
+      parent,
+      key,
+      child,
+    });
     return path(child, keyPath);
   }
   // We checked the length, so we know this is not undefined.
   const child = getProp(parent, key);
-  logger.debug("path: get prop", parent, key, child);
+  logger.debug({
+    msg: "get prop",
+    fn: "path()",
+    parent,
+    key,
+    child,
+  });
   return path(child, keyPath);
 };
 
