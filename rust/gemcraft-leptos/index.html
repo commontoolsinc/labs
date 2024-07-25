@@ -2,6 +2,20 @@
 <html>
   <head>
     <style>
+      .app {
+        display: flex;
+        flex-direction: row;
+      }
+
+      .app > div {
+        flex: 1;
+      }
+
+      app > div > pre {
+        overflow: auto;
+        max-width: 50%;
+      }
+
       .data-gem {
         display: flex;
         align-items: center;
@@ -17,6 +31,26 @@
         width: 5rem;
         text-align: center;
         height: 5rem;
+        user-select: none;
+      }
+
+      .gem-list {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        flex-direction: row;
+      }
+
+      .data-gem.small .icon {
+        font-size: 1.5rem;
+        color: #ccc;
+        border: 1px solid #ccc;
+        border-radius: 50%;
+        padding: 0.33rem;
+        box-sizing: border-box;
+        width: 3rem;
+        text-align: center;
+        height: 3rem;
         user-select: none;
       }
       .data-gem .content {
@@ -37,7 +71,7 @@
         font-family: monospace;
       }
 
-      form table td { 
+      form table td {
         vertical-align: top;
         padding: 0.5rem;
       }
