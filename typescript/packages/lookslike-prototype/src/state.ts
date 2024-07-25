@@ -1,14 +1,17 @@
-import { get, set, del, keys } from "idb-keyval";
-import { SignalSubject } from "../../common-frp/lib/signal.js";
+import { computed, reactive } from "@vue/reactivity";
+import { Message } from "./data.js";
+import { Graph } from "./reactivity/runtime.js";
+import { get, set, keys } from "idb-keyval";
 
-// Helper function for serialization boundary (this can be customized as needed)
-const serializationBoundary = (data: any) => {
-  return JSON.stringify(data);
-};
+import { Reflect } from "@rocicorp/reflect/client";
+import { mutators } from "./reactivity/mutators.js";
 
-export async function listKeys() {
-  return await keys();
-}
+export const r = new Reflect({
+  server: "http://localhost:8081",
+  roomID: "myRoom",
+  userID: "myUser",
+  mutators
+});
 
 export type Context<T> = {
   inputs: { [node: string]: { [input: string]: T } };
@@ -16,44 +19,72 @@ export type Context<T> = {
   cancellation: (() => void)[];
 };
 
-export function snapshot(ctx: Context<SignalSubject<any>>) {
-  const snapshot: Context<any> = {
-    inputs: {},
-    outputs: {}
-  };
+export const session = reactive({
+  history: [] as Message[],
+  requests: [] as string[],
+  reactCode: "",
+  speclang: "",
+  transformed: ""
+});
 
-  for (const key in ctx.outputs) {
-    const value = ctx.outputs[key].get();
-    snapshot.outputs[key] = value;
-  }
-
-  for (const key in ctx.inputs) {
-    snapshot.inputs[key] = {};
-    for (const inputKey in ctx.inputs[key]) {
-      const value = ctx.inputs[key][inputKey].get();
-      snapshot.inputs[key][inputKey] = value;
-    }
-  }
-
-  return snapshot;
+export async function saveSession(name: IDBValidKey) {
+  await set(name, JSON.parse(JSON.stringify(session)));
 }
 
-// System object that interacts with IndexedDB
-export const storage = {
-  get: async (key: string) => {
-    const data = await get(key);
-    if (data) {
-      return data;
+export async function loadSession(name: IDBValidKey) {
+  const data = await get(name);
+  if (data) {
+    Object.assign(session, data);
+  }
+}
+
+export async function listSessions() {
+  return await keys();
+}
+
+export const sessionList = reactive({ recipes: [] as IDBValidKey[] });
+listSessions().then((sessions) => {
+  sessionList.recipes = sessions;
+});
+
+export const appState = reactive({} as any);
+export const appGraph = new Graph(appState);
+
+window.__refresh = () => {
+  appGraph.update();
+};
+
+const syncChannel = new BroadcastChannel("sync");
+
+type SyncMessage = { type: "write"; key: string; value: any };
+
+export function gem(db: any, key: string) {
+  return {
+    get() {
+      // if (db[key] === undefined) {
+      //   db[key] = await get(key);
+      // }
+
+      return db[key];
+    },
+    set(value: any, broadcast = true) {
+      console.log("gem:set", key, value);
+      const plain = JSON.parse(JSON.stringify(value));
+      db[key] = value;
+      localStorage.setItem(key, JSON.stringify(plain));
+      if (broadcast && JSON.stringify(value) !== "{}") {
+        r.mutate.write({ key, data: plain });
+        // syncChannel.postMessage({ type: "write", key, value: plain });
+      }
     }
+  };
+}
 
-    return [];
-  },
-
-  set: async (key: string, value: any) => {
-    await set(key, value);
-  },
-
-  delete: async (key: string) => {
-    await del(key);
+syncChannel.onmessage = (e: MessageEvent<SyncMessage>) => {
+  console.log("syncChannel", e.data);
+  switch (e.data.type) {
+    case "write":
+      gem(appState, e.data.key).set(e.data.value, false);
+      break;
   }
 };

@@ -1,19 +1,17 @@
-import { Anthropic } from "@anthropic-ai/sdk";
-export * from './dummy-data.js'
+import { CoreMessage, CoreTool } from "ai";
+export * from "./dummy-data.js";
 
-type Tool = Anthropic.Messages.Tool & {
+export type LlmTool = CoreTool & {
   implementation: (input: any) => Promise<string> | string;
 };
 
 export interface ClientConfig {
   serverUrl: string;
-  tools: Tool[];
+  tools: LlmTool[];
   system?: string;
 }
 
 export class ConversationThread {
-  private pendingToolCalls: Anthropic.Messages.ToolUseBlockParam[] = [];
-
   constructor(
     private client: LLMClient,
     public id: string,
@@ -25,58 +23,22 @@ export class ConversationThread {
   }
 
   async sendMessage(message: string): Promise<string> {
-    let response: AppendThreadResponse;
-
-    if (this.pendingToolCalls) {
-      const toolResponses = await this.handleToolCalls(this.pendingToolCalls);
-      response = await this.client.continueThread(
-        this.id,
-        undefined,
-        toolResponses,
-      );
-    } else {
-      response = await this.client.continueThread(this.id, message);
-    }
+    const response: AppendThreadResponse = await this.client.continueThread(
+      this.id,
+      message,
+    );
 
     this.conversation.push(`User: ${message}`);
-    let assistantResponse = "";
+    let assistantResponse = response.assistantResponse;
+    this.conversation.push(`Assistant: ${assistantResponse.content}`);
 
-    if (response.pendingToolCalls && response.pendingToolCalls.length > 0) {
-      this.pendingToolCalls = response.pendingToolCalls;
-      assistantResponse = (
-        response.assistantResponse?.content[0] as { text: string }
-      ).text;
-    } else {
-      assistantResponse = response.output || "";
-      this.pendingToolCalls = [];
-    }
-
-    this.conversation.push(`Assistant: ${assistantResponse}`);
-    return assistantResponse;
-  }
-
-  private async handleToolCalls(
-    toolCalls: Anthropic.Messages.ToolUseBlockParam[],
-  ): Promise<ToolResponse[]> {
-    return await Promise.all(
-      toolCalls.map(async (toolCall) => ({
-        type: "tool_result",
-        tool_use_id: toolCall.id,
-        content: [
-          { type: "text", text: await this.client.executeTool(toolCall) },
-        ],
-      })),
-    );
-  }
-
-  hasPendingToolCalls(): boolean {
-    return this.pendingToolCalls !== null;
+    return response.output;
   }
 }
 
 export class LLMClient {
   private serverUrl: string;
-  private tools: Tool[];
+  private tools: LlmTool[];
   private system: string;
 
   constructor(config: ClientConfig) {
@@ -115,16 +77,9 @@ export class LLMClient {
     const response: CreateThreadResponse = await this.sendRequest(request);
     const thread = new ConversationThread(this, response.threadId);
 
-    const initialAssistantResponse = (
-      response.assistantResponse.content[0] as { text: string }
-    ).text;
+    const initialAssistantResponse = response.output;
     thread.conversation.push(`User: ${message}`);
     thread.conversation.push(`Assistant: ${initialAssistantResponse}`);
-
-    if (response.pendingToolCalls && response.pendingToolCalls.length > 0) {
-      // Instead of handling tool calls here, we set them as pending in the Thread
-      (thread as any).pendingToolCalls = response.pendingToolCalls;
-    }
 
     return thread;
   }
@@ -143,16 +98,6 @@ export class LLMClient {
 
     return await this.sendRequest(request);
   }
-
-  async executeTool(
-    toolCall: Anthropic.Messages.ToolUseBlockParam,
-  ): Promise<string> {
-    const tool = this.tools.find((t) => t.name === toolCall.name);
-    if (!tool) {
-      throw new Error(`Tool not found: ${toolCall.name}`);
-    }
-    return await tool.implementation(toolCall.input);
-  }
 }
 
 // Types (you can move these to a separate file if desired)
@@ -160,7 +105,7 @@ interface CreateThreadRequest {
   action: "create";
   system: string;
   message: string;
-  activeTools: Anthropic.Messages.Tool[];
+  activeTools: CoreTool[];
 }
 
 interface AppendThreadRequest {
@@ -172,17 +117,16 @@ interface AppendThreadRequest {
 
 interface CreateThreadResponse {
   threadId: string;
-  pendingToolCalls: Anthropic.Messages.ToolUseBlockParam[];
-  assistantResponse: Anthropic.Messages.MessageParam;
-  conversation: Anthropic.Messages.MessageParam[];
+  output: string;
+  assistantResponse: CoreMessage;
+  conversation: CoreMessage[];
 }
 
 interface AppendThreadResponse {
   threadId: string;
-  output?: string;
-  assistantResponse: Anthropic.Messages.MessageParam;
-  pendingToolCalls?: Anthropic.Messages.ToolUseBlockParam[];
-  conversation: Anthropic.Messages.MessageParam[];
+  assistantResponse: CoreMessage;
+  output: string;
+  conversation: CoreMessage[];
 }
 
 interface ToolResponse {

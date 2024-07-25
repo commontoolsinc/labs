@@ -1,158 +1,299 @@
-import {
-  ChatCompletionMessage,
-  ChatCompletionMessageParam
-} from "openai/resources/index.mjs";
-import { client, grabJson, messageReducer, model } from "./llm.js";
-import { recordThought, suggestions, updateThought } from "./model.js";
-import { Recipe } from "../data.js";
-import { codePrompt } from "./implement.js";
-import { describeTools, toolSpec } from "./tools.js";
+export function sketchReactVersion(userRequests: string[]) {
+  const system = `Generate a dead simple react application using typescript and JSX all in one file. Do not worry about the overall application structure, just generate a unified solution to the problem.
 
-type Conversation = ChatCompletionMessageParam[];
+  Include no styles on the components. When the user asks for a side effect or rendering output you cannot provide, use \`placeholder(description: string)\`. For a UI component that use \`<Placeholder description="" />\` for similar effect.
 
-export async function plan(userInput: string, steps: string[]) {
-  const logId = `plan[${userInput}]`;
-  console.group(logId);
+  Include brief clarifying comments for intended behaviour, data flow and possible future extension.`;
 
-  if (steps.length === 0) {
-    console.warn("No steps in plan");
-    return;
-  }
-
-  console.log(steps);
-
-  let messages: ChatCompletionMessageParam[] = [
-    { role: "system", content: codePrompt },
-    { role: "system", content: steps[0] },
-    { role: "user", content: steps[1] }
-  ];
-
-  await recordThought(messages[0]);
-  await recordThought(messages[1]);
-
-  let msgIdx = 1;
-
-  let running = true;
-  while (running) {
-    const response = await client.chat.completions.create({
-      messages,
-      model,
-      temperature: 0,
-      stream: true
-    });
-
-    let message = {} as ChatCompletionMessage;
-    const thoughtId = await recordThought(message);
-    let finishReason = null as string | null;
-    for await (const chunk of response) {
-      finishReason ||= chunk.choices[0].finish_reason;
-      message = messageReducer(message, chunk);
-      await updateThought(thoughtId, message);
-    }
-
-    const latest = message;
-    console.log("response", latest);
-    messages.push(latest);
-
-    if (msgIdx >= steps.length - 1) {
-      running = false;
-      break;
-    }
-
-    const nextStep: ChatCompletionMessageParam = {
-      role: "user",
-      content: steps[++msgIdx]
-    };
-    messages.push(nextStep);
-    await recordThought(nextStep);
-  }
-
-  suggest(userInput, messages);
-
-  console.groupEnd();
-  return messages;
+  return {
+    system,
+    prompt: `${userRequests.map((req) => `<user-request>${req}</user-request>`).join("\n")}`
+  };
 }
 
-export async function suggest(input: string, fullPlan: Conversation) {
-  const response = await client.chat.completions.create({
-    messages: [
-      ...fullPlan,
+export function transformToGraph(reactVersion: string) {
+  return {
+    system: documentation(
+      "Convert a simple application description to a reactive graph programming paradigm.",
+      ""
+    ),
+    prompt: reactVersion
+  };
+}
+
+export function fixGraph(code: string, spec: string, errors: string[]) {
+  return {
+    system: documentation("Fix the errors in the provided implementation.", ""),
+    prompt: `<spec>${spec}</spec>\n<code>${code}</code>\n<errors>${errors.map((e) => `<error>${e}</error>`).join("\n")}</errors>`
+  };
+}
+
+export function documentation(prefix: string, suffix: string) {
+  const system = `${prefix}
+
+  type Id = string
+  type PortName = string
+
+  type Bindings = {
+    inputs: [PortName], // named arguments for this node
+    outputs: { [target: Id]: PortName } // bindings for the output of this node
+  }
+
+  ---
+
+  addState(id: Id, explanation: string, initial: any, bindings: Bindings)
+
+  state nodes can only be mutated when the output of another node is bound to any input port and updated
+
+  ---
+
+  addTransformation(id: Id, explanation: string, code: string, bindings: Bindings)
+
+  transformation nodes are designed to format data before displaying it, persisting it or handing it to another process
+
+  their bindings are arguments and the function runs whenever one changes, producing a new output, they are always pure.
+
+  <examples>
+    <example>
+      addState(
+        "myValue",
+        "Example value for transformations",
+        0,
+        {
+          "inputs": [],
+          "outputs": {
+            "multiplyByTwo": "value"
+          }
+        }
+      )
+
+      addTransformation(
+        "multiplyByTwo",
+        "Double the value of a number.",
+        "function (value) {
+          return value * 2;
+        }",
+        {
+          "inputs": ["value"],
+          "outputs": {}
+        }
+      )
+    </example>
+
+    <example>
+    addTransformation(
+      "filterCheckedTodos",
+      "Filter todos to only show checked todos.",
+      "function (todos) {
+        return todos.filter(todo => todo.checked);
+      }",
       {
-        role: "user",
-        content: `Based on the original user request (${input}) and the plan to service it, suggest 3 similar or related tasks the user might like to explore next. This could include tweaks to the existing UI, reusing the data in another context or a mix of both. Be concise, return a JSON array of strings with no more than 7 words per item.`
+        "inputs": ["todos"],
+        "outputs": {
+          "todoListUi": "filteredTodos"
+        }
       }
-    ],
-    model,
-    temperature: 0
-  });
+    )
+    </example>
+  </examples>
 
-  recordThought(response.choices[0].message);
-  const suggestionsText = response.choices[0].message.content;
-  if (suggestionsText) {
-    const data = grabJson(suggestionsText);
-    suggestions.send(data);
-  }
+  ---
 
-  return response.choices[0].message;
-}
+  addUi(id: Id, explanation: string, template: string, bindings: Bindings)
 
-export function prepareSteps(userInput: string, recipe: Recipe) {
-  if (recipe.length === 0) {
-    return [
-      `You will create and modify software to solve a user's problems using a reactive graph computation model. Modules, a.k.a nodes, connect with each other, where the output of one or more nodes serves as the input to another. Available modules:
+  UI nodes show a view for a user to interact with, they can dispatch events by name which will be bound to by handlers.
 
-      ${describeTools(toolSpec, false)}
+  <examples>
+    <example>
+    addUi(
+      "imageUi",
+      "A simple image gallery showing images in a list.",
+      {
+        "tag": "ul",
+        "props": {
+          "className": "image"
+        },
+        "children": {
+          "type": "repeat",
+          "binding": "images",
+          "template": {
+            "tag": "li",
+            "props": {},
+            "children": [
+              {
+                "tag": "img",
+                "props": {
+                  "src": { "@type": 'binding', "name": 'src' },
+                },
+                "children": []
+              }
+            ],
+          }
+        }
+      },
+      {
+        "inputs": ["images"],
+        "outputs": { }
+      }
+    )
+    </example>
+    <example>
+    addUi(
+      "basicDataUi",
+      "A simple value displayed as text.",
+      {
+        "tag": "span",
+        "props": { "innerText": { "@type": "binding", "name": "text" } },
+        "children": [ ]
+      },
+      {
+        "inputs": ["text"],
+        "outputs": { }
+      }
+    )
+    </example>
+    <example>
+    addUi(
+      "todoUi",
+      "A todo list with checkboxes.",
+      {
+        "tag": "ul",
+        "props": {
+          "className": "todo"
+        },
+        "children": [
+          {
+            "@type": "repeat",
+            "name": "todos",
+            "template": {
+              "tag": "li",
+              "props": {},
+              "children": [
+                {
+                  "tag": "input",
+                  "props": {
+                    "type": "checkbox",
+                    "checked": { "@type": "binding", "name": "checked" }
+                  },
+                  "children": []
+                },
+                {
+                  "tag": "span",
+                  "props": {
+                    "className": "todo-label",
+                    "innerText": { "@type": "binding", "name": "label" }
+                  },
+                  "children": [ ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "inputs": ["todos"],
+        "outputs": {
+      }
+    )
+    </example>
+  </examples>
 
-      To declare a constant value, return it from a code node as a literal.
-      Declare event nodes and refer to them BY NAME from within UI template event bindings (i.e. "@click": "clickEvent").
+  ---
 
-      Plan your approach at a high-level dot-point level of detail and be extremely concise using technical terms.`,
-      `Service the minimal useful version of this request: <user-request>${userInput}</user-request>.
+  addEventListener(id: Id, explanation: string, event: string, code: string, bindings: Bindings)
 
-    Give each node an ID and describe its purpose without writing the full code. Each node can have several named inputs which can be mapped to the outputs of other node ID.
-    The output of all nodes must be used and all inputs must be mapped to valid outputs.
+  event listeners cannot access any other functions in the namespace, they must react directly to user input and mutate state. bind to an event from the UI and bind the output to a state node (or another function for further transformation)
 
-    Provide your plan as a list of tool actions you intend to take on the graph.
-    notalk;justgo
-    `,
-      `Reflect on the plan, does it make sense for a incredibly small immediately useful application? Can you implement it with these tools?
+  they will not be triggered when their input bindings change, only when their event is fired
 
-      ${describeTools(toolSpec, true)}
+  <examples>
 
-    Use pseudocode to sketch the technical approach. Write as concisely and accurately as possible without introducing assumptions or full specifying the details. Code nodes cannot mutate state, they are pure functions only. Do not attempt to model them as having side effects.
-    Ensure all node are created in a logical order, so that the dependencies always exist. Start with fetching data, then processing, filtering, mapping and rendering.
-    You must create a code node to declare constant values for code but NOT for shader uniforms. For static data you may inline constants into the code/shader nodes.
+  <example>
+  addUi({
+    "id": "generateRandom",
+    "explanation": "A button that generates a random number",
+    "template": {
+      "tag": "button",
+      "props": {
+        "@click": { "@type": "binding", "name": "clicked" }
+      },
+      "children": [ "Click me" ]
+    },
+    "bindings": {
+      "inputs": [],
+      "outputs": {}
+    }
+  })
 
-    Be creative in your examination of the tools, e.g. "show me myself" could be a shader using the webcam.
+  addEventListener({
+    "id": "onGenerateRandom",
+    "event": "clicked",
+    "code": "return Math.random()"
+  })
+  </example>
 
-    Review the plan and make sure the user will be happy with the request: <user-request>${userInput}</user-request>
-    notalk;justgo`
-    ];
-  } else {
-    return [
-      `Modify a reactive graph based application based on a user request.
-      Modules, acting as nodes, connect with each other, where the output of one or more nodes serves as the input to another.
+  <example>
+  addState({
+    "id": "counter",
+    "explanation": "A counter.",
+    "initial": 0,
+    "bindings": {
+      "inputs": [],
+      "outputs": {
+        "incrementButton": "counter"
+      }
+    }
+  })
 
-      Available modules:
+  addUi({
+    "id": "incrementButton",
+    "explanation": "A button that increments the counter",
+    "template": {
+      "tag": "button",
+      "props": {
+        "@click": { "@type": "binding", "name": "clicked" },
+        "innerText": { "@type": "binding", "name": "counter" }
+      },
+      "children": [
+        "Click me"
+      ]
+    },
+    "bindings": {
+      "inputs": ["counter"],
+      "outputs": {}
+    }
+  })
 
+  addEventListener({
+    "id": "onIncrement",
+    "event": "clicked",
+    "code": "function (counter) {
+      return counter + 1
+    },
+    "bindings": {
+      "inputs": ["counter"],
+      "outputs": {
+        "counter": "counter"
+      }
+    }
+  })
+  </example>
 
-    ${describeTools(toolSpec, true)}
+  </examples>
 
-    The current graph is:
+  ---
 
-    \`\`\`json
-    ${JSON.stringify(recipe, null, 2)}
-    \`\`\`
+  think methodically, step by step, avoid creating transformation nodes when event handlers can do the job.
 
-    <user-request>${userInput}</user-request>
+  add clear comments to each node indicating its purpose (do not repeat the information easily grokked from code)
 
-    Explain which nodes will be altered, added or removed. Do not repeat the entire graph.
-    Code nodes cannot mutate state, they are pure functions only.
-    Do not attempt to model them as having side effects.
-    notalk;justgo`,
-      `Reflect on the plan. The user has requested a specific change. Do not overcomplicate it or add superfluous features. Just make the change.
+  ---
 
-      Recall the request: <user-request>${userInput}</user-request>`
-    ];
-  }
+  ${suffix}
+
+  ---
+
+  Return two blocks, a description of the application in SpecLang (https://githubnext.com/projects/speclang/) format within a markdown block followed by the calls needed to construct the graph.`;
+
+  return system;
 }

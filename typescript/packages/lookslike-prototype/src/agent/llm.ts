@@ -68,8 +68,8 @@ export async function processUserInput(
     { role: "user", content: input }
   ];
 
-  await recordThought(messages[0]);
-  await recordThought(messages[1]);
+  await recordThought({ role: "system", content: system });
+  await recordThought({ role: "user", content: input });
 
   let running = true;
   while (running) {
@@ -88,7 +88,7 @@ export async function processUserInput(
     }
 
     const latest = message;
-    await recordThought(latest);
+    await recordThought({ role: "assistant", content: message.content! });
     messages.push(latest);
 
     const toolCalls = latest.tool_calls;
@@ -184,6 +184,43 @@ export function grabViewTemplate(txt: string) {
   return txt.match(/```vue\n([\s\S]+?)```/)?.[1];
 }
 
+function createTagRegex(tagName: string) {
+  // Escape special characters in the tag name
+  const escapedTagName = tagName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  // Create the regular expression
+  return new RegExp(
+    `<${escapedTagName}>([\\s\\S]*?)<\/${escapedTagName}>`,
+    "g"
+  );
+}
+
+export function grabTag(txt: string, tag: string = "plan") {
+  const regex = createTagRegex(tag);
+  const matches = [];
+  let match;
+
+  while ((match = regex.exec(txt)) !== null) {
+    // match[1] contains the content inside the capturing group
+    matches.push(match[1]);
+  }
+
+  return matches[0];
+}
+
+export function grabAllTags(txt: string, tag: string = "plan") {
+  const regex = createTagRegex(tag);
+  const matches = [];
+  let match;
+
+  while ((match = regex.exec(txt)) !== null) {
+    // match[1] contains the content inside the capturing group
+    matches.push(match[1]);
+  }
+
+  return matches;
+}
+
 export function grabJson(txt: string) {
   const json = txt.match(/```json\n([\s\S]+?)```/)?.[1];
   if (!json) {
@@ -191,6 +228,33 @@ export function grabJson(txt: string) {
     return {};
   }
   return JSON.parse(json);
+}
+
+export function grabJavascript(txt: string) {
+  const code = txt.match(/```javascript\n([\s\S]+?)```/)?.[1];
+  if (!code) {
+    console.error("No code found in text", txt);
+    return "";
+  }
+  return code;
+}
+
+export function grabMarkdown(txt: string) {
+  const markdown = txt.match(/```markdown\n([\s\S]+?)```/)?.[1];
+  if (!markdown) {
+    console.error("No markdown found in text", txt);
+    return "";
+  }
+  return markdown;
+}
+
+export function grabSpeclang(txt: string) {
+  const markdown = txt.match(/```speclang\n([\s\S]+?)```/)?.[1];
+  if (!markdown) {
+    console.error("No speclang found in text", txt);
+    return "";
+  }
+  return markdown;
 }
 
 export function extractResponse(data: any) {

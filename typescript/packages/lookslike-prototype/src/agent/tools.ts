@@ -6,12 +6,12 @@ export function describeTools(
 ) {
   return tools
     .map((tool) => {
-      const description = `- ${tool.function.name}: ${tool.function.description}`;
+      const description = `<module>${tool.function.name}: ${tool.function.description}</module>`;
       const properties = Object.entries(
         tool.function.parameters?.properties || {}
       )
         .map(([name, { type, description }]) => {
-          return `  - ${name} (${type}): ${description}`;
+          return `  - ${name} (${type}): ${description || ""}`;
         })
         .join("\n");
       if (!includeParameters) {
@@ -22,71 +22,77 @@ export function describeTools(
     .join("\n");
 }
 
-export const toolSpec: ChatCompletionTool[] = [
+export const planningToolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "addCodeNode",
+      name: "placeholder",
       description:
-        "Add a data transformation node to the graph written in javascript, write only the function body.",
+        "Add a node that can be replaced with a different node later. This is useful for planning out the structure of your graph before you have all the details.",
       parameters: {
         type: "object",
         properties: {
           id: { type: "string" },
-          code: { type: "string" }
+          docstring: { type: "string" }
         },
-        required: ["id", "code"]
+        required: ["id", "docstring"]
       }
     }
   },
   {
     type: "function",
     function: {
-      name: "addUiNode",
-      description: "Adds a UI node written using a hyperscript tree.",
+      name: "declareFunc",
+      description: "Create a stub function node to be implemented later.",
       parameters: {
         type: "object",
         properties: {
           id: { type: "string" },
-          uiTree: { type: "object", description: "The UI tree." }
+          docstring: { type: "string" }
         },
-        required: ["id", "uiTree"]
+        required: ["id", "docstring"]
       }
     }
   },
   {
     type: "function",
     function: {
-      name: "addEventNode",
+      name: "data",
       description:
-        "A node that will be bound to a user-input event from a UI node.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "addStorageNode",
-      description:
-        "A node that will persist data to the passed address, for retrieval later.",
+        "A node representing a  variable that can be changed and accessed by other nodes. For state, events, input etc.",
       parameters: {
         type: "object",
         properties: {
           id: { type: "string" },
-          address: { type: "string" }
-        }
+          data: { type: "object", description: "Default value" },
+          docstring: { type: "string" }
+        },
+        required: ["id", "data", "docstring"]
       }
     }
   },
   {
     type: "function",
     function: {
-      name: "addConnection",
+      name: "listen",
+      description:
+        "Add an event listener to the graph with a handler written in javascript, write only the function body. No comments.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          event: { type: "string" },
+          code: { type: "string" },
+          docstring: { type: "string" }
+        },
+        required: ["id", "event", "code", "docstring"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "connect",
       description: "Adds a connection between two existing nodes.",
       parameters: {
         type: "object",
@@ -96,10 +102,12 @@ export const toolSpec: ChatCompletionTool[] = [
             description: "Path of the OUTPUT node in the graph"
           },
           to: {
-            type: "array",
-            items: { type: "string" },
-            description:
-              "Path to the INPUT node + port to connect to, e.g. ['nodeId', 'portName']"
+            type: "string",
+            description: "Path to the INPUT node"
+          },
+          portName: {
+            type: "string",
+            description: "Name of the port to connect to"
           }
         }
       }
@@ -108,7 +116,183 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "deleteNode",
+      name: "disconnect",
+      description: "Removes a connection between two existing nodes.",
+      parameters: {
+        type: "object",
+        properties: {
+          from: {
+            type: "string",
+            description: "Path of the OUTPUT node in the graph"
+          },
+          to: {
+            type: "string",
+            description: "Path to the INPUT node"
+          },
+          portName: {
+            type: "string",
+            description: "Name of the port to connect to"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete",
+      description: "Deletes a node from the graph.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" }
+        }
+      }
+    }
+  }
+];
+
+export const toolSpec: ChatCompletionTool[] = [
+  {
+    type: "function",
+    function: {
+      name: "func",
+      description:
+        "Implement (or update) a data transformation function written in javascript, write only the function body. No comments.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          code: { type: "string" },
+          docstring: { type: "string" }
+        },
+        required: ["id", "code", "docstring"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "ui",
+      description:
+        "Adds (or updates) a UI node written using a hyperscript tree. Only use span, ul, button and h1 elements for now.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          uiTree: { type: "object", description: "The UI tree." },
+          docstring: { type: "string" }
+        },
+        required: ["id", "uiTree", "docstring"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "data",
+      description:
+        "Add (or update) a node representing a variable that can be changed and accessed by other nodes. For state, events, input etc.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          data: { type: "object", description: "Default value" },
+          docstring: { type: "string" }
+        },
+        required: ["id", "data", "docstring"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "listen",
+      description:
+        "Add an event listener to the graph with a handler written in javascript, write only the function body. No comments.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          event: { type: "string" },
+          code: { type: "string" },
+          docstring: { type: "string" }
+        },
+        required: ["id", "event", "code", "docstring"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "voxel3dScene",
+      description: `Render a simple pannable, zoomable, rotatable 3D scene using voxels in a flattened list format e.g. [{ "position": [1, 1, 1], "color": "#FFFFFF" }...]`,
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          dataSource: {
+            type: "string",
+            description: "Path of the source data in the graph"
+          },
+          docstring: { type: "string" }
+        },
+        required: ["id", "dataSource", "docstring"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "connect",
+      description: "Adds a connection between two existing nodes.",
+      parameters: {
+        type: "object",
+        properties: {
+          from: {
+            type: "string",
+            description: "Path of the OUTPUT node in the graph"
+          },
+          to: {
+            type: "string",
+            description: "Path to the INPUT node"
+          },
+          portName: {
+            type: "string",
+            description: "Name of the port to connect to"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "disconnect",
+      description: "Removes a connection between two existing nodes.",
+      parameters: {
+        type: "object",
+        properties: {
+          from: {
+            type: "string",
+            description: "Path of the OUTPUT node in the graph"
+          },
+          to: {
+            type: "string",
+            description: "Path to the INPUT node"
+          },
+          portName: {
+            type: "string",
+            description: "Name of the port to connect to"
+          }
+        }
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete",
       description: "Deletes a node from the graph.",
       parameters: {
         type: "object",
@@ -121,81 +305,17 @@ export const toolSpec: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "addClockNode",
-      description:
-        "A node that emit an incrementing value every second, starting from 0.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "addFetchNode",
-      description: "Fetch node to retrieve (GET) data from the web.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          url: { type: "string" }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "addGlslShaderNode",
+      name: "glslShader",
       description:
         "Shader node in ShaderToy format. iTime, iResolution, iMouse and iChannel0 (the user's webcam). Do not re-define them.",
       parameters: {
         type: "object",
         properties: {
           id: { type: "string" },
-          shaderToyCode: { type: "string" }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "addLanguageModelNode",
-      description:
-        "LLM node to the graph, responds in text format. Prompt must be calculated using a code node.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          promptSource: {
-            type: "string",
-            description:
-              "Name of the node who's output should be used as the prompt"
-          }
-        }
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "addImageGenerationNode",
-      description:
-        "Generate an image from a prompt/description. The output is the URL.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          promptSource: {
-            type: "string",
-            description:
-              "Name of the node who's output should be used as the prompt"
-          }
-        }
+          shaderToyCode: { type: "string" },
+          docstring: { type: "string" }
+        },
+        required: ["id", "shaderToyCode", "docstring"]
       }
     }
   }

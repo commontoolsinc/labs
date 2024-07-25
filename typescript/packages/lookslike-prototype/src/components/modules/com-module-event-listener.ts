@@ -12,8 +12,8 @@ import { formatDataForConsole } from "../../text.js";
 
 const styles = css``;
 
-@customElement("com-module-code")
-export class ComModuleCode extends LitElement {
+@customElement("com-module-event-listener")
+export class ComModuleEventListener extends LitElement {
   static override styles = [styles];
 
   @property() node!: RuntimeNode;
@@ -31,14 +31,10 @@ export class ComModuleCode extends LitElement {
       return html`<pre>loading...</pre>`;
     }
 
-    // HACK: force SES by default
-    this.node.definition.evalMode =
-      this.node.definition.evalMode || SES_SANDBOX;
-
     const codeChanged = (ev: CustomEvent) => {
       if (!this.node) return;
 
-      this.node.definition.body = ev.detail.code;
+      this.node.definition.body.code = ev.detail.code;
       this.node.update();
     };
 
@@ -50,8 +46,9 @@ export class ComModuleCode extends LitElement {
     };
 
     return html`
+      <code>${this.node.definition.body.event}</code>
       <com-code
-        .code=${this.node.definition.body}
+        .code=${this.node.definition.body.code}
         @updated=${codeChanged}
       ></com-code>
       <com-toggle>

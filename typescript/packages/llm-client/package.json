@@ -28,8 +28,8 @@
     "./lib/index.js"
   ],
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.24.0",
-    "@cfworker/json-schema": "^1.12.8"
+    "@cfworker/json-schema": "^1.12.8",
+    "ai": "^3.2.29"
   },
   "devDependencies": {
     "tslib": "^2.6.2",

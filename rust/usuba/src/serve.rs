@@ -19,8 +19,8 @@ use crate::{
     error::UsubaError,
     openapi::OpenApiDocs,
     routes::{
-        build_module, bundle_javascript, eval_recipe, retrieve_module, ui_file, ui_index,
-        upstream_index, verify,
+        build_module, bundle_javascript, eval_recipe, local_inference_proxy, retrieve_module,
+        ui_file, ui_index, upstream_index, verify,
     },
     PersistedHashStorage,
 };
@@ -51,6 +51,7 @@ pub async fn serve(listener: TcpListener, upstream: Option<Uri>) -> Result<(), U
         .route("/api/v0/module/:id", get(retrieve_module))
         .route("/api/v0/recipe/eval", post(eval_recipe))
         .route("/api/v0/verify", get(verify))
+        .route("/api/v0/llm", post(local_inference_proxy))
         .route("/", get(ui_index))
         .route("/*file", get(ui_file))
         .with_state(UsubaState {

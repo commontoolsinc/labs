@@ -15,6 +15,7 @@ export * as ComThoughtLog from "./components/com-thought-log.js";
 export * as ComShader from "./components/com-shader.js";
 export * as ComMarkdown from "./components/com-markdown.js";
 export * as ComDebug from "./components/com-debug.js";
+export * as ComScene from "./components/com-scene.js";
 export * as ComModuleCode from "./components/modules/com-module-code.js";
 export * as ComModuleUi from "./components/modules/com-module-ui.js";
 export * as ComModuleFetch from "./components/modules/com-module-fetch.js";
@@ -23,6 +24,15 @@ export * as ComModuleImage from "./components/modules/com-module-image.js";
 export * as ComModuleShader from "./components/modules/com-module-shader.js";
 export * as ComModuleEvent from "./components/modules/com-module-event.js";
 export * as ComModuleStorage from "./components/modules/com-module-storage.js";
+export * as ComModuleScene from "./components/modules/com-module-scene.js";
+export * as ComModuleData from "./components/modules/com-module-data.js";
+export * as ComModuleEventListener from "./components/modules/com-module-event-listener.js";
+export * as ComCursor from "./components/com-cursor.js";
+export * as ComLoader from "./components/com-loader.js";
+export * as ComTypingPreview from "./components/com-typing-preview.js";
+export * as ComTypeout from "./components/com-typeout.js";
+export * as ComTabs from "./components/com-tabs.js";
+export * as ComRecipe from "./components/com-recipe.js";
 
 export * as ComApp from "./components/com-app.js";
 

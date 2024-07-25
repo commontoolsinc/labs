@@ -11,5 +11,14 @@ export default defineConfig({
   },
   optimizeDeps: {
     noDiscovery: true
-  }
+  },
+  server: {
+    proxy: {
+      "/api/llm": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/llm/, ""),
+      },
+    },
+  },
 });
