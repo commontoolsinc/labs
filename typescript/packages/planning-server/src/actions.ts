@@ -3,7 +3,7 @@ import {
   ConversationThread,
   InMemoryConversationThreadManager,
 } from "./conversation.ts";
-import { ask } from "./anthropic.ts";
+import { ask } from "./llm.ts";
 
 const cache: Record<string, any> = {};
 const threadManager = new InMemoryConversationThreadManager();

@@ -20,6 +20,7 @@ fn main() {
 #[component]
 fn App() -> impl IntoView {
     let gems = create_rw_signal(HashMap::<String, DataGem>::new());
+    let search = create_rw_signal(String::new());
     let (selection, set_selection) = create_signal(Vec::<String>::new());
     let (imagined_apps, set_imagined_apps) = create_signal(String::new());
 
@@ -55,7 +56,7 @@ fn App() -> impl IntoView {
                 .filter(|(id, _)| selection.get().contains(id))
                 .map(|(_, gem)| gem.clone())
                 .collect();
-            let data = llm::combine_data(selectedData, "".to_string()).await;
+            let data = llm::combine_data(selectedData, search.get()).await;
             match data {
                 Ok(data) => {
                     log!("Response: {:?}", data);
@@ -98,8 +99,9 @@ fn App() -> impl IntoView {
                 <div class="gem-list">
                     {move || selection.get().iter().map(|id| view! { <MiniDataGemPreview gem=gems.get().get(id).unwrap().clone() /> }).collect_view()}
                 </div>
+                <input type="text" placeholder="Search" on:input=move |e| search.set(event_target_value(&e)) prop:value=search></input>
                 <button on:click=move |_| combine_data.dispatch(gems)>"Imagine"</button>
-                <pre>{move || imagined_apps.get()}</pre>
+                <pre class="app-ideas">{move || imagined_apps.get()}</pre>
             </div>
         </div>
     }

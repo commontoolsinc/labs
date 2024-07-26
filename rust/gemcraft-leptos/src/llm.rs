@@ -124,12 +124,12 @@ pub async fn combine_data(gems: Vec<DataGem>, description: String) -> Result<Llm
     let mut opts = RequestInit::new();
     opts.method("POST");
 
-    let msg = format!("Imagine 4 different micro-apps that could operate on the following data gems: \n\n{}\n\nContext:\n\n{}\n\nRemember, we are creating micro-apps that literally operate ON the provided data as their input.", gems.iter().map(|g| format_gem_with_classification(g.clone())).collect::<Vec<String>>().join("\n\n"), description);
+    let msg = format!("Imagine 4 different micro-apps that could operate on the following data gems: \n\n{}\n\nRemember, we are creating micro-apps that literally operate ON the provided data as their input. <requested-app-description>{}</requested-app-description>", gems.iter().map(|g| format_gem_with_classification(g.clone())).collect::<Vec<String>>().join("\n\n"), description);
 
     // set body as JSON string
     let body = CreateThreadRequest {
         action: String::from("create"),
-        system: String::from("Examine the provided data gems and imagine what kind of user interface / mini-app a user would like to use to explore, manipulate and interact with the data contained within. Describe each micro-app with a small spec listing what a user can do with a loose idea of the visual components and layout. Include an emoji as the icon."),
+        system: String::from("Examine the provided data gems and imagine what kind of user interface / mini-app a user would like to use to explore, manipulate and interact with the data contained within. You must utilize all provided data gems and consider how to use them TOGETHER in an app. The user selected each one for a reason. Describe each micro-app with a small spec listing what a user can do with a loose idea of the visual components and layout. Include an emoji as the icon."),
         message: msg,
     };
     let body = serde_json::to_string(&body).unwrap();

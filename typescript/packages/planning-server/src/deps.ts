@@ -7,5 +7,22 @@ export { oakCors } from "https://deno.land/x/cors/mod.ts";
 
 export * as ai from "npm:ai";
 export { anthropic } from "npm:@ai-sdk/anthropic";
+export { google } from "npm:@ai-sdk/google";
+import { createVertex } from "npm:@ai-sdk/google-vertex";
 
 await config({ export: true });
+
+const authOptions = {
+  credentials: {
+    client_email: Deno.env.get("GOOGLE_VERTEX_CLIENT_EMAIL")!,
+    private_key: Deno.env
+      .get("GOOGLE_VERTEX_PRIVATE_KEY")!
+      .replace(/\\n/g, "\n"),
+  },
+};
+
+export const vertex = createVertex({
+  project: Deno.env.get("GOOGLE_VERTEX_PROJECT")!,
+  location: Deno.env.get("GOOGLE_VERTEX_LOCATION")!,
+  googleAuthOptions: authOptions,
+});

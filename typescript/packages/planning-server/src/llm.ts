@@ -1,4 +1,4 @@
-import { anthropic, ai } from "./deps.ts";
+import { anthropic, google, ai, vertex } from "./deps.ts";
 import { CoreMessage } from "npm:ai";
 import { CoreTool } from "npm:ai";
 const { generateText, streamText } = ai;
@@ -6,6 +6,7 @@ const { generateText, streamText } = ai;
 export const OPUS = "claude-3-5-opus-20240307";
 export const HAIKU = "claude-3-haiku-20240307";
 export const SONNET = "claude-3-5-sonnet-20240620";
+export const LLAMA_3_1_405B = "meta/llama3-405b-instruct-maas";
 const model = anthropic(SONNET);
 
 type Model = typeof model;
@@ -30,7 +31,7 @@ export async function single(text: string, model: Model) {
 export async function ask(
   initialConversation: CoreMessage[] = [],
   systemPrompt: string = "",
-  activeTools: CoreTool[],
+  activeTools: CoreTool[]
 ) {
   const conversation: CoreMessage[] = [...initialConversation];
 
