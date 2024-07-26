@@ -1,0 +1,109 @@
+use leptos::*;
+use leptos::html::*;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MicroAppIdea {
+    title: String,
+    spec: String,
+    svg: String,
+}
+
+pub fn parse_micro_app_ideas(input: &str) -> Vec<MicroAppIdea> {
+    let mut ideas = Vec::new();
+    let parts: Vec<&str> = input.split("<micro-app-idea>").skip(1).collect();
+
+    for part in parts {
+        if let Some(end_idx) = part.find("</micro-app-idea>") {
+            let content = &part[..end_idx];
+            let mut lines = content.lines();
+
+            let title = lines.next().unwrap_or("").trim().to_string();
+            let mut spec = String::new();
+            let mut svg = String::new();
+            let mut in_svg = false;
+
+            for line in lines {
+                if line.trim().starts_with("<svg") {
+                    in_svg = true;
+                }
+                if in_svg {
+                    svg.push_str(line);
+                    svg.push('\n');
+                } else {
+                    spec.push_str(line);
+                    spec.push('\n');
+                }
+                if line.trim().starts_with("</svg>") {
+                    in_svg = false;
+                }
+            }
+
+            ideas.push(MicroAppIdea {
+                title,
+                spec: spec.trim().to_string(),
+                svg: svg.trim().to_string(),
+            });
+        }
+    }
+
+    ideas
+}
+
+#[component]
+pub fn MicroAppGrid(input: ReadSignal<String>) -> impl IntoView {
+    let ideas = create_memo(move |_| parse_micro_app_ideas(&input.get()));
+
+    view! {
+        <>
+            <style>
+                {r#"
+                .micro-app-grid {
+                    display: grid;
+                    grid-template-columns: repeat(2, 1fr);
+                    gap: 1rem;
+                }
+                .micro-app-item {
+                    border: 1px solid #ccc;
+                    padding: 1rem;
+                    border-radius: 0.5rem;
+                }
+                .micro-app-title {
+                    font-size: 1.25rem;
+                    font-weight: bold;
+                    margin-bottom: 0.5rem;
+                }
+                .micro-app-spec {
+                    margin-top: 0.5rem;
+                }
+                .micro-app-spec-title {
+                    font-weight: 600;
+                }
+                .micro-app-spec-content {
+                    white-space: pre-wrap;
+                }
+                .micro-app-svg {
+                    margin-top: 1rem;
+                }
+                "#}
+            </style>
+            <div class="micro-app-grid">
+                <For
+                    each=move || ideas.get()
+                    key=|idea| idea.title.clone()
+                    children=move |idea| {
+                        view! {
+                            <div class="micro-app-item">
+                                <h3 class="micro-app-title">{&idea.title}</h3>
+                                <div class="micro-app-spec">
+                                    <h4 class="micro-app-spec-title">Spec:</h4>
+                                    <pre class="micro-app-spec-content">{&idea.spec}</pre>
+                                </div>
+                                <div class="micro-app-svg" inner_html=&idea.svg></div>
+                            </div>
+                        }
+                    }
+                />
+            </div>
+        </>
+    }
+}

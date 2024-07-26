@@ -2,6 +2,7 @@ mod data;
 mod extract;
 mod gem;
 mod llm;
+mod micro_app;
 
 use leptos::*;
 use logging::log;
@@ -10,6 +11,7 @@ use uuid::Uuid;
 
 use data::{ClassificationData, DataGem};
 use gem::{DataGemEditor, MiniDataGemPreview};
+use micro_app::MicroAppGrid;
 
 fn main() {
     console_error_panic_hook::set_once();
@@ -101,7 +103,7 @@ fn App() -> impl IntoView {
                 </div>
                 <input type="text" placeholder="Search" on:input=move |e| search.set(event_target_value(&e)) prop:value=search></input>
                 <button on:click=move |_| combine_data.dispatch(gems)>"Imagine"</button>
-                <pre class="app-ideas">{move || imagined_apps.get()}</pre>
+                <MicroAppGrid input={imagined_apps}></MicroAppGrid>
             </div>
         </div>
     }
