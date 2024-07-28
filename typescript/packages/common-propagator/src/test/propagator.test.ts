@@ -169,4 +169,31 @@ describe("lift()", () => {
       "calls neighbors once per upstream output of the diamond",
     );
   });
+
+  it("solves the diamond problem for inputs that are transformed multiple times", () => {
+    const add2 = lift((a: number, b: number) => a + b);
+
+    const a = cell(state({ value: 1 }), "lift.a");
+    const b = cell(state({ value: 1 }), "lift.b");
+    const c = cell(state({ value: 0 }), "lift.c");
+    const d = cell(state({ value: 0 }), "lift.c");
+
+    add2(a, b, c);
+    add2(a, c, d);
+    assertEqual(d.get().value, 3);
+
+    let calls = 0;
+    d.sink((_value) => {
+      calls++;
+    });
+
+    b.send(b.get().next(2));
+    assertEqual(d.get().value, 4);
+
+    assertEqual(
+      calls,
+      2,
+      "calls neighbors once per upstream output of the diamond",
+    );
+  });
 });
