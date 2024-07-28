@@ -160,7 +160,7 @@ describe("lift()", () => {
       calls++;
     });
 
-    b.send(state({ value: 2, time: 1 }));
+    b.send(b.get().next(2));
     assertEqual(out.get().value, 5);
 
     assertEqual(
