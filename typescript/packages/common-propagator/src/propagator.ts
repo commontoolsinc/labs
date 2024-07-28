@@ -1,10 +1,12 @@
 import { Cancel, Cancellable, useCancelGroup } from "./cancel.js";
+import debug from "./debug.js";
 import * as logger from "./logger.js";
 import { Lens } from "./lens.js";
 import cid from "./cid.js";
 import { merge } from "./mergeable.js";
-import { state, isStale, State } from "./stateful.js";
-
+import scheduler from "./scheduler.js";
+import { AnyTask, task } from "./task.js";
+import { Causes, shouldUpdate, State } from "./state.js";
 /**
  * A cell is a reactive value that can be updated and subscribed to.
  */
@@ -15,19 +17,21 @@ export class Cell<T> {
 
   #id = cid();
   #name = "";
-  #neighbors = new Set<(value: T) => void>();
+  #neighbors = new Set<AnyTask>();
   #value: T;
 
   constructor(value: T, name = "") {
     this.#name = name;
     this.#value = value;
-    logger.debug({
-      topic: "cell",
-      msg: "Cell created",
-      id: this.id,
-      name: this.name,
-      value: this.#value,
-    });
+    if (debug()) {
+      logger.debug({
+        topic: "cell",
+        msg: "Cell created",
+        id: this.id,
+        name: this.name,
+        value: this.#value,
+      });
+    }
   }
 
   get id() {
@@ -43,68 +47,67 @@ export class Cell<T> {
   }
 
   send(value: T) {
-    logger.debug({
-      topic: "cell",
-      msg: "Sent value",
-      id: this.id,
-      value,
-    });
-
+    if (debug()) {
+      logger.debug({
+        topic: "cell",
+        msg: "Sent value",
+        id: this.id,
+        value,
+      });
+    }
     const next = merge(this.#value, value);
 
     // We only advance clock if value changes state
     if (this.#value === next) {
-      logger.debug({
-        topic: "cell",
-        msg: "Value unchanged. Ignoring.",
-        id: this.id,
-        value: next,
-      });
+      if (debug()) {
+        logger.debug({
+          topic: "cell",
+          msg: "Value unchanged. Ignoring.",
+          id: this.id,
+          value: next,
+        });
+      }
       return;
     }
 
-    const prev = this.#value;
+    if (debug()) {
+      logger.debug({
+        topic: "cell",
+        msg: "Updating value",
+        id: this.id,
+        prev: this.#value,
+        value: next,
+      });
+    }
     this.#value = next;
 
-    logger.debug({
-      topic: "cell",
-      msg: "Value updated",
-      id: this.id,
-      prev,
-      value: next,
-    });
-
     // Notify neighbors
-    for (const neighbor of this.#neighbors) {
-      neighbor(next);
-    }
-
-    logger.debug({
-      topic: "cell",
-      msg: "Notified neighbors",
-      id: this.id,
-      neighbors: this.#neighbors.size,
-    });
+    scheduler.queue(...this.#neighbors);
   }
 
   /** Disconnect all neighbors */
-  disconnect() {
-    const size = this.#neighbors.size;
+  disconnectAll() {
+    if (debug()) {
+      logger.debug({
+        topic: "cell",
+        msg: "Disconnect all neighbors",
+        id: this.id,
+        neighbors: this.#neighbors.size,
+      });
+    }
     this.#neighbors.clear();
-    logger.debug({
-      topic: "cell",
-      msg: "Disconnected all neighbors",
-      id: this.id,
-      neighbors: size,
-    });
+  }
+
+  connect(task: AnyTask) {
+    this.#neighbors.add(task);
+    scheduler.queue(task);
+    return () => {
+      this.#neighbors.delete(task);
+    };
   }
 
   sink(callback: (value: T) => void) {
-    callback(this.#value);
-    this.#neighbors.add(callback);
-    return () => {
-      this.#neighbors.delete(callback);
-    };
+    return this.connect(task(() => callback(this.get())));
   }
 
   key<K extends keyof T>(valueKey: K) {
@@ -164,6 +167,9 @@ export const key = <T, K extends keyof T>(
     get: (big) => big[key],
     update: (big, small) => ({ ...big, [key]: small }),
   });
+
+const getCellStateValue = <T>(stateCell: StateCell<T>): T =>
+  stateCell.get().value;
 
 export function lift<A, B>(
   fn: (a: A) => B,
@@ -244,45 +250,48 @@ export function lift(fn: (...args: unknown[]) => unknown) {
 
     const output = cells.pop()!;
 
+    const recompute = () => fn(...cells.map(getCellStateValue));
+
     // Create a map of cell IDs to causes.
     // We use this as a vector clock when updating.
     // All cells are initialized to t=-1 since we will have never seen
     // an update from any of the cells. This will get immediately replaced
     // by the first immediate update we get from sink.
-    const mergedCauses: Record<string, number> = {};
-    cells.forEach((cell) => {
-      const { id, time } = cell.get();
-      mergedCauses[id] = time;
-      Object.assign(mergedCauses, cell.get().causes);
-    });
+    let mergedCauses: Causes = Object.assign(
+      {},
+      ...cells.map((cell) => cell.get().causes),
+    );
 
-    let time = output.get().time;
+    output.send(output.get().next(recompute(), mergedCauses));
 
     for (const cell of cells) {
-      const cancel = cell.sink((incoming) => {
-        if (isStale(mergedCauses, incoming.causes)) {
-          return;
-        }
+      const cancel = cell.connect(
+        task(() => {
+          const currentState = output.get();
 
-        // Update our causal clock
-        Object.assign(mergedCauses, incoming.causes);
+          const nextPartialState = cell.get();
+          if (!shouldUpdate(mergedCauses, nextPartialState.causes)) {
+            return;
+          }
 
-        // Get the most recent time from clock and use that as our state time.
-        time = Math.max(time, ...Object.values(mergedCauses));
+          // Update our causal clock
+          Object.assign(mergedCauses, nextPartialState.causes);
 
-        // Recalculate the output value
-        const next = fn(...cells.map((cell) => cell.get().value));
+          // Recalculate the output value
+          const nextValue = recompute();
 
-        logger.debug({
-          topic: "lift",
-          msg: "updated",
-          value: next,
-          time: time,
-          causes: mergedCauses,
-        });
+          if (debug()) {
+            logger.debug({
+              topic: "lift",
+              msg: "updated",
+              value: nextValue,
+              causes: mergedCauses,
+            });
+          }
 
-        output.send(state(next, time, mergedCauses));
-      });
+          output.send(currentState.next(nextValue, mergedCauses));
+        }),
+      );
       addCancel(cancel);
     }
 

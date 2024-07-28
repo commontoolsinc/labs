@@ -2,11 +2,8 @@ import {
   equal as assertEqual,
   deepEqual as assertDeepEqual,
 } from "node:assert/strict";
-import { state } from "../stateful.js";
+import { state } from "../state.js";
 import { cell, lens, lift } from "../propagator.js";
-import { setDebug } from "../logger.js";
-
-setDebug(true);
 
 describe("cell()", () => {
   it("synchronously sets the value", () => {
@@ -96,9 +93,9 @@ describe("lift()", () => {
   it("lifts a function into a function that reads from and writes to cells", () => {
     const addCells = lift((a: number, b: number) => a + b);
 
-    const a = cell(state(1), "lift.a");
-    const b = cell(state(2), "lift.b");
-    const out = cell(state(3), "lift.out");
+    const a = cell(state({ value: 1 }), "lift.a");
+    const b = cell(state({ value: 2 }), "lift.b");
+    const out = cell(state({ value: 0 }), "lift.out");
 
     const cancel = addCells(a, b, out);
 
@@ -110,9 +107,9 @@ describe("lift()", () => {
   it("updates the out cell whenever an input cell updates", () => {
     const addCells = lift((a: number, b: number) => a + b);
 
-    const a = cell(state(1), "lift.a");
-    const b = cell(state(1), "lift.b");
-    const out = cell(state(0), "lift.out");
+    const a = cell(state({ value: 1 }), "lift.a");
+    const b = cell(state({ value: 1 }), "lift.b");
+    const out = cell(state({ value: 0 }), "lift.out");
 
     addCells(a, b, out);
     assertEqual(out.get().value, 2);
@@ -127,19 +124,18 @@ describe("lift()", () => {
   it("solves the diamond problem", () => {
     const addCells = lift((a: number, b: number) => a + b);
 
-    const a = cell(state(1), "lift.a");
-    const out = cell(state(0), "lift.out");
+    const a = cell(state({ value: 1 }), "lift.a");
+    const out = cell(state({ value: 0 }), "lift.out");
 
     addCells(a, a, out);
     assertEqual(out.get().value, 2, "the initial state is correct");
 
     let calls = 0;
-    out.sink((value) => {
-      console.log("out", value);
+    out.sink(() => {
       calls++;
     });
 
-    a.send(state(2, 1));
+    a.send(a.get().next(2));
     assertEqual(out.get().value, 4, "the updated state is correct");
 
     assertEqual(
@@ -152,9 +148,9 @@ describe("lift()", () => {
   it("solves the diamond problem (2)", () => {
     const add3 = lift((a: number, b: number, c: number) => a + b + c);
 
-    const a = cell(state(1), "lift.a");
-    const b = cell(state(1), "lift.b");
-    const out = cell(state(0), "lift.out");
+    const a = cell(state({ value: 1 }), "lift.a");
+    const b = cell(state({ value: 1 }), "lift.b");
+    const out = cell(state({ value: 0 }), "lift.out");
 
     add3(a, b, b, out);
     assertEqual(out.get().value, 3);
@@ -164,7 +160,7 @@ describe("lift()", () => {
       calls++;
     });
 
-    b.send(state(2, 1));
+    b.send(state({ value: 2, time: 1 }));
     assertEqual(out.get().value, 5);
 
     assertEqual(
