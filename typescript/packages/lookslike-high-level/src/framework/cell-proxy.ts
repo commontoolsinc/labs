@@ -3,9 +3,9 @@ import {
   CellProxyMethods,
   Value,
   NodeProxy,
-  getCellForRecipe,
+  isCellMarker,
 } from "./types.js";
-import { setValueAtPath, getValueAtPath, hasValueAtPath } from "./utils.js";
+import { setValueAtPath, hasValueAtPath } from "./utils.js";
 
 // A cell factory that creates a future cell with an optional default value.
 //
@@ -41,23 +41,24 @@ export function cell<T>(defaultValue?: Value<T>): CellProxy<T> {
           setValueAtPath(store, ["defaultValue", ...path], newValue);
       },
       connect: (node: NodeProxy) => store.nodes.add(node),
-      [getCellForRecipe]: () => ({
+      export: () => ({
+        cell: top,
         path,
-        value: getValueAtPath(store, ["value", ...path]),
-        defaultValue: getValueAtPath(store, ["defaultValue", ...path]),
-        nodes: store.nodes,
+        ...store,
       }),
+      [isCellMarker]: true,
     };
 
-    const proxy = new Proxy(target || methods, {
+    const proxy = new Proxy(target || {}, {
       get(_, prop) {
-        if (prop in methods) {
+        if (typeof prop === "symbol") {
+          return methods[prop as keyof CellProxyMethods<any>];
+        } else if (prop in methods) {
           return createNestedProxy(
             [...path, prop],
             methods[prop as keyof CellProxyMethods<any>]
           );
-        }
-        return createNestedProxy([...path, prop]);
+        } else return createNestedProxy([...path, prop]);
       },
       set(_, prop, value) {
         methods.set({ [prop]: value });
@@ -68,5 +69,6 @@ export function cell<T>(defaultValue?: Value<T>): CellProxy<T> {
     return proxy;
   }
 
-  return createNestedProxy([]) as CellProxy<T>;
+  const top = createNestedProxy([]) as CellProxy<T>;
+  return top;
 }

@@ -19,16 +19,18 @@ export type CellProxyMethods<T> = {
   set(value: Value<T>): void;
   setDefault(value: Value<T>): void;
   connect(node: NodeProxy): void;
-  [getCellForRecipe](): {
+  export(): {
+    cell: CellProxy<any>;
     path: PropertyKey[];
     value?: Value<T>;
     defaultValue?: Value<T>;
     nodes: Set<NodeProxy>;
   };
+  [isCellMarker]: true;
 };
 
 export function isCell(value: any): value is CellProxy<any> {
-  return value && typeof value[getCellForRecipe] === "function";
+  return value && typeof value[isCellMarker] === "boolean";
 }
 
 export type NodeProxy = {
@@ -39,6 +41,9 @@ export type NodeProxy = {
 
 export type NodeFactory<T, R> = ((inputs: Value<T>) => Value<R>) &
   (Module | Recipe);
+
+export type RecipeFactory<T, R> = ((inputs: Value<T>) => Value<R>) & Recipe;
+export type ModuleFactory<T, R> = ((inputs: Value<T>) => Value<R>) & Module;
 
 export type JSONValue =
   | string
@@ -84,4 +89,4 @@ export function isRecipe(value: any): value is Recipe {
   return !!(value && value.schema && value.nodes && Array.isArray(value.nodes));
 }
 
-export const getCellForRecipe = Symbol("getCellForRecipe");
+export const isCellMarker = Symbol("isCell");

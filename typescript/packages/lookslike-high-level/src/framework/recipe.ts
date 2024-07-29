@@ -1,13 +1,12 @@
 import {
   Recipe,
-  NodeFactory,
+  RecipeFactory,
   NodeProxy,
   Value,
   CellProxy,
   isCell,
   Node,
   Module,
-  getCellForRecipe,
   Reference,
 } from "./types.js";
 import { cell } from "./cell-proxy.js";
@@ -28,30 +27,27 @@ import {
 export function recipe<T>(
   description: string,
   fn: (input: Value<T>) => any
-): NodeFactory<T, ReturnType<typeof fn>>;
+): RecipeFactory<T, ReturnType<typeof fn>>;
 export function recipe<T, R>(
   description: string,
   fn: (input: Value<T>) => Value<R>
-): NodeFactory<T, R> {
+): RecipeFactory<T, R> {
   // The recipe graph is created by calling `fn` which populates for `inputs`
   // and `outputs` with Value<> (which containts CellProxy<>) and/or default
   // values.
   const state = cell<T & R>();
-  let outputs: CellProxy<R> = fn(state) as CellProxy<R>;
-  if (!isCell(outputs)) outputs = cell<R>(outputs);
+  const outputs = fn(state);
 
   // Next we need to traverse the inputs and outputs serialize the graph.
 
   // First, assign the outputs to the state cell.
   // TOOD: We assume no default values for top-level output for now.
-  const outputValue = outputs[getCellForRecipe]().value;
-  const stateValue = state[getCellForRecipe]().value ?? {};
-  if (typeof outputValue === "object" && typeof stateValue === "object")
+  const stateValue = state.export().value ?? {};
+  if (typeof outputs === "object" && typeof stateValue === "object")
     state.set({
       ...stateValue,
-      ...outputValue,
+      ...outputs,
     } as Value<T & R>);
-  outputs[getCellForRecipe]().nodes.forEach((node) => state.connect(node));
 
   // Then traverse the value, collect all mentioned nodes and cells
   const cells = new Set<CellProxy<any>>();
@@ -61,14 +57,14 @@ export function recipe<T, R>(
     traverseValue(value, (value) => {
       if (isCell(value)) {
         cells.add(value);
-        value[getCellForRecipe]().nodes.forEach((node) => {
+        value.export().nodes.forEach((node) => {
           if (!nodes.has(node)) {
             nodes.add(node);
             collectCellsAndNodes(node.inputs);
             collectCellsAndNodes(node.outputs);
           }
         });
-        collectCellsAndNodes(value[getCellForRecipe]().value);
+        collectCellsAndNodes(value.export().value);
       }
     });
   collectCellsAndNodes(state);
@@ -77,25 +73,28 @@ export function recipe<T, R>(
   // incremental counters, since we don't have access to the original variable
   // names. Later we might do something more clever by analyzing the code (we'll
   // want that anyway for extracting schemas from TypeScript).
-  const paths = new Map<CellProxy<any>, PropertyKey[]>();
+  const paths = new Map<CellProxy<any>, PropertyKey[]>([[state, []]]);
   let count = 0;
   cells.forEach((cell) => {
-    if (cell === state) paths.set(cell, []);
-    else paths.set(cell, [`__#${count++}`]);
+    if (paths.has(cell)) return;
+    const top = cell.export().cell;
+    if (!paths.has(top)) paths.set(top, [`__#${count++}`]);
+    paths.set(cell, [...paths.get(top)!, ...cell.export().path]);
   });
 
   // Now serialize the defaults and initial values, copying them from other
   // cells into the primary cell.
-  const { value, defaultValue } = state[getCellForRecipe]();
+  const { value, defaultValue } = state.export();
   const initial = toJSONWithReferences(value, paths);
   const defaults = toJSONWithReferences(defaultValue, paths);
 
   cells.forEach((cell) => {
     if (cell === state) return;
-    const path = [...paths.get(cell)!];
-    const { value, defaultValue } = cell[getCellForRecipe]();
-    if (value) setValueAtPath(initial, path, value);
-    if (defaultValue) setValueAtPath(defaults, path, defaultValue);
+    const { path, value, defaultValue } = cell.export();
+    if (path.length) return; // Only process root nodes
+    const cellPath = [...paths.get(cell)!];
+    if (value) setValueAtPath(initial, cellPath, value);
+    if (defaultValue) setValueAtPath(defaults, cellPath, defaultValue);
   });
 
   const schema = createJsonSchema(defaults, initial);
@@ -121,5 +120,5 @@ export function recipe<T, R>(
     outputs.connect(node);
 
     return outputs;
-  }, recipe) satisfies NodeFactory<T, R>;
+  }, recipe) satisfies RecipeFactory<T, R>;
 }

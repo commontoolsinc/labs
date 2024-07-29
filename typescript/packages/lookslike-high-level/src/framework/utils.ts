@@ -68,22 +68,25 @@ export function createJsonSchema(
   referenceValues: any
 ): JSON {
   function analyzeType(value: any, defaultValue: any): JSON {
-    const type = typeof value;
-    const schema: any = { type };
+    const type = typeof (value ?? defaultValue);
+    const schema: JSON = {};
 
     switch (type) {
       case "object":
-        if (Array.isArray(value)) {
+        if (Array.isArray(value ?? defaultValue)) {
           schema.type = "array";
-          if (value.length > 0) {
-            schema.items = analyzeType(value[0], defaultValue?.[0]);
+          if ((value ?? defaultValue).length > 0) {
+            schema.items = analyzeType(value?.[0], defaultValue?.[0]);
           }
-        } else if (value !== null) {
+        } else if (value ?? defaultValue !== null) {
           schema.type = "object";
           schema.properties = {};
-          for (const key in value) {
+          for (const key of new Set([
+            ...Object.keys(value ?? {}),
+            ...Object.keys(defaultValue ?? {}),
+          ])) {
             schema.properties[key] = analyzeType(
-              value[key],
+              value?.[key],
               defaultValue?.[key]
             );
           }
@@ -92,13 +95,16 @@ export function createJsonSchema(
         }
         break;
       case "number":
-        if (Number.isInteger(value)) {
-          schema.type = "integer";
-        }
+        schema.type = Number.isInteger(value ?? defaultValue)
+          ? "integer"
+          : "number";
+        break;
+      default:
+        schema.type = type;
         break;
     }
 
-    if (defaultValue !== undefined) {
+    if (defaultValue !== undefined && schema.type !== "object") {
       schema.default = defaultValue;
     }
 

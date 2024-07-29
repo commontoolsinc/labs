@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isCell, getCellForRecipe } from "../src/framework/types.js";
+import { isCell } from "../src/framework/types.js";
 import { cell } from "../src/framework/cell-proxy.js";
 
 describe("cell function", () => {
@@ -11,7 +11,7 @@ describe("cell function", () => {
   it("supports set methods", () => {
     const c = cell<number>();
     c.set(5);
-    const v = c[getCellForRecipe]();
+    const v = c.export();
     expect(v.path).toEqual([]);
     expect(v.value).toBe(5);
   });
@@ -19,7 +19,7 @@ describe("cell function", () => {
   it("supports default value methods", () => {
     const c = cell<number>();
     c.setDefault(5);
-    const v = c[getCellForRecipe]();
+    const v = c.export();
     expect(v.path).toEqual([]);
     expect(v.value).toBe(undefined);
     expect(v.defaultValue).toBe(5);
@@ -35,8 +35,17 @@ describe("cell function", () => {
     const c = cell<{ a: number; b: string }>();
     c.a.set(5);
     c.b.set("test");
-    const v = c[getCellForRecipe]();
+    const v = c.export();
     expect(v.path).toEqual([]);
     expect(v.value).toEqual({ a: 5, b: "test" });
+  });
+
+  it("supports nested default values", () => {
+    const c = cell<{ a: number; b: string }>();
+    c.a.setDefault(5);
+    c.b.setDefault("test");
+    const v = c.export();
+    expect(v.path).toEqual([]);
+    expect(v.defaultValue).toEqual({ a: 5, b: "test" });
   });
 });
