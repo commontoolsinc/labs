@@ -15,6 +15,8 @@ import {
   setValueAtPath,
   toJSONWithReferences,
   createJsonSchema,
+  moduleToJSON,
+  recipeToJSON,
 } from "./utils.js";
 
 /** Declare a recipe
@@ -111,8 +113,17 @@ export function recipe<T, R>(
     return { module, inputs, outputs } satisfies Node;
   });
 
-  const recipe: Recipe = { schema, initial, nodes: serializedNodes };
-  const module: Module = { type: "recipe", implementation: recipe };
+  const recipe: Recipe = {
+    schema,
+    initial,
+    nodes: serializedNodes,
+    toJSON: () => recipeToJSON(recipe),
+  };
+  const module: Module = {
+    type: "recipe",
+    implementation: recipe,
+    toJSON: () => moduleToJSON(module),
+  };
 
   return Object.assign((inputs: Value<T>): Value<R> => {
     const outputs = cell<R>();

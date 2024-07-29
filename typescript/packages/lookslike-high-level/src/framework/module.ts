@@ -7,7 +7,7 @@ import {
   NodeProxy,
 } from "./types.js";
 import { cell } from "./cell-proxy.js";
-import { traverseValue } from "./utils.js";
+import { traverseValue, moduleToJSON } from "./utils.js";
 
 /** Declare a module
  *
@@ -23,7 +23,11 @@ export function lift<T extends (...args: any[]) => any>(
   implementation: T
 ): NodeFactory<Parameters<T>[0], ReturnType<T>>;
 export function lift<T, R>(implementation: (input: T) => R): NodeFactory<T, R> {
-  const module: Module = { type: "javascript", implementation };
+  const module: Module = {
+    type: "javascript",
+    implementation,
+    toJSON: () => moduleToJSON(module),
+  };
 
   return Object.assign((inputs: Value<T>): CellProxy<R> => {
     const outputs = cell<R>();

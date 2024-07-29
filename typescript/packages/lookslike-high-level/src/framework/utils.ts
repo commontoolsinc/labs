@@ -1,4 +1,12 @@
-import { Value, CellProxy, isCell, JSONValue, JSON } from "./types.js";
+import {
+  Value,
+  Module,
+  Recipe,
+  CellProxy,
+  isCell,
+  JSONValue,
+  JSON,
+} from "./types.js";
 
 /** traverse a value, _not_ entering cells */
 export function traverseValue(value: Value<any>, fn: (value: any) => any) {
@@ -112,4 +120,22 @@ export function createJsonSchema(
   }
 
   return analyzeType(referenceValues, defaultValues);
+}
+
+export function moduleToJSON(module: Module) {
+  return {
+    type: module.type,
+    implementation:
+      typeof module.implementation === "function"
+        ? module.implementation.toString()
+        : module.implementation,
+  };
+}
+
+export function recipeToJSON(recipe: Recipe) {
+  return {
+    schema: recipe.schema,
+    initial: recipe.initial,
+    nodes: recipe.nodes,
+  };
 }

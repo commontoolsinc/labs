@@ -65,7 +65,8 @@ export function isReference(value: any): value is Reference {
 
 export type Module = {
   type: "javascript" | "recipe" | "value";
-  implementation?: Function | Recipe | JSON;
+  implementation: Function | Recipe | JSON;
+  toJSON(): any;
 };
 
 export function isModule(value: any): value is Module {
@@ -83,6 +84,7 @@ export type Recipe = {
   schema: JSON;
   initial: JSON;
   nodes: Node[];
+  toJSON(): any;
 };
 
 export function isRecipe(value: any): value is Recipe {
