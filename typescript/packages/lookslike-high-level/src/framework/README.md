@@ -7,8 +7,8 @@ nested and assigned to each other.
 
 `recipe` creates an internal representation, which is effectively:
 
-- the default value for the cell representing the recipe, which includes all
-  constants
+- the default value for the cell representing the recipe
+- initial values, usually constants or bound data structures like the UI
 - nodes, which are defined by
   - module
   - input cell expressed as bound data structure
@@ -53,4 +53,64 @@ When invoking a recipe, the following steps happen:
 - Default values are populated, unless there is already something there
 - Initial values are populated, overwriting what is there already
 - Nodes are registered with inputs as assumed dependencies
-- ...
+- Run loop:
+  - Events are dispatched, which will mark cells dirty
+  - Effects (e.g. UI rendering) mark cells dirty, and the graph is walked up
+    until the end is reached. The first time this is on declared cells, afterwards on actually used ones.
+  - All involved nodes are topologically sorted.
+  - Repeat until no cells are dirty or a fixed number of maximum iterations have
+    been completed.
+
+Note: Since the graph is flatted after resolving all recipes, etc., only UI
+rendering will cause computation. We will need some other way to trigger
+computation for slow jobs / imports / etc.
+
+---
+
+There are two levels of indirections for cells:
+
+- The aliasing at recipe level, which is as static as the recipe (i.e. an inner
+  module can't rewire the aliases)
+- The cell references in the data itself, which can be overriden.
+
+As an example: Say a recipe is invoked, and a cell bound to `a.b` in its
+namespace. A module write into `a` will also write into that bound cell (the
+value of `a.b` or `undefined` otherwise). The value of `a.b` can be a cell
+reference itself, but then that reference is written into the bound cell.
+
+`a` can't be a cell reference though: The path to any aliased cells must be
+static. This means in practice that we don't want to go too deep in the nesting
+when aliasing. Usuall it is either top-level or one level deeper for an open
+ended set to not pollute the top namespace (e.g. `template` at the top level and
+then `vars.foo` and `vars.bar` for the template veriables). A module could in
+principle modify individual `vars` and some of those might be local to the
+recipe, but a module can't change `vars` itself to point somewhere else.
+
+IOW, all properties up-path from aliases are readonly to modules. They can
+however be cell references themselves, just created by the runtime, and
+typically to seperate cells that are changed at different times (this might just
+be an intermediate optimization, depending on how the runtime and the storage
+layer evolve).
+
+When a module is invoked, we do another round of path following, and this is
+where cell references in the data are resolved, often lazily. Modules are
+reactive to the last data read (and called with the initial cells the first
+time).
+
+Is changing references allowed? Yes, but we have to be careful with the reactive
+nature: Are we rewriting a path, and now listen to other parts? Say a module
+reads `{ foo: { bar: ... } }` and writes a different cell reference for `foo`.
+In principle, if `bar` has never been read, we wouldn't listen to changes just
+on `bar` (assuming the reference `foo` remains the same). But by definition none
+of the other values could depend on that `bar`, so this should be fine: At this
+level, i.e. beyond what the recipe marks read-only, modules can change cell
+references.
+
+To summarize the implications for the implementation:
+
+- Write cell references into the data, and resolve them lazily
+- For recipe-level aliases mark those and all the paths ahead as read-only
+- When writing a cell reference to such a cell reference, make it two levels
+  deep, otherwise overwrite. In fact this go several levels deep, as a recipe
+  can call another recipe pointing to a cell reference. So this just reflects
+  layers of aliasing. Though all but the last are static!
