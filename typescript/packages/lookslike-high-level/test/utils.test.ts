@@ -1,10 +1,37 @@
 import { describe, it, expect } from "vitest";
-import { isReference, isModule, isRecipe } from "../src/framework/types.js";
+import {
+  isReference,
+  isModule,
+  isRecipe,
+  Value,
+} from "../src/framework/types.js";
 import {
   setValueAtPath,
   getValueAtPath,
   hasValueAtPath,
 } from "../src/framework/utils.js";
+
+describe("value type", () => {
+  it("can destructure a value without TS errors", () => {
+    const { foo, bar }: { foo: Value<string>; bar: Value<string> } = {
+      foo: "foo",
+      bar: "bar",
+    } as Value<{
+      foo: string;
+      bar: string;
+    }>;
+    expect(foo).toBe("foo");
+    expect(bar).toBe("bar");
+  });
+
+  it("works for arrays as well without TS errors", () => {
+    const [foo, bar]: [Value<string>, Value<string>] = ["foo", "bar"] as Value<
+      [string, string]
+    >;
+    expect(foo).toBe("foo");
+    expect(bar).toBe("bar");
+  });
+});
 
 describe("utility functions", () => {
   it("isReference correctly identifies references", () => {

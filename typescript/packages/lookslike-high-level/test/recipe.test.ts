@@ -7,9 +7,9 @@ describe("recipe function", () => {
   it("creates a recipe", () => {
     const doubleRecipe = recipe<{ x: number }, { double: number }>(
       "Double a number",
-      (input) => {
+      ({ x }) => {
         const double = lift<{ x: number }, number>(({ x }) => x * 2);
-        return { double: double(input) };
+        return { double: double({ x }) };
       }
     );
     expect(isRecipe(doubleRecipe)).toBe(true);
