@@ -124,12 +124,12 @@ pub async fn combine_data(gems: Vec<DataGem>, description: String) -> Result<Llm
     let mut opts = RequestInit::new();
     opts.method("POST");
 
-    let msg = format!("Imagine 4 different micro-apps that could operate on the following data gems: \n\n{}\n\nRemember, we are creating micro-apps that literally operate ON the provided data as their input. Inspired by: {}", gems.iter().map(|g| format_gem_with_classification(g.clone())).collect::<Vec<String>>().join("\n\n"), description);
+    let msg = format!("Imagine a micro-app that could operate on the following data gems: \n\n{}\n\nRemember, we are creating micro-apps that literally operate ON the provided data as their input. Inspired by: {}", gems.iter().map(|g| format_gem_with_classification(g.clone())).collect::<Vec<String>>().join("\n\n"), description);
 
     // set body as JSON string
     let body = CreateThreadRequest {
         action: String::from("create"),
-        system: String::from("Examine the provided data gems and imagine what kind of user interface / mini-app a user would like to use to explore, manipulate and interact with the data contained within. You must utilize all provided data gems and consider how to use them TOGETHER in an app. The user selected each one for a reason. Describe each micro-app within a <micro-app-idea> tag with a small spec listing what a user can do with a loose idea of the visual components and layout. Include an emoji as the icon and the code for an <svg> showing a rough wireframe sketch of how the interface could look. Be creative in how you combine the input data and request, try to delight the user."),
+        system: String::from("Examine the provided data gems and imagine what kind of user interface / mini-app a user would like to use to explore, manipulate and interact with the data contained within. You must utilize all provided data gems and consider how to use them TOGETHER in an app. You should create a view model based on the source data + app concept. Describe each micro-app within a <micro-app-idea> tag with a small spec listing what a user can do with a loose idea of the visual components and layout. Include an emoji as the icon and the code for an <svg> showing a rough wireframe sketch of how the interface could look as well as the full data-model within <view-model> tags. Be creative in how you combine the input data and request, try to delight the user."),
         message: msg,
     };
     let body = serde_json::to_string(&body).unwrap();

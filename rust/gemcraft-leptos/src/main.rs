@@ -1,4 +1,5 @@
 mod data;
+mod db;
 mod extract;
 mod gem;
 mod llm;
@@ -8,10 +9,12 @@ use leptos::*;
 use logging::log;
 use std::collections::HashMap;
 use uuid::Uuid;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
 
 use data::{ClassificationData, DataGem};
 use gem::{DataGemEditor, MiniDataGemPreview};
-use micro_app::MicroAppGrid;
+use micro_app::{parse_micro_app_ideas, MicroAppGrid};
 
 fn main() {
     console_error_panic_hook::set_once();
@@ -26,6 +29,12 @@ fn App() -> impl IntoView {
     let (selection, set_selection) = create_signal(Vec::<String>::new());
     let (imagined_apps, set_imagined_apps) = create_signal(String::new());
 
+    let insert = |id: String, gem: DataGem, gems: &mut HashMap<String, DataGem>| {
+        gems.insert(id.clone(), gem.clone());
+        let serialized = serde_json::to_string(&gem).unwrap();
+        db::save("", &id, &serialized);
+    };
+
     let on_toggle_selection = move |id| {
         set_selection.update(|current| {
             if current.contains(&id) {
@@ -37,16 +46,12 @@ fn App() -> impl IntoView {
     };
 
     let on_classify = move |(id, classification, description, json_data)| {
-        gems.update(|gems| {
-            gems.insert(
-                id,
-                DataGem {
-                    classification: Some(classification),
-                    description,
-                    json_data,
-                },
-            );
-        });
+        gems.update(|gems| 
+            insert(id, DataGem {
+            classification: Some(classification),
+            description,
+            json_data,
+        }, gems));
     };
 
     let combine_data = create_action(move |_| {
@@ -70,6 +75,26 @@ fn App() -> impl IntoView {
             }
         }
     });
+
+    let on_save = move |_| {
+        let data = imagined_apps.get();
+        let ideas = parse_micro_app_ideas(data.as_str());
+
+        // add each idea as a gem
+        gems.update(|gems| {
+            for idea in ideas {
+                let id = Uuid::new_v4().to_string();
+                insert(
+                    id.clone(), 
+                    DataGem {
+                        classification: None,
+                        description: idea.spec.clone(),
+                        json_data: idea.view_model.clone(),
+                    }, 
+                    gems);
+            }
+        });
+    };
 
     view! {
         <div class="app">
@@ -103,7 +128,7 @@ fn App() -> impl IntoView {
                 </div>
                 <input type="text" placeholder="Search" on:input=move |e| search.set(event_target_value(&e)) prop:value=search></input>
                 <button on:click=move |_| combine_data.dispatch(gems)>"Imagine"</button>
-                <MicroAppGrid input={imagined_apps}></MicroAppGrid>
+                <MicroAppGrid input={imagined_apps} on_save=on_save></MicroAppGrid>
             </div>
         </div>
     }

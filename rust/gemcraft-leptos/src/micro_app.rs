@@ -1,11 +1,12 @@
-use leptos::*;
 use leptos::html::*;
+use leptos::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MicroAppIdea {
-    title: String,
-    spec: String,
-    svg: String,
+    pub title: String,
+    pub spec: String,
+    pub svg: String,
+    pub view_model: String,
 }
 
 pub fn parse_micro_app_ideas(input: &str) -> Vec<MicroAppIdea> {
@@ -20,15 +21,24 @@ pub fn parse_micro_app_ideas(input: &str) -> Vec<MicroAppIdea> {
             let title = lines.next().unwrap_or("").trim().to_string();
             let mut spec = String::new();
             let mut svg = String::new();
+            let mut view_model = String::new();
             let mut in_svg = false;
+            let mut in_model = false;
 
             for line in lines {
                 if line.trim().starts_with("<svg") {
                     in_svg = true;
                 }
+
+                if line.trim().starts_with("<view-model") {
+                    in_model = true;
+                }
                 if in_svg {
                     svg.push_str(line);
                     svg.push('\n');
+                } else if in_model {
+                    view_model.push_str(line);
+                    view_model.push('\n');
                 } else {
                     spec.push_str(line);
                     spec.push('\n');
@@ -36,12 +46,16 @@ pub fn parse_micro_app_ideas(input: &str) -> Vec<MicroAppIdea> {
                 if line.trim().starts_with("</svg>") {
                     in_svg = false;
                 }
+                if line.trim().starts_with("</view-model>") {
+                    in_model = false;
+                }
             }
 
             ideas.push(MicroAppIdea {
                 title,
                 spec: spec.trim().to_string(),
                 svg: svg.trim().to_string(),
+                view_model: view_model.trim().to_string(),
             });
         }
     }
@@ -50,7 +64,10 @@ pub fn parse_micro_app_ideas(input: &str) -> Vec<MicroAppIdea> {
 }
 
 #[component]
-pub fn MicroAppGrid(input: ReadSignal<String>) -> impl IntoView {
+pub fn MicroAppGrid(
+    input: ReadSignal<String>,
+    #[prop(into)] on_save: Callback<()>,
+) -> impl IntoView {
     let ideas = create_memo(move |_| parse_micro_app_ideas(&input.get()));
 
     view! {
@@ -96,9 +113,13 @@ pub fn MicroAppGrid(input: ReadSignal<String>) -> impl IntoView {
                                 <h3 class="micro-app-title">{&idea.title}</h3>
                                 <div class="micro-app-spec">
                                     <h4 class="micro-app-spec-title">Spec:</h4>
-                                    <pre class="micro-app-spec-content">{&idea.spec}</pre>
+                                    <div class="micro-app-spec-content">{&idea.spec}</div>
                                 </div>
+                                <pre>{&idea.view_model}</pre>
                                 <div class="micro-app-svg" inner_html=&idea.svg></div>
+                                <button on:click=move |_| on_save(())>
+                                Click me!
+                                </button>
                             </div>
                         }
                     }
