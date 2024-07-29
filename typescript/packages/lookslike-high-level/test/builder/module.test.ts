@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { isCell, isModule } from "../src/framework/types.js";
-import { lift } from "../src/framework/module.js";
-import { cell } from "../src/framework/cell-proxy.js";
+import { isCell, isModule } from "../../src/builder/types.js";
+import { lift } from "../../src/builder/module.js";
+import { cell } from "../../src/builder/cell-proxy.js";
 
 describe("lift function", () => {
   it("creates a node factory", () => {

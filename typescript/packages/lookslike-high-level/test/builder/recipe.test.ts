@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { CellProxy, isRecipe, isModule } from "../src/framework/types.js";
-import { lift } from "../src/framework/module.js";
-import { recipe } from "../src/framework/recipe.js";
+import { CellProxy, isRecipe, isModule } from "../../src/builder/types.js";
+import { lift } from "../../src/builder/module.js";
+import { recipe } from "../../src/builder/recipe.js";
 
 describe("recipe function", () => {
   it("creates a recipe", () => {

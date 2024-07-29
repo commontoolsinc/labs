@@ -4,12 +4,12 @@ import {
   isModule,
   isRecipe,
   Value,
-} from "../src/framework/types.js";
+} from "../../src/builder/types.js";
 import {
   setValueAtPath,
   getValueAtPath,
   hasValueAtPath,
-} from "../src/framework/utils.js";
+} from "../../src/builder/utils.js";
 
 describe("value type", () => {
   it("can destructure a value without TS errors", () => {
