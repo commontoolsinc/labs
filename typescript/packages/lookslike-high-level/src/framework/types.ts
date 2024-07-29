@@ -20,7 +20,7 @@ export type CellProxyMethods<T> = {
   setDefault(value: Value<T>): void;
   connect(node: NodeProxy): void;
   export(): {
-    cell: CellProxy<any>;
+    top: CellProxy<any>;
     path: PropertyKey[];
     value?: Value<T>;
     defaultValue?: Value<T>;

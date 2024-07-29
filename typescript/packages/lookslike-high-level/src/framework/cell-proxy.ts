@@ -42,7 +42,7 @@ export function cell<T>(defaultValue?: Value<T>): CellProxy<T> {
       },
       connect: (node: NodeProxy) => store.nodes.add(node),
       export: () => ({
-        cell: top,
+        top,
         path,
         ...store,
       }),

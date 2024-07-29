@@ -77,9 +77,9 @@ export function recipe<T, R>(
   let count = 0;
   cells.forEach((cell) => {
     if (paths.has(cell)) return;
-    const top = cell.export().cell;
+    const { top, path } = cell.export();
     if (!paths.has(top)) paths.set(top, [`__#${count++}`]);
-    paths.set(cell, [...paths.get(top)!, ...cell.export().path]);
+    if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
   });
 
   // Now serialize the defaults and initial values, copying them from other
@@ -89,9 +89,11 @@ export function recipe<T, R>(
   const defaults = toJSONWithReferences(defaultValue, paths);
 
   cells.forEach((cell) => {
+    // Only process roots of extra cells:
     if (cell === state) return;
     const { path, value, defaultValue } = cell.export();
-    if (path.length) return; // Only process root nodes
+    if (path.length > 0) return;
+
     const cellPath = [...paths.get(cell)!];
     if (value) setValueAtPath(initial, cellPath, value);
     if (defaultValue) setValueAtPath(defaults, cellPath, defaultValue);
