@@ -1,5 +1,13 @@
 export type Value<T> =
-  | (T extends object ? { [K in keyof T]: Value<T[K]> } : T)
+  | (T extends string | number | boolean | null | undefined
+      ? T
+      : T extends readonly [...any[]]
+      ? { [K in keyof T]: Value<T[K]> }
+      : T extends Array<infer U>
+      ? Array<Value<U>>
+      : T extends object
+      ? { [K in keyof T]: Value<T[K]> }
+      : never)
   | CellProxy<T>;
 
 export type CellProxy<T> = CellProxyMethods<T> & {

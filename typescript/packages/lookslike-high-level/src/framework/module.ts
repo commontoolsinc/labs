@@ -15,6 +15,13 @@ import { traverseValue } from "./utils.js";
  *
  * @returns A module node factory that also serializes as module.
  */
+export function lift<T, R>(implementation: (input: T) => R): NodeFactory<T, R>;
+export function lift<T>(
+  implementation: (input: T) => any
+): NodeFactory<T, ReturnType<typeof implementation>>;
+export function lift<T extends (...args: any[]) => any>(
+  implementation: T
+): NodeFactory<Parameters<T>[0], ReturnType<T>>;
 export function lift<T, R>(implementation: (input: T) => R): NodeFactory<T, R> {
   const module: Module = { type: "javascript", implementation };
 

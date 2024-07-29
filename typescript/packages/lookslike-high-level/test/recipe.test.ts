@@ -5,13 +5,18 @@ import { recipe } from "../src/framework/recipe.js";
 
 describe("recipe function", () => {
   it("creates a recipe", () => {
-    const doubleRecipe = recipe<{ x: number }, { double: number }>(
-      "Double a number",
-      ({ x }) => {
-        const double = lift<{ x: number }, number>(({ x }) => x * 2);
-        return { double: double({ x }) };
-      }
-    );
+    const doubleRecipe = recipe<{ x: number }>("Double a number", ({ x }) => {
+      const double = lift(({ x }) => x * 2);
+      return { double: double({ x }) };
+    });
+    expect(isRecipe(doubleRecipe)).toBe(true);
+  });
+
+  it("creates a recipe, with simple function", () => {
+    const doubleRecipe = recipe<{ x: number }>("Double a number", ({ x }) => {
+      const double = lift<number>((x) => x * 2);
+      return { double: double(x) };
+    });
     expect(isRecipe(doubleRecipe)).toBe(true);
   });
 });

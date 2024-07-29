@@ -25,6 +25,10 @@ import {
  *
  * @returns A recipe node factory that also serializes as recipe.
  */
+export function recipe<T>(
+  description: string,
+  fn: (input: Value<T>) => any
+): NodeFactory<T, ReturnType<typeof fn>>;
 export function recipe<T, R>(
   description: string,
   fn: (input: Value<T>) => Value<R>
@@ -40,13 +44,14 @@ export function recipe<T, R>(
 
   // First, assign the outputs to the state cell.
   // TOOD: We assume no default values for top-level output for now.
-  const outputValues = outputs[getCellForRecipe]();
-  if (typeof outputValues.value === "object")
+  const outputValue = outputs[getCellForRecipe]().value;
+  const stateValue = state[getCellForRecipe]().value ?? {};
+  if (typeof outputValue === "object" && typeof stateValue === "object")
     state.set({
-      ...state[getCellForRecipe]().value,
-      ...outputValues.value,
+      ...stateValue,
+      ...outputValue,
     } as Value<T & R>);
-  outputValues.nodes.forEach((node) => state.connect(node));
+  outputs[getCellForRecipe]().nodes.forEach((node) => state.connect(node));
 
   // Then traverse the value, collect all mentioned nodes and cells
   const cells = new Set<CellProxy<any>>();
