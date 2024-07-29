@@ -45,7 +45,7 @@ pub async fn classify_data(
     // set body as JSON string
     let body = CreateThreadRequest {
         action: String::from("create"),
-        system: String::from("Examine the provided raw data and context and return a brief title, it's confidentiality/sensitivity (public, shared, personal, secret), the data type and emoji to describe the data. Respond with a JSON object containing the title and emoji, e.g. {\"title\": \"Personal Budget\", \"contentType\": \"Spreadsheet\", \"emoji\": \"💸\", \"sensitivity\": \"personal/financial\"} wrapped in a code block."),
+        system: String::from("Examine the provided raw data and context and return a brief title, it's confidentiality/sensitivity (public, shared, personal, secret), the data type and emoji to describe the data. Respond with a JSON object containing the title and emoji, e.g. ```json\n{\"title\": \"Personal Budget\", \"contentType\": \"Spreadsheet\", \"emoji\": \"💸\", \"sensitivity\": \"personal/financial\"}``` wrapped in a block e.g. ```json\n{}\n```."),
         message: msg,
     };
     let body = serde_json::to_string(&body).unwrap();
@@ -84,7 +84,7 @@ pub async fn hallucinate_data(description: String) -> Result<String, String> {
     // set body as JSON string
     let body = CreateThreadRequest {
         action: String::from("create"),
-        system: String::from("imagine realistic JSON data based on the user request, respond with only JSON in a code block."),
+        system: String::from("imagine realistic JSON data based on the user request, respond with only JSON wrapped in a block e.g. ```json\n{}\n```."),
         message: msg,
     };
     let body = serde_json::to_string(&body).unwrap();

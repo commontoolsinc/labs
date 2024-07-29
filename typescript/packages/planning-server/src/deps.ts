@@ -9,6 +9,7 @@ export * as ai from "npm:ai";
 export { anthropic } from "npm:@ai-sdk/anthropic";
 export { google } from "npm:@ai-sdk/google";
 import { createVertex } from "npm:@ai-sdk/google-vertex";
+export { openai } from "npm:@ai-sdk/openai";
 
 await config({ export: true });
 
