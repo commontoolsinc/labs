@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CellProxy, isRecipe, isModule } from "../../src/builder/types.js";
+import { isRecipe, isModule } from "../../src/builder/types.js";
 import { lift } from "../../src/builder/module.js";
 import { recipe } from "../../src/builder/recipe.js";
 
@@ -23,8 +23,7 @@ describe("recipe function", () => {
 
 describe("complex recipe function", () => {
   const doubleRecipe = recipe<{ x: number }>("Double a number", ({ x }) => {
-    // TODO: Fix types
-    (x as CellProxy<number>).setDefault(1);
+    x.setDefault(1);
     const double = lift<number>((x) => x * 2);
     return { double: double(double(x)) };
   });
@@ -57,7 +56,7 @@ describe("complex recipe function", () => {
 
 describe("complex recipe with path references", () => {
   const doubleRecipe = recipe<{ x: number }>("Double a number", ({ x }) => {
-    (x as CellProxy<number>).setDefault(1);
+    x.setDefault(1);
     const double = lift<{ x: number }>(({ x }) => ({ doubled: x * 2 }));
     const result = double({ x });
     const result2 = double({ x: result.doubled });

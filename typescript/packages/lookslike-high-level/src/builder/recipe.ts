@@ -48,7 +48,7 @@ export function recipe<T, R>(
   if (typeof outputs === "object" && typeof stateValue === "object")
     state.set({
       ...stateValue,
-      ...outputs,
+      ...(outputs as R),
     } as Value<T & R>);
 
   // Then traverse the value, collect all mentioned nodes and cells
@@ -59,7 +59,7 @@ export function recipe<T, R>(
     traverseValue(value, (value) => {
       if (isCell(value)) {
         cells.add(value);
-        value.export().nodes.forEach((node) => {
+        value.export().nodes.forEach((node: NodeProxy) => {
           if (!nodes.has(node)) {
             nodes.add(node);
             collectCellsAndNodes(node.inputs);

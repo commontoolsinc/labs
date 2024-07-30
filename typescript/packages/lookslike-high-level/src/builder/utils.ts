@@ -12,7 +12,7 @@ import {
 export function traverseValue(value: Value<any>, fn: (value: any) => any) {
   if (Array.isArray(value)) value.map(fn);
   else if (!isCell(value) && typeof value === "object" && value !== null)
-    for (const key in value) fn(value[key]);
+    for (const key in value as any) fn(value[key]);
   else fn(value);
 }
 
@@ -60,11 +60,11 @@ export function toJSONWithReferences(
   if (Array.isArray(value))
     // Escape `$ref` that are arrays by prefixing with an empty array
     return (key === "$ref" ? [[], ...value] : value).map((value) =>
-      toJSONWithReferences(value, paths)
+      toJSONWithReferences(value as Value<any>, paths)
     );
   if (typeof value === "object") {
     const result: any = {};
-    for (const key in value)
+    for (const key in value as any)
       result[key] = toJSONWithReferences(value[key], paths, key);
     return result;
   }

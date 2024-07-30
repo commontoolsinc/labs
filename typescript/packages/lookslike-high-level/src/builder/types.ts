@@ -1,6 +1,6 @@
 export type Value<T> =
   | (T extends string | number | boolean | null | undefined
-      ? T
+      ? CellProxy<T>
       : T extends readonly [...any[]]
       ? { [K in keyof T]: Value<T[K]> }
       : T extends Array<infer U>
@@ -10,14 +10,17 @@ export type Value<T> =
       : never)
   | CellProxy<T>;
 
-export type CellProxy<T> = CellProxyMethods<T> & {
-  [K in keyof T]: CellProxy<T[K]>;
-};
+export type CellProxy<T> = CellProxyMethods<T> &
+  (T extends object
+    ? {
+        [K in keyof T]: CellProxy<T[K]>;
+      }
+    : T);
 
 export type CellProxyMethods<T> = {
   get(): CellProxy<T>;
-  set(value: Value<T>): void;
-  setDefault(value: Value<T>): void;
+  set(value: Value<T> | T): void;
+  setDefault(value: Value<T> | T): void;
   connect(node: NodeProxy): void;
   export(): {
     top: CellProxy<any>;
@@ -71,7 +74,7 @@ export type Module = {
 
 export function isModule(value: any): value is Module {
   return (
-    typeof value === "object" &&
+    (typeof value === "function" || typeof value === "object") &&
     (value.type === "javascript" ||
       value.type === "recipe" ||
       value.type === "passthrough")
