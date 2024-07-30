@@ -3,7 +3,7 @@ import {
   CellProxyMethods,
   Value,
   NodeProxy,
-  isCellMarker,
+  isCellProxyMarker,
 } from "./types.js";
 import { setValueAtPath, hasValueAtPath } from "./utils.js";
 
@@ -46,7 +46,7 @@ export function cell<T>(defaultValue?: Value<T>): CellProxy<T> {
         path,
         ...store,
       }),
-      [isCellMarker]: true,
+      [isCellProxyMarker]: true,
     };
 
     const proxy = new Proxy(target || {}, {

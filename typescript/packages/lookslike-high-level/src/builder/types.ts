@@ -26,11 +26,11 @@ export type CellProxyMethods<T> = {
     defaultValue?: Value<T>;
     nodes: Set<NodeProxy>;
   };
-  [isCellMarker]: true;
+  [isCellProxyMarker]: true;
 };
 
 export function isCell(value: any): value is CellProxy<any> {
-  return value && typeof value[isCellMarker] === "boolean";
+  return value && typeof value[isCellProxyMarker] === "boolean";
 }
 
 export type NodeProxy = {
@@ -64,18 +64,23 @@ export function isReference(value: any): value is Reference {
 }
 
 export type Module = {
-  type: "javascript" | "recipe" | "value";
-  implementation: Function | Recipe | JSON;
+  type: "javascript" | "recipe" | "passthrough";
+  implementation?: Function | Recipe;
   toJSON(): any;
 };
 
 export function isModule(value: any): value is Module {
-  return !!(value && value.implementation);
+  return (
+    typeof value === "object" &&
+    (value.type === "javascript" ||
+      value.type === "recipe" ||
+      value.type === "passthrough")
+  );
 }
 
 export type Node = {
   description?: string;
-  module: Module | Recipe | Reference;
+  module: Module | Reference;
   inputs: JSON;
   outputs: JSON;
 };
@@ -91,4 +96,4 @@ export function isRecipe(value: any): value is Recipe {
   return !!(value && value.schema && value.nodes && Array.isArray(value.nodes));
 }
 
-export const isCellMarker = Symbol("isCell");
+export const isCellProxyMarker = Symbol("isCellProxy");
