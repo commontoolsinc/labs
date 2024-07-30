@@ -1,7 +1,7 @@
 import { Recipe, isModule, isRecipe, isReference } from "../builder/index.js";
-import { cell, CellReference, Cell } from "./cell.js";
+import { cell, CellReference, CellImpl } from "./cell.js";
 
-export function runRecipe<T>(recipe: Recipe, bindings: T): Cell<T> {
+export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
   // Walk the recipe's schema and extract all default values
   const defaults = extractDefaultValues(recipe.schema);
 
@@ -9,19 +9,24 @@ export function runRecipe<T>(recipe: Recipe, bindings: T): Cell<T> {
   // TODO: Some initial values can be references to outside cells
   const recipeCell = cell(mergeObjects(defaults, bindings, recipe.initial));
 
+  console.log(recipeCell.get());
+
   for (const node of recipe.nodes) {
     if (isModule(node.module)) {
       switch (node.module.type) {
         case "javascript":
           //node.module.implementation(recipeCell);
           break;
+        case "passthrough":
+          sendValueToBinding(recipeCell, node.outputs, node.inputs);
+          break;
         case "recipe":
-          const inputs = mapBindingToCellReferences(
+          if (!isRecipe(node.module.implementation))
+            throw new Error(`Invalid recipe`);
+          const inputs = mapBindingsToCell(
             mergeObjects(node.inputs, node.outputs),
             recipeCell
           );
-          if (!isRecipe(node.module.implementation))
-            throw new Error(`Invalid recipe`);
           runRecipe(node.module.implementation, inputs);
           break;
       }
@@ -93,26 +98,32 @@ export function mergeObjects(...objects: any[]): any {
 // traverse the binding and the valye in parallel accordingly. If the binding is
 // a reference, it will send the value to the referenced cell. If the binding is
 // a literal, we verify that it matches the value and throw an error otherwise.
-export function sendValueToBinding(cell: Cell<any>, binding: any, value: any) {
+export function sendValueToBinding(
+  cell: CellImpl<any>,
+  binding: any,
+  value: any
+) {
   if (isReference(binding)) {
-    cell.setAtPath(binding.$ref, value);
+    cell.setAtPath(binding.$ref.path, value);
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value))
       for (let i = 0; i < Math.min(binding.length, value.length); i++)
         sendValueToBinding(cell, binding[i], value[i]);
   } else if (typeof binding === "object" && binding !== null) {
     for (const key of Object.keys(binding))
-      if (key in value) sendValueToBinding(cell, value[key], value[key]);
+      if (key in value) sendValueToBinding(cell, binding[key], value[key]);
   } else {
     if (binding !== value)
       throw new Error(`Got ${value} instead of ${binding}`);
   }
 }
 
-export function mapBindingToCellReferences<T>(binding: T, cell: Cell<any>): T {
+export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
   function convert(binding: any): any {
     if (isReference(binding))
-      return { cell, path: binding.$ref } satisfies CellReference;
+      return {
+        $ref: { ...binding.$ref, cell },
+      };
     if (Array.isArray(binding)) return binding.map(convert);
     if (typeof binding === "object" && binding !== null)
       return Object.fromEntries(

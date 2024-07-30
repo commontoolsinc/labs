@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   cell,
+  Cell,
   isCell,
   isCellReference,
   isCellProxy,
@@ -86,8 +87,22 @@ describe("createProxy", () => {
     expect(proxy.a.b.c).toBe(42);
   });
 
+  it("should support regular assigments", () => {
+    const c = cell({ x: 1 });
+    const proxy = createProxy(c, []);
+    proxy.x = 2;
+    expect(c.get()).toBe(2);
+  });
+
+  it("should support set", () => {
+    const c = cell({ x: 1 });
+    const proxy = createProxy(c, []) as Cell<{ x: number }>;
+    proxy.set({ x: 2 });
+    expect(c.get()).toBe(2);
+  });
+
   it("should handle $ref in objects", () => {
-    const c = cell({ x: { $ref: ["y"] }, y: 42 });
+    const c = cell({ x: { $ref: { path: ["y"] } }, y: 42 });
     const proxy = createProxy(c, []);
     expect(proxy.x).toBe(42);
   });

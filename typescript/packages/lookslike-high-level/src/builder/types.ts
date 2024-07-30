@@ -42,11 +42,21 @@ export type NodeProxy = {
   outputs: CellProxy<any>;
 };
 
-export type NodeFactory<T, R> = ((inputs: Value<T>) => Value<R>) &
-  (Module | Recipe);
+export type toJSON = {
+  toJSON(): any;
+};
 
-export type RecipeFactory<T, R> = ((inputs: Value<T>) => Value<R>) & Recipe;
-export type ModuleFactory<T, R> = ((inputs: Value<T>) => Value<R>) & Module;
+export type NodeFactory<T, R> = ((inputs: Value<T>) => Value<R>) &
+  (Module | Recipe) &
+  toJSON;
+
+export type RecipeFactory<T, R> = ((inputs: Value<T>) => Value<R>) &
+  Recipe &
+  toJSON;
+
+export type ModuleFactory<T, R> = ((inputs: Value<T>) => Value<R>) &
+  Module &
+  toJSON;
 
 export type JSONValue =
   | string
@@ -59,17 +69,16 @@ export type JSONValue =
 export type JSON = JSONValue | { [key: string]: JSONValue };
 
 export type Reference = {
-  $ref: PropertyKey[] | [[], ...any];
+  $ref: { cell?: any; path: PropertyKey[] };
 };
 
 export function isReference(value: any): value is Reference {
-  return !!(value && value.$ref && Array.isArray(value.$ref));
+  return !!(value && value.$ref && Array.isArray(value.$ref.path));
 }
 
 export type Module = {
   type: "javascript" | "recipe" | "passthrough";
   implementation?: Function | Recipe;
-  toJSON(): any;
 };
 
 export function isModule(value: any): value is Module {
@@ -92,7 +101,6 @@ export type Recipe = {
   schema: JSON;
   initial: JSON;
   nodes: Node[];
-  toJSON(): any;
 };
 
 export function isRecipe(value: any): value is Recipe {

@@ -6,6 +6,7 @@ import {
   isCell,
   JSONValue,
   JSON,
+  Reference,
 } from "./types.js";
 
 /** traverse a value, _not_ entering cells */
@@ -48,26 +49,29 @@ export function hasValueAtPath(obj: any, path: PropertyKey[]): boolean {
 
 export function toJSONWithReferences(
   value: Value<any>,
-  paths: Map<CellProxy<any>, PropertyKey[]>,
-  key: string = ""
+  paths: Map<CellProxy<any>, PropertyKey[]>
 ): JSONValue {
   if (isCell(value)) {
     const path = paths.get(value);
-    if (path) return { $ref: path as (string | number)[] };
+    if (path)
+      return {
+        $ref: { path: path as (string | number)[] },
+      } satisfies Reference;
     else throw new Error(`Cell not found in paths`);
   }
 
   if (Array.isArray(value))
-    // Escape `$ref` that are arrays by prefixing with an empty array
-    return (key === "$ref" ? [[], ...value] : value).map((value) =>
-      toJSONWithReferences(value as Value<any>, paths)
+    return (value as Value<any>).map((v: Value<any>) =>
+      toJSONWithReferences(v, paths)
     );
+
   if (typeof value === "object") {
     const result: any = {};
     for (const key in value as any)
-      result[key] = toJSONWithReferences(value[key], paths, key);
+      result[key] = toJSONWithReferences(value[key], paths);
     return result;
   }
+
   return value;
 }
 

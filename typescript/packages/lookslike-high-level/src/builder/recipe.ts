@@ -8,6 +8,7 @@ import {
   Node,
   Module,
   Reference,
+  toJSON,
 } from "./types.js";
 import { cell } from "./cell-proxy.js";
 import {
@@ -113,13 +114,13 @@ export function recipe<T, R>(
     return { module, inputs, outputs } satisfies Node;
   });
 
-  const recipe: Recipe = {
+  const recipe: Recipe & toJSON = {
     schema,
     initial,
     nodes: serializedNodes,
     toJSON: () => recipeToJSON(recipe),
   };
-  const module: Module = {
+  const module: Module & toJSON = {
     type: "recipe",
     implementation: recipe,
     toJSON: () => moduleToJSON(module),

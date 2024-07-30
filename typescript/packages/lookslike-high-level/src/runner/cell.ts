@@ -1,8 +1,8 @@
 import { getValueAtPath, setValueAtPath } from "../builder/utils.js";
 
-export type Cell<T> = {
+export type CellImpl<T> = {
   get(): T;
-  getAsProxy(path?: PropertyKey[]): CellValueProxy<T> | T;
+  getAsProxy(path?: PropertyKey[]): Cell<T> | T;
   send(value: T): void;
   sink(callback: (value: T) => void): () => void;
   getAtPath(path: PropertyKey[]): T;
@@ -11,19 +11,19 @@ export type Cell<T> = {
 };
 
 export type CellReference = {
-  cell: Cell<any>;
+  cell: CellImpl<any>;
   path: PropertyKey[];
 };
 
-export type CellValueProxy<T> = T & {
+export type Cell<T> = T & {
   set(value: T): void;
-  [getCellReference]: [Cell<any>, PropertyKey[]];
+  [getCellReference]: [CellImpl<any>, PropertyKey[]];
 };
 
-export function cell<T>(value?: T): Cell<T> {
+export function cell<T>(value?: T): CellImpl<T> {
   const callbacks = new Set<(value: T) => void>();
 
-  const self: Cell<T> = {
+  const self: CellImpl<T> = {
     get: () => value as T,
     getAsProxy: (path: PropertyKey[] = []) => createProxy(self, path),
     send: (newValue: T) => {
@@ -49,14 +49,19 @@ export function cell<T>(value?: T): Cell<T> {
 }
 
 export function createProxy<T>(
-  cell: Cell<T>,
+  cell: CellImpl<T>,
   path: PropertyKey[]
-): CellValueProxy<T> | T {
+): Cell<T> | T {
   console.log("createProxy", path);
   const target = cell.getAtPath(path);
   if (typeof target !== "object" || target === null) return target;
 
   return new Proxy(target as object, {
+    apply: (_target, _thisArg, argumentsList) => {
+      if (!path.length || path[path.length - 1] !== "set")
+        throw new Error("only calls to set are supported");
+      cell.setAtPath(path, argumentsList[0]);
+    },
     get: (_target, prop) => {
       if (prop === getCellReference)
         return { cell, path } satisfies CellReference;
@@ -84,11 +89,11 @@ export function createProxy<T>(
       cell.setAtPath([...path, prop], value);
       return true;
     },
-  }) as CellValueProxy<T>;
+  }) as Cell<T>;
 }
 
 const isCellMarker = Symbol("isCell");
-export function isCell(value: any): value is Cell<any> {
+export function isCell(value: any): value is CellImpl<any> {
   return typeof value === "object" && value[isCellMarker] === true;
 }
 
@@ -99,6 +104,6 @@ export function isCellReference(value: any): value is CellReference {
 }
 
 const getCellReference = Symbol("isCellProxy");
-export function isCellProxy(value: any): value is CellValueProxy<any> {
+export function isCellProxy(value: any): value is Cell<any> {
   return typeof value === "object" && value[getCellReference] !== undefined;
 }

@@ -1,67 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
-  //runRecipe,
   extractDefaultValues,
   mergeObjects,
   sendValueToBinding,
-  mapBindingToCellReferences,
+  mapBindingsToCell,
 } from "../../src/runner/runner.js";
 import { cell } from "../../src/runner/cell.js";
-//import { cell } from "../../src/builder/index.js";
-
-/*describe.skip("runRecipe", () => {
-  it("should run a simple recipe", () => {
-    const mockRecipe: Recipe = {
-      schema: {},
-      initial: { value: 1 },
-      nodes: [
-        {
-          module: {
-            type: "javascript",
-            implementation: (cell) => cell.value.set(cell.value.get() * 2),
-          },
-          inputs: {},
-          outputs: {},
-        },
-      ],
-    };
-
-    const result = runRecipe(mockRecipe, {});
-    expect(result.export().value).toEqual({ value: 2 });
-  });
-
-  it("should handle nested recipes", () => {
-    const nestedRecipe: Recipe = {
-      schema: {},
-      initial: { value: 2 },
-      nodes: [
-        {
-          module: {
-            type: "javascript",
-            implementation: (cell) => cell.value.set(cell.value.get() * 2),
-          },
-          inputs: {},
-          outputs: {},
-        },
-      ],
-    };
-
-    const mockRecipe: Recipe = {
-      schema: {},
-      initial: { value: 1 },
-      nodes: [
-        {
-          module: { type: "recipe", implementation: nestedRecipe },
-          inputs: { value: { $ref: ["value"] } },
-          outputs: { value: { $ref: ["value"] } },
-        },
-      ],
-    };
-
-    const result = runRecipe(mockRecipe, {});
-    expect(result.export().value).toEqual({ value: 4 });
-  });
-});*/
 
 describe("extractDefaultValues", () => {
   it("should extract default values from a schema", () => {
@@ -120,7 +64,7 @@ describe("mergeObjects", () => {
 describe("sendValueToBinding", () => {
   it("should send value to a simple binding", () => {
     const testCell = cell({ value: 0 });
-    sendValueToBinding(testCell, { $ref: ["value"] }, 42);
+    sendValueToBinding(testCell, { $ref: { path: ["value"] } }, 42);
     expect(testCell.get()).toEqual({ value: 42 });
   });
 
@@ -128,10 +72,54 @@ describe("sendValueToBinding", () => {
     const testCell = cell({ arr: [0, 0, 0] });
     sendValueToBinding(
       testCell,
-      [{ $ref: ["arr", 0] }, { $ref: ["arr", 2] }],
+      [{ $ref: { path: ["arr", 0] } }, { $ref: { path: ["arr", 2] } }],
       [1, 3]
     );
     expect(testCell.get()).toEqual({ arr: [1, 0, 3] });
+  });
+
+  it("should handle bindings with multiple levels", () => {
+    const testCell = cell({
+      user: {
+        name: {
+          first: "John",
+          last: "Doe",
+        },
+        age: 30,
+      },
+    });
+
+    const binding = {
+      person: {
+        fullName: {
+          firstName: { $ref: { path: ["user", "name", "first"] } },
+          lastName: { $ref: { path: ["user", "name", "last"] } },
+        },
+        currentAge: { $ref: { path: ["user", "age"] } },
+      },
+    };
+
+    const value = {
+      person: {
+        fullName: {
+          firstName: "Jane",
+          lastName: "Smith",
+        },
+        currentAge: 25,
+      },
+    };
+
+    sendValueToBinding(testCell, binding, value);
+
+    expect(testCell.get()).toEqual({
+      user: {
+        name: {
+          first: "Jane",
+          last: "Smith",
+        },
+        age: 25,
+      },
+    });
   });
 });
 
@@ -139,15 +127,15 @@ describe("mapBindingToCellReferences", () => {
   it("should map bindings to cell references", () => {
     const testCell = cell({ a: 1, b: { c: 2 } });
     const binding = {
-      x: { $ref: ["a"] },
-      y: { $ref: ["b", "c"] },
+      x: { $ref: { path: ["a"] } },
+      y: { $ref: { path: ["b", "c"] } },
       z: 3,
     };
 
-    const result = mapBindingToCellReferences(binding, testCell);
+    const result = mapBindingsToCell(binding, testCell);
     expect(result).toEqual({
-      x: { cell: testCell, path: ["a"] },
-      y: { cell: testCell, path: ["b", "c"] },
+      x: { $ref: { cell: testCell, path: ["a"] } },
+      y: { $ref: { cell: testCell, path: ["b", "c"] } },
       z: 3,
     });
   });
