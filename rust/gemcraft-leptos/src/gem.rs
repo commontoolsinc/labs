@@ -4,6 +4,7 @@ use logging::log;
 use crate::{
     data::{ClassificationData, DataGem},
     llm,
+    toggle::ToggleContent,
 };
 
 #[component]
@@ -75,12 +76,13 @@ pub fn DataGemEditor(
     });
 
     view! {
-        <form class="max-w-2xl mx-auto p-4">
+        <form class="gem-form">
             <div>
                 <input type="checkbox" id="selected" checked=selected on:change=move |_| on_toggle(id.get_value()) />
                 {gem.classification.map(|c| view! { <DataGemPreview classification=c /> })}
             </div>
 
+            <ToggleContent>
             <table>
                 <tr>
                     <td>
@@ -133,6 +135,7 @@ pub fn DataGemEditor(
                     </td>
                 </tr>
             </table>
+            </ToggleContent>
         </form>
     }
 }

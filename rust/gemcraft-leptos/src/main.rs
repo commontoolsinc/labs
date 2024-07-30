@@ -4,7 +4,9 @@ mod extract;
 mod gem;
 mod llm;
 mod micro_app;
+mod toggle;
 
+use html::Data;
 use leptos::*;
 use logging::log;
 use std::collections::HashMap;
@@ -19,20 +21,24 @@ use micro_app::{parse_micro_app_ideas, MicroAppGrid};
 fn main() {
     console_error_panic_hook::set_once();
 
+    // let saved = db::list::<DataGem>("").unwrap();
+    // for (id, gem) in saved {
+    //     log!("Loaded saved gem {}: {:?}", id, gem);
+    // }
+
     mount_to_body(|| view! { <App /> })
 }
 
 #[component]
 fn App() -> impl IntoView {
-    let gems = create_rw_signal(HashMap::<String, DataGem>::new());
+    let gems = create_rw_signal(db::list::<DataGem>("").unwrap());
     let search = create_rw_signal(String::new());
     let (selection, set_selection) = create_signal(Vec::<String>::new());
     let (imagined_apps, set_imagined_apps) = create_signal(String::new());
 
     let insert = |id: String, gem: DataGem, gems: &mut HashMap<String, DataGem>| {
         gems.insert(id.clone(), gem.clone());
-        let serialized = serde_json::to_string(&gem).unwrap();
-        db::save("", &id, &serialized);
+        db::save("", &id, &gem);
     };
 
     let on_toggle_selection = move |id| {
@@ -46,12 +52,17 @@ fn App() -> impl IntoView {
     };
 
     let on_classify = move |(id, classification, description, json_data)| {
-        gems.update(|gems| 
-            insert(id, DataGem {
-            classification: Some(classification),
-            description,
-            json_data,
-        }, gems));
+        gems.update(|gems| {
+            insert(
+                id,
+                DataGem {
+                    classification: Some(classification),
+                    description,
+                    json_data,
+                },
+                gems,
+            )
+        });
     };
 
     let combine_data = create_action(move |_| {
@@ -85,43 +96,48 @@ fn App() -> impl IntoView {
             for idea in ideas {
                 let id = Uuid::new_v4().to_string();
                 insert(
-                    id.clone(), 
+                    id.clone(),
                     DataGem {
                         classification: None,
                         description: idea.spec.clone(),
                         json_data: idea.view_model.clone(),
-                    }, 
-                    gems);
+                    },
+                    gems,
+                );
             }
         });
     };
 
     view! {
-        <div class="app">
+        <div class="app"><div>
         <div>
+        <button on:click=move |_| gems.update(|gems| gems.clear())>"Clear"</button>
+        <button on:click=move |_| gems.update(|gems|  {
+            let id = Uuid::new_v4().to_string();
+            gems.insert(
+                id,
+                DataGem {
+                    classification: Some(ClassificationData {
+                        title: "Test".to_string(),
+                        content_type: "Test".to_string(),
+                        emoji: "❓".to_string(),
+                        sensitivity: "Test".to_string(),
+                    }),
+                    description: "Test".to_string(),
+                    json_data: "{}".to_string(),
+                });
+        })>
+            "Add Gem"
+        </button>
+        </div>
+        <div class="gem-dock">
+
         {move || gems()
             .into_iter()
             .map(|(id, gem)| view! { <DataGemEditor id=id.to_string() gem=gem selected=selection.get().contains(&id) on_classify=on_classify on_toggle=on_toggle_selection /> })
             .collect_view()}
-            <button on:click=move |_| gems.update(|gems| gems.clear())>"Clear"</button>
-            <button on:click=move |_| gems.update(|gems|  {
-                let id = Uuid::new_v4().to_string();
-                gems.insert(
-                    id,
-                    DataGem {
-                        classification: Some(ClassificationData {
-                            title: "Test".to_string(),
-                            content_type: "Test".to_string(),
-                            emoji: "🔥".to_string(),
-                            sensitivity: "Test".to_string(),
-                        }),
-                        description: "Test".to_string(),
-                        json_data: "{}".to_string(),
-                    });
-            })>
-                "Add Gem"
-            </button>
-            </div>
+        </div>
+        </div>
             <div>
                 <div class="gem-list">
                     {move || selection.get().iter().map(|id| view! { <MiniDataGemPreview gem=gems.get().get(id).unwrap().clone() /> }).collect_view()}
