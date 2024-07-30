@@ -4,12 +4,13 @@ import {
 } from "node:assert/strict";
 import { state } from "../state.js";
 import { cell, lens, lift } from "../propagator.js";
+import { task } from "../task.js";
 
 describe("cell()", () => {
   it("synchronously sets the value", () => {
     const a = cell(1);
     a.send(2);
-    assertEqual(a.get(), 2);
+    assertEqual(a.value, 2);
   });
 
   it("reacts synchronously when sent a new value", () => {
@@ -39,12 +40,12 @@ describe("lens()", () => {
       update: (state, next) => ({ ...state, a: { b: { c: next } } }),
     });
 
-    assertEqual(c.get(), 10);
+    assertEqual(c.value, 10);
 
     c.send(20);
 
-    assertDeepEqual(x.get(), { a: { b: { c: 20 } } });
-    assertEqual(c.get(), 20);
+    assertDeepEqual(x.value, { a: { b: { c: 20 } } });
+    assertEqual(c.value, 20);
   });
 });
 
@@ -53,7 +54,7 @@ describe("cell.key()", () => {
     const x = cell({ a: 10 });
     const a = x.key("a");
 
-    assertEqual(a.get(), 10);
+    assertEqual(a.value, 10);
   });
 
   it("reflects updates from parent to child", () => {
@@ -62,7 +63,7 @@ describe("cell.key()", () => {
 
     x.send({ a: 20 });
 
-    assertEqual(a.get(), 20);
+    assertEqual(a.value, 20);
   });
 
   it("reflects updates from child to parent", () => {
@@ -71,7 +72,7 @@ describe("cell.key()", () => {
 
     a.send(20);
 
-    assertDeepEqual(x.get(), { a: 20 });
+    assertDeepEqual(x.value, { a: 20 });
   });
 
   it("it works for deep derived keys", () => {
@@ -82,10 +83,36 @@ describe("cell.key()", () => {
 
     c.send(20);
 
-    assertDeepEqual(x.get(), { a: { b: { c: 20 } } });
-    assertDeepEqual(a.get(), { b: { c: 20 } });
-    assertDeepEqual(b.get(), { c: 20 });
-    assertDeepEqual(c.get(), 20);
+    assertDeepEqual(x.value, { a: { b: { c: 20 } } });
+    assertDeepEqual(a.value, { b: { c: 20 } });
+    assertDeepEqual(b.value, { c: 20 });
+    assertDeepEqual(c.value, 20);
+  });
+});
+
+describe("Cell containing State", () => {
+  it("handles circular relationships", () => {
+    const a = cell(state({ value: 0 }), "circular.a");
+    const b = cell(state({ value: 0 }), "circular.b");
+
+    const MAX = 5;
+
+    a.connect(
+      task(() => {
+        b.send(
+          b.value.step(a.value.value < MAX ? a.value.value + 1 : a.value.value),
+        );
+      }),
+    );
+
+    b.connect(
+      task(() => {
+        a.send(a.value.step(b.value.value));
+      }),
+    );
+
+    assertEqual(a.value.value, 5);
+    assertEqual(b.value.value, 5);
   });
 });
 
@@ -101,7 +128,7 @@ describe("lift()", () => {
 
     assertEqual(typeof cancel, "function", "returns a cancel function");
 
-    assertEqual(out.get().value, 3);
+    assertEqual(out.value.value, 3);
   });
 
   it("updates the out cell whenever an input cell updates", () => {
@@ -112,13 +139,13 @@ describe("lift()", () => {
     const out = cell(state({ value: 0 }), "lift.out");
 
     addCells(a, b, out);
-    assertEqual(out.get().value, 2);
+    assertEqual(out.value.value, 2);
 
-    a.send(a.get().next(2));
-    assertEqual(out.get().value, 3);
+    a.send(a.value.step(2));
+    assertEqual(out.value.value, 3);
 
-    b.send(b.get().next(2));
-    assertEqual(out.get().value, 4);
+    b.send(b.value.step(2));
+    assertEqual(out.value.value, 4);
   });
 
   it("solves the diamond problem", () => {
@@ -128,15 +155,15 @@ describe("lift()", () => {
     const out = cell(state({ value: 0 }), "lift.out");
 
     addCells(a, a, out);
-    assertEqual(out.get().value, 2, "the initial state is correct");
+    assertEqual(out.value.value, 2, "the initial state is correct");
 
     let calls = 0;
     out.sink(() => {
       calls++;
     });
 
-    a.send(a.get().next(2));
-    assertEqual(out.get().value, 4, "the updated state is correct");
+    a.send(a.value.step(2));
+    assertEqual(out.value.value, 4, "the updated state is correct");
 
     assertEqual(
       calls,
@@ -153,15 +180,15 @@ describe("lift()", () => {
     const out = cell(state({ value: 0 }), "lift.out");
 
     add3(a, b, b, out);
-    assertEqual(out.get().value, 3);
+    assertEqual(out.value.value, 3);
 
     let calls = 0;
     out.sink((_value) => {
       calls++;
     });
 
-    b.send(b.get().next(2));
-    assertEqual(out.get().value, 5);
+    b.send(b.value.step(2));
+    assertEqual(out.value.value, 5);
 
     assertEqual(
       calls,
@@ -180,15 +207,15 @@ describe("lift()", () => {
 
     add2(a, b, c);
     add2(a, c, d);
-    assertEqual(d.get().value, 3);
+    assertEqual(d.value.value, 3);
 
     let calls = 0;
     d.sink((_value) => {
       calls++;
     });
 
-    b.send(b.get().next(2));
-    assertEqual(d.get().value, 4);
+    b.send(b.value.step(2));
+    assertEqual(d.value.value, 4);
 
     assertEqual(
       calls,

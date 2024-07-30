@@ -28,21 +28,27 @@ describe("State", () => {
   });
 });
 
-describe("State.next()", () => {
+describe("State.step()", () => {
   it("creates the next state", () => {
     const a = state({ value: 1 });
-    const b = a.next(2);
+    const b = a.step(2);
     assert.notEqual(a, b);
     assert.equal(b.value, 2);
     assert.equal(a.id, b.id);
     assert.equal(a.time, b.time - 1);
+  });
+
+  it("returns the current state if the values are equal", () => {
+    const a = state({ value: 1 });
+    const b = a.step(1);
+    assert.equal(a, b);
   });
 });
 
 describe("State.merge()", () => {
   it("advances to newer states", () => {
     const a = state({ value: 1 });
-    const b = a.next(2);
+    const b = a.step(2);
     const c = a.merge(b);
     assert.equal(b, c);
   });
@@ -57,7 +63,7 @@ describe("State.merge()", () => {
       causes: { ...a.causes, ...b.causes, ...c.causes },
     });
 
-    const b2 = b.next(4);
+    const b2 = b.step(4);
 
     const d2 = state({
       id: d.id,

@@ -12,7 +12,7 @@ import { Causes, shouldUpdate, State } from "./state.js";
  */
 export class Cell<T> {
   static get<T>(cell: Cell<T>) {
-    return cell.get();
+    return cell.value;
   }
 
   #id = cid();
@@ -42,7 +42,7 @@ export class Cell<T> {
     return this.#name;
   }
 
-  get(): T {
+  get value(): T {
     return this.#value;
   }
 
@@ -52,12 +52,13 @@ export class Cell<T> {
         topic: "cell",
         msg: "Sent value",
         id: this.id,
+        name: this.name,
         value,
       });
     }
+
     const next = merge(this.#value, value);
 
-    // We only advance clock if value changes state
     if (this.#value === next) {
       if (debug()) {
         logger.debug({
@@ -75,6 +76,7 @@ export class Cell<T> {
         topic: "cell",
         msg: "Updating value",
         id: this.id,
+        name: this.name,
         prev: this.#value,
         value: next,
       });
@@ -92,6 +94,7 @@ export class Cell<T> {
         topic: "cell",
         msg: "Disconnect all neighbors",
         id: this.id,
+        name: this.name,
         neighbors: this.#neighbors.size,
       });
     }
@@ -107,7 +110,7 @@ export class Cell<T> {
   }
 
   sink(callback: (value: T) => void) {
-    return this.connect(task(() => callback(this.get())));
+    return this.connect(task(() => callback(this.value)));
   }
 
   key<K extends keyof T>(valueKey: K) {
@@ -131,7 +134,7 @@ export const lens = <B, S>(
   big: Cell<B>,
   lens: Lens<B, S>,
 ): CancellableCell<S> => {
-  const bigValue = big.get();
+  const bigValue = big.value;
 
   const small = cell<S>(lens.get(bigValue));
 
@@ -145,7 +148,7 @@ export const lens = <B, S>(
 
   // Propagate writes from child to parent
   const cancelSmallToBig = small.sink((smallValue) => {
-    const bigValue = big.get();
+    const bigValue = big.value;
     const currSmallValue = lens.get(bigValue);
     if (currSmallValue !== smallValue) {
       big.send(lens.update(bigValue, smallValue));
@@ -169,7 +172,7 @@ export const key = <T, K extends keyof T>(
   });
 
 const getCellStateValue = <T>(stateCell: StateCell<T>): T =>
-  stateCell.get().value;
+  stateCell.value.value;
 
 export function lift<A, B>(
   fn: (a: A) => B,
@@ -259,17 +262,17 @@ export function lift(fn: (...args: unknown[]) => unknown) {
     // by the first immediate update we get from sink.
     let mergedCauses: Causes = Object.assign(
       {},
-      ...cells.map((cell) => cell.get().causes),
+      ...cells.map((cell) => cell.value.causes),
     );
 
-    output.send(output.get().next(recompute(), mergedCauses));
+    output.send(output.value.step(recompute(), mergedCauses));
 
     for (const cell of cells) {
       const cancel = cell.connect(
         task(() => {
-          const currentState = output.get();
+          const currentState = output.value;
 
-          const nextPartialState = cell.get();
+          const nextPartialState = cell.value;
           if (!shouldUpdate(mergedCauses, nextPartialState.causes)) {
             return;
           }
@@ -289,7 +292,7 @@ export function lift(fn: (...args: unknown[]) => unknown) {
             });
           }
 
-          output.send(currentState.next(nextValue, mergedCauses));
+          output.send(currentState.step(nextValue, mergedCauses));
         }),
       );
       addCancel(cancel);

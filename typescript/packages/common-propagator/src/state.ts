@@ -92,7 +92,10 @@ export class State<T> {
     return that;
   }
 
-  next(value: T, causes: Record<Cid, Time> = {}) {
+  step(value: T, causes: Record<Cid, Time> = {}): State<T> {
+    if (this.value === value) {
+      return this;
+    }
     return new State({
       id: this.id,
       value,
