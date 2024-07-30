@@ -1,7 +1,9 @@
 use leptos::*;
 use logging::log;
+use anyhow::{Context, Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen;
+use serde_json::json;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, Response};
@@ -29,11 +31,7 @@ pub struct CreateThreadRequest {
     pub message: String,
 }
 
-pub async fn classify_data(
-    json: String,
-    description: String,
-) -> Result<ClassificationData, String> {
-    let win = window();
+pub fn build_classify_request(json: String, description: String) -> Result<Request, JsValue> {
     let mut opts = RequestInit::new();
     opts.method("POST");
 
@@ -43,38 +41,57 @@ pub async fn classify_data(
     );
 
     // set body as JSON string
-    let body = CreateThreadRequest {
-        action: String::from("create"),
-        system: String::from("Examine the provided raw data and context and return a brief title, it's confidentiality/sensitivity (public, shared, personal, secret), the data type and emoji to describe the data. Respond with a JSON object containing the title and emoji, e.g. ```json\n{\"title\": \"Personal Budget\", \"contentType\": \"Spreadsheet\", \"emoji\": \"💸\", \"sensitivity\": \"personal/financial\"}``` wrapped in a block e.g. ```json\n{}\n```."),
-        message: msg,
-    };
+    let body = json!({
+        "action": String::from("create"),
+        "system": String::from("Examine the provided raw data and context and return a brief title, it's confidentiality/sensitivity (public, shared, personal, secret), the data type and emoji to describe the data. Respond with a JSON object containing the title and emoji, e.g. ```json\n{\"title\": \"Personal Budget\", \"contentType\": \"Spreadsheet\", \"emoji\": \"💸\", \"sensitivity\": \"personal/financial\"}``` wrapped in a block e.g. ```json\n{}\n```."),
+        "message": msg,
+    });
     let body = serde_json::to_string(&body).unwrap();
     opts.body(Some(&JsValue::from_str(&body)));
 
-    let request = Request::new_with_str_and_init(LLM_URL, &opts).unwrap();
+    Request::new_with_str_and_init(LLM_URL, &opts)
+}
 
-    let resp_value = JsFuture::from(win.fetch_with_request(&request))
-        .await
-        .expect("failed to fetch");
-    let resp: Response = resp_value.dyn_into().unwrap();
+pub async fn send_request(window: &web_sys::Window, request: Request) -> Result<JsValue, JsValue> {
+    let resp = JsFuture::from(window.fetch_with_request(&request))
+        .await?;
 
-    let json = JsFuture::from(resp.json().unwrap())
-        .await
-        .expect("failed to get response text");
+    let resp: Response = resp.dyn_into()?;
+
+    let json = JsFuture::from(resp.json()?)
+        .await?;
+
+    Ok(json)
+}
+
+pub async fn classify_data(
+    json: String,
+    description: String,
+) -> Result<ClassificationData, JsValue> {
+    let win = window();
+    
+    let request = build_classify_request(json, description)?;
+    let json = send_request(&win, request).await?;
 
     let llm_response: LlmResponse =
-        serde_wasm_bindgen::from_value(json).map_err(|_| "Failed to deserialize JSON")?;
+        serde_wasm_bindgen::from_value(json)
+        .map_err(|_| "Failed to deserialize JSON")?;
 
     log!("Response: {:?}", llm_response);
 
-    let classification_data = extract_code_blocks_from_markdown(&llm_response.output, "json");
+    let blocks = extract_code_blocks_from_markdown(&llm_response.output, "json");
+    let data = blocks
+        .first()
+        .ok_or("No blocks")?;
+
     let classification_data: ClassificationData =
-        serde_json::from_str(&classification_data[0]).unwrap();
+        serde_json::from_str(data.clone().as_str())
+            .map_err(|_| "Failed to deserialize ClassificationData")?;
 
     Ok(classification_data)
 }
 
-pub async fn hallucinate_data(description: String) -> Result<String, String> {
+pub async fn hallucinate_data(description: String) -> Result<String, JsValue> {
     let win = window();
     let mut opts = RequestInit::new();
     opts.method("POST");
@@ -92,22 +109,16 @@ pub async fn hallucinate_data(description: String) -> Result<String, String> {
 
     let request = Request::new_with_str_and_init(LLM_URL, &opts).unwrap();
 
-    let resp_value = JsFuture::from(win.fetch_with_request(&request))
-        .await
-        .expect("failed to fetch");
-    let resp: Response = resp_value.dyn_into().unwrap();
-
-    let json = JsFuture::from(resp.json().unwrap())
-        .await
-        .expect("failed to get response text");
+    let json = send_request(&win, request).await?;
 
     let llm_response: LlmResponse =
         serde_wasm_bindgen::from_value(json).map_err(|_| "Failed to deserialize JSON")?;
-    let data = extract_code_blocks_from_markdown(&llm_response.output, "json");
+    let blocks = extract_code_blocks_from_markdown(&llm_response.output, "json");
+    let data = blocks
+        .first()
+        .ok_or("No blocks")?;
 
-    log!("Response: {:?}", llm_response);
-
-    Ok(data[0].clone())
+    Ok(data.clone())
 }
 
 pub fn format_gem_with_classification(gem: DataGem) -> String {
@@ -119,7 +130,7 @@ pub fn format_gem_with_classification(gem: DataGem) -> String {
     );
 }
 
-pub async fn combine_data(gems: Vec<DataGem>, description: String) -> Result<LlmResponse, String> {
+pub async fn combine_data(gems: Vec<DataGem>, description: String) -> Result<LlmResponse, JsValue> {
     let win = window();
     let mut opts = RequestInit::new();
     opts.method("POST");
@@ -137,14 +148,7 @@ pub async fn combine_data(gems: Vec<DataGem>, description: String) -> Result<Llm
 
     let request = Request::new_with_str_and_init(LLM_URL, &opts).unwrap();
 
-    let resp_value = JsFuture::from(win.fetch_with_request(&request))
-        .await
-        .expect("failed to fetch");
-    let resp: Response = resp_value.dyn_into().unwrap();
-
-    let json = JsFuture::from(resp.json().unwrap())
-        .await
-        .expect("failed to get response text");
+    let json = send_request(&win, request).await?;
 
     let llm_response: LlmResponse =
         serde_wasm_bindgen::from_value(json).map_err(|_| "Failed to deserialize JSON")?;
