@@ -52,6 +52,7 @@ export function createProxy<T>(
   cell: Cell<T>,
   path: PropertyKey[]
 ): CellValueProxy<T> | T {
+  console.log("createProxy", path);
   const target = cell.getAtPath(path);
   if (typeof target !== "object" || target === null) return target;
 
@@ -62,11 +63,21 @@ export function createProxy<T>(
       const value = cell.getAtPath([...path, prop]);
       if (typeof value !== "object" || value === null) return value;
       // TODO: Follow multiple references
+      // TODO: Handle $ref literals
       if ("$ref" in value && Array.isArray(value.$ref))
         return createProxy(cell, value.$ref);
       if (isCell(value)) return createProxy(value, []);
-      if (isCellReference(value)) return createProxy(value.cell, value.path);
-      else return createProxy(cell, [...path, prop]);
+      if (isCellReference(value)) {
+        let nextValue: CellReference = value;
+        const seen = new Set<CellReference>([nextValue]);
+        while (isCellReference(nextValue.cell.getAtPath(nextValue.path))) {
+          nextValue = nextValue.cell.getAtPath(nextValue.path);
+          if (seen.has(value))
+            throw `Infinite cell reference with ${value.path.join(".")}`;
+          seen.add(value);
+        }
+        return createProxy(value.cell, value.path);
+      } else return createProxy(cell, [...path, prop]);
     },
     set: (_target, prop, value) => {
       if (isCellProxy(value)) value = value[getCellReference];

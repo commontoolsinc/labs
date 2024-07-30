@@ -106,4 +106,12 @@ describe("createProxy", () => {
     proxy.y = ref;
     expect(proxy.y).toBe(42);
   });
+
+  it.only("should handle infinite loops in cell references", () => {
+    const c = cell<any>({ x: 42 });
+    const ref = { cell: c, path: ["x"] };
+    const proxy = createProxy(c, []);
+    proxy.x = ref;
+    expect(() => proxy.x).toThrow();
+  });
 });
