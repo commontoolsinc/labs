@@ -44,6 +44,7 @@ pub fn DataGemEditor(
     selected: bool,
     #[prop(into)] on_toggle: Callback<String>,
     #[prop(into)] on_classify: Callback<(String, ClassificationData, String, String)>,
+    #[prop(into)] on_delete: Callback<String>,
 ) -> impl IntoView {
     let id = store_value(id);
     let (description, set_description) = create_signal(gem.description.clone());
@@ -206,6 +207,17 @@ pub fn DataGemEditor(
                                 "Run Action"
                             </button>
                         </div>
+                    </td>
+                </tr>
+                <tr>
+                    <td colspan="2" style="text-align: right;">
+                        <button
+                            type="button"
+                            class="delete"
+                            on:click=move |_| on_delete.call(id.get_value())
+                        >
+                            "Delete"
+                        </button>
                     </td>
                 </tr>
             </table>
