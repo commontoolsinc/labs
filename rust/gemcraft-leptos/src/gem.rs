@@ -74,8 +74,7 @@ pub fn DataGemEditor(
                 handle_explode_action(id.get_value(), json_data.get()).await;
             }
             GemAction::MakeVariations => {
-                log!("Make variations action");
-                todo!("Implement make variations action");
+                handle_make_variations_action(id.get_value(), json_data.get(), description.get()).await;
             }
             GemAction::Classify => {
                 handle_classify_action(id.get_value(), json_data.get(), description.get(), on_classify).await;
@@ -108,6 +107,18 @@ pub fn DataGemEditor(
             }
             Err(e) => {
                 log!("Error: {:?}", e);
+            }
+        }
+    }
+
+    async fn handle_make_variations_action(id: String, json_data: String, description: String) {
+        match llm::make_variations(json_data, description).await {
+            Ok(variations) => {
+                log!("Variations for gem {}: {}", id, variations);
+                // TODO: Handle the variations, e.g., update the UI or create new gems
+            }
+            Err(e) => {
+                log!("Error making variations for gem {}: {:?}", id, e);
             }
         }
     }
