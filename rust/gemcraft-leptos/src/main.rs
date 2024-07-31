@@ -42,6 +42,11 @@ fn App() -> impl IntoView {
         db::save("", &id, &gem);
     };
 
+    let delete = |id: String, gems: &mut HashMap<String, DataGem>| {
+        gems.remove(&id);
+        db::delete("", &id);
+    };
+
     let on_toggle_selection = move |id| {
         set_selection.update(|current| {
             if current.contains(&id) {
@@ -109,6 +114,10 @@ fn App() -> impl IntoView {
         });
     };
 
+    let on_delete = move |id| {
+        gems.update(|gems| delete(id, gems));
+    };
+
     view! {
         <div class="app"><div>
         <div>
@@ -135,13 +144,29 @@ fn App() -> impl IntoView {
 
         {move || gems()
             .into_iter()
-            .map(|(id, gem)| view! { <DataGemEditor id=id.to_string() gem=gem selected=selection.get().contains(&id) on_classify=on_classify on_toggle=on_toggle_selection /> })
+            .map(|(id, gem)| view! {
+                <DataGemEditor
+                    id=id.to_string()
+                    gem=gem
+                    selected=selection.get().contains(&id)
+                    on_classify=on_classify
+                    on_toggle=on_toggle_selection
+                    on_delete=on_delete
+                /> 
+            })
             .collect_view()}
         </div>
         </div>
             <div>
                 <div class="gem-list">
-                    {move || selection.get().iter().map(|id| view! { <MiniDataGemPreview gem=gems.get().get(id).unwrap().clone() /> }).collect_view()}
+                    { move || selection
+                        .get()
+                        .iter()
+                        .map(|id| view! { 
+                            <MiniDataGemPreview gem=gems.get().get(id).unwrap().clone() />
+                        })
+                        .collect_view()
+                    }
                 </div>
                 <input type="text" placeholder="Search" on:input=move |e| search.set(event_target_value(&e)) prop:value=search></input>
                 <button on:click=move |_| combine_data.dispatch(gems)>"Imagine"</button>

@@ -206,18 +206,14 @@ pub fn DataGemEditor(
                             >
                                 "Run Action"
                             </button>
-                        </div>
-                    </td>
-                </tr>
-                <tr>
-                    <td colspan="2" style="text-align: right;">
-                        <button
+                            <button
                             type="button"
                             class="danger"
                             on:click=move |_| on_delete.call(id.get_value())
                         >
                             "Delete"
                         </button>
+                        </div>
                     </td>
                 </tr>
             </table>
