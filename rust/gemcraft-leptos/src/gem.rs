@@ -9,7 +9,7 @@ use crate::{
 
 #[derive(Clone, PartialEq)]
 enum GemAction {
-    Parameterize,
+    Decompose,
     Explode,
     MakeVariations,
     Classify,
@@ -66,9 +66,9 @@ pub fn DataGemEditor(
 
     let run_action = create_action(move |_| async move {
         match selected_action.get() {
-            GemAction::Parameterize => {
-                log!("Parameterize action");
-                todo!("Implement parameterize action");
+            GemAction::Decompose => {
+                log!("Decompose action");
+                todo!("Implement decompose action");
             }
             GemAction::Explode => {
                 handle_explode_action(id.get_value(), json_data.get()).await;
@@ -175,7 +175,7 @@ pub fn DataGemEditor(
                                     let value = event_target_value(&ev);
                                     set_selected_action.set(match value.as_str() {
                                         "classify" => GemAction::Classify,
-                                        "parameterize" => GemAction::Parameterize,
+                                        "decompose" => GemAction::Decompose,
                                         "explode" => GemAction::Explode,
                                         "make-variations" => GemAction::MakeVariations,
                                         _ => GemAction::Classify,
@@ -183,7 +183,7 @@ pub fn DataGemEditor(
                                 }
                             >
                                 <option value="classify">"Classify"</option>
-                                <option value="parameterize">"Parameterize"</option>
+                                <option value="decompose">"Decompose"</option>
                                 <option value="explode">"Explode"</option>
                                 <option value="make-variations">"Make Variations"</option>
                             </select>
