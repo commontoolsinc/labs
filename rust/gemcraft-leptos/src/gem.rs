@@ -153,17 +153,6 @@ pub fn DataGemEditor(
                 </tr>
                 <tr>
                     <td colspan="2">
-                    <button
-                        type="button"
-                        on:click=move |_| classify_data.dispatch(())
-                        class="classify"
-                    >
-                        "Classify Data"
-                    </button>
-                    </td>
-                </tr>
-                <tr>
-                    <td colspan="2">
                         <div class="actions-section">
                             <select
                                 on:change=move |ev| {
