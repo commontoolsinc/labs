@@ -103,6 +103,14 @@ export class State<T> {
       causes: { ...this.causes, ...causes },
     });
   }
+
+  // Get a subkey of the state, returning a new state
+  key<K extends keyof T>(key: K) {
+    return new State({
+      value: this.value[key],
+      causes: this.causes,
+    });
+  }
 }
 
 export const state = <T>(options: {

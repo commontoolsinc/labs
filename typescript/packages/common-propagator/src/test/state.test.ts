@@ -90,3 +90,18 @@ describe("State.merge()", () => {
     assert.equal(a, c);
   });
 });
+
+describe("State.key()", () => {
+  it("it returns a new state for the key of the value", () => {
+    const a = state({ value: { b: 1 } });
+    const b = a.key("b");
+    assert.notEqual(a, b);
+    assert.equal(b.value, 1);
+  });
+
+  it("carries forward the causes of the parent state", () => {
+    const a = state({ value: { b: 1 }, causes: { z: 1 } });
+    const b = a.key("b");
+    assert.equal(b.causes.z, 1);
+  });
+});
