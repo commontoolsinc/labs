@@ -113,6 +113,14 @@ pub fn DataGemEditor(
                 <tr>
                     <td>
                 <label for="description">Description</label>
+                <br />
+                <button
+                    type="button"
+                    on:click=move |_| hallucinate_data.dispatch(())
+                    class="classify"
+                >
+                    "Hallucinate Data"
+                </button>
                 </td>
                 <td>
                 <textarea
@@ -124,17 +132,6 @@ pub fn DataGemEditor(
                     rows="4"
                 ></textarea>
                 </td>
-                </tr>
-                <tr>
-                    <td colspan="2">
-                    <button
-                        type="button"
-                        on:click=move |_| hallucinate_data.dispatch(())
-                        class="classify"
-                    >
-                        "Hallucinate Data"
-                    </button>
-                    </td>
                 </tr>
                 <tr>
                 <td><label for="json-editor">JSON Editor</label></td>
