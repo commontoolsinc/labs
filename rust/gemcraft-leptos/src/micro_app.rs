@@ -68,7 +68,6 @@ pub fn MicroAppGrid(
     input: ReadSignal<String>,
     #[prop(into)] on_save: Callback<()>,
 ) -> impl IntoView {
-    let ideas = create_memo(move |_| parse_micro_app_ideas(&input.get()));
 
     view! {
         <>
@@ -105,7 +104,7 @@ pub fn MicroAppGrid(
             </style>
             <div class="micro-app-grid">
                 <For
-                    each=move || ideas.get()
+                    each=move || parse_micro_app_ideas(&input.get())
                     key=|idea| idea.title.clone()
                     children=move |idea| {
                         view! {

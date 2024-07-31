@@ -45,6 +45,7 @@ pub fn build_classify_request(json: String, description: String) -> Result<Reque
         "action": String::from("create"),
         "system": String::from("Examine the provided raw data and context and return a brief title, it's confidentiality/sensitivity (public, shared, personal, secret), the data type and emoji to describe the data. Respond with a JSON object containing the title and emoji, e.g. ```json\n{\"title\": \"Personal Budget\", \"contentType\": \"Spreadsheet\", \"emoji\": \"💸\", \"sensitivity\": \"personal/financial\"}``` wrapped in a block e.g. ```json\n{}\n```."),
         "message": msg,
+        "model": "gpt-4o-mini"
     });
     let body = serde_json::to_string(&body).unwrap();
     opts.body(Some(&JsValue::from_str(&body)));
@@ -104,10 +105,11 @@ pub async fn hallucinate_data(description: String) -> Result<String, JsValue> {
         system: String::from("imagine realistic JSON data based on the user request, respond with only JSON wrapped in a block e.g. ```json\n{}\n```."),
         message: msg,
     };
-    let body = serde_json::to_string(&body).unwrap();
+    let body = serde_json::to_string(&body)
+        .map_err(|_| "Failed to serialize JSON")?;
     opts.body(Some(&JsValue::from_str(&body)));
 
-    let request = Request::new_with_str_and_init(LLM_URL, &opts).unwrap();
+    let request = Request::new_with_str_and_init(LLM_URL, &opts)?;
 
     let json = send_request(&win, request).await?;
 
@@ -130,7 +132,7 @@ pub fn format_gem_with_classification(gem: DataGem) -> String {
     );
 }
 
-pub async fn combine_data(gems: Vec<DataGem>, description: String) -> Result<LlmResponse, JsValue> {
+pub async fn combine_data(gems: Vec<DataGem>, description: String, model: String) -> Result<LlmResponse, JsValue> {
     let win = window();
     let mut opts = RequestInit::new();
     opts.method("POST");
@@ -138,11 +140,12 @@ pub async fn combine_data(gems: Vec<DataGem>, description: String) -> Result<Llm
     let msg = format!("Imagine a micro-app that could operate on the following data gems: \n\n{}\n\nRemember, we are creating micro-apps that literally operate ON the provided data as their input. Inspired by: {}", gems.iter().map(|g| format_gem_with_classification(g.clone())).collect::<Vec<String>>().join("\n\n"), description);
 
     // set body as JSON string
-    let body = CreateThreadRequest {
-        action: String::from("create"),
-        system: String::from("Examine the provided data gems and imagine what kind of user interface / mini-app a user would like to use to explore, manipulate and interact with the data contained within. You must utilize all provided data gems and consider how to use them TOGETHER in an app. You should create a view model based on the source data + app concept. Describe each micro-app within a <micro-app-idea> tag with a small spec listing what a user can do with a loose idea of the visual components and layout. Include an emoji as the icon and the code for an <svg> showing a rough wireframe sketch of how the interface could look as well as the full data-model within <view-model> tags. Be creative in how you combine the input data and request, try to delight the user."),
-        message: msg,
-    };
+    let body = json!({
+        "action": String::from("create"),
+        "system": String::from("Examine the provided data gems and imagine what kind of user interface / mini-app a user would like to use to explore, manipulate and interact with the data contained within. You must utilize all provided data gems and consider how to use them TOGETHER in an app. You should create a view model based on the source data + app concept. Describe each micro-app within a <micro-app-idea> tag with a small spec listing what a user can do with a loose idea of the visual components and layout. Include an emoji as the icon and the code for an <svg> showing a rough wireframe sketch of how the interface could look as well as the full data-model within <view-model> tags. Be creative in how you combine the input data and request, try to delight the user. You must respond in clear sections <micro-app-idea><title></title><emoji></emoji><spec></spec><view-model></view-model><svg></svg></micro-app-idea>"),
+        "message": msg,
+        "model": model.clone(),
+    });
     let body = serde_json::to_string(&body).unwrap();
     opts.body(Some(&JsValue::from_str(&body)));
 

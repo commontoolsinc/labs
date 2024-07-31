@@ -35,6 +35,7 @@ fn App() -> impl IntoView {
     let search = create_rw_signal(String::new());
     let (selection, set_selection) = create_signal(Vec::<String>::new());
     let (imagined_apps, set_imagined_apps) = create_signal(String::new());
+    let (llm_model, set_llm_model) = create_signal(String::from("claude-3-5-sonnet-20240620"));
 
     let insert = |id: String, gem: DataGem, gems: &mut HashMap<String, DataGem>| {
         gems.insert(id.clone(), gem.clone());
@@ -74,7 +75,7 @@ fn App() -> impl IntoView {
                 .filter(|(id, _)| selection.get().contains(id))
                 .map(|(_, gem)| gem.clone())
                 .collect();
-            let data = llm::combine_data(selectedData, search.get()).await;
+            let data = llm::combine_data(selectedData, search.get(), llm_model.get()).await;
             match data {
                 Ok(data) => {
                     log!("Response: {:?}", data);
@@ -144,6 +145,14 @@ fn App() -> impl IntoView {
                 </div>
                 <input type="text" placeholder="Search" on:input=move |e| search.set(event_target_value(&e)) prop:value=search></input>
                 <button on:click=move |_| combine_data.dispatch(gems)>"Imagine"</button>
+                <select on:change=move |e| set_llm_model.set(event_target_value(&e)) prop:value=llm_model>
+                    <option value="claude-3-5-sonnet-20240620">Claude 3.5 Sonnet</option>
+                    <option value="gpt-4o-mini">GPT-4o Mini</option>
+                    <option value="llama3-405b-instruct-maas">Llama 3.1 405B</option>
+                    <option value="gpt-4o">GPT-4o</option>
+                    <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                    <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
+                </select>
                 <MicroAppGrid input={imagined_apps} on_save=on_save></MicroAppGrid>
             </div>
         </div>

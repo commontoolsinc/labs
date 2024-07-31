@@ -5,18 +5,21 @@ import {
   handleAppendToConversationThread,
   handleCreateConversationThread,
 } from "./actions.ts";
+import { ModelName } from "./llm.ts";
 
 type CreateConversationThreadRequest = {
   action: "create";
   message: string;
   system: string;
   activeTools: CoreTool[];
+  model?: ModelName;
 };
 
 type AppendToConversationThreadRequest = {
   action: "append";
   threadId: string;
-  message?: string;
+  message: string;
+  model?: ModelName;
 };
 
 type ConversationThreadRequest =
@@ -30,15 +33,14 @@ export async function start() {
   // make sure to initialize oakCors before the routers
   app.use(
     oakCors({
-      origin: "http://localhost:8080",
+      origin: "http://localhost:8081",
       optionsSuccessStatus: 200,
       methods: "POST, OPTIONS",
     })
   );
 
   const router = new Router();
-
-  router.post("/", async (context) => {
+  const handler = async (context) => {
     const request = context.request;
     if (request.method === "POST") {
       try {
@@ -47,21 +49,23 @@ export async function start() {
 
         switch (action) {
           case "create": {
-            const { message, system, activeTools } = body;
+            const { message, system, activeTools, model } = body;
             const result = await handleCreateConversationThread(
               system,
               message,
-              activeTools
+              activeTools,
+              model
             );
             context.response.status = 200;
             context.response.body = result;
             break;
           }
           case "append": {
-            const { threadId, message } = body;
+            const { threadId, message, model } = body;
             const result = await handleAppendToConversationThread(
               threadId,
-              message
+              message,
+              model
             );
             context.response.status = 200;
             context.response.body = result;
@@ -79,7 +83,10 @@ export async function start() {
       context.response.status = 405;
       context.response.body = { error: "Method not allowed" };
     }
-  });
+  };
+
+  router.post("/", handler);
+  router.post("/api/v0/llm", handler);
 
   app.use(router.routes());
   app.use(router.allowedMethods());

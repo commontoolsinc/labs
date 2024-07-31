@@ -3,7 +3,7 @@ import {
   ConversationThread,
   InMemoryConversationThreadManager,
 } from "./conversation.ts";
-import { ask } from "./llm.ts";
+import { ModelName, ask } from "./llm.ts";
 
 const cache: Record<string, any> = {};
 const threadManager = new InMemoryConversationThreadManager();
@@ -36,7 +36,8 @@ type ErrorResponse = {
 export async function handleCreateConversationThread(
   system: string,
   message: string,
-  activeTools: CoreTool[]
+  activeTools: CoreTool[],
+  model?: ModelName
 ): Promise<CreateConversationThreadResponse | ErrorResponse> {
   const cacheKey = `${system}:${message}`;
 
@@ -49,7 +50,7 @@ export async function handleCreateConversationThread(
   }
 
   const thread = threadManager.create(system, message, activeTools);
-  const result = await processConversationThread(thread);
+  const result = await processConversationThread(thread, model);
   if (result.type === "error") {
     throw new Error(result.error);
   }
@@ -65,7 +66,8 @@ export async function handleCreateConversationThread(
 
 export async function handleAppendToConversationThread(
   threadId: string,
-  message?: string
+  message?: string,
+  model?: ModelName
 ): Promise<AppendToConversationThreadResponse | ErrorResponse> {
   const thread = threadManager.get(threadId);
   if (!thread) {
@@ -81,7 +83,7 @@ export async function handleAppendToConversationThread(
     ]);
   }
 
-  const result = await processConversationThread(thread);
+  const result = await processConversationThread(thread, model);
   if (result.type === "error") {
     return result;
   }
@@ -105,14 +107,16 @@ type ProcessConversationThreadResult =
   | { type: "error"; error: string };
 
 async function processConversationThread(
-  thread: ConversationThread
+  thread: ConversationThread,
+  model?: ModelName
 ): Promise<ProcessConversationThreadResult> {
-  console.log("Thread", thread);
+  console.log("Process thread", thread.id, model);
 
   const result = await ask(
     thread.conversation,
     thread.system,
-    thread.activeTools
+    thread.activeTools,
+    model
   );
   if (!result) {
     return { type: "error", error: "No response from Anthropic" };
