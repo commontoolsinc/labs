@@ -128,7 +128,7 @@ pub async fn explode_data(json: String) -> Result<String, JsValue> {
     let mut opts = RequestInit::new();
     opts.method("POST");
 
-    let msg = format!("Explode the following JSON object into subcomponents:\n\n{}", json);
+    let msg = format!("Explode the following JSON object into subcomponents:\n\njson```{}```", json);
 
     // set body as JSON string
     let body = CreateThreadRequest {
