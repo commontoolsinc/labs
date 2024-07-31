@@ -111,7 +111,7 @@ pub fn DataGemEditor(
                     </td>
                 </tr>
                 <tr>
-                <td><label for="json-editor" class="block mb-2 font-bold">JSON Editor</label></td>
+                <td><label for="json-editor">JSON Editor</label></td>
                 <td><textarea
                     id="json-editor"
                     on:input=move |ev| {
