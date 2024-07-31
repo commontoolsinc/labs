@@ -14,5 +14,6 @@ pub struct DataGem {
     pub classification: Option<ClassificationData>,
     pub description: String,
     pub json_data: String,
+    #[serde(default)]
     pub derived_from: Vec<String>,
 }
