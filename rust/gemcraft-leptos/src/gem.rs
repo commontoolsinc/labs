@@ -48,7 +48,7 @@ pub fn DataGemEditor(
     let id = store_value(id);
     let (description, set_description) = create_signal(gem.description.clone());
     let (json_data, set_json_data) = create_signal(gem.json_data.clone());
-    let (selected_action, set_selected_action) = create_signal(GemAction::Parameterize);
+    let (selected_action, set_selected_action) = create_signal(GemAction::Classify);
 
     let classify_data = create_action(move |_| async move {
         handle_classify_action(id.get_value(), json_data.get(), description.get(), on_classify).await;
@@ -169,18 +169,18 @@ pub fn DataGemEditor(
                                 on:change=move |ev| {
                                     let value = event_target_value(&ev);
                                     set_selected_action.set(match value.as_str() {
+                                        "classify" => GemAction::Classify,
                                         "parameterize" => GemAction::Parameterize,
                                         "explode" => GemAction::Explode,
                                         "make-variations" => GemAction::MakeVariations,
-                                        "classify" => GemAction::Classify,
-                                        _ => GemAction::Parameterize,
+                                        _ => GemAction::Classify,
                                     });
                                 }
                             >
+                                <option value="classify">"Classify"</option>
                                 <option value="parameterize">"Parameterize"</option>
                                 <option value="explode">"Explode"</option>
                                 <option value="make-variations">"Make Variations"</option>
-                                <option value="classify">"Classify"</option>
                             </select>
                             <button
                                 type="button"
