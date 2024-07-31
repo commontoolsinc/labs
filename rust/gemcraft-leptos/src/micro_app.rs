@@ -70,38 +70,7 @@ pub fn MicroAppGrid(
 ) -> impl IntoView {
 
     view! {
-        <>
-            <style>
-                {r#"
-                .micro-app-grid {
-                    display: grid;
-                    grid-template-columns: repeat(2, 1fr);
-                    gap: 1rem;
-                }
-                .micro-app-item {
-                    border: 1px solid #ccc;
-                    padding: 1rem;
-                    border-radius: 0.5rem;
-                }
-                .micro-app-title {
-                    font-size: 1.25rem;
-                    font-weight: bold;
-                    margin-bottom: 0.5rem;
-                }
-                .micro-app-spec {
-                    margin-top: 0.5rem;
-                }
-                .micro-app-spec-title {
-                    font-weight: 600;
-                }
-                .micro-app-spec-content {
-                    white-space: pre-wrap;
-                }
-                .micro-app-svg {
-                    margin-top: 1rem;
-                }
-                "#}
-            </style>
+        <>            
             <div class="micro-app-grid">
                 <For
                     each=move || parse_micro_app_ideas(&input.get())
