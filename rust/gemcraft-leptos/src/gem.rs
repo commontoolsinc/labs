@@ -71,8 +71,7 @@ pub fn DataGemEditor(
                 todo!("Implement parameterize action");
             }
             GemAction::Explode => {
-                log!("Explode action");
-                todo!("Implement explode action");
+                handle_explode_action(id.get_value(), json_data.get()).await;
             }
             GemAction::MakeVariations => {
                 log!("Make variations action");
@@ -83,6 +82,18 @@ pub fn DataGemEditor(
             }
         }
     });
+
+    async fn handle_explode_action(id: String, json_data: String) {
+        match llm::explode_data(json_data).await {
+            Ok(exploded_data) => {
+                log!("Exploded data for gem {}: {}", id, exploded_data);
+                // TODO: Handle the exploded data, e.g., update the UI or create new gems
+            }
+            Err(e) => {
+                log!("Error exploding data for gem {}: {:?}", id, e);
+            }
+        }
+    }
 
     async fn handle_classify_action(
         id: String,

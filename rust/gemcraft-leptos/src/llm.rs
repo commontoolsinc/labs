@@ -123,6 +123,37 @@ pub async fn hallucinate_data(description: String) -> Result<String, JsValue> {
     Ok(data.clone())
 }
 
+pub async fn explode_data(json: String) -> Result<String, JsValue> {
+    let win = window();
+    let mut opts = RequestInit::new();
+    opts.method("POST");
+
+    let msg = format!("Explode the following JSON object into subcomponents:\n\n{}", json);
+
+    // set body as JSON string
+    let body = CreateThreadRequest {
+        action: String::from("create"),
+        system: String::from("Break down the provided JSON object into a list of smaller, logically related JSON objects. Each subcomponent should represent a meaningful part of the original data. Respond with only JSON wrapped in a block e.g. ```json\n[]\n```."),
+        message: msg,
+    };
+    let body = serde_json::to_string(&body)
+        .map_err(|_| "Failed to serialize JSON")?;
+    opts.body(Some(&JsValue::from_str(&body)));
+
+    let request = Request::new_with_str_and_init(LLM_URL, &opts)?;
+
+    let json = send_request(&win, request).await?;
+
+    let llm_response: LlmResponse =
+        serde_wasm_bindgen::from_value(json).map_err(|_| "Failed to deserialize JSON")?;
+    let blocks = extract_code_blocks_from_markdown(&llm_response.output, "json");
+    let data = blocks
+        .first()
+        .ok_or("No blocks")?;
+
+    Ok(data.clone())
+}
+
 pub fn format_gem_with_classification(gem: DataGem) -> String {
     return format!(
         "<gem><description>{}</description><json>{}</json><classification>{:?}</classification></gem>",
