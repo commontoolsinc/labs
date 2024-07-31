@@ -185,6 +185,37 @@ pub async fn make_variations(json: String, description: String) -> Result<String
     Ok(data.clone())
 }
 
+pub async fn decompose_data(json: String) -> Result<String, JsValue> {
+    let win = window();
+    let mut opts = RequestInit::new();
+    opts.method("POST");
+
+    let msg = format!("Decompose the following JSON object:\n\n{}", json);
+
+    // set body as JSON string
+    let body = CreateThreadRequest {
+        action: String::from("create"),
+        system: String::from("Analyze the provided JSON object and identify regions within it that could be extracted to variables. These are typically embedded pieces of data that are statically defined but could be made dynamic. Return a JSON object containing two properties: 'templated' (the original object with {{mustache}} style placeholders replacing the extracted regions) and 'extracted' (an object containing the extracted regions as key-value pairs). Respond with only JSON wrapped in a block e.g. ```json\n{\"templated\": {}, \"extracted\": {}}\n```."),
+        message: msg,
+    };
+    let body = serde_json::to_string(&body)
+        .map_err(|_| "Failed to serialize JSON")?;
+    opts.body(Some(&JsValue::from_str(&body)));
+
+    let request = Request::new_with_str_and_init(LLM_URL, &opts)?;
+
+    let json = send_request(&win, request).await?;
+
+    let llm_response: LlmResponse =
+        serde_wasm_bindgen::from_value(json).map_err(|_| "Failed to deserialize JSON")?;
+    let blocks = extract_code_blocks_from_markdown(&llm_response.output, "json");
+    let data = blocks
+        .first()
+        .ok_or("No blocks")?;
+
+    Ok(data.clone())
+}
+
 pub fn format_gem_with_classification(gem: DataGem) -> String {
     return format!(
         "<gem><description>{}</description><json>{}</json><classification>{:?}</classification></gem>",

@@ -67,8 +67,7 @@ pub fn DataGemEditor(
     let run_action = create_action(move |_| async move {
         match selected_action.get() {
             GemAction::Decompose => {
-                log!("Decompose action");
-                todo!("Implement decompose action");
+                handle_decompose_action(id.get_value(), json_data.get()).await;
             }
             GemAction::Explode => {
                 handle_explode_action(id.get_value(), json_data.get()).await;
@@ -81,6 +80,18 @@ pub fn DataGemEditor(
             }
         }
     });
+
+    async fn handle_decompose_action(id: String, json_data: String) {
+        match llm::decompose_data(json_data).await {
+            Ok(decomposed_data) => {
+                log!("Decomposed data for gem {}: {}", id, decomposed_data);
+                // TODO: Handle the decomposed data, e.g., update the UI or create new gems
+            }
+            Err(e) => {
+                log!("Error decomposing data for gem {}: {:?}", id, e);
+            }
+        }
+    }
 
     async fn handle_explode_action(id: String, json_data: String) {
         match llm::explode_data(json_data).await {
