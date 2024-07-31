@@ -50,10 +50,6 @@ pub fn DataGemEditor(
     let (json_data, set_json_data) = create_signal(gem.json_data.clone());
     let (selected_action, set_selected_action) = create_signal(GemAction::Classify);
 
-    let classify_data = create_action(move |_| async move {
-        handle_classify_action(id.get_value(), json_data.get(), description.get(), on_classify).await;
-    });
-
     let hallucinate_data = create_action(move |_| async move {
         let description = move || description.get();
 
