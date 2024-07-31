@@ -86,7 +86,7 @@ pub fn DataGemEditor(
             <table>
                 <tr>
                     <td>
-                <label for="description" class="block mb-2 font-bold">Description</label>
+                <label for="description">Description</label>
                 </td>
                 <td>
                 <textarea
@@ -95,7 +95,6 @@ pub fn DataGemEditor(
                         set_description.set(event_target_value(&ev));
                     }
                     prop:value=description
-                    class="w-full p-2 border rounded"
                     rows="4"
                 ></textarea>
                 </td>
@@ -119,7 +118,6 @@ pub fn DataGemEditor(
                         set_json_data.set(event_target_value(&ev));
                     }
                     prop:value=json_data
-                    class="w-full p-2 border rounded font-mono"
                     rows="10"
                 ></textarea></td>
                 </tr>
