@@ -7,6 +7,13 @@ use crate::{
     toggle::ToggleContent,
 };
 
+#[derive(Clone, PartialEq)]
+enum GemAction {
+    Parameterize,
+    Explode,
+    MakeVariations,
+}
+
 #[component]
 pub fn DataGemPreview(classification: ClassificationData) -> impl IntoView {
     view! {
@@ -40,6 +47,7 @@ pub fn DataGemEditor(
     let id = store_value(id);
     let (description, set_description) = create_signal(gem.description.clone());
     let (json_data, set_json_data) = create_signal(gem.json_data.clone());
+    let (selected_action, set_selected_action) = create_signal(GemAction::Parameterize);
 
     let classify_data = create_action(move |_| async move {
         let json = move || json_data.get();
@@ -71,6 +79,23 @@ pub fn DataGemEditor(
             }
             Err(e) => {
                 log!("Error: {:?}", e);
+            }
+        }
+    });
+
+    let run_action = create_action(move |_| async move {
+        match selected_action.get() {
+            GemAction::Parameterize => {
+                log!("Parameterize action");
+                todo!("Implement parameterize action");
+            }
+            GemAction::Explode => {
+                log!("Explode action");
+                todo!("Implement explode action");
+            }
+            GemAction::MakeVariations => {
+                log!("Make variations action");
+                todo!("Implement make variations action");
             }
         }
     });
@@ -130,6 +155,33 @@ pub fn DataGemEditor(
                     >
                         "Classify Data"
                     </button>
+                    </td>
+                </tr>
+                <tr>
+                    <td colspan="2">
+                        <div class="actions-section">
+                            <select
+                                on:change=move |ev| {
+                                    let value = event_target_value(&ev);
+                                    set_selected_action.set(match value.as_str() {
+                                        "parameterize" => GemAction::Parameterize,
+                                        "explode" => GemAction::Explode,
+                                        "make-variations" => GemAction::MakeVariations,
+                                        _ => GemAction::Parameterize,
+                                    });
+                                }
+                            >
+                                <option value="parameterize">"Parameterize"</option>
+                                <option value="explode">"Explode"</option>
+                                <option value="make-variations">"Make Variations"</option>
+                            </select>
+                            <button
+                                type="button"
+                                on:click=move |_| run_action.dispatch(())
+                            >
+                                "Run Action"
+                            </button>
+                        </div>
                     </td>
                 </tr>
             </table>
