@@ -151,7 +151,7 @@ pub fn DataGemEditor(
                 <button
                     type="button"
                     on:click=move |_| hallucinate_data.dispatch(())
-                    class="classify"
+                    class="primary"
                 >
                     "Hallucinate"
                 </button>
@@ -201,7 +201,7 @@ pub fn DataGemEditor(
                             </select>
                             <button
                                 type="button"
-                                class="classify"
+                                class="primary"
                                 on:click=move |_| run_action.dispatch(())
                             >
                                 "Run Action"
@@ -213,7 +213,7 @@ pub fn DataGemEditor(
                     <td colspan="2" style="text-align: right;">
                         <button
                             type="button"
-                            class="delete"
+                            class="danger"
                             on:click=move |_| on_delete.call(id.get_value())
                         >
                             "Delete"
