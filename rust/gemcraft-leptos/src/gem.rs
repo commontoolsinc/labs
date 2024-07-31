@@ -12,6 +12,7 @@ enum GemAction {
     Parameterize,
     Explode,
     MakeVariations,
+    Classify,
 }
 
 #[component]
@@ -50,23 +51,7 @@ pub fn DataGemEditor(
     let (selected_action, set_selected_action) = create_signal(GemAction::Parameterize);
 
     let classify_data = create_action(move |_| async move {
-        let json = move || json_data.get();
-        let description = move || description.get();
-
-        let data = llm::classify_data(json(), description()).await;
-        match data {
-            Ok(data) => {
-                on_classify((
-                    id.get_value().clone(),
-                    data.clone(),
-                    description(),
-                    json_data(),
-                ));
-            }
-            Err(e) => {
-                log!("Error: {:?}", e);
-            }
-        }
+        handle_classify_action(id.get_value(), json_data.get(), description.get(), on_classify).await;
     });
 
     let hallucinate_data = create_action(move |_| async move {
@@ -97,8 +82,28 @@ pub fn DataGemEditor(
                 log!("Make variations action");
                 todo!("Implement make variations action");
             }
+            GemAction::Classify => {
+                handle_classify_action(id.get_value(), json_data.get(), description.get(), on_classify).await;
+            }
         }
     });
+
+    async fn handle_classify_action(
+        id: String,
+        json_data: String,
+        description: String,
+        on_classify: Callback<(String, ClassificationData, String, String)>,
+    ) {
+        let data = llm::classify_data(json_data.clone(), description.clone()).await;
+        match data {
+            Ok(data) => {
+                on_classify((id, data.clone(), description, json_data));
+            }
+            Err(e) => {
+                log!("Error: {:?}", e);
+            }
+        }
+    }
 
     view! {
         <form class="gem-form">
@@ -167,6 +172,7 @@ pub fn DataGemEditor(
                                         "parameterize" => GemAction::Parameterize,
                                         "explode" => GemAction::Explode,
                                         "make-variations" => GemAction::MakeVariations,
+                                        "classify" => GemAction::Classify,
                                         _ => GemAction::Parameterize,
                                     });
                                 }
@@ -174,6 +180,7 @@ pub fn DataGemEditor(
                                 <option value="parameterize">"Parameterize"</option>
                                 <option value="explode">"Explode"</option>
                                 <option value="make-variations">"Make Variations"</option>
+                                <option value="classify">"Classify"</option>
                             </select>
                             <button
                                 type="button"
