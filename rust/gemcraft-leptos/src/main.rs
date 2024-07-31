@@ -65,6 +65,7 @@ fn App() -> impl IntoView {
                     classification: Some(classification),
                     description,
                     json_data,
+                    derived_from: Vec::new(),
                 },
                 gems,
             )
@@ -101,12 +102,14 @@ fn App() -> impl IntoView {
         gems.update(|gems| {
             for idea in ideas {
                 let id = Uuid::new_v4().to_string();
+                let derived_from = selection.get();
                 insert(
                     id.clone(),
                     DataGem {
                         classification: None,
                         description: idea.spec.clone(),
                         json_data: idea.view_model.clone(),
+                        derived_from,
                     },
                     gems,
                 );
@@ -135,6 +138,7 @@ fn App() -> impl IntoView {
                     }),
                     description: "Test".to_string(),
                     json_data: "{}".to_string(),
+                    derived_from: Vec::new(),
                 });
         })>
             "Add Gem"
