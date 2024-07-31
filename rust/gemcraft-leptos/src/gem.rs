@@ -119,7 +119,7 @@ pub fn DataGemEditor(
                     on:click=move |_| hallucinate_data.dispatch(())
                     class="classify"
                 >
-                    "Hallucinate Data"
+                    "Hallucinate"
                 </button>
                 </td>
                 <td>
@@ -134,14 +134,15 @@ pub fn DataGemEditor(
                 </td>
                 </tr>
                 <tr>
-                <td><label for="json-editor">JSON Editor</label></td>
-                <td><textarea
+                <td colspan="2">
+                <textarea
                     id="json-editor"
                     on:input=move |ev| {
                         set_json_data.set(event_target_value(&ev));
                     }
                     prop:value=json_data
                     rows="10"
+                    cols="36"
                 ></textarea></td>
                 </tr>
                 <tr>
@@ -166,6 +167,7 @@ pub fn DataGemEditor(
                             </select>
                             <button
                                 type="button"
+                                class="classify"
                                 on:click=move |_| run_action.dispatch(())
                             >
                                 "Run Action"
