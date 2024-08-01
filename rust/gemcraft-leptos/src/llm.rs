@@ -190,3 +190,24 @@ pub async fn combine_data(gems: Vec<DataGem>, description: String, model: String
 
     Ok(llm_response)
 }
+
+pub async fn implement_app(app_idea: String, model: String) -> Result<LlmResponse, JsValue> {
+    log!("Implementing app: {:?}, model: {:?}", app_idea, model);
+
+    let system_prompt = include_str!("./implement_app_prompt.md");
+
+    let msg = format!("Implement the following micro-app idea: \n\n{}", app_idea);
+
+    let body = json!({
+        "action": String::from("create"),
+        "message": msg,
+        "model": model,
+        "system": system_prompt,
+    });
+    log!("Body: {:?}", body);
+
+    let llm_response = send_llm_request(serde_json::from_value(body).unwrap()).await?;
+    log!("Response: {:?}", llm_response);
+
+    Ok(llm_response)
+}
