@@ -4,8 +4,10 @@ import {
   mergeObjects,
   sendValueToBinding,
   mapBindingsToCell,
+  followCellReferences,
+  followAliases,
 } from "../../src/runner/utils.js";
-import { cell } from "../../src/runner/cell.js";
+import { cell, CellReference } from "../../src/runner/cell.js";
 
 describe("extractDefaultValues", () => {
   it("should extract default values from a schema", () => {
@@ -138,5 +140,65 @@ describe("mapBindingToCell", () => {
       y: { $alias: { cell: testCell, path: ["b", "c"] } },
       z: 3,
     });
+  });
+});
+
+describe("followCellReferences", () => {
+  it("should follow a simple cell reference", () => {
+    const testCell = cell({ value: 42 });
+    const reference: CellReference = { cell: testCell, path: ["value"] };
+    const result = followCellReferences(reference);
+    expect(result.cell.getAtPath(result.path)).toBe(42);
+  });
+
+  it("should follow nested cell references", () => {
+    const innerCell = cell({ inner: 10 });
+    const outerCell = cell({
+      outer: { cell: innerCell, path: ["inner"] },
+    });
+    const reference: CellReference = { cell: outerCell, path: ["outer"] };
+    const result = followCellReferences(reference);
+    expect(result.cell.getAtPath(result.path)).toBe(10);
+  });
+
+  it("should throw an error on circular references", () => {
+    const cellA = cell({});
+    const cellB = cell({});
+    cellA.send({ ref: { cell: cellB, path: ["ref"] } });
+    cellB.send({ ref: { cell: cellA, path: ["ref"] } });
+    const reference: CellReference = { cell: cellA, path: ["ref"] };
+    expect(() => followCellReferences(reference)).toThrow(
+      "Reference cycle detected"
+    );
+  });
+});
+
+describe("followAliases", () => {
+  it("should follow a simple alias", () => {
+    const testCell = cell({ value: 42 });
+    const binding = { $alias: { path: ["value"] } };
+    const result = followAliases(binding, testCell);
+    expect(result.cell.getAtPath(result.path)).toBe(42);
+  });
+
+  it("should follow nested aliases", () => {
+    const innerCell = cell({ inner: 10 });
+    const outerCell = cell({
+      outer: { $alias: { cell: innerCell, path: ["inner"] } },
+    });
+    const binding = { $alias: { path: ["outer"] } };
+    const result = followAliases(binding, outerCell);
+    expect(result.cell).toEqual(innerCell);
+    expect(result.path).toEqual(["inner"]);
+    expect(result.cell.getAtPath(result.path)).toBe(10);
+  });
+
+  it("should throw an error on circular aliases", () => {
+    const cellA = cell({});
+    const cellB = cell({});
+    cellA.send({ alias: { $alias: { cell: cellB, path: ["alias"] } } });
+    cellB.send({ alias: { $alias: { cell: cellA, path: ["alias"] } } });
+    const binding = { $alias: { path: ["alias"] } };
+    expect(() => followAliases(binding, cellA)).toThrow("Alias cycle detected");
   });
 });

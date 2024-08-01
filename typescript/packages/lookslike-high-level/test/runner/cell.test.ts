@@ -108,6 +108,13 @@ describe("createProxy", () => {
     expect(proxy.x).toBe(42);
   });
 
+  it("should handle aliases when writing", () => {
+    const c = cell<any>({ x: { $alias: { path: ["y"] } }, y: 42 });
+    const proxy = createProxy(c, []);
+    proxy.x = 100;
+    expect(c.get().y).toBe(100);
+  });
+
   it("should handle nested cells", () => {
     const innerCell = cell(42);
     const outerCell = cell({ x: innerCell });

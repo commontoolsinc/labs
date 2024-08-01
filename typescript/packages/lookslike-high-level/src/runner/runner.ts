@@ -17,8 +17,6 @@ export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
   // TODO: Some initial values can be aliases to outside cells
   const recipeCell = cell(mergeObjects(defaults, bindings, recipe.initial));
 
-  console.log(recipeCell.get());
-
   for (const node of recipe.nodes) {
     if (isModule(node.module)) {
       switch (node.module.type) {
@@ -51,13 +49,16 @@ export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
         }
         case "passthrough": {
           const inputs = mapBindingsToCell(node.inputs, recipeCell);
+          const inputsCell = cell(inputs);
           const reads = findAllAliasedCells(inputs);
 
           const outputs = mapBindingsToCell(node.outputs, recipeCell);
           const writes = findAllAliasedCells(outputs);
 
           const action: Action = (log: ReactivityLog) => {
-            sendValueToBinding(recipeCell, node.outputs, node.inputs, log);
+            console.log("passthrough node called");
+            const inputsProxy = inputsCell.getAsProxy([], log);
+            sendValueToBinding(recipeCell, node.outputs, inputsProxy, log);
           };
 
           schedule(action, { reads, writes } satisfies ReactivityLog);
@@ -70,12 +71,16 @@ export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
             mergeObjects(node.inputs, node.outputs),
             recipeCell
           );
-          runRecipe(node.module.implementation, inputs);
+          console.log("running inner recipe", JSON.stringify(inputs, null, 2));
+          const result = runRecipe(node.module.implementation, inputs);
+          result.sink((value) =>
+            console.log("inner recipe", JSON.stringify(value, null, 2))
+          );
           break;
         }
       }
     } else if (isAlias(node.module)) {
-      // TODO: Implement
+      // TODO: Implement, a dynamic node
     } else {
       throw new Error(`Unknown module type: ${node.module}`);
     }

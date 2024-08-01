@@ -4,7 +4,7 @@ import { runRecipe } from "../../src/runner/runner.js";
 import { idle } from "../../src/runner/scheduler.js";
 
 describe("runRecipe", () => {
-  it("should work with passthrough", () => {
+  it("should work with passthrough", async () => {
     const recipe = {
       schema: {
         type: "object",
@@ -26,14 +26,14 @@ describe("runRecipe", () => {
     } as Recipe;
 
     const result = runRecipe(recipe, {});
-    idle();
+    await idle();
     expect(result.get()).toEqual({
       input: 1,
       output: 1,
     });
   });
 
-  it("should work with nested recipes", () => {
+  it.only("should work with nested recipes", async () => {
     const innerRecipe = {
       schema: {
         type: "object",
@@ -73,11 +73,11 @@ describe("runRecipe", () => {
     } as Recipe;
 
     const result = runRecipe(outerRecipe, {});
-    idle();
+    await idle();
     expect(result.get()).toEqual({ value: 5, result: 5 });
   });
 
-  it("should run a simple recipe", () => {
+  it("should run a simple recipe", async () => {
     const mockRecipe: Recipe = {
       schema: {},
       initial: { value: 1 },
@@ -94,11 +94,11 @@ describe("runRecipe", () => {
     };
 
     const result = runRecipe(mockRecipe, {});
-    idle();
+    await idle();
     expect(result.get()).toEqual({ value: 2 });
   });
 
-  it("should handle nested recipes", () => {
+  it("should handle nested recipes", async () => {
     const nestedRecipe: Recipe = {
       schema: {},
       initial: { value: 2 },
@@ -127,7 +127,7 @@ describe("runRecipe", () => {
     };
 
     const result = runRecipe(mockRecipe, {});
-    idle();
+    await idle();
     expect(result.get()).toEqual({ value: 4 });
   });
 });

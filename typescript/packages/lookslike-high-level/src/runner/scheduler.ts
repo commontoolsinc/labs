@@ -1,10 +1,10 @@
 import { Cancel } from "@commontools/common-frp";
-import { Cell, ReactivityLog } from "./cell.js";
+import { CellImpl, ReactivityLog } from "./cell.js";
 
 export type Action = (log: ReactivityLog) => any;
 
 const pending = new Set<Action>();
-const dirty = new Set<Cell<any>>();
+const dirty = new Set<CellImpl<any>>();
 const dependencies = new WeakMap<Action, ReactivityLog>();
 const cancels = new WeakMap<Action, Cancel[]>();
 const idlePromises: (() => void)[] = [];
@@ -15,35 +15,13 @@ const MAX_ITERATIONS_PER_RUN = 100;
 
 export function schedule(action: Action, log: ReactivityLog) {
   dependencies.set(action, log);
+  log.reads.forEach((cell) => dirty.add(cell));
 
   if (pending.size === 0) queueMicrotask(execute);
   pending.add(action);
 }
 
-export function run(action: Action): void {
-  const log = { reads: new Set<Cell<any>>(), writes: new Set<Cell<any>>() };
-
-  action(log);
-
-  // Note: By adding the listeners after the call we avoid triggering a re-run
-  // of the action if it changed a r/w cell. Note that this also means that
-  // those actions can't loop on themselves.
-  dependencies.set(action, log);
-  cancels.set(
-    action,
-    Array.from(log.reads).map((cell) =>
-      cell.updates({
-        send: () => {
-          dirty.add(cell);
-          if (pending.size === 0) queueMicrotask(execute);
-          pending.add(action);
-        },
-      })
-    )
-  );
-}
-
-export function remove(fn: Action): void {
+export function unschedule(fn: Action): void {
   cancels.get(fn)?.forEach((cancel) => cancel());
   cancels.delete(fn);
   dependencies.delete(fn);
@@ -65,8 +43,33 @@ function handleError(error: Error) {
   for (const handler of errorHandlers) handler(error);
 }
 
+function runAction(action: Action): void {
+  const log = {
+    reads: new Set<CellImpl<any>>(),
+    writes: new Set<CellImpl<any>>(),
+  };
+
+  action(log);
+
+  // Note: By adding the listeners after the call we avoid triggering a re-run
+  // of the action if it changed a r/w cell. Note that this also means that
+  // those actions can't loop on themselves.
+  dependencies.set(action, log);
+  cancels.set(
+    action,
+    Array.from(log.reads).map((cell) =>
+      cell.updates(() => {
+        dirty.add(cell);
+        if (pending.size === 0) queueMicrotask(execute);
+        pending.add(action);
+      })
+    )
+  );
+}
+
 function execute() {
   const order = topologicalSort(pending, dependencies, dirty);
+  console.log("execute", order, pending, dirty.size);
 
   // Clear pending and dirty sets, and cancel all listeners for cells on already
   // scheduled actions.
@@ -80,7 +83,7 @@ function execute() {
     loopCounter.set(fn, (loopCounter.get(fn) || 0) + 1);
     if (loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN)
       handleError(new Error("Too many iterations"));
-    else run(fn);
+    else runAction(fn);
   }
 
   if (pending.size === 0) {
@@ -97,7 +100,7 @@ function execute() {
 function topologicalSort(
   actions: Set<Action>,
   dependencies: WeakMap<Action, ReactivityLog>,
-  dirty: Set<Cell<any>>
+  dirty: Set<CellImpl<any>>
 ): Action[] {
   const relevantActions = new Set<Action>();
   const graph = new Map<Action, Set<Action>>();

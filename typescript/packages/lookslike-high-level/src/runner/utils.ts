@@ -1,5 +1,10 @@
 import { isAlias } from "../builder/index.js";
-import { CellImpl, ReactivityLog } from "./cell.js";
+import {
+  CellImpl,
+  ReactivityLog,
+  CellReference,
+  isCellReference,
+} from "./cell.js";
 
 export function extractDefaultValues(schema: any): any {
   if (typeof schema !== "object" || schema === null) return undefined;
@@ -109,4 +114,46 @@ export function findAllAliasedCells(binding: any): Set<CellImpl<any>> {
   }
   find(binding);
   return cells;
+}
+
+// Follows cell references and returns the last one
+export function followCellReferences(
+  reference: CellReference,
+  log?: ReactivityLog
+): any {
+  const seen = new Set<CellReference>();
+  let result = reference;
+
+  while (isCellReference(reference)) {
+    log?.reads.add(reference.cell);
+    result = reference;
+    if (seen.has(reference)) throw new Error("Reference cycle detected");
+    seen.add(reference);
+    reference = reference.cell.getAtPath(reference.path);
+  }
+
+  return result;
+}
+
+// Follows aliases and returns cell reference describing the last alias.
+export function followAliases(
+  alias: any,
+  cell: CellImpl<any>,
+  log?: ReactivityLog
+): CellReference {
+  const seen = new Set<any>();
+  let result: CellReference;
+
+  if (!isAlias(alias)) throw new Error("Not an alias");
+  while (isAlias(alias)) {
+    if (alias.$alias.cell) cell = alias.$alias.cell;
+    log?.reads.add(alias.$alias.cell);
+    result = { cell, path: alias.$alias.path };
+
+    if (seen.has(alias)) throw new Error("Alias cycle detected");
+    seen.add(alias);
+    alias = cell.getAtPath(alias.$alias.path);
+  }
+
+  return result!;
 }

@@ -1,14 +1,17 @@
 import { isAlias } from "../builder/types.js";
 import { getValueAtPath, setValueAtPath } from "../builder/utils.js";
+import { followCellReferences, followAliases } from "./utils.js";
 
 export type CellImpl<T> = {
   get(): T;
   getAsProxy(path?: PropertyKey[], log?: ReactivityLog): Cell<T> | T;
   send(value: T): void;
+  updates(callback: () => void): () => void;
   sink(callback: (value: T) => void): () => void;
   getAtPath(path: PropertyKey[]): T;
   setAtPath(path: PropertyKey[], newValue: any): void;
   freeze(): void;
+  isFrozen(): boolean;
   [isCellMarker]: true;
 };
 
@@ -40,12 +43,14 @@ export function cell<T>(value?: T): CellImpl<T> {
       value = newValue;
       for (const callback of callbacks) callback(value as T);
     },
+    updates: (callback: () => void) => {
+      callbacks.add(callback);
+      return () => callbacks.delete(callback);
+    },
     sink: (callback: (value: T) => void) => {
       callback(value as T);
       callbacks.add(callback);
-      return () => {
-        callbacks.delete(callback);
-      };
+      return () => callbacks.delete(callback);
     },
     getAtPath: (path: PropertyKey[]) => getValueAtPath(value, path),
     setAtPath: (path: PropertyKey[], newValue: any) => {
@@ -56,6 +61,7 @@ export function cell<T>(value?: T): CellImpl<T> {
       readOnly = true;
       value = Object.freeze(value);
     },
+    isFrozen: () => readOnly,
     [isCellMarker]: true,
   };
 
@@ -71,46 +77,33 @@ export function createProxy<T>(
   if (typeof target !== "object" || target === null) return target;
 
   return new Proxy(target as object, {
-    apply: (_target, _thisArg, argumentsList) => {
-      if (!path.length || path[path.length - 1] !== "set")
-        throw new Error("only calls to set are supported");
-      log?.writes.add(cell);
-      cell.setAtPath(path, argumentsList[0]);
-    },
     get: (_target, prop) => {
       if (prop === getCellReference)
         return { cell, path } satisfies CellReference;
       else if (typeof prop === "symbol") return; // TODO: iterators, etc.
 
       log?.reads.add(cell);
-
       const value = cell.getAtPath([...path, prop]);
       if (typeof value !== "object" || value === null) return value;
-      if (isAlias(value))
-        return createProxy(value.$alias.cell ?? cell, value.$alias.path);
-      if (isCell(value)) return createProxy(value, []);
-      if (isCellReference(value)) {
-        console.log("isCellReference", value);
-        let nextValue: CellReference = value;
-        let nextCell = nextValue.cell ?? cell;
-        const seen = new Set<CellReference>([nextValue]);
-        while (isCellReference(nextCell.getAtPath(nextValue.path))) {
-          nextValue = nextValue.cell.getAtPath(nextValue.path);
-          if (seen.has(value))
-            throw `Infinite cell reference with ${value.path.join(".")}`;
-          seen.add(value);
-          if (nextValue.cell) {
-            nextCell = nextValue.cell;
-            log?.reads.add(nextCell);
-          } // else: It's a cell-local
-        }
-        return createProxy(nextCell, nextValue.path);
+      else if (isCell(value)) return createProxy(value, []);
+      else if (isAlias(value)) {
+        const ref = followAliases(value, cell, log);
+        return createProxy(ref.cell, ref.path);
+      } else if (isCellReference(value)) {
+        const ref = followCellReferences(value, log);
+        return createProxy(ref.cell, ref.path);
       } else return createProxy(cell, [...path, prop]);
     },
     set: (_target, prop, value) => {
       if (isCellProxy(value)) value = value[getCellReference];
-      log?.writes.add(cell);
-      cell.setAtPath([...path, prop], value);
+
+      const ref = isAlias(cell.getAtPath([...path, prop]))
+        ? followAliases(cell.getAtPath([...path, prop]), cell, log)
+        : { cell, path: [...path, prop] };
+
+      if (ref.cell.isFrozen()) return false;
+      log?.writes.add(ref.cell);
+      ref.cell.setAtPath(ref.path, value);
       return true;
     },
   }) as Cell<T>;
