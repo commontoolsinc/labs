@@ -1,5 +1,6 @@
 import { Recipe, isModule, isRecipe, isReference } from "../builder/index.js";
-import { cell, CellReference, CellImpl } from "./cell.js";
+import { cell, CellImpl, ReactivityLog } from "./cell.js";
+import { Action, schedule } from "./scheduler.js";
 
 export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
   // Walk the recipe's schema and extract all default values
@@ -14,13 +15,35 @@ export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
   for (const node of recipe.nodes) {
     if (isModule(node.module)) {
       switch (node.module.type) {
-        case "javascript":
-          //node.module.implementation(recipeCell);
+        case "javascript": {
+          const inputs = mapBindingsToCell(node.inputs, recipeCell);
+          const inputsCell = cell(inputs);
+          inputsCell.freeze(); // Freezes the bindings, not referenced cells.
+          // TODO: This isn't correct, as module can write into passed cells. We
+          // should look at the schema to find out what cells are read and
+          // written.
+          const reads = findAllReferencedCell(inputs);
+
+          const outputs = mapBindingsToCell(node.outputs, recipeCell);
+          const writes = findAllReferencedCell(outputs);
+
+          const fn = node.module.implementation;
+          if (typeof fn !== "function") throw new Error(`Invalid module`);
+
+          const action: Action = (log: ReactivityLog) => {
+            const inputsProxy = inputsCell.getAsProxy([], log);
+            const result = fn(inputsProxy);
+            sendValueToBinding(recipeCell, outputs, result, log);
+          };
+
+          schedule(action, { reads, writes } satisfies ReactivityLog);
           break;
-        case "passthrough":
+        }
+        case "passthrough": {
           sendValueToBinding(recipeCell, node.outputs, node.inputs);
           break;
-        case "recipe":
+        }
+        case "recipe": {
           if (!isRecipe(node.module.implementation))
             throw new Error(`Invalid recipe`);
           const inputs = mapBindingsToCell(
@@ -29,6 +52,7 @@ export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
           );
           runRecipe(node.module.implementation, inputs);
           break;
+        }
       }
     } else if (isReference(node.module)) {
       // TODO: Implement
@@ -101,23 +125,26 @@ export function mergeObjects(...objects: any[]): any {
 export function sendValueToBinding(
   cell: CellImpl<any>,
   binding: any,
-  value: any
+  value: any,
+  log?: ReactivityLog
 ) {
   if (isReference(binding)) {
     cell.setAtPath(binding.$ref.path, value);
+    log?.writes.add(cell);
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value))
       for (let i = 0; i < Math.min(binding.length, value.length); i++)
-        sendValueToBinding(cell, binding[i], value[i]);
+        sendValueToBinding(cell, binding[i], value[i], log);
   } else if (typeof binding === "object" && binding !== null) {
     for (const key of Object.keys(binding))
-      if (key in value) sendValueToBinding(cell, binding[key], value[key]);
+      if (key in value) sendValueToBinding(cell, binding[key], value[key], log);
   } else {
     if (binding !== value)
       throw new Error(`Got ${value} instead of ${binding}`);
   }
 }
 
+// Turn local references into explicit references to named cell.
 export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
   function convert(binding: any): any {
     if (isReference(binding))
@@ -132,4 +159,21 @@ export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
     return binding;
   }
   return convert(binding) as T;
+}
+
+// Traverses binding and returns all cells referenced.
+export function findAllReferencedCell(binding: any): Set<CellImpl<any>> {
+  const cells = new Set<CellImpl<any>>();
+  function find(binding: any) {
+    if (isReference(binding)) {
+      cells.add(binding.$ref.cell);
+      find(binding.$ref.cell.getAtPath(binding.$ref.path));
+    } else if (Array.isArray(binding)) {
+      for (const value of binding) find(value);
+    } else if (typeof binding === "object" && binding !== null) {
+      for (const value of Object.values(binding)) find(value);
+    }
+  }
+  find(binding);
+  return cells;
 }
