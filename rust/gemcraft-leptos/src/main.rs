@@ -87,7 +87,8 @@ fn App() -> impl IntoView {
             match data {
                 Ok(data) => {
                     log!("Response: {:?}", data);
-                    set_imagined_apps.set(data.output);
+                    let output = data.output.replace("\\n", "\n");
+                    set_imagined_apps.set(output);
                 }
                 Err(e) => {
                     log!("Error: {:?}", e);
