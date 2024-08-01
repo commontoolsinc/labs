@@ -87,8 +87,9 @@ fn parse_xml_and_combine(input: &str, sketches: Vec<String>) -> Vec<MicroAppIdea
 pub fn MicroAppGrid(
     input: ReadSignal<String>,
     #[prop(into)] on_save: Callback<()>,
+    #[prop(into)] on_implement: Callback<String>,
+    implemented_apps: ReadSignal<String>,
 ) -> impl IntoView {
-
 
     view! {
         <>            
@@ -125,7 +126,16 @@ pub fn MicroAppGrid(
                             Tab {
                                 id: "tab3".into(),
                                 title: "Code".into(),
-                                content: Rc::new(move || view! { <div>"Content for Tab 3"</div> }.into_any()),
+                                content: Rc::new(move || {
+                                    view! {
+                                        <div>
+                                            <button on:click=move |_| on_implement(input.get())>
+                                                "Generate Implementation"
+                                            </button>
+                                            <pre>{move || implemented_apps.get()}</pre>
+                                        </div>
+                                    }.into_any()
+                                }),
                             },
                         ];
 

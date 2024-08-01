@@ -19,6 +19,7 @@ use data::{ClassificationData, DataGem};
 use gem::{DataGemEditor, MiniDataGemPreview};
 use micro_app::{parse_micro_app_ideas, MicroAppGrid};
 use tabs::{Tab, TabControl};
+use crate::llm::LlmResponse;
 
 fn main() {
     console_error_panic_hook::set_once();
@@ -37,6 +38,7 @@ fn App() -> impl IntoView {
     let search = create_rw_signal(String::new());
     let (selection, set_selection) = create_signal(Vec::<String>::new());
     let (imagined_apps, set_imagined_apps) = create_signal(String::new());
+    let (implemented_apps, set_implemented_apps) = create_signal(String::new());
     let (llm_model, set_llm_model) = create_signal(String::from("claude-3-5-sonnet-20240620"));
 
     let insert = |id: String, gem: DataGem, gems: &mut HashMap<String, DataGem>| {
@@ -187,7 +189,23 @@ fn App() -> impl IntoView {
                 </select>
                 <code>{move || llm_model.get()}</code>
                 
-                <MicroAppGrid input={imagined_apps} on_save=on_save></MicroAppGrid>
+                <MicroAppGrid
+                    input={imagined_apps}
+                    on_save=on_save
+                    on_implement=move |app_spec| {
+                        spawn_local(async move {
+                            match llm::implement_app(app_spec, llm_model.get()).await {
+                                Ok(LlmResponse { output, .. }) => {
+                                    set_implemented_apps.set(output);
+                                }
+                                Err(e) => {
+                                    log!("Error implementing app: {:?}", e);
+                                }
+                            }
+                        });
+                    }
+                    implemented_apps={implemented_apps}
+                ></MicroAppGrid>
             </div>
         </div>
     }
