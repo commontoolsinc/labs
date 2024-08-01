@@ -1,10 +1,13 @@
+use std::rc::Rc;
+
+use html::AnyElement;
 use leptos::*;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub struct Tab {
     pub id: String,
     pub title: String,
-    pub content: String,
+    pub content: Rc<dyn Fn() -> HtmlElement<AnyElement>>,
 }
 
 #[component]

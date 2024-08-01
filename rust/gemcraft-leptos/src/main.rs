@@ -124,24 +124,6 @@ fn App() -> impl IntoView {
         gems.update(|gems| delete(id, gems));
     };
 
-    let tabs = vec![
-        Tab {
-            id: "tab1".into(),
-            title: "Tab 1".into(),
-            content: "Content for Tab 1".into(),
-        },
-        Tab {
-            id: "tab2".into(),
-            title: "Tab 2".into(),
-            content: "Content for Tab 2".into(),
-        },
-        Tab {
-            id: "tab3".into(),
-            title: "Tab 3".into(),
-            content: "Content for Tab 3".into(),
-        },
-    ];
-
     view! {
         <div class="app"><div>
         <div>
@@ -203,7 +185,8 @@ fn App() -> impl IntoView {
                     <option value="claude-3-opus-20240229">Claude 3 Opus</option>
                     <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
                 </select>
-                <TabControl tabs=tabs default_tab="tab1".into() />
+                <code>{move || llm_model.get()}</code>
+                
                 <MicroAppGrid input={imagined_apps} on_save=on_save></MicroAppGrid>
             </div>
         </div>

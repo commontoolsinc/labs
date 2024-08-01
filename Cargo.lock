@@ -1444,6 +1444,7 @@ dependencies = [
  "indexed_db_futures",
  "js-sys",
  "leptos",
+ "quick-xml",
  "regex",
  "serde",
  "serde-wasm-bindgen",
@@ -2727,6 +2728,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5787f7cda34e3033a72192c018bc5883100330f362ef279a8cbccfce8bb4e874"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8533f14c8382aaad0d592c812ac3b826162128b65662331e1127b45c3d18536b"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

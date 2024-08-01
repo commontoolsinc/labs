@@ -29,6 +29,7 @@ pub struct CreateThreadRequest {
     pub action: String,
     pub system: String,
     pub message: String,
+    pub model: Option<String>,
 }
 
 async fn send_llm_request(body: CreateThreadRequest) -> Result<LlmResponse, JsValue> {
@@ -79,6 +80,7 @@ pub async fn classify_data(
         action: String::from("create"),
         system: String::from("Examine the provided raw data and context and return a brief title, it's confidentiality/sensitivity (public, shared, personal, secret), the data type and emoji to describe the data. Respond with a JSON object containing the title and emoji, e.g. ```json\n{\"title\": \"Personal Budget\", \"contentType\": \"Spreadsheet\", \"emoji\": \"💸\", \"sensitivity\": \"personal/financial\"}``` wrapped in a block e.g. ```json\n{}\n```."),
         message: msg,
+        model: None,
     };
 
     let llm_response = send_llm_request(body).await?;
@@ -95,6 +97,7 @@ pub async fn hallucinate_data(description: String) -> Result<String, JsValue> {
         action: String::from("create"),
         system: String::from("imagine realistic JSON data based on the user request, respond with only JSON wrapped in a block e.g. ```json\n{}\n```."),
         message: description,
+        model: None,
     };
 
     let llm_response = send_llm_request(body).await?;
@@ -108,6 +111,7 @@ pub async fn explode_data(json: String) -> Result<String, JsValue> {
         action: String::from("create"),
         system: String::from("Break down the provided JSON object into a list of smaller, logically related JSON objects. Each subcomponent should represent a meaningful part of the original data. Respond with only JSON wrapped in a block e.g. ```json\n[]\n```."),
         message: msg,
+        model: None,
     };
 
     let llm_response = send_llm_request(body).await?;
@@ -121,6 +125,7 @@ pub async fn make_variations(json: String, description: String) -> Result<String
         action: String::from("create"),
         system: String::from("Create three variations of the provided data that are 'one step away' in idea space from the original. Each variation should be a complete JSON object. Respond with only JSON wrapped in a block e.g. ```json\n[{\"variation1\":{}},{\"variation2\":{}},{\"variation3\":{}}]\n```."),
         message: msg,
+        model: None,
     };
 
     let llm_response = send_llm_request(body).await?;
@@ -134,6 +139,7 @@ pub async fn decompose_data(json: String) -> Result<String, JsValue> {
         action: String::from("create"),
         system: String::from("Analyze the provided JSON object and identify regions within it that could be extracted to variables. These are typically embedded pieces of data that are statically defined but could be made dynamic. Return a JSON object containing two properties: 'templated' (the original object with {{mustache}} style placeholders replacing the extracted regions) and 'extracted' (an object containing the extracted regions as key-value pairs). Respond with only JSON wrapped in a block e.g. ```json\n{\"templated\": {}, \"extracted\": {}}\n```."),
         message: msg,
+        model: None,
     };
 
     let llm_response = send_llm_request(body).await?;
@@ -150,14 +156,34 @@ pub fn format_gem_with_classification(gem: DataGem) -> String {
 }
 
 pub async fn combine_data(gems: Vec<DataGem>, description: String, model: String) -> Result<LlmResponse, JsValue> {
+    log!("Gems: {:?}, model: {:?}", gems, model);
     let msg = format!("Imagine a micro-app that could operate on the following data gems: \n\n{}\n\nRemember, we are creating micro-apps that literally operate ON the provided data as their input. Inspired by: {}", gems.iter().map(|g| format_gem_with_classification(g.clone())).collect::<Vec<String>>().join("\n\n"), description);
+    let system = String::from("Examine the provided data gems and imagine what kind of user interface / mini-app a user would like to use to explore, manipulate and interact with the data contained within.
+    You must utilize all provided data gems and consider how to use them TOGETHER in an app.
+    You should create a view model based on the source data + app concept. Describe each micro-app within a <micro-app-idea> tag with a small spec listing what a user can do with a loose idea of the visual components and layout.
+    
+    Include an emoji as the icon and the code for an <svg> showing a rough wireframe sketch of how the interface could look as well as the full data-model within <view-model> tags.
+    
+    Be creative in how you combine the input data and request, try to delight the user.
+    
+    You must respond in clear sections:
+    
+    <micro-app-idea>
+    <name></name>
+    <tagline></tagline
+    <icon></icon>
+    <spec></spec>
+    <view-model></view-model>
+    <sketch><svg ...></svg></sketch>
+    </micro-app-idea>");
 
     let body = json!({
         "action": String::from("create"),
-        "system": String::from("Examine the provided data gems and imagine what kind of user interface / mini-app a user would like to use to explore, manipulate and interact with the data contained within. You must utilize all provided data gems and consider how to use them TOGETHER in an app. You should create a view model based on the source data + app concept. Describe each micro-app within a <micro-app-idea> tag with a small spec listing what a user can do with a loose idea of the visual components and layout. Include an emoji as the icon and the code for an <svg> showing a rough wireframe sketch of how the interface could look as well as the full data-model within <view-model> tags. Be creative in how you combine the input data and request, try to delight the user. You must respond in clear sections <micro-app-idea><title></title><emoji></emoji><spec></spec><view-model></view-model><svg></svg></micro-app-idea>"),
         "message": msg,
-        "model": model.clone(),
+        "model": model,
+        "system": system,
     });
+    log!("Body: {:?}", body);
 
     let llm_response = send_llm_request(serde_json::from_value(body).unwrap()).await?;
     log!("Response: {:?}", llm_response);
