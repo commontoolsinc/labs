@@ -25,8 +25,8 @@ describe("runRecipe", () => {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $ref: { path: ["input"] } } },
-          outputs: { value: { $ref: { path: ["output"] } } },
+          inputs: { value: { $alias: { path: ["input"] } } },
+          outputs: { value: { $alias: { path: ["output"] } } },
         },
       ],
     } as Recipe;
@@ -34,7 +34,7 @@ describe("runRecipe", () => {
     const result = runRecipe(recipe, {});
     expect(result.get()).toEqual({
       input: 1,
-      output: { $ref: { path: ["input"] } },
+      output: { $alias: { path: ["input"] } },
     });
   });
 
@@ -53,8 +53,8 @@ describe("runRecipe", () => {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $ref: { path: ["input"] } } },
-          outputs: { value: { $ref: { path: ["output"] } } },
+          inputs: { value: { $alias: { path: ["input"] } } },
+          outputs: { value: { $alias: { path: ["output"] } } },
         },
       ],
     } as Recipe;
@@ -71,8 +71,8 @@ describe("runRecipe", () => {
       nodes: [
         {
           module: { type: "recipe", implementation: innerRecipe },
-          inputs: { input: { $ref: { path: ["value"] } } },
-          outputs: { output: { $ref: { path: ["result"] } } },
+          inputs: { input: { $alias: { path: ["value"] } } },
+          outputs: { output: { $alias: { path: ["result"] } } },
         },
       ],
     } as Recipe;
@@ -123,8 +123,8 @@ describe("runRecipe", () => {
       nodes: [
         {
           module: { type: "recipe", implementation: nestedRecipe },
-          inputs: { value: { $ref: ["value"] } },
-          outputs: { value: { $ref: ["value"] } },
+          inputs: { value: { $alias: ["value"] } },
+          outputs: { value: { $alias: ["value"] } },
         },
       ],
     };

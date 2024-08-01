@@ -64,7 +64,7 @@ describe("mergeObjects", () => {
 describe("sendValueToBinding", () => {
   it("should send value to a simple binding", () => {
     const testCell = cell({ value: 0 });
-    sendValueToBinding(testCell, { $ref: { path: ["value"] } }, 42);
+    sendValueToBinding(testCell, { $alias: { path: ["value"] } }, 42);
     expect(testCell.get()).toEqual({ value: 42 });
   });
 
@@ -72,7 +72,7 @@ describe("sendValueToBinding", () => {
     const testCell = cell({ arr: [0, 0, 0] });
     sendValueToBinding(
       testCell,
-      [{ $ref: { path: ["arr", 0] } }, { $ref: { path: ["arr", 2] } }],
+      [{ $alias: { path: ["arr", 0] } }, { $alias: { path: ["arr", 2] } }],
       [1, 3]
     );
     expect(testCell.get()).toEqual({ arr: [1, 0, 3] });
@@ -92,10 +92,10 @@ describe("sendValueToBinding", () => {
     const binding = {
       person: {
         fullName: {
-          firstName: { $ref: { path: ["user", "name", "first"] } },
-          lastName: { $ref: { path: ["user", "name", "last"] } },
+          firstName: { $alias: { path: ["user", "name", "first"] } },
+          lastName: { $alias: { path: ["user", "name", "last"] } },
         },
-        currentAge: { $ref: { path: ["user", "age"] } },
+        currentAge: { $alias: { path: ["user", "age"] } },
       },
     };
 
@@ -123,19 +123,19 @@ describe("sendValueToBinding", () => {
   });
 });
 
-describe("mapBindingToCellReferences", () => {
-  it("should map bindings to cell references", () => {
+describe("mapBindingToCell", () => {
+  it("should map bindings to cell aliases", () => {
     const testCell = cell({ a: 1, b: { c: 2 } });
     const binding = {
-      x: { $ref: { path: ["a"] } },
-      y: { $ref: { path: ["b", "c"] } },
+      x: { $alias: { path: ["a"] } },
+      y: { $alias: { path: ["b", "c"] } },
       z: 3,
     };
 
     const result = mapBindingsToCell(binding, testCell);
     expect(result).toEqual({
-      x: { $ref: { cell: testCell, path: ["a"] } },
-      y: { $ref: { cell: testCell, path: ["b", "c"] } },
+      x: { $alias: { cell: testCell, path: ["a"] } },
+      y: { $alias: { cell: testCell, path: ["b", "c"] } },
       z: 3,
     });
   });

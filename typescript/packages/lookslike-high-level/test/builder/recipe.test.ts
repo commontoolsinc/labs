@@ -35,11 +35,11 @@ describe("complex recipe function", () => {
       description: "Double a number",
       type: "object",
       properties: {
-        double: { properties: { $ref: { type: "array" } } },
+        double: { properties: { $alias: { type: "object" } } },
         x: { type: "integer", default: 1 },
       },
     });
-    expect(initial).toEqual({ double: { $ref: ["__#0"] } });
+    expect(initial).toEqual({ double: { $alias: { path: ["__#0"] } } });
   });
 
   it("is has the correct nodes", () => {
@@ -47,14 +47,14 @@ describe("complex recipe function", () => {
     expect(isModule(nodes[0].module) && nodes[0].module.type).toBe(
       "javascript"
     );
-    expect(nodes[0].inputs).toEqual({ $ref: ["x"] });
-    expect(nodes[0].outputs).toEqual({ $ref: ["__#1"] });
-    expect(nodes[1].inputs).toEqual({ $ref: ["__#1"] });
-    expect(nodes[1].outputs).toEqual({ $ref: ["__#0"] });
+    expect(nodes[0].inputs).toEqual({ $alias: { path: ["x"] } });
+    expect(nodes[0].outputs).toEqual({ $alias: { path: ["__#1"] } });
+    expect(nodes[1].inputs).toEqual({ $alias: { path: ["__#1"] } });
+    expect(nodes[1].outputs).toEqual({ $alias: { path: ["__#0"] } });
   });
 });
 
-describe("complex recipe with path references", () => {
+describe("complex recipe with path aliases", () => {
   const doubleRecipe = recipe<{ x: number }>("Double a number", ({ x }) => {
     x.setDefault(1);
     const double = lift<{ x: number }>(({ x }) => ({ doubled: x * 2 }));
@@ -70,11 +70,13 @@ describe("complex recipe with path references", () => {
       description: "Double a number",
       type: "object",
       properties: {
-        double: { properties: { $ref: { type: "array" } } },
+        double: { properties: { $alias: { type: "object" } } },
         x: { type: "integer", default: 1 },
       },
     });
-    expect(initial).toEqual({ double: { $ref: ["__#0", "doubled"] } });
+    expect(initial).toEqual({
+      double: { $alias: { path: ["__#0", "doubled"] } },
+    });
   });
 
   it("has the correct nodes", () => {
@@ -82,10 +84,12 @@ describe("complex recipe with path references", () => {
     expect(isModule(nodes[0].module) && nodes[0].module.type).toBe(
       "javascript"
     );
-    expect(nodes[0].inputs).toEqual({ x: { $ref: ["x"] } });
-    expect(nodes[0].outputs).toEqual({ $ref: ["__#1"] });
-    expect(nodes[1].inputs).toEqual({ x: { $ref: ["__#1", "doubled"] } });
-    expect(nodes[1].outputs).toEqual({ $ref: ["__#0"] });
+    expect(nodes[0].inputs).toEqual({ x: { $alias: { path: ["x"] } } });
+    expect(nodes[0].outputs).toEqual({ $alias: { path: ["__#1"] } });
+    expect(nodes[1].inputs).toEqual({
+      x: { $alias: { path: ["__#1", "doubled"] } },
+    });
+    expect(nodes[1].outputs).toEqual({ $alias: { path: ["__#0"] } });
   });
 
   it("correctly serializes to JSON", () => {

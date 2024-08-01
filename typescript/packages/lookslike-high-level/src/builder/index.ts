@@ -9,7 +9,7 @@ export {
   isCell,
   isModule,
   isRecipe,
-  isReference,
+  isAlias,
   JSONValue,
   JSON,
 } from "./types.js";

@@ -102,8 +102,8 @@ describe("createProxy", () => {
     expect(c.get()).toBe(2);
   });
 
-  it("should handle $ref in objects", () => {
-    const c = cell({ x: { $ref: { path: ["y"] } }, y: 42 });
+  it("should handle $alias in objects", () => {
+    const c = cell({ x: { $alias: { path: ["y"] } }, y: 42 });
     const proxy = createProxy(c, []);
     expect(proxy.x).toBe(42);
   });

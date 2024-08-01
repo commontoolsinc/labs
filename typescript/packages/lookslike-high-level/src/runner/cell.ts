@@ -1,4 +1,4 @@
-import { isReference } from "../builder/types.js";
+import { isAlias } from "../builder/types.js";
 import { getValueAtPath, setValueAtPath } from "../builder/utils.js";
 
 export type CellImpl<T> = {
@@ -86,8 +86,8 @@ export function createProxy<T>(
 
       const value = cell.getAtPath([...path, prop]);
       if (typeof value !== "object" || value === null) return value;
-      if (isReference(value))
-        return createProxy(value.$ref.cell ?? cell, value.$ref.path);
+      if (isAlias(value))
+        return createProxy(value.$alias.cell ?? cell, value.$alias.path);
       if (isCell(value)) return createProxy(value, []);
       if (isCellReference(value)) {
         console.log("isCellReference", value);

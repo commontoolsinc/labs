@@ -68,12 +68,12 @@ export type JSONValue =
 
 export type JSON = JSONValue | { [key: string]: JSONValue };
 
-export type Reference = {
-  $ref: { cell?: any; path: PropertyKey[] };
+export type Alias = {
+  $alias: { cell?: any; path: PropertyKey[] };
 };
 
-export function isReference(value: any): value is Reference {
-  return !!(value && value.$ref && Array.isArray(value.$ref.path));
+export function isAlias(value: any): value is Alias {
+  return !!(value && value.$alias && Array.isArray(value.$alias.path));
 }
 
 export type Module = {
@@ -92,7 +92,7 @@ export function isModule(value: any): value is Module {
 
 export type Node = {
   description?: string;
-  module: Module | Reference;
+  module: Module | Alias;
   inputs: JSON;
   outputs: JSON;
 };

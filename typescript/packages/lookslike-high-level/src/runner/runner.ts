@@ -1,4 +1,4 @@
-import { Recipe, isModule, isRecipe, isReference } from "../builder/index.js";
+import { Recipe, isModule, isRecipe, isAlias } from "../builder/index.js";
 import { cell, CellImpl, ReactivityLog } from "./cell.js";
 import { Action, schedule } from "./scheduler.js";
 
@@ -7,7 +7,7 @@ export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
   const defaults = extractDefaultValues(recipe.schema);
 
   // Generate recipe cell using defaults, bindings, and initial values
-  // TODO: Some initial values can be references to outside cells
+  // TODO: Some initial values can be aliases to outside cells
   const recipeCell = cell(mergeObjects(defaults, bindings, recipe.initial));
 
   console.log(recipeCell.get());
@@ -18,14 +18,14 @@ export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
         case "javascript": {
           const inputs = mapBindingsToCell(node.inputs, recipeCell);
           const inputsCell = cell(inputs);
-          inputsCell.freeze(); // Freezes the bindings, not referenced cells.
+          inputsCell.freeze(); // Freezes the bindings, not aliased cells.
           // TODO: This isn't correct, as module can write into passed cells. We
           // should look at the schema to find out what cells are read and
           // written.
-          const reads = findAllReferencedCell(inputs);
+          const reads = findAllAliasedCells(inputs);
 
           const outputs = mapBindingsToCell(node.outputs, recipeCell);
-          const writes = findAllReferencedCell(outputs);
+          const writes = findAllAliasedCells(outputs);
 
           const fn = node.module.implementation;
           if (typeof fn !== "function") throw new Error(`Invalid module`);
@@ -54,12 +54,8 @@ export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
           break;
         }
       }
-    } else if (isReference(node.module)) {
+    } else if (isAlias(node.module)) {
       // TODO: Implement
-    } else if (node.module === "static") {
-      // Assign inputs to outputs. Since this is called after input cells are
-      // assigned, this can include references to those cells.
-      sendValueToBinding(recipeCell, node.outputs, node.inputs);
     } else {
       throw new Error(`Unknown module type: ${node.module}`);
     }
@@ -120,7 +116,7 @@ export function mergeObjects(...objects: any[]): any {
 
 // Sends a value to a binding. If the binding is an array or object, it'll
 // traverse the binding and the valye in parallel accordingly. If the binding is
-// a reference, it will send the value to the referenced cell. If the binding is
+// an alias, it will send the value to the aliased cell. If the binding is
 // a literal, we verify that it matches the value and throw an error otherwise.
 export function sendValueToBinding(
   cell: CellImpl<any>,
@@ -128,8 +124,8 @@ export function sendValueToBinding(
   value: any,
   log?: ReactivityLog
 ) {
-  if (isReference(binding)) {
-    cell.setAtPath(binding.$ref.path, value);
+  if (isAlias(binding)) {
+    cell.setAtPath(binding.$alias.path, value);
     log?.writes.add(cell);
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value))
@@ -144,12 +140,12 @@ export function sendValueToBinding(
   }
 }
 
-// Turn local references into explicit references to named cell.
+// Turn local aliases into explicit aliases to named cell.
 export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
   function convert(binding: any): any {
-    if (isReference(binding))
+    if (isAlias(binding))
       return {
-        $ref: { ...binding.$ref, cell },
+        $alias: { ...binding.$alias, cell },
       };
     if (Array.isArray(binding)) return binding.map(convert);
     if (typeof binding === "object" && binding !== null)
@@ -161,13 +157,13 @@ export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
   return convert(binding) as T;
 }
 
-// Traverses binding and returns all cells referenced.
-export function findAllReferencedCell(binding: any): Set<CellImpl<any>> {
+// Traverses binding and returns all cells reacheable through aliases.
+export function findAllAliasedCells(binding: any): Set<CellImpl<any>> {
   const cells = new Set<CellImpl<any>>();
   function find(binding: any) {
-    if (isReference(binding)) {
-      cells.add(binding.$ref.cell);
-      find(binding.$ref.cell.getAtPath(binding.$ref.path));
+    if (isAlias(binding)) {
+      cells.add(binding.$alias.cell);
+      find(binding.$alias.cell.getAtPath(binding.$alias.path));
     } else if (Array.isArray(binding)) {
       for (const value of binding) find(value);
     } else if (typeof binding === "object" && binding !== null) {

@@ -1,10 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  isReference,
-  isModule,
-  isRecipe,
-  Value,
-} from "../../src/builder/types.js";
+import { isAlias, isModule, isRecipe, Value } from "../../src/builder/types.js";
 import {
   setValueAtPath,
   getValueAtPath,
@@ -34,9 +29,9 @@ describe("value type", () => {
 });
 
 describe("utility functions", () => {
-  it("isReference correctly identifies references", () => {
-    expect(isReference({ $ref: ["path", "to", "value"] })).toBe(true);
-    expect(isReference({ notRef: "something" })).toBe(false);
+  it("isAlias correctly identifies aliases", () => {
+    expect(isAlias({ $alias: { path: ["path", "to", "value"] } })).toBe(true);
+    expect(isAlias({ notAlias: "something" })).toBe(false);
   });
 
   it("isModule correctly identifies modules", () => {

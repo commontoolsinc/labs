@@ -7,14 +7,14 @@ import {
   isCell,
   Node,
   Module,
-  Reference,
+  Alias,
   toJSON,
 } from "./types.js";
 import { cell } from "./cell-proxy.js";
 import {
   traverseValue,
   setValueAtPath,
-  toJSONWithReferences,
+  toJSONWithAliases,
   createJsonSchema,
   moduleToJSON,
   recipeToJSON,
@@ -88,8 +88,8 @@ export function recipe<T, R>(
   // Now serialize the defaults and initial values, copying them from other
   // cells into the primary cell.
   const { value, defaultValue } = state.export();
-  const initial = toJSONWithReferences(value, paths);
-  const defaults = toJSONWithReferences(defaultValue, paths);
+  const initial = toJSONWithAliases(value, paths);
+  const defaults = toJSONWithAliases(defaultValue, paths);
 
   cells.forEach((cell) => {
     // Only process roots of extra cells:
@@ -107,10 +107,10 @@ export function recipe<T, R>(
 
   const serializedNodes = Array.from(nodes).map((node) => {
     const module = isCell(node.module)
-      ? (toJSONWithReferences(node.module, paths) as Reference)
+      ? (toJSONWithAliases(node.module, paths) as Alias)
       : (node.module as Module);
-    const inputs = toJSONWithReferences(node.inputs, paths);
-    const outputs = toJSONWithReferences(node.outputs, paths);
+    const inputs = toJSONWithAliases(node.inputs, paths);
+    const outputs = toJSONWithAliases(node.outputs, paths);
     return { module, inputs, outputs } satisfies Node;
   });
 
