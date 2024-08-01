@@ -15,7 +15,7 @@ const MAX_ITERATIONS_PER_RUN = 100;
 
 export function schedule(action: Action, log: ReactivityLog) {
   dependencies.set(action, log);
-  log.reads.forEach((cell) => dirty.add(cell));
+  log.reads.forEach(({ cell }) => dirty.add(cell));
 
   if (pending.size === 0) queueMicrotask(execute);
   pending.add(action);
@@ -44,10 +44,7 @@ function handleError(error: Error) {
 }
 
 function runAction(action: Action): void {
-  const log = {
-    reads: new Set<CellImpl<any>>(),
-    writes: new Set<CellImpl<any>>(),
-  };
+  const log: ReactivityLog = { reads: [], writes: [] };
 
   action(log);
 
@@ -57,13 +54,23 @@ function runAction(action: Action): void {
   dependencies.set(action, log);
   cancels.set(
     action,
-    Array.from(log.reads).map((cell) =>
-      cell.updates(() => {
-        dirty.add(cell);
-        if (pending.size === 0) queueMicrotask(execute);
-        pending.add(action);
+    Array.from(log.reads).map(({ cell, path }) =>
+      cell.updates((_newValue, changedPath) => {
+        if (pathAffected(changedPath, path)) {
+          dirty.add(cell);
+          if (pending.size === 0) queueMicrotask(execute);
+          pending.add(action);
+        }
       })
     )
+  );
+}
+
+function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
+  return (
+    (changedPath.length <= path.length &&
+      changedPath.every((key, index) => key === path[index])) ||
+    path.every((key, index) => key === changedPath[index])
   );
 }
 
@@ -109,7 +116,8 @@ function topologicalSort(
   // First pass: identify relevant actions
   for (const action of actions) {
     const { reads } = dependencies.get(action)!;
-    if (Array.from(reads).some((cell) => dirty.has(cell))) {
+    // TODO: Keep track of affected paths
+    if (Array.from(reads).some(({ cell }) => dirty.has(cell))) {
       relevantActions.add(action);
     }
   }
@@ -124,7 +132,12 @@ function topologicalSort(
         for (const write of writes) {
           if (
             Array.from(relevantActions).some((relevantAction) =>
-              dependencies.get(relevantAction)!.reads.has(write)
+              dependencies
+                .get(relevantAction)!
+                .reads.some(
+                  ({ cell, path }) =>
+                    cell === write.cell && pathAffected(write.path, path)
+                )
             )
           ) {
             relevantActions.add(action);
@@ -148,7 +161,12 @@ function topologicalSort(
       for (const actionB of relevantActions) {
         if (actionA !== actionB) {
           const { reads } = dependencies.get(actionB)!;
-          if (reads.has(write)) {
+          if (
+            reads.some(
+              ({ cell, path }) =>
+                cell === write.cell && pathAffected(write.path, path)
+            )
+          ) {
             graph.get(actionA)!.add(actionB);
             inDegree.set(actionB, (inDegree.get(actionB) || 0) + 1);
           }

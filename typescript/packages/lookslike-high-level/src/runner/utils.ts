@@ -69,8 +69,7 @@ export function sendValueToBinding(
 ) {
   if (isAlias(binding)) {
     const ref = followAliases(binding, cell, log);
-    ref.cell.setAtPath(ref.path, value);
-    log?.writes.add(ref.cell);
+    setNestedValue(ref.cell, ref.path, value, log);
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value))
       for (let i = 0; i < Math.min(binding.length, value.length); i++)
@@ -82,6 +81,50 @@ export function sendValueToBinding(
     if (binding !== value)
       throw new Error(`Got ${value} instead of ${binding}`);
   }
+}
+
+// Sets a value at a path, following aliases and recursing into objects. Returns
+// success, meaning no frozen cells were in the way. That is, also returns true
+// if there was no change.
+export function setNestedValue(
+  cell: CellImpl<any>,
+  path: PropertyKey[],
+  value: any,
+  log?: ReactivityLog
+): boolean {
+  let destValue = cell.getAtPath(path);
+  if (isAlias(destValue)) {
+    const ref = followAliases(destValue, cell, log);
+    return setNestedValue(ref.cell, ref.path, value, log);
+  }
+
+  // Compare destValue and value, if they are the same, recurse, otherwise write
+  // value with setAtPath
+  if (
+    typeof destValue === "object" &&
+    destValue !== null &&
+    typeof value === "object" &&
+    value !== null &&
+    Array.isArray(value) === Array.isArray(destValue)
+  ) {
+    let success = true;
+    for (const key in value)
+      if (key in destValue)
+        success &&= setNestedValue(cell, [...path, key], value[key], log);
+      else {
+        if (cell.isFrozen()) success = false;
+        else cell.setAtPath(path, value, log);
+      }
+
+    return success;
+  } else if (!Object.is(destValue, value)) {
+    // Use Object.is for comparison to handle NaN and -0 correctly
+    if (cell.isFrozen()) return false;
+    cell.setAtPath(path, value, log);
+    return true;
+  }
+
+  return true;
 }
 
 // Turn local aliases into explicit aliases to named cell.
@@ -102,11 +145,11 @@ export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
 }
 
 // Traverses binding and returns all cells reacheable through aliases.
-export function findAllAliasedCells(binding: any): Set<CellImpl<any>> {
-  const cells = new Set<CellImpl<any>>();
+export function findAllAliasedCells(binding: any): CellReference[] {
+  const cells: CellReference[] = [];
   function find(binding: any) {
     if (isAlias(binding)) {
-      cells.add(binding.$alias.cell);
+      cells.push(binding.$alias as CellReference);
       find(binding.$alias.cell.getAtPath(binding.$alias.path));
     } else if (Array.isArray(binding)) {
       for (const value of binding) find(value);
@@ -127,7 +170,7 @@ export function followCellReferences(
   let result = reference;
 
   while (isCellReference(reference)) {
-    log?.reads.add(reference.cell);
+    log?.reads.push(reference);
     result = reference;
     if (seen.has(reference)) throw new Error("Reference cycle detected");
     seen.add(reference);
@@ -149,7 +192,7 @@ export function followAliases(
   if (!isAlias(alias)) throw new Error("Not an alias");
   while (isAlias(alias)) {
     if (alias.$alias.cell) cell = alias.$alias.cell;
-    log?.reads.add(cell);
+    log?.reads.push({ cell, path: alias.$alias.path });
     result = { cell, path: alias.$alias.path };
 
     if (seen.has(alias)) throw new Error("Alias cycle detected");

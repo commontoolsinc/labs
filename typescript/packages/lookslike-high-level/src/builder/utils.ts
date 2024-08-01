@@ -17,7 +17,11 @@ export function traverseValue(value: Value<any>, fn: (value: any) => any) {
   else fn(value);
 }
 
-export function setValueAtPath(obj: any, path: PropertyKey[], value: any) {
+export function setValueAtPath(
+  obj: any,
+  path: PropertyKey[],
+  value: any
+): boolean {
   let parent = obj;
   for (let i = 0; i < path.length - 1; i++) {
     const key = path[i];
@@ -25,7 +29,9 @@ export function setValueAtPath(obj: any, path: PropertyKey[], value: any) {
       parent[key] = typeof path[i + 1] === "number" ? [] : {};
     parent = parent[key];
   }
+  if (deepEqual(parent[path[path.length - 1]], value)) return false;
   parent[path[path.length - 1]] = value;
+  return true;
 }
 
 export function getValueAtPath(obj: any, path: PropertyKey[]): any {
@@ -46,6 +52,22 @@ export function hasValueAtPath(obj: any, path: PropertyKey[]): boolean {
   }
   return current !== undefined;
 }
+
+export const deepEqual = (a: any, b: any): boolean => {
+  if (a === b) return true;
+  if (a && b && typeof a === "object" && typeof b === "object") {
+    if (a.constructor !== b.constructor) return false;
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+    if (keysA.length !== keysB.length) return false;
+    for (const key of keysA) {
+      if (!keysB.includes(key)) return false;
+      if (!deepEqual(a[key], b[key])) return false;
+    }
+    return true;
+  }
+  return a !== a && b !== b; // NaN check
+};
 
 export function toJSONWithAliases(
   value: Value<any>,

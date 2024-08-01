@@ -1,15 +1,19 @@
 import { isAlias } from "../builder/types.js";
 import { getValueAtPath, setValueAtPath } from "../builder/utils.js";
-import { followCellReferences, followAliases } from "./utils.js";
+import {
+  followCellReferences,
+  followAliases,
+  setNestedValue,
+} from "./utils.js";
 
 export type CellImpl<T> = {
   get(): T;
   getAsProxy(path?: PropertyKey[], log?: ReactivityLog): Cell<T> | T;
-  send(value: T): void;
-  updates(callback: () => void): () => void;
-  sink(callback: (value: T) => void): () => void;
+  send(value: T, log?: ReactivityLog): boolean;
+  updates(callback: (value: T, path: PropertyKey[]) => void): () => void;
+  sink(callback: (value: T, path: PropertyKey[]) => void): () => void;
   getAtPath(path: PropertyKey[]): T;
-  setAtPath(path: PropertyKey[], newValue: any): void;
+  setAtPath(path: PropertyKey[], newValue: any, log?: ReactivityLog): boolean;
   freeze(): void;
   isFrozen(): boolean;
   [isCellMarker]: true;
@@ -26,36 +30,44 @@ export type Cell<T> = T & {
 };
 
 export type ReactivityLog = {
-  reads: Set<CellImpl<any>>;
-  writes: Set<CellImpl<any>>;
+  reads: CellReference[];
+  writes: CellReference[];
 };
 
 export function cell<T>(value?: T): CellImpl<T> {
-  const callbacks = new Set<(value: T) => void>();
+  const callbacks = new Set<(value: T, path: PropertyKey[]) => void>();
   let readOnly = false;
 
   const self: CellImpl<T> = {
     get: () => value as T,
     getAsProxy: (path: PropertyKey[] = [], log?: ReactivityLog) =>
       createProxy(self, path, log),
-    send: (newValue: T) => {
-      if (readOnly) throw new Error("Cell is read-only");
-      value = newValue;
-      for (const callback of callbacks) callback(value as T);
-    },
-    updates: (callback: () => void) => {
+    send: (newValue: T, log?: ReactivityLog) =>
+      self.setAtPath([], newValue, log),
+    updates: (callback: (value: T, path: PropertyKey[]) => void) => {
       callbacks.add(callback);
       return () => callbacks.delete(callback);
     },
-    sink: (callback: (value: T) => void) => {
-      callback(value as T);
+    sink: (callback: (value: T, path: PropertyKey[]) => void) => {
+      callback(value as T, []);
       callbacks.add(callback);
       return () => callbacks.delete(callback);
     },
     getAtPath: (path: PropertyKey[]) => getValueAtPath(value, path),
-    setAtPath: (path: PropertyKey[], newValue: any) => {
-      setValueAtPath(value, path, newValue);
-      for (const callback of callbacks) callback(value as T);
+    setAtPath: (path: PropertyKey[], newValue: any, log?: ReactivityLog) => {
+      if (readOnly) throw new Error("Cell is read-only");
+      let changed = false;
+      if (path.length > 0) {
+        changed = setValueAtPath(value, path, newValue);
+      } else if (value !== newValue) {
+        changed = true;
+        value = newValue;
+      }
+      if (changed) {
+        log?.writes.push({ cell: self, path });
+        for (const callback of callbacks) callback(value as T, path);
+      }
+      return changed;
     },
     freeze: () => {
       readOnly = true;
@@ -89,20 +101,13 @@ export function createProxy<T>(
         return { cell, path } satisfies CellReference;
       else if (typeof prop === "symbol") return; // TODO: iterators, etc.
 
-      log?.reads.add(cell);
+      log?.reads.push({ cell, path: [...path, prop] });
       return createProxy(cell, [...path, prop]);
     },
     set: (_target, prop, value) => {
       if (isCellProxy(value)) value = value[getCellReference];
 
-      const ref = isAlias(cell.getAtPath([...path, prop]))
-        ? followAliases(cell.getAtPath([...path, prop]), cell, log)
-        : { cell, path: [...path, prop] };
-
-      if (ref.cell.isFrozen()) return false;
-      log?.writes.add(ref.cell);
-      ref.cell.setAtPath(ref.path, value);
-      return true;
+      return setNestedValue(cell, [...path, prop], value, log);
     },
   }) as Cell<T>;
 }
