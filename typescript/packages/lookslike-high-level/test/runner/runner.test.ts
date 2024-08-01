@@ -33,7 +33,7 @@ describe("runRecipe", () => {
     });
   });
 
-  it.only("should work with nested recipes", async () => {
+  it("should work with nested recipes", async () => {
     const innerRecipe = {
       schema: {
         type: "object",
@@ -77,7 +77,7 @@ describe("runRecipe", () => {
     expect(result.get()).toEqual({ value: 5, result: 5 });
   });
 
-  it("should run a simple recipe", async () => {
+  it("should run a simple module", async () => {
     const mockRecipe: Recipe = {
       schema: {},
       initial: { value: 1 },
@@ -87,29 +87,29 @@ describe("runRecipe", () => {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: {},
-          outputs: {},
+          inputs: { $alias: { path: ["value"] } },
+          outputs: { $alias: { path: ["result"] } },
         },
       ],
     };
 
     const result = runRecipe(mockRecipe, {});
     await idle();
-    expect(result.get()).toEqual({ value: 2 });
+    expect(result.get()).toEqual({ value: 1, result: 2 });
   });
 
   it("should handle nested recipes", async () => {
     const nestedRecipe: Recipe = {
       schema: {},
-      initial: { value: 2 },
+      initial: {},
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: {},
-          outputs: {},
+          inputs: { $alias: { path: ["input"] } },
+          outputs: { $alias: { path: ["output"] } },
         },
       ],
     };
@@ -120,14 +120,14 @@ describe("runRecipe", () => {
       nodes: [
         {
           module: { type: "recipe", implementation: nestedRecipe },
-          inputs: { value: { $alias: ["value"] } },
-          outputs: { value: { $alias: ["value"] } },
+          inputs: { input: { $alias: { path: ["value"] } } },
+          outputs: { output: { $alias: { path: ["result"] } } },
         },
       ],
     };
 
     const result = runRecipe(mockRecipe, {});
     await idle();
-    expect(result.get()).toEqual({ value: 4 });
+    expect(result.get()).toEqual({ value: 1, result: 2 });
   });
 });

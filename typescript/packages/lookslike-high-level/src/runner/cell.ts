@@ -74,7 +74,14 @@ export function createProxy<T>(
   log?: ReactivityLog
 ): Cell<T> | T {
   const target = cell.getAtPath(path);
-  if (typeof target !== "object" || target === null) return target;
+  if (isCell(target)) return createProxy(target, []);
+  else if (isAlias(target)) {
+    const ref = followAliases(target, cell, log);
+    return createProxy(ref.cell, ref.path);
+  } else if (isCellReference(target)) {
+    const ref = followCellReferences(target, log);
+    return createProxy(ref.cell, ref.path);
+  } else if (typeof target !== "object" || target === null) return target;
 
   return new Proxy(target as object, {
     get: (_target, prop) => {
@@ -83,16 +90,7 @@ export function createProxy<T>(
       else if (typeof prop === "symbol") return; // TODO: iterators, etc.
 
       log?.reads.add(cell);
-      const value = cell.getAtPath([...path, prop]);
-      if (typeof value !== "object" || value === null) return value;
-      else if (isCell(value)) return createProxy(value, []);
-      else if (isAlias(value)) {
-        const ref = followAliases(value, cell, log);
-        return createProxy(ref.cell, ref.path);
-      } else if (isCellReference(value)) {
-        const ref = followCellReferences(value, log);
-        return createProxy(ref.cell, ref.path);
-      } else return createProxy(cell, [...path, prop]);
+      return createProxy(cell, [...path, prop]);
     },
     set: (_target, prop, value) => {
       if (isCellProxy(value)) value = value[getCellReference];

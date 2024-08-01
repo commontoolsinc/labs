@@ -58,8 +58,9 @@ export function mergeObjects(...objects: any[]): any {
 
 // Sends a value to a binding. If the binding is an array or object, it'll
 // traverse the binding and the valye in parallel accordingly. If the binding is
-// an alias, it will send the value to the aliased cell. If the binding is
-// a literal, we verify that it matches the value and throw an error otherwise.
+// an alias, it will follow all aliases and send the value to the last aliased
+// cell. If the binding is a literal, we verify that it matches the value and
+// throw an error otherwise.
 export function sendValueToBinding(
   cell: CellImpl<any>,
   binding: any,
@@ -67,8 +68,9 @@ export function sendValueToBinding(
   log?: ReactivityLog
 ) {
   if (isAlias(binding)) {
-    cell.setAtPath(binding.$alias.path, value);
-    log?.writes.add(cell);
+    const ref = followAliases(binding, cell, log);
+    ref.cell.setAtPath(ref.path, value);
+    log?.writes.add(ref.cell);
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value))
       for (let i = 0; i < Math.min(binding.length, value.length); i++)
@@ -147,7 +149,7 @@ export function followAliases(
   if (!isAlias(alias)) throw new Error("Not an alias");
   while (isAlias(alias)) {
     if (alias.$alias.cell) cell = alias.$alias.cell;
-    log?.reads.add(alias.$alias.cell);
+    log?.reads.add(cell);
     result = { cell, path: alias.$alias.path };
 
     if (seen.has(alias)) throw new Error("Alias cycle detected");
