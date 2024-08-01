@@ -1,13 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Recipe } from "../../src/builder/types.js";
-import {
-  runRecipe,
-  extractDefaultValues,
-  mergeObjects,
-  sendValueToBinding,
-  mapBindingsToCell,
-} from "../../src/runner/runner.js";
-import { cell } from "../../src/runner/cell.js";
+import { runRecipe } from "../../src/runner/runner.js";
+import { idle } from "../../src/runner/scheduler.js";
 
 describe("runRecipe", () => {
   it("should work with passthrough", () => {
@@ -32,9 +26,10 @@ describe("runRecipe", () => {
     } as Recipe;
 
     const result = runRecipe(recipe, {});
+    idle();
     expect(result.get()).toEqual({
       input: 1,
-      output: { $alias: { path: ["input"] } },
+      output: 1,
     });
   });
 
@@ -78,9 +73,10 @@ describe("runRecipe", () => {
     } as Recipe;
 
     const result = runRecipe(outerRecipe, {});
+    idle();
     expect(result.get()).toEqual({ value: 5, result: 5 });
   });
-  /*
+
   it("should run a simple recipe", () => {
     const mockRecipe: Recipe = {
       schema: {},
@@ -89,7 +85,7 @@ describe("runRecipe", () => {
         {
           module: {
             type: "javascript",
-            implementation: (cell) => cell.value.set(cell.value.get() * 2),
+            implementation: (value: number) => value * 2,
           },
           inputs: {},
           outputs: {},
@@ -98,7 +94,8 @@ describe("runRecipe", () => {
     };
 
     const result = runRecipe(mockRecipe, {});
-    expect(result.export().value).toEqual({ value: 2 });
+    idle();
+    expect(result.get()).toEqual({ value: 2 });
   });
 
   it("should handle nested recipes", () => {
@@ -109,7 +106,7 @@ describe("runRecipe", () => {
         {
           module: {
             type: "javascript",
-            implementation: (cell) => cell.value.set(cell.value.get() * 2),
+            implementation: (value: number) => value * 2,
           },
           inputs: {},
           outputs: {},
@@ -130,7 +127,7 @@ describe("runRecipe", () => {
     };
 
     const result = runRecipe(mockRecipe, {});
-    expect(result.export().value).toEqual({ value: 4 });
+    idle();
+    expect(result.get()).toEqual({ value: 4 });
   });
-  */
 });

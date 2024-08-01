@@ -4,7 +4,7 @@ import {
   mergeObjects,
   sendValueToBinding,
   mapBindingsToCell,
-} from "../../src/runner/runner.js";
+} from "../../src/runner/utils.js";
 import { cell } from "../../src/runner/cell.js";
 
 describe("extractDefaultValues", () => {

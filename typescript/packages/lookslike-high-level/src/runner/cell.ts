@@ -3,7 +3,7 @@ import { getValueAtPath, setValueAtPath } from "../builder/utils.js";
 
 export type CellImpl<T> = {
   get(): T;
-  getAsProxy(path?: PropertyKey[]): Cell<T> | T;
+  getAsProxy(path?: PropertyKey[], log?: ReactivityLog): Cell<T> | T;
   send(value: T): void;
   sink(callback: (value: T) => void): () => void;
   getAtPath(path: PropertyKey[]): T;
