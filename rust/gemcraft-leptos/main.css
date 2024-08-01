@@ -13,6 +13,16 @@ app > div > pre {
   max-width: 50%;
 }
 
+.columns {
+  display: flex;
+  flex-direction: row;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+
 /* Data Gem Styles */
 .data-gem {
   display: flex;
@@ -168,7 +178,8 @@ button.danger {
 .micro-app-title {
   font-size: 1.25rem;
   font-weight: bold;
-  margin-bottom: 0.5rem;
+  margin: 0;
+  padding: 0.25rem ;
 }
 
 .micro-app-spec {
@@ -179,7 +190,19 @@ button.danger {
   font-weight: 600;
 }
 
+.margin-left {
+  margin-left: 1rem;
+}
+
+.micro-app-tagline {
+  margin: 0;
+  font-weight: normal;
+  font-style: italic;
+  padding: 0.25rem;
+}
+
 .micro-app-spec-content {
+  margin-top: 2rem;
   white-space: pre-wrap;
 }
 

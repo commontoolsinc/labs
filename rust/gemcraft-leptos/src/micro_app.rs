@@ -104,11 +104,15 @@ pub fn MicroAppGrid(
                                 content: Rc::new(move || view! { 
                                     <div class="micro-app-spec">
                                         <div class="micro-app-svg" inner_html=&idea.sketch></div>
-                                        <div class="data-gem">
-                                            <div class="small icon">{&idea.icon}</div>
+                                        <div class="columns">
+                                            <div class="data-gem">
+                                                <div class="small icon">{&idea.icon}</div>
+                                            </div>
+                                            <div class="rows margin-left">
+                                                <h3 class="micro-app-title">{&idea.name}</h3>
+                                                <h4 class="micro-app-tagline">{&idea.tagline}</h4>
+                                            </div>
                                         </div>
-                                        <h3 class="micro-app-title">{&idea.name}</h3>
-                                        <h4 class="micro-app-spec-title"></h4>
                                         <div class="micro-app-spec-content">{&idea.spec}</div>
                                     </div>
                                 }.into_any()),
