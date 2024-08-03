@@ -3,11 +3,12 @@ import {
   extractDefaultValues,
   mergeObjects,
   sendValueToBinding,
+  setNestedValue,
   mapBindingsToCell,
   followCellReferences,
   followAliases,
 } from "../../src/runner/utils.js";
-import { cell, CellReference } from "../../src/runner/cell.js";
+import { cell, CellReference, ReactivityLog } from "../../src/runner/cell.js";
 
 describe("extractDefaultValues", () => {
   it("should extract default values from a schema", () => {
@@ -122,6 +123,70 @@ describe("sendValueToBinding", () => {
         age: 25,
       },
     });
+  });
+});
+
+describe("setNestedValue", () => {
+  it("should set a value at a path", () => {
+    const testCell = cell({ a: 1, b: { c: 2 } });
+    const success = setNestedValue(testCell, ["b", "c"], 3);
+    expect(success).toBe(true);
+    expect(testCell.get()).toEqual({ a: 1, b: { c: 3 } });
+  });
+
+  it("should delete no longer used fields when setting a nested value", () => {
+    const testCell = cell({ a: 1, b: { c: 2, d: 3 } });
+    const success = setNestedValue(testCell, ["b"], { c: 4 });
+    expect(success).toBe(true);
+    expect(testCell.get()).toEqual({ a: 1, b: { c: 4 } });
+  });
+
+  it("should log no changes when setting a nested value that is already set", () => {
+    const testCell = cell({ a: 1, b: { c: 2 } });
+    const log: ReactivityLog = { reads: [], writes: [] };
+    const success = setNestedValue(testCell, [], { a: 1, b: { c: 2 } }, log);
+    expect(success).toBe(true); // No changes is still a success
+    expect(testCell.get()).toEqual({ a: 1, b: { c: 2 } });
+    expect(log.writes).toEqual([]);
+  });
+
+  it("should log minimal changes when setting a nested value", () => {
+    const testCell = cell({ a: 1, b: { c: 2 } });
+    const log: ReactivityLog = { reads: [], writes: [] };
+    const success = setNestedValue(testCell, [], { a: 1, b: { c: 3 } }, log);
+    expect(success).toBe(true);
+    expect(testCell.get()).toEqual({ a: 1, b: { c: 3 } });
+    expect(log.writes.length).toEqual(1);
+    expect(log.writes[0].path).toEqual(["b", "c"]);
+  });
+
+  it("should fail when setting a nested value on a frozen cell", () => {
+    const testCell = cell({ a: 1, b: { c: 2 } });
+    testCell.freeze();
+    const log: ReactivityLog = { reads: [], writes: [] };
+    const success = setNestedValue(testCell, [], { a: 1, b: { c: 3 } }, log);
+    expect(success).toBe(false);
+  });
+
+  it("should correctly update with shorter arrays", () => {
+    const testCell = cell({ a: [1, 2, 3] });
+    const success = setNestedValue(testCell, ["a"], [1, 2]);
+    expect(success).toBe(true);
+    expect(testCell.get()).toEqual({ a: [1, 2] });
+  });
+
+  it("should correctly update with a longer arrays", () => {
+    const testCell = cell({ a: [1, 2, 3] });
+    const success = setNestedValue(testCell, ["a"], [1, 2, 3, 4]);
+    expect(success).toBe(true);
+    expect(testCell.get()).toEqual({ a: [1, 2, 3, 4] });
+  });
+
+  it("should overwrite an object with an array", () => {
+    const testCell = cell({ a: { b: 1 } });
+    const success = setNestedValue(testCell, ["a"], [1, 2, 3]);
+    expect(success).toBe(true);
+    expect(testCell.get()).toEqual({ a: [1, 2, 3] });
   });
 });
 

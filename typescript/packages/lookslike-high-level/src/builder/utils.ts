@@ -29,8 +29,18 @@ export function setValueAtPath(
       parent[key] = typeof path[i + 1] === "number" ? [] : {};
     parent = parent[key];
   }
+
   if (deepEqual(parent[path[path.length - 1]], value)) return false;
-  parent[path[path.length - 1]] = value;
+
+  if (value === undefined) {
+    delete parent[path[path.length - 1]];
+    // Truncate array from the end for undefined values
+    if (Array.isArray(parent)) {
+      while (parent.length > 0 && parent[parent.length - 1] === undefined)
+        parent.pop();
+    }
+  } else parent[path[path.length - 1]] = value;
+
   return true;
 }
 

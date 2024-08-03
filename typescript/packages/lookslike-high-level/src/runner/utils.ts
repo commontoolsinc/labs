@@ -113,7 +113,12 @@ export function setNestedValue(
         success &&= setNestedValue(cell, [...path, key], value[key], log);
       else {
         if (cell.isFrozen()) success = false;
-        else cell.setAtPath(path, value, log);
+        else cell.setAtPath([...path, key], value[key], log);
+      }
+    for (const key in destValue)
+      if (!(key in value)) {
+        if (cell.isFrozen()) success = false;
+        else cell.setAtPath([...path, key], undefined, log);
       }
 
     return success;
