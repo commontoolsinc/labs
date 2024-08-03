@@ -76,6 +76,14 @@ export function isAlias(value: any): value is Alias {
   return !!(value && value.$alias && Array.isArray(value.$alias.path));
 }
 
+export type StreamAlias = {
+  $stream: true;
+};
+
+export function isStreamAlias(value: any): value is StreamAlias {
+  return !!value && typeof value.$stream === "boolean" && value.$stream;
+}
+
 export type Module = {
   type: "javascript" | "recipe" | "passthrough";
   implementation?: Function | Recipe;

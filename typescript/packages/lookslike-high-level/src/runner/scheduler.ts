@@ -1,10 +1,13 @@
 import { Cancel } from "@commontools/common-frp";
-import { CellImpl, ReactivityLog } from "./cell.js";
-import { compactifyPaths } from "./utils.js";
+import { CellImpl, CellReference, ReactivityLog } from "./cell.js";
+import { compactifyPaths, pathAffected } from "./utils.js";
 
 export type Action = (log: ReactivityLog) => any;
+export type EventHandler = (event: any) => any;
 
 const pending = new Set<Action>();
+const eventQueue: (() => void)[] = [];
+const eventHandlers: [CellReference, EventHandler][] = [];
 const dirty = new Set<CellImpl<any>>();
 const dependencies = new WeakMap<Action, ReactivityLog>();
 const cancels = new WeakMap<Action, Cancel[]>();
@@ -18,7 +21,7 @@ export function schedule(action: Action, log: ReactivityLog) {
   setDependencies(action, log);
   log.reads.forEach(({ cell }) => dirty.add(cell));
 
-  if (pending.size === 0) queueMicrotask(execute);
+  queueExecution();
   pending.add(action);
 }
 
@@ -28,15 +31,74 @@ export function unschedule(fn: Action): void {
   dependencies.delete(fn);
 }
 
+// Like schedule, but runs the action immediately to gather dependencies
+export function run(action: Action): any {
+  const log: ReactivityLog = { reads: [], writes: [] };
+
+  const result = action(log);
+  console.log("run", log, result);
+
+  // Note: By adding the listeners after the call we avoid triggering a re-run
+  // of the action if it changed a r/w cell. Note that this also means that
+  // those actions can't loop on themselves.
+  setDependencies(action, log);
+  cancels.set(
+    action,
+    Array.from(log.reads).map(({ cell, path }) =>
+      cell.updates((_newValue, changedPath) => {
+        console.log("dirty", cell, path, changedPath);
+        if (pathAffected(changedPath, path)) {
+          dirty.add(cell);
+          queueExecution();
+          pending.add(action);
+        }
+      })
+    )
+  );
+
+  return result;
+}
+
 export async function idle() {
   return new Promise<void>((resolve) => {
-    if (pending.size === 0) resolve();
+    if (pending.size === 0 && eventQueue.length === 0) resolve();
     idlePromises.push(resolve);
   });
 }
 
 export function onError(fn: (error: Error) => void) {
   errorHandlers.add(fn);
+}
+
+export function queueEvent(eventRef: CellReference, event: any) {
+  for (const [ref, handler] of eventHandlers) {
+    if (
+      ref.cell === eventRef.cell &&
+      ref.path.length === eventRef.path.length &&
+      ref.path.every((p, i) => p === eventRef.path[i])
+    ) {
+      queueExecution();
+      eventQueue.push(() => {
+        const nextEvent = handler(event);
+        if (nextEvent) queueEvent(ref, nextEvent);
+      });
+    }
+  }
+}
+
+export function addEventHandler(
+  handler: EventHandler,
+  ref: CellReference
+): () => void {
+  eventHandlers.push([ref, handler]);
+  return () => {
+    const index = eventHandlers.findIndex(([r, _]) => r === ref);
+    if (index !== -1) eventHandlers.splice(index, 1);
+  };
+}
+
+function queueExecution() {
+  if (pending.size === 0 && eventQueue.length === 0) queueMicrotask(execute);
 }
 
 function setDependencies(action: Action, log: ReactivityLog) {
@@ -51,38 +113,10 @@ function handleError(error: Error) {
   for (const handler of errorHandlers) handler(error);
 }
 
-function runAction(action: Action): void {
-  const log: ReactivityLog = { reads: [], writes: [] };
-
-  action(log);
-
-  // Note: By adding the listeners after the call we avoid triggering a re-run
-  // of the action if it changed a r/w cell. Note that this also means that
-  // those actions can't loop on themselves.
-  setDependencies(action, log);
-  cancels.set(
-    action,
-    Array.from(log.reads).map(({ cell, path }) =>
-      cell.updates((_newValue, changedPath) => {
-        if (pathAffected(changedPath, path)) {
-          dirty.add(cell);
-          if (pending.size === 0) queueMicrotask(execute);
-          pending.add(action);
-        }
-      })
-    )
-  );
-}
-
-function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
-  return (
-    (changedPath.length <= path.length &&
-      changedPath.every((key, index) => key === path[index])) ||
-    path.every((key, index) => key === changedPath[index])
-  );
-}
-
 function execute() {
+  // Process next event from the event queue. Will mark more cells as dirty.
+  eventQueue.shift()?.();
+
   const order = topologicalSort(pending, dependencies, dirty);
   console.log("execute", order, pending, dirty.size);
 
@@ -98,10 +132,10 @@ function execute() {
     loopCounter.set(fn, (loopCounter.get(fn) || 0) + 1);
     if (loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN)
       handleError(new Error("Too many iterations"));
-    else runAction(fn);
+    else run(fn);
   }
 
-  if (pending.size === 0) {
+  if (pending.size === 0 && eventQueue.length === 0) {
     const promises = idlePromises;
     for (const resolve of promises) resolve();
     idlePromises.length = 0;

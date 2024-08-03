@@ -236,3 +236,11 @@ export function compactifyPaths(entries: CellReference[]): CellReference[] {
   }
   return result;
 }
+
+export function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
+  return (
+    (changedPath.length <= path.length &&
+      changedPath.every((key, index) => key === path[index])) ||
+    path.every((key, index) => key === changedPath[index])
+  );
+}

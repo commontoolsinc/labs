@@ -1,13 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   cell,
-  Cell,
   isCell,
   isCellReference,
   isCellProxy,
-  createProxy,
   ReactivityLog,
 } from "../../src/runner/cell.js";
+import { addEventHandler, idle } from "../../src/runner/scheduler.js";
 
 describe("Cell", () => {
   it("should create a cell with initial value", () => {
@@ -150,5 +149,81 @@ describe("createProxy", () => {
     expect(c.get()).toEqual([1, 2, 3]);
     expect(log.reads).toEqual([{ cell: c, path: [] }]);
     expect(log.writes).toEqual([]);
+  });
+});
+
+describe("asSimpleCell", () => {
+  it("should create a simple cell interface", () => {
+    const c = cell({ x: 1, y: 2 });
+    const simpleCell = c.asSimpleCell();
+
+    expect(simpleCell.get()).toEqual({ x: 1, y: 2 });
+
+    simpleCell.set({ x: 3, y: 4 });
+    expect(c.get()).toEqual({ x: 3, y: 4 });
+
+    simpleCell.send({ x: 5, y: 6 });
+    expect(c.get()).toEqual({ x: 5, y: 6 });
+  });
+
+  it("should create a simple cell for nested properties", () => {
+    const c = cell({ nested: { value: 42 } });
+    const nestedCell = c.asSimpleCell<number>(["nested", "value"]);
+
+    expect(nestedCell.get()).toBe(42);
+
+    nestedCell.set(100);
+    expect(c.get()).toEqual({ nested: { value: 100 } });
+  });
+
+  it("should support the key method for nested access", () => {
+    const c = cell({ a: { b: { c: 42 } } });
+    const simpleCell = c.asSimpleCell();
+
+    const nestedCell = simpleCell.key("a").key("b").key("c");
+    expect(nestedCell.get()).toBe(42);
+
+    nestedCell.set(100);
+    expect(c.get()).toEqual({ a: { b: { c: 100 } } });
+  });
+
+  it("should return a Sendable for stream aliases", async () => {
+    const c = cell({ stream: { $stream: true } });
+    const streamCell = c.asSimpleCell<string>(["stream"]);
+
+    expect(streamCell).toHaveProperty("send");
+    expect(streamCell).not.toHaveProperty("get");
+    expect(streamCell).not.toHaveProperty("set");
+    expect(streamCell).not.toHaveProperty("key");
+
+    let lastEventSeen = "";
+    let eventCount = 0;
+
+    addEventHandler(
+      (event) => {
+        eventCount++;
+        lastEventSeen = event;
+      },
+      { cell: c, path: ["stream"] }
+    );
+
+    streamCell.send("event");
+    await idle();
+
+    expect(c.get()).toStrictEqual({ stream: { $stream: true } });
+    expect(eventCount).toBe(1);
+    expect(lastEventSeen).toBe("event");
+  });
+
+  it("should call sink only when the cell changes on the subpath", () => {
+    const c = cell({ a: { b: 42, c: 10 }, d: 5 });
+    const values: number[] = [];
+    c.asSimpleCell<number>(["a", "b"]).sink((value) => values.push(value));
+    c.setAtPath(["d"], 50);
+    c.setAtPath(["a", "c"], 100);
+    c.setAtPath(["a", "b"], 42);
+    c.setAtPath(["a", "b"], 300);
+    expect(values).toEqual([42, 300]);
+    expect(c.get()).toEqual({ a: { b: 300, c: 100 }, d: 50 });
   });
 });

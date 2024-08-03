@@ -114,3 +114,24 @@ To summarize the implications for the implementation:
   deep, otherwise overwrite. In fact this go several levels deep, as a recipe
   can call another recipe pointing to a cell reference. So this just reflects
   layers of aliasing. Though all but the last are static!
+
+### Streams
+
+A special binding `{ $stream: true }` marks a cell path as a stream. Values
+written into that location won't be stored, but instead immediately sent to the
+scheduler to be queued up.
+
+The scheduler will invoke each handler tied to that location in turn, always
+waiting for at least one round of computation to settle between calls. That way
+no event should be lost, as long as it is translated into a state change
+captured by a cell.
+
+Handlers are called exactly once per event. If they read from other cells,
+changes to those don't trigger a new call. When they write to cells, those are
+marked dirty, but they aren't added as dependencies for the topological sort,
+since anyway the only time they are called is at the top of the transaction
+cycle when a new event is queued.
+
+We currently only support simple event handler for one event.
+
+Right now, only `handler` and `asHandler` return these "streams".
