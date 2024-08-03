@@ -87,6 +87,7 @@ export function isStreamAlias(value: any): value is StreamAlias {
 export type Module = {
   type: "javascript" | "recipe" | "passthrough";
   implementation?: Function | Recipe;
+  wrapper?: "handler";
 };
 
 export function isModule(value: any): value is Module {
