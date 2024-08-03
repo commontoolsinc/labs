@@ -1,5 +1,6 @@
 import { Cancel } from "@commontools/common-frp";
 import { CellImpl, ReactivityLog } from "./cell.js";
+import { compactifyPaths } from "./utils.js";
 
 export type Action = (log: ReactivityLog) => any;
 
@@ -14,7 +15,7 @@ const errorHandlers = new Set<(error: Error) => void>();
 const MAX_ITERATIONS_PER_RUN = 100;
 
 export function schedule(action: Action, log: ReactivityLog) {
-  dependencies.set(action, log);
+  setDependencies(action, log);
   log.reads.forEach(({ cell }) => dirty.add(cell));
 
   if (pending.size === 0) queueMicrotask(execute);
@@ -38,6 +39,13 @@ export function onError(fn: (error: Error) => void) {
   errorHandlers.add(fn);
 }
 
+function setDependencies(action: Action, log: ReactivityLog) {
+  dependencies.set(action, {
+    reads: compactifyPaths(log.reads),
+    writes: compactifyPaths(log.writes),
+  });
+}
+
 function handleError(error: Error) {
   if (errorHandlers.size === 0) throw error;
   for (const handler of errorHandlers) handler(error);
@@ -51,7 +59,7 @@ function runAction(action: Action): void {
   // Note: By adding the listeners after the call we avoid triggering a re-run
   // of the action if it changed a r/w cell. Note that this also means that
   // those actions can't loop on themselves.
-  dependencies.set(action, log);
+  setDependencies(action, log);
   cancels.set(
     action,
     Array.from(log.reads).map(({ cell, path }) =>

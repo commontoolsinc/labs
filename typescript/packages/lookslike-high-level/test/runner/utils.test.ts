@@ -7,6 +7,7 @@ import {
   mapBindingsToCell,
   followCellReferences,
   followAliases,
+  compactifyPaths,
 } from "../../src/runner/utils.js";
 import { cell, CellReference, ReactivityLog } from "../../src/runner/cell.js";
 
@@ -265,5 +266,38 @@ describe("followAliases", () => {
     cellB.send({ alias: { $alias: { cell: cellA, path: ["alias"] } } });
     const binding = { $alias: { path: ["alias"] } };
     expect(() => followAliases(binding, cellA)).toThrow("Alias cycle detected");
+  });
+});
+
+describe("compactifyPaths", () => {
+  it("should compactify paths", () => {
+    const testCell = cell({});
+    const paths = [
+      { cell: testCell, path: ["a", "b"] },
+      { cell: testCell, path: ["a"] },
+    ];
+    const result = compactifyPaths(paths);
+    expect(result).toEqual([{ cell: testCell, path: ["a"] }]);
+  });
+
+  it("should remove duplicate paths", () => {
+    const testCell = cell({});
+    const paths = [
+      { cell: testCell, path: ["a", "b"] },
+      { cell: testCell, path: ["a", "b"] },
+    ];
+    const result = compactifyPaths(paths);
+    expect(result).toEqual([{ cell: testCell, path: ["a", "b"] }]);
+  });
+
+  it("should not compactify across cells", () => {
+    const cellA = cell({});
+    const cellB = cell({});
+    const paths = [
+      { cell: cellA, path: ["a", "b"] },
+      { cell: cellB, path: ["a", "b"] },
+    ];
+    const result = compactifyPaths(paths);
+    expect(result).toEqual(paths);
   });
 });

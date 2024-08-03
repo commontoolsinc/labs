@@ -207,3 +207,35 @@ export function followAliases(
 
   return result!;
 }
+
+// Remove longer paths already covered by shorter paths
+export function compactifyPaths(entries: CellReference[]): CellReference[] {
+  // First group by cell via a Map
+  const cellToPaths = new Map<CellImpl<any>, PropertyKey[][]>();
+  for (const { cell, path } of entries) {
+    const paths = cellToPaths.get(cell) || [];
+    paths.push(path);
+    cellToPaths.set(cell, paths);
+  }
+
+  // For each cell, sort the paths by components, then save paths not covered by
+  // the previous one in the sorted list
+  const result: CellReference[] = [];
+  for (const [cell, paths] of cellToPaths.entries()) {
+    paths.sort((a, b) => {
+      for (let i = 0; i < Math.min(a.length, b.length); i++) {
+        if (a[i] !== b[i]) return String(a[i]) < String(b[i]) ? -1 : 1;
+      }
+      return a.length < b.length ? -1 : 1;
+    });
+    for (let i = 0; i < paths.length; i++) {
+      if (
+        i === 0 ||
+        !paths[i - 1].every((key, index) => key === paths[i][index])
+      ) {
+        result.push({ cell, path: paths[i] });
+      }
+    }
+  }
+  return result;
+}
