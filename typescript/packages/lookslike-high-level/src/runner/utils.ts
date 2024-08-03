@@ -218,23 +218,20 @@ export function compactifyPaths(entries: CellReference[]): CellReference[] {
     cellToPaths.set(cell, paths);
   }
 
-  // For each cell, sort the paths by components, then save paths not covered by
-  // the previous one in the sorted list
+  // For each cell, sort the paths by length, then only return those that don't
+  // have a prefix earlier in the list
   const result: CellReference[] = [];
   for (const [cell, paths] of cellToPaths.entries()) {
-    paths.sort((a, b) => {
-      for (let i = 0; i < Math.min(a.length, b.length); i++) {
-        if (a[i] !== b[i]) return String(a[i]) < String(b[i]) ? -1 : 1;
-      }
-      return a.length < b.length ? -1 : 1;
-    });
+    paths.sort((a, b) => a.length - b.length);
     for (let i = 0; i < paths.length; i++) {
+      const earlier = paths.slice(0, i);
       if (
-        i === 0 ||
-        !paths[i - 1].every((key, index) => key === paths[i][index])
-      ) {
-        result.push({ cell, path: paths[i] });
-      }
+        earlier.some((path) =>
+          path.every((key, index) => key === paths[i][index])
+        )
+      )
+        continue;
+      result.push({ cell, path: paths[i] });
     }
   }
   return result;

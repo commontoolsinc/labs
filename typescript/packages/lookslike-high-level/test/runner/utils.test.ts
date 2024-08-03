@@ -275,9 +275,13 @@ describe("compactifyPaths", () => {
     const paths = [
       { cell: testCell, path: ["a", "b"] },
       { cell: testCell, path: ["a"] },
+      { cell: testCell, path: ["c"] },
     ];
     const result = compactifyPaths(paths);
-    expect(result).toEqual([{ cell: testCell, path: ["a"] }]);
+    expect(result).toEqual([
+      { cell: testCell, path: ["a"] },
+      { cell: testCell, path: ["c"] },
+    ]);
   });
 
   it("should remove duplicate paths", () => {
@@ -299,5 +303,17 @@ describe("compactifyPaths", () => {
     ];
     const result = compactifyPaths(paths);
     expect(result).toEqual(paths);
+  });
+
+  it("empty paths should trump all other ones", () => {
+    const cellA = cell({});
+    const paths = [
+      { cell: cellA, path: ["a", "b"] },
+      { cell: cellA, path: ["c"] },
+      { cell: cellA, path: ["d"] },
+      { cell: cellA, path: [] },
+    ];
+    const result = compactifyPaths(paths);
+    expect(result).toEqual([{ cell: cellA, path: [] }]);
   });
 });
