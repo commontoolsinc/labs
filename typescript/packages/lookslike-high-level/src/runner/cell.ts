@@ -80,6 +80,41 @@ export function cell<T>(value?: T): CellImpl<T> {
   return self;
 }
 
+// Array.prototype's entries, and whether they modify the array
+const arrayMethods: { [key: string]: boolean } = {
+  at: false,
+  concat: false,
+  entries: false,
+  every: false,
+  fill: true,
+  filter: false,
+  find: false,
+  findIndex: false,
+  findLast: false,
+  findLastIndex: false,
+  includes: false,
+  indexOf: false,
+  join: false,
+  keys: false,
+  lastIndexOf: false,
+  map: false,
+  pop: true,
+  push: true,
+  reduce: false,
+  reduceRight: false,
+  reverse: true,
+  shift: true,
+  slice: false,
+  some: false,
+  sort: true,
+  splice: true,
+  toLocaleString: false,
+  toString: false,
+  unshift: true,
+  values: false,
+  with: false,
+};
+
 export function createProxy<T>(
   cell: CellImpl<T>,
   path: PropertyKey[],
@@ -100,6 +135,25 @@ export function createProxy<T>(
       if (prop === getCellReference)
         return { cell, path } satisfies CellReference;
       else if (typeof prop === "symbol") return; // TODO: iterators, etc.
+
+      if (Array.isArray(target) && prop in arrayMethods)
+        return arrayMethods[prop] == false
+          ? (...args: any[]) => {
+              log?.reads.push({ cell, path });
+              return Array.prototype[
+                prop as keyof typeof Array.prototype
+              ].apply(target, args);
+            }
+          : (...args: any[]) => {
+              log?.reads.push({ cell, path });
+              const copy = [...target];
+              const result = Array.prototype[
+                prop as keyof typeof Array.prototype
+              ].apply(copy, args);
+              setNestedValue(cell, path, copy, log);
+              console.log("got", prop, result, target);
+              return result;
+            };
 
       log?.reads.push({ cell, path: [...path, prop] });
       return createProxy(cell, [...path, prop]);

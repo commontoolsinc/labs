@@ -6,6 +6,7 @@ import {
   isCellReference,
   isCellProxy,
   createProxy,
+  ReactivityLog,
 } from "../../src/runner/cell.js";
 
 describe("Cell", () => {
@@ -83,34 +84,26 @@ describe("Cell utility functions", () => {
 describe("createProxy", () => {
   it("should create a proxy for nested objects", () => {
     const c = cell({ a: { b: { c: 42 } } });
-    const proxy = createProxy(c, []);
+    const proxy = c.getAsProxy();
     expect(proxy.a.b.c).toBe(42);
   });
 
   it("should support regular assigments", () => {
     const c = cell({ x: 1 });
-    const proxy = createProxy(c, []);
+    const proxy = c.getAsProxy();
     proxy.x = 2;
     expect(c.get()).toStrictEqual({ x: 2 });
   });
 
-  // TODO: Need a change of strategy for .set() here, if we keep it
-  it.skip("should support set", () => {
-    const c = cell({ x: 1 });
-    const proxy = createProxy(c, []) as Cell<{ x: number }>;
-    proxy.set({ x: 2 });
-    expect(c.get()).toBe(2);
-  });
-
   it("should handle $alias in objects", () => {
     const c = cell({ x: { $alias: { path: ["y"] } }, y: 42 });
-    const proxy = createProxy(c, []);
+    const proxy = c.getAsProxy();
     expect(proxy.x).toBe(42);
   });
 
   it("should handle aliases when writing", () => {
     const c = cell<any>({ x: { $alias: { path: ["y"] } }, y: 42 });
-    const proxy = createProxy(c, []);
+    const proxy = c.getAsProxy();
     proxy.x = 100;
     expect(c.get().y).toBe(100);
   });
@@ -118,14 +111,14 @@ describe("createProxy", () => {
   it("should handle nested cells", () => {
     const innerCell = cell(42);
     const outerCell = cell({ x: innerCell });
-    const proxy = createProxy(outerCell, []);
+    const proxy = outerCell.getAsProxy();
     expect(proxy.x).toBe(42);
   });
 
   it("should handle cell references", () => {
     const c = cell<any>({ x: 42 });
     const ref = { cell: c, path: ["x"] };
-    const proxy = createProxy(c, []);
+    const proxy = c.getAsProxy();
     proxy.y = ref;
     expect(proxy.y).toBe(42);
   });
@@ -133,8 +126,29 @@ describe("createProxy", () => {
   it("should handle infinite loops in cell references", () => {
     const c = cell<any>({ x: 42 });
     const ref = { cell: c, path: ["x"] };
-    const proxy = createProxy(c, []);
+    const proxy = c.getAsProxy();
     proxy.x = ref;
     expect(() => proxy.x).toThrow();
+  });
+
+  it("should support modifying array methods and log reads and writes", () => {
+    const c = cell<any>([1, 2, 3]);
+    const log: ReactivityLog = { reads: [], writes: [] };
+    const proxy = c.getAsProxy([], log);
+    proxy.push(4);
+    expect(c.get()).toEqual([1, 2, 3, 4]);
+    expect(log.reads).toEqual([{ cell: c, path: [] }]);
+    expect(log.writes).toEqual([{ cell: c, path: ["3"] }]);
+  });
+
+  it("should support readonly array methods and log reads", () => {
+    const c = cell<any>([1, 2, 3]);
+    const log: ReactivityLog = { reads: [], writes: [] };
+    const proxy = c.getAsProxy([], log);
+    const result = proxy.find((x: any) => x === 2);
+    expect(result).toBe(2);
+    expect(c.get()).toEqual([1, 2, 3]);
+    expect(log.reads).toEqual([{ cell: c, path: [] }]);
+    expect(log.writes).toEqual([]);
   });
 });
