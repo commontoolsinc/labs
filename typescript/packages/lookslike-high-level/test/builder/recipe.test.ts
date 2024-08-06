@@ -35,7 +35,7 @@ describe("complex recipe function", () => {
       description: "Double a number",
       type: "object",
       properties: {
-        double: { properties: { $alias: { type: "object" } } },
+        double: {},
         x: { type: "integer", default: 1 },
       },
     });
@@ -70,7 +70,7 @@ describe("complex recipe with path aliases", () => {
       description: "Double a number",
       type: "object",
       properties: {
-        double: { properties: { $alias: { type: "object" } } },
+        double: {},
         x: { type: "integer", default: 1 },
       },
     });

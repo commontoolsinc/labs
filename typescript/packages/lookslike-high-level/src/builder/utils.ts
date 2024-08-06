@@ -7,6 +7,7 @@ import {
   JSONValue,
   JSON,
   Alias,
+  isAlias,
 } from "./types.js";
 
 /** traverse a value, _not_ entering cells */
@@ -112,6 +113,14 @@ export function createJsonSchema(
   referenceValues: any
 ): JSON {
   function analyzeType(value: any, defaultValue: any): JSON {
+    if (isAlias(value)) {
+      const path = value.$alias.path;
+      return analyzeType(
+        getValueAtPath(defaultValues, path),
+        getValueAtPath(referenceValues, path)
+      );
+    }
+
     const type = typeof (value ?? defaultValue);
     const schema: JSON = {};
 
@@ -142,6 +151,8 @@ export function createJsonSchema(
         schema.type = Number.isInteger(value ?? defaultValue)
           ? "integer"
           : "number";
+        break;
+      case "undefined":
         break;
       default:
         schema.type = type;

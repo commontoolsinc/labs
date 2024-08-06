@@ -57,7 +57,7 @@ export function mergeObjects(...objects: any[]): any {
 }
 
 // Sends a value to a binding. If the binding is an array or object, it'll
-// traverse the binding and the valye in parallel accordingly. If the binding is
+// traverse the binding and the value in parallel accordingly. If the binding is
 // an alias, it will follow all aliases and send the value to the last aliased
 // cell. If the binding is a literal, we verify that it matches the value and
 // throw an error otherwise.

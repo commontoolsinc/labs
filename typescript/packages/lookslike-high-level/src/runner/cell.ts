@@ -172,14 +172,41 @@ export function createValueProxy<T>(
 ): T {
   log?.reads.push({ cell, path });
 
-  const target = cell.getAtPath(path);
-  if (isCell(target)) return createValueProxy(target, []);
+  // Follow path, following aliases and cells, so might end up on different cell
+  let target = cell.get() as any;
+  const keys = [...path];
+  path = [];
+  while (keys.length) {
+    const key = keys.shift()!;
+    if (isAlias(target)) {
+      const ref = followAliases(target, cell, log);
+      cell = ref.cell;
+      path = ref.path;
+    } else if (isCell(target)) {
+      cell = target;
+      target = target.get();
+    } else if (isCellReference(target)) {
+      const ref = followCellReferences(target, log);
+      cell = ref.cell;
+      path = ref.path;
+    }
+    path.push(key);
+    if (typeof target === "object" && target !== null) {
+      target = target[key as keyof typeof target];
+    } else {
+      target = undefined;
+    }
+  }
+
+  // Now target is the end of the path. It might still be a cell, alias or cell
+  // reference, so we follow these as well.
+  if (isCell(target)) return createValueProxy(target, [], log);
   else if (isAlias(target)) {
     const ref = followAliases(target, cell, log);
-    return createValueProxy(ref.cell, ref.path);
+    return createValueProxy(ref.cell, ref.path, log);
   } else if (isCellReference(target)) {
     const ref = followCellReferences(target, log);
-    return createValueProxy(ref.cell, ref.path);
+    return createValueProxy(ref.cell, ref.path, log);
   } else if (typeof target !== "object" || target === null) return target;
 
   return new Proxy(target as object, {

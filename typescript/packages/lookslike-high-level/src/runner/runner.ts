@@ -32,13 +32,17 @@ export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
           const outputs = mapBindingsToCell(node.outputs, recipeCell);
           const writes = findAllAliasedCells(outputs);
 
-          const fn = (
+          let fn = (
             typeof node.module.implementation === "string"
               ? eval(node.module.implementation)
               : node.module.implementation
           ) as (inputs: any) => any;
 
+          if (node.module.wrapper && node.module.wrapper in moduleWrappers)
+            fn = moduleWrappers[node.module.wrapper](fn);
+
           const action: Action = (log: ReactivityLog) => {
+            console.log("module node called", fn.toString(), inputs, outputs);
             const inputsProxy = inputsCell.getAsProxy([], log);
             const result = fn(inputsProxy);
             sendValueToBinding(recipeCell, outputs, result, log);
@@ -67,15 +71,14 @@ export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
         case "recipe": {
           if (!isRecipe(node.module.implementation))
             throw new Error(`Invalid recipe`);
-          const inputs = mapBindingsToCell(
-            mergeObjects(node.inputs, node.outputs),
-            recipeCell
-          );
-          console.log("running inner recipe", JSON.stringify(inputs, null, 2));
+          const inputs = mapBindingsToCell(node.inputs, recipeCell);
           const result = runRecipe(node.module.implementation, inputs);
-          result.sink((value) =>
-            console.log("inner recipe", JSON.stringify(value, null, 2))
-          );
+          if (isAlias(node.outputs))
+            sendValueToBinding(recipeCell, node.outputs, result);
+          else
+            result.sink((value) =>
+              sendValueToBinding(recipeCell, node.outputs, value)
+            );
           break;
         }
       }
@@ -88,3 +91,10 @@ export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
 
   return recipeCell;
 }
+
+const moduleWrappers = {
+  handler:
+    (fn: (event: any, ...props: any[]) => any) =>
+    ({ $event, ...props }: any) =>
+      fn($event, ...props),
+};

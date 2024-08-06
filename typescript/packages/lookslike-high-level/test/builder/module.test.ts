@@ -44,6 +44,7 @@ describe("asHandler function", () => {
     expect(value).toEqual({ $stream: true });
     expect(nodes.size).toBe(1);
     expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
+    expect([...nodes][0].inputs).toMatchObject({ $event: stream });
   });
 });
 
@@ -63,11 +64,9 @@ describe("handler function", () => {
   it("creates an event handler and returns a value", () => {
     const stream = handler(
       { x: cell(5), y: cell(10) },
-      (event: MouseEvent, input) => {
-        return {
-          clientX: event.clientX + input.x,
-          clientY: event.clientY + input.y,
-        };
+      (event: MouseEvent, props) => {
+        props.x = event.clientX;
+        props.y = event.clientY;
       }
     );
     expect(isCell(stream)).toBe(true);
@@ -77,5 +76,6 @@ describe("handler function", () => {
     expect(value).toEqual({ $stream: true });
     expect(nodes.size).toBe(1);
     expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
+    expect([...nodes][0].inputs).toMatchObject({ $event: stream });
   });
 });

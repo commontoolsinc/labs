@@ -46,11 +46,16 @@ export function recipe<T, R>(
   // First, assign the outputs to the state cell.
   // TOOD: We assume no default values for top-level output for now.
   const stateValue = state.export().value ?? {};
-  if (typeof outputs === "object" && typeof stateValue === "object")
+  if (typeof stateValue !== "object")
+    throw new Error("Inputs must be an object");
+  if (outputs !== undefined && typeof outputs !== "object")
+    throw new Error("Outputs must be an object or undefined");
+  if (outputs) {
     state.set({
       ...stateValue,
       ...(outputs as R),
     } as Value<T & R>);
+  }
 
   // Then traverse the value, collect all mentioned nodes and cells
   const cells = new Set<CellProxy<any>>();
