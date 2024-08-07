@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
+use rand::prelude::*;
 
 use data::{ClassificationData, DataGem};
 use gem::{DataGemEditor, MiniDataGemPreview};
@@ -126,6 +127,19 @@ fn App() -> impl IntoView {
         gems.update(|gems| delete(id, gems));
     };
 
+    let select_random_gems = move || {
+        let mut rng = thread_rng();
+        let gem_ids: Vec<String> = gems.get().keys().cloned().collect();
+        let num_to_select = rng.gen_range(2..=3.min(gem_ids.len()));
+        let selected: Vec<String> = gem_ids.choose_multiple(&mut rng, num_to_select).cloned().collect();
+        set_selection.set(selected);
+    };
+
+    let feeling_lucky = move |_| {
+        select_random_gems();
+        combine_data.dispatch(());
+    };
+
     view! {
         <div class="app"><div>
         <div>
@@ -178,7 +192,8 @@ fn App() -> impl IntoView {
                     }
                 </div>
                 <input type="text" placeholder="Search" on:input=move |e| search.set(event_target_value(&e)) prop:value=search></input>
-                <button on:click=move |_| combine_data.dispatch(gems)>"Imagine"</button>
+                <button on:click=move |_| combine_data.dispatch(())>"Imagine"</button>
+                <button on:click=feeling_lucky>"I'm feeling lucky"</button>
                 <select on:change=move |e| set_llm_model.set(event_target_value(&e)) prop:value=llm_model>
                     <option value="claude-3-5-sonnet-20240620">Claude 3.5 Sonnet</option>
                     <option value="gpt-4o-mini">GPT-4o Mini</option>
