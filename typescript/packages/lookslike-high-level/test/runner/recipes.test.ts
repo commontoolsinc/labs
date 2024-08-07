@@ -20,7 +20,7 @@ describe("Recipe Runner", () => {
     expect(result.getAsProxy()).toMatchObject({ result: 10 });
   });
 
-  it.only("should handle nested recipes", async () => {
+  it("should handle nested recipes", async () => {
     const innerRecipe = recipe<{ x: number }>("Inner Recipe", ({ x }) => {
       const squared = lift((n: number) => {
         console.log("square", n);

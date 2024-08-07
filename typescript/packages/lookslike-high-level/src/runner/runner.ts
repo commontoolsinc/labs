@@ -15,7 +15,7 @@ export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
 
   // Generate recipe cell using defaults, bindings, and initial values
   // TODO: Some initial values can be aliases to outside cells
-  const recipeCell = cell(mergeObjects(defaults, bindings, recipe.initial));
+  const recipeCell = cell(mergeObjects(recipe.initial, bindings, defaults));
 
   for (const node of recipe.nodes) {
     if (isModule(node.module)) {

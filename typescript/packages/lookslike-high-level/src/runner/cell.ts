@@ -1,5 +1,5 @@
 import { isAlias, isStreamAlias } from "../builder/types.js";
-import { getValueAtPath, setValueAtPath } from "../builder/utils.js";
+import { getValueAtPath, setValueAtPath, deepEqual } from "../builder/utils.js";
 import {
   followCellReferences,
   followAliases,
@@ -109,7 +109,7 @@ export function cell<T>(value?: T): CellImpl<T> {
       let changed = false;
       if (path.length > 0) {
         changed = setValueAtPath(value, path, newValue);
-      } else if (value !== newValue) {
+      } else if (!deepEqual(value, newValue)) {
         changed = true;
         value = newValue;
       }
@@ -121,7 +121,9 @@ export function cell<T>(value?: T): CellImpl<T> {
     },
     freeze: () => {
       readOnly = true;
-      value = Object.freeze(value);
+      /* NOTE: Can't freeze actual object, since otherwise JS throws type errors
+      for the cases where the proxy returns different values than what is
+      proxied, e.g. for aliases. TODO: Consider changing proxy here. */
     },
     isFrozen: () => readOnly,
     [isCellMarker]: true,
