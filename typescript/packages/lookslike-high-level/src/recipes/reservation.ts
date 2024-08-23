@@ -1,6 +1,8 @@
-import { recipe, NAME } from "../recipe.js";
+import { recipe, NAME } from "../builder/index.js";
 
-export const reservation = recipe("reservation", (bindings) => ({
-  [NAME]: bindings.title,
-  ...bindings,
-}));
+export const reservation = recipe<{ title: string }>(
+  "reservation",
+  ({ title }) => ({
+    [NAME]: title,
+  })
+);

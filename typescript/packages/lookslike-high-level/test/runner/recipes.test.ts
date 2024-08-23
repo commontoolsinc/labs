@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { recipe, lift } from "../../src/builder/index.js";
-import { runRecipe } from "../../src/runner/runner.js";
+import { run } from "../../src/runner/runner.js";
 import { idle } from "../../src/runner/scheduler.js";
 
 describe("Recipe Runner", () => {
@@ -13,7 +13,7 @@ describe("Recipe Runner", () => {
       }
     );
 
-    const result = runRecipe(simpleRecipe, { value: 5 });
+    const result = run(simpleRecipe, { value: 5 });
 
     await idle();
 
@@ -43,7 +43,7 @@ describe("Recipe Runner", () => {
 
     console.log("serialized", JSON.stringify(outerRecipe.toJSON(), null, 2));
 
-    const result = runRecipe(outerRecipe, { value: 4 });
+    const result = run(outerRecipe, { value: 4 });
 
     await idle();
 
@@ -61,13 +61,13 @@ describe("Recipe Runner", () => {
       }
     );
 
-    const result1 = runRecipe(recipeWithDefaults, {});
+    const result1 = run(recipeWithDefaults, {});
 
     await idle();
 
     expect(result1.getAsProxy()).toMatchObject({ sum: 15 });
 
-    const result2 = runRecipe(recipeWithDefaults, { a: 20 });
+    const result2 = run(recipeWithDefaults, { a: 20 });
 
     await idle();
 

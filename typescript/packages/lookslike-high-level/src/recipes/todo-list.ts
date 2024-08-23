@@ -1,72 +1,62 @@
-import { view, tags } from "@commontools/common-ui";
-import { signal, stream } from "@commontools/common-frp";
-import { recipe, NAME } from "../recipe.js";
-import { annotation } from "../components/annotation.js";
-const { repeat } = view;
-const { vstack, sendInput, todo, commonInput } = tags;
-const { state, computed } = signal;
-const { subject } = stream;
+import { html } from "@commontools/common-html";
+import { recipe, apply, handler, UI, NAME } from "../builder/index.js";
 
 export interface TodoItem {
-  title: signal.Signal<string>;
-  done: signal.Signal<boolean>;
+  title: string;
+  done: boolean;
 }
 
-export function makeTodoItem(title: string, done: boolean = false): TodoItem {
-  return {
-    title: typeof title === "string" ? state(title) : title,
-    done: typeof done === "boolean" ? state(done) : done,
-  };
-}
-
-export const todoList = recipe("todo list", ({ id, title, items }) => {
-  const newTasks = subject<{ detail: { message: string } }>();
-  newTasks.sink({
-    send: (event) => {
-      const task = event.detail?.message?.trim();
-      if (!task) return;
-      items.send([...items.get(), makeTodoItem(task)]);
-    },
+export const todoList = recipe<{
+  id: number;
+  title: string;
+  items: TodoItem[];
+}>("todo list", ({ id, title, items }) => {
+  const newTasks = handler<
+    { detail: { message: string } },
+    { items: TodoItem[] }
+  >({ items }, (event, { items }) => {
+    const task = event.detail?.message?.trim();
+    if (task) items.push({ title: task, done: false });
   });
 
   return {
-    UI: vstack({gap: "sm"}, [
-      commonInput({
-        value: title,
-        placeholder: "List title",
-        "@common-input#value": title,
-      }),
-      vstack(
-        {gap: "sm"},
-        repeat(items, (item: TodoItem) =>
-          vstack({gap: "sm"}, [
-            todo(
-              {
-                checked: item.done,
-                value: item.title,
-                "@todo-checked#checked": item.done,
-                "@todo-input#value": item.title,
-              },
-              [
-                annotation({
-                  query: item.title,
-                  target: id,
-                  data: { items, done: item.done, title: item.title },
-                }),
-              ]
-            ),
-          ])
-        )
-      ),
-      sendInput({
-        name: "Add",
-        placeholder: "New task",
-        appearance: "rounded",
-        "@messageSend": newTasks,
-      }),
-    ]),
+    [UI]: html`
+      <vstack gap="sm">
+        <common-input
+          value=${title}
+          placeholder="List title"
+          @common-input#value=${title}
+        ></common-input>
+        <vstack gap="sm">
+          ${items.map(
+            (item: TodoItem) => html`
+              <vstack gap="sm">
+                <todo
+                  checked=${item.done}
+                  value=${item.title}
+                  @todo-checked#checked=${item.done}
+                  @todo-input#value=${item.title}
+                >
+                  <annotation
+                    query=${item.title}
+                    target=${id}
+                    data=${{ items, done: item.done, title: item.title }}
+                  ></annotation>
+                </todo>
+              </vstack>
+            `
+          )}
+        </vstack>
+        <send-input
+          name="Add"
+          placeholder="New task"
+          appearance="rounded"
+          @messageSend="${newTasks}"
+        ></send-input>
+      </vstack>
+    `,
     title,
     items,
-    [NAME]: computed([title], (title) => title || "untitled"),
+    [NAME]: apply({ title }, (title) => title || "untitled"),
   };
 });

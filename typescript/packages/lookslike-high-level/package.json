@@ -31,6 +31,7 @@
       "dependencies": [
         "../common-ui:build",
         "../common-frp:build",
+        "../common-html:build",
         "../lookslike-sagas:build",
         "../llm-client:build"
       ],
@@ -41,9 +42,10 @@
     }
   },
   "dependencies": {
-    "@commontools/common-ui": "^0.0.1",
     "@commontools/common-frp": "^0.0.1",
-    "@commontools/lookslike-sagas": "^0.0.1",
-    "@commontools/llm-client": "^0.0.1"
+    "@commontools/common-html": "^0.0.1",
+    "@commontools/common-ui": "^0.0.1",
+    "@commontools/llm-client": "^0.0.1",
+    "@commontools/lookslike-sagas": "^0.0.1"
   }
 }

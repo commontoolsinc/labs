@@ -1,16 +1,9 @@
 import { tags } from "@commontools/common-ui";
 import { signal, stream } from "@commontools/common-frp";
 import { dataGems, openSaga } from "../data.js";
-import {
-  recipe,
-  Recipe,
-  Gem,
-  ID,
-  TYPE,
-  NAME,
-  suggestions,
-  type Suggestion,
-} from "../recipe.js";
+import { recipe, Recipe, ID, TYPE, NAME } from "../builder/index.js";
+import { type Gem } from "../data.js";
+import { suggestions, type Suggestion } from "../suggestions.js";
 import { effect } from "@commontools/common-frp/signal";
 import { suggestionClient } from "../llm-client.js";
 const { include, div } = tags;

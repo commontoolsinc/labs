@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Recipe } from "../../src/builder/types.js";
-import { runRecipe } from "../../src/runner/runner.js";
+import { run } from "../../src/runner/runner.js";
 import { idle } from "../../src/runner/scheduler.js";
 
 describe("runRecipe", () => {
@@ -25,7 +25,7 @@ describe("runRecipe", () => {
       ],
     } as Recipe;
 
-    const result = runRecipe(recipe, {});
+    const result = run(recipe, {});
     await idle();
     expect(result.get()).toEqual({
       input: 1,
@@ -72,7 +72,7 @@ describe("runRecipe", () => {
       ],
     } as Recipe;
 
-    const result = runRecipe(outerRecipe, {});
+    const result = run(outerRecipe, {});
     await idle();
     expect(result.get()).toEqual({ value: 5, result: 5 });
   });
@@ -93,7 +93,7 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = runRecipe(mockRecipe, {});
+    const result = run(mockRecipe, {});
     await idle();
     expect(result.get()).toEqual({ value: 1, result: 2 });
   });
@@ -126,7 +126,7 @@ describe("runRecipe", () => {
       ],
     };
 
-    const result = runRecipe(mockRecipe, {});
+    const result = run(mockRecipe, {});
     await idle();
     expect(result.get()).toEqual({ value: 1, result: 2 });
   });

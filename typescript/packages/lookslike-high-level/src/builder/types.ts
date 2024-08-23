@@ -1,3 +1,10 @@
+// Should be Symbol("ID") or so, but this makes repeat() use these when
+// iterating over recipes.
+export const ID = "id";
+export const TYPE = Symbol("type");
+export const NAME = Symbol("name");
+export const UI = Symbol("ui");
+
 export type Value<T> =
   | (T extends string | number | boolean | null | undefined
       ? CellProxy<T>

@@ -10,7 +10,7 @@ export const annotation = ({
 }: {
   query: signal.Signal<string> | string;
   target: number;
-  data: { [key: string]: signal.Signal<any> };
+  data: { [key: string]: any };
 }) => {
   const annotation = annotationRecipe({ "?": query, ".": target, ...data });
 

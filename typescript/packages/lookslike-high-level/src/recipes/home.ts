@@ -1,45 +1,37 @@
-import { view, tags } from "@commontools/common-ui";
-import { signal } from "@commontools/common-frp";
-import { recipe, Gem, ID } from "../recipe.js";
+import { html } from "@commontools/common-html";
+import { recipe, lift, ID } from "../builder/index.js";
+import { Gem } from "../data.js";
 import { sagaLink } from "../components/saga-link.js";
 import { recipeLink } from "../components/recipe-link.js";
-import { annotation } from "../components/annotation.js";
-const { binding, repeat } = view;
-const { vstack } = tags;
 
-export const home = recipe("home screen", ({ sagas, recipes }) => {
-  const sagasWithIDs = signal.computed(
-    [sagas],
-    (sagas: { [key: string]: Gem }) =>
-      Object.values(sagas)
-        .filter((saga) => saga.UI) // Only show sagas with UI
-        .map((saga) => ({
-          id: saga[ID],
-          saga,
-        }))
-  );
-
-  const recipesWithIDs = signal.computed(
-    [recipes],
-    (recipes: { [key: string]: Gem }) =>
-      Object.values(recipes).map((recipe) => ({
-        id: recipe[ID],
-        recipe,
+export const home = recipe<{
+  sagas: { [key: string]: Gem };
+  recipes: { [key: string]: Gem };
+}>("home screen", ({ sagas, recipes }) => {
+  const sagasWithIDs = lift((sagas: { [key: string]: Gem }) =>
+    Object.values(sagas)
+      .filter((saga) => saga.UI) // Only show sagas with UI
+      .map((saga) => ({
+        id: saga[ID],
+        saga,
       }))
-  );
+  )(sagas);
+
+  const recipesWithIDs = lift((recipes: { [key: string]: Gem }) =>
+    Object.values(recipes).map((recipe) => ({
+      id: recipe[ID],
+      recipe,
+    }))
+  )(recipes);
 
   return {
-    UI: vstack({}, [
-      vstack({}, repeat(sagasWithIDs, sagaLink({ saga: binding("saga") }))),
-      vstack(
-        {},
-        repeat(recipesWithIDs, recipeLink({ recipe: binding("recipe") }))
-      ),
-      annotation({
-        query: "dream fun things to explore",
-        target: -1,
-        data: { sagas, recipes },
-      }),
-    ]),
+    UI: html`<vstack
+      >${sagasWithIDs.map((saga) => sagaLink({ saga }))}
+      ${recipesWithIDs.map((recipe) => recipeLink({ recipe }))}<annotation
+        query="dream fun things to explore"
+        target="-1"
+        data=${{ sagas, recipes }}
+      />
+    </vstack>`,
   };
 });

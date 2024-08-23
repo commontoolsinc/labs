@@ -1,8 +1,8 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { tags, render, style } from "@commontools/common-ui";
-import { isGem, Gem, ID, NAME } from "../recipe.js";
-import { annotation } from "../components/annotation.js";
+import { isGem, Gem, ID } from "../data.js";
+//import { annotation } from "../components/annotation.js";
 const { include } = tags;
 
 @customElement("common-window-manager")
@@ -29,9 +29,7 @@ export class CommonWindowManager extends LitElement {
         border-radius: var(--radius);
         background-color: rgba(255, 255, 255, 0.8);
         backdrop-filter: blur(10px);
-        box-shadow:
-          0 10px 20px rgba(0, 0, 0, 0.1),
-          0 6px 6px rgba(0, 0, 0, 0.1),
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1), 0 6px 6px rgba(0, 0, 0, 0.1),
           0 0 0 1px rgba(0, 0, 0, 0.05);
         transition: all 0.3s ease;
         overflow: hidden;
@@ -72,6 +70,7 @@ export class CommonWindowManager extends LitElement {
         idCounts[saga[ID]] ??= 0;
         const id = saga[ID] + "#" + idCounts[saga[ID]]++;
 
+        /*
         const annotationUI = annotation({
           query: saga[NAME] as string,
           data: Object.fromEntries(
@@ -81,14 +80,16 @@ export class CommonWindowManager extends LitElement {
             )
           ),
           target: saga[ID],
-        });
+        });*/
         return html`
           <div class="window" id="${id}">
             <button class="close-button" @click="${this.onClose}">×</button>
             <common-screen-element>
               <common-system-layout>
                 ${render.render(include({ content: saga.UI }))}
-                  <div slot="secondary">${render.render(annotationUI)}</div>
+                  <div slot="secondary">${
+                    /*render.render(annotationUI)}*/ ""
+                  }</div>
                   <common-unibox slot="search" value="" placeholder="" label=">">
               </common-system-layout>
             </common-screen-element>

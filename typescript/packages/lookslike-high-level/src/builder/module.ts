@@ -74,6 +74,10 @@ export function apply<T extends (...args: any[]) => any>(
 export function apply<T, R>(
   inputs: Value<T>,
   implementation: (input: T) => R
+): Value<R>;
+export function apply<T, R>(
+  inputs: Value<T>,
+  implementation: (input: T) => R
 ): Value<R> {
   return lift(implementation)(inputs);
 }
@@ -82,6 +86,10 @@ export function handler<T extends (...args: any[]) => any>(
   props: Value<Parameters<T>[1]>,
   implementation: T
 ): NodeFactory<Parameters<T>[1], Parameters<T>[0]>;
+export function handler<E, T>(
+  props: Value<T>,
+  handler: (event: E, props: T) => any
+): Value<E>;
 export function handler<E, T>(
   props: Value<T>,
   handler: (event: E, props: T) => any

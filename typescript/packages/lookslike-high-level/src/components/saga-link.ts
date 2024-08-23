@@ -2,7 +2,7 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { render } from "@commontools/common-ui";
 import { signal, Cancel } from "@commontools/common-frp";
-import { Gem, ID, NAME } from "../recipe.js";
+import { Gem, ID, NAME } from "../data.js";
 
 export const sagaLink = render.view("common-saga-link", {
   saga: { type: "object" },

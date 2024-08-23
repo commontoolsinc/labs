@@ -9,7 +9,7 @@ import {
   sendValueToBinding,
 } from "./utils.js";
 
-export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
+export function run<T>(recipe: Recipe, bindings: T): CellImpl<T> {
   // Walk the recipe's schema and extract all default values
   const defaults = extractDefaultValues(recipe.schema);
 
@@ -72,7 +72,7 @@ export function runRecipe<T>(recipe: Recipe, bindings: T): CellImpl<T> {
           if (!isRecipe(node.module.implementation))
             throw new Error(`Invalid recipe`);
           const inputs = mapBindingsToCell(node.inputs, recipeCell);
-          const result = runRecipe(node.module.implementation, inputs);
+          const result = run(node.module.implementation, inputs);
           if (isAlias(node.outputs))
             sendValueToBinding(recipeCell, node.outputs, result);
           else

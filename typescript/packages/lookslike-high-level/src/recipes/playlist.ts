@@ -1,68 +1,73 @@
-import { view, tags } from "@commontools/common-ui";
-import { state, computed, effect } from "@commontools/common-frp/signal";
-import { generateData } from "@commontools/llm-client";
-import { mockResultClient } from "../llm-client.js";
-import { recipe, Gem, NAME, addSuggestion, description } from "../recipe.js";
-const { repeat } = view;
-const { vstack, hstack, div, commonInput, button, input, include } = tags;
+import { html } from "@commontools/common-html";
+import {
+  recipe,
+  apply,
+  handler,
+  cell,
+  generateData,
+  UI,
+  NAME,
+} from "../builder/index.js";
+import { addSuggestion, description } from "../suggestions.js";
 
 interface Playlist {
   title: string;
   songs: string[];
 }
 
-export const playlistForTrip = recipe(
-  "playlist for trip",
-  ({ ticket, booking }) => {
-    const playlist = state<Playlist>({ title: "", songs: [] });
-    const name = computed([playlist, ticket], (playlist, ticket: Gem) =>
-      playlist.title
-        ? playlist.title
-        : `Creating playlist for ${ticket.show.get()}`
-    );
+export const playlistForTrip = recipe<{
+  ticket: { show: string };
+  booking: any;
+}>("playlist for trip", ({ ticket, booking }) => {
+  const query = cell({
+    prompt: "",
+  });
 
-    effect([ticket, booking], (ticket: Gem, booking: Gem) => {
-      if (!ticket || !booking) return;
-      const result = generateData(
-        mockResultClient,
-        `Create a playlist in anticipation of a trip to see ${ticket.show.get()}`,
-        {},
-        {
-          type: "object",
-          properties: {
-            title: {
-              type: "string",
-              title: "Title of the playlist",
-            },
-            songs: {
-              type: "array",
-              title: "Songs",
-              items: {
-                type: "string",
-              },
-              description: "10 songs to listen to on the way to the show",
-            },
+  const generatePlaylist = handler<
+    {},
+    { ticket: { show: string }; booking: any; query: { prompt: string } }
+  >({ ticket, booking, query }, (_, { ticket, query }) => {
+    query.prompt = `Create a playlist in anticipation of a trip to see ${ticket.show}`;
+  });
+
+  const { result: playlist } = generateData<Playlist>({
+    prompt: query.prompt,
+    schema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          title: "Title of the playlist",
+        },
+        songs: {
+          type: "array",
+          title: "Songs",
+          items: {
+            type: "string",
           },
-        }
-      );
+          description: "10 songs to listen to on the way to the show",
+        },
+      },
+    },
+  });
 
-      result.then((data) => playlist.send(data as Playlist));
-    });
-    return {
-      UI: computed([playlist], (playlist: Playlist) =>
-        vstack({}, [
-          playlist.title,
-          vstack(
-            {},
-            repeat(state(playlist.songs), (song: string) => div({}, [song]))
-          ),
-        ])
-      ),
-      [NAME]: name,
-      playlist,
-    };
-  }
-);
+  return {
+    [UI]: html`
+      <vstack gap="sm">
+        <div>${playlist.title}</div>
+        <vstack gap="xs">
+          ${playlist.songs.map((song) => html` <div>${song}</div> `)}
+        </vstack>
+        <button @click=${generatePlaylist}>Generate Playlist</button>
+      </vstack>
+    `,
+    query,
+    playlist,
+    [NAME]: apply({ playlist, ticket }, (playlist, ticket) =>
+      playlist.title ? playlist.title : `Creating playlist for ${ticket.show}`
+    ),
+  };
+});
 
 addSuggestion({
   description: description`Make a playlist for ${"ticket"}`,
