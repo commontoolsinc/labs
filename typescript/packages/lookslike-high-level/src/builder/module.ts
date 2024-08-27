@@ -10,6 +10,25 @@ import {
 import { cell } from "./cell-proxy.js";
 import { traverseValue, moduleToJSON } from "./utils.js";
 
+export function createNodeFactory<T = any, R = any>(
+  moduleSpec: Module
+): NodeFactory<T, R> {
+  const module: Module & toJSON = {
+    ...moduleSpec,
+    toJSON: () => moduleToJSON(module),
+  };
+
+  return Object.assign((inputs: Value<T>): CellProxy<R> => {
+    const outputs = cell<R>();
+    const node: NodeProxy = { module, inputs, outputs };
+
+    traverseValue(inputs, (value) => isCell(value) && value.connect(node));
+    outputs.connect(node);
+
+    return outputs;
+  }, module);
+}
+
 /** Declare a module
  *
  * @param implementation A function that takes an input and returns a result
@@ -24,21 +43,10 @@ export function lift<T extends (...args: any[]) => any>(
   implementation: T
 ): NodeFactory<Parameters<T>[0], ReturnType<T>>;
 export function lift<T, R>(implementation: (input: T) => R): NodeFactory<T, R> {
-  const module: Module & toJSON = {
+  return createNodeFactory({
     type: "javascript",
     implementation,
-    toJSON: () => moduleToJSON(module),
-  };
-
-  return Object.assign((inputs: Value<T>): CellProxy<R> => {
-    const outputs = cell<R>();
-    const node: NodeProxy = { module, inputs, outputs };
-
-    traverseValue(inputs, (value) => isCell(value) && value.connect(node));
-    outputs.connect(node);
-
-    return outputs;
-  }, module);
+  });
 }
 
 export function asHandler<E, T>(

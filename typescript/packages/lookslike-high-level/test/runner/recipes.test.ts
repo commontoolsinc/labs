@@ -23,7 +23,6 @@ describe("Recipe Runner", () => {
   it("should handle nested recipes", async () => {
     const innerRecipe = recipe<{ x: number }>("Inner Recipe", ({ x }) => {
       const squared = lift((n: number) => {
-        console.log("square", n);
         return n * n;
       })(x);
       return { squared };
@@ -34,14 +33,11 @@ describe("Recipe Runner", () => {
       ({ value }) => {
         const { squared } = innerRecipe({ x: value });
         const result = lift((n: number) => {
-          console.log("inc", n);
           return n + 1;
         })(squared);
         return { result };
       }
     );
-
-    console.log("serialized", JSON.stringify(outerRecipe.toJSON(), null, 2));
 
     const result = run(outerRecipe, { value: 4 });
 
@@ -72,5 +68,26 @@ describe("Recipe Runner", () => {
     await idle();
 
     expect(result2.getAsProxy()).toMatchObject({ sum: 30 });
+  });
+
+  it("should handle recipes with map nodes", async () => {
+    const doubleArray = recipe<{ values: { x: number }[] }>(
+      "Double numbers",
+      ({ values }) => {
+        const doubled = values.map(({ x }) => {
+          const double = lift<number>((x) => x * 2);
+          return { doubled: double(x) };
+        });
+        return { doubled };
+      }
+    );
+
+    const result = run(doubleArray, { values: [{ x: 1 }, { x: 2 }, { x: 3 }] });
+
+    await idle();
+
+    expect(result.getAsProxy()).toMatchObject({
+      doubled: [{ doubled: 2 }, { doubled: 4 }, { doubled: 6 }],
+    });
   });
 });

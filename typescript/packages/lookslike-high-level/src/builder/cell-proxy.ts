@@ -3,9 +3,14 @@ import {
   CellProxyMethods,
   Value,
   NodeProxy,
+  NodeFactory,
   isCellProxyMarker,
 } from "./types.js";
 import { setValueAtPath, hasValueAtPath } from "./utils.js";
+import { recipe } from "./recipe.js";
+import { createNodeFactory } from "./module.js";
+
+let mapFactory: NodeFactory<any, any>;
 
 // A cell factory that creates a future cell with an optional default value.
 //
@@ -46,6 +51,20 @@ export function cell<T>(defaultValue?: Value<T> | T): CellProxy<T> {
         path,
         ...store,
       }),
+      map: <S>(
+        fn: (value: Value<T extends Array<infer U> ? U : T>) => Value<S>
+      ) => {
+        // Create the factory if it doesn't exist. Doing it here to avoid
+        // circular dependency.
+        mapFactory ||= createNodeFactory({
+          type: "builtin",
+          implementation: "map",
+        });
+        return mapFactory({
+          list: proxy,
+          op: recipe("mapping function", fn),
+        });
+      },
       [isCellProxyMarker]: true,
     };
 

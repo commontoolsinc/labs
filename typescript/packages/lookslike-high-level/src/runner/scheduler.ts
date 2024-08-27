@@ -36,7 +36,6 @@ export function run(action: Action): any {
   const log: ReactivityLog = { reads: [], writes: [] };
 
   const result = action(log);
-  console.log("run", log, result);
 
   // Note: By adding the listeners after the call we avoid triggering a re-run
   // of the action if it changed a r/w cell. Note that this also means that
@@ -46,7 +45,6 @@ export function run(action: Action): any {
     action,
     Array.from(log.reads).map(({ cell, path }) =>
       cell.updates((_newValue, changedPath) => {
-        console.log("dirty", cell, path, changedPath);
         if (pathAffected(changedPath, path)) {
           dirty.add(cell);
           queueExecution();
@@ -118,7 +116,6 @@ function execute() {
   eventQueue.shift()?.();
 
   const order = topologicalSort(pending, dependencies, dirty);
-  console.log("execute", order, pending, dirty.size);
 
   // Clear pending and dirty sets, and cancel all listeners for cells on already
   // scheduled actions.

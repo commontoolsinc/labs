@@ -34,6 +34,10 @@ export function recipe<T>(
 export function recipe<T, R>(
   description: string,
   fn: (input: Value<T>) => Value<R>
+): RecipeFactory<T, R>;
+export function recipe<T, R>(
+  description: string,
+  fn: (input: Value<T>) => Value<R>
 ): RecipeFactory<T, R> {
   // The recipe graph is created by calling `fn` which populates for `inputs`
   // and `outputs` with Value<> (which containts CellProxy<>) and/or default
@@ -63,7 +67,7 @@ export function recipe<T, R>(
 
   const collectCellsAndNodes = (value: Value<any>) =>
     traverseValue(value, (value) => {
-      if (isCell(value)) {
+      if (isCell(value) && !cells.has(value)) {
         cells.add(value);
         value.export().nodes.forEach((node: NodeProxy) => {
           if (!nodes.has(node)) {
@@ -93,8 +97,8 @@ export function recipe<T, R>(
   // Now serialize the defaults and initial values, copying them from other
   // cells into the primary cell.
   const { value, defaultValue } = state.export();
-  const initial = toJSONWithAliases(value, paths);
-  const defaults = toJSONWithAliases(defaultValue, paths);
+  const initial = toJSONWithAliases(value ?? {}, paths);
+  const defaults = toJSONWithAliases(defaultValue ?? {}, paths);
 
   cells.forEach((cell) => {
     // Only process roots of extra cells:

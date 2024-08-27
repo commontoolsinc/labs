@@ -1,9 +1,9 @@
 // Should be Symbol("ID") or so, but this makes repeat() use these when
 // iterating over recipes.
-export const ID = "id";
-export const TYPE = Symbol("type");
-export const NAME = Symbol("name");
-export const UI = Symbol("ui");
+export const ID = "$ID";
+export const TYPE = "$TYPE";
+export const NAME = "$NAME";
+export const UI = "$UI";
 
 export type Value<T> =
   | (T extends string | number | boolean | null | undefined
@@ -36,6 +36,9 @@ export type CellProxyMethods<T> = {
     defaultValue?: Value<T>;
     nodes: Set<NodeProxy>;
   };
+  map<S>(
+    fn: (value: T extends Array<infer U> ? Value<U> : Value<T>) => Value<S>
+  ): Value<S[]>;
   [isCellProxyMarker]: true;
 };
 
@@ -92,8 +95,8 @@ export function isStreamAlias(value: any): value is StreamAlias {
 }
 
 export type Module = {
-  type: "javascript" | "recipe" | "passthrough";
-  implementation?: Function | Recipe;
+  type: "javascript" | "recipe" | "builtin" | "passthrough";
+  implementation?: Function | Recipe | string;
   wrapper?: "handler";
 };
 
@@ -102,6 +105,7 @@ export function isModule(value: any): value is Module {
     (typeof value === "function" || typeof value === "object") &&
     (value.type === "javascript" ||
       value.type === "recipe" ||
+      value.type === "builtin" ||
       value.type === "passthrough")
   );
 }

@@ -12,10 +12,10 @@ import {
 
 /** traverse a value, _not_ entering cells */
 export function traverseValue(value: Value<any>, fn: (value: any) => any) {
-  if (Array.isArray(value)) value.map(fn);
+  fn(value);
+  if (Array.isArray(value)) value.forEach((v) => traverseValue(v, fn));
   else if (!isCell(value) && typeof value === "object" && value !== null)
-    for (const key in value as any) fn(value[key]);
-  else fn(value);
+    for (const key in value as any) traverseValue(value[key], fn);
 }
 
 export function setValueAtPath(

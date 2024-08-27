@@ -5,6 +5,7 @@ import {
   followAliases,
   setNestedValue,
   pathAffected,
+  transformToSimpleCells,
 } from "./utils.js";
 import { queueEvent } from "./scheduler.js";
 
@@ -70,28 +71,7 @@ export function cell<T>(value?: T): CellImpl<T> {
     getAsProxy: (path: PropertyKey[] = [], log?: ReactivityLog) =>
       createValueProxy(self, path, log),
     asSimpleCell: <Q = T>(path: PropertyKey[] = [], log?: ReactivityLog) =>
-      isStreamAlias(self.getAtPath(path))
-        ? ({
-            // Implementing just Sendable<T>
-            send: (event: Q) => {
-              log?.writes.push({ cell: self, path });
-              queueEvent({ cell: self, path }, event);
-            },
-          } as Cell<Q>)
-        : ({
-            get: () => self.getAsProxy(path, log) as unknown as Q,
-            set: (newValue: Q) => self.setAtPath(path, newValue, log),
-            send: (newValue: Q) => self.setAtPath(path, newValue, log),
-            sink: (callback: (value: Q) => void) => {
-              return self.sink(
-                (value, changedPath) =>
-                  pathAffected(changedPath, path) &&
-                  callback(getValueAtPath(value, path))
-              );
-            },
-            key: <K extends keyof Q>(key: K) =>
-              self.asSimpleCell([...path, key], log) as Cell<Q[K]>,
-          } satisfies Cell<Q>),
+      simpleCell<Q>(self, path, log),
     send: (newValue: T, log?: ReactivityLog) =>
       self.setAtPath([], newValue, log),
     updates: (callback: (value: T, path: PropertyKey[]) => void) => {
@@ -130,6 +110,38 @@ export function cell<T>(value?: T): CellImpl<T> {
   };
 
   return self;
+}
+
+function simpleCell<T>(
+  self: CellImpl<any>,
+  path: PropertyKey[],
+  log?: ReactivityLog
+): Cell<T> {
+  if (isStreamAlias(self.getAtPath(path)))
+    return {
+      // Implementing just Sendable<T>
+      send: (event: T) => {
+        log?.writes.push({ cell: self, path });
+        queueEvent({ cell: self, path }, event);
+      },
+    } as Cell<T>;
+  else
+    return {
+      get: () => transformToSimpleCells(self, self.getAtPath(path), log) as T,
+      set: (newValue: T) => self.setAtPath(path, newValue, log),
+      send: (newValue: T) => self.setAtPath(path, newValue, log),
+      sink: (callback: (value: T) => void) => {
+        return self.sink(
+          (value, changedPath) =>
+            pathAffected(changedPath, path) &&
+            callback(
+              transformToSimpleCells(self, getValueAtPath(value, path), log)
+            )
+        );
+      },
+      key: <K extends keyof T>(key: K) =>
+        self.asSimpleCell([...path, key], log) as Cell<T[K]>,
+    } satisfies Cell<T>;
 }
 
 // Array.prototype's entries, and whether they modify the array
@@ -215,10 +227,9 @@ export function createValueProxy<T>(
     get: (_target, prop) => {
       if (prop === getCellReference)
         return { cell, path } satisfies CellReference;
-      else if (typeof prop === "symbol") return; // TODO: iterators, etc.
 
       if (Array.isArray(target) && prop in arrayMethods)
-        return arrayMethods[prop] == false
+        return arrayMethods[prop as keyof typeof arrayMethods] == false
           ? (...args: any[]) => {
               return Array.prototype[
                 prop as keyof typeof Array.prototype
@@ -230,7 +241,6 @@ export function createValueProxy<T>(
                 prop as keyof typeof Array.prototype
               ].apply(copy, args);
               setNestedValue(cell, path, copy, log);
-              console.log("got", prop, result, target);
               return result;
             };
 

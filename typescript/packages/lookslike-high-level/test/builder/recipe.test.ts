@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isRecipe, isModule } from "../../src/builder/types.js";
+import { Recipe, isRecipe, Module, isModule } from "../../src/builder/types.js";
 import { lift } from "../../src/builder/module.js";
 import { recipe } from "../../src/builder/recipe.js";
 
@@ -97,5 +97,44 @@ describe("complex recipe with path aliases", () => {
     const parsed = JSON.parse(json);
     expect(json.length).toBeGreaterThan(200);
     expect(parsed.nodes[0].module.implementation).toContain(" => ");
+  });
+});
+
+describe("recipe with map node", () => {
+  const doubleArray = recipe<{ values: { x: number }[] }>(
+    "Double numbers",
+    ({ values }) => {
+      const doubled = values.map(({ x }) => {
+        const double = lift<number>((x) => x * 2);
+        return { doubled: double(x) };
+      });
+      return { doubled };
+    }
+  );
+
+  it("correctly serializes to a single map node", () => {
+    expect(doubleArray.nodes.length).toBe(1);
+    const module = doubleArray.nodes[0].module as Module;
+    expect(module.type).toBe("builtin");
+    expect(module.implementation).toBe("map");
+  });
+
+  it("correctly lists the input array as input to the map node", () => {
+    const node = doubleArray.nodes[0];
+    expect(node.inputs).toMatchObject({
+      list: { $alias: { path: ["values"] } },
+    });
+  });
+
+  it("correctly lists the recipe as input to the map node", () => {
+    const inputs = doubleArray.nodes[0].inputs as { op: Recipe };
+    expect(isRecipe(inputs.op)).toBe(true);
+  });
+
+  it("correctly associated the code with the inner recipe", () => {
+    const inputs = doubleArray.nodes[0].inputs as { op: Recipe };
+    const module = inputs.op.nodes[0].module as Module;
+    expect(module.type).toBe("javascript");
+    expect(typeof module.implementation).toBe("function");
   });
 });

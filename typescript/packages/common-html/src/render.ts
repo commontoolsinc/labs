@@ -10,7 +10,11 @@ import {
   isSection,
   getContext,
 } from "./view.js";
-import { effect, isSendable } from "@commontools/common-propagator/reactive.js";
+import {
+  effect,
+  isSendable,
+  isReactive,
+} from "@commontools/common-propagator/reactive.js";
 import {
   useCancelGroup,
   Cancel,
@@ -33,7 +37,7 @@ export default render;
 
 const renderNode = (
   node: VNode,
-  context: Context,
+  context: Context
 ): [HTMLElement | null, Cancel] => {
   const [cancel, addCancel] = useCancelGroup();
 
@@ -57,7 +61,7 @@ const renderNode = (
 const bindChildren = (
   element: HTMLElement,
   children: Array<Child>,
-  context: Context,
+  context: Context
 ): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
 
@@ -77,12 +81,40 @@ const bindChildren = (
       const replacement = getContext(context, child.path);
       // Anchor for reactive replacement
       let anchor: ChildNode = document.createTextNode("");
+      let endAnchor: ChildNode | undefined = undefined;
       element.append(anchor);
-      const cancel = effect(replacement, (replacement) => {
-        if (isView(replacement)) {
+      const replace = (replacement: any) => {
+        if (isReactive(replacement)) {
+          const cancel = effect(replacement, replace);
+          addCancel(cancel);
+        } else if (Array.isArray(replacement)) {
+          // TODO: Probably should move this up and instead only support the
+          // case where all the children are dynamic. That is, call bindChildren
+          // again from effect.
+
+          // For now a dumb version that replaces the whole list every time
+          while (endAnchor && anchor.nextSibling !== endAnchor) {
+            anchor.nextSibling?.remove();
+          }
+          if (!endAnchor) {
+            endAnchor = document.createTextNode("");
+            anchor.after(endAnchor);
+          }
+
+          // Swap out anchor for each item, so we can use the rest of the code
+          // as if it was a regular node.
+          const originalAnchor = anchor;
+          for (const item of replacement) {
+            const newAnchor = document.createTextNode("");
+            anchor.after(newAnchor);
+            anchor = newAnchor;
+            replace(item);
+          }
+          anchor = originalAnchor;
+        } else if (isView(replacement)) {
           const [childElement, cancel] = renderNode(
             replacement.template,
-            replacement.context,
+            replacement.context
           );
           addCancel(cancel);
           if (childElement != null) {
@@ -96,8 +128,8 @@ const bindChildren = (
           anchor.replaceWith(text);
           anchor = text;
         }
-      });
-      addCancel(cancel);
+      };
+      replace(replacement);
     } else if (isSection(child)) {
       logger.warn("Sections not yet implemented");
     }
@@ -108,7 +140,7 @@ const bindChildren = (
 const bindProps = (
   element: HTMLElement,
   props: Props,
-  context: Context,
+  context: Context
 ): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
   for (const [propKey, propValue] of Object.entries(props)) {
@@ -118,7 +150,7 @@ const bindProps = (
       if (isEventProp(propKey)) {
         if (!isSendable(replacement)) {
           throw new TypeError(
-            `Event prop "${propKey}" does not have a send method`,
+            `Event prop "${propKey}" does not have a send method`
           );
         }
         const key = cleanEventProp(propKey);
@@ -159,7 +191,7 @@ const cleanEventProp = (key: string) => {
 const listen = (
   element: HTMLElement,
   key: string,
-  callback: (event: Event) => void,
+  callback: (event: Event) => void
 ) => {
   element.addEventListener(key, callback);
   return () => {

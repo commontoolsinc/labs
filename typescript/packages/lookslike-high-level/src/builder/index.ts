@@ -1,5 +1,11 @@
 export { cell } from "./cell-proxy.js";
-export { lift, asHandler, apply, handler } from "./module.js";
+export {
+  lift,
+  createNodeFactory as builtin,
+  asHandler,
+  apply,
+  handler,
+} from "./module.js";
 export { recipe } from "./recipe.js";
 export { generateData } from "./built-in.js";
 export {
@@ -7,14 +13,16 @@ export {
   TYPE,
   NAME,
   UI,
-  Value,
-  Module,
-  Recipe,
-  CellProxy,
+  type Value,
+  type Module,
+  type Recipe,
+  type Node,
+  type RecipeFactory,
+  type CellProxy,
   isCell,
   isModule,
   isRecipe,
   isAlias,
-  JSONValue,
-  JSON,
+  type JSONValue,
+  type JSON,
 } from "./types.js";

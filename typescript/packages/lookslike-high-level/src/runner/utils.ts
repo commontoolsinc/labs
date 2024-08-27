@@ -1,5 +1,6 @@
 import { isAlias } from "../builder/index.js";
 import {
+  isCell,
   CellImpl,
   ReactivityLog,
   CellReference,
@@ -243,4 +244,32 @@ export function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
       changedPath.every((key, index) => key === path[index])) ||
     path.every((key, index) => key === changedPath[index])
   );
+}
+
+export function transformToSimpleCells(
+  cell: CellImpl<any>,
+  value: any,
+  log?: ReactivityLog
+): any {
+  if (isAlias(value)) {
+    const ref = followCellReferences(followAliases(value, cell, log), log);
+    return ref.cell.asSimpleCell(ref.path, log);
+  } else if (isCell(value)) {
+    return value.asSimpleCell([], log);
+  } else if (isCellReference(value)) {
+    const ref = followCellReferences(value);
+    return ref.cell.asSimpleCell(ref.path, log);
+  }
+
+  if (typeof value === "object" && value !== null)
+    if (Array.isArray(value))
+      return value.map((value) => transformToSimpleCells(cell, value, log));
+    else
+      return Object.fromEntries(
+        Object.entries(value).map(([key, value]) => [
+          key,
+          transformToSimpleCells(cell, value, log),
+        ])
+      );
+  else return value;
 }

@@ -7,10 +7,12 @@ export interface TodoItem {
 }
 
 export const todoList = recipe<{
-  id: number;
   title: string;
   items: TodoItem[];
-}>("todo list", ({ id, title, items }) => {
+}>("todo list", ({ title, items }) => {
+  title.setDefault("untitled");
+  //items.setDefault([]);
+
   const newTasks = handler<
     { detail: { message: string } },
     { items: TodoItem[] }
@@ -37,11 +39,13 @@ export const todoList = recipe<{
                   @todo-checked#checked=${item.done}
                   @todo-input#value=${item.title}
                 >
-                  <annotation
+                  ${
+                    /*<annotation
                     query=${item.title}
                     target=${id}
                     data=${{ items, done: item.done, title: item.title }}
-                  ></annotation>
+                  ></annotation>*/ ""
+                  }
                 </todo>
               </vstack>
             `

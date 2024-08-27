@@ -19,7 +19,6 @@ describe("scheduler", () => {
     const b = cell(2);
     const c = cell(0);
     const adder: Action = (log) => {
-      console.log("running adder");
       runCount++;
       c.asSimpleCell([], log).send(
         a.getAsProxy([], log) + b.getAsProxy([], log)

@@ -1,2 +1,2 @@
 export { run } from "./runner.js";
-export { CellImpl, isCell, cell, CellReference } from "./cell.js";
+export { type CellImpl, isCell, cell, type CellReference } from "./cell.js";

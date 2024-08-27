@@ -1,4 +1,10 @@
-import { Recipe, isModule, isRecipe, isAlias } from "../builder/index.js";
+import {
+  Recipe,
+  RecipeFactory,
+  isModule,
+  isRecipe,
+  isAlias,
+} from "../builder/index.js";
 import { cell, CellImpl, ReactivityLog } from "./cell.js";
 import { Action, schedule } from "./scheduler.js";
 import {
@@ -8,7 +14,13 @@ import {
   mergeObjects,
   sendValueToBinding,
 } from "./utils.js";
+import { builtins } from "./builtins/index.js";
 
+export function run<T, R>(
+  recipeFactory: RecipeFactory<T, R>,
+  bindings: T
+): CellImpl<R>;
+export function run<T>(recipe: Recipe, bindings: T): CellImpl<T>;
 export function run<T>(recipe: Recipe, bindings: T): CellImpl<T> {
   // Walk the recipe's schema and extract all default values
   const defaults = extractDefaultValues(recipe.schema);
@@ -42,13 +54,25 @@ export function run<T>(recipe: Recipe, bindings: T): CellImpl<T> {
             fn = moduleWrappers[node.module.wrapper](fn);
 
           const action: Action = (log: ReactivityLog) => {
-            console.log("module node called", fn.toString(), inputs, outputs);
             const inputsProxy = inputsCell.getAsProxy([], log);
             const result = fn(inputsProxy);
             sendValueToBinding(recipeCell, outputs, result, log);
           };
 
           schedule(action, { reads, writes } satisfies ReactivityLog);
+          break;
+        }
+        case "builtin": {
+          // TODO: Factor out javascript and passthrough types to built-ins.
+          // Then rationalize "node.type" vs the builtin type.
+          if (typeof node.module.implementation !== "string")
+            throw new Error(`Builtin is not a string`);
+          if (!(node.module.implementation in builtins))
+            throw new Error(`Unknown builtin: ${node.module.implementation}`);
+
+          // Built-ins can define their own scheduling logic, so they'll
+          // implement parts of the above themselves.
+          builtins[node.module.implementation](recipeCell, node);
           break;
         }
         case "passthrough": {
@@ -60,7 +84,6 @@ export function run<T>(recipe: Recipe, bindings: T): CellImpl<T> {
           const writes = findAllAliasedCells(outputs);
 
           const action: Action = (log: ReactivityLog) => {
-            console.log("passthrough node called");
             const inputsProxy = inputsCell.getAsProxy([], log);
             sendValueToBinding(recipeCell, node.outputs, inputsProxy, log);
           };
@@ -96,5 +119,5 @@ const moduleWrappers = {
   handler:
     (fn: (event: any, ...props: any[]) => any) =>
     ({ $event, ...props }: any) =>
-      fn($event, ...props),
+      fn($event, props),
 };
