@@ -57,7 +57,7 @@ fn parse_xml_and_combine(input: &str, sketches: Vec<String>) -> Vec<MicroAppIdea
                 }
             }
             Ok(Event::Text(e)) => {
-                let text = e.unescape_and_decode(&reader).unwrap();
+                let text = e.unescape_and_decode(&reader).unwrap_or_default();
                 match current_field.as_str() {
                     "name" => current_idea.name = text,
                     "tagline" => current_idea.tagline = text,

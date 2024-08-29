@@ -1445,6 +1445,7 @@ dependencies = [
  "js-sys",
  "leptos",
  "quick-xml",
+ "rand",
  "regex",
  "serde",
  "serde-wasm-bindgen",

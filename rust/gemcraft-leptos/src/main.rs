@@ -15,6 +15,7 @@ use uuid::Uuid;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use rand::prelude::*;
+use rand::Rng;
 
 use data::{ClassificationData, DataGem};
 use gem::{DataGemEditor, MiniDataGemPreview};

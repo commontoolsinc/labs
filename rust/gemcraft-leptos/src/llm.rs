@@ -162,7 +162,7 @@ pub async fn combine_data(gems: Vec<DataGem>, description: String, model: String
     You must utilize all provided data gems and consider how to use them TOGETHER in an app.
     You should create a view model based on the source data + app concept. Describe each micro-app within a <micro-app-idea> tag with a small spec listing what a user can do with a loose idea of the visual components and layout.
     
-    Include a single emoji as the icon and the code for an <svg> showing a rough wireframe sketch of how the interface could look as well as the full data-model within <view-model> tags.
+    Include a single emoji as the icon and the code for an <svg> showing a rough wireframe sketch of how the interface could look as well as the full data-model within <view-model> tags as valid literal JSON.
     
     Be creative in how you combine the input data and request, try to delight the user.
     
