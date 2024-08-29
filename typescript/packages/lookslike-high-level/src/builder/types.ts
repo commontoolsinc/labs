@@ -5,24 +5,24 @@ export const TYPE = "$TYPE";
 export const NAME = "$NAME";
 export const UI = "$UI";
 
+export type CellProxy<T> = CellProxyMethods<T> &
+  (T extends Array<infer U>
+    ? Array<CellProxy<U>>
+    : T extends object
+    ? { [K in keyof T]: CellProxy<T[K]> }
+    : T);
+
+// Any CellProxy is also a Value, but a Value can have static values as well.
+// Use Value<T> in APIs that get inputs from the developer and use CellProxy
+// when data gets passed into what developers see (either recipe inputs or
+// module outputs).
 export type Value<T> =
-  | (T extends string | number | boolean | null | undefined
-      ? CellProxy<T>
-      : T extends readonly [...any[]]
-      ? { [K in keyof T]: Value<T[K]> }
-      : T extends Array<infer U>
+  | CellProxy<T>
+  | (T extends Array<infer U>
       ? Array<Value<U>>
       : T extends object
       ? { [K in keyof T]: Value<T[K]> }
-      : never)
-  | CellProxy<T>;
-
-export type CellProxy<T> = CellProxyMethods<T> &
-  (T extends object
-    ? {
-        [K in keyof T]: CellProxy<T[K]>;
-      }
-    : T);
+      : T);
 
 export type CellProxyMethods<T> = {
   get(): CellProxy<T>;
@@ -56,15 +56,15 @@ export type toJSON = {
   toJSON(): any;
 };
 
-export type NodeFactory<T, R> = ((inputs: Value<T>) => Value<R>) &
+export type NodeFactory<T, R> = ((inputs: Value<T>) => CellProxy<R>) &
   (Module | Recipe) &
   toJSON;
 
-export type RecipeFactory<T, R> = ((inputs: Value<T>) => Value<R>) &
+export type RecipeFactory<T, R> = ((inputs: Value<T>) => CellProxy<R>) &
   Recipe &
   toJSON;
 
-export type ModuleFactory<T, R> = ((inputs: Value<T>) => Value<R>) &
+export type ModuleFactory<T, R> = ((inputs: Value<T>) => CellProxy<R>) &
   Module &
   toJSON;
 

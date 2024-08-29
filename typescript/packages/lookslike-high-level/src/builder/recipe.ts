@@ -30,15 +30,15 @@ import {
  */
 export function recipe<T>(
   description: string,
-  fn: (input: Value<T>) => any
+  fn: (input: CellProxy<T>) => any
 ): RecipeFactory<T, ReturnType<typeof fn>>;
 export function recipe<T, R>(
   description: string,
-  fn: (input: Value<T>) => Value<R>
+  fn: (input: CellProxy<T>) => Value<R>
 ): RecipeFactory<T, R>;
 export function recipe<T, R>(
   description: string,
-  fn: (input: Value<T>) => Value<R>
+  fn: (input: CellProxy<T>) => Value<R>
 ): RecipeFactory<T, R> {
   // The recipe graph is created by calling `fn` which populates for `inputs`
   // and `outputs` with Value<> (which containts CellProxy<>) and/or default
@@ -157,7 +157,7 @@ export function recipe<T, R>(
     toJSON: () => moduleToJSON(module),
   };
 
-  return Object.assign((inputs: Value<T>): Value<R> => {
+  return Object.assign((inputs: Value<T>): CellProxy<R> => {
     const outputs = cell<R>();
     const node: NodeProxy = { module, inputs, outputs };
 

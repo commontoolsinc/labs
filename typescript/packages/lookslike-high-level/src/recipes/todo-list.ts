@@ -11,7 +11,7 @@ export const todoList = recipe<{
   items: TodoItem[];
 }>("todo list", ({ title, items }) => {
   title.setDefault("untitled");
-  //items.setDefault([]);
+  items.setDefault([]);
 
   const newTasks = handler<
     { detail: { message: string } },
@@ -33,7 +33,7 @@ export const todoList = recipe<{
           ${items.map(
             (item: TodoItem) => html`
               <vstack gap="sm">
-                <todo
+                <common-todo
                   checked=${item.done}
                   value=${item.title}
                   @todo-checked#checked=${item.done}
@@ -51,7 +51,7 @@ export const todoList = recipe<{
             `
           )}
         </vstack>
-        <send-input
+        <common-send-message
           name="Add"
           placeholder="New task"
           appearance="rounded"
