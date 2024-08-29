@@ -1,6 +1,6 @@
 // This file is setting up example data
 
-import { ID, TYPE, NAME, Recipe } from "./builder/index.js";
+import { ID, TYPE, NAME, UI, Recipe } from "./builder/index.js";
 import { run, cell, isCell, CellImpl } from "./runner/index.js";
 
 import { todoList } from "./recipes/todo-list.js";
@@ -17,10 +17,11 @@ export type Gem = {
   [ID]: number;
   [TYPE]: string;
   [NAME]?: string;
+  [UI]?: any;
   [key: string]: any;
 };
 
-export { ID, TYPE, NAME };
+export { ID, TYPE, NAME, UI };
 
 export function isGem(value: any): value is Gem {
   return isCell(value) && ID in value.get() && TYPE in value.get();
@@ -79,6 +80,7 @@ export const recipes: RecipeManifest[] = [
     recipe: luftBnBSearch,
   },
 ];
+(window as any).recipes = recipes;
 
 // Helper for mock data
 function getFridayAndMondayDateStrings() {
@@ -103,8 +105,8 @@ function getFridayAndMondayDateStrings() {
 }
 
 // Terrible hack to open a saga from a recipe
-let openSagaOpener: (saga: Gem) => void = () => {};
-export const openSaga = (saga: Gem) => openSagaOpener(saga);
-openSaga.set = (opener: (saga: Gem) => void) => {
+let openSagaOpener: (saga: CellImpl<Gem>) => void = () => {};
+export const openSaga = (saga: CellImpl<Gem>) => openSagaOpener(saga);
+openSaga.set = (opener: (saga: CellImpl<Gem>) => void) => {
   openSagaOpener = opener;
 };

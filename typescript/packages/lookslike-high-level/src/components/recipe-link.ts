@@ -2,6 +2,7 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { render } from "@commontools/common-ui";
 import { addGems, RecipeManifest } from "../data.js";
+import { run } from "../runner/index.js";
 
 export const recipeLink = render.view("common-recipe-link", {
   recipe: { type: "object" },
@@ -27,7 +28,7 @@ export class CommonRecipeLink extends LitElement {
 
     if (!this.recipe) return;
 
-    const saga = this.recipe.recipe(this.recipe.inputs);
+    const saga = run(this.recipe.recipe, {});
     addGems([saga]);
 
     this.dispatchEvent(
@@ -40,6 +41,7 @@ export class CommonRecipeLink extends LitElement {
   }
 
   override render() {
+    console.log("recipe link render", this.recipe);
     if (!this.recipe?.name) return html``;
     return html`
       <a href="#" @click="${this.handleClick}">👨‍🍳 ${this.recipe.name}</a>

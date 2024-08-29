@@ -20,8 +20,8 @@ export function run<T, R>(
   recipeFactory: RecipeFactory<T, R>,
   bindings: T
 ): CellImpl<R>;
-export function run<T>(recipe: Recipe, bindings: T): CellImpl<T>;
-export function run<T>(recipe: Recipe, bindings: T): CellImpl<T> {
+export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R>;
+export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
   // Walk the recipe's schema and extract all default values
   const defaults = extractDefaultValues(recipe.schema);
 
@@ -39,10 +39,10 @@ export function run<T>(recipe: Recipe, bindings: T): CellImpl<T> {
           // TODO: This isn't correct, as module can write into passed cells. We
           // should look at the schema to find out what cells are read and
           // written.
-          const reads = findAllAliasedCells(inputs);
+          const reads = findAllAliasedCells(inputs, recipeCell);
 
           const outputs = mapBindingsToCell(node.outputs, recipeCell);
-          const writes = findAllAliasedCells(outputs);
+          const writes = findAllAliasedCells(outputs, recipeCell);
 
           let fn = (
             typeof node.module.implementation === "string"
@@ -78,10 +78,10 @@ export function run<T>(recipe: Recipe, bindings: T): CellImpl<T> {
         case "passthrough": {
           const inputs = mapBindingsToCell(node.inputs, recipeCell);
           const inputsCell = cell(inputs);
-          const reads = findAllAliasedCells(inputs);
+          const reads = findAllAliasedCells(inputs, recipeCell);
 
           const outputs = mapBindingsToCell(node.outputs, recipeCell);
-          const writes = findAllAliasedCells(outputs);
+          const writes = findAllAliasedCells(outputs, recipeCell);
 
           const action: Action = (log: ReactivityLog) => {
             const inputsProxy = inputsCell.getAsProxy([], log);

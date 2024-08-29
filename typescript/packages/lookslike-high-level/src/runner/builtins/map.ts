@@ -82,7 +82,7 @@ export function map(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
   };
 
   schedule(mapValuesToOp, {
-    reads: findAllAliasedCells(inputBindings),
-    writes: findAllAliasedCells(outputBindings),
+    reads: findAllAliasedCells(inputBindings, recipeCell),
+    writes: findAllAliasedCells(outputBindings, recipeCell),
   });
 }

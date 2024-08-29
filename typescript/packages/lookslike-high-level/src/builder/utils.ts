@@ -82,27 +82,43 @@ export const deepEqual = (a: any, b: any): boolean => {
 
 export function toJSONWithAliases(
   value: Value<any>,
-  paths: Map<CellProxy<any>, PropertyKey[]>
-): JSONValue {
+  paths: Map<CellProxy<any>, PropertyKey[]>,
+  ignoreSelfAliases: boolean = false,
+  path: PropertyKey[] = []
+): JSONValue | undefined {
   if (isCell(value)) {
-    const path = paths.get(value);
-    if (path)
+    const pathToCell = paths.get(value);
+    if (pathToCell) {
+      if (ignoreSelfAliases && deepEqual(path, pathToCell)) return undefined;
+
       return {
-        $alias: { path: path as (string | number)[] },
+        $alias: { path: pathToCell as (string | number)[] },
       } satisfies Alias;
-    else throw new Error(`Cell not found in paths`);
+    } else throw new Error(`Cell not found in paths`);
   }
 
   if (Array.isArray(value))
-    return (value as Value<any>).map((v: Value<any>) =>
-      toJSONWithAliases(v, paths)
+    return (value as Value<any>).map((v: Value<any>, i: number) =>
+      toJSONWithAliases(v, paths, ignoreSelfAliases, [...path, i])
     );
 
   if (typeof value === "object") {
     const result: any = {};
-    for (const key in value as any)
-      result[key] = toJSONWithAliases(value[key], paths);
-    return result;
+    let hasValue = false;
+    for (const key in value as any) {
+      const jsonValue = toJSONWithAliases(
+        value[key],
+        paths,
+        ignoreSelfAliases,
+        [...path, key]
+      );
+      if (jsonValue !== undefined) {
+        result[key] = jsonValue;
+        hasValue = true;
+      }
+    }
+
+    return hasValue || Object.keys(result).length === 0 ? result : undefined;
   }
 
   return value;

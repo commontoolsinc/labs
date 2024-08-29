@@ -151,19 +151,25 @@ export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
 }
 
 // Traverses binding and returns all cells reacheable through aliases.
-export function findAllAliasedCells(binding: any): CellReference[] {
+export function findAllAliasedCells(
+  binding: any,
+  cell: CellImpl<any>
+): CellReference[] {
   const cells: CellReference[] = [];
-  function find(binding: any) {
+  function find(binding: any, origCell: CellImpl<any>) {
     if (isAlias(binding)) {
-      cells.push(binding.$alias as CellReference);
-      find(binding.$alias.cell.getAtPath(binding.$alias.path));
+      const cell = binding.$alias.cell ?? origCell;
+      const path = binding.$alias.path;
+      if (cells.find((c) => c.cell === cell && c.path === path)) return;
+      cells.push({ cell, path });
+      find(cell.getAtPath(path), cell);
     } else if (Array.isArray(binding)) {
-      for (const value of binding) find(value);
+      for (const value of binding) find(value, origCell);
     } else if (typeof binding === "object" && binding !== null) {
-      for (const value of Object.values(binding)) find(value);
+      for (const value of Object.values(binding)) find(value, origCell);
     }
   }
-  find(binding);
+  find(binding, cell);
   return cells;
 }
 
