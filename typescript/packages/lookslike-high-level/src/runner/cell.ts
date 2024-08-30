@@ -250,7 +250,7 @@ export function createValueProxy<T>(
               return result;
             };
 
-      return createValueProxy(cell, [...path, prop]);
+      return createValueProxy(cell, [...path, prop], log);
     },
     set: (_target, prop, value) => {
       if (isCellProxy(value)) value = value[getCellReference];

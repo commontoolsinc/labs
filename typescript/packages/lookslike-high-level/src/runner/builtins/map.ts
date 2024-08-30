@@ -34,7 +34,7 @@ export function map(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
   const outputBindings = mapBindingsToCell(outputs, recipeCell) as any[];
 
   const inputsCell = cell(inputBindings);
-  const result = cell<any[]>([]);
+  const result = cell<any[] | undefined>(undefined);
   const valueToResult: Map<any, CellImpl<any>> = new Map();
 
   const mapValuesToOp: Action = (log: ReactivityLog) => {
@@ -50,11 +50,18 @@ export function map(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
     if (!Array.isArray(list))
       throw new Error("map currently only supports arrays");
 
-    const previousResult = result.getAsProxy([], log);
+    let previousResult = result.getAsProxy([]);
+    if (!Array.isArray(previousResult)) {
+      result.setAtPath([], [], log);
+      previousResult = [];
+    }
+
     const seen = new Set<any>();
 
     // Update values that are new or have changed
-    list.map((value: any, index: number) => {
+    for (let index = 0; index < list.length; index++) {
+      const value = list[index];
+
       if (previousResult[index] === value) return;
 
       if (typeof value !== "object")
@@ -69,7 +76,7 @@ export function map(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
       // Send the result value to the result cell
       result.setAtPath([index], valueToResult.get(value), log);
       seen.add(value);
-    });
+    }
 
     // Remove values that are no longer in the input
     for (const value of valueToResult.keys()) {

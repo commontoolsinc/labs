@@ -11,7 +11,6 @@ document.addEventListener("DOMContentLoaded", () => {
     "window-manager"
   )! as CommonWindowManager;
   openSaga.set(windowManager.openSaga.bind(windowManager));
-  console.log("dataGems", dataGems.get());
   const homeGem = run(home, { sagas: dataGems, recipes }) as CellImpl<Gem>;
   windowManager.openSaga(homeGem.get()[ID]);
 });

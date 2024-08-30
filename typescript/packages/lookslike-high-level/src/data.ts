@@ -30,7 +30,6 @@ export function isGem(value: any): value is Gem {
 export const dataGems = cell<CellImpl<Gem>[]>([]);
 
 export function addGems(gems: CellImpl<any>[]) {
-  console.log("addGems", dataGems.get(), gems);
   dataGems.send([...dataGems.get(), ...gems]);
 }
 

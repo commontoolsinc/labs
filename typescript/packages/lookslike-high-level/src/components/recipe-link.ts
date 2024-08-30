@@ -41,7 +41,6 @@ export class CommonRecipeLink extends LitElement {
   }
 
   override render() {
-    console.log("recipe link render", this.recipe);
     if (!this.recipe?.name) return html``;
     return html`
       <a href="#" @click="${this.handleClick}">👨‍🍳 ${this.recipe.name}</a>
