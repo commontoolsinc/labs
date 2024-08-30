@@ -22,7 +22,7 @@ import { mapBindingsToCell } from "../utils.js";
  * We should make sure updates to arrays don't unnecessarily re-ify objects
  * and/or change the comparision here.
  *
- * @param values - A cell containing an array of values to map over.
+ * @param list - A cell containing an array of values to map over.
  * @param op - A recipe to apply to each value.
  * @returns A cell containing the mapped values.
  */

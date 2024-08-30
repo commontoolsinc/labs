@@ -1,7 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { render } from "@commontools/common-ui";
-import { addGems, RecipeManifest } from "../data.js";
+import { addGems, RecipeManifest, ID } from "../data.js";
 import { run } from "../runner/index.js";
 
 export const recipeLink = render.view("common-recipe-link", {
@@ -33,7 +33,7 @@ export class CommonRecipeLink extends LitElement {
 
     this.dispatchEvent(
       new CustomEvent("open-saga", {
-        detail: { saga },
+        detail: { sagaId: saga.get()[ID] },
         bubbles: true,
         composed: true,
       })
