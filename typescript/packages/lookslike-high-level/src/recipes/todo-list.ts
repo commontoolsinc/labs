@@ -55,7 +55,7 @@ export const todoList = recipe<{
           name="Add"
           placeholder="New task"
           appearance="rounded"
-          @messageSend="${newTasks}"
+          onmessagesend="${newTasks}"
         ></send-input>
       </vstack>
     `,

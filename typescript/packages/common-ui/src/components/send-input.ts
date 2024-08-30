@@ -42,7 +42,7 @@ export class SendMessageElement extends LitElement {
     inputEl.value = "";
 
     this.dispatchEvent(
-      new CustomEvent("messageSend", {
+      new CustomEvent("messagesend", {
         detail: { message: value },
         bubbles: true,
         composed: true,

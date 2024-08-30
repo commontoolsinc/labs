@@ -4,9 +4,10 @@ import {
   isModule,
   isRecipe,
   isAlias,
+  isStreamAlias,
 } from "../builder/index.js";
-import { cell, CellImpl, ReactivityLog } from "./cell.js";
-import { Action, schedule } from "./scheduler.js";
+import { cell, CellImpl, ReactivityLog, CellReference } from "./cell.js";
+import { Action, schedule, addEventHandler } from "./scheduler.js";
 import {
   extractDefaultValues,
   mapBindingsToCell,
@@ -33,9 +34,11 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
     if (isModule(node.module)) {
       switch (node.module.type) {
         case "javascript": {
-          const inputs = mapBindingsToCell(node.inputs, recipeCell);
-          const inputsCell = cell(inputs);
-          inputsCell.freeze(); // Freezes the bindings, not aliased cells.
+          const inputs = mapBindingsToCell(
+            node.inputs as { [key: string]: any },
+            recipeCell
+          );
+
           // TODO: This isn't correct, as module can write into passed cells. We
           // should look at the schema to find out what cells are read and
           // written.
@@ -53,13 +56,56 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
           if (node.module.wrapper && node.module.wrapper in moduleWrappers)
             fn = moduleWrappers[node.module.wrapper](fn);
 
-          const action: Action = (log: ReactivityLog) => {
-            const inputsProxy = inputsCell.getAsProxy([], log);
-            const result = fn(inputsProxy);
-            sendValueToBinding(recipeCell, outputs, result, log);
-          };
+          // Check if any of the read cells is a stream alias
+          let streamRef: CellReference | undefined = undefined;
+          for (const ref of reads) {
+            const { cell, path } = ref;
+            if (isStreamAlias(cell.getAtPath(path))) {
+              streamRef = ref;
+              break;
+            }
+          }
 
-          schedule(action, { reads, writes } satisfies ReactivityLog);
+          if (streamRef) {
+            // Register as event handler for the stream. Replace alias to
+            // streamref with the event.
+            const handler = (event: any) => {
+              const eventInputs = { ...inputs };
+              for (const key in eventInputs) {
+                if (
+                  isAlias(eventInputs[key]) &&
+                  eventInputs[key].$alias.cell === streamRef.cell &&
+                  eventInputs[key].$alias.path.length ===
+                    streamRef.path.length &&
+                  eventInputs[key].$alias.path.every(
+                    (value, index) => value === streamRef.path[index]
+                  )
+                ) {
+                  eventInputs[key] = event;
+                }
+              }
+
+              const inputsCell = cell(eventInputs);
+              inputsCell.freeze(); // Freezes the bindings, not aliased cells.
+
+              return fn(inputsCell.getAsProxy([]));
+            };
+            addEventHandler(handler, streamRef);
+          } else {
+            // Schedule the action to run when the inputs change
+
+            const inputsCell = cell(inputs);
+            inputsCell.freeze(); // Freezes the bindings, not aliased cells.
+
+            const action: Action = (log: ReactivityLog) => {
+              const inputsProxy = inputsCell.getAsProxy([], log);
+              const result = fn(inputsProxy);
+              sendValueToBinding(recipeCell, outputs, result, log);
+            };
+
+            schedule(action, { reads, writes } satisfies ReactivityLog);
+          }
+
           break;
         }
         case "builtin": {

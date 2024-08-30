@@ -23,6 +23,7 @@ export {
   isModule,
   isRecipe,
   isAlias,
+  isStreamAlias,
   type JSONValue,
   type JSON,
 } from "./types.js";
