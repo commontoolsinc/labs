@@ -4,7 +4,7 @@ import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
 import { Gem, ID, UI } from "../data.js";
-import { CellImpl, isCell } from "../runner/index.js";
+import { CellImpl, isCell, gemById } from "../runner/index.js";
 //import { annotation } from "../components/annotation.js";
 
 @customElement("common-window-manager")
@@ -110,7 +110,9 @@ export class CommonWindowManager extends LitElement {
     `;
   }
 
-  openSaga(saga: CellImpl<Gem>) {
+  openSaga(sagaId: number) {
+    const saga = gemById.get(sagaId) as CellImpl<Gem>;
+    if (!isCell(saga)) throw new Error("Saga ${sagaId} doesn't exist");
     this.sagas = [...this.sagas, saga];
     this.updateComplete.then(() => {
       while (this.newSagaRefs.length > 0) {
@@ -157,9 +159,7 @@ export class CommonWindowManager extends LitElement {
   }
 
   private handleAddWindow(e: Event) {
-    const saga = (e as CustomEvent).detail.saga;
-    if (isCell(saga)) {
-      this.openSaga(saga);
-    }
+    const sagaId = (e as CustomEvent).detail.sagaId;
+    this.openSaga(sagaId);
   }
 }

@@ -6,19 +6,16 @@ export const home = recipe<{
   sagas: Gem[];
   recipes: RecipeManifest[];
 }>("home screen", ({ sagas, recipes }) => {
-  const sagasWithIDs = lift((sagas: Gem[]) =>
+  const sagaIDs = lift((sagas: Gem[]) =>
     sagas
-      .filter((saga) => saga.UI) // Only show sagas with UI
-      .map((saga) => ({
-        id: saga[ID],
-        saga,
-      }))
+      .filter((saga) => saga[UI] ?? saga.get()[UI]) // Only show sagas with UI
+      .map((saga) => ({ id: saga[ID] ?? saga.get()[ID] }))
   )(sagas);
 
   return {
     [UI]: html`<vstack
-      >${sagasWithIDs.map(
-        (saga) => html`<div><common-saga-link .saga=${saga}></sagaLink></div>`
+      >${sagaIDs.map(
+        (saga) => html`<div><common-saga-link saga=${saga.id}></sagaLink></div>`
       )}
       ${recipes.map(
         (recipe) =>

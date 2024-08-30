@@ -27,7 +27,7 @@ describe("runRecipe", () => {
 
     const result = run(recipe, {});
     await idle();
-    expect(result.get()).toEqual({
+    expect(result.get()).toMatchObject({
       input: 1,
       output: 1,
     });
@@ -74,7 +74,7 @@ describe("runRecipe", () => {
 
     const result = run(outerRecipe, {});
     await idle();
-    expect(result.get()).toEqual({ value: 5, result: 5 });
+    expect(result.get()).toMatchObject({ value: 5, result: 5 });
   });
 
   it("should run a simple module", async () => {
@@ -95,7 +95,7 @@ describe("runRecipe", () => {
 
     const result = run(mockRecipe, {});
     await idle();
-    expect(result.get()).toEqual({ value: 1, result: 2 });
+    expect(result.get()).toMatchObject({ value: 1, result: 2 });
   });
 
   it("should handle nested recipes", async () => {
@@ -128,6 +128,6 @@ describe("runRecipe", () => {
 
     const result = run(mockRecipe, {});
     await idle();
-    expect(result.get()).toEqual({ value: 1, result: 2 });
+    expect(result.get()).toMatchObject({ value: 1, result: 2 });
   });
 });

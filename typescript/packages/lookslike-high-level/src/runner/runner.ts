@@ -1,3 +1,4 @@
+import { ID } from "../builder/index.js";
 import {
   Recipe,
   RecipeFactory,
@@ -17,6 +18,9 @@ import {
 } from "./utils.js";
 import { builtins } from "./builtins/index.js";
 
+export const gemById = new Map<number, CellImpl<any>>();
+let nextGemId = 0;
+
 export function run<T, R>(
   recipeFactory: RecipeFactory<T, R>,
   bindings: T
@@ -28,7 +32,11 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
 
   // Generate recipe cell using defaults, bindings, and initial values
   // TODO: Some initial values can be aliases to outside cells
-  const recipeCell = cell(mergeObjects(recipe.initial, bindings, defaults));
+  const id = nextGemId++;
+  const recipeCell = cell(
+    mergeObjects(recipe.initial, bindings, defaults, { [ID]: id })
+  );
+  gemById.set(id, recipeCell);
 
   for (const node of recipe.nodes) {
     if (isModule(node.module)) {

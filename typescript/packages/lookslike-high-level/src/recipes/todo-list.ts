@@ -61,6 +61,6 @@ export const todoList = recipe<{
     `,
     title,
     items,
-    [NAME]: apply({ title }, (title) => title || "untitled"),
+    [NAME]: apply({ title }, ({ title }) => title || "untitled"),
   };
 });

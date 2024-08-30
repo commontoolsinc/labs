@@ -34,6 +34,10 @@ export interface Cell<T> {
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
 }
 
+export interface ReactiveCell<T> {
+  sink(callback: (value: T) => void): () => void;
+}
+
 export type CellImpl<T> = {
   get(): T;
   getAsProxy(path?: PropertyKey[], log?: ReactivityLog): T;
@@ -198,6 +202,8 @@ export function createValueProxy<T>(
       path = ref.path;
     } else if (isCell(target)) {
       cell = target;
+      path = [];
+      log?.reads.push({ cell, path });
       target = target.get();
     } else if (isCellReference(target)) {
       const ref = followCellReferences(target, log);
@@ -269,3 +275,13 @@ const getCellReference = Symbol("isCellProxy");
 export function isCellProxy(value: any): value is CellProxy<any> {
   return typeof value === "object" && value[getCellReference] !== undefined;
 }
+
+export const isReactive = <T = any>(
+  value: ReactiveCell<T>
+): value is ReactiveCell<T> => {
+  return (
+    typeof value === "object" &&
+    "sink" in value &&
+    typeof value.sink === "function"
+  );
+};

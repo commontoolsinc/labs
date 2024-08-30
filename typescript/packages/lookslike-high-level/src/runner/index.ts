@@ -1,2 +1,8 @@
-export { run } from "./runner.js";
-export { type CellImpl, isCell, cell, type CellReference } from "./cell.js";
+export { run, gemById } from "./runner.js";
+export {
+  type CellImpl,
+  isCell,
+  cell,
+  type CellReference,
+  isReactive,
+} from "./cell.js";

@@ -15,7 +15,6 @@ import "./recipes/playlist.js";
 
 export type Gem = {
   [ID]: number;
-  [TYPE]: string;
   [NAME]?: string;
   [UI]?: any;
   [key: string]: any;
@@ -23,6 +22,7 @@ export type Gem = {
 
 export { ID, TYPE, NAME, UI };
 
+// TODO: TYPE is now obsolete. Do we still need this?
 export function isGem(value: any): value is Gem {
   return isCell(value) && ID in value.get() && TYPE in value.get();
 }
@@ -30,7 +30,8 @@ export function isGem(value: any): value is Gem {
 export const dataGems = cell<CellImpl<Gem>[]>([]);
 
 export function addGems(gems: CellImpl<any>[]) {
-  dataGems.send([...dataGems.get(), ...gems.filter(isGem)]);
+  console.log("addGems", dataGems.get(), gems);
+  dataGems.send([...dataGems.get(), ...gems]);
 }
 
 addGems([
@@ -105,8 +106,8 @@ function getFridayAndMondayDateStrings() {
 }
 
 // Terrible hack to open a saga from a recipe
-let openSagaOpener: (saga: CellImpl<Gem>) => void = () => {};
-export const openSaga = (saga: CellImpl<Gem>) => openSagaOpener(saga);
-openSaga.set = (opener: (saga: CellImpl<Gem>) => void) => {
+let openSagaOpener: (sagaId: number) => void = () => {};
+export const openSaga = (sagaId: number) => openSagaOpener(sagaId);
+openSaga.set = (opener: (sagaId: number) => void) => {
   openSagaOpener = opener;
 };
