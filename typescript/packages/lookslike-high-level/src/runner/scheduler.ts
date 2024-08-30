@@ -69,7 +69,6 @@ export function onError(fn: (error: Error) => void) {
 }
 
 export function queueEvent(eventRef: CellReference, event: any) {
-  console.log("queueEvent", eventRef, event, eventHandlers);
   for (const [ref, handler] of eventHandlers) {
     if (
       ref.cell === eventRef.cell &&
