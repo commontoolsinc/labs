@@ -96,13 +96,13 @@ async function saveLink(
     if (comment) {
       console.log(`Comment: ${comment}`);
     }
-
-    // Fetch and analyze the link in the background
-    analyzeLink(url);
   } catch (error) {
     db.query("ROLLBACK");
-    console.error(`Error saving link: ${error.message}`);
+    throw new Error(`Error saving link: ${error.message}`);
   }
+
+  // FIXME(ja): should we rollback if this fails?
+  await analyzeLink(url);
 }
 
 export function grabJson(txt: string) {
@@ -240,6 +240,7 @@ no yapping, just output the JSON
     const structured = grabJson(message);
 
     // Update the database
+    // FIXME(ja): this will silently fail if the URL is not found
     db.query(
       `UPDATE links SET
         title = ?, description = ?, tags = ?, category = ?,
@@ -262,75 +263,53 @@ no yapping, just output the JSON
 
     console.log(`Updated metadata for: ${url}`);
   } catch (error) {
-    console.error(`Error analyzing link: ${error.message}`);
+    throw new Error(`Error analyzing link: ${error.message}`);
   }
 }
 
-async function listLinks(collection?: string) {
-  if (!collection) {
-    // List all collections
-    const collections = db.query(`
-      SELECT c.name, COUNT(lc.link_id) as link_count
+async function listCollections() {
+  const collections = db.query<[string]>(`
+      SELECT json_object(
+        'name', c.name,
+        'link_count', COUNT(lc.link_id)
+      ) as json
       FROM collections c
       LEFT JOIN link_collections lc ON c.id = lc.collection_id
       GROUP BY c.id
       ORDER BY c.name
-    `);
+    `).map(([collection]) => JSON.parse(collection));
 
-    console.log("Collections:");
-    for (const [name, linkCount] of collections) {
-      console.log(`  ${name} (${linkCount} links)`);
-    }
-    console.log(
-      "\nUse 'list <COLLECTION>' to see details of a specific collection.",
-    );
-  } else {
-    // List details of a specific collection
-    const links = db.query(
-      `
-      SELECT l.*
+  return collections;
+}
+
+
+async function listLinks(collection?: string) {
+  const links = db.query<[string]>(
+    `
+      SELECT json_object(
+        'id', l.id,
+        'url', l.url,
+        'comment', l.comment,
+        'title', l.title,
+        'description', l.description,
+        'tags', l.tags,
+        'category', l.category,
+        'summary', l.summary,
+        'image_url', l.image_url,
+        'favicon_url', l.favicon_url,
+        'screenshot_path', l.screenshot_path,
+        'created_at', l.created_at
+      ) as json
       FROM links l
       JOIN link_collections lc ON l.id = lc.link_id
       JOIN collections c ON lc.collection_id = c.id
       WHERE c.name = ?
       ORDER BY l.created_at DESC
     `,
-      [collection],
-    );
+    [collection]
+  ).map(([link]) => JSON.parse(link));
 
-    if (links.length === 0) {
-      console.log(`No links found in collection: ${collection}`);
-      return;
-    }
-
-    console.log(`Links in collection: ${collection}`);
-    for (const [
-      id,
-      url,
-      comment,
-      title,
-      description,
-      tags,
-      category,
-      summary,
-      image_url,
-      favicon_url,
-      screenshot_path,
-      created_at,
-    ] of links) {
-      console.log(`\n${id}. ${url}`);
-      if (comment) console.log(`   Comment: ${comment}`);
-      console.log(`   Title: ${title || "N/A"}`);
-      console.log(`   Description: ${description || "N/A"}`);
-      console.log(`   Tags: ${tags || "N/A"}`);
-      console.log(`   Category: ${category || "N/A"}`);
-      console.log(`   Summary: ${summary || "N/A"}`);
-      console.log(`   Image URL: ${image_url || "N/A"}`);
-      console.log(`   Favicon URL: ${favicon_url || "N/A"}`);
-      console.log(`   Screenshot: ${screenshot_path || "N/A"}`);
-      console.log(`   Created at: ${created_at}`);
-    }
-  }
+  return links;
 }
 
 async function viewCollection(collection: string, comment?: string) {
@@ -339,18 +318,7 @@ async function viewCollection(collection: string, comment?: string) {
     const viewsDir = "views";
     await ensureDir(viewsDir);
 
-    // Fetch links for the given collection
-    const links = db.query(
-      `
-      SELECT l.*
-      FROM links l
-      JOIN link_collections lc ON l.id = lc.link_id
-      JOIN collections c ON lc.collection_id = c.id
-      WHERE c.name = ?
-      ORDER BY l.created_at DESC
-    `,
-      [collection],
-    );
+    const links = await listLinks(collection);
 
     // Generate HTML content
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -388,29 +356,17 @@ async function viewCollection(collection: string, comment?: string) {
         </tr>
     `;
 
-    for (const [
-      id,
-      url,
-      linkComment,
-      title,
-      ,
-      tags,
-      category,
-      summary,
-      image_url,
-      ,
-      screenshot_path,
-    ] of links) {
+    for (const link of links) {
       htmlContent += `
         <tr>
-          <td>${title || "N/A"}</td>
-          <td><a href="${url}" target="_blank">${url}</a></td>
-          <td>${category || "N/A"}</td>
-          <td>${linkComment || "N/A"}</td>
-          <td>${summary || "N/A"}</td>
-          <td>${tags || "N/A"}</td>
-          <td>${screenshot_path ? `<img src="${screenshot_path}" alt="Screenshot">` : "N/A"}</td>
-          <td>${image_url ? `<img src="${image_url}" alt="Image">` : "N/A"}</td>
+          <td>${link.title || "N/A"}</td>
+          <td><a href="${link.url}" target="_blank">${link.url}</a></td>
+          <td>${link.category || "N/A"}</td>
+          <td>${link.comment || "N/A"}</td>
+          <td>${link.summary || "N/A"}</td>
+          <td>${link.tags || "N/A"}</td>
+          <td>${link.screenshot_path ? `<img src="${link.screenshot_path}" alt="Screenshot">` : "N/A"}</td>
+          <td>${link.image_url ? `<img src="${link.image_url}" alt="Image">` : "N/A"}</td>
         </tr>
       `;
     }
@@ -426,8 +382,7 @@ async function viewCollection(collection: string, comment?: string) {
 
     console.log(`View saved to: ${filePath}`);
 
-    // Open the HTML file in the default web browser
-    await open(filePath);
+    return filePath;
   } catch (error) {
     console.error(`Error viewing collection: ${error.message}`);
   }
@@ -440,58 +395,17 @@ async function imagineCollection(collection: string, userComment?: string) {
     await ensureDir(viewsDir);
 
     // Fetch links for the given collection
-    const links = db.query(
-      `
-      SELECT l.*
-      FROM links l
-      JOIN link_collections lc ON l.id = lc.link_id
-      JOIN collections c ON lc.collection_id = c.id
-      WHERE c.name = ?
-      ORDER BY l.created_at DESC
-    `,
-      [collection],
-    );
+    const links = await listLinks(collection);
 
     if (links.length === 0) {
       console.log(`No links found in collection: ${collection}`);
       return;
     }
 
-    // Prepare data for LLM query
-    const linksData = links.map(
-      ([
-        id,
-        url,
-        comment,
-        title,
-        description,
-        tags,
-        category,
-        summary,
-        image_url,
-        favicon_url,
-        screenshot_path,
-        created_at,
-        json,
-      ]) => ({
-        url,
-        comment,
-        title,
-        description,
-        tags,
-        category,
-        image_url,
-        favicon_url,
-        screenshot_path,
-        created_at,
-        json,
-      }),
-    );
-
     const prompt = `
     Take this collections of links and imagine an interactive webpage. The collection is named "${collection}" and contains ${links.length} links. Here's the data:
 
-${JSON.stringify(linksData, null, 2).slice(0, 50000)}
+${JSON.stringify(links, null, 2).slice(0, 50000)}
 
 Create a complete HTML page that inspired by this collection. Try to synthesize the broader themes of this collection and capture them in the artifact.
 
@@ -535,10 +449,9 @@ Provide the entire HTML code for the page, including any embedded CSS and JavaSc
 
     console.log(`Imagined view saved to: ${filePath}`);
 
-    // Open the HTML file in the default web browser
-    await open(filePath);
+    return filePath;
   } catch (error) {
-    console.error(`Error imagining collection: ${error.message}`);
+    throw new Error(`Error imagining collection: ${error.message}`);
   }
 }
 
@@ -558,69 +471,109 @@ async function main() {
     const args = line.trim().split(" ");
     const command = args.shift()?.toLowerCase();
 
-    switch (command) {
-      case "save":
-        if (args.length === 0) {
-          console.log("Please provide a URL to save.");
-        } else {
-          const url = args.shift()!;
-          const commentIndex = args.indexOf("--comment");
-          let collections: string[] = [];
-          let comment: string = "";
-
-          if (commentIndex !== -1) {
-            collections = args.slice(0, commentIndex);
-            comment = args.slice(commentIndex + 1).join(" ");
+    try {
+      switch (command) {
+        case "save":
+          if (args.length === 0) {
+            console.log("Please provide a URL to save.");
           } else {
-            collections = args;
+            const url = args.shift()!;
+            const commentIndex = args.indexOf("--comment");
+            let collections: string[] = [];
+            let comment: string = "";
+
+            if (commentIndex !== -1) {
+              collections = args.slice(0, commentIndex);
+              comment = args.slice(commentIndex + 1).join(" ");
+            } else {
+              collections = args;
+            }
+
+            await saveLink(url, collections, comment);
           }
+          break;
+        case "list":
+          if (args.length === 0) {
+            const collections = await listCollections();
 
-          await saveLink(url, collections, comment);
-        }
-        break;
-      case "list":
-        await listLinks(args[0]);
-        break;
-      case "view":
-        if (args.length === 0) {
-          console.log("Please provide a collection name to view.");
-        } else {
-          const collection = args.shift()!;
-          const comment = args.join(" ");
-          await viewCollection(collection, comment);
-        }
-        break;
-      case "imagine":
-        if (args.length === 0) {
-          console.log("Please provide a collection name to imagine.");
-        } else {
-          const collection = args.shift()!;
-          const comment = args.join(" ");
-          await imagineCollection(collection, comment);
-        }
-        break;
-      case "refresh":
-        if (args.length === 0) {
-          console.log("Please provide a URL to refresh.");
-        } else {
-          const url = args[0];
-          await analyzeLink(url);
-        }
-        break;
+            console.log("Collections:");
+            for (const collection of collections) {
+              console.log(`  ${collection.name} (${collection.link_count} links)`);
+            }
+            console.log(
+              "\nUse 'list <COLLECTION>' to see details of a specific collection.",
+            );
+          } else {
+            const collection = args[0];
+            const links = await listLinks(collection);
+            if (links.length === 0) {
+              console.log(`No links found in collection: ${collection}`);
+              return;
+            }
 
-      case "exit":
-        console.log("Goodbye!");
-        Deno.exit(0);
-      default:
-        console.log("Unknown command. Available commands:");
-        console.log(
-          "  save <URL> [collection1 collection2 ...] [--comment <COMMENT>]",
-        );
-        console.log("  list [<COLLECTION>]");
-        console.log("  view <COLLECTION> [<COMMENT>]");
-        console.log("  imagine <COLLECTION> [<COMMENT>]");
-        console.log("  refresh <URL>");
-        console.log("  exit");
+            console.log(`Links in collection: ${collection}`);
+            for (const link of links) {
+              console.log(`\n${link.url}`);
+              if (link.comment) console.log(`   Comment: ${link.comment}`);
+              console.log(`   Title: ${link.title || "N/A"}`);
+              console.log(`   Description: ${link.description || "N/A"}`);
+              console.log(`   Tags: ${link.tags || "N/A"}`);
+              console.log(`   Category: ${link.category || "N/A"}`);
+              console.log(`   Summary: ${link.summary || "N/A"}`);
+              console.log(`   Image URL: ${link.image_url || "N/A"}`);
+              console.log(`   Favicon URL: ${link.favicon_url || "N/A"}`);
+              console.log(`   Screenshot: ${link.screenshot_path || "N/A"}`);
+              console.log(`   Created at: ${link.created_at}`);
+            }
+          }
+          break;
+        case "view":
+          if (args.length === 0) {
+            console.log("Please provide a collection name to view.");
+          } else {
+            const collection = args.shift()!;
+            const comment = args.join(" ");
+            const filePath = await viewCollection(collection, comment);
+            console.log(`View saved to: ${filePath}`);
+            await open(filePath);
+          }
+          break;
+        case "imagine":
+          if (args.length === 0) {
+            console.log("Please provide a collection name to imagine.");
+          } else {
+            const collection = args.shift()!;
+            const comment = args.join(" ");
+            const filePath = await imagineCollection(collection, comment);
+            console.log(`Imagined view saved to: ${filePath}`);
+            await open(filePath);
+          }
+          break;
+        case "refresh":
+          if (args.length === 0) {
+            console.log("Please provide a URL to refresh.");
+          } else {
+            const url = args[0];
+            await analyzeLink(url);
+          }
+          break;
+
+        case "exit":
+          console.log("Goodbye!");
+          Deno.exit(0);
+        default:
+          console.log("Unknown command. Available commands:");
+          console.log(
+            "  save <URL> [collection1 collection2 ...] [--comment <COMMENT>]",
+          );
+          console.log("  list [<COLLECTION>]");
+          console.log("  view <COLLECTION> [<COMMENT>]");
+          console.log("  imagine <COLLECTION> [<COMMENT>]");
+          console.log("  refresh <URL>");
+          console.log("  exit");
+      }
+    } catch (error) {
+      console.error(error.message);
     }
   }
 }
@@ -628,3 +581,5 @@ async function main() {
 if (import.meta.main) {
   main();
 }
+
+export { saveLink, analyzeLink, listCollections, listLinks, viewCollection, imagineCollection };
