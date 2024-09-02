@@ -62,7 +62,7 @@ function getOrCreateCollection(name: string): number {
   }
   const result = db.query(
     "INSERT INTO collections (name) VALUES (?) RETURNING id",
-    [name]
+    [name],
   );
   return result[0][0] as number;
 }
@@ -70,14 +70,14 @@ function getOrCreateCollection(name: string): number {
 async function saveLink(
   url: string,
   collections: string[],
-  comment: string = ""
+  comment: string = "",
 ) {
   try {
     db.query("BEGIN TRANSACTION");
 
     const result = db.query(
       "INSERT INTO links (url, comment) VALUES (?, ?) RETURNING id",
-      [url, comment]
+      [url, comment],
     );
     const linkId = result[0][0] as number;
 
@@ -85,7 +85,7 @@ async function saveLink(
       const collectionId = getOrCreateCollection(collectionName);
       db.query(
         "INSERT INTO link_collections (link_id, collection_id) VALUES (?, ?)",
-        [linkId, collectionId]
+        [linkId, collectionId],
       );
     }
 
@@ -123,7 +123,7 @@ export function grabJson(txt: string) {
 
 async function analyzeLink(
   url: string,
-  comment: string = "Look at the content not the markup."
+  comment: string = "Look at the content not the markup.",
 ) {
   try {
     const browser = await puppeteer.launch();
@@ -185,23 +185,23 @@ async function analyzeLink(
 
     const { textStream: analysisStream } = await streamText({
       model: model,
-      system: ``,
+      system: `Analyze the following HTML content`,
       messages: [
         {
           role: "user",
-          content: `Analyze the following HTML content and extract:
+          content: `Extract:
       1. 5 relevant hashtags (\`tags\`)
       2. A category for the page (\`category\`)
       3. A brief summary of the page (max 100 words) (\`summary\`)
       4. The URL of the most relevant image on the page (if any) (\`image_url\`)
-      
+
       HTML Content:
       <sample>
       ${html}
       </sample>
 
       User instruction: ${comment}
-      
+
       Provide the results in JSON format within a JSON markdown block.`,
         },
       ],
@@ -241,8 +241,8 @@ no yapping, just output the JSON
 
     // Update the database
     db.query(
-      `UPDATE links SET 
-        title = ?, description = ?, tags = ?, category = ?, 
+      `UPDATE links SET
+        title = ?, description = ?, tags = ?, category = ?,
         summary = ?, image_url = ?, favicon_url = ?, screenshot_path = ?, html = ?, json = ?
       WHERE url = ?`,
       [
@@ -257,7 +257,7 @@ no yapping, just output the JSON
         html,
         JSON.stringify(structured),
         url,
-      ]
+      ],
     );
 
     console.log(`Updated metadata for: ${url}`);
@@ -282,7 +282,7 @@ async function listLinks(collection?: string) {
       console.log(`  ${name} (${linkCount} links)`);
     }
     console.log(
-      "\nUse 'list <COLLECTION>' to see details of a specific collection."
+      "\nUse 'list <COLLECTION>' to see details of a specific collection.",
     );
   } else {
     // List details of a specific collection
@@ -295,7 +295,7 @@ async function listLinks(collection?: string) {
       WHERE c.name = ?
       ORDER BY l.created_at DESC
     `,
-      [collection]
+      [collection],
     );
 
     if (links.length === 0) {
@@ -349,7 +349,7 @@ async function viewCollection(collection: string, comment?: string) {
       WHERE c.name = ?
       ORDER BY l.created_at DESC
     `,
-      [collection]
+      [collection],
     );
 
     // Generate HTML content
@@ -449,7 +449,7 @@ async function imagineCollection(collection: string, userComment?: string) {
       WHERE c.name = ?
       ORDER BY l.created_at DESC
     `,
-      [collection]
+      [collection],
     );
 
     if (links.length === 0) {
@@ -485,7 +485,7 @@ async function imagineCollection(collection: string, userComment?: string) {
         screenshot_path,
         created_at,
         json,
-      })
+      }),
     );
 
     const prompt = `
@@ -546,7 +546,7 @@ async function main() {
   console.log("Welcome to the Link Saver CLI!");
   console.log("Available commands:");
   console.log(
-    "  save <URL> [collection1 collection2 ...] [--comment <COMMENT>]"
+    "  save <URL> [collection1 collection2 ...] [--comment <COMMENT>]",
   );
   console.log("  list [<COLLECTION>]");
   console.log("  view <COLLECTION> [<COMMENT>]");
@@ -614,7 +614,7 @@ async function main() {
       default:
         console.log("Unknown command. Available commands:");
         console.log(
-          "  save <URL> [collection1 collection2 ...] [--comment <COMMENT>]"
+          "  save <URL> [collection1 collection2 ...] [--comment <COMMENT>]",
         );
         console.log("  list [<COLLECTION>]");
         console.log("  view <COLLECTION> [<COMMENT>]");
