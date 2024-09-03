@@ -31,6 +31,17 @@ export const luftBnBSearch = recipe<{
   endDate: string;
   location: string;
 }>("luft bnb search", ({ startDate, endDate, location }) => {
+  // TODO: This works because we recreate the recipe every time, but really this
+  // should be dynamically generated at runtime.
+  startDate.setDefault(
+    new Date(new Date().getTime() + 86400).toISOString().split("T")[0]
+  );
+  endDate.setDefault(
+    new Date(new Date().getTime() + 2 * 86400).toISOString().split("T")[0]
+  );
+  // TODO: This should be the user's default location, not hardcoded
+  location.setDefault("San Francisco");
+
   const query = cell({
     prompt: "",
   });

@@ -25,6 +25,10 @@ export const localSearch = recipe<{
   what: string;
   where: string;
 }>("local search", ({ what, where }) => {
+  what.setDefault("restaurants");
+  // TODO: This should be the user's default location, not hardcoded
+  where.setDefault("San Francisco");
+
   const query = cell({
     prompt: "",
   });
@@ -79,7 +83,7 @@ export const localSearch = recipe<{
             ></common-input>
           </common-vstack>
         </common-hstack>
-        <button @click=${search}>Search</button>
+        <common-button onclick=${search}>Search</common-button>
         <common-vstack gap="md">
           ${places.map(
             (place) => html`
@@ -95,12 +99,12 @@ export const localSearch = recipe<{
         </common-vstack>
       </common-vstack>
     `,
-    query,
-    location,
+    what,
+    where,
     places,
     [NAME]: apply(
-      { query, location },
-      (query, location) => `${query || "all"} in ${location || "anywhere"}`
+      { what, where },
+      (what, where) => `${what || "all"} in ${where || "anywhere"}`
     ),
   };
 });
