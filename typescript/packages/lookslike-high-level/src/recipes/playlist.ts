@@ -53,13 +53,15 @@ export const playlistForTrip = recipe<{
 
   return {
     [UI]: html`
-      <vstack gap="sm">
+      <common-vstack gap="sm">
         <div>${playlist.title}</div>
-        <vstack gap="xs">
+        <common-vstack gap="xs">
           ${playlist.songs.map((song) => html` <div>${song}</div> `)}
-        </vstack>
-        <button @click=${generatePlaylist}>Generate Playlist</button>
-      </vstack>
+        </common-vstack>
+        <common-button @click=${generatePlaylist}
+          >Generate Playlist</common-button
+        >
+      </common-vstack>
     `,
     query,
     playlist,

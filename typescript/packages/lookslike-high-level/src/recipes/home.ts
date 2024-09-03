@@ -13,7 +13,7 @@ export const home = recipe<{
   )(sagas);
 
   return {
-    [UI]: html`<vstack
+    [UI]: html`<common-vstack
       >${sagaIDs.map(
         (saga) => html`<div><common-saga-link saga=${saga.id}></sagaLink></div>`
       )}
@@ -27,6 +27,6 @@ export const home = recipe<{
         target="-1"
         data=${{ sagas, recipes }}
       />
-    </vstack>`,
+    </common-vstack>`,
   };
 });

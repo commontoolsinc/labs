@@ -1,12 +1,12 @@
 import { html } from "@commontools/common-html";
-import { recipe, lift } from "../builder/index.js";
+import { recipe, lift, ID } from "../builder/index.js";
 import { addSuggestion, description } from "../suggestions.js";
 import { type TodoItem } from "./todo-list.js";
 
 // TODO: detailUI as input is so we can overwrite it, but it should be an output
 // that is then replacing another signal in the caller.
 export const todoListAsTask = recipe<{
-  list: { items: TodoItem[] };
+  list: { [ID]: number; items: TodoItem[] };
   task: TodoItem;
 }>("todo list as task", ({ list, task }) => {
   const listSummary = lift((items: TodoItem[]) => {
@@ -31,10 +31,10 @@ export const todoListAsTask = recipe<{
   const UI = html`
     <details>
       <summary>
-        <vstack gap="sm">
-          <sagaLink saga=${list}>
+        <common-vstack gap="sm">
+          <common-saga-link saga=${list[ID]}>
           <span>${listSummary}</span>
-        </vstack>
+        </common-vstack>
       </summary>
       ${list}
     </details>

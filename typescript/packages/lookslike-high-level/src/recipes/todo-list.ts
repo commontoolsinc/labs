@@ -23,16 +23,16 @@ export const todoList = recipe<{
 
   return {
     [UI]: html`
-      <vstack gap="sm">
+      <common-vstack gap="sm">
         <common-input
           value=${title}
           placeholder="List title"
           @common-input#value=${title}
         ></common-input>
-        <vstack gap="sm">
+        <common-vstack gap="sm">
           ${items.map(
             (item: TodoItem) => html`
-              <vstack gap="sm">
+              <common-vstack gap="sm">
                 <common-todo
                   checked=${item.done}
                   value=${item.title}
@@ -46,18 +46,18 @@ export const todoList = recipe<{
                     data=${{ items, done: item.done, title: item.title }}
                   ></annotation>*/ ""
                   }
-                </todo>
-              </vstack>
+                </common-todo>
+              </common-vstack>
             `
           )}
-        </vstack>
+        </common-vstack>
         <common-send-message
           name="Add"
           placeholder="New task"
           appearance="rounded"
           onmessagesend="${newTasks}"
         ></send-input>
-      </vstack>
+      </common-vstack>
     `,
     title,
     items,

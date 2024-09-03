@@ -60,40 +60,40 @@ export const localSearch = recipe<{
 
   return {
     [UI]: html`
-      <vstack gap="sm">
-        <hstack gap="sm">
-          <vstack gap="xs">
+      <common-vstack gap="sm">
+        <common-hstack gap="sm">
+          <common-vstack gap="xs">
             <div>What</div>
             <common-input
               value=${what}
               placeholder="Type of place"
               @common-input#value=${what}
             ></common-input>
-          </vstack>
-          <vstack gap="xs">
+          </common-vstack>
+          <common-vstack gap="xs">
             <div>Where</div>
             <common-input
               value=${where}
               placeholder="Location"
               @common-input#value=${where}
             ></common-input>
-          </vstack>
-        </hstack>
+          </common-vstack>
+        </common-hstack>
         <button @click=${search}>Search</button>
-        <vstack gap="md">
+        <common-vstack gap="md">
           ${places.map(
             (place) => html`
-              <vstack gap="xs">
+              <common-vstack gap="xs">
                 <div>${place.name}</div>
                 <div>${place.description}</div>
                 <div>${place.address}</div>
                 <div>${place.city}, ${place.state} ${place.zip}</div>
                 <div>${"*****".slice(0, place.rating)}</div>
-              </vstack>
+              </common-vstack>
             `
           )}
-        </vstack>
-      </vstack>
+        </common-vstack>
+      </common-vstack>
     `,
     query,
     location,

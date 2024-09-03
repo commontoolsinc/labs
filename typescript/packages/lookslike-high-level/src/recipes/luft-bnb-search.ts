@@ -123,8 +123,8 @@ export const luftBnBSearch = recipe<{
 
   return {
     [UI]: html`
-      <vstack gap="sm">
-        <hstack gap="sm">
+      <common-vstack gap="sm">
+        <common-hstack gap="sm">
           <common-input
             type="date"
             value=${startDate}
@@ -137,17 +137,17 @@ export const luftBnBSearch = recipe<{
             placeholder="End Date"
             @common-input#value=${endDate}
           ></common-input>
-        </hstack>
+        </common-hstack>
         <common-input
           value=${location}
           placeholder="Location"
           @common-input#value=${location}
         ></common-input>
-        <button @click=${search}>Search</button>
-        <vstack gap="md">
+        <common-button @click=${search}>Search</common-button>
+        <common-vstack gap="md">
           ${places.map(
             (place) => html`
-              <vstack gap="xs">
+              <common-vstack gap="xs">
                 <div>${place.title}</div>
                 <div>
                   ${place.propertyType}, ${place.numberOfGuests} max guests
@@ -159,14 +159,14 @@ export const luftBnBSearch = recipe<{
                   )}
                   (${place.rating})
                 </div>
-                <button @click=${book} id="${place.id}}">
+                <common-button @click=${book} id="${place.id}}">
                   Book for $${place.pricePerNight} per night
-                </button>
-              </vstack>
+                </common-button>
+              </common-vstack>
             `
           )}
-        </vstack>
-      </vstack>
+        </common-vstack>
+      </common-vstack>
     `,
     query,
     location,
