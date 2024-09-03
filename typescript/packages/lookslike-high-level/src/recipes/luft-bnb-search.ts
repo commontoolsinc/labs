@@ -43,7 +43,7 @@ export const luftBnBSearch = recipe<{
   location.setDefault("San Francisco");
 
   const query = cell({
-    prompt: "",
+    prompt: undefined as string | undefined,
   });
 
   const search = handler<
@@ -56,6 +56,7 @@ export const luftBnBSearch = recipe<{
     }
   >({ startDate, endDate, location, query }, (_, { location, query }) => {
     query.prompt = `generate 10 places for private home short-term rentals in ${location}`;
+    console.log("search", location, query);
   });
 
   const { result: places } = generateData<LuftBnBPlace[]>({
@@ -140,21 +141,30 @@ export const luftBnBSearch = recipe<{
             type="date"
             value=${startDate}
             placeholder="Start Date"
-            @common-input#value=${startDate}
+            oncommon-input=${handler(
+              { startDate },
+              ({ detail }, state) => (state.startDate = detail.value)
+            )}
           ></common-input>
           <common-input
             type="date"
             value=${endDate}
             placeholder="End Date"
-            @common-input#value=${endDate}
+            oncommon-input=${handler(
+              { endDate },
+              ({ detail }, state) => (state.endDate = detail.value)
+            )}
           ></common-input>
         </common-hstack>
         <common-input
           value=${location}
           placeholder="Location"
-          @common-input#value=${location}
+          oncommon-input=${handler({ location }, (event, state) => {
+            state.location = event.detail?.value ?? "";
+            console.log("location", state, state.location);
+          })}
         ></common-input>
-        <common-button @click=${search}>Search</common-button>
+        <common-button onclick=${search}>Search</common-button>
         <common-vstack gap="md">
           ${places.map(
             (place) => html`

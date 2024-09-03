@@ -170,8 +170,6 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
 }
 
 const moduleWrappers = {
-  handler:
-    (fn: (event: any, ...props: any[]) => any) =>
-    ({ $event, ...props }: any) =>
-      fn($event, props),
+  handler: (fn: (event: any, ...props: any[]) => any) => (props: any) =>
+    fn(props.$event, props),
 };
