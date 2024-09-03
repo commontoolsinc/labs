@@ -5,4 +5,5 @@ export {
   cell,
   type CellReference,
   isReactive,
+  getCellReferenceOrValue as getCellReferenceFromProxy,
 } from "./cell.js";

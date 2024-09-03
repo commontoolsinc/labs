@@ -41,9 +41,10 @@ export function map(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
     const { list, op } = inputsCell.getAsProxy([], log);
 
     // If the list is undefined it means the input isn't available yet.
-    // Correspondingly, the result should be undefined.
+    // Correspondingly, the result should be []. TODO: Maybe it's important to
+    // distinguish empty inputs from undefined inputs?
     if (list === undefined) {
-      result.setAtPath([], undefined, log);
+      result.setAtPath([], [], log);
       return;
     }
 

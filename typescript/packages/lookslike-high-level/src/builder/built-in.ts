@@ -1,13 +1,6 @@
 import { createNodeFactory } from "./module.js";
 import { Value, NodeFactory } from "./types.js";
 
-let generateDataFactory:
-  | NodeFactory<
-      { prompt: string; result?: any; schema: any },
-      { pending: boolean; result: any; partial: any; error: any }
-    >
-  | undefined = undefined;
-
 export function generateData<T>(
   params: Value<{
     prompt: string;
@@ -21,3 +14,24 @@ export function generateData<T>(
   });
   return generateDataFactory(params);
 }
+
+export function ifElse<T, U, V>(
+  condition: Value<T>,
+  ifTrue: Value<U>,
+  ifFalse: Value<V>
+): Value<T extends true ? U : V> {
+  ifElseFactory ||= createNodeFactory({
+    type: "builtin",
+    implementation: "ifElse",
+  });
+  return ifElseFactory([condition, ifTrue, ifFalse]);
+}
+
+let ifElseFactory: NodeFactory<[any, any, any], any> | undefined = undefined;
+
+let generateDataFactory:
+  | NodeFactory<
+      { prompt: string; result?: any; schema: any },
+      { pending: boolean; result: any; partial: any; error: any }
+    >
+  | undefined = undefined;

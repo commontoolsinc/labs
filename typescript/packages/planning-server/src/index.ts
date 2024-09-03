@@ -90,7 +90,7 @@ async function handleCreateConversationThread(
     threadManager.update(thread.id, [result.assistantResponse]);
   }
 
-  // cache[cacheKey] = result;
+  cache[cacheKey] = result;
 
   return new Response(JSON.stringify(result), {
     headers: { "Content-Type": "application/json" },

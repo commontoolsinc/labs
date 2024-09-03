@@ -260,6 +260,11 @@ export function createValueProxy<T>(
   }) as T;
 }
 
+export function getCellReferenceOrValue(value: any): CellReference {
+  if (isCellProxy(value)) return value[getCellReference];
+  else return value;
+}
+
 const isCellMarker = Symbol("isCell");
 export function isCell(value: any): value is CellImpl<any> {
   return typeof value === "object" && value[isCellMarker] === true;

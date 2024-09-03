@@ -7,6 +7,7 @@ import {
   generateData,
   UI,
   NAME,
+  ifElse,
 } from "../builder/index.js";
 
 export interface Place {
@@ -40,7 +41,7 @@ export const localSearch = recipe<{
     query.prompt = `generate 10 places that match they query: ${what} in ${where}`;
   });
 
-  const { result: places } = generateData<Place[]>({
+  const { pending, result: places } = generateData<Place[]>({
     prompt: query.prompt,
     result: [],
     schema: {
@@ -85,16 +86,20 @@ export const localSearch = recipe<{
         </common-hstack>
         <common-button onclick=${search}>Search</common-button>
         <common-vstack gap="md">
-          ${places.map(
-            (place) => html`
-              <common-vstack gap="xs">
-                <div>${place.name}</div>
-                <div>${place.description}</div>
-                <div>${place.address}</div>
-                <div>${place.city}, ${place.state} ${place.zip}</div>
-                <div>${"*****".slice(0, place.rating)}</div>
-              </common-vstack>
-            `
+          ${ifElse(
+            pending,
+            html`<div>Loading...</div>`,
+            places.map(
+              (place) => html`
+                <common-vstack gap="xs">
+                  <div>${place.name}</div>
+                  <div>${place.description}</div>
+                  <div>${place.address}</div>
+                  <div>${place.city}, ${place.state} ${place.zip}</div>
+                  <div>${"*****".slice(0, place.rating)}</div>
+                </common-vstack>
+              `
+            )
           )}
         </common-vstack>
       </common-vstack>
