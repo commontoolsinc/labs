@@ -25,10 +25,10 @@ let mapFactory: NodeFactory<any, any>;
 //
 // The proxy yields another proxy for each nested value, but still allows the
 // methods to be called. Setters just call .set() on the nested cell.
-export function cell<T>(defaultValue?: Value<T> | T): CellProxy<T> {
+export function cell<T>(value?: Value<T> | T): CellProxy<T> {
   const store = {
-    value: undefined,
-    defaultValue,
+    value,
+    defaultValue: undefined,
     nodes: new Set<NodeProxy>(),
   };
 
