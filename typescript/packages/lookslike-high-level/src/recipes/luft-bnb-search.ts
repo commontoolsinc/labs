@@ -9,7 +9,9 @@ import {
   UI,
   NAME,
 } from "../builder/index.js";
+import { run, getCellReferenceOrValue } from "../runner/index.js";
 import { addSuggestion, description } from "../suggestions.js";
+import { openSaga, ID } from "../data.js";
 
 export interface LuftBnBPlace {
   // Schema for a place
@@ -56,7 +58,6 @@ export const luftBnBSearch = recipe<{
     }
   >({ startDate, endDate, location, query }, (_, { location, query }) => {
     query.prompt = `generate 10 places for private home short-term rentals in ${location}`;
-    console.log("search", location, query);
   });
 
   const { result: places } = generateData<LuftBnBPlace[]>({
@@ -122,17 +123,6 @@ export const luftBnBSearch = recipe<{
     },
   });
 
-  const book = handler<{ id: string }, { places: LuftBnBPlace[] }>(
-    { places },
-    ({ id }, { places }) => {
-      const place = places.find((p) => p.id === id);
-      if (place) {
-        console.log("Booked", place);
-        // Implement booking logic here
-      }
-    }
-  );
-
   return {
     [UI]: html`
       <common-vstack gap="sm">
@@ -180,7 +170,21 @@ export const luftBnBSearch = recipe<{
                   )}
                   (${place.rating})
                 </div>
-                <common-button @click=${book} id="${place.id}}">
+                <common-button onclick=${handler({ place }, (_, { place }) => {
+                  // TODO: This isn't serializable. Instead we have to add a way
+                  // to trigger a recipe from an event.
+
+                  const booking = run(luftBnBBooking, {
+                    place: getCellReferenceOrValue(place),
+                    // TODO: This should come from the scope above, but we
+                    // first have to build currying of the recipe for this to
+                    // work.
+                    startDate: "2024-09-06",
+                    endDate: "2024-09-08",
+                  });
+
+                  openSaga(booking.get()[ID]);
+                })}}">
                   Book for $${place.pricePerNight} per night
                 </common-button>
               </common-vstack>
@@ -215,7 +219,7 @@ export const luftBnBBooking = recipe<{
     place,
   });
   return {
-    UI: html`<div>${text}</div>`,
+    [UI]: html`<div>${text}</div>`,
     [NAME]: name,
     place,
     startDate,
@@ -243,7 +247,7 @@ const makeLuftBnBSearch = recipe<{
   });
 
   return {
-    UI: html`
+    [UI]: html`
       <vstack gap="sm">
         ${luftBnB.summaryUI} Or search for other places:
         <sagaLink saga=${luftBnB}></sagaLink>

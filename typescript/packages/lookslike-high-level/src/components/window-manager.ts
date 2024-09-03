@@ -118,6 +118,7 @@ export class CommonWindowManager extends LitElement {
       while (this.newSagaRefs.length > 0) {
         const [saga, sagaRef] = this.newSagaRefs.pop()!;
         const view = saga.asSimpleCell<Gem>();
+        if (!view.get()[UI]) throw new Error("Saga has no UI");
         render(sagaRef.value!, view.get()[UI]);
       }
 
