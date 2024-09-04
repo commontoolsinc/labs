@@ -13,6 +13,7 @@ import {
   extractDefaultValues,
   mapBindingsToCell,
   findAllAliasedCells,
+  followAliases,
   mergeObjects,
   sendValueToBinding,
 } from "./utils.js";
@@ -70,28 +71,38 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
 
           // Check if any of the read cells is a stream alias
           let streamRef: CellReference | undefined = undefined;
-          for (const ref of reads) {
-            const { cell, path } = ref;
-            if (isStreamAlias(cell.getAtPath(path))) {
-              streamRef = ref;
+          for (const key in inputs) {
+            let cell = recipeCell;
+            let path: PropertyKey[] = [key];
+            let value = inputs[key];
+            while (isAlias(value)) {
+              const ref = followAliases(value, recipeCell);
+              cell = ref.cell;
+              path = ref.path;
+              value = cell.getAtPath(path);
+            }
+            if (isStreamAlias(value)) {
+              streamRef = { cell, path };
               break;
             }
           }
 
           if (streamRef) {
             // Register as event handler for the stream. Replace alias to
-            // streamref with the event.
+            // stream with the event.
+
+            const stream = { ...streamRef };
+
             const handler = (event: any) => {
               if (event.preventDefault) event.preventDefault();
               const eventInputs = { ...inputs };
               for (const key in eventInputs) {
                 if (
                   isAlias(eventInputs[key]) &&
-                  eventInputs[key].$alias.cell === streamRef.cell &&
-                  eventInputs[key].$alias.path.length ===
-                    streamRef.path.length &&
+                  eventInputs[key].$alias.cell === stream.cell &&
+                  eventInputs[key].$alias.path.length === stream.path.length &&
                   eventInputs[key].$alias.path.every(
-                    (value, index) => value === streamRef.path[index]
+                    (value, index) => value === stream.path[index]
                   )
                 ) {
                   eventInputs[key] = event;
@@ -103,7 +114,16 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
 
               return fn(inputsCell.getAsProxy([]));
             };
-            addEventHandler(handler, streamRef);
+
+            addEventHandler(handler, stream);
+            console.log(
+              "added handler",
+              stream.path,
+              node.inputs,
+              (node.inputs as any)?.$event?.$alias.path,
+              reads.map((r) => r.cell.getAtPath(r.path)),
+              node.module.implementation
+            );
           } else {
             // Schedule the action to run when the inputs change
 
