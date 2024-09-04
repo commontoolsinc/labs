@@ -109,7 +109,7 @@ export const localSearch = recipe<{
     places,
     [NAME]: apply(
       { what, where },
-      (what, where) => `${what || "all"} in ${where || "anywhere"}`
+      ({ what, where }) => `${what || "all"} in ${where || "anywhere"}`
     ),
   };
 });

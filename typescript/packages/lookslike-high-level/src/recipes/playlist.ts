@@ -65,7 +65,7 @@ export const playlistForTrip = recipe<{
     `,
     query,
     playlist,
-    [NAME]: apply({ playlist, ticket }, (playlist, ticket) =>
+    [NAME]: apply({ playlist, ticket }, ({ playlist, ticket }) =>
       playlist.title ? playlist.title : `Creating playlist for ${ticket.show}`
     ),
   };
