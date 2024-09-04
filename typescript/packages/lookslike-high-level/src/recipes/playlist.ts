@@ -2,9 +2,9 @@ import { html } from "@commontools/common-html";
 import {
   recipe,
   apply,
-  handler,
-  cell,
+  lift,
   generateData,
+  ifElse,
   UI,
   NAME,
 } from "../builder/index.js";
@@ -12,26 +12,20 @@ import { addSuggestion, description } from "../suggestions.js";
 
 interface Playlist {
   title: string;
-  songs: string[];
+  songs: { name: string; artist: string }[];
 }
 
 export const playlistForTrip = recipe<{
   ticket: { show: string };
   booking: any;
-}>("playlist for trip", ({ ticket, booking }) => {
-  const query = cell({
-    prompt: "",
-  });
-
-  const generatePlaylist = handler<
-    {},
-    { ticket: { show: string }; booking: any; query: { prompt: string } }
-  >({ ticket, booking, query }, (_, { ticket, query }) => {
-    query.prompt = `Create a playlist in anticipation of a trip to see ${ticket.show}`;
-  });
+}>("playlist for trip", ({ ticket }) => {
+  const prompt = lift<{ ticket: { show: string } }, string>(
+    ({ ticket }) =>
+      `Create a fun playlist in anticipation of a trip to see ${ticket.show}`
+  )({ ticket });
 
   const { result: playlist } = generateData<Playlist>({
-    prompt: query.prompt,
+    prompt: prompt,
     schema: {
       type: "object",
       properties: {
@@ -43,7 +37,17 @@ export const playlistForTrip = recipe<{
           type: "array",
           title: "Songs",
           items: {
-            type: "string",
+            type: "object",
+            properties: {
+              name: {
+                type: "string",
+                title: "Song name",
+              },
+              artist: {
+                type: "string",
+                title: "Artist",
+              },
+            },
           },
           description: "10 songs to listen to on the way to the show",
         },
@@ -53,20 +57,24 @@ export const playlistForTrip = recipe<{
 
   return {
     [UI]: html`
-      <common-vstack gap="sm">
-        <div>${playlist.title}</div>
-        <common-vstack gap="xs">
-          ${playlist.songs.map((song) => html` <div>${song}</div> `)}
-        </common-vstack>
-        <common-button @click=${generatePlaylist}
-          >Generate Playlist</common-button
-        >
+      <common-vstack gap="sm"
+        >${ifElse(
+          playlist,
+          html`<div>
+            <div>${playlist.title}</div>
+            <common-vstack gap="xs">
+              ${playlist.songs.map(
+                (song) => html` <div>${song.name} by ${song.artist}</div> `
+              )}
+            </common-vstack>
+          </div>`,
+          "Creating playlist..."
+        )}
       </common-vstack>
     `,
-    query,
     playlist,
     [NAME]: apply({ playlist, ticket }, ({ playlist, ticket }) =>
-      playlist.title ? playlist.title : `Creating playlist for ${ticket.show}`
+      playlist?.title ? playlist.title : `Creating playlist for ${ticket.show}`
     ),
   };
 });
