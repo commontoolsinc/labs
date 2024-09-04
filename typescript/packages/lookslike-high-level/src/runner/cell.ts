@@ -57,9 +57,11 @@ export type CellReference = {
   path: PropertyKey[];
 };
 
-export type CellProxy<T> = T & {
+export type CellProxyMethods = {
   [getCellReference]: [CellImpl<any>, PropertyKey[]];
 };
+
+export type CellProxy<T> = T & CellProxyMethods;
 
 export type ReactivityLog = {
   reads: CellReference[];
@@ -265,6 +267,11 @@ export function getCellReferenceOrValue(value: any): CellReference {
   else return value;
 }
 
+export function getCellReferenceOrThrow(value: any): CellReference {
+  if (isCellProxy(value)) return value[getCellReference];
+  else throw new Error("Value is not a cell reference");
+}
+
 const isCellMarker = Symbol("isCell");
 export function isCell(value: any): value is CellImpl<any> {
   return typeof value === "object" && value[isCellMarker] === true;
@@ -279,6 +286,12 @@ export function isCellReference(value: any): value is CellReference {
 const getCellReference = Symbol("isCellProxy");
 export function isCellProxy(value: any): value is CellProxy<any> {
   return typeof value === "object" && value[getCellReference] !== undefined;
+}
+
+export function isCellProxyForDereferencing(
+  value: any
+): value is CellProxyMethods {
+  return isCellProxy(value);
 }
 
 export const isReactive = <T = any>(

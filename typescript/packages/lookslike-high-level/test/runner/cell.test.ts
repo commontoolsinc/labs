@@ -150,6 +150,21 @@ describe("createProxy", () => {
     expect(log.reads).toEqual([{ cell: c, path: [] }]);
     expect(log.writes).toEqual([]);
   });
+
+  it.skip("should support mapping over a proxied array", () => {
+    const c = cell({ a: [1, 2, 3] });
+    const log: ReactivityLog = { reads: [], writes: [] };
+    const proxy = c.getAsProxy([], log);
+    const result = proxy.a.map((x) => x + 1);
+    expect(result).toEqual([2, 3, 4]);
+    expect(log.reads).toEqual([
+      { cell: c, path: [] },
+      { cell: c, path: ["a"] },
+      { cell: c, path: ["a", "0"] },
+      { cell: c, path: ["a", "1"] },
+      { cell: c, path: ["a", "2"] },
+    ]);
+  });
 });
 
 describe("asSimpleCell", () => {

@@ -5,6 +5,8 @@ import {
   ReactivityLog,
   CellReference,
   isCellReference,
+  isCellProxyForDereferencing,
+  getCellReferenceOrThrow,
 } from "./cell.js";
 
 export function extractDefaultValues(schema: any): any {
@@ -257,7 +259,12 @@ export function transformToSimpleCells(
   value: any,
   log?: ReactivityLog
 ): any {
-  if (isAlias(value)) {
+  if (isCellProxyForDereferencing(value)) {
+    const ref = getCellReferenceOrThrow(value);
+    if (cell === ref.cell)
+      return transformToSimpleCells(cell, cell.getAtPath(ref.path), log);
+    else return ref.cell.asSimpleCell(ref.path, log);
+  } else if (isAlias(value)) {
     const ref = followCellReferences(followAliases(value, cell, log), log);
     return ref.cell.asSimpleCell(ref.path, log);
   } else if (isCell(value)) {

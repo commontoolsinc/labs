@@ -42,6 +42,7 @@ export const todoListAsTask = recipe<{
           <span>${listId}</span>
         </common-vstack>
       </summary>
+      ${listUI}
     </details>`,
   };
 });
