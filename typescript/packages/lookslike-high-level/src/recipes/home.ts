@@ -23,7 +23,7 @@ export const home = recipe<{
             <common-recipe-link foo="bar" recipe=${recipe}></common-recipe-link>
           </div>`
       )}<common-annotation
-        query="dream fun things to explore"
+        query="dream fun things to explore, especially with tickets and reservations"
         target="-1"
         data=${{ sagas, recipes }}
       />

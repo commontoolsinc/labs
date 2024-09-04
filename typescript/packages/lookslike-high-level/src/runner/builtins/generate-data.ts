@@ -88,6 +88,7 @@ export function generateData(
 
     resultPromise.then((result) => {
       if (thisRun !== currentRun) return;
+
       pending.setAtPath([], false, log);
       fullResult.setAtPath([], result, log);
       partialResult.setAtPath([], result, log);

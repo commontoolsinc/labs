@@ -96,7 +96,7 @@ notalk;justgo
     ({ matchedIndices, gemInfo }) =>
       (matchedIndices ?? [])
         .filter((item) => item.confidence > MINIMUM_CONFIDENCE)
-        .map((item) => gemInfo[item.index])
+        .map((item) => gemInfo.find((gem) => gem.id === item.index))
         .filter((gem) => gem !== undefined)
         .filter((gem) => gem.id !== 0) // TODO: HACK - ignore first todo list
   )({ matchedIndices, gemInfo });

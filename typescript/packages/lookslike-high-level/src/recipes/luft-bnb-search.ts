@@ -10,7 +10,7 @@ import {
 } from "../builder/index.js";
 import { run, getCellReferenceOrValue } from "../runner/index.js";
 import { addSuggestion, description } from "../suggestions.js";
-import { openSaga, ID } from "../data.js";
+import { openSaga, addGems, ID } from "../data.js";
 
 export interface LuftBnBPlace {
   // Schema for a place
@@ -195,6 +195,8 @@ export const luftBnBSearch = recipe<{
                     startDate: "2024-09-06",
                     endDate: "2024-09-08",
                   });
+
+                  addGems([booking]);
 
                   openSaga(booking.get()[ID]);
                 })}}">
