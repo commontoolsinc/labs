@@ -1,14 +1,19 @@
-import { tags } from "@commontools/common-ui";
-import { signal, stream } from "@commontools/common-frp";
-import { dataGems, openSaga } from "../data.js";
-import { recipe, Recipe, ID, TYPE, NAME } from "../builder/index.js";
-import { type Gem } from "../data.js";
-import { suggestions, type Suggestion } from "../suggestions.js";
-import { effect } from "@commontools/common-frp/signal";
-import { suggestionClient } from "../llm-client.js";
-const { include, div } = tags;
-const { state, computed, isSignal } = signal;
-const { subject } = stream;
+import { html } from "@commontools/common-html";
+import {
+  recipe,
+  lift,
+  handler,
+  cell,
+  UI,
+  ID,
+  NAME,
+  TYPE,
+  ifElse,
+  generateData,
+} from "../builder/index.js";
+import { type Gem, openSaga } from "../data.js";
+import { run, gemById, getCellReferenceOrValue } from "../runner/index.js";
+import { suggestions } from "../suggestions.js";
 
 const MINIMUM_CONFIDENCE = -1.0;
 
@@ -27,146 +32,39 @@ const MINIMUM_CONFIDENCE = -1.0;
  * supplied data.
  */
 
-export const annotation = recipe(
-  "annotation",
-  ({ "?": query, ".": target, ...data }) => {
-    const suggestion = state<Result | undefined>(undefined);
+export const annotation = recipe<{
+  query: string;
+  target: number;
+  data: { [key: string]: any };
+  gems: Gem[];
+}>("annotation", ({ query, target, data, gems }) => {
+  type GemInfo = {
+    id: number;
+    name: string;
+    type: string;
+  };
 
-    effect(
-      [dataGems, query, target],
-      async (dataGems, query: string, target: number) => {
-        if (dataGems.length === 0) return;
-        const guess = await findSuggestion(
-          dataGems,
-          suggestions,
-          query,
-          Object.keys(data),
-          [target]
-        );
-        suggestion.send(guess);
-      }
-    );
+  const gemInfo = lift(({ gems }) => {
+    const gemInfo: GemInfo[] = [];
+    for (let i = 0; i < gems.length; i++) {
+      gemInfo.push({
+        id: Number(gems[i][ID]),
+        name: String(gems[i][NAME] ?? "unknown"),
+        type: String(gems[i][TYPE]),
+      } satisfies GemInfo);
+    }
+    return gemInfo;
+  })({ gems });
 
-    const acceptSuggestion = subject<any>();
-    const acceptedSuggestion = state<Result | undefined>(undefined);
-    acceptSuggestion.sink({
-      send: () => {
-        acceptedSuggestion.send(suggestion.get());
-      },
-    });
-
-    const UI = computed(
-      [suggestion, acceptedSuggestion, target],
-      (suggestion, acceptedSuggestion, target) => {
-        if (acceptedSuggestion) {
-          const acceptedRecipe = acceptedSuggestion.recipe;
-          const accepted = acceptedRecipe({
-            ...data,
-            ...acceptedSuggestion.boundGems,
-          });
-          // HACK: -1 is home screen and so let's open a new tab
-          if (target === -1) {
-            openSaga(accepted);
-            return div({});
-          }
-          return include({ content: accepted.UI });
-        } else if (suggestion) {
-          return tags.suggestions({
-            suggestions: [{ id: 1, title: suggestion.description }],
-            "@select-suggestion": acceptSuggestion,
-          });
-        } else {
-          return undefined;
-        }
-      }
-    );
-
-    return { UI };
-  }
-);
-
-type Result = {
-  recipe: Recipe;
-  description: string;
-  boundGems: { [key: string]: Gem };
-};
-
-async function findSuggestion(
-  dataGems: Gem[],
-  suggestions: Suggestion[],
-  query: string,
-  data: string[],
-  ignoreList: number[]
-): Promise<Result | undefined> {
-  // Use LLM to match query to data gems
-  const matchedGems = await matchGemsWithLLM(dataGems, query, ignoreList);
-
-  // Filter to only compatible suggestions
-  const suggestion = suggestions.find(
-    (suggestion) =>
-      Object.values(suggestion.dataGems).every((type) =>
-        matchedGems.find((gem) => gem[TYPE] === type)
-      ) &&
-      Object.values(suggestion.bindings).every((binding) =>
-        data.includes(binding)
-      )
-  );
-
-  console.log("Suggestion:", query, matchedGems, suggestion);
-
-  if (suggestion) {
-    const bindings = Object.entries(suggestion.dataGems).map(([key, type]) => [
-      key,
-      matchedGems.find((gem) => gem[TYPE] === type),
-    ]) as [[string, Gem]];
-
-    const nameBindings = Object.fromEntries(
-      bindings.map(([key, gem]) => [key, getNameFromGem(gem)])
-    );
-    const gemBindings = Object.fromEntries(bindings);
-
-    const description = suggestion.description
-      .map((part, i) => (i % 2 === 0 ? part : nameBindings[part]))
-      .join("");
-
-    return { recipe: suggestion.recipe, description, boundGems: gemBindings };
-  } else {
-    return undefined;
-  }
-}
-
-type LLMSuggestion = {
-  index: 0;
-  chosen: string;
-  confidence: number;
-  reason: string;
-};
-
-async function matchGemsWithLLM(
-  dataGems: Gem[],
-  query: string,
-  ignoreList: number[] = []
-): Promise<Gem[]> {
-  dataGems = dataGems.filter((gem) => !ignoreList.includes(gem[ID]));
-
-  const gemInfo = dataGems.map((gem) => ({
-    name: getNameFromGem(gem),
-    type: gem[TYPE],
-  }));
-
-  if (gemInfo.length == 0) {
-    console.warn("No data gems to match with LLM");
-    return [];
-  }
-
-  const prompt = `
-Given the following user query and list of data gems, return the indices of the gems that are most relevant to the query.
+  const prompt = lift(
+    ({ query, gemInfo }) =>
+      `Given the following user query and list of data gems, return the indices of the gems that are most relevant to the query.
 Consider both the names and types of the gems when making your selection.
 Think broadly, e.g. a stay in a hotel could match a gem called "morning routine", as the user would want to pick a hotel that supports their morning routine.
 
 User query: "${query}"
 
-Data gems:
+Data:
 ${JSON.stringify(gemInfo, null, 2)}
 
 Respond with only JSON array of suggestions, e.g.
@@ -176,35 +74,123 @@ Respond with only JSON array of suggestions, e.g.
 \`\`\`
 
 notalk;justgo
-`;
+`
+  )({ query, gemInfo });
 
-  const thread = await suggestionClient.createThread(prompt);
-  const response = thread.conversation;
+  const { result: matchedIndices } = generateData<
+    { index: number; confidence: number }[]
+  >({
+    prompt,
+    system:
+      "You are an assistant that helps match user queries to relevant data gems based on their names and types.",
+  });
 
-  let matchedIndices: LLMSuggestion[] = [];
-  try {
-    // TODO: use `zod` to actually validate the shape of the result
-    matchedIndices = grabJson(response[response.length - 1]);
-    if (!Array.isArray(matchedIndices)) {
-      console.log("Invalid LLM response", matchedIndices);
-      return [];
+  const matchingGems = lift<
+    {
+      matchedIndices: { index: number; confidence: number }[];
+      gemInfo: GemInfo[];
+    },
+    GemInfo[]
+  >(
+    ({ matchedIndices, gemInfo }) =>
+      (matchedIndices ?? [])
+        .filter((item) => item.confidence > MINIMUM_CONFIDENCE)
+        .map((item) => gemInfo[item.index])
+        .filter((gem) => gem !== undefined)
+        .filter((gem) => gem.id !== 0) // TODO: HACK - ignore first todo list
+  )({ matchedIndices, gemInfo });
+
+  const suggestion = lift<{
+    matchingGems: GemInfo[];
+    data: { [key: string]: any };
+  }>(({ matchingGems, data }) => {
+    const suggestion = suggestions.find(
+      (suggestion) =>
+        Object.values(suggestion.dataGems ?? {}).every((type) =>
+          matchingGems.find((gem) => gem.type === type)
+        ) &&
+        Object.values(suggestion.bindings ?? {}).every((binding) =>
+          Object.keys(data ?? {}).includes(binding)
+        )
+    );
+
+    if (suggestion) {
+      const bindings = Object.entries(suggestion.dataGems).map(
+        ([key, type]) => [key, matchingGems.find((gem) => gem.type === type)]
+      ) as [string, GemInfo][];
+
+      const nameBindings = Object.fromEntries(
+        bindings.map(([key, gem]) => [key, gem.name])
+      );
+      const gemBindings = Object.fromEntries(
+        bindings.map(([key, gem]) => [key, gem.id])
+      );
+
+      const description = suggestion.description
+        .map((part, i) => (i % 2 === 0 ? part : nameBindings[part]))
+        .join("");
+
+      return { recipe: suggestion.recipe, description, boundGems: gemBindings };
+    } else {
+      return undefined;
     }
-  } catch (error) {
-    console.error("Failed to parse LLM response:", error);
+  })({ matchingGems, data });
+
+  const suggestionsList = lift(({ suggestion }) => {
+    if (suggestion) {
+      return [{ id: 1, title: suggestion.description }];
+    }
     return [];
-  }
-  console.log("LLM response:", matchedIndices);
+  })({ suggestion });
 
-  return matchedIndices
-    .filter((item) => item.confidence > MINIMUM_CONFIDENCE)
-    .map((item) => dataGems[item.index])
-    .filter((gem) => gem !== undefined);
-}
+  const acceptedSuggestion = cell<any | undefined>(undefined);
+  const acceptSuggestion = handler(
+    { acceptedSuggestion, suggestion, data, target },
+    (_, state) => {
+      const { suggestion, data, target } = state;
 
-export function grabJson(txt: string) {
-  return JSON.parse(txt.match(/```json\n([\s\S]+?)```/)?.[1] ?? "{}");
-}
+      const acceptedRecipe = suggestion.recipe;
 
-function getNameFromGem(gem: Gem): string {
-  return (isSignal(gem[NAME]) ? gem[NAME].get() : gem[NAME]) as string;
-}
+      const accepted = run<any, Gem>(acceptedRecipe, {
+        ...Object.fromEntries(
+          Object.entries(data).map(([key, value]) => [
+            key,
+            getCellReferenceOrValue(value),
+          ])
+        ),
+        ...Object.fromEntries(
+          Object.entries(suggestion.boundGems).map(([key, value]) => [
+            key,
+            gemById.get(value as number),
+          ])
+        ),
+      });
+
+      // HACK: -1 is home screen and so let's open a new tab
+      if (target == -1) openSaga(accepted.get()[ID]);
+
+      // TODO: Use .value here once supported
+      state.acceptedSuggestion = accepted.asSimpleCell().key(UI);
+    }
+  );
+
+  return {
+    [UI]: html`<div>
+      ${ifElse(
+        acceptedSuggestion,
+        acceptedSuggestion,
+        ifElse(
+          suggestion,
+          html`<common-suggestions
+            suggestions=${suggestionsList}
+            onselect-suggestion=${acceptSuggestion}
+          />`,
+          ""
+        )
+      )}
+    </div>`,
+    /*    [UI]: html`<div>
+      <common-suggestions suggestions=${suggestionsList} />
+    </div>`,*/
+  };
+});

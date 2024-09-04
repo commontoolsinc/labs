@@ -1,4 +1,4 @@
-import { ID } from "../builder/index.js";
+import { ID, TYPE } from "../builder/index.js";
 import {
   Recipe,
   RecipeFactory,
@@ -34,7 +34,11 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
   // TODO: Some initial values can be aliases to outside cells
   const id = nextGemId++;
   const recipeCell = cell(
-    mergeObjects(recipe.initial, bindings, defaults, { [ID]: id })
+    mergeObjects(recipe.initial, bindings, defaults, {
+      [ID]: id,
+      [TYPE]:
+        (recipe.schema as { description: string })?.description ?? "unknown",
+    })
   );
   gemById.set(id, recipeCell);
 
@@ -78,6 +82,7 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
             // Register as event handler for the stream. Replace alias to
             // streamref with the event.
             const handler = (event: any) => {
+              if (event.preventDefault) event.preventDefault();
               const eventInputs = { ...inputs };
               for (const key in eventInputs) {
                 if (

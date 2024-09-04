@@ -1,48 +1,48 @@
 import { html } from "@commontools/common-html";
-import { recipe, lift, ID } from "../builder/index.js";
+import { recipe, lift, ID, UI } from "../builder/index.js";
 import { addSuggestion, description } from "../suggestions.js";
 import { type TodoItem } from "./todo-list.js";
 
 // TODO: detailUI as input is so we can overwrite it, but it should be an output
 // that is then replacing another signal in the caller.
 export const todoListAsTask = recipe<{
-  list: { [ID]: number; items: TodoItem[] };
+  list: { [ID]: number; [UI]: any; items: TodoItem[] };
   task: TodoItem;
 }>("todo list as task", ({ list, task }) => {
   const listSummary = lift((items: TodoItem[]) => {
     const notDoneTitles = items.flatMap((item) =>
       item.done ? [] : [item.title]
     );
-    return (
+
+    const summary =
       items.length +
       " items. " +
       (notDoneTitles.length
         ? "Open tasks: " +
           notDoneTitles.splice(0, 3).join(", ") +
           (notDoneTitles.length > 0 ? ", ..." : "")
-        : "All done.")
-    );
+        : "All done.");
+
+    return summary;
   })(list.items);
 
   task.done = lift((items: TodoItem[]) => items.every((item) => item.done))(
     list.items
   );
 
-  const UI = html`
-    <details>
+  const listId = lift((list: { [ID]: number }) => list[ID])(list);
+  const listUI = lift((list: { [UI]: any }) => list[UI])(list);
+
+  return {
+    [UI]: html` <details>
       <summary>
         <common-vstack gap="sm">
-          <common-saga-link saga=${list[ID]}>
           <span>${listSummary}</span>
+          <common-saga-link saga=${listId} />
+          <span>${listId}</span>
         </common-vstack>
       </summary>
-      ${list}
-    </details>
-  `;
-  return {
-    UI,
-    list,
-    task,
+    </details>`,
   };
 });
 

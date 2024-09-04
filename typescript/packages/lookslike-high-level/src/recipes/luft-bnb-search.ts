@@ -6,6 +6,7 @@ import {
   handler,
   cell,
   generateData,
+  ifElse,
   UI,
   NAME,
 } from "../builder/index.js";
@@ -44,6 +45,10 @@ export const luftBnBSearch = recipe<{
   // TODO: This should be the user's default location, not hardcoded
   location.setDefault("San Francisco");
 
+  const startDateUI = lift(({ startDate }) => startDate)({ startDate });
+  const endDateUI = lift(({ endDate }) => endDate)({ endDate });
+  const locationUI = lift(({ location }) => location)({ location });
+
   const query = cell({
     prompt: undefined as string | undefined,
   });
@@ -54,10 +59,24 @@ export const luftBnBSearch = recipe<{
       startDate: string;
       endDate: string;
       location: string;
-      query: { prompt: string };
+      startDateUI: string;
+      endDateUI: string;
+      locationUI: string;
     }
-  >({ startDate, endDate, location, query }, (_, { location, query }) => {
-    query.prompt = `generate 10 places for private home short-term rentals in ${location}`;
+  >(
+    { startDate, endDate, location, startDateUI, endDateUI, locationUI },
+    (_, state) => {
+      state.startDate = state.startDateUI;
+      state.endDate = state.endDateUI;
+      state.location = state.locationUI;
+    }
+  );
+
+  query.prompt = lift(
+    ({ location }) =>
+      `generate 10 places for private home short-term rentals in ${location}`
+  )({
+    location,
   });
 
   const { result: places } = generateData<LuftBnBPlace[]>({
@@ -129,29 +148,29 @@ export const luftBnBSearch = recipe<{
         <common-hstack gap="sm">
           <common-input
             type="date"
-            value=${startDate}
+            value=${startDateUI}
             placeholder="Start Date"
             oncommon-input=${handler(
               { startDate },
-              ({ detail }, state) => (state.startDate = detail.value)
+              ({ detail }, state) => (state.startDateUI = detail.value)
             )}
           ></common-input>
           <common-input
             type="date"
-            value=${endDate}
+            value=${endDateUI}
             placeholder="End Date"
             oncommon-input=${handler(
               { endDate },
-              ({ detail }, state) => (state.endDate = detail.value)
+              ({ detail }, state) => (state.endDateUI = detail.value)
             )}
           ></common-input>
         </common-hstack>
         <common-input
-          value=${location}
+          value=${locationUI}
           placeholder="Location"
           oncommon-input=${handler({ location }, (event, state) => {
-            state.location = event.detail?.value ?? "";
-            console.log("location", state, state.location);
+            state.locationUI = event.detail?.value ?? "";
+            console.log("location", state, state.locationUI);
           })}
         ></common-input>
         <common-button onclick=${search}>Search</common-button>
@@ -187,6 +206,7 @@ export const luftBnBSearch = recipe<{
                 })}}">
                   Book for $${place.pricePerNight} per night
                 </common-button>
+                ${place.annotationUI}
               </common-vstack>
             `
           )}
@@ -246,11 +266,24 @@ const makeLuftBnBSearch = recipe<{
     location: reservation.location,
   });
 
+  const topPlace = html`<div>
+    ${apply(luftBnB, ({ places, startDate, endDate }) =>
+      places && places.length
+        ? `${places[0].propertyType} ${startDate}-${endDate} in ${
+            places[0].location
+          }. ${"⭐".repeat(Math.round(places[0].rating))} (${
+            places[0].rating
+          }). $${places[0].pricePerNight} per night`
+        : "Searching..."
+    )}
+  </div>`;
+  const searchId = lift((luftBnB: any) => luftBnB[ID])(luftBnB);
+
   return {
     [UI]: html`
       <vstack gap="sm">
-        ${luftBnB.summaryUI} Or search for other places:
-        <sagaLink saga=${luftBnB}></sagaLink>
+        ${topPlace} Or search for other places:
+        <common-saga-link saga=${searchId} />
       </vstack>
     `,
     reservation,
@@ -261,7 +294,7 @@ const makeLuftBnBSearch = recipe<{
 addSuggestion({
   description: description`Book LuftBnB for ${"reservation"}`,
   recipe: makeLuftBnBSearch,
-  bindings: { done: "done" },
+  bindings: { task: "task" },
   dataGems: {
     reservation: "ticket",
   },
@@ -309,19 +342,19 @@ const nearbyPlacesForRoutine = recipe<{
     };
   })({ routine, places });
 
-  const { partial } = generateData(query);
+  const { result } = generateData(query);
 
-  lift(({ partial, places }) => {
-    partial.forEach(
+  lift(({ result, places }) => {
+    (result ?? []).forEach(
       (place: { name: string; walkingDistance: number }, i: number) => {
         places[i].annotationUI = html`<div>
           ${place.name} is ${place.walkingDistance} min away
         </div>`;
       }
     );
-  })({ partial, places });
+  })({ result, places });
 
-  return { UI: html`<div></div>` };
+  return { [UI]: html`<div></div>` };
 });
 
 addSuggestion({

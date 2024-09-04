@@ -5,7 +5,8 @@ export function generateData<T>(
   params: Value<{
     prompt: string;
     result?: T;
-    schema: any;
+    schema?: any;
+    system?: string;
   }>
 ): Value<{ pending: boolean; result: T; partial: any; error: any }> {
   generateDataFactory ||= createNodeFactory({
@@ -31,7 +32,7 @@ let ifElseFactory: NodeFactory<[any, any, any], any> | undefined = undefined;
 
 let generateDataFactory:
   | NodeFactory<
-      { prompt: string; result?: any; schema: any },
+      { prompt: string; result?: any; schema?: any; system?: string },
       { pending: boolean; result: any; partial: any; error: any }
     >
   | undefined = undefined;

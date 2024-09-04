@@ -3,9 +3,8 @@ import { customElement, property } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
-import { Gem, ID, UI } from "../data.js";
+import { Gem, ID, UI, NAME } from "../data.js";
 import { CellImpl, isCell, gemById } from "../runner/index.js";
-//import { annotation } from "../components/annotation.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -72,7 +71,8 @@ export class CommonWindowManager extends LitElement {
     const idCounts: { [key: string]: number } = {};
     return html`
       ${this.sagas.map((saga) => {
-        const sagaId = saga.getAsProxy()[ID];
+        const sagaValues = saga.getAsProxy();
+        const sagaId = sagaValues[ID];
         idCounts[sagaId] ??= 0;
         const id = sagaId + "#" + idCounts[sagaId]++;
 
@@ -100,7 +100,11 @@ export class CommonWindowManager extends LitElement {
             <common-screen-element>
               <common-system-layout>
                 <div ${ref(sagaRef)}></div>
-                <div slot="secondary">${annotationUI}</div>
+                <div slot="secondary"><common-annotation .query=${
+                  sagaValues[NAME] ?? ""
+                } .target=${
+          sagaValues[ID]
+        } .data=${sagaValues} ></common-annotation></div>
                 <common-unibox slot="search" value="" placeholder="" label=">">
               </common-system-layout>
             </common-screen-element>

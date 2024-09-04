@@ -27,6 +27,9 @@ export const todoList = recipe<{
         <common-input
           value=${title}
           placeholder="List title"
+          oncommon-input=${handler({ title }, ({ detail }, state) => {
+            state.title = detail.value;
+          })}
           @common-input#value=${title}
         ></common-input>
         <common-vstack gap="sm">
@@ -36,16 +39,17 @@ export const todoList = recipe<{
                 <common-todo
                   checked=${item.done}
                   value=${item.title}
-                  @todo-checked#checked=${item.done}
-                  @todo-input#value=${item.title}
+                  ontodo-checked=${handler({ item }, ({ detail }, { item }) => {
+                    item.done = detail.done;
+                  })}
+                  ontodo-input=${handler({ item }, ({ detail }, { item }) => {
+                    item.title = detail.value;
+                  })}
                 >
-                  ${
-                    /*<annotation
+                  <common-annotation
                     query=${item.title}
-                    target=${id}
-                    data=${{ items, done: item.done, title: item.title }}
-                  ></annotation>*/ ""
-                  }
+                    data=${{ task: item }}
+                  />
                 </common-todo>
               </common-vstack>
             `
