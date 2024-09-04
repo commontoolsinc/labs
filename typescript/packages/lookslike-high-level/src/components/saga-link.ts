@@ -51,7 +51,7 @@ export class CommonSagaLink extends LitElement {
     const saga = this.saga !== undefined && gemById.get(this.saga);
     if (!saga) return;
 
-    let name = saga.asSimpleCell().get()[NAME];
+    let name = saga.asSimpleCell().key(NAME).get();
 
     if (isReactive(name)) {
       this.nameEffect = name.sink((name: string) => {

@@ -36,7 +36,6 @@ export class CommonAnnotation extends LitElement {
 
   override async updated(changedProperties: Map<string, any>) {
     super.updated(changedProperties);
-    console.log("running annotation", this.query, this.target, this.data);
 
     if (changedProperties.has("query")) this.queryCell.send(this.query);
     if (changedProperties.has("target")) this.targetCell.send(this.target);

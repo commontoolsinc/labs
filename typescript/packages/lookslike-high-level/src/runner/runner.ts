@@ -116,14 +116,6 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
             };
 
             addEventHandler(handler, stream);
-            console.log(
-              "added handler",
-              stream.path,
-              node.inputs,
-              (node.inputs as any)?.$event?.$alias.path,
-              reads.map((r) => r.cell.getAtPath(r.path)),
-              node.module.implementation
-            );
           } else {
             // Schedule the action to run when the inputs change
 

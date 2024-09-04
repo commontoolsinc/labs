@@ -210,13 +210,12 @@ export const luftBnBSearch = recipe<{
     query,
     location,
     places,
-    [NAME]: apply(
-      { location, startDate, endDate },
-      (location, startDate, endDate) =>
+    [NAME]: lift(
+      ({ location, startDate, endDate }) =>
         `LuftBnB ${startDate?.slice(5)} - ${endDate?.slice(5)} in ${
-          location || "anywhere"
+          location ?? "anywhere"
         }`
-    ),
+    )({ location, startDate, endDate }),
   };
 });
 
