@@ -341,9 +341,10 @@ const nearbyPlacesForRoutine = recipe<{
   lift(({ result, places }) => {
     (result ?? []).forEach(
       (place: { name: string; walkingDistance: number }, i: number) => {
-        places[i].annotationUI = html`<div>
-          ${place.name} is ${place.walkingDistance} min away
-        </div>`;
+        if (place)
+          places[i].annotationUI = html`<div>
+            ${place.name} is ${place.walkingDistance} min away
+          </div>`;
       }
     );
   })({ result, places });
