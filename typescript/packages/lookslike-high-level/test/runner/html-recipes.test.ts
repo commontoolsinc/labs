@@ -65,4 +65,35 @@ describe("recipes with HTML", () => {
       "<div><h1>test</h1><ul><li>item 1</li><li>item 2</li></ul></div>"
     );
   });
+
+  it.skip("works with paths on nested recipes", async () => {
+    const todoList = recipe<{
+      title: { name: string };
+      items: { title: string; done: boolean }[];
+    }>("todo list", ({ title }) => {
+      const { [UI]: summaryUI } = recipe<
+        { title: { name: string } },
+        { [UI]: View }
+      >("summary", ({ title }) => {
+        return { [UI]: html`<div>${title.name}</div>` };
+      })({ title });
+      return { [UI]: html`<div>${summaryUI}</div>` };
+    });
+
+    const result = run(todoList, {
+      title: { name: "test" },
+      items: [
+        { title: "item 1", done: false },
+        { title: "item 2", done: true },
+      ],
+    });
+
+    await idle();
+
+    const parent = document.createElement("div");
+    const cell = result.asSimpleCell<View>([UI]);
+    render(parent, cell.get());
+
+    expect(parent.innerHTML).toBe("<div>test</div>");
+  });
 });
