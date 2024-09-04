@@ -10,6 +10,7 @@ import {
   TYPE,
   ifElse,
   generateData,
+  Recipe,
 } from "../builder/index.js";
 import { type Gem, openSaga } from "../data.js";
 import { run, gemById, getCellReferenceOrValue } from "../runner/index.js";
@@ -100,10 +101,19 @@ notalk;justgo
         .filter((gem) => gem.id !== 0) // TODO: HACK - ignore first todo list
   )({ matchedIndices, gemInfo });
 
-  const suggestion = lift<{
-    matchingGems: GemInfo[];
-    data: { [key: string]: any };
-  }>(({ matchingGems, data }) => {
+  const suggestion = lift<
+    {
+      matchingGems: GemInfo[];
+      data: { [key: string]: any };
+    },
+    | {
+        recipe: Recipe;
+        description: string;
+        bindings: { [key: string]: string };
+        boundGems: { [k: string]: number };
+      }
+    | undefined
+  >(({ matchingGems, data }) => {
     const suggestion = suggestions.find(
       (suggestion) =>
         Object.values(suggestion.dataGems ?? {}).every((type) =>
@@ -130,7 +140,12 @@ notalk;justgo
         .map((part, i) => (i % 2 === 0 ? part : nameBindings[part]))
         .join("");
 
-      return { recipe: suggestion.recipe, description, boundGems: gemBindings };
+      return {
+        recipe: suggestion.recipe,
+        description,
+        bindings: suggestion.bindings,
+        boundGems: gemBindings,
+      };
     } else {
       return undefined;
     }
@@ -153,10 +168,9 @@ notalk;justgo
 
       const accepted = run<any, Gem>(acceptedRecipe, {
         ...Object.fromEntries(
-          Object.entries(data).map(([key, value]) => [
-            key,
-            getCellReferenceOrValue(value),
-          ])
+          Object.entries(suggestion.bindings as { [key: string]: string }).map(
+            ([key, value]) => [key, getCellReferenceOrValue(data[value])]
+          )
         ),
         ...Object.fromEntries(
           Object.entries(suggestion.boundGems).map(([key, value]) => [
@@ -170,7 +184,7 @@ notalk;justgo
       if (target == -1) openSaga(accepted.get()[ID]);
 
       // TODO: Use .value here once supported
-      state.acceptedSuggestion = accepted.asSimpleCell().key(UI);
+      state.acceptedSuggestion = accepted.asSimpleCell().get()[UI];
     }
   );
 
@@ -178,7 +192,7 @@ notalk;justgo
     [UI]: html`<div>
       ${ifElse(
         acceptedSuggestion,
-        acceptedSuggestion,
+        html`<div>${acceptedSuggestion}</div>`,
         ifElse(
           suggestion,
           html`<common-suggestions

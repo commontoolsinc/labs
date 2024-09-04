@@ -84,16 +84,6 @@ export class CommonWindowManager extends LitElement {
           this.newSagaRefs.push([saga, sagaRef]);
         }
 
-        const annotationUI = ""; /*annotation({
-          query: saga[NAME] as string,
-          data: Object.fromEntries(
-            Object.entries(saga).filter(
-              ([key]: (string | Symbol)[]) =>
-                key !== ID && key !== NAME && key !== "UI"
-            )
-          ),
-          target: saga[ID],
-        });*/
         return html`
           <div class="window" id="${id}">
             <button class="close-button" @click="${this.onClose}">×</button>
