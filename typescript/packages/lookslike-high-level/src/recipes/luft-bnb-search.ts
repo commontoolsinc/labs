@@ -4,9 +4,7 @@ import {
   apply,
   lift,
   handler,
-  cell,
   generateData,
-  ifElse,
   UI,
   NAME,
 } from "../builder/index.js";
@@ -40,7 +38,7 @@ export const luftBnBSearch = recipe<{
     new Date(new Date().getTime() + 86400).toISOString().split("T")[0]
   );
   endDate.setDefault(
-    new Date(new Date().getTime() + 2 * 86400).toISOString().split("T")[0]
+    new Date(new Date().getTime() + 3 * 86400).toISOString().split("T")[0]
   );
   // TODO: This should be the user's default location, not hardcoded
   location.setDefault("San Francisco");
@@ -48,10 +46,6 @@ export const luftBnBSearch = recipe<{
   const startDateUI = lift(({ startDate }) => startDate)({ startDate });
   const endDateUI = lift(({ endDate }) => endDate)({ endDate });
   const locationUI = lift(({ location }) => location)({ location });
-
-  const query = cell({
-    prompt: undefined as string | undefined,
-  });
 
   const search = handler<
     {},
@@ -72,15 +66,8 @@ export const luftBnBSearch = recipe<{
     }
   );
 
-  query.prompt = lift(
-    ({ location }) =>
-      `generate 10 places for private home short-term rentals in ${location}`
-  )({
-    location,
-  });
-
-  const { result: places } = generateData<LuftBnBPlace[]>({
-    prompt: query.prompt,
+  const query = lift(({ location }) => ({
+    prompt: `generate 10 places for private home short-term rentals in ${location}`,
     result: [],
     schema: {
       type: "array",
@@ -140,7 +127,11 @@ export const luftBnBSearch = recipe<{
         ],
       },
     },
+  }))({
+    location,
   });
+
+  const { result: places } = generateData<LuftBnBPlace[]>(query);
 
   return {
     [UI]: html`
@@ -151,8 +142,9 @@ export const luftBnBSearch = recipe<{
             value=${startDateUI}
             placeholder="Start Date"
             oncommon-input=${handler(
-              { startDate },
-              ({ detail }, state) => (state.startDateUI = detail.value)
+              { startDateUI },
+              ({ detail }, state) =>
+                detail?.value && (state.startDateUI = detail.value)
             )}
           ></common-input>
           <common-input
@@ -160,18 +152,20 @@ export const luftBnBSearch = recipe<{
             value=${endDateUI}
             placeholder="End Date"
             oncommon-input=${handler(
-              { endDate },
-              ({ detail }, state) => (state.endDateUI = detail.value)
+              { endDateUI },
+              ({ detail }, state) =>
+                detail?.value && (state.endDateUI = detail.value)
             )}
           ></common-input>
         </common-hstack>
         <common-input
           value=${locationUI}
           placeholder="Location"
-          oncommon-input=${handler({ location }, (event, state) => {
-            state.locationUI = event.detail?.value ?? "";
-            console.log("location", state, state.locationUI);
-          })}
+          oncommon-input=${handler(
+            { locationUI },
+            ({ detail }, state) =>
+              detail?.value && (state.locationUI = detail.value)
+          )}
         ></common-input>
         <common-button onclick=${search}>Search</common-button>
         <common-vstack gap="md">

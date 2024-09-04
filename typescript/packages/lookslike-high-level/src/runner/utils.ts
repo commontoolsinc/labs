@@ -206,12 +206,12 @@ export function followAliases(
   if (!isAlias(alias)) throw new Error("Not an alias");
   while (isAlias(alias)) {
     if (alias.$alias.cell) cell = alias.$alias.cell;
-    log?.reads.push({ cell, path: alias.$alias.path });
     result = { cell, path: alias.$alias.path };
 
     if (seen.has(alias)) throw new Error("Alias cycle detected");
     seen.add(alias);
     alias = cell.getAtPath(alias.$alias.path);
+    if (isAlias(alias)) log?.reads.push({ cell, path: alias.$alias.path });
   }
 
   return result!;
