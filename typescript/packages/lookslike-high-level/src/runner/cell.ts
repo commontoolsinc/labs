@@ -57,11 +57,11 @@ export type CellReference = {
   path: PropertyKey[];
 };
 
-export type CellProxyMethods = {
-  [getCellReference]: [CellImpl<any>, PropertyKey[]];
+export type CellProxyInternals = {
+  [getCellReference]: CellReference;
 };
 
-export type CellProxy<T> = T & CellProxyMethods;
+export type CellProxy<T> = T & CellProxyInternals;
 
 export type ReactivityLog = {
   reads: CellReference[];
@@ -198,7 +198,11 @@ export function createValueProxy<T>(
   path = [];
   while (keys.length) {
     const key = keys.shift()!;
-    if (isAlias(target)) {
+    if (isCellProxyForDereferencing(target)) {
+      const ref = target[getCellReference];
+      cell = ref.cell;
+      path = ref.path;
+    } else if (isAlias(target)) {
       const ref = followAliases(target, cell, log);
       cell = ref.cell;
       path = ref.path;
@@ -222,8 +226,12 @@ export function createValueProxy<T>(
 
   // Now target is the end of the path. It might still be a cell, alias or cell
   // reference, so we follow these as well.
-  if (isCell(target)) return createValueProxy(target, [], log);
-  else if (isAlias(target)) {
+  if (isCellProxy(target)) {
+    const ref = target[getCellReference];
+    return createValueProxy(ref.cell, ref.path, log);
+  } else if (isCell(target)) {
+    return createValueProxy(target, [], log);
+  } else if (isAlias(target)) {
     const ref = followAliases(target, cell, log);
     return createValueProxy(ref.cell, ref.path, log);
   } else if (isCellReference(target)) {
@@ -290,7 +298,7 @@ export function isCellProxy(value: any): value is CellProxy<any> {
 
 export function isCellProxyForDereferencing(
   value: any
-): value is CellProxyMethods {
+): value is CellProxyInternals {
   return isCellProxy(value);
 }
 
