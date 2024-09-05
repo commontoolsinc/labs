@@ -30,19 +30,15 @@ export const todoListAsTask = recipe<{
     list.items
   );
 
-  const listId = lift((list: { [ID]: number }) => list[ID])(list);
-  const listUI = lift((list: { [UI]: any }) => list[UI])(list);
-
   return {
     [UI]: html` <details>
       <summary>
         <common-vstack gap="sm">
           <span>${listSummary}</span>
-          <common-saga-link saga=${listId} />
-          <span>${listId}</span>
+          <common-saga-link saga=${list[ID]} />
         </common-vstack>
       </summary>
-      ${listUI}
+      ${list[UI]}
     </details>`,
   };
 });

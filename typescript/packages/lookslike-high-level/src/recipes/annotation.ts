@@ -205,8 +205,5 @@ notalk;justgo
         )
       )}
     </div>`,
-    /*    [UI]: html`<div>
-      <common-suggestions suggestions=${suggestionsList} />
-    </div>`,*/
   };
 });

@@ -66,7 +66,7 @@ describe("recipes with HTML", () => {
     );
   });
 
-  it.skip("works with paths on nested recipes", async () => {
+  it("works with paths on nested recipes", async () => {
     const todoList = recipe<{
       title: { name: string };
       items: { title: string; done: boolean }[];
@@ -94,6 +94,6 @@ describe("recipes with HTML", () => {
     const cell = result.asSimpleCell<View>([UI]);
     render(parent, cell.get());
 
-    expect(parent.innerHTML).toBe("<div>test</div>");
+    expect(parent.innerHTML).toBe("<div><div>test</div></div>");
   });
 });

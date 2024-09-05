@@ -272,13 +272,12 @@ const makeLuftBnBSearch = recipe<{
         : "Searching..."
     )}
   </div>`;
-  const searchId = lift((luftBnB: any) => luftBnB[ID])(luftBnB);
 
   return {
     [UI]: html`
       <vstack gap="sm">
         ${topPlace} Or search for other places:
-        <common-saga-link saga=${searchId} />
+        <common-saga-link saga=${luftBnB[ID]} />
       </vstack>
     `,
     reservation,

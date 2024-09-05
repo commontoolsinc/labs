@@ -111,9 +111,9 @@ export class CommonWindowManager extends LitElement {
     this.updateComplete.then(() => {
       while (this.newSagaRefs.length > 0) {
         const [saga, sagaRef] = this.newSagaRefs.pop()!;
-        const view = saga.asSimpleCell<Gem>();
-        if (!view.get()[UI]) throw new Error("Saga has no UI");
-        render(sagaRef.value!, view.get()[UI]);
+        const view = saga.asSimpleCell<Gem>().key(UI).get();
+        if (!view) throw new Error("Saga has no UI");
+        render(sagaRef.value!, view);
       }
 
       const newWindow = this.renderRoot.querySelector(".window:last-child");

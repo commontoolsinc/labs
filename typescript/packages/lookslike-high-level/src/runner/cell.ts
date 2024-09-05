@@ -119,35 +119,70 @@ export function cell<T>(value?: T): CellImpl<T> {
 }
 
 function simpleCell<T>(
-  self: CellImpl<any>,
+  cell: CellImpl<any>,
   path: PropertyKey[],
   log?: ReactivityLog
 ): Cell<T> {
-  if (isStreamAlias(self.getAtPath(path)))
-    return {
-      // Implementing just Sendable<T>
-      send: (event: T) => {
-        log?.writes.push({ cell: self, path });
-        queueEvent({ cell: self, path }, event);
-      },
-    } as Cell<T>;
-  else
-    return {
-      get: () => transformToSimpleCells(self, self.getAtPath(path), log) as T,
-      set: (newValue: T) => self.setAtPath(path, newValue, log),
-      send: (newValue: T) => self.setAtPath(path, newValue, log),
-      sink: (callback: (value: T) => void) => {
-        return self.sink(
-          (value, changedPath) =>
-            pathAffected(changedPath, path) &&
-            callback(
-              transformToSimpleCells(self, getValueAtPath(value, path), log)
-            )
-        );
-      },
-      key: <K extends keyof T>(key: K) =>
-        self.asSimpleCell([...path, key], log) as Cell<T[K]>,
-    } satisfies Cell<T>;
+  // Follow aliases, cell references, etc. in path. Note that
+  // transformToSimpleCells will follow aliases, but not cell references, so
+  // this is just for setup. Arguably key() should possibly fail if it crosses a
+  // cell, but right now it'll silently cross cells.
+  let keys = [...path];
+  let target = cell.get();
+  while (keys.length) {
+    const key = keys.shift()!;
+    target = target[key];
+    const seen = new Set();
+    let ref: CellReference | undefined;
+    do {
+      if (typeof target === "object" && target !== null) {
+        if (seen.has(target)) {
+          throw new Error("Cyclic cell reference");
+        } else {
+          seen.add(target);
+        }
+      }
+
+      ref = undefined;
+      if (isCellProxyForDereferencing(target)) ref = target[getCellReference];
+      else if (isCellReference(target)) ref = followCellReferences(target, log);
+      else if (isCell(target))
+        ref = { cell: target, path: [] } satisfies CellReference;
+      else if (isAlias(target)) ref = followAliases(target, cell, log);
+
+      if (ref) {
+        target = ref.cell.getAtPath(ref.path);
+        cell = ref.cell;
+        path = [...ref.path, ...keys];
+      }
+    } while (ref);
+  }
+
+  const self = isStreamAlias(cell.getAtPath(path))
+    ? ({
+        // Implementing just Sendable<T>
+        send: (event: T) => {
+          log?.writes.push({ cell: cell, path });
+          queueEvent({ cell: cell, path }, event);
+        },
+      } as Cell<T>)
+    : ({
+        get: () => transformToSimpleCells(cell, cell.getAtPath(path), log) as T,
+        set: (newValue: T) => cell.setAtPath(path, newValue, log),
+        send: (newValue: T) => self.set(newValue),
+        sink: (callback: (value: T) => void) => {
+          return cell.sink(
+            (value, changedPath) =>
+              pathAffected(changedPath, path) &&
+              callback(
+                transformToSimpleCells(cell, getValueAtPath(value, path), log)
+              )
+          );
+        },
+        key: <K extends keyof T>(key: K) =>
+          cell.asSimpleCell([...path, key], log) as Cell<T[K]>,
+      } satisfies Cell<T>);
+  return self;
 }
 
 // Array.prototype's entries, and whether they modify the array
@@ -156,6 +191,7 @@ enum ArrayMethodType {
   ReadWrite,
   WriteOnly,
 }
+
 const arrayMethods: { [key: string]: ArrayMethodType } = {
   at: ArrayMethodType.ReadOnly,
   concat: ArrayMethodType.ReadOnly,

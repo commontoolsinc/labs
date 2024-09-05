@@ -52,7 +52,7 @@ export class CommonAnnotation extends LitElement {
 
       render(
         this.annotationRef.value,
-        this.annotation.asSimpleCell<{ [UI]: View }>().get()[UI]
+        this.annotation.asSimpleCell<{ [UI]: View }>().key(UI).get()
       );
     }
   }
