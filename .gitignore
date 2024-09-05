@@ -10,3 +10,5 @@ __pycache__
 cache
 typescript/packages/planning-server/.env
 typescript/packages/lookslike-prototype/.reflect
+typescript/packages/linkheap/views
+typescript/packages/linkheap/.env

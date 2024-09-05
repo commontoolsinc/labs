@@ -1,14 +1,13 @@
 {
-  "name": "@commontools/planning-server",
+  "name": "@commontools/linkheap",
   "author": "The Common Authors",
   "version": "0.0.1",
-  "description": "A server for planning and scheduling AI tasks.",
+  "description": "A link clipping prototype.",
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "deno run --allow-env --allow-read --allow-write --allow-net src/index.ts",
-    "test": "deno test --no-check",
+    "start": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run main.ts",
     "build": "wireit",
     "clean": "wireit"
   },
