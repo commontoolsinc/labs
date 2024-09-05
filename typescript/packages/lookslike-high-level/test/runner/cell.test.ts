@@ -170,6 +170,27 @@ describe("createProxy", () => {
       { cell: c, path: ["a", 2] },
     ]);
   });
+
+  it("should allow changig array lengts by writing length", () => {
+    const c = cell([1, 2, 3]);
+    const log: ReactivityLog = { reads: [], writes: [] };
+    const proxy = c.getAsProxy([], log);
+    proxy.length = 2;
+    expect(c.get()).toEqual([1, 2]);
+    expect(log.writes).toEqual([
+      { cell: c, path: ["length"] },
+      { cell: c, path: [2] },
+    ]);
+    proxy.length = 4;
+    expect(c.get()).toEqual([1, 2, undefined, undefined]);
+    expect(log.writes).toEqual([
+      { cell: c, path: ["length"] },
+      { cell: c, path: [2] },
+      { cell: c, path: ["length"] },
+      { cell: c, path: [2] },
+      { cell: c, path: [3] },
+    ]);
+  });
 });
 
 describe("asSimpleCell", () => {

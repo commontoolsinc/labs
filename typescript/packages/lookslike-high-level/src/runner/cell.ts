@@ -290,8 +290,25 @@ export function createValueProxy<T>(
 
       return createValueProxy(cell, [...path, prop], log);
     },
-    set: (_target, prop, value) => {
+    set: (target, prop, value) => {
       if (isCellProxy(value)) value = value[getCellReference];
+
+      if (Array.isArray(target) && prop === "length") {
+        const oldLength = target.length;
+        const result = setNestedValue(cell, [...path, prop], value, log);
+        const newLength = value;
+        if (result) {
+          for (
+            let i = Math.min(oldLength, newLength);
+            i < Math.max(oldLength, newLength);
+            i++
+          ) {
+            log?.writes.push({ cell, path: [...path, i] });
+            queueEvent({ cell, path: [...path, i] }, undefined);
+          }
+        }
+        return result;
+      }
 
       return setNestedValue(cell, [...path, prop], value, log);
     },
