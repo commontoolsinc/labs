@@ -63,6 +63,31 @@ describe("mergeObjects", () => {
     const result = mergeObjects(obj1, obj2, obj3);
     expect(result).toEqual({ a: 1, b: 2 });
   });
+
+  it("should give precedence to earlier objects in the case of a conflict", () => {
+    const obj1 = { a: 1 };
+    const obj2 = { a: 2, b: { c: 3 } };
+    const obj3 = { a: 3, b: { c: 4 } };
+
+    const result = mergeObjects(obj1, obj2, obj3);
+    expect(result).toEqual({ a: 1, b: { c: 3 } });
+  });
+
+  it("should treat cell aliases and references as values", () => {
+    const testCell = cell();
+    const obj1 = { a: { $alias: { path: [] } } };
+    const obj2 = { a: 2, b: { c: { cell: testCell, path: [] } } };
+    const obj3 = {
+      a: { $alias: { cell: testCell, path: ["a"] } },
+      b: { c: 4 },
+    };
+
+    const result = mergeObjects(obj1, obj2, obj3);
+    expect(result).toEqual({
+      a: { $alias: { path: [] } },
+      b: { c: { cell: testCell, path: [] } },
+    });
+  });
 });
 
 describe("sendValueToBinding", () => {

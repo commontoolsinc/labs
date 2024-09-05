@@ -34,12 +34,18 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
   // Generate recipe cell using defaults, bindings, and initial values
   // TODO: Some initial values can be aliases to outside cells
   const id = nextGemId++;
-  const recipeCell = cell(
-    mergeObjects(recipe.initial, bindings, defaults, {
-      [ID]: id,
-      [TYPE]:
-        (recipe.schema as { description: string })?.description ?? "unknown",
-    })
+  const recipeCell = cell<R>();
+  recipeCell.send(
+    mergeObjects(
+      {
+        [ID]: id,
+        [TYPE]:
+          (recipe.schema as { description: string })?.description ?? "unknown",
+      },
+      recipe.initial,
+      bindings,
+      defaults
+    )
   );
   gemById.set(id, recipeCell);
 

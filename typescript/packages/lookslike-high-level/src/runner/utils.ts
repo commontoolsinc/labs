@@ -44,7 +44,13 @@ export function mergeObjects(...objects: any[]): any {
     // If we have a literal value, return it. Same for arrays, since we wouldn't
     // know how to merge them. Note that earlier objects take precedence, so if
     // an earlier was e.g. an object, we'll return that instead of the literal.
-    if (typeof obj !== "object" || obj === null || Array.isArray(obj))
+    if (
+      typeof obj !== "object" ||
+      obj === null ||
+      Array.isArray(obj) ||
+      isAlias(obj) ||
+      isCellReference(obj)
+    )
       return obj;
 
     // Then merge objects, only passing those on that have any values.
