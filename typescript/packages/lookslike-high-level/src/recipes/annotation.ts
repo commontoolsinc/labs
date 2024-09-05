@@ -181,10 +181,12 @@ notalk;justgo
       });
 
       // HACK: -1 is home screen and so let's open a new tab
-      if (target == -1) openSaga(accepted.get()[ID]);
-
-      // TODO: Use .value here once supported
-      state.acceptedSuggestion = accepted.asSimpleCell().get()[UI];
+      if (target == -1) {
+        openSaga(accepted.get()[ID]);
+        state.acceptedSuggestion = html`<div></div>`;
+      } else {
+        state.acceptedSuggestion = accepted.asSimpleCell().get()[UI];
+      }
     }
   );
 
