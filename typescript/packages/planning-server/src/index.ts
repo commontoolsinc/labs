@@ -6,8 +6,12 @@ import {
 } from "./conversation.ts";
 import { CoreMessage, CoreTool } from "npm:ai";
 import { CoreAssistantMessage } from "npm:ai";
+import { ensureDir } from "https://deno.land/std/fs/mod.ts";
+import { crypto } from "https://deno.land/std/crypto/mod.ts";
 
 const threadManager = new InMemoryConversationThreadManager();
+
+const CACHE_DIR = "./cache";
 
 type CreateConversationThreadRequest = {
   action: "create";
@@ -58,7 +62,32 @@ const handler = async (request: Request): Promise<Response> => {
   }
 };
 
-const cache: Record<string, any> = {};
+async function hashKey(key: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(key);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function loadCacheItem(key: string): Promise<any | null> {
+  const hash = await hashKey(key);
+  const filePath = `${CACHE_DIR}/${hash}.json`;
+  try {
+    await ensureDir(CACHE_DIR);
+    const cacheData = await Deno.readTextFile(filePath);
+    return JSON.parse(cacheData);
+  } catch {
+    return null;
+  }
+}
+
+async function saveCacheItem(key: string, data: any): Promise<void> {
+  const hash = await hashKey(key);
+  const filePath = `${CACHE_DIR}/${hash}.json`;
+  await ensureDir(CACHE_DIR);
+  await Deno.writeTextFile(filePath, JSON.stringify(data, null, 2));
+}
 
 async function handleCreateConversationThread(
   system: string,
@@ -67,12 +96,13 @@ async function handleCreateConversationThread(
 ): Promise<Response> {
   const cacheKey = `${system}:${message}`;
 
-  if (cache[cacheKey]) {
+  const cachedResult = await loadCacheItem(cacheKey);
+  if (cachedResult) {
     console.log(
       "Cache hit!",
       (cacheKey.slice(0, 20) + "..." + cacheKey.slice(-20)).replaceAll("\n", "")
     );
-    return new Response(JSON.stringify(cache[cacheKey]), {
+    return new Response(JSON.stringify(cachedResult), {
       headers: { "Content-Type": "application/json" },
     });
   }
@@ -90,7 +120,7 @@ async function handleCreateConversationThread(
     threadManager.update(thread.id, [result.assistantResponse]);
   }
 
-  // cache[cacheKey] = result;
+  await saveCacheItem(cacheKey, result);
 
   return new Response(JSON.stringify(result), {
     headers: { "Content-Type": "application/json" },
