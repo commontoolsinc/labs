@@ -151,38 +151,43 @@ function simpleCell<T>(
 }
 
 // Array.prototype's entries, and whether they modify the array
-const arrayMethods: { [key: string]: boolean } = {
-  at: false,
-  concat: false,
-  entries: false,
-  every: false,
-  fill: true,
-  filter: false,
-  find: false,
-  findIndex: false,
-  findLast: false,
-  findLastIndex: false,
-  includes: false,
-  indexOf: false,
-  join: false,
-  keys: false,
-  lastIndexOf: false,
-  map: false,
-  pop: true,
-  push: true,
-  reduce: false,
-  reduceRight: false,
-  reverse: true,
-  shift: true,
-  slice: false,
-  some: false,
-  sort: true,
-  splice: true,
-  toLocaleString: false,
-  toString: false,
-  unshift: true,
-  values: false,
-  with: false,
+enum ArrayMethodType {
+  ReadOnly,
+  ReadWrite,
+  WriteOnly,
+}
+const arrayMethods: { [key: string]: ArrayMethodType } = {
+  at: ArrayMethodType.ReadOnly,
+  concat: ArrayMethodType.ReadOnly,
+  entries: ArrayMethodType.ReadOnly,
+  every: ArrayMethodType.ReadOnly,
+  fill: ArrayMethodType.WriteOnly,
+  filter: ArrayMethodType.ReadOnly,
+  find: ArrayMethodType.ReadOnly,
+  findIndex: ArrayMethodType.ReadOnly,
+  findLast: ArrayMethodType.ReadOnly,
+  findLastIndex: ArrayMethodType.ReadOnly,
+  includes: ArrayMethodType.ReadOnly,
+  indexOf: ArrayMethodType.ReadOnly,
+  join: ArrayMethodType.ReadOnly,
+  keys: ArrayMethodType.ReadOnly,
+  lastIndexOf: ArrayMethodType.ReadOnly,
+  map: ArrayMethodType.ReadOnly,
+  pop: ArrayMethodType.ReadWrite,
+  push: ArrayMethodType.WriteOnly,
+  reduce: ArrayMethodType.ReadOnly,
+  reduceRight: ArrayMethodType.ReadOnly,
+  reverse: ArrayMethodType.ReadWrite,
+  shift: ArrayMethodType.ReadWrite,
+  slice: ArrayMethodType.ReadOnly,
+  some: ArrayMethodType.ReadOnly,
+  sort: ArrayMethodType.ReadWrite,
+  splice: ArrayMethodType.ReadWrite,
+  toLocaleString: ArrayMethodType.ReadOnly,
+  toString: ArrayMethodType.ReadOnly,
+  unshift: ArrayMethodType.WriteOnly,
+  values: ArrayMethodType.ReadOnly,
+  with: ArrayMethodType.ReadOnly,
 };
 
 export function createValueProxy<T>(
@@ -240,25 +245,48 @@ export function createValueProxy<T>(
   } else if (typeof target !== "object" || target === null) return target;
 
   return new Proxy(target as object, {
-    get: (_target, prop) => {
-      if (prop === getCellReference)
-        return { cell, path } satisfies CellReference;
+    get: (target, prop, receiver) => {
+      if (typeof prop === "symbol") {
+        if (prop === getCellReference)
+          return { cell, path } satisfies CellReference;
 
-      if (Array.isArray(target) && prop in arrayMethods)
-        return arrayMethods[prop as keyof typeof arrayMethods] == false
+        const value = Reflect.get(target, prop, receiver);
+        if (typeof value === "function") return value.bind(receiver);
+        else return value;
+      }
+
+      if (Array.isArray(target) && prop in arrayMethods) {
+        const method = Array.prototype[prop as keyof typeof Array.prototype];
+        const isReadWrite = arrayMethods[prop as keyof typeof arrayMethods];
+
+        return isReadWrite === ArrayMethodType.ReadOnly
           ? (...args: any[]) => {
-              return Array.prototype[
-                prop as keyof typeof Array.prototype
-              ].apply(target, args);
+              // This will also mark each element read in the log. Almost all
+              // methods implicitly read all elements. TODO: Deal with
+              // exceptions like at().
+              const copy = target.map((_, index) =>
+                createValueProxy(cell, [...path, index], log)
+              );
+
+              return method.apply(copy, args);
             }
           : (...args: any[]) => {
-              const copy = [...target];
-              const result = Array.prototype[
-                prop as keyof typeof Array.prototype
-              ].apply(copy, args);
+              // Operate on a copy so we can diff. For write-only methods like
+              // push, don't proxy the other members so we don't log reads.
+              // TODO: Some methods like pop() and shift() don't read the whole
+              // array, so we could optimize that.
+              const copy =
+                isReadWrite === ArrayMethodType.WriteOnly
+                  ? [...target]
+                  : target.map((_, index) =>
+                      createValueProxy(cell, [...path, index], log)
+                    );
+
+              const result = method.apply(copy, args);
               setNestedValue(cell, path, copy, log);
               return result;
             };
+      }
 
       return createValueProxy(cell, [...path, prop], log);
     },

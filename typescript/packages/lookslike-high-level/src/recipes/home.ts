@@ -8,8 +8,8 @@ export const home = recipe<{
 }>("home screen", ({ sagas, recipes }) => {
   const sagaIDs = lift((sagas: Gem[]) =>
     sagas
-      .filter((saga) => saga[UI] ?? saga.get()[UI]) // Only show sagas with UI
-      .map((saga) => ({ id: saga[ID] ?? saga.get()[ID] }))
+      .filter((saga) => saga[UI]) // Only show sagas with UI
+      .map((saga) => ({ id: saga[ID] }))
   )(sagas);
 
   return {

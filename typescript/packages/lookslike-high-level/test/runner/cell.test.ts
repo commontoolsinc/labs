@@ -147,11 +147,16 @@ describe("createProxy", () => {
     const result = proxy.find((x: any) => x === 2);
     expect(result).toBe(2);
     expect(c.get()).toEqual([1, 2, 3]);
-    expect(log.reads).toEqual([{ cell: c, path: [] }]);
+    expect(log.reads).toEqual([
+      { cell: c, path: [] },
+      { cell: c, path: [0] },
+      { cell: c, path: [1] },
+      { cell: c, path: [2] },
+    ]);
     expect(log.writes).toEqual([]);
   });
 
-  it.skip("should support mapping over a proxied array", () => {
+  it("should support mapping over a proxied array", () => {
     const c = cell({ a: [1, 2, 3] });
     const log: ReactivityLog = { reads: [], writes: [] };
     const proxy = c.getAsProxy([], log);
@@ -160,9 +165,9 @@ describe("createProxy", () => {
     expect(log.reads).toEqual([
       { cell: c, path: [] },
       { cell: c, path: ["a"] },
-      { cell: c, path: ["a", "0"] },
-      { cell: c, path: ["a", "1"] },
-      { cell: c, path: ["a", "2"] },
+      { cell: c, path: ["a", 0] },
+      { cell: c, path: ["a", 1] },
+      { cell: c, path: ["a", 2] },
     ]);
   });
 });
