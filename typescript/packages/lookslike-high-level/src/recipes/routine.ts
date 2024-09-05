@@ -1,6 +1,5 @@
-import { recipe, NAME } from "../recipe.js";
+import { recipe, NAME } from "../builder/index.js";
 
-export const routine = recipe("routine", (bindings) => ({
-  [NAME]: bindings.title,
-  ...bindings,
+export const routine = recipe<{ title: string }>("routine", ({ title }) => ({
+  [NAME]: title,
 }));

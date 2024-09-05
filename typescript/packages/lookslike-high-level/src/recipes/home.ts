@@ -1,45 +1,32 @@
-import { view, tags } from "@commontools/common-ui";
-import { signal } from "@commontools/common-frp";
-import { recipe, Gem, ID } from "../recipe.js";
-import { sagaLink } from "../components/saga-link.js";
-import { recipeLink } from "../components/recipe-link.js";
-import { annotation } from "../components/annotation.js";
-const { binding, repeat } = view;
-const { vstack } = tags;
+import { html } from "@commontools/common-html";
+import { recipe, lift, ID, UI } from "../builder/index.js";
+import { Gem, RecipeManifest } from "../data.js";
 
-export const home = recipe("home screen", ({ sagas, recipes }) => {
-  const sagasWithIDs = signal.computed(
-    [sagas],
-    (sagas: { [key: string]: Gem }) =>
-      Object.values(sagas)
-        .filter((saga) => saga.UI) // Only show sagas with UI
-        .map((saga) => ({
-          id: saga[ID],
-          saga,
-        }))
-  );
-
-  const recipesWithIDs = signal.computed(
-    [recipes],
-    (recipes: { [key: string]: Gem }) =>
-      Object.values(recipes).map((recipe) => ({
-        id: recipe[ID],
-        recipe,
-      }))
-  );
+export const home = recipe<{
+  sagas: Gem[];
+  recipes: RecipeManifest[];
+}>("home screen", ({ sagas, recipes }) => {
+  const sagaIDs = lift((sagas: Gem[]) =>
+    sagas
+      .filter((saga) => saga[UI]) // Only show sagas with UI
+      .map((saga) => ({ id: saga[ID] }))
+  )(sagas);
 
   return {
-    UI: vstack({}, [
-      vstack({}, repeat(sagasWithIDs, sagaLink({ saga: binding("saga") }))),
-      vstack(
-        {},
-        repeat(recipesWithIDs, recipeLink({ recipe: binding("recipe") }))
-      ),
-      annotation({
-        query: "dream fun things to explore",
-        target: -1,
-        data: { sagas, recipes },
-      }),
-    ]),
+    [UI]: html`<common-vstack
+      >${sagaIDs.map(
+        (saga) => html`<div><common-saga-link saga=${saga.id}></sagaLink></div>`
+      )}
+      ${recipes.map(
+        (recipe) =>
+          html`<div>
+            <common-recipe-link foo="bar" recipe=${recipe}></common-recipe-link>
+          </div>`
+      )}<common-annotation
+        query="dream fun things to explore, especially with tickets and reservations"
+        target="-1"
+        data=${{ sagas, recipes }}
+      />
+    </common-vstack>`,
   };
 });

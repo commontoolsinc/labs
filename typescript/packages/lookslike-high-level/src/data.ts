@@ -1,9 +1,9 @@
 // This file is setting up example data
-import { signal } from "@commontools/common-frp";
-import { Gem } from "./recipe.js";
-const { state } = signal;
 
-import { todoList, makeTodoItem } from "./recipes/todo-list.js";
+import { ID, TYPE, NAME, UI, Recipe } from "./builder/index.js";
+import { run, cell, isCell, CellImpl } from "./runner/index.js";
+
+import { todoList } from "./recipes/todo-list.js";
 import { localSearch } from "./recipes/local-search.js";
 import { luftBnBSearch } from "./recipes/luft-bnb-search.js";
 import { ticket } from "./recipes/ticket.js";
@@ -13,30 +13,48 @@ import { routine } from "./recipes/routine.js";
 import "./recipes/todo-list-as-task.js";
 import "./recipes/playlist.js";
 
-export const dataGems = state<Gem[]>([]);
+export type Gem = {
+  [ID]: number;
+  [NAME]?: string;
+  [UI]?: any;
+  [key: string]: any;
+};
 
-export function addGems(gems: Gem[]) {
+export { ID, TYPE, NAME, UI };
+
+// TODO: TYPE is now obsolete. Do we still need this?
+export function isGem(value: any): value is Gem {
+  return isCell(value) && ID in value.get() && TYPE in value.get();
+}
+
+export const dataGems = cell<CellImpl<Gem>[]>([]);
+
+export function addGems(gems: CellImpl<any>[]) {
   dataGems.send([...dataGems.get(), ...gems]);
 }
 
 addGems([
-  todoList({
+  run(todoList, {
     title: "My TODOs",
-    items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) =>
-      makeTodoItem(item)
-    ),
+    items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) => ({
+      title: item,
+      done: false,
+    })),
   }),
-  todoList({
+  run(todoList, {
     title: "My grocery shopping list",
-    items: ["milk", "eggs", "bread"].map((item) => makeTodoItem(item)),
+    items: ["milk", "eggs", "bread"].map((item) => ({
+      title: item,
+      done: false,
+    })),
   }),
-  ticket({
+  run(ticket, {
     title: "Reservation for 'Counterstrike the Musical'",
     show: "Counterstrike the Musical",
-    date: "2021-07-07",
+    date: getFridayAndMondayDateStrings().startDate,
     location: "New York",
   }),
-  routine({
+  run(routine, {
     title: "Morning routine",
     // TODO: A lot more missing here, this is just to drive the suggestion.
     locations: ["coffee shop with great baristas"],
@@ -45,27 +63,24 @@ addGems([
 
 export type RecipeManifest = {
   name: string;
-  recipe: (inputs: Record<string, any>) => Gem;
-  inputs: Record<string, any>;
+  recipe: Recipe;
 };
 
 export const recipes: RecipeManifest[] = [
   {
     name: "Create a new TODO list",
     recipe: todoList,
-    inputs: { title: "", items: [] },
   },
   {
     name: "Find places",
     recipe: localSearch,
-    inputs: { query: "", location: "" },
   },
   {
     name: "Find a LuftBnB place to stay",
     recipe: luftBnBSearch,
-    inputs: { ...getFridayAndMondayDateStrings(), location: "" },
   },
 ];
+(window as any).recipes = recipes;
 
 // Helper for mock data
 function getFridayAndMondayDateStrings() {
@@ -90,8 +105,8 @@ function getFridayAndMondayDateStrings() {
 }
 
 // Terrible hack to open a saga from a recipe
-let openSagaOpener: (saga: Gem) => void = () => {};
-export const openSaga = (saga: Gem) => openSagaOpener(saga);
-openSaga.set = (opener: (saga: Gem) => void) => {
+let openSagaOpener: (sagaId: number) => void = () => {};
+export const openSaga = (sagaId: number) => openSagaOpener(sagaId);
+openSaga.set = (opener: (sagaId: number) => void) => {
   openSagaOpener = opener;
 };

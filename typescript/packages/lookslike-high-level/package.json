@@ -8,6 +8,7 @@
   "type": "module",
   "scripts": {
     "dev": "npm run build && npx vite",
+    "test": "npm run build && vitest",
     "build": "wireit",
     "clean": "wireit"
   },
@@ -20,8 +21,10 @@
   },
   "homepage": "https://github.com/commontoolsinc/labs#readme",
   "devDependencies": {
+    "jsdom": "^25.0.0",
     "typescript": "^5.2.2",
     "vite": "^5.2.0",
+    "vitest": "^1.6.0",
     "wireit": "^0.14.4"
   },
   "wireit": {
@@ -29,6 +32,7 @@
       "dependencies": [
         "../common-ui:build",
         "../common-frp:build",
+        "../common-html:build",
         "../lookslike-sagas:build",
         "../llm-client:build"
       ],
@@ -39,9 +43,13 @@
     }
   },
   "dependencies": {
-    "@commontools/common-ui": "^0.0.1",
     "@commontools/common-frp": "^0.0.1",
-    "@commontools/lookslike-sagas": "^0.0.1",
-    "@commontools/llm-client": "^0.0.1"
+    "@commontools/common-html": "^0.0.1",
+    "@commontools/common-ui": "^0.0.1",
+    "@commontools/llm-client": "^0.0.1",
+    "@commontools/lookslike-sagas": "^0.0.1"
+  },
+  "overrides": {
+    "tough-cookie": "^5.0.0-rc.4"
   }
 }

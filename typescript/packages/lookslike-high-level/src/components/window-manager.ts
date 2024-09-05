@@ -1,9 +1,10 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { tags, render, style } from "@commontools/common-ui";
-import { isGem, Gem, ID, NAME } from "../recipe.js";
-import { annotation } from "../components/annotation.js";
-const { include } = tags;
+import { ref, createRef, Ref } from "lit/directives/ref.js";
+import { style } from "@commontools/common-ui";
+import { render } from "@commontools/common-html";
+import { Gem, ID, UI, NAME } from "../data.js";
+import { CellImpl, isCell, gemById } from "../runner/index.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -29,9 +30,7 @@ export class CommonWindowManager extends LitElement {
         border-radius: var(--radius);
         background-color: rgba(255, 255, 255, 0.8);
         backdrop-filter: blur(10px);
-        box-shadow:
-          0 10px 20px rgba(0, 0, 0, 0.1),
-          0 6px 6px rgba(0, 0, 0, 0.1),
+        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1), 0 6px 6px rgba(0, 0, 0, 0.1),
           0 0 0 1px rgba(0, 0, 0, 0.05);
         transition: all 0.3s ease;
         overflow: hidden;
@@ -63,33 +62,40 @@ export class CommonWindowManager extends LitElement {
   ];
 
   @property({ type: Array })
-  sagas: Gem[] = [];
+  sagas: CellImpl<Gem>[] = [];
+
+  private sagaRefs: Map<string, Ref<HTMLElement>> = new Map();
+  private newSagaRefs: [CellImpl<Gem>, Ref<HTMLElement>][] = [];
 
   override render() {
     const idCounts: { [key: string]: number } = {};
     return html`
       ${this.sagas.map((saga) => {
-        idCounts[saga[ID]] ??= 0;
-        const id = saga[ID] + "#" + idCounts[saga[ID]]++;
+        const sagaValues = saga.getAsProxy();
+        const sagaId = sagaValues[ID];
+        idCounts[sagaId] ??= 0;
+        const id = sagaId + "#" + idCounts[sagaId]++;
 
-        const annotationUI = annotation({
-          query: saga[NAME] as string,
-          data: Object.fromEntries(
-            Object.entries(saga).filter(
-              ([key]: (string | Symbol)[]) =>
-                key !== ID && key !== NAME && key !== "UI"
-            )
-          ),
-          target: saga[ID],
-        });
+        // Create a new ref for this saga
+        let sagaRef = this.sagaRefs.get(id);
+        if (!sagaRef) {
+          sagaRef = createRef<HTMLElement>();
+          this.sagaRefs.set(id, sagaRef);
+          this.newSagaRefs.push([saga, sagaRef]);
+        }
+
         return html`
           <div class="window" id="${id}">
             <button class="close-button" @click="${this.onClose}">×</button>
             <common-screen-element>
               <common-system-layout>
-                ${render.render(include({ content: saga.UI }))}
-                  <div slot="secondary">${render.render(annotationUI)}</div>
-                  <common-unibox slot="search" value="" placeholder="" label=">">
+                <div ${ref(sagaRef)}></div>
+                <div slot="secondary"><common-annotation .query=${
+                  sagaValues[NAME] ?? ""
+                } .target=${
+          sagaValues[ID]
+        } .data=${sagaValues} ></common-annotation></div>
+                <common-unibox slot="search" value="" placeholder="" label=">">
               </common-system-layout>
             </common-screen-element>
           </div>
@@ -98,9 +104,18 @@ export class CommonWindowManager extends LitElement {
     `;
   }
 
-  openSaga(saga: Gem) {
+  openSaga(sagaId: number) {
+    const saga = gemById.get(sagaId) as CellImpl<Gem>;
+    if (!isCell(saga)) throw new Error("Saga ${sagaId} doesn't exist");
     this.sagas = [...this.sagas, saga];
     this.updateComplete.then(() => {
+      while (this.newSagaRefs.length > 0) {
+        const [saga, sagaRef] = this.newSagaRefs.pop()!;
+        const view = saga.asSimpleCell<Gem>().key(UI).get();
+        if (!view) throw new Error("Saga has no UI");
+        render(sagaRef.value!, view);
+      }
+
       const newWindow = this.renderRoot.querySelector(".window:last-child");
       if (newWindow) {
         newWindow.scrollIntoView({
@@ -118,8 +133,10 @@ export class CommonWindowManager extends LitElement {
       const idCounts: { [key: string]: number } = {};
 
       this.sagas = this.sagas.filter((saga) => {
-        idCounts[saga[ID]] ??= 0;
-        const sagaID = saga[ID] + "#" + idCounts[saga[ID]]++;
+        const sagaId = saga.getAsProxy()[ID];
+
+        idCounts[sagaId] ??= 0;
+        const sagaID = sagaId + "#" + idCounts[sagaId]++;
         return sagaID !== id;
       });
     }
@@ -136,9 +153,7 @@ export class CommonWindowManager extends LitElement {
   }
 
   private handleAddWindow(e: Event) {
-    const saga = (e as CustomEvent).detail.saga;
-    if (isGem(saga)) {
-      this.openSaga(saga);
-    }
+    const sagaId = (e as CustomEvent).detail.sagaId;
+    this.openSaga(sagaId);
   }
 }

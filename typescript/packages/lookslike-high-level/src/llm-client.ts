@@ -14,3 +14,10 @@ export const mockResultClient = new LLMClient({
   system: `Generate dummy data as JSON as per the provided spec. Use the input to imagine what an API response would look like for a request.`,
   tools: [],
 });
+
+export const makeClient = (system: string) =>
+  new LLMClient({
+    serverUrl: LLM_SERVER_URL,
+    system,
+    tools: [],
+  });

@@ -1,12 +1,14 @@
-import { view, tags } from "@commontools/common-ui";
-import { signal, stream } from "@commontools/common-frp";
-import { generateData } from "@commontools/llm-client";
-import { recipe, NAME } from "../recipe.js";
-import { mockResultClient } from "../llm-client.js";
-const { binding, repeat } = view;
-const { vstack, hstack, div, commonInput, button } = tags;
-const { state, computed } = signal;
-const { subject } = stream;
+import { html } from "@commontools/common-html";
+import {
+  recipe,
+  apply,
+  handler,
+  cell,
+  generateData,
+  UI,
+  NAME,
+  ifElse,
+} from "../builder/index.js";
 
 export interface Place {
   name: string;
@@ -20,88 +22,29 @@ export interface Place {
   rating: number;
 }
 
-export const localSearch = recipe("local search", ({ query, location }) => {
-  // Initial search
-  const places = state<Place[]>([]);
-  performLocalSearch(query.get(), location.get()).then((results) =>
-    places.send(results)
-  );
+export const localSearch = recipe<{
+  what: string;
+  where: string;
+}>("local search", ({ what, where }) => {
+  what.setDefault("restaurants");
+  // TODO: This should be the user's default location, not hardcoded
+  where.setDefault("San Francisco");
 
-  const search = subject<any>();
-  search.sink({
-    send: () =>
-      performLocalSearch(query.get(), location.get()).then((results) =>
-        places.send(results)
-      ),
+  const query = cell({
+    prompt: "",
   });
 
-  const summaries = computed([places], (places: Place[]) =>
-    places.map((place) => ({
-      name: place.name,
-      description: place.description,
-      address: place.address,
-      city: place.city + ", " + place.state + " " + place.zip,
-      rating: "*****".slice(0, place.rating),
-    }))
-  );
+  const search = handler<
+    {},
+    { what: string; where: string; query: { prompt: string } }
+  >({ what, where, query }, (_, { what, where, query }) => {
+    query.prompt = `generate 10 places that match they query: ${what} in ${where}`;
+  });
 
-  return {
-    UI: vstack({}, [
-      hstack({}, [
-        vstack({}, [
-          "What",
-          commonInput({
-            value: query,
-            placeholder: "Type of place",
-            "@common-input#value": query,
-          }),
-        ]),
-        vstack({}, [
-          "Where",
-          commonInput({
-            value: location,
-            placeholder: "Location",
-            "@common-input#value": location,
-          }),
-        ]),
-      ]),
-      button({ "@click": search }, ["Search"]),
-      vstack(
-        {},
-        repeat(
-          summaries,
-          vstack({}, [
-            div({}, binding("name")),
-            div({}, binding("description")),
-            div({}, binding("imageUrl")),
-            div({}, binding("address")),
-            div({}, binding("city")),
-            div({}, binding("rating")),
-          ])
-        )
-      ),
-    ]),
-    query,
-    location,
-    places,
-    [NAME]: computed(
-      [query, location],
-      (query: string, location: string) =>
-        `${query || "all"} in ${location || "anywhere"}`
-    ),
-  };
-});
-
-async function performLocalSearch(
-  query: string,
-  location: string
-): Promise<Place[]> {
-  if (!query || !location) return [];
-  const result = await generateData(
-    mockResultClient,
-    `generate 10 places that match they query: ${query} in ${location}`,
-    [],
-    {
+  const { pending, result: places } = generateData<Place[]>({
+    prompt: query.prompt,
+    result: [],
+    schema: {
       type: "array",
       items: {
         type: "object",
@@ -117,7 +60,56 @@ async function performLocalSearch(
           rating: { type: "number", minimum: 0, maximum: 5 },
         },
       },
-    }
-  );
-  return result as Place[];
-}
+    },
+  });
+
+  return {
+    [UI]: html`
+      <common-vstack gap="sm">
+        <common-hstack gap="sm">
+          <common-vstack gap="xs">
+            <div>What</div>
+            <common-input
+              value=${what}
+              placeholder="Type of place"
+              @common-input#value=${what}
+            ></common-input>
+          </common-vstack>
+          <common-vstack gap="xs">
+            <div>Where</div>
+            <common-input
+              value=${where}
+              placeholder="Location"
+              @common-input#value=${where}
+            ></common-input>
+          </common-vstack>
+        </common-hstack>
+        <common-button onclick=${search}>Search</common-button>
+        <common-vstack gap="md">
+          ${ifElse(
+            pending,
+            html`<div>Loading...</div>`,
+            places.map(
+              (place) => html`
+                <common-vstack gap="xs">
+                  <div>${place.name}</div>
+                  <div>${place.description}</div>
+                  <div>${place.address}</div>
+                  <div>${place.city}, ${place.state} ${place.zip}</div>
+                  <div>${"*****".slice(0, place.rating)}</div>
+                </common-vstack>
+              `
+            )
+          )}
+        </common-vstack>
+      </common-vstack>
+    `,
+    what,
+    where,
+    places,
+    [NAME]: apply(
+      { what, where },
+      ({ what, where }) => `${what || "all"} in ${where || "anywhere"}`
+    ),
+  };
+});
