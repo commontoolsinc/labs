@@ -9,7 +9,7 @@
   "scripts": {
     "build": "wireit",
     "clean": "wireit",
-    "test": "npm run build && mocha lib/test/**/*.test.js"
+    "test": "npm run build && mocha -j=1 lib/test/**/*.test.js"
   },
   "repository": {
     "type": "git",
