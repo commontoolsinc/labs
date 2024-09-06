@@ -35,7 +35,7 @@ export function addGems(gems: CellImpl<any>[]) {
 }
 
 addGems([
-  run(prompt, { title: "a whippet sleeping" }),
+  run(prompt, { title: "a cute blue betta fish" }),
   run(todoList, {
     title: "My TODOs",
     items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) => ({
