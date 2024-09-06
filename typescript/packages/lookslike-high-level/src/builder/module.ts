@@ -104,3 +104,26 @@ export function handler<E, T>(
 ): Value<E> {
   return asHandler(handler)(props);
 }
+
+// Example:
+// str`Hello, ${name}!`
+//
+// TODO: This should be a built-in module
+export function str(
+  strings: TemplateStringsArray,
+  ...values: any[]
+): CellProxy<string> {
+  const interpolatedString = ({
+    strings,
+    values,
+  }: {
+    strings: TemplateStringsArray;
+    values: any[];
+  }) =>
+    strings.reduce(
+      (result, str, i) => result + str + (i < values.length ? values[i] : ""),
+      ""
+    );
+
+  return lift(interpolatedString)({ strings, values });
+}

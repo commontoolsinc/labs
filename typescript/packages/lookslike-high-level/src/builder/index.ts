@@ -5,6 +5,7 @@ export {
   asHandler,
   apply,
   handler,
+  str,
 } from "./module.js";
 export { recipe } from "./recipe.js";
 export { generateData, ifElse } from "./built-in.js";

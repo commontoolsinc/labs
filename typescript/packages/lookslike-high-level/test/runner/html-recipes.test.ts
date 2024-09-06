@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { html, render, View } from "@commontools/common-html";
-import { recipe, lift, UI } from "../../src/builder/index.js";
+import { recipe, lift, str, UI } from "../../src/builder/index.js";
 import { run } from "../../src/runner/runner.js";
 import { idle } from "../../src/runner/scheduler.js";
 
@@ -95,5 +95,21 @@ describe("recipes with HTML", () => {
     render(parent, cell.get());
 
     expect(parent.innerHTML).toBe("<div><div>test</div></div>");
+  });
+
+  it("works with str", async () => {
+    const strRecipe = recipe<{ name: string }>("str recipe", ({ name }) => {
+      return { [UI]: html`<div>${str`Hello, ${name}!`}</div>` };
+    });
+
+    const result = run(strRecipe, { name: "world" });
+
+    await idle();
+
+    const parent = document.createElement("div");
+    const cell = result.asSimpleCell<View>([UI]);
+    render(parent, cell.get());
+
+    expect(parent.innerHTML).toBe("<div>Hello, world!</div>");
   });
 });
