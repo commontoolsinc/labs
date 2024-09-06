@@ -2,7 +2,7 @@ import { html } from "@commontools/common-html";
 import {
   recipe,
   apply,
-  lift,
+  str,
   generateData,
   ifElse,
   UI,
@@ -19,13 +19,8 @@ export const playlistForTrip = recipe<{
   ticket: { show: string };
   booking: any;
 }>("playlist for trip", ({ ticket }) => {
-  const prompt = lift<{ ticket: { show: string } }, string>(
-    ({ ticket }) =>
-      `Create a fun playlist in anticipation of a trip to see ${ticket.show}`
-  )({ ticket });
-
   const { result: playlist } = generateData<Playlist>({
-    prompt: prompt,
+    prompt: str`Create a fun playlist in anticipation of a trip to see ${ticket.show}`,
     schema: {
       type: "object",
       properties: {

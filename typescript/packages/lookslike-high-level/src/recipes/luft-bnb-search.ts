@@ -4,11 +4,12 @@ import {
   apply,
   lift,
   handler,
+  str,
   generateData,
   UI,
   NAME,
 } from "../builder/index.js";
-import { run, getCellReferenceOrValue } from "../runner/index.js";
+import { run } from "../runner/index.js";
 import { addSuggestion, description } from "../suggestions.js";
 import { openSaga, addGems, ID } from "../data.js";
 
@@ -188,7 +189,11 @@ export const luftBnBSearch = recipe<{
                   // to trigger a recipe from an event.
 
                   const booking = run(luftBnBBooking, {
-                    place: getCellReferenceOrValue(place),
+                    place: {
+                      title: place.title,
+                      location: place.location,
+                      pricePerNight: place.pricePerNight,
+                    },
                     // TODO: This should come from the scope above, but we
                     // first have to build currying of the recipe for this to
                     // work.
@@ -226,16 +231,12 @@ export const luftBnBBooking = recipe<{
   startDate: string;
   endDate: string;
 }>("booking", ({ place, startDate, endDate }) => {
-  const text = lift(
-    ({ place, startDate, endDate }) =>
-      `Booked ${place.title} LuftBnB from ${startDate} to ${endDate} for $${place.pricePerNight} per night`
-  )({ place, startDate, endDate });
-  const name = lift(({ place }) => `Booking for LuftBnB in ${place.location}`)({
-    place,
-  });
   return {
-    [UI]: html`<div>${text}</div>`,
-    [NAME]: name,
+    [UI]: html`<div>
+      Booked ${place.title} LuftBnB from ${startDate} to ${endDate} for
+      $${place.pricePerNight} per night
+    </div>`,
+    [NAME]: str`Booking for LuftBnB in ${place.location}`,
     place,
     startDate,
     endDate,
