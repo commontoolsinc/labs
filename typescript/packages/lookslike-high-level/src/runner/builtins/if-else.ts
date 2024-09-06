@@ -1,13 +1,7 @@
 import { type Node } from "../../builder/index.js";
-import {
-  cell,
-  CellImpl,
-  CellReference,
-  ReactivityLog,
-  getCellReferenceOrValue,
-} from "../cell.js";
+import { cell, type CellImpl, type ReactivityLog } from "../cell.js";
 import { sendValueToBinding, findAllAliasedCells } from "../utils.js";
-import { schedule, Action } from "../scheduler.js";
+import { schedule, type Action } from "../scheduler.js";
 import { mapBindingsToCell } from "../utils.js";
 
 export function ifElse(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
@@ -20,12 +14,15 @@ export function ifElse(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
 
   const outputBindings = mapBindingsToCell(outputs, recipeCell) as any;
 
-  const result = cell<CellReference>(undefined);
+  const result = cell<any>(undefined);
 
   const checkCondition: Action = (log: ReactivityLog) => {
-    const [condition, ifTrue, ifFalse] = inputsCell.getAsProxy([], log);
+    const condition = inputsCell.getAsProxy([0], log);
 
-    result.send(getCellReferenceOrValue(condition ? ifTrue : ifFalse), log);
+    result.send(
+      condition ? inputsCell.getAtPath([1]) : inputsCell.getAtPath([2]),
+      log
+    );
 
     sendValueToBinding(recipeCell, outputBindings, result, log);
   };
