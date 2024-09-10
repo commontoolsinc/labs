@@ -1,8 +1,8 @@
-import { html } from "@commontools/common-html";
+import { html, type View } from "@commontools/common-html";
 import {
   recipe,
   lift,
-  handler,
+  asHandler,
   cell,
   UI,
   ID,
@@ -10,7 +10,6 @@ import {
   TYPE,
   ifElse,
   generateData,
-  Recipe,
 } from "../builder/index.js";
 import { type Gem, openSaga } from "../data.js";
 import { run, gemById, getCellReferenceOrValue } from "../runner/index.js";
@@ -18,48 +17,24 @@ import { suggestions } from "../suggestions.js";
 
 const MINIMUM_CONFIDENCE = -1.0;
 
-/**
- * Strategy:
- *
- * The paremeters to suggestion are:
- *  - query: signal.Signal<string> - the query for the suggestion
- *  - data: { key: Signal<any> } - the data available to bind to
- *
- * We'll create a vdom that is the UI and return including it as the vdom for
- * this node. We populate that vdom with suggestions by computing from the
- * query.
- *
- * If a suggestion is accepted, we instantiate the recipe and bind it to the
- * supplied data.
- */
+type GemInfo = { id: number; name: string; type: string };
 
-export const annotation = recipe<{
-  query: string;
-  target: number;
-  data: { [key: string]: any };
-  gems: Gem[];
-}>("annotation", ({ query, target, data, gems }) => {
-  type GemInfo = {
-    id: number;
-    name: string;
-    type: string;
-  };
+// Lifted functions at module scope
+const getGemInfo = lift(({ gems }) => {
+  const gemInfo: GemInfo[] = [];
+  for (let i = 0; i < gems.length; i++) {
+    gemInfo.push({
+      id: Number(gems[i][ID]),
+      name: String(gems[i][NAME] ?? "unknown"),
+      type: String(gems[i][TYPE]),
+    });
+  }
+  return gemInfo;
+});
 
-  const gemInfo = lift(({ gems }) => {
-    const gemInfo: GemInfo[] = [];
-    for (let i = 0; i < gems.length; i++) {
-      gemInfo.push({
-        id: Number(gems[i][ID]),
-        name: String(gems[i][NAME] ?? "unknown"),
-        type: String(gems[i][TYPE]),
-      } satisfies GemInfo);
-    }
-    return gemInfo;
-  })({ gems });
-
-  const prompt = lift(
-    ({ query, gemInfo }) =>
-      `Given the following user query and list of data gems, return the indices of the gems that are most relevant to the query.
+const buildPrompt = lift(
+  ({ query, gemInfo }) =>
+    `Given the following user query and list of data gems, return the indices of the gems that are most relevant to the query.
 Consider both the names and types of the gems when making your selection.
 Think broadly, e.g. a stay in a hotel could match a gem called "morning routine", as the user would want to pick a hotel that supports their morning routine.
 
@@ -76,133 +51,140 @@ Respond with only JSON array of suggestions, e.g.
 
 notalk;justgo
 `
-  )({ query, gemInfo });
+);
 
+const filterMatchingGems = lift<{
+  matchedIndices: { index: number; confidence: number }[];
+  gemInfo: GemInfo[];
+}>(
+  ({ matchedIndices, gemInfo }) =>
+    (matchedIndices ?? [])
+      .filter((item) => item.confidence > MINIMUM_CONFIDENCE)
+      .map((item) => gemInfo.find((gem) => gem.id === item.index))
+      .filter((gem) => gem !== undefined)
+      .filter((gem) => gem.id !== 0) // TODO: HACK - ignore first todo list
+);
+
+const findSuggestion = lift<{
+  matchingGems: GemInfo[];
+  data: { [key: string]: any };
+}>(({ matchingGems, data }) => {
+  const suggestion = suggestions.find(
+    (suggestion) =>
+      Object.values(suggestion.dataGems ?? {}).every((type) =>
+        matchingGems.find((gem) => gem.type === type)
+      ) &&
+      Object.values(suggestion.bindings ?? {}).every((binding) =>
+        Object.keys(data ?? {}).includes(binding)
+      )
+  );
+
+  if (suggestion) {
+    const bindings = Object.entries(suggestion.dataGems).map(([key, type]) => [
+      key,
+      matchingGems.find((gem) => gem.type === type),
+    ]) as [string, { id: number; name: string; type: string }][];
+
+    const nameBindings = Object.fromEntries(
+      bindings.map(([key, gem]) => [key, gem.name])
+    );
+    const gemBindings = Object.fromEntries(
+      bindings.map(([key, gem]) => [key, gem.id])
+    );
+
+    const description = suggestion.description
+      .map((part, i) => (i % 2 === 0 ? part : nameBindings[part]))
+      .join("");
+
+    return {
+      recipe: suggestion.recipe,
+      description,
+      bindings: suggestion.bindings,
+      boundGems: gemBindings,
+    };
+  } else {
+    return undefined;
+  }
+});
+
+const buildSuggestionsList = lift(({ suggestion }) => {
+  if (suggestion) {
+    return [{ id: 1, title: suggestion.description }];
+  }
+  return [];
+});
+
+// Extracted handler using asHandler
+const acceptSuggestion = asHandler<
+  {},
+  {
+    acceptedSuggestion: View | undefined;
+    suggestion: any;
+    data: { [key: string]: any };
+    target: number;
+  }
+>((_, state) => {
+  const { suggestion, data, target } = state;
+
+  const acceptedRecipe = suggestion.recipe;
+
+  const accepted = run<any, Gem>(acceptedRecipe, {
+    ...Object.fromEntries(
+      Object.entries(suggestion.bindings as { [key: string]: string }).map(
+        ([key, value]) => [key, getCellReferenceOrValue(data[value])]
+      )
+    ),
+    ...Object.fromEntries(
+      Object.entries(suggestion.boundGems).map(([key, value]) => [
+        key,
+        gemById.get(value as number),
+      ])
+    ),
+  });
+
+  // HACK: -1 is home screen and so let's open a new tab
+  if (target == -1) {
+    openSaga(accepted.get()[ID]);
+    state.acceptedSuggestion = html`<div></div>`;
+  } else {
+    state.acceptedSuggestion = accepted.asSimpleCell().get()[UI];
+  }
+});
+
+export const annotation = recipe<{
+  query: string;
+  target: number;
+  data: { [key: string]: any };
+  gems: Gem[];
+}>("annotation", ({ query, target, data, gems }) => {
+  const gemInfo = getGemInfo({ gems });
   const { result: matchedIndices } = generateData<
     { index: number; confidence: number }[]
   >({
-    prompt,
+    prompt: buildPrompt({ query, gemInfo }),
     system:
       "You are an assistant that helps match user queries to relevant data gems based on their names and types.",
   });
+  const matchingGems = filterMatchingGems({ matchedIndices, gemInfo });
+  const suggestion = findSuggestion({ matchingGems, data });
 
-  const matchingGems = lift<
-    {
-      matchedIndices: { index: number; confidence: number }[];
-      gemInfo: GemInfo[];
-    },
-    GemInfo[]
-  >(
-    ({ matchedIndices, gemInfo }) =>
-      (matchedIndices ?? [])
-        .filter((item) => item.confidence > MINIMUM_CONFIDENCE)
-        .map((item) => gemInfo.find((gem) => gem.id === item.index))
-        .filter((gem) => gem !== undefined)
-        .filter((gem) => gem.id !== 0) // TODO: HACK - ignore first todo list
-  )({ matchedIndices, gemInfo });
-
-  const suggestion = lift<
-    {
-      matchingGems: GemInfo[];
-      data: { [key: string]: any };
-    },
-    | {
-        recipe: Recipe;
-        description: string;
-        bindings: { [key: string]: string };
-        boundGems: { [k: string]: number };
-      }
-    | undefined
-  >(({ matchingGems, data }) => {
-    const suggestion = suggestions.find(
-      (suggestion) =>
-        Object.values(suggestion.dataGems ?? {}).every((type) =>
-          matchingGems.find((gem) => gem.type === type)
-        ) &&
-        Object.values(suggestion.bindings ?? {}).every((binding) =>
-          Object.keys(data ?? {}).includes(binding)
-        )
-    );
-
-    if (suggestion) {
-      const bindings = Object.entries(suggestion.dataGems).map(
-        ([key, type]) => [key, matchingGems.find((gem) => gem.type === type)]
-      ) as [string, GemInfo][];
-
-      const nameBindings = Object.fromEntries(
-        bindings.map(([key, gem]) => [key, gem.name])
-      );
-      const gemBindings = Object.fromEntries(
-        bindings.map(([key, gem]) => [key, gem.id])
-      );
-
-      const description = suggestion.description
-        .map((part, i) => (i % 2 === 0 ? part : nameBindings[part]))
-        .join("");
-
-      return {
-        recipe: suggestion.recipe,
-        description,
-        bindings: suggestion.bindings,
-        boundGems: gemBindings,
-      };
-    } else {
-      return undefined;
-    }
-  })({ matchingGems, data });
-
-  const suggestionsList = lift(({ suggestion }) => {
-    if (suggestion) {
-      return [{ id: 1, title: suggestion.description }];
-    }
-    return [];
-  })({ suggestion });
-
-  const acceptedSuggestion = cell<any | undefined>(undefined);
-  const acceptSuggestion = handler(
-    { acceptedSuggestion, suggestion, data, target },
-    (_, state) => {
-      const { suggestion, data, target } = state;
-
-      const acceptedRecipe = suggestion.recipe;
-
-      const accepted = run<any, Gem>(acceptedRecipe, {
-        ...Object.fromEntries(
-          Object.entries(suggestion.bindings as { [key: string]: string }).map(
-            ([key, value]) => [key, getCellReferenceOrValue(data[value])]
-          )
-        ),
-        ...Object.fromEntries(
-          Object.entries(suggestion.boundGems).map(([key, value]) => [
-            key,
-            gemById.get(value as number),
-          ])
-        ),
-      });
-
-      // HACK: -1 is home screen and so let's open a new tab
-      if (target == -1) {
-        openSaga(accepted.get()[ID]);
-        state.acceptedSuggestion = html`<div></div>`;
-      } else {
-        state.acceptedSuggestion = accepted.asSimpleCell().get()[UI];
-      }
-    }
-  );
+  // Will be populated by acceptSuggestion
+  const acceptedSuggestion = cell<View | undefined>(undefined);
 
   return {
     [UI]: html`<div>
       ${ifElse(
         acceptedSuggestion,
         html`<div>${acceptedSuggestion}</div>`,
-        ifElse(
-          suggestion,
-          html`<common-suggestions
-            suggestions=${suggestionsList}
-            onselect-suggestion=${acceptSuggestion}
-          />`,
-          ""
-        )
+        html`<common-suggestions
+          suggestions=${buildSuggestionsList({ suggestion })}
+          onselect-suggestion=${acceptSuggestion({
+            acceptedSuggestion,
+            suggestion,
+            data,
+            target,
+          })}
+        />`
       )}
     </div>`,
   };
