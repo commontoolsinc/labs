@@ -35,7 +35,7 @@ const justMonthAndDay = lift((isoDate: string) =>
 );
 
 const updateValue = asHandler<{ detail: { value: string } }, { value: string }>(
-  ({ detail }, state) => detail.value && (state.value = detail.value)
+  ({ detail }, state) => detail?.value && (state.value = detail.value)
 );
 
 const handleSearchClick = asHandler<

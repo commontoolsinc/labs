@@ -1,8 +1,9 @@
 import { html } from "@commontools/common-html";
 import {
   recipe,
-  apply,
-  handler,
+  asHandler,
+  lift,
+  str,
   cell,
   generateData,
   UI,
@@ -22,6 +23,19 @@ export interface Place {
   rating: number;
 }
 
+const searchPlaces = asHandler<
+  {},
+  { what: string; where: string; query: { prompt: string } }
+>((_, { what, where, query }) => {
+  query.prompt = `generate 10 places that match they query: ${what} in ${where}`;
+});
+
+const updateValue = asHandler<{ detail: { value: string } }, { value: string }>(
+  ({ detail }, state) => detail?.value && (state.value = detail.value)
+);
+
+const asStars = lift((rating: number) => "⭐".repeat(Math.round(rating)));
+
 export const localSearch = recipe<{
   what: string;
   where: string;
@@ -31,18 +45,7 @@ export const localSearch = recipe<{
   where.setDefault("San Francisco");
 
   const query = cell({
-    prompt: "",
-  });
-
-  const search = handler<
-    {},
-    { what: string; where: string; query: { prompt: string } }
-  >({ what, where, query }, (_, { what, where, query }) => {
-    query.prompt = `generate 10 places that match they query: ${what} in ${where}`;
-  });
-
-  const { pending, result: places } = generateData<Place[]>({
-    prompt: query.prompt,
+    prompt: undefined,
     result: [],
     schema: {
       type: "array",
@@ -63,6 +66,8 @@ export const localSearch = recipe<{
     },
   });
 
+  const { pending, result: places } = generateData<Place[]>(query);
+
   return {
     [UI]: html`
       <common-vstack gap="sm">
@@ -72,7 +77,7 @@ export const localSearch = recipe<{
             <common-input
               value=${what}
               placeholder="Type of place"
-              @common-input#value=${what}
+              oncommon-input=${updateValue({ value: what })}
             ></common-input>
           </common-vstack>
           <common-vstack gap="xs">
@@ -80,11 +85,13 @@ export const localSearch = recipe<{
             <common-input
               value=${where}
               placeholder="Location"
-              @common-input#value=${where}
+              oncommon-input=${updateValue({ value: where })}
             ></common-input>
           </common-vstack>
         </common-hstack>
-        <common-button onclick=${search}>Search</common-button>
+        <common-button onclick=${searchPlaces({ what, where, query })}
+          >Search</common-button
+        >
         <common-vstack gap="md">
           ${ifElse(
             pending,
@@ -96,7 +103,7 @@ export const localSearch = recipe<{
                   <div>${place.description}</div>
                   <div>${place.address}</div>
                   <div>${place.city}, ${place.state} ${place.zip}</div>
-                  <div>${"*****".slice(0, place.rating)}</div>
+                  <div>${asStars(place.rating)}</div>
                 </common-vstack>
               `
             )
@@ -107,9 +114,6 @@ export const localSearch = recipe<{
     what,
     where,
     places,
-    [NAME]: apply(
-      { what, where },
-      ({ what, where }) => `${what || "all"} in ${where || "anywhere"}`
-    ),
+    [NAME]: str`${what} in ${where}`,
   };
 });
