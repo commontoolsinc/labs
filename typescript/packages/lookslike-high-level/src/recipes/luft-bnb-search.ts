@@ -1,9 +1,8 @@
 import { html } from "@commontools/common-html";
 import {
   recipe,
-  apply,
   lift,
-  handler,
+  asHandler,
   str,
   generateData,
   UI,
@@ -27,6 +26,118 @@ export interface LuftBnBPlace {
   annotationUI: any;
 }
 
+const copy = lift(({ value }: { value: string }) => value);
+
+const asStars = lift((rating: number) => "⭐".repeat(Math.round(rating)));
+
+const justMonthAndDay = lift((isoDate: string) =>
+  isoDate.split("T")[0].slice(5)
+);
+
+const updateValue = asHandler<{ detail: { value: string } }, { value: string }>(
+  ({ detail }, state) => detail.value && (state.value = detail.value)
+);
+
+const handleSearchClick = asHandler<
+  {},
+  {
+    startDate: string;
+    endDate: string;
+    location: string;
+    startDateUI: string;
+    endDateUI: string;
+    locationUI: string;
+  }
+>((_, state) => {
+  state.startDate = state.startDateUI;
+  state.endDate = state.endDateUI;
+  state.location = state.locationUI;
+});
+
+const makeBooking = asHandler<
+  {},
+  {
+    place: LuftBnBPlace;
+  }
+>((_, { place }) => {
+  // TODO: This isn't serializable. Instead we have to add a way to trigger a
+  // recipe from an event.
+  launch(luftBnBBooking, {
+    place: {
+      title: place.title,
+      location: place.location,
+      pricePerNight: place.pricePerNight,
+    },
+    // TODO: This should come from the scope above, but we first have to build
+    // currying of the recipe for this to work.
+    startDate: "2024-09-06",
+    endDate: "2024-09-08",
+  });
+});
+
+const buildQuery = lift(({ location }) => ({
+  prompt: `generate 10 places for private home short-term rentals in ${location}`,
+  result: [],
+  schema: {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: "Unique identifier for the listing",
+        },
+        title: {
+          type: "string",
+          description: "Title of the listing",
+        },
+        host: {
+          type: "string",
+          description: "Host of the listing",
+        },
+        location: {
+          type: "string",
+          description: "Street corner, Neighborhood and city of the listing",
+        },
+        propertyType: {
+          type: "string",
+          enum: ["Apartment", "House", "Room"],
+        },
+        pricePerNight: {
+          type: "number",
+          minimum: 0,
+        },
+        numberOfGuests: {
+          type: "integer",
+          minimum: 1,
+        },
+        latitude: {
+          type: "number",
+        },
+        longitude: {
+          type: "number",
+        },
+        rating: {
+          type: "number",
+          minimum: 0,
+          maximum: 5,
+          description: "Average rating of the listing",
+        },
+      },
+      required: [
+        "id",
+        "title",
+        "host",
+        "location",
+        "propertyType",
+        "pricePerNight",
+        "numberOfGuests",
+        "imageUrl",
+      ],
+    },
+  },
+}));
+
 export const luftBnBSearch = recipe<{
   startDate: string;
   endDate: string;
@@ -43,95 +154,13 @@ export const luftBnBSearch = recipe<{
   // TODO: This should be the user's default location, not hardcoded
   location.setDefault("San Francisco");
 
-  const startDateUI = lift(({ startDate }) => startDate)({ startDate });
-  const endDateUI = lift(({ endDate }) => endDate)({ endDate });
-  const locationUI = lift(({ location }) => location)({ location });
+  const startDateUI = copy({ value: startDate });
+  const endDateUI = copy({ value: endDate });
+  const locationUI = copy({ value: location });
 
-  const search = handler<
-    {},
-    {
-      startDate: string;
-      endDate: string;
-      location: string;
-      startDateUI: string;
-      endDateUI: string;
-      locationUI: string;
-    }
-  >(
-    { startDate, endDate, location, startDateUI, endDateUI, locationUI },
-    (_, state) => {
-      state.startDate = state.startDateUI;
-      state.endDate = state.endDateUI;
-      state.location = state.locationUI;
-    }
+  const { result: places } = generateData<LuftBnBPlace[]>(
+    buildQuery({ location })
   );
-
-  const query = lift(({ location }) => ({
-    prompt: `generate 10 places for private home short-term rentals in ${location}`,
-    result: [],
-    schema: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: {
-            type: "string",
-            description: "Unique identifier for the listing",
-          },
-          title: {
-            type: "string",
-            description: "Title of the listing",
-          },
-          host: {
-            type: "string",
-            description: "Host of the listing",
-          },
-          location: {
-            type: "string",
-            description: "Street corner, Neighborhood and city of the listing",
-          },
-          propertyType: {
-            type: "string",
-            enum: ["Apartment", "House", "Room"],
-          },
-          pricePerNight: {
-            type: "number",
-            minimum: 0,
-          },
-          numberOfGuests: {
-            type: "integer",
-            minimum: 1,
-          },
-          latitude: {
-            type: "number",
-          },
-          longitude: {
-            type: "number",
-          },
-          rating: {
-            type: "number",
-            minimum: 0,
-            maximum: 5,
-            description: "Average rating of the listing",
-          },
-        },
-        required: [
-          "id",
-          "title",
-          "host",
-          "location",
-          "propertyType",
-          "pricePerNight",
-          "numberOfGuests",
-          "imageUrl",
-        ],
-      },
-    },
-  }))({
-    location,
-  });
-
-  const { result: places } = generateData<LuftBnBPlace[]>(query);
 
   return {
     [UI]: html`
@@ -141,33 +170,31 @@ export const luftBnBSearch = recipe<{
             type="date"
             value=${startDateUI}
             placeholder="Start Date"
-            oncommon-input=${handler(
-              { startDateUI },
-              ({ detail }, state) =>
-                detail?.value && (state.startDateUI = detail.value)
-            )}
+            oncommon-input=${updateValue({ value: startDateUI })}
           ></common-input>
           <common-input
             type="date"
             value=${endDateUI}
             placeholder="End Date"
-            oncommon-input=${handler(
-              { endDateUI },
-              ({ detail }, state) =>
-                detail?.value && (state.endDateUI = detail.value)
-            )}
+            oncommon-input=${updateValue({ value: endDateUI })}
           ></common-input>
         </common-hstack>
         <common-input
           value=${locationUI}
           placeholder="Location"
-          oncommon-input=${handler(
-            { locationUI },
-            ({ detail }, state) =>
-              detail?.value && (state.locationUI = detail.value)
-          )}
+          oncommon-input=${updateValue({ value: locationUI })}
         ></common-input>
-        <common-button onclick=${search}>Search</common-button>
+        <common-button
+          onclick=${handleSearchClick({
+            startDate,
+            endDate,
+            location,
+            startDateUI,
+            endDateUI,
+            locationUI,
+          })}
+          >Search</common-button
+        >
         <common-vstack gap="md">
           ${places.map(
             (place) => html`
@@ -178,28 +205,10 @@ export const luftBnBSearch = recipe<{
                 </div>
                 <div>${place.location}</div>
                 <div>
-                  ${lift((rating: number) => "⭐".repeat(Math.round(rating)))(
-                    place.rating
-                  )}
+                  ${asStars(place.rating)}
                   (${place.rating})
                 </div>
-                <common-button onclick=${handler({ place }, (_, { place }) => {
-                  // TODO: This isn't serializable. Instead we have to add a way
-                  // to trigger a recipe from an event.
-
-                  launch(luftBnBBooking, {
-                    place: {
-                      title: place.title,
-                      location: place.location,
-                      pricePerNight: place.pricePerNight,
-                    },
-                    // TODO: This should come from the scope above, but we
-                    // first have to build currying of the recipe for this to
-                    // work.
-                    startDate: "2024-09-06",
-                    endDate: "2024-09-08",
-                  });
-                })}}">
+                <common-button onclick=${makeBooking({ place })}">
                   Book for $${place.pricePerNight} per night
                 </common-button>
                 ${place.annotationUI}
@@ -209,15 +218,11 @@ export const luftBnBSearch = recipe<{
         </common-vstack>
       </common-vstack>
     `,
-    query,
     location,
     places,
-    [NAME]: lift(
-      ({ location, startDate, endDate }) =>
-        `LuftBnB ${startDate?.slice(5)} - ${endDate?.slice(5)} in ${
-          location ?? "anywhere"
-        }`
-    )({ location, startDate, endDate }),
+    [NAME]: str`LuftBnB ${justMonthAndDay(startDate)} - ${justMonthAndDay(
+      endDate
+    )} in ${location}`,
   };
 });
 
@@ -238,18 +243,32 @@ export const luftBnBBooking = recipe<{
   };
 });
 
+const computeBookingDatesFromEvent = lift(({ date }) => {
+  const startDate = new Date(new Date(date).getTime() - 86400)
+    .toISOString()
+    .split("T")[0];
+  const endDate = new Date(new Date(date).getTime() + 86400)
+    .toISOString()
+    .split("T")[0];
+  return { startDate, endDate };
+});
+
+const describeFirstResult = lift(({ places, startDate, endDate }) => {
+  return places && places.length
+    ? `${places[0].propertyType} ${startDate}-${endDate} in ${
+        places[0].location
+      }. ${"⭐".repeat(Math.round(places[0].rating))} (${places[0].rating}). $${
+        places[0].pricePerNight
+      } per night`
+    : "Searching...";
+});
+
 const makeLuftBnBSearch = recipe<{
   reservation: { date: string; location: string };
 }>("book luftBnB for reservation", ({ reservation }) => {
-  const { startDate, endDate } = lift<{ date: string }>(({ date }) => {
-    const startDate = new Date(new Date(date).getTime() - 86400)
-      .toISOString()
-      .split("T")[0];
-    const endDate = new Date(new Date(date).getTime() + 86400)
-      .toISOString()
-      .split("T")[0];
-    return { startDate, endDate };
-  })({ date: reservation.date });
+  const { startDate, endDate } = computeBookingDatesFromEvent({
+    date: reservation.date,
+  });
 
   const luftBnB = luftBnBSearch({
     startDate,
@@ -257,22 +276,11 @@ const makeLuftBnBSearch = recipe<{
     location: reservation.location,
   });
 
-  const topPlace = html`<div>
-    ${apply(luftBnB, ({ places, startDate, endDate }) =>
-      places && places.length
-        ? `${places[0].propertyType} ${startDate}-${endDate} in ${
-            places[0].location
-          }. ${"⭐".repeat(Math.round(places[0].rating))} (${
-            places[0].rating
-          }). $${places[0].pricePerNight} per night`
-        : "Searching..."
-    )}
-  </div>`;
-
   return {
     [UI]: html`
       <vstack gap="sm">
-        ${topPlace} Or search for other places:
+        ${describeFirstResult({ places: luftBnB.places, startDate, endDate })}
+        Or search for other places:
         <common-saga-link saga=${luftBnB[ID]} />
       </vstack>
     `,
@@ -290,60 +298,65 @@ addSuggestion({
   },
 });
 
+const generateNearbyPlaceQuery = lift(({ routine, places }) => {
+  const locationType = routine.locations[0] ?? "coffee shop";
+
+  const initialData = places.map((place: LuftBnBPlace) => ({
+    location: place.location,
+  }));
+
+  return {
+    prompt: `generate ${initialData.length} ${locationType} with pun names`,
+    initialData,
+    schema: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            description: "Unique identifier for the listing",
+          },
+          name: {
+            type: "string",
+            description: `Name of the ${locationType}`,
+          },
+          location: {
+            type: "string",
+            description:
+              "Street corner, Neighborhood and city of the ${locationType}",
+          },
+          walkingDistance: {
+            type: "number",
+            description: "Walking distance in minutes",
+          },
+        },
+      },
+    },
+  };
+});
+
+// NOTE: This writes results into `places`
+const annotatePlacesWithNearbyPlaces = lift(({ nearbyPlaces, places }) => {
+  (nearbyPlaces ?? []).forEach(
+    (place: { name: string; walkingDistance: number }, i: number) => {
+      if (place)
+        places[i].annotationUI = html`<div>
+          ${place.name} is ${place.walkingDistance} min away
+        </div>`;
+    }
+  );
+});
+
 const nearbyPlacesForRoutine = recipe<{
   routine: { locations: string[] };
   places: LuftBnBPlace[];
 }>("annotate places for routine", ({ routine, places }) => {
-  const query = lift(({ routine, places }) => {
-    const locationType = routine.locations[0] ?? "coffee shop";
+  const query = generateNearbyPlaceQuery({ routine, places });
 
-    const initialData = places.map((place: LuftBnBPlace) => ({
-      location: place.location,
-    }));
+  const { result: nearbyPlaces } = generateData(query);
 
-    return {
-      prompt: `generate ${initialData.length} ${locationType} with pun names`,
-      initialData,
-      schema: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            id: {
-              type: "string",
-              description: "Unique identifier for the listing",
-            },
-            name: {
-              type: "string",
-              description: `Name of the ${locationType}`,
-            },
-            location: {
-              type: "string",
-              description:
-                "Street corner, Neighborhood and city of the ${locationType}",
-            },
-            walkingDistance: {
-              type: "number",
-              description: "Walking distance in minutes",
-            },
-          },
-        },
-      },
-    };
-  })({ routine, places });
-
-  const { result } = generateData(query);
-
-  lift(({ result, places }) => {
-    (result ?? []).forEach(
-      (place: { name: string; walkingDistance: number }, i: number) => {
-        if (place)
-          places[i].annotationUI = html`<div>
-            ${place.name} is ${place.walkingDistance} min away
-          </div>`;
-      }
-    );
-  })({ result, places });
+  annotatePlacesWithNearbyPlaces({ nearbyPlaces, places });
 
   return { [UI]: html`<div></div>` };
 });
