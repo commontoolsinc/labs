@@ -49,3 +49,88 @@ export function printItem(itemId: number, showRaw: boolean = false) {
     collections.forEach(([name]) => console.log(`- ${name}`));
   }
 }
+
+export function deleteItem(itemId: number) {
+  try {
+    db.query("BEGIN TRANSACTION");
+
+    // Delete from item_collections first to maintain referential integrity
+    db.query("DELETE FROM item_collections WHERE item_id = ?", [itemId]);
+
+    // Then delete the item itself
+    const result = db.query("DELETE FROM items WHERE id = ?", [itemId]);
+
+    db.query("COMMIT");
+
+    if (result.length > 0) {
+      console.log(`Item with ID ${itemId} has been deleted.`);
+    } else {
+      console.log(`No item found with ID ${itemId}.`);
+    }
+  } catch (error) {
+    db.query("ROLLBACK");
+    console.error(`Error deleting item: ${error.message}`);
+  }
+}
+
+export async function editItem(
+  itemId: number,
+  editRawContent: boolean = false
+) {
+  const item = db.query<[string, string]>(
+    "SELECT content, raw_content FROM items WHERE id = ?",
+    [itemId]
+  )[0];
+
+  if (!item) {
+    console.log(`Item with ID ${itemId} not found.`);
+    return;
+  }
+
+  const [content, rawContent] = item;
+  const contentToEdit = editRawContent ? rawContent : content;
+
+  // Create a temporary file
+  const tempFile = await Deno.makeTempFile({ suffix: ".txt" });
+  await Deno.writeTextFile(tempFile, contentToEdit);
+
+  // Open the editor
+  const editor = Deno.env.get("EDITOR") || "nano";
+  const process = Deno.run({
+    cmd: [editor, tempFile],
+    stdin: "inherit",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+
+  // Wait for the editor to close
+  await process.status();
+
+  // Read the edited content
+  const editedContent = await Deno.readTextFile(tempFile);
+
+  // Update the database if the content has changed
+  if (editedContent !== contentToEdit) {
+    try {
+      if (editRawContent) {
+        db.query("UPDATE items SET raw_content = ? WHERE id = ?", [
+          editedContent,
+          itemId,
+        ]);
+      } else {
+        db.query("UPDATE items SET content = ? WHERE id = ?", [
+          editedContent,
+          itemId,
+        ]);
+      }
+      console.log(`Item ${itemId} has been updated.`);
+    } catch (error) {
+      console.error(`Error updating item: ${error.message}`);
+    }
+  } else {
+    console.log("No changes were made.");
+  }
+
+  // Clean up the temporary file
+  await Deno.remove(tempFile);
+}

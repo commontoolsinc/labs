@@ -9,7 +9,8 @@ import {
 } from "./collections.ts";
 import { readLines } from "./deps.ts";
 import { clipGitHub } from "./github.ts";
-import { printItem } from "./items.ts";
+import { importFiles } from "./import.ts";
+import { deleteItem, editItem, printItem } from "./items.ts";
 import { clipRSS } from "./rss.ts";
 import { addRule, applyRules, deleteRule, listRules } from "./rules.ts";
 import { clipWebpage } from "./webpage.ts";
@@ -24,11 +25,14 @@ async function main() {
   console.log("  add <ITEM_ID> <COLLECTION>");
   console.log("  remove <ITEM_ID> <COLLECTION>");
   console.log("  delete-collection <COLLECTION>");
+  console.log("  delete-item <ITEM_ID>");
+  console.log("  edit <ITEM_ID> [-raw]");
   console.log("  rule <COLLECTION> <RULE> <TARGET_COLLECTION>");
   console.log("  rules <COLLECTION>");
   console.log("  delete-rule <RULE_ID>");
   console.log("  apply-rules <COLLECTION> [RULE_ID]");
   console.log("  chat <COLLECTION1> [COLLECTION2 ...]");
+  console.log("  import <PATH> <COLLECTION>");
   console.log("  exit");
 
   for await (const line of readLines(Deno.stdin)) {
@@ -140,14 +144,47 @@ async function main() {
           await startChat(args);
         }
         break;
+      case "import":
+        if (args.length !== 2) {
+          console.log("Usage: import <PATH> <COLLECTION>");
+        } else {
+          const [path, collection] = args;
+          await importFiles(path, collection);
+        }
+        break;
+      case "delete-item":
+        if (args.length !== 1) {
+          console.log("Usage: delete-item <ITEM_ID>");
+        } else {
+          deleteItem(parseInt(args[0]));
+        }
+        break;
+      case "edit":
+        if (args.length < 1 || args.length > 2) {
+          console.log("Usage: edit <ITEM_ID> [-raw]");
+        } else {
+          const itemId = parseInt(args[0]);
+          const editRaw = args[1] === "-raw";
+          await editItem(itemId, editRaw);
+        }
+        break;
       default:
         console.log("Unknown command. Available commands:");
-        console.log("  clip <URL> <COLLECTION>");
+        console.log("  clip <URL> <COLLECTION> [-p PROMPT]");
         console.log("  collections");
         console.log("  items <COLLECTION>");
+        console.log("  item <ITEM_ID> [-raw]");
         console.log("  add <ITEM_ID> <COLLECTION>");
         console.log("  remove <ITEM_ID> <COLLECTION>");
         console.log("  delete-collection <COLLECTION>");
+        console.log("  delete-item <ITEM_ID>");
+        console.log("  edit <ITEM_ID> [-raw]");
+        console.log("  rule <COLLECTION> <RULE> <TARGET_COLLECTION>");
+        console.log("  rules <COLLECTION>");
+        console.log("  delete-rule <RULE_ID>");
+        console.log("  apply-rules <COLLECTION> [RULE_ID]");
+        console.log("  chat <COLLECTION1> [COLLECTION2 ...]");
+        console.log("  import <PATH> <COLLECTION>");
         console.log("  exit");
     }
   }

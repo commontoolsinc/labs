@@ -96,6 +96,8 @@ export async function applyRules(collectionName: string, ruleId?: number) {
 Evaluate if the following content matches this rule: "${rule}"
 
 Content:
+${itemId}
+${content}
 ${rawContent}
 
 Respond with a JSON object of the form 
