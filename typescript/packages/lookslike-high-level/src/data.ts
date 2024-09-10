@@ -1,7 +1,13 @@
 // This file is setting up example data
 
 import { ID, TYPE, NAME, UI, Recipe } from "./builder/index.js";
-import { run, cell, isCell, CellImpl } from "./runner/index.js";
+import {
+  run,
+  cell,
+  isCell,
+  CellImpl,
+  getCellReferenceOrValue,
+} from "./runner/index.js";
 
 import { todoList } from "./recipes/todo-list.js";
 import { localSearch } from "./recipes/local-search.js";
@@ -12,6 +18,10 @@ import { routine } from "./recipes/routine.js";
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.js";
 import "./recipes/playlist.js";
+import {
+  getCellReferenceOrThrow,
+  isCellProxyForDereferencing,
+} from "./runner/cell.js";
 
 export type Gem = {
   [ID]: number;
@@ -110,3 +120,23 @@ export const openSaga = (sagaId: number) => openSagaOpener(sagaId);
 openSaga.set = (opener: (sagaId: number) => void) => {
   openSagaOpener = opener;
 };
+
+export function launch(recipe: Recipe, bindings: any) {
+  if (isCellProxyForDereferencing(bindings)) {
+    const { cell, path } = getCellReferenceOrThrow(bindings);
+    const keys = Object.keys(bindings);
+    bindings = Object.fromEntries(
+      keys.map((key) => [key, { cell, path: [...path, key] }])
+    );
+  } else {
+    bindings = Object.fromEntries(
+      Object.entries(bindings).map(([key, value]) => [
+        key,
+        getCellReferenceOrValue(value),
+      ])
+    );
+  }
+  const gem = run(recipe, bindings);
+  addGems([gem]);
+  openSaga(gem.get()[ID]);
+}

@@ -9,9 +9,8 @@ import {
   UI,
   NAME,
 } from "../builder/index.js";
-import { run } from "../runner/index.js";
 import { addSuggestion, description } from "../suggestions.js";
-import { openSaga, addGems, ID } from "../data.js";
+import { launch, ID } from "../data.js";
 
 export interface LuftBnBPlace {
   // Schema for a place
@@ -188,7 +187,7 @@ export const luftBnBSearch = recipe<{
                   // TODO: This isn't serializable. Instead we have to add a way
                   // to trigger a recipe from an event.
 
-                  const booking = run(luftBnBBooking, {
+                  launch(luftBnBBooking, {
                     place: {
                       title: place.title,
                       location: place.location,
@@ -200,10 +199,6 @@ export const luftBnBSearch = recipe<{
                     startDate: "2024-09-06",
                     endDate: "2024-09-08",
                   });
-
-                  addGems([booking]);
-
-                  openSaga(booking.get()[ID]);
                 })}}">
                   Book for $${place.pricePerNight} per night
                 </common-button>
