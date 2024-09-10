@@ -2,19 +2,19 @@ import { html } from "@commontools/common-html";
 import { recipe, lift, ID, UI } from "../builder/index.js";
 import { Gem, RecipeManifest } from "../data.js";
 
+const getIDsForSagasWithUI = lift((sagas: Gem[]) =>
+  sagas
+    .filter((saga) => saga[UI]) // Only show sagas with UI
+    .map((saga) => ({ id: saga[ID] }))
+);
+
 export const home = recipe<{
   sagas: Gem[];
   recipes: RecipeManifest[];
 }>("home screen", ({ sagas, recipes }) => {
-  const sagaIDs = lift((sagas: Gem[]) =>
-    sagas
-      .filter((saga) => saga[UI]) // Only show sagas with UI
-      .map((saga) => ({ id: saga[ID] }))
-  )(sagas);
-
   return {
     [UI]: html`<common-vstack
-      >${sagaIDs.map(
+      >${getIDsForSagasWithUI(sagas).map(
         (saga) => html`<div><common-saga-link saga=${saga.id}></sagaLink></div>`
       )}
       ${recipes.map(
