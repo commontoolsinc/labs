@@ -1,10 +1,30 @@
 import { html } from "@commontools/common-html";
-import { recipe, apply, handler, UI, NAME } from "../builder/index.js";
+import { recipe, asHandler, UI, NAME } from "../builder/index.js";
 
 export interface TodoItem {
   title: string;
   done: boolean;
 }
+
+const addTask = asHandler<
+  { detail: { message: string } },
+  { items: TodoItem[] }
+>((event, { items }) => {
+  const task = event.detail?.message?.trim();
+  if (task) items.push({ title: task, done: false });
+});
+
+const updateTitle = asHandler<{ detail: { value: string } }, { title: string }>(
+  ({ detail }, state) => (state.title = detail.value)
+);
+
+const updateItem = asHandler<
+  { detail: { done: boolean; value: string } },
+  { item: TodoItem }
+>(({ detail }, { item }) => {
+  item.done = detail.done;
+  item.title = detail.value;
+});
 
 export const todoList = recipe<{
   title: string;
@@ -13,23 +33,13 @@ export const todoList = recipe<{
   title.setDefault("untitled");
   items.setDefault([]);
 
-  const newTasks = handler<
-    { detail: { message: string } },
-    { items: TodoItem[] }
-  >({ items }, (event, { items }) => {
-    const task = event.detail?.message?.trim();
-    if (task) items.push({ title: task, done: false });
-  });
-
   return {
     [UI]: html`
       <common-vstack gap="sm">
         <common-input
           value=${title}
           placeholder="List title"
-          oncommon-input=${handler({ title }, ({ detail }, state) => {
-            state.title = detail.value;
-          })}
+          oncommon-input=${updateTitle({ title })}
           @common-input#value=${title}
         ></common-input>
         <common-vstack gap="sm">
@@ -39,12 +49,8 @@ export const todoList = recipe<{
                 <common-todo
                   checked=${item.done}
                   value=${item.title}
-                  ontodo-checked=${handler({ item }, ({ detail }, { item }) => {
-                    item.done = detail.done;
-                  })}
-                  ontodo-input=${handler({ item }, ({ detail }, { item }) => {
-                    item.title = detail.value;
-                  })}
+                  ontodo-checked=${updateItem({ item })}
+                  ontodo-input=${updateItem({ item })}
                 >
                   <common-annotation
                     query=${item.title}
@@ -59,12 +65,12 @@ export const todoList = recipe<{
           name="Add"
           placeholder="New task"
           appearance="rounded"
-          onmessagesend="${newTasks}"
+          onmessagesend="${addTask({ items })}"
         ></send-input>
       </common-vstack>
     `,
     title,
     items,
-    [NAME]: apply({ title }, ({ title }) => title || "untitled"),
+    [NAME]: title,
   };
 });
