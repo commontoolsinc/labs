@@ -1,20 +1,29 @@
 import { db } from "./db.ts";
 import { walk, ensureDir } from "./deps.ts";
 import { getOrCreateCollection } from "./collections.ts";
-
-export async function importFiles(path: string, collectionName: string) {
+export async function importFiles(
+  path: string,
+  collectionName: string,
+  fileTypeFilter: string = "*",
+) {
   try {
     const fullPath = await Deno.realPath(path);
     const fileInfo = await Deno.stat(fullPath);
 
     db.query("BEGIN TRANSACTION");
 
-    const collectionId = getOrCreateCollection(collectionName);
+    const collectionId = await getOrCreateCollection(collectionName);
     let itemCount = 0;
     let updatedCount = 0;
 
+    const gitignorePattern = await getGitignorePattern(fullPath);
+
     if (fileInfo.isDirectory) {
-      for await (const entry of walk(fullPath, { includeDirs: false })) {
+      for await (const entry of walk(fullPath, {
+        includeDirs: false,
+        match: [new RegExp(fileTypeFilter.replace("*", ".*"))],
+        skip: [/node_modules/, /\.git/, ...gitignorePattern],
+      })) {
         const result = await processFile(entry.path, collectionId, fullPath);
         if (result === "updated") {
           updatedCount++;
@@ -23,18 +32,25 @@ export async function importFiles(path: string, collectionName: string) {
         }
       }
     } else {
-      const result = await processFile(fullPath, collectionId, Deno.cwd());
-      if (result === "updated") {
-        updatedCount++;
-      } else {
-        itemCount++;
+      if (
+        fileTypeFilter === "*" ||
+        fullPath.endsWith(fileTypeFilter.replace("*", ""))
+      ) {
+        if (!isIgnoredFile(fullPath, gitignorePattern)) {
+          const result = await processFile(fullPath, collectionId, Deno.cwd());
+          if (result === "updated") {
+            updatedCount++;
+          } else {
+            itemCount++;
+          }
+        }
       }
     }
 
     db.query("COMMIT");
 
     console.log(
-      `Imported ${itemCount} new file(s) and updated ${updatedCount} existing file(s) in collection: ${collectionName}`
+      `Imported ${itemCount} new file(s) and updated ${updatedCount} existing file(s) in collection: ${collectionName}`,
     );
   } catch (error) {
     db.query("ROLLBACK");
@@ -42,10 +58,27 @@ export async function importFiles(path: string, collectionName: string) {
   }
 }
 
+async function getGitignorePattern(path: string): Promise<RegExp[]> {
+  try {
+    const gitignorePath = `${path}/.gitignore`;
+    const content = await Deno.readTextFile(gitignorePath);
+    return content
+      .split("\n")
+      .filter((line) => line.trim() && !line.startsWith("#"))
+      .map((pattern) => new RegExp(pattern.replace(/\*/g, ".*")));
+  } catch {
+    return [];
+  }
+}
+
+function isIgnoredFile(filePath: string, gitignorePattern: RegExp[]): boolean {
+  return gitignorePattern.some((pattern) => pattern.test(filePath));
+}
+
 async function processFile(
   filePath: string,
   collectionId: number,
-  basePath: string
+  basePath: string,
 ): Promise<"new" | "updated"> {
   const relativePath = filePath.replace(basePath, "").replace(/^\//, "");
   const content = await Deno.readTextFile(filePath);
@@ -59,7 +92,7 @@ async function processFile(
   // Check if the file already exists in the database
   const existingItem = db.query<[number]>(
     "SELECT id FROM items WHERE url = ?",
-    [fileUrl]
+    [fileUrl],
   );
 
   if (existingItem.length > 0) {
@@ -67,13 +100,13 @@ async function processFile(
     const itemId = existingItem[0][0];
     db.query(
       "UPDATE items SET title = ?, content = ?, raw_content = ? WHERE id = ?",
-      [relativePath, JSON.stringify(contentJson), content, itemId]
+      [relativePath, JSON.stringify(contentJson), content, itemId],
     );
 
     // Ensure the item is associated with the current collection
     db.query(
       "INSERT OR IGNORE INTO item_collections (item_id, collection_id) VALUES (?, ?)",
-      [itemId, collectionId]
+      [itemId, collectionId],
     );
 
     return "updated";
@@ -87,13 +120,13 @@ async function processFile(
         JSON.stringify(contentJson),
         content,
         "Local File",
-      ]
+      ],
     );
     const itemId = result[0][0] as number;
 
     db.query(
       "INSERT INTO item_collections (item_id, collection_id) VALUES (?, ?)",
-      [itemId, collectionId]
+      [itemId, collectionId],
     );
 
     return "new";

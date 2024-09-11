@@ -1,8 +1,9 @@
 // collections.ts
 import { db } from "./db.ts";
+import { Table } from "./deps.ts";
 
-export function getOrCreateCollection(name: string): number {
-  const existing = db.query("SELECT id FROM collections WHERE name = ?", [
+export async function getOrCreateCollection(name: string): Promise<number> {
+  const existing = await db.query("SELECT id FROM collections WHERE name = ?", [
     name,
   ]);
   if (existing.length > 0) {
@@ -10,7 +11,7 @@ export function getOrCreateCollection(name: string): number {
   }
   const result = db.query(
     "INSERT INTO collections (name) VALUES (?) RETURNING id",
-    [name]
+    [name],
   );
   return result[0][0] as number;
 }
@@ -23,24 +24,30 @@ export async function listCollections() {
     GROUP BY c.id
     ORDER BY c.name
   `);
+  const t = new Table();
+
+  collections.forEach((collection) => {
+    t.cell("ID", collection[0]);
+    t.cell("Name", collection[1]);
+    t.cell("Item Count", collection[2], Table.number(0));
+    t.newRow();
+  });
 
   console.log("Collections:");
-  for (const [id, name, itemCount] of collections) {
-    console.log(`  ${id}: ${name} (${itemCount} items)`);
-  }
+  console.log(t.toString());
 }
 
 export async function listItems(collectionName: string) {
   const items = db.query<[number, string, string]>(
     `
-    SELECT i.id, i.title, i.url
+    SELECT i.id, i.title, REPLACE(SUBSTR(i.raw_content, 1, 32), CHAR(10), ' ') as snippet
     FROM items i
     JOIN item_collections ic ON i.id = ic.item_id
     JOIN collections c ON ic.collection_id = c.id
     WHERE c.name = ?
     ORDER BY i.id
   `,
-    [collectionName]
+    [collectionName],
   );
 
   if (items.length === 0) {
@@ -49,22 +56,32 @@ export async function listItems(collectionName: string) {
   }
 
   console.log(`Items in collection "${collectionName}":`);
-  for (const [id, title, url] of items) {
-    console.log(`  ${id}: ${title} (${url})`);
-  }
+  const t = new Table();
+
+  items.forEach((item) => {
+    t.cell("ID", item[0]);
+    t.cell("Title", item[1]);
+    t.cell("Snippet", item[2]);
+    t.newRow();
+  });
+
+  console.log(t.toString());
 }
 
 export async function addItemToCollection(
   itemId: number,
-  collectionName: string
+  collectionName: string,
+  silent = false,
 ) {
   try {
-    const collectionId = getOrCreateCollection(collectionName);
-    db.query(
+    const collectionId = await getOrCreateCollection(collectionName);
+    await db.query(
       "INSERT OR IGNORE INTO item_collections (item_id, collection_id) VALUES (?, ?)",
-      [itemId, collectionId]
+      [itemId, collectionId],
     );
-    console.log(`Added item ${itemId} to collection "${collectionName}"`);
+    if (!silent) {
+      console.log(`Added item ${itemId} to collection "${collectionName}"`);
+    }
   } catch (error) {
     console.error(`Error adding item to collection: ${error.message}`);
   }
@@ -72,7 +89,7 @@ export async function addItemToCollection(
 
 export async function removeItemFromCollection(
   itemId: number,
-  collectionName: string
+  collectionName: string,
 ) {
   try {
     db.query(
@@ -80,7 +97,7 @@ export async function removeItemFromCollection(
       DELETE FROM item_collections
       WHERE item_id = ? AND collection_id = (SELECT id FROM collections WHERE name = ?)
     `,
-      [itemId, collectionName]
+      [itemId, collectionName],
     );
     console.log(`Removed item ${itemId} from collection "${collectionName}"`);
   } catch (error) {
@@ -93,7 +110,7 @@ export async function deleteCollection(collectionName: string) {
     db.query("BEGIN TRANSACTION");
     db.query(
       "DELETE FROM item_collections WHERE collection_id = (SELECT id FROM collections WHERE name = ?)",
-      [collectionName]
+      [collectionName],
     );
     db.query("DELETE FROM collections WHERE name = ?", [collectionName]);
     db.query("COMMIT");
@@ -101,5 +118,21 @@ export async function deleteCollection(collectionName: string) {
   } catch (error) {
     db.query("ROLLBACK");
     console.error(`Error deleting collection: ${error.message}`);
+  }
+}
+
+export async function moveCollection(oldName: string, newName: string) {
+  try {
+    const result = db.query("UPDATE collections SET name = ? WHERE name = ?", [
+      newName,
+      oldName,
+    ]);
+    if (result.affectedRows > 0) {
+      console.log(`Renamed collection "${oldName}" to "${newName}"`);
+    } else {
+      console.log(`Collection "${oldName}" not found`);
+    }
+  } catch (error) {
+    console.error(`Error renaming collection: ${error.message}`);
   }
 }

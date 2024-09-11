@@ -21,7 +21,11 @@ export function grabJson(txt: string) {
   return JSON.parse(json);
 }
 
-export async function chat(system: string, messages: CoreMessage[]) {
+export async function chat(
+  system: string,
+  messages: CoreMessage[],
+  silent = false,
+) {
   const { textStream: analysisStream } = await streamText({
     model: model,
     system,
@@ -31,7 +35,9 @@ export async function chat(system: string, messages: CoreMessage[]) {
   let message = "";
   for await (const delta of analysisStream) {
     message += delta;
-    Deno.stdout.writeSync(new TextEncoder().encode(delta));
+    if (!silent) {
+      Deno.stdout.writeSync(new TextEncoder().encode(delta));
+    }
   }
 
   return message;

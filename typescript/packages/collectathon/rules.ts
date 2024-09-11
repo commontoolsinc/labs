@@ -1,11 +1,12 @@
 import { addItemToCollection, getOrCreateCollection } from "./collections.ts";
 import { db } from "./db.ts";
 import { completion } from "./llm.ts";
+import { Table } from "./deps.ts";
 
 export async function addRule(
   collectionName: string,
   rule: string,
-  targetCollection: string
+  targetCollection: string,
 ) {
   try {
     // Ensure both collections exist
@@ -14,11 +15,11 @@ export async function addRule(
 
     const result = db.query(
       "INSERT INTO rules (collection_name, rule, target_collection) VALUES (?, ?, ?) RETURNING id",
-      [collectionName, rule, targetCollection]
+      [collectionName, rule, targetCollection],
     );
     const ruleId = result[0][0] as number;
     console.log(
-      `Added rule (ID: ${ruleId}) to collection "${collectionName}": "${rule}" -> "${targetCollection}"`
+      `Added rule (ID: ${ruleId}) to collection "${collectionName}": "${rule}" -> "${targetCollection}"`,
     );
   } catch (error) {
     console.error(`Error adding rule: ${error.message}`);
@@ -28,7 +29,7 @@ export async function addRule(
 export async function listRules(collectionName: string) {
   const rules = db.query<[number, string, string]>(
     "SELECT id, rule, target_collection FROM rules WHERE collection_name = ? ORDER BY id",
-    [collectionName]
+    [collectionName],
   );
 
   if (rules.length === 0) {
@@ -37,9 +38,17 @@ export async function listRules(collectionName: string) {
   }
 
   console.log(`Rules for collection "${collectionName}":`);
-  for (const [id, rule, targetCollection] of rules) {
-    console.log(`  ${id}: "${rule}" -> "${targetCollection}"`);
-  }
+
+  const t = new Table();
+
+  rules.forEach(function (rule) {
+    t.cell("Rule Id", rule[0]);
+    t.cell("Rule", rule[1]);
+    t.cell("Target Collection", rule[2]);
+    t.newRow();
+  });
+
+  console.log(t.toString());
 }
 
 export async function deleteRule(ruleId: number) {
@@ -57,7 +66,7 @@ export async function applyRules(collectionName: string, ruleId?: number) {
   if (ruleId) {
     rules = db.query<[number, string, string]>(
       "SELECT id, rule, target_collection FROM rules WHERE id = ?",
-      [ruleId]
+      [ruleId],
     );
     if (rules.length === 0) {
       console.error(`Rule with ID ${ruleId} not found`);
@@ -66,7 +75,7 @@ export async function applyRules(collectionName: string, ruleId?: number) {
   } else {
     rules = db.query<[number, string, string]>(
       "SELECT id, rule, target_collection FROM rules WHERE collection_name = ?",
-      [collectionName]
+      [collectionName],
     );
     if (rules.length === 0) {
       console.log(`No rules found for collection: ${collectionName}`);
@@ -75,12 +84,12 @@ export async function applyRules(collectionName: string, ruleId?: number) {
   }
 
   const items = db.query<[number, string, string]>(
-    `SELECT i.id, i.content, i.raw_content 
+    `SELECT i.id, i.content, i.raw_content
      FROM items i
      JOIN item_collections ic ON i.id = ic.item_id
      JOIN collections c ON ic.collection_id = c.id
      WHERE c.name = ?`,
-    [collectionName]
+    [collectionName],
   );
 
   if (items.length === 0) {
@@ -100,7 +109,7 @@ ${itemId}
 ${content}
 ${rawContent}
 
-Respond with a JSON object of the form 
+Respond with a JSON object of the form
 
 \`\`\`json
 { "match": true }
@@ -119,7 +128,7 @@ Say NOTHING else.
       if (response.match) {
         await addItemToCollection(itemId, targetCollection);
         console.log(
-          `Rule ${ruleId} matched. Added item ${itemId} to collection "${targetCollection}"`
+          `Rule ${ruleId} matched. Added item ${itemId} to collection "${targetCollection}"`,
         );
       }
     }

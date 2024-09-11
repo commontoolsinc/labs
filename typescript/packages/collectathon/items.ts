@@ -5,7 +5,7 @@ export function printItem(itemId: number, showRaw: boolean = false) {
     [number, string, string, string, string, string, string]
   >(
     "SELECT id, url, title, content, raw_content, source, created_at FROM items WHERE id = ?",
-    [itemId]
+    [itemId],
   )[0];
 
   if (!item) {
@@ -37,11 +37,11 @@ export function printItem(itemId: number, showRaw: boolean = false) {
 
   // Print associated collections
   const collections = db.query<[string]>(
-    `SELECT c.name 
+    `SELECT c.name
      FROM collections c
      JOIN item_collections ic ON c.id = ic.collection_id
      WHERE ic.item_id = ?`,
-    [itemId]
+    [itemId],
   );
 
   if (collections.length > 0) {
@@ -75,11 +75,11 @@ export function deleteItem(itemId: number) {
 
 export async function editItem(
   itemId: number,
-  editRawContent: boolean = false
+  editRawContent: boolean = false,
 ) {
   const item = db.query<[string, string]>(
     "SELECT content, raw_content FROM items WHERE id = ?",
-    [itemId]
+    [itemId],
   )[0];
 
   if (!item) {
@@ -133,4 +133,30 @@ export async function editItem(
 
   // Clean up the temporary file
   await Deno.remove(tempFile);
+}
+
+export function purge() {
+  try {
+    db.query("BEGIN TRANSACTION");
+
+    // Find and delete items that are not members of any collection
+    const result = db.query(`
+      DELETE FROM items
+      WHERE id NOT IN (
+        SELECT DISTINCT item_id
+        FROM item_collections
+      )
+    `);
+
+    const purgedCount = result.length;
+
+    db.query("COMMIT");
+
+    console.log(
+      `Purged ${purgedCount} items that were not members of any collection.`,
+    );
+  } catch (error) {
+    db.query("ROLLBACK");
+    console.error(`Error purging items: ${error.message}`);
+  }
 }

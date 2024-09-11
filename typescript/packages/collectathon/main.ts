@@ -1,4 +1,4 @@
-// main.ts
+import { addActionCommand } from "./action.ts";
 import { startChat } from "./chat.ts";
 import {
   addItemToCollection,
@@ -6,34 +6,44 @@ import {
   listCollections,
   listItems,
   removeItemFromCollection,
+  moveCollection,
 } from "./collections.ts";
 import { readLines } from "./deps.ts";
 import { clipGitHub } from "./github.ts";
 import { importFiles } from "./import.ts";
-import { deleteItem, editItem, printItem } from "./items.ts";
+import { deleteItem, editItem, printItem, purge } from "./items.ts";
 import { clipRSS } from "./rss.ts";
 import { addRule, applyRules, deleteRule, listRules } from "./rules.ts";
+import { search } from "./search.ts";
 import { clipWebpage } from "./webpage.ts";
+
+function listAPI() {
+  console.log("Available commands:");
+  console.log("  clip <URL> <COLLECTION> [-p PROMPT]");
+  console.log("  collection list");
+  console.log("  collection delete <COLLECTION>");
+  console.log("  collection apply-rules <COLLECTION>");
+  console.log("  collection move <COLLECTION> <NEW_NAME>");
+  console.log("  item list <COLLECTION>");
+  console.log("  item show <ITEM_ID> [-raw]");
+  console.log("  item delete <ITEM_ID>");
+  console.log("  item edit <ITEM_ID> [-raw]");
+  console.log("  item add <ITEM_ID> <COLLECTION>");
+  console.log("  item remove <ITEM_ID> <COLLECTION>");
+  console.log("  item purge");
+  console.log("  rule add <COLLECTION> <RULE> <TARGET_COLLECTION>");
+  console.log("  rule list <COLLECTION>");
+  console.log("  rule delete <RULE_ID>");
+  console.log("  chat <COLLECTION1> [COLLECTION2 ...]");
+  console.log("  import <PATH> <COLLECTION> [FILE_TYPE_FILTER]");
+  console.log("  search <QUERY>");
+  console.log("  action <COLLECTION> <PROMPT>");
+  console.log("  exit");
+}
 
 async function main() {
   console.log("Welcome to the Collection Clipper CLI!");
-  console.log("Available commands:");
-  console.log("  clip <URL> <COLLECTION> [-p PROMPT]");
-  console.log("  collections");
-  console.log("  items <COLLECTION>");
-  console.log("  item <ITEM_ID> [-raw]");
-  console.log("  add <ITEM_ID> <COLLECTION>");
-  console.log("  remove <ITEM_ID> <COLLECTION>");
-  console.log("  delete-collection <COLLECTION>");
-  console.log("  delete-item <ITEM_ID>");
-  console.log("  edit <ITEM_ID> [-raw]");
-  console.log("  rule <COLLECTION> <RULE> <TARGET_COLLECTION>");
-  console.log("  rules <COLLECTION>");
-  console.log("  delete-rule <RULE_ID>");
-  console.log("  apply-rules <COLLECTION> [RULE_ID]");
-  console.log("  chat <COLLECTION1> [COLLECTION2 ...]");
-  console.log("  import <PATH> <COLLECTION>");
-  console.log("  exit");
+  listAPI();
 
   for await (const line of readLines(Deno.stdin)) {
     const args = line.trim().split(" ");
@@ -60,81 +70,142 @@ async function main() {
           }
         }
         break;
-      case "collections":
-        await listCollections();
-        break;
-      case "items":
-        if (args.length !== 1) {
-          console.log("Usage: items <COLLECTION>");
-        } else {
-          await listItems(args[0]);
+      case "collection":
+        if (args.length < 1) {
+          console.log("Usage: collection <action> [arguments]");
+          break;
+        }
+        const collectionAction = args.shift();
+        switch (collectionAction) {
+          case "list":
+            await listCollections();
+            break;
+          case "delete":
+            if (args.length !== 1) {
+              console.log("Usage: collection delete <COLLECTION>");
+            } else {
+              await deleteCollection(args[0]);
+            }
+            break;
+          case "apply-rules":
+            if (args.length !== 1) {
+              console.log("Usage: collection apply-rules <COLLECTION>");
+            } else {
+              await applyRules(args[0]);
+            }
+            break;
+          case "move":
+            if (args.length !== 2) {
+              console.log("Usage: collection move <COLLECTION> <NEW_NAME>");
+            } else {
+              await moveCollection(args[0], args[1]);
+            }
+            break;
+          default:
+            console.log(
+              "Unknown collection action. Available actions: list, delete, apply-rules, move",
+            );
         }
         break;
       case "item":
         if (args.length < 1) {
-          console.log("Usage: item <ITEM_ID> [-raw]");
-        } else {
-          const itemId = parseInt(args[0]);
-          const showRaw = args[1] === "-raw";
-          printItem(itemId, showRaw);
+          console.log("Usage: item <action> [arguments]");
+          break;
         }
-        break;
-      case "add":
-        if (args.length !== 2) {
-          console.log("Usage: add <ITEM_ID> <COLLECTION>");
-        } else {
-          await addItemToCollection(parseInt(args[0]), args[1]);
+        const itemAction = args.shift();
+        switch (itemAction) {
+          case "list":
+            if (args.length !== 1) {
+              console.log("Usage: item list <COLLECTION>");
+            } else {
+              await listItems(args[0]);
+            }
+            break;
+          case "show":
+            if (args.length < 1) {
+              console.log("Usage: item show <ITEM_ID> [-raw]");
+            } else {
+              const itemId = parseInt(args[0]);
+              const showRaw = args[1] === "-raw";
+              printItem(itemId, showRaw);
+            }
+            break;
+          case "delete":
+            if (args.length !== 1) {
+              console.log("Usage: item delete <ITEM_ID>");
+            } else {
+              deleteItem(parseInt(args[0]));
+            }
+            break;
+          case "edit":
+            if (args.length < 1 || args.length > 2) {
+              console.log("Usage: item edit <ITEM_ID> [-raw]");
+            } else {
+              const itemId = parseInt(args[0]);
+              const editRaw = args[1] === "-raw";
+              await editItem(itemId, editRaw);
+            }
+            break;
+          case "add":
+            if (args.length !== 2) {
+              console.log("Usage: item add <ITEM_ID> <COLLECTION>");
+            } else {
+              await addItemToCollection(parseInt(args[0]), args[1]);
+            }
+            break;
+          case "remove":
+            if (args.length !== 2) {
+              console.log("Usage: item remove <ITEM_ID> <COLLECTION>");
+            } else {
+              await removeItemFromCollection(parseInt(args[0]), args[1]);
+            }
+            break;
+          case "purge":
+            await purge();
+            break;
+          default:
+            console.log(
+              "Unknown item action. Available actions: list, show, delete, edit, add, remove, purge",
+            );
         }
-        break;
-      case "remove":
-        if (args.length !== 2) {
-          console.log("Usage: remove <ITEM_ID> <COLLECTION>");
-        } else {
-          await removeItemFromCollection(parseInt(args[0]), args[1]);
-        }
-        break;
-      case "delete-collection":
-        if (args.length !== 1) {
-          console.log("Usage: delete-collection <COLLECTION>");
-        } else {
-          await deleteCollection(args[0]);
-        }
-        break;
-      case "exit":
-        console.log("Goodbye!");
-        Deno.exit(0);
         break;
       case "rule":
-        if (args.length < 3) {
-          console.log("Usage: rule <COLLECTION> <RULE> <TARGET_COLLECTION>");
-        } else {
-          const collection = args.shift()!;
-          const targetCollection = args.pop()!;
-          const rule = args.join(" ");
-          await addRule(collection, rule, targetCollection);
+        if (args.length < 1) {
+          console.log("Usage: rule <action> [arguments]");
+          break;
         }
-        break;
-      case "rules":
-        if (args.length !== 1) {
-          console.log("Usage: rules <COLLECTION>");
-        } else {
-          await listRules(args[0]);
-        }
-        break;
-      case "delete-rule":
-        if (args.length !== 1) {
-          console.log("Usage: delete-rule <RULE_ID>");
-        } else {
-          await deleteRule(parseInt(args[0]));
-        }
-        break;
-      case "apply-rules":
-        if (args.length < 1 || args.length > 2) {
-          console.log("Usage: apply-rules <COLLECTION> [RULE_ID]");
-        } else {
-          const collection = args[0];
-          const ruleId = args[1] ? parseInt(args[1]) : undefined;
-          await applyRules(collection, ruleId);
+        const ruleAction = args.shift();
+        switch (ruleAction) {
+          case "add":
+            if (args.length < 3) {
+              console.log(
+                "Usage: rule add <COLLECTION> <RULE> <TARGET_COLLECTION>",
+              );
+            } else {
+              const collection = args.shift()!;
+              const targetCollection = args.pop()!;
+              const rule = args.join(" ");
+              await addRule(collection, rule, targetCollection);
+            }
+            break;
+          case "list":
+            if (args.length !== 1) {
+              console.log("Usage: rule list <COLLECTION>");
+            } else {
+              await listRules(args[0]);
+            }
+            break;
+          case "delete":
+            if (args.length !== 1) {
+              console.log("Usage: rule delete <RULE_ID>");
+            } else {
+              await deleteRule(parseInt(args[0]));
+            }
+            break;
+          default:
+            console.log(
+              "Unknown rule action. Available actions: add, list, delete",
+            );
         }
         break;
       case "chat":
@@ -145,47 +216,31 @@ async function main() {
         }
         break;
       case "import":
-        if (args.length !== 2) {
-          console.log("Usage: import <PATH> <COLLECTION>");
+        if (args.length < 2 || args.length > 3) {
+          console.log("Usage: import <PATH> <COLLECTION> [FILE_TYPE_FILTER]");
         } else {
-          const [path, collection] = args;
-          await importFiles(path, collection);
+          const [path, collection, fileTypeFilter] = args;
+          await importFiles(path, collection, fileTypeFilter);
         }
         break;
-      case "delete-item":
-        if (args.length !== 1) {
-          console.log("Usage: delete-item <ITEM_ID>");
+      case "search":
+        if (args.length === 0) {
+          console.log("Usage: search <QUERY>");
         } else {
-          deleteItem(parseInt(args[0]));
+          const query = args.join(" ");
+          await search(query);
         }
         break;
-      case "edit":
-        if (args.length < 1 || args.length > 2) {
-          console.log("Usage: edit <ITEM_ID> [-raw]");
-        } else {
-          const itemId = parseInt(args[0]);
-          const editRaw = args[1] === "-raw";
-          await editItem(itemId, editRaw);
-        }
+      case "action":
+        addActionCommand(args);
+        break;
+      case "exit":
+        console.log("Goodbye!");
+        Deno.exit(0);
         break;
       default:
-        console.log("Unknown command. Available commands:");
-        console.log("  clip <URL> <COLLECTION> [-p PROMPT]");
-        console.log("  collections");
-        console.log("  items <COLLECTION>");
-        console.log("  item <ITEM_ID> [-raw]");
-        console.log("  add <ITEM_ID> <COLLECTION>");
-        console.log("  remove <ITEM_ID> <COLLECTION>");
-        console.log("  delete-collection <COLLECTION>");
-        console.log("  delete-item <ITEM_ID>");
-        console.log("  edit <ITEM_ID> [-raw]");
-        console.log("  rule <COLLECTION> <RULE> <TARGET_COLLECTION>");
-        console.log("  rules <COLLECTION>");
-        console.log("  delete-rule <RULE_ID>");
-        console.log("  apply-rules <COLLECTION> [RULE_ID]");
-        console.log("  chat <COLLECTION1> [COLLECTION2 ...]");
-        console.log("  import <PATH> <COLLECTION>");
-        console.log("  exit");
+        console.log("Unknown command.");
+        listAPI();
     }
   }
 }
