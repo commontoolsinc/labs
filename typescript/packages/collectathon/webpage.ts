@@ -39,7 +39,7 @@ ${html}
 export async function clipWebpage(
   url: string,
   collectionName: string,
-  prompt?: string
+  prompt?: string,
 ) {
   try {
     db.query("BEGIN TRANSACTION");
@@ -48,7 +48,7 @@ export async function clipWebpage(
 
     const entities = await extractEntities(html, url, prompt);
 
-    const collectionId = getOrCreateCollection(collectionName);
+    const collectionId = await getOrCreateCollection(collectionName);
     let itemCount = 0;
 
     for (const entity of entities) {
@@ -60,13 +60,13 @@ export async function clipWebpage(
           JSON.stringify(entity),
           JSON.stringify(entity.content),
           "Webpage",
-        ]
+        ],
       );
       const itemId = result[0][0] as number;
 
       db.query(
         "INSERT INTO item_collections (item_id, collection_id) VALUES (?, ?)",
-        [itemId, collectionId]
+        [itemId, collectionId],
       );
 
       itemCount++;
@@ -75,7 +75,7 @@ export async function clipWebpage(
     db.query("COMMIT");
 
     console.log(
-      `Clipped ${itemCount} entities from webpage to collection: ${collectionName}`
+      `Clipped ${itemCount} entities from webpage to collection: ${collectionName}`,
     );
   } catch (error) {
     db.query("ROLLBACK");

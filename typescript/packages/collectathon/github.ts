@@ -32,7 +32,7 @@ export async function clipGitHub(url: string, collectionName: string) {
 
     db.query("BEGIN TRANSACTION");
 
-    const collectionId = getOrCreateCollection(collectionName);
+    const collectionId = await getOrCreateCollection(collectionName);
     let itemCount = 0;
 
     for await (const entry of walk(localPath, { includeDirs: false })) {
@@ -57,13 +57,13 @@ export async function clipGitHub(url: string, collectionName: string) {
           JSON.stringify(contentJson),
           content,
           "GitHub",
-        ]
+        ],
       );
       const itemId = result[0][0] as number;
 
       db.query(
         "INSERT INTO item_collections (item_id, collection_id) VALUES (?, ?)",
-        [itemId, collectionId]
+        [itemId, collectionId],
       );
 
       itemCount++;
@@ -72,7 +72,7 @@ export async function clipGitHub(url: string, collectionName: string) {
     db.query("COMMIT");
 
     console.log(
-      `Clipped ${itemCount} files from GitHub repository to collection: ${collectionName}`
+      `Clipped ${itemCount} files from GitHub repository to collection: ${collectionName}`,
     );
 
     // Clean up: remove the cloned repository

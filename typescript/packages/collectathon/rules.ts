@@ -10,8 +10,8 @@ export async function addRule(
 ) {
   try {
     // Ensure both collections exist
-    getOrCreateCollection(collectionName);
-    getOrCreateCollection(targetCollection);
+    await getOrCreateCollection(collectionName);
+    await getOrCreateCollection(targetCollection);
 
     const result = db.query(
       "INSERT INTO rules (collection_name, rule, target_collection) VALUES (?, ?, ?) RETURNING id",

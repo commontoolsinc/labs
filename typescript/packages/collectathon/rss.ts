@@ -10,7 +10,7 @@ export async function clipRSS(url: string, collectionName: string) {
 
     db.query("BEGIN TRANSACTION");
 
-    const collectionId = getOrCreateCollection(collectionName);
+    const collectionId = await getOrCreateCollection(collectionName);
     let itemCount = 0;
 
     for (const item of feed.entries) {
@@ -37,13 +37,13 @@ export async function clipRSS(url: string, collectionName: string) {
           JSON.stringify(contentJson),
           item.description?.value || "",
           "RSS",
-        ]
+        ],
       );
       const itemId = result[0][0] as number;
 
       db.query(
         "INSERT INTO item_collections (item_id, collection_id) VALUES (?, ?)",
-        [itemId, collectionId]
+        [itemId, collectionId],
       );
 
       itemCount++;
@@ -52,7 +52,7 @@ export async function clipRSS(url: string, collectionName: string) {
     db.query("COMMIT");
 
     console.log(
-      `Clipped ${itemCount} items from RSS feed to collection: ${collectionName}`
+      `Clipped ${itemCount} items from RSS feed to collection: ${collectionName}`,
     );
   } catch (error) {
     db.query("ROLLBACK");

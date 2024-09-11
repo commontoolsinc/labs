@@ -19,7 +19,7 @@ export async function search(query: string) {
   const results = db.query(sqlQuery);
 
   // Create ephemeral collection
-  const collectionId = getOrCreateCollection(collectionName);
+  const collectionId = await getOrCreateCollection(collectionName);
 
   // Add search results to the ephemeral collection
   for (const [itemId] of results) {
