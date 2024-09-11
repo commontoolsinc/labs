@@ -9,6 +9,7 @@ import {
   moveCollection,
 } from "./collections.ts";
 import { readLines } from "./deps.ts";
+import { addDreamCommand } from "./dream.ts";
 import { clipGitHub } from "./github.ts";
 import { importFiles } from "./import.ts";
 import { deleteItem, editItem, printItem, purge } from "./items.ts";
@@ -38,6 +39,7 @@ function listAPI() {
   console.log("  import <PATH> <COLLECTION> [FILE_TYPE_FILTER]");
   console.log("  search <QUERY>");
   console.log("  action <COLLECTION> <PROMPT>");
+  console.log("  dream <COLLECTION>");
   console.log("  exit");
 }
 
@@ -238,6 +240,9 @@ async function main() {
         break;
       case "action":
         addActionCommand(args);
+        break;
+      case "dream":
+        addDreamCommand(args);
         break;
       case "exit":
         console.log("Goodbye!");
