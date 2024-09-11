@@ -1,5 +1,5 @@
 import { db } from "./db.ts";
-import { chat } from "./llm.ts";
+import { chat, fastCompletion } from "./llm.ts";
 import { CoreMessage } from "npm:ai@3.3.21";
 
 export async function handleActionCommand(
@@ -27,10 +27,8 @@ export async function handleActionCommand(
     ...JSON.parse(content),
   }));
 
-  console.log(jsonItems);
-
   // Extract the shape of the JSON items
-  const itemShape = extractJsonShape(jsonItems[0]);
+  const itemShape = await extractJsonShape(jsonItems);
 
   console.log("Items shape:", itemShape);
 
@@ -62,12 +60,18 @@ export async function handleActionCommand(
   }
 }
 
-function extractJsonShape(obj: any): string {
-  const shape: { [key: string]: string } = {};
-  for (const [key, value] of Object.entries(obj)) {
-    shape[key] = typeof value;
-  }
-  return JSON.stringify(shape, null, 2);
+async function extractJsonShape(items: any[]): Promise<string> {
+  const systemPrompt =
+    "Output a json schema that covers all the keys and values of the JSON objects.";
+  const userMessage = `${JSON.stringify(items, null, 2)}`;
+
+  const messages: CoreMessage[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userMessage },
+  ];
+
+  const response = await fastCompletion(systemPrompt, messages);
+  return response;
 }
 
 async function generateTransformationFunction(

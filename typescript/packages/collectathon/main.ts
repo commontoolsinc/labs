@@ -63,7 +63,12 @@ async function main() {
 
           if (url.includes("github.com")) {
             await clipGitHub(url, collection);
-          } else if (url.includes(".rss") || url.includes("/feed")) {
+          } else if (
+            url.includes(".rss") ||
+            url.includes("/RSS") ||
+            url.includes("/feed") ||
+            url.includes("feedformat=")
+          ) {
             await clipRSS(url, collection);
           } else {
             await clipWebpage(url, collection, prompt);

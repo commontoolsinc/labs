@@ -1,6 +1,6 @@
 import { getOrCreateCollection } from "./collections.ts";
 import { db } from "./db.ts";
-import { completion } from "./llm.ts";
+import { completion, fastCompletion } from "./llm.ts";
 
 async function extractEntities(html: string, url: string, prompt?: string) {
   const systemPrompt =
@@ -29,7 +29,7 @@ HTML Content:
 ${html}
   `;
 
-  const response = await completion(systemPrompt, [
+  const response = await fastCompletion(systemPrompt, [
     { role: "user", content: userPrompt },
   ]);
 

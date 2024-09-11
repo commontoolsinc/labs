@@ -4,11 +4,10 @@ import { parseFeed } from "./deps.ts";
 
 export async function clipRSS(url: string, collectionName: string) {
   try {
+    db.query("BEGIN TRANSACTION");
     const response = await fetch(url);
     const xml = await response.text();
     const feed = await parseFeed(xml);
-
-    db.query("BEGIN TRANSACTION");
 
     const collectionId = await getOrCreateCollection(collectionName);
     let itemCount = 0;
