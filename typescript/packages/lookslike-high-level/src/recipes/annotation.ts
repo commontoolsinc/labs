@@ -2,7 +2,7 @@ import { html, type View } from "@commontools/common-html";
 import {
   recipe,
   lift,
-  asHandler,
+  handler,
   cell,
   UI,
   ID,
@@ -114,8 +114,7 @@ const buildSuggestionsList = lift(({ suggestion }) => {
   return [];
 });
 
-// Extracted handler using asHandler
-const acceptSuggestion = asHandler<
+const acceptSuggestion = handler<
   {},
   {
     acceptedSuggestion: View | undefined;

@@ -1,8 +1,8 @@
 import { html } from "@commontools/common-html";
 import {
   recipe,
-  apply,
   str,
+  lift,
   generateData,
   ifElse,
   UI,
@@ -68,9 +68,9 @@ export const playlistForTrip = recipe<{
       </common-vstack>
     `,
     playlist,
-    [NAME]: apply({ playlist, ticket }, ({ playlist, ticket }) =>
+    [NAME]: lift(({ playlist, ticket }) =>
       playlist?.title ? playlist.title : `Creating playlist for ${ticket.show}`
-    ),
+    )({ playlist, ticket }),
   };
 });
 

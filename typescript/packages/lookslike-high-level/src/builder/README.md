@@ -134,4 +134,4 @@ cycle when a new event is queued.
 
 We currently only support simple event handler for one event.
 
-Right now, only `handler` and `asHandler` return these "streams".
+Right now, only `handler` returns these "streams".

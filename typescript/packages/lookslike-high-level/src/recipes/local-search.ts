@@ -1,7 +1,7 @@
 import { html } from "@commontools/common-html";
 import {
   recipe,
-  asHandler,
+  handler,
   lift,
   str,
   cell,
@@ -23,14 +23,14 @@ export interface Place {
   rating: number;
 }
 
-const searchPlaces = asHandler<
+const searchPlaces = handler<
   {},
   { what: string; where: string; query: { prompt: string } }
 >((_, { what, where, query }) => {
   query.prompt = `generate 10 places that match they query: ${what} in ${where}`;
 });
 
-const updateValue = asHandler<{ detail: { value: string } }, { value: string }>(
+const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value)
 );
 

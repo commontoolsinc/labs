@@ -2,7 +2,7 @@ import { html } from "@commontools/common-html";
 import {
   recipe,
   lift,
-  asHandler,
+  handler,
   str,
   generateData,
   UI,
@@ -34,11 +34,11 @@ const justMonthAndDay = lift((isoDate: string) =>
   isoDate.split("T")[0].slice(5)
 );
 
-const updateValue = asHandler<{ detail: { value: string } }, { value: string }>(
+const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value)
 );
 
-const handleSearchClick = asHandler<
+const handleSearchClick = handler<
   {},
   {
     startDate: string;
@@ -54,7 +54,7 @@ const handleSearchClick = asHandler<
   state.location = state.locationUI;
 });
 
-const makeBooking = asHandler<
+const makeBooking = handler<
   {},
   {
     place: LuftBnBPlace;

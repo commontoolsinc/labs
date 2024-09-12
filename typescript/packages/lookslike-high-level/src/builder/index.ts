@@ -1,14 +1,7 @@
 export { cell } from "./cell-proxy.js";
-export {
-  lift,
-  createNodeFactory as builtin,
-  asHandler,
-  apply,
-  handler,
-  str,
-} from "./module.js";
+export { lift, createNodeFactory as builtin, handler } from "./module.js";
 export { recipe } from "./recipe.js";
-export { generateData, ifElse } from "./built-in.js";
+export { generateData, ifElse, str } from "./built-in.js";
 export {
   ID,
   TYPE,
