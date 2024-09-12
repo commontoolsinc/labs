@@ -49,7 +49,7 @@ export function lift<T, R>(implementation: (input: T) => R): NodeFactory<T, R> {
   });
 }
 
-export function asHandler<E, T>(
+export function handler<E, T>(
   handler: (event: E, props: T) => any
 ): NodeFactory<T, E> {
   const module: Module & toJSON = {
@@ -73,57 +73,4 @@ export function asHandler<E, T>(
 
     return stream as unknown as CellProxy<E>;
   }, module);
-}
-
-export function apply<T extends (...args: any[]) => any>(
-  inputs: Value<Parameters<T>[0]>,
-  implementation: T
-): NodeFactory<Parameters<T>[0], ReturnType<T>>;
-export function apply<T, R>(
-  inputs: Value<T>,
-  implementation: (input: T) => R
-): Value<R>;
-export function apply<T, R>(
-  inputs: Value<T>,
-  implementation: (input: T) => R
-): Value<R> {
-  return lift(implementation)(inputs);
-}
-
-export function handler<T extends (...args: any[]) => any>(
-  props: Value<Parameters<T>[1]>,
-  implementation: T
-): NodeFactory<Parameters<T>[1], Parameters<T>[0]>;
-export function handler<E, T>(
-  props: Value<T>,
-  handler: (event: E, props: T) => any
-): Value<E>;
-export function handler<E, T>(
-  props: Value<T>,
-  handler: (event: E, props: T) => any
-): Value<E> {
-  return asHandler(handler)(props);
-}
-
-// Example:
-// str`Hello, ${name}!`
-//
-// TODO: This should be a built-in module
-export function str(
-  strings: TemplateStringsArray,
-  ...values: any[]
-): CellProxy<string> {
-  const interpolatedString = ({
-    strings,
-    values,
-  }: {
-    strings: TemplateStringsArray;
-    values: any[];
-  }) =>
-    strings.reduce(
-      (result, str, i) => result + str + (i < values.length ? values[i] : ""),
-      ""
-    );
-
-  return lift(interpolatedString)({ strings, values });
 }

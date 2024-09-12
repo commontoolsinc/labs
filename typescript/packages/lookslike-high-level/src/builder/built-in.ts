@@ -1,5 +1,5 @@
-import { createNodeFactory } from "./module.js";
-import { Value, NodeFactory } from "./types.js";
+import { lift, createNodeFactory } from "./module.js";
+import { Value, NodeFactory, CellProxy } from "./types.js";
 
 export function generateData<T>(
   params: Value<{
@@ -36,3 +36,26 @@ let generateDataFactory:
       { pending: boolean; result: any; partial: any; error: any }
     >
   | undefined = undefined;
+
+// Example:
+// str`Hello, ${name}!`
+//
+// TODO: This should be a built-in module
+export function str(
+  strings: TemplateStringsArray,
+  ...values: any[]
+): CellProxy<string> {
+  const interpolatedString = ({
+    strings,
+    values,
+  }: {
+    strings: TemplateStringsArray;
+    values: any[];
+  }) =>
+    strings.reduce(
+      (result, str, i) => result + str + (i < values.length ? values[i] : ""),
+      ""
+    );
+
+  return lift(interpolatedString)({ strings, values });
+}

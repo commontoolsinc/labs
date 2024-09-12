@@ -1,24 +1,23 @@
 import { html } from "@commontools/common-html";
-import { recipe, asHandler, UI, NAME } from "../builder/index.js";
+import { recipe, handler, UI, NAME } from "../builder/index.js";
 
 export interface TodoItem {
   title: string;
   done: boolean;
 }
 
-const addTask = asHandler<
-  { detail: { message: string } },
-  { items: TodoItem[] }
->((event, { items }) => {
-  const task = event.detail?.message?.trim();
-  if (task) items.push({ title: task, done: false });
-});
+const addTask = handler<{ detail: { message: string } }, { items: TodoItem[] }>(
+  (event, { items }) => {
+    const task = event.detail?.message?.trim();
+    if (task) items.push({ title: task, done: false });
+  }
+);
 
-const updateTitle = asHandler<{ detail: { value: string } }, { title: string }>(
+const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
   ({ detail }, state) => (state.title = detail.value)
 );
 
-const updateItem = asHandler<
+const updateItem = handler<
   { detail: { done: boolean; value: string } },
   { item: TodoItem }
 >(({ detail }, { item }) => {
