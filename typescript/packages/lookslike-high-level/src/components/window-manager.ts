@@ -4,7 +4,7 @@ import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
 import { Gem, ID, UI, NAME } from "../data.js";
-import { CellImpl, isCell, gemById } from "../runner/index.js";
+import { CellImpl, isCell, gemById } from "@commontools/common-runner";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {

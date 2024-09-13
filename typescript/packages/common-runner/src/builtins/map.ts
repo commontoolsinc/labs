@@ -1,4 +1,4 @@
-import { type Recipe, type Node } from "../../builder/index.js";
+import { type Recipe, type Node } from "@commontools/common-builder";
 import { cell, CellImpl, ReactivityLog } from "../cell.js";
 import { run } from "../runner.js";
 import { sendValueToBinding, findAllAliasedCells } from "../utils.js";

@@ -1,5 +1,5 @@
 import { html } from "@commontools/common-html";
-import { recipe, lift, ID, UI } from "../builder/index.js";
+import { recipe, lift, ID, UI } from "@commontools/common-builder";
 import { Gem, RecipeManifest } from "../data.js";
 
 const getIDsForSagasWithUI = lift((sagas: Gem[]) =>

@@ -1,5 +1,9 @@
-import { isAlias, isStreamAlias } from "../builder/types.js";
-import { getValueAtPath, setValueAtPath, deepEqual } from "../builder/utils.js";
+import { isAlias, isStreamAlias } from "@commontools/common-builder";
+import {
+  getValueAtPath,
+  setValueAtPath,
+  deepEqual,
+} from "@commontools/common-builder";
 import {
   followCellReferences,
   followAliases,
@@ -158,7 +162,7 @@ function simpleCell<T>(
     } while (ref);
   }
 
-  const self = isStreamAlias(cell.getAtPath(path))
+  const self: Cell<T> = isStreamAlias(cell.getAtPath(path))
     ? ({
         // Implementing just Sendable<T>
         send: (event: T) => {
@@ -166,7 +170,7 @@ function simpleCell<T>(
           queueEvent({ cell: cell, path }, event);
         },
       } as Cell<T>)
-    : ({
+    : {
         get: () => transformToSimpleCells(cell, cell.getAtPath(path), log) as T,
         set: (newValue: T) => cell.setAtPath(path, newValue, log),
         send: (newValue: T) => self.set(newValue),
@@ -181,7 +185,7 @@ function simpleCell<T>(
         },
         key: <K extends keyof T>(key: K) =>
           cell.asSimpleCell([...path, key], log) as Cell<T[K]>,
-      } satisfies Cell<T>);
+      };
   return self;
 }
 

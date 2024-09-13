@@ -1,4 +1,4 @@
-import { Recipe } from "./builder/index.js";
+import { Recipe } from "@commontools/common-builder";
 
 export type Suggestion = {
   // Description of the suggestion

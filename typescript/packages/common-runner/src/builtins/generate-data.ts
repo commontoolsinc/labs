@@ -1,10 +1,10 @@
-import { type Node } from "../../builder/index.js";
+import { type Node } from "@commontools/common-builder";
 import { cell, CellImpl, ReactivityLog } from "../cell.js";
 import { sendValueToBinding, findAllAliasedCells } from "../utils.js";
 import { schedule, Action } from "../scheduler.js";
 import { generateData as generateDataClient } from "@commontools/llm-client";
 import { mapBindingsToCell } from "../utils.js";
-import { mockResultClient, makeClient } from "../../llm-client.js";
+import { mockResultClient, makeClient } from "../llm-client.js";
 
 // TODO: generateData should really be a recipe, not a builtin, and either the
 // underlying llm client call or even just fetch the built-in.

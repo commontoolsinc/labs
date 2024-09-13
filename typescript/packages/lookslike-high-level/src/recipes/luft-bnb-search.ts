@@ -7,7 +7,7 @@ import {
   generateData,
   UI,
   NAME,
-} from "../builder/index.js";
+} from "@commontools/common-builder";
 import { addSuggestion, description } from "../suggestions.js";
 import { launch, ID } from "../data.js";
 

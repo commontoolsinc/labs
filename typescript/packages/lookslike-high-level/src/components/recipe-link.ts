@@ -2,7 +2,7 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { render } from "@commontools/common-ui";
 import { addGems, RecipeManifest, ID } from "../data.js";
-import { run } from "../runner/index.js";
+import { run } from "@commontools/common-runner";
 
 export const recipeLink = render.view("common-recipe-link", {
   recipe: { type: "object" },

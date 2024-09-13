@@ -1,4 +1,4 @@
-import { type Node } from "../../builder/index.js";
+import { type Node } from "@commontools/common-builder";
 import { type CellImpl } from "../cell.js";
 import { map } from "./map.js";
 import { generateData } from "./generate-data.js";

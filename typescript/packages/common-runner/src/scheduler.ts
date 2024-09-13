@@ -1,9 +1,10 @@
-import { Cancel } from "@commontools/common-frp";
 import { CellImpl, CellReference, ReactivityLog } from "./cell.js";
 import { compactifyPaths, pathAffected } from "./utils.js";
 
 export type Action = (log: ReactivityLog) => any;
 export type EventHandler = (event: any) => any;
+
+type Cancel = () => void;
 
 const pending = new Set<Action>();
 const eventQueue: (() => void)[] = [];

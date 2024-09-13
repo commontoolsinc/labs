@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { isCell } from "../../src/builder/types.js";
-import { cell } from "../../src/builder/cell-proxy.js";
+import { isCell } from "../src/types.js";
+import { cell } from "../src/cell-proxy.js";
 
 describe("cell function", () => {
   it("creates a cell proxy", () => {

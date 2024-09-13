@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { Recipe } from "../../src/builder/types.js";
-import { run } from "../../src/runner/runner.js";
-import { idle } from "../../src/runner/scheduler.js";
+import { Recipe } from "@commontools/common-builder";
+import { run } from "../src/runner.js";
+import { idle } from "../src/scheduler.js";
 
 describe("runRecipe", () => {
   it("should work with passthrough", async () => {

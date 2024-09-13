@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { recipe, lift } from "../../src/builder/index.js";
-import { run } from "../../src/runner/runner.js";
-import { idle } from "../../src/runner/scheduler.js";
+import { recipe, lift } from "@commontools/common-builder";
+import { run } from "../src/runner.js";
+import { idle } from "../src/scheduler.js";
 
 describe("Recipe Runner", () => {
   it("should run a simple recipe", async () => {

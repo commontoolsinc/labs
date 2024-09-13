@@ -8,8 +8,8 @@ import {
   followCellReferences,
   followAliases,
   compactifyPaths,
-} from "../../src/runner/utils.js";
-import { cell, CellReference, ReactivityLog } from "../../src/runner/cell.js";
+} from "../src/utils.js";
+import { cell, CellReference, ReactivityLog } from "../src/cell.js";
 
 describe("extractDefaultValues", () => {
   it("should extract default values from a schema", () => {

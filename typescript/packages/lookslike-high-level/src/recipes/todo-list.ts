@@ -1,5 +1,5 @@
 import { html } from "@commontools/common-html";
-import { recipe, handler, UI, NAME } from "../builder/index.js";
+import { recipe, handler, UI, NAME } from "@commontools/common-builder";
 
 export interface TodoItem {
   title: string;

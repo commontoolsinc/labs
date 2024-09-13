@@ -1,13 +1,13 @@
 // This file is setting up example data
 
-import { ID, TYPE, NAME, UI, Recipe } from "./builder/index.js";
+import { ID, TYPE, NAME, UI, Recipe } from "@commontools/common-builder";
 import {
   run,
   cell,
   isCell,
   CellImpl,
   getCellReferenceOrValue,
-} from "./runner/index.js";
+} from "@commontools/common-runner";
 
 import { todoList } from "./recipes/todo-list.js";
 import { localSearch } from "./recipes/local-search.js";
@@ -21,7 +21,7 @@ import "./recipes/playlist.js";
 import {
   getCellReferenceOrThrow,
   isCellProxyForDereferencing,
-} from "./runner/cell.js";
+} from "@commontools/common-runner";
 
 export type Gem = {
   [ID]: number;

@@ -1,4 +1,4 @@
-import { type Node } from "../../builder/index.js";
+import { type Node } from "@commontools/common-builder";
 import { cell, type CellImpl, type ReactivityLog } from "../cell.js";
 import { sendValueToBinding, findAllAliasedCells } from "../utils.js";
 import { schedule, type Action } from "../scheduler.js";
