@@ -16,6 +16,28 @@ export function generateData<T>(
   return generateDataFactory(params);
 }
 
+export function fetchData<T>(
+  params: Value<{
+    url: string;
+    options?: RequestInit;
+    result?: T;
+    schema?: any;
+  }>
+): Value<{ pending: boolean; result: T; error: any }> {
+  fetchDataFactory ||= createNodeFactory({
+    type: "builtin",
+    implementation: "fetchData",
+  });
+  return fetchDataFactory(params);
+}
+
+let fetchDataFactory:
+  | NodeFactory<
+      { url: string; options?: RequestInit; result?: any; schema?: any },
+      { pending: boolean; result: any; error: any }
+    >
+  | undefined = undefined;
+
 export function ifElse<T, U, V>(
   condition: Value<T>,
   ifTrue: Value<U>,

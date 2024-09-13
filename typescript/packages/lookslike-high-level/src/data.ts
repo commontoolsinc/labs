@@ -14,6 +14,7 @@ import { localSearch } from "./recipes/local-search.js";
 import { luftBnBSearch } from "./recipes/luft-bnb-search.js";
 import { ticket } from "./recipes/ticket.js";
 import { routine } from "./recipes/routine.js";
+import { fetchExample } from "./recipes/fetchExample.js"
 
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.js";
@@ -44,6 +45,8 @@ export function addGems(gems: CellImpl<any>[]) {
 }
 
 addGems([
+  run(fetchExample, {
+    url: "https://anotherjesse-restfuljsonblobapi.web.val.run/items" }),
   run(todoList, {
     title: "My TODOs",
     items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) => ({
