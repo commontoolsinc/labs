@@ -8,7 +8,7 @@ export function generateData<T>(
     schema?: any;
     system?: string;
   }>
-): Value<{ pending: boolean; result: T; partial: any; error: any }> {
+): CellProxy<{ pending: boolean; result: T; partial: any; error: any }> {
   generateDataFactory ||= createNodeFactory({
     type: "builtin",
     implementation: "generateData",
@@ -20,7 +20,7 @@ export function ifElse<T, U, V>(
   condition: Value<T>,
   ifTrue: Value<U>,
   ifFalse: Value<V>
-): Value<T extends true ? U : V> {
+): CellProxy<T extends true ? U : V> {
   ifElseFactory ||= createNodeFactory({
     type: "builtin",
     implementation: "ifElse",
