@@ -7,7 +7,7 @@ interface Item {
 }
 
 export const fetchExample = recipe<{ url: string }>("Fetch Example", ({ url }) => {
-  const { result } = fetchData<{ result: Item[] }>({
+  const { result } = fetchData<Item[]>({
     url,
     schema: {
       type: "array",
