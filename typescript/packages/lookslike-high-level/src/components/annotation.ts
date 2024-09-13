@@ -8,7 +8,7 @@ import {
   cell,
   CellImpl,
   getCellReferenceOrValue,
-} from "../runner/index.js";
+} from "@commontools/common-runner";
 import { annotation } from "../recipes/annotation.js";
 
 // TODO: Should instead be a curried recipe that is inlined as component

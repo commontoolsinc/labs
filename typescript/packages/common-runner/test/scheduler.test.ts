@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { cell, ReactivityLog } from "../../src/runner/cell.js";
+import { cell, ReactivityLog } from "../src/cell.js";
 import {
   Action,
   run,
@@ -10,7 +10,7 @@ import {
   addEventHandler,
   queueEvent,
   EventHandler,
-} from "../../src/runner/scheduler.js";
+} from "../src/scheduler.js";
 
 describe("scheduler", () => {
   it("should run actions when cells change", async () => {

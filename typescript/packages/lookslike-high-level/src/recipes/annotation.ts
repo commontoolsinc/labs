@@ -10,9 +10,13 @@ import {
   TYPE,
   ifElse,
   generateData,
-} from "../builder/index.js";
+} from "@commontools/common-builder";
 import { type Gem, openSaga } from "../data.js";
-import { run, gemById, getCellReferenceOrValue } from "../runner/index.js";
+import {
+  run,
+  gemById,
+  getCellReferenceOrValue,
+} from "@commontools/common-runner";
 import { suggestions } from "../suggestions.js";
 
 const MINIMUM_CONFIDENCE = -1.0;

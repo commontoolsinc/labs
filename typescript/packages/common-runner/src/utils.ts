@@ -1,4 +1,4 @@
-import { isAlias } from "../builder/index.js";
+import { isAlias } from "@commontools/common-builder";
 import {
   isCell,
   CellImpl,

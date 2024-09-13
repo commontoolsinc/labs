@@ -1,5 +1,5 @@
 import { html } from "@commontools/common-html";
-import { recipe, NAME, UI } from "../builder/index.js";
+import { recipe, NAME, UI } from "@commontools/common-builder";
 
 export const ticket = recipe<{
   title: string;

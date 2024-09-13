@@ -1,9 +1,10 @@
 export { run, gemById } from "./runner.js";
+export type { CellImpl, CellReference } from "./cell.js";
 export {
-  type CellImpl,
   isCell,
   cell,
-  type CellReference,
   isReactive,
   getCellReferenceOrValue,
+  getCellReferenceOrThrow,
+  isCellProxyForDereferencing,
 } from "./cell.js";

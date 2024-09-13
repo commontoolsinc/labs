@@ -9,7 +9,7 @@ import {
   UI,
   NAME,
   ifElse,
-} from "../builder/index.js";
+} from "@commontools/common-builder";
 
 export interface Place {
   name: string;

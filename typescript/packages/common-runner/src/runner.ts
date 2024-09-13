@@ -1,12 +1,13 @@
-import { ID, TYPE } from "../builder/index.js";
 import {
+  ID,
+  TYPE,
   Recipe,
   RecipeFactory,
   isModule,
   isRecipe,
   isAlias,
   isStreamAlias,
-} from "../builder/index.js";
+} from "@commontools/common-builder";
 import { cell, CellImpl, ReactivityLog, CellReference } from "./cell.js";
 import { Action, schedule, addEventHandler } from "./scheduler.js";
 import {
@@ -108,7 +109,8 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
                   eventInputs[key].$alias.cell === stream.cell &&
                   eventInputs[key].$alias.path.length === stream.path.length &&
                   eventInputs[key].$alias.path.every(
-                    (value, index) => value === stream.path[index]
+                    (value: PropertyKey, index: number) =>
+                      value === stream.path[index]
                   )
                 ) {
                   eventInputs[key] = event;

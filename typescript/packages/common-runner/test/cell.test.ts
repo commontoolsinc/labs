@@ -5,8 +5,8 @@ import {
   isCellReference,
   isCellProxy,
   ReactivityLog,
-} from "../../src/runner/cell.js";
-import { addEventHandler, idle } from "../../src/runner/scheduler.js";
+} from "../src/cell.js";
+import { addEventHandler, idle } from "../src/scheduler.js";
 
 describe("Cell", () => {
   it("should create a cell with initial value", () => {

@@ -1,13 +1,12 @@
 {
-  "name": "@commontools/lookslike-high-level",
+  "name": "@commontools/common-runner",
   "author": "The Common Authors",
   "version": "0.0.1",
-  "description": "High level UI experiments.",
+  "description": "Typescript implementation of Common Runtime.",
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npm run build && npx vite",
     "test": "npm run build && vitest",
     "build": "wireit",
     "clean": "wireit"
@@ -20,10 +19,18 @@
     "url": "https://github.com/commontoolsinc/labs/issues"
   },
   "homepage": "https://github.com/commontoolsinc/labs#readme",
+  "exports": "./lib/index.js",
+  "files": [
+    "./lib/index.js"
+  ],
+  "dependencies": {
+    "@commontools/llm-client": "^0.0.1",
+    "@commontools/common-builder": "^0.0.1"
+  },
   "devDependencies": {
+    "@commontools/common-html": "^0.0.1",
     "jsdom": "^25.0.0",
     "typescript": "^5.2.2",
-    "vite": "^5.2.0",
     "vitest": "^1.6.0",
     "wireit": "^0.14.4"
   },
@@ -31,28 +38,19 @@
     "build": {
       "dependencies": [
         "../common-builder:build",
-        "../common-runner:build",
-        "../common-frp:build",
         "../common-html:build",
-        "../lookslike-sagas:build",
         "../llm-client:build"
       ],
-      "command": "vite build"
+      "files": [
+        "./src/**/*"
+      ],
+      "output": [
+        "./lib/**/*"
+      ],
+      "command": "tsc --build -f"
     },
     "clean": {
       "command": "rm -rf ./lib ./dist ./.wireit ./node_modules"
     }
-  },
-  "dependencies": {
-    "@commontools/common-builder": "^0.0.1",
-    "@commontools/common-runner": "^0.0.1",
-    "@commontools/common-frp": "^0.0.1",
-    "@commontools/common-html": "^0.0.1",
-    "@commontools/common-ui": "^0.0.1",
-    "@commontools/llm-client": "^0.0.1",
-    "@commontools/lookslike-sagas": "^0.0.1"
-  },
-  "overrides": {
-    "tough-cookie": "^5.0.0-rc.4"
   }
 }

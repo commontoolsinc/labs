@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { Recipe, isRecipe, Module, isModule } from "../../src/builder/types.js";
-import { lift } from "../../src/builder/module.js";
-import { recipe } from "../../src/builder/recipe.js";
+import { Recipe, isRecipe, Module, isModule } from "../src/types.js";
+import { lift } from "../src/module.js";
+import { recipe } from "../src/recipe.js";
 
 describe("recipe function", () => {
   it("creates a recipe", () => {

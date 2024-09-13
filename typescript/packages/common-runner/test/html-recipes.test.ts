@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { html, render, View } from "@commontools/common-html";
-import { recipe, lift, str, UI } from "../../src/builder/index.js";
-import { run } from "../../src/runner/runner.js";
-import { idle } from "../../src/runner/scheduler.js";
+import { recipe, lift, str, UI } from "@commontools/common-builder";
+import { run } from "../src/runner.js";
+import { idle } from "../src/scheduler.js";
 
 describe("recipes with HTML", () => {
   it("renders a simple UI", async () => {

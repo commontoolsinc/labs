@@ -7,7 +7,7 @@ import {
   ifElse,
   UI,
   NAME,
-} from "../builder/index.js";
+} from "@commontools/common-builder";
 import { addSuggestion, description } from "../suggestions.js";
 
 interface Playlist {
