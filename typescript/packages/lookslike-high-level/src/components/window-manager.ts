@@ -1,6 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
+import { repeat } from "lit/directives/repeat.js"; // Import repeat directive
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
 import { Gem, ID, UI, NAME } from "../data.js";
@@ -62,52 +63,57 @@ export class CommonWindowManager extends LitElement {
   ];
 
   @property({ type: Array })
-  sagas: CellImpl<Gem>[] = [];
+  sagas: { saga: CellImpl<Gem>; windowId: string }[] = [];
 
   private sagaRefs: Map<string, Ref<HTMLElement>> = new Map();
   private newSagaRefs: [CellImpl<Gem>, Ref<HTMLElement>][] = [];
+  private nextWindowId: number = 0;
 
   override render() {
-    const idCounts: { [key: string]: number } = {};
     return html`
-      ${this.sagas.map((saga) => {
-        const sagaValues = saga.getAsProxy();
-        const sagaId = sagaValues[ID];
-        idCounts[sagaId] ??= 0;
-        const id = sagaId + "#" + idCounts[sagaId]++;
+      ${repeat(
+        this.sagas,
+        (item) => item.windowId,
+        ({ saga, windowId }) => {
+          const sagaValues = saga.getAsProxy();
 
-        // Create a new ref for this saga
-        let sagaRef = this.sagaRefs.get(id);
-        if (!sagaRef) {
-          sagaRef = createRef<HTMLElement>();
-          this.sagaRefs.set(id, sagaRef);
-          this.newSagaRefs.push([saga, sagaRef]);
+          // Create a new ref for this saga
+          let sagaRef = this.sagaRefs.get(windowId);
+          if (!sagaRef) {
+            sagaRef = createRef<HTMLElement>();
+            this.sagaRefs.set(windowId, sagaRef);
+            this.newSagaRefs.push([saga, sagaRef]);
+          }
+
+          return html`
+            <div class="window" id="${windowId}">
+              <button class="close-button" @click="${(e: Event) => this.onClose(e, windowId)}">×</button>
+              <common-screen-element>
+                <common-system-layout>
+                  <div ${ref(sagaRef)}></div>
+                  <div slot="secondary">
+                    <common-annotation
+                      .query=${sagaValues[NAME] ?? ""}
+                      .target=${sagaValues[ID]}
+                      .data=${sagaValues}
+                    ></common-annotation>
+                  </div>
+                  <common-unibox slot="search" value="" placeholder="" label=">"></common-unibox>
+                </common-system-layout>
+              </common-screen-element>
+            </div>
+          `;
         }
-
-        return html`
-          <div class="window" id="${id}">
-            <button class="close-button" @click="${this.onClose}">×</button>
-            <common-screen-element>
-              <common-system-layout>
-                <div ${ref(sagaRef)}></div>
-                <div slot="secondary"><common-annotation .query=${
-                  sagaValues[NAME] ?? ""
-                } .target=${
-          sagaValues[ID]
-        } .data=${sagaValues} ></common-annotation></div>
-                <common-unibox slot="search" value="" placeholder="" label=">">
-              </common-system-layout>
-            </common-screen-element>
-          </div>
-        `;
-      })}
+      )}
     `;
   }
 
   openSaga(sagaId: number) {
     const saga = gemById.get(sagaId) as CellImpl<Gem>;
-    if (!isCell(saga)) throw new Error("Saga ${sagaId} doesn't exist");
-    this.sagas = [...this.sagas, saga];
+    if (!isCell(saga)) throw new Error(`Saga ${sagaId} doesn't exist`);
+    const windowId = `window#${this.nextWindowId++}`;
+    this.sagas = [...this.sagas, { saga, windowId }];
+    
     this.updateComplete.then(() => {
       while (this.newSagaRefs.length > 0) {
         const [saga, sagaRef] = this.newSagaRefs.pop()!;
@@ -127,19 +133,9 @@ export class CommonWindowManager extends LitElement {
     });
   }
 
-  onClose(e: Event) {
-    const id = (e.currentTarget as HTMLElement).parentElement?.id;
-    if (id) {
-      const idCounts: { [key: string]: number } = {};
-
-      this.sagas = this.sagas.filter((saga) => {
-        const sagaId = saga.getAsProxy()[ID];
-
-        idCounts[sagaId] ??= 0;
-        const sagaID = sagaId + "#" + idCounts[sagaId]++;
-        return sagaID !== id;
-      });
-    }
+  onClose(e: Event, windowId: string) {
+    this.sagas = this.sagas.filter(({ windowId: id }) => id !== windowId)
+    this.sagaRefs.delete(windowId)
   }
 
   override connectedCallback() {
