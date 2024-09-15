@@ -14,6 +14,7 @@ import { localSearch } from "./recipes/local-search.js";
 import { luftBnBSearch } from "./recipes/luft-bnb-search.js";
 import { ticket } from "./recipes/ticket.js";
 import { routine } from "./recipes/routine.js";
+import { prompt } from "./recipes/prompt.js";
 
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.js";
@@ -44,6 +45,7 @@ export function addGems(gems: CellImpl<any>[]) {
 }
 
 addGems([
+  run(prompt, { title: "a cute blue betta fish" }),
   run(todoList, {
     title: "My TODOs",
     items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) => ({
@@ -98,10 +100,10 @@ function getFridayAndMondayDateStrings() {
   const daysUntilFriday = (5 - today.getDay() + 7) % 7;
 
   const nextFriday = new Date(
-    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000
+    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000,
   );
   const followingMonday = new Date(
-    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000
+    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000,
   );
 
   const formatDate = (date: Date): string => {
