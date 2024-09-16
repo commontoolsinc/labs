@@ -58,43 +58,52 @@ export class CommonWindowManager extends LitElement {
         background-color: rgba(0, 0, 0, 0.15);
         color: rgba(0, 0, 0, 0.6);
       }
+      @keyframes highlight {
+        0%,
+        100% {
+          box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1),
+            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
+        }
+        50% {
+          box-shadow: 0 0 20px 5px rgba(255, 215, 0, 0.5),
+            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
+        }
+      }
+      .highlight {
+        animation: highlight 1s ease-in-out;
+      }
     `,
   ];
 
   @property({ type: Array })
   sagas: CellImpl<Gem>[] = [];
 
-  private sagaRefs: Map<string, Ref<HTMLElement>> = new Map();
+  private sagaRefs: Map<number, Ref<HTMLElement>> = new Map();
   private newSagaRefs: [CellImpl<Gem>, Ref<HTMLElement>][] = [];
 
   override render() {
-    const idCounts: { [key: string]: number } = {};
     return html`
       ${this.sagas.map((saga) => {
         const sagaValues = saga.getAsProxy();
         const sagaId = sagaValues[ID];
-        idCounts[sagaId] ??= 0;
-        const id = sagaId + "#" + idCounts[sagaId]++;
 
         // Create a new ref for this saga
-        let sagaRef = this.sagaRefs.get(id);
+        let sagaRef = this.sagaRefs.get(sagaId);
         if (!sagaRef) {
           sagaRef = createRef<HTMLElement>();
-          this.sagaRefs.set(id, sagaRef);
+          this.sagaRefs.set(sagaId, sagaRef);
           this.newSagaRefs.push([saga, sagaRef]);
         }
 
         return html`
-          <div class="window" id="${id}">
+          <div class="window" id="window-${sagaId}">
             <button class="close-button" @click="${this.onClose}">×</button>
             <common-screen-element>
               <common-system-layout>
                 <div ${ref(sagaRef)}></div>
                 <div slot="secondary"><common-annotation .query=${
                   sagaValues[NAME] ?? ""
-                } .target=${
-          sagaValues[ID]
-        } .data=${sagaValues} ></common-annotation></div>
+                } .target=${sagaId} .data=${sagaValues} ></common-annotation></div>
                 <common-unibox slot="search" value="" placeholder="" label=">">
               </common-system-layout>
             </common-screen-element>
@@ -106,7 +115,14 @@ export class CommonWindowManager extends LitElement {
 
   openSaga(sagaId: number) {
     const saga = gemById.get(sagaId) as CellImpl<Gem>;
-    if (!isCell(saga)) throw new Error("Saga ${sagaId} doesn't exist");
+    if (!isCell(saga)) throw new Error(`Saga ${sagaId} doesn't exist`);
+
+    const existingWindow = this.renderRoot.querySelector(`#window-${sagaId}`);
+    if (existingWindow) {
+      this.scrollToAndHighlight(sagaId, true);
+      return;
+    }
+
     this.sagas = [...this.sagas, saga];
     this.updateComplete.then(() => {
       while (this.newSagaRefs.length > 0) {
@@ -116,29 +132,33 @@ export class CommonWindowManager extends LitElement {
         render(sagaRef.value!, view);
       }
 
-      const newWindow = this.renderRoot.querySelector(".window:last-child");
-      if (newWindow) {
-        newWindow.scrollIntoView({
-          behavior: "smooth",
-          block: "nearest",
-          inline: "start",
-        });
-      }
+      this.scrollToAndHighlight(sagaId, false);
     });
   }
 
-  onClose(e: Event) {
-    const id = (e.currentTarget as HTMLElement).parentElement?.id;
-    if (id) {
-      const idCounts: { [key: string]: number } = {};
-
-      this.sagas = this.sagas.filter((saga) => {
-        const sagaId = saga.getAsProxy()[ID];
-
-        idCounts[sagaId] ??= 0;
-        const sagaID = sagaId + "#" + idCounts[sagaId];
-        return sagaID !== id;
+  private scrollToAndHighlight(sagaId: number, animate: boolean) {
+    const window = this.renderRoot.querySelector(`#window-${sagaId}`);
+    if (window) {
+      window.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "start",
       });
+      if (animate) {
+        window.classList.add("highlight");
+        setTimeout(() => window.classList.remove("highlight"), 1000);
+      }
+    }
+  }
+
+  onClose(e: Event) {
+    const windowElement = (e.currentTarget as HTMLElement).closest(".window");
+    if (windowElement) {
+      const sagaId = parseInt(windowElement.id.replace("window-", ""), 10);
+      this.sagas = this.sagas.filter(
+        (saga) => saga.getAsProxy()[ID] !== sagaId
+      );
+      this.sagaRefs.delete(sagaId);
     }
   }
 
