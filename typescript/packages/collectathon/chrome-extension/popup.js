@@ -70,11 +70,10 @@ document.addEventListener('DOMContentLoaded', function() {
       container.appendChild(div);
     });
   }
-
   function handleClip() {
     chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
       const url = tabs[0].url;
-      const collections = Array.from(selectedCollections);
+      const collections = Array.from(selectedCollections).map(collection => collection.replace(/[^a-zA-Z0-9-_]/g, ''));
       const prompt = promptInput.value;
 
       if (collections.length === 0) {
@@ -82,21 +81,20 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
 
-      collections.forEach(collection => {
-        fetch(`${API_URL}/clip`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ url, collection, prompt }),
-        })
-        .then(response => response.json())
-        .then(data => {
-          console.log(`Clipped to ${collection}:`, data);
-        })
-        .catch(error => {
-          console.error(`Error clipping to ${collection}:`, error);
-        });
+      fetch(`${API_URL}/clip`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ url, collections, prompt }),
+      })
+      .then(response => response.json())
+      .then(data => {
+        console.log(`Clipped to collections:`, data);
+        window.close();
+      })
+      .catch(error => {
+        console.error(`Error clipping to collections:`, error);
       });
 
       alert(`URL clipped to ${collections.length} collection(s)`);

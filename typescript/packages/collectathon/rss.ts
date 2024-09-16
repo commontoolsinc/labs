@@ -2,14 +2,16 @@ import { getOrCreateCollection } from "./collections.ts";
 import { db } from "./db.ts";
 import { parseFeed } from "./deps.ts";
 
-export async function clipRSS(url: string, collectionName: string) {
+export async function clipRSS(url: string, collections: string[]) {
   try {
     db.query("BEGIN TRANSACTION");
     const response = await fetch(url);
     const xml = await response.text();
     const feed = await parseFeed(xml);
 
-    const collectionId = await getOrCreateCollection(collectionName);
+    const collectionIds = await Promise.all(collections.map(collectionName =>
+      getOrCreateCollection(collectionName)
+    ));
     let itemCount = 0;
 
     for (const item of feed.entries) {
@@ -40,10 +42,12 @@ export async function clipRSS(url: string, collectionName: string) {
       );
       const itemId = result[0][0] as number;
 
-      db.query(
-        "INSERT INTO item_collections (item_id, collection_id) VALUES (?, ?)",
-        [itemId, collectionId],
-      );
+      for (const collectionId of collectionIds) {
+        db.query(
+          "INSERT INTO item_collections (item_id, collection_id) VALUES (?, ?)",
+          [itemId, collectionId],
+        );
+      }
 
       itemCount++;
     }
@@ -51,7 +55,7 @@ export async function clipRSS(url: string, collectionName: string) {
     db.query("COMMIT");
 
     console.log(
-      `Clipped ${itemCount} items from RSS feed to collection: ${collectionName}`,
+      `Clipped ${itemCount} items from RSS feed to collections: ${collections.join(', ')}`,
     );
   } catch (error) {
     db.query("ROLLBACK");

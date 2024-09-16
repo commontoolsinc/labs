@@ -2,6 +2,7 @@ import { Application, Router, oakCors } from "./deps.ts";
 import { clipWebpage } from "./webpage.ts";
 import { db } from "./db.ts";
 import { getOrCreateCollection } from "./collections.ts";
+import { clipUrl } from "./import.ts";
 
 const app = new Application();
 const router = new Router();
@@ -33,11 +34,12 @@ router.post("/clip", async (ctx) => {
   try {
     const body = ctx.request.body();
     if (body.type === "json") {
-      const { url, collection, prompt } = await body.value;
-      if (!url || !collection) {
+      const { url, collections, prompt } = await body.value;
+      if (!url || !collections || collections.length === 0) {
         throw new Error("URL and collection are required");
       }
-      await clipWebpage(url, collection, prompt);
+      console.log("Clipping URL:", url, "to collections:", collections, "with prompt:", prompt);
+      await clipUrl(url, collections, prompt);
       ctx.response.body = { message: "URL clipped successfully" };
     } else {
       throw new Error("Invalid request body");

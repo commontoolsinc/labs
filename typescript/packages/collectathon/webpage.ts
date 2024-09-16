@@ -38,7 +38,7 @@ ${html}
 
 export async function clipWebpage(
   url: string,
-  collectionName: string,
+  collections: string[],
   prompt?: string,
 ) {
   try {
@@ -48,35 +48,40 @@ export async function clipWebpage(
 
     const entities = await extractEntities(html, url, prompt);
 
-    const collectionId = await getOrCreateCollection(collectionName);
-    let itemCount = 0;
+    let totalItemCount = 0;
 
-    for (const entity of entities) {
-      const result = db.query(
-        "INSERT INTO items (url, title, content, raw_content, source) VALUES (?, ?, ?, ?, ?) RETURNING id",
-        [
-          url,
-          `${entity.type} from ${url}`,
-          JSON.stringify(entity),
-          JSON.stringify(entity.content),
-          "Webpage",
-        ],
+    for (const collectionName of collections) {
+      const collectionId = await getOrCreateCollection(collectionName);
+      let itemCount = 0;
+
+      for (const entity of entities) {
+        const result = db.query(
+          "INSERT INTO items (url, title, content, raw_content, source) VALUES (?, ?, ?, ?, ?) RETURNING id",
+          [
+            url,
+            `${entity.type} from ${url}`,
+            JSON.stringify(entity),
+            JSON.stringify(entity.content),
+            "Webpage",
+          ],
+        );
+        const itemId = result[0][0] as number;
+
+        db.query(
+          "INSERT INTO item_collections (item_id, collection_id) VALUES (?, ?)",
+          [itemId, collectionId],
+        );
+
+        itemCount++;
+      }
+
+      console.log(
+        `Clipped ${itemCount} entities from webpage to collection: ${collectionName}`,
       );
-      const itemId = result[0][0] as number;
-
-      db.query(
-        "INSERT INTO item_collections (item_id, collection_id) VALUES (?, ?)",
-        [itemId, collectionId],
-      );
-
-      itemCount++;
+      totalItemCount += itemCount;
     }
 
     db.query("COMMIT");
-
-    console.log(
-      `Clipped ${itemCount} entities from webpage to collection: ${collectionName}`,
-    );
   } catch (error) {
     db.query("ROLLBACK");
     console.error(`Error clipping webpage: ${error.message}`);

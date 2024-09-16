@@ -20,7 +20,7 @@ export async function runCommand(cmd: string[], cwd?: string): Promise<string> {
   }
 }
 
-export async function clipGitHub(url: string, collectionName: string) {
+export async function clipGitHub(url: string, collections: string[]) {
   try {
     db.query("BEGIN TRANSACTION");
     const repoPath = new URL(url).pathname.split("/").slice(-2).join("/");
@@ -31,7 +31,7 @@ export async function clipGitHub(url: string, collectionName: string) {
     console.log(`Cloning repository: ${url}`);
     await runCommand(["git", "clone", url, localPath]);
 
-    const collectionId = await getOrCreateCollection(collectionName);
+    const collectionIds = await Promise.all(collections.map(collectionName => getOrCreateCollection(collectionName)));
     let itemCount = 0;
 
     for await (const entry of walk(localPath, { includeDirs: false })) {
@@ -60,16 +60,18 @@ export async function clipGitHub(url: string, collectionName: string) {
       );
       const itemId = result[0][0] as number;
 
-      await db.query(
-        "INSERT INTO item_collections (item_id, collection_id) VALUES (?, ?)",
-        [itemId, collectionId],
-      );
+      for (const collectionId of collectionIds) {
+        await db.query(
+          "INSERT INTO item_collections (item_id, collection_id) VALUES (?, ?)",
+          [itemId, collectionId],
+        );
+      }
 
       itemCount++;
     }
 
     console.log(
-      `Clipped ${itemCount} files from GitHub repository to collection: ${collectionName}`,
+      `Clipped ${itemCount} files from GitHub repository to collection: ${collections.join(', ')}`,
     );
 
     // Clean up: remove the cloned repository

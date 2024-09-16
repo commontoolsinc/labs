@@ -10,14 +10,11 @@ import {
 } from "./collections.ts";
 import { readLines } from "./deps.ts";
 import { addDreamCommand } from "./dream.ts";
-import { clipGitHub } from "./github.ts";
-import { importFiles } from "./import.ts";
+import { importFiles, clipUrl } from "./import.ts";
 import { deleteItem, editItem, printItem, purge } from "./items.ts";
-import { clipRSS } from "./rss.ts";
 import { addRule, applyRules, deleteRule, listRules } from "./rules.ts";
 import { search } from "./search.ts";
 import { start } from "./server.ts";
-import { clipWebpage } from "./webpage.ts";
 
 function listAPI() {
   console.log("Available commands:");
@@ -64,18 +61,7 @@ async function main() {
               ? rest.slice(promptIndex + 1).join(" ")
               : undefined;
 
-          if (url.includes("github.com")) {
-            await clipGitHub(url, collection);
-          } else if (
-            url.includes(".rss") ||
-            url.includes("/RSS") ||
-            url.includes("/feed") ||
-            url.includes("feedformat=")
-          ) {
-            await clipRSS(url, collection);
-          } else {
-            await clipWebpage(url, collection, prompt);
-          }
+          clipUrl(url, collection, prompt);
         }
         break;
       case "collection":
