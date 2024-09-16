@@ -90,7 +90,6 @@ export const recipes: RecipeManifest[] = [
     recipe: luftBnBSearch,
   },
 ];
-(window as any).recipes = recipes;
 
 // Helper for mock data
 function getFridayAndMondayDateStrings() {
@@ -140,3 +139,6 @@ export function launch(recipe: Recipe, bindings: any) {
   addGems([gem]);
   openSaga(gem.get()[ID]);
 }
+
+(window as any).recipes = recipes;
+(window as any).dataGems = dataGems;
