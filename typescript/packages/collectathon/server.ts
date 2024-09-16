@@ -9,11 +9,41 @@ const router = new Router();
 
 app.use(oakCors()); // Enable CORS for all routes
 
-router.get("/recent-collections", async (ctx) => {
-  const recentCollections = db.query<[string]>(
-    "SELECT DISTINCT name FROM collections ORDER BY id DESC LIMIT 5"
+router.get("/suggested-collections", async (ctx) => {
+  const currentUrl = ctx.request.url.searchParams.get("url");
+  if (!currentUrl) {
+    ctx.response.status = 400;
+    ctx.response.body = { error: "URL parameter is required" };
+    return;
+  }
+
+  const baseUrl = new URL(currentUrl).origin;
+
+  // First, get collections containing items from the same base URL
+  const suggestedCollections = db.query<[string]>(
+    `SELECT DISTINCT c.name
+     FROM collections c
+     JOIN item_collections ic ON c.id = ic.collection_id
+     JOIN items i ON ic.item_id = i.id
+     WHERE i.url LIKE ?
+     LIMIT 5`,
+    [`${baseUrl}%`]
   );
-  ctx.response.body = recentCollections.map(([name]) => name);
+
+  // If we have less than 5 suggested collections, add recent collections to fill the gap
+  if (suggestedCollections.length < 5) {
+    const recentCollections = db.query<[string]>(
+      `SELECT DISTINCT name
+       FROM collections
+       WHERE name NOT IN (${suggestedCollections.map(() => '?').join(',')})
+       ORDER BY id DESC
+       LIMIT ?`,
+      [...suggestedCollections.map(([name]) => name), 5 - suggestedCollections.length]
+    );
+    suggestedCollections.push(...recentCollections);
+  }
+
+  ctx.response.body = suggestedCollections.map(([name]) => name);
 });
 
 router.get("/search-collections", async (ctx) => {

@@ -43,17 +43,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const recentCollections = document.getElementById('recentCollections');
   const searchResults = document.getElementById('searchResults');
 
-  // Load recent collections
-  fetch('http://localhost:8000/recent-collections')
-    .then(response => response.json())
-    .then(collections => {
-      recentCollections.innerHTML = '<h3>Recent Collections</h3>' +
-        collections.map(collection => `
-          <div class="collection-item">
-            <input type="checkbox" id="${collection}" name="${collection}">
-            <label for="${collection}">${collection}</label>
-          </div>
-        `).join('');
+  chrome.tabs.query({active: true, currentWindow: true}, async function(tabs) {
+      const currentUrl = tabs[0].url;
+      // Load recent collections
+      fetch(`http://localhost:8000/suggested-collections?url=${encodeURIComponent(currentUrl)}`)
+        .then(response => response.json())
+        .then(collections => {
+          recentCollections.innerHTML = '<h3>Suggested Collections</h3>' +
+            collections.map(collection => `
+              <div class="collection-item">
+                <input type="checkbox" id="${collection}" name="${collection}">
+                <label for="${collection}">${collection}</label>
+              </div>
+            `).join('');
+        });
     });
 
   // Search collections
