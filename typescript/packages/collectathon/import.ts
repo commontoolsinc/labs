@@ -53,8 +53,8 @@ export async function importFiles(
       `Imported ${itemCount} new file(s) and updated ${updatedCount} existing file(s) in collection: ${collectionName}`,
     );
   } catch (error) {
-    db.query("ROLLBACK");
     console.error(`Error importing files: ${error.message}`);
+    db.query("ROLLBACK");
   }
 }
 
@@ -90,7 +90,7 @@ async function processFile(
   };
 
   // Check if the file already exists in the database
-  const existingItem = db.query<[number]>(
+  const existingItem = await db.query<[number]>(
     "SELECT id FROM items WHERE url = ?",
     [fileUrl],
   );
@@ -98,13 +98,13 @@ async function processFile(
   if (existingItem.length > 0) {
     // Update existing record
     const itemId = existingItem[0][0];
-    db.query(
+    await db.query(
       "UPDATE items SET title = ?, content = ?, raw_content = ? WHERE id = ?",
       [relativePath, JSON.stringify(contentJson), content, itemId],
     );
 
     // Ensure the item is associated with the current collection
-    db.query(
+    await db.query(
       "INSERT OR IGNORE INTO item_collections (item_id, collection_id) VALUES (?, ?)",
       [itemId, collectionId],
     );
@@ -112,7 +112,7 @@ async function processFile(
     return "updated";
   } else {
     // Insert new record
-    const result = db.query(
+    const result = await db.query(
       "INSERT INTO items (url, title, content, raw_content, source) VALUES (?, ?, ?, ?, ?) RETURNING id",
       [
         fileUrl,
@@ -124,7 +124,7 @@ async function processFile(
     );
     const itemId = result[0][0] as number;
 
-    db.query(
+    await db.query(
       "INSERT INTO item_collections (item_id, collection_id) VALUES (?, ?)",
       [itemId, collectionId],
     );

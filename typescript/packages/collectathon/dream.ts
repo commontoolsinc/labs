@@ -78,7 +78,7 @@ ${JSON.stringify(items, null, 2)}
 Item Shape:
 ${itemShape}
 
-Generate a single new item that follows the same structure but introduces new, creative content. Return only the JSON object for the new item, without any explanation or additional text.`;
+Generate a single new item that follows the same structure but introduces a creative twist inspired by synthesising ideas from multiple games. Return only the JSON object for the new item, without any explanation or additional text.`;
 
   const messages: CoreMessage[] = [
     { role: "system", content: systemPrompt },

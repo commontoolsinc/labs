@@ -22,6 +22,7 @@ export async function runCommand(cmd: string[], cwd?: string): Promise<string> {
 
 export async function clipGitHub(url: string, collectionName: string) {
   try {
+    db.query("BEGIN TRANSACTION");
     const repoPath = new URL(url).pathname.split("/").slice(-2).join("/");
     const localPath = `./temp/${repoPath}`;
 
@@ -29,8 +30,6 @@ export async function clipGitHub(url: string, collectionName: string) {
 
     console.log(`Cloning repository: ${url}`);
     await runCommand(["git", "clone", url, localPath]);
-
-    db.query("BEGIN TRANSACTION");
 
     const collectionId = await getOrCreateCollection(collectionName);
     let itemCount = 0;
@@ -49,7 +48,7 @@ export async function clipGitHub(url: string, collectionName: string) {
         content: content,
       };
 
-      const result = db.query(
+      const result = await db.query(
         "INSERT INTO items (url, title, content, raw_content, source) VALUES (?, ?, ?, ?, ?) RETURNING id",
         [
           `${url}/blob/main/${relativePath}`,
@@ -61,7 +60,7 @@ export async function clipGitHub(url: string, collectionName: string) {
       );
       const itemId = result[0][0] as number;
 
-      db.query(
+      await db.query(
         "INSERT INTO item_collections (item_id, collection_id) VALUES (?, ?)",
         [itemId, collectionId],
       );
@@ -69,16 +68,16 @@ export async function clipGitHub(url: string, collectionName: string) {
       itemCount++;
     }
 
-    db.query("COMMIT");
-
     console.log(
       `Clipped ${itemCount} files from GitHub repository to collection: ${collectionName}`,
     );
 
     // Clean up: remove the cloned repository
     await Deno.remove(localPath, { recursive: true });
+
+    db.query("COMMIT");
   } catch (error) {
-    db.query("ROLLBACK");
     console.error(`Error clipping GitHub repository: ${error.message}`);
+    db.query("ROLLBACK");
   }
 }
