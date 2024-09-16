@@ -14,7 +14,7 @@ const addTask = handler<{ detail: { message: string } }, { items: TodoItem[] }>(
 );
 
 const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
-  ({ detail }, state) => (state.title = detail.value)
+  ({ detail }, state) => (state.title = detail?.value ?? "untitled")
 );
 
 const updateItem = handler<
@@ -39,7 +39,6 @@ export const todoList = recipe<{
           value=${title}
           placeholder="List title"
           oncommon-input=${updateTitle({ title })}
-          @common-input#value=${title}
         ></common-input>
         <common-vstack gap="sm">
           ${items.map(
