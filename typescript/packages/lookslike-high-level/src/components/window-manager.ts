@@ -136,7 +136,7 @@ export class CommonWindowManager extends LitElement {
         const sagaId = saga.getAsProxy()[ID];
 
         idCounts[sagaId] ??= 0;
-        const sagaID = sagaId + "#" + idCounts[sagaId]++;
+        const sagaID = sagaId + "#" + idCounts[sagaId];
         return sagaID !== id;
       });
     }
