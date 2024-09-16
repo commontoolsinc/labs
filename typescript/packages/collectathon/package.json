@@ -7,7 +7,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run main.ts",
+    "start": "./start.sh",
     "build": "wireit",
     "clean": "wireit"
   },

@@ -3,11 +3,32 @@ import { extractEntities } from "./webpage.ts";
 import { db } from "./db.ts";
 import { getOrCreateCollection } from "./collections.ts";
 import { clipUrl } from "./import.ts";
+import { views } from "./view.ts";
 
 const app = new Application();
 const router = new Router();
 
 app.use(oakCors()); // Enable CORS for all routes
+
+router.get("/view/:collection/:viewId", (ctx) => {
+  const { collection, viewId } = ctx.params;
+  const result = db.query<[string]>(
+    "SELECT html FROM views WHERE id = ? AND collection = ?",
+    [viewId, collection]
+  );
+
+  if (result.length > 0) {
+    const [html] = result[0];
+    ctx.response.type = "text/html";
+    ctx.response.body = html;
+
+    // Optionally, remove the view after serving it
+    // db.query("DELETE FROM views WHERE id = ?", [viewId]);
+  } else {
+    ctx.response.status = 404;
+    ctx.response.body = "View not found";
+  }
+});
 
 router.get("/suggested-collections", async (ctx) => {
   const currentUrl = ctx.request.url.searchParams.get("url");
@@ -120,4 +141,8 @@ app.use(router.allowedMethods());
 export async function start() {
   console.log("Server running on http://localhost:8000");
   await app.listen({ port: 8000 });
+}
+
+if (import.meta.main) {
+  start();
 }

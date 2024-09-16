@@ -40,3 +40,12 @@ db.execute(`
     target_collection TEXT
   )
 `);
+
+db.execute(`
+  CREATE TABLE IF NOT EXISTS views (
+    id TEXT PRIMARY KEY,
+    collection TEXT,
+    html TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);

@@ -23,6 +23,15 @@ export function grabJson(txt: string) {
   return JSON.parse(json);
 }
 
+export function grabHtml(txt: string) {
+  const html = txt.match(/```html\n([\s\S]+?)```/)?.[1];
+  if (!html) {
+    console.error("No HTML found in text", txt);
+    return ""
+  }
+  return html;
+}
+
 export async function chat(
   system: string,
   messages: CoreMessage[],

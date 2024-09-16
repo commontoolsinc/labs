@@ -15,6 +15,8 @@ import { deleteItem, editItem, printItem, purge } from "./items.ts";
 import { addRule, applyRules, deleteRule, listRules } from "./rules.ts";
 import { search } from "./search.ts";
 import { start } from "./server.ts";
+import { handleViewCommand } from "./view.ts";
+import { open } from "https://deno.land/x/open@v0.0.5/index.ts";
 
 function listAPI() {
   console.log("Available commands:");
@@ -38,6 +40,7 @@ function listAPI() {
   console.log("  search <QUERY>");
   console.log("  action <COLLECTION> <PROMPT>");
   console.log("  dream <COLLECTION>");
+  console.log("  view <COLLECTION> <PROMPT>");
   console.log("  exit");
 }
 
@@ -231,6 +234,15 @@ async function main() {
       case "dream":
         addDreamCommand(args);
         break;
+      case "view":
+        if (args.length < 2) {
+          console.log("Usage: view <COLLECTION> <INITIAL_PROMPT>");
+        } else {
+          const collection = args.shift()!;
+          const initialPrompt = args.join(" ");
+          await handleViewCommand(collection, initialPrompt);
+        }
+        break;
       case "exit":
         console.log("Goodbye!");
         Deno.exit(0);
@@ -244,5 +256,4 @@ async function main() {
 
 if (import.meta.main) {
   main();
-  start();
 }
