@@ -1,7 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
-import { repeat } from "lit/directives/repeat.js"; // Import repeat directive
+import { repeat } from "lit/directives/repeat.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
 import { Gem, ID, UI, NAME } from "../data.js";
