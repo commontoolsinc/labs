@@ -3,7 +3,7 @@ import { customElement, property } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
-import { Gem, ID, UI, NAME } from "../data.js";
+import { Gem, ID, UI, NAME, addGems } from "../data.js";
 import { CellImpl, isCell, gemById } from "@commontools/common-runner";
 
 @customElement("common-window-manager")
@@ -116,6 +116,8 @@ export class CommonWindowManager extends LitElement {
   openSaga(sagaId: number) {
     const saga = gemById.get(sagaId) as CellImpl<Gem>;
     if (!isCell(saga)) throw new Error(`Saga ${sagaId} doesn't exist`);
+
+    addGems([saga]); // Make sure any shows gem is in the list of gems
 
     const existingWindow = this.renderRoot.querySelector(`#window-${sagaId}`);
     if (existingWindow) {

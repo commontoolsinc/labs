@@ -39,8 +39,14 @@ export function isGem(value: any): value is Gem {
 
 export const dataGems = cell<CellImpl<Gem>[]>([]);
 
-export function addGems(gems: CellImpl<any>[]) {
-  dataGems.send([...dataGems.get(), ...gems]);
+export function addGems(newGems: CellImpl<any>[]) {
+  const currentGems = dataGems.get();
+  const currentIds = new Set(currentGems.map((gem) => gem.get()[ID]));
+  const gemsToAdd = newGems.filter((gem) => !currentIds.has(gem.get()[ID]));
+
+  if (gemsToAdd.length > 0) {
+    dataGems.send([...currentGems, ...gemsToAdd]);
+  }
 }
 
 addGems([
@@ -136,7 +142,6 @@ export function launch(recipe: Recipe, bindings: any) {
     );
   }
   const gem = run(recipe, bindings);
-  addGems([gem]);
   openSaga(gem.get()[ID]);
 }
 
