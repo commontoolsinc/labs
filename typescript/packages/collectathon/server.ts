@@ -1,5 +1,5 @@
 import { Application, Router, oakCors } from "./deps.ts";
-import { clipWebpage } from "./webpage.ts";
+import { extractEntities } from "./webpage.ts";
 import { db } from "./db.ts";
 import { getOrCreateCollection } from "./collections.ts";
 import { clipUrl } from "./import.ts";
@@ -34,13 +34,21 @@ router.post("/clip", async (ctx) => {
   try {
     const body = ctx.request.body();
     if (body.type === "json") {
-      const { url, collections, prompt } = await body.value;
+      const { url, collections, prompt, content } = await body.value;
       if (!url || !collections || collections.length === 0) {
         throw new Error("URL and collection are required");
       }
-      console.log("Clipping URL:", url, "to collections:", collections, "with prompt:", prompt);
-      await clipUrl(url, collections, prompt);
-      ctx.response.body = { message: "URL clipped successfully" };
+      console.log("Clipping content:", content, "to collections:", collections, "with prompt:", prompt);
+
+      let entities;
+      if (content.type === 'webpage') {
+        await clipUrl(url, collections, prompt);
+      } else {
+        entities = await extractEntities(JSON.stringify(content), url, prompt);
+        await saveEntities(entities, collections);
+      }
+
+      ctx.response.body = { message: "Content clipped successfully" };
     } else {
       throw new Error("Invalid request body");
     }
@@ -50,6 +58,31 @@ router.post("/clip", async (ctx) => {
     ctx.response.body = { error: error.message };
   }
 });
+
+async function saveEntities(entities: any[], collections: string[]) {
+  const collectionIds = await Promise.all(collections.map(collectionName => getOrCreateCollection(collectionName)));
+
+  for (const entity of entities) {
+    const result = await db.query(
+      "INSERT INTO items (url, title, content, raw_content, source) VALUES (?, ?, ?, ?, ?) RETURNING id",
+      [
+        entity.url || "",
+        entity.title || `${entity.type} from clipped content`,
+        JSON.stringify(entity),
+        JSON.stringify(entity.content),
+        "Clipped Content",
+      ],
+    );
+    const itemId = result[0][0] as number;
+
+    for (const collectionId of collectionIds) {
+      await db.query(
+        "INSERT INTO item_collections (item_id, collection_id) VALUES (?, ?)",
+        [itemId, collectionId],
+      );
+    }
+  }
+}
 
 app.use(router.routes());
 app.use(router.allowedMethods());

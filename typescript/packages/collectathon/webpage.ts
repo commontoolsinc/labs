@@ -2,7 +2,7 @@ import { getOrCreateCollection } from "./collections.ts";
 import { db } from "./db.ts";
 import { completion, fastCompletion } from "./llm.ts";
 
-async function extractEntities(html: string, url: string, prompt?: string) {
+export async function extractEntities(html: string, url: string, prompt?: string) {
   const systemPrompt =
     "You are an expert at extracting structured data from web pages. You respond only with the entities extracted, no commentary.";
   const userPrompt = `

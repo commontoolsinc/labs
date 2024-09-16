@@ -2,10 +2,15 @@
   "manifest_version": 3,
   "name": "Collectathon Clipper",
   "version": "1.0",
-  "description": "Clip URLs to Collectathon",
+  "description": "Clip URLs and selected content to Collectathon",
   "permissions": [
-    "activeTab"
+    "activeTab",
+    "contextMenus",
+    "storage"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html"
   }
