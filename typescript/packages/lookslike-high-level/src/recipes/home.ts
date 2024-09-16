@@ -2,10 +2,8 @@ import { html } from "@commontools/common-html";
 import { recipe, lift, ID, UI } from "@commontools/common-builder";
 import { Gem, RecipeManifest } from "../data.js";
 
-const getIDsForSagasWithUI = lift((sagas: Gem[]) =>
-  sagas
-    .filter((saga) => saga[UI]) // Only show sagas with UI
-    .map((saga) => ({ id: saga[ID] }))
+const getSagasWithUI = lift(
+  (sagas: Gem[]) => sagas.filter((saga) => UI in saga) // Only show sagas with UI
 );
 
 export const home = recipe<{
@@ -14,8 +12,9 @@ export const home = recipe<{
 }>("home screen", ({ sagas, recipes }) => {
   return {
     [UI]: html`<common-vstack
-      >${getIDsForSagasWithUI(sagas).map(
-        (saga) => html`<div><common-saga-link saga=${saga.id}></sagaLink></div>`
+      >${getSagasWithUI(sagas).map(
+        (saga) =>
+          html`<div><common-saga-link saga=${saga[ID]}></sagaLink></div>`
       )}
       ${recipes.map(
         (recipe) =>
