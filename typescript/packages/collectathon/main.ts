@@ -16,6 +16,7 @@ import { deleteItem, editItem, printItem, purge } from "./items.ts";
 import { clipRSS } from "./rss.ts";
 import { addRule, applyRules, deleteRule, listRules } from "./rules.ts";
 import { search } from "./search.ts";
+import { start } from "./server.ts";
 import { clipWebpage } from "./webpage.ts";
 
 function listAPI() {
@@ -257,4 +258,5 @@ async function main() {
 
 if (import.meta.main) {
   main();
+  start();
 }
