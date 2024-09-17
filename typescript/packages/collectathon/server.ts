@@ -164,8 +164,8 @@ async function saveEntities(entities: any[], collections: string[]) {
 
 // Collection routes
 router.get("/collections", async (ctx) => {
-  await listCollections();
-  ctx.response.body = { message: "Collections listed in console" };
+  const result = await listCollections();
+  ctx.response.body = result;
 });
 
 router.delete("/collections/:name", async (ctx) => {
@@ -190,8 +190,8 @@ router.put("/collections/:name/move", async (ctx) => {
 // Item routes
 router.get("/collections/:name/items", async (ctx) => {
   const { name } = ctx.params;
-  await listItems(name);
-  ctx.response.body = { message: `Items listed for collection ${name} in console` };
+  const items = await listItems(name);
+  ctx.response.body = items
 });
 
 router.get("/items/:id", (ctx) => {
@@ -314,8 +314,8 @@ app.use(router.routes());
 app.use(router.allowedMethods());
 
 export async function start() {
-  console.log("Server running on http://localhost:8000");
-  await app.listen({ port: 8000 });
+  console.log("Server running on http://localhost:8001");
+  await app.listen({ port: 8001 });
 }
 
 if (import.meta.main) {

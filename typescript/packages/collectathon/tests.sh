@@ -2,7 +2,7 @@
 
 # Test script for Collectathon Web API
 
-BASE_URL="http://localhost:8000"
+BASE_URL="http://localhost:8001"
 
 # Colors for output
 GREEN='\033[0;32m'

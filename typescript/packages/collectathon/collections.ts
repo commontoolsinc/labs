@@ -35,6 +35,14 @@ export async function listCollections() {
 
   console.log("Collections:");
   console.log(t.toString());
+
+  const formattedCollections = collections.map((collection) => ({
+    id: collection[0],
+    name: collection[1],
+    itemCount: collection[2]
+  }));
+
+  return formattedCollections;
 }
 
 export async function listItems(collectionName: string) {
@@ -64,8 +72,15 @@ export async function listItems(collectionName: string) {
     t.cell("Snippet", item[2]);
     t.newRow();
   });
-
   console.log(t.toString());
+
+  const formattedItems = items.map((item) => ({
+    id: item[0],
+    title: item[1],
+    snippet: item[2]
+  }));
+
+  return formattedItems;
 }
 
 export async function addItemToCollection(
