@@ -1,5 +1,5 @@
 import { db } from "./db.ts";
-import { chat } from "./llm.ts";
+import { chat, smart } from "./llm.ts";
 import { CoreMessage } from "npm:ai@3.3.21";
 import { extractJsonShape } from "./schema.ts";
 import { getOrCreateCollection, addItemToCollection } from "./collections.ts";
@@ -68,8 +68,6 @@ export async function handleDreamCommand(collectionName: string) {
 }
 
 async function generateNewItem(items: any[], itemShape: string): Promise<any> {
-  const systemPrompt =
-    "You are an expert at generating creative and novel content based on existing data patterns.";
   const userMessage = `Given the following array of items and their shape, generate a new item that fits within the set but contains novel ideas or data:
 
 Items:
@@ -78,15 +76,15 @@ ${JSON.stringify(items, null, 2)}
 Item Shape:
 ${itemShape}
 
-Generate a single new item that follows the same structure but introduces a creative twist inspired by synthesising ideas from multiple games. Return only the JSON object for the new item, without any explanation or additional text.`;
+Generate a single new item that fits in the collection. Return only the JSON object for the new item, without any explanation or additional text.`;
 
   const messages: CoreMessage[] = [
-    { role: "system", content: systemPrompt },
     { role: "user", content: userMessage },
   ];
 
-  const response = await chat(systemPrompt, messages, true);
-  return JSON.parse(response);
+  console.log("Dreaming...");
+  const response = await smart(messages, false);
+  return response;
 }
 
 export function addDreamCommand(args: string[]) {

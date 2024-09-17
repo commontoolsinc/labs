@@ -4,7 +4,7 @@ import { completion, fastCompletion } from "./llm.ts";
 
 export async function extractEntities(html: string, url: string, prompt?: string) {
   const systemPrompt =
-    "You are an expert at extracting structured data from web pages. You respond only with the entities extracted, no commentary.";
+    "You are an expert at extracting structured data from web pages. You respond only with the entities extracted as JSON in a ``json``` markdown block, no commentary.";
   const userPrompt = `
 Extract entities from this HTML content. Include:
 ${

@@ -1,11 +1,14 @@
 import { CoreMessage } from "npm:ai@3.3.21";
-import { ai, anthropic } from "./deps.ts";
-const streamText = ai.streamText;
+import { ai, anthropic, openai } from "./deps.ts";
+const { streamText, generateText } = ai;
 
 const SONNET = "claude-3-5-sonnet-20240620";
 const HAIKU = "claude-3-haiku-20240307";
+const O1_MINI = "o1-mini";
+const O1_PREVIEW = "o1-preview";
 const model = anthropic(SONNET);
 const fastModel = anthropic(HAIKU);
+const smartModel = openai(O1_PREVIEW);
 
 export function grabJson(txt: string) {
   // try parsing whole string first
@@ -41,6 +44,7 @@ export async function chat(
     model: model,
     system,
     messages,
+    temperature: 1.0
   });
 
   let message = "";
@@ -92,4 +96,17 @@ export async function fastCompletion(
 
   const analysis = grabJson(message);
   return analysis;
+}
+
+export async function smart(
+  messages: CoreMessage[],
+  silent = false,
+) {
+  const result = await generateText({
+    model: smartModel,
+    messages,
+    temperature: 1.0,
+  });
+
+  return grabJson(result.text);
 }
