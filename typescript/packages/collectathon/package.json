@@ -8,6 +8,8 @@
   "type": "module",
   "scripts": {
     "start": "./start.sh",
+    "server": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run server.ts",
+    "cli": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run main.ts",
     "build": "wireit",
     "clean": "wireit"
   },
