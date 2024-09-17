@@ -23,6 +23,7 @@ import {
   getCellReferenceOrThrow,
   isCellProxyForDereferencing,
 } from "@commontools/common-runner";
+import { fetchCollections } from "./recipes/fetchCollections.js";
 
 export type Gem = {
   [ID]: number;
@@ -53,6 +54,8 @@ export function addGems(newGems: CellImpl<any>[]) {
 addGems([
   run(fetchExample, {
     url: "https://anotherjesse-restfuljsonblobapi.web.val.run/items" }),
+  run(fetchCollections, {
+    url: "/api/data/collections/hn/items" }),
   run(todoList, {
     title: "My TODOs",
     items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) => ({
