@@ -77,8 +77,8 @@ export const playlistForTrip = recipe<{
 addSuggestion({
   description: description`Make a playlist for ${"ticket"}`,
   recipe: playlistForTrip,
-  bindings: { sagas: "sagas" },
-  dataGems: {
+  bindings: { charms: "charms" },
+  charms: {
     ticket: "ticket",
     booking: "booking",
   },

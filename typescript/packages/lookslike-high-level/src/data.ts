@@ -14,8 +14,8 @@ import { localSearch } from "./recipes/local-search.js";
 import { luftBnBSearch } from "./recipes/luft-bnb-search.js";
 import { ticket } from "./recipes/ticket.js";
 import { routine } from "./recipes/routine.js";
-import { fetchExample } from "./recipes/fetchExample.js"
-import { counter } from "./recipes/counter.js"
+import { fetchExample } from "./recipes/fetchExample.js";
+import { counter } from "./recipes/counter.js";
 
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.js";
@@ -26,37 +26,42 @@ import {
 } from "@commontools/common-runner";
 import { fetchCollections } from "./recipes/fetchCollections.js";
 
-export type Gem = {
+export type Charm = {
   [ID]: number;
   [NAME]?: string;
   [UI]?: any;
+  [TYPE]?: string;
   [key: string]: any;
 };
 
 export { ID, TYPE, NAME, UI };
 
 // TODO: TYPE is now obsolete. Do we still need this?
-export function isGem(value: any): value is Gem {
+export function isCharm(value: any): value is Charm {
   return isCell(value) && ID in value.get() && TYPE in value.get();
 }
 
-export const dataGems = cell<CellImpl<Gem>[]>([]);
+export const charms = cell<CellImpl<Charm>[]>([]);
 
-export function addGems(newGems: CellImpl<any>[]) {
-  const currentGems = dataGems.get();
-  const currentIds = new Set(currentGems.map((gem) => gem.get()[ID]));
-  const gemsToAdd = newGems.filter((gem) => !currentIds.has(gem.get()[ID]));
+export function addCharms(newCharms: CellImpl<any>[]) {
+  const currentCharms = charms.get();
+  const currentIds = new Set(currentCharms.map((charm) => charm.get()[ID]));
+  const charmsToAdd = newCharms.filter(
+    (charm) => !currentIds.has(charm.get()[ID])
+  );
 
-  if (gemsToAdd.length > 0) {
-    dataGems.send([...currentGems, ...gemsToAdd]);
+  if (charmsToAdd.length > 0) {
+    charms.send([...currentCharms, ...charmsToAdd]);
   }
 }
 
-addGems([
+addCharms([
   run(fetchExample, {
-    url: "https://anotherjesse-restfuljsonblobapi.web.val.run/items" }),
+    url: "https://anotherjesse-restfuljsonblobapi.web.val.run/items",
+  }),
   run(fetchCollections, {
-    url: "/api/data/collections/hn/items" }),
+    url: "/api/data/collections/hn/items",
+  }),
   run(todoList, {
     title: "My TODOs",
     items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) => ({
@@ -131,11 +136,11 @@ function getFridayAndMondayDateStrings() {
   };
 }
 
-// Terrible hack to open a saga from a recipe
-let openSagaOpener: (sagaId: number) => void = () => {};
-export const openSaga = (sagaId: number) => openSagaOpener(sagaId);
-openSaga.set = (opener: (sagaId: number) => void) => {
-  openSagaOpener = opener;
+// Terrible hack to open a charm from a recipe
+let openCharmOpener: (charmId: number) => void = () => {};
+export const openCharm = (charmId: number) => openCharmOpener(charmId);
+openCharm.set = (opener: (charmId: number) => void) => {
+  openCharmOpener = opener;
 };
 
 export function launch(recipe: Recipe, bindings: any) {
@@ -153,9 +158,9 @@ export function launch(recipe: Recipe, bindings: any) {
       ])
     );
   }
-  const gem = run(recipe, bindings);
-  openSaga(gem.get()[ID]);
+  const charm = run(recipe, bindings);
+  openCharm(charm.get()[ID]);
 }
 
 (window as any).recipes = recipes;
-(window as any).dataGems = dataGems;
+(window as any).charms = charms;

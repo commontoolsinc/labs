@@ -2,15 +2,15 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { render } from "@commontools/common-ui";
 import { NAME } from "../data.js";
-import { gemById, isReactive } from "@commontools/common-runner";
+import { charmById, isReactive } from "@commontools/common-runner";
 
-export const sagaLink = render.view("common-saga-link", {
-  saga: { type: "object" },
+export const charmLink = render.view("common-charm-link", {
+  charm: { type: "object" },
   name: { type: "string" },
 });
 
-@customElement("common-saga-link")
-export class CommonSagaLink extends LitElement {
+@customElement("common-charm-link")
+export class CommonCharmLink extends LitElement {
   static override styles = css`
     a {
       color: #3366cc;
@@ -22,13 +22,13 @@ export class CommonSagaLink extends LitElement {
   `;
 
   @property({ type: Number })
-  saga: number | undefined = undefined;
+  charm: number | undefined = undefined;
 
   @property({ type: String })
   name: string | undefined = undefined;
 
   private nameEffect: (() => void) | undefined;
-  private nameFromGem: string | undefined;
+  private nameFromCharm: string | undefined;
 
   override connectedCallback() {
     super.connectedCallback();
@@ -42,34 +42,34 @@ export class CommonSagaLink extends LitElement {
 
   override updated(changedProperties: Map<string | number | symbol, unknown>) {
     super.updated(changedProperties);
-    if (changedProperties.has("saga")) {
+    if (changedProperties.has("charm")) {
       this.maybeListenToName(true);
     }
   }
 
   private maybeListenToName(skipUpdate = false) {
-    const saga = this.saga !== undefined && gemById.get(this.saga);
-    if (!saga) return;
+    const charm = this.charm !== undefined && charmById.get(this.charm);
+    if (!charm) return;
 
-    let name = saga.asSimpleCell().get()[NAME];
+    let name = charm.asSimpleCell().get()[NAME];
 
     if (isReactive(name)) {
       this.nameEffect = name.sink((name: string) => {
-        this.nameFromGem = name;
+        this.nameFromCharm = name;
         if (!skipUpdate) this.requestUpdate();
         skipUpdate = false;
       });
     } else {
       this.nameEffect?.();
-      this.nameFromGem = name;
+      this.nameFromCharm = name;
     }
   }
 
   handleClick(e: Event) {
     e.preventDefault();
     this.dispatchEvent(
-      new CustomEvent("open-saga", {
-        detail: { sagaId: this.saga },
+      new CustomEvent("open-charm", {
+        detail: { charmId: this.charm },
         bubbles: true,
         composed: true,
       })
@@ -77,13 +77,13 @@ export class CommonSagaLink extends LitElement {
   }
 
   override render() {
-    if (this.saga === undefined) return html``;
-    const saga = gemById.get(this.saga);
-    if (!saga) return html`<div>⚠️ (unknown saga)</div>`;
+    if (this.charm === undefined) return html``;
+    const charm = charmById.get(this.charm);
+    if (!charm) return html`<div>⚠️ (unknown charm)</div>`;
 
-    const name = this.name ?? this.nameFromGem ?? "(unknown)";
+    const name = this.name ?? this.nameFromCharm ?? "(unknown)";
     return html`
-      <a href="#${this.saga}" @click="${this.handleClick}">💎 ${name}</a>
+      <a href="#${this.charm}" @click="${this.handleClick}">💎 ${name}</a>
     `;
   }
 }

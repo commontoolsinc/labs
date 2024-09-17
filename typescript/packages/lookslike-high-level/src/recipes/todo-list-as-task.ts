@@ -30,7 +30,7 @@ export const todoListAsTask = recipe<{
       <summary>
         <common-vstack gap="sm">
           <span>${getListSummary(list.items)}</span>
-          <common-saga-link saga=${list[ID]} />
+          <common-charm-link charm=${list[ID]} />
         </common-vstack>
       </summary>
       ${list[UI]}
@@ -42,7 +42,7 @@ addSuggestion({
   description: description`Add 💎${"list"} as sub tasks`,
   recipe: todoListAsTask,
   bindings: { task: "task" },
-  dataGems: {
+  charms: {
     list: "todo list",
   },
 });

@@ -281,7 +281,7 @@ const makeLuftBnBSearch = recipe<{
       <vstack gap="sm">
         ${describeFirstResult({ places: luftBnB.places, startDate, endDate })}
         Or search for other places:
-        <common-saga-link saga=${luftBnB[ID]} />
+        <common-charm-link charm=${luftBnB[ID]} />
       </vstack>
     `,
     reservation,
@@ -293,7 +293,7 @@ addSuggestion({
   description: description`Book LuftBnB for ${"reservation"}`,
   recipe: makeLuftBnBSearch,
   bindings: { task: "task" },
-  dataGems: {
+  charms: {
     reservation: "ticket",
   },
 });
@@ -365,7 +365,7 @@ addSuggestion({
   description: description`Find nearby places for ${"routine"}`,
   recipe: nearbyPlacesForRoutine,
   bindings: { places: "places" },
-  dataGems: {
+  charms: {
     routine: "routine",
   },
 });

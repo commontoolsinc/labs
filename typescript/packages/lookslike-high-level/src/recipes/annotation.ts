@@ -11,41 +11,41 @@ import {
   ifElse,
   generateData,
 } from "@commontools/common-builder";
-import { type Gem, openSaga } from "../data.js";
+import { type Charm, openCharm } from "../data.js";
 import {
   run,
-  gemById,
+  charmById,
   getCellReferenceOrValue,
 } from "@commontools/common-runner";
 import { suggestions } from "../suggestions.js";
 
 const MINIMUM_CONFIDENCE = -1.0;
 
-type GemInfo = { id: number; name: string; type: string };
+type CharmInfo = { id: number; name: string; type: string };
 
 // Lifted functions at module scope
-const getGemInfo = lift(({ gems }) => {
-  const gemInfo: GemInfo[] = [];
-  for (let i = 0; i < gems.length; i++) {
-    gemInfo.push({
-      id: Number(gems[i][ID]),
-      name: String(gems[i][NAME] ?? "unknown"),
-      type: String(gems[i][TYPE]),
+const getCharmInfo = lift(({ charms }) => {
+  const charmInfo: CharmInfo[] = [];
+  for (let i = 0; i < charms.length; i++) {
+    charmInfo.push({
+      id: Number(charms[i][ID]),
+      name: String(charms[i][NAME] ?? "unknown"),
+      type: String(charms[i][TYPE]),
     });
   }
-  return gemInfo;
+  return charmInfo;
 });
 
 const buildPrompt = lift(
-  ({ query, gemInfo }) =>
-    `Given the following user query and list of data gems, return the indices of the gems that are most relevant to the query.
-Consider both the names and types of the gems when making your selection.
-Think broadly, e.g. a stay in a hotel could match a gem called "morning routine", as the user would want to pick a hotel that supports their morning routine.
+  ({ query, charmInfo }) =>
+    `Given the following user query and list of data charms, return the indices of the charms that are most relevant to the query.
+Consider both the names and types of the charms when making your selection.
+Think broadly, e.g. a stay in a hotel could match a charm called "morning routine", as the user would want to pick a hotel that supports their morning routine.
 
 User query: "${query}"
 
 Data:
-${JSON.stringify(gemInfo, null, 2)}
+${JSON.stringify(charmInfo, null, 2)}
 
 Respond with only JSON array of suggestions, e.g.
 
@@ -57,26 +57,26 @@ notalk;justgo
 `
 );
 
-const filterMatchingGems = lift<{
+const filterMatchingCharms = lift<{
   matchedIndices: { index: number; confidence: number }[];
-  gemInfo: GemInfo[];
+  charmInfo: CharmInfo[];
 }>(
-  ({ matchedIndices, gemInfo }) =>
+  ({ matchedIndices, charmInfo }) =>
     (matchedIndices ?? [])
       .filter((item) => item.confidence > MINIMUM_CONFIDENCE)
-      .map((item) => gemInfo.find((gem) => gem.id === item.index))
-      .filter((gem) => gem !== undefined)
-      .filter((gem) => gem.id !== 0) // TODO: HACK - ignore first todo list
+      .map((item) => charmInfo.find((charm) => charm.id === item.index))
+      .filter((charm) => charm !== undefined)
+      .filter((charm) => charm.id !== 0) // TODO: HACK - ignore first todo list
 );
 
 const findSuggestion = lift<{
-  matchingGems: GemInfo[];
+  matchingCharms: CharmInfo[];
   data: { [key: string]: any };
-}>(({ matchingGems, data }) => {
+}>(({ matchingCharms, data }) => {
   const suggestion = suggestions.find(
     (suggestion) =>
-      Object.values(suggestion.dataGems ?? {}).every((type) =>
-        matchingGems.find((gem) => gem.type === type)
+      Object.values(suggestion.charms ?? {}).every((type) =>
+        matchingCharms.find((charm) => charm.type === type)
       ) &&
       Object.values(suggestion.bindings ?? {}).every((binding) =>
         Object.keys(data ?? {}).includes(binding)
@@ -84,16 +84,16 @@ const findSuggestion = lift<{
   );
 
   if (suggestion) {
-    const bindings = Object.entries(suggestion.dataGems).map(([key, type]) => [
+    const bindings = Object.entries(suggestion.charms).map(([key, type]) => [
       key,
-      matchingGems.find((gem) => gem.type === type),
+      matchingCharms.find((charm) => charm.type === type),
     ]) as [string, { id: number; name: string; type: string }][];
 
     const nameBindings = Object.fromEntries(
-      bindings.map(([key, gem]) => [key, gem.name])
+      bindings.map(([key, charm]) => [key, charm.name])
     );
-    const gemBindings = Object.fromEntries(
-      bindings.map(([key, gem]) => [key, gem.id])
+    const charmBindings = Object.fromEntries(
+      bindings.map(([key, charm]) => [key, charm.id])
     );
 
     const description = suggestion.description
@@ -104,7 +104,7 @@ const findSuggestion = lift<{
       recipe: suggestion.recipe,
       description,
       bindings: suggestion.bindings,
-      boundGems: gemBindings,
+      boundCharms: charmBindings,
     };
   } else {
     return undefined;
@@ -131,23 +131,23 @@ const acceptSuggestion = handler<
 
   const acceptedRecipe = suggestion.recipe;
 
-  const accepted = run<any, Gem>(acceptedRecipe, {
+  const accepted = run<any, Charm>(acceptedRecipe, {
     ...Object.fromEntries(
       Object.entries(suggestion.bindings as { [key: string]: string }).map(
         ([key, value]) => [key, getCellReferenceOrValue(data[value])]
       )
     ),
     ...Object.fromEntries(
-      Object.entries(suggestion.boundGems).map(([key, value]) => [
+      Object.entries(suggestion.boundCharms).map(([key, value]) => [
         key,
-        gemById.get(value as number),
+        charmById.get(value as number),
       ])
     ),
   });
 
   // HACK: -1 is home screen and so let's open a new tab
   if (target == -1) {
-    openSaga(accepted.get()[ID]);
+    openCharm(accepted.get()[ID]);
     state.acceptedSuggestion = html`<div></div>`;
   } else {
     state.acceptedSuggestion = accepted.asSimpleCell().get()[UI];
@@ -158,18 +158,18 @@ export const annotation = recipe<{
   query: string;
   target: number;
   data: { [key: string]: any };
-  gems: Gem[];
-}>("annotation", ({ query, target, data, gems }) => {
-  const gemInfo = getGemInfo({ gems });
+  charms: Charm[];
+}>("annotation", ({ query, target, data, charms }) => {
+  const charmInfo = getCharmInfo({ charms });
   const { result: matchedIndices } = generateData<
     { index: number; confidence: number }[]
   >({
-    prompt: buildPrompt({ query, gemInfo }),
+    prompt: buildPrompt({ query, charmInfo }),
     system:
-      "You are an assistant that helps match user queries to relevant data gems based on their names and types.",
+      "You are an assistant that helps match user queries to relevant data charms based on their names and types.",
   });
-  const matchingGems = filterMatchingGems({ matchedIndices, gemInfo });
-  const suggestion = findSuggestion({ matchingGems, data });
+  const matchingCharms = filterMatchingCharms({ matchedIndices, charmInfo });
+  const suggestion = findSuggestion({ matchingCharms, data });
 
   // Will be populated by acceptSuggestion
   const acceptedSuggestion = cell<View | undefined>(undefined);

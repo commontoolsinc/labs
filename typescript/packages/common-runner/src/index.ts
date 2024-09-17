@@ -1,4 +1,4 @@
-export { run, gemById } from "./runner.js";
+export { run, charmById } from "./runner.js";
 export type {
   Cell,
   ReactiveCell,
