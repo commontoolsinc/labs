@@ -5,6 +5,7 @@ import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
 import { Gem, ID, UI, NAME, addGems } from "../data.js";
 import { CellImpl, isCell, gemById } from "@commontools/common-runner";
+import { repeat } from 'lit/directives/repeat.js';
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -83,33 +84,37 @@ export class CommonWindowManager extends LitElement {
 
   override render() {
     return html`
-      ${this.sagas.map((saga) => {
-        const sagaValues = saga.getAsProxy();
-        const sagaId = sagaValues[ID];
+      ${repeat(
+        this.sagas,
+        (saga) => saga.getAsProxy()[ID],
+        (saga) => {
+          const sagaValues = saga.getAsProxy();
+          const sagaId = sagaValues[ID];
 
-        // Create a new ref for this saga
-        let sagaRef = this.sagaRefs.get(sagaId);
-        if (!sagaRef) {
-          sagaRef = createRef<HTMLElement>();
-          this.sagaRefs.set(sagaId, sagaRef);
-          this.newSagaRefs.push([saga, sagaRef]);
+          // Create a new ref for this saga
+          let sagaRef = this.sagaRefs.get(sagaId);
+          if (!sagaRef) {
+            sagaRef = createRef<HTMLElement>();
+            this.sagaRefs.set(sagaId, sagaRef);
+            this.newSagaRefs.push([saga, sagaRef]);
+          }
+
+          return html`
+            <div class="window" id="window-${sagaId}">
+              <button class="close-button" @click="${this.onClose}">×</button>
+              <common-screen-element>
+                <common-system-layout>
+                  <div ${ref(sagaRef)}></div>
+                  <div slot="secondary"><common-annotation .query=${
+                    sagaValues[NAME] ?? ""
+                  } .target=${sagaId} .data=${sagaValues} ></common-annotation></div>
+                  <common-unibox slot="search" value="" placeholder="" label=">">
+                </common-system-layout>
+              </common-screen-element>
+            </div>
+          `;
         }
-
-        return html`
-          <div class="window" id="window-${sagaId}">
-            <button class="close-button" @click="${this.onClose}">×</button>
-            <common-screen-element>
-              <common-system-layout>
-                <div ${ref(sagaRef)}></div>
-                <div slot="secondary"><common-annotation .query=${
-                  sagaValues[NAME] ?? ""
-                } .target=${sagaId} .data=${sagaValues} ></common-annotation></div>
-                <common-unibox slot="search" value="" placeholder="" label=">">
-              </common-system-layout>
-            </common-screen-element>
-          </div>
-        `;
-      })}
+      )}
     `;
   }
 
