@@ -23,7 +23,6 @@ import { addRule, applyRules, deleteRule, listRules } from "./rules.ts";
 import { search } from "./search.ts";
 import { handleActionCommand } from "./action.ts";
 import { handleDreamCommand } from "./dream.ts";
-import { handleViewCommand } from "./view.ts";
 const app = new Application();
 const router = new Router();
 
@@ -313,9 +312,26 @@ router.put("/collections/:name/view/:viewId", async (ctx) => {
 app.use(router.routes());
 app.use(router.allowedMethods());
 
+export const PORT = 8001;
+let server;
+
 export async function start() {
-  console.log("Server running on http://localhost:8001");
-  await app.listen({ port: 8001 });
+  console.log(`Server running on http://localhost:${PORT}`);
+  server = await app.listen({ port: PORT });
+}
+
+function shutdown() {
+  console.log("Shutting down server...");
+  if (server) {
+    server.close();
+    console.log("Server shut down successfully");
+  }
+  Deno.exit(0);
+}
+
+if (Deno) {
+  Deno.addSignalListener("SIGINT", shutdown);
+  Deno.addSignalListener("SIGTERM", shutdown);
 }
 
 if (import.meta.main) {

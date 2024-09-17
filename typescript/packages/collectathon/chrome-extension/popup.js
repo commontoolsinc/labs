@@ -1,4 +1,4 @@
-const API_URL = 'http://localhost:8000';
+const API_URL = 'http://localhost:8001';
 let clipContent = null;
 
 chrome.runtime.connect({name: "popup"});
@@ -46,7 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
   chrome.tabs.query({active: true, currentWindow: true}, async function(tabs) {
       const currentUrl = tabs[0].url;
       // Load recent collections
-      fetch(`http://localhost:8000/suggested-collections?url=${encodeURIComponent(currentUrl)}`)
+      fetch(`${API_URL}/suggested-collections?url=${encodeURIComponent(currentUrl)}`)
         .then(response => response.json())
         .then(collections => {
           recentCollections.innerHTML = '<h3>Suggested Collections</h3>' +
@@ -63,7 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
   searchInput.addEventListener('input', () => {
     const query = searchInput.value;
     if (query) {
-      fetch(`http://localhost:8000/search-collections?q=${encodeURIComponent(query)}`)
+      fetch(`${API_URL}/search-collections?q=${encodeURIComponent(query)}`)
         .then(response => response.json())
         .then(collections => {
           let resultsHtml = '<h3>Search Results</h3>';
@@ -118,7 +118,7 @@ document.getElementById('clipButton').addEventListener('click', () => {
     const url = clipContent ? clipContent.pageUrl : tabs[0].url;
     const content = clipContent || { type: 'webpage', url: url };
 
-    fetch('http://localhost:8000/clip', {
+    fetch(`${API_URL}/clip`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

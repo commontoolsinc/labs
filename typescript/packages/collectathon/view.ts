@@ -2,6 +2,7 @@ import { db } from "./db.ts";
 import { chat, grabHtml } from "./llm.ts";
 import { CoreMessage } from "npm:ai@3.3.21";
 import { open } from "https://deno.land/x/open@v0.0.5/index.ts";
+import { PORT } from "./server.ts";
 
 export const views = new Map<string, string>();
 
@@ -85,7 +86,7 @@ export async function handleViewCommandSingleShot(collection: string, prompt: st
     [viewId, collection, html]
   );
 
-  const url = `http://localhost:8000/view/${collection}/${viewId}`;
+  const url = `http://localhost:${PORT}/view/${collection}/${viewId}`;
   console.log(`Opening view in browser: ${url}`);
   await open(url);
 
@@ -129,7 +130,7 @@ export async function handleViewCommandUpdate(viewId: string, newPrompt: string)
     [html, viewId]
   );
 
-  const url = `http://localhost:8000/view/${collection}/${viewId}`;
+  const url = `http://localhost:${PORT}/view/${collection}/${viewId}`;
   console.log(`Updated view. Opening in browser: ${url}`);
   await open(url);
 }
