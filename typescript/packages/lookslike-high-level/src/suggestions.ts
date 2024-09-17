@@ -10,8 +10,8 @@ export type Suggestion = {
   // Map from locally available data to recipe input:
   bindings: { [key: string]: string };
 
-  // Map from recipe input to globally available data gem type:
-  dataGems: { [key: string]: string };
+  // Map from recipe input to globally available charm type:
+  charms: { [key: string]: string };
 };
 
 export const suggestions: Suggestion[] = [];

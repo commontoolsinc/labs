@@ -3,9 +3,9 @@ import { customElement, property } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
-import { Gem, ID, UI, NAME, addGems } from "../data.js";
-import { CellImpl, isCell, gemById } from "@commontools/common-runner";
-import { repeat } from 'lit/directives/repeat.js';
+import { Charm, ID, UI, NAME, addCharms } from "../data.js";
+import { CellImpl, isCell, charmById } from "@commontools/common-runner";
+import { repeat } from "lit/directives/repeat.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -77,37 +77,37 @@ export class CommonWindowManager extends LitElement {
   ];
 
   @property({ type: Array })
-  sagas: CellImpl<Gem>[] = [];
+  charms: CellImpl<Charm>[] = [];
 
-  private sagaRefs: Map<number, Ref<HTMLElement>> = new Map();
-  private newSagaRefs: [CellImpl<Gem>, Ref<HTMLElement>][] = [];
+  private charmRefs: Map<number, Ref<HTMLElement>> = new Map();
+  private newCharmRefs: [CellImpl<Charm>, Ref<HTMLElement>][] = [];
 
   override render() {
     return html`
       ${repeat(
-        this.sagas,
-        (saga) => saga.getAsProxy()[ID],
-        (saga) => {
-          const sagaValues = saga.getAsProxy();
-          const sagaId = sagaValues[ID];
+        this.charms,
+        (charm) => charm.getAsProxy()[ID],
+        (charm) => {
+          const charmValues = charm.getAsProxy();
+          const charmId = charmValues[ID];
 
-          // Create a new ref for this saga
-          let sagaRef = this.sagaRefs.get(sagaId);
-          if (!sagaRef) {
-            sagaRef = createRef<HTMLElement>();
-            this.sagaRefs.set(sagaId, sagaRef);
-            this.newSagaRefs.push([saga, sagaRef]);
+          // Create a new ref for this charm
+          let charmRef = this.charmRefs.get(charmId);
+          if (!charmRef) {
+            charmRef = createRef<HTMLElement>();
+            this.charmRefs.set(charmId, charmRef);
+            this.newCharmRefs.push([charm, charmRef]);
           }
 
           return html`
-            <div class="window" id="window-${sagaId}">
+            <div class="window" id="window-${charmId}">
               <button class="close-button" @click="${this.onClose}">×</button>
               <common-screen-element>
                 <common-system-layout>
-                  <div ${ref(sagaRef)}></div>
+                  <div ${ref(charmRef)}></div>
                   <div slot="secondary"><common-annotation .query=${
-                    sagaValues[NAME] ?? ""
-                  } .target=${sagaId} .data=${sagaValues} ></common-annotation></div>
+                    charmValues[NAME] ?? ""
+                  } .target=${charmId} .data=${charmValues} ></common-annotation></div>
                   <common-unibox slot="search" value="" placeholder="" label=">">
                 </common-system-layout>
               </common-screen-element>
@@ -118,33 +118,33 @@ export class CommonWindowManager extends LitElement {
     `;
   }
 
-  openSaga(sagaId: number) {
-    const saga = gemById.get(sagaId) as CellImpl<Gem>;
-    if (!isCell(saga)) throw new Error(`Saga ${sagaId} doesn't exist`);
+  openCharm(charmId: number) {
+    const charm = charmById.get(charmId) as CellImpl<Charm>;
+    if (!isCell(charm)) throw new Error(`Charm ${charmId} doesn't exist`);
 
-    addGems([saga]); // Make sure any shows gem is in the list of gems
+    addCharms([charm]); // Make sure any shows charm is in the list of charms
 
-    const existingWindow = this.renderRoot.querySelector(`#window-${sagaId}`);
+    const existingWindow = this.renderRoot.querySelector(`#window-${charmId}`);
     if (existingWindow) {
-      this.scrollToAndHighlight(sagaId, true);
+      this.scrollToAndHighlight(charmId, true);
       return;
     }
 
-    this.sagas = [...this.sagas, saga];
+    this.charms = [...this.charms, charm];
     this.updateComplete.then(() => {
-      while (this.newSagaRefs.length > 0) {
-        const [saga, sagaRef] = this.newSagaRefs.pop()!;
-        const view = saga.asSimpleCell<Gem>().key(UI).get();
-        if (!view) throw new Error("Saga has no UI");
-        render(sagaRef.value!, view);
+      while (this.newCharmRefs.length > 0) {
+        const [charm, charmRef] = this.newCharmRefs.pop()!;
+        const view = charm.asSimpleCell<Charm>().key(UI).get();
+        if (!view) throw new Error("Charm has no UI");
+        render(charmRef.value!, view);
       }
 
-      this.scrollToAndHighlight(sagaId, false);
+      this.scrollToAndHighlight(charmId, false);
     });
   }
 
-  private scrollToAndHighlight(sagaId: number, animate: boolean) {
-    const window = this.renderRoot.querySelector(`#window-${sagaId}`);
+  private scrollToAndHighlight(charmId: number, animate: boolean) {
+    const window = this.renderRoot.querySelector(`#window-${charmId}`);
     if (window) {
       window.scrollIntoView({
         behavior: "smooth",
@@ -161,26 +161,26 @@ export class CommonWindowManager extends LitElement {
   onClose(e: Event) {
     const windowElement = (e.currentTarget as HTMLElement).closest(".window");
     if (windowElement) {
-      const sagaId = parseInt(windowElement.id.replace("window-", ""), 10);
-      this.sagas = this.sagas.filter(
-        (saga) => saga.getAsProxy()[ID] !== sagaId
+      const charmId = parseInt(windowElement.id.replace("window-", ""), 10);
+      this.charms = this.charms.filter(
+        (charm) => charm.getAsProxy()[ID] !== charmId
       );
-      this.sagaRefs.delete(sagaId);
+      this.charmRefs.delete(charmId);
     }
   }
 
   override connectedCallback() {
     super.connectedCallback();
-    this.addEventListener("open-saga", this.handleAddWindow);
+    this.addEventListener("open-charm", this.handleAddWindow);
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    this.removeEventListener("open-saga", this.handleAddWindow);
+    this.removeEventListener("open-charm", this.handleAddWindow);
   }
 
   private handleAddWindow(e: Event) {
-    const sagaId = (e as CustomEvent).detail.sagaId;
-    this.openSaga(sagaId);
+    const charmId = (e as CustomEvent).detail.charmId;
+    this.openCharm(charmId);
   }
 }

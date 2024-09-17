@@ -2,7 +2,7 @@ import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ref, createRef } from "lit/directives/ref.js";
 import { render, View } from "@commontools/common-html";
-import { dataGems, UI } from "../data.js";
+import { charms, UI } from "../data.js";
 import {
   run,
   cell,
@@ -47,7 +47,7 @@ export class CommonAnnotation extends LitElement {
         query: this.queryCell,
         target: this.targetCell,
         data: this.dataCell,
-        gems: dataGems,
+        charms,
       });
 
       render(

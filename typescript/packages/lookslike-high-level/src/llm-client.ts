@@ -5,7 +5,7 @@ export const LLM_SERVER_URL =
 export const suggestionClient = new LLMClient({
   serverUrl: LLM_SERVER_URL,
   system:
-    "You are an assistant that helps match user queries to relevant data gems based on their names and types.",
+    "You are an assistant that helps match user queries to relevant charms based on their names and types.",
   tools: [],
 });
 

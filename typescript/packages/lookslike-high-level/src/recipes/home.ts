@@ -1,27 +1,30 @@
 import { html } from "@commontools/common-html";
 import { recipe, lift, ID, UI } from "@commontools/common-builder";
-import { Gem, RecipeManifest } from "../data.js";
+import { Charm, RecipeManifest } from "../data.js";
 
-const getIDsForSagasWithUI = lift<
-  { sagas: Gem[]; homeId: number },
+const getIDsForCharmsWithUI = lift<
+  { charms: Charm[]; homeId: number },
   { id: number }[]
 >(
-  ({ sagas, homeId }) =>
-    sagas
-      .filter((saga) => saga[UI]) // Only show sagas with UI
-      .map((saga) => ({ id: saga[ID] }))
-      .filter((saga) => saga.id != homeId) // Don't include the home screen
+  ({ charms, homeId }) =>
+    charms
+      .filter((charm) => charm[UI]) // Only show charms with UI
+      .map((charm) => ({ id: charm[ID] }))
+      .filter((charm) => charm.id != homeId) // Don't include the home screen
 );
 
 export const home = recipe<{
-  sagas: Gem[];
+  charms: Charm[];
   recipes: RecipeManifest[];
   [ID]: number;
-}>("home screen", ({ sagas, recipes, [ID]: homeId }) => {
+}>("home screen", ({ charms, recipes, [ID]: homeId }) => {
   return {
     [UI]: html`<common-vstack
-      >${getIDsForSagasWithUI({ sagas, homeId }).map(
-        (saga) => html`<div><common-saga-link saga=${saga.id}></sagaLink></div>`
+      >${getIDsForCharmsWithUI({ charms: charms, homeId }).map(
+        (charm) =>
+          html`<div>
+            <common-charm-link charm=${charm.id}></common-charm-link>
+          </div>`
       )}
       ${recipes.map(
         (recipe) =>
@@ -31,7 +34,7 @@ export const home = recipe<{
       )}<common-annotation
         query="dream fun things to explore"
         target="-1"
-        data=${{ sagas, recipes }}
+        data=${{ charms, recipes }}
       />
     </common-vstack>`,
   };
