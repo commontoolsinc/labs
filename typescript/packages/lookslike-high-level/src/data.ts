@@ -15,6 +15,7 @@ import { luftBnBSearch } from "./recipes/luft-bnb-search.js";
 import { ticket } from "./recipes/ticket.js";
 import { routine } from "./recipes/routine.js";
 import { fetchExample } from "./recipes/fetchExample.js"
+import { counter } from "./recipes/counter.js"
 
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.js";
@@ -76,6 +77,7 @@ addGems([
     date: getFridayAndMondayDateStrings().startDate,
     location: "New York",
   }),
+  run(counter, { title: "Summer Reading" }),
   run(routine, {
     title: "Morning routine",
     // TODO: A lot more missing here, this is just to drive the suggestion.
@@ -100,6 +102,10 @@ export const recipes: RecipeManifest[] = [
   {
     name: "Find a LuftBnB place to stay",
     recipe: luftBnBSearch,
+  },
+  {
+    name: "Create a counter",
+    recipe: counter,
   },
 ];
 
