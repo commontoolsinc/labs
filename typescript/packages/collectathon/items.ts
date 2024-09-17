@@ -1,3 +1,4 @@
+import { addItemToCollection } from "./collections.ts";
 import { db } from "./db.ts";
 
 export function printItem(itemId: number, showRaw: boolean = false) {
@@ -73,7 +74,7 @@ export function deleteItem(itemId: number) {
   }
 }
 
-export async function editItem(
+export async function editItemCLI(
   itemId: number,
   editRawContent: boolean = false,
 ) {
@@ -133,6 +134,58 @@ export async function editItem(
 
   // Clean up the temporary file
   await Deno.remove(tempFile);
+}
+
+export function editItemWeb(
+  itemId: number,
+  editRawContent: boolean,
+  newContent: string
+) {
+  try {
+    if (editRawContent) {
+      db.query("UPDATE items SET raw_content = ? WHERE id = ?", [
+        newContent,
+        itemId,
+      ]);
+    } else {
+      db.query("UPDATE items SET content = ? WHERE id = ?", [
+        newContent,
+        itemId,
+      ]);
+    }
+    console.log(`Item ${itemId} has been updated.`);
+    return true;
+  } catch (error) {
+    console.error(`Error updating item: ${error.message}`);
+    return false;
+  }
+}
+
+export async function createNewItem(content: any, collections?: string[]) {
+  try {
+    const result = await db.query(
+      "INSERT INTO items (url, title, content, raw_content, source) VALUES (?, ?, ?, ?, ?) RETURNING id",
+      [
+        content.url || "",
+        content.title || "New item",
+        JSON.stringify(content),
+        JSON.stringify(content.raw_content || content),
+        "API",
+      ]
+    );
+    const itemId = result[0][0] as number;
+
+    if (collections && collections.length > 0) {
+      for (const collection of collections) {
+        await addItemToCollection(itemId, collection);
+      }
+    }
+
+    return itemId;
+  } catch (error) {
+    console.error(`Error creating new item: ${error.message}`);
+    return null;
+  }
 }
 
 export function purge() {

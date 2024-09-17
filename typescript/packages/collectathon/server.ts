@@ -1,12 +1,39 @@
 import { Application, Router, oakCors } from "./deps.ts";
 import { extractEntities } from "./webpage.ts";
 import { db } from "./db.ts";
-import { getOrCreateCollection } from "./collections.ts";
+import {
+  getOrCreateCollection,
+  listCollections,
+  listItems,
+  deleteCollection,
+  addItemToCollection,
+  removeItemFromCollection,
+  moveCollection,
+} from "./collections.ts";
 import { clipUrl } from "./import.ts";
-import { views } from "./view.ts";
-
+import { handleViewCommandSingleShot, handleViewCommandUpdate, views } from "./view.ts";
+import {
+  deleteItem,
+  printItem,
+  purge,
+  editItemWeb,
+  createNewItem,
+} from "./items.ts";
+import { addRule, applyRules, deleteRule, listRules } from "./rules.ts";
+import { search } from "./search.ts";
+import { handleActionCommand } from "./action.ts";
+import { handleDreamCommand } from "./dream.ts";
+import { handleViewCommand } from "./view.ts";
 const app = new Application();
 const router = new Router();
+
+const getJsonBody = async (ctx: any) => {
+  const body = ctx.request.body();
+  if (body.type !== "json") {
+    throw new Error("Invalid request body");
+  }
+  return await body.value;
+};
 
 app.use(oakCors()); // Enable CORS for all routes
 
@@ -134,6 +161,154 @@ async function saveEntities(entities: any[], collections: string[]) {
     }
   }
 }
+
+// Collection routes
+router.get("/collections", async (ctx) => {
+  await listCollections();
+  ctx.response.body = { message: "Collections listed in console" };
+});
+
+router.delete("/collections/:name", async (ctx) => {
+  const { name } = ctx.params;
+  await deleteCollection(name);
+  ctx.response.body = { message: `Collection ${name} deleted` };
+});
+
+router.post("/collections/:name/apply-rules", async (ctx) => {
+  const { name } = ctx.params;
+  await applyRules(name);
+  ctx.response.body = { message: `Rules applied to collection ${name}` };
+});
+
+router.put("/collections/:name/move", async (ctx) => {
+  const { name } = ctx.params;
+  const { newName } = await getJsonBody(ctx);
+  await moveCollection(name, newName);
+  ctx.response.body = { message: `Collection ${name} moved to ${newName}` };
+});
+
+// Item routes
+router.get("/collections/:name/items", async (ctx) => {
+  const { name } = ctx.params;
+  await listItems(name);
+  ctx.response.body = { message: `Items listed for collection ${name} in console` };
+});
+
+router.get("/items/:id", (ctx) => {
+  const { id } = ctx.params;
+  const showRaw = ctx.request.url.searchParams.get("raw") === "true";
+  printItem(parseInt(id), showRaw);
+  ctx.response.body = { message: `Item ${id} printed in console` };
+});
+
+router.delete("/items/:id", (ctx) => {
+  const { id } = ctx.params;
+  deleteItem(parseInt(id));
+  ctx.response.body = { message: `Item ${id} deleted` };
+});
+
+router.put("/items/:id", async (ctx) => {
+  const { id } = ctx.params;
+  const { content, raw } = await getJsonBody(ctx);
+  const success = editItemWeb(parseInt(id), raw, content);
+  if (success) {
+    ctx.response.body = { message: `Item ${id} updated` };
+  } else {
+    ctx.response.status = 500;
+    ctx.response.body = { error: `Failed to update item ${id}` };
+  }
+});
+
+router.post("/items/:id/collections/:collection", async (ctx) => {
+  const { id, collection } = ctx.params;
+  await addItemToCollection(parseInt(id), collection);
+  ctx.response.body = { message: `Item ${id} added to collection ${collection}` };
+});
+
+router.delete("/items/:id/collections/:collection", async (ctx) => {
+  const { id, collection } = ctx.params;
+  await removeItemFromCollection(parseInt(id), collection);
+  ctx.response.body = { message: `Item ${id} removed from collection ${collection}` };
+});
+
+router.post("/items/purge", async (ctx) => {
+  await purge();
+  ctx.response.body = { message: "Purge completed" };
+});
+
+// New route for creating an item
+router.post("/items", async (ctx) => {
+  const { content, collections } = await getJsonBody(ctx);
+  const itemId = await createNewItem(content, collections);
+
+  if (itemId) {
+    ctx.response.body = { message: `New item created with ID ${itemId}`, itemId };
+  } else {
+    ctx.response.status = 500;
+    ctx.response.body = { error: "Failed to create new item" };
+  }
+});
+
+// Rule routes
+router.post("/rules", async (ctx) => {
+  const { collection, rule, targetCollection } = await getJsonBody(ctx);
+  await addRule(collection, rule, targetCollection);
+  ctx.response.body = { message: "Rule added" };
+});
+
+router.get("/collections/:name/rules", async (ctx) => {
+  const { name } = ctx.params;
+  await listRules(name);
+  ctx.response.body = { message: `Rules listed for collection ${name} in console` };
+});
+
+router.delete("/rules/:id", async (ctx) => {
+  const { id } = ctx.params;
+  await deleteRule(parseInt(id));
+  ctx.response.body = { message: `Rule ${id} deleted` };
+});
+
+// Search route
+router.get("/search", async (ctx) => {
+  const query = ctx.request.url.searchParams.get("q");
+  if (!query) {
+    ctx.response.status = 400;
+    ctx.response.body = { error: "Query parameter 'q' is required" };
+    return;
+  }
+  await search(query);
+  ctx.response.body = { message: "Search results printed in console" };
+});
+
+// Action route
+router.post("/collections/:name/action", async (ctx) => {
+  const { name } = ctx.params;
+  const { prompt } = await getJsonBody(ctx);
+  await handleActionCommand(name, prompt);
+  ctx.response.body = { message: `Action performed on collection ${name}` };
+});
+
+// Dream route
+router.post("/collections/:name/dream", async (ctx) => {
+  const { name } = ctx.params;
+  await handleDreamCommand(name);
+  ctx.response.body = { message: `Dream generated for collection ${name}` };
+});
+
+// View routes
+router.post("/collections/:name/view", async (ctx) => {
+  const { name } = ctx.params;
+  const { prompt } = await getJsonBody(ctx);
+  const id = await handleViewCommandSingleShot(name, prompt);
+  ctx.response.body = { viewId: id, message: `View generated for collection ${name}` };
+});
+
+router.put("/collections/:name/view/:viewId", async (ctx) => {
+  const { name, viewId } = ctx.params;
+  const { prompt } = await getJsonBody(ctx);
+  await handleViewCommandUpdate(viewId, prompt);
+  ctx.response.body = { viewId, message: `View updated for collection ${name}` };
+});
 
 app.use(router.routes());
 app.use(router.allowedMethods());

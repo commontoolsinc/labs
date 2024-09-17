@@ -11,12 +11,10 @@ import {
 import { readLines } from "./deps.ts";
 import { addDreamCommand } from "./dream.ts";
 import { importFiles, clipUrl } from "./import.ts";
-import { deleteItem, editItem, printItem, purge } from "./items.ts";
+import { deleteItem, editItemCLI, printItem, purge } from "./items.ts";
 import { addRule, applyRules, deleteRule, listRules } from "./rules.ts";
 import { search } from "./search.ts";
-import { start } from "./server.ts";
-import { handleViewCommand } from "./view.ts";
-import { open } from "https://deno.land/x/open@v0.0.5/index.ts";
+import { handleViewCommandInteractive } from "./view.ts";
 
 function listAPI() {
   console.log("Available commands:");
@@ -140,7 +138,7 @@ async function main() {
             } else {
               const itemId = parseInt(args[0]);
               const editRaw = args[1] === "-raw";
-              await editItem(itemId, editRaw);
+              await editItemCLI(itemId, editRaw);
             }
             break;
           case "add":
@@ -240,7 +238,7 @@ async function main() {
         } else {
           const collection = args.shift()!;
           const initialPrompt = args.join(" ");
-          await handleViewCommand(collection, initialPrompt);
+          await handleViewCommandInteractive(collection, initialPrompt);
         }
         break;
       case "exit":

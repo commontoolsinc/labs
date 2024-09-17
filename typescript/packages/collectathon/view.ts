@@ -5,7 +5,8 @@ import { open } from "https://deno.land/x/open@v0.0.5/index.ts";
 
 export const views = new Map<string, string>();
 
-export async function handleViewCommand(collection: string, initialPrompt: string): Promise<void> {
+// 1. Interactive version
+export async function handleViewCommandInteractive(collection: string, initialPrompt: string): Promise<void> {
   const items = db.query<[number, string]>(
     `SELECT i.id, i.content
      FROM items i
@@ -51,6 +52,86 @@ export async function handleViewCommand(collection: string, initialPrompt: strin
 
     currentPrompt = nextPrompt || currentPrompt;
   }
+}
+
+// 2. Single-shot version
+export async function handleViewCommandSingleShot(collection: string, prompt: string): Promise<string> {
+  const items = db.query<[number, string]>(
+    `SELECT i.id, i.content
+     FROM items i
+     JOIN item_collections ic ON i.id = ic.item_id
+     JOIN collections c ON ic.collection_id = c.id
+     WHERE c.name = ?`,
+    [collection]
+  );
+
+  if (items.length === 0) {
+    console.log(`No items found in collection: ${collection}`);
+    return "";
+  }
+
+  const jsonItems = items.map(([id, content]) => ({
+    id,
+    ...JSON.parse(content),
+  }));
+
+  const messages: CoreMessage[] = [];
+  const html = await generateHTML(jsonItems, prompt, messages);
+  const viewId = crypto.randomUUID();
+
+  // Store the view in the database
+  db.query(
+    "INSERT INTO views (id, collection, html) VALUES (?, ?, ?)",
+    [viewId, collection, html]
+  );
+
+  const url = `http://localhost:8000/view/${collection}/${viewId}`;
+  console.log(`Opening view in browser: ${url}`);
+  await open(url);
+
+  return viewId;
+}
+
+// 3. Update existing view version
+export async function handleViewCommandUpdate(viewId: string, newPrompt: string): Promise<void> {
+  const view = db.query<[string, string]>(
+    "SELECT collection, html FROM views WHERE id = ?",
+    [viewId]
+  )[0];
+
+  if (!view) {
+    console.log(`No view found with id: ${viewId}`);
+    return;
+  }
+
+  const [collection, _] = view;
+
+  const items = db.query<[number, string]>(
+    `SELECT i.id, i.content
+     FROM items i
+     JOIN item_collections ic ON i.id = ic.item_id
+     JOIN collections c ON ic.collection_id = c.id
+     WHERE c.name = ?`,
+    [collection]
+  );
+
+  const jsonItems = items.map(([id, content]) => ({
+    id,
+    ...JSON.parse(content),
+  }));
+
+  const messages: CoreMessage[] = [];
+  const html = await generateHTML(jsonItems, newPrompt, messages);
+
+  // Update the view in the database
+  db.query(
+    "UPDATE views SET html = ? WHERE id = ?",
+    [html, viewId]
+  );
+
+  const url = `http://localhost:8000/view/${collection}/${viewId}`;
+  console.log(`Updated view. Opening in browser: ${url}`);
+  await open(url);
 }
 
 async function generateHTML(items: any[], prompt: string, messages: CoreMessage[]): Promise<string> {
