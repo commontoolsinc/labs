@@ -7,6 +7,7 @@ import {
   ifElse,
   lift,
   handler,
+  str
 } from "@commontools/common-builder";
 import { launch } from "../data.js";
 
@@ -68,7 +69,7 @@ const viewItem = recipe<{ id: string }>(
     });
 
     return {
-      [NAME]: "View Item",
+      [NAME]: str`Item: ${result.title || '(unknown)'}`,
       [UI]: html`
           <div>
             ${ifElse(
@@ -124,7 +125,7 @@ const viewCollecton = recipe<{ collection: string }>(
     });
 
     return {
-      [NAME]: "View Collection",
+      [NAME]: str`Collection: ${collection}`,
       [UI]: html`
         <div>
             ${ifElse(
