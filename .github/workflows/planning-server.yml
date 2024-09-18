@@ -1,0 +1,33 @@
+name: Deploy @commontools/planning-server
+
+on:
+  push:
+    # branches:
+    #   - main
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: typescript/packages/planning-server
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: cache deno installation and deno.land dependencies
+        uses: actions/cache@v2
+        with:
+          key: ${{ runner.os }}-deno-${{ hashFiles('**/*') }}
+          restore-keys: ${{ runner.os }}-deno-
+          path: |
+            /home/runner/.deno
+            /home/runner/.cache/deno/deps/https/deno.land
+
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v1
+
+      - run: deno run build
