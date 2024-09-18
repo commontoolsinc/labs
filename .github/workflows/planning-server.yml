@@ -132,7 +132,7 @@ jobs:
             arch: aarch64
     runs-on: ${{ matrix.host_os }}
     env:
-      DESTINATION: ./dist/bin/${{ matrix.os }}/${{ matrix.arch }}/planning-server
+      DESTINATION: dist/bin/${{ matrix.os }}/${{ matrix.arch }}/planning-server
     name: Build Deno binary for ${{ matrix.os }} ${{ matrix.arch }}
     continue-on-error: true
     steps:
@@ -170,7 +170,7 @@ jobs:
         with:
           if-no-files-found: error
           name: planning-server-${{ matrix.target }}
-          path: ${{ env.DESTINATION }}
+          path: typescript/packages/planning-server/${{ env.DESTINATION }}
 
   check:
     name: Check code quality
