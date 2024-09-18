@@ -170,7 +170,7 @@ jobs:
         with:
           if-no-files-found: error
           name: planning-server-${{ matrix.target }}
-          path: typescript/packages/planning-server/${{ env.DESTINATION }}
+          path: typescript/packages/planning-server/${{ env.DESTINATION }}${{ runner.os == 'Windows' && '.exe' || '' }}
 
   check:
     name: Check code quality
