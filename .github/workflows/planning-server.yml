@@ -39,7 +39,9 @@ jobs:
         run: echo "timestamp=$(git log -1 --pretty=%ct)" >> $GITHUB_OUTPUT
       - name: Compute lower case owner name
         id: owner_lower
-        run: echo "owner_lower=${${{ github.repository_owner }},,}" >> $GITHUB_OUTPUT
+        env:
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: echo "owner_lower=${REPO_OWNER@L}" >> $GITHUB_OUTPUT
       - name: Compute repository name
         id: repo_name
         run: echo "image_name=$(echo "${{ github.repository }}" | cut -d'/' -f2)" >> $GITHUB_OUTPUT
