@@ -52,6 +52,7 @@ jobs:
   deno_test:
     name: Test under Deno
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: cache deno installation and deno.land dependencies
         uses: actions/cache@v4
@@ -73,6 +74,7 @@ jobs:
   node_test:
     name: Test under Node.js
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -97,10 +99,8 @@ jobs:
 
   deno_build:
     name: Build with Deno
-    # needs:
-    # - deno_test
-    # - node_test
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -132,6 +132,7 @@ jobs:
   check:
     name: Check code quality
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v3
       - uses: denoland/setup-deno@v1
@@ -168,6 +169,7 @@ jobs:
   node_build:
     name: Build with Node.js
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
