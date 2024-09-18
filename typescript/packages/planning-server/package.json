@@ -14,7 +14,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/commontoolsinc/labs.git"
+    "url": "git+https://github.com/commontoolsinc/labs.git",
+    "directory": "typescript/packages/planning-server/package.json"
   },
   "bugs": {
     "url": "https://github.com/commontoolsinc/labs/issues"
