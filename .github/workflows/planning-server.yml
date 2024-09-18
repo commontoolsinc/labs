@@ -15,6 +15,7 @@ env:
   NODE_VERSION: 20
   PUSH: ${{ github.event.inputs.push || 'false' }}
   WORKING_DIRECTORY: typescript/packages/planning-server
+  IMAGE_NAME: planning-server
 
 defaults:
   run:
@@ -24,7 +25,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+  # git rev-parse --short ${{ github.sha }}
 jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - id: short_hash
+        run: echo "short_hash=$(git rev-parse --short ${{ github.sha }})" >> $GITHUB_OUTPUT
+    outputs:
+      short_hash: ${{ steps.short_hash.outputs.short_hash }}
+
   deno_test:
     name: Test under Deno
     runs-on: ubuntu-latest
@@ -106,6 +116,7 @@ jobs:
           name: planning-server
 
   check:
+    name: Check code quality
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -116,18 +127,29 @@ jobs:
       # Check if the code is formatted according to Deno's default
       # formatting conventions.
       - run: deno fmt --check
+        name: Check formatting
 
       # Scan the code for syntax errors and style issues. If
       # you want to use a custom linter configuration you can add a configuration file with --config <myconfig>
       - run: deno lint
+        name: Lint code
 
       # Run all test files in the repository and collect code coverage. The example
       # runs with all permissions, but it is recommended to run with the minimal permissions your program needs (for example --allow-read).
       - run: deno test --allow-all --coverage=cov/
+        name: Run tests and collect coverage
 
       # This generates a report from the collected coverage in `deno test --coverage`. It is
       # stored as a .lcov file which integrates well with services such as Codecov, Coveralls and Travis CI.
       - run: deno coverage --lcov cov/ > cov.lcov
+        name: Generate coverage report
+
+      # Upload the coverage report as an artifact
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: cov.lcov
 
   node_build:
     name: Build with Node.js
@@ -168,3 +190,10 @@ jobs:
         with:
           context: ${{ env.WORKING_DIRECTORY }}
           push: ${{ env.PUSH }}
+          cache-from: |
+            type=gha,mode=max
+          cache-to: |
+            type=gha,mode=max
+          provenance: mode=max
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/$IMAGE_NAME:${{ steps.short_hash.outputs.short_hash }}
