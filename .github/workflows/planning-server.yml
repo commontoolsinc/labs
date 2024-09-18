@@ -21,7 +21,7 @@ jobs:
       - name: cache deno installation and deno.land dependencies
         uses: actions/cache@v4
         with:
-          key: ${{ runner.os }}-deno-${{ hashFiles('**/*') }}
+          key: ${{ runner.os }}-deno-${{ hashFiles('**/*.ts') }}
           restore-keys: ${{ runner.os }}-deno-
           path: |
             /home/runner/.deno
@@ -51,7 +51,7 @@ jobs:
       - name: cache deno installation and deno.land dependencies
         uses: actions/cache@v4
         with:
-          key: ${{ runner.os }}-deno-${{ hashFiles('**/*') }}
+          key: ${{ runner.os }}-deno-${{ hashFiles('**/*.ts') }}
           restore-keys: ${{ runner.os }}-deno-
           path: |
             /home/runner/.deno
