@@ -322,7 +322,7 @@ jobs:
           context: ${{ env.WORKING_DIRECTORY }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          push: ${{ env.PUSH }}
+          push: ${{ env.PUSH == 'true' }}
           platforms: linux/amd64,linux/arm64
           provenance: mode=max
           tags: ${{ steps.meta.outputs.tags }}
