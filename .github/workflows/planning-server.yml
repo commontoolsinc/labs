@@ -158,16 +158,25 @@ jobs:
       - name: Compile Deno entrypoint
         run: deno compile --output ${{ env.DESTINATION }} --target ${{ matrix.target }} --allow-net --allow-env --allow-read src/index.ts
 
-      - name: List all outputs (Unix or macOS)
+      - name: List all outputs ( Unix or macOS )
         if: ${{ runner.os != 'Windows' }}
         run: ls -R $(dirname ${{ env.DESTINATION }})
 
-      - name: List all outputs (Windows)
+      - name: List all outputs ( Windows )
         if: ${{ runner.os == 'Windows' }}
         run: dir $(dirname ${{ env.DESTINATION }})
 
+      - name: Make the binary executable ( Unix or macOS )
+        if: ${{ runner.os != 'Windows' }}
+        run: chmod +x ${{ env.DESTINATION }}
+
+      - name: Set extended attributes ( macOS )
+        if: ${{ runner.os == 'macOS' }}
+        # run: xattr -w com.apple.quarantine 0000 $(dirname ${{ env.DESTINATION }})
+        run: xattr -d com.apple.quarantine ${{ env.DESTINATION }}
+
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-tar-artifact
         with:
           if-no-files-found: error
           name: planning-server-${{ matrix.target }}
