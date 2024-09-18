@@ -11,13 +11,14 @@ on:
         required: false
         default: "false"
 
-defaults:
-  run:
-    working-directory: typescript/packages/planning-server
-
 env:
   NODE_VERSION: 20
   PUSH: ${{ github.event.inputs.push || 'false' }}
+  WORKING_DIRECTORY: typescript/packages/planning-server
+
+defaults:
+  run:
+    working-directory: ${{ env.WORKING_DIRECTORY }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -165,4 +166,5 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
+          context: ${{ env.WORKING_DIRECTORY }}
           push: ${{ env.PUSH }}
