@@ -30,6 +30,8 @@ jobs:
   setup:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
       - id: short_hash
         run: echo "short_hash=$(git rev-parse --short ${{ github.sha }})" >> $GITHUB_OUTPUT
       - name: Get Git commit timestamps
