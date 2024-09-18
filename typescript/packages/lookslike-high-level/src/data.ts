@@ -60,7 +60,7 @@ addCharms([
     url: "https://anotherjesse-restfuljsonblobapi.web.val.run/items",
   }),
   run(fetchCollections, {
-    url: "/api/data/collections/hn/items",
+    url: "/api/data/collections/"
   }),
   run(todoList, {
     title: "My TODOs",
