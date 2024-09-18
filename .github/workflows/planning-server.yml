@@ -9,11 +9,13 @@ on:
       push:
         description: "Push docker image"
         required: false
-        default: "false"
+        type: boolean
+        default: false
 
 env:
   NODE_VERSION: 20
-  PUSH: ${{ github.event.inputs.push || 'false' }}
+  # on push to main or push input
+  PUSH: ${{ ( github.ref == 'refs/heads/main' && github.event_name == 'push' ) || github.event.inputs.push }}
   WORKING_DIRECTORY: typescript/packages/planning-server
   REGISTRY: ghcr.io
 
