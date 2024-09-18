@@ -5,6 +5,11 @@ on:
     # branches:
     #   - main
   workflow_dispatch:
+    inputs:
+      push:
+        description: "Push docker image"
+        required: false
+        default: "false"
 
 defaults:
   run:
@@ -12,6 +17,7 @@ defaults:
 
 env:
   NODE_VERSION: 20
+  PUSH: ${{ github.event.inputs.push || 'false' }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -38,7 +44,6 @@ jobs:
         uses: denoland/setup-deno@v1
 
       - run: deno run test
-        continue-on-error: true
 
   node_test:
     name: Test under Node.js
@@ -64,13 +69,12 @@ jobs:
       - run: npm install
 
       - run: npm test
-        continue-on-error: true
 
-  build:
-    name: Build
+  deno_build:
+    name: Build with Deno
     # needs:
-      # - deno_test
-      # - node_test
+    # - deno_test
+    # - node_test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -99,3 +103,66 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: planning-server
+
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x # Run with latest stable Deno.
+
+      # Check if the code is formatted according to Deno's default
+      # formatting conventions.
+      - run: deno fmt --check
+
+      # Scan the code for syntax errors and style issues. If
+      # you want to use a custom linter configuration you can add a configuration file with --config <myconfig>
+      - run: deno lint
+
+      # Run all test files in the repository and collect code coverage. The example
+      # runs with all permissions, but it is recommended to run with the minimal permissions your program needs (for example --allow-read).
+      - run: deno test --allow-all --coverage=cov/
+
+      # This generates a report from the collected coverage in `deno test --coverage`. It is
+      # stored as a .lcov file which integrates well with services such as Codecov, Coveralls and Travis CI.
+      - run: deno coverage --lcov cov/ > cov.lcov
+
+  node_build:
+    name: Build with Node.js
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - run: npm install
+
+      - run: npm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: planning-server
+
+  docker_build:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          push: ${{ env.PUSH }}
