@@ -32,8 +32,12 @@ jobs:
     steps:
       - id: short_hash
         run: echo "short_hash=$(git rev-parse --short ${{ github.sha }})" >> $GITHUB_OUTPUT
+      - name: Get Git commit timestamps
+        id: timestamp
+        run: echo "timestamp=$(git log -1 --pretty=%ct)" >> $GITHUB_OUTPUT
     outputs:
       short_hash: ${{ steps.short_hash.outputs.short_hash }}
+      timestamp: ${{ steps.timestamp.outputs.timestamp }}
 
   deno_test:
     name: Test under Deno
@@ -187,6 +191,8 @@ jobs:
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
+        env:
+          SOURCE_DATE_EPOCH: ${{ env.TIMESTAMP }} # see https://docs.docker.com/build/ci/github-actions/reproducible-builds
         with:
           context: ${{ env.WORKING_DIRECTORY }}
           push: ${{ env.PUSH }}
@@ -194,6 +200,7 @@ jobs:
             type=gha,mode=max
           cache-to: |
             type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
           provenance: mode=max
           tags: |
             ghcr.io/${{ github.repository_owner }}/$IMAGE_NAME:${{ steps.short_hash.outputs.short_hash }}
