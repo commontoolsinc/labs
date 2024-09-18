@@ -13,6 +13,10 @@ defaults:
 env:
   NODE_VERSION: 20
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deno_test:
     name: Test under Deno
