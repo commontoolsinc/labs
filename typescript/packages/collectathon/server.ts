@@ -18,6 +18,7 @@ import {
   purge,
   editItemWeb,
   createNewItem,
+  getItem,
 } from "./items.ts";
 import { addRule, applyRules, deleteRule, listRules } from "./rules.ts";
 import { search } from "./search.ts";
@@ -196,8 +197,8 @@ router.get("/collections/:name/items", async (ctx) => {
 router.get("/items/:id", (ctx) => {
   const { id } = ctx.params;
   const showRaw = ctx.request.url.searchParams.get("raw") === "true";
-  printItem(parseInt(id), showRaw);
-  ctx.response.body = { message: `Item ${id} printed in console` };
+  const item = getItem(parseInt(id));
+  ctx.response.body = item;
 });
 
 router.delete("/items/:id", (ctx) => {

@@ -51,6 +51,40 @@ export function printItem(itemId: number, showRaw: boolean = false) {
   }
 }
 
+export function getItem(itemId: number): any {
+  const item = db.query<
+    [number, string, string, string, string, string, string]
+  >(
+    "SELECT id, url, title, content, raw_content, source, created_at FROM items WHERE id = ?",
+    [itemId],
+  )[0];
+
+  if (!item) {
+    return null;
+  }
+
+  const [id, url, title, content, rawContent, source, createdAt] = item;
+
+  const collections = db.query<[string]>(
+    `SELECT c.name
+     FROM collections c
+     JOIN item_collections ic ON c.id = ic.collection_id
+     WHERE ic.item_id = ?`,
+    [itemId],
+  );
+
+  return {
+    id,
+    url,
+    title,
+    content: JSON.parse(content),
+    rawContent,
+    source,
+    createdAt,
+    collections: collections.map(([name]) => name),
+  };
+}
+
 export function deleteItem(itemId: number) {
   try {
     db.query("BEGIN TRANSACTION");
