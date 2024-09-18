@@ -1,13 +1,17 @@
 import { db } from "./db.ts";
 import { walk, ensureDir } from "./deps.ts";
 import { getOrCreateCollection } from "./collections.ts";
-import { clipGitHub } from "./github.ts";
+import { clipGitHub, syncGitHubIssues } from "./github.ts";
 import { clipRSS } from "./rss.ts";
 import { clipWebpage } from "./webpage.ts";
 
 export async function clipUrl(url: string, collections: string[], prompt: string | undefined) {
   if (url.includes("github.com")) {
-    await clipGitHub(url, collections);
+    if (url.includes("issues")) {
+      await syncGitHubIssues(url, collections);
+    } else {
+      await clipGitHub(url, collections);
+    }
   } else if (
     url.includes(".rss") ||
     url.includes("/RSS") ||
