@@ -15,9 +15,7 @@ env:
   NODE_VERSION: 20
   PUSH: ${{ github.event.inputs.push || 'false' }}
   WORKING_DIRECTORY: typescript/packages/planning-server
-  # IMAGE_NAME: planning-server
   REGISTRY: ghcr.io
-  # github.repository as <account>/<repo>
   IMAGE_NAME: ${{ github.repository }}-planning-server
 
 defaults:
@@ -222,9 +220,10 @@ jobs:
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5 # https://github.com/docker/metadata-action
-
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha
 
       - name: Build ${{ env.PUSH == 'true' && 'and push' }} Docker image
         uses: docker/build-push-action@v6 # https://github.com/docker/build-push-action
