@@ -47,6 +47,15 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: cache deno installation and deno.land dependencies
+        uses: actions/cache@v4
+        with:
+          key: ${{ runner.os }}-deno-${{ hashFiles('**/*') }}
+          restore-keys: ${{ runner.os }}-deno-
+          path: |
+            /home/runner/.deno
+            /home/runner/.cache/deno/deps/https/deno.land
+
       - run: npm install
 
       - run: npm test
