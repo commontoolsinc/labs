@@ -1,0 +1,8 @@
+services:
+  planning-server:
+    build:
+      context: .
+      args:
+        progress: plain
+    ports:
+      - "8000:8000"
