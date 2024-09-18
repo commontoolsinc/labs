@@ -235,8 +235,29 @@ jobs:
           load: true
 
       - name: Validate test image
+        env:
+          PORT: 8000
         run: |
-          docker run --rm --stop-timeout 30 ${{ env.REGISTRY }}/${{ needs.setup.outputs.image_name }}:test
+          # Start the container in detached mode
+          docker run -d --rm -p $PORT:$PORT ${{ env.REGISTRY }}/${{ needs.setup.outputs.image_name }}:test
+
+          # Wait for the server to start (adjust the port and URL as needed)
+          for i in {1..10}; do
+            if nc -z localhost $PORT; then
+              echo "Server is up"
+              break
+            fi
+            sleep 1
+          done
+
+          # verify port is reachable
+          if ! nc -z localhost $PORT; then
+            echo "Server did not start"
+            exit 1
+          fi
+
+          # Stop the container
+          docker stop $(docker ps -q --filter ancestor=${{ env.REGISTRY }}/${{ needs.setup.outputs.image_name }}:test)
         continue-on-error: true # TODO: remove this when the test image is validated
 
       - name: Extract Docker metadata
