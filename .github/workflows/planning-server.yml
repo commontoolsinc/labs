@@ -18,7 +18,7 @@ env:
 
 defaults:
   run:
-    working-directory: ${{ env.WORKING_DIRECTORY }}
+    working-directory: typescript/packages/planning-server
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
