@@ -162,6 +162,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
+          if-no-files-found: error
           name: planning-server-${{ matrix.target }}
           path: ${{ env.DESTINATION }}
 
