@@ -104,6 +104,8 @@ jobs:
       - run: npm test
 
   deno_build:
+    env:
+      DESTINATION: dist/bin/planning-server
     name: Build with Deno
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -128,12 +130,20 @@ jobs:
       - name: Set up Deno
         uses: denoland/setup-deno@v1
 
-      - run: deno run build
+      - name: Compile Deno entrypoint
+        run: |
+          deno compile \
+          --output $DESTINATION \
+          --allow-net \
+          --allow-env \
+          --allow-read \
+          src/index.ts
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: planning-server
+          path: ${{ env.DESTINATION }}
 
   check:
     name: Check code quality
