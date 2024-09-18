@@ -16,7 +16,6 @@ env:
   PUSH: ${{ github.event.inputs.push || 'false' }}
   WORKING_DIRECTORY: typescript/packages/planning-server
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-planning-server
 
 defaults:
   run:
@@ -38,16 +37,20 @@ jobs:
       - name: Get Git commit timestamps
         id: timestamp
         run: echo "timestamp=$(git log -1 --pretty=%ct)" >> $GITHUB_OUTPUT
-      - name: set lower case owner name
-        # echo "REPO=${GITHUB_REPOSITORY@L}" >> "${GITHUB_ENV}"
-        # ${{ github.repository_owner }}
-        # echo "REPO=${GITHUB_REPOSITORY,,}" >>${GITHUB_ENV}
-        run: echo "owner_lower=${${{ github.repository_owner }},,}" >> $GITHUB_OUTPUT
+      - name: Compute lower case owner name
         id: owner_lower
+        run: echo "owner_lower=${${{ github.repository_owner }},,}" >> $GITHUB_OUTPUT
+      - name: Compute repository name
+        id: repo_name
+        run: echo "image_name=$(echo "${{ github.repository }}" | cut -d'/' -f2)" >> $GITHUB_OUTPUT
+      - name: Compute image name
+        id: image_name
+        run: echo "image_name=${{ steps.owner_lower.outputs.owner_lower }}/${{ steps.repo_name.outputs.image_name }}-planning-server" >> $GITHUB_OUTPUT
     outputs:
       short_hash: ${{ steps.short_hash.outputs.short_hash }}
       timestamp: ${{ steps.timestamp.outputs.timestamp }}
       owner_lower: ${{ steps.owner_lower.outputs.owner_lower }}
+      repo_name: ${{ steps.repo_name.outputs.repo_name }}
 
   deno_test:
     name: Test under Deno
@@ -225,7 +228,7 @@ jobs:
         with:
           context: ${{ env.WORKING_DIRECTORY }}
           push: false
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test
+          tags: ${{ env.REGISTRY }}/${{ needs.setup.outputs.image_name }}:test
           load: true
 
       - name: Validate test image
@@ -236,7 +239,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5 # https://github.com/docker/metadata-action
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ needs.setup.outputs.image_name }}
           tags: |
             type=sha
 
