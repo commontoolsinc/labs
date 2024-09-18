@@ -236,7 +236,7 @@ jobs:
 
       - name: Validate test image
         run: |
-          docker run --rm ${{ steps.build_test.outputs.image }}
+          docker run --rm ${{ env.REGISTRY }}/${{ needs.setup.outputs.image_name }}:test
 
       - name: Extract Docker metadata
         id: meta
