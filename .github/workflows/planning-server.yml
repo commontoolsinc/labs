@@ -219,6 +219,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build and export test image
+        id: build_test
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.WORKING_DIRECTORY }}
+          push: false
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:test
+          load: true
+
+      - name: Validate test image
+        run: |
+          docker run --rm ${{ steps.build_test.outputs.image }}
+
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5 # https://github.com/docker/metadata-action
@@ -243,6 +256,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
       - name: Sign the published Docker image
+        if: ${{ env.PUSH == 'true' }}
         env:
           # https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-an-intermediate-environment-variable
           TAGS: ${{ steps.meta.outputs.tags }}
