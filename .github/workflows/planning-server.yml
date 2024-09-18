@@ -133,7 +133,7 @@ jobs:
     runs-on: ${{ matrix.host_os }}
     env:
       DESTINATION: dist/bin/${{ matrix.os }}/${{ matrix.arch }}/planning-server
-    name: Build Deno binary for ${{ matrix.os }} ${{ matrix.arch }}
+    name: Compile ${{ matrix.os }} ${{ matrix.arch }} binary
     continue-on-error: true
     steps:
       - name: Checkout
