@@ -104,7 +104,7 @@ jobs:
       - run: npm test
 
   deno_build:
-    # supported architectures:
+    # supported deno architectures:
     # x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-pc-windows-msvc, x86_64-apple-darwin, aarch64-apple-darwin
     strategy:
       fail-fast: false
@@ -114,22 +114,27 @@ jobs:
             target: x86_64-unknown-linux-gnu
             os: linux
             arch: x86_64
+
           - host_os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             os: linux
             arch: aarch64
+
           - host_os: windows-latest
             target: x86_64-pc-windows-msvc
             os: windows
             arch: x86_64
+
           - host_os: macos-latest
             target: x86_64-apple-darwin
             os: macos
             arch: x86_64
+
           - host_os: macos-latest
             target: aarch64-apple-darwin
             os: macos
             arch: aarch64
+
     runs-on: ${{ matrix.host_os }}
     env:
       DESTINATION: dist/bin/${{ matrix.os }}/${{ matrix.arch }}/planning-server
@@ -158,25 +163,16 @@ jobs:
       - name: Compile Deno entrypoint
         run: deno compile --output ${{ env.DESTINATION }} --target ${{ matrix.target }} --allow-net --allow-env --allow-read src/index.ts
 
-      - name: List all outputs ( Unix or macOS )
+      - name: List all files recursively in dist directory (Unix or macOS)
         if: ${{ runner.os != 'Windows' }}
         run: ls -R $(dirname ${{ env.DESTINATION }})
 
-      - name: List all outputs ( Windows )
+      - name: List all files recursively in dist directory (Windows)
         if: ${{ runner.os == 'Windows' }}
         run: dir $(dirname ${{ env.DESTINATION }})
 
-      - name: Make the binary executable ( Unix or macOS )
-        if: ${{ runner.os != 'Windows' }}
-        run: chmod +x ${{ env.DESTINATION }}
-
-      - name: Set extended attributes ( macOS )
-        if: ${{ runner.os == 'macOS' }}
-        # run: xattr -w com.apple.quarantine 0000 $(dirname ${{ env.DESTINATION }})
-        run: xattr -d com.apple.quarantine ${{ env.DESTINATION }}
-
       - name: Upload build artifacts
-        uses: ./.github/actions/upload-tar-artifact
+        uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
           name: planning-server-${{ matrix.target }}
