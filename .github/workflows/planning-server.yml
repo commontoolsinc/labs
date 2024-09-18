@@ -15,6 +15,7 @@ env:
 
 jobs:
   deno_test:
+    name: Test under Deno
     runs-on: ubuntu-latest
     steps:
       - name: cache deno installation and deno.land dependencies
@@ -35,6 +36,7 @@ jobs:
       - run: deno run test
 
   node_test:
+    name: Test under Node.js
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -50,6 +52,7 @@ jobs:
       - run: npm test
 
   build:
+    name: Build
     needs:
       - deno_test
       - node_test
