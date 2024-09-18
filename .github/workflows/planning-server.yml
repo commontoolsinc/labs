@@ -51,6 +51,7 @@ jobs:
       timestamp: ${{ steps.timestamp.outputs.timestamp }}
       owner_lower: ${{ steps.owner_lower.outputs.owner_lower }}
       repo_name: ${{ steps.repo_name.outputs.repo_name }}
+      image_name: ${{ steps.image_name.outputs.image_name }}
 
   deno_test:
     name: Test under Deno
