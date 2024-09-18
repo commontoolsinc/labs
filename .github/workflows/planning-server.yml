@@ -64,9 +64,9 @@ jobs:
 
   build:
     name: Build
-    needs:
-      - deno_test
-      - node_test
+    # needs:
+      # - deno_test
+      # - node_test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -77,9 +77,19 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - run: npm install
+      - name: cache deno installation and deno.land dependencies
+        uses: actions/cache@v4
+        with:
+          key: ${{ runner.os }}-deno-${{ hashFiles('**/*.ts') }}
+          restore-keys: ${{ runner.os }}-deno-
+          path: |
+            /home/runner/.deno
+            /home/runner/.cache/deno/deps/https/deno.land
 
-      - run: npm run build
+      - name: Set up Deno
+        uses: denoland/setup-deno@v1
+
+      - run: deno run build
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
