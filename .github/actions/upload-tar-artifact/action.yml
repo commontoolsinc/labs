@@ -5,16 +5,12 @@ inputs:
   name:
     description: Artifact name
   path:
-    description: Path to tar
+    description: Path to archive
     required: true
-  args:
-    description: Options to pass to tar
-    required: false
-    default: -czf
   output:
-    description: Output path for the tarball
+    description: Output path for the archive
     required: false
-    default: ${{ github.workspace }}/artifact.tar.gz
+    default: ${{ github.workspace }}/artifact
   if-no-files-found:
     description: Behavior when no files are found
     required: false
@@ -24,24 +20,29 @@ inputs:
     required: false
     default: "0"
   include-hidden-files:
-    description: Include hidden files in the tarball
+    description: Include hidden files in the archive
     required: false
     default: "false"
 
 runs:
   using: composite
   steps:
-    - name: Create tarball
-      run: tar ${{ inputs.args }} ${{ inputs.output }} ${{ inputs.path }}
+    - name: Archive files
       shell: bash
+      run: |
+        if [ "${{ inputs.include-hidden-files }}" == "true" ]; then
+          tar -czf "${{ inputs.output }}.tar.gz" -C "${{ inputs.path }}" .[!.]* *
+        else
+          tar -czf "${{ inputs.output }}.tar.gz" -C "${{ inputs.path }}" *
+        fi
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: ${{ inputs.name || inputs.path }}
-        path: ${{ inputs.output }}
-        if-no-files-found: error
+        path: ${{ inputs.output }}.tar.gz
+        if-no-files-found: ${{ inputs.if-no-files-found }}
         retention-days: ${{ inputs.retention-days }}
         include-hidden-files: ${{ inputs.include-hidden-files }}
     - name: Clean up
-      run: rm -f ${{ inputs.output }}
       shell: bash
+      run: rm -f "${{ inputs.output }}.tar.gz"
