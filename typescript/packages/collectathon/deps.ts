@@ -8,6 +8,7 @@ export { oakCors } from "https://deno.land/x/cors@v1.2.2/mod.ts";
 export * as ai from "npm:ai@3.3.39";
 export { Application, Router } from "https://deno.land/x/oak@v12.1.0/mod.ts";
 export { default as Table } from "npm:easy-table";
+export { default as parseICS } from "https://raw.githubusercontent.com/mansueli/deno_ics_parser/ecb78556377dee1fb6061f985a9f185ec29304bd/ics_parser.ts";
 
 import { load } from "https://deno.land/std@0.181.0/dotenv/mod.ts";
 await load({ export: true });

@@ -2,11 +2,14 @@ import { db } from "./db.ts";
 import { walk, ensureDir } from "./deps.ts";
 import { getOrCreateCollection } from "./collections.ts";
 import { clipGitHub, syncGitHubIssues } from "./github.ts";
+import { clipCalendar } from "./calendar.ts";
 import { clipRSS } from "./rss.ts";
 import { clipWebpage } from "./webpage.ts";
 
 export async function clipUrl(url: string, collections: string[], prompt: string | undefined) {
-  if (url.includes("github.com")) {
+  if (url.endsWith(".ics")) {
+    await clipCalendar(url, collections);
+  } else if (url.includes("github.com")) {
     if (url.includes("issues")) {
       await syncGitHubIssues(url, collections);
     } else {
