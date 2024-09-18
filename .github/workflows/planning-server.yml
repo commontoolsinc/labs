@@ -104,10 +104,35 @@ jobs:
       - run: npm test
 
   deno_build:
+    # supported architectures:
+    # x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-pc-windows-msvc, x86_64-apple-darwin, aarch64-apple-darwin
+    strategy:
+      matrix:
+        include:
+          - host_os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            os: linux
+            arch: x86_64
+          - host_os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            os: linux
+            arch: aarch64
+          - host_os: windows-latest
+            target: x86_64-pc-windows-msvc
+            os: windows
+            arch: x86_64
+          - host_os: macos-latest
+            target: x86_64-apple-darwin
+            os: macos
+            arch: x86_64
+          - host_os: macos-latest
+            target: aarch64-apple-darwin
+            os: macos
+            arch: aarch64
+    runs-on: ${{ matrix.host_os }}
     env:
-      DESTINATION: dist/bin/planning-server
-    name: Build with Deno
-    runs-on: ubuntu-latest
+      DESTINATION: dist/bin/${{ matrix.os }}/${{ matrix.arch }}/planning-server
+    name: Build Deno binary for ${{ matrix.os }} ${{ matrix.arch }}
     continue-on-error: true
     steps:
       - name: Checkout
@@ -118,7 +143,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: cache deno installation and deno.land dependencies
+      - name: Cache deno installation and deno.land dependencies
         uses: actions/cache@v4
         with:
           key: ${{ runner.os }}-deno-${{ hashFiles('**/*.ts') }}
@@ -133,16 +158,17 @@ jobs:
       - name: Compile Deno entrypoint
         run: |
           deno compile \
-          --output $DESTINATION \
-          --allow-net \
-          --allow-env \
-          --allow-read \
-          src/index.ts
+            --output $DESTINATION \
+            --target ${{ matrix.target }} \
+            --allow-net \
+            --allow-env \
+            --allow-read \
+            src/index.ts
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: planning-server
+          name: planning-server-${{ matrix.target }}
           path: ${{ env.DESTINATION }}
 
   check:
