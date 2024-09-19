@@ -186,8 +186,8 @@ function simpleCell<T>(
         },
         key: <K extends keyof T>(key: K) =>
           cell.asSimpleCell([...path, key], log) as Cell<T[K]>,
-        getAsProxy: (path: PropertyKey[] = []) =>
-          createValueProxy(cell, [...path, ...keys], log),
+        getAsProxy: (subPath: PropertyKey[] = []) =>
+          createValueProxy(cell, [...path, ...subPath], log),
       };
   return self;
 }
