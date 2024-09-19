@@ -143,6 +143,7 @@ const bindProps = (
   context: Context
 ): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
+  console.log("binding props", element.tagName, props);
   for (const [propKey, propValue] of Object.entries(props)) {
     if (isBinding(propValue)) {
       const replacement = getContext(context, propValue.path);
@@ -163,6 +164,10 @@ const bindProps = (
         } else {
           logger.warn("Could not bind event", propKey, propValue);
         }
+      } else if (propKey.startsWith("$")) {
+        console.log("binding context directly", propKey);
+        const key = propKey.slice(1);
+        setProp(element, key, replacement);
       } else {
         const cancel = effect(replacement, (replacement) => {
           // Replacements are set as properties not attributes to avoid
