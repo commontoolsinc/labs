@@ -86,7 +86,7 @@ export const iframeExample = recipe<{ prompt: string; data: any }>(
 
         <common-iframe
           src=${maybeHTML({ result: response.result })}
-          context=${{ context: data }}
+          $context=${data}
         ></common-iframe>
       </div>`,
       response,
