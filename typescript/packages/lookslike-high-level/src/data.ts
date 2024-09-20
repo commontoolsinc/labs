@@ -58,6 +58,7 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 
 addCharms([
   run(iframeExample, { }),
+  run(iframeExample, { prompt: "playable breakout/arkanoid, use `score` to write score, click to start, reset score at start", data: { score: 0, counter: 0 } }),
   run(fetchExample, {
     url: "https://anotherjesse-restfuljsonblobapi.web.val.run/items",
   }),

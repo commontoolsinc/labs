@@ -13,6 +13,8 @@ export class CommonIframe extends LitElement {
 
   private iframeRef: Ref<HTMLIFrameElement> = createRef();
 
+  private subscriptions: Map<string, () => void> = new Map();
+
   private handleMessage = (event: MessageEvent) => {
     console.log("Received message", event);
     if (event.source === this.iframeRef.value?.contentWindow) {
@@ -21,17 +23,17 @@ export class CommonIframe extends LitElement {
         console.error("Invalid key type. Expected string.");
         return;
       }
-      console.log(
-        { type, key, data },
-        this.context,
-        typeof this.context?.get === "function" ? "cell" : "not cell"
-      );
-      console.log(
-        "data",
-        this.context,
-        this.context?.get && this.context?.get(),
-        this.context?.getAsProxy && this.context?.getAsProxy()
-      );
+      // console.log(
+      //   { type, key, data },
+      //   this.context,
+      //   typeof this.context?.get === "function" ? "cell" : "not cell"
+      // );
+      // console.log(
+      //   "data",
+      //   this.context,
+      //   this.context?.get && this.context?.get(),
+      //   this.context?.getAsProxy && this.context?.getAsProxy()
+      // );
       if (type === "read" && this.context) {
         const value = this.context?.getAsProxy
           ? this.context?.getAsProxy([key])
@@ -45,14 +47,43 @@ export class CommonIframe extends LitElement {
         );
       } else if (type === "write" && this.context) {
         this.context.getAsProxy()[key] = data;
+        if (this.subscriptions.has(key)) {
+          this.notifySubscribers(key, data);
+        }
+      } else if (type === "subscribe" && this.context) {
+        if (!this.subscriptions) {
+          this.subscriptions = new Map();
+        }
+        console.log("subscribing", key, this.context[key]);
+        const unsub = this.context.sink(() => {
+          this.notifySubscribers(key, this.context.get()[key]);
+        });
+        this.subscriptions.set(key, unsub);
+      } else if (type === "unsubscribe" && this.context) {
+        if (this.subscriptions && this.subscriptions.has(key)) {
+          const unsub = this.subscriptions.get(key);
+          if (unsub) {
+            unsub();
+          }
+          this.subscriptions.delete(key);
+        }
       }
     }
   };
+
+  private notifySubscribers(key: string, value: any) {
+    console.log("notifySubscribers", key, value);
+    this.iframeRef.value?.contentWindow?.postMessage(
+      { type: "update", key, value },
+      "*"
+    );
+  }
   private boundHandleMessage = this.handleMessage.bind(this);
 
   override connectedCallback() {
     super.connectedCallback();
     window.addEventListener("message", this.boundHandleMessage);
+
   }
 
   override disconnectedCallback() {
