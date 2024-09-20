@@ -1,6 +1,12 @@
 import { LitElement, html } from "lit-element";
 import { customElement, property } from "lit/decorators.js";
-import { Cell } from "@commontools/common-runner";
+import {
+  Cell,
+  addAction,
+  removeAction,
+  type Action,
+  type ReactivityLog,
+} from "@commontools/common-runner";
 import { Ref, createRef, ref } from "lit/directives/ref.js";
 
 @customElement("common-iframe")
@@ -13,7 +19,7 @@ export class CommonIframe extends LitElement {
 
   private iframeRef: Ref<HTMLIFrameElement> = createRef();
 
-  private subscriptions: Map<string, () => void> = new Map();
+  private subscriptions: Map<string, Action[]> = new Map();
 
   private handleMessage = (event: MessageEvent) => {
     console.log("Received message", event);
@@ -28,7 +34,8 @@ export class CommonIframe extends LitElement {
           ? this.context?.getAsProxy([key])
           : this.context?.[key];
         // TODO: This might cause infinite loops, since the data can be a graph.
-        const copy = JSON.parse(JSON.stringify(value ?? {}));
+        const copy =
+          value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
         console.log("readResponse", key, value);
         this.iframeRef.value?.contentWindow?.postMessage(
           { type: "readResponse", key, data: copy },
@@ -37,21 +44,20 @@ export class CommonIframe extends LitElement {
       } else if (type === "write" && this.context) {
         this.context.getAsProxy()[key] = data;
       } else if (type === "subscribe" && this.context) {
-        if (!this.subscriptions) {
-          this.subscriptions = new Map();
-        }
         console.log("subscribing", key, this.context);
-        // TODO(ben): should be subscribing to just the cell, not the whole context
-        // but doing .getAsProxy([key]) or [key] both seem to be lacking .sink()?
-        const unsub = this.context.sink(() => {
-          this.notifySubscribers(key, this.context.get()[key]);
-        });
-        this.subscriptions.set(key, unsub);
+
+        const action: Action = (log: ReactivityLog) => {
+          this.notifySubscribers(key, this.context.getAsProxy([key], log));
+        };
+        addAction(action);
+
+        if (!this.subscriptions.has(key)) this.subscriptions.set(key, [action]);
+        else this.subscriptions.get(key)!.push(action);
       } else if (type === "unsubscribe" && this.context) {
         if (this.subscriptions && this.subscriptions.has(key)) {
-          const unsub = this.subscriptions.get(key);
-          if (unsub) {
-            unsub();
+          const actions = this.subscriptions.get(key);
+          if (actions && actions.length) {
+            removeAction(actions.pop()!);
           }
           this.subscriptions.delete(key);
         }
@@ -61,8 +67,11 @@ export class CommonIframe extends LitElement {
 
   private notifySubscribers(key: string, value: any) {
     console.log("notifySubscribers", key, value);
+    // TODO: This might cause infinite loops, since the data can be a graph.
+    const copy =
+      value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
     this.iframeRef.value?.contentWindow?.postMessage(
-      { type: "update", key, value },
+      { type: "update", key, value: copy },
       "*"
     );
   }
@@ -71,7 +80,6 @@ export class CommonIframe extends LitElement {
   override connectedCallback() {
     super.connectedCallback();
     window.addEventListener("message", this.boundHandleMessage);
-
   }
 
   override disconnectedCallback() {
