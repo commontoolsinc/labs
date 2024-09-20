@@ -30,15 +30,13 @@ const generate = handler<void, { prompt: string; query: string }>(
   }
 );
 
-const randomize = handler<void, { data: Record<string, any> }>(
-  (_, state) => {
-    for (const key in state.data) {
-      if (typeof state.data[key] === 'number') {
-        state.data[key] = Math.round(Math.random() * 100); // Generates a random number between 0 and 100
-      }
+const randomize = handler<void, { data: Record<string, any> }>((_, state) => {
+  for (const key in state.data) {
+    if (typeof state.data[key] === "number") {
+      state.data[key] = Math.round(Math.random() * 100); // Generates a random number between 0 and 100
     }
   }
-);
+});
 
 const maybeHTML = lift(({ result }) => result?.html ?? "");
 
@@ -99,8 +97,10 @@ export const iframeExample = recipe<{ prompt: string; data: any }>(
   "iFrame Example",
   ({ prompt, data }) => {
     tap({ data });
-    prompt.setDefault("make a red circle and say the message from the data");
-    data.setDefault({ message: "hello" });
+    prompt.setDefault(
+      "counter example using write and subscribe with key `counter`"
+    );
+    data.setDefault({ message: "hello", counter: 0 });
 
     const query = cell<string>();
     const response = generateData<{ html: string }>({
