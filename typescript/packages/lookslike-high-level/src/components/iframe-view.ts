@@ -23,17 +23,6 @@ export class CommonIframe extends LitElement {
         console.error("Invalid key type. Expected string.");
         return;
       }
-      // console.log(
-      //   { type, key, data },
-      //   this.context,
-      //   typeof this.context?.get === "function" ? "cell" : "not cell"
-      // );
-      // console.log(
-      //   "data",
-      //   this.context,
-      //   this.context?.get && this.context?.get(),
-      //   this.context?.getAsProxy && this.context?.getAsProxy()
-      // );
       if (type === "read" && this.context) {
         const value = this.context?.getAsProxy
           ? this.context?.getAsProxy([key])
@@ -47,14 +36,13 @@ export class CommonIframe extends LitElement {
         );
       } else if (type === "write" && this.context) {
         this.context.getAsProxy()[key] = data;
-        if (this.subscriptions.has(key)) {
-          this.notifySubscribers(key, data);
-        }
       } else if (type === "subscribe" && this.context) {
         if (!this.subscriptions) {
           this.subscriptions = new Map();
         }
-        console.log("subscribing", key, this.context[key]);
+        console.log("subscribing", key, this.context);
+        // TODO(ben): should be subscribing to just the cell, not the whole context
+        // but doing .getAsProxy([key]) or [key] both seem to be lacking .sink()?
         const unsub = this.context.sink(() => {
           this.notifySubscribers(key, this.context.get()[key]);
         });
