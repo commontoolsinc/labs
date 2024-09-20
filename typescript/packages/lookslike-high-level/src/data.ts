@@ -25,6 +25,7 @@ import {
   isCellProxyForDereferencing,
 } from "@commontools/common-runner";
 import { fetchCollections } from "./recipes/fetchCollections.js";
+import { iframeExample } from "./recipes/iframeExample.js";
 
 export type Charm = {
   [ID]: number;
@@ -56,6 +57,8 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 }
 
 addCharms([
+  run(iframeExample, { }),
+  run(iframeExample, { prompt: "playable breakout/arkanoid, use `score` to write score, click to start, reset score at start", data: { score: 0, counter: 0 } }),
   run(fetchExample, {
     url: "https://anotherjesse-restfuljsonblobapi.web.val.run/items",
   }),
