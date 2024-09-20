@@ -42,7 +42,7 @@ const maybeHTML = lift(({ result }) => result?.html ?? "");
 
 const viewSystemPrompt = `generate a complete HTML document within a json block , e.g.
   \`\`\`json
-  { html: '...'}
+  { html: "..."}
   \`\`\`
 
   This must be plain JSON.
@@ -60,6 +60,7 @@ const viewSystemPrompt = `generate a complete HTML document within a json block 
     window.addEventListener('message', function(event) {
       if (event.data.type === 'readResponse') {
         // use response
+        console.log('readResponse', event.data.key,event.data.value);
       } else if (event.data.type === 'update') {
       ...
     });
@@ -76,7 +77,7 @@ const viewSystemPrompt = `generate a complete HTML document within a json block 
   window.parent.postMessage({
     type: 'write',
     key: 'exampleKey',
-    data: 'Example data to write'
+    value: 'Example data to write'
   }, '*');
 
   You can also subscribe and unsubscribe to changes from the keys:
@@ -89,7 +90,7 @@ const viewSystemPrompt = `generate a complete HTML document within a json block 
   You receive 'update' messages with a 'key' and 'value' field.
 
   window.parent.postMessage({
-    type: 'ubsubscribe',
+    type: 'unsubscribe',
     key: 'exampleKey',
   }, '*');`;
 

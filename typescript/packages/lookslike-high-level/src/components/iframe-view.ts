@@ -24,7 +24,7 @@ export class CommonIframe extends LitElement {
   private handleMessage = (event: MessageEvent) => {
     console.log("Received message", event);
     if (event.source === this.iframeRef.value?.contentWindow) {
-      const { type, key, data } = event.data;
+      const { type, key, value } = event.data;
       if (typeof key !== "string") {
         console.error("Invalid key type. Expected string.");
         return;
@@ -38,28 +38,24 @@ export class CommonIframe extends LitElement {
           value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
         console.log("readResponse", key, value);
         this.iframeRef.value?.contentWindow?.postMessage(
-          { type: "readResponse", key, data: copy },
+          { type: "readResponse", key, value: copy },
           "*"
         );
       } else if (type === "write" && this.context) {
-        this.context.getAsProxy()[key] = data;
+        this.context.getAsProxy()[key] = value;
       } else if (type === "subscribe" && this.context) {
         console.log("subscribing", key, this.context);
 
-        const action: Action = (log: ReactivityLog) => {
+        const action: Action = (log: ReactivityLog) =>
           this.notifySubscribers(key, this.context.getAsProxy([key], log));
-        };
-        addAction(action);
 
+        addAction(action);
         if (!this.subscriptions.has(key)) this.subscriptions.set(key, [action]);
         else this.subscriptions.get(key)!.push(action);
       } else if (type === "unsubscribe" && this.context) {
         if (this.subscriptions && this.subscriptions.has(key)) {
           const actions = this.subscriptions.get(key);
-          if (actions && actions.length) {
-            removeAction(actions.pop()!);
-          }
-          this.subscriptions.delete(key);
+          if (actions && actions.length) removeAction(actions.pop()!);
         }
       }
     }
