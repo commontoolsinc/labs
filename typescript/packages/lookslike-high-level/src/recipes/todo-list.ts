@@ -18,10 +18,10 @@ const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
 );
 
 const updateItem = handler<
-  { detail: { done: boolean; value: string } },
+  { detail: { checked: boolean; value: string } },
   { item: TodoItem }
 >(({ detail }, { item }) => {
-  item.done = detail.done;
+  item.done = detail.checked;
   item.title = detail.value;
 });
 
