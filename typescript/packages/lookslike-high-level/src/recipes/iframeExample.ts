@@ -10,6 +10,8 @@ import {
   cell,
 } from "@commontools/common-builder";
 
+import { launch } from "../data.js";
+
 const formatData = lift(({ obj }) => {
   console.log("stringify", obj);
   return JSON.stringify(obj, null, 2);
@@ -95,6 +97,10 @@ const viewSystemPrompt = `generate a complete HTML document within a json block 
     key: 'exampleKey',
   }, '*');`;
 
+const cloneRecipe = handler<void, { data: any, title: string, prompt: string }>((_, state) => {
+  launch(iframeExample, { data: state.data, title: 'clone of ' + state.title, prompt: state.prompt });
+});
+
 export const iframeExample = recipe<{ title: string; prompt: string; data: any }>(
   "iFrame Example",
   ({ title, prompt, data }) => {
@@ -102,7 +108,7 @@ export const iframeExample = recipe<{ title: string; prompt: string; data: any }
     prompt.setDefault(
       "counter example using write and subscribe with key `counter`"
     );
-    data.setDefault({ message: "hello", counter: 0 });
+    data.setDefault({ message: "hello" });
 
     const query = cell<string>();
     const response = generateData<{ html: string }>({
@@ -130,6 +136,9 @@ export const iframeExample = recipe<{ title: string; prompt: string; data: any }
         ></common-input>
         <common-button onclick=${randomize({ data })}
           >Randomize Values</common-button
+        >
+        <common-button onclick=${cloneRecipe({ data, title, prompt })}
+          >Clone</common-button
         >
         <common-button onclick=${generate({ prompt, query })}
           >Generate</common-button
