@@ -6,6 +6,7 @@ import {
   lift,
   generateData,
   handler,
+  str,
   cell,
 } from "@commontools/common-builder";
 
@@ -94,9 +95,9 @@ const viewSystemPrompt = `generate a complete HTML document within a json block 
     key: 'exampleKey',
   }, '*');`;
 
-export const iframeExample = recipe<{ prompt: string; data: any }>(
+export const iframeExample = recipe<{ title: string; prompt: string; data: any }>(
   "iFrame Example",
-  ({ prompt, data }) => {
+  ({ title, prompt, data }) => {
     tap({ data });
     prompt.setDefault(
       "counter example using write and subscribe with key `counter`"
@@ -111,9 +112,16 @@ export const iframeExample = recipe<{ prompt: string; data: any }>(
     tap({ response });
     tap({ result: response.result });
 
+    const src = maybeHTML({ result: response.result });
+
     return {
-      [NAME]: "iFrame Example",
+      [NAME]: str`${title} - iframe`,
       [UI]: html`<div>
+        <common-input
+          value=${title}
+          placeholder="title"
+          oncommon-input=${updateValue({ value: title })}
+        ></common-input>
         <pre>${formatData({ obj: data })}</pre>
         <common-input
           value=${prompt}
@@ -128,12 +136,14 @@ export const iframeExample = recipe<{ prompt: string; data: any }>(
         >
 
         <common-iframe
-          src=${maybeHTML({ result: response.result })}
+          src=${src}
           $context=${data}
         ></common-iframe>
-        <pre>${maybeHTML({ result: response.result })}</pre>
+        <pre>${src}</pre>
       </div>`,
-      response,
+      prompt,
+      title,
+      src,
       data,
     };
   }
