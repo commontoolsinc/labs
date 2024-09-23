@@ -102,8 +102,8 @@ export function cell<T>(value?: T): CellImpl<T> {
       let changed = false;
       if (path.length > 0) {
         // Changes all array elements to cells, reusing previous cells
-        makeArrayElementsAllCells(newValue, self.getAtPath(path));
-        changed = setValueAtPath(value, path, newValue);
+        changed = makeArrayElementsAllCells(newValue, self.getAtPath(path));
+        if (changed) changed = setValueAtPath(value, path, newValue);
       } else {
         changed = makeArrayElementsAllCells(newValue, value);
         if (changed) value = newValue;

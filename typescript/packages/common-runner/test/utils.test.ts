@@ -490,4 +490,31 @@ describe("makeArrayElementsAllCells", () => {
 
     expect(changed).toBe(false);
   });
+
+  it("should detect non-array changes: property changes", () => {
+    const previousInput = { foo: "bar" };
+    const newInput = { foo: "baz" };
+
+    const changed = makeArrayElementsAllCells(newInput, previousInput);
+
+    expect(changed).toBe(true);
+  });
+
+  it("should detect non-array changes: new props", () => {
+    const previousInput = { foo: "bar" };
+    const newInput = { foo: "bar", baz: "qux" };
+
+    const changed = makeArrayElementsAllCells(newInput, previousInput);
+
+    expect(changed).toBe(true);
+  });
+
+  it("should detect non-array changes: missing props", () => {
+    const previousInput = { foo: "bar", baz: "qux" };
+    const newInput = { foo: "bar" };
+
+    const changed = makeArrayElementsAllCells(newInput, previousInput);
+
+    expect(changed).toBe(true);
+  });
 });

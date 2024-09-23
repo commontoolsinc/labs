@@ -324,6 +324,8 @@ export function makeArrayElementsAllCells(value: any, previous?: any): boolean {
     if (!Array.isArray(previous)) {
       previous = undefined;
       changed = true;
+    } else if (value.length !== previous.length) {
+      changed = true;
     }
     for (let i = 0; i < value.length; i++) {
       if (
@@ -369,6 +371,14 @@ export function makeArrayElementsAllCells(value: any, previous?: any): boolean {
           : previous[key]
       );
       changed ||= change;
+    }
+    if (!changed) {
+      for (const key in previous) {
+        if (!(key in value)) {
+          changed = true;
+          break;
+        }
+      }
     }
   } else if (isCellReference(previous)) {
     // value is a literal value here and the last clause
