@@ -307,7 +307,10 @@ export function transformToSimpleCells(
  * cells.
  * @returns Whether the value was changed.
  */
-export function makeArrayElementsAllCells(value: any, previous?: any): boolean {
+export function deepEqualAndMakeAllElementsCells(
+  value: any,
+  previous?: any
+): boolean {
   let changed = false;
   if (isCell(value)) {
     changed = value !== previous;
@@ -331,7 +334,7 @@ export function makeArrayElementsAllCells(value: any, previous?: any): boolean {
       if (
         !(isCell(value[i]) || isCellReference(value[i]) || isAlias(value[i]))
       ) {
-        const different = makeArrayElementsAllCells(
+        const different = deepEqualAndMakeAllElementsCells(
           value[i],
           !previous
             ? undefined
@@ -362,7 +365,7 @@ export function makeArrayElementsAllCells(value: any, previous?: any): boolean {
       changed = true;
     }
     for (const key in value) {
-      let change = makeArrayElementsAllCells(
+      let change = deepEqualAndMakeAllElementsCells(
         value[key],
         !previous
           ? undefined

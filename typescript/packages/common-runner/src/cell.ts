@@ -1,16 +1,12 @@
 import { isAlias, isStreamAlias } from "@commontools/common-builder";
-import {
-  getValueAtPath,
-  setValueAtPath,
-  deepEqual,
-} from "@commontools/common-builder";
+import { getValueAtPath, setValueAtPath } from "@commontools/common-builder";
 import {
   followCellReferences,
   followAliases,
   setNestedValue,
   pathAffected,
   transformToSimpleCells,
-  makeArrayElementsAllCells,
+  deepEqualAndMakeAllElementsCells,
 } from "./utils.js";
 import { queueEvent } from "./scheduler.js";
 
@@ -102,10 +98,13 @@ export function cell<T>(value?: T): CellImpl<T> {
       let changed = false;
       if (path.length > 0) {
         // Changes all array elements to cells, reusing previous cells
-        changed = makeArrayElementsAllCells(newValue, self.getAtPath(path));
+        changed = deepEqualAndMakeAllElementsCells(
+          newValue,
+          self.getAtPath(path)
+        );
         if (changed) changed = setValueAtPath(value, path, newValue);
       } else {
-        changed = makeArrayElementsAllCells(newValue, value);
+        changed = deepEqualAndMakeAllElementsCells(newValue, value);
         if (changed) value = newValue;
       }
       if (changed) {
