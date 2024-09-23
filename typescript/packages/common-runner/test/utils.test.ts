@@ -8,8 +8,14 @@ import {
   followCellReferences,
   followAliases,
   compactifyPaths,
+  makeArrayElementsAllCells,
 } from "../src/utils.js";
-import { cell, CellReference, ReactivityLog } from "../src/cell.js";
+import {
+  cell,
+  CellReference,
+  ReactivityLog,
+  isCellReference,
+} from "../src/cell.js";
 
 describe("extractDefaultValues", () => {
   it("should extract default values from a schema", () => {
@@ -340,5 +346,64 @@ describe("compactifyPaths", () => {
     ];
     const result = compactifyPaths(paths);
     expect(result).toEqual([{ cell: cellA, path: [] }]);
+  });
+});
+
+describe("makeArrayElementsAllCells", () => {
+  it("should convert non-cell array elements to cell references", () => {
+    const input = [1, 2, 3];
+    makeArrayElementsAllCells(input);
+
+    expect(input.length).toBe(3);
+    input.forEach((item) => {
+      expect(isCellReference(item)).toBe(true);
+    });
+  });
+
+  it("should not modify existing cell references, cells, or aliases", () => {
+    const cellRef = { cell: cell(42), path: [] };
+    const cellInstance = cell(43);
+    const alias = { $alias: { path: ["some", "path"] } };
+    const input = [cellRef, cellInstance, alias];
+
+    makeArrayElementsAllCells(input);
+
+    expect(input[0]).toBe(cellRef);
+    expect(input[1]).toBe(cellInstance);
+    expect(input[2]).toBe(alias);
+  });
+
+  it("should handle nested arrays", () => {
+    const input = [1, [2, 3], 4];
+    makeArrayElementsAllCells(input);
+
+    expect(isCellReference(input[0])).toBe(true);
+    expect(isCellReference(input[1])).toBe(true);
+    const { cell, path } = input[1] as unknown as CellReference;
+    expect(cell).toBeDefined();
+    expect(path).toEqual([]);
+    expect(Array.isArray(cell.get())).toBe(true);
+    (cell.get() as any[]).forEach((item) => {
+      expect(isCellReference(item)).toBe(true);
+    });
+    expect(isCellReference(input[2])).toBe(true);
+  });
+
+  it("should handle objects with array properties", () => {
+    const input = { arr: [1, 2, 3], nested: { arr: [4, 5] } };
+    makeArrayElementsAllCells(input);
+
+    input.arr.forEach((item) => {
+      expect(isCellReference(item)).toBe(true);
+    });
+    input.nested.arr.forEach((item) => {
+      expect(isCellReference(item)).toBe(true);
+    });
+  });
+
+  it("should not modify non-array, non-object values", () => {
+    const input = 42;
+    makeArrayElementsAllCells(input);
+    expect(input).toBe(42);
   });
 });

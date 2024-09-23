@@ -1,5 +1,6 @@
 import { isAlias } from "@commontools/common-builder";
 import {
+  cell,
   isCell,
   CellImpl,
   ReactivityLog,
@@ -291,4 +292,27 @@ export function transformToSimpleCells(
         ])
       );
   else return value;
+}
+
+/**
+ * Ensures that all elements of an array are cells. If not, i.e. they are static
+ * data, turn them into cells. "Is a cell" means it's either a cell, a cell
+ * reference or an alias.
+ *
+ * @param value - The value to traverse and make sure all arrays are arrays of
+ * cells.
+ */
+export function makeArrayElementsAllCells(value: any): void {
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      if (
+        !(isCell(value[i]) || isCellReference(value[i]) || isAlias(value[i]))
+      ) {
+        makeArrayElementsAllCells(value[i]);
+        value[i] = { cell: cell(value[i]), path: [] } satisfies CellReference;
+      }
+    }
+  } else if (typeof value === "object" && value !== null) {
+    for (const key in value) makeArrayElementsAllCells(value[key]);
+  }
 }
