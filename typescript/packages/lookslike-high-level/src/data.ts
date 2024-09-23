@@ -26,6 +26,7 @@ import {
 } from "@commontools/common-runner";
 import { fetchCollections } from "./recipes/fetchCollections.js";
 import { iframeExample } from "./recipes/iframeExample.js";
+import { arenaRecipes } from "./recipes/arena.js";
 
 export type Charm = {
   [ID]: number;
@@ -59,6 +60,7 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 addCharms([
   run(iframeExample, { title: "two way binding counter", prompt: "counter example using write and subscribe with key `counter`", data: { counter: 0 } }),
   run(iframeExample, { title: "breakout", prompt: "playable breakout/arkanoid, use `score` to write score, click to start, reset score at start", data: { score: 0, counter: 0 } }),
+  run(arenaRecipes.fetchChannels, { title: "are.na", page: 1, per: 25 }),
   run(fetchExample, {
     url: "https://anotherjesse-restfuljsonblobapi.web.val.run/items",
   }),
