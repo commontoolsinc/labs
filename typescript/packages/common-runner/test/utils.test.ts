@@ -391,8 +391,9 @@ describe("makeArrayElementsAllCells", () => {
 
   it("should handle objects with array properties", () => {
     const input = { arr: [1, 2, 3], nested: { arr: [4, 5] } };
-    makeArrayElementsAllCells(input);
+    const changed = makeArrayElementsAllCells(input);
 
+    expect(changed).toBe(true);
     input.arr.forEach((item) => {
       expect(isCellReference(item)).toBe(true);
     });
@@ -405,5 +406,88 @@ describe("makeArrayElementsAllCells", () => {
     const input = 42;
     makeArrayElementsAllCells(input);
     expect(input).toBe(42);
+  });
+
+  it("should reuse cell references if value hasn't changed", () => {
+    const previousCell = cell(42);
+    const previousInput = [{ cell: previousCell, path: [] }];
+    const newInput = [42];
+
+    const changed = makeArrayElementsAllCells(newInput, previousInput);
+
+    expect(changed).toBe(false);
+    expect(newInput[0]).toBe(previousInput[0]);
+    expect(isCellReference(newInput[0])).toBe(true);
+    expect((newInput[0] as unknown as CellReference).cell).toBe(previousCell);
+  });
+
+  it("should create new cell reference if value has changed", () => {
+    const previousCell = cell(42);
+    const previousInput = [{ cell: previousCell, path: [] }];
+    const newInput = [43];
+
+    const changed = makeArrayElementsAllCells(newInput, previousInput);
+
+    expect(changed).toBe(true);
+    expect(newInput[0]).not.toBe(previousInput[0]);
+    expect(isCellReference(newInput[0])).toBe(true);
+    expect((newInput[0] as unknown as CellReference).cell.get()).toBe(43);
+  });
+
+  it("should handle nested objects and arrays", () => {
+    const previousInput = {
+      arr: [
+        { cell: cell(1), path: [] } satisfies CellReference,
+        { cell: cell(2), path: [] } satisfies CellReference,
+      ],
+      nested: { value: { cell: cell(3), path: [] } satisfies CellReference },
+    };
+    const newInput = {
+      arr: [1, 3],
+      nested: { value: 3 },
+    };
+
+    const changed = makeArrayElementsAllCells(newInput, previousInput);
+
+    expect(changed).toBe(true);
+    expect(isCellReference(newInput.arr[0])).toBe(true);
+    expect((newInput.arr[0] as unknown as CellReference).cell).toBe(
+      previousInput.arr[0].cell
+    );
+    expect(isCellReference(newInput.arr[1])).toBe(true);
+    expect((newInput.arr[1] as unknown as CellReference).cell.get()).toBe(3);
+    expect(isCellReference(newInput.nested.value)).toBe(false);
+    expect(newInput.nested.value).toBe(3); // Cell is overwritten
+  });
+
+  it("should detect changes in cell references", () => {
+    const cell1 = cell(1);
+    const cell2 = cell(2);
+    const previousInput = { cell: cell1, path: ["a"] };
+    const newInput = { cell: cell2, path: ["b"] };
+
+    const changed = makeArrayElementsAllCells(newInput, previousInput);
+
+    expect(changed).toBe(true);
+  });
+
+  it("should detect changes in aliases", () => {
+    const cell1 = cell(1);
+    const cell2 = cell(2);
+    const previousInput = { $alias: { cell: cell1, path: ["a"] } };
+    const newInput = { $alias: { cell: cell2, path: ["b"] } };
+
+    const changed = makeArrayElementsAllCells(newInput, previousInput);
+
+    expect(changed).toBe(true);
+  });
+
+  it("should handle null and undefined values", () => {
+    const previousInput = { foo: null };
+    const newInput = { foo: null };
+
+    const changed = makeArrayElementsAllCells(newInput, previousInput);
+
+    expect(changed).toBe(false);
   });
 });

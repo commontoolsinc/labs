@@ -101,15 +101,14 @@ export function cell<T>(value?: T): CellImpl<T> {
 
       let changed = false;
       if (path.length > 0) {
+        // Changes all array elements to cells, reusing previous cells
+        makeArrayElementsAllCells(newValue, self.getAtPath(path));
         changed = setValueAtPath(value, path, newValue);
-      } else if (!deepEqual(value, newValue)) {
-        changed = true;
-        value = newValue;
+      } else {
+        changed = makeArrayElementsAllCells(newValue, value);
+        if (changed) value = newValue;
       }
       if (changed) {
-        // If anything was changed, traverse value and make sure all elements on
-        // the list are cells.
-        makeArrayElementsAllCells(newValue);
         log?.writes.push({ cell: self, path });
         for (const callback of callbacks) callback(value as T, path);
       }
@@ -375,18 +374,27 @@ export function getCellReferenceOrThrow(value: any): CellReference {
 
 const isCellMarker = Symbol("isCell");
 export function isCell(value: any): value is CellImpl<any> {
-  return typeof value === "object" && value[isCellMarker] === true;
+  return (
+    typeof value === "object" && value !== null && value[isCellMarker] === true
+  );
 }
 
 export function isCellReference(value: any): value is CellReference {
   return (
-    typeof value === "object" && isCell(value.cell) && Array.isArray(value.path)
+    typeof value === "object" &&
+    value !== null &&
+    isCell(value.cell) &&
+    Array.isArray(value.path)
   );
 }
 
 const getCellReference = Symbol("isCellProxy");
 export function isCellProxy(value: any): value is CellProxy<any> {
-  return typeof value === "object" && value[getCellReference] !== undefined;
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    value[getCellReference] !== undefined
+  );
 }
 
 export function isCellProxyForDereferencing(

@@ -299,20 +299,88 @@ export function transformToSimpleCells(
  * data, turn them into cells. "Is a cell" means it's either a cell, a cell
  * reference or an alias.
  *
+ * Pass the previous value to reuse cells from previous transitions. It does so
+ * if the values match, but only on arrays (as for objects we don't (yet?) do
+ * this behind the scenes translation).
+ *
  * @param value - The value to traverse and make sure all arrays are arrays of
  * cells.
+ * @returns Whether the value was changed.
  */
-export function makeArrayElementsAllCells(value: any): void {
-  if (Array.isArray(value)) {
+export function makeArrayElementsAllCells(value: any, previous?: any): boolean {
+  let changed = false;
+  if (isCell(value)) {
+    changed = value !== previous;
+  } else if (isCellReference(value)) {
+    changed = isCellReference(previous)
+      ? value.cell !== previous.cell || !arrayEqual(value.path, previous.path)
+      : true;
+  } else if (isAlias(value)) {
+    changed = isAlias(previous)
+      ? value.$alias.cell !== previous.$alias.cell ||
+        !arrayEqual(value.$alias.path, previous.$alias.path)
+      : true;
+  } else if (Array.isArray(value)) {
+    if (!Array.isArray(previous)) {
+      previous = undefined;
+      changed = true;
+    }
     for (let i = 0; i < value.length; i++) {
       if (
         !(isCell(value[i]) || isCellReference(value[i]) || isAlias(value[i]))
       ) {
-        makeArrayElementsAllCells(value[i]);
-        value[i] = { cell: cell(value[i]), path: [] } satisfies CellReference;
+        const different = makeArrayElementsAllCells(
+          value[i],
+          !previous
+            ? undefined
+            : isCellReference(previous[i])
+            ? previous[i].cell.getAtPath(previous[i].path)
+            : previous[i]
+        );
+        if (
+          !different &&
+          previous &&
+          previous[i] &&
+          isCellReference(previous[i])
+        ) {
+          value[i] = previous[i];
+          // NOTE: We don't treat making it a cell reference as a change, since
+          // we'll still have the same value. This is reusing the cell reference
+          // transition from a previous run, but only if the value didn't
+          // change as well.
+        } else {
+          value[i] = { cell: cell(value[i]), path: [] } satisfies CellReference;
+          changed = true;
+        }
       }
     }
   } else if (typeof value === "object" && value !== null) {
-    for (const key in value) makeArrayElementsAllCells(value[key]);
+    if (typeof previous !== "object" || previous === null) {
+      previous = undefined;
+      changed = true;
+    }
+    for (const key in value) {
+      let change = makeArrayElementsAllCells(
+        value[key],
+        !previous
+          ? undefined
+          : isCellReference(previous[key])
+          ? previous[key].cell.getAtPath(previous[key].path)
+          : previous[key]
+      );
+      changed ||= change;
+    }
+  } else if (isCellReference(previous)) {
+    // value is a literal value here and the last clause
+    changed = value !== previous.cell.getAtPath(previous.path);
+  } else {
+    changed = value !== previous;
   }
+  return changed;
+}
+
+function arrayEqual(a: PropertyKey[], b: PropertyKey[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
