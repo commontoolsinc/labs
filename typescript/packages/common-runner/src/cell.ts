@@ -10,6 +10,7 @@ import {
   setNestedValue,
   pathAffected,
   transformToSimpleCells,
+  makeArrayElementsAllCells,
 } from "./utils.js";
 import { queueEvent } from "./scheduler.js";
 
@@ -97,6 +98,7 @@ export function cell<T>(value?: T): CellImpl<T> {
     getAtPath: (path: PropertyKey[]) => getValueAtPath(value, path),
     setAtPath: (path: PropertyKey[], newValue: any, log?: ReactivityLog) => {
       if (readOnly) throw new Error("Cell is read-only");
+
       let changed = false;
       if (path.length > 0) {
         changed = setValueAtPath(value, path, newValue);
@@ -105,6 +107,9 @@ export function cell<T>(value?: T): CellImpl<T> {
         value = newValue;
       }
       if (changed) {
+        // If anything was changed, traverse value and make sure all elements on
+        // the list are cells.
+        makeArrayElementsAllCells(newValue);
         log?.writes.push({ cell: self, path });
         for (const callback of callbacks) callback(value as T, path);
       }
