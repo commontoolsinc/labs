@@ -87,7 +87,7 @@ export class CommonIframe extends LitElement {
     return html`
       <iframe
         ${ref(this.iframeRef)}
-        sandbox="allow-scripts"
+        sandbox="allow-scripts allow-forms"
         .srcdoc=${this.src}
         height="512px"
         width="100%"
