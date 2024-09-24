@@ -35,14 +35,16 @@ export class CommonIframe extends LitElement {
           : this.context?.[key];
         // TODO: This might cause infinite loops, since the data can be a graph.
         const copy =
-          value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
+          value !== undefined ? JSON.stringify(value) : undefined;
         console.log("readResponse", key, value);
         this.iframeRef.value?.contentWindow?.postMessage(
           { type: "readResponse", key, value: copy },
           "*"
         );
       } else if (type === "write" && this.context) {
-        this.context.getAsProxy()[key] = value;
+        const updated = typeof value === "string" && value.includes('{') ? JSON.parse(value) : value;
+        console.log("write", key, updated);
+        this.context.getAsProxy()[key] = updated;
       } else if (type === "subscribe" && this.context) {
         console.log("subscribing", key, this.context);
 
