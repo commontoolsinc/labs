@@ -8,6 +8,7 @@ import {
   handler,
   str,
   cell,
+  createJsonSchema
 } from "@commontools/common-builder";
 
 import { launch } from "../data.js";
@@ -26,10 +27,15 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value)
 );
 
-const generate = handler<void, { prompt: string; query: string }>(
+const generate = handler<void, { prompt: string; schema: object; query: string }>(
   (_, state) => {
-    state.query = state.prompt;
-    console.log("generarting", state.query);
+    state.query = `
+      <schema>
+        ${JSON.stringify(state.schema, null, 2)}
+      </schema>
+
+      ${state.prompt}`;
+    console.log("generating", state.query);
   }
 );
 
@@ -43,14 +49,20 @@ const randomize = handler<void, { data: Record<string, any> }>((_, state) => {
 
 const maybeHTML = lift(({ result }) => result?.html ?? "");
 
-const viewSystemPrompt = `generate a complete HTML document within a json block , e.g.
-  \`\`\`json
-  { html: "..."}
+const viewSystemPrompt = `generate a complete HTML document within a html block , e.g.
+  \`\`\`html
+  ...
   \`\`\`
 
-  This must be plain JSON.
+  This must be complete HTML.
+  Import Tailwind (include \`<script src="https://cdn.tailwindcss.com"></script>\`) and style the page using it. Use tasteful, minimal defaults with a consistent style but customize based on the request.
+  Import React (include \`
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  \`) and write the app using it.
 
-  the document can and should make use of postMessage to read and write data from the host context. e.g.
+  The document can and should make use of postMessage to read and write data from the host context. e.g.
 
   document.addEventListener('DOMContentLoaded', function() {
     console.log('Initialized!');
@@ -65,12 +77,10 @@ const viewSystemPrompt = `generate a complete HTML document within a json block 
         // use response
         console.log('readResponse', event.data.key,event.data.value);
       } else if (event.data.type === 'update') {
+        // event.data.value is a JSON object already
       ...
     });
   });
-
-
-
 
   window.parent.postMessage({
     type: 'read',
@@ -95,30 +105,73 @@ const viewSystemPrompt = `generate a complete HTML document within a json block 
   window.parent.postMessage({
     type: 'unsubscribe',
     key: 'exampleKey',
-  }, '*');`;
+  }, '*');
+
+  Do not explain the HTML, no-one will be able to read the explanation. If the user does not specify any style, make it beautiful. You got this.`;
 
 const cloneRecipe = handler<void, { data: any, title: string, prompt: string }>((_, state) => {
   launch(iframeExample, { data: state.data, title: 'clone of ' + state.title, prompt: state.prompt });
 });
 
-export const iframeExample = recipe<{ title: string; prompt: string; data: any }>(
+const deriveJsonSchema = lift(({ data }) => {
+  return createJsonSchema({}, data)?.["properties"];
+});
+
+const onInput = handler<{ input: Event }, { value: string; }>(
+  (input, state) => {
+    state.value = input.target.value;
+  }
+);
+
+const toggleView = recipe<{ child: UI.View; isOpen: boolean }>(
+  "Toggle View",
+  ({ child, isOpen }) => {
+    isOpen.setDefault(false);
+
+    const toggle = handler<void, { isOpen: boolean }>((_, state) => {
+      state.isOpen = !state.isOpen;
+    });
+
+    return {
+      [NAME]: "Toggle View",
+      [UI]: html`
+        <div>
+          <button
+            class="px-4 py-2 bg-blue-500 text-white rounded"
+            onclick=${toggle({ isOpen })}
+          >
+            ${isOpen ? "Hide" : "Show"}
+          </button>
+          ${isOpen ? child : html``}
+        </div>
+      `,
+      isOpen,
+    };
+  }
+);
+
+export const iframeExample = recipe<{ title: string; prompt: string; data: any; src: string; }>(
   "iFrame Example",
-  ({ title, prompt, data }) => {
+  ({ title, prompt, data, src }) => {
     tap({ data });
     prompt.setDefault(
       "counter example using write and subscribe with key `counter`"
     );
     data.setDefault({ message: "hello" });
+    src.setDefault('hi')
+
+    const schema = deriveJsonSchema({ data });
 
     const query = cell<string>();
     const response = generateData<{ html: string }>({
       prompt: query,
       system: viewSystemPrompt,
+      mode: "html",
     });
     tap({ response });
     tap({ result: response.result });
 
-    const src = maybeHTML({ result: response.result });
+    src = maybeHTML({ result: response.result });
 
     return {
       [NAME]: str`${title} - iframe`,
@@ -128,26 +181,40 @@ export const iframeExample = recipe<{ title: string; prompt: string; data: any }
           placeholder="title"
           oncommon-input=${updateValue({ value: title })}
         ></common-input>
-        <pre>${formatData({ obj: data })}</pre>
-        <common-input
-          value=${prompt}
-          placeholder="Prompt"
-          oncommon-input=${updateValue({ value: prompt })}
-        ></common-input>
-        <common-button onclick=${randomize({ data })}
-          >Randomize Values</common-button
-        >
-        <common-button onclick=${cloneRecipe({ data, title, prompt })}
-          >Clone</common-button
-        >
-        <common-button onclick=${generate({ prompt, query })}
-          >Generate</common-button
-        >
+
+        <div style="display: flex; align-items: flex-start;">
+          <textarea
+            value=${prompt}
+            onkeyup=${onInput({ value: prompt })}
+            style="width: 80%; min-height: 64px; margin-right: 10px;"
+          ></textarea>
+          <common-button
+            onclick=${generate({ prompt, schema, query })}
+            style="white-space: nowrap;"
+          >
+            Generate
+          </common-button>
+        </div>
 
         <common-iframe
           src=${src}
           $context=${data}
         ></common-iframe>
+        <common-button onclick=${cloneRecipe({ data, title, prompt })}
+          >Clone</common-button
+        >
+        <details>
+          <summary>View Data</summary>
+          <pre>${formatData({ obj: data })}</pre>
+        </details>
+        <details>
+          <summary>Edit Source</summary>
+          <textarea
+            value=${src}
+            onkeyup=${onInput({ value: src })}
+            style="width: 100%; min-height: 64px;"
+          ></textarea>
+        </details>
         <pre>${src}</pre>
       </div>`,
       prompt,
