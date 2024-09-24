@@ -27,7 +27,7 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value)
 );
 
-const generate = handler<void, { prompt: string; schema: object; query: string }>(
+const generate = handler<void, { prompt: string; schema: object; query: string; loading: boolean }>(
   (_, state) => {
     state.query = `
       <schema>
@@ -36,6 +36,7 @@ const generate = handler<void, { prompt: string; schema: object; query: string }
 
       ${state.prompt}`;
     console.log("generating", state.query);
+    state.loading = true;
   }
 );
 
@@ -61,6 +62,8 @@ const viewSystemPrompt = `generate a complete HTML document within a html block 
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   \`) and write the app using it.
+
+  You may not use any other libraries unless requested by the user.
 
   The document can and should make use of postMessage to read and write data from the host context. e.g.
 
@@ -123,42 +126,26 @@ const onInput = handler<{ input: Event }, { value: string; }>(
   }
 );
 
-const toggleView = recipe<{ child: UI.View; isOpen: boolean }>(
-  "Toggle View",
-  ({ child, isOpen }) => {
-    isOpen.setDefault(false);
-
-    const toggle = handler<void, { isOpen: boolean }>((_, state) => {
-      state.isOpen = !state.isOpen;
-    });
-
-    return {
-      [NAME]: "Toggle View",
-      [UI]: html`
-        <div>
-          <button
-            class="px-4 py-2 bg-blue-500 text-white rounded"
-            onclick=${toggle({ isOpen })}
-          >
-            ${isOpen ? "Hide" : "Show"}
-          </button>
-          ${isOpen ? child : html``}
-        </div>
-      `,
-      isOpen,
-    };
+const onContentLoaded = handler<void, { loading: boolean }>(
+  (_, state) => {
+    state.loading = false;
   }
 );
 
-export const iframeExample = recipe<{ title: string; prompt: string; data: any; src: string; }>(
+const loadingStatus = lift(({ loading }) =>
+  loading ? html`<div>Loading...</div>` : html`<div></div>`
+);
+
+export const iframeExample = recipe<{ title: string; prompt: string; data: any; src: string; loading: boolean; }>(
   "iFrame Example",
-  ({ title, prompt, data, src }) => {
+  ({ title, prompt, data, src, loading }) => {
     tap({ data });
     prompt.setDefault(
-      "counter example using write and subscribe with key `counter`"
+      "counter"
     );
     data.setDefault({ message: "hello" });
     src.setDefault('hi')
+    loading.setDefault(false)
 
     const schema = deriveJsonSchema({ data });
 
@@ -172,6 +159,8 @@ export const iframeExample = recipe<{ title: string; prompt: string; data: any; 
     tap({ result: response.result });
 
     src = maybeHTML({ result: response.result });
+
+
 
     return {
       [NAME]: str`${title} - iframe`,
@@ -189,16 +178,19 @@ export const iframeExample = recipe<{ title: string; prompt: string; data: any; 
             style="width: 80%; min-height: 64px; margin-right: 10px;"
           ></textarea>
           <common-button
-            onclick=${generate({ prompt, schema, query })}
+            onclick=${generate({ prompt, schema, query, loading })}
             style="white-space: nowrap;"
           >
             Generate
           </common-button>
         </div>
 
+        ${loadingStatus({ loading })}
+
         <common-iframe
           src=${src}
           $context=${data}
+          onloaded=${onContentLoaded({loading})}
         ></common-iframe>
         <common-button onclick=${cloneRecipe({ data, title, prompt })}
           >Clone</common-button
@@ -212,10 +204,10 @@ export const iframeExample = recipe<{ title: string; prompt: string; data: any; 
           <textarea
             value=${src}
             onkeyup=${onInput({ value: src })}
-            style="width: 100%; min-height: 64px;"
+            style="width: 100%; min-height: 192px;"
           ></textarea>
         </details>
-        <pre>${src}</pre>
+
       </div>`,
       prompt,
       title,
