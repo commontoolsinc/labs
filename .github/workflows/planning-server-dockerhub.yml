@@ -343,3 +343,19 @@ jobs:
             type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3 # https://github.com/sigstore/cosign-installer
+
+      - name: Sign the images with GitHub OIDC Token
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: |
+            ${{ steps.image_path.outputs.IMAGE_PATH }}
+            ${{ steps.image_path.outputs.IMAGE_NAME }}:latest
+        run: |
+          images=""
+          for tag in ${TAGS}; do
+            images+="${tag}@${DIGEST} "
+          done
+          cosign sign --yes ${images}
