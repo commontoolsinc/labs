@@ -35,6 +35,7 @@ concurrency:
 
 jobs:
   setup:
+    name: Setup
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -73,7 +74,7 @@ jobs:
   test:
     needs:
       - setup
-    name: Build Docker image and test locally
+    name: Local container test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -195,7 +196,7 @@ jobs:
     needs:
       - setup
       - test
-    name: Push Docker image to Docker Hub
+    name: Docker Hub build and push
     runs-on: ubuntu-latest
     permissions:
       contents: read
