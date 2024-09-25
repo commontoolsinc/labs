@@ -251,8 +251,7 @@ jobs:
 
       - name: Get Docker logs
         if: steps.test.outcome == 'failure'
-        run: |
-          docker logs --details --timestamps --since 1h $(docker ps -q)
+        run: docker ps -q | xargs -L 1 docker logs
 
       - name: Stop the container
         run: docker stop $CONTAINER_ID
