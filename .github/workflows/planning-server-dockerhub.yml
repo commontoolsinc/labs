@@ -235,7 +235,11 @@ jobs:
           docker image ls -a
 
       - name: Launch image in local registry
-        run: docker run -d --rm -p $CONTAINER_PORT:$CONTAINER_PORT $IMAGE_PATH
+        run: |
+          docker run -d --rm \
+          -e ANTHROPIC_API_KEY=sk-fake \
+          -e ANTHROPIC_BASE_URL=https://api.anthropic.com \
+          -p $CONTAINER_PORT:$CONTAINER_PORT $IMAGE_PATH
       - name: Container identity
         id: container_id
         run: |
