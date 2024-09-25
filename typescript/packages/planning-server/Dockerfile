@@ -12,6 +12,8 @@ ADD . /app
 
 RUN deno --version
 
-RUN deno cache src/index.ts
+ARG TS_ENTRYPOINT=src/index.ts
 
-CMD ["run", "--allow-net", "--allow-read", "--allow-env", "src/index.ts"]
+RUN deno cache $TS_ENTRYPOINT
+
+CMD ["run", "--allow-all", ${TS_ENTRYPOINT}]
