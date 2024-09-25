@@ -192,8 +192,8 @@ jobs:
         if: ${{ env.PUSH }}
         uses: docker/login-action@v3 # https://github.com/docker/login-action
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - uses: docker/build-push-action@v6 # https://github.com/docker/build-push-action
         name: Build and locally push Docker image
@@ -204,12 +204,12 @@ jobs:
             ARTIFACT_NAME=${{ needs.setup.outputs.ARTIFACT_NAME }}
           context: ${{ needs.setup.outputs.WORKING_DIRECTORY }}
           push: true
-          tags: localhost:5000/${{ secrets.DOCKER_USERNAME }}/${{ needs.setup.outputs.ARTIFACT_NAME }}:${{ needs.setup.outputs.SHORT_HASH }}
+          tags: localhost:5000/${{ secrets.DOCKERHUB_USERNAME }}/${{ needs.setup.outputs.ARTIFACT_NAME }}:${{ needs.setup.outputs.SHORT_HASH }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Launch image in local registry
-        run: docker run -d --rm -p $CONTAINER_PORT:$CONTAINER_PORT localhost:5000/${{ secrets.DOCKER_USERNAME }}/$ARTIFACT_NAME:${{ needs.setup.outputs.SHORT_HASH }}
+        run: docker run -d --rm -p $CONTAINER_PORT:$CONTAINER_PORT localhost:5000/${{ secrets.DOCKERHUB_USERNAME }}/$ARTIFACT_NAME:${{ needs.setup.outputs.SHORT_HASH }}
       - name: Wait until the container is up
 
         run: |
@@ -225,4 +225,4 @@ jobs:
       - name: Stop the container
         env:
           PORT: ${{ env.CONTAINER_PORT }}
-        run: docker stop $(docker ps -q --filter "ancestor=localhost:5000/${{ secrets.DOCKER_USERNAME }}/ARTIFACT_NAME:${{ needs.setup.outputs.SHORT_HASH }}")
+        run: docker stop $(docker ps -q --filter "ancestor=localhost:5000/${{ secrets.DOCKERHUB_USERNAME }}/ARTIFACT_NAME:${{ needs.setup.outputs.SHORT_HASH }}")
