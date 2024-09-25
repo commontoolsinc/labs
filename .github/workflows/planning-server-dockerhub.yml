@@ -226,7 +226,7 @@ jobs:
       - name: Container identity
         id: container_id
         run: |
-          CONTAINER_ID="$(docker ps -q --filter 'ancestor=$IMAGE_PATH')"
+          CONTAINER_ID=$(docker ps --format "{{.ID}}" --filter "ancestor=$IMAGE_PATH")
           echo "CONTAINER_ID=${CONTAINER_ID}" >> $GITHUB_ENV
           echo "CONTAINER_ID=${CONTAINER_ID}" >> $GITHUB_OUTPUT
 
