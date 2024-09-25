@@ -1,5 +1,5 @@
 import { html } from "@commontools/common-html";
-import { recipe, handler, UI, NAME } from "@commontools/common-builder";
+import { recipe, handler, UI, NAME, lift } from "@commontools/common-builder";
 
 export interface TodoItem {
   title: string;
@@ -17,6 +17,34 @@ const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
   ({ detail }, state) => (state.title = detail?.value ?? "untitled")
 );
 
+const toggleAll = handler<{}, { items: TodoItem[] }>(
+  ({ }, { items }) => {
+    items.forEach((item) => {
+      item.done = !item.done;
+      item.title += " T";
+    });
+  }
+);
+
+const getListSummary = lift(({ items }) => {
+  const notDoneTitles = items.flatMap((item) =>
+    item.done ? [] : [item.title]
+  );
+
+  return (
+    notDoneTitles.length + ' of ' +
+    items.length +
+    " items completed." +
+    (notDoneTitles.length
+      ? " Open tasks: " + notDoneTitles.join(", ")
+      : "")
+  );
+});
+
+// const logger = lift(({obj}) => {
+//   console.log("logger", obj);
+// });
+
 const updateItem = handler<
   { detail: { checked: boolean; value: string } },
   { item: TodoItem }
@@ -32,6 +60,8 @@ export const todoList = recipe<{
   title.setDefault("untitled");
   items.setDefault([]);
 
+  // logger({ obj: items });
+
   return {
     [UI]: html`
       <common-vstack gap="sm">
@@ -40,9 +70,10 @@ export const todoList = recipe<{
           placeholder="List title"
           oncommon-input=${updateTitle({ title })}
         ></common-input>
+        ${getListSummary({ items })}
         <common-vstack gap="sm">
           ${items.map(
-            (item: TodoItem) => html`
+      (item: TodoItem) => html`
               <common-vstack gap="sm">
                 <common-todo
                   checked=${item.done}
@@ -57,8 +88,13 @@ export const todoList = recipe<{
                 </common-todo>
               </common-vstack>
             `
-          )}
+    )}
         </common-vstack>
+        <button
+          onclick=${toggleAll({ items })}
+        >
+          Toggle all done
+        </button>
         <common-send-message
           name="Add"
           placeholder="New task"
