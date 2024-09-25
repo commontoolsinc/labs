@@ -150,7 +150,7 @@ jobs:
           --rm
           --network host
           -p $CONTAINER_PORT:$CONTAINER_PORT
-          $( docker build -q . )
+          ${{ steps.image_path.outputs.IMAGE_PATH }}
 
       - name: Container identity
         id: container_id
