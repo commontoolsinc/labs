@@ -244,7 +244,9 @@ jobs:
       - name: Test the container
         id: test
         run: |
-          curl 'http://localhost:8000/' -H 'Content-Type: application/json' --data-raw '{"action":"create","system":"You say 42 to any message","message":"What is the meaning of life?","activeTools":[]}'
+          curl 'http://localhost:8000/' \
+          -H 'Content-Type: application/json' \
+          --data-raw $'{"action":"create","system":"You say 42 to any message","message":"What is the meaning of life?","activeTools":[]}'
         continue-on-error: true
       - name: Get container logs
         if: steps.test.outcome == 'failure'
