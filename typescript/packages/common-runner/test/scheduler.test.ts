@@ -24,7 +24,7 @@ describe("scheduler", () => {
         a.getAsProxy([], log) + b.getAsProxy([], log)
       );
     };
-    run(adder);
+    await run(adder);
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
     a.send(2); // No log, simulate external change
@@ -70,7 +70,7 @@ describe("scheduler", () => {
         a.getAsProxy([], log) + b.getAsProxy([], log)
       );
     };
-    run(adder);
+    await run(adder);
     expect(runCount).toBe(1);
     expect(c.get()).toBe(3);
 
@@ -105,8 +105,8 @@ describe("scheduler", () => {
         c.getAsProxy([], log) + d.getAsProxy([], log)
       );
     };
-    run(adder1);
-    run(adder2);
+    await run(adder1);
+    await run(adder2);
     expect(runs.join(",")).toBe("adder1,adder2");
     expect(c.get()).toBe(3);
     expect(e.get()).toBe(4);
@@ -151,14 +151,14 @@ describe("scheduler", () => {
     const stopped = vi.fn();
     onError(() => stopped());
 
-    run(adder1);
-    run(adder2);
-    run(adder3);
+    await run(adder1);
+    await run(adder2);
+    await run(adder3);
 
     expect(stopped).not.toHaveBeenCalled();
     await idle();
-    expect(stopped).toHaveBeenCalled();
     expect(maxRuns).toBeGreaterThan(0);
+    expect(stopped).toHaveBeenCalled();
   });
 
   it("should not loop on r/w changes on its own output", async () => {
@@ -172,7 +172,7 @@ describe("scheduler", () => {
     const stopped = vi.fn();
     onError(() => stopped());
 
-    run(inc);
+    await run(inc);
     expect(counter.get()).toBe(1);
     await idle();
     expect(counter.get()).toBe(1);
