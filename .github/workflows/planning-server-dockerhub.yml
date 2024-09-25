@@ -193,6 +193,9 @@ jobs:
       IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
 
   docker:
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-docker
+      cancel-in-progress: false
     needs:
       - setup
       - test
