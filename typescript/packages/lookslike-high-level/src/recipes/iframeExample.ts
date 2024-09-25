@@ -19,7 +19,7 @@ const formatData = lift(({ obj }) => {
 });
 
 const tap = lift((x) => {
-  console.log(x);
+  console.log(x, JSON.stringify(x, null, 2));
   return x;
 });
 
@@ -35,17 +35,9 @@ const generate = handler<void, { prompt: string; schema: object; query: string; 
   }
 );
 
-const randomize = handler<void, { data: Record<string, any> }>((_, state) => {
-  for (const key in state.data) {
-    if (typeof state.data[key] === "number") {
-      state.data[key] = Math.round(Math.random() * 100); // Generates a random number between 0 and 100
-    }
-  }
-});
-
 const maybeHTML = lift(({ result }) => result?.html ?? "");
 
-const viewSystemPrompt = lift((schema: string) => `generate a complete HTML document within a html block , e.g.
+const viewSystemPrompt = lift(({ schema }) => `generate a complete HTML document within a html block , e.g.
   \`\`\`html
   ...
   \`\`\`
@@ -111,8 +103,17 @@ const cloneRecipe = handler<void, { data: any, title: string, prompt: string }>(
   launch(iframeExample, { data: state.data, title: 'clone of ' + state.title, prompt: state.prompt });
 });
 
-const deriveJsonSchema = lift(({ data }) => {
-  return createJsonSchema({}, data)?.["properties"];
+const deriveJsonSchema = lift(({ data, filter }) => {
+  const schema = createJsonSchema({}, data)?.["properties"];
+  if (!schema) return {};
+
+  const filterKeys = (filter || '').split(',').map(key => key.trim()).filter(Boolean);
+
+  if (filterKeys.length === 0) return schema;
+
+  return Object.fromEntries(
+    Object.entries(schema).filter(([key]) => filterKeys.includes(key))
+  );
 });
 
 const onInput = handler<{ input: Event }, { value: string; }>(
@@ -131,9 +132,45 @@ const loadingStatus = lift(({ loading }) =>
   loading ? html`<div>Loading...</div>` : html`<div></div>`
 );
 
-export const iframeExample = recipe<{ title: string; prompt: string; data: any; src: string; loading: boolean; }>(
+const objectKeys = lift(({ obj }) => Object.keys(obj).map(key => ({ key })));
+
+const onToggle = handler<Event, { key: string, selected: string[] }>((input, { key, selected }) => {
+  const checkbox = input.target as HTMLInputElement;
+  const isChecked = checkbox.checked;
+  if (isChecked) {
+    if (!selected.includes(key)) {
+      selected.push(key);
+    }
+  } else {
+    selected = selected.filter(item => item !== key);
+  }
+});
+
+const copy = lift(({ value }: { value: any }) => cell(JSON.parse(JSON.stringify(value || {}))));
+
+const selectedKeys = lift(({ keys }) => {
+  let result = [];
+  for (const key of keys) {
+    if (key.checked) {
+      result.push(key.key);
+    }
+  }
+  return result;
+});
+
+const stringify = lift(({ value }) => JSON.stringify(value, null, 2));
+
+const promptFilterSchema = lift(({ schema, query }) => `Given the following schema:
+
+${JSON.stringify(schema, null, 2)}
+
+Filter and return only the relevant parts of this schema for the following request:
+
+${query}`);
+
+export const iframeExample = recipe<{ title: string; prompt: string; data: any; src: string; loading: boolean; filter: string; }>(
   "iFrame Example",
-  ({ title, prompt, data, src, loading }) => {
+  ({ title, prompt, filter, data, src, loading }) => {
     tap({ data });
     prompt.setDefault(
       "counter"
@@ -142,19 +179,28 @@ export const iframeExample = recipe<{ title: string; prompt: string; data: any; 
     src.setDefault('hi')
     loading.setDefault(false)
 
-    const schema = deriveJsonSchema({ data });
-
+    filter.setDefault("");
+    const schema = deriveJsonSchema({ data, filter });
+    tap({ schema });
     const query = cell<string>();
+
+    const scopedSchema = generateData<{ html: string }>({
+      prompt: promptFilterSchema({ schema, query }),
+      system: `Filter any keys from this schema that seem unrelated to the request. Respond in a json block.`,
+      mode: "json",
+    });
+
+    tap({ scopedSchema });
+
     const response = generateData<{ html: string }>({
       prompt: query,
-      system: viewSystemPrompt(schema),
+      system: viewSystemPrompt({ schema: scopedSchema.result }),
       mode: "html",
     });
     tap({ response });
     tap({ result: response.result });
 
     src = maybeHTML({ result: response.result });
-
 
 
     return {
@@ -192,6 +238,11 @@ export const iframeExample = recipe<{ title: string; prompt: string; data: any; 
         >
         <details>
           <summary>View Data</summary>
+          <common-input
+            value=${filter}
+            placeholder="Filter keys (comma-separated)"
+            oncommon-input=${updateValue({ value: filter })}
+          ></common-input>
           <pre>${formatData({ obj: data })}</pre>
         </details>
         <details>
