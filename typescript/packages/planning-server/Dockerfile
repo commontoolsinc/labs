@@ -16,4 +16,6 @@ ARG TS_ENTRYPOINT=src/index.ts
 
 RUN deno cache $TS_ENTRYPOINT
 
-CMD ["run", "--allow-all", "${TS_ENTRYPOINT}"]
+ENV START_CMD="deno run --allow-all ${TS_ENTRYPOINT}"
+
+CMD ["/bin/sh", "-c", "$START_CMD"]
