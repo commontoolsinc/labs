@@ -135,7 +135,7 @@ jobs:
 
       - id: tar_path
         run: |
-          TAR_PATH=/tmp/images/
+          TAR_PATH=/tmp/images.tar
           echo "TAR_PATH=${TAR_PATH}" >> $GITHUB_ENV
           echo "TAR_PATH=${TAR_PATH}" >> $GITHUB_OUTPUT
 
@@ -155,7 +155,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           outputs: |
-            type=tar,dest=${{ steps.tar_path.outputs.TAR_PATH }}
+            type=tar,dest=${{ steps.tar_path.outputs.TAR_PATH }},platform-split=false
           platforms: linux/amd64,linux/arm64
       - name: Show all files in output directories recursively
         run: |
