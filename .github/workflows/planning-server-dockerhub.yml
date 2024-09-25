@@ -231,7 +231,6 @@ jobs:
           outputs: |
             type=registry
             type=docker,dest=$TAR_PATH
-          sbom: true
           provenance: mode=max
 
       - name: Launch image in local registry
@@ -325,7 +324,7 @@ jobs:
         id: build
         env:
           SOURCE_DATE_EPOCH: ${{ needs.setup.outputs.TIMESTAMP }} # see https://docs.docker.com/build/ci/github-actions/reproducible-builds
-        name: Build and locally push Docker image
+        name: Build and push Docker image
         with:
           build-args: |
             DENO_VERSION=${{ needs.setup.outputs.DENO_VERSION }}
@@ -341,7 +340,6 @@ jobs:
             type=local,src=${{ steps.docker_test.outputs.IMAGE_DIGEST }}
             type=gha
           cache-to: type=gha,mode=max
-          sbom: true
           provenance: mode=max
 
       - name: Sign the image
