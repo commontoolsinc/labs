@@ -210,9 +210,9 @@ jobs:
             ARTIFACT_NAME=${{ needs.setup.outputs.ARTIFACT_NAME }}
           context: ${{ needs.setup.outputs.WORKING_DIRECTORY }}
           push: true
-          load: false # load the image into the Docker daemon
+          load: true # load the image into the Docker daemon
           tags: |
-            ${{ needs.setup.outputs.IMAGE_PATH }}
+            ${{ steps.image_path.outputs.IMAGE_PATH }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
