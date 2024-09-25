@@ -31,7 +31,9 @@ type ConversationThreadRequest =
   | AppendToConversationThreadRequest;
 
 const handler = async (request: Request): Promise<Response> => {
-  if (request.method === "POST") {
+  if (request.method === "GET") {
+    return new Response("Planning Server", { status: 200 });
+  }  else if (request.method === "POST") {
     try {
       const body: ConversationThreadRequest = await request.json();
       const { action } = body;
