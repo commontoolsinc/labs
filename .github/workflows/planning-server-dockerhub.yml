@@ -250,6 +250,6 @@ jobs:
         continue-on-error: true
       - name: Get container logs
         if: steps.test.outcome == 'failure'
-        run: docker logs $CONTAINER_ID
+        run: docker logs ${{ steps.container_id.outputs.CONTAINER_ID }}
       - name: Stop the container
-        run: docker stop $CONTAINER_ID
+        run: docker stop ${{ steps.container_id.outputs.CONTAINER_ID }}
