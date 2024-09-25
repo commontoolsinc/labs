@@ -1,15 +1,14 @@
 #!/usr/bin/env -S deno run --allow-net --allow-read --allow-env
 
-import { ask } from "./anthropic.ts";
-import { serve } from "./deps.ts";
-import {
-  InMemoryConversationThreadManager,
-  ConversationThread,
-} from "./conversation.ts";
-import { CoreMessage, CoreTool } from "npm:ai";
-import { CoreAssistantMessage } from "npm:ai";
-import { ensureDir } from "https://deno.land/std/fs/mod.ts";
 import { crypto } from "https://deno.land/std/crypto/mod.ts";
+import { ensureDir } from "https://deno.land/std/fs/mod.ts";
+import { CoreAssistantMessage, CoreMessage, CoreTool } from "npm:ai";
+import { ask } from "./anthropic.ts";
+import {
+  ConversationThread,
+  InMemoryConversationThreadManager,
+} from "./conversation.ts";
+import { serve } from "./deps.ts";
 
 const threadManager = new InMemoryConversationThreadManager();
 
