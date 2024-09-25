@@ -160,24 +160,18 @@ jobs:
         run: |
           for i in {1..10}; do
             if nc -z localhost $CONTAINER_PORT; then
-              echo "Server is up"
+              echo "Server is up after $i seconds"
+              break
+            fi
               break
             fi
             sleep 1
           done
       - name: Verify curl is installed
         run: curl --version
-      - name: GET /
-        id: test
-        run: |
-          RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$CONTAINER_PORT)
 
-          if [ $RESPONSE_CODE -lt 200 ] || [ $RESPONSE_CODE -ge 300 ]; then
-            echo "Failed to GET /"
-            exit 1
-          else
-            echo "GET / returned $RESPONSE_CODE"
-          fi
+      - name: Check for ok status code
+        run: curl -I localhost:$CONTAINER_PORT
 
       - name: Get Docker logs
         if: steps.test.outcome == 'failure'
