@@ -194,9 +194,6 @@ jobs:
         with:
           driver-opts: network=host # required for local registry. see: https://docs.docker.com/build/ci/github-actions/local-registry/
 
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v3 # https://github.com/sigstore/cosign-installer
-
       - name: Compute full image tag path
         id: image_path
         run: |
@@ -340,11 +337,9 @@ jobs:
           push: true
           tags: |
             ${{ steps.image_path.outputs.IMAGE_PATH }}
+            ${{ steps.image_path.outputs.IMAGE_NAME }}:latest
           cache-from: |
             ${{ needs.docker_test.outputs.IMAGE_NAME }}
             type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
-
-      - name: Sign the image
-        run: cosign sign -key cosign.key $IMAGE_PATH
