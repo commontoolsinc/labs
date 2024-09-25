@@ -167,13 +167,17 @@ jobs:
           done
       - name: Verify curl is installed
         run: curl --version
-      - name: Test the container
+      - name: GET /
         id: test
         run: |
-          curl 'http://localhost:8000/' \
-          -H 'Content-Type: application/json' \
-          --data-raw $'{"action":"create","system":"You say 42 to any message","message":"What is the meaning of life?","activeTools":[]}'
-        continue-on-error: true
+          RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:$CONTAINER_PORT)
+
+          if [ $RESPONSE_CODE -lt 200 ] || [ $RESPONSE_CODE -ge 300 ]; then
+            echo "Failed to GET /"
+            exit 1
+          else
+            echo "GET / returned $RESPONSE_CODE"
+          fi
 
       - name: Get Docker logs
         if: steps.test.outcome == 'failure'
