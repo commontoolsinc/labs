@@ -163,8 +163,6 @@ jobs:
               echo "Server is up after $i seconds"
               break
             fi
-              break
-            fi
             sleep 1
           done
       - name: Verify curl is installed
