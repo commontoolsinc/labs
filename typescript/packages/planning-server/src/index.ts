@@ -1,3 +1,4 @@
+#!/usr/bin/env -S deno run --allow-net --allow-read --allow-env
 import { ask } from "./anthropic.ts";
 import { serve } from "./deps.ts";
 import {
