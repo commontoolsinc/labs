@@ -157,6 +157,14 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      PUSH: ${{ needs.setup.outputs.PUSH }}
+      WORKING_DIRECTORY: ${{ needs.setup.outputs.WORKING_DIRECTORY }}
+      DENO_VERSION: ${{ needs.setup.outputs.DENO_VERSION }}
+      TS_ENTRYPOINT: ${{ needs.setup.outputs.TS_ENTRYPOINT }}
+      ARTIFACT_NAME: ${{ needs.setup.outputs.ARTIFACT_NAME }}
+      CONTAINER_PORT: ${{ needs.setup.outputs.CONTAINER_PORT }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -183,34 +191,30 @@ jobs:
         name: Build and locally push Docker image
         with:
           build-args: |
-            DENO_VERSION=${{ env.DENO_VERSION }}
-            TS_ENTRYPOINT=${{ env.TS_ENTRYPOINT }}
-          context: ${{ env.WORKING_DIRECTORY }}
+            DENO_VERSION=$DENO_VERSION
+            TS_ENTRYPOINT=$TS_ENTRYPOINT
+            ARTIFACT_NAME=$ARTIFACT_NAME
+          context: ${{ needs.setup.outputs.WORKING_DIRECTORY }}
           push: true
-          tags: localhost:5000/local/${{ env.ARTIFACT_NAME }}:${{ github.sha }}
+          tags: localhost:5000/local/$ARTIFACT_NAME:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Launch image in local registry
-        env:
-          PORT: ${{ env.CONTAINER_PORT }}
-        run: docker run -d --rm -p $PORT:$PORT localhost:5000/local/${{ env.ARTIFACT_NAME }}:${{ github.sha }}
+        run: docker run -d --rm -p $CONTAINER_PORT:$CONTAINER_PORT localhost:5000/local/$ARTIFACT_NAME:${{ github.sha }}
       - name: Wait until the container is up
-        env:
-          PORT: ${{ env.CONTAINER_PORT }}
+
         run: |
           for i in {1..10}; do
-            if nc -z localhost $PORT; then
+            if nc -z localhost $CONTAINER_PORT; then
               echo "Server is up"
               break
             fi
             sleep 1
           done
       - name: Test the container
-        env:
-          PORT: ${{ env.CONTAINER_PORT }}
-        run: curl -s localhost:$PORT
+        run: curl -s localhost:$CONTAINER_PORT
       - name: Stop the container
         env:
           PORT: ${{ env.CONTAINER_PORT }}
-        run: docker stop $(docker ps -q --filter "ancestor=localhost:5000/local/${{ env.ARTIFACT_NAME }}:${{ github.sha }}")
+        run: docker stop $(docker ps -q --filter "ancestor=localhost:5000/local/ARTIFACT_NAME:${{ github.sha }}")
