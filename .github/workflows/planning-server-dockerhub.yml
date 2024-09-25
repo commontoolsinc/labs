@@ -338,12 +338,10 @@ jobs:
             ARTIFACT_NAME=${{ needs.setup.outputs.ARTIFACT_NAME }}
           context: ${{ needs.setup.outputs.WORKING_DIRECTORY }}
           push: true
-          load: true # load the image into the Docker daemon
           tags: |
             ${{ steps.image_path.outputs.IMAGE_PATH }}
           cache-from: |
-            ${{ needs.docker_test.outputs.IMAGE_PATH }}
-            type=local,src=${{ needs.docker_test.outputs.IMAGE_DIGEST }}
+            ${{ needs.docker_test.outputs.IMAGE_NAME }}
             type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
