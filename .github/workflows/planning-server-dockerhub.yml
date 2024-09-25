@@ -323,7 +323,11 @@ jobs:
       - name: Compute image path
         id: image_path
         run: |
-          IMAGE_PATH="${{ secrets.DOCKERHUB_USERNAME }}/${{ needs.setup.outputs.ARTIFACT_NAME }}:${{ needs.setup.outputs.SHORT_HASH }}"
+          IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/${{ needs.setup.outputs.ARTIFACT_NAME }}"
+          echo "IMAGE_NAME=${IMAGE_NAME}" >> $GITHUB_ENV
+          echo "IMAGE_NAME=${IMAGE_NAME}" >> $GITHUB_OUTPUT
+
+          IMAGE_PATH="$IMAGE_NAME:${{ needs.setup.outputs.SHORT_HASH }}"
           echo "IMAGE_PATH=${IMAGE_PATH}" >> $GITHUB_ENV
           echo "IMAGE_PATH=${IMAGE_PATH}" >> $GITHUB_OUTPUT
 
