@@ -1,5 +1,4 @@
 name: Deploy cmntls/planning-server to Docker Hub
-run-name: Deploy cmntls/planning-server to Docker Hub
 
 on:
   push:
