@@ -89,7 +89,7 @@ jobs:
 
     runs-on: ${{ matrix.host_os }}
     env:
-      DESTINATION: dist/bin/${{ matrix.os }}/${{ matrix.arch }}/${{ env.ARTIFACT_NAME }}
+      DESTINATION: dist/bin/${{ matrix.os }}/${{ matrix.arch }}/$ARTIFACT_NAME
     name: Compile ${{ matrix.os }} ${{ matrix.arch }} binary
     steps:
       - name: Checkout
