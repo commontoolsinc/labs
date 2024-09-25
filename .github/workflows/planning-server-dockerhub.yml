@@ -21,7 +21,7 @@ env:
   PUSH: ${{ ( github.ref == 'refs/heads/main' && github.event_name == 'push' ) || github.event.inputs.push }}
   WORKING_DIRECTORY: typescript/packages/planning-server
   DENO_VERSION: 1.46.3
-  TS_ENTRYPOINT: src/main.ts
+  TS_ENTRYPOINT: src/index.ts
   ARTIFACT_NAME: planning-server
   CONTAINER_PORT: 8000
 
