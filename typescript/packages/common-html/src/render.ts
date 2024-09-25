@@ -25,7 +25,6 @@ export const render = (parent: HTMLElement, view: View): Cancel => {
   const { template, context } = view;
   const [root, cancel] = renderNode(template, context);
   if (!root) {
-    logger.warn("Could not render view", view);
     return cancel;
   }
   parent.append(root);
@@ -143,7 +142,6 @@ const bindProps = (
   context: Context
 ): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
-  //console.log("binding props", element.tagName, props);
   for (const [propKey, propValue] of Object.entries(props)) {
     if (isBinding(propValue)) {
       const replacement = getContext(context, propValue.path);
@@ -165,7 +163,6 @@ const bindProps = (
           logger.warn("Could not bind event", propKey, propValue);
         }
       } else if (propKey.startsWith("$")) {
-        console.log("binding context directly", propKey);
         const key = propKey.slice(1);
         setProp(element, key, replacement);
       } else {
