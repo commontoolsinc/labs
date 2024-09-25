@@ -165,7 +165,7 @@ jobs:
   docker_test:
     needs:
       - setup
-    name: Build Docker image${{ needs.setup.outputs.PUSH && ' and push to Docker Hub' || '' }}
+    name: Build Docker image and test locally
     runs-on: ubuntu-latest
     permissions:
       contents: read
