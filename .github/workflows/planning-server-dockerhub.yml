@@ -322,9 +322,9 @@ jobs:
       - name: Compute image path
         id: image_path
         run: |
-          IMAGE_PATH_TO_PUSH="${{ secrets.DOCKERHUB_USERNAME }}/${{ needs.setup.outputs.ARTIFACT_NAME }}:${{ needs.setup.outputs.SHORT_HASH }}"
-          echo "IMAGE_PATH_TO_PUSH=${IMAGE_PATH_TO_PUSH}" >> $GITHUB_ENV
-          echo "IMAGE_PATH_TO_PUSH=${IMAGE_PATH_TO_PUSH}" >> $GITHUB_OUTPUT
+          IMAGE_PATH="${{ secrets.DOCKERHUB_USERNAME }}/${{ needs.setup.outputs.ARTIFACT_NAME }}:${{ needs.setup.outputs.SHORT_HASH }}"
+          echo "IMAGE_PATH=${IMAGE_PATH}" >> $GITHUB_ENV
+          echo "IMAGE_PATH=${IMAGE_PATH}" >> $GITHUB_OUTPUT
 
       - uses: docker/build-push-action@v6
         id: build
@@ -342,8 +342,8 @@ jobs:
           tags: |
             ${{ steps.image_path.outputs.IMAGE_PATH }}
           cache-from: |
-            ${{ steps.docker_test.outputs.IMAGE_NAME }}
-            type=local,src=${{ steps.docker_test.outputs.IMAGE_DIGEST }}
+            ${{ needs.docker_test.outputs.IMAGE_PATH }}
+            type=local,src=${{ needs.docker_test.outputs.IMAGE_DIGEST }}
             type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
