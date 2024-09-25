@@ -32,6 +32,7 @@ defaults:
 
 jobs:
   setup:
+    runs-on: ubuntu-latest
     setps:
       - name: Get env vars
         id: vars
