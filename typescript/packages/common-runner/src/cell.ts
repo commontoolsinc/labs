@@ -36,6 +36,7 @@ export interface Cell<T> {
   send(value: T): void;
   sink(callback: (value: T) => void): () => void;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
+  getAsProxy(path?: PropertyKey[], log?: ReactivityLog): CellProxy<T>;
 }
 
 export interface ReactiveCell<T> {
@@ -185,6 +186,8 @@ function simpleCell<T>(
         },
         key: <K extends keyof T>(key: K) =>
           cell.asSimpleCell([...path, key], log) as Cell<T[K]>,
+        getAsProxy: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
+          createValueProxy(cell, [...path, ...subPath], newLog ?? log),
       };
   return self;
 }

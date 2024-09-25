@@ -40,7 +40,7 @@ export async function handleViewCommandInteractive(collection: string, initialPr
       [viewId, collection, html]
     );
 
-    const url = `http://localhost:8000/view/${collection}/${viewId}`;
+    const url = `http://localhost:8001/view/${collection}/${viewId}`;
     console.log(`Opening view in browser: ${url}`);
     await open(url);
 

@@ -1,4 +1,9 @@
 export { run, charmById } from "./runner.js";
+export {
+  run as addAction,
+  unschedule as removeAction,
+  type Action,
+} from "./scheduler.js";
 export type {
   Cell,
   ReactiveCell,
