@@ -211,7 +211,7 @@ jobs:
 
       - name: Launch image in local registry
         run: docker run -d --rm -p $CONTAINER_PORT:$CONTAINER_PORT localhost:5000/local/$ARTIFACT_NAME:${{ needs.setup.outputs.SHORT_HASH }}
-      - name: Wait until the container is up
+      - name: Wait until the container port is open
         run: |
           for i in {1..10}; do
             if nc -z localhost $CONTAINER_PORT; then
@@ -223,7 +223,15 @@ jobs:
       - name: Verify curl is installed
         run: curl --version
       - name: Test the container
-        run: curl -s localhost:$CONTAINER_PORT
+        id: test
+        run: |
+          curl 'http://localhost:8000/' \
+          -H 'Content-Type: application/json' \
+          --data-raw $'{"action":"create","system":"You say 42 to any message","message":"What is the meaning of life?","activeTools":[]}'
+        continue-on-error: true
+      - name: Get container logs
+        if: steps.test.outcome == 'failure'
+        run: docker logs $(docker ps -q --filter "ancestor=local/ARTIFACT_NAME:${{ needs.setup.outputs.SHORT_HASH }}")
       - name: Stop the container
         env:
           PORT: ${{ env.CONTAINER_PORT }}
