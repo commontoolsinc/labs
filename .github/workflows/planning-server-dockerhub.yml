@@ -202,7 +202,7 @@ jobs:
       - name: Compute full image tag path
         id: image_path
         run: |
-          IMAGE_PATH="localhost:5000/${{ secrets.DOCKERHUB_USERNAME || 'local' }}/${{ needs.setup.outputs.ARTIFACT_NAME }}:${{ needs.setup.outputs.SHORT_HASH }}"
+          IMAGE_PATH="localhost:5000/local/${{ needs.setup.outputs.ARTIFACT_NAME }}:${{ needs.setup.outputs.SHORT_HASH }}"
           echo "IMAGE_PATH=${IMAGE_PATH}" >> $GITHUB_ENV
           echo "IMAGE_PATH=${IMAGE_PATH}" >> $GITHUB_OUTPUT
 
@@ -252,6 +252,3 @@ jobs:
       - name: Get Docker logs
         if: steps.test.outcome == 'failure'
         run: docker ps -q | xargs -L 1 docker logs
-
-      - name: Stop the container
-        run: docker stop $CONTAINER_ID
