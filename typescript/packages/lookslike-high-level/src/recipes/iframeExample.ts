@@ -29,12 +29,7 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
 
 const generate = handler<void, { prompt: string; schema: object; query: string; loading: boolean }>(
   (_, state) => {
-    state.query = `
-      <schema>
-        ${JSON.stringify(state.schema, null, 2)}
-      </schema>
-
-      ${state.prompt}`;
+    state.query = `${state.prompt}`;
     console.log("generating", state.query);
     state.loading = true;
   }
@@ -50,7 +45,7 @@ const randomize = handler<void, { data: Record<string, any> }>((_, state) => {
 
 const maybeHTML = lift(({ result }) => result?.html ?? "");
 
-const viewSystemPrompt = `generate a complete HTML document within a html block , e.g.
+const viewSystemPrompt = lift((schema: string) => `generate a complete HTML document within a html block , e.g.
   \`\`\`html
   ...
   \`\`\`
@@ -81,14 +76,10 @@ const viewSystemPrompt = `generate a complete HTML document within a html block 
         console.log('readResponse', event.data.key,event.data.value);
       } else if (event.data.type === 'update') {
         // event.data.value is a JSON object already
+        // refer to schema for structure
       ...
     });
   });
-
-  window.parent.postMessage({
-    type: 'read',
-    key: 'exampleKey'
-  }, '*');
 
   window.parent.postMessage({
     type: 'write',
@@ -96,7 +87,7 @@ const viewSystemPrompt = `generate a complete HTML document within a html block 
     value: 'Example data to write'
   }, '*');
 
-  You can also subscribe and unsubscribe to changes from the keys:
+  You can subscribe and unsubscribe to changes from the keys:
 
   window.parent.postMessage({
     type: 'subscribe',
@@ -110,7 +101,11 @@ const viewSystemPrompt = `generate a complete HTML document within a html block 
     key: 'exampleKey',
   }, '*');
 
-  Do not explain the HTML, no-one will be able to read the explanation. If the user does not specify any style, make it beautiful. You got this.`;
+  <view-model-schema>
+    ${JSON.stringify(schema, null, 2)}
+  </view-model-schema>
+
+  It's best to access and manage each state reference seperately.`);
 
 const cloneRecipe = handler<void, { data: any, title: string, prompt: string }>((_, state) => {
   launch(iframeExample, { data: state.data, title: 'clone of ' + state.title, prompt: state.prompt });
@@ -152,7 +147,7 @@ export const iframeExample = recipe<{ title: string; prompt: string; data: any; 
     const query = cell<string>();
     const response = generateData<{ html: string }>({
       prompt: query,
-      system: viewSystemPrompt,
+      system: viewSystemPrompt(schema),
       mode: "html",
     });
     tap({ response });

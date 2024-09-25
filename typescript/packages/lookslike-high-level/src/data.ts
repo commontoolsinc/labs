@@ -27,6 +27,7 @@ import {
 import { fetchCollections } from "./recipes/fetchCollections.js";
 import { iframeExample } from "./recipes/iframeExample.js";
 import { importCalendar } from "./recipes/importCalendar.js";
+import { dungeon } from "./recipes/dungeon.js";
 
 export type Charm = {
   [ID]: number;
@@ -61,6 +62,7 @@ addCharms([
   run(iframeExample, { title: "two way binding counter", prompt: "counter", data: { counter: 0 } }),
   run(iframeExample, { title: "breakout", prompt: "playable breakout/arkanoid, click to start, reset score at start", data: { score: 0, counter: 0 } }),
   run(importCalendar, {}),
+  run(dungeon, {}),
   run(fetchExample, {
     url: "https://anotherjesse-restfuljsonblobapi.web.val.run/items",
   }),

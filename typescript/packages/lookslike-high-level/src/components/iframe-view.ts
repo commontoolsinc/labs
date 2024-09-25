@@ -94,7 +94,7 @@ export class CommonIframe extends LitElement {
     return html`
       <iframe
         ${ref(this.iframeRef)}
-        sandbox="allow-scripts allow-forms"
+        sandbox="allow-scripts allow-forms allow-pointer-lock"
         .srcdoc=${this.src}
         height="768px"
         width="100%"
