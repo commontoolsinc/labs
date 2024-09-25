@@ -16,8 +16,13 @@ env:
   NODE_VERSION: 20
   # on push to main or push input
   PUSH: ${{ ( github.ref == 'refs/heads/main' && github.event_name == 'push' ) || github.event.inputs.push }}
+
   WORKING_DIRECTORY: typescript/packages/planning-server
-  REGISTRY: ghcr.io
+
+  GITHUB_REGISTRY: ghcr.io
+  DOCKERHUB_REGISTRY: docker.io
+
+  REGISTRY: docker.io
 
 defaults:
   run:
@@ -263,12 +268,21 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@v3 # https://github.com/sigstore/cosign-installer
 
-      - name: Log into registry ${{ env.REGISTRY }}
+      - name: Log in to GitHub registry
+        if: ${{ env.REGISTRY == env.GITHUB_REGISTRY }}
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to DockerHub registry
+        if: ${{ env.REGISTRY == env.DOCKERHUB_REGISTRY }}
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and export test image
         id: build_test
