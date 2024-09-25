@@ -228,6 +228,7 @@ jobs:
           cache-to: type=gha,mode=max
           outputs: |
             type=docker,dest=${{ steps.tar_path.outputs.TAR_PATH }}
+          platforms: linux/amd64,linux/arm64
 
       - name: Load image from tarball
         run: |
@@ -351,6 +352,7 @@ jobs:
             type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
+          platforms: linux/amd64,linux/arm64
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3 # https://github.com/sigstore/cosign-installer
