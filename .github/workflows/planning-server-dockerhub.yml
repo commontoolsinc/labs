@@ -222,15 +222,18 @@ jobs:
             TS_ENTRYPOINT=${{ needs.setup.outputs.TS_ENTRYPOINT }}
             ARTIFACT_NAME=${{ needs.setup.outputs.ARTIFACT_NAME }}
           context: ${{ needs.setup.outputs.WORKING_DIRECTORY }}
-          push: true
-          load: true # load the image into the Docker daemon
           tags: |
             ${{ steps.image_path.outputs.IMAGE_PATH }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           outputs: |
             type=docker,dest=$TAR_PATH
-          provenance: mode=max
+
+      - name: Load image from tarball
+        run: docker load -i ${{ steps.tar_path.outputs.TAR_PATH }}
+
+      - name: List images
+        run: docker image ls -a
 
       - name: Launch image in local registry
         run: docker run -d --rm -p $CONTAINER_PORT:$CONTAINER_PORT $IMAGE_PATH
