@@ -248,8 +248,11 @@ jobs:
           -H 'Content-Type: application/json' \
           --data-raw $'{"action":"create","system":"You say 42 to any message","message":"What is the meaning of life?","activeTools":[]}'
         continue-on-error: true
-      - name: Get container logs
+
+      - name: Get Docker logs
         if: steps.test.outcome == 'failure'
-        run: docker logs $CONTAINER_ID
+        run: |
+          docker logs --details --timestamps --since 1h $(docker ps -q)
+
       - name: Stop the container
         run: docker stop $CONTAINER_ID
