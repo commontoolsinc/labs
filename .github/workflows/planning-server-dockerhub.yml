@@ -31,6 +31,25 @@ defaults:
     working-directory: typescript/packages/planning-server # annoying necessity as env vars are not available in defaults
 
 jobs:
+  setup:
+    setps:
+      - name: Get env vars
+        id: vars
+        run: |
+          echo "PUSH=${{ env.PUSH }}" >> $GITHUB_ENV
+          echo "WORKING_DIRECTORY=${{ env.WORKING_DIRECTORY }}" >> $GITHUB_ENV
+          echo "DENO_VERSION=${{ env.DENO_VERSION }}" >> $GITHUB_ENV
+          echo "TS_ENTRYPOINT=${{ env.TS_ENTRYPOINT }}" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME=${{ env.ARTIFACT_NAME }}" >> $GITHUB_ENV
+          echo "CONTAINER_PORT=${{ env.CONTAINER_PORT }}" >> $GITHUB_ENV
+    outputs:
+      PUSH: ${{ steps.vars.outputs.PUSH }}
+      WORKING_DIRECTORY: ${{ steps.vars.outputs.WORKING_DIRECTORY }}
+      DENO_VERSION: ${{ steps.vars.outputs.DENO_VERSION }}
+      TS_ENTRYPOINT: ${{ steps.vars.outputs.TS_ENTRYPOINT }}
+      ARTIFACT_NAME: ${{ steps.vars.outputs.ARTIFACT_NAME }}
+      CONTAINER_PORT: ${{ steps.vars.outputs.CONTAINER_PORT }}
+
   test:
     continue-on-error: true # TODO: remove this when tests are validated
     name: Test under Deno
@@ -128,7 +147,9 @@ jobs:
           path: typescript/packages/planning-server/${{ env.DESTINATION }}${{ runner.os == 'Windows' && '.exe' || '' }}
 
   docker:
-    name: Build Docker image${{ env.PUSH && ' and push' || '' }}
+    needs:
+      - setup
+    name: Build Docker image${{ needs.setup.outputs.PUSH && ' and push to Docker Hub' || '' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
