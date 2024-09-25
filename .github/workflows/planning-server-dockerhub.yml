@@ -44,11 +44,11 @@ jobs:
           echo "CONTAINER_PORT=${{ env.CONTAINER_PORT }}" >> $GITHUB_ENV
     outputs:
       PUSH: ${{ steps.vars.outputs.PUSH }}
-      WORKING_DIRECTORY: ${{ steps.vars.outputs.WORKING_DIRECTORY }}
-      DENO_VERSION: ${{ steps.vars.outputs.DENO_VERSION }}
-      TS_ENTRYPOINT: ${{ steps.vars.outputs.TS_ENTRYPOINT }}
-      ARTIFACT_NAME: ${{ steps.vars.outputs.ARTIFACT_NAME }}
-      CONTAINER_PORT: ${{ steps.vars.outputs.CONTAINER_PORT }}
+    #   WORKING_DIRECTORY: ${{ steps.vars.outputs.WORKING_DIRECTORY }}
+    #   DENO_VERSION: ${{ steps.vars.outputs.DENO_VERSION }}
+    #   TS_ENTRYPOINT: ${{ steps.vars.outputs.TS_ENTRYPOINT }}
+    #   ARTIFACT_NAME: ${{ steps.vars.outputs.ARTIFACT_NAME }}
+    #   CONTAINER_PORT: ${{ steps.vars.outputs.CONTAINER_PORT }}
 
   test:
     continue-on-error: true # TODO: remove this when tests are validated
