@@ -144,7 +144,13 @@ jobs:
           docker image ls -a
 
       - name: Launch image in local registry
-        run: docker run -d --rm -p $CONTAINER_PORT:$CONTAINER_PORT $( docker build -q . )
+        run: >
+          docker run
+          -d
+          --rm
+          --network host
+          -p $CONTAINER_PORT:$CONTAINER_PORT
+          $( docker build -q . )
 
       - name: Container identity
         id: container_id
