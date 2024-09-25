@@ -28,7 +28,7 @@ env:
 
 defaults:
   run:
-    working-directory: ${{ env.WORKING_DIRECTORY }}
+    working-directory: typescript/packages/planning-server # annoying necessity as env vars are not available in defaults
 
 jobs:
   test:
