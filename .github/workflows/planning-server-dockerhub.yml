@@ -135,7 +135,7 @@ jobs:
 
       - id: tar_path
         run: |
-          TAR_PATH=/tmp/images
+          TAR_PATH=/tmp/images/
           echo "TAR_PATH=${TAR_PATH}" >> $GITHUB_ENV
           echo "TAR_PATH=${TAR_PATH}" >> $GITHUB_OUTPUT
 
@@ -157,9 +157,9 @@ jobs:
           outputs: |
             type=tar,dest=${{ steps.tar_path.outputs.TAR_PATH }}
           platforms: linux/amd64,linux/arm64
-      - name: Show output files
+      - name: Show all files in output directories recursively
         run: |
-          ls -R ${{ steps.tar_path.outputs.TAR_PATH }}
+          ls -Ralh ${{ steps.tar_path.outputs.TAR_PATH }}
       - name: Load image from tarball
         run: |
           docker load --input "${{ steps.tar_path.outputs.TAR_PATH }}"
