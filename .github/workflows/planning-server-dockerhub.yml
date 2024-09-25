@@ -198,8 +198,9 @@ jobs:
       - name: Compute full image tag path
         id: image_path
         run: |
-          echo "IMAGE_PATH=localhost:5000/${{ secrets.DOCKERHUB_USERNAME || 'local' }}/${{ needs.setup.outputs.ARTIFACT_NAME }}:${{ needs.setup.outputs.SHORT_HASH }}" >> $GITHUB_ENV
-          echo "IMAGE_PATH=$IMAGE_PATH" >> $GITHUB_OUTPUT
+          IMAGE_PATH="localhost:5000/${{ secrets.DOCKERHUB_USERNAME || 'local' }}/${{ needs.setup.outputs.ARTIFACT_NAME }}:${{ needs.setup.outputs.SHORT_HASH }}"
+          echo "IMAGE_PATH=${IMAGE_PATH}" >> $GITHUB_ENV
+          echo "IMAGE_PATH=${IMAGE_PATH}" >> $GITHUB_OUTPUT
 
       - uses: docker/build-push-action@v6 # https://github.com/docker/build-push-action
         name: Build and locally push Docker image
@@ -221,8 +222,9 @@ jobs:
       - name: Container identity
         id: container_id
         run: |
-          echo "CONTAINER_ID=$(docker ps -q --filter "ancestor=$IMAGE_PATH")" >> $GITHUB_ENV
-          echo "CONTAINER_ID=$CONTAINER_ID" >> $GITHUB_OUTPUT
+          echo "CONTAINER_ID=$(docker ps -q --filter "ancestor=$IMAGE_PATH")"
+          echo "CONTAINER_ID=${CONTAINER_ID}" >> $GITHUB_ENV
+          echo "CONTAINER_ID=${CONTAINER_ID}" >> $GITHUB_OUTPUT
 
       - name: Wait until the container port is open
         run: |
