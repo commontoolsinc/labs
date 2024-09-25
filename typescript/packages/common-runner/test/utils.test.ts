@@ -217,8 +217,12 @@ describe("setNestedValue", () => {
   it("should overwrite an object with an array", () => {
     const testCell = cell({ a: { b: 1 } });
     const success = setNestedValue(testCell, ["a"], [1, 2, 3]);
-    expect(success).toBe(true);
-    expect(testCell.get()).toEqual({ a: [1, 2, 3] });
+    expect(success).toBeTruthy();
+    expect(testCell.get()).toHaveProperty("a");
+    expect(testCell.get().a).toHaveLength(3);
+    expect(isCellReference(testCell.get().a[0])).toBeTruthy();
+    expect(isCellReference(testCell.get().a[1])).toBeTruthy();
+    expect(isCellReference(testCell.get().a[2])).toBeTruthy();
   });
 });
 
