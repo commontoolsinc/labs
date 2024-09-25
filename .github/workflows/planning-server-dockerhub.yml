@@ -165,8 +165,8 @@ jobs:
       - name: Verify curl is installed
         run: curl --version
 
-      - name: Check for ok status code
-        run: curl -I localhost:$CONTAINER_PORT
+      - name: Check for ok status code from GET
+        run: curl -s -o /dev/null -w "%{http_code}" localhost:$CONTAINER_PORT
 
       - name: Get Docker logs
         if: steps.test.outcome == 'failure'
