@@ -39,6 +39,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Get Git commit timestamps
+        id: timestamp
+        run: echo "timestamp=$(git log -1 --pretty=%ct)" >> $GITHUB_OUTPUT
+
       - name: Compute short hash
         id: short_hash
         run: echo "short_hash=$(git rev-parse --short ${{ github.sha }})" >> $GITHUB_OUTPUT
@@ -60,6 +64,7 @@ jobs:
       ARTIFACT_NAME: ${{ steps.vars.outputs.ARTIFACT_NAME }}
       CONTAINER_PORT: ${{ steps.vars.outputs.CONTAINER_PORT }}
       SHORT_HASH: ${{ steps.short_hash.outputs.short_hash }}
+      TIMESTAMP: ${{ steps.timestamp.outputs.timestamp }}
 
   test:
     continue-on-error: true # TODO: remove this when tests are validated
@@ -157,7 +162,7 @@ jobs:
           name: planning-server-${{ matrix.target }}
           path: typescript/packages/planning-server/${{ env.DESTINATION }}${{ runner.os == 'Windows' && '.exe' || '' }}
 
-  docker:
+  docker_test:
     needs:
       - setup
     name: Build Docker image${{ needs.setup.outputs.PUSH && ' and push to Docker Hub' || '' }}
@@ -192,21 +197,24 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@v3 # https://github.com/sigstore/cosign-installer
 
-      # - name: Log in to Docker Hub
-      #   if: ${{ env.PUSH }}
-      #   uses: docker/login-action@v3 # https://github.com/docker/login-action
-      #   with:
-      #     username: ${{ secrets.DOCKERHUB_USERNAME }}
-      #     password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Compute full image tag path
         id: image_path
         run: |
-          IMAGE_PATH="localhost:5000/local/${{ needs.setup.outputs.ARTIFACT_NAME }}:${{ needs.setup.outputs.SHORT_HASH }}"
+          IMAGE_NAME="local/${{ needs.setup.outputs.ARTIFACT_NAME }}:${{ needs.setup.outputs.SHORT_HASH }}"
+          echo "IMAGE_NAME=${IMAGE_NAME}" >> $GITHUB_ENV
+          echo "IMAGE_NAME=${IMAGE_NAME}" >> $GITHUB_OUTPUT
+
+          IMAGE_PATH="localhost:5000/$IMAGE_NAME"
           echo "IMAGE_PATH=${IMAGE_PATH}" >> $GITHUB_ENV
           echo "IMAGE_PATH=${IMAGE_PATH}" >> $GITHUB_OUTPUT
 
+      - id: tar_path
+        run: echo "TAR_PATH=/tmp/image.tar" >> $GITHUB_ENV
+
       - uses: docker/build-push-action@v6 # https://github.com/docker/build-push-action
+        id: build
+        env:
+          SOURCE_DATE_EPOCH: ${{ needs.setup.outputs.TIMESTAMP }} # see https://docs.docker.com/build/ci/github-actions/reproducible-builds
         name: Build and locally push Docker image
         with:
           build-args: |
@@ -220,6 +228,11 @@ jobs:
             ${{ steps.image_path.outputs.IMAGE_PATH }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          outputs: |
+            type=registry
+            type=docker,dest=$TAR_PATH
+          sbom: true
+          provenance: mode=max
 
       - name: Launch image in local registry
         run: docker run -d --rm -p $CONTAINER_PORT:$CONTAINER_PORT $IMAGE_PATH
@@ -252,3 +265,84 @@ jobs:
       - name: Get Docker logs
         if: steps.test.outcome == 'failure'
         run: docker ps -q | xargs -L 1 docker logs
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: error
+          name: planning-server-image
+          path: ${{ steps.tar_path.outputs.TAR_PATH }}
+
+    outputs:
+      IMAGE_NAME: ${{ steps.image_path.outputs.IMAGE_NAME }}
+      IMAGE_PATH: ${{ steps.image_path.outputs.IMAGE_PATH }}
+      IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+
+  docker:
+    needs:
+      - setup
+      - docker_test
+    name: Push Docker image to Docker Hub
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Download artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: planning-server-image
+          path: /tmp
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Load image from tarball
+        run: |
+          docker load -i ${{ steps.docker_test.outputs.TAR_PATH }}
+          docker image ls -a
+
+      - name: Compute image path
+        id: image_path
+        run: |
+          IMAGE_PATH_TO_PUSH="${{ secrets.DOCKERHUB_USERNAME }}/${{ needs.setup.outputs.ARTIFACT_NAME }}:${{ needs.setup.outputs.SHORT_HASH }}"
+          echo "IMAGE_PATH_TO_PUSH=${IMAGE_PATH_TO_PUSH}" >> $GITHUB_ENV
+          echo "IMAGE_PATH_TO_PUSH=${IMAGE_PATH_TO_PUSH}" >> $GITHUB_OUTPUT
+
+      - uses: docker/build-push-action@v6
+        id: build
+        env:
+          SOURCE_DATE_EPOCH: ${{ needs.setup.outputs.TIMESTAMP }} # see https://docs.docker.com/build/ci/github-actions/reproducible-builds
+        name: Build and locally push Docker image
+        with:
+          build-args: |
+            DENO_VERSION=${{ needs.setup.outputs.DENO_VERSION }}
+            TS_ENTRYPOINT=${{ needs.setup.outputs.TS_ENTRYPOINT }}
+            ARTIFACT_NAME=${{ needs.setup.outputs.ARTIFACT_NAME }}
+          context: ${{ needs.setup.outputs.WORKING_DIRECTORY }}
+          push: true
+          load: true # load the image into the Docker daemon
+          tags: |
+            ${{ steps.image_path.outputs.IMAGE_PATH }}
+          cache-from: |
+            ${{ steps.docker_test.outputs.IMAGE_NAME }}
+            type=local,src=${{ steps.docker_test.outputs.IMAGE_DIGEST }}
+            type=gha
+          cache-to: type=gha,mode=max
+          sbom: true
+          provenance: mode=max
+
+      - name: Sign the image
+        run: cosign sign -key cosign.key $IMAGE_PATH
