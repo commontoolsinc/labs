@@ -1,0 +1,36 @@
+<script type="module">
+    import init, { CommonRuntime } from './common_runtime.js';
+
+    await init();
+    const rt = new CommonRuntime("http://localhost:8081");
+
+    const definition = {
+        inputs: {
+            "a": { tag: "string", val: "" },
+            "b": { tag: "string", val: "" },
+        },
+        outputs: {
+            "result": "string",
+        },
+        body: `
+import { read, write } from "common:io/state@0.0.1";
+
+export const run = () => {
+  const a = read("a")?.deref();
+  const b = read("b")?.deref();
+  write("result", {
+    tag: "string",
+    val: \`\${a?.val}\${b?.val}\`,
+  });
+};
+`
+    };
+
+    let fn = await rt.instantiate(definition);
+    let inputs = {
+        a: { tag: 'string', val: 'hello' },
+        b: { tag: 'string', val: 'world' }
+    };
+    let output = await fn.run(inputs);
+    console.log(output);
+</script>

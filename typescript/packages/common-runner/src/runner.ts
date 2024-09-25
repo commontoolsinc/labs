@@ -19,6 +19,11 @@ import {
   sendValueToBinding,
 } from "./utils.js";
 import { builtins } from "./builtins/index.js";
+import init, { CommonRuntime } from "@commontools/common-runtime";
+
+// Initialize web runtime wasm artifact.
+// Needed only once.
+await (init as unknown as Function)();
 
 export const charmById = new Map<number, CellImpl<any>>();
 let nextCharmId = 0;
