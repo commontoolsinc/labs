@@ -229,7 +229,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           outputs: |
-            type=registry
             type=docker,dest=$TAR_PATH
           provenance: mode=max
 
