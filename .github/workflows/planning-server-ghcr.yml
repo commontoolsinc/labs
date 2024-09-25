@@ -1,4 +1,4 @@
-name: Deploy @commontools/planning-server
+name: Deploy @commontools/planning-server to GitHub Container Registry
 
 on:
   push:
