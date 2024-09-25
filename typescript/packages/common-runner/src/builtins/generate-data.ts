@@ -33,6 +33,7 @@ export function generateData(
     result?: any;
     schema?: any;
     system?: string;
+    mode?: 'json' | 'html'
   };
   const inputsCell = cell(inputBindings);
 
@@ -52,7 +53,8 @@ export function generateData(
   let currentRun = 0;
 
   const startGeneration: Action = (log: ReactivityLog) => {
-    const { prompt, result, schema, system } = inputsCell.getAsProxy([], log);
+    const { prompt, result, schema, system, mode } = inputsCell.getAsProxy([], log);
+    const grab = (mode || 'json') === 'json' ? grabJson : grabHtml;
 
     if (prompt === undefined) {
       pending.setAtPath([], false, log);
@@ -73,7 +75,7 @@ export function generateData(
       resultPromise = client
         .createThread(prompt)
         .then((thread) =>
-          grabJson(thread.conversation[thread.conversation.length - 1])
+          grab(thread.conversation[thread.conversation.length - 1])
         );
     } else {
       resultPromise = generateDataClient(
@@ -103,4 +105,13 @@ export function generateData(
 
 function grabJson(txt: string) {
   return JSON.parse(txt.match(/```json\n([\s\S]+?)```/)?.[1] ?? "{}");
+}
+
+export function grabHtml(txt: string) {
+  const html = txt.match(/```html\n([\s\S]+?)```/)?.[1];
+  if (!html) {
+    console.error("No HTML found in text", txt);
+    return ""
+  }
+  return {html};
 }

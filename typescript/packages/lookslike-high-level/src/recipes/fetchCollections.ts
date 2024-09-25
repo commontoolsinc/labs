@@ -190,7 +190,6 @@ export const fetchCollections = recipe<{ url: string }>(
     });
 
     const data = ensureArray(result);
-    tap(data);
 
     return {
       [NAME]: "Fetch Collections",
