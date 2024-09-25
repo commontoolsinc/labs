@@ -5,7 +5,7 @@ on:
     # branches:
     # - main
     paths:
-      - typescript/packages/planning-server
+      - typescript/packages/planning-server/**/*
       - .github/workflows/planning-server-dockerhub.yml
   pull_request:
 
