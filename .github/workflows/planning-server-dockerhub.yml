@@ -230,7 +230,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           outputs: |
-            type=docker,dest=$TAR_PATH
+            type=docker,dest=${{ steps.tar_path.outputs.TAR_PATH }}
 
       - name: Load image from tarball
         run: |
