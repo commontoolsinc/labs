@@ -212,7 +212,6 @@ jobs:
       - name: Launch image in local registry
         run: docker run -d --rm -p $CONTAINER_PORT:$CONTAINER_PORT localhost:5000/local/$ARTIFACT_NAME:${{ needs.setup.outputs.SHORT_HASH }}
       - name: Wait until the container is up
-
         run: |
           for i in {1..10}; do
             if nc -z localhost $CONTAINER_PORT; then
@@ -221,6 +220,8 @@ jobs:
             fi
             sleep 1
           done
+      - name: Verify curl is installed
+        run: curl --version
       - name: Test the container
         run: curl -s localhost:$CONTAINER_PORT
       - name: Stop the container
