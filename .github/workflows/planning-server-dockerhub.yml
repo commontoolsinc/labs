@@ -195,6 +195,12 @@ jobs:
       #     username: ${{ secrets.DOCKERHUB_USERNAME }}
       #     password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Compute full image tag path
+        id: image_path
+        run: |
+          echo "IMAGE_PATH=localhost:5000/local/${{ needs.setup.outputs.ARTIFACT_NAME }}:${{ needs.setup.outputs.SHORT_HASH }}" >> $GITHUB_ENV
+          echo "IMAGE_PATH=$IMAGE_PATH" >> $GITHUB_OUTPUT
+
       - uses: docker/build-push-action@v6 # https://github.com/docker/build-push-action
         name: Build and locally push Docker image
         with:
@@ -205,12 +211,19 @@ jobs:
           context: ${{ needs.setup.outputs.WORKING_DIRECTORY }}
           push: false
           load: true # load the image into the Docker daemon
-          tags: localhost:5000/local/${{ needs.setup.outputs.ARTIFACT_NAME }}:${{ needs.setup.outputs.SHORT_HASH }}
+          tags: |
+            ${{ needs.setup.outputs.IMAGE_PATH }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Launch image in local registry
-        run: docker run -d --rm -p $CONTAINER_PORT:$CONTAINER_PORT localhost:5000/local/$ARTIFACT_NAME:${{ needs.setup.outputs.SHORT_HASH }}
+        run: docker run -d --rm -p $CONTAINER_PORT:$CONTAINER_PORT $IMAGE_PATH
+      - name: Container identity
+        id: container_id
+        run: |
+          echo "CONTAINER_ID=$(docker ps -q --filter "ancestor=$IMAGE_PATH")" >> $GITHUB_ENV
+          echo "CONTAINER_ID=$CONTAINER_ID" >> $GITHUB_OUTPUT
+
       - name: Wait until the container port is open
         run: |
           for i in {1..10}; do
@@ -231,8 +244,6 @@ jobs:
         continue-on-error: true
       - name: Get container logs
         if: steps.test.outcome == 'failure'
-        run: docker logs $(docker ps -q --filter "ancestor=local/ARTIFACT_NAME:${{ needs.setup.outputs.SHORT_HASH }}")
+        run: docker logs $CONTAINER_ID
       - name: Stop the container
-        env:
-          PORT: ${{ env.CONTAINER_PORT }}
-        run: docker stop $(docker ps -q --filter "ancestor=local/ARTIFACT_NAME:${{ needs.setup.outputs.SHORT_HASH }}")
+        run: docker stop $CONTAINER_ID
