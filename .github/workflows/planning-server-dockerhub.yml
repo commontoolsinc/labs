@@ -226,7 +226,7 @@ jobs:
       - name: Container identity
         id: container_id
         run: |
-          echo "CONTAINER_ID=$(docker ps -q --filter "ancestor=$IMAGE_PATH")"
+          CONTAINER_ID="$(docker ps -q --filter 'ancestor=$IMAGE_PATH')"
           echo "CONTAINER_ID=${CONTAINER_ID}" >> $GITHUB_ENV
           echo "CONTAINER_ID=${CONTAINER_ID}" >> $GITHUB_OUTPUT
 
@@ -244,12 +244,10 @@ jobs:
       - name: Test the container
         id: test
         run: |
-          curl 'http://localhost:8000/' \
-          -H 'Content-Type: application/json' \
-          --data-raw $'{"action":"create","system":"You say 42 to any message","message":"What is the meaning of life?","activeTools":[]}'
+          curl 'http://localhost:8000/' -H 'Content-Type: application/json' --data-raw '{"action":"create","system":"You say 42 to any message","message":"What is the meaning of life?","activeTools":[]}'
         continue-on-error: true
       - name: Get container logs
         if: steps.test.outcome == 'failure'
-        run: docker logs ${{ steps.container_id.outputs.CONTAINER_ID }}
+        run: docker logs $CONTAINER_ID
       - name: Stop the container
-        run: docker stop ${{ steps.container_id.outputs.CONTAINER_ID }}
+        run: docker stop $CONTAINER_ID
