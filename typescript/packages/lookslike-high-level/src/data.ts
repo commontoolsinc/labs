@@ -10,11 +10,6 @@ import {
 } from "@commontools/common-runner";
 
 import { todoList } from "./recipes/todo-list.js";
-import { localSearch } from "./recipes/local-search.js";
-import { luftBnBSearch } from "./recipes/luft-bnb-search.js";
-import { ticket } from "./recipes/ticket.js";
-import { routine } from "./recipes/routine.js";
-import { fetchExample } from "./recipes/fetchExample.js";
 import { counter } from "./recipes/counter.js";
 
 // Necessary, so that suggestions are indexed.
@@ -24,8 +19,6 @@ import {
   getCellReferenceOrThrow,
   isCellProxyForDereferencing,
 } from "@commontools/common-runner";
-import { fetchCollections } from "./recipes/fetchCollections.js";
-import { iframeExample } from "./recipes/iframeExample.js";
 
 export type Charm = {
   [ID]: number;
@@ -56,41 +49,101 @@ export function addCharms(newCharms: CellImpl<any>[]) {
   }
 }
 
+const counterQuery = async function* () {
+  const request = await fetch('///localhost:8080', {
+    method: "PUT",
+    body: JSON.stringify({
+      select: {
+        id: "?id",
+        title: "?title",
+        count: "?count",
+      },
+      where: [
+        { Case: ["?id", "title", "?title"] },
+        { Case: ["?id", "count", "?count"] },
+      ]
+    })
+  })
+
+  if (!request.body) {
+    console.log('synTest request.body is null')
+    return
+  }
+
+  const reader = request.body.getReader()
+  const utf8 = new TextDecoder()
+  while (true) {
+    const read = await reader.read()
+    if (read.done) {
+      break
+    } else {
+      const [id, event, data] =
+        utf8.decode(read.value).split('\n')
+
+      yield {
+        id: id.slice('id:'.length),
+        event: event.slice('event:'.length),
+        data: JSON.parse(data.slice('data:'.length))
+      }
+    }
+  }
+}
+
+let syncedCharms: { [key: string]: CellImpl<any> } = {}
+
+export async function watch() {
+  let query = counterQuery()
+  for await (const event of query) {
+    console.log('synTest event', event)
+
+    for (const change of event.data) {
+      const synId = change.id["/"]
+      if (synId in syncedCharms) {
+        let charmProxy = syncedCharms[synId].getAsProxy()
+        
+        if (change.count !== charmProxy.count) {
+          charmProxy.count = change.count
+        }
+        if (change.title !== charmProxy.title) {
+          charmProxy.title = change.title
+        }
+      } else {
+        let charm = run(counter, {
+          title: change.title,
+          count: change.count,
+          synopsis: change.id
+        })
+        syncedCharms[synId] = charm
+        openCharm(charm.get()[ID]);
+      }
+    }
+  }
+}
+
+const synTest = async () => {
+  watch();
+
+  // while (true) {
+  //   await sleep(1000)
+  //   let syncIds = Object.keys(syncedCharms)
+  //   let randomSyncId = syncIds[Math.floor(Math.random() * syncIds.length)];
+  //   let oldValue = syncedCharms[randomSyncId].get().count
+  //   const newValue = Math.floor(Math.random() * 100)
+  //   console.log("synTest newValue", newValue, "oldValue", oldValue)
+
+  //   // fixme(ja): maybe not an issue
+  //   if (newValue !== oldValue) {
+  //     await updateCounter({ "/": randomSyncId }, 'count', newValue, oldValue)
+  //   }
+  // }
+}
+
+synTest()
+
+import { spawnCounter } from "./recipes/spawnCounter.js";
+
 addCharms([
-  run(iframeExample, { }),
-  run(iframeExample, { prompt: "playable breakout/arkanoid, use `score` to write score, click to start, reset score at start", data: { score: 0, counter: 0 } }),
-  run(fetchExample, {
-    url: "https://anotherjesse-restfuljsonblobapi.web.val.run/items",
-  }),
-  run(fetchCollections, {
-    url: "/api/data/collections/"
-  }),
-  run(todoList, {
-    title: "My TODOs",
-    items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) => ({
-      title: item,
-      done: false,
-    })),
-  }),
-  run(todoList, {
-    title: "My grocery shopping list",
-    items: ["milk", "eggs", "bread"].map((item) => ({
-      title: item,
-      done: false,
-    })),
-  }),
-  run(ticket, {
-    title: "Reservation for 'Counterstrike the Musical'",
-    show: "Counterstrike the Musical",
-    date: getFridayAndMondayDateStrings().startDate,
-    location: "New York",
-  }),
-  run(counter, { title: "Summer Reading" }),
-  run(routine, {
-    title: "Morning routine",
-    // TODO: A lot more missing here, this is just to drive the suggestion.
-    locations: ["coffee shop with great baristas"],
-  }),
+  run(spawnCounter, {  }),
 ]);
 
 export type RecipeManifest = {
@@ -99,22 +152,6 @@ export type RecipeManifest = {
 };
 
 export const recipes: RecipeManifest[] = [
-  {
-    name: "Create a new TODO list",
-    recipe: todoList,
-  },
-  {
-    name: "Find places",
-    recipe: localSearch,
-  },
-  {
-    name: "Find a LuftBnB place to stay",
-    recipe: luftBnBSearch,
-  },
-  {
-    name: "Create a counter",
-    recipe: counter,
-  },
 ];
 
 // Helper for mock data
@@ -140,7 +177,7 @@ function getFridayAndMondayDateStrings() {
 }
 
 // Terrible hack to open a charm from a recipe
-let openCharmOpener: (charmId: number) => void = () => {};
+let openCharmOpener: (charmId: number) => void = () => { };
 export const openCharm = (charmId: number) => openCharmOpener(charmId);
 openCharm.set = (opener: (charmId: number) => void) => {
   openCharmOpener = opener;
