@@ -10,7 +10,6 @@ export class CommonOsSidebar extends LitElement {
       :host {
         display: flex;
         flex-direction: column;
-        background-color: var(--bg-2);
         padding: var(--u-pad);
       }
     `,

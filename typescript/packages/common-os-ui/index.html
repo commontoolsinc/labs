@@ -7,9 +7,9 @@
     <script type="module" src="src/index.ts"></script>
   </head>
   <body>
-    <commonos-screen>
-      <commonos-main></commonos-main>
-      <commonos-sidebar>
+    <commonos-scene>
+      <div slot="content"></div>
+      <commonos-sidebar slot="sidebar">
         <nav slot="actions">
           <li>A</li>
           <li>B</li>
@@ -24,6 +24,6 @@
           <div slot="content">Content</div>
         </common-sidebar-group>
       </commonos-sidebar>
-    </commonos-screen>
+    </commonos-scene>
   </body>
 </html>
