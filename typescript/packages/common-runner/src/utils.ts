@@ -97,15 +97,41 @@ export function sendValueToBinding(
 // success, meaning no frozen cells were in the way. That is, also returns true
 // if there was no change.
 export function setNestedValue(
-  cell: CellImpl<any>,
+  currentCell: CellImpl<any>,
   path: PropertyKey[],
   value: any,
   log?: ReactivityLog
 ): boolean {
-  let destValue = cell.getAtPath(path);
+  let destValue = currentCell.getAtPath(path);
   if (isAlias(destValue)) {
-    const ref = followAliases(destValue, cell, log);
+    const ref = followAliases(destValue, currentCell, log);
     return setNestedValue(ref.cell, ref.path, value, log);
+  }
+
+  // Let's check whether we're setting a value in an array, i.e. the parent in
+  // the cell is of type array. If so, we have to turn the value into a cell
+  // reference, while reusing an existing cell reference if the value is the
+  // same.
+  if (
+    path.length > 0 &&
+    path.at(-1) !== "length" &&
+    Array.isArray(currentCell.getAtPath(path.slice(0, -1))) &&
+    !isCellReference(value)
+  ) {
+    if (
+      deepEqualAndMakeAllElementsCells(
+        value,
+        isCellReference(destValue)
+          ? destValue.cell.getAtPath(destValue.path)
+          : destValue
+      ) ||
+      !isCellReference(destValue)
+    ) {
+      value = { cell: cell(value), path: [] } satisfies CellReference;
+      log?.writes.push({ cell: value.cell, path: value.path });
+    } else {
+      value = destValue;
+    }
   }
 
   // Compare destValue and value, if they are the same, recurse, otherwise write
@@ -120,22 +146,27 @@ export function setNestedValue(
     let success = true;
     for (const key in value)
       if (key in destValue)
-        success &&= setNestedValue(cell, [...path, key], value[key], log);
+        success &&= setNestedValue(
+          currentCell,
+          [...path, key],
+          value[key],
+          log
+        );
       else {
-        if (cell.isFrozen()) success = false;
-        else cell.setAtPath([...path, key], value[key], log);
+        if (currentCell.isFrozen()) success = false;
+        else currentCell.setAtPath([...path, key], value[key], log);
       }
     for (const key in destValue)
       if (!(key in value)) {
-        if (cell.isFrozen()) success = false;
-        else cell.setAtPath([...path, key], undefined, log);
+        if (currentCell.isFrozen()) success = false;
+        else currentCell.setAtPath([...path, key], undefined, log);
       }
 
     return success;
   } else if (!Object.is(destValue, value)) {
     // Use Object.is for comparison to handle NaN and -0 correctly
-    if (cell.isFrozen()) return false;
-    cell.setAtPath(path, value, log);
+    if (currentCell.isFrozen()) return false;
+    currentCell.setAtPath(path, value, log);
     return true;
   }
 
@@ -309,7 +340,8 @@ export function transformToSimpleCells(
  */
 export function deepEqualAndMakeAllElementsCells(
   value: any,
-  previous?: any
+  previous?: any,
+  log?: ReactivityLog
 ): boolean {
   let changed = false;
   if (isCell(value)) {
@@ -355,6 +387,7 @@ export function deepEqualAndMakeAllElementsCells(
           // change as well.
         } else {
           value[i] = { cell: cell(value[i]), path: [] } satisfies CellReference;
+          log?.writes.push({ cell: value[i].cell, path: value[i].path });
           changed = true;
         }
       }

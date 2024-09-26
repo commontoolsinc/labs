@@ -131,13 +131,23 @@ describe("createProxy", () => {
   });
 
   it("should support modifying array methods and log reads and writes", () => {
-    const c = cell<any>([1, 2, 3]);
+    const c = cell<any>([]);
     const log: ReactivityLog = { reads: [], writes: [] };
     const proxy = c.getAsProxy([], log);
-    proxy.push(4);
-    expect(c.get()).toEqual([1, 2, 3, 4]);
+    proxy[0] = 1;
+    proxy.push(2);
+    expect(c.get()).toHaveLength(2);
+    expect(isCellReference(c.get()[0])).toBeTruthy();
+    expect(c.get()[0].cell.get()).toBe(1);
+    expect(isCellReference(c.get()[1])).toBeTruthy();
+    expect(c.get()[1].cell.get()).toBe(2);
     expect(log.reads).toEqual([{ cell: c, path: [] }]);
-    expect(log.writes).toEqual([{ cell: c, path: ["3"] }]);
+    expect(log.writes).toEqual([
+      { cell: c.get()[0].cell, path: [] },
+      { cell: c, path: ["0"] },
+      { cell: c.get()[1].cell, path: [] },
+      { cell: c, path: ["1"] },
+    ]);
   });
 
   it("should support readonly array methods and log reads", () => {

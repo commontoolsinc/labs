@@ -1,5 +1,9 @@
 import { isAlias, isStreamAlias } from "@commontools/common-builder";
-import { getValueAtPath, setValueAtPath } from "@commontools/common-builder";
+import {
+  getValueAtPath,
+  setValueAtPath,
+  deepEqual,
+} from "@commontools/common-builder";
 import {
   followCellReferences,
   followAliases,
@@ -97,15 +101,10 @@ export function cell<T>(value?: T): CellImpl<T> {
 
       let changed = false;
       if (path.length > 0) {
-        // Changes all array elements to cells, reusing previous cells
-        changed = deepEqualAndMakeAllElementsCells(
-          newValue,
-          self.getAtPath(path)
-        );
-        if (changed) changed = setValueAtPath(value, path, newValue);
-      } else {
-        changed = deepEqualAndMakeAllElementsCells(newValue, value);
-        if (changed) value = newValue;
+        changed = setValueAtPath(value, path, newValue);
+      } else if (!deepEqual(value, newValue)) {
+        changed = true;
+        value = newValue;
       }
       if (changed) {
         log?.writes.push({ cell: self, path });
@@ -321,15 +320,34 @@ export function createValueProxy<T>(
               // push, don't proxy the other members so we don't log reads.
               // TODO: Some methods like pop() and shift() don't read the whole
               // array, so we could optimize that.
-              const copy =
-                isReadWrite === ArrayMethodType.WriteOnly
-                  ? [...target]
-                  : target.map((_, index) =>
-                      createValueProxy(cell, [...path, index], log)
-                    );
+              let copy: any;
+              if (isReadWrite === ArrayMethodType.WriteOnly) copy = [...target];
+              else
+                copy = target.map((_, index) =>
+                  createValueProxy(cell, [...path, index], log)
+                );
 
               const result = method.apply(copy, args);
-              setNestedValue(cell, path, copy, log);
+
+              // Undo the cell proxy wrapping for elements that are also cells.
+              copy = copy.map((value: any) => {
+                if (isCellProxyForDereferencing(value)) {
+                  const ref = value[getCellReference];
+                  if (
+                    ref.cell === cell &&
+                    ref.path.length === path.length + 1 &&
+                    typeof ref.path[ref.path.length - 1] === "number" &&
+                    ref.path.slice(0, -1).every((p, i) => p === path[i])
+                  )
+                    return ref.cell.getAtPath(ref.path);
+                  else return value;
+                } else return value;
+              });
+              // Turn any newly added elements into cells. And if there was a
+              // change at all, update the cell.
+              if (deepEqualAndMakeAllElementsCells(copy, target, log))
+                setNestedValue(cell, path, copy, log);
+
               return result;
             };
       }

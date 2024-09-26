@@ -110,7 +110,7 @@ describe("sendValueToBinding", () => {
       [{ $alias: { path: ["arr", 0] } }, { $alias: { path: ["arr", 2] } }],
       [1, 3]
     );
-    expect(testCell.get()).toEqual({ arr: [1, 0, 3] });
+    expect(testCell.getAsProxy()).toEqual({ arr: [1, 0, 3] });
   });
 
   it("should handle bindings with multiple levels", () => {
@@ -204,14 +204,14 @@ describe("setNestedValue", () => {
     const testCell = cell({ a: [1, 2, 3] });
     const success = setNestedValue(testCell, ["a"], [1, 2]);
     expect(success).toBe(true);
-    expect(testCell.get()).toEqual({ a: [1, 2] });
+    expect(testCell.getAsProxy()).toEqual({ a: [1, 2] });
   });
 
   it("should correctly update with a longer arrays", () => {
     const testCell = cell({ a: [1, 2, 3] });
     const success = setNestedValue(testCell, ["a"], [1, 2, 3, 4]);
     expect(success).toBe(true);
-    expect(testCell.get()).toEqual({ a: [1, 2, 3, 4] });
+    expect(testCell.getAsProxy()).toEqual({ a: [1, 2, 3, 4] });
   });
 
   it("should overwrite an object with an array", () => {
@@ -220,9 +220,7 @@ describe("setNestedValue", () => {
     expect(success).toBeTruthy();
     expect(testCell.get()).toHaveProperty("a");
     expect(testCell.get().a).toHaveLength(3);
-    expect(isCellReference(testCell.get().a[0])).toBeTruthy();
-    expect(isCellReference(testCell.get().a[1])).toBeTruthy();
-    expect(isCellReference(testCell.get().a[2])).toBeTruthy();
+    expect(testCell.getAsProxy().a).toEqual([1, 2, 3]);
   });
 });
 
