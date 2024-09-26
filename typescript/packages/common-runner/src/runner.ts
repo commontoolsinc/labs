@@ -194,8 +194,9 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
         }
         case "isolated": {
           const inputs = mapBindingsToCell(node.inputs, recipeCell);
-          const inputsCell = cell(inputs);
           const reads = findAllAliasedCells(inputs, recipeCell);
+          const inputsCell = cell(inputs);
+          inputsCell.freeze();
 
           const outputs = mapBindingsToCell(node.outputs, recipeCell);
           const writes = findAllAliasedCells(outputs, recipeCell);
@@ -220,16 +221,17 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
             const inputsProxy = inputsCell.getAsProxy([], log);
             if (typeof inputsProxy !== "object")
               throw new Error(`Invalid inputs: Must be an object`);
+
             const fn = await fnPromise;
-            const result = await fn.run(
+            const fnOutput = await fn.run(
               inputsProxy as unknown as JavaScriptValueMap
             );
 
-            const out: any = {};
-            for (const key of Object.keys(result)) {
-              out[key] = result[key].val;
-            }
-            sendValueToBinding(recipeCell, node.outputs, out, log);
+            const result: any = Object.fromEntries(
+              Object.entries(fnOutput).map(([key, value]) => [key, value.val])
+            );
+
+            sendValueToBinding(recipeCell, node.outputs, result, log);
           };
 
           schedule(action, { reads, writes } satisfies ReactivityLog);
