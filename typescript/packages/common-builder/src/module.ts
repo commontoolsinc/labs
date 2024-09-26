@@ -107,7 +107,7 @@ export function isolated<T, R>(
     ${Object.keys(inputs)
       .map((key) => `inputs["${key}"] = read("${key}")?.deref()?.val;`)
       .join("\n")}
-    fn = ${implementation.toString()};
+    let fn = ${implementation.toString()};
     let result = fn(inputs);
     ${Object.keys(outputs)
       .map(
