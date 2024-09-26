@@ -3,9 +3,10 @@ import { customElement, property } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
-import { Charm, ID, UI, NAME, addCharms } from "../data.js";
+import { Charm, ID, UI, NAME, addCharms, launch } from "../data.js";
 import { CellImpl, isCell, charmById } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
+import { iframeExample } from "../recipes/iframeExample.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -23,7 +24,7 @@ export class CommonWindowManager extends LitElement {
       .window {
         flex: 0 0 auto;
         width: 25%;
-        min-width: 300px;
+        min-width: 512px;
         height: 95%; /* Make the window full height */
         margin-left: 20px;
         margin-bottom: 20px;
@@ -79,8 +80,40 @@ export class CommonWindowManager extends LitElement {
   @property({ type: Array })
   charms: CellImpl<Charm>[] = [];
 
+
   private charmRefs: Map<number, Ref<HTMLElement>> = new Map();
   private newCharmRefs: [CellImpl<Charm>, Ref<HTMLElement>][] = [];
+
+  handleUniboxSubmit(event: CustomEvent, charm: CellImpl<Charm>) {
+    const value = event.detail.value;
+    const shiftHeld = event.detail.shiftHeld;
+    console.log('Unibox submitted:', value);
+
+    if (shiftHeld) {
+      charm.asSimpleCell(["addToPrompt"]).send({ prompt: value } as any)
+      // if (charm.prompt !== undefined) {
+      //   charm.prompt = charm.prompt + '\n' + value;
+      // } else {
+      //   charm.prompt = value;
+      // }
+    } else {
+      const charmValues = charm.getAsProxy()
+      let fieldsToInclude = Object.entries(charmValues).reduce((acc, [key, value]) => {
+        if (!key.startsWith('$') && !key.startsWith('_')) {
+          acc[key] = value;
+        }
+        return acc;
+      }, {} as any);
+
+      if (charmValues.data) {
+        fieldsToInclude = charmValues.data;
+      }
+
+      launch(iframeExample, { data: fieldsToInclude, title: value, prompt: value });
+    }
+  }
+
+  input: string = '';
 
   override render() {
     return html`
@@ -108,7 +141,7 @@ export class CommonWindowManager extends LitElement {
                   <div slot="secondary"><common-annotation .query=${
                     charmValues[NAME] ?? ""
                   } .target=${charmId} .data=${charmValues} ></common-annotation></div>
-                  <common-unibox slot="search" value="" placeholder="" label=">">
+                  <common-unibox slot="search" value=${this.input} @submit=${(e) => this.handleUniboxSubmit(e, charm)} placeholder="" label=">">
                 </common-system-layout>
               </common-screen-element>
             </div>

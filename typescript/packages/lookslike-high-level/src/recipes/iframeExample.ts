@@ -29,7 +29,7 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
 
 const generate = handler<void, { prompt: string; schema: object; query: string; loading: boolean }>(
   (_, state) => {
-    state.query = `${state.prompt}`;
+    state.prompt = `${state.query}`;
     console.log("generating", state.query);
     state.loading = true;
   }
@@ -146,7 +146,7 @@ const onToggle = handler<Event, { key: string, selected: string[] }>((input, { k
   }
 });
 
-const copy = lift(({ value }: { value: any }) => cell(JSON.parse(JSON.stringify(value || {}))));
+const copy = lift(({ value }: { value: any }) => value);
 
 const selectedKeys = lift(({ keys }) => {
   let result = [];
@@ -160,13 +160,26 @@ const selectedKeys = lift(({ keys }) => {
 
 const stringify = lift(({ value }) => JSON.stringify(value, null, 2));
 
-const promptFilterSchema = lift(({ schema, query }) => `Given the following schema:
+const promptFilterSchema = lift(({ schema, prompt }) => `Given the following schema:
 
 ${JSON.stringify(schema, null, 2)}
 
 Filter and return only the relevant parts of this schema for the following request:
 
-${query}`);
+${prompt}`);
+
+const addToPrompt = handler((e, state) => {
+  state.prompt += '\n' + e.prompt;
+  state.lastSrc = state.src;
+});
+
+const buildUiPrompt = lift(({ prompt, lastSrc }) => {
+  let fullPrompt = prompt;
+  if (lastSrc) {
+    fullPrompt += `\n\nHere's the previous HTML for reference:\n\`\`\`html\n${lastSrc}\n\`\`\``;
+  }
+  return fullPrompt;
+});
 
 export const iframeExample = recipe<{ title: string; prompt: string; data: any; src: string; loading: boolean; filter: string; }>(
   "iFrame Example",
@@ -182,10 +195,12 @@ export const iframeExample = recipe<{ title: string; prompt: string; data: any; 
     filter.setDefault("");
     const schema = deriveJsonSchema({ data, filter });
     tap({ schema });
-    const query = cell<string>();
+    console.log('prompt', prompt)
+    const query = copy({ value: prompt });
+    const lastSrc = cell()
 
     const scopedSchema = generateData<{ html: string }>({
-      prompt: promptFilterSchema({ schema, query }),
+      prompt: promptFilterSchema({ schema, prompt }),
       system: `Filter any keys from this schema that seem unrelated to the request. Respond in a json block.`,
       mode: "json",
     });
@@ -193,7 +208,7 @@ export const iframeExample = recipe<{ title: string; prompt: string; data: any; 
     tap({ scopedSchema });
 
     const response = generateData<{ html: string }>({
-      prompt: query,
+      prompt: buildUiPrompt({ prompt, lastSrc }),
       system: viewSystemPrompt({ schema: scopedSchema.result }),
       mode: "html",
     });
@@ -201,7 +216,6 @@ export const iframeExample = recipe<{ title: string; prompt: string; data: any; 
     tap({ result: response.result });
 
     src = maybeHTML({ result: response.result });
-
 
     return {
       [NAME]: str`${title} - iframe`,
@@ -212,19 +226,6 @@ export const iframeExample = recipe<{ title: string; prompt: string; data: any; 
           oncommon-input=${updateValue({ value: title })}
         ></common-input>
 
-        <div style="display: flex; align-items: flex-start;">
-          <textarea
-            value=${prompt}
-            onkeyup=${onInput({ value: prompt })}
-            style="width: 80%; min-height: 64px; margin-right: 10px;"
-          ></textarea>
-          <common-button
-            onclick=${generate({ prompt, schema, query, loading })}
-            style="white-space: nowrap;"
-          >
-            Generate
-          </common-button>
-        </div>
 
         ${loadingStatus({ loading })}
 
@@ -254,11 +255,18 @@ export const iframeExample = recipe<{ title: string; prompt: string; data: any; 
           ></textarea>
         </details>
 
+        <textarea
+        value=${query}
+        onkeyup=${onInput({ value: query })}
+        style="width: 100%; min-height: 128px;"
+        ></textarea>
+
       </div>`,
       prompt,
       title,
       src,
       data,
+      addToPrompt: addToPrompt({ prompt, src, lastSrc }),
     };
   }
 );
