@@ -1,0 +1,65 @@
+import { LitElement, css, html } from "lit-element";
+import { customElement } from "lit/decorators.js";
+import { base } from "../shared/styles.js";
+
+@customElement("commonos-toolbar")
+export class CommonOsToolbar extends LitElement {
+  static override styles = [
+    base,
+    css`
+      :host {
+        --u-toolbar-height: calc(var(--u) * 24);
+        display: block;
+      }
+
+      .toolbar {
+        height: var(--u-toolbar-height);
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        grid-template-areas: "start center end";
+        align-items: center;
+        gap: var(--u-gap);
+      }
+
+      .toolbar-start {
+        grid-area: start;
+        display: flex;
+        gap: var(--u-gap);
+        align-items: center;
+        justify-content: flex-start;
+      }
+
+      .toolbar-end {
+        grid-area: end;
+        display: flex;
+        gap: var(--u-gap);
+        align-items: center;
+        justify-content: flex-end;
+      }
+
+      .toolbar-center {
+        grid-area: center;
+        display: flex;
+        gap: var(--u-gap);
+        align-items: center;
+        justify-content: center;
+      }
+    `,
+  ];
+
+  override render() {
+    return html`
+      <header class="toolbar">
+        <div class="toolbar-start">
+          <slot name="toolbar-start"></slot>
+        </div>
+        <div class="toolbar-center">
+          <slot name="toolbar-center"></slot>
+        </div>
+        <div class="toolbar-end">
+          <slot name="toolbar-end"></slot>
+        </div>
+      </header>
+    `;
+  }
+}

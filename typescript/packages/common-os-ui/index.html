@@ -3,12 +3,27 @@
   <head>
     <meta charset="utf-8" />
     <title></title>
+    <link rel="stylesheet" href="src/static/main.css" />
     <script type="module" src="src/index.ts"></script>
   </head>
   <body>
     <commonos-screen>
       <commonos-main></commonos-main>
-      <commonos-sidebar></commonos-sidebar>
+      <commonos-sidebar>
+        <nav slot="actions">
+          <li>A</li>
+          <li>B</li>
+          <li>C</li>
+        </nav>
+        <common-sidebar-group slot="content">
+          <h1 slot="label">Title</h1>
+          <div slot="content">Content</div>
+        </common-sidebar-group>
+        <common-sidebar-group slot="content">
+          <h1 slot="label">Title</h1>
+          <div slot="content">Content</div>
+        </common-sidebar-group>
+      </commonos-sidebar>
     </commonos-screen>
   </body>
 </html>

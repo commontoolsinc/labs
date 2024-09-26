@@ -5,14 +5,7 @@
     "outDir": "./lib",
     "rootDir": "./src",
     "strict": false,
-    "paths": {
-      "common:module/module@0.0.1": [
-        "../../node_modules/@commontools/module/lib/index.d.ts"
-      ],
-      "common:io/state@0.0.1": [
-        "../../node_modules/@commontools/io/lib/index.d.ts"
-      ]
-    }
+    "paths": {}
   },
   "include": ["src/**/*"]
 }

@@ -27,6 +27,7 @@ export const base = css`
     --u-xsm-size: calc(var(--u) * 2.75);
     --u-xsm-line: calc(var(--u) * 4);
     --u-pad: calc(var(--u) * 6);
+    --u-gap: calc(var(--u) * 6);
     --bg: #fff;
     --bg-1: #fafafa;
     --bg-2: #f0f0f0;
@@ -40,7 +41,6 @@ export const base = css`
     --font-family: Helvetica, sans-serif;
 
     display: block;
-    background-color: var(--bg);
     color: var(--c-text);
     font-family: var(--font-family);
     font-size: var(--u-body-size);
@@ -95,6 +95,7 @@ export const base = css`
 
   .label {
     color: var(--c-text2);
+    font-weight: normal;
     font-family: var(--font-family);
     font-size: var(--u-xsm-size);
     line-height: var(--u-xsm-line);
@@ -108,33 +109,17 @@ export const base = css`
     color: var(--c-text2);
   }
 
-  .toolbar {
-    --u-toolbar-height: calc(var(--u) * 24);
-    height: var(--u-toolbar-height);
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    grid-template-areas: "start center end";
-    align-items: center;
+  .vstack {
+    display: flex;
+    flex-direction: column;
   }
 
-  .toolbar-start {
-    grid-area: start;
+  .hstack {
     display: flex;
-    align-items: center;
-    justify-content: flex-start;
+    flex-direction: row;
   }
 
-  .toolbar-end {
-    grid-area: end;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-  }
-
-  .toolbar-center {
-    grid-area: center;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  .gap {
+    gap: var(--u-gap);
   }
 `;
