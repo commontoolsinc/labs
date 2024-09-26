@@ -7,23 +7,21 @@
     <script type="module" src="src/index.ts"></script>
   </head>
   <body>
-    <commonos-scene>
+    <os-scene>
       <div slot="content"></div>
-      <commonos-sidebar slot="sidebar">
-        <nav slot="actions">
-          <li>A</li>
-          <li>B</li>
-          <li>C</li>
-        </nav>
-        <common-sidebar-group slot="content">
+      <os-sidebar slot="sidebar">
+        <os-icon-button slot="actions"></os-icon-button>
+        <os-icon-button slot="actions"></os-icon-button>
+        <os-icon-button slot="actions"></os-icon-button>
+        <os-sidebar-group slot="content">
           <h1 slot="label">Title</h1>
           <div slot="content">Content</div>
-        </common-sidebar-group>
-        <common-sidebar-group slot="content">
+        </os-sidebar-group>
+        <os-sidebar-group slot="content">
           <h1 slot="label">Title</h1>
           <div slot="content">Content</div>
-        </common-sidebar-group>
-      </commonos-sidebar>
-    </commonos-scene>
+        </os-sidebar-group>
+      </os-sidebar>
+    </os-scene>
   </body>
 </html>

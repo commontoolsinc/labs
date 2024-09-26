@@ -2,13 +2,14 @@ import { LitElement, css, html } from "lit-element";
 import { customElement } from "lit/decorators.js";
 import { base } from "../shared/styles.js";
 
-@customElement("commonos-toolbar")
-export class CommonOsToolbar extends LitElement {
+@customElement("os-toolbar")
+export class OsToolbar extends LitElement {
   static override styles = [
     base,
     css`
       :host {
         --u-toolbar-height: calc(var(--u) * 24);
+        --u-button-gap: calc(var(--u) * 4);
         display: block;
       }
 
@@ -24,7 +25,7 @@ export class CommonOsToolbar extends LitElement {
       .toolbar-start {
         grid-area: start;
         display: flex;
-        gap: var(--u-gap);
+        gap: var(--u-button-gap);
         align-items: center;
         justify-content: flex-start;
       }
@@ -32,7 +33,7 @@ export class CommonOsToolbar extends LitElement {
       .toolbar-end {
         grid-area: end;
         display: flex;
-        gap: var(--u-gap);
+        gap: var(--u-button-gap);
         align-items: center;
         justify-content: flex-end;
       }
@@ -40,7 +41,7 @@ export class CommonOsToolbar extends LitElement {
       .toolbar-center {
         grid-area: center;
         display: flex;
-        gap: var(--u-gap);
+        gap: var(--u-button-gap);
         align-items: center;
         justify-content: center;
       }
@@ -51,13 +52,13 @@ export class CommonOsToolbar extends LitElement {
     return html`
       <header class="toolbar">
         <div class="toolbar-start">
-          <slot name="toolbar-start"></slot>
+          <slot name="start"></slot>
         </div>
         <div class="toolbar-center">
-          <slot name="toolbar-center"></slot>
+          <slot name="center"></slot>
         </div>
         <div class="toolbar-end">
-          <slot name="toolbar-end"></slot>
+          <slot name="end"></slot>
         </div>
       </header>
     `;

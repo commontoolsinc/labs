@@ -2,8 +2,8 @@ import { LitElement, css, html } from "lit-element";
 import { customElement } from "lit/decorators.js";
 import { base } from "../shared/styles.js";
 
-@customElement("commonos-scene")
-export class CommonOsSidebar extends LitElement {
+@customElement("os-scene")
+export class OsScene extends LitElement {
   static override styles = [
     base,
     css`

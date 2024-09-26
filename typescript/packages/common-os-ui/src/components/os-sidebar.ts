@@ -2,8 +2,8 @@ import { LitElement, css, html } from "lit-element";
 import { customElement } from "lit/decorators.js";
 import { base } from "../shared/styles.js";
 
-@customElement("commonos-sidebar")
-export class CommonOsSidebar extends LitElement {
+@customElement("os-sidebar")
+export class OsSidebar extends LitElement {
   static override styles = [
     base,
     css`
@@ -17,9 +17,9 @@ export class CommonOsSidebar extends LitElement {
 
   override render() {
     return html`
-      <commonos-toolbar>
-        <slot name="actions"></slot>
-      </commonos-toolbar>
+      <os-toolbar>
+        <slot slot="end" name="actions"></slot>
+      </os-toolbar>
       <div>
         <slot name="content"></slot>
       </div>
@@ -27,8 +27,8 @@ export class CommonOsSidebar extends LitElement {
   }
 }
 
-@customElement("common-sidebar-group")
-export class CommonOsSidebarGroup extends LitElement {
+@customElement("os-sidebar-group")
+export class OsSidebarGroup extends LitElement {
   static override styles = [
     base,
     css`

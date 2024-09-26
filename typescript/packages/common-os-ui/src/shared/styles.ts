@@ -9,7 +9,7 @@ export const base = css`
     */
     --u: 4px;
     --u-min-touch-size: calc(var(--u) * 11);
-    --u-radius1: calc(var(--u) * 3);
+    --u-radius: calc(var(--u) * 3);
     --u-radius2: calc(var(--u) * 6);
     /* Body size 17px */
     --u-body-size: calc(var(--u) * 4.25);
