@@ -30,6 +30,9 @@ export class OsSidebar extends LitElement {
         padding: var(--u-pad);
         overflow-x: hidden;
         overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: var(--u-gap);
       }
     `,
   ];
