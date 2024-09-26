@@ -104,7 +104,12 @@ export function generateData(
 }
 
 function grabJson(txt: string) {
-  return JSON.parse(txt.match(/```json\n([\s\S]+?)```/)?.[1] ?? "{}");
+  const jsonMatch = txt.match(/```json\n([\s\S]+?)```/);
+  if (!jsonMatch) {
+    console.log("No JSON found in text:", txt);
+    return {};
+  }
+  return JSON.parse(jsonMatch[1]);
 }
 
 export function grabHtml(txt: string) {

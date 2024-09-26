@@ -6,7 +6,7 @@ import { render } from "@commontools/common-html";
 import { Charm, ID, UI, NAME, addCharms, launch } from "../data.js";
 import { CellImpl, isCell, charmById } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
-import { iframeExample } from "../recipes/iframeExample.js";
+import { iframe} from "../recipes/iframe.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -91,11 +91,6 @@ export class CommonWindowManager extends LitElement {
 
     if (shiftHeld) {
       charm.asSimpleCell(["addToPrompt"]).send({ prompt: value } as any)
-      // if (charm.prompt !== undefined) {
-      //   charm.prompt = charm.prompt + '\n' + value;
-      // } else {
-      //   charm.prompt = value;
-      // }
     } else {
       const charmValues = charm.getAsProxy()
       let fieldsToInclude = Object.entries(charmValues).reduce((acc, [key, value]) => {
@@ -109,7 +104,7 @@ export class CommonWindowManager extends LitElement {
         fieldsToInclude = charmValues.data;
       }
 
-      launch(iframeExample, { data: fieldsToInclude, title: value, prompt: value });
+      launch(iframe, { data: fieldsToInclude, title: value, prompt: value });
     }
   }
 

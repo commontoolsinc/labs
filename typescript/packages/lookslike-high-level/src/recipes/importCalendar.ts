@@ -1,6 +1,6 @@
 import { html } from "@commontools/common-html";
 import { recipe, handler, UI, NAME, cell, ifElse, lift } from "@commontools/common-builder";
-import { iframeExample } from "./iframeExample.js";
+import { iframe} from "./iframe.js";
 import { launch } from "../data.js";
 
 interface CalendarEvent {
@@ -256,11 +256,6 @@ const startImport = handler<{}, { importing: boolean; progress: number, imported
   }
 );
 
-
-const cloneRecipe = handler<void, { data: any, title: string, prompt: string }>((_, state) => {
-  launch(iframeExample, { data: state.data, title: 'clone of ' + state.title, prompt: state.prompt });
-});
-
 const formatDateTime = lift((dateTimeString: string): string => {
   const date = new Date(dateTimeString);
   const year = date.getFullYear();
@@ -287,8 +282,6 @@ export const importCalendar = recipe<{ importing: boolean, progress: number, imp
   importing.setDefault(false)
   progress.setDefault(0)
   importedEvents.setDefault([])
-
-  const event = lastEvent(importedEvents);
 
   return {
     [NAME]: "Import Calendar",
@@ -341,9 +334,6 @@ export const importCalendar = recipe<{ importing: boolean, progress: number, imp
             `)}
           </tbody>
         </table>
-        <common-button onclick=${cloneRecipe({ data: { events: importedEvents }, title: "Calendar", prompt: "list events" })}
-          >Fork</common-button
-        >
       </div>
     `,
     importedEvents,

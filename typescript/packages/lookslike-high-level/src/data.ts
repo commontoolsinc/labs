@@ -25,7 +25,7 @@ import {
   isCellProxyForDereferencing,
 } from "@commontools/common-runner";
 import { fetchCollections } from "./recipes/fetchCollections.js";
-import { iframeExample } from "./recipes/iframeExample.js";
+import { iframe} from "./recipes/iframe.js";
 import { importCalendar } from "./recipes/importCalendar.js";
 import { dungeon } from "./recipes/dungeon.js";
 
@@ -59,8 +59,8 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 }
 
 addCharms([
-  run(iframeExample, { title: "two way binding counter", prompt: "counter", data: { counter: 0 } }),
-  run(iframeExample, { title: "breakout", prompt: "playable breakout/arkanoid, click to start, reset score at start", data: { score: 0, counter: 0 } }),
+  run(iframe, { title: "two way binding counter", prompt: "counter", data: { counter: 0 } }),
+  run(iframe, { title: "breakout", prompt: "playable breakout/arkanoid, click to start, reset score at start", data: { score: 0, counter: 0 } }),
   run(importCalendar, {}),
   run(dungeon, {}),
   run(fetchExample, {
