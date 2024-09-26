@@ -103,7 +103,7 @@ export const dungeon = recipe<DungeonGame>("Import Calendar", (state) => {
         <common-button onclick=${cloneRecipe({ state, prompt: 'retro rpg style dialogue box printing text character by character, you can switch which character you\'re talking to and cycle through the dialogue options. there should be a graphical representation of the character speaking.' })}
             >Chat</common-button
         >
-        <common-button onclick=${cloneRecipe({ state, prompt: 'epic boss fight where the skeleton, hero and goblin must team up against a dragon - visualized as emoji, top down tactical encounter' })}
+        <common-button onclick=${cloneRecipe({ state, prompt: 'epic boss fight where the skeleton, hero and goblin must team up against a dragon - visualized as emoji, mother/earthbound style turn based battle with retro effects' })}
             >Dragon Battle</common-button
         >
         <common-button onclick=${cloneRecipe({ state, prompt: 'three.js dungeon viewer w/ procedural texture on walls. Add a minimap overlay to the 3D dungeon viewer, showing the player, skeleton and goblin\'s position. custom camera y axis rotation with slider control. nice lighting with torches.' })}
