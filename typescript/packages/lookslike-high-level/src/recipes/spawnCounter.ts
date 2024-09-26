@@ -1,8 +1,6 @@
 import { html } from "@commontools/common-html";
-import { recipe, NAME, UI, handler, lift } from "@commontools/common-builder";
+import { recipe, NAME, UI, handler } from "@commontools/common-builder";
 import * as DB from "datalogia"
-
-const jsonify = lift((x: any) => JSON.stringify(x, null, 2));
 
 const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
     ({ detail }, state) => detail?.value && (state.title = detail.value)
@@ -16,7 +14,10 @@ const spawn = handler<void, { title: string; count: number }>((_, { title, count
 
     console.log('spawn', title)
 
-    let id = DB.Link.of({ title, recipe: "counter" })
+    let id = DB.Link.of({ title, 
+        recipe: "counter",
+        ts: new Date().toISOString()
+    })
 
     fetch('///localhost:8080/', {
         method: 'PATCH',

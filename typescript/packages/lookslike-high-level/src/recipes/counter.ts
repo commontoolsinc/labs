@@ -1,59 +1,29 @@
 import { html } from "@commontools/common-html";
 import { recipe, NAME, UI, handler } from "@commontools/common-builder";
 
-const incSynopsis = handler<{}, { count: number, synopsis: { "/": string } }>(
-    ({ }, { count, synopsis }) => {
-
-        let newValue = count + 1;
-
-        fetch('///localhost:8080/', {
-            method: 'PATCH',
-            body: JSON.stringify([
-                { Retract: [synopsis, 'count', count] },
-                { Assert: [synopsis, 'count', newValue] },
-            ])
-        }).then(r => r.json()).then(data => {
-            console.log('data', data)
-        })
- 
-    }
+const inc = handler<{}, { count: { value: number } }>(
+    ({ }, { count }) => { count.value = count.value + 1 }
 );
 
-const retitleSynopsis = handler<{}, { title: string, synopsis: { "/": string } }>(
-    ({ }, { title, synopsis }) => {
-
-        let newValue = `${title}.`;
-
-        fetch('///localhost:8080/', {
-            method: 'PATCH',
-            body: JSON.stringify([
-                { Retract: [synopsis, 'title', title] },
-                { Assert: [synopsis, 'title', newValue] },
-            ])
-        }).then(r => r.json()).then(data => {
-            console.log('data', data)
-        })
- 
-    }
+const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
+    ({ detail }, state) => detail?.value && (state.title = detail.value)
 );
 
-
-export const counter = recipe<{ title: string; count: number, synopsis: { "/": string } }>(
+export const counter = recipe<{ title: string; count: { value: number } }>(
     "counter",
-    ({ title, count, synopsis }) => {
-        count.setDefault(0);
+    ({ title, count }) => {
+        count.setDefault({ value: 0 });
         title.setDefault("untitled counter");
 
         return {
             [NAME]: title,
             [UI]: html`<div>
-                    <p>${title}</p>
-                    <p>${count}</p>
-                    <button onclick=${incSynopsis({ synopsis, count })}>Increment</button>
-                    <button onclick=${retitleSynopsis({ synopsis, title })}>Retitle</button>
-                </div>`,
+                         <common-input value=${title} placeholder="Counter title"
+                           oncommon-input=${updateTitle({ title })}></common-input>
+                         <p>${count.value}</p>
+                         <button onclick=${inc({ count })}>Increment</button>
+                       </div>`,
             count,
-            title,
-            synopsis
+            title
         }
     })

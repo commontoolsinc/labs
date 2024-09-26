@@ -91,6 +91,18 @@ const counterQuery = async function* () {
 
 let syncedCharms: { [key: string]: CellImpl<any> } = {}
 
+function postChange(id: string, prop: string, { newValue, oldValue }: { newValue: string | number, oldValue: string | number }) {
+  fetch('///localhost:8080/', {
+    method: 'PATCH',
+    body: JSON.stringify([
+      { Retract: [{ "/": id }, prop, oldValue] },
+      { Assert: [{ "/": id }, prop, newValue] },
+    ])
+  })
+}
+
+let datas: { [key: string]: any } = {}
+
 export async function watch() {
   let query = counterQuery()
   for await (const event of query) {
@@ -98,23 +110,51 @@ export async function watch() {
 
     for (const change of event.data) {
       const synId = change.id["/"]
-      if (synId in syncedCharms) {
-        let charmProxy = syncedCharms[synId].getAsProxy()
-        
-        if (change.count !== charmProxy.count) {
-          charmProxy.count = change.count
-        }
-        if (change.title !== charmProxy.title) {
-          charmProxy.title = change.title
-        }
-      } else {
-        let charm = run(counter, {
+
+      // if we've not seen this counter before, create new charm
+      if (!(synId in syncedCharms)) {
+
+        let serverData = {
           title: change.title,
-          count: change.count,
-          synopsis: change.id
+          count: { value: change.count },
+        }
+        let charm = run(counter, serverData)
+        datas[synId] = serverData
+
+        // hook up the cell to send changes to server
+        charm.sink((instance) => {
+          if (instance.title !== serverData.title) {
+            let oldTitle = serverData.title
+            let newTitle = instance.title
+            serverData.title = newTitle
+            postChange(synId, 'title', { newValue: newTitle, oldValue: oldTitle })
+          }
+        // no clue if we have to be this paranoid, but I've had too many infinite loops
+        if (instance.count.value !== serverData.count.value) {
+            let oldCount = serverData.count.value;
+            let newCount = instance.count.value
+            console.log(`counter sending count to server ${oldCount} -> ${newCount}`)
+            serverData.count.value = newCount
+            postChange(synId, 'count', { newValue: newCount, oldValue: oldCount })
+          }
         })
         syncedCharms[synId] = charm
         openCharm(charm.get()[ID]);
+      } else {
+        // we've seen this counter before, update the existing instance
+
+        let instance = syncedCharms[synId].getAsProxy()
+
+        // no clue if we have to be this paranoid, but I've had too many infinite loops
+        if (change.count !== instance.count.value) {
+          console.log(`counter receiving count from server ${instance.count.value} -> ${change.count}`)
+          instance.count.value = change.count
+          datas[synId].count.value = change.count
+        }
+        if (change.title !== instance.title) {
+          instance.title = change.title
+          datas[synId].title = change.title
+        }
       }
     }
   }
@@ -143,7 +183,7 @@ synTest()
 import { spawnCounter } from "./recipes/spawnCounter.js";
 
 addCharms([
-  run(spawnCounter, {  }),
+  run(spawnCounter, {}),
 ]);
 
 export type RecipeManifest = {
