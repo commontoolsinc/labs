@@ -224,7 +224,12 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
             const result = await fn.run(
               inputsProxy as unknown as JavaScriptValueMap
             );
-            sendValueToBinding(recipeCell, node.outputs, result, log);
+
+            const out: any = {};
+            for (const key of Object.keys(result)) {
+              out[key] = result[key].val;
+            }
+            sendValueToBinding(recipeCell, node.outputs, out, log);
           };
 
           schedule(action, { reads, writes } satisfies ReactivityLog);
