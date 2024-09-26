@@ -15,15 +15,15 @@ export class OsScene extends LitElement {
       .scene {
         display: grid;
         grid-template-columns: 1fr var(--sidebar-width);
-        grid-template-areas: "content sidebar";
+        grid-template-areas: "main sidebar";
         gap: var(--gap);
         overflow: hidden;
         justify-items: stretch;
         height: 100vh;
       }
 
-      .scene-content {
-        grid-area: content;
+      .scene-main {
+        grid-area: main;
         display: flex;
         flex-direction: column;
         justify-items: stretch;
@@ -48,8 +48,8 @@ export class OsScene extends LitElement {
   override render() {
     return html`
       <div class="scene">
-        <div class="scene-content">
-          <slot name="content"></slot>
+        <div class="scene-main">
+          <slot name="main"></slot>
         </div>
         <div class="scene-sidebar">
           <slot name="sidebar"></slot>

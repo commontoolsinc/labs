@@ -41,18 +41,26 @@ export const base = css`
     --font-family: Helvetica, sans-serif;
 
     display: block;
-    color: var(--c-text);
-    font-family: var(--font-family);
-    font-size: var(--u-body-size);
-    line-height: var(--u-body-line);
   }
 
   * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
-    font-size: inherit;
+    font-weight: normal;
+    color: var(--c-text);
+    font-family: var(--font-family);
+    font-size: var(--u-body-size);
+    line-height: var(--u-body-line);
     list-style: none;
+  }
+
+  .defaults {
+    display: block;
+    color: var(--c-text);
+    font-family: var(--font-family);
+    font-size: var(--u-body-size);
+    line-height: var(--u-body-line);
   }
 
   .body {

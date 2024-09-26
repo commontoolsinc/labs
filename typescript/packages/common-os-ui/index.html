@@ -8,17 +8,23 @@
   </head>
   <body>
     <os-scene>
-      <div slot="content">Content</div>
+      <div slot="main">
+        <os-toolbar>
+          <div slot="start">start</div>
+          <div slot="center">location</div>
+          <div slot="end">end</div>
+        </os-toolbar>
+      </div>
       <os-sidebar slot="sidebar">
         <os-icon-button slot="actions"></os-icon-button>
         <os-icon-button slot="actions"></os-icon-button>
         <os-icon-button slot="actions"></os-icon-button>
         <os-sidebar-group slot="content">
-          <h1 slot="label">Title</h1>
+          <div slot="label">Title</div>
           <div slot="content">Content</div>
         </os-sidebar-group>
         <os-sidebar-group slot="content">
-          <h1 slot="label">Title</h1>
+          <div slot="label">Title</div>
           <div slot="content">
             <p>
               Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do
