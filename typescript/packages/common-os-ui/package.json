@@ -8,7 +8,8 @@
   "type": "module",
   "scripts": {
     "build": "wireit",
-    "clean": "wireit"
+    "clean": "wireit",
+    "dev": "vite"
   },
   "repository": {
     "type": "git",
@@ -32,7 +33,9 @@
   },
   "wireit": {
     "build": {
-      "dependencies": [],
+      "dependencies": [
+        "../common-ui:build"
+      ],
       "files": [
         "./src/**/*"
       ],
