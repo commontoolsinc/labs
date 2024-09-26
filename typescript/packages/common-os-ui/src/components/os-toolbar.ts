@@ -20,6 +20,8 @@ export class OsToolbar extends LitElement {
         grid-template-areas: "start center end";
         align-items: center;
         gap: var(--u-gap);
+        padding-left: var(--u-pad);
+        padding-right: var(--u-pad);
       }
 
       .toolbar-start {

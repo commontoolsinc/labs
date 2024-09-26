@@ -8,21 +8,42 @@ export class OsSidebar extends LitElement {
     base,
     css`
       :host {
-        display: flex;
-        flex-direction: column;
+        display: block;
+      }
+
+      .sidebar {
+        display: grid;
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
+        grid-template-areas:
+          "toolbar"
+          "content";
+        height: 100%;
+      }
+
+      .sidebar-toolbar {
+        grid-area: toolbar;
+      }
+
+      .sidebar-content {
+        grid-area: content;
         padding: var(--u-pad);
+        overflow-x: hidden;
+        overflow-y: auto;
       }
     `,
   ];
 
   override render() {
     return html`
-      <os-toolbar>
-        <slot slot="end" name="actions"></slot>
-      </os-toolbar>
-      <div>
-        <slot name="content"></slot>
-      </div>
+      <aside class="sidebar">
+        <os-toolbar class="sidebar-toolbar">
+          <slot slot="end" name="actions"></slot>
+        </os-toolbar>
+        <div class="sidebar-content">
+          <slot name="content"></slot>
+        </div>
+      </aside>
     `;
   }
 }

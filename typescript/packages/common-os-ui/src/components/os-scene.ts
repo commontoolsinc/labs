@@ -17,7 +17,9 @@ export class OsScene extends LitElement {
         grid-template-columns: 1fr var(--sidebar-width);
         grid-template-areas: "content sidebar";
         gap: var(--gap);
-        min-height: 100vh;
+        overflow: hidden;
+        justify-items: stretch;
+        height: 100vh;
       }
 
       .scene-content {
@@ -25,6 +27,7 @@ export class OsScene extends LitElement {
         display: flex;
         flex-direction: column;
         justify-items: stretch;
+        height: 100vh;
       }
 
       .scene-sidebar {
@@ -33,8 +36,11 @@ export class OsScene extends LitElement {
         display: flex;
         flex-direction: column;
         justify-items: stretch;
-        overflow-x: hidden;
-        overflow-y: auto;
+        height: 100vh;
+      }
+
+      .scene-sidebar ::slotted(*) {
+        height: 100%;
       }
     `,
   ];
