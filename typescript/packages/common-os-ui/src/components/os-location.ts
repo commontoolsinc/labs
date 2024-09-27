@@ -18,12 +18,31 @@ export class OsLocation extends LitElement {
         display: flex;
         align-items: center;
         justify-content: center;
+        background: var(--bg-3);
         border: 0;
+        border-radius: calc(var(--location-height) / 2);
         width: var(--location-width);
         height: var(--location-height);
-        background: var(--bg-3);
-        border-radius: calc(var(--location-height) / 2);
+        overflow: hidden;
         padding: 0 calc(var(--u) * 4);
+        position: relative;
+        cursor: pointer;
+      }
+
+      .location::before {
+        background-color: var(--bg-scrim);
+        content: "";
+        display: block;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+        position: absolute;
+        pointer-events: none;
+        transition: opacity 250ms ease-out;
+      }
+
+      .location:hover::before {
+        opacity: 1;
       }
 
       .location-inner {
