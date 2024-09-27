@@ -29,6 +29,7 @@ import { iframe} from "./recipes/iframe.js";
 import { importCalendar } from "./recipes/importCalendar.js";
 import { dungeon } from "./recipes/dungeon.js";
 import { dataDesigner } from "./recipes/dataDesigner.js";
+import { jsonImporter } from "./recipes/jsonImport.js";
 
 export type Charm = {
   [ID]: number;
@@ -61,6 +62,7 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 
 addCharms([
   run(iframe, { title: "two way binding counter", prompt: "counter", data: { counter: 0 } }),
+  run(jsonImporter, { title: "JSON Importer"}),
   run(dataDesigner, { title: "Data Designer"}),
   run(importCalendar, {}),
   run(dungeon, {}),
