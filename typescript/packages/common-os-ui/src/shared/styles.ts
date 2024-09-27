@@ -64,6 +64,8 @@ export const base = css`
     --font-family: Helvetica, sans-serif;
     --dur-sm: 250ms;
     --dur-md: 500ms;
+    --ease-out-cubic: cubic-bezier(0.215, 0.61, 0.355, 1);
+    --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
 
     display: block;
   }

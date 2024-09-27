@@ -1,5 +1,5 @@
 import { LitElement, css, html } from "lit-element";
-import { customElement } from "lit/decorators.js";
+import { customElement, property } from "lit/decorators.js";
 import { base } from "../shared/styles.js";
 
 @customElement("os-scene")
@@ -14,13 +14,13 @@ export class OsScene extends LitElement {
 
       .scene {
         display: grid;
-        grid-template-columns: 1fr var(--sidebar-width);
+        grid-template-columns: 1fr 0;
         grid-template-areas: "main sidebar";
         gap: var(--gap);
         overflow: hidden;
         justify-items: stretch;
         height: 100vh;
-        transition: grid var(--dur-md) ease-out;
+        transition: grid var(--dur-md) var(--ease-out-cubic);
       }
 
       .scene-main {
@@ -43,6 +43,8 @@ export class OsScene extends LitElement {
         /* Set fixed width on inner element to prevent text reflow on
         sidebar animation. */
         width: var(--sidebar-width);
+        /* Needed to correctly trigger scrolling in sidebar main */
+        height: 100vh;
       }
 
       .scene-sidebar-main {
@@ -51,9 +53,9 @@ export class OsScene extends LitElement {
       }
 
       /* Sidebar animation */
-      :host([state="closed"]) {
+      :host([sidebar]) {
         .scene {
-          grid-template-columns: 1fr 0;
+          grid-template-columns: 1fr var(--sidebar-width);
         }
       }
 
@@ -67,13 +69,24 @@ export class OsScene extends LitElement {
     `,
   ];
 
+  @property({ type: Boolean, reflect: true }) sidebar = true;
+
   override render() {
+    const onSidebarButton = () => {
+      this.sidebar = !this.sidebar;
+    };
+
     return html`
       <div class="scene">
         <section class="scene-main">
-          <header class="scene-main-toolbar">
-            <slot name="main-toolbar"></slot>
-          </header>
+          <os-toolbar class="scene-main-toolbar">
+            <os-location slot="center" display="Location"></os-location>
+            <os-icon-button
+              @click="${onSidebarButton}"
+              slot="end"
+              icon="menu"
+            ></os-icon-button>
+          </os-toolbar>
           <div class="scene-main-main">
             <slot name="main"></slot>
           </div>
