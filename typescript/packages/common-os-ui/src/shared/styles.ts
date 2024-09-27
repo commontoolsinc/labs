@@ -127,6 +127,7 @@ export const base = css`
   .label {
     color: var(--c-text2);
     font-weight: normal;
+    text-transform: uppercase;
     font-family: var(--font-family);
     font-size: var(--u-xsm-size);
     line-height: var(--u-xsm-line);

@@ -60,14 +60,20 @@ export class OsSidebarGroup extends LitElement {
         display: flex;
         flex-direction: column;
       }
+
+      .sgroup {
+        gap: var(--u);
+      }
     `,
   ];
 
   override render() {
     return html`
-      <aside class="vstack">
-        <slot class="label" name="label"></slot>
-        <div><slot name="content"></slot></div>
+      <aside class="sgroup vstack">
+        <heading class="sgroup-heading"
+          ><slot class="label" name="label"></slot
+        ></heading>
+        <div class="sgroup-content"><slot name="content"></slot></div>
       </aside>
     `;
   }
