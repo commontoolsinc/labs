@@ -62,8 +62,6 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 
 addCharms([
   run(iframe, { title: "two way binding counter", prompt: "counter", data: { counter: 0 } }),
-  run(jsonImporter, { title: "JSON Importer"}),
-  run(dataDesigner, { title: "Data Designer"}),
   run(importCalendar, {}),
   run(dungeon, {}),
   run(fetchExample, {
@@ -117,6 +115,14 @@ export const recipes: RecipeManifest[] = [
   {
     name: "Find a LuftBnB place to stay",
     recipe: luftBnBSearch,
+  },
+  {
+    name: "JSON Importer",
+    recipe: jsonImporter,
+  },
+  {
+    name: "Data Designer",
+    recipe: dataDesigner,
   },
   {
     name: "Create a counter",

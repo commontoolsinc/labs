@@ -157,6 +157,7 @@ export const dataDesigner = recipe<{
   prompt.setDefault("");
   data.setDefault({ key: 'value'  });
   loading.setDefault(false);
+  title.setDefault("Untitled Data Designer");
 
   const schema = deriveJsonSchema({ data });
   console.log("prompt", prompt);

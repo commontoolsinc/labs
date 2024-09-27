@@ -35,7 +35,7 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
 );
 
 const viewSystemPrompt = lift(
-  ({ }) => `generate/modify a document based on inpout, respond within a json block , e.g.
+  ({ }) => `generate/modify a document based on input, respond within a json block , e.g.
   \`\`\`json
   ...
   \`\`\`
@@ -164,9 +164,9 @@ export const jsonImporter = recipe<{
   prompt.setDefault("");
   data.setDefault({ key: 'value'  });
   loading.setDefault(false);
+  title.setDefault("Untitled JSON Importer");
 
   const schema = deriveJsonSchema({ data });
-  console.log("prompt", prompt);
   const jsonText = cell<string>('{}');
   jsonText.setDefault('{}')
 
