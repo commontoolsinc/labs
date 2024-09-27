@@ -92,7 +92,7 @@ addCharms([
     date: getFridayAndMondayDateStrings().startDate,
     location: "New York",
   }),
-  run(counter, { title: "Summer Reading" }),
+  run(counter, { title: "Summer Reading", count: 42 }),
   run(routine, {
     title: "Morning routine",
     // TODO: A lot more missing here, this is just to drive the suggestion.
