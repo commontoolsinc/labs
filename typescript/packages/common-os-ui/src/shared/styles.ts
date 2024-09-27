@@ -1,6 +1,27 @@
 import { css } from "lit";
 
 export const base = css`
+  @font-face {
+    font-family: "Material Symbols Rounded";
+    font-style: normal;
+    src: url("./material-symbols.woff") format("woff");
+  }
+
+  .material-symbols-rounded {
+    font-family: "Material Symbols Rounded";
+    font-weight: normal;
+    font-style: normal;
+    font-size: 24px; /* Preferred icon size */
+    display: inline-block;
+    line-height: 1;
+    text-transform: none;
+    letter-spacing: normal;
+    word-wrap: normal;
+    white-space: nowrap;
+    direction: ltr;
+    font-variation-settings: "FILL" 1;
+  }
+
   :host {
     /*
     Baseline grid unit.

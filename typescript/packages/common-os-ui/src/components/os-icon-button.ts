@@ -1,5 +1,5 @@
 import { LitElement, css, html } from "lit-element";
-import { customElement } from "lit/decorators.js";
+import { customElement, property } from "lit/decorators.js";
 import { base } from "../shared/styles.js";
 
 @customElement("os-icon-button")
@@ -13,10 +13,12 @@ export class OsIconButton extends LitElement {
       }
 
       .icon-button {
-        display: block;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         cursor: pointer;
         border: 0;
-        --webkit-appearance: none;
+        -webkit-appearance: none;
         appearance: none;
         background-color: var(--bg-3);
         border-radius: var(--u-radius);
@@ -44,10 +46,12 @@ export class OsIconButton extends LitElement {
     `,
   ];
 
+  @property({ type: String }) icon = "";
+
   override render() {
     return html`
       <button class="icon-button">
-        <slot></slot>
+        <os-icon icon="${this.icon}"></os-icon>
       </button>
     `;
   }
