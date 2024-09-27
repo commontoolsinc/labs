@@ -14,7 +14,7 @@ const addTask = handler<{ detail: { message: string } }, { items: TodoItem[] }>(
 );
 
 const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
-  ({ detail }, state) => (state.title = detail?.value ?? "untitled")
+  ({ detail }, state) => {(state.title = detail?.value ?? "untitled")}
 );
 
 const updateItem = handler<
