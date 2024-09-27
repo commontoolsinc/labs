@@ -28,6 +28,7 @@ import { fetchCollections } from "./recipes/fetchCollections.js";
 import { iframe} from "./recipes/iframe.js";
 import { importCalendar } from "./recipes/importCalendar.js";
 import { dungeon } from "./recipes/dungeon.js";
+import { dataDesigner } from "./recipes/dataDesigner.js";
 
 export type Charm = {
   [ID]: number;
@@ -60,7 +61,7 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 
 addCharms([
   run(iframe, { title: "two way binding counter", prompt: "counter", data: { counter: 0 } }),
-  run(iframe, { title: "breakout", prompt: "playable breakout/arkanoid, click to start, reset score at start", data: { score: 0, counter: 0 } }),
+  run(dataDesigner, { title: "Data Designer"}),
   run(importCalendar, {}),
   run(dungeon, {}),
   run(fetchExample, {
