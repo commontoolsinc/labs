@@ -19,7 +19,9 @@ export const base = css`
     word-wrap: normal;
     white-space: nowrap;
     direction: ltr;
-    font-variation-settings: "FILL" 1;
+    font-variation-settings:
+      "FILL" 1,
+      "GRAD" 200;
   }
 
   :host {
