@@ -55,13 +55,15 @@ export const base = css`
     --bg-1: #fafafa;
     --bg-2: #f0f0f0;
     --bg-3: #d2d2d2;
-    --bg-scrim: rgba(0 0 0 / 5%);
+    --bg-scrim: rgb(0 0 0 / 5%);
     --c-border: #d0d0d0;
     --c-text: #000;
     --c-text2: #969696;
-    --c-placeholder: --shadow-menu: 0px 2px 4px rgba(0, 0, 0, 0.08),
-      0px 0px 10px rgba(0, 0, 0, 0.08);
+    --c-placeholder: rgb(0, 0, 0 / 20%);
+    --shadow-menu: 0px 2px 4px rgb(0, 0, 0 / 8%), 0px 0px 10px rgb(0, 0, 0 / 8%);
     --font-family: Helvetica, sans-serif;
+    --dur-sm: 250ms;
+    --dur-md: 500ms;
 
     display: block;
   }
@@ -76,6 +78,8 @@ export const base = css`
     font-size: var(--u-body-size);
     line-height: var(--u-body-line);
     list-style: none;
+    -webkit-font-smoothing: antialiased;
+    font-smooth: antialiased;
   }
 
   .defaults {
@@ -84,30 +88,40 @@ export const base = css`
     font-family: var(--font-family);
     font-size: var(--u-body-size);
     line-height: var(--u-body-line);
+    -webkit-font-smoothing: antialiased;
+    font-smooth: antialiased;
   }
 
   .body {
     font-family: var(--font-family);
     font-size: var(--u-body-size);
     line-height: var(--u-body-line);
+    -webkit-font-smoothing: antialiased;
+    font-smooth: antialiased;
   }
 
   .lg {
     font-family: var(--font-family);
     font-size: var(--u-lg-size);
     line-height: var(--u-lg-line);
+    -webkit-font-smoothing: antialiased;
+    font-smooth: antialiased;
   }
 
   .sm {
     font-family: var(--font-family);
     font-size: var(--u-sm-size);
     line-height: var(--u-sm-line);
+    -webkit-font-smoothing: antialiased;
+    font-smooth: antialiased;
   }
 
   .xsm {
     font-family: var(--font-family);
     font-size: var(--u-xsm-size);
     line-height: var(--u-xsm-line);
+    -webkit-font-smoothing: antialiased;
+    font-smooth: antialiased;
   }
 
   .title {
@@ -115,6 +129,8 @@ export const base = css`
     font-family: var(--font-family);
     font-size: var(--u-body-size);
     line-height: var(--u-body-line);
+    -webkit-font-smoothing: antialiased;
+    font-smooth: antialiased;
   }
 
   .heading {
@@ -122,6 +138,8 @@ export const base = css`
     font-family: var(--font-family);
     font-size: var(--u-heading-size);
     line-height: var(--u-heading-line);
+    -webkit-font-smoothing: antialiased;
+    font-smooth: antialiased;
   }
 
   .label {
@@ -131,6 +149,8 @@ export const base = css`
     font-family: var(--font-family);
     font-size: var(--u-xsm-size);
     line-height: var(--u-xsm-line);
+    -webkit-font-smoothing: antialiased;
+    font-smooth: antialiased;
   }
 
   .c-text {

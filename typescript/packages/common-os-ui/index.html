@@ -8,22 +8,32 @@
   </head>
   <body>
     <os-scene>
-      <div slot="main">
-        <os-toolbar>
-          <div slot="start">start</div>
-          <os-location slot="center" display="Location"></os-location>
-          <div slot="end">end</div>
-        </os-toolbar>
-      </div>
+      <os-toolbar slot="main-toolbar">
+        <os-location slot="center" display="Location"></os-location>
+        <os-icon-button slot="end" icon="menu"></os-icon-button>
+      </os-toolbar>
+      <os-container slot="main">
+        <os-colgrid>
+          <os-tile></os-tile>
+          <os-tile></os-tile>
+          <os-tile></os-tile>
+          <os-tile></os-tile>
+          <os-tile></os-tile>
+          <os-tile></os-tile>
+          <os-tile></os-tile>
+        </os-colgrid>
+      </os-container>
+      <os-toolbar slot="sidebar-toolbar">
+        <os-icon-button slot="end" icon="info"></os-icon-button>
+        <os-icon-button slot="end" icon="palette"></os-icon-button>
+        <os-icon-button slot="end" icon="menu"></os-icon-button>
+      </os-toolbar>
       <os-sidebar slot="sidebar">
-        <os-icon-button slot="actions" icon="info"></os-icon-button>
-        <os-icon-button slot="actions" icon="palette"></os-icon-button>
-        <os-icon-button slot="actions" icon="menu"></os-icon-button>
-        <os-sidebar-group slot="content">
+        <os-sidebar-group>
           <div slot="label">Title</div>
           <div slot="content">Content</div>
         </os-sidebar-group>
-        <os-sidebar-group slot="content">
+        <os-sidebar-group>
           <div slot="label">Title</div>
           <div slot="content">
             <p>

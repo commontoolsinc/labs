@@ -12,24 +12,7 @@ export class OsSidebar extends LitElement {
       }
 
       .sidebar {
-        display: grid;
-        grid-template-columns: 1fr;
-        grid-template-rows: auto 1fr;
-        grid-template-areas:
-          "toolbar"
-          "content";
-        height: 100%;
-      }
-
-      .sidebar-toolbar {
-        grid-area: toolbar;
-      }
-
-      .sidebar-content {
-        grid-area: content;
         padding: var(--u-pad);
-        overflow-x: hidden;
-        overflow-y: auto;
         display: flex;
         flex-direction: column;
         gap: var(--u-gap);
@@ -40,12 +23,7 @@ export class OsSidebar extends LitElement {
   override render() {
     return html`
       <aside class="sidebar">
-        <os-toolbar class="sidebar-toolbar">
-          <slot slot="end" name="actions"></slot>
-        </os-toolbar>
-        <div class="sidebar-content">
-          <slot name="content"></slot>
-        </div>
+        <slot></slot>
       </aside>
     `;
   }

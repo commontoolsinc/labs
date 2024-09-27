@@ -20,6 +20,7 @@ export class OsScene extends LitElement {
         overflow: hidden;
         justify-items: stretch;
         height: 100vh;
+        transition: grid var(--dur-md) ease-out;
       }
 
       .scene-main {
@@ -33,14 +34,35 @@ export class OsScene extends LitElement {
       .scene-sidebar {
         background-color: var(--bg-2);
         grid-area: sidebar;
-        display: flex;
-        flex-direction: column;
-        justify-items: stretch;
         height: 100vh;
       }
 
-      .scene-sidebar ::slotted(*) {
-        height: 100%;
+      .scene-sidebar-inner {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        /* Set fixed width on inner element to prevent text reflow on
+        sidebar animation. */
+        width: var(--sidebar-width);
+      }
+
+      .scene-sidebar-main {
+        overflow-x: hidden;
+        overflow-y: auto;
+      }
+
+      /* Sidebar animation */
+      :host([state="closed"]) {
+        .scene {
+          grid-template-columns: 1fr 0;
+        }
+      }
+
+      /* Half-and-half editor mode animation */
+      :host([state="split"]) {
+        .scene {
+          /* FIXME fr is not animatable? */
+          grid-template-columns: 1fr 1fr;
+        }
       }
     `,
   ];
@@ -48,12 +70,22 @@ export class OsScene extends LitElement {
   override render() {
     return html`
       <div class="scene">
-        <div class="scene-main">
-          <slot name="main"></slot>
-        </div>
-        <div class="scene-sidebar">
-          <slot name="sidebar"></slot>
-        </div>
+        <section class="scene-main">
+          <header class="scene-main-toolbar">
+            <slot name="main-toolbar"></slot>
+          </header>
+          <div class="scene-main-main">
+            <slot name="main"></slot>
+          </div>
+        </section>
+        <aside class="scene-sidebar">
+          <div class="scene-sidebar-inner">
+            <div class="scene-sidebar-toolbar">
+              <slot name="sidebar-toolbar"></slot>
+            </div>
+            <div class="scene-sidebar-main"><slot name="sidebar"></slot></div>
+          </div>
+        </aside>
       </div>
     `;
   }
