@@ -180,3 +180,8 @@ export function launch(recipe: Recipe, bindings: any) {
 
 (window as any).recipes = recipes;
 (window as any).charms = charms;
+
+export let annotationsEnabled = cell<boolean>(false);
+export const toggleAnnotations = () => {
+  annotationsEnabled.send(!annotationsEnabled.get());
+};
