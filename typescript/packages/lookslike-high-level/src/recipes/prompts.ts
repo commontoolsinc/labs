@@ -11,15 +11,11 @@ import {
 import { launch } from '../data.js';
 
 const imageUrl = lift(
-    ({ title }) =>
-        `https://ct-img.m4ke.workers.dev/?prompt=${encodeURIComponent(title)}`,
+    ({ title }) => `https://ct-img.m4ke.workers.dev/?prompt=${encodeURIComponent(title)}`
 )
 
-const launcher = handler<{e: Event}, { title: string }>(
-    ({ e }, { title }) => {
-        console.log("launching", e, title);
-        launch(prompt, { title });
-    }
+const launcher = handler<PointerEvent, { title: string }>(
+    (_, { title }) => { launch(prompt, { title }) }
 );
 
 const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
