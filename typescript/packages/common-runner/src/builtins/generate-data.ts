@@ -20,6 +20,8 @@ import { mockResultClient, makeClient } from "../llm-client.js";
  * @param schema - A cell to store the schema of the generated data.
  * @param system - A cell overriding the default system prompt. Only `prompt`
  *   above will be used, as-is, and `result` and `schema` will be ignored.
+ * @param mode - The mode to use for generating data. Either `json` or `html`
+ *   default to `json` results.
  * @returns { pending: boolean, result: any, partial: any } - As individual
  *   cells, representing `pending` state, final `result` and incrementally
  *   updating `partial` result.

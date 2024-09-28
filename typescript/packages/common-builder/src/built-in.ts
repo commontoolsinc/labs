@@ -7,6 +7,7 @@ export function generateData<T>(
     result?: T;
     schema?: any;
     system?: string;
+    mode?: "json" | "html";
   }>
 ): CellProxy<{ pending: boolean; result: T; partial: any; error: any }> {
   generateDataFactory ||= createNodeFactory({
@@ -21,7 +22,6 @@ export function fetchData<T>(
     url: string;
     options?: RequestInit;
     result?: T;
-    schema?: any;
   }>
 ): Value<{ pending: boolean; result: T; error: any }> {
   fetchDataFactory ||= createNodeFactory({
@@ -33,7 +33,7 @@ export function fetchData<T>(
 
 let fetchDataFactory:
   | NodeFactory<
-      { url: string; options?: RequestInit; result?: any; schema?: any },
+      { url: string; options?: RequestInit; result?: any },
       { pending: boolean; result: any; error: any }
     >
   | undefined = undefined;
