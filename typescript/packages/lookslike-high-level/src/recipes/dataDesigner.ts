@@ -7,18 +7,9 @@ import {
   generateData,
   handler,
   str,
-  cell,
   createJsonSchema,
-  ifElse,
 } from "@commontools/common-builder";
 
-import { launch } from "../data.js";
-import { iframe } from "./iframe.js";
-
-type Suggestion = {
-  behaviour: 'append' | 'fork',
-  prompt: string,
-}
 
 const formatData = lift(({ obj }) => {
   console.log("stringify", obj);
@@ -30,49 +21,29 @@ const tap = lift((x) => {
   return x;
 });
 
-const updateValue = handler<{ detail: { value: string } }, { value: string }>(
-  ({ detail }, state) => detail?.value && (state.value = detail.value),
+const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
+  ({ detail }, state) => detail?.value && (state.title = detail.value),
 );
 
-const viewSystemPrompt = lift(
-  ({ }) => `generate/modify a document based on inpout, respond within a json block , e.g.
+const systemPrompt = `generate/modify a document based on input, respond within a json block , e.g.
   \`\`\`json
   ...
   \`\`\`
 
-  No field can be set to null or undefined.`,
-);
+  No field can be set to null or undefined.`;
 
-const deriveJsonSchema = lift(({ data}) => {
+const deriveJsonSchema = lift(({ data }) => {
   const schema = createJsonSchema({}, data)?.["properties"];
   if (!schema) return {};
 
   return schema;
 });
 
-const onInput = handler<{ input: Event }, { value: string }>((input, state) => {
-  state.value = input.target.value;
+const onInput = handler<KeyboardEvent, { value: string }>((input, state) => {
+  state.value = (input.target as HTMLTextAreaElement).value;
 });
-
-const onContentLoaded = handler<void, { loading: boolean }>((_, state) => {
-  state.loading = false;
-});
-
-const loadingStatus = lift(({ loading }) =>
-  loading ? html`<div>Loading...</div>` : html`<div></div>`,
-);
 
 const copy = lift(({ value }: { value: any }) => value);
-
-const promptFilterSchema = lift(
-  ({ schema, prompt }) => `Given the following schema:
-
-${JSON.stringify(schema, null, 2)}
-
-Filter and return only the relevant parts of this schema for the following request:
-
-${prompt}`,
-);
 
 const addToPrompt = handler<
   { prompt: string },
@@ -82,62 +53,13 @@ const addToPrompt = handler<
   state.query = state.prompt;
 });
 
-const acceptSuggestion = handler <
-  void,
-  { suggestion: Suggestion; prompt: string; query: string, data: any; }
->((_, state) => {
-  if (state.suggestion.behaviour === 'append') {
-    console.log(state.prompt, state.query, state.suggestion.prompt)
-    state.prompt += "\n" + state.suggestion.prompt;
-    state.query = `${state.prompt}`;
-  } else if (state.suggestion.behaviour === 'fork') {
-    launch(iframe, { data: state.data, title: state.suggestion.prompt, prompt: state.suggestion.prompt });
-  }
-});
-
-const buildUiPrompt = lift(({ prompt, data }) => {
+const buildJSONGenPrompt = lift(({ prompt, data }) => {
   console.log("prompt", prompt, data);
   let fullPrompt = prompt;
   if (data) {
     fullPrompt += `\n\nHere's the previous JSON for reference:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
   }
   return fullPrompt;
-});
-
-const buildSuggestionsPrompt = lift(({ src, prompt, schema }) => {
-  let fullPrompt = `Given the current prompt: "${prompt}"`;
-  fullPrompt += `\n\nGiven the following schema:\n<view-model-schema>\n${JSON.stringify(schema, null, 2)}\n</view-model-schema>`;
-  if (src) {
-    fullPrompt += `\n\nAnd the previous HTML:\n\`\`\`html\n${src}\n\`\`\``;
-  }
-  fullPrompt += `\n\nSuggest 3 prompts to enhancem, refine or branch off into a new UI. Return the suggestions in a JSON block with the following structure:
-  \`\`\`json
-  {
-    "suggestions": [
-      {
-        "behaviour": "append" | "fork",
-        "prompt": "string"
-      }
-    ]
-  }
-  \`\`\``;
-  return fullPrompt;
-});
-
-const isAppend = lift(({ suggestion }: { suggestion: Suggestion }) => suggestion?.behaviour === 'append');
-
-const getSuggestions = lift(({ result }) => result?.suggestions ?? []);
-
-const getFirstSuggestion = lift(({ suggestions }: { suggestions: Suggestion[] }) => {
-  return suggestions[0] || { behaviour: '', prompt: '' };
-});
-
-const getSecondSuggestion = lift(({ suggestions }: { suggestions: Suggestion[] }) => {
-  return suggestions[1] || { behaviour: '', prompt: '' };
-});
-
-const getThirdSuggestion = lift(({ suggestions }: { suggestions: Suggestion[] }) => {
-  return suggestions[2] || { behaviour: '', prompt: '' };
 });
 
 const onAcceptData = handler<void, { data: any; lastData: any; result: any }>(
@@ -152,39 +74,23 @@ export const dataDesigner = recipe<{
   title: string;
   prompt: string;
   data: any;
-  loading: boolean;
-}>("iframe", ({ title, prompt, data, loading }) => {
+}>("iframe", ({ title, prompt, data }) => {
   prompt.setDefault("");
-  data.setDefault({ key: 'value'  });
-  loading.setDefault(false);
+  data.setDefault({ key: 'value' });
   title.setDefault("Untitled Data Designer");
 
   const schema = deriveJsonSchema({ data });
-  console.log("prompt", prompt);
   const query = copy({ value: prompt });
   const lastData = copy({ value: data });
   lastData.setDefault({});
   tap({ lastData });
 
-  // const suggestedPrompts = generateData<{ suggestions: Suggestion[] }>({
-  //   prompt: buildSuggestionsPrompt({ data, prompt, schema }),
-  //   system: `Suggest extensions to the data. Respond in a json block.`,
-  //   mode: "json",
-  // });
-  // suggestedPrompts.setDefault({ result: { suggestions: [] } });
-
-  // tap({ suggestions: suggestedPrompts.result.suggestions });
-
-  const response = generateData<any>({
-    prompt: buildUiPrompt({ prompt, data: lastData }),
-    system: viewSystemPrompt({ }),
+  const { result } = generateData<any>({
+    prompt: buildJSONGenPrompt({ prompt, data: lastData }),
+    system: systemPrompt,
     mode: "json",
   });
-  const result = response.result;
-  tap({ result})
-
-  // const suggestions = getSuggestions({ result: suggestedPrompts.result });
-  // suggestions.setDefault([]);
+  tap({ result })
 
   return {
     [NAME]: str`${title}`,
@@ -192,12 +98,11 @@ export const dataDesigner = recipe<{
       <common-input
         value=${title}
         placeholder="title"
-        oncommon-input=${updateValue({ value: title })}
+        oncommon-input=${updateTitle({ title })}
       ></common-input>
 
-      ${loadingStatus({ loading })}
-        <pre>${formatData({ obj: data })}</pre>
-        <pre>${formatData({ obj: schema })}</pre>
+      <pre>${formatData({ obj: data })}</pre>
+      <pre>${formatData({ obj: schema })}</pre>
 
       <textarea
         value=${query}
@@ -207,11 +112,8 @@ export const dataDesigner = recipe<{
 
       <pre>${formatData({ obj: result })}</pre>
       <common-button
-        onclick=${onAcceptData({ data, lastData, result})}
-      >
-        Accept
-      </common-button>
-
+        onclick=${onAcceptData({ data, lastData, result })}
+      >Accept</common-button>
 
     </div>`,
     prompt,
@@ -220,38 +122,3 @@ export const dataDesigner = recipe<{
     addToPrompt: addToPrompt({ prompt, query }),
   };
 });
-
-
-// <button
-//   type="button"
-//   onclick=${acceptSuggestion({ suggestion: getFirstSuggestion({ suggestions }), prompt, src, lastSrc, query, data })}
-// >
-//     ${ifElse(
-//           isAppend({ suggestion: getFirstSuggestion({ suggestions }) }),
-//           `Append:`,
-//           `Fork:`
-//         )}
-//     ${getFirstSuggestion({ suggestions }).prompt}
-// </button>
-// <button
-//   type="button"
-//   onclick=${acceptSuggestion({ suggestion: getSecondSuggestion({ suggestions }), prompt, src, lastSrc, query, data})}
-// >
-//     ${ifElse(
-//           isAppend({ suggestion: getSecondSuggestion({ suggestions }) }),
-//           `Append:`,
-//           `Fork:`
-//         )}
-//     ${getSecondSuggestion({ suggestions }).prompt}
-// </button>
-// <button
-//   type="button"
-//   onclick=${acceptSuggestion({ suggestion: getThirdSuggestion({ suggestions }), prompt, src, lastSrc, query, data })}
-// >
-//     ${ifElse(
-//           isAppend({ suggestion: getThirdSuggestion({ suggestions }) }),
-//           `Append:`,
-//           `Fork:`
-//         )}
-//     ${getThirdSuggestion({ suggestions }).prompt}
-// </button>
