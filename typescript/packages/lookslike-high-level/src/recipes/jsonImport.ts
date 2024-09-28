@@ -26,8 +26,8 @@ const deriveJsonSchema = lift(({ data}) => {
   return schema;
 });
 
-const onInput = handler<{ input: Event }, { value: string }>((input, state) => {
-  state.value = input.target.value;
+const onInput = handler<KeyboardEvent, { value: string }>((input, state) => {
+  state.value = (input.target as HTMLTextAreaElement).value;
 });
 
 const onAcceptData = handler<void, { json: string, data: string }>(
