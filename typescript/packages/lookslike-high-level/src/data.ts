@@ -31,6 +31,7 @@ import { dungeon } from "./recipes/dungeon.js";
 import { dataDesigner } from "./recipes/dataDesigner.js";
 import { jsonImporter } from "./recipes/jsonImport.js";
 import { prompt } from "./recipes/prompts.js";
+import { wiki } from "./recipes/wiki.js";
 
 export type Charm = {
   [ID]: number;
@@ -135,6 +136,10 @@ export const recipes: RecipeManifest[] = [
   {
     name: "Explore imagery prompts",
     recipe: prompt,
+  },
+  {
+    name: "Explore Halucinated wiki",
+    recipe: wiki,
   }
 ];
 
