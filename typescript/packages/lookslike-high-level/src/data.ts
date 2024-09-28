@@ -64,10 +64,6 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 addCharms([
   run(iframe, { title: "two way binding counter", prompt: "counter", data: { counter: 0 } }),
   run(importCalendar, {}),
-  run(dungeon, {}),
-  run(fetchExample, {
-    url: "https://anotherjesse-restfuljsonblobapi.web.val.run/items",
-  }),
   run(fetchCollections, {
     url: "/api/data/collections/"
   }),
@@ -91,7 +87,6 @@ addCharms([
     date: getFridayAndMondayDateStrings().startDate,
     location: "New York",
   }),
-  run(counter, { title: "Summer Reading", count: 42 }),
   run(routine, {
     title: "Morning routine",
     // TODO: A lot more missing here, this is just to drive the suggestion.
@@ -105,6 +100,10 @@ export type RecipeManifest = {
 };
 
 export const recipes: RecipeManifest[] = [
+  {
+    name: "Explore dungeon game",
+    recipe: dungeon,
+  },
   {
     name: "Create a new TODO list",
     recipe: todoList,
@@ -128,6 +127,10 @@ export const recipes: RecipeManifest[] = [
   {
     name: "Create a counter",
     recipe: counter,
+  },
+  {
+    name: "Fetch JSON from a URL",
+    recipe: fetchExample,
   },
   {
     name: "Explore imagery prompts",
