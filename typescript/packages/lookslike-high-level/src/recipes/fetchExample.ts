@@ -21,6 +21,7 @@ const updateUrl = handler<{ detail: { value: string } }, { url: string }>(
     ({ detail }, state) => { (state.url = detail?.value ?? "untitled") }
 );
 
+// FIXME(ja): integrate jsonImport / dataDesigner ability to work with arbitrary schema
 export const fetchExample = recipe<{ url: string }>(
   "Fetch Example",
   ({ url }) => {
