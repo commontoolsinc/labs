@@ -30,6 +30,7 @@ import { importCalendar } from "./recipes/importCalendar.js";
 import { dungeon } from "./recipes/dungeon.js";
 import { dataDesigner } from "./recipes/dataDesigner.js";
 import { jsonImporter } from "./recipes/jsonImport.js";
+import { prompt } from "./recipes/prompts.js";
 
 export type Charm = {
   [ID]: number;
@@ -128,6 +129,10 @@ export const recipes: RecipeManifest[] = [
     name: "Create a counter",
     recipe: counter,
   },
+  {
+    name: "Explore imagery prompts",
+    recipe: prompt,
+  }
 ];
 
 // Helper for mock data
