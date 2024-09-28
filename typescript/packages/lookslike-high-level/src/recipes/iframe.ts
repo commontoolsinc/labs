@@ -9,7 +9,6 @@ import {
   str,
   cell,
   createJsonSchema,
-  ifElse,
 } from "@commontools/common-builder";
 
 import { launch } from "../data.js";
@@ -33,7 +32,26 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value),
 );
 
-const maybeHTML = lift(({ result }) => result?.html ?? "");
+const maybeHTML = lift(({ result, pending }) => {
+  if (pending) return `
+    <div style="display: flex; justify-content: center; align-items: center; height: 100vh;">
+      <div style="border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite;"></div>
+      <p style="margin-left: 10px; font-family: Arial, sans-serif;">Generating...</p>
+    </div>
+    <style>
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    </style>
+  `;
+  return result?.html ?? `
+    <div style="display: flex; justify-content: center; align-items: center; height: 100vh;">
+      <span style="font-size: 40px;">❌</span>
+      <p style="margin-left: 10px; font-family: Arial, sans-serif; color: #e74c3c;">Error generating content</p>
+    </div>
+  `;
+});
 
 const viewSystemPrompt = lift(
   ({ schema }) => `generate a complete HTML document within a html block , e.g.
@@ -115,29 +133,11 @@ const deriveJsonSchema = lift(({ data, filter }) => {
   );
 });
 
-const onInput = handler<{ input: Event }, { value: string }>((input, state) => {
-  state.value = input.target.value;
+const onInput = handler<KeyboardEvent, { value: string }>((input, state) => {
+  state.value = (input.target as HTMLTextAreaElement).value;
 });
-
-const onContentLoaded = handler<void, { loading: boolean }>((_, state) => {
-  state.loading = false;
-});
-
-const loadingStatus = lift(({ loading }) =>
-  loading ? html`<div>Loading...</div>` : html`<div></div>`,
-);
 
 const copy = lift(({ value }: { value: any }) => value);
-
-const promptFilterSchema = lift(
-  ({ schema, prompt }) => `Given the following schema:
-
-${JSON.stringify(schema, null, 2)}
-
-Filter and return only the relevant parts of this schema for the following request:
-
-${prompt}`,
-);
 
 const addToPrompt = handler<
   { prompt: string },
@@ -148,7 +148,7 @@ const addToPrompt = handler<
   state.query = state.prompt;
 });
 
-const acceptSuggestion = handler <
+const acceptSuggestion = handler<
   void,
   { suggestion: Suggestion; prompt: string; lastSrc: string; src: string, query: string, data: any; }
 >((_, state) => {
@@ -190,20 +190,10 @@ const buildSuggestionsPrompt = lift(({ src, prompt, schema }) => {
   return fullPrompt;
 });
 
-const isAppend = lift(({ suggestion }: { suggestion: Suggestion }) => suggestion?.behaviour === 'append');
-
 const getSuggestions = lift(({ result }) => result?.suggestions ?? []);
 
-const getFirstSuggestion = lift(({ suggestions }: { suggestions: Suggestion[] }) => {
-  return suggestions[0] || { behaviour: '', prompt: '' };
-});
-
-const getSecondSuggestion = lift(({ suggestions }: { suggestions: Suggestion[] }) => {
-  return suggestions[1] || { behaviour: '', prompt: '' };
-});
-
-const getThirdSuggestion = lift(({ suggestions }: { suggestions: Suggestion[] }) => {
-  return suggestions[2] || { behaviour: '', prompt: '' };
+const getSuggestion = lift(({ suggestions, index }: { suggestions: Suggestion[], index: number }) => {
+  return suggestions[index] || { behaviour: '', prompt: '' };
 });
 
 export const iframe = recipe<{
@@ -211,19 +201,17 @@ export const iframe = recipe<{
   prompt: string;
   data: any;
   src: string;
-  loading: boolean;
   filter: string;
-}>("iframe", ({ title, prompt, filter, data, src, loading }) => {
+}>("iframe", ({ title, prompt, filter, data, src }) => {
   tap({ data });
   prompt.setDefault("");
-  data.setDefault({  });
+  data.setDefault({});
   src.setDefault("");
-  loading.setDefault(false);
 
   filter.setDefault("");
   const schema = deriveJsonSchema({ data, filter });
   tap({ schema });
-  console.log("prompt", prompt);
+
   const query = copy({ value: prompt });
   const lastSrc = cell<string>();
 
@@ -233,24 +221,25 @@ export const iframe = recipe<{
   //   mode: "json",
   // });
 
-  const suggestedPrompts = generateData<{ suggestions: Suggestion[] }>({
+  const { result: suggestionsResult } = generateData<{ suggestions: Suggestion[] }>({
     prompt: buildSuggestionsPrompt({ src, prompt, schema }),
     system: `Suggest extensions to the UI either as modifications or forks off into new interfaces. Avoid bloat, focus on the user experience and creative potential. Respond in a json block.`,
     mode: "json",
   });
-  suggestedPrompts.setDefault({ result: { suggestions: [] } });
+  const suggestions = getSuggestions({ result: suggestionsResult });
+  tap({ suggestions });
 
-  tap({ suggestions: suggestedPrompts.result.suggestions });
-
-  const response = generateData<{ html: string }>({
+  const { result: htmlResult, pending: htmlPending } = generateData<{ html: string }>({
     prompt: buildUiPrompt({ prompt, lastSrc }),
     system: viewSystemPrompt({ schema }),
     mode: "html",
   });
 
-  src = maybeHTML({ result: response.result });
-  const suggestions = getSuggestions({ result: suggestedPrompts.result });
-  suggestions.setDefault([]);
+  src = maybeHTML({ result: htmlResult, pending: htmlPending });
+
+  let firstSuggestion = getSuggestion({ suggestions, index: 0 });
+  let secondSuggestion = getSuggestion({ suggestions, index: 1 });
+  let thirdSuggestion = getSuggestion({ suggestions, index: 2 });
 
   return {
     [NAME]: str`${title} - iframe`,
@@ -260,14 +249,7 @@ export const iframe = recipe<{
         placeholder="title"
         oncommon-input=${updateValue({ value: title })}
       ></common-input>
-
-      ${loadingStatus({ loading })}
-
-      <common-iframe
-        src=${src}
-        $context=${data}
-        onloaded=${onContentLoaded({ loading })}
-      ></common-iframe>
+      <common-iframe src=${src} $context=${data}></common-iframe>
       <details>
         <summary>View Data</summary>
         <common-input
@@ -292,39 +274,15 @@ export const iframe = recipe<{
         style="width: 100%; min-height: 128px;"
       ></textarea>
 
-      <button
-        type="button"
-        onclick=${acceptSuggestion({ suggestion: getFirstSuggestion({ suggestions }), prompt, src, lastSrc, query, data })}
-      >
-          ${ifElse(
-                isAppend({ suggestion: getFirstSuggestion({ suggestions }) }),
-                `Append:`,
-                `Fork:`
-              )}
-          ${getFirstSuggestion({ suggestions }).prompt}
-      </button>
-      <button
-        type="button"
-        onclick=${acceptSuggestion({ suggestion: getSecondSuggestion({ suggestions }), prompt, src, lastSrc, query, data})}
-      >
-          ${ifElse(
-                isAppend({ suggestion: getSecondSuggestion({ suggestions }) }),
-                `Append:`,
-                `Fork:`
-              )}
-          ${getSecondSuggestion({ suggestions }).prompt}
-      </button>
-      <button
-        type="button"
-        onclick=${acceptSuggestion({ suggestion: getThirdSuggestion({ suggestions }), prompt, src, lastSrc, query, data })}
-      >
-          ${ifElse(
-                isAppend({ suggestion: getThirdSuggestion({ suggestions }) }),
-                `Append:`,
-                `Fork:`
-              )}
-          ${getThirdSuggestion({ suggestions }).prompt}
-      </button>
+      <button type="button"
+        onclick=${acceptSuggestion({ suggestion: firstSuggestion, prompt, src, lastSrc, query, data })}
+      >${firstSuggestion.behaviour} ${firstSuggestion.prompt}</button>
+      <button type="button"
+        onclick=${acceptSuggestion({ suggestion: secondSuggestion, prompt, src, lastSrc, query, data })}
+      >${secondSuggestion.behaviour} ${secondSuggestion.prompt}</button>
+      <button type="button"
+        onclick=${acceptSuggestion({ suggestion: thirdSuggestion, prompt, src, lastSrc, query, data })}
+      >${thirdSuggestion.behaviour} ${thirdSuggestion.prompt}</button>
     </div>`,
     prompt,
     title,
