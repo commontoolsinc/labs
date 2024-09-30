@@ -51,6 +51,7 @@ export const base = css`
     --u-xsm-line: calc(var(--u) * 4);
     --u-pad: calc(var(--u) * 6);
     --u-gap: calc(var(--u) * 6);
+    --u-gap-sm: calc(var(--u) * 4);
     --bg: #fff;
     --bg-1: #fafafa;
     --bg-2: #f0f0f0;
@@ -171,9 +172,28 @@ export const base = css`
   .hstack {
     display: flex;
     flex-direction: row;
+    align-items: center;
   }
 
   .gap {
     gap: var(--u-gap);
+  }
+
+  .gap-sm {
+    gap: var(--u-gap-sm);
+  }
+
+  /*
+  Fade out element by toggling ".fade.fade-out".
+  Hidden element will have zero opacity and will not be interactable, but will
+  still have the same box size in the DOM.
+  */
+  .fade {
+    transition: opacity var(--dur-md) var(--ease-out-expo);
+
+    &.fade-out {
+      opacity: 0;
+      pointer-events: none;
+    }
   }
 `;

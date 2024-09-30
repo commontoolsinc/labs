@@ -2,6 +2,14 @@ import { LitElement, css, html } from "lit-element";
 import { customElement, property } from "lit/decorators.js";
 import { base } from "../shared/styles.js";
 
+/**
+ * A custom element representing a location display.
+ *
+ * This element creates a rounded button-like display for showing a location.
+ *
+ * @element os-location
+ * @property {string} display - The text to display as the location.
+ */
 @customElement("os-location")
 export class OsLocation extends LitElement {
   static override styles = [

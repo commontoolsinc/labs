@@ -16,8 +16,10 @@ export class OsIconButton extends LitElement {
     base,
     css`
       :host {
-        display: inline-block;
         --u-button-size: var(--u-min-touch-size);
+        display: inline-block;
+        width: var(--u-button-size);
+        height: var(--u-button-size);
       }
 
       .icon-button {
