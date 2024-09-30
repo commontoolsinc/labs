@@ -176,7 +176,7 @@ const buildSuggestionsPrompt = lift(({ src, prompt, schema }) => {
   if (src) {
     fullPrompt += `\n\nAnd the previous HTML:\n\`\`\`html\n${src}\n\`\`\``;
   }
-  fullPrompt += `\n\nSuggest 3 prompts to enhancem, refine or branch off into a new UI. Return the suggestions in a JSON block with the following structure:
+  fullPrompt += `\n\nSuggest 3 prompts to enhancem, refine or branch off into a new UI. Keep it simple these add or change a single feature. Return the suggestions in a JSON block with the following structure:
   \`\`\`json
   {
     "suggestions": [
@@ -186,7 +186,10 @@ const buildSuggestionsPrompt = lift(({ src, prompt, schema }) => {
       }
     ]
   }
-  \`\`\``;
+  \`\`\`
+
+  Do not ever exceed a single sentence. Prefer terse, suggestions that take one step.
+  `;
   return fullPrompt;
 });
 
