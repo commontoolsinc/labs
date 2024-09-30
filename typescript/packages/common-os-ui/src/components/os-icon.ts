@@ -8,15 +8,16 @@ export class OsIcon extends LitElement {
     base,
     css`
       :host {
+        --icon-size: calc(var(--u) * 6);
         display: block;
-        width: 24px;
-        height: 24px;
+        width: var(--icon-size);
+        height: var(--icon-size);
       }
 
       .icon {
         display: block;
-        width: 24px;
-        height: 24px;
+        width: var(--icon-size);
+        height: var(--icon-size);
         overflow: hidden;
       }
     `,

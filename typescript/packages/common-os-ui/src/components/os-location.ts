@@ -54,8 +54,8 @@ export class OsLocation extends LitElement {
       }
 
       .location-inner {
-        font-size: var(--u-sm-size);
-        line-height: var(--u-sm-size);
+        font-size: var(--sm-size);
+        line-height: var(--sm-size);
         text-wrap: nowrap;
         text-overflow: ellipsis;
         text-align: center;

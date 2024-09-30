@@ -13,7 +13,7 @@ export class OsColgrid extends LitElement {
 
       .colgrid {
         display: grid;
-        gap: var(--u-gap);
+        gap: var(--gap);
         grid-template-columns: 1fr 1fr 1fr 1fr;
         align-items: center;
         justify-items: center;

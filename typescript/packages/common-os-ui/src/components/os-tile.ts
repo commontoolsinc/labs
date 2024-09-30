@@ -15,7 +15,7 @@ export class OsTile extends LitElement {
       .tile {
         display: block;
         aspect-ratio: 1 / 1;
-        border-radius: var(--u-radius2);
+        border-radius: var(--radius2);
         border: 1px solid var(--c-border);
       }
     `,

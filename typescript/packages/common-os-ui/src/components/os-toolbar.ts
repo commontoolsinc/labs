@@ -8,26 +8,26 @@ export class OsToolbar extends LitElement {
     base,
     css`
       :host {
-        --u-toolbar-height: calc(var(--u) * 24);
-        --u-button-gap: calc(var(--u) * 4);
+        --toolbar-height: calc(var(--u) * 24);
+        --button-gap: calc(var(--u) * 4);
         display: block;
       }
 
       .toolbar {
-        height: var(--u-toolbar-height);
+        height: var(--toolbar-height);
         display: grid;
         grid-template-columns: auto 1fr auto;
         grid-template-areas: "start center end";
         align-items: center;
-        gap: var(--u-gap);
-        padding-left: var(--u-pad);
-        padding-right: var(--u-pad);
+        gap: var(--gap);
+        padding-left: var(--pad);
+        padding-right: var(--pad);
       }
 
       .toolbar-start {
         grid-area: start;
         display: flex;
-        gap: var(--u-button-gap);
+        gap: var(--button-gap);
         align-items: center;
         justify-content: flex-start;
       }
@@ -35,7 +35,7 @@ export class OsToolbar extends LitElement {
       .toolbar-end {
         grid-area: end;
         display: flex;
-        gap: var(--u-button-gap);
+        gap: var(--button-gap);
         align-items: center;
         justify-content: flex-end;
       }
@@ -43,7 +43,7 @@ export class OsToolbar extends LitElement {
       .toolbar-center {
         grid-area: center;
         display: flex;
-        gap: var(--u-button-gap);
+        gap: var(--button-gap);
         align-items: center;
         justify-content: center;
       }

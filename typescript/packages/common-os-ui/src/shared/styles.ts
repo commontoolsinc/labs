@@ -31,27 +31,27 @@ export const base = css`
     - Text and icons should line up to 4px baseline grid (1x multiples)
     */
     --u: 4px;
-    --u-min-touch-size: calc(var(--u) * 11);
-    --u-radius: calc(var(--u) * 3);
-    --u-radius2: calc(var(--u) * 6);
+    --min-touch-size: calc(var(--u) * 11);
+    --radius: calc(var(--u) * 3);
+    --radius2: calc(var(--u) * 6);
     /* Body size 17px */
-    --u-body-size: calc(var(--u) * 4.25);
-    --u-body-line: calc(var(--u) * 6);
+    --body-size: calc(var(--u) * 4.25);
+    --body-line: calc(var(--u) * 6);
     /* Heading size 24px */
-    --u-heading-size: calc(var(--u) * 6);
-    --u-heading-line: calc(var(--u) * 7);
+    --heading-size: calc(var(--u) * 6);
+    --heading-line: calc(var(--u) * 7);
     /* Large text size 24px with more generous line height */
-    --u-lg-size: calc(var(--u) * 6);
-    --u-lg-line: calc(var(--u) * 8);
+    --lg-line: calc(var(--u) * 6);
+    --lg-line: calc(var(--u) * 8);
     /* sm size 13px */
-    --u-sm-size: calc(var(--u) * 3.25);
-    --u-sm-line: calc(var(--u) * 5);
+    --sm-size: calc(var(--u) * 3.25);
+    --sm-line: calc(var(--u) * 5);
     /* xsm size 11px */
-    --u-xsm-size: calc(var(--u) * 2.75);
-    --u-xsm-line: calc(var(--u) * 4);
-    --u-pad: calc(var(--u) * 6);
-    --u-gap: calc(var(--u) * 6);
-    --u-gap-sm: calc(var(--u) * 4);
+    --xsm-size: calc(var(--u) * 2.75);
+    --xsm-line: calc(var(--u) * 4);
+    --pad: calc(var(--u) * 6);
+    --gap: calc(var(--u) * 6);
+    --gap-sm: calc(var(--u) * 4);
     --bg: #fff;
     --bg-1: #fafafa;
     --bg-2: #f0f0f0;
@@ -78,8 +78,8 @@ export const base = css`
     font-weight: normal;
     color: var(--c-text);
     font-family: var(--font-family);
-    font-size: var(--u-body-size);
-    line-height: var(--u-body-line);
+    font-size: var(--body-size);
+    line-height: var(--body-line);
     list-style: none;
     -webkit-font-smoothing: antialiased;
     font-smooth: antialiased;
@@ -89,40 +89,40 @@ export const base = css`
     display: block;
     color: var(--c-text);
     font-family: var(--font-family);
-    font-size: var(--u-body-size);
-    line-height: var(--u-body-line);
+    font-size: var(--body-size);
+    line-height: var(--body-line);
     -webkit-font-smoothing: antialiased;
     font-smooth: antialiased;
   }
 
   .body {
     font-family: var(--font-family);
-    font-size: var(--u-body-size);
-    line-height: var(--u-body-line);
+    font-size: var(--body-size);
+    line-height: var(--body-line);
     -webkit-font-smoothing: antialiased;
     font-smooth: antialiased;
   }
 
   .lg {
     font-family: var(--font-family);
-    font-size: var(--u-lg-size);
-    line-height: var(--u-lg-line);
+    font-size: var(--lg-line);
+    line-height: var(--lg-line);
     -webkit-font-smoothing: antialiased;
     font-smooth: antialiased;
   }
 
   .sm {
     font-family: var(--font-family);
-    font-size: var(--u-sm-size);
-    line-height: var(--u-sm-line);
+    font-size: var(--sm-size);
+    line-height: var(--sm-line);
     -webkit-font-smoothing: antialiased;
     font-smooth: antialiased;
   }
 
   .xsm {
     font-family: var(--font-family);
-    font-size: var(--u-xsm-size);
-    line-height: var(--u-xsm-line);
+    font-size: var(--xsm-size);
+    line-height: var(--xsm-line);
     -webkit-font-smoothing: antialiased;
     font-smooth: antialiased;
   }
@@ -130,8 +130,8 @@ export const base = css`
   .title {
     font-weight: bold;
     font-family: var(--font-family);
-    font-size: var(--u-body-size);
-    line-height: var(--u-body-line);
+    font-size: var(--body-size);
+    line-height: var(--body-line);
     -webkit-font-smoothing: antialiased;
     font-smooth: antialiased;
   }
@@ -139,8 +139,8 @@ export const base = css`
   .heading {
     font-weight: bold;
     font-family: var(--font-family);
-    font-size: var(--u-heading-size);
-    line-height: var(--u-heading-line);
+    font-size: var(--heading-size);
+    line-height: var(--heading-line);
     -webkit-font-smoothing: antialiased;
     font-smooth: antialiased;
   }
@@ -150,8 +150,8 @@ export const base = css`
     font-weight: normal;
     text-transform: uppercase;
     font-family: var(--font-family);
-    font-size: var(--u-xsm-size);
-    line-height: var(--u-xsm-line);
+    font-size: var(--xsm-size);
+    line-height: var(--xsm-line);
     -webkit-font-smoothing: antialiased;
     font-smooth: antialiased;
   }
@@ -176,11 +176,11 @@ export const base = css`
   }
 
   .gap {
-    gap: var(--u-gap);
+    gap: var(--gap);
   }
 
   .gap-sm {
-    gap: var(--u-gap-sm);
+    gap: var(--gap-sm);
   }
 
   /*

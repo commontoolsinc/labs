@@ -81,9 +81,9 @@ export class OsChrome extends LitElement {
         grid-template-columns: auto 1fr auto;
         grid-template-areas: "start center end";
         align-items: center;
-        gap: var(--u-gap-sm);
-        padding-left: var(--u-pad);
-        padding-right: var(--u-pad);
+        gap: var(--gap-sm);
+        padding-left: var(--pad);
+        padding-right: var(--pad);
 
         .toolbar-start {
           grid-area: start;

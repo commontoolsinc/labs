@@ -12,10 +12,10 @@ export class OsSidebar extends LitElement {
       }
 
       .sidebar {
-        padding: var(--u-pad);
+        padding: var(--pad);
         display: flex;
         flex-direction: column;
-        gap: var(--u-gap);
+        gap: var(--gap);
       }
     `,
   ];
