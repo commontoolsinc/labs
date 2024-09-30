@@ -3,8 +3,8 @@ import { customElement, property } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
 import { base } from "../shared/styles.js";
 
-@customElement("os-scene")
-export class OsScene extends LitElement {
+@customElement("os-chrome")
+export class OsChrome extends LitElement {
   static override styles = [
     base,
     css`
@@ -15,56 +15,61 @@ export class OsScene extends LitElement {
         --button-gap: calc(var(--u) * 4);
       }
 
-      .scene {
+      .chrome {
         display: grid;
         grid-template-columns: 1fr 0;
         grid-template-areas: "main sidebar";
-        gap: var(--u-gap);
         overflow: hidden;
         justify-items: stretch;
         height: 100vh;
         transition: grid var(--dur-md) var(--ease-out-cubic);
       }
 
-      .scene-main {
+      .chrome-main {
         grid-area: main;
-        display: flex;
-        flex-direction: column;
-        justify-items: stretch;
+        display: grid;
+        grid-template-rows: auto 1fr;
         height: 100vh;
+
+        .chrome-main-content {
+          display: flex;
+          flex-direction: column;
+          overflow-x: hidden;
+          overflow-y: auto;
+        }
       }
 
-      .scene-sidebar {
+      .chrome-sidebar {
         background-color: var(--bg-2);
         grid-area: sidebar;
         height: 100vh;
-      }
 
-      .scene-sidebar-inner {
-        display: grid;
-        grid-template-rows: auto 1fr;
-        /* Set fixed width on inner element to prevent text reflow on
-        sidebar animation. */
-        width: var(--sidebar-width);
-        /* Needed to correctly trigger scrolling in sidebar main */
-        height: 100vh;
-      }
+        .chrome-sidebar-inner {
+          display: grid;
+          grid-template-rows: auto 1fr;
+          /* Set fixed width on inner element to prevent text reflow on
+          sidebar animation. */
+          width: var(--sidebar-width);
+          /* Needed to correctly trigger scrolling in sidebar main */
+          height: 100vh;
+        }
 
-      .scene-sidebar-main {
-        overflow-x: hidden;
-        overflow-y: auto;
+        .chrome-sidebar-content {
+          overflow-x: hidden;
+          overflow-y: auto;
+        }
       }
 
       /* Sidebar animation */
       :host([sidebar]) {
-        .scene {
+        .chrome {
           grid-template-columns: 1fr var(--sidebar-width);
         }
       }
 
       /* Half-and-half editor mode animation */
       :host([state="split"]) {
-        .scene {
+        .chrome {
           /* FIXME fr is not animatable? */
           grid-template-columns: 1fr 1fr;
         }
@@ -79,30 +84,30 @@ export class OsScene extends LitElement {
         gap: var(--u-gap-sm);
         padding-left: var(--u-pad);
         padding-right: var(--u-pad);
-      }
 
-      .toolbar-start {
-        grid-area: start;
-        display: flex;
-        gap: var(--button-gap);
-        align-items: center;
-        justify-content: flex-start;
-      }
+        .toolbar-start {
+          grid-area: start;
+          display: flex;
+          gap: var(--button-gap);
+          align-items: center;
+          justify-content: flex-start;
+        }
 
-      .toolbar-end {
-        grid-area: end;
-        display: flex;
-        gap: var(--button-gap);
-        align-items: center;
-        justify-content: flex-end;
-      }
+        .toolbar-end {
+          grid-area: end;
+          display: flex;
+          gap: var(--button-gap);
+          align-items: center;
+          justify-content: flex-end;
+        }
 
-      .toolbar-center {
-        grid-area: center;
-        display: flex;
-        gap: var(--button-gap);
-        align-items: center;
-        justify-content: center;
+        .toolbar-center {
+          grid-area: center;
+          display: flex;
+          gap: var(--button-gap);
+          align-items: center;
+          justify-content: center;
+        }
       }
     `,
   ];
@@ -115,9 +120,9 @@ export class OsScene extends LitElement {
     };
 
     return html`
-      <div class="scene">
-        <section class="scene-main">
-          <nav class="scene-main-toolbar toolbar">
+      <div class="chrome">
+        <section class="chrome-main">
+          <nav class="chrome-main-toolbar toolbar">
             <div class="toolbar-start"></div>
             <div class="toolbar-center">
               <os-location display="Location"></os-location>
@@ -135,13 +140,13 @@ export class OsScene extends LitElement {
               ></os-icon-button>
             </div>
           </nav>
-          <div class="scene-main-main">
+          <div class="chrome-main-content">
             <slot name="main"></slot>
           </div>
         </section>
-        <aside class="scene-sidebar">
-          <div class="scene-sidebar-inner">
-            <nav class="scene-sidebar-toolbar toolbar">
+        <aside class="chrome-sidebar">
+          <div class="chrome-sidebar-inner">
+            <nav class="chrome-sidebar-toolbar toolbar">
               <div class="toolbar-end gap-sm hstack">
                 <slot name="sidebar-toolbar"></slot>
                 <os-icon-button
@@ -150,7 +155,9 @@ export class OsScene extends LitElement {
                 ></os-icon-button>
               </div>
             </nav>
-            <div class="scene-sidebar-main"><slot name="sidebar"></slot></div>
+            <div class="chrome-sidebar-content">
+              <slot name="sidebar"></slot>
+            </div>
           </div>
         </aside>
       </div>
