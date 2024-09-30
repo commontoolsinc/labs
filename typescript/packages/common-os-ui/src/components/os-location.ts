@@ -8,7 +8,7 @@ import { base } from "../shared/styles.js";
  * This element creates a rounded button-like display for showing a location.
  *
  * @element os-location
- * @property {string} display - The text to display as the location.
+ * @property {string} locationtitle - The text to display as the location.
  */
 @customElement("os-location")
 export class OsLocation extends LitElement {
@@ -65,12 +65,12 @@ export class OsLocation extends LitElement {
   ];
 
   @property({ type: String })
-  display = "";
+  locationtitle = "";
 
   override render() {
     return html`
       <div class="location">
-        <div class="location-inner">${this.display}</div>
+        <div class="location-inner">${this.locationtitle}</div>
       </div>
     `;
   }

@@ -3,6 +3,21 @@ import { customElement, property } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
 import { base } from "../shared/styles.js";
 
+/**
+ * Custom element representing the chrome (outer structure) of the application.
+ *
+ * This element provides a layout with a main content area and a toggleable sidebar.
+ * It includes a toolbar in both the main area and the sidebar, with customizable
+ * slots for content.
+ *
+ * @element os-chrome
+ * @property {string} locationtitle - The title to be displayed in the location bar.
+ * @property {boolean} sidebar - Whether the sidebar is currently visible.
+ *
+ * @slot main - The main content of the application.
+ * @slot sidebar - The content of the sidebar.
+ * @slot sidebar-toolbar - Additional elements to be placed in the sidebar toolbar.
+ */
 @customElement("os-chrome")
 export class OsChrome extends LitElement {
   static override styles = [
@@ -112,6 +127,7 @@ export class OsChrome extends LitElement {
     `,
   ];
 
+  @property({ type: String }) locationtitle = "";
   @property({ type: Boolean, reflect: true }) sidebar = true;
 
   override render() {
@@ -125,7 +141,7 @@ export class OsChrome extends LitElement {
           <nav class="chrome-main-toolbar toolbar">
             <div class="toolbar-start"></div>
             <div class="toolbar-center">
-              <os-location display="Location"></os-location>
+              <os-location locationtitle="${this.locationtitle}"></os-location>
             </div>
             <div class="toolbar-end">
               <os-icon-button
