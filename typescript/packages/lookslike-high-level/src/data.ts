@@ -35,6 +35,7 @@ import { jsonImporter } from "./recipes/jsonImport.js";
 import { prompt } from "./recipes/prompts.js";
 import { wiki } from "./recipes/wiki.js";
 import { helloIsolated } from "./recipes/helloIsolated.js";
+import { coder } from "./recipes/coder.js";
 
 export type Charm = {
   [ID]: number;
@@ -101,6 +102,34 @@ addCharms([
     locations: ["coffee shop with great baristas"],
   }),
   run(counters, {}),
+  run(coder, {
+    title: "hello world", src: `const greeting: string = "Hello, TypeScript!";
+    console.log(greeting);
+    
+    // You can also use TypeScript-specific features
+    interface Person {
+      name: string;
+      age: number;
+    }
+    
+    const printPerson = (person: Person) => {
+      console.log(person.name, 'is', person.age, 'years old');
+    };
+    
+    printPerson({ name: "Alice", age: 30 });`}),
+  run(coder, {
+    title: "launcher", src: `import { html } from "@commontools/common-html";
+import { recipe, UI, NAME } from "@commontools/common-builder";
+import { launch } from "../data.js";
+
+const helloWorld = recipe("hello", ({ name }) => (
+  {
+    [NAME]: "hello world",
+    [UI]: html\`<h1>Hello, \$\{name}!</h1>\`
+  }
+));
+
+launch(helloWorld, { name: "world" });`}),
 ]);
 
 export type RecipeManifest = {
@@ -192,7 +221,7 @@ function getFridayAndMondayDateStrings() {
 }
 
 // Terrible hack to open a charm from a recipe
-let openCharmOpener: (charmId: number) => void = () => {};
+let openCharmOpener: (charmId: number) => void = () => { };
 export const openCharm = (charmId: number) => openCharmOpener(charmId);
 openCharm.set = (opener: (charmId: number) => void) => {
   openCharmOpener = opener;
