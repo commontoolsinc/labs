@@ -29,6 +29,13 @@ type Prompt = {
     prompt: string;
 }
 
+const addToPrompt = handler<
+  { prompt: string },
+  { title: string }
+>((e, state) => {
+  state.title += " " + e.prompt;
+});
+
 export const prompt = recipe<{ title: string }>("prompt", ({ title }) => {
     title.setDefault("abstract geometric art");
     const { result } = generateData<Prompt[]>({
@@ -64,5 +71,6 @@ export const prompt = recipe<{ title: string }>("prompt", ({ title }) => {
         </common-vstack>`,
         title,
         variations: result,
+        addToPrompt: addToPrompt({ title }),
     };
 });
