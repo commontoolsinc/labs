@@ -1,5 +1,5 @@
 import { css, html } from "lit-element";
-import { customElement, state } from "lit/decorators.js";
+import { customElement } from "lit/decorators.js";
 import { base } from "../shared/styles.js";
 import { ResponsiveElement } from "./responsive-element.js";
 
