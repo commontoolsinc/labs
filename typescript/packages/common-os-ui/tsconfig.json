@@ -6,7 +6,8 @@
     "rootDir": "./src",
     "strict": false,
     "paths": {},
-    "useDefineForClassFields": false
+    "useDefineForClassFields": false,
+    "strictNullChecks": true
   },
   "include": ["src/**/*"]
 }
