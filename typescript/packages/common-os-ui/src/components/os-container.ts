@@ -9,7 +9,7 @@ export class OsContainer extends LitElement {
     css`
       :host {
         /* 800px + padding */
-        --container-width: calc((var(--u) * 200) + (var(--pad) * 2));
+        --container-width: calc((var(--u) * 256));
         display: block;
       }
 
