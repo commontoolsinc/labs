@@ -32,6 +32,7 @@ export const base = css`
     */
     --u: 4px;
     --min-touch-size: calc(var(--u) * 11);
+    --toolbar-height: calc(var(--u) * 24);
     --radius: calc(var(--u) * 3);
     --radius2: calc(var(--u) * 6);
     /* Body size 17px */
@@ -181,6 +182,63 @@ export const base = css`
 
   .gap-sm {
     gap: var(--gap-sm);
+  }
+
+  .pad {
+    padding: var(--pad);
+  }
+
+  .pad-t {
+    padding-top: var(--pad);
+  }
+
+  .pad-b {
+    padding-bottom: var(--pad);
+  }
+
+  .pad-h {
+    padding-left: var(--pad);
+    padding-right: var(--pad);
+  }
+
+  .pad-v {
+    padding-top: var(--pad);
+    padding-bottom: var(--pad);
+  }
+
+  .toolbar {
+    height: var(--toolbar-height);
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas: "start center end";
+    align-items: center;
+    gap: var(--gap-sm);
+
+    .toolbar-start {
+      grid-area: start;
+      display: flex;
+      gap: var(--button-gap);
+      align-items: center;
+      justify-content: flex-start;
+      min-width: 104px;
+    }
+
+    .toolbar-end {
+      grid-area: end;
+      display: flex;
+      gap: var(--button-gap);
+      align-items: center;
+      justify-content: flex-end;
+      min-width: 100px;
+    }
+
+    .toolbar-center {
+      grid-area: center;
+      display: flex;
+      gap: var(--button-gap);
+      align-items: center;
+      justify-content: center;
+    }
   }
 
   /*

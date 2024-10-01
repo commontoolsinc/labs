@@ -1,8 +1,81 @@
+let slowAnimations = false;
+
+/** Set slow animations for debugging */
+export const setSlowAnimations = (isSlow: boolean) => {
+  slowAnimations = isSlow;
+};
+
+/** @returns 10s if slow animations is turned on, otherwise returns `ms` */
+export const slowable = (ms: number) => (slowAnimations ? 10000 : ms);
+
+export const durationSm = 250;
+export const durationMd = 350;
+export const durationLg = 500;
+
 /** Create a promise for a timeout  */
 export const timeout = (ms: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+
+export type CubicBezier = {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+};
+
+export const cubicBezier = (
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): CubicBezier => Object.freeze({ x1, y1, x2, y2 });
+
+export const easeOutCubic = cubicBezier(0.215, 0.61, 0.355, 1);
+export const easeOutExpo = cubicBezier(0.19, 1, 0.22, 1);
+
+/** Create a cubic  */
+export const cubicBezierCss = ({ x1, y1, x2, y2 }: CubicBezier) =>
+  `cubic-bezier(${x1}, ${y1}, ${x2}, ${y2})`;
+
+export type Transition = {
+  property: string;
+  duration: number;
+  delay: number;
+  easing: string;
+  value: string;
+};
+
+export const transition = ({
+  property,
+  value,
+  duration = 0,
+  delay = 0,
+  easing = "ease-out",
+}: {
+  property: string;
+  value: string;
+  duration?: number;
+  delay?: number;
+  easing?: string;
+}): Transition => ({
+  property,
+  value,
+  duration: slowable(duration),
+  easing,
+  delay,
+});
+
+/** Get full transition duration by finding the longest duration + delay */
+export const fullTransitionDuration = (
+  transitions: Array<Transition>,
+): number => Math.max(...transitions.map((t) => t.duration + t.delay));
+
+const transitionsToCssRule = (transitions: Array<Transition>) =>
+  transitions
+    .map((t) => `${t.property} ${t.duration}ms ${t.easing} ${t.delay}ms`)
+    .join(", ");
 
 /**
  * Set a property on an element with a CSS transition.
@@ -14,22 +87,16 @@ export const timeout = (ms: number): Promise<void> =>
  * @returns A Promise that resolves to the element after the transition
  * completes.
  */
-export const transition = async <E extends HTMLElement, V>({
-  element,
-  property,
-  duration,
-  easing,
-  value,
-}: {
-  element: E;
-  property: string;
-  duration: number;
-  easing: string;
-  value: V;
-}): Promise<E> => {
-  element.style.transition = `${property} ${duration} ${easing}`;
-  element.style.setProperty(property, `${value}`);
-  await timeout(duration + 0.001);
+export const setTransitions = async <E extends HTMLElement>(
+  element: E,
+  transitions: Array<Transition>,
+): Promise<E> => {
+  const fullDuration = fullTransitionDuration(transitions);
+  element.style.transition = transitionsToCssRule(transitions);
+  for (const t of transitions) {
+    element.style.setProperty(t.property, t.value);
+  }
+  await timeout(fullDuration + 0.001);
   element.style.removeProperty("transition");
   return element;
 };

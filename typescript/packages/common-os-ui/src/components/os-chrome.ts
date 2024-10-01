@@ -60,18 +60,11 @@ export class OsChrome extends LitElement {
         height: 100vh;
 
         .chrome-sidebar-inner {
-          display: grid;
-          grid-template-rows: auto 1fr;
+          display: block;
           /* Set fixed width on inner element to prevent text reflow on
           sidebar animation. */
           width: var(--sidebar-width);
-          /* Needed to correctly trigger scrolling in sidebar main */
           height: 100vh;
-        }
-
-        .chrome-sidebar-content {
-          overflow-x: hidden;
-          overflow-y: auto;
         }
       }
 
@@ -89,41 +82,6 @@ export class OsChrome extends LitElement {
           grid-template-columns: 1fr 1fr;
         }
       }
-
-      .toolbar {
-        height: var(--toolbar-height);
-        display: grid;
-        grid-template-columns: auto 1fr auto;
-        grid-template-areas: "start center end";
-        align-items: center;
-        gap: var(--gap-sm);
-        padding-left: var(--pad);
-        padding-right: var(--pad);
-
-        .toolbar-start {
-          grid-area: start;
-          display: flex;
-          gap: var(--button-gap);
-          align-items: center;
-          justify-content: flex-start;
-        }
-
-        .toolbar-end {
-          grid-area: end;
-          display: flex;
-          gap: var(--button-gap);
-          align-items: center;
-          justify-content: flex-end;
-        }
-
-        .toolbar-center {
-          grid-area: center;
-          display: flex;
-          gap: var(--button-gap);
-          align-items: center;
-          justify-content: center;
-        }
-      }
     `,
   ];
 
@@ -131,14 +89,18 @@ export class OsChrome extends LitElement {
   @property({ type: Boolean, reflect: true }) sidebar = true;
 
   override render() {
+    const onSidebarClose = () => {
+      this.sidebar = false;
+    };
+
     const onSidebarButton = () => {
       this.sidebar = !this.sidebar;
     };
 
     return html`
-      <div class="chrome">
+      <div class="chrome" @sidebarclose="${onSidebarClose}">
         <section class="chrome-main">
-          <nav class="chrome-main-toolbar toolbar">
+          <nav class="chrome-main-toolbar toolbar pad-h">
             <div class="toolbar-start"></div>
             <div class="toolbar-center">
               <os-location locationtitle="${this.locationtitle}"></os-location>
@@ -162,21 +124,43 @@ export class OsChrome extends LitElement {
         </section>
         <aside class="chrome-sidebar">
           <div class="chrome-sidebar-inner">
-            <nav class="chrome-sidebar-toolbar toolbar">
-              <div class="toolbar-end gap-sm hstack">
-                <slot name="sidebar-toolbar"></slot>
-                <os-icon-button
-                  @click="${onSidebarButton}"
-                  icon="close"
-                ></os-icon-button>
-              </div>
-            </nav>
-            <div class="chrome-sidebar-content">
-              <slot name="sidebar"></slot>
-            </div>
+            <slot name="sidebar"></slot>
           </div>
         </aside>
       </div>
     `;
+  }
+}
+
+export class SidebarCloseEvent extends Event {
+  constructor() {
+    super("sidebarclose", {
+      bubbles: true,
+      composed: true,
+    });
+  }
+}
+
+@customElement("os-sidebar-close-button")
+export class OsCloseButton extends LitElement {
+  static override styles = [
+    css`
+      :host {
+        display: block;
+        width: fit-content;
+        height: fit-content;
+      }
+    `,
+  ];
+
+  override render() {
+    const onClick = () => {
+      this.dispatchEvent(new SidebarCloseEvent());
+    };
+
+    return html`<os-icon-button
+      @click="${onClick}"
+      icon="close"
+    ></os-icon-button>`;
   }
 }
