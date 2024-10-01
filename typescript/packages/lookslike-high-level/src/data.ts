@@ -141,7 +141,8 @@ export const recipes: RecipeManifest[] = [
   {
     name: "Explore Halucinated wiki",
     recipe: wiki,
-  }
+  },
+  {
     name: "Hello Isolated",
     recipe: helloIsolated,
   },
