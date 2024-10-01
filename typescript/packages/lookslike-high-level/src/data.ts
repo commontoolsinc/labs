@@ -25,7 +25,13 @@ import {
   isCellProxyForDereferencing,
 } from "@commontools/common-runner";
 import { fetchCollections } from "./recipes/fetchCollections.js";
-import { iframeExample } from "./recipes/iframeExample.js";
+import { iframe} from "./recipes/iframe.js";
+import { importCalendar } from "./recipes/importCalendar.js";
+import { dungeon } from "./recipes/dungeon.js";
+import { dataDesigner } from "./recipes/dataDesigner.js";
+import { jsonImporter } from "./recipes/jsonImport.js";
+import { prompt } from "./recipes/prompts.js";
+import { wiki } from "./recipes/wiki.js";
 
 export type Charm = {
   [ID]: number;
@@ -57,11 +63,8 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 }
 
 addCharms([
-  run(iframeExample, { title: "two way binding counter", prompt: "counter example using write and subscribe with key `counter`", data: { counter: 0 } }),
-  run(iframeExample, { title: "breakout", prompt: "playable breakout/arkanoid, use `score` to write score, click to start, reset score at start", data: { score: 0, counter: 0 } }),
-  run(fetchExample, {
-    url: "https://anotherjesse-restfuljsonblobapi.web.val.run/items",
-  }),
+  run(iframe, { title: "two way binding counter", prompt: "counter", data: { counter: 0 } }),
+  run(importCalendar, {}),
   run(fetchCollections, {
     url: "/api/data/collections/"
   }),
@@ -85,7 +88,6 @@ addCharms([
     date: getFridayAndMondayDateStrings().startDate,
     location: "New York",
   }),
-  run(counter, { title: "Summer Reading" }),
   run(routine, {
     title: "Morning routine",
     // TODO: A lot more missing here, this is just to drive the suggestion.
@@ -100,6 +102,10 @@ export type RecipeManifest = {
 
 export const recipes: RecipeManifest[] = [
   {
+    name: "Explore dungeon game",
+    recipe: dungeon,
+  },
+  {
     name: "Create a new TODO list",
     recipe: todoList,
   },
@@ -112,9 +118,29 @@ export const recipes: RecipeManifest[] = [
     recipe: luftBnBSearch,
   },
   {
+    name: "JSON Importer",
+    recipe: jsonImporter,
+  },
+  {
+    name: "Data Designer",
+    recipe: dataDesigner,
+  },
+  {
     name: "Create a counter",
     recipe: counter,
   },
+  {
+    name: "Fetch JSON from a URL",
+    recipe: fetchExample,
+  },
+  {
+    name: "Explore imagery prompts",
+    recipe: prompt,
+  },
+  {
+    name: "Explore Halucinated wiki",
+    recipe: wiki,
+  }
 ];
 
 // Helper for mock data
@@ -167,3 +193,8 @@ export function launch(recipe: Recipe, bindings: any) {
 
 (window as any).recipes = recipes;
 (window as any).charms = charms;
+
+export let annotationsEnabled = cell<boolean>(false);
+export const toggleAnnotations = () => {
+  annotationsEnabled.send(!annotationsEnabled.get());
+};

@@ -20,6 +20,8 @@ import { mockResultClient, makeClient } from "../llm-client.js";
  * @param schema - A cell to store the schema of the generated data.
  * @param system - A cell overriding the default system prompt. Only `prompt`
  *   above will be used, as-is, and `result` and `schema` will be ignored.
+ * @param mode - The mode to use for generating data. Either `json` or `html`
+ *   default to `json` results.
  * @returns { pending: boolean, result: any, partial: any } - As individual
  *   cells, representing `pending` state, final `result` and incrementally
  *   updating `partial` result.
@@ -33,6 +35,7 @@ export function generateData(
     result?: any;
     schema?: any;
     system?: string;
+    mode?: 'json' | 'html'
   };
   const inputsCell = cell(inputBindings);
 
@@ -52,7 +55,8 @@ export function generateData(
   let currentRun = 0;
 
   const startGeneration: Action = (log: ReactivityLog) => {
-    const { prompt, result, schema, system } = inputsCell.getAsProxy([], log);
+    const { prompt, result, schema, system, mode } = inputsCell.getAsProxy([], log);
+    const grab = (mode || 'json') === 'json' ? grabJson : grabHtml;
 
     if (prompt === undefined) {
       pending.setAtPath([], false, log);
@@ -73,7 +77,7 @@ export function generateData(
       resultPromise = client
         .createThread(prompt)
         .then((thread) =>
-          grabJson(thread.conversation[thread.conversation.length - 1])
+          grab(thread.conversation[thread.conversation.length - 1])
         );
     } else {
       resultPromise = generateDataClient(
@@ -102,5 +106,19 @@ export function generateData(
 }
 
 function grabJson(txt: string) {
-  return JSON.parse(txt.match(/```json\n([\s\S]+?)```/)?.[1] ?? "{}");
+  const jsonMatch = txt.match(/```json\n([\s\S]+?)```/);
+  if (!jsonMatch) {
+    console.log("No JSON found in text:", txt);
+    return {};
+  }
+  return JSON.parse(jsonMatch[1]);
+}
+
+export function grabHtml(txt: string) {
+  const html = txt.match(/```html\n([\s\S]+?)```/)?.[1];
+  if (!html) {
+    console.error("No HTML found in text", txt);
+    return ""
+  }
+  return {html};
 }

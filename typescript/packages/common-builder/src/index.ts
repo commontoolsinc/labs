@@ -29,4 +29,4 @@ export {
 } from "./types.js";
 
 // This should be a separate package, but for now it's easier to keep it here.
-export { getValueAtPath, setValueAtPath, deepEqual } from "./utils.js";
+export { getValueAtPath, setValueAtPath, deepEqual, createJsonSchema } from "./utils.js";

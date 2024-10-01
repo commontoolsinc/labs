@@ -2,7 +2,7 @@ import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ref, createRef } from "lit/directives/ref.js";
 import { render, View } from "@commontools/common-html";
-import { charms, UI } from "../data.js";
+import { charms, UI, annotationsEnabled, toggleAnnotations } from "../data.js";
 import {
   run,
   cell,
@@ -10,6 +10,23 @@ import {
   getCellReferenceOrValue,
 } from "@commontools/common-runner";
 import { annotation } from "../recipes/annotation.js";
+
+@customElement("common-annotation-toggle")
+export class CommonAnnotationToggle extends LitElement {
+  override render() {
+    return html`<div>
+      ${!annotationsEnabled.get() &&
+          html`<button @click=${toggleAnnotations}>
+            Enable Annotation Suggestions
+          </button>` || html`<div></div>`
+      }
+    </div>`;
+  }
+
+  override firstUpdated() {
+    annotationsEnabled.sink(() => this.requestUpdate());
+  }
+}
 
 // TODO: Should instead be a curried recipe that is inlined as component
 @customElement("common-annotation")
@@ -31,6 +48,9 @@ export class CommonAnnotation extends LitElement {
   private dataCell: CellImpl<{ [key: string]: any } | undefined> = cell();
 
   override render() {
+    if (!annotationsEnabled.get()) {
+      return html`<div></div>`;
+    }
     return html`<div ${ref(this.annotationRef)}></div>`;
   }
 
@@ -55,5 +75,9 @@ export class CommonAnnotation extends LitElement {
         this.annotation.asSimpleCell<{ [UI]: View }>().key(UI).get()
       );
     }
+  }
+
+  override firstUpdated() {
+    annotationsEnabled.sink(() => this.requestUpdate());
   }
 }

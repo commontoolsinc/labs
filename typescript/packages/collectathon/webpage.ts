@@ -1,24 +1,27 @@
 import { getOrCreateCollection } from "./collections.ts";
 import { db } from "./db.ts";
+import { CID, json, sha256 } from "./deps.ts";
 import { completion, fastCompletion } from "./llm.ts";
+import { assert, cid, jsonToFacts } from "./synopsys.ts";
 
 export async function extractEntities(html: string, url: string, prompt?: string) {
   const systemPrompt =
-    "You are an expert at extracting structured data from web pages. You respond only with the entities extracted as JSON in a ``json``` markdown block, no commentary.";
+    "Extract the information the user requested from the provided webpage. You respond only with the entities extracted as JSON in a ``json``` markdown block, no commentary.";
   const userPrompt = `
-Extract entities from this HTML content. Include:
+Extract entities from this HTML content. Intrusctions are as follows:
 ${
   prompt
-    ? `User instruction: ${prompt}`
-    : `- Media artifacts (images, videos, files) with metadata
-- Paragraphs
+    ? `${prompt}`
+    : `Extract:
+- Media artifacts (images, videos, files) with metadata
+- Meaningful paragraphs
+- Table of contents
 - People
-- Messages
-- Objects
-- Ideas
-- Places
-- Links to other resources
-- Any other relevant entities`
+- Organizations
+- Locations
+- A summary
+- Quotes or excerpts
+- Key related resources`
 }
 
 
@@ -66,6 +69,18 @@ export async function clipWebpage(
           ],
         );
         const itemId = result[0][0] as number;
+
+        entity.url = url;
+        entity["collection/" + collectionName] = true;
+
+        const collection = { name: collectionName, type: 'collection' };
+        const collectionCid = await cid(collection);
+        const entityCid = await cid(entity);
+
+        const collectionFacts = await jsonToFacts(collection);
+        const entityFacts = await jsonToFacts(entity);
+        const response = await assert(...collectionFacts, ...entityFacts, [{ "/": collectionCid }, 'member', { "/": entityCid }]);
+        console.log('assert', response);
 
         db.query(
           "INSERT INTO item_collections (item_id, collection_id) VALUES (?, ?)",

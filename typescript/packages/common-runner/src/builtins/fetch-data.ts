@@ -10,7 +10,6 @@ import { mapBindingsToCell } from "../utils.js";
  * Returns the fetched result as `result`. `pending` is true while a request is pending.
  *
  * @param url - A cell containing the URL to fetch data from.
- * @param schema - A cell containing the JSON schema to validate the fetched data.
  * @returns { pending: boolean, result: any, error: any } - As individual cells, representing `pending` state, final `result`, and any `error`.
  */
 export function fetchData(
@@ -24,12 +23,12 @@ export function fetchData(
   const inputsCell = cell(inputBindings);
 
   const pending = cell(false);
-  const fullResult = cell<any | undefined>(undefined);
+  const result = cell<any | undefined>(undefined);
   const error = cell<any | undefined>(undefined);
 
   const resultCell = cell({
     pending,
-    result: fullResult,
+    result,
     error,
   });
 
@@ -43,14 +42,14 @@ export function fetchData(
 
     if (url === undefined) {
       pending.setAtPath([], false, log);
-      fullResult.setAtPath([], undefined, log);
+      result.setAtPath([], undefined, log);
       error.setAtPath([], undefined, log);
       ++currentRun;
       return;
     }
 
     pending.setAtPath([], true, log);
-    fullResult.setAtPath([], undefined, log);
+    result.setAtPath([], undefined, log);
     error.setAtPath([], undefined, log);
 
     const thisRun = ++currentRun;
@@ -61,7 +60,7 @@ export function fetchData(
         if (thisRun !== currentRun) return;
 
         pending.setAtPath([], false, log);
-        fullResult.setAtPath([], data, log);
+        result.setAtPath([], data, log);
       })
       .catch((err) => {
         if (thisRun !== currentRun) return;

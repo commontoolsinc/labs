@@ -25,6 +25,21 @@ export class CommonInputEvent extends Event {
   }
 }
 
+export type CommonKeydown = {
+  id: string;
+  key: string;
+  value: string;
+}
+
+export class CommonKeydownEvent extends Event {
+  detail: CommonKeydown;
+
+  constructor(detail: CommonKeydown) {
+    super("common-keydown", { bubbles: true, composed: true });
+    this.detail = detail;
+  }
+}
+
 @customElement("common-input")
 export class CommonInputElement extends LitElement {
   static override styles = [
@@ -74,11 +89,16 @@ export class CommonInputElement extends LitElement {
       this.dispatchEvent(new CommonInputEvent({ id: this.id, value }));
     };
 
+    const onkeydown = (event: KeyboardEvent) => {
+      this.dispatchEvent(new CommonKeydownEvent({ id: this.id, key: event.key, value: this.value }));
+    };
+
     return html`
       <div class="input-wrapper">
         <input
           class="input"
           @input="${oninput}"
+          @keydown="${onkeydown}"
           .value="${this.value}"
           .placeholder="${this.placeholder}"
           type="text"

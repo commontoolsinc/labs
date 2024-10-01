@@ -31,7 +31,9 @@ export const home = recipe<{
           html`<div>
             <common-recipe-link foo="bar" recipe=${recipe}></common-recipe-link>
           </div>`
-      )}<common-annotation
+      )}
+      <common-annotation-toggle />
+      <common-annotation
         query="dream fun things to explore"
         target="-1"
         data=${{ charms, recipes }}
