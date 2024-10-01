@@ -9,6 +9,11 @@ import {
 } from "./types.js";
 import { cell } from "./cell-proxy.js";
 import { traverseValue, moduleToJSON } from "./utils.js";
+import type {
+  JavaScriptModuleDefinition,
+  JavaScriptValueMap,
+  JavaScriptShapeMap,
+} from "@commontools/common-runtime";
 
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module
@@ -73,4 +78,52 @@ export function handler<E, T>(
 
     return stream as unknown as CellProxy<E>;
   }, module);
+}
+
+export function isolated<T, R>(
+  inputs: JavaScriptValueMap,
+  outputs: JavaScriptShapeMap,
+  implementation: (input: T) => R
+): NodeFactory<T, R>;
+export function isolated<T>(
+  inputs: JavaScriptValueMap,
+  outputs: JavaScriptShapeMap,
+  implementation: (input: T) => any
+): NodeFactory<T, ReturnType<typeof implementation>>;
+export function isolated<T extends (...args: any[]) => any>(
+  inputs: JavaScriptValueMap,
+  outputs: JavaScriptShapeMap,
+  implementation: T
+): NodeFactory<Parameters<T>[0], ReturnType<T>>;
+export function isolated<T, R>(
+  inputs: JavaScriptValueMap,
+  outputs: JavaScriptShapeMap,
+  implementation: (input: T) => R
+): NodeFactory<T, R> {
+  const body = `import { read, write } from "common:io/state@0.0.1";
+
+  export const run = () => {
+    let inputs = {};
+    ${Object.keys(inputs)
+      .map((key) => `inputs["${key}"] = read("${key}")?.deref()?.val;`)
+      .join("\n")}
+    let fn = ${implementation.toString()};
+    let result = fn(inputs);
+    ${Object.keys(outputs)
+      .map(
+        (key) =>
+          `write("${key}", { tag: typeof result["${key}"], val: result["${key}"] })`
+      )
+      .join("\n")}
+  };
+  `;
+
+  return createNodeFactory({
+    type: "isolated",
+    implementation: {
+      inputs,
+      outputs,
+      body,
+    } satisfies JavaScriptModuleDefinition,
+  });
 }

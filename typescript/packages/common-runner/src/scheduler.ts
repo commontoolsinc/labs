@@ -33,10 +33,10 @@ export function unschedule(fn: Action): void {
 }
 
 // Like schedule, but runs the action immediately to gather dependencies
-export function run(action: Action): any {
+export async function run(action: Action): Promise<any> {
   const log: ReactivityLog = { reads: [], writes: [] };
 
-  const result = action(log);
+  const result = await action(log);
 
   // Note: By adding the listeners after the call we avoid triggering a re-run
   // of the action if it changed a r/w cell. Note that this also means that
@@ -112,7 +112,7 @@ function handleError(error: Error) {
   for (const handler of errorHandlers) handler(error);
 }
 
-function execute() {
+async function execute() {
   // Process next event from the event queue. Will mark more cells as dirty.
   eventQueue.shift()?.();
 
@@ -130,7 +130,7 @@ function execute() {
     loopCounter.set(fn, (loopCounter.get(fn) || 0) + 1);
     if (loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN)
       handleError(new Error("Too many iterations"));
-    else run(fn);
+    else await run(fn);
   }
 
   if (pending.size === 0 && eventQueue.length === 0) {

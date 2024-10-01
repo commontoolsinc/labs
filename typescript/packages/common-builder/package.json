@@ -23,7 +23,9 @@
   "files": [
     "./lib/index.js"
   ],
-  "dependencies": {},
+  "dependencies": {
+    "@commontools/common-runtime": "file:../common-runtime"
+  },
   "devDependencies": {
     "typescript": "^5.2.2",
     "vitest": "^1.6.0",
