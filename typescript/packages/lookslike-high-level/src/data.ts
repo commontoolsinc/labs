@@ -67,41 +67,6 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 }
 
 addCharms([
-  run(iframe, {
-    title: "two way binding counter",
-    prompt: "counter",
-    data: { counter: 0 },
-  }),
-  run(importCalendar, {}),
-  run(queryCollections, {
-    url: "/api/data/",
-  }),
-  run(todoList, {
-    title: "My TODOs",
-    items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) => ({
-      title: item,
-      done: false,
-    })),
-  }),
-  run(todoList, {
-    title: "My grocery shopping list",
-    items: ["milk", "eggs", "bread"].map((item) => ({
-      title: item,
-      done: false,
-    })),
-  }),
-  run(ticket, {
-    title: "Reservation for 'Counterstrike the Musical'",
-    show: "Counterstrike the Musical",
-    date: getFridayAndMondayDateStrings().startDate,
-    location: "New York",
-  }),
-  run(routine, {
-    title: "Morning routine",
-    // TODO: A lot more missing here, this is just to drive the suggestion.
-    locations: ["coffee shop with great baristas"],
-  }),
-  run(counters, {}),
   run(coder, {
     title: "hello world", src: `const greeting: string = "Hello, TypeScript!";
     console.log(greeting);
@@ -116,9 +81,12 @@ addCharms([
       console.log(person.name, 'is', person.age, 'years old');
     };
     
-    printPerson({ name: "Alice", age: 30 });`}),
-  run(coder, {
-    title: "launcher", src: `import { html } from "@commontools/common-html";
+    printPerson({ name: "Alice", age: 30 });`})
+  ]);
+
+  setTimeout(() => {
+    launch(coder, {
+      title: "launcher", src: `import { html } from "@commontools/common-html";
 import { recipe, UI, NAME } from "@commontools/common-builder";
 import { launch } from "../data.js";
 
@@ -129,8 +97,10 @@ const helloWorld = recipe("hello", ({ name }) => (
   }
 ));
 
-launch(helloWorld, { name: "world" });`}),
-]);
+console.log(helloWorld);
+
+launch(helloWorld, { name: "world" });`}); }, 1000);
+
 
 export type RecipeManifest = {
   name: string;
@@ -152,50 +122,6 @@ function addRecipe(recipe: Recipe) {
 }
 
 export const recipes: RecipeManifest[] = [
-  {
-    name: "Explore dungeon game",
-    recipeId: addRecipe(dungeon),
-  },
-  {
-    name: "Create a new TODO list",
-    recipeId: addRecipe(todoList),
-  },
-  {
-    name: "Find places",
-    recipeId: addRecipe(localSearch),
-  },
-  {
-    name: "Find a LuftBnB place to stay",
-    recipeId: addRecipe(luftBnBSearch),
-  },
-  {
-    name: "JSON Importer",
-    recipeId: addRecipe(jsonImporter),
-  },
-  {
-    name: "Data Designer",
-    recipeId: addRecipe(dataDesigner),
-  },
-  {
-    name: "Create a counter",
-    recipeId: addRecipe(counter),
-  },
-  {
-    name: "Fetch JSON from a URL",
-    recipeId: addRecipe(fetchExample),
-  },
-  {
-    name: "Explore imagery prompts",
-    recipeId: addRecipe(prompt),
-  },
-  {
-    name: "Explore Halucinated wiki",
-    recipeId: addRecipe(wiki),
-  },
-  {
-    name: "Hello Isolated",
-    recipeId: addRecipe(helloIsolated),
-  },
 ];
 
 // Helper for mock data

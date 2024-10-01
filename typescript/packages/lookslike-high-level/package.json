@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "npm run build && npx vite",
     "test": "npm run build && vitest",
+    "bundle-type-defs": "node bundle-type-defs.js",
     "build": "wireit",
     "clean": "wireit"
   },
@@ -21,6 +22,8 @@
   },
   "homepage": "https://github.com/commontoolsinc/labs#readme",
   "devDependencies": {
+    "fs-extra": "^11.2.0",
+    "glob": "^11.0.0",
     "jsdom": "^25.0.0",
     "typescript": "^5.2.2",
     "vite": "^5.2.0",
