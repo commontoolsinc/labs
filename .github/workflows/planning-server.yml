@@ -423,9 +423,8 @@ jobs:
       - name: Verify attestation
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # run: gh attestation verify oci://${{ steps.image_path.outputs.IMAGE_PATH }} -R ${{ github.repository }}
         run: |
-          RESULT=$(gh attestation verify oci://${{ steps.image_path.outputs.IMAGE_PATH }} -R ${{ github.repository }})
+          RESULT=$(gh attestation verify oci://${{ steps.image_path.outputs.IMAGE_PATH }} -R ${{ github.repository }} --format json)
           echo "$RESULT"
 
       # - name: Install cosign
