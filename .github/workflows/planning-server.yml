@@ -2,8 +2,8 @@ name: Planning Server
 
 on:
   push:
-    branches:
-      - main
+    # branches:
+      # - main
     paths:
       - typescript/packages/planning-server/**/*
       - .github/workflows/planning-server.yml
