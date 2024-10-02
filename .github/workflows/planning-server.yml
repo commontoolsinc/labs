@@ -163,19 +163,26 @@ jobs:
         name: Lint code
         if: always()
 
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: v${{ env.DENO_VERSION }}
+
       - run: deno test --allow-all --coverage=cov/
         name: Run tests and collect coverage
         id: test
-        if: always()
 
       - run: deno coverage --lcov cov/ > cov.lcov
         name: Generate coverage report
         id: coverage
-        if: ${{ steps.test.outcome == 'success' || steps.test.outcome == 'failure' }}
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
-        if: steps.coverage.outcome == 'success'
         with:
           name: coverage-report
           path: cov.lcov
