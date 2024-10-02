@@ -1,7 +1,7 @@
 name: Deploy @commontools/planning-server to GitHub Container Registry
 
 on:
-  push:
+  # push:
     # branches:
     #   - main
   workflow_dispatch:
