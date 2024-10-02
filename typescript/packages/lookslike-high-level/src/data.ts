@@ -16,6 +16,7 @@ import { ticket } from "./recipes/ticket.js";
 import { routine } from "./recipes/routine.js";
 import { fetchExample } from "./recipes/fetchExample.js";
 import { counter } from "./recipes/counter.js";
+import { counters } from "./recipes/counters.js";
 
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.js";
@@ -94,6 +95,7 @@ addCharms([
     // TODO: A lot more missing here, this is just to drive the suggestion.
     locations: ["coffee shop with great baristas"],
   }),
+  run(counters, { }),
 ]);
 
 export type RecipeManifest = {
