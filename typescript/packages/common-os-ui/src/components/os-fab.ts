@@ -16,7 +16,6 @@ export class OsFabgroup extends LitElement {
       .fabgroup {
         display: flex;
         flex-direction: column;
-        cursor: pointer;
         gap: var(--gap-xsm);
         align-items: end;
         overflow: hidden;
@@ -114,6 +113,7 @@ export class OsBubble extends LitElement {
 
       .bubble {
         background-color: var(--bg-3);
+        cursor: pointer;
         width: fit-content;
         height: var(--height);
         border-radius: calc(var(--height) / 2);
