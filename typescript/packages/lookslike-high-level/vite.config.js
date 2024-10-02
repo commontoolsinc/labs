@@ -7,6 +7,7 @@ const commonPackages = [
   "@commontools/common-runner",
   "@commontools/common-html",
   "@commontools/common-ui",
+  "@commontools/common-runtime",
   "@commontools/llm-client",
 ];
 
@@ -44,6 +45,11 @@ export default defineConfig({
         target: "http://localhost:8001",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/data/, ""),
+      },
+    },
+    headers: {
+      "*.wasm": {
+        "Content-Type": "application/wasm",
       },
     },
   },

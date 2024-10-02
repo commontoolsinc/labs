@@ -3,6 +3,7 @@ import {
   TYPE,
   Recipe,
   RecipeFactory,
+  Module,
   isModule,
   isRecipe,
   isAlias,
@@ -19,6 +20,27 @@ import {
   sendValueToBinding,
 } from "./utils.js";
 import { builtins } from "./builtins/index.js";
+import init, {
+  CommonRuntime,
+  JavaScriptModuleDefinition,
+  JavaScriptValueMap,
+} from "@commontools/common-runtime";
+
+let runtime: Promise<CommonRuntime> | undefined;
+const COMMON_RUNTIME_URL = "http://localhost:8081";
+
+// This should be in common-runtime
+function isJavaScriptModuleDefinition(
+  module: any
+): module is JavaScriptModuleDefinition {
+  return (
+    typeof module === "object" &&
+    module !== null &&
+    typeof module.body === "string" &&
+    typeof module.inputs === "object" &&
+    typeof module.outputs === "object"
+  );
+}
 
 export const charmById = new Map<number, CellImpl<any>>();
 let nextCharmId = 0;
@@ -165,6 +187,51 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
           const action: Action = (log: ReactivityLog) => {
             const inputsProxy = inputsCell.getAsProxy([], log);
             sendValueToBinding(recipeCell, node.outputs, inputsProxy, log);
+          };
+
+          schedule(action, { reads, writes } satisfies ReactivityLog);
+          break;
+        }
+        case "isolated": {
+          const inputs = mapBindingsToCell(node.inputs, recipeCell);
+          const reads = findAllAliasedCells(inputs, recipeCell);
+          const inputsCell = cell(inputs);
+          inputsCell.freeze();
+
+          const outputs = mapBindingsToCell(node.outputs, recipeCell);
+          const writes = findAllAliasedCells(outputs, recipeCell);
+
+          if (!isJavaScriptModuleDefinition(node.module.implementation))
+            throw new Error(`Invalid module definition`);
+
+          // Initialize web runtime wasm artifact.
+          // Needed only once.
+          runtime ||= (init as unknown as () => Promise<any>)().then(
+            () => new CommonRuntime(COMMON_RUNTIME_URL)
+          );
+
+          const fnPromise = runtime.then((rt) =>
+            rt.instantiate(
+              (node.module as Module)
+                .implementation as unknown as JavaScriptModuleDefinition
+            )
+          );
+
+          const action: Action = async (log: ReactivityLog) => {
+            const inputsProxy = inputsCell.getAsProxy([], log);
+            if (typeof inputsProxy !== "object")
+              throw new Error(`Invalid inputs: Must be an object`);
+
+            const fn = await fnPromise;
+            const fnOutput = await fn.run(
+              inputsProxy as unknown as JavaScriptValueMap
+            );
+
+            const result: any = Object.fromEntries(
+              Object.entries(fnOutput).map(([key, value]) => [key, value.val])
+            );
+
+            sendValueToBinding(recipeCell, node.outputs, result, log);
           };
 
           schedule(action, { reads, writes } satisfies ReactivityLog);

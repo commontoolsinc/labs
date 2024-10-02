@@ -143,7 +143,7 @@ const bindProps = (
   context: Context
 ): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
-  console.log("binding props", element.tagName, props);
+  //console.log("binding props", element.tagName, props);
   for (const [propKey, propValue] of Object.entries(props)) {
     if (isBinding(propValue)) {
       const replacement = getContext(context, propValue.path);
