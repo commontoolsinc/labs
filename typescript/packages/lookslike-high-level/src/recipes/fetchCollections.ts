@@ -51,7 +51,7 @@ const asTable = lift((inputData: object | object[]) => {
     </table>
   `;
 });
-const collectionUrl = lift((collection: string) => `/api/data/collections/${collection}/items`)
+
 const itemUrl = lift((id: string) => `/api/data/items/${id}`)
 const viewItem = recipe<{ id: string }>(
   "View Item",
@@ -110,17 +110,27 @@ const onViewItem = handler<
 const viewCollecton = recipe<{ collection: string }>(
   "View Collection",
   ({ collection }) => {
-    const { result } = fetchData<ItemRow[]>({
-      url: collectionUrl(collection),
-      schema: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            id: { type: "string" },
-            title: { type: "string" }
-          }
-        }
+    const { result } = fetchData<Item>({
+      url: `/api/data`,
+      options: {
+        method: "PUT",
+        body: JSON.stringify({
+            select: {
+              id: "?item",
+              url: "?url",
+              content: "?content",
+              collection: [{
+                name: "?name",
+              }]
+            },
+            where: [
+              { Case: ["?item", "content", "?content"] },
+              { Case: ["?item", "type", "idea"] },
+              { Case: ["?item", "url", "?url"] },
+              { Case: ["?collection", "member", "?item"] },
+              { Case: ["?collection", "name", "?name"] },
+            ]
+        })
       }
     });
 

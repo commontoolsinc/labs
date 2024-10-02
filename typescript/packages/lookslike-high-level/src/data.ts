@@ -72,7 +72,7 @@ addCharms([
   }),
   run(importCalendar, {}),
   run(fetchCollections, {
-    url: "/api/data/collections/",
+    url: "/api/data/",
   }),
   run(todoList, {
     title: "My TODOs",
