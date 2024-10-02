@@ -107,6 +107,8 @@ jobs:
     env:
       DESTINATION: dist/bin/${{ matrix.os }}/${{ matrix.arch }}/planning-server
     name: Compile ${{ matrix.os }} ${{ matrix.arch }} binary
+    needs:
+      - setup
     steps:
       - name: Checkout
         uses: actions/checkout@v4
