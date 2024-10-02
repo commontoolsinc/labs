@@ -1,7 +1,8 @@
-import { LitElement, css, html } from "lit-element";
+import { LitElement, PropertyValues, css, html } from "lit-element";
 import { customElement, property } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
 import { base } from "../shared/styles.js";
+import { breakpointLg, ResponsiveElement } from "./responsive-element.js";
 
 /**
  * Custom element representing the chrome (outer structure) of the application.
@@ -19,7 +20,7 @@ import { base } from "../shared/styles.js";
  * @slot sidebar-toolbar - Additional elements to be placed in the sidebar toolbar.
  */
 @customElement("os-chrome")
-export class OsChrome extends LitElement {
+export class OsChrome extends ResponsiveElement {
   static override styles = [
     base,
     css`
@@ -31,14 +32,58 @@ export class OsChrome extends LitElement {
       }
 
       .chrome {
-        display: grid;
-        grid-template-columns: 1fr 0;
-        grid-template-areas: "main sidebar";
-        overflow: hidden;
+        display: block;
+        grid-template-columns: 1fr;
         justify-items: stretch;
         height: 100vh;
-        transition: grid var(--dur-md) var(--ease-out-cubic);
         position: relative;
+        overflow: hidden;
+        /*
+        NOTE: prevents transition initial state bug. We trigger an update due to
+        responsive element ResizeObserver, which sets a breakpoint class to
+        work around bugs with container queries and slotted content.
+        Because this class is not present during the first microtask, the
+        initial property of the padding is 0, causing a transition on first
+        load. However, setting display none and then block when we add the
+        breakpoint class solves the issue, since the the intial value will
+        not be used for animation since the element is display none.
+        */
+        display: none;
+
+        &.breakpoint {
+          display: block;
+        }
+
+        .chrome-main {
+          transition: padding-right var(--dur-lg) var(--ease-out-expo);
+          padding-right: 0;
+
+          :host([sidebar]) .breakpoint-lg & {
+            padding-right: var(--sidebar-width);
+          }
+        }
+
+        .chrome-sidebar {
+          background-color: var(--bg-2);
+          position: absolute;
+          right: 0;
+          top: 0;
+          height: 100vh;
+          transform: translateX(var(--sidebar-width));
+          transition: transform var(--dur-lg) var(--ease-out-expo);
+
+          :host([sidebar]) & {
+            transform: translateX(0);
+          }
+
+          .chrome-sidebar-inner {
+            display: block;
+            /* Set fixed width on inner element to prevent text reflow on
+            sidebar animation. */
+            width: var(--sidebar-width);
+            height: 100vh;
+          }
+        }
       }
 
       /** Container for absolute elements */
@@ -74,27 +119,6 @@ export class OsChrome extends LitElement {
         }
       }
 
-      .chrome-sidebar {
-        background-color: var(--bg-2);
-        grid-area: sidebar;
-        height: 100vh;
-
-        .chrome-sidebar-inner {
-          display: block;
-          /* Set fixed width on inner element to prevent text reflow on
-          sidebar animation. */
-          width: var(--sidebar-width);
-          height: 100vh;
-        }
-      }
-
-      /* Sidebar animation */
-      :host([sidebar]) {
-        .chrome {
-          grid-template-columns: 1fr var(--sidebar-width);
-        }
-      }
-
       /* Half-and-half editor mode animation */
       :host([state="split"]) {
         .chrome {
@@ -123,8 +147,14 @@ export class OsChrome extends LitElement {
       this.sidebar = !this.sidebar;
     };
 
+    const classes = classMap({
+      chrome: true,
+      breakpoint: this.getObservedWidth() > 0,
+      "breakpoint-lg": this.getObservedWidth() >= breakpointLg + 480,
+    });
+
     return html`
-      <div class="chrome" @sidebarclose="${onSidebarClose}">
+      <div class="${classes}" @sidebarclose="${onSidebarClose}">
         <div class="chrome-overlay">
           <os-fabgroup class="pin-br">
             <os-bubble icon="add" text="Lorem ipsum dolor sit amet"></os-bubble>

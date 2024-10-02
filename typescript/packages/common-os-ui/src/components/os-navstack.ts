@@ -4,9 +4,8 @@ import {
   setTransitions,
   transition,
   durationMd,
-  cubicBezierCss,
-  easeOutCubic,
-  easeOutExpo,
+  easeOutExpoCss,
+  easeOutCubicCss,
 } from "../shared/animation.js";
 
 @customElement("os-navstack")
@@ -83,15 +82,15 @@ export class OsNavstack extends LitElement {
       transition({
         property: "left",
         duration: durationMd,
-        easing: cubicBezierCss(easeOutCubic),
-        value: `480px`,
+        easing: easeOutCubicCss,
+        to: `480px`,
       }),
       transition({
         property: "opacity",
         duration: durationMd,
         delay: 100,
-        easing: cubicBezierCss(easeOutExpo),
-        value: `0`,
+        easing: easeOutExpoCss,
+        to: `0`,
       }),
     ]);
     panels.pop();

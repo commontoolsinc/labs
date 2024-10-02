@@ -10,7 +10,7 @@ export const slowable = (ms: number) => (slowAnimations ? 10000 : ms);
 
 export const durationSm = 250;
 export const durationMd = 350;
-export const durationLg = 500;
+export const durationLg = 350;
 
 /** Create a promise for a timeout  */
 export const timeout = (ms: number): Promise<void> =>
@@ -39,29 +39,36 @@ export const easeOutExpo = cubicBezier(0.19, 1, 0.22, 1);
 export const cubicBezierCss = ({ x1, y1, x2, y2 }: CubicBezier) =>
   `cubic-bezier(${x1}, ${y1}, ${x2}, ${y2})`;
 
+export const easeOutCubicCss = cubicBezierCss(easeOutCubic);
+export const easeOutExpoCss = cubicBezierCss(easeOutExpo);
+
 export type Transition = {
   property: string;
   duration: number;
   delay: number;
   easing: string;
-  value: string;
+  from?: string;
+  to: string;
 };
 
 export const transition = ({
   property,
-  value,
-  duration = 0,
+  from,
+  to,
+  duration = durationMd,
   delay = 0,
-  easing = "ease-out",
+  easing = easeOutCubicCss,
 }: {
   property: string;
-  value: string;
+  from?: any;
+  to: any;
   duration?: number;
   delay?: number;
   easing?: string;
 }): Transition => ({
   property,
-  value,
+  from: from != null ? `${from}` : undefined,
+  to: `${to}`,
   duration: slowable(duration),
   easing,
   delay,
@@ -92,11 +99,18 @@ export const setTransitions = async <E extends HTMLElement>(
   transitions: Array<Transition>,
 ): Promise<E> => {
   const fullDuration = fullTransitionDuration(transitions);
+  element.style.removeProperty("transition");
+  for (const t of transitions) {
+    if (t.from != null) {
+      element.style.setProperty(t.property, t.from);
+    }
+  }
+  await timeout(0);
   element.style.transition = transitionsToCssRule(transitions);
   for (const t of transitions) {
-    element.style.setProperty(t.property, t.value);
+    element.style.setProperty(t.property, t.to);
   }
-  await timeout(fullDuration + 0.001);
+  await timeout(fullDuration);
   element.style.removeProperty("transition");
   return element;
 };

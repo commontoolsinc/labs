@@ -1,7 +1,11 @@
 import { css, html } from "lit-element";
 import { customElement } from "lit/decorators.js";
 import { base } from "../shared/styles.js";
-import { ResponsiveElement } from "./responsive-element.js";
+import {
+  ResponsiveElement,
+  breakpointLg,
+  breakpointMd,
+} from "./responsive-element.js";
 
 @customElement("os-colgrid")
 export class OsColgrid extends ResponsiveElement {
@@ -31,13 +35,13 @@ export class OsColgrid extends ResponsiveElement {
   ];
 
   #getSizeClass() {
-    switch (this.breakpoint()) {
-      case "lg":
-        return "colgrid-lg";
-      case "md":
-        return "colgrid-md";
-      default:
-        return "colgrid-sm";
+    const width = this.getObservedWidth();
+    if (width >= breakpointLg) {
+      return "colgrid-lg";
+    } else if (width >= breakpointMd) {
+      return "colgrid-md";
+    } else {
+      return "colgrid-sm";
     }
   }
 

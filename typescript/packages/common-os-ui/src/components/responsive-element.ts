@@ -1,15 +1,7 @@
 import { LitElement } from "lit";
-import { state } from "lit/decorators.js";
 
-export const breakpointForWidth = (width: number): String => {
-  if (width >= 800) {
-    return "lg";
-  } else if (width >= 600) {
-    return "md";
-  } else {
-    return "sm";
-  }
-};
+export const breakpointLg = 800;
+export const breakpointMd = 600;
 
 /**
  * This element reacts to changes in its width using a resize observer,
@@ -27,12 +19,18 @@ export const breakpointForWidth = (width: number): String => {
  */
 export class ResponsiveElement extends LitElement {
   #resizeObserver: ResizeObserver;
-  @state() private _observedWidth: number = -1;
+  #observedWidth: number = -1;
 
   constructor() {
     super();
+    const isSelf = (entry: ResizeObserverEntry) => entry.target === this;
     this.#resizeObserver = new ResizeObserver((entries) => {
-      this._observedWidth = entries.at(0)?.contentRect.width ?? -1;
+      const entry = entries.find(isSelf);
+      const observedWidth = entry?.contentRect.width ?? -1;
+      if (this.#observedWidth !== observedWidth) {
+        this.#observedWidth = observedWidth;
+        this.requestUpdate();
+      }
     });
   }
 
@@ -47,7 +45,7 @@ export class ResponsiveElement extends LitElement {
     this.#resizeObserver.disconnect();
   }
 
-  breakpoint() {
-    return breakpointForWidth(this._observedWidth);
+  getObservedWidth() {
+    return this.#observedWidth;
   }
 }
