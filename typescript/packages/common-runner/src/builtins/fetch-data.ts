@@ -10,6 +10,8 @@ import { mapBindingsToCell } from "../utils.js";
  * Returns the fetched result as `result`. `pending` is true while a request is pending.
  *
  * @param url - A cell containing the URL to fetch data from.
+ * @param mode - The mode to use for fetching data. Either `text` or `json`
+ *   default to `json` results.
  * @returns { pending: boolean, result: any, error: any } - As individual cells, representing `pending` state, final `result`, and any `error`.
  */
 export function fetchData(
@@ -18,6 +20,7 @@ export function fetchData(
 ) {
   const inputBindings = mapBindingsToCell(inputs, recipeCell) as {
     url: string;
+    mode?: 'text' | 'json';
     result?: any;
   };
   const inputsCell = cell(inputBindings);
@@ -38,7 +41,8 @@ export function fetchData(
   let currentRun = 0;
 
   const startFetch: Action = (log: ReactivityLog) => {
-    const { url } = inputsCell.getAsProxy([], log);
+    const { url, mode } = inputsCell.getAsProxy([], log);
+    const processResponse = (mode || 'json') === 'json' ? (r: Response) => r.json() : (r: Response) => r.text();
 
     if (url === undefined) {
       pending.setAtPath([], false, log);
@@ -55,7 +59,7 @@ export function fetchData(
     const thisRun = ++currentRun;
 
     fetch(url)
-      .then((response) => response.json())
+      .then(processResponse)
       .then((data) => {
         if (thisRun !== currentRun) return;
 

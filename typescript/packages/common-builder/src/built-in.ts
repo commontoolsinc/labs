@@ -20,6 +20,7 @@ export function generateData<T>(
 export function fetchData<T>(
   params: Value<{
     url: string;
+    mode?: "json" | "text";
     options?: RequestInit;
     result?: T;
   }>
