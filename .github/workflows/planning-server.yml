@@ -1,4 +1,4 @@
-name: Deploy to Docker Hub
+name: Planning Server
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
     # - main
     paths:
       - typescript/packages/planning-server/**/*
-      - .github/workflows/planning-server-dockerhub.yml
+      - .github/workflows/planning-server.yml
   pull_request:
 
   workflow_dispatch:
