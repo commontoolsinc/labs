@@ -423,9 +423,7 @@ jobs:
       - name: Verify attestation
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          RESULT=$(gh attestation verify oci://${{ steps.image_path.outputs.IMAGE_PATH }} -R ${{ github.repository }} --format json)
-          echo "$RESULT"
+        run: gh attestation verify oci://${{ steps.image_path.outputs.IMAGE_PATH }} -R ${{ github.repository }} --format json | jq
 
       # - name: Install cosign
       #   uses: sigstore/cosign-installer@v3 # https://github.com/sigstore/cosign-installer
