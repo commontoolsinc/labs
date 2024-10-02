@@ -144,7 +144,7 @@ jobs:
         with:
           if-no-files-found: error
           name: planning-server-${{ matrix.target }}
-          path: typescript/packages/planning-server/${{ env.DESTINATION }}${{ runner.os == 'Windows' && '.exe' || '' }}
+          path: ${ env.WORKING_DIRECTORY }}/${{ env.DESTINATION }}${{ runner.os == 'Windows' && '.exe' || '' }}
 
   check:
     name: Check code quality
@@ -183,10 +183,10 @@ jobs:
           name: coverage-report
           path: cov.lcov
 
-  test:
+  test_docker:
+    name: Local container test
     needs:
       - setup
-    name: Local container test
     runs-on: ubuntu-latest
     permissions:
       contents: read
