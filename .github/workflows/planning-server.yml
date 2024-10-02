@@ -417,6 +417,9 @@ jobs:
           if-no-files-found: error
           path: ${{ steps.attest_build_provenance.outputs.bundle-path }}
 
+      - name: Verify attestation
+        run: gh attestations verify oci://${{ steps.image_path.outputs.IMAGE_PATH }} -R ${{ github.repository }}
+
       # - name: Install cosign
       #   uses: sigstore/cosign-installer@v3 # https://github.com/sigstore/cosign-installer
 
