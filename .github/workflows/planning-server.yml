@@ -124,8 +124,11 @@ jobs:
       - name: Cache deno installation and deno.land dependencies
         uses: actions/cache@v4
         with:
-          key: ${{ runner.os }}-deno-${{ hashFiles('**/*.ts') }}
-          restore-keys: ${{ runner.os }}-deno-
+          key: ${{ runner.os }}-deno-${{ env.DENO_VERSION }}-${{ github.ref }}
+          restore-keys: |
+            ${{ runner.os }}-deno-${{ env.DENO_VERSION }}-
+            ${{ runner.os }}-deno-
+            ${{ runner.os }}-
           path: |
             /home/runner/.deno
             /home/runner/.cache/deno/deps/https/deno.land
