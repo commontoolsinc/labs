@@ -20,7 +20,7 @@ export class OsSidebarGroup extends LitElement {
 
   override render() {
     return html`
-      <aside class="sgroup vstack">
+      <aside class="sgroup vstack pad-h">
         <heading class="sgroup-heading"
           ><slot class="label" name="label"></slot
         ></heading>

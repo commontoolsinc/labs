@@ -20,10 +20,18 @@
         </os-colgrid>
       </os-container>
       <os-navstack slot="sidebar">
-        <os-navpanel>
+        <os-navpanel safearea>
           <os-icon-button slot="toolbar-end" icon="info"></os-icon-button>
           <os-icon-button slot="toolbar-end" icon="palette"></os-icon-button>
           <os-sidebar-close-button slot="toolbar-end"></os-sidebar-close-button>
+          <os-charm-row-group>
+            <os-charm-row icon="mail" text="Mail"></os-charm-row>
+            <os-charm-row icon="calendar_month" text="Calendar"> </os-charm-row>
+            <os-charm-row icon="map" text="Bike and rail directions">
+            </os-charm-row>
+            <os-charm-row icon="cloud" text="Weather"> </os-charm-row>
+            <os-charm-row icon="folder" text="CHEM131"> </os-charm-row>
+          </os-charm-row-group>
           <os-sidebar-group>
             <div slot="label">Title</div>
             <div slot="content">Content</div>

@@ -213,7 +213,6 @@ export const base = css`
   }
 
   .toolbar {
-    height: var(--toolbar-height);
     display: grid;
     grid-template-columns: auto 1fr auto;
     grid-template-areas: "start center end";

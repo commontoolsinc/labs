@@ -68,6 +68,10 @@ export class OsChrome extends LitElement {
           overflow-x: hidden;
           overflow-y: auto;
         }
+
+        .chrome-main-toolbar {
+          height: var(--toolbar-height);
+        }
       }
 
       .chrome-sidebar {

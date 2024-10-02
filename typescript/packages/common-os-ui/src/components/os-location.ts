@@ -49,10 +49,8 @@ export class OsLocation extends LitElement {
           transition: opacity var(--dur-lg) var(--ease-out-expo);
         }
 
-        &:active::before {
-          opacity: 1;
-        }
-
+        &:hover::before,
+        &:active::before,
         :host([activated]) &::before {
           opacity: 1;
         }

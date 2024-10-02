@@ -12,6 +12,7 @@ export class OsIcon extends LitElement {
         display: block;
         width: var(--icon-size);
         height: var(--icon-size);
+        color: var(--c-text);
       }
 
       .icon {
@@ -19,6 +20,11 @@ export class OsIcon extends LitElement {
         width: var(--icon-size);
         height: var(--icon-size);
         overflow: hidden;
+        user-select: none;
+
+        :host([theme*="secondary"]) & {
+          color: var(--c-text2);
+        }
       }
     `,
   ];

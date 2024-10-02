@@ -10,16 +10,17 @@ import { base } from "../shared/styles.js";
  * @prop {string} icon - The name of the icon to display in the button.
  * @prop {boolean} activated - toggle the button's activated state.
  */
-@customElement("os-icon-button")
-export class OsIconButton extends LitElement {
+@customElement("os-icon-button-plain")
+export class OsIconButtonPlain extends LitElement {
   static override styles = [
     base,
     css`
       :host {
-        --button-size: var(--min-touch-size);
+        --touch-size: var(--min-touch-size);
+        --disc-size: calc(var(--u) * 9);
         display: inline-block;
-        width: var(--button-size);
-        height: var(--button-size);
+        width: var(--disc-size);
+        height: var(--touch-size);
       }
 
       .icon-button {
@@ -30,14 +31,23 @@ export class OsIconButton extends LitElement {
         border: 0;
         -webkit-appearance: none;
         appearance: none;
-        background-color: var(--bg-3);
-        border-radius: var(--radius);
-        width: var(--button-size);
-        height: var(--button-size);
+        width: var(--disc-size);
+        height: var(--touch-size);
         overflow: hidden;
-        position: relative;
+        background: transparent;
 
-        &::before {
+        .icon-button-inner {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: var(--disc-size);
+          height: var(--disc-size);
+          overflow: hidden;
+          border-radius: calc(var(--disc-size) / 2);
+          position: relative;
+        }
+
+        .icon-button-inner::before {
           content: "";
           background-color: rgb(0, 0, 0 / 0);
           top: 0;
@@ -50,9 +60,7 @@ export class OsIconButton extends LitElement {
           transition: background var(--dur-lg) var(--ease-out-expo);
         }
 
-        &:hover::before,
-        &:active::before,
-        :host([activated]) &::before {
+        .icon-button-inner:hover::before {
           background-color: var(--bg-scrim);
         }
       }
@@ -64,7 +72,9 @@ export class OsIconButton extends LitElement {
   override render() {
     return html`
       <button class="icon-button">
-        <os-icon icon="${this.icon}"></os-icon>
+        <div class="icon-button-inner">
+          <os-icon icon="${this.icon}"></os-icon>
+        </div>
       </button>
     `;
   }

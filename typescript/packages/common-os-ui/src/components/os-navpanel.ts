@@ -9,7 +9,6 @@ export class OsNavpanel extends LitElement {
     css`
       :host {
         --panel-bg: var(--bg-2);
-        --toolbar-height: calc(var(--u) * 24);
         display: block;
         width: 100%;
         height: 100%;
@@ -24,11 +23,20 @@ export class OsNavpanel extends LitElement {
         overflow: hidden;
       }
 
+      .navpanel-toolbar {
+        height: var(--toolbar-height);
+      }
+
       .navpanel-content {
         width: 100%;
         height: 100%;
         overflow-x: hidden;
         overflow-y: scroll;
+      }
+
+      /** Add padding to bottom to make room for absolutely positioned fab */
+      :host([safearea]) .navpanel-content {
+        padding-bottom: calc(var(--u) * 24);
       }
     `,
   ];
@@ -44,7 +52,7 @@ export class OsNavpanel extends LitElement {
             <slot name="toolbar-end"></slot>
           </div>
         </nav>
-        <div class="navpanel-content vstack gap pad-h">
+        <div class="navpanel-content vstack gap">
           <slot></slot>
         </div>
       </div>
