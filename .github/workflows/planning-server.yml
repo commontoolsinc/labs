@@ -376,7 +376,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ steps.image_path.outputs.NAME }}
+          images: ${{ needs.setup.outputs.DOCKERHUB_REGISTRY }}/${{ steps.image_path.outputs.IMAGE_NAME }}
 
       - uses: docker/build-push-action@v6
         id: build
