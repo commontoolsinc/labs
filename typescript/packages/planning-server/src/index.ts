@@ -34,7 +34,7 @@ type ConversationThreadRequest =
 const handler = async (request: Request): Promise<Response> => {
   if (request.method === "GET") {
     return new Response("Planning Server", { status: 200 });
-  }  else if (request.method === "POST") {
+  } else if (request.method === "POST") {
     try {
       const body: ConversationThreadRequest = await request.json();
       const { action } = body;
@@ -70,10 +70,10 @@ async function hashKey(key: string): Promise<string> {
   const data = encoder.encode(key);
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function loadCacheItem(key: string): Promise<any | null> {
+async function loadCacheItem(key: string): Promise<unknown | null> {
   const hash = await hashKey(key);
   const filePath = `${CACHE_DIR}/${hash}.json`;
   try {
@@ -85,7 +85,16 @@ async function loadCacheItem(key: string): Promise<any | null> {
   }
 }
 
-async function saveCacheItem(key: string, data: any): Promise<void> {
+async function saveCacheItem(
+  key: string,
+  data: {
+    type: "success";
+    threadId: string;
+    output: string;
+    assistantResponse: CoreAssistantMessage;
+    conversation: CoreMessage[];
+  },
+): Promise<void> {
   const hash = await hashKey(key);
   const filePath = `${CACHE_DIR}/${hash}.json`;
   await ensureDir(CACHE_DIR);
@@ -95,7 +104,7 @@ async function saveCacheItem(key: string, data: any): Promise<void> {
 async function handleCreateConversationThread(
   system: string,
   message: string,
-  activeTools: CoreTool[]
+  activeTools: CoreTool[],
 ): Promise<Response> {
   const cacheKey = `${system}:${message}`;
 
@@ -103,7 +112,10 @@ async function handleCreateConversationThread(
   if (cachedResult) {
     console.log(
       "Cache hit!",
-      (cacheKey.slice(0, 20) + "..." + cacheKey.slice(-20)).replaceAll("\n", "")
+      (cacheKey.slice(0, 20) + "..." + cacheKey.slice(-20)).replaceAll(
+        "\n",
+        "",
+      ),
     );
     return new Response(JSON.stringify(cachedResult), {
       headers: { "Content-Type": "application/json" },
@@ -132,7 +144,7 @@ async function handleCreateConversationThread(
 
 async function handleAppendToConversationThread(
   threadId: string,
-  message?: string
+  message?: string,
 ): Promise<Response> {
   const thread = threadManager.get(threadId);
   if (!thread) {
@@ -165,7 +177,7 @@ async function handleAppendToConversationThread(
   }
 
   // Remove the assistantResponse from the result before sending it to the client
-  const { assistantResponse, ...responseToClient } = result;
+  const { assistantResponse: _assistantResponse, ...responseToClient } = result;
 
   return new Response(JSON.stringify(responseToClient), {
     headers: { "Content-Type": "application/json" },
@@ -174,23 +186,23 @@ async function handleAppendToConversationThread(
 
 type ProcessConversationThreadResult =
   | {
-      type: "success";
-      threadId: string;
-      output: string;
-      assistantResponse: CoreAssistantMessage;
-      conversation: CoreMessage[];
-    }
+    type: "success";
+    threadId: string;
+    output: string;
+    assistantResponse: CoreAssistantMessage;
+    conversation: CoreMessage[];
+  }
   | { type: "error"; error: string };
 
 async function processConversationThread(
-  thread: ConversationThread
+  thread: ConversationThread,
 ): Promise<ProcessConversationThreadResult> {
   console.log("Thread", thread);
 
   const result = await ask(
     thread.conversation,
     thread.system,
-    thread.activeTools
+    thread.activeTools,
   );
   if (!result) {
     return { type: "error", error: "No response from Anthropic" };
