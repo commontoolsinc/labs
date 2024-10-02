@@ -418,6 +418,8 @@ jobs:
           path: ${{ steps.attest_build_provenance.outputs.bundle-path }}
 
       - name: Verify attestation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh attestation verify oci://${{ steps.image_path.outputs.IMAGE_PATH }} -R ${{ github.repository }}
 
       # - name: Install cosign
