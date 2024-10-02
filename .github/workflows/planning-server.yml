@@ -141,7 +141,7 @@ jobs:
         with:
           if-no-files-found: error
           name: planning-server-${{ matrix.target }}
-          path: ${ env.WORKING_DIRECTORY }}/${{ env.DESTINATION }}${{ runner.os == 'Windows' && '.exe' || '' }}
+          path: ${{ steps.setup.outputs.WORKING_DIRECTORY }}/${{ env.DESTINATION }}${{ runner.os == 'Windows' && '.exe' || '' }}
 
   check:
     name: Check code quality
