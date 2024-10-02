@@ -6,7 +6,7 @@ export {
   isolated,
 } from "./module.js";
 export { recipe } from "./recipe.js";
-export { fetchData, generateData, ifElse, str } from "./built-in.js";
+export { streamData, fetchData, generateData, ifElse, str } from "./built-in.js";
 export {
   ID,
   TYPE,

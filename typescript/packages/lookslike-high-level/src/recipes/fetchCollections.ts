@@ -10,6 +10,7 @@ import {
   str
 } from "@commontools/common-builder";
 import { launch } from "../data.js";
+import { streamData } from "@commontools/common-builder";
 
 interface ItemRow {
   id: string;
@@ -188,18 +189,39 @@ const onViewCollection = handler<
 const ensureArray = lift((r: any) => Array.isArray(r) ? r : [r]);
 
 const tap = lift(x => {
-  console.log(x);
+  console.log(x,JSON.stringify(x, null, 2));
   return x;
 })
 
 export const fetchCollections = recipe<{ url: string }>(
   "Fetch Collections",
   ({ url }) => {
-    const { result } = fetchData<any>({
-      url
+    const { result } = streamData<Item>({
+      url: `/api/data`,
+      options: {
+        method: "PUT",
+        body: JSON.stringify({
+            select: {
+              id: "?item",
+              url: "?url",
+              content: "?content",
+              collection: [{
+                name: "?name",
+              }]
+            },
+            where: [
+              { Case: ["?item", "content", "?content"] },
+              { Case: ["?item", "type", "idea"] },
+              { Case: ["?item", "url", "?url"] },
+              { Case: ["?collection", "member", "?item"] },
+              { Case: ["?collection", "name", "?name"] },
+            ]
+        })
+      }
     });
+    tap({ result })
 
-    const data = ensureArray(result);
+    const data = ensureArray(result.data);
 
     return {
       [NAME]: "Fetch Collections",
@@ -211,7 +233,6 @@ export const fetchCollections = recipe<{ url: string }>(
                 <thead>
                     <tr>
                     <th>Action</th>
-                    <th>id</th>
                     <th>name</th>
                     <th>item count</th>
                     </tr>
@@ -220,9 +241,8 @@ export const fetchCollections = recipe<{ url: string }>(
                     ${data.map(row => html`
                     <tr>
                         <td><common-button onclick=${onViewCollection({ collection: row.name })}>View</common-button></td>
-                        <td>${row.id || ''}</td>
-                        <td>${row.name || ''}</td>
-                        <td>${row.itemCount || ''}</td>
+                        <td>${row.content || ''}</td>
+                        <td>${row.url || ''}</td>
                     </tr>
                     `)}
                 </tbody>
