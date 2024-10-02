@@ -11,7 +11,7 @@
     "test": "deno test --no-check",
     "build": "tsc --build -f",
     "prebuild": "npm run clean",
-    "clean": "rm -rf ./lib ./.wireit"
+    "clean": "rm -rf ./lib"
   },
   "repository": {
     "type": "git",
@@ -29,7 +29,6 @@
   "dependencies": {},
   "devDependencies": {
     "tslib": "^2.6.2",
-    "typescript": "^5.2.2",
-    "wireit": "^0.14.4"
+    "typescript": "^5.2.2"
   }
 }
