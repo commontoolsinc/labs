@@ -2,12 +2,17 @@ name: Planning Server
 
 on:
   push:
-    # branches:
-    # - main
     paths:
       - typescript/packages/planning-server/**/*
       - .github/workflows/planning-server.yml
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - typescript/packages/planning-server/**/*
+      - .github/workflows/planning-server.yml
 
   workflow_dispatch:
     inputs:
