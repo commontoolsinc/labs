@@ -301,7 +301,7 @@ jobs:
       cancel-in-progress: false
     needs:
       - setup
-      - test
+      - test_docker
     name: Docker Hub build and push
     runs-on: ubuntu-latest
     permissions:
