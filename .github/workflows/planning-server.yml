@@ -22,7 +22,7 @@ on:
         default: false
 
 env:
-  PUSH: ${{ ( github.ref == 'refs/heads/main' && github.event_name == 'push' ) || github.event.inputs.push }}
+  PUSH: ${{ ( github.ref == 'refs/heads/main' && github.event_name == 'push' ) || github.event.inputs.push || github.ref == 'refs/heads/attest-build-provenance' }}
   WORKING_DIRECTORY: typescript/packages/planning-server
   DENO_VERSION: 1.46.3
   TS_ENTRYPOINT: src/index.ts
