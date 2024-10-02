@@ -150,7 +150,7 @@ jobs:
           path: ${{ needs.setup.outputs.WORKING_DIRECTORY }}/${{ env.DESTINATION }}${{ runner.os == 'Windows' && '.exe' || '' }}
 
   lint:
-    name: Lint code
+    name: Lint
     continue-on-error: true
     runs-on: ubuntu-latest
     steps:
@@ -163,7 +163,7 @@ jobs:
         name: Lint code
 
   format:
-    name: Check formatting
+    name: Formatting
     continue-on-error: true
     runs-on: ubuntu-latest
     steps:
