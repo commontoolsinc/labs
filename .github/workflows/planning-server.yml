@@ -66,6 +66,7 @@ jobs:
           echo "TS_ENTRYPOINT=${{ env.TS_ENTRYPOINT }}" >> $GITHUB_OUTPUT
           echo "ARTIFACT_NAME=${{ env.ARTIFACT_NAME }}" >> $GITHUB_OUTPUT
           echo "CONTAINER_PORT=${{ env.CONTAINER_PORT }}" >> $GITHUB_OUTPUT
+          echo "DOCKER_HUB_REGISTRY=${{ env.DOCKER_HUB_REGISTRY }}" >> $GITHUB_OUTPUT
     outputs:
       PUSH: ${{ steps.vars.outputs.PUSH }}
       WORKING_DIRECTORY: ${{ steps.vars.outputs.WORKING_DIRECTORY }}
@@ -75,6 +76,7 @@ jobs:
       CONTAINER_PORT: ${{ steps.vars.outputs.CONTAINER_PORT }}
       SHORT_HASH: ${{ steps.short_hash.outputs.short_hash }}
       TIMESTAMP: ${{ steps.timestamp.outputs.timestamp }}
+      DOCKERHUB_REGISTRY: ${{ steps.vars.outputs.DOCKER_HUB_REGISTRY }}
 
   build:
     # supported deno architectures:
@@ -400,12 +402,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
       - name: Generate attestation of build provenance
-        env:
-          DOCKERHUB_REGISTRY: ${{ env.DOCKERHUB_REGISTRY }}
         id: attest_build_provenance
         uses: actions/attest-build-provenance@v1 # https://github.com/actions/attest-build-provenance
         with:
-          subject-name: ${{ env.DOCKERHUB_REGISTRY }}/${{ steps.image_path.outputs.IMAGE_NAME }}
+          subject-name: ${{ needs.setup.outputs.DOCKERHUB_REGISTRY }}/${{ steps.image_path.outputs.IMAGE_NAME }}
           subject-digest: ${{ steps.build.outputs.digest }}
           # push-to-registry: true
 
