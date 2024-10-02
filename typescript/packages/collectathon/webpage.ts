@@ -70,8 +70,10 @@ export async function clipWebpage(
         );
         const itemId = result[0][0] as number;
 
-        entity.url = url;
-        entity["collection/" + collectionName] = true;
+        entity["import/url"] = url;
+        entity["import/source"] = "Webpage";
+        entity["import/tool"] = "clipper";
+        entity["import/time"] = new Date().toISOString();
 
         const collection = { name: collectionName, type: 'collection' };
         const collectionCid = await cid(collection);
