@@ -8,3 +8,4 @@ export * as colgrid from "./components/os-colgrid.js";
 export * as tile from "./components/os-tile.js";
 export * as navstack from "./components/os-navstack.js";
 export * as navpanel from "./components/os-navpanel.js";
+export * as fab from "./components/os-fab.js";

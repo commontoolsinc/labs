@@ -53,6 +53,7 @@ export const base = css`
     --pad: calc(var(--u) * 6);
     --gap: calc(var(--u) * 6);
     --gap-sm: calc(var(--u) * 4);
+    --gap-xsm: calc(var(--u) * 2);
     --bg: #fff;
     --bg-1: #fafafa;
     --bg-2: #f0f0f0;
@@ -182,6 +183,10 @@ export const base = css`
 
   .gap-sm {
     gap: var(--gap-sm);
+  }
+
+  .gap-xsm {
+    gap: var(--gap-xsm);
   }
 
   .pad {

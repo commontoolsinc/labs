@@ -38,6 +38,22 @@ export class OsChrome extends LitElement {
         justify-items: stretch;
         height: 100vh;
         transition: grid var(--dur-md) var(--ease-out-cubic);
+        position: relative;
+      }
+
+      /** Container for absolute elements */
+      .chrome-overlay {
+        position: absolute;
+        left: var(--pad);
+        right: var(--pad);
+        top: var(--pad);
+        bottom: var(--pad);
+        pointer-events: none;
+        z-index: 2;
+
+        & > * {
+          pointer-events: all;
+        }
       }
 
       .chrome-main {
@@ -82,6 +98,12 @@ export class OsChrome extends LitElement {
           grid-template-columns: 1fr 1fr;
         }
       }
+
+      .pin-br {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+      }
     `,
   ];
 
@@ -99,6 +121,12 @@ export class OsChrome extends LitElement {
 
     return html`
       <div class="chrome" @sidebarclose="${onSidebarClose}">
+        <div class="chrome-overlay">
+          <os-fabgroup class="pin-br">
+            <os-bubble icon="add" text="Lorem ipsum dolor sit amet"></os-bubble>
+            <os-bubble icon="note" text="Sumer et"></os-bubble>
+          </os-fabgroup>
+        </div>
         <section class="chrome-main">
           <nav class="chrome-main-toolbar toolbar pad-h">
             <div class="toolbar-start"></div>
@@ -119,7 +147,7 @@ export class OsChrome extends LitElement {
             </div>
           </nav>
           <div class="chrome-main-content">
-            <slot name="main"></slot>
+            <slot></slot>
           </div>
         </section>
         <aside class="chrome-sidebar">
