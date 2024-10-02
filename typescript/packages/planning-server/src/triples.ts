@@ -171,7 +171,21 @@ function getAllNotesWithTags() {
   return datascript.q(query, datascript.db(conn));
 }
 
-function storeMemoryWithConnections(newMemory: { [x: string]: unknown; "note/timestamp"?: Date; "note/location"?: string; "note/weather"?: string; "note/scope"?: string; "note/author"?: string; "note/tag"?: string[]; "note/content"?: string[]; "note/question"?: string; "note/coral_species"?: string[]; "note/request"?: string; }) {
+function storeMemoryWithConnections(
+  newMemory: {
+    [x: string]: unknown;
+    "note/timestamp"?: Date;
+    "note/location"?: string;
+    "note/weather"?: string;
+    "note/scope"?: string;
+    "note/author"?: string;
+    "note/tag"?: string[];
+    "note/content"?: string[];
+    "note/question"?: string;
+    "note/coral_species"?: string[];
+    "note/request"?: string;
+  },
+) {
   // Step 1: Query for related memories
   const relatedMemoriesQuery = `
     [:find ?e ?tag
@@ -184,7 +198,7 @@ function storeMemoryWithConnections(newMemory: { [x: string]: unknown; "note/tim
   const relatedMemories = datascript.q(
     relatedMemoriesQuery,
     datascript.db(conn),
-    newMemory["note/tag"]
+    newMemory["note/tag"],
   );
 
   console.log("Related Memories:", relatedMemories);
@@ -202,7 +216,7 @@ function storeMemoryWithConnections(newMemory: { [x: string]: unknown; "note/tim
   const newMemoryId = datascript.q(
     newMemoryIdQuery,
     datascript.db(conn),
-    newMemory["note/timestamp"]
+    newMemory["note/timestamp"],
   );
 
   console.log("New Memory ID:", newMemoryId);

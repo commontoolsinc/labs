@@ -11,7 +11,7 @@ export interface ConversationThreadManager {
   create(
     system: string,
     initialMessage: string,
-    activeTools: CoreTool[]
+    activeTools: CoreTool[],
   ): ConversationThread;
   get(id: string): ConversationThread | undefined;
   update(id: string, newMessages: CoreMessage[]): void;
@@ -19,14 +19,13 @@ export interface ConversationThreadManager {
 }
 
 export class InMemoryConversationThreadManager
-  implements ConversationThreadManager
-{
+  implements ConversationThreadManager {
   private threads: Map<string, ConversationThread> = new Map();
 
   create(
     system: string,
     initialMessage: string,
-    activeTools: CoreTool[]
+    activeTools: CoreTool[],
   ): ConversationThread {
     const id = crypto.randomUUID();
     const thread: ConversationThread = {

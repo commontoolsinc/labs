@@ -1,4 +1,4 @@
-import { anthropic, ai } from "./deps.ts";
+import { ai, anthropic } from "./deps.ts";
 import { CoreMessage } from "npm:ai";
 import { CoreTool } from "npm:ai";
 const { generateText: _generateText, streamText } = ai;
