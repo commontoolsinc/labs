@@ -36,6 +36,7 @@ import { prompt } from "./recipes/prompts.js";
 import { wiki } from "./recipes/wiki.js";
 import { helloIsolated } from "./recipes/helloIsolated.js";
 import { coder } from "./recipes/coder.js";
+import { runz } from "./recipes/runz.js";
 
 export type Charm = {
   [ID]: number;
@@ -67,40 +68,27 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 }
 
 addCharms([
-  run(coder, {
-    title: "hello world", src: `const greeting: string = "Hello, TypeScript!";
-    console.log(greeting);
+  // run(coder, {
+  //   title: "hello world", src: `const greeting: string = "Hello, TypeScript!";
+  //   console.log(greeting);
     
-    // You can also use TypeScript-specific features
-    interface Person {
-      name: string;
-      age: number;
-    }
+  //   // You can also use TypeScript-specific features
+  //   interface Person {
+  //     name: string;
+  //     age: number;
+  //   }
     
-    const printPerson = (person: Person) => {
-      console.log(person.name, 'is', person.age, 'years old');
-    };
+  //   const printPerson = (person: Person) => {
+  //     console.log(person.name, 'is', person.age, 'years old');
+  //   };
     
-    printPerson({ name: "Alice", age: 30 });`})
+  //   printPerson({ name: "Alice", age: 30 });`})
+  // 
   ]);
 
   setTimeout(() => {
-    launch(coder, {
-      title: "launcher", src: `import { html } from "@commontools/common-html";
-import { recipe, UI, NAME } from "@commontools/common-builder";
-import { launch } from "../data.js";
-
-const helloWorld = recipe<{ name: string }>("hello", ({ name }) => (
-  {
-    [NAME]: "hello world",
-    [UI]: html\`<h1>Hello, \$\{name}!</h1>\`
-  }
-));
-
-console.log(helloWorld);
-
-launch(helloWorld, { name: "world" });`}); }, 1000);
-
+    launch(runz, { hash: "ef011d2367e0421df88ef23073fa882557989d7147c3e9f50fb1c42437932e6b" });
+  }, 1000);
 
 export type RecipeManifest = {
   name: string;
@@ -174,7 +162,24 @@ export function launch(recipe: Recipe, bindings: any) {
     );
   }
   const charm = run(recipe, bindings);
+  persist(charm)  // put in the collection / add a ts to make it unique id
+  
   openCharm(charm.get()[ID]);
+}
+
+import {createJsonSchema} from "@commontools/common-builder";
+
+function persist(charm: CellImpl<any>) {
+  // let data = charm.get()
+  // let schema = createJsonSchema({}, data);
+  // let query = createDataQuery(schema)
+  // assert(id, "query", query)
+  // // asert all the things - if isCellReference is true, then check if the cell has an ID
+  // assert(hash, "hash")
+
+  // from the cells, determine the schema...
+  // write to synopsys both the schema and the data and recipe hash
+  // if shared synopsys ... this ID is enough to re-hydrate the charm ... including the recipe
 }
 
 (window as any).recipes = recipes;
