@@ -52,6 +52,22 @@ libFiles.forEach((libFile) => {
   moduleTypeDefs[libFile] = content;
 });
 
+// Corrected data.d.ts
+moduleTypeDefs['../data.d.ts'] = `
+export type Recipe = {
+  // Define the properties of Recipe here
+  name: string;
+  // ... other properties
+};
+
+export function launch(recipe: Recipe, props: any): void;
+`;
+
+// Add this new entry for the JavaScript file
+moduleTypeDefs['../data.js'] = `
+// This file can be empty or contain any necessary JavaScript code
+`;
+
 // Combine all type definitions
 const virtualTypeDefs = {
   'lib.es2015.d.ts': libDts,

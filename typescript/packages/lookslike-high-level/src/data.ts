@@ -90,7 +90,7 @@ addCharms([
 import { recipe, UI, NAME } from "@commontools/common-builder";
 import { launch } from "../data.js";
 
-const helloWorld = recipe("hello", ({ name }) => (
+const helloWorld = recipe<{ name: string }>("hello", ({ name }) => (
   {
     [NAME]: "hello world",
     [UI]: html\`<h1>Hello, \$\{name}!</h1>\`
