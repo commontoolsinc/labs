@@ -406,7 +406,7 @@ jobs:
         id: attest_build_provenance
         uses: actions/attest-build-provenance@v1 # https://github.com/actions/attest-build-provenance
         with:
-          subject-name: ${{ needs.setup.outputs.DOCKER_REGISTRY == needs.setup.outputs.DOCKERHUB_REGISTRY && 'index.' }}${{ steps.image_path.outputs.IMAGE_PATH }}
+          subject-name: ${{ needs.setup.outputs.DOCKER_REGISTRY == needs.setup.outputs.DOCKERHUB_REGISTRY && 'index.' }}${{ needs.setup.outputs.DOCKER_REGISTRY }}/${{ steps.image_path.outputs.IMAGE_NAME }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
