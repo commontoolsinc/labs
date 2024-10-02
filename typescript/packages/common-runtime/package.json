@@ -1,0 +1,16 @@
+{
+  "name": "common-runtime",
+  "type": "module",
+  "description": "A Common runtime",
+  "version": "0.1.0",
+  "files": [
+    "common_runtime_bg.wasm",
+    "common_runtime.js",
+    "common_runtime.d.ts"
+  ],
+  "main": "common_runtime.js",
+  "types": "common_runtime.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

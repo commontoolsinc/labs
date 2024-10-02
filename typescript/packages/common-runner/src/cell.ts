@@ -136,7 +136,7 @@ function simpleCell<T>(
   let target = cell.get();
   while (keys.length) {
     const key = keys.shift()!;
-    target = target[key];
+    target = target instanceof Object ? target[key] : undefined;
     const seen = new Set();
     let ref: CellReference | undefined;
     do {

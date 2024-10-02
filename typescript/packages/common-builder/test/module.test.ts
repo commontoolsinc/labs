@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { isCell, isModule, CellProxy } from "../src/types.js";
-import { lift, handler } from "../src/module.js";
+import { isCell, isModule, CellProxy, Module } from "../src/types.js";
+import { lift, handler, isolated } from "../src/module.js";
 import { cell } from "../src/cell-proxy.js";
+import { JavaScriptModuleDefinition } from "@commontools/common-runtime";
 
 describe("lift function", () => {
   it("creates a node factory", () => {
@@ -45,5 +46,33 @@ describe("handler function", () => {
     expect(nodes.size).toBe(1);
     expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
     expect([...nodes][0].inputs).toMatchObject({ $event: stream });
+  });
+});
+
+describe("isolated function", () => {
+  it("creates a node factory for isolated modules", () => {
+    const add = isolated<{ a: number; b: number }, number>(
+      { a: { tag: "number", val: 0 }, b: { tag: "number", val: 0 } },
+      { result: "number" },
+      ({ a, b }) => a + b
+    );
+    expect(typeof add).toBe("function");
+    const result = add({ a: 1, b: 2 });
+    expect(isCell(result)).toBe(true);
+    expect(result.export().nodes.size).toBe(1);
+    const module = [...result.export().nodes][0].module as Module;
+    expect(module.type).toBe("isolated");
+    const definition = module.implementation as JavaScriptModuleDefinition;
+    expect(definition.body).toContain("export const run = () => {");
+    expect(definition.body).toContain('inputs["a"] = read("a")?.deref()?.val;');
+    expect(definition.body).toContain('inputs["b"] = read("b")?.deref()?.val;');
+    expect(definition.body).toContain('write("result", {');
+    expect(definition.inputs).toMatchObject({
+      a: { tag: "number", val: 0 },
+      b: { tag: "number", val: 0 },
+    });
+    expect(definition.outputs).toMatchObject({
+      result: "number",
+    });
   });
 });

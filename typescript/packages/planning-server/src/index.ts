@@ -1,4 +1,5 @@
 #!/usr/bin/env -S deno run --allow-net --allow-read --allow-env
+
 import { crypto } from "https://deno.land/std/crypto/mod.ts";
 import { ensureDir } from "https://deno.land/std/fs/mod.ts";
 import { CoreAssistantMessage, CoreMessage, CoreTool } from "npm:ai";

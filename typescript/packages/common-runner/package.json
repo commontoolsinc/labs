@@ -24,6 +24,7 @@
     "./lib/index.js"
   ],
   "dependencies": {
+    "@commontools/common-runtime": "file:../common-runtime",
     "@commontools/llm-client": "^0.0.1",
     "@commontools/common-builder": "^0.0.1"
   },

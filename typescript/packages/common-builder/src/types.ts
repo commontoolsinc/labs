@@ -1,3 +1,5 @@
+import { JavaScriptModuleDefinition } from "@commontools/common-runtime";
+
 // Should be Symbol("ID") or so, but this makes repeat() use these when
 // iterating over recipes.
 export const ID = "$ID";
@@ -95,8 +97,8 @@ export function isStreamAlias(value: any): value is StreamAlias {
 }
 
 export type Module = {
-  type: "javascript" | "recipe" | "builtin" | "passthrough";
-  implementation?: Function | Recipe | string;
+  type: "javascript" | "recipe" | "builtin" | "isolated" | "passthrough";
+  implementation?: Function | Recipe | JavaScriptModuleDefinition | string;
   wrapper?: "handler";
 };
 
@@ -106,6 +108,7 @@ export function isModule(value: any): value is Module {
     (value.type === "javascript" ||
       value.type === "recipe" ||
       value.type === "builtin" ||
+      value.type === "isolated" ||
       value.type === "passthrough")
   );
 }

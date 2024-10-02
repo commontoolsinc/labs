@@ -32,6 +32,7 @@ import { dataDesigner } from "./recipes/dataDesigner.js";
 import { jsonImporter } from "./recipes/jsonImport.js";
 import { prompt } from "./recipes/prompts.js";
 import { wiki } from "./recipes/wiki.js";
+import { helloIsolated } from "./recipes/helloIsolated.js";
 
 export type Charm = {
   [ID]: number;
@@ -66,7 +67,7 @@ addCharms([
   run(iframe, { title: "two way binding counter", prompt: "counter", data: { counter: 0 } }),
   run(importCalendar, {}),
   run(fetchCollections, {
-    url: "/api/data/collections/"
+    url: "/api/data/collections/",
   }),
   run(todoList, {
     title: "My TODOs",
@@ -140,7 +141,11 @@ export const recipes: RecipeManifest[] = [
   {
     name: "Explore Halucinated wiki",
     recipe: wiki,
-  }
+  },
+  {
+    name: "Hello Isolated",
+    recipe: helloIsolated,
+  },
 ];
 
 // Helper for mock data

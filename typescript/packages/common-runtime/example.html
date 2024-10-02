@@ -1,0 +1,50 @@
+<!--
+  This example assumes a remote runtime running
+  on 127.0.0.1:8081.
+-->
+<script type="module">
+    import init, { CommonRuntime } from './common_runtime.js';
+
+    // Only needed once, call the default export function
+    // to fetch and setup the web assembly artifact. 
+    await init();
+
+    // Ensure a runtime is running on `127.0.0.1:8081`.
+    const rt = new CommonRuntime("http://127.0.0.1:8081");
+
+    // Define a module definition that takes two string
+    // inputs and returns a concatenated string.
+    const definition = {
+        inputs: {
+            "a": { tag: "string", val: "" },
+            "b": { tag: "string", val: "" },
+        },
+        outputs: {
+            "result": "string",
+        },
+        body: `
+import { read, write } from "common:io/state@0.0.1";
+
+export const run = () => {
+  const a = read("a")?.deref();
+  const b = read("b")?.deref();
+  write("result", {
+    tag: "string",
+    val: \`\${a?.val}\${b?.val}\`,
+  });
+};
+`
+    };
+
+    // Instantiate the module.
+    let fn = await rt.instantiate(definition);
+
+    let inputs = {
+        a: { tag: 'string', val: 'hello' },
+        b: { tag: 'string', val: 'world' }
+    };
+
+    // Call the module function.
+    let output = await fn.run(inputs);
+    console.log(output);
+</script>
