@@ -294,6 +294,7 @@ jobs:
       IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
 
   docker:
+    if: ${{ needs.setup.outputs.PUSH }}
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-docker
       cancel-in-progress: false
