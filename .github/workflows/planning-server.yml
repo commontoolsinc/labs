@@ -404,7 +404,7 @@ jobs:
         with:
           subject-name: ${{ env.DOCKERHUB_REGISTRY }}/${{ steps.image_path.outputs.IMAGE_NAME }}
           subject-digest: ${{ steps.build.outputs.digest }}
-          push-to-registry: true
+          # push-to-registry: true
 
       - name: Upload build provenance attestation
         uses: actions/upload-artifact@v4
