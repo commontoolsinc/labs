@@ -185,6 +185,7 @@ jobs:
         with:
           name: coverage-report
           path: cov.lcov
+          if-no-files-found: error
 
   test_docker:
     name: Local container test
