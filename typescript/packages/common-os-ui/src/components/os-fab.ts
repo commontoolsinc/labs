@@ -58,17 +58,45 @@ export class OsFab extends LitElement {
       .fab {
         background-color: var(--bg-3);
         cursor: pointer;
-        display: block;
+        display: flex;
+        justify-content: center;
+        align-items: center;
         width: var(--fab-size);
         height: var(--fab-size);
         overflow: hidden;
+        position: relative;
         border-radius: calc(var(--fab-size) / 2);
+
+        &::before {
+          content: "";
+          background-color: var(--bg-scrim);
+          top: 0;
+          left: 0;
+          bottom: 0;
+          right: 0;
+          opacity: 0;
+          position: absolute;
+          pointer-events: none;
+          transition: opacity var(--dur-lg) var(--ease-out-expo);
+        }
+
+        &:active::before {
+          opacity: 1;
+        }
+
+        :host([activated]) &::before {
+          opacity: 1;
+        }
       }
     `,
   ];
 
   override render() {
-    return html` <div class="fab material-symbols-rounded"></div> `;
+    return html`
+      <div class="fab">
+        <os-ai-icon></os-ai-icon>
+      </div>
+    `;
   }
 }
 
@@ -90,13 +118,36 @@ export class OsBubble extends LitElement {
         height: var(--height);
         border-radius: calc(var(--height) / 2);
         padding: 0 calc(var(--u) * 4);
-      }
-
-      .bubble-text {
+        position: relative;
         overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        max-width: calc(var(--u) * 90);
+
+        &::before {
+          content: "";
+          background-color: var(--bg-scrim);
+          top: 0;
+          left: 0;
+          bottom: 0;
+          right: 0;
+          opacity: 0;
+          position: absolute;
+          pointer-events: none;
+          transition: opacity var(--dur-lg) var(--ease-out-expo);
+        }
+
+        &:active::before {
+          opacity: 1;
+        }
+
+        :host([activated]) &::before {
+          opacity: 1;
+        }
+
+        .bubble-text {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          max-width: calc(var(--u) * 90);
+        }
       }
     `,
   ];

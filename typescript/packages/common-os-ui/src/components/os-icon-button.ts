@@ -40,13 +40,14 @@ export class OsIconButton extends LitElement {
         &::before {
           content: "";
           background-color: var(--bg-scrim);
-          width: var(--button-size);
-          height: var(--button-size);
           top: 0;
           left: 0;
+          bottom: 0;
+          right: 0;
           opacity: 0;
           position: absolute;
           pointer-events: none;
+          transition: opacity var(--dur-lg) var(--ease-out-expo);
         }
 
         &:active::before {

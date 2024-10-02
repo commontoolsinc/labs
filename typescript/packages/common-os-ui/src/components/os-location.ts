@@ -35,22 +35,27 @@ export class OsLocation extends LitElement {
         padding: 0 calc(var(--u) * 4);
         position: relative;
         cursor: pointer;
-      }
 
-      .location::before {
-        background-color: var(--bg-scrim);
-        content: "";
-        display: block;
-        width: 100%;
-        height: 100%;
-        opacity: 0;
-        position: absolute;
-        pointer-events: none;
-        transition: opacity 250ms ease-out;
-      }
+        &::before {
+          content: "";
+          background-color: var(--bg-scrim);
+          top: 0;
+          left: 0;
+          bottom: 0;
+          right: 0;
+          opacity: 0;
+          position: absolute;
+          pointer-events: none;
+          transition: opacity var(--dur-lg) var(--ease-out-expo);
+        }
 
-      .location:hover::before {
-        opacity: 1;
+        &:active::before {
+          opacity: 1;
+        }
+
+        :host([activated]) &::before {
+          opacity: 1;
+        }
       }
 
       .location-inner {

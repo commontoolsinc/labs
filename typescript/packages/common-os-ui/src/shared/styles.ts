@@ -66,7 +66,8 @@ export const base = css`
     --shadow-menu: 0px 2px 4px rgb(0, 0, 0 / 8%), 0px 0px 10px rgb(0, 0, 0 / 8%);
     --font-family: Helvetica, sans-serif;
     --dur-sm: 250ms;
-    --dur-md: 500ms;
+    --dur-md: 350ms;
+    --dur-lg: 500ms;
     --ease-out-cubic: cubic-bezier(0.215, 0.61, 0.355, 1);
     --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
 
