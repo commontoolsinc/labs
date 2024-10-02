@@ -2,8 +2,8 @@ name: Planning Server
 
 on:
   push:
-    # branches:
-    # - main
+    branches:
+      - main
     paths:
       - typescript/packages/planning-server/**/*
       - .github/workflows/planning-server.yml
@@ -141,7 +141,7 @@ jobs:
         with:
           if-no-files-found: error
           name: planning-server-${{ matrix.target }}
-          path: ${{ steps.setup.outputs.WORKING_DIRECTORY }}/${{ env.DESTINATION }}${{ runner.os == 'Windows' && '.exe' || '' }}
+          path: ${{ needs.setup.outputs.WORKING_DIRECTORY }}/${{ env.DESTINATION }}${{ runner.os == 'Windows' && '.exe' || '' }}
 
   check:
     name: Check code quality
