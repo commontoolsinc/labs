@@ -77,10 +77,15 @@ export function queueEvent(eventRef: CellReference, event: any) {
       ref.path.every((p, i) => p === eventRef.path[i])
     ) {
       queueExecution();
+      eventQueue.push(() => handler(event));
+      /*
+       * TODO: Re-enable ability for handlers to return follow-up events
+       * once it is less likely to accidentally create cycles.
       eventQueue.push(() => {
         const nextEvent = handler(event);
         if (nextEvent) queueEvent(ref, nextEvent);
       });
+      */
     }
   }
 }
