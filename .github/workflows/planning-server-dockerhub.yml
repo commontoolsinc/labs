@@ -86,11 +86,11 @@ jobs:
       TS_ENTRYPOINT: ${{ needs.setup.outputs.TS_ENTRYPOINT }}
       ARTIFACT_NAME: ${{ needs.setup.outputs.ARTIFACT_NAME }}
       CONTAINER_PORT: ${{ needs.setup.outputs.CONTAINER_PORT }}
-    services:
-      registry:
-        image: registry
-        ports:
-          - 5000:5000
+    # services:
+    #   registry:
+    #     image: registry
+    #     ports:
+    #       - 5000:5000
     steps:
       - name: Checkout
         uses: actions/checkout@v4
