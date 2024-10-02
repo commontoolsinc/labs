@@ -1,7 +1,7 @@
 import { anthropic, ai } from "./deps.ts";
 import { CoreMessage } from "npm:ai";
 import { CoreTool } from "npm:ai";
-const { generateText, streamText } = ai;
+const { generateText: _generateText, streamText } = ai;
 
 export const OPUS = "claude-3-5-opus-20240307";
 export const HAIKU = "claude-3-haiku-20240307";
@@ -10,7 +10,7 @@ const model = anthropic(SONNET);
 
 type Model = typeof model;
 
-const MAX_TOKENS = 4096;
+const _MAX_TOKENS = 4096;
 
 export async function single(text: string, model: Model) {
   let response = "";
@@ -30,7 +30,7 @@ export async function single(text: string, model: Model) {
 export async function ask(
   initialConversation: CoreMessage[] = [],
   systemPrompt: string = "",
-  activeTools: CoreTool[],
+  _activeTools: CoreTool[],
 ) {
   const conversation: CoreMessage[] = [...initialConversation];
 

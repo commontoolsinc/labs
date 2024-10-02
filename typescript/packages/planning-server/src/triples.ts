@@ -171,7 +171,7 @@ function getAllNotesWithTags() {
   return datascript.q(query, datascript.db(conn));
 }
 
-async function storeMemoryWithConnections(newMemory: any) {
+function storeMemoryWithConnections(newMemory: { [x: string]: unknown; "note/timestamp"?: Date; "note/location"?: string; "note/weather"?: string; "note/scope"?: string; "note/author"?: string; "note/tag"?: string[]; "note/content"?: string[]; "note/question"?: string; "note/coral_species"?: string[]; "note/request"?: string; }) {
   // Step 1: Query for related memories
   const relatedMemoriesQuery = `
     [:find ?e ?tag
@@ -190,13 +190,13 @@ async function storeMemoryWithConnections(newMemory: any) {
   console.log("Related Memories:", relatedMemories);
 
   // Step 2: Store the new memory
-  const txReport = datascript.transact(conn, [newMemory]);
+  const _txReport = datascript.transact(conn, [newMemory]);
 
   // Query for the ID of the newly inserted entity
   const newMemoryIdQuery = `
     [:find ?e .
      :in $ ?timestamp
-     :where 
+     :where
      [?e "note/timestamp" ?timestamp]]
   `;
   const newMemoryId = datascript.q(
@@ -256,7 +256,7 @@ const newDoc = {
 await storeMemoryWithConnections(newDoc);
 
 // Query to find connections
-function getAllMemoriesWithConnections() {
+function _getAllMemoriesWithConnections() {
   const query = `
     [:find ?e ?timestamp ?tag ?connFrom ?connTo ?connTag
      :where
@@ -272,7 +272,7 @@ function getAllMemoriesWithConnections() {
   return datascript.q(query, datascript.db(conn));
 }
 
-function getConnections() {
+function _getConnections() {
   const query = `
     [:find ?from ?to ?tag
      :where
