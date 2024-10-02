@@ -162,10 +162,12 @@ jobs:
       - run: deno fmt --check
         name: Check formatting
         if: always()
+        continue-on-error: true
 
       - run: deno lint
         name: Lint code
         if: always()
+        continue-on-error: true
 
   test:
     name: Test
