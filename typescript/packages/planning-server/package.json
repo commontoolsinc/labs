@@ -9,34 +9,26 @@
   "scripts": {
     "start": "deno run --allow-env --allow-read --allow-write --allow-net src/index.ts",
     "test": "deno test --no-check",
-    "build": "wireit",
-    "clean": "wireit"
+    "build": "tsc --build -f",
+    "prebuild": "npm run clean",
+    "clean": "rm -rf ./lib"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/commontoolsinc/labs.git"
+    "url": "git+https://github.com/commontoolsinc/labs.git",
+    "directory": "typescript/packages/planning-server/package.json"
   },
   "bugs": {
     "url": "https://github.com/commontoolsinc/labs/issues"
   },
   "homepage": "https://github.com/commontoolsinc/labs#readme",
   "exports": "./lib/index.js",
-  "files": ["./lib/*.js"],
+  "files": [
+    "./lib/*.js"
+  ],
   "dependencies": {},
   "devDependencies": {
     "tslib": "^2.6.2",
-    "typescript": "^5.2.2",
-    "wireit": "^0.14.4"
-  },
-  "wireit": {
-    "build": {
-      "dependencies": [],
-      "files": ["./src/**/*"],
-      "output": ["./lib/**/*"],
-      "command": "tsc --build -f"
-    },
-    "clean": {
-      "command": "rm -rf ./lib ./.wireit"
-    }
+    "typescript": "^5.2.2"
   }
 }
