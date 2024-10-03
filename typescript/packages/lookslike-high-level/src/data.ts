@@ -25,8 +25,8 @@ import {
   getCellReferenceOrThrow,
   isCellProxyForDereferencing,
 } from "@commontools/common-runner";
-import { fetchCollections } from "./recipes/fetchCollections.js";
 import { iframe } from "./recipes/iframe.js";
+import { queryCollections } from "./recipes/queryCollections.js";
 import { importCalendar } from "./recipes/importCalendar.js";
 import { dungeon } from "./recipes/dungeon.js";
 import { dataDesigner } from "./recipes/dataDesigner.js";
@@ -71,7 +71,7 @@ addCharms([
     data: { counter: 0 },
   }),
   run(importCalendar, {}),
-  run(fetchCollections, {
+  run(queryCollections, {
     url: "/api/data/",
   }),
   run(todoList, {

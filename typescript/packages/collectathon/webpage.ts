@@ -6,26 +6,15 @@ import { assert, cid, jsonToFacts } from "./synopsys.ts";
 
 export async function extractEntities(html: string, url: string, prompt?: string) {
   const systemPrompt =
-    "Extract the information the user requested from the provided webpage. You respond only with the entities extracted as JSON in a ``json``` markdown block, no commentary.";
+    "Extract the information the user requested from the provided webpage. You respond only with the entities extracted as an array e.g. ```json [{}, {}]``` block, no commentary.";
   const userPrompt = `
-Extract entities from this HTML content. Intrusctions are as follows:
 ${
   prompt
     ? `${prompt}`
-    : `Extract:
-- Media artifacts (images, videos, files) with metadata
-- Meaningful paragraphs
-- Table of contents
-- People
-- Organizations
-- Locations
-- A summary
-- Quotes or excerpts
-- Key related resources`
+    : `Extract a summary of the page as a JSON blob.`
 }
 
-
-Format the output as a JSON array of objects, each with 'type', 'content' and as many other fields as appropriate.
+Format the output as a JSON array of one or more JSON objects. Use well-known keys for the entities from the set: ["title", "content-type" "author", "date", "content", "src", "summary", "name", "location"] but also include others to fulfill the request.
 URL: ${url}
 
 HTML Content:
