@@ -1,13 +1,7 @@
 import { html } from "@commontools/common-html";
 import { recipe, NAME, UI, isolated, str, lift } from "@commontools/common-builder";
 
-const concat = isolated<{ a: string; b: string }, { result: string }>(
-  { a: { tag: "string", val: "hola" }, b: { tag: "string", val: "mundo" } },
-  { result: "string" },
-  ({ a, b }) => ({ result: `${a} ${b}` })
-);
-
-const tap = isolated<{ data: string }, { result: string }>(
+const uniqueUrls = isolated<{ data: string }, { result: string }>(
   { data: { tag: "string", val: "[]" } },
   { result: "string" },
   ({ data }) => {
@@ -37,17 +31,17 @@ export const runtimeWorkbench = recipe<{ a: string; b: string; data: any; }>(
     b.setDefault("world");
     data.setDefault([{ a: "yello", b: "world" }]);
 
-    const { result: concatenated } = tap({ data: stringify({ obj: { items: data } }) });
+    const { result: urls } = uniqueUrls({ data: stringify({ obj: { items: data } }) });
 
     return {
       [NAME]: str`${a} ${b}`,
       [UI]: html`<div>
 
-          <div>${concatenated}</div>
+          <div>${urls}</div>
 
           <pre>${stringify({ obj: data })}</pre></div>
           `,
-      concatenated,
+      urls: urls,
     };
   }
 );
