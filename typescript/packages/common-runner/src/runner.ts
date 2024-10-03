@@ -72,11 +72,15 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
     const ref = isCellReference(bindings)
       ? bindings
       : ({ cell: bindings, path: [] } satisfies CellReference);
-    const keys = Object.keys(ref.cell.getAsProxy(ref.path));
-    bindings = keys.reduce((acc: any, key) => {
-      acc[key] = { cell: ref.cell, path: [...ref.path, key] };
-      return acc;
-    }, {} as T);
+    const value = ref.cell.getAsProxy(ref.path);
+    if (typeof value !== "object" || value === null)
+      throw new Error(`Invalid bindings: Must be an object`);
+    bindings = Object.fromEntries(
+      Object.entries(value).map(([key]) => [
+        key,
+        { cell: ref.cell, path: [...ref.path, key] },
+      ])
+    ) as T;
   }
 
   // Generate recipe cell using defaults, bindings, and initial values
