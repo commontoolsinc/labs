@@ -13,3 +13,4 @@ export * as fab from "./components/os-fab.js";
 export * as aiIcon from "./components/os-ai-icon.js";
 export * as charmIcon from "./components/os-charm-icon.js";
 export * as charmRow from "./components/os-charm-row.js";
+export * as dialog from "./components/os-dialog.js";

@@ -63,7 +63,7 @@ export const base = css`
     --c-text: #000;
     --c-text2: #969696;
     --c-placeholder: rgb(0, 0, 0 / 20%);
-    --shadow-menu: 0px 2px 4px rgb(0, 0, 0 / 8%), 0px 0px 10px rgb(0, 0, 0 / 8%);
+    --shadow-menu: 0px 2px 4px rgb(0, 0, 0, 8%), 0px 0px 10px rgb(0, 0, 0, 8%);
     --font-family: Helvetica, sans-serif;
     --dur-sm: 250ms;
     --dur-md: 350ms;
