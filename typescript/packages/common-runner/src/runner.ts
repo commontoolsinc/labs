@@ -18,6 +18,7 @@ import {
   followAliases,
   mergeObjects,
   sendValueToBinding,
+  staticDataToNestedCells,
 } from "./utils.js";
 import { builtins } from "./builtins/index.js";
 import init, {
@@ -66,7 +67,7 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
           (recipe.schema as { description: string })?.description ?? "unknown",
       },
       recipe.initial,
-      bindings,
+      staticDataToNestedCells(bindings),
       defaults
     )
   );

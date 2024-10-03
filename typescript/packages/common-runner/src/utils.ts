@@ -327,6 +327,22 @@ export function transformToSimpleCells(
 
 /**
  * Ensures that all elements of an array are cells. If not, i.e. they are static
+ * data, turn them into cell references. Also unwraps proxies.
+ *
+ * Use e.g. when running a recipe and getting static data as input.
+ *
+ * @param value - The value to traverse and make sure all arrays are arrays of
+ * cells. NOTE: The passed value is mutated.
+ * @returns The (potentially unwrapped) input value
+ */
+export function staticDataToNestedCells(value: any, log?: ReactivityLog): any {
+  value = maybeUnwrapProxy(value);
+  deepEqualAndMakeAllElementsCells(value, undefined, log);
+  return value;
+}
+
+/**
+ * Ensures that all elements of an array are cells. If not, i.e. they are static
  * data, turn them into cells. "Is a cell" means it's either a cell, a cell
  * reference or an alias.
  *
@@ -343,6 +359,9 @@ export function deepEqualAndMakeAllElementsCells(
   previous?: any,
   log?: ReactivityLog
 ): boolean {
+  value = maybeUnwrapProxy(value);
+  previous = maybeUnwrapProxy(previous);
+
   let changed = false;
   if (isCell(value)) {
     changed = value !== previous;
@@ -363,16 +382,14 @@ export function deepEqualAndMakeAllElementsCells(
       changed = true;
     }
     for (let i = 0; i < value.length; i++) {
-      if (
-        !(isCell(value[i]) || isCellReference(value[i]) || isAlias(value[i]))
-      ) {
+      const item = maybeUnwrapProxy(value[i]);
+      const previousItem = previous ? maybeUnwrapProxy(previous[i]) : undefined;
+      if (!(isCell(item) || isCellReference(item) || isAlias(item))) {
         const different = deepEqualAndMakeAllElementsCells(
           value[i],
-          !previous
-            ? undefined
-            : isCellReference(previous[i])
-            ? previous[i].cell.getAtPath(previous[i].path)
-            : previous[i]
+          isCellReference(previousItem)
+            ? previousItem.cell.getAtPath(previousItem.path)
+            : previousItem
         );
         if (
           !different &&
@@ -387,7 +404,7 @@ export function deepEqualAndMakeAllElementsCells(
           // change as well.
         } else {
           value[i] = { cell: cell(value[i]), path: [] } satisfies CellReference;
-          log?.writes.push({ cell: value[i].cell, path: value[i].path });
+          log?.writes.push(value[i]);
           changed = true;
         }
       }
@@ -398,13 +415,15 @@ export function deepEqualAndMakeAllElementsCells(
       changed = true;
     }
     for (const key in value) {
+      const item = maybeUnwrapProxy(value[key]);
+      const previousItem = previous
+        ? maybeUnwrapProxy(previous[key])
+        : undefined;
       let change = deepEqualAndMakeAllElementsCells(
-        value[key],
-        !previous
-          ? undefined
-          : isCellReference(previous[key])
-          ? previous[key].cell.getAtPath(previous[key].path)
-          : previous[key]
+        item,
+        isCellReference(previousItem)
+          ? previousItem.cell.getAtPath(previousItem.path)
+          : previousItem
       );
       changed ||= change;
     }
@@ -423,6 +442,12 @@ export function deepEqualAndMakeAllElementsCells(
     changed = value !== previous;
   }
   return changed;
+}
+
+function maybeUnwrapProxy(value: any): any {
+  return isCellProxyForDereferencing(value)
+    ? getCellReferenceOrThrow(value)
+    : value;
 }
 
 function arrayEqual(a: PropertyKey[], b: PropertyKey[]): boolean {

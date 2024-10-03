@@ -236,37 +236,37 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
 };
 
 export function createValueProxy<T>(
-  cell: CellImpl<T>,
-  path: PropertyKey[],
+  valueCell: CellImpl<T>,
+  valuePath: PropertyKey[],
   log?: ReactivityLog
 ): T {
-  log?.reads.push({ cell, path });
+  log?.reads.push({ cell: valueCell, path: valuePath });
 
   // Follow path, following aliases and cells, so might end up on different cell
-  let target = cell.get() as any;
-  const keys = [...path];
-  path = [];
+  let target = valueCell.get() as any;
+  const keys = [...valuePath];
+  valuePath = [];
   while (keys.length) {
     const key = keys.shift()!;
     if (isCellProxyForDereferencing(target)) {
       const ref = target[getCellReference];
-      cell = ref.cell;
-      path = ref.path;
+      valueCell = ref.cell;
+      valuePath = ref.path;
     } else if (isAlias(target)) {
-      const ref = followAliases(target, cell, log);
-      cell = ref.cell;
-      path = ref.path;
+      const ref = followAliases(target, valueCell, log);
+      valueCell = ref.cell;
+      valuePath = ref.path;
     } else if (isCell(target)) {
-      cell = target;
-      path = [];
-      log?.reads.push({ cell, path });
+      valueCell = target;
+      valuePath = [];
+      log?.reads.push({ cell: valueCell, path: valuePath });
       target = target.get();
     } else if (isCellReference(target)) {
       const ref = followCellReferences(target, log);
-      cell = ref.cell;
-      path = ref.path;
+      valueCell = ref.cell;
+      valuePath = ref.path;
     }
-    path.push(key);
+    valuePath.push(key);
     if (typeof target === "object" && target !== null) {
       target = target[key as keyof typeof target];
     } else {
@@ -282,7 +282,7 @@ export function createValueProxy<T>(
   } else if (isCell(target)) {
     return createValueProxy(target, [], log);
   } else if (isAlias(target)) {
-    const ref = followAliases(target, cell, log);
+    const ref = followAliases(target, valueCell, log);
     return createValueProxy(ref.cell, ref.path, log);
   } else if (isCellReference(target)) {
     const ref = followCellReferences(target, log);
@@ -293,7 +293,7 @@ export function createValueProxy<T>(
     get: (target, prop, receiver) => {
       if (typeof prop === "symbol") {
         if (prop === getCellReference)
-          return { cell, path } satisfies CellReference;
+          return { cell: valueCell, path: valuePath } satisfies CellReference;
 
         const value = Reflect.get(target, prop, receiver);
         if (typeof value === "function") return value.bind(receiver);
@@ -310,7 +310,7 @@ export function createValueProxy<T>(
               // methods implicitly read all elements. TODO: Deal with
               // exceptions like at().
               const copy = target.map((_, index) =>
-                createValueProxy(cell, [...path, index], log)
+                createValueProxy(valueCell, [...valuePath, index], log)
               );
 
               return method.apply(copy, args);
@@ -318,48 +318,54 @@ export function createValueProxy<T>(
           : (...args: any[]) => {
               // Operate on a copy so we can diff. For write-only methods like
               // push, don't proxy the other members so we don't log reads.
-              // TODO: Some methods like pop() and shift() don't read the whole
-              // array, so we could optimize that.
+              // Wraps values in a proxy that remembers the original index and
+              // creates cell value proxies on demand.
               let copy: any;
               if (isReadWrite === ArrayMethodType.WriteOnly) copy = [...target];
               else
                 copy = target.map((_, index) =>
-                  createValueProxy(cell, [...path, index], log)
+                  createProxyForArrayValue(
+                    index,
+                    valueCell,
+                    [...valuePath, index],
+                    log
+                  )
                 );
 
               const result = method.apply(copy, args);
 
-              // Undo the cell proxy wrapping for elements that are also cells.
-              copy = copy.map((value: any) => {
-                if (isCellProxyForDereferencing(value)) {
-                  const ref = value[getCellReference];
-                  if (
-                    ref.cell === cell &&
-                    ref.path.length === path.length + 1 &&
-                    typeof ref.path[ref.path.length - 1] === "number" &&
-                    ref.path.slice(0, -1).every((p, i) => p === path[i])
-                  )
-                    return ref.cell.getAtPath(ref.path);
-                  else return value;
-                } else return value;
-              });
+              // Undo the proxy wrapping and assign original items.
+              if (isReadWrite !== ArrayMethodType.ReadWrite)
+                copy = copy.map((value: any) =>
+                  value &&
+                  typeof value === "object" &&
+                  unproxyArrayValue in value
+                    ? target[value[unproxyArrayValue]]
+                    : value
+                );
+
               // Turn any newly added elements into cells. And if there was a
               // change at all, update the cell.
               if (deepEqualAndMakeAllElementsCells(copy, target, log))
-                setNestedValue(cell, path, copy, log);
+                setNestedValue(valueCell, valuePath, copy, log);
 
               return result;
             };
       }
 
-      return createValueProxy(cell, [...path, prop], log);
+      return createValueProxy(valueCell, [...valuePath, prop], log);
     },
     set: (target, prop, value) => {
       if (isCellProxy(value)) value = value[getCellReference];
 
       if (Array.isArray(target) && prop === "length") {
         const oldLength = target.length;
-        const result = setNestedValue(cell, [...path, prop], value, log);
+        const result = setNestedValue(
+          valueCell,
+          [...valuePath, prop],
+          value,
+          log
+        );
         const newLength = value;
         if (result) {
           for (
@@ -367,17 +373,55 @@ export function createValueProxy<T>(
             i < Math.max(oldLength, newLength);
             i++
           ) {
-            log?.writes.push({ cell, path: [...path, i] });
-            queueEvent({ cell, path: [...path, i] }, undefined);
+            log?.writes.push({ cell: valueCell, path: [...valuePath, i] });
+            queueEvent({ cell: valueCell, path: [...valuePath, i] }, undefined);
           }
         }
         return result;
       }
 
-      return setNestedValue(cell, [...path, prop], value, log);
+      // Make sure that any nested arrays are made of cells.
+      deepEqualAndMakeAllElementsCells(value, undefined, log);
+
+      if (isCell(value))
+        value = { cell: value, path: [] } satisfies CellReference;
+
+      // When setting a value in an array, make sure it's a cell reference.
+      if (Array.isArray(target) && !isCellReference(value)) {
+        value = { cell: cell(value), path: [] };
+        log?.writes.push(value);
+      }
+
+      return setNestedValue(valueCell, [...valuePath, prop], value, log);
     },
   }) as T;
 }
+
+// Wraps a value on an array so that it can be read as literal or object,
+// yet when copied will remember the original array index.
+const unproxyArrayValue = Symbol("unproxy array value");
+const createProxyForArrayValue = (
+  source: number,
+  valueCell: CellImpl<any>,
+  valuePath: PropertyKey[],
+  log?: ReactivityLog
+): { [unproxyArrayValue]: number } => {
+  const target = {
+    valueOf: function () {
+      return createValueProxy(valueCell, valuePath, log);
+    },
+    toString: function () {
+      return String(createValueProxy(valueCell, valuePath, log));
+    },
+  };
+
+  return new Proxy(target, {
+    get(target, prop, receiver) {
+      if (prop === unproxyArrayValue) return source;
+      return Reflect.get(target, prop, receiver);
+    },
+  }) as { [unproxyArrayValue]: number };
+};
 
 export function getCellReferenceOrValue(value: any): CellReference {
   if (isCellProxy(value)) return value[getCellReference];
