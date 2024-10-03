@@ -30,7 +30,7 @@ const stringify = lift(({ obj }) => {
   return JSON.stringify(obj || {}, null, 2);
 });
 
-export const workbench = recipe<{ a: string; b: string; data: any; }>(
+export const runtimeWorkbench = recipe<{ a: string; b: string; data: any; }>(
   "isolated hello world",
   ({ a, b, data }) => {
     a.setDefault("hello");

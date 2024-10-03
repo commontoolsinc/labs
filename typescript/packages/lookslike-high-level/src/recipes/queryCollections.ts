@@ -12,7 +12,7 @@ import {
 } from "@commontools/common-builder";
 import { launch } from "../data.js";
 import { streamData } from "@commontools/common-builder";
-import { workbench } from "./workbench.js";
+import { runtimeWorkbench } from "./runtimeWorkbench.js";
 
 const ensureArray = lift((r: any) => Array.isArray(r) ? r : [r]);
 
@@ -109,7 +109,7 @@ const onWorkbench = handler<
     data: any;
   }
 >((event, state) => {
-  launch(workbench, {
+  launch(runtimeWorkbench, {
     data: state.data
   });
 });
