@@ -79,6 +79,12 @@ export function sendValueToBinding(
 ) {
   if (isAlias(binding)) {
     const ref = followAliases(binding, cell, log);
+    if (!isCellReference(value) && !isCell(value))
+      deepEqualAndMakeAllElementsCells(
+        value,
+        ref.cell.getAtPath(ref.path),
+        log
+      );
     setNestedValue(ref.cell, ref.path, value, log);
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value))
@@ -187,7 +193,12 @@ export function findAllAliasedCells(
       find(cell.getAtPath(path), cell);
     } else if (Array.isArray(binding)) {
       for (const value of binding) find(value, origCell);
-    } else if (typeof binding === "object" && binding !== null) {
+    } else if (
+      typeof binding === "object" &&
+      binding !== null &&
+      !isCellReference(binding) &&
+      !isCell(binding)
+    ) {
       for (const value of Object.values(binding)) find(value, origCell);
     }
   }
@@ -401,12 +412,7 @@ export function deepEqualAndMakeAllElementsCells(
       const previousItem = previous
         ? maybeUnwrapProxy(previous[key])
         : undefined;
-      let change = deepEqualAndMakeAllElementsCells(
-        item,
-        isCellReference(previousItem)
-          ? previousItem.cell.getAtPath(previousItem.path)
-          : previousItem
-      );
+      let change = deepEqualAndMakeAllElementsCells(item, previousItem);
       changed ||= change;
     }
     if (!changed) {

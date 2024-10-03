@@ -3,7 +3,10 @@ import { cell, CellImpl, ReactivityLog } from "../cell.js";
 import { sendValueToBinding, findAllAliasedCells } from "../utils.js";
 import { schedule, Action } from "../scheduler.js";
 import { generateData as generateDataClient } from "@commontools/llm-client";
-import { mapBindingsToCell } from "../utils.js";
+import {
+  mapBindingsToCell,
+  deepEqualAndMakeAllElementsCells,
+} from "../utils.js";
 import { mockResultClient, makeClient } from "../llm-client.js";
 
 // TODO: generateData should really be a recipe, not a builtin, and either the
@@ -35,7 +38,7 @@ export function generateData(
     result?: any;
     schema?: any;
     system?: string;
-    mode?: 'json' | 'html'
+    mode?: "json" | "html";
   };
   const inputsCell = cell(inputBindings);
 
@@ -55,8 +58,11 @@ export function generateData(
   let currentRun = 0;
 
   const startGeneration: Action = (log: ReactivityLog) => {
-    const { prompt, result, schema, system, mode } = inputsCell.getAsProxy([], log);
-    const grab = (mode || 'json') === 'json' ? grabJson : grabHtml;
+    const { prompt, result, schema, system, mode } = inputsCell.getAsProxy(
+      [],
+      log
+    );
+    const grab = (mode || "json") === "json" ? grabJson : grabHtml;
 
     if (prompt === undefined) {
       pending.setAtPath([], false, log);
@@ -93,6 +99,8 @@ export function generateData(
     resultPromise.then((result) => {
       if (thisRun !== currentRun) return;
 
+      deepEqualAndMakeAllElementsCells(result, undefined, log);
+
       pending.setAtPath([], false, log);
       fullResult.setAtPath([], result, log);
       partialResult.setAtPath([], result, log);
@@ -118,7 +126,7 @@ export function grabHtml(txt: string) {
   const html = txt.match(/```html\n([\s\S]+?)```/)?.[1];
   if (!html) {
     console.error("No HTML found in text", txt);
-    return ""
+    return "";
   }
-  return {html};
+  return { html };
 }

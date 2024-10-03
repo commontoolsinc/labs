@@ -29,7 +29,10 @@ export const home = recipe<{
       ${recipes.map(
         (recipe) =>
           html`<div>
-            <common-recipe-link foo="bar" recipe=${recipe}></common-recipe-link>
+            <common-recipe-link
+              foo="bar"
+              recipe=${{ name: recipe.name, recipe: recipe.recipe }}
+            ></common-recipe-link>
           </div>`
       )}
       <common-annotation-toggle />

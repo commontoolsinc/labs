@@ -5,7 +5,7 @@ import {
   ReactivityLog,
   getCellReferenceOrThrow,
   isCellReference,
-  isCellProxy,
+  isCell,
   type CellReference,
 } from "../cell.js";
 import { run } from "../runner.js";
@@ -47,8 +47,9 @@ export function map(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
   const outputBindings = mapBindingsToCell(outputs, recipeCell) as any[];
 
   const inputsCell = cell(inputBindings);
-  const result = cell<any[] | undefined>(undefined);
-  let sourceRefToResult: { ref: CellReference; result: CellImpl<any> }[] = [];
+  const result = cell<any[]>([]);
+  let sourceRefToResult: { ref: CellReference; resultCell: CellImpl<any> }[] =
+    [];
 
   const mapValuesToOp: Action = (log: ReactivityLog) => {
     let { list, op } = inputsCell.getAsProxy([], log);
@@ -64,21 +65,11 @@ export function map(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
     if (!Array.isArray(list))
       throw new Error("map currently only supports arrays");
 
-    let previousResult: any[] = result.getAsProxy([]) as any[];
-    if (!Array.isArray(previousResult)) {
-      result.setAtPath([], [], log);
-      previousResult = [];
-    }
-
-    const seen: any[] = [];
-
     // Hack to get to underlying array that lists cell references, etc.
     const listRef = getCellReferenceOrThrow(list);
     list = listRef.cell.getAtPath(listRef.path);
-    if (isCellProxy(previousResult)) {
-      const previousResultRef = getCellReferenceOrThrow(previousResult);
-      previousResult = previousResultRef.cell.getAtPath(previousResultRef.path);
-    }
+
+    const seen: any[] = [];
 
     // Update values that are new or have changed
     for (let index = 0; index < list.length; index++) {
@@ -87,39 +78,56 @@ export function map(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
       // We have to manually add read logs, as we don't go via the proxy here.
       log?.reads.push({ cell: listRef.cell, path: [...listRef.path, index] });
 
+      if (value === undefined) {
+        result.setAtPath([index], undefined, log);
+        continue;
+      }
+
+      if (isCell(value)) value = { cell: value, path: [] };
       if (!isCellReference(value))
         throw new Error("map requires all values to be cell references");
 
       // TODO: Replace with something that follows aliases as well.
       value = followCellReferences(value, log);
 
-      if (isEqualCellReferences(previousResult[index], value)) return;
-
       if (typeof value !== "object")
         throw new Error("map currently only supports objects");
 
+      // If the value is new, instantiate the recipe and store the result cell
       let itemResult = sourceRefToResult.find(({ ref }) =>
         isEqualCellReferences(ref, value)
       );
-      // If the value is new, instantiate the recipe and store the result cell
+
       if (!itemResult) {
+        if (value.cell.getAtPath(value.path) === undefined) {
+          // If value is undefined, don't yet insert the item. Add to read log,
+          // so we get invoked again once it changes.
+          log?.reads.push(value);
+          continue;
+        }
         const resultCell = run(op, value);
-        itemResult = { ref: value, result: resultCell };
+        itemResult = { ref: value, resultCell };
         sourceRefToResult.push(itemResult);
       }
 
       // Send the result value to the result cell
-      result.setAtPath([index], itemResult.result, log);
+      result.setAtPath([index], { cell: itemResult.resultCell, path: [] }, log);
       seen.push(value);
     }
 
-    // Remove values that are no longer in the input
-    sourceRefToResult = sourceRefToResult.filter(({ ref }) =>
-      seen.find((seenValue) => isEqualCellReferences(seenValue, ref))
-    );
+    if (result.get().length > list.length)
+      result.setAtPath(["length"], list.length, log);
 
-    sendValueToBinding(recipeCell, outputBindings, result, log);
+    // NOTE: We leave prior results in the list for now, so they reuse prior
+    // runs when items reappear
+    //
+    // Remove values that are no longer in the input sourceRefToResult =
+    // sourceRefToResult.filter(({ ref }) => seen.find((seenValue) =>
+    // isEqualCellReferences(seenValue, ref))
+    //);
   };
+
+  sendValueToBinding(recipeCell, outputBindings, result);
 
   schedule(mapValuesToOp, {
     reads: findAllAliasedCells(inputBindings, recipeCell),
