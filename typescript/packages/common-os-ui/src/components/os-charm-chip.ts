@@ -12,6 +12,7 @@ export class OsCharmChip extends LitElement {
       }
 
       .os-charm-chip {
+        cursor: pointer;
         display: flex;
         align-items: center;
         flex-direction: column;

@@ -11,7 +11,7 @@ export class OsDialog extends LitElement {
       :host {
         --input-height: calc(var(--u) * 14);
         --width: calc(var(--u) * 150);
-        --offset: calc(var(--u) * 30);
+        --offset: calc(var(--u) * 34);
         display: block;
       }
 
