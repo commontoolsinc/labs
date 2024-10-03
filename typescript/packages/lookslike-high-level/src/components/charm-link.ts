@@ -51,7 +51,7 @@ export class CommonCharmLink extends LitElement {
     const charm = this.charm !== undefined && charmById.get(this.charm);
     if (!charm) return;
 
-    let name = charm.asSimpleCell().get()[NAME];
+    let name = charm.asSimpleCell().key(NAME).get();
 
     if (isReactive(name)) {
       this.nameEffect = name.sink((name: string) => {

@@ -9,7 +9,14 @@ import {
   isAlias,
   isStreamAlias,
 } from "@commontools/common-builder";
-import { cell, CellImpl, ReactivityLog, CellReference } from "./cell.js";
+import {
+  cell,
+  CellImpl,
+  ReactivityLog,
+  CellReference,
+  isCell,
+  isCellReference,
+} from "./cell.js";
 import { Action, schedule, addEventHandler } from "./scheduler.js";
 import {
   extractDefaultValues,
@@ -18,6 +25,7 @@ import {
   followAliases,
   mergeObjects,
   sendValueToBinding,
+  staticDataToNestedCells,
 } from "./utils.js";
 import { builtins } from "./builtins/index.js";
 import init, {
@@ -54,6 +62,27 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
   // Walk the recipe's schema and extract all default values
   const defaults = extractDefaultValues(recipe.schema);
 
+  // Ensure static data is converted to cell references, e.g. for arrays
+  bindings = staticDataToNestedCells(bindings);
+
+  // If the bindings are a cell or cell reference, convert them to an object
+  // where each property is a cell reference.
+  // TODO: If new keys are added after first load, this won't work.
+  if (isCell(bindings) || isCellReference(bindings)) {
+    const ref = isCellReference(bindings)
+      ? bindings
+      : ({ cell: bindings, path: [] } satisfies CellReference);
+    const value = ref.cell.getAsProxy(ref.path);
+    if (typeof value !== "object" || value === null)
+      throw new Error(`Invalid bindings: Must be an object`);
+    bindings = Object.fromEntries(
+      Object.entries(value).map(([key]) => [
+        key,
+        { cell: ref.cell, path: [...ref.path, key] },
+      ])
+    ) as T;
+  }
+
   // Generate recipe cell using defaults, bindings, and initial values
   // TODO: Some initial values can be aliases to outside cells
   const id = nextCharmId++;
@@ -66,7 +95,7 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
           (recipe.schema as { description: string })?.description ?? "unknown",
       },
       recipe.initial,
-      bindings,
+      staticDataToNestedCells(bindings),
       defaults
     )
   );

@@ -23,9 +23,9 @@ export function ifElse(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
       condition ? inputsCell.getAtPath([1]) : inputsCell.getAtPath([2]),
       log
     );
-
-    sendValueToBinding(recipeCell, outputBindings, result, log);
   };
+
+  sendValueToBinding(recipeCell, outputBindings, result);
 
   schedule(checkCondition, {
     reads: findAllAliasedCells(inputBindings[0], recipeCell),

@@ -1,5 +1,6 @@
 import { isAlias } from "@commontools/common-builder";
 import {
+  cell,
   isCell,
   CellImpl,
   ReactivityLog,
@@ -78,6 +79,12 @@ export function sendValueToBinding(
 ) {
   if (isAlias(binding)) {
     const ref = followAliases(binding, cell, log);
+    if (!isCellReference(value) && !isCell(value))
+      deepEqualAndMakeAllElementsCells(
+        value,
+        ref.cell.getAtPath(ref.path),
+        log
+      );
     setNestedValue(ref.cell, ref.path, value, log);
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value))
@@ -96,14 +103,14 @@ export function sendValueToBinding(
 // success, meaning no frozen cells were in the way. That is, also returns true
 // if there was no change.
 export function setNestedValue(
-  cell: CellImpl<any>,
+  currentCell: CellImpl<any>,
   path: PropertyKey[],
   value: any,
   log?: ReactivityLog
 ): boolean {
-  let destValue = cell.getAtPath(path);
+  let destValue = currentCell.getAtPath(path);
   if (isAlias(destValue)) {
-    const ref = followAliases(destValue, cell, log);
+    const ref = followAliases(destValue, currentCell, log);
     return setNestedValue(ref.cell, ref.path, value, log);
   }
 
@@ -114,27 +121,40 @@ export function setNestedValue(
     destValue !== null &&
     typeof value === "object" &&
     value !== null &&
-    Array.isArray(value) === Array.isArray(destValue)
+    Array.isArray(value) === Array.isArray(destValue) &&
+    !isCellReference(value)
   ) {
     let success = true;
     for (const key in value)
       if (key in destValue)
-        success &&= setNestedValue(cell, [...path, key], value[key], log);
+        success &&= setNestedValue(
+          currentCell,
+          [...path, key],
+          value[key],
+          log
+        );
       else {
-        if (cell.isFrozen()) success = false;
-        else cell.setAtPath([...path, key], value[key], log);
+        if (currentCell.isFrozen()) success = false;
+        else currentCell.setAtPath([...path, key], value[key], log);
       }
     for (const key in destValue)
       if (!(key in value)) {
-        if (cell.isFrozen()) success = false;
-        else cell.setAtPath([...path, key], undefined, log);
+        if (currentCell.isFrozen()) success = false;
+        else currentCell.setAtPath([...path, key], undefined, log);
       }
 
     return success;
+  } else if (isCellReference(value) && isCellReference(destValue)) {
+    if (
+      value.cell !== destValue.cell ||
+      !arrayEqual(value.path, destValue.path)
+    )
+      currentCell.setAtPath(path, value, log);
+    return true;
   } else if (!Object.is(destValue, value)) {
     // Use Object.is for comparison to handle NaN and -0 correctly
-    if (cell.isFrozen()) return false;
-    cell.setAtPath(path, value, log);
+    if (currentCell.isFrozen()) return false;
+    currentCell.setAtPath(path, value, log);
     return true;
   }
 
@@ -173,7 +193,12 @@ export function findAllAliasedCells(
       find(cell.getAtPath(path), cell);
     } else if (Array.isArray(binding)) {
       for (const value of binding) find(value, origCell);
-    } else if (typeof binding === "object" && binding !== null) {
+    } else if (
+      typeof binding === "object" &&
+      binding !== null &&
+      !isCellReference(binding) &&
+      !isCell(binding)
+    ) {
       for (const value of Object.values(binding)) find(value, origCell);
     }
   }
@@ -291,4 +316,142 @@ export function transformToSimpleCells(
         ])
       );
   else return value;
+}
+
+/**
+ * Ensures that all elements of an array are cells. If not, i.e. they are static
+ * data, turn them into cell references. Also unwraps proxies.
+ *
+ * Use e.g. when running a recipe and getting static data as input.
+ *
+ * @param value - The value to traverse and make sure all arrays are arrays of
+ * cells. NOTE: The passed value is mutated.
+ * @returns The (potentially unwrapped) input value
+ */
+export function staticDataToNestedCells(value: any, log?: ReactivityLog): any {
+  value = maybeUnwrapProxy(value);
+  deepEqualAndMakeAllElementsCells(value, undefined, log);
+  return value;
+}
+
+/**
+ * Ensures that all elements of an array are cells. If not, i.e. they are static
+ * data, turn them into cells. "Is a cell" means it's either a cell, a cell
+ * reference or an alias.
+ *
+ * Pass the previous value to reuse cells from previous transitions. It does so
+ * if the values match, but only on arrays (as for objects we don't (yet?) do
+ * this behind the scenes translation).
+ *
+ * @param value - The value to traverse and make sure all arrays are arrays of
+ * cells.
+ * @returns Whether the value was changed.
+ */
+export function deepEqualAndMakeAllElementsCells(
+  value: any,
+  previous?: any,
+  log?: ReactivityLog
+): boolean {
+  value = maybeUnwrapProxy(value);
+  previous = maybeUnwrapProxy(previous);
+
+  let changed = false;
+  if (isCell(value)) {
+    changed = value !== previous;
+  } else if (isCellReference(value)) {
+    changed = isCellReference(previous)
+      ? value.cell !== previous.cell || !arrayEqual(value.path, previous.path)
+      : true;
+  } else if (isAlias(value)) {
+    changed = isAlias(previous)
+      ? value.$alias.cell !== previous.$alias.cell ||
+        !arrayEqual(value.$alias.path, previous.$alias.path)
+      : true;
+  } else if (Array.isArray(value)) {
+    if (!Array.isArray(previous)) {
+      previous = undefined;
+      changed = true;
+    } else if (value.length !== previous.length) {
+      changed = true;
+    }
+    for (let i = 0; i < value.length; i++) {
+      const item = maybeUnwrapProxy(value[i]);
+      const previousItem = previous ? maybeUnwrapProxy(previous[i]) : undefined;
+      if (!(isCell(item) || isCellReference(item) || isAlias(item))) {
+        const different = deepEqualAndMakeAllElementsCells(
+          value[i],
+          isCellReference(previousItem)
+            ? previousItem.cell.getAtPath(previousItem.path)
+            : previousItem
+        );
+        if (
+          !different &&
+          previous &&
+          previous[i] &&
+          isCellReference(previous[i])
+        ) {
+          value[i] = previous[i];
+          // NOTE: We don't treat making it a cell reference as a change, since
+          // we'll still have the same value. This is reusing the cell reference
+          // transition from a previous run, but only if the value didn't
+          // change as well.
+        } else {
+          value[i] = { cell: cell(value[i]), path: [] } satisfies CellReference;
+          log?.writes.push(value[i]);
+          changed = true;
+        }
+      }
+    }
+  } else if (typeof value === "object" && value !== null) {
+    if (typeof previous !== "object" || previous === null) {
+      previous = undefined;
+      changed = true;
+    }
+    for (const key in value) {
+      const item = maybeUnwrapProxy(value[key]);
+      const previousItem = previous
+        ? maybeUnwrapProxy(previous[key])
+        : undefined;
+      let change = deepEqualAndMakeAllElementsCells(item, previousItem);
+      changed ||= change;
+    }
+    if (!changed) {
+      for (const key in previous) {
+        if (!(key in value)) {
+          changed = true;
+          break;
+        }
+      }
+    }
+  } else if (isCellReference(previous)) {
+    // value is a literal value here and the last clause
+    changed = value !== previous.cell.getAtPath(previous.path);
+  } else {
+    changed = value !== previous;
+  }
+  return changed;
+}
+
+function maybeUnwrapProxy(value: any): any {
+  return isCellProxyForDereferencing(value)
+    ? getCellReferenceOrThrow(value)
+    : value;
+}
+
+function arrayEqual(a: PropertyKey[], b: PropertyKey[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+export function isEqualCellReferences(
+  a: CellReference,
+  b: CellReference
+): boolean {
+  return (
+    isCellReference(a) &&
+    isCellReference(b) &&
+    a.cell === b.cell &&
+    arrayEqual(a.path, b.path)
+  );
 }
