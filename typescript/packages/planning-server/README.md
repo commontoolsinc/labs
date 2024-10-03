@@ -180,3 +180,5 @@ After deployment, you can access your Planning Server using either:
 - The Tailscale device name (if using Tailscale)
 
 The specific address and port will be provided in the Terraform output.
+
+The Planning Server includes a health check endpoint that responds to all `GET` requests with a `200 OK` status code.
