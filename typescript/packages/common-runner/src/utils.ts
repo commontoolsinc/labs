@@ -437,3 +437,15 @@ function arrayEqual(a: PropertyKey[], b: PropertyKey[]): boolean {
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
 }
+
+export function isEqualCellReferences(
+  a: CellReference,
+  b: CellReference
+): boolean {
+  return (
+    isCellReference(a) &&
+    isCellReference(b) &&
+    a.cell === b.cell &&
+    arrayEqual(a.path, b.path)
+  );
+}
