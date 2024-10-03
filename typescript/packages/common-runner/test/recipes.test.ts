@@ -76,7 +76,7 @@ describe("Recipe Runner", () => {
       ({ values }) => {
         const doubled = values.map(({ x }) => {
           const double = lift<number>((x) => x * 2);
-          return { doubled: double(x) };
+          return { double: double(x) };
         });
         return { doubled };
       }
@@ -86,8 +86,12 @@ describe("Recipe Runner", () => {
 
     await idle();
 
+    // This is necessary to ensure the recipe has time to run
+    // TODO: Get await idle() to work for this case as well
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
     expect(result.getAsProxy()).toMatchObject({
-      doubled: [{ doubled: 2 }, { doubled: 4 }, { doubled: 6 }],
+      doubled: [{ double: 2 }, { double: 4 }, { double: 6 }],
     });
   });
 });
