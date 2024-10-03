@@ -1,5 +1,5 @@
 import { LitElement, html, css } from "lit";
-import { customElement } from "lit/decorators.js";
+import { customElement, property } from "lit/decorators.js";
 import { base } from "../shared/styles.js";
 
 @customElement("os-ai-icon")
@@ -10,8 +10,18 @@ export class OsAiIcon extends LitElement {
       :host {
         --icon-size: calc(var(--u) * 6);
         display: block;
-        width: 32px;
-        height: 32px;
+        width: var(--icon-size);
+        height: var(--icon-size);
+      }
+
+      :host([iconsize="lg"]) {
+        --icon-size: calc(var(--u) * 8);
+      }
+
+      .ai-icon {
+        display: block;
+        width: var(--icon-size);
+        height: var(--icon-size);
       }
     `,
   ];
@@ -19,6 +29,7 @@ export class OsAiIcon extends LitElement {
   override render() {
     return html`
       <svg
+        class="ai-icon"
         width="32"
         height="32"
         viewBox="0 0 32 32"

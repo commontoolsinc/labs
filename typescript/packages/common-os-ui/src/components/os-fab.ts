@@ -2,46 +2,6 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { base } from "../shared/styles.js";
 
-@customElement("os-fabgroup")
-export class OsFabgroup extends LitElement {
-  static override styles = [
-    base,
-    css`
-      :host {
-        display: block;
-        width: fit-content;
-        height: fit-content;
-      }
-
-      .fabgroup {
-        display: flex;
-        flex-direction: column;
-        gap: var(--gap-xsm);
-        align-items: end;
-        overflow: hidden;
-      }
-
-      .bubbles {
-        display: flex;
-        flex-direction: column;
-        gap: var(--gap-xsm);
-        align-items: end;
-      }
-    `,
-  ];
-
-  override render() {
-    return html`
-      <div class="fabgroup material-symbols-rounded">
-        <div class="bubbles">
-          <slot></slot>
-        </div>
-        <os-fab></os-fab>
-      </div>
-    `;
-  }
-}
-
 @customElement("os-fab")
 export class OsFab extends LitElement {
   static override styles = [
@@ -49,7 +9,6 @@ export class OsFab extends LitElement {
     css`
       :host {
         --fab-size: calc(var(--u) * 14);
-        display: block;
         width: fit-content;
         height: fit-content;
       }
@@ -93,7 +52,47 @@ export class OsFab extends LitElement {
   override render() {
     return html`
       <div class="fab">
-        <os-ai-icon></os-ai-icon>
+        <os-ai-icon class="fab-icon" iconsize="lg"></os-ai-icon>
+      </div>
+    `;
+  }
+}
+
+@customElement("os-fabgroup")
+export class OsFabgroup extends LitElement {
+  static override styles = [
+    base,
+    css`
+      :host {
+        display: block;
+        width: fit-content;
+        height: fit-content;
+      }
+
+      .fabgroup {
+        display: flex;
+        flex-direction: column;
+        gap: var(--gap-xsm);
+        align-items: end;
+        overflow: hidden;
+      }
+
+      .bubbles {
+        display: flex;
+        flex-direction: column;
+        gap: var(--gap-xsm);
+        align-items: end;
+      }
+    `,
+  ];
+
+  override render() {
+    return html`
+      <div class="fabgroup material-symbols-rounded">
+        <div class="bubbles">
+          <slot></slot>
+        </div>
+        <os-fab></os-fab>
       </div>
     `;
   }
