@@ -3,7 +3,7 @@ import { Value, NodeFactory, CellProxy } from "./types.js";
 
 export function generateData<T>(
   params: Value<{
-    prompt: string;
+    messages: string[];
     result?: T;
     schema?: any;
     system?: string;
@@ -20,7 +20,6 @@ export function generateData<T>(
 export function fetchData<T>(
   params: Value<{
     url: string;
-    mode?: "json" | "text";
     options?: RequestInit;
     result?: T;
   }>
@@ -76,7 +75,7 @@ let ifElseFactory: NodeFactory<[any, any, any], any> | undefined = undefined;
 
 let generateDataFactory:
   | NodeFactory<
-      { prompt: string; result?: any; schema?: any; system?: string },
+      { messages: string[]; result?: any; schema?: any; system?: string },
       { pending: boolean; result: any; partial: any; error: any }
     >
   | undefined = undefined;

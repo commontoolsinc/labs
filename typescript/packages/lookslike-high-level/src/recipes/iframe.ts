@@ -32,25 +32,19 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value),
 );
 
-const maybeHTML = lift(({ result, pending }) => {
-  if (pending) return `
-    <div style="display: flex; justify-content: center; align-items: center; height: 100vh;">
-      <div style="border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite;"></div>
-      <p style="margin-left: 10px; font-family: Arial, sans-serif;">Generating...</p>
-    </div>
-    <style>
-      @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-    </style>
-  `;
-  return result?.html ?? `
+const maybeHTML = lift(({ result }) => {
+  return result?.html || ''
+});
+
+const maybeSRC = lift(({ src, pending, partial }) => {
+  if (src) return src;
+  if (!pending) return `
     <div style="display: flex; justify-content: center; align-items: center; height: 100vh;">
       <span style="font-size: 40px;">❌</span>
       <p style="margin-left: 10px; font-family: Arial, sans-serif; color: #e74c3c;">Error generating content</p>
     </div>
   `;
+  if (partial) return '<pre>'+ partial.replace(/</g, '&lt;').slice(-1000);
 });
 
 const viewSystemPrompt = lift(
@@ -225,20 +219,22 @@ export const iframe = recipe<{
   // });
 
   const { result: suggestionsResult } = generateData<{ suggestions: Suggestion[] }>({
-    prompt: buildSuggestionsPrompt({ src, prompt, schema }),
+    messages: [buildSuggestionsPrompt({ src, prompt, schema }), '```json\n{"suggestions":['],
     system: `Suggest extensions to the UI either as modifications or forks off into new interfaces. Avoid bloat, focus on the user experience and creative potential. Respond in a json block.`,
     mode: "json",
   });
   const suggestions = getSuggestions({ result: suggestionsResult });
   tap({ suggestions });
 
-  const { result: htmlResult, pending: htmlPending } = generateData<{ html: string }>({
-    prompt: buildUiPrompt({ prompt, lastSrc }),
+  const { result: htmlResult, pending: htmlPending, partial: partialHtml } = generateData<{ html: string }>({
+    messages: [buildUiPrompt({ prompt, lastSrc }), '```html\n<html>'],
     system: viewSystemPrompt({ schema }),
     mode: "html",
   });
 
-  src = maybeHTML({ result: htmlResult, pending: htmlPending });
+  src = maybeHTML({ result: htmlResult });
+  let preview = maybeSRC({ src, pending: htmlPending, partial: partialHtml });
+  tap({ preview })
 
   let firstSuggestion = getSuggestion({ suggestions, index: 0 });
   let secondSuggestion = getSuggestion({ suggestions, index: 1 });
@@ -252,7 +248,7 @@ export const iframe = recipe<{
         placeholder="title"
         oncommon-input=${updateValue({ value: title })}
       ></common-input>
-      <common-iframe src=${src} $context=${data}></common-iframe>
+      <common-iframe src=${preview} $context=${data}></common-iframe>
       <details>
         <summary>View Data</summary>
         <common-input
