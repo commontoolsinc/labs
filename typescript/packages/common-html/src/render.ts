@@ -25,6 +25,7 @@ export const render = (parent: HTMLElement, view: View): Cancel => {
   const { template, context } = view;
   const [root, cancel] = renderNode(template, context);
   if (!root) {
+    logger.warn("Could not render view", view);
     return cancel;
   }
   parent.append(root);
