@@ -31,8 +31,8 @@ export class OsChrome extends LitElement {
       }
 
       /* Half-and-half editor mode animation */
-      :host([splitscreen]) {
-        --sidebar-width: 50vw;
+      :host([wide]) {
+        --sidebar-width: calc(var(--u) * 189);
       }
 
       .chrome {
