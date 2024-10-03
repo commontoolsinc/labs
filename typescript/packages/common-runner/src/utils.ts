@@ -108,32 +108,6 @@ export function setNestedValue(
     return setNestedValue(ref.cell, ref.path, value, log);
   }
 
-  // Let's check whether we're setting a value in an array, i.e. the parent in
-  // the cell is of type array. If so, we have to turn the value into a cell
-  // reference, while reusing an existing cell reference if the value is the
-  // same.
-  if (
-    path.length > 0 &&
-    path.at(-1) !== "length" &&
-    Array.isArray(currentCell.getAtPath(path.slice(0, -1))) &&
-    !isCellReference(value)
-  ) {
-    if (
-      deepEqualAndMakeAllElementsCells(
-        value,
-        isCellReference(destValue)
-          ? destValue.cell.getAtPath(destValue.path)
-          : destValue
-      ) ||
-      !isCellReference(destValue)
-    ) {
-      value = { cell: cell(value), path: [] } satisfies CellReference;
-      log?.writes.push({ cell: value.cell, path: value.path });
-    } else {
-      value = destValue;
-    }
-  }
-
   // Compare destValue and value, if they are the same, recurse, otherwise write
   // value with setAtPath
   if (
@@ -141,7 +115,8 @@ export function setNestedValue(
     destValue !== null &&
     typeof value === "object" &&
     value !== null &&
-    Array.isArray(value) === Array.isArray(destValue)
+    Array.isArray(value) === Array.isArray(destValue) &&
+    !isCellReference(value)
   ) {
     let success = true;
     for (const key in value)
@@ -163,6 +138,13 @@ export function setNestedValue(
       }
 
     return success;
+  } else if (isCellReference(value) && isCellReference(destValue)) {
+    if (
+      value.cell !== destValue.cell ||
+      !arrayEqual(value.path, destValue.path)
+    )
+      currentCell.setAtPath(path, value, log);
+    return true;
   } else if (!Object.is(destValue, value)) {
     // Use Object.is for comparison to handle NaN and -0 correctly
     if (currentCell.isFrozen()) return false;

@@ -55,6 +55,7 @@ export type CellImpl<T> = {
   setAtPath(path: PropertyKey[], newValue: any, log?: ReactivityLog): boolean;
   freeze(): void;
   isFrozen(): boolean;
+  value: T;
   [isCellMarker]: true;
 };
 
@@ -119,6 +120,9 @@ export function cell<T>(value?: T): CellImpl<T> {
       proxied, e.g. for aliases. TODO: Consider changing proxy here. */
     },
     isFrozen: () => readOnly,
+    get value(): T {
+      return value as T;
+    },
     [isCellMarker]: true,
   };
 
@@ -332,22 +336,27 @@ export function createValueProxy<T>(
                   )
                 );
 
-              const result = method.apply(copy, args);
+              let result = method.apply(copy, args);
 
-              // Undo the proxy wrapping and assign original items.
-              if (isReadWrite !== ArrayMethodType.ReadWrite)
+              // Unwrap results and return as value proxies
+              if (isProxyForArrayValue(result)) result = result.valueOf();
+              else if (Array.isArray(result))
+                result = result.map((value) =>
+                  isProxyForArrayValue(value) ? value.valueOf() : value
+                );
+
+              if (isReadWrite === ArrayMethodType.ReadWrite)
+                // Undo the proxy wrapping and assign original items.
                 copy = copy.map((value: any) =>
-                  value &&
-                  typeof value === "object" &&
-                  unproxyArrayValue in value
-                    ? target[value[unproxyArrayValue]]
+                  isProxyForArrayValue(value)
+                    ? target[value[originalIndex]]
                     : value
                 );
 
               // Turn any newly added elements into cells. And if there was a
               // change at all, update the cell.
-              if (deepEqualAndMakeAllElementsCells(copy, target, log))
-                setNestedValue(valueCell, valuePath, copy, log);
+              deepEqualAndMakeAllElementsCells(copy, target, log);
+              setNestedValue(valueCell, valuePath, copy, log);
 
               return result;
             };
@@ -399,13 +408,19 @@ export function createValueProxy<T>(
 
 // Wraps a value on an array so that it can be read as literal or object,
 // yet when copied will remember the original array index.
-const unproxyArrayValue = Symbol("unproxy array value");
+type ProxyForArrayValue = {
+  valueOf: () => any;
+  toString: () => string;
+  [originalIndex]: number;
+};
+const originalIndex = Symbol("original index");
+
 const createProxyForArrayValue = (
   source: number,
   valueCell: CellImpl<any>,
   valuePath: PropertyKey[],
   log?: ReactivityLog
-): { [unproxyArrayValue]: number } => {
+): { [originalIndex]: number } => {
   const target = {
     valueOf: function () {
       return createValueProxy(valueCell, valuePath, log);
@@ -413,15 +428,15 @@ const createProxyForArrayValue = (
     toString: function () {
       return String(createValueProxy(valueCell, valuePath, log));
     },
+    [originalIndex]: source,
   };
 
-  return new Proxy(target, {
-    get(target, prop, receiver) {
-      if (prop === unproxyArrayValue) return source;
-      return Reflect.get(target, prop, receiver);
-    },
-  }) as { [unproxyArrayValue]: number };
+  return target;
 };
+
+function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
+  return typeof value === "object" && value !== null && originalIndex in value;
+}
 
 export function getCellReferenceOrValue(value: any): CellReference {
   if (isCellProxy(value)) return value[getCellReference];

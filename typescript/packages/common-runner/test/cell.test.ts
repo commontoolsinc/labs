@@ -6,6 +6,7 @@ import {
   isCellProxy,
   ReactivityLog,
 } from "../src/cell.js";
+import { compactifyPaths } from "../src/utils.js";
 import { addEventHandler, idle } from "../src/scheduler.js";
 
 describe("Cell", () => {
@@ -148,6 +149,30 @@ describe("createProxy", () => {
       { cell: c.get()[1].cell, path: [] },
       { cell: c, path: ["1"] },
     ]);
+  });
+
+  it("should support pop() and only read the popped element", () => {
+    const c = cell({ a: [] as number[] });
+    const log: ReactivityLog = { reads: [], writes: [] };
+    const proxy = c.getAsProxy([], log);
+    proxy.a = [1, 2, 3];
+    const result = proxy.a.pop();
+    const pathsRead = log.reads.map((r) => r.path.join("."));
+    expect(pathsRead).toContain("a.2");
+    expect(pathsRead).not.toContain("a.0");
+    expect(pathsRead).not.toContain("a.1");
+    expect(result).toEqual(3);
+    expect(proxy.a).toEqual([1, 2]);
+  });
+
+  it("should correctly sort() with cell references", () => {
+    const c = cell({ a: [] as number[] });
+    const log: ReactivityLog = { reads: [], writes: [] };
+    const proxy = c.getAsProxy([], log);
+    proxy.a = [3, 1, 2];
+    const result = proxy.a.sort();
+    expect(result).toEqual([1, 2, 3]);
+    expect(proxy.a).toEqual([1, 2, 3]);
   });
 
   it("should support readonly array methods and log reads", () => {
