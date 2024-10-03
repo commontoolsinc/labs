@@ -9,7 +9,14 @@ import {
   isAlias,
   isStreamAlias,
 } from "@commontools/common-builder";
-import { cell, CellImpl, ReactivityLog, CellReference } from "./cell.js";
+import {
+  cell,
+  CellImpl,
+  ReactivityLog,
+  CellReference,
+  isCell,
+  isCellReference,
+} from "./cell.js";
 import { Action, schedule, addEventHandler } from "./scheduler.js";
 import {
   extractDefaultValues,
@@ -54,6 +61,23 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R>;
 export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
   // Walk the recipe's schema and extract all default values
   const defaults = extractDefaultValues(recipe.schema);
+
+  // Ensure static data is converted to cell references, e.g. for arrays
+  bindings = staticDataToNestedCells(bindings);
+
+  // If the bindings are a cell or cell reference, convert them to an object
+  // where each property is a cell reference.
+  // TODO: If new keys are added after first load, this won't work.
+  if (isCell(bindings) || isCellReference(bindings)) {
+    const ref = isCellReference(bindings)
+      ? bindings
+      : ({ cell: bindings, path: [] } satisfies CellReference);
+    const keys = Object.keys(ref.cell.getAsProxy(ref.path));
+    bindings = keys.reduce((acc: any, key) => {
+      acc[key] = { cell: ref.cell, path: [...ref.path, key] };
+      return acc;
+    }, {} as T);
+  }
 
   // Generate recipe cell using defaults, bindings, and initial values
   // TODO: Some initial values can be aliases to outside cells
