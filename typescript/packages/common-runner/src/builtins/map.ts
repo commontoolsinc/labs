@@ -1,7 +1,20 @@
 import { type Recipe, type Node } from "@commontools/common-builder";
-import { cell, CellImpl, ReactivityLog } from "../cell.js";
+import {
+  cell,
+  CellImpl,
+  ReactivityLog,
+  getCellReferenceOrThrow,
+  isCellReference,
+  isCellProxy,
+  type CellReference,
+} from "../cell.js";
 import { run } from "../runner.js";
-import { sendValueToBinding, findAllAliasedCells } from "../utils.js";
+import {
+  sendValueToBinding,
+  findAllAliasedCells,
+  isEqualCellReferences,
+  followCellReferences,
+} from "../utils.js";
 import { schedule, Action } from "../scheduler.js";
 import { mapBindingsToCell } from "../utils.js";
 
@@ -35,10 +48,10 @@ export function map(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
 
   const inputsCell = cell(inputBindings);
   const result = cell<any[] | undefined>(undefined);
-  const valueToResult: Map<any, CellImpl<any>> = new Map();
+  let sourceRefToResult: { ref: CellReference; result: CellImpl<any> }[] = [];
 
   const mapValuesToOp: Action = (log: ReactivityLog) => {
-    const { list, op } = inputsCell.getAsProxy([], log);
+    let { list, op } = inputsCell.getAsProxy([], log);
 
     // If the list is undefined it means the input isn't available yet.
     // Correspondingly, the result should be []. TODO: Maybe it's important to
@@ -51,40 +64,59 @@ export function map(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
     if (!Array.isArray(list))
       throw new Error("map currently only supports arrays");
 
-    let previousResult = result.getAsProxy([]);
+    let previousResult: any[] = result.getAsProxy([]) as any[];
     if (!Array.isArray(previousResult)) {
       result.setAtPath([], [], log);
       previousResult = [];
     }
 
-    const seen = new Set<any>();
+    const seen: any[] = [];
+
+    // Hack to get to underlying array that lists cell references, etc.
+    const listRef = getCellReferenceOrThrow(list);
+    list = listRef.cell.getAtPath(listRef.path);
+    if (isCellProxy(previousResult)) {
+      const previousResultRef = getCellReferenceOrThrow(previousResult);
+      previousResult = previousResultRef.cell.getAtPath(previousResultRef.path);
+    }
 
     // Update values that are new or have changed
     for (let index = 0; index < list.length; index++) {
-      const value = list[index];
+      let value = list[index];
 
-      if (previousResult[index] === value) return;
+      // We have to manually add read logs, as we don't go via the proxy here.
+      log?.reads.push({ cell: listRef.cell, path: [...listRef.path, index] });
+
+      if (!isCellReference(value))
+        throw new Error("map requires all values to be cell references");
+
+      // TODO: Replace with something that follows aliases as well.
+      value = followCellReferences(value, log);
+
+      if (isEqualCellReferences(previousResult[index], value)) return;
 
       if (typeof value !== "object")
         throw new Error("map currently only supports objects");
 
+      let itemResult = sourceRefToResult.find(({ ref }) =>
+        isEqualCellReferences(ref, value)
+      );
       // If the value is new, instantiate the recipe and store the result cell
-      if (!valueToResult.has(value)) {
-        const resultValue = run(op, value);
-        valueToResult.set(value, resultValue);
+      if (!itemResult) {
+        const resultCell = run(op, value);
+        itemResult = { ref: value, result: resultCell };
+        sourceRefToResult.push(itemResult);
       }
 
       // Send the result value to the result cell
-      result.setAtPath([index], valueToResult.get(value), log);
-      seen.add(value);
+      result.setAtPath([index], itemResult.result, log);
+      seen.push(value);
     }
 
     // Remove values that are no longer in the input
-    for (const value of valueToResult.keys()) {
-      if (!seen.has(value)) {
-        valueToResult.delete(value);
-      }
-    }
+    sourceRefToResult = sourceRefToResult.filter(({ ref }) =>
+      seen.find((seenValue) => isEqualCellReferences(seenValue, ref))
+    );
 
     sendValueToBinding(recipeCell, outputBindings, result, log);
   };
