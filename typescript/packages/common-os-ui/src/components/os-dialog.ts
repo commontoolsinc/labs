@@ -47,8 +47,8 @@ export class OsDialog extends LitElement {
         max-width: var(--width);
         margin: 0 auto;
         top: var(--offset);
-        left: 0;
-        right: 0;
+        left: var(--pad);
+        right: var(--pad);
         z-index: 2;
       }
 
