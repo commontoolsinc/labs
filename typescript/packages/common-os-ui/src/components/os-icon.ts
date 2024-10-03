@@ -23,7 +23,7 @@ export class OsIcon extends LitElement {
         user-select: none;
 
         :host([theme*="secondary"]) & {
-          color: var(--c-text2);
+          color: var(--c-text-2);
         }
       }
     `,

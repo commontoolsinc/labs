@@ -34,7 +34,7 @@ export class OsDialog extends LitElement {
       .dialog {
         background-color: var(--bg);
         border: 0;
-        border-radius: var(--radius2);
+        border-radius: var(--radius-2);
         box-shadow: var(--shadow-menu);
         position: absolute;
         overflow: hidden;

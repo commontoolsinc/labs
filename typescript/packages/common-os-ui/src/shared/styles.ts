@@ -34,7 +34,7 @@ export const base = css`
     --min-touch-size: calc(var(--u) * 11);
     --toolbar-height: calc(var(--u) * 24);
     --radius: calc(var(--u) * 3);
-    --radius2: calc(var(--u) * 6);
+    --radius-2: calc(var(--u) * 6);
     /* Body size 17px */
     --body-size: calc(var(--u) * 4.25);
     --body-line: calc(var(--u) * 6);
@@ -61,7 +61,7 @@ export const base = css`
     --bg-scrim: rgb(0 0 0 / 5%);
     --c-border: #d0d0d0;
     --c-text: #000;
-    --c-text2: #969696;
+    --c-text-2: #969696;
     --c-placeholder: rgb(0, 0, 0 / 20%);
     --shadow-menu: 0px 2px 4px rgb(0, 0, 0, 8%), 0px 0px 10px rgb(0, 0, 0, 8%);
     --font-family: Helvetica, sans-serif;
@@ -149,7 +149,7 @@ export const base = css`
   }
 
   .label {
-    color: var(--c-text2);
+    color: var(--c-text-2);
     font-weight: normal;
     text-transform: uppercase;
     font-family: var(--font-family);
@@ -163,8 +163,8 @@ export const base = css`
     color: var(--c-text);
   }
 
-  .c-text2 {
-    color: var(--c-text2);
+  .c-text-2 {
+    color: var(--c-text-2);
   }
 
   .vstack {
