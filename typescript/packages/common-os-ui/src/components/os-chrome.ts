@@ -76,7 +76,7 @@ export class OsChrome extends LitElement {
 
       /** Container for absolute elements */
       .chrome-overlay {
-        position: absolute;
+        position: fixed;
         left: var(--pad);
         right: var(--pad);
         top: var(--pad);

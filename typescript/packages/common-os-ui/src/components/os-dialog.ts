@@ -9,14 +9,15 @@ export class OsDialog extends LitElement {
     base,
     css`
       :host {
+        --input-height: calc(var(--u) * 14);
         --width: calc(var(--u) * 150);
-        --top-offset: calc(var(--u) * 30);
+        --offset: calc(var(--u) * 30);
         display: block;
       }
 
       /* Creates a fixed position layer on top of the existing layers */
       .layer {
-        transition: opacity var(--dur-sm) var(--ease-out-expo);
+        transition: opacity var(--dur-sm) var(--ease-out-cubic);
         display: block;
         position: fixed;
         left: 0;
@@ -32,19 +33,23 @@ export class OsDialog extends LitElement {
       }
 
       .dialog {
+        --pad: calc(var(--u) * 4);
         background-color: var(--bg);
         border: 0;
-        border-radius: var(--radius-2);
+        border-radius: calc((var(--input-height) / 2) + var(--pad));
+        padding: var(--pad) var(--pad) calc(var(--pad) * 2);
         box-shadow: var(--shadow-menu);
+        display: flex;
+        flex-direction: column;
+        gap: var(--gap);
         position: absolute;
         overflow: hidden;
         max-width: var(--width);
         margin: 0 auto;
+        top: var(--offset);
         left: 0;
         right: 0;
-        top: var(--top-offset);
         z-index: 2;
-        padding: var(--pad);
       }
 
       .scrim {
