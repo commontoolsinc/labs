@@ -44,7 +44,7 @@ export type CellProxyMethods<T> = {
   [isCellProxyMarker]: true;
 };
 
-export function isCell(value: any): value is CellProxy<any> {
+export function isCellProxy(value: any): value is CellProxy<any> {
   return value && typeof value[isCellProxyMarker] === "boolean";
 }
 
@@ -105,11 +105,7 @@ export type Module = {
 export function isModule(value: any): value is Module {
   return (
     (typeof value === "function" || typeof value === "object") &&
-    (value.type === "javascript" ||
-      value.type === "recipe" ||
-      value.type === "builtin" ||
-      value.type === "isolated" ||
-      value.type === "passthrough")
+    typeof value.type === "string"
   );
 }
 
@@ -127,7 +123,13 @@ export type Recipe = {
 };
 
 export function isRecipe(value: any): value is Recipe {
-  return !!(value && value.schema && value.nodes && Array.isArray(value.nodes));
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "schema" in value &&
+    "nodes" in value &&
+    Array.isArray(value.nodes)
+  );
 }
 
 export const isCellProxyMarker = Symbol("isCellProxy");

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isCell, isModule, CellProxy, Module } from "../src/types.js";
+import { isCellProxy, isModule, CellProxy, Module } from "../src/types.js";
 import { lift, handler, isolated } from "../src/module.js";
 import { cell } from "../src/cell-proxy.js";
 import { JavaScriptModuleDefinition } from "@commontools/common-runtime";
@@ -14,7 +14,7 @@ describe("lift function", () => {
   it("creates a cell proxy when called", () => {
     const add = lift<{ a: number; b: number }, number>(({ a, b }) => a + b);
     const result = add({ a: cell(1), b: cell(2) });
-    expect(isCell(result)).toBe(true);
+    expect(isCellProxy(result)).toBe(true);
   });
 });
 
@@ -38,7 +38,7 @@ describe("handler function", () => {
       }
     );
     const stream = clickHandler({ x: cell(10), y: cell(20) });
-    expect(isCell(stream)).toBe(true);
+    expect(isCellProxy(stream)).toBe(true);
     const { value, nodes } = (
       stream as unknown as CellProxy<{ $stream: true }>
     ).export();
@@ -58,7 +58,7 @@ describe("isolated function", () => {
     );
     expect(typeof add).toBe("function");
     const result = add({ a: 1, b: 2 });
-    expect(isCell(result)).toBe(true);
+    expect(isCellProxy(result)).toBe(true);
     expect(result.export().nodes.size).toBe(1);
     const module = [...result.export().nodes][0].module as Module;
     expect(module.type).toBe("isolated");

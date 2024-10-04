@@ -3,7 +3,7 @@ import {
   NodeFactory,
   Value,
   CellProxy,
-  isCell,
+  isCellProxy,
   NodeProxy,
   toJSON,
 } from "./types.js";
@@ -27,7 +27,7 @@ export function createNodeFactory<T = any, R = any>(
     const outputs = cell<R>();
     const node: NodeProxy = { module, inputs, outputs };
 
-    traverseValue(inputs, (value) => isCell(value) && value.connect(node));
+    traverseValue(inputs, (value) => isCellProxy(value) && value.connect(node));
     outputs.connect(node);
 
     return outputs;
@@ -73,7 +73,7 @@ export function handler<E, T>(
       outputs: {},
     };
 
-    traverseValue(props, (value) => isCell(value) && value.connect(node));
+    traverseValue(props, (value) => isCellProxy(value) && value.connect(node));
     stream.connect(node);
 
     return stream as unknown as CellProxy<E>;

@@ -4,7 +4,7 @@ import {
   NodeProxy,
   Value,
   CellProxy,
-  isCell,
+  isCellProxy,
   Node,
   Module,
   Alias,
@@ -70,7 +70,7 @@ export function recipe<T, R>(
 
   const collectCellsAndNodes = (value: Value<any>) =>
     traverseValue(value, (value) => {
-      if (isCell(value) && !cells.has(value)) {
+      if (isCellProxy(value) && !cells.has(value)) {
         cells.add(value);
         value.export().nodes.forEach((node: NodeProxy) => {
           if (!nodes.has(node)) {
@@ -137,7 +137,7 @@ export function recipe<T, R>(
   }
 
   const serializedNodes = Array.from(nodes).map((node) => {
-    const module = isCell(node.module)
+    const module = isCellProxy(node.module)
       ? (toJSONWithAliases(node.module, paths) as Alias)
       : (node.module as Module);
     const inputs = toJSONWithAliases(node.inputs, paths)!;
@@ -161,7 +161,7 @@ export function recipe<T, R>(
     const outputs = cell<R>();
     const node: NodeProxy = { module, inputs, outputs };
 
-    traverseValue(inputs, (value) => isCell(value) && value.connect(node));
+    traverseValue(inputs, (value) => isCellProxy(value) && value.connect(node));
     outputs.connect(node);
 
     return outputs;
