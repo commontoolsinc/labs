@@ -192,7 +192,11 @@ function topologicalSort(
   for (const action of actions) {
     const { reads } = dependencies.get(action)!;
     // TODO: Keep track of affected paths
-    if (Array.from(reads).some(({ cell }) => dirty.has(cell))) {
+    if (reads.length === 0) {
+      // Actions with no dependencies are always relevant. Note that they must
+      // be manually added to `pending`, which happens only once on `schedule`.
+      relevantActions.add(action);
+    } else if (reads.some(({ cell }) => dirty.has(cell))) {
       relevantActions.add(action);
     }
   }
@@ -255,6 +259,7 @@ function topologicalSort(
   const result: Action[] = [];
   const visited = new Set<Action>();
 
+  // Add all actions with no dependencies (in-degree 0) to the queue
   for (const [action, degree] of inDegree.entries()) {
     if (degree === 0) {
       queue.push(action);

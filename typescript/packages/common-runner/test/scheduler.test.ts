@@ -184,6 +184,14 @@ describe("scheduler", () => {
 
     expect(stopped).not.toHaveBeenCalled();
   });
+
+  it("should immediately run actions that have no dependencies", async () => {
+    let runs = 0;
+    const inc: Action = () => runs++;
+    schedule(inc, { reads: [], writes: [] });
+    await idle();
+    expect(runs).toBe(1);
+  });
 });
 
 describe("event handling", () => {
