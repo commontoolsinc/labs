@@ -124,10 +124,10 @@ export type Recipe = {
 
 export function isRecipe(value: any): value is Recipe {
   return (
-    typeof value === "object" &&
+    (typeof value === "function" || typeof value === "object") &&
     value !== null &&
-    "schema" in value &&
-    "nodes" in value &&
+    !!value.schema &&
+    !!value.nodes &&
     Array.isArray(value.nodes)
   );
 }
