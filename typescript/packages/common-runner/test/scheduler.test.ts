@@ -11,6 +11,7 @@ import {
   queueEvent,
   EventHandler,
 } from "../src/scheduler.js";
+import { lift } from "@commontools/common-builder";
 
 describe("scheduler", () => {
   it("should run actions when cells change", async () => {
@@ -312,5 +313,29 @@ describe("event handling", () => {
     expect(eventResultCell.get()).toBe(2);
     expect(actionCount).toBe(3);
     expect(lastEventSeen).toBe(2);
+  });
+
+  it("should handle event handlers that return cell proxies", async () => {
+    const eventCell = cell(0);
+    const eventResultCell = cell(0);
+    let eventCount = 0;
+    let actionCount = 0;
+    let lastEventSeen = 0;
+
+    const eventHandler: EventHandler = () =>
+      lift((state: { value: number }) => {
+        state.value++;
+        console.log("value", state.value);
+      })({
+        value: eventResultCell.getAsProxy(),
+      });
+
+    addEventHandler(eventHandler, { cell: eventCell, path: [] });
+
+    queueEvent({ cell: eventCell, path: [] }, 1);
+    await idle();
+
+    expect(eventCount).toBe(1);
+    expect(eventResultCell.get()).toBe(1);
   });
 });

@@ -1,5 +1,7 @@
-import { CellImpl, CellReference, ReactivityLog } from "./cell.js";
+import { cell, CellImpl, CellReference, ReactivityLog } from "./cell.js";
 import { compactifyPaths, pathAffected } from "./utils.js";
+import { run as runRecipe } from "./runner.js";
+import { isCellProxy, recipe } from "@commontools/common-builder";
 
 export type Action = (log: ReactivityLog) => any;
 export type EventHandler = (event: any) => any;
@@ -87,15 +89,26 @@ export function queueEvent(eventRef: CellReference, event: any) {
       ref.path.every((p, i) => p === eventRef.path[i])
     ) {
       queueExecution();
-      eventQueue.push(() => handler(event));
-      /*
-       * TODO: Re-enable ability for handlers to return follow-up events
-       * once it is less likely to accidentally create cycles.
       eventQueue.push(() => {
-        const nextEvent = handler(event);
-        if (nextEvent) queueEvent(ref, nextEvent);
+        let result = handler(event);
+        // If handler returns a graph created by builder, run it
+        // TODO: Handle case where the result is a structure with possibly
+        // multiple such nodes
+        if (isCellProxy(result)) {
+          const resultNode = result;
+
+          // Recipe that assigns the result of the returned node to "result"
+          const resultRecipe = recipe("event handler result", () => ({
+            result: resultNode,
+          }));
+
+          // New result is a cell that captures that result
+          result = cell();
+          runRecipe(resultRecipe, { result });
+        }
+
+        // TODO: Do something with the result, maybe treat it as another event?
       });
-      */
     }
   }
 }
