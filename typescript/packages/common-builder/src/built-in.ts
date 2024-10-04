@@ -9,7 +9,12 @@ export function llm(
     stop?: string;
     max_tokens?: number;
   }>
-): CellProxy<{ pending: boolean; result?: string; partial?: string; error: any }> {
+): CellProxy<{
+  pending: boolean;
+  result?: string;
+  partial?: string;
+  error: any;
+}> {
   llmFactory ||= createNodeFactory({
     type: "builtin",
     implementation: "llm",
@@ -31,13 +36,6 @@ export function fetchData<T>(
   });
   return fetchDataFactory(params);
 }
-
-let fetchDataFactory:
-  | NodeFactory<
-      { url: string; options?: RequestInit; result?: any },
-      { pending: boolean; result: any; error: any }
-    >
-  | undefined = undefined;
 
 export function streamData<T>(
   params: Value<{
@@ -72,14 +70,47 @@ export function ifElse<T, U, V>(
   return ifElseFactory([condition, ifTrue, ifFalse]);
 }
 
-let ifElseFactory: NodeFactory<[any, any, any], any> | undefined = undefined;
+export function launch<T>(recipeNode: CellProxy<T>): CellProxy<string> {
+  if (
+    recipeNode.export().nodes.size !== 1 ||
+    recipeNode.export().nodes.values().next().value.module.implementation
+      .type !== "recipe"
+  )
+    throw new Error(
+      "launch: Must be a called recipe, e.g. `launch(myRecipe(...))`"
+    );
+  launchFactory ||= createNodeFactory({
+    type: "builtin",
+    implementation: "launch",
+  });
+  return launchFactory({ recipeNode: recipeNode });
+}
+
+let fetchDataFactory:
+  | NodeFactory<
+      { url: string; options?: RequestInit; result?: any },
+      { pending: boolean; result: any; error: any }
+    >
+  | undefined;
+
+let ifElseFactory: NodeFactory<[any, any, any], any> | undefined;
 
 let llmFactory:
   | NodeFactory<
-      { messages?: string[]; prompt?: string; system?: string; stop?: string; max_tokens?: number },
+      {
+        messages?: string[];
+        prompt?: string;
+        system?: string;
+        stop?: string;
+        max_tokens?: number;
+      },
       { pending: boolean; result?: string; partial?: string; error: any }
     >
-  | undefined = undefined;
+  | undefined;
+
+let launchFactory:
+  | NodeFactory<{ recipeNode: CellProxy<any> }, string>
+  | undefined;
 
 // Example:
 // str`Hello, ${name}!`

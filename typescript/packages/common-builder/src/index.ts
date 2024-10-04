@@ -23,7 +23,7 @@ export {
   type RecipeFactory,
   type NodeFactory,
   type ModuleFactory,
-  isCell,
+  isCellProxy,
   isModule,
   isRecipe,
   isAlias,
