@@ -1,8 +1,8 @@
 import { html } from "@commontools/common-html";
 import { recipe, NAME, UI, handler } from "@commontools/common-builder";
 
-const inc = handler<{}, { count: { value: number } }>(({}, state) => {
-  state.count.value += 1;
+const inc = handler<{}, { count: number }>(({}, state) => {
+  state.count += 1;
 });
 
 const updateValue = handler<{ detail: { value: string } }, { value: string }>(
@@ -11,10 +11,10 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   }
 );
 
-export const counter = recipe<{ title: string; count: { value: number } }>(
+export const counter = recipe<{ title: string; count: number }>(
   "counter",
   ({ title, count }) => {
-    count.setDefault({ value: 0 });
+    count.setDefault(0);
     title.setDefault("untitled counter");
 
     return {
