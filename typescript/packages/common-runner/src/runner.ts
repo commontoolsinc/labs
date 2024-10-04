@@ -1,6 +1,7 @@
 import {
   ID,
   TYPE,
+  Node,
   Recipe,
   RecipeFactory,
   Module,
@@ -102,192 +103,212 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
   charmById.set(id, recipeCell);
 
   for (const node of recipe.nodes) {
-    if (isModule(node.module)) {
-      switch (node.module.type) {
-        case "javascript": {
-          const inputs = mapBindingsToCell(
-            node.inputs as { [key: string]: any },
-            recipeCell
-          );
-
-          // TODO: This isn't correct, as module can write into passed cells. We
-          // should look at the schema to find out what cells are read and
-          // written.
-          const reads = findAllAliasedCells(inputs, recipeCell);
-
-          const outputs = mapBindingsToCell(node.outputs, recipeCell);
-          const writes = findAllAliasedCells(outputs, recipeCell);
-
-          let fn = (
-            typeof node.module.implementation === "string"
-              ? eval(node.module.implementation)
-              : node.module.implementation
-          ) as (inputs: any) => any;
-
-          if (node.module.wrapper && node.module.wrapper in moduleWrappers)
-            fn = moduleWrappers[node.module.wrapper](fn);
-
-          // Check if any of the read cells is a stream alias
-          let streamRef: CellReference | undefined = undefined;
-          for (const key in inputs) {
-            let cell = recipeCell;
-            let path: PropertyKey[] = [key];
-            let value = inputs[key];
-            while (isAlias(value)) {
-              const ref = followAliases(value, recipeCell);
-              cell = ref.cell;
-              path = ref.path;
-              value = cell.getAtPath(path);
-            }
-            if (isStreamAlias(value)) {
-              streamRef = { cell, path };
-              break;
-            }
-          }
-
-          if (streamRef) {
-            // Register as event handler for the stream. Replace alias to
-            // stream with the event.
-
-            const stream = { ...streamRef };
-
-            const handler = (event: any) => {
-              if (event.preventDefault) event.preventDefault();
-              const eventInputs = { ...inputs };
-              for (const key in eventInputs) {
-                if (
-                  isAlias(eventInputs[key]) &&
-                  eventInputs[key].$alias.cell === stream.cell &&
-                  eventInputs[key].$alias.path.length === stream.path.length &&
-                  eventInputs[key].$alias.path.every(
-                    (value: PropertyKey, index: number) =>
-                      value === stream.path[index]
-                  )
-                ) {
-                  eventInputs[key] = event;
-                }
-              }
-
-              const inputsCell = cell(eventInputs);
-              inputsCell.freeze(); // Freezes the bindings, not aliased cells.
-
-              return fn(inputsCell.getAsProxy([]));
-            };
-
-            addEventHandler(handler, stream);
-          } else {
-            // Schedule the action to run when the inputs change
-
-            const inputsCell = cell(inputs);
-            inputsCell.freeze(); // Freezes the bindings, not aliased cells.
-
-            const action: Action = (log: ReactivityLog) => {
-              const inputsProxy = inputsCell.getAsProxy([], log);
-              const result = fn(inputsProxy);
-              sendValueToBinding(recipeCell, outputs, result, log);
-            };
-
-            schedule(action, { reads, writes } satisfies ReactivityLog);
-          }
-
-          break;
-        }
-        case "builtin": {
-          // TODO: Factor out javascript and passthrough types to built-ins.
-          // Then rationalize "node.type" vs the builtin type.
-          if (typeof node.module.implementation !== "string")
-            throw new Error(`Builtin is not a string`);
-          if (!(node.module.implementation in builtins))
-            throw new Error(`Unknown builtin: ${node.module.implementation}`);
-
-          // Built-ins can define their own scheduling logic, so they'll
-          // implement parts of the above themselves.
-          builtins[node.module.implementation](recipeCell, node);
-          break;
-        }
-        case "passthrough": {
-          const inputs = mapBindingsToCell(node.inputs, recipeCell);
-          const inputsCell = cell(inputs);
-          const reads = findAllAliasedCells(inputs, recipeCell);
-
-          const outputs = mapBindingsToCell(node.outputs, recipeCell);
-          const writes = findAllAliasedCells(outputs, recipeCell);
-
-          const action: Action = (log: ReactivityLog) => {
-            const inputsProxy = inputsCell.getAsProxy([], log);
-            sendValueToBinding(recipeCell, node.outputs, inputsProxy, log);
-          };
-
-          schedule(action, { reads, writes } satisfies ReactivityLog);
-          break;
-        }
-        case "isolated": {
-          const inputs = mapBindingsToCell(node.inputs, recipeCell);
-          const reads = findAllAliasedCells(inputs, recipeCell);
-          const inputsCell = cell(inputs);
-          inputsCell.freeze();
-
-          const outputs = mapBindingsToCell(node.outputs, recipeCell);
-          const writes = findAllAliasedCells(outputs, recipeCell);
-
-          if (!isJavaScriptModuleDefinition(node.module.implementation))
-            throw new Error(`Invalid module definition`);
-
-          // Initialize web runtime wasm artifact.
-          // Needed only once.
-          runtime ||= (init as unknown as () => Promise<any>)().then(
-            () => new CommonRuntime(COMMON_RUNTIME_URL)
-          );
-
-          const fnPromise = runtime.then((rt) =>
-            rt.instantiate(
-              (node.module as Module)
-                .implementation as unknown as JavaScriptModuleDefinition
-            )
-          );
-
-          const action: Action = async (log: ReactivityLog) => {
-            const inputsProxy = inputsCell.getAsProxy([], log);
-            if (typeof inputsProxy !== "object")
-              throw new Error(`Invalid inputs: Must be an object`);
-
-            const fn = await fnPromise;
-            const fnOutput = await fn.run(
-              inputsProxy as unknown as JavaScriptValueMap
-            );
-
-            const result: any = Object.fromEntries(
-              Object.entries(fnOutput).map(([key, value]) => [key, value.val])
-            );
-
-            sendValueToBinding(recipeCell, node.outputs, result, log);
-          };
-
-          schedule(action, { reads, writes } satisfies ReactivityLog);
-          break;
-        }
-        case "recipe": {
-          if (!isRecipe(node.module.implementation))
-            throw new Error(`Invalid recipe`);
-          const inputs = mapBindingsToCell(node.inputs, recipeCell);
-          const result = run(node.module.implementation, inputs);
-          if (isAlias(node.outputs))
-            sendValueToBinding(recipeCell, node.outputs, result);
-          else
-            result.sink((value) =>
-              sendValueToBinding(recipeCell, node.outputs, value)
-            );
-          break;
-        }
-      }
-    } else if (isAlias(node.module)) {
-      // TODO: Implement, a dynamic node
-    } else {
-      throw new Error(`Unknown module type: ${node.module}`);
-    }
+    instantiateNode(node, recipeCell);
   }
 
   return recipeCell;
+}
+
+export function instantiateNode(node: Node, recipeCell: CellImpl<any>) {
+  if (isModule(node.module)) {
+    switch (node.module.type) {
+      case "javascript":
+        instantiateJavaScriptNode(node, recipeCell);
+        break;
+      case "builtin":
+        instantiateBuiltinNode(node, recipeCell);
+        break;
+      case "passthrough":
+        instantiatePassthroughNode(node, recipeCell);
+        break;
+      case "isolated":
+        instantiateIsolatedNode(node, recipeCell);
+        break;
+      case "recipe":
+        instantiateRecipeNode(node, recipeCell);
+        break;
+      default:
+        throw new Error(`Unknown module type: ${node.module.type}`);
+    }
+  } else if (isAlias(node.module)) {
+    // TODO: Implement, a dynamic node
+  } else {
+    throw new Error(`Unknown module type: ${node.module}`);
+  }
+}
+
+function instantiateJavaScriptNode(node: Node, recipeCell: CellImpl<any>) {
+  const module = node.module as Module;
+
+  const inputs = mapBindingsToCell(
+    node.inputs as { [key: string]: any },
+    recipeCell
+  );
+
+  // TODO: This isn't correct, as module can write into passed cells. We
+  // should look at the schema to find out what cells are read and
+  // written.
+  const reads = findAllAliasedCells(inputs, recipeCell);
+
+  const outputs = mapBindingsToCell(node.outputs, recipeCell);
+  const writes = findAllAliasedCells(outputs, recipeCell);
+
+  let fn = (
+    typeof module.implementation === "string"
+      ? eval(module.implementation)
+      : module.implementation
+  ) as (inputs: any) => any;
+
+  if (module.wrapper && module.wrapper in moduleWrappers)
+    fn = moduleWrappers[module.wrapper](fn);
+
+  // Check if any of the read cells is a stream alias
+  let streamRef: CellReference | undefined = undefined;
+  for (const key in inputs) {
+    let cell = recipeCell;
+    let path: PropertyKey[] = [key];
+    let value = inputs[key];
+    while (isAlias(value)) {
+      const ref = followAliases(value, recipeCell);
+      cell = ref.cell;
+      path = ref.path;
+      value = cell.getAtPath(path);
+    }
+    if (isStreamAlias(value)) {
+      streamRef = { cell, path };
+      break;
+    }
+  }
+
+  if (streamRef) {
+    // Register as event handler for the stream. Replace alias to
+    // stream with the event.
+
+    const stream = { ...streamRef };
+
+    const handler = (event: any) => {
+      if (event.preventDefault) event.preventDefault();
+      const eventInputs = { ...inputs };
+      for (const key in eventInputs) {
+        if (
+          isAlias(eventInputs[key]) &&
+          eventInputs[key].$alias.cell === stream.cell &&
+          eventInputs[key].$alias.path.length === stream.path.length &&
+          eventInputs[key].$alias.path.every(
+            (value: PropertyKey, index: number) => value === stream.path[index]
+          )
+        ) {
+          eventInputs[key] = event;
+        }
+      }
+
+      const inputsCell = cell(eventInputs);
+      inputsCell.freeze(); // Freezes the bindings, not aliased cells.
+
+      return fn(inputsCell.getAsProxy([]));
+    };
+
+    addEventHandler(handler, stream);
+  } else {
+    // Schedule the action to run when the inputs change
+
+    const inputsCell = cell(inputs);
+    inputsCell.freeze(); // Freezes the bindings, not aliased cells.
+
+    const action: Action = (log: ReactivityLog) => {
+      const inputsProxy = inputsCell.getAsProxy([], log);
+      const result = fn(inputsProxy);
+      sendValueToBinding(recipeCell, outputs, result, log);
+    };
+
+    schedule(action, { reads, writes } satisfies ReactivityLog);
+  }
+}
+
+function instantiateBuiltinNode(node: Node, recipeCell: CellImpl<any>) {
+  const module = node.module as Module;
+
+  if (typeof module.implementation !== "string")
+    throw new Error(`Builtin is not a string`);
+  if (!(module.implementation in builtins))
+    throw new Error(`Unknown builtin: ${module.implementation}`);
+
+  // Built-ins can define their own scheduling logic, so they'll
+  // implement parts of the above themselves.
+  builtins[module.implementation](recipeCell, node);
+}
+
+function instantiatePassthroughNode(node: Node, recipeCell: CellImpl<any>) {
+  const inputs = mapBindingsToCell(node.inputs, recipeCell);
+  const inputsCell = cell(inputs);
+  const reads = findAllAliasedCells(inputs, recipeCell);
+
+  const outputs = mapBindingsToCell(node.outputs, recipeCell);
+  const writes = findAllAliasedCells(outputs, recipeCell);
+
+  const action: Action = (log: ReactivityLog) => {
+    const inputsProxy = inputsCell.getAsProxy([], log);
+    sendValueToBinding(recipeCell, node.outputs, inputsProxy, log);
+  };
+
+  schedule(action, { reads, writes } satisfies ReactivityLog);
+}
+
+function instantiateIsolatedNode(node: Node, recipeCell: CellImpl<any>) {
+  const module = node.module as Module;
+
+  const inputs = mapBindingsToCell(node.inputs, recipeCell);
+  const reads = findAllAliasedCells(inputs, recipeCell);
+  const inputsCell = cell(inputs);
+  inputsCell.freeze();
+
+  const outputs = mapBindingsToCell(node.outputs, recipeCell);
+  const writes = findAllAliasedCells(outputs, recipeCell);
+
+  if (!isJavaScriptModuleDefinition(module.implementation))
+    throw new Error(`Invalid module definition`);
+
+  // Initialize web runtime wasm artifact.
+  // Needed only once.
+  runtime ||= (init as unknown as () => Promise<any>)().then(
+    () => new CommonRuntime(COMMON_RUNTIME_URL)
+  );
+
+  const fnPromise = runtime.then((rt) =>
+    rt.instantiate(
+      (node.module as Module)
+        .implementation as unknown as JavaScriptModuleDefinition
+    )
+  );
+
+  const action: Action = async (log: ReactivityLog) => {
+    const inputsProxy = inputsCell.getAsProxy([], log);
+    if (typeof inputsProxy !== "object")
+      throw new Error(`Invalid inputs: Must be an object`);
+
+    const fn = await fnPromise;
+    const fnOutput = await fn.run(inputsProxy as unknown as JavaScriptValueMap);
+
+    const result: any = Object.fromEntries(
+      Object.entries(fnOutput).map(([key, value]) => [key, value.val])
+    );
+
+    sendValueToBinding(recipeCell, node.outputs, result, log);
+  };
+
+  schedule(action, { reads, writes } satisfies ReactivityLog);
+}
+
+function instantiateRecipeNode(node: Node, recipeCell: CellImpl<any>) {
+  const module = node.module as Module;
+
+  if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
+  const inputs = mapBindingsToCell(node.inputs, recipeCell);
+  const result = run(module.implementation, inputs);
+  if (isAlias(node.outputs))
+    sendValueToBinding(recipeCell, node.outputs, result);
+  else
+    result.sink((value) => sendValueToBinding(recipeCell, node.outputs, value));
 }
 
 const moduleWrappers = {
