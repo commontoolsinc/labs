@@ -26,7 +26,7 @@ import {
   isCellProxyForDereferencing,
 } from "@commontools/common-runner";
 import { fetchCollections } from "./recipes/fetchCollections.js";
-import { iframe} from "./recipes/iframe.js";
+import { iframe } from "./recipes/iframe.js";
 import { importCalendar } from "./recipes/importCalendar.js";
 import { dungeon } from "./recipes/dungeon.js";
 import { dataDesigner } from "./recipes/dataDesigner.js";
@@ -65,7 +65,11 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 }
 
 addCharms([
-  run(iframe, { title: "two way binding counter", prompt: "counter", data: { counter: 0 } }),
+  run(iframe, {
+    title: "two way binding counter",
+    prompt: "counter",
+    data: { counter: 0 },
+  }),
   run(importCalendar, {}),
   run(fetchCollections, {
     url: "/api/data/collections/",
@@ -95,58 +99,72 @@ addCharms([
     // TODO: A lot more missing here, this is just to drive the suggestion.
     locations: ["coffee shop with great baristas"],
   }),
-  run(counters, { }),
+  run(counters, {}),
 ]);
 
 export type RecipeManifest = {
   name: string;
-  recipe: Recipe;
+  recipeId: string;
 };
+
+// TODO: Make this a map of hashes that get persisted
+export const recipeById = new Map<string, Recipe>();
+
+let unknownCounter = 0;
+function addRecipe(recipe: Recipe) {
+  const id =
+    (recipe.schema as { description: string })?.description ??
+    `unknown-${unknownCounter++}`;
+
+  recipeById.set(id, recipe);
+
+  return id;
+}
 
 export const recipes: RecipeManifest[] = [
   {
     name: "Explore dungeon game",
-    recipe: dungeon,
+    recipeId: addRecipe(dungeon),
   },
   {
     name: "Create a new TODO list",
-    recipe: todoList,
+    recipeId: addRecipe(todoList),
   },
   {
     name: "Find places",
-    recipe: localSearch,
+    recipeId: addRecipe(localSearch),
   },
   {
     name: "Find a LuftBnB place to stay",
-    recipe: luftBnBSearch,
+    recipeId: addRecipe(luftBnBSearch),
   },
   {
     name: "JSON Importer",
-    recipe: jsonImporter,
+    recipeId: addRecipe(jsonImporter),
   },
   {
     name: "Data Designer",
-    recipe: dataDesigner,
+    recipeId: addRecipe(dataDesigner),
   },
   {
     name: "Create a counter",
-    recipe: counter,
+    recipeId: addRecipe(counter),
   },
   {
     name: "Fetch JSON from a URL",
-    recipe: fetchExample,
+    recipeId: addRecipe(fetchExample),
   },
   {
     name: "Explore imagery prompts",
-    recipe: prompt,
+    recipeId: addRecipe(prompt),
   },
   {
     name: "Explore Halucinated wiki",
-    recipe: wiki,
+    recipeId: addRecipe(wiki),
   },
   {
     name: "Hello Isolated",
-    recipe: helloIsolated,
+    recipeId: addRecipe(helloIsolated),
   },
 ];
 

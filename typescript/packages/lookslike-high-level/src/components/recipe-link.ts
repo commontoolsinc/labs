@@ -1,8 +1,8 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { render } from "@commontools/common-ui";
-import { addCharms, RecipeManifest, ID, type Charm } from "../data.js";
-import { run, isGettable, type CellImpl } from "@commontools/common-runner";
+import { addCharms, recipeById, ID, type Charm } from "../data.js";
+import { run, type CellImpl } from "@commontools/common-runner";
 
 export const recipeLink = render.view("common-recipe-link", {
   recipe: { type: "object" },
@@ -20,15 +20,17 @@ export class CommonRecipeLink extends LitElement {
     }
   `;
 
-  @property({ type: Object })
-  recipe: RecipeManifest | undefined = undefined;
+  @property({ type: String })
+  recipe: string | undefined = undefined;
 
   handleClick(e: Event) {
     e.preventDefault();
 
     if (!this.recipe) return;
+    const recipe = recipeById.get(this.recipe);
+    if (!recipe) return;
 
-    const charm: CellImpl<Charm> = run(maybeUnwrap(this.recipe.recipe), {});
+    const charm: CellImpl<Charm> = run(recipe, {});
     addCharms([charm]);
 
     this.dispatchEvent(
@@ -41,15 +43,13 @@ export class CommonRecipeLink extends LitElement {
   }
 
   override render() {
-    if (!this.recipe?.name) return html``;
     return html`
-      <a href="#" @click="${this.handleClick}"
-        >👨‍🍳 ${maybeUnwrap(this.recipe.name)}</a
+      <a
+        href="#open-recipe-${this.recipe ?? "unknown"}"
+        @click="${this.handleClick}"
       >
+        <slot></slot>
+      </a>
     `;
   }
-}
-
-function maybeUnwrap(value: any) {
-  return isGettable(value) ? value.get() : value;
 }
