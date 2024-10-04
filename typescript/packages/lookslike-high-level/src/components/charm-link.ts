@@ -51,7 +51,11 @@ export class CommonCharmLink extends LitElement {
     const charm = this.charm !== undefined && charmById.get(this.charm);
     if (!charm) return;
 
-    let name = charm.asSimpleCell().key(NAME).get();
+    // Unsubscribe from previous listener
+    this.nameEffect?.();
+    this.nameEffect = undefined;
+
+    let { [NAME]: name } = charm.asSimpleCell().get();
 
     if (isReactive(name)) {
       this.nameEffect = name.sink((name: string) => {
@@ -60,7 +64,6 @@ export class CommonCharmLink extends LitElement {
         skipUpdate = false;
       });
     } else {
-      this.nameEffect?.();
       this.nameFromCharm = name;
     }
   }
