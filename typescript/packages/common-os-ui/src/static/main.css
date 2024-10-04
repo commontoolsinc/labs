@@ -1,0 +1,35 @@
+@font-face {
+  font-family: "Material Symbols Rounded";
+  font-style: normal;
+  src: url("./material-symbols.woff") format("woff");
+}
+
+@layer basic {
+  .material-symbols-rounded {
+    font-family: "Material Symbols Rounded";
+    font-weight: normal;
+    font-style: normal;
+    font-size: 24px; /* Preferred icon size */
+    display: inline-block;
+    line-height: 1;
+    text-transform: none;
+    letter-spacing: normal;
+    word-wrap: normal;
+    white-space: nowrap;
+    direction: ltr;
+    font-variation-settings:
+      "FILL" 1,
+      "GRAD" 200;
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    list-style: none;
+  }
+
+  :not(:defined) {
+    display: none;
+  }
+}
