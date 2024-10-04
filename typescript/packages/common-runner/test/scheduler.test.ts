@@ -325,18 +325,13 @@ describe("event handling", () => {
 
   it("should handle event handlers that return cell proxies", async () => {
     const eventCell = cell(0);
-    const eventResultCell = cell(0);
+    const eventResultCell = cell({ value: 0 });
     let eventCount = 0;
-    let actionCount = 0;
-    let lastEventSeen = 0;
 
     const eventHandler: EventHandler = () =>
       lift((state: { value: number }) => {
-        state.value++;
-        console.log("value", state.value);
-      })({
-        value: eventResultCell.getAsProxy(),
-      });
+        state.value = state.value + 1;
+      })(eventResultCell.getAsProxy());
 
     addEventHandler(eventHandler, { cell: eventCell, path: [] });
 
