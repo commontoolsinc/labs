@@ -15,14 +15,16 @@ import { makeClient, dataRequest } from "../llm-client.js";
  * Returns the complete result as `result` and the incremental result as
  * `partial`. `pending` is true while a request is pending.
  *
+ * @param messages - list of strings to send to the LLM. - alternating user and assistant messages.
+ *  - if you end with an assistant message, the LLM will continue from there.
+ *  - if empty, no LLM call will be made, result and partial will be undefined.
  * @param result - A cell to store the generated data.
  * @param schema - A cell to store the schema of the generated data.
  * @param system - A cell overriding the default system prompt. Only `prompt`
  *   above will be used, as-is, and `result` and `schema` will be ignored.
  * @param mode - The mode to use for generating data. Either `json` or `html`
  *   default to `json` results.
- * @param messages - list of strings to send to the LLM. - alternating user and assistant messages.
- *   if you end with an assistant message, the LLM will continue from there.
+ *  
  * @returns { pending: boolean, result: any, partial: any } - As individual
  *   cells, representing `pending` state, final `result` and incrementally
  *   updating `partial` result.
@@ -32,11 +34,11 @@ export function generateData(
   { inputs, outputs }: Node
 ) {
   const inputBindings = mapBindingsToCell(inputs, recipeCell) as {
+    messages?: string[];
     result?: any;
     schema?: any;
     system?: string;
     mode?: "json" | "html";
-    messages?: string[];
   };
   const inputsCell = cell(inputBindings);
 
