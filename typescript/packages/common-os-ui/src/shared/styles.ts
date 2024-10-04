@@ -38,6 +38,7 @@ export const base = css`
     /* Body size 17px */
     --body-size: calc(var(--u) * 4.25);
     --body-line: calc(var(--u) * 6);
+    --body-gap: calc(var(--u) * 3);
     /* Heading size 24px */
     --heading-size: calc(var(--u) * 6);
     --heading-line: calc(var(--u) * 7);
