@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Recipe } from "@commontools/common-builder";
 import { run } from "../src/runner.js";
 import { idle } from "../src/scheduler.js";
+import { cell } from "../src/cell.js";
 
 describe("runRecipe", () => {
   it("should work with passthrough", async () => {
@@ -129,5 +130,33 @@ describe("runRecipe", () => {
     const result = run(mockRecipe, {});
     await idle();
     expect(result.get()).toMatchObject({ value: 1, result: 2 });
+  });
+
+  it("should allow passing a cell as a binding", async () => {
+    const recipe: Recipe = {
+      schema: {},
+      initial: {},
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (value: number) => value * 2,
+          },
+          inputs: { $alias: { path: ["input"] } },
+          outputs: { $alias: { path: ["output"] } },
+        },
+      ],
+    };
+
+    const inputCell = cell({ input: 10, output: 0 });
+    const result = run(recipe, inputCell);
+
+    await idle();
+
+    expect(result.get()).toMatchObject({
+      output: { $alias: { cell: inputCell, path: ["output"] } },
+      input: { $alias: { cell: inputCell, path: ["input"] } },
+    });
+    expect(inputCell.get()).toMatchObject({ input: 10, output: 20 });
   });
 });

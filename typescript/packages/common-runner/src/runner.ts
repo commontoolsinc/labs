@@ -78,7 +78,7 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
     bindings = Object.fromEntries(
       Object.entries(value).map(([key]) => [
         key,
-        { cell: ref.cell, path: [...ref.path, key] },
+        { $alias: { cell: ref.cell, path: [...ref.path, key] } },
       ])
     ) as T;
   }

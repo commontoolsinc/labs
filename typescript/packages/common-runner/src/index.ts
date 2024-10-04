@@ -18,6 +18,8 @@ export {
   isCellReference,
   isCellProxy,
   isReactive,
+  isGettable,
+  isSendable,
   getCellReferenceOrValue,
   getCellReferenceOrThrow,
   isCellProxyForDereferencing,
