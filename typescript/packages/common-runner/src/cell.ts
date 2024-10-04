@@ -10,7 +10,7 @@ import {
   setNestedValue,
   pathAffected,
   transformToSimpleCells,
-  deepEqualAndMakeAllElementsCells,
+  normalizeToCells,
 } from "./utils.js";
 import { queueEvent } from "./scheduler.js";
 
@@ -42,6 +42,14 @@ export interface Cell<T> {
 
 export interface ReactiveCell<T> {
   sink(callback: (value: T) => void): () => void;
+}
+
+export interface GettableCell<T> {
+  get(): T;
+}
+
+export interface SendableCell<T> {
+  send(value: T): void;
 }
 
 export type CellImpl<T> = {
@@ -355,7 +363,7 @@ export function createValueProxy<T>(
 
               // Turn any newly added elements into cells. And if there was a
               // change at all, update the cell.
-              deepEqualAndMakeAllElementsCells(copy, target, log);
+              normalizeToCells(copy, target, log);
               setNestedValue(valueCell, valuePath, copy, log);
 
               return result;
@@ -390,7 +398,7 @@ export function createValueProxy<T>(
       }
 
       // Make sure that any nested arrays are made of cells.
-      deepEqualAndMakeAllElementsCells(value, undefined, log);
+      normalizeToCells(value, undefined, log);
 
       if (isCell(value))
         value = { cell: value, path: [] } satisfies CellReference;
@@ -486,5 +494,25 @@ export const isReactive = <T = any>(
     typeof value === "object" &&
     "sink" in value &&
     typeof value.sink === "function"
+  );
+};
+
+export const isGettable = <T = any>(
+  value: GettableCell<T>
+): value is GettableCell<T> => {
+  return (
+    typeof value === "object" &&
+    "get" in value &&
+    typeof value.get === "function"
+  );
+};
+
+export const isSendable = <T = any>(
+  value: SendableCell<T>
+): value is SendableCell<T> => {
+  return (
+    typeof value === "object" &&
+    "send" in value &&
+    typeof value.send === "function"
   );
 };

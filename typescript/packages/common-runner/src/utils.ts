@@ -80,11 +80,7 @@ export function sendValueToBinding(
   if (isAlias(binding)) {
     const ref = followAliases(binding, cell, log);
     if (!isCellReference(value) && !isCell(value))
-      deepEqualAndMakeAllElementsCells(
-        value,
-        ref.cell.getAtPath(ref.path),
-        log
-      );
+      normalizeToCells(value, ref.cell.getAtPath(ref.path), log);
     setNestedValue(ref.cell, ref.path, value, log);
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value))
@@ -330,7 +326,7 @@ export function transformToSimpleCells(
  */
 export function staticDataToNestedCells(value: any, log?: ReactivityLog): any {
   value = maybeUnwrapProxy(value);
-  deepEqualAndMakeAllElementsCells(value, undefined, log);
+  normalizeToCells(value, undefined, log);
   return value;
 }
 
@@ -347,7 +343,7 @@ export function staticDataToNestedCells(value: any, log?: ReactivityLog): any {
  * cells.
  * @returns Whether the value was changed.
  */
-export function deepEqualAndMakeAllElementsCells(
+export function normalizeToCells(
   value: any,
   previous?: any,
   log?: ReactivityLog
@@ -378,7 +374,7 @@ export function deepEqualAndMakeAllElementsCells(
       const item = maybeUnwrapProxy(value[i]);
       const previousItem = previous ? maybeUnwrapProxy(previous[i]) : undefined;
       if (!(isCell(item) || isCellReference(item) || isAlias(item))) {
-        const different = deepEqualAndMakeAllElementsCells(
+        const different = normalizeToCells(
           value[i],
           isCellReference(previousItem)
             ? previousItem.cell.getAtPath(previousItem.path)
@@ -412,7 +408,7 @@ export function deepEqualAndMakeAllElementsCells(
       const previousItem = previous
         ? maybeUnwrapProxy(previous[key])
         : undefined;
-      let change = deepEqualAndMakeAllElementsCells(item, previousItem);
+      let change = normalizeToCells(item, previousItem);
       changed ||= change;
     }
     if (!changed) {

@@ -2,7 +2,7 @@ import { type Node } from "@commontools/common-builder";
 import { cell, CellImpl, ReactivityLog } from "../cell.js";
 import { sendValueToBinding, findAllAliasedCells } from "../utils.js";
 import { schedule, Action } from "../scheduler.js";
-import { mapBindingsToCell } from "../utils.js";
+import { mapBindingsToCell, normalizeToCells } from "../utils.js";
 
 /**
  * Fetch data from a URL.
@@ -20,7 +20,7 @@ export function fetchData(
 ) {
   const inputBindings = mapBindingsToCell(inputs, recipeCell) as {
     url: string;
-    mode?: 'text' | 'json';
+    mode?: "text" | "json";
     result?: any;
   };
   const inputsCell = cell(inputBindings);
@@ -42,7 +42,10 @@ export function fetchData(
 
   const startFetch: Action = (log: ReactivityLog) => {
     const { url, mode } = inputsCell.getAsProxy([], log);
-    const processResponse = (mode || 'json') === 'json' ? (r: Response) => r.json() : (r: Response) => r.text();
+    const processResponse =
+      (mode || "json") === "json"
+        ? (r: Response) => r.json()
+        : (r: Response) => r.text();
 
     if (url === undefined) {
       pending.setAtPath([], false, log);
@@ -62,6 +65,8 @@ export function fetchData(
       .then(processResponse)
       .then((data) => {
         if (thisRun !== currentRun) return;
+
+        normalizeToCells(result, undefined, log);
 
         pending.setAtPath([], false, log);
         result.setAtPath([], data, log);

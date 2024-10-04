@@ -3,10 +3,7 @@ import { cell, CellImpl, ReactivityLog } from "../cell.js";
 import { sendValueToBinding, findAllAliasedCells } from "../utils.js";
 import { schedule, Action } from "../scheduler.js";
 import { generateData as generateDataClient } from "@commontools/llm-client";
-import {
-  mapBindingsToCell,
-  deepEqualAndMakeAllElementsCells,
-} from "../utils.js";
+import { mapBindingsToCell, normalizeToCells } from "../utils.js";
 import { mockResultClient, makeClient } from "../llm-client.js";
 
 // TODO: generateData should really be a recipe, not a builtin, and either the
@@ -99,7 +96,7 @@ export function generateData(
     resultPromise.then((result) => {
       if (thisRun !== currentRun) return;
 
-      deepEqualAndMakeAllElementsCells(result, undefined, log);
+      normalizeToCells(result, undefined, log);
 
       pending.setAtPath([], false, log);
       fullResult.setAtPath([], result, log);

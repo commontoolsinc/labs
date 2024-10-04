@@ -1,5 +1,10 @@
 import { type Node } from "@commontools/common-builder";
-import { cell, type CellImpl, type ReactivityLog } from "../cell.js";
+import {
+  cell,
+  getCellReferenceOrThrow,
+  type CellImpl,
+  type ReactivityLog,
+} from "../cell.js";
 import { sendValueToBinding, findAllAliasedCells } from "../utils.js";
 import { schedule, type Action } from "../scheduler.js";
 import { mapBindingsToCell } from "../utils.js";
@@ -19,10 +24,10 @@ export function ifElse(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
   const checkCondition: Action = (log: ReactivityLog) => {
     const condition = inputsCell.getAsProxy([0], log);
 
-    result.send(
-      condition ? inputsCell.getAtPath([1]) : inputsCell.getAtPath([2]),
-      log
+    const ref = getCellReferenceOrThrow(
+      inputsCell.getAsProxy([condition ? 1 : 2], log)
     );
+    result.send(ref.cell.getAsProxy(ref.path), log);
   };
 
   sendValueToBinding(recipeCell, outputBindings, result);

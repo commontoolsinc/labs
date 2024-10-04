@@ -2,7 +2,7 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { render } from "@commontools/common-ui";
 import { addCharms, RecipeManifest, ID, type Charm } from "../data.js";
-import { run, type CellImpl } from "@commontools/common-runner";
+import { run, isGettable, type CellImpl } from "@commontools/common-runner";
 
 export const recipeLink = render.view("common-recipe-link", {
   recipe: { type: "object" },
@@ -51,11 +51,5 @@ export class CommonRecipeLink extends LitElement {
 }
 
 function maybeUnwrap(value: any) {
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    typeof value.get === "function"
-  )
-    return value.get();
-  else return value;
+  return isGettable(value) ? value.get() : value;
 }
