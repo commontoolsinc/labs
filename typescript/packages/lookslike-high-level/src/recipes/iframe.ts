@@ -44,7 +44,7 @@ const maybeSRC = lift(({ src, pending, partial }) => {
       <p style="margin-left: 10px; font-family: Arial, sans-serif; color: #e74c3c;">Error generating content</p>
     </div>
   `;
-  if (partial) return '<pre>'+ partial.replace(/</g, '&lt;').slice(-1000);
+  if (partial) return '<pre>' + partial.replace(/</g, '&lt;').slice(-1000);
 });
 
 const viewSystemPrompt = lift(
@@ -156,21 +156,21 @@ const acceptSuggestion = handler<
   }
 });
 
-const buildUiPrompt = lift(({ prompt, lastSrc }) => {
+const buildUiMessages = lift(({ prompt, lastSrc }) => {
   let fullPrompt = prompt;
   if (lastSrc) {
     fullPrompt += `\n\nHere's the previous HTML for reference:\n\`\`\`html\n${lastSrc}\n\`\`\``;
   }
-  return fullPrompt;
+  return [fullPrompt, '```html\n<html>']
 });
 
-const buildSuggestionsPrompt = lift(({ src, prompt, schema }) => {
-  let fullPrompt = `Given the current prompt: "${prompt}"`;
-  fullPrompt += `\n\nGiven the following schema:\n<view-model-schema>\n${JSON.stringify(schema, null, 2)}\n</view-model-schema>`;
-  if (src) {
-    fullPrompt += `\n\nAnd the previous HTML:\n\`\`\`html\n${src}\n\`\`\``;
-  }
-  fullPrompt += `\n\nSuggest 3 prompts to enhancem, refine or branch off into a new UI. Keep it simple these add or change a single feature. Return the suggestions in a JSON block with the following structure:
+const buildSuggestionsMessages = lift(({ src, prompt, schema }) => {
+  if (!src) return;
+
+  let user = `Given the current prompt: "${prompt}"`;
+  user += `\n\nGiven the following schema:\n<view-model-schema>\n${JSON.stringify(schema, null, 2)}\n</view-model-schema>`;
+  user += `\n\nAnd the current HTML:\n\`\`\`html\n${src}\n\`\`\``;
+  user += `\n\nSuggest 3 prompts to enhancem, refine or branch off into a new UI. Keep it simple these add or change a single feature. Return the suggestions in a JSON block with the following structure:
   \`\`\`json
   {
     "suggestions": [
@@ -184,7 +184,8 @@ const buildSuggestionsPrompt = lift(({ src, prompt, schema }) => {
 
   Do not ever exceed a single sentence. Prefer terse, suggestions that take one step.
   `;
-  return fullPrompt;
+
+  return [user, '```json\n{"suggestions":['];
 });
 
 const getSuggestions = lift(({ result }) => result?.suggestions ?? []);
@@ -219,22 +220,20 @@ export const iframe = recipe<{
   // });
 
   const { result: suggestionsResult } = generateData<{ suggestions: Suggestion[] }>({
-    messages: [buildSuggestionsPrompt({ src, prompt, schema }), '```json\n{"suggestions":['],
+    messages: buildSuggestionsMessages({ src, prompt, schema }),
     system: `Suggest extensions to the UI either as modifications or forks off into new interfaces. Avoid bloat, focus on the user experience and creative potential. Respond in a json block.`,
     mode: "json",
   });
   const suggestions = getSuggestions({ result: suggestionsResult });
-  tap({ suggestions });
 
   const { result: htmlResult, pending: htmlPending, partial: partialHtml } = generateData<{ html: string }>({
-    messages: [buildUiPrompt({ prompt, lastSrc }), '```html\n<html>'],
+    messages: buildUiMessages({ prompt, lastSrc }),
     system: viewSystemPrompt({ schema }),
     mode: "html",
   });
 
   src = maybeHTML({ result: htmlResult });
   let preview = maybeSRC({ src, pending: htmlPending, partial: partialHtml });
-  tap({ preview })
 
   let firstSuggestion = getSuggestion({ suggestions, index: 0 });
   let secondSuggestion = getSuggestion({ suggestions, index: 1 });

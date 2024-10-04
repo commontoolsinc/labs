@@ -2,9 +2,9 @@ import { type Node } from "@commontools/common-builder";
 import { cell, CellImpl, ReactivityLog } from "../cell.js";
 import { sendValueToBinding, findAllAliasedCells } from "../utils.js";
 import { schedule, Action } from "../scheduler.js";
-import { generateData as generateDataClient } from "@commontools/llm-client";
+import { SimpleMessage } from "@commontools/llm-client";
 import { mapBindingsToCell, normalizeToCells } from "../utils.js";
-import { mockResultClient } from "../llm-client.js";
+import { makeClient, dataRequest } from "../llm-client.js";
 
 // TODO: generateData should really be a recipe, not a builtin, and either the
 // underlying llm client call or even just fetch the built-in.
@@ -77,77 +77,48 @@ export function generateData(
     fullResult.setAtPath([], undefined, log);
     partialResult.setAtPath([], undefined, log);
 
-    let resultPromise: Promise<any>;
-    let fullMessages = messages?.map((message, index) => ({ role: index % 2 === 0 ? "user" : "assistant", content: message }))
+    let fullMessages: SimpleMessage[] = (messages || []).map(
+      (message, index) => ({ role: index % 2 === 0 ? "user" : "assistant", content: message })
+    );
 
-    if (system) {
-      resultPromise = fetch("/api/llm", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messages: fullMessages,
-          system,
-          model: "claude-3-5-sonnet-20240620",
-          max_tokens: 4096,
-          stream: true
-        })
-      }).then(async (response) => {
-        if (!response.body) {
-          throw new Error("No response body");
-        }
+    // FIXME(ja): lack of system prompt => "create system prompt about json":
+    let effectiveSystem = system || dataRequest({
+      description: "hmm",
+      inputData: result,
+      jsonSchema: schema,
+    })
 
-        // if json, just return the response
-        if (response.headers.get("content-type") === "application/json") {
-          return response.json().then((data) => {
-            let messages = data['messages']
-            let lastMessage = messages[messages.length - 1]
-            console.log("lastMessage", lastMessage)
-            return grab(lastMessage['content'])
-          });
-        }
+    const updatePartial = (t: string) => partialResult.setAtPath([], t, log);
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let doneReading = false;
-        let partialText = "";
-
-        while (!doneReading) {
-          const { value, done } = await reader.read();
-          doneReading = done;
-          if (value) {
-            const chunk = decoder.decode(value, { stream: true });
-            partialText += chunk.slice(0, -1); // remove the \n
-            partialResult.setAtPath([], partialText, log);
-          }
-        }
-
-        return grab(partialText);
-      }).catch((err) => {
-        console.error(err);
-        pending.setAtPath([], false, log);
-      });
-    } else {
-      resultPromise = generateDataClient(
-        mockResultClient,
-        messages[messages.length - 1],
-        result,
-        schema
-      );
-    }
+    let resultPromise = makeClient().sendRequest({
+      messages: fullMessages,
+      system: effectiveSystem,
+      model: "claude-3-5-sonnet-20240620",
+      max_tokens: 4096,
+    }, updatePartial)
 
     const thisRun = ++currentRun;
 
-    resultPromise.then((result) => {
-      if (thisRun !== currentRun) return;
+    resultPromise
+      .then((a: SimpleMessage) => {
+        console.log("result", a);
+        return a;
+      })
+      .then((assistant: SimpleMessage) => grab(assistant.content))
+      .then((result) => {
+        if (thisRun !== currentRun) return;
 
-      normalizeToCells(result, undefined, log);
+        normalizeToCells(result, undefined, log);
 
-      pending.setAtPath([], false, log);
-      fullResult.setAtPath([], result, log);
-      partialResult.setAtPath([], result, log);
-    });
+        pending.setAtPath([], false, log);
+        fullResult.setAtPath([], result, log);
+        partialResult.setAtPath([], result, log);
+      }).catch((error) => {
+        console.error("Error generating data", error);
+        pending.setAtPath([], false, log);
+        fullResult.setAtPath([], undefined, log);
+        partialResult.setAtPath([], undefined, log);
+      });
   };
 
   schedule(startGeneration, {

@@ -36,7 +36,8 @@ export const wiki = recipe<{ title: string; canon: string }>(
     const {
       result: { text, related }, pending,
     } = generateData<ExploreResult>({
-      prompt: str`Here is the pages the user has explored so far:\n\n<canon>${canon}</canon>.  Generate a 2 sentence article in a fictional wiki current page titled, and a list of 5 related pages and 1 page that only partially belongs': <title>${title}</title>`,
+      messages: [str`Here is the pages the user has explored so far:\n\n<canon>${canon}</canon>.  Generate a 2 sentence article in a fictional wiki current page titled, and a list of 5 related pages and 1 page that only partially belongs': <title>${title}</title>`,
+        '```json\n'],
       schema: {
         type: "object",
         properties: {
@@ -71,9 +72,9 @@ export const wiki = recipe<{ title: string; canon: string }>(
       [UI]: html`<div>
         <h3>${title}</h3>
         ${ifElse(pending,
-        html`<p>generating...</p>`,
-        html`<p>${text}</p>`,
-      )}
+          html`<p>generating...</p>`,
+          html`<p>${text}</p>`,
+        )}
         <ul>
           ${relatedWithClosure.map(({ title, canon }) => html`<li onclick=${launcher({ title, canon })}>${title}</li>`)}
         </ul>

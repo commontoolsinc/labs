@@ -26,13 +26,13 @@ const handler = async (request: Request): Promise<Response> => {
       const cacheKey = await hashKey(JSON.stringify(payload));
       const cachedResult = await loadCacheItem(cacheKey);
       if (cachedResult) {
-        console.log("Cache hit:", description);
-        return new Response(JSON.stringify(cachedResult), {
+        const lastMessage = cachedResult.messages[cachedResult.messages.length - 1];
+        return new Response(JSON.stringify(lastMessage), {
           headers: { "Content-Type": "application/json" },
         });
       }
 
-      console.log("Cache miss:", description);
+      console.log("Generating:", description);
 
       let messages = payload.messages;
 
@@ -56,12 +56,14 @@ const handler = async (request: Request): Promise<Response> => {
       if (payload.stream) {
         const stream = new ReadableStream({
           async start(controller) {
+            // NOTE: the llm doesn't send text we put into its mouth, so we need to
+            // manually send it so that streaming client sees everything assistant 'said'
             if (messages[messages.length - 1].role === "assistant") {
-              controller.enqueue(new TextEncoder().encode(result + '\n'));
+              controller.enqueue(new TextEncoder().encode(JSON.stringify(result) + '\n'));
             }
             for await (const delta of textStream) {
               result += delta;
-              controller.enqueue(new TextEncoder().encode(delta + '\n'));
+              controller.enqueue(new TextEncoder().encode(JSON.stringify(delta) + '\n'));
             }
 
             if (messages[messages.length - 1].role === "user") {
@@ -104,7 +106,7 @@ const handler = async (request: Request): Promise<Response> => {
 
       await saveCacheItem(cacheKey, params);
 
-      return new Response(JSON.stringify(params), {
+      return new Response(JSON.stringify(params.messages[params.messages.length - 1]), {
         headers: { "Content-Type": "application/json" },
       });
     } catch (error) {
@@ -135,6 +137,7 @@ async function loadCacheItem(key: string): Promise<any | null> {
   try {
     await ensureDir(CACHE_DIR);
     const cacheData = await Deno.readTextFile(filePath);
+    console.log(`Loading cache item: ${filePath}`);
     return JSON.parse(cacheData);
   } catch {
     return null;
@@ -144,6 +147,7 @@ async function loadCacheItem(key: string): Promise<any | null> {
 async function saveCacheItem(key: string, data: any): Promise<void> {
   const hash = await hashKey(key);
   const filePath = `${CACHE_DIR}/${hash}.json`;
+  console.log(`Saving cache item: ${filePath}`);
   await ensureDir(CACHE_DIR);
   await Deno.writeTextFile(filePath, JSON.stringify(data, null, 2));
 }

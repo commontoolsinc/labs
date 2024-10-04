@@ -36,26 +36,33 @@ const getCharmInfo = lift(({ charms }) => {
   return charmInfo;
 });
 
-const buildPrompt = lift(
-  ({ query, charmInfo }) =>
-    `Given the following user query and list of data charms, return the indices of the charms that are most relevant to the query.
+const buildMessages = lift(
+  ({ query, charmInfo }) => {
+
+    return [
+      `Given the following user query and list of data charms, return the indices of the charms that are most relevant to the query.
 Consider both the names and types of the charms when making your selection.
 Think broadly, e.g. a stay in a hotel could match a charm called "morning routine", as the user would want to pick a hotel that supports their morning routine.
 
-User query: "${query}"
+<USER_QUERY>
+${query}
+</USER_QUERY>
 
-Data:
+<DATA_CHARMS>
 ${JSON.stringify(charmInfo, null, 2)}
+</DATA_CHARMS>
 
 Respond with only JSON array of suggestions, e.g.
 
 \`\`\`json
-[{ index: 0, chosen: "work todo list", confidence: 0.9, reason: "the use of the "work projects" implies the user might want a connection to work TODOs" }, { index: 2, chosen: "hobby projects", confidence: 0.5, reason: "projects could be referring to personal projects, hard to tell from context" }, { index: 5, chosen: "suzy collab", reason: "could this be related to Susan? she appears in several project related lists", confidence: 0.33 }]
+[
+  { index: 0, chosen: "work todo list", confidence: 0.9, reason: "the use of the "work projects" implies the user might want a connection to work TODOs" },
+  { index: 2, chosen: "hobby projects", confidence: 0.5, reason: "projects could be referring to personal projects, hard to tell from context" },
+  { index: 5, chosen: "suzy collab", reason: "could this be related to Susan? she appears in several project related lists", confidence: 0.33 }
+]
 \`\`\`
-
-notalk;justgo
-`
-);
+`, '```json\n['];
+  });
 
 const filterMatchingCharms = lift<{
   matchedIndices: { index: number; confidence: number }[];
@@ -164,9 +171,8 @@ export const annotation = recipe<{
   const { result: matchedIndices } = generateData<
     { index: number; confidence: number }[]
   >({
-    prompt: buildPrompt({ query, charmInfo }),
-    system:
-      "You are an assistant that helps match user queries to relevant data charms based on their names and types.",
+    messages: buildMessages({ query, charmInfo }),
+    system: "You are an assistant that helps match user queries to relevant data charms based on their names and types.",
   });
   const matchingCharms = filterMatchingCharms({ matchedIndices, charmInfo });
   const suggestion = findSuggestion({ matchingCharms, data });

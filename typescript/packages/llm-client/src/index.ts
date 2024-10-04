@@ -1,59 +1,33 @@
-import { CoreMessage, CoreTool } from "ai";
-export * from "./dummy-data.js";
-
-export type LlmTool = CoreTool & {
-  implementation: (input: any) => Promise<string> | string;
-};
-
-export interface ClientConfig {
-  serverUrl: string;
-  tools: LlmTool[];
-  system?: string;
+export type SimpleMessage = {
+  role: "user" | "assistant",
+  content: string,
 }
 
-export class ConversationThread {
-  constructor(
-    private client: LLMClient,
-    public id: string,
-    public conversation: string[] = [],
-  ) {
-    this.client = client;
-    this.id = id;
-    this.conversation = conversation;
-  }
-
-  async sendMessage(message: string): Promise<string> {
-    const response: AppendThreadResponse = await this.client.continueThread(
-      this.id,
-      message,
-    );
-
-    this.conversation.push(`User: ${message}`);
-    let assistantResponse = response.assistantResponse;
-    this.conversation.push(`Assistant: ${assistantResponse.content}`);
-
-    return response.output;
-  }
+type LLMRequest = {
+  messages: SimpleMessage[],
+  system: string,
+  model: string,
+  max_tokens: number,
+  stream?: boolean,
 }
+
 
 export class LLMClient {
   private serverUrl: string;
-  private tools: LlmTool[];
-  private system: string;
 
-  constructor(config: ClientConfig) {
-    this.serverUrl = config.serverUrl;
-    this.tools = config.tools;
-    this.system =
-      config.system ||
-      "You are a helpful assistant that uses the provided tools to create effect.";
+  constructor(serverUrl: string) {
+    this.serverUrl = serverUrl;
   }
 
-  private async sendRequest(body: any): Promise<any> {
+  async sendRequest(userRequest: LLMRequest, partialCB?: (text: string) => void): Promise<SimpleMessage> {
+    const fullRequest: LLMRequest = {
+      ...userRequest,
+      stream: partialCB ? true : false,
+    }
     const response = await fetch(this.serverUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(fullRequest),
     });
 
     if (!response.ok) {
@@ -63,74 +37,64 @@ export class LLMClient {
       );
     }
 
-    return await response.json();
+    if (!response.body) {
+      throw new Error("No response body");
+    }
+
+    // if server responds with json, just return the response
+    if (response.headers.get("content-type") === "application/json") {
+      return response.json() as Promise<SimpleMessage>;
+    }
+
+    let content = await this.stream(response.body, partialCB);
+
+    return { content, role: "assistant" };
   }
 
-  async createThread(message: string): Promise<ConversationThread> {
-    const request: CreateThreadRequest = {
-      action: "create",
-      system: this.system,
-      message,
-      activeTools: this.tools.map(({ implementation, ...tool }) => tool),
-    };
+  private async stream(body: ReadableStream, cb?: (partial: string) => void): Promise<string> {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
 
-    const response: CreateThreadResponse = await this.sendRequest(request);
-    const thread = new ConversationThread(this, response.threadId);
+    let doneReading = false;
+    let buffer = "";
+    let text = "";
 
-    const initialAssistantResponse = response.output;
-    thread.conversation.push(`User: ${message}`);
-    thread.conversation.push(`Assistant: ${initialAssistantResponse}`);
+    while (!doneReading) {
+      const { value, done } = await reader.read();
+      doneReading = done;
+      if (value) {
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
 
-    return thread;
+        let newlineIndex: number;
+        while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, newlineIndex).trim();
+          buffer = buffer.slice(newlineIndex + 1);
+
+          if (line) {
+            try {
+              const t = JSON.parse(line);
+              text += t;
+              if (cb) cb(text);
+            } catch (error) {
+              console.error("Failed to parse JSON line:", line, error);
+            }
+          }
+        }
+      }
+    }
+
+    // Handle any remaining buffer
+    if (buffer.trim()) {
+      try {
+        const t = JSON.parse(buffer.trim());
+        text += t;
+        if (cb) cb(text);
+      } catch (error) {
+        console.error("Failed to parse final JSON line:", buffer, error);
+      }
+    }
+
+    return text;
   }
-
-  async continueThread(
-    threadId: string,
-    message?: string,
-    toolResponses: ToolResponse[] = [],
-  ): Promise<AppendThreadResponse> {
-    const request: AppendThreadRequest = {
-      action: "append",
-      threadId,
-      message,
-      toolResponses,
-    };
-
-    return await this.sendRequest(request);
-  }
-}
-
-// Types (you can move these to a separate file if desired)
-interface CreateThreadRequest {
-  action: "create";
-  system: string;
-  message: string;
-  activeTools: CoreTool[];
-}
-
-interface AppendThreadRequest {
-  action: "append";
-  threadId: string;
-  message?: string;
-  toolResponses: ToolResponse[];
-}
-
-interface CreateThreadResponse {
-  threadId: string;
-  output: string;
-  assistantResponse: CoreMessage;
-  conversation: CoreMessage[];
-}
-
-interface AppendThreadResponse {
-  threadId: string;
-  assistantResponse: CoreMessage;
-  output: string;
-  conversation: CoreMessage[];
-}
-
-interface ToolResponse {
-  type: "tool_result";
-  tool_use_id: string;
-  content: { type: "text"; text: string }[];
 }

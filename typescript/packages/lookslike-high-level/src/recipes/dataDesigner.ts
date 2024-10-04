@@ -53,13 +53,13 @@ const addToPrompt = handler<
   state.query = state.prompt;
 });
 
-const buildJSONGenPrompt = lift(({ prompt, data }) => {
+const buildJSONGenMessages = lift(({ prompt, data }) => {
   console.log("prompt", prompt, data);
   let fullPrompt = prompt;
   if (data) {
     fullPrompt += `\n\nHere's the previous JSON for reference:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
   }
-  return fullPrompt;
+  return [fullPrompt, '```json\n']
 });
 
 const onAcceptData = handler<void, { data: any; lastData: any; result: any }>(
@@ -86,7 +86,7 @@ export const dataDesigner = recipe<{
   tap({ lastData });
 
   const { result } = generateData<any>({
-    prompt: buildJSONGenPrompt({ prompt, data: lastData }),
+    messages: buildJSONGenMessages({ prompt, data: lastData }),
     system: systemPrompt,
     mode: "json",
   });

@@ -76,7 +76,7 @@ const makeBooking = handler<
 });
 
 const buildQuery = lift(({ location }) => ({
-  prompt: `generate 10 places for private home short-term rentals in ${location}`,
+  messages: [`generate 10 places for private home short-term rentals in ${location}`, '```json\n'],
   result: [],
   schema: {
     type: "array",
@@ -306,7 +306,7 @@ const generateNearbyPlaceQuery = lift(({ routine, places }) => {
   }));
 
   return {
-    prompt: `generate ${initialData.length} ${locationType} with pun names`,
+    messages: [`generate ${initialData.length} ${locationType} with pun names`, '```json\n'],
     initialData,
     schema: {
       type: "array",
