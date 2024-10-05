@@ -1,6 +1,6 @@
 import { LitElement, css } from "lit";
 import { EditorState, Plugin } from "prosemirror-state";
-import { EditorView } from "prosemirror-view";
+import { EditorView, Decoration, DecorationSet } from "prosemirror-view";
 import { Schema } from "prosemirror-model";
 import { history } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
@@ -20,6 +20,10 @@ const schema = new Schema({
     text: { group: "inline" },
   },
   marks: {
+    hashtag: {
+      parseDOM: [{ tag: "span.hashtag" }],
+      toDOM: () => ["span", { class: "hashtag" }, 0],
+    },
     bold: {
       parseDOM: [{ tag: "strong" }],
       toDOM: () => ["strong", 0],
@@ -29,6 +33,43 @@ const schema = new Schema({
       toDOM: () => ["em", 0],
     },
   },
+});
+
+export const modelessMarkupDecorationPlugin = ({
+  pattern,
+  decoration,
+}: {
+  pattern: RegExp;
+  decoration: (from: number, to: number) => Decoration;
+}) =>
+  new Plugin({
+    props: {
+      decorations(state) {
+        const decorations: Array<Decoration> = [];
+        state.doc.descendants((node, pos) => {
+          if (node.isText && node.text != null) {
+            const text = node.text;
+            const matches = text.matchAll(pattern);
+            for (const match of matches) {
+              const from = pos + match.index;
+              const to = from + match[0].length;
+              decorations.push(decoration(from, to));
+            }
+          }
+        });
+        return DecorationSet.create(state.doc, decorations);
+      },
+    },
+  });
+
+const hashtagPlugin = modelessMarkupDecorationPlugin({
+  pattern: /#\w+/g,
+  decoration: (from, to) => Decoration.inline(from, to, { class: "hashtag" }),
+});
+
+const mentionPlugin = modelessMarkupDecorationPlugin({
+  pattern: /@\w+/g,
+  decoration: (from, to) => Decoration.inline(from, to, { class: "mention" }),
 });
 
 const editorClassPlugin = new Plugin({
@@ -43,7 +84,13 @@ const editorClassPlugin = new Plugin({
   },
 });
 
-const plugins = () => [history(), keymap(baseKeymap), editorClassPlugin];
+const plugins = () => [
+  history(),
+  keymap(baseKeymap),
+  editorClassPlugin,
+  hashtagPlugin,
+  mentionPlugin,
+];
 
 @customElement("os-rich-text-editor")
 export class OsRichTextEditor extends LitElement {
@@ -61,10 +108,33 @@ export class OsRichTextEditor extends LitElement {
         display: flex;
         flex-direction: column;
         gap: var(--body-gap);
+        white-space: pre-wrap;
 
         &:focus {
           outline: none;
         }
+      }
+
+      .mention {
+        --height: calc(var(--u) * 5);
+        font-weight: bold;
+        display: inline-block;
+        background-color: var(--bg-3);
+        height: var(--height);
+        line-height: var(--height);
+        border-radius: calc(var(--height) / 2);
+        padding: 0 calc(var(--u) * 2);
+      }
+
+      .hashtag {
+        --height: calc(var(--u) * 5);
+        font-weight: bold;
+        display: inline-block;
+        background-color: var(--bg-3);
+        height: var(--height);
+        line-height: var(--height);
+        border-radius: calc(var(--height) / 2);
+        padding: 0 calc(var(--u) * 2);
       }
     `,
   ];
