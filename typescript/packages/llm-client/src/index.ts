@@ -9,8 +9,8 @@ type LLMRequest = {
   model: string,
   max_tokens: number,
   stream?: boolean,
+  stop?: string,
 }
-
 
 export class LLMClient {
   private serverUrl: string;

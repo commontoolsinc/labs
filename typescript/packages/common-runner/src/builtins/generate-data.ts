@@ -60,12 +60,6 @@ export function generateData(
   const startGeneration: Action = (log: ReactivityLog) => {
     const { result, schema, system, mode, messages } = inputsCell.getAsProxy([], log);
     const grab = (mode || 'json') === 'json' ? grabJson : grabHtml;
-    if (grab === undefined) {
-      pending.setAtPath([], false, log);
-      fullResult.setAtPath([], undefined, log);
-      partialResult.setAtPath([], undefined, log);
-      return;
-    }
 
     if (messages === undefined || messages.length === 0) {
       pending.setAtPath([], false, log);
@@ -97,6 +91,7 @@ export function generateData(
       system: effectiveSystem,
       model: "claude-3-5-sonnet-20240620",
       max_tokens: 4096,
+      stop: '```'
     }, updatePartial)
 
     const thisRun = ++currentRun;
