@@ -18,6 +18,7 @@ const handler = async (request: Request): Promise<Response> => {
         system: string;
         model: string;
         max_tokens: number;
+        stop?: string;
         stream: boolean; // LLM streams regardless, this is if we stream to the client
       };
 
@@ -39,12 +40,14 @@ const handler = async (request: Request): Promise<Response> => {
       let params = {
         model: payload.model,
         system: payload.system,
+        maxTokens: payload.max_tokens,
         messages,
       }
 
-      const { textStream } = await streamText({
+      const llmStream = await streamText({
         ...params,
-        model: anthropic(payload.model)
+        model: anthropic(payload.model),
+        stopSequences: payload.stop ? [payload.stop] : undefined,
       });
 
       let result = "";
@@ -61,9 +64,16 @@ const handler = async (request: Request): Promise<Response> => {
             if (messages[messages.length - 1].role === "assistant") {
               controller.enqueue(new TextEncoder().encode(JSON.stringify(result) + '\n'));
             }
-            for await (const delta of textStream) {
+            for await (const delta of llmStream.textStream) {
               result += delta;
               controller.enqueue(new TextEncoder().encode(JSON.stringify(delta) + '\n'));
+            }
+
+            if ((await llmStream.finishReason) === "stop" && payload.stop) {
+              // NOTE(ja): we might have stopped because of a stop sequence, so add it to the result...
+              // this is a hack that helps the client parse the result
+              result += payload.stop;
+              controller.enqueue(new TextEncoder().encode(JSON.stringify(payload.stop) + '\n'));
             }
 
             if (messages[messages.length - 1].role === "user") {
@@ -84,7 +94,7 @@ const handler = async (request: Request): Promise<Response> => {
         });
       }
 
-      for await (const delta of textStream) {
+      for await (const delta of llmStream.textStream) {
         result += delta;
       }
 
@@ -96,6 +106,10 @@ const handler = async (request: Request): Promise<Response> => {
             headers: { "Content-Type": "application/json" },
           }
         );
+      }
+
+      if ((await llmStream.finishReason) === "stop" && payload.stop) {
+        result += payload.stop;
       }
 
       if (messages[messages.length - 1].role === "user") {
