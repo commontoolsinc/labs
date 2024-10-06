@@ -4,6 +4,7 @@ export * as CommonDict from './common-dict.js';
 export * as CommonHstack from './common-hstack.js';
 export * as CommonImg from './common-img.js';
 export * as CommonInput from './common-input.js';
+export * as CommonInputFile from './common-input-file.js';
 export * as CommonMedia from './common-media.js';
 export * as CommonNavPanel from './common-navpanel.js';
 export * as CommonRecord from './common-record.js';
