@@ -3,7 +3,7 @@ import { type CellImpl } from "../cell.js";
 import { map } from "./map.js";
 import { fetchData } from "./fetch-data.js";
 import { streamData } from "./stream-data.js";
-import { generateData } from "./generate-data.js";
+import { generateText } from "./generate-text.js";
 import { ifElse } from "./if-else.js";
 export const builtins: {
   [key: string]: (recipeCell: CellImpl<any>, node: Node) => void;
@@ -11,6 +11,6 @@ export const builtins: {
   map,
   fetchData,
   streamData,
-  generateData,
+  generateText,
   ifElse,
 };

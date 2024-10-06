@@ -1,13 +1,24 @@
 export type SimpleMessage = {
-  role: "user" | "assistant",
-  content: string,
+  role: "user" | "assistant";
+  content: SimpleContent;
 }
 
+export type SimpleContent = string | TypedContent[]
+
+type TypedContent = {
+  type: "text",
+  text: string,
+} | {
+  type: "image",
+  url: string,
+}
+
+
 type LLMRequest = {
-  messages: SimpleMessage[],
+  messages: SimpleMessage[] | SimpleContent[],
   system: string,
   model: string,
-  max_tokens: number,
+  max_tokens?: number,
   stream?: boolean,
   stop?: string,
 }
@@ -19,11 +30,13 @@ export class LLMClient {
     this.serverUrl = serverUrl;
   }
 
-  async sendRequest(userRequest: LLMRequest, partialCB?: (text: string) => void): Promise<SimpleMessage> {
+  async sendRequest(userRequest: LLMRequest, partialCB?: (text: string) => void): Promise<string> {
     const fullRequest: LLMRequest = {
       ...userRequest,
       stream: partialCB ? true : false,
+      messages: userRequest.messages.map(processMessage),
     }
+
     const response = await fetch(this.serverUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -41,14 +54,14 @@ export class LLMClient {
       throw new Error("No response body");
     }
 
-    // if server responds with json, just return the response
+    // the server might return cached data instead of a stream
     if (response.headers.get("content-type") === "application/json") {
-      return response.json() as Promise<SimpleMessage>;
+      let data = await response.json() as SimpleMessage;
+      // FIXME(ja): can the LLM ever return anything other than a string?
+      return data.content as string; 
     }
 
-    let content = await this.stream(response.body, partialCB);
-
-    return { content, role: "assistant" };
+    return await this.stream(response.body, partialCB);
   }
 
   private async stream(body: ReadableStream, cb?: (partial: string) => void): Promise<string> {
@@ -97,4 +110,14 @@ export class LLMClient {
 
     return text;
   }
+}
+
+function processMessage(m: SimpleMessage | SimpleContent, idx: number): SimpleMessage {
+  if (typeof m === "string" || Array.isArray(m)) {
+    return {
+      role: idx % 2 === 0 ? "user" : "assistant",
+      content: m,
+    };
+  }
+  return m;
 }
