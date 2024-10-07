@@ -8,13 +8,20 @@ import {
   JSON,
   Alias,
   isAlias,
+  canBeCellProxy,
+  makeCellProxy,
 } from "./types.js";
 
 /** traverse a value, _not_ entering cells */
 export function traverseValue(value: Value<any>, fn: (value: any) => any) {
   fn(value);
   if (Array.isArray(value)) value.forEach((v) => traverseValue(v, fn));
-  else if (!isCellProxy(value) && typeof value === "object" && value !== null)
+  else if (
+    !isCellProxy(value) &&
+    !canBeCellProxy(value) &&
+    typeof value === "object" &&
+    value !== null
+  )
     for (const key in value as any) traverseValue(value[key], fn);
 }
 
@@ -86,6 +93,7 @@ export function toJSONWithAliases(
   ignoreSelfAliases: boolean = false,
   path: PropertyKey[] = []
 ): JSONValue | undefined {
+  if (canBeCellProxy(value)) value = makeCellProxy(value);
   if (isCellProxy(value)) {
     const pathToCell = paths.get(value);
     if (pathToCell) {

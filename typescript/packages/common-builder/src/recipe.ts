@@ -10,6 +10,8 @@ import {
   Alias,
   toJSON,
   UI,
+  canBeCellProxy,
+  makeCellProxy,
 } from "./types.js";
 import { cell } from "./cell-proxy.js";
 import {
@@ -70,6 +72,7 @@ export function recipe<T, R>(
 
   const collectCellsAndNodes = (value: Value<any>) =>
     traverseValue(value, (value) => {
+      if (canBeCellProxy(value)) value = makeCellProxy(value);
       if (isCellProxy(value) && !cells.has(value)) {
         cells.add(value);
         value.export().nodes.forEach((node: NodeProxy) => {
@@ -92,9 +95,9 @@ export function recipe<T, R>(
   const paths = new Map<CellProxy<any>, PropertyKey[]>([[inputs, []]]);
 
   let count = 0;
-  cells.forEach((cell) => {
+  cells.forEach((cell: CellProxy<any>) => {
     if (paths.has(cell)) return;
-    const { top, path } = cell.export();
+    const { cell: top, path } = cell.export();
     if (!paths.has(top)) paths.set(top, [`__#${count++}`]);
     if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
   });
@@ -111,12 +114,13 @@ export function recipe<T, R>(
   cells.forEach((cell) => {
     // Only process roots of extra cells:
     if (cell === inputs) return;
-    const { path, value, defaultValue } = cell.export();
+    const { path, value, defaultValue, external } = cell.export();
     if (path.length > 0) return;
 
     const cellPath = [...paths.get(cell)!];
     if (value) setValueAtPath(initial, cellPath, value);
     if (defaultValue) setValueAtPath(defaults, cellPath, defaultValue);
+    if (external) setValueAtPath(initial, cellPath, external);
   });
 
   const schema = createJsonSchema(defaults, initial) as {

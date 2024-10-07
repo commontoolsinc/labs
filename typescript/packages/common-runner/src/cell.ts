@@ -3,6 +3,9 @@ import {
   getValueAtPath,
   setValueAtPath,
   deepEqual,
+  toCellProxy,
+  cell as builderCell,
+  type CellProxy as BuilderCellProxy,
 } from "@commontools/common-builder";
 import {
   followCellReferences,
@@ -64,6 +67,7 @@ export type CellImpl<T> = {
   freeze(): void;
   isFrozen(): boolean;
   value: T;
+  [toCellProxy]: () => BuilderCellProxy<T>;
   [isCellMarker]: true;
 };
 
@@ -131,6 +135,7 @@ export function cell<T>(value?: T): CellImpl<T> {
     get value(): T {
       return value as T;
     },
+    [toCellProxy]: () => toBuilderCellProxy(self, []),
     [isCellMarker]: true,
   };
 
@@ -306,6 +311,8 @@ export function createValueProxy<T>(
       if (typeof prop === "symbol") {
         if (prop === getCellReference)
           return { cell: valueCell, path: valuePath } satisfies CellReference;
+        if (prop === toCellProxy)
+          return () => toBuilderCellProxy(valueCell, valuePath);
 
         const value = Reflect.get(target, prop, receiver);
         if (typeof value === "function") return value.bind(receiver);
@@ -441,6 +448,30 @@ const createProxyForArrayValue = (
 
   return target;
 };
+
+const cellToBuilderCellProxy = new WeakMap<
+  CellImpl<any>,
+  BuilderCellProxy<any>
+>();
+
+function toBuilderCellProxy(
+  valueCell: CellImpl<any>,
+  valuePath: PropertyKey[]
+): BuilderCellProxy<any> {
+  console.log("toBuilderCellProxy", valueCell, valuePath);
+  let cell = cellToBuilderCellProxy.get(valueCell);
+  if (!cell) {
+    cell = builderCell();
+    // This will be written into the recipe: An alias to the cell. Note that the
+    // recipe will have another alias into paths where this is at the beginning.
+    // TODO: Make this serialize, maybe by adding .toJSON to CellImpl?
+    cell.setPreExisting({ $alias: { cell: valueCell, path: [] } });
+    cellToBuilderCellProxy.set(valueCell, cell);
+  }
+  let proxy = cell;
+  for (const key of valuePath) proxy = proxy.key(key);
+  return proxy;
+}
 
 function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
   return typeof value === "object" && value !== null && originalIndex in value;

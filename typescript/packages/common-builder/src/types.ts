@@ -29,14 +29,17 @@ export type Value<T> =
 export type CellProxyMethods<T> = {
   get(): CellProxy<T>;
   set(value: Value<T> | T): void;
+  key<K extends keyof T>(key: K): CellProxy<T[K]>;
   setDefault(value: Value<T> | T): void;
+  setPreExisting(ref: any): void;
   connect(node: NodeProxy): void;
   export(): {
-    top: CellProxy<any>;
+    cell: CellProxy<any>;
     path: PropertyKey[];
     value?: Value<T>;
     defaultValue?: Value<T>;
     nodes: Set<NodeProxy>;
+    external?: any;
   };
   map<S>(
     fn: (value: T extends Array<infer U> ? Value<U> : Value<T>) => Value<S>
@@ -132,4 +135,20 @@ export function isRecipe(value: any): value is Recipe {
   );
 }
 
+type CanBeCellProxy = { [toCellProxy]: () => CellProxy<any> };
+
+export function canBeCellProxy(value: any): value is CanBeCellProxy {
+  return (
+    !!value &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof value[toCellProxy] === "function"
+  );
+}
+
+export function makeCellProxy(value: CanBeCellProxy): CellProxy<any> {
+  return value[toCellProxy]();
+}
+
 export const isCellProxyMarker = Symbol("isCellProxy");
+
+export const toCellProxy = Symbol("toCellProxy");

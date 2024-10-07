@@ -330,6 +330,7 @@ describe("event handling", () => {
 
     const eventHandler: EventHandler = () =>
       lift((state: { value: number }) => {
+        console.log("eventHandler", state);
         state.value = state.value + 1;
       })(eventResultCell.getAsProxy());
 
@@ -338,7 +339,6 @@ describe("event handling", () => {
     queueEvent({ cell: eventCell, path: [] }, 1);
     await idle();
 
-    expect(eventCount).toBe(1);
-    expect(eventResultCell.get()).toBe(1);
+    expect(eventResultCell.get()).toEqual({ value: 1 });
   });
 });

@@ -41,13 +41,19 @@ export function cell<T>(value?: Value<T> | T): CellProxy<T> {
       set: (newValue: Value<any>) => {
         setValueAtPath(store, ["value", ...path], newValue);
       },
+      key: (key: PropertyKey) => createNestedProxy([...path, key]),
       setDefault: (newValue: Value<any>) => {
         if (!hasValueAtPath(store, ["defaultValue", ...path]))
           setValueAtPath(store, ["defaultValue", ...path], newValue);
       },
+      setPreExisting: (ref: any) => {
+        if (path.length !== 0)
+          throw new Error("Cannot set external on a nested cell");
+        setValueAtPath(store, ["external"], ref);
+      },
       connect: (node: NodeProxy) => store.nodes.add(node),
       export: () => ({
-        top,
+        cell: top,
         path,
         ...store,
       }),

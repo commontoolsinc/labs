@@ -6,6 +6,8 @@ import {
   isCellProxy,
   NodeProxy,
   toJSON,
+  canBeCellProxy,
+  makeCellProxy,
 } from "./types.js";
 import { cell } from "./cell-proxy.js";
 import { traverseValue, moduleToJSON } from "./utils.js";
@@ -27,11 +29,18 @@ export function createNodeFactory<T = any, R = any>(
     const outputs = cell<R>();
     const node: NodeProxy = { module, inputs, outputs };
 
-    traverseValue(inputs, (value) => isCellProxy(value) && value.connect(node));
+    connectInputAndOutputs(node);
     outputs.connect(node);
 
     return outputs;
   }, module);
+}
+
+function connectInputAndOutputs(node: NodeProxy) {
+  traverseValue(node.inputs, (value) => {
+    if (canBeCellProxy(value)) value = makeCellProxy(value);
+    if (isCellProxy(value)) value.connect(node);
+  });
 }
 
 /** Declare a module
@@ -73,7 +82,7 @@ export function handler<E, T>(
       outputs: {},
     };
 
-    traverseValue(props, (value) => isCellProxy(value) && value.connect(node));
+    connectInputAndOutputs(node);
     stream.connect(node);
 
     return stream as unknown as CellProxy<E>;
