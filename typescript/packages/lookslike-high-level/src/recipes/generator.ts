@@ -17,12 +17,7 @@ const prepText = lift(({ prompt }) => {
     }
     return {};
 });
-const grabText = lift(({ result, partial, pending }) => {
-    if (pending) {
-        return partial || ''
-    }
-    return result
-})
+const grabText = lift(({ partial }) => { return partial || '' })
 
 
 const prepHTML = lift(({ prompt }) => {
@@ -35,21 +30,18 @@ const prepHTML = lift(({ prompt }) => {
     }
     return {};
 });
-const grabHtml = lift(({ result, partial, pending }) => {
+const grabHtml = lift(({ partial, pending }) => {
+    if (!partial) {
+        return ""
+    }
+
     if (pending) {
-        if (!partial) {
-            return ""
-        }
-        return partial.replace(/</g, "&lt;").replace(/>/g, "&gt;").slice(-1000);
+        return `<code>${partial.slice(-1000).replace(/</g, "&lt;").replace(/>/g, "&gt;").slice(-1000)}</code>`;
     }
 
-    if (!result) {
-        return "";
-    }
-
-    const html = result.match(/```html\n([\s\S]+?)```/)?.[1];
+    const html = partial.match(/```html\n([\s\S]+?)```/)?.[1];
     if (!html) {
-        console.error("No HTML found in text", result);
+        console.error("No HTML found in text", partial);
         return "";
     }
     return html
