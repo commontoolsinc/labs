@@ -4,19 +4,15 @@ import {
   UI,
   NAME,
   lift,
-  generateData,
+  generateText,
   handler,
   str,
   cell,
   createJsonSchema,
 } from "@commontools/common-builder";
+import { z } from "zod";
 
 import { launch } from "../data.js";
-
-type Suggestion = {
-  behaviour: 'append' | 'fork',
-  prompt: string,
-}
 
 const formatData = lift(({ obj }) => {
   console.log("stringify", obj);
@@ -30,85 +26,6 @@ const tap = lift((x) => {
 
 const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value),
-);
-
-const maybeHTML = lift(({ result }) => {
-  return result?.html || ''
-});
-
-const maybeSRC = lift(({ src, pending, partial }) => {
-  if (src) return src;
-  if (!pending) return `
-    <div style="display: flex; justify-content: center; align-items: center; height: 100vh;">
-      <span style="font-size: 40px;">❌</span>
-      <p style="margin-left: 10px; font-family: Arial, sans-serif; color: #e74c3c;">Error generating content</p>
-    </div>
-  `;
-  if (partial) return '<pre>' + partial.replace(/</g, '&lt;').slice(-1000);
-});
-
-const viewSystemPrompt = lift(
-  ({ schema }) => `generate a complete HTML document within a html block , e.g.
-  \`\`\`html
-  ...
-  \`\`\`
-
-  This must be complete HTML.
-  Import Tailwind (include \`<script src="https://cdn.tailwindcss.com"></script>\`) and style the page using it. Use tasteful, minimal defaults with a consistent style but customize based on the request.
-  Import React (include \`
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  \`) and write the app using it.
-
-  You may not use any other libraries unless requested by the user.
-
-  The document can and should make use of postMessage to read and write data from the host context. e.g.
-
-  document.addEventListener('DOMContentLoaded', function() {
-    console.log('Initialized!');
-
-    window.parent.postMessage({
-        type: 'subscribe',
-        key: 'exampleKey'
-      }, '*');
-
-    window.addEventListener('message', function(event) {
-      if (event.data.type === 'readResponse') {
-        // use response
-        console.log('readResponse', event.data.key,event.data.value);
-      } else if (event.data.type === 'update') {
-        // event.data.value is a JSON object already
-        // refer to schema for structure
-      ...
-    });
-  });
-
-  window.parent.postMessage({
-    type: 'write',
-    key: 'exampleKey',
-    value: 'Example data to write'
-  }, '*');
-
-  You can subscribe and unsubscribe to changes from the keys:
-
-  window.parent.postMessage({
-    type: 'subscribe',
-    key: 'exampleKey'
-  }, '*');
-
-  You receive 'update' messages with a 'key' and 'value' field.
-
-  window.parent.postMessage({
-    type: 'unsubscribe',
-    key: 'exampleKey',
-  }, '*');
-
-  <view-model-schema>
-    ${JSON.stringify(schema, null, 2)}
-  </view-model-schema>
-
-  It's best to access and manage each state reference seperately.`,
 );
 
 const deriveJsonSchema = lift(({ data, filter }) => {
@@ -156,43 +73,175 @@ const acceptSuggestion = handler<
   }
 });
 
-const buildUiMessages = lift(({ prompt, lastSrc }) => {
-  let fullPrompt = prompt;
-  if (lastSrc) {
-    fullPrompt += `\n\nHere's the previous HTML for reference:\n\`\`\`html\n${lastSrc}\n\`\`\``;
-  }
-  return [fullPrompt, '```html\n<html>']
-});
 
-const buildSuggestionsMessages = lift(({ src, prompt, schema }) => {
-  if (!src) return;
+const Suggestion = z.object({
+  behaviour: z.enum(['append', 'fork']),
+  prompt: z.string(),
+});
+type Suggestion = z.infer<typeof Suggestion>;
+
+const prepSuggestions = lift(({ src, prompt, schema }) => {
+  if (!src) {
+    return {};
+  }
 
   let user = `Given the current prompt: "${prompt}"`;
   user += `\n\nGiven the following schema:\n<view-model-schema>\n${JSON.stringify(schema, null, 2)}\n</view-model-schema>`;
   user += `\n\nAnd the current HTML:\n\`\`\`html\n${src}\n\`\`\``;
-  user += `\n\nSuggest 3 prompts to enhancem, refine or branch off into a new UI. Keep it simple these add or change a single feature. Return the suggestions in a JSON block with the following structure:
-  \`\`\`json
-  {
-    "suggestions": [
-      {
-        "behaviour": "append" | "fork",
-        "prompt": "string"
-      }
-    ]
-  }
-  \`\`\`
+  user += `\n\nSuggest 3 prompts to enhancem, refine or branch off into a new UI. Keep it simple these add or change a single feature.
 
   Do not ever exceed a single sentence. Prefer terse, suggestions that take one step.
   `;
 
-  return [user, '```json\n{"suggestions":['];
+  return {
+    messages: [user, '```json\n{"suggestions":['],
+    system: `Suggest extensions to the UI either as modifications or forks off into new interfaces. Avoid bloat, focus on the user experience and creative potential. Respond in a json block.
+    
+\`\`\`json
+{
+  "suggestions": [
+    {
+      "behaviour": "append" | "fork",
+      "prompt": "string"
+    }
+  ]
+}
+\`\`\``,
+    stop: '```'
+  }
 });
 
-const getSuggestions = lift(({ result }) => result?.suggestions ?? []);
+
+const grabSuggestions = lift<{ result: string }, Suggestion[]>(({ result }) => {
+  if (!result) {
+    return [];
+  }
+  const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
+  if (!jsonMatch) {
+    console.error("No JSON found in text:", result);
+    return [];
+  }
+  let rawData = JSON.parse(jsonMatch[1]);
+  let parsedData = Suggestion.array().safeParse(rawData['suggestions'] || []);
+  if (!parsedData.success) {
+    console.error("Invalid JSON:", parsedData.error);
+    return [];
+  }
+  return parsedData.data;
+})
 
 const getSuggestion = lift(({ suggestions, index }: { suggestions: Suggestion[], index: number }) => {
   return suggestions[index] || { behaviour: '', prompt: '' };
 });
+
+const prepHTML = lift(({ prompt, schema, lastSrc }) => {
+  if (!prompt) {
+    return {};
+  }
+
+  let fullPrompt = prompt;
+  if (lastSrc) {
+    fullPrompt += `\n\nHere's the previous HTML for reference:\n\`\`\`html\n${lastSrc}\n\`\`\``;
+  }
+
+  const base = `<html>
+<head>
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<title>`
+
+  return {
+    messages: [fullPrompt, '```html\n' + base],
+    stop: '```',
+    system: `generate a complete HTML document within a html block , e.g.
+    \`\`\`html
+    ...
+    \`\`\`
+  
+    This must be complete HTML.
+    Import Tailwind and style the page using it. Use tasteful, minimal defaults with a consistent style but customize based on the request.
+    Import React and write the app using it.
+  
+    You may not use any other libraries unless requested by the user (in which case, use a CDN to import them)
+  
+    The document can and should make use of postMessage to read and write data from the host context. e.g.
+  
+    document.addEventListener('DOMContentLoaded', function() {
+      console.log('Initialized!');
+  
+      window.parent.postMessage({
+          type: 'subscribe',
+          key: 'exampleKey'
+        }, '*');
+  
+      window.addEventListener('message', function(event) {
+        if (event.data.type === 'readResponse') {
+          // use response
+          console.log('readResponse', event.data.key,event.data.value);
+        } else if (event.data.type === 'update') {
+          // event.data.value is a JSON object already
+          // refer to schema for structure
+        ...
+      });
+    });
+  
+    window.parent.postMessage({
+      type: 'write',
+      key: 'exampleKey',
+      value: 'Example data to write'
+    }, '*');
+  
+    You can subscribe and unsubscribe to changes from the keys:
+  
+    window.parent.postMessage({
+      type: 'subscribe',
+      key: 'exampleKey'
+    }, '*');
+  
+    You receive 'update' messages with a 'key' and 'value' field.
+  
+    window.parent.postMessage({
+      type: 'unsubscribe',
+      key: 'exampleKey',
+    }, '*');
+  
+    <view-model-schema>
+      ${JSON.stringify(schema, null, 2)}
+    </view-model-schema>
+  
+    It's best to access and manage each state reference seperately.`
+  }
+});
+
+const grabHTML = lift<{ pending: boolean, partial: string }, string>(({ pending, partial }) => {
+  if (pending || !partial) {
+    return '';
+  }
+  const html = partial.match(/```html\n([\s\S]+?)```/)?.[1];
+  if (!html) {
+    console.error("No HTML found in text", partial);
+    return '';
+  }
+  return html
+});
+
+const genHTMLView = lift(({ pending, partial }) => {
+  if (!partial) {
+    return "";
+  }
+  if (pending) {
+    return `<code>${partial.slice(-1000).replace(/</g, "&lt;").replace(/>/g, "&gt;").slice(-1000)}</code>`;
+  }
+  const html = partial.match(/```html\n([\s\S]+?)```/)?.[1];
+  if (!html) {
+    console.error("No HTML found in text", partial);
+    return `<h2>error generating html...</h2><pre>${partial.replace(/>/g, "&gt;")}</pre>`;
+  }
+  return html
+});
+
 
 export const iframe = recipe<{
   title: string;
@@ -219,21 +268,12 @@ export const iframe = recipe<{
   //   mode: "json",
   // });
 
-  const { result: suggestionsResult } = generateData<{ suggestions: Suggestion[] }>({
-    messages: buildSuggestionsMessages({ src, prompt, schema }),
-    system: `Suggest extensions to the UI either as modifications or forks off into new interfaces. Avoid bloat, focus on the user experience and creative potential. Respond in a json block.`,
-    mode: "json",
-  });
-  const suggestions = getSuggestions({ result: suggestionsResult });
+  const suggestions = grabSuggestions(generateText(prepSuggestions({ src, prompt, schema })));
 
-  const { result: htmlResult, pending: htmlPending, partial: partialHtml } = generateData<{ html: string }>({
-    messages: buildUiMessages({ prompt, lastSrc }),
-    system: viewSystemPrompt({ schema }),
-    mode: "html",
-  });
-
-  src = maybeHTML({ result: htmlResult });
-  let preview = maybeSRC({ src, pending: htmlPending, partial: partialHtml });
+  // this html is a bit of a mess as changing src triggers suggestions and view (showing streaming)
+  const { pending: pendingHTML, partial: partialHTML } = generateText(prepHTML({ prompt, schema, lastSrc }));
+  src = grabHTML({ pending: pendingHTML, partial: partialHTML });
+  const viewsrc = genHTMLView({ pending: pendingHTML, partial: partialHTML });
 
   let firstSuggestion = getSuggestion({ suggestions, index: 0 });
   let secondSuggestion = getSuggestion({ suggestions, index: 1 });
@@ -247,7 +287,7 @@ export const iframe = recipe<{
         placeholder="title"
         oncommon-input=${updateValue({ value: title })}
       ></common-input>
-      <common-iframe src=${preview} $context=${data}></common-iframe>
+      <common-iframe src=${viewsrc} $context=${data}></common-iframe>
       <details>
         <summary>View Data</summary>
         <common-input
