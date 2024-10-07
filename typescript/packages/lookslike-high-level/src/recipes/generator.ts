@@ -1,6 +1,7 @@
 import { html } from "@commontools/common-html";
 import { recipe, NAME, UI, handler, lift, generateText } from "@commontools/common-builder";
-
+import { z } from 'zod';
+import zodToJsonSchema from 'zod-to-json-schema';
 
 const updateValue = handler<{ detail: { value: string } }, { value: string }>(
     ({ detail }, state) => { detail?.value && (state.value = detail.value); }
@@ -55,30 +56,47 @@ const grabHtml = lift(({ result, partial, pending }) => {
 });
 
 
+const Character = z.object({
+    name: z.string(),
+    class: z
+        .string()
+        .describe('Character class, e.g. warrior, mage, or thief.'),
+    description: z.string(),
+});
+type Character = z.infer<typeof Character>;
+
 const prepJSON = lift(({ prompt }) => {
+    const jsonSchema = JSON.stringify(zodToJsonSchema(Character), null, 2);
+
     if (prompt) {
         return {
             messages: [prompt, '```json\n{'],
-            system: "You are a helpful assistant that generates JSON objects for testing.  Respond in JSON",
+            system: `Generate character data inspired by the user description using JSON:\n\n<schema>${jsonSchema}</schema>`,
             stop: '```'
         }
     }
     return {};
 });
-const grabJson = lift(({ result }) => {
+const grabJson = lift<{ result: string }, Character | undefined>(({ result }) => {
     if (!result) {
         return;
     }
     const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
     if (!jsonMatch) {
-        console.log("No JSON found in text:", result);
+        console.error("No JSON found in text:", result);
         return;
     }
-    return JSON.parse(jsonMatch[1]);
+    let rawData = JSON.parse(jsonMatch[1]);
+    let parsedData = Character.safeParse(rawData);
+    if (!parsedData.success) {
+        console.error("Invalid JSON:", parsedData.error);
+        return;
+    }
+    return parsedData.data;
 })
 const jsonify = lift(({ data }) => JSON.stringify(data, null, 2))
 
-export const generator = recipe<{ jsonprompt: string; htmlprompt: string; textprompt: string; data: any }>(
+export const generator = recipe<{ jsonprompt: string; htmlprompt: string; textprompt: string; data: Character | undefined }>(
     "data generator",
     ({ jsonprompt, htmlprompt, textprompt, data }) => {
 
