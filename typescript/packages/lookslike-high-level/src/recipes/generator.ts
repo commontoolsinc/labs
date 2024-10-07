@@ -6,16 +6,36 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
     ({ detail }, state) => { detail?.value && (state.value = detail.value); }
 );
 
-const generateTextMessages = lift(({ textprompt }) => {
-    return textprompt && [textprompt, 'It was']
+const prepText = lift(({ prompt }) => {
+    if (prompt) {
+        return {
+            messages: [prompt, 'It was'],
+            system: "You are a helpful assistant that generates text for testing.  Respond in text"
+        }
+    }
+    return {};
 });
 
-const generateJSONMessages = lift(({ jsonprompt }) => {
-    return jsonprompt && [jsonprompt, '```json\n{']
+const prepJSON = lift(({ prompt }) => {
+    if (prompt) {
+        return {
+            messages: [prompt, '```json\n{'],
+            system: "You are a helpful assistant that generates JSON objects for testing.  Respond in JSON",
+            stop: '```'
+        }
+    }
+    return {};
 });
 
-const generateHTMLMessages = lift(({ htmlprompt }) => {
-    return htmlprompt && [htmlprompt, '```html\n<html>']
+const prepHTML = lift(({ prompt }) => {
+    if (prompt) {
+        return {
+            messages: [prompt, '```html\n<html>'],
+            system: "You are a helpful assistant that generates HTML for testing.  Respond in HTML",
+            stop: '```'
+        }
+    }
+    return {};
 });
 
 const grabText = lift(({ result, partial, pending }) => {
@@ -23,24 +43,23 @@ const grabText = lift(({ result, partial, pending }) => {
         return partial || ''
     }
     return result
-})    
+})
 
 const grabJson = lift(({ result }) => {
     if (!result) {
-        return {};
+        return;
     }
     const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
     if (!jsonMatch) {
         console.log("No JSON found in text:", result);
-        return {};
+        return;
     }
     return JSON.parse(jsonMatch[1]);
 })
 
 const grabHtml = lift(({ result, partial, pending }) => {
-    console.log({partial, pending})
     if (pending) {
-        if (!partial) { 
+        if (!partial) {
             return ""
         }
         console.log(partial);
@@ -66,28 +85,14 @@ export const generator = recipe<{ jsonprompt: string; htmlprompt: string; textpr
     ({ jsonprompt, htmlprompt, textprompt, data }) => {
 
         textprompt.setDefault("2 sentence story");
-        const { result: textResult, partial: textPartial, pending: textPending } = generateText({
-            messages: generateTextMessages({ textprompt }),
-            system: "You are a helpful assistant that generates text for testing.  Respond in text"
-        });
-        const maybeText = grabText({ result: textResult, partial: textPartial, pending: textPending });
+        const maybeText = grabText(generateText(prepText({ prompt: textprompt })))
 
         jsonprompt.setDefault("pet");
-        const { result: jsonResult } = generateText({
-            messages: generateJSONMessages({ jsonprompt }),
-            system: "You are a helpful assistant that generates JSON objects for testing.  Respond in JSON",
-            stop: '```'
-        });
-        data = grabJson({ result: jsonResult });
+        data = grabJson(generateText(prepJSON({ prompt: jsonprompt })));
         const maybeJSON = jsonify({ data });
 
         htmlprompt.setDefault("simple html about recipes");
-        const { result: htmlResult, partial: htmlPartial, pending: htmlPending } = generateText({
-            messages: generateHTMLMessages({ htmlprompt }),
-            system: "You are a helpful assistant that generates HTML for testing.  Respond in HTML",
-            stop: '```'
-        });
-        const maybeHTML = grabHtml({ result: htmlResult, partial: htmlPartial, pending: htmlPending });
+        const maybeHTML = grabHtml(generateText(prepHTML({ prompt: htmlprompt })));
 
         return {
             [NAME]: 'data generator',
