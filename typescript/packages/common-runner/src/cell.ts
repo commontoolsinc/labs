@@ -458,7 +458,6 @@ function toBuilderCellProxy(
   valueCell: CellImpl<any>,
   valuePath: PropertyKey[]
 ): BuilderCellProxy<any> {
-  console.log("toBuilderCellProxy", valueCell, valuePath);
   let cell = cellToBuilderCellProxy.get(valueCell);
   if (!cell) {
     cell = builderCell();

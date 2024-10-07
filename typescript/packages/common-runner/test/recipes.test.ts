@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { recipe, lift } from "@commontools/common-builder";
+import { recipe, lift, handler } from "@commontools/common-builder";
 import { run } from "../src/runner.js";
+import { cell } from "../src/cell.js";
 import { idle } from "../src/scheduler.js";
 
 describe("Recipe Runner", () => {
@@ -93,5 +94,34 @@ describe("Recipe Runner", () => {
     expect(result.getAsProxy()).toMatchObject({
       doubled: [{ double: 2 }, { double: 4 }, { double: 6 }],
     });
+  });
+
+  it("should execute recipes returned by handlers", async () => {
+    const counter = cell({ value: 0 });
+
+    const inc = handler<{ amount: number }, { counter: { value: number } }>(
+      (event, { counter }) => {
+        counter.value += event.amount;
+      }
+    );
+
+    const incRecipe = recipe<{
+      counter: { value: number };
+    }>("event handler that returns a recipe", ({ counter }) => {
+      const stream = inc({ counter });
+      return { stream };
+    });
+
+    const result = run(incRecipe, { counter });
+
+    await idle();
+
+    result.asSimpleCell(["stream"]).send({ amount: 1 });
+    await idle();
+    expect(counter.get()).toEqual({ value: 1 });
+
+    result.asSimpleCell(["stream"]).send({ amount: 2 });
+    await idle();
+    expect(counter.get()).toEqual({ value: 3 });
   });
 });
