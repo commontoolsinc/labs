@@ -6,6 +6,7 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
     ({ detail }, state) => { detail?.value && (state.value = detail.value); }
 );
 
+
 const prepText = lift(({ prompt }) => {
     if (prompt) {
         return {
@@ -15,17 +16,13 @@ const prepText = lift(({ prompt }) => {
     }
     return {};
 });
-
-const prepJSON = lift(({ prompt }) => {
-    if (prompt) {
-        return {
-            messages: [prompt, '```json\n{'],
-            system: "You are a helpful assistant that generates JSON objects for testing.  Respond in JSON",
-            stop: '```'
-        }
+const grabText = lift(({ result, partial, pending }) => {
+    if (pending) {
+        return partial || ''
     }
-    return {};
-});
+    return result
+})
+
 
 const prepHTML = lift(({ prompt }) => {
     if (prompt) {
@@ -37,32 +34,11 @@ const prepHTML = lift(({ prompt }) => {
     }
     return {};
 });
-
-const grabText = lift(({ result, partial, pending }) => {
-    if (pending) {
-        return partial || ''
-    }
-    return result
-})
-
-const grabJson = lift(({ result }) => {
-    if (!result) {
-        return;
-    }
-    const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
-    if (!jsonMatch) {
-        console.log("No JSON found in text:", result);
-        return;
-    }
-    return JSON.parse(jsonMatch[1]);
-})
-
 const grabHtml = lift(({ result, partial, pending }) => {
     if (pending) {
         if (!partial) {
             return ""
         }
-        console.log(partial);
         return partial.replace(/</g, "&lt;").replace(/>/g, "&gt;").slice(-1000);
     }
 
@@ -78,6 +54,28 @@ const grabHtml = lift(({ result, partial, pending }) => {
     return html
 });
 
+
+const prepJSON = lift(({ prompt }) => {
+    if (prompt) {
+        return {
+            messages: [prompt, '```json\n{'],
+            system: "You are a helpful assistant that generates JSON objects for testing.  Respond in JSON",
+            stop: '```'
+        }
+    }
+    return {};
+});
+const grabJson = lift(({ result }) => {
+    if (!result) {
+        return;
+    }
+    const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
+    if (!jsonMatch) {
+        console.log("No JSON found in text:", result);
+        return;
+    }
+    return JSON.parse(jsonMatch[1]);
+})
 const jsonify = lift(({ data }) => JSON.stringify(data, null, 2))
 
 export const generator = recipe<{ jsonprompt: string; htmlprompt: string; textprompt: string; data: any }>(
