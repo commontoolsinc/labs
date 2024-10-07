@@ -4,6 +4,7 @@ import {
   UI,
   NAME,
   lift,
+  ifElse,
   generateText,
   handler,
   str,
@@ -85,16 +86,23 @@ const prepSuggestions = lift(({ src, prompt, schema }) => {
     return {};
   }
 
-  let user = `Given the current prompt: "${prompt}"`;
-  user += `\n\nGiven the following schema:\n<view-model-schema>\n${JSON.stringify(schema, null, 2)}\n</view-model-schema>`;
-  user += `\n\nAnd the current HTML:\n\`\`\`html\n${src}\n\`\`\``;
-  user += `\n\nSuggest 3 prompts to enhancem, refine or branch off into a new UI. Keep it simple these add or change a single feature.
+  let instructions = `Given the current prompt: "${prompt}"
 
-  Do not ever exceed a single sentence. Prefer terse, suggestions that take one step.
-  `;
+Given the following schema:
+<view-model-schema>
+${JSON.stringify(schema, null, 2)}
+</view-model-schema>
+
+And the current HTML:
+
+${src}
+
+Suggest 3 prompts to enhance, refine or branch off into a new UI. Keep it simple these add or change a single feature.
+
+Do not ever exceed a single sentence. Prefer terse, suggestions that take one step.`;
 
   return {
-    messages: [user, '```json\n{"suggestions":['],
+    messages: [instructions, '```json\n{"suggestions":['],
     system: `Suggest extensions to the UI either as modifications or forks off into new interfaces. Avoid bloat, focus on the user experience and creative potential. Respond in a json block.
     
 \`\`\`json
@@ -215,31 +223,23 @@ const prepHTML = lift(({ prompt, schema, lastSrc }) => {
   }
 });
 
-const grabHTML = lift<{ pending: boolean, partial: string }, string>(({ pending, partial }) => {
-  if (pending || !partial) {
+const grabHTML = lift<{ result: string }, string | undefined>(({ result }) => {
+  if (!result) {
     return '';
   }
-  const html = partial.match(/```html\n([\s\S]+?)```/)?.[1];
+  const html = result.match(/```html\n([\s\S]+?)```/)?.[1];
   if (!html) {
-    console.error("No HTML found in text", partial);
+    console.error("No HTML found in text", result);
     return '';
   }
   return html
 });
 
-const genHTMLView = lift(({ pending, partial }) => {
-  if (!partial) {
+const previewHTML = lift(({ pending, partial }) => {
+  if (!partial || !pending) {
     return "";
   }
-  if (pending) {
-    return `<code>${partial.slice(-1000).replace(/</g, "&lt;").replace(/>/g, "&gt;").slice(-1000)}</code>`;
-  }
-  const html = partial.match(/```html\n([\s\S]+?)```/)?.[1];
-  if (!html) {
-    console.error("No HTML found in text", partial);
-    return `<h2>error generating html...</h2><pre>${partial.replace(/>/g, "&gt;")}</pre>`;
-  }
-  return html
+  return partial.slice(-200);
 });
 
 
@@ -270,10 +270,8 @@ export const iframe = recipe<{
 
   const suggestions = grabSuggestions(generateText(prepSuggestions({ src, prompt, schema })));
 
-  // this html is a bit of a mess as changing src triggers suggestions and view (showing streaming)
-  const { pending: pendingHTML, partial: partialHTML } = generateText(prepHTML({ prompt, schema, lastSrc }));
-  src = grabHTML({ pending: pendingHTML, partial: partialHTML });
-  const viewsrc = genHTMLView({ pending: pendingHTML, partial: partialHTML });
+  // FIXME(ja): this html is a bit of a mess as changing src triggers suggestions and view (showing streaming)
+  const { result, pending: pendingHTML, partial: partialHTML } = generateText(prepHTML({ prompt, schema, lastSrc }));
 
   let firstSuggestion = getSuggestion({ suggestions, index: 0 });
   let secondSuggestion = getSuggestion({ suggestions, index: 1 });
@@ -287,7 +285,8 @@ export const iframe = recipe<{
         placeholder="title"
         oncommon-input=${updateValue({ value: title })}
       ></common-input>
-      <common-iframe src=${viewsrc} $context=${data}></common-iframe>
+      <common-iframe src=${grabHTML({ result })} $context=${data}></common-iframe>
+      <pre>${previewHTML({ partial: partialHTML, pending: pendingHTML })}
       <details>
         <summary>View Data</summary>
         <common-input
