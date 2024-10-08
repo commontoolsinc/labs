@@ -12,6 +12,7 @@ import {
   UI,
   canBeCellProxy,
   makeCellProxy,
+  Frame,
 } from "./types.js";
 import { cell } from "./cell-proxy.js";
 import {
@@ -46,28 +47,31 @@ export function recipe<T, R>(
   // The recipe graph is created by calling `fn` which populates for `inputs`
   // and `outputs` with Value<> (which containts CellProxy<>) and/or default
   // values.
-  const inputs = cell<Required<T & R>>();
+
+  const frame = pushFrame();
+  const inputs = cell<Required<T>>();
   const outputs = fn(inputs);
+  const result = factoryFromRecipe<T, R>(description, inputs, outputs);
+  popFrame(frame);
+  return result;
+}
 
-  // Next we need to traverse the inputs and outputs serialize the graph.
+// Same as above, but assumes the caller manages the frame
+export function recipeFromFrame<T, R>(
+  description: string,
+  fn: (input: CellProxy<Required<T>>) => Value<R>
+): RecipeFactory<T, R> {
+  const inputs = cell<Required<T>>();
+  const outputs = fn(inputs);
+  return factoryFromRecipe<T, R>(description, inputs, outputs);
+}
 
-  // First, assign the outputs to the state cell.
-  // TOOD: We assume no default values for top-level output for now.
-  /*
-  const stateValue = inputs.export().value ?? {};
-  if (typeof stateValue !== "object")
-    throw new Error("Inputs must be an object");
-  if (outputs !== undefined && typeof outputs !== "object")
-    throw new Error("Outputs must be an object or undefined");
-  if (outputs) {
-    inputs.set({
-      ...stateValue,
-      ...(outputs as R),
-    } as Value<T & R>);
-  }
-  */
-
-  // Then traverse the value, collect all mentioned nodes and cells
+function factoryFromRecipe<T, R>(
+  description: string,
+  inputs: CellProxy<T>,
+  outputs: Value<R>
+): RecipeFactory<T, R> {
+  // Traverse the value, collect all mentioned nodes and cells
   const cells = new Set<CellProxy<any>>();
   const nodes = new Set<NodeProxy>();
 
@@ -176,4 +180,21 @@ export function recipe<T, R>(
 
     return outputs;
   }, recipe) satisfies RecipeFactory<T, R>;
+}
+
+const frames: Frame[] = [];
+
+export function pushFrame(frame?: Frame): Frame {
+  if (!frame) frame = { parent: getTopFrame() };
+  frames.push(frame);
+  return frame;
+}
+
+export function popFrame(frame?: Frame): void {
+  if (frame && getTopFrame() !== frame) throw new Error("Frame mismatch");
+  frames.pop();
+}
+
+export function getTopFrame(): Frame | undefined {
+  return frames.length ? frames[frames.length - 1] : undefined;
 }

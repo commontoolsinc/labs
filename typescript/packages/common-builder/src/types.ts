@@ -47,6 +47,8 @@ export type CellProxyMethods<T> = {
   [isCellProxyMarker]: true;
 };
 
+export const isCellProxyMarker = Symbol("isCellProxy");
+
 export function isCellProxy(value: any): value is CellProxy<any> {
   return value && typeof value[isCellProxyMarker] === "boolean";
 }
@@ -155,6 +157,8 @@ export function makeCellProxy(value: CanBeCellProxy): CellProxy<any> {
   return value[toCellProxy]();
 }
 
-export const isCellProxyMarker = Symbol("isCellProxy");
-
 export const toCellProxy = Symbol("toCellProxy");
+
+export type Frame = {
+  parent?: Frame;
+};

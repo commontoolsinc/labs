@@ -6,12 +6,14 @@ import {
   type Module,
   type Alias,
   type JSON,
-  recipe,
   isModule,
   isRecipe,
   isAlias,
   isCellProxy,
   isStreamAlias,
+  pushFrame,
+  popFrame,
+  recipeFromFrame,
 } from "@commontools/common-builder";
 import {
   cell,
@@ -264,6 +266,7 @@ function instantiateJavaScriptNode(
       const inputsCell = cell(eventInputs);
       inputsCell.freeze(); // Freezes the bindings, not aliased cells.
 
+      const frame = pushFrame();
       const result = fn(inputsCell.getAsProxy([]));
 
       // If handler returns a graph created by builder, run it
@@ -273,12 +276,14 @@ function instantiateJavaScriptNode(
         const resultNode = result;
 
         // Recipe that assigns the result of the returned node to "result"
-        const resultRecipe = recipe("event handler result", () => ({
+        const resultRecipe = recipeFromFrame("event handler result", () => ({
           result: resultNode,
         }));
 
         run(resultRecipe, {});
       }
+
+      popFrame(frame);
     };
 
     addEventHandler(handler, stream);

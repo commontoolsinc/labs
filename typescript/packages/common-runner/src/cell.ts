@@ -6,6 +6,8 @@ import {
   toCellProxy,
   cell as builderCell,
   type CellProxy as BuilderCellProxy,
+  getTopFrame,
+  type Frame,
 } from "@commontools/common-builder";
 import {
   followCellReferences,
@@ -451,8 +453,11 @@ const createProxyForArrayValue = (
 };
 
 const cellToBuilderCellProxy = new WeakMap<
-  CellImpl<any>,
-  { path: PropertyKey[]; proxy: BuilderCellProxy<any> }[]
+  Frame,
+  WeakMap<
+    CellImpl<any>,
+    { path: PropertyKey[]; proxy: BuilderCellProxy<any> }[]
+  >
 >();
 
 // Creates aliases to value, used in recipes to refer to this specific cell. We
@@ -462,10 +467,14 @@ function toBuilderCellProxy(
   valueCell: CellImpl<any>,
   valuePath: PropertyKey[]
 ): BuilderCellProxy<any> {
-  let proxies = cellToBuilderCellProxy.get(valueCell);
+  const frame = getTopFrame();
+  if (!frame) throw new Error("No frame");
+  if (!cellToBuilderCellProxy.has(frame))
+    cellToBuilderCellProxy.set(frame, new WeakMap());
+  let proxies = cellToBuilderCellProxy.get(frame)!.get(valueCell);
   if (!proxies) {
     proxies = [];
-    cellToBuilderCellProxy.set(valueCell, proxies);
+    cellToBuilderCellProxy.get(frame)!.set(valueCell, proxies);
   }
   let proxy = proxies.find((p) => arrayEqual(valuePath, p.path))?.proxy;
   if (!proxy) {

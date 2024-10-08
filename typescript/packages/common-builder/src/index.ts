@@ -6,8 +6,21 @@ export {
   handler,
   isolated,
 } from "./module.js";
-export { recipe } from "./recipe.js";
-export { streamData, fetchData, llm, navigateTo, ifElse, str } from "./built-in.js";
+export {
+  recipe,
+  recipeFromFrame,
+  pushFrame,
+  popFrame,
+  getTopFrame,
+} from "./recipe.js";
+export {
+  streamData,
+  fetchData,
+  llm,
+  navigateTo,
+  ifElse,
+  str,
+} from "./built-in.js";
 export {
   ID,
   TYPE,
@@ -25,6 +38,7 @@ export {
   type NodeFactory,
   type ModuleFactory,
   isCellProxy,
+  toCellProxy,
   isModule,
   isRecipe,
   isAlias,
@@ -32,7 +46,7 @@ export {
   type toJSON,
   type JSONValue,
   type JSON,
-  toCellProxy,
+  type Frame,
 } from "./types.js";
 
 // This should be a separate package, but for now it's easier to keep it here.
