@@ -87,8 +87,8 @@ export function streamData(
 
         console.log("parsed", parsedData);
 
-        normalizeToCells(parsedData.data, result, log);
-        result.setAtPath([], parsedData.data, log);
+        normalizeToCells(result, undefined, log);
+        result.send(parsedData);
         break;
       }
 

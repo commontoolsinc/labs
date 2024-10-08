@@ -52,23 +52,23 @@ const generateQuery = handler<
   MouseEvent,
   {
     collectionName: string;
-    fields: string;
-    query: string;
+    query: any;
   }
 >((event, state) => {
-  const fieldList = state.fields.split(",").map((field) => field.trim());
   const query = {
     select: {
-      id: "?item",
-      ...fieldList.reduce(
-        (acc, field) => ({ ...acc, [field]: `?${field}` }),
-        {},
-      ),
+      item: [
+        {
+          item: "?item",
+          key: "?key",
+          value: "?value",
+        },
+      ],
     },
     where: [
       { Case: ["?collection", "name", state.collectionName] },
       { Case: ["?collection", "member", "?item"] },
-      ...fieldList.map((field) => ({ Case: ["?item", field, `?${field}`] })),
+      { Case: ["?item", "?key", "?value"] },
     ],
   };
   console.log("Generated query:", JSON.stringify(query, null, 2));
@@ -86,16 +86,35 @@ const onWorkbench = handler<
   });
 });
 
+const normalizeData = lift(({ result }) => {
+  if (!result || !result.data || !result.data[0] || !result.data[0].item) {
+    return [];
+  }
+  const groupedData = result.data[0].item.reduce(
+    (acc, { item, key, value }) => {
+      const itemKey = item["/"];
+      if (!acc[itemKey]) {
+        acc[itemKey] = {};
+      }
+      acc[itemKey][key] = value;
+      return acc;
+    },
+    {},
+  );
+
+  return Object.values(groupedData);
+});
+
 export const queryCollections = recipe<{}>("Fetch Collections", ({}) => {
   const query = cell<any>({ where: [] });
 
-  const { result: collectionResults } = streamData({
-    url: `/api/data`,
-    options: {
-      method: "PUT",
-      body: listCollections,
-    },
-  });
+  // const { result: collectionResults } = streamData({
+  //   url: `/api/data`,
+  //   options: {
+  //     method: "PUT",
+  //     body: listCollections,
+  //   },
+  // });
 
   const { result } = streamData({
     url: `/api/data`,
@@ -105,13 +124,12 @@ export const queryCollections = recipe<{}>("Fetch Collections", ({}) => {
     },
   });
 
-  const collections = ensureArray({ data: collectionResults });
-  const data = ensureArray({ data: collectionResults });
+  // const collections = ensureArray({ data: collectionResults?.data });
+  const data = ensureArray({ data: result });
+  const normalizedData = normalizeData({ result: result });
   const exportedData = lift((data: any[]) => ({ items: data }))(data);
 
-  const collectionNameInput = cell<string>("links");
-  const schemaInput = cell<string>(`title, summary, import/url, import/time`);
-  // schemaInput.setDefault(`title, summary`)
+  const collectionNameInput = cell<string>("reminders");
 
   return {
     [NAME]: "Query Synopsys Collections",
@@ -119,15 +137,6 @@ export const queryCollections = recipe<{}>("Fetch Collections", ({}) => {
       ${ifElse(
         result,
         html`<div>
-          <div class="collection-list">
-            ${collections.map(
-              (collection) => html`
-                <span class="collection-name"
-                  >${collection.name} (${collection.item.length})</span
-                >
-              `,
-            )}
-          </div>
           <div class="collection-input">
             <input
               value=${collectionNameInput}
@@ -135,16 +144,10 @@ export const queryCollections = recipe<{}>("Fetch Collections", ({}) => {
               type="text"
               placeholder="Enter collection name"
             />
-            <textarea
-              value=${schemaInput}
-              onkeyup=${onInput({ value: schemaInput })}
-              style="width: 100%; min-height: 128px;"
-            ></textarea>
 
             <common-button
               onclick=${generateQuery({
                 collectionName: collectionNameInput,
-                fields: schemaInput,
                 query,
               })}
             >
@@ -153,7 +156,7 @@ export const queryCollections = recipe<{}>("Fetch Collections", ({}) => {
           </div>
 
           <p>Number of items: ${data.length}</p>
-          <pre>${stringify({ obj: data })}</pre>
+          <pre>${stringify({ obj: normalizedData })}</pre>
           <details>
             <summary>Generated Query</summary>
             <pre>${stringify({ obj: query })}</pre>
@@ -166,7 +169,7 @@ export const queryCollections = recipe<{}>("Fetch Collections", ({}) => {
       )}
     </div>`,
     result,
-    collections,
+    // collections,
     data: exportedData,
   };
 });
