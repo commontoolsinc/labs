@@ -24,6 +24,7 @@
     "./lib/index.js"
   ],
   "dependencies": {
+    "@floating-ui/dom": "^1.6.11",
     "lit": "^3.2.0",
     "prosemirror-commands": "^1.6.0",
     "prosemirror-history": "^1.4.1",

@@ -1,6 +1,6 @@
 import { LitElement, css } from "lit";
 import { EditorState, Plugin } from "prosemirror-state";
-import { EditorView, Decoration, DecorationSet } from "prosemirror-view";
+import { EditorView, Decoration } from "prosemirror-view";
 import { Schema } from "prosemirror-model";
 import { history } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
@@ -9,6 +9,7 @@ import { customElement } from "lit/decorators.js";
 import { base } from "../../shared/styles.js";
 import { suggestionsPlugin } from "./suggestions-plugin.js";
 import { classes } from "../../shared/dom.js";
+import { positionMenu } from "../../shared/position.js";
 
 const schema = new Schema({
   nodes: {
@@ -37,48 +38,64 @@ const schema = new Schema({
   },
 });
 
-const hashtagPlugin = suggestionsPlugin({
-  pattern: /#\w+/g,
-  decoration: ({ from, to, active }) =>
-    Decoration.inline(from, to, {
-      class: classes({ hashtag: true, "hashtag--active": active }),
-    }),
-  onKeyDown: () => {
-    return false;
-  },
-});
+const editorClassPlugin = () =>
+  new Plugin({
+    view(editorView) {
+      editorView.dom.classList.add("editor");
 
-const mentionPlugin = suggestionsPlugin({
-  pattern: /@\w+/g,
-  decoration: ({ from, to, active }) =>
-    Decoration.inline(from, to, {
-      class: classes({ mention: true, "mention--active": active }),
-    }),
-  onKeyDown: (view, keyboardEvent) => {
-    console.log("!!!", view, keyboardEvent);
-    return false;
-  },
-});
+      return {
+        destroy() {
+          editorView.dom.classList.remove("editor");
+        },
+      };
+    },
+  });
 
-const editorClassPlugin = new Plugin({
-  view(editorView) {
-    editorView.dom.classList.add("editor");
+const createEditor = (
+  editorElement: HTMLElement,
+  suggestionsElement: HTMLElement,
+) => {
+  const hashtagPlugin = suggestionsPlugin({
+    pattern: /#\w+/g,
+    decoration: ({ from, to, active }) =>
+      Decoration.inline(from, to, {
+        class: classes({ hashtag: true, "hashtag--active": active }),
+      }),
+    onSuggest: async (view, suggestion) => {
+      const rect = view.coordsAtPos(suggestion.from);
+      positionMenu(suggestionsElement, rect);
+    },
+  });
 
-    return {
-      destroy() {
-        editorView.dom.classList.remove("editor");
-      },
-    };
-  },
-});
+  const mentionPlugin = suggestionsPlugin({
+    pattern: /@\w+/g,
+    decoration: ({ from, to, active }) =>
+      Decoration.inline(from, to, {
+        class: classes({ mention: true, "mention--active": active }),
+      }),
+    onSuggest: async (view, suggestion) => {
+      const rect = view.coordsAtPos(suggestion.from);
+      positionMenu(suggestionsElement, rect);
+    },
+  });
 
-const plugins = () => [
-  history(),
-  keymap(baseKeymap),
-  editorClassPlugin,
-  mentionPlugin,
-  hashtagPlugin,
-];
+  const plugins = [
+    history(),
+    keymap(baseKeymap),
+    editorClassPlugin(),
+    mentionPlugin,
+    hashtagPlugin,
+  ];
+
+  const state = EditorState.create({
+    schema,
+    plugins,
+  });
+
+  return new EditorView(editorElement, {
+    state,
+  });
+};
 
 @customElement("os-rich-text-editor")
 export class OsRichTextEditor extends LitElement {
@@ -87,6 +104,11 @@ export class OsRichTextEditor extends LitElement {
   static override styles = [
     base,
     css`
+      .wrapper {
+        display: block;
+        position: relative;
+      }
+
       .editor {
         font-family: var(--font-family);
         font-size: var(--body-size);
@@ -101,6 +123,13 @@ export class OsRichTextEditor extends LitElement {
         &:focus {
           outline: none;
         }
+      }
+
+      .suggestions {
+        border: 1px solid black;
+        position: absolute;
+        left: 0;
+        top: 0;
       }
 
       .mention {
@@ -136,18 +165,22 @@ export class OsRichTextEditor extends LitElement {
   }
 
   #initEditor() {
-    const state = EditorState.create({
-      schema,
-      plugins: plugins(),
-    });
+    const wrapperEl = document.createElement("div");
+    wrapperEl.classList.add("wrapper");
 
     const editorEl = document.createElement("div");
     editorEl.id = "editor";
     editorEl.classList.add("editor");
-    this.shadowRoot?.append(editorEl);
+    wrapperEl.append(editorEl);
 
-    this.#editor = new EditorView(editorEl, {
-      state,
-    });
+    const suggestionsEl = document.createElement("div");
+    suggestionsEl.id = "suggestions";
+    suggestionsEl.classList.add("suggestions");
+    suggestionsEl.innerText = "Hello suggestions!";
+    wrapperEl.append(suggestionsEl);
+
+    this.shadowRoot?.append(wrapperEl);
+
+    this.#editor = createEditor(editorEl, suggestionsEl);
   }
 }

@@ -9,22 +9,35 @@ export type Suggestion = {
   text: string;
 };
 
+/// Create a frozen suggestion
+export const createSuggestion = (
+  from: number,
+  to: number,
+  active: boolean,
+  text: string,
+): Suggestion => Object.freeze({ from, to, active, text });
+
 export const suggestionsPlugin = ({
   pattern,
   decoration,
-  onKeyDown,
+  onSuggest,
 }: {
   pattern: RegExp;
   decoration: (suggestion: Suggestion) => Decoration;
-  onKeyDown: (view: EditorView, event: KeyboardEvent) => boolean;
+  onSuggest: (view: EditorView, suggestion: Suggestion) => void;
 }) => {
   return new Plugin({
     key: new PluginKey("suggestions"),
 
-    view(_editorView: EditorView) {
+    view(_view: EditorView) {
       return {
-        update(_view: EditorView, _prevState: EditorState) {
-          // Update logic can be added here if needed
+        update: (view: EditorView, _prevState: EditorState) => {
+          const suggestions: Array<Suggestion> =
+            this.key!.getState(view.state) ?? [];
+          const active = suggestions.find((suggestion) => suggestion.active);
+          if (active) {
+            onSuggest(view, active);
+          }
         },
       };
     },
@@ -48,12 +61,14 @@ export const suggestionsPlugin = ({
             for (const match of matches) {
               const from = pos + match.index;
               const to = from + match[0].length;
-              suggestions.push({
-                from,
-                to,
-                active: isBetweenInclusive(from, to, headPos),
-                text: match[0],
-              });
+              suggestions.push(
+                createSuggestion(
+                  from,
+                  to,
+                  isBetweenInclusive(from, to, headPos),
+                  match[0],
+                ),
+              );
             }
           }
         });
@@ -62,17 +77,6 @@ export const suggestionsPlugin = ({
     },
 
     props: {
-      /**
-       * Call the keydown hook if suggestion is active.
-       */
-      handleKeyDown(view, event) {
-        // const state = this.getState(view.state);
-        // if (state == null) return;
-        // if (!state.active) return false;
-        // return onKeyDown(view, event, state);
-        return onKeyDown(view, event);
-      },
-
       decorations(state) {
         const suggestions = this.getState(state) ?? [];
         return DecorationSet.create(state.doc, suggestions.map(decoration));
