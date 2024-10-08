@@ -6,7 +6,7 @@ import { render } from "@commontools/common-html";
 import { Charm, ID, UI, NAME, addCharms, launch } from "../data.js";
 import { CellImpl, isCell, charmById } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
-import { iframe} from "../recipes/iframe.js";
+import { iframe } from "../recipes/iframe.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -14,26 +14,18 @@ export class CommonWindowManager extends LitElement {
     style.baseStyles,
     css`
       :host {
-        display: flex;
+        /* display: flex;
         overflow-x: auto;
-        overflow-y: visible;
+        overflow-y: visible; */
         width: 100%;
-        height: 95vh;
-        padding: 20px 0; /* Add vertical padding */
       }
       .window {
-        flex: 0 0 auto;
-        width: 25%;
-        min-width: 512px;
-        height: 95%; /* Make the window full height */
-        margin-left: 20px;
-        margin-bottom: 20px;
+        height: 100%;
+        flex: 1 1 auto;
         border: 1px solid #e0e0e0;
         border-radius: var(--radius);
         background-color: rgba(255, 255, 255, 0.8);
         backdrop-filter: blur(10px);
-        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1), 0 6px 6px rgba(0, 0, 0, 0.1),
-          0 0 0 1px rgba(0, 0, 0, 0.05);
         transition: all 0.3s ease;
         overflow: hidden;
       }
@@ -63,12 +55,16 @@ export class CommonWindowManager extends LitElement {
       @keyframes highlight {
         0%,
         100% {
-          box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1),
-            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow:
+            0 10px 20px rgba(0, 0, 0, 0.1),
+            0 6px 6px rgba(0, 0, 0, 0.1),
+            0 0 0 1px rgba(0, 0, 0, 0.05);
         }
         50% {
-          box-shadow: 0 0 20px 5px rgba(255, 215, 0, 0.5),
-            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow:
+            0 0 20px 5px rgba(255, 215, 0, 0.5),
+            0 6px 6px rgba(0, 0, 0, 0.1),
+            0 0 0 1px rgba(0, 0, 0, 0.05);
         }
       }
       .highlight {
@@ -80,25 +76,27 @@ export class CommonWindowManager extends LitElement {
   @property({ type: Array })
   charms: CellImpl<Charm>[] = [];
 
-
   private charmRefs: Map<number, Ref<HTMLElement>> = new Map();
   private newCharmRefs: [CellImpl<Charm>, Ref<HTMLElement>][] = [];
 
   handleUniboxSubmit(event: CustomEvent, charm: CellImpl<Charm>) {
     const value = event.detail.value;
     const shiftHeld = event.detail.shiftHeld;
-    console.log('Unibox submitted:', value);
+    console.log("Unibox submitted:", value);
 
     if (shiftHeld) {
-      charm.asSimpleCell(["addToPrompt"]).send({ prompt: value } as any)
+      charm.asSimpleCell(["addToPrompt"]).send({ prompt: value } as any);
     } else {
-      const charmValues = charm.getAsProxy()
-      let fieldsToInclude = Object.entries(charmValues).reduce((acc, [key, value]) => {
-        if (!key.startsWith('$') && !key.startsWith('_')) {
-          acc[key] = value;
-        }
-        return acc;
-      }, {} as any);
+      const charmValues = charm.getAsProxy();
+      let fieldsToInclude = Object.entries(charmValues).reduce(
+        (acc, [key, value]) => {
+          if (!key.startsWith("$") && !key.startsWith("_")) {
+            acc[key] = value;
+          }
+          return acc;
+        },
+        {} as any,
+      );
 
       if (charmValues.data) {
         fieldsToInclude = charmValues.data;
@@ -108,7 +106,7 @@ export class CommonWindowManager extends LitElement {
     }
   }
 
-  input: string = '';
+  input: string = "";
 
   override render() {
     return html`
@@ -128,20 +126,24 @@ export class CommonWindowManager extends LitElement {
           }
 
           return html`
-            <div class="window" id="window-${charmId}">
-              <button class="close-button" @click="${this.onClose}">×</button>
-              <common-screen-element>
-                <common-system-layout>
-                  <div ${ref(charmRef)}></div>
-                  <div slot="secondary"><common-annotation .query=${
-                    charmValues[NAME] ?? ""
-                  } .target=${charmId} .data=${charmValues} ></common-annotation></div>
-                  <common-unibox slot="search" value=${this.input} @submit=${(e) => this.handleUniboxSubmit(e, charm)} placeholder="" label=">">
-                </common-system-layout>
-              </common-screen-element>
-            </div>
+            <os-chrome>
+                <slot name="main">
+                    <div class="window" id="window-${charmId}">
+                    <button class="close-button" @click="${this.onClose}">×</button>
+                    <common-screen-element>
+                        <common-system-layout>
+                        <div ${ref(charmRef)}></div>
+                        <div slot="secondary"><common-annotation .query=${
+                          charmValues[NAME] ?? ""
+                        } .target=${charmId} .data=${charmValues} ></common-annotation></div>
+                        <common-unibox slot="search" value=${this.input} @submit=${(e) => this.handleUniboxSubmit(e, charm)} placeholder="" label=">">
+                        </common-system-layout>
+                    </common-screen-element>
+                    </div>
+                </slot>
+            </os-chrome>
           `;
-        }
+        },
       )}
     `;
   }
@@ -191,7 +193,7 @@ export class CommonWindowManager extends LitElement {
     if (windowElement) {
       const charmId = parseInt(windowElement.id.replace("window-", ""), 10);
       this.charms = this.charms.filter(
-        (charm) => charm.getAsProxy()[ID] !== charmId
+        (charm) => charm.getAsProxy()[ID] !== charmId,
       );
       this.charmRefs.delete(charmId);
     }
