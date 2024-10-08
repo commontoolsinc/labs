@@ -2,7 +2,7 @@ import { type Node } from "@commontools/common-builder";
 import { cell, CellImpl, ReactivityLog } from "../cell.js";
 import { sendValueToBinding, findAllAliasedCells } from "../utils.js";
 import { schedule, Action } from "../scheduler.js";
-import { mapBindingsToCell } from "../utils.js";
+import { mapBindingsToCell, normalizeToCells } from "../utils.js";
 
 /**
  * Stream data from a URL, used for querying Synopsys.
@@ -17,7 +17,7 @@ import { mapBindingsToCell } from "../utils.js";
  */
 export function streamData(
   recipeCell: CellImpl<any>,
-  { inputs, outputs }: Node
+  { inputs, outputs }: Node,
 ) {
   const inputBindings = mapBindingsToCell(inputs, recipeCell) as {
     url: string;
@@ -64,7 +64,7 @@ export function streamData(
       const utf8 = new TextDecoder();
 
       if (!reader) {
-        throw new Error('Response body is not readable');
+        throw new Error("Response body is not readable");
       }
 
       // this reads until we hit the first response frame for now
@@ -78,16 +78,17 @@ export function streamData(
           break;
         }
 
-        const [id, event, data] = utf8.decode(value).split('\n');
+        const [id, event, data] = utf8.decode(value).split("\n");
         const parsedData = {
-          id: id.slice('id:'.length),
-          event: event.slice('event:'.length),
-          data: JSON.parse(data.slice('data:'.length))
+          id: id.slice("id:".length),
+          event: event.slice("event:".length),
+          data: JSON.parse(data.slice("data:".length)),
         };
 
-        console.log('parsed', parsedData);
+        console.log("parsed", parsedData);
 
-        result.setAtPath([], parsedData, log);
+        normalizeToCells(parsedData.data, result, log);
+        result.setAtPath([], parsedData.data, log);
         break;
       }
 
