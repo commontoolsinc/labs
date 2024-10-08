@@ -14,11 +14,12 @@ ${
     : `Extract a summary of the page as a JSON blob.`
 }
 
-Format the output as a JSON array of one or more JSON objects. Use well-known keys for the entities from the set: ["title", "content-type" "author", "date", "content", "src", "summary", "name", "location"] but also include others to fulfill the request.
 URL: ${url}
 
 HTML Content:
 ${html}
+
+Format the output as a JSON array of one or more objects in a \`\`\`json\`\`\ block. Use well-known keys for the entities from the set: ["title", "content-type" "author", "date", "content", "src", "summary", "name", "location"] but also include others to fulfill the request.
   `;
 
   const response = await fastCompletion(systemPrompt, [
