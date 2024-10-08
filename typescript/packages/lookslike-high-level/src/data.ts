@@ -56,7 +56,7 @@ export function addCharms(newCharms: CellImpl<any>[]) {
   const currentCharms = charms.get();
   const currentIds = new Set(currentCharms.map((charm) => charm.get()[ID]));
   const charmsToAdd = newCharms.filter(
-    (charm) => !currentIds.has(charm.get()[ID])
+    (charm) => !currentIds.has(charm.get()[ID]),
   );
 
   if (charmsToAdd.length > 0) {
@@ -72,7 +72,7 @@ addCharms([
   }),
   run(importCalendar, {}),
   run(queryCollections, {
-    url: "/api/data/",
+    collection: "home",
   }),
   run(todoList, {
     title: "My TODOs",
@@ -174,10 +174,10 @@ function getFridayAndMondayDateStrings() {
   const daysUntilFriday = (5 - today.getDay() + 7) % 7;
 
   const nextFriday = new Date(
-    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000
+    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000,
   );
   const followingMonday = new Date(
-    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000
+    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000,
   );
 
   const formatDate = (date: Date): string => {
@@ -202,14 +202,14 @@ export function launch(recipe: Recipe, bindings: any) {
     const { cell, path } = getCellReferenceOrThrow(bindings);
     const keys = Object.keys(bindings);
     bindings = Object.fromEntries(
-      keys.map((key) => [key, { cell, path: [...path, key] }])
+      keys.map((key) => [key, { cell, path: [...path, key] }]),
     );
   } else {
     bindings = Object.fromEntries(
       Object.entries(bindings).map(([key, value]) => [
         key,
         getCellReferenceOrValue(value),
-      ])
+      ]),
     );
   }
   const charm = run(recipe, bindings);

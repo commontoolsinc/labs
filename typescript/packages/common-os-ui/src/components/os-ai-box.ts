@@ -57,6 +57,19 @@ export class OsAiBox extends LitElement {
     }
   };
 
+  #onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Enter") {
+      console.log("Enter key pressed");
+      this.dispatchEvent(
+        new CustomEvent("submit", {
+          detail: {
+            value: this.value,
+          },
+        }),
+      );
+    }
+  };
+
   override render() {
     return html`
       <div class="ai-box">
@@ -67,6 +80,7 @@ export class OsAiBox extends LitElement {
           value="${this.value}"
           placeholder=${this.placeholder}
           @input=${this.#onInput}
+          @keydown=${this.#onKeyDown}
         />
         <os-icon iconsize="lg" icon="apps"></os-icon>
       </div>
