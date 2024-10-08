@@ -21,10 +21,12 @@ export const suggestionsPlugin = ({
   pattern,
   decoration,
   onSuggest,
+  onExit,
 }: {
   pattern: RegExp;
   decoration: (suggestion: Suggestion) => Decoration;
   onSuggest: (view: EditorView, suggestion: Suggestion) => void;
+  onExit: (view: EditorView) => void;
 }) => {
   return new Plugin({
     key: new PluginKey("suggestions"),
@@ -37,6 +39,8 @@ export const suggestionsPlugin = ({
           const active = suggestions.find((suggestion) => suggestion.active);
           if (active) {
             onSuggest(view, active);
+          } else {
+            onExit(view);
           }
         },
       };

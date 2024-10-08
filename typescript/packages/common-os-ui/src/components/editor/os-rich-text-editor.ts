@@ -1,4 +1,4 @@
-import { LitElement, css } from "lit";
+import { LitElement, css, html, render } from "lit";
 import { EditorState, Plugin } from "prosemirror-state";
 import { EditorView, Decoration } from "prosemirror-view";
 import { Schema } from "prosemirror-model";
@@ -8,7 +8,7 @@ import { baseKeymap } from "prosemirror-commands";
 import { customElement } from "lit/decorators.js";
 import { base } from "../../shared/styles.js";
 import { suggestionsPlugin } from "./suggestions-plugin.js";
-import { classes } from "../../shared/dom.js";
+import { classes, toggleHidden } from "../../shared/dom.js";
 import { positionMenu } from "../../shared/position.js";
 
 const schema = new Schema({
@@ -53,7 +53,8 @@ const editorClassPlugin = () =>
 
 const createEditor = (
   editorElement: HTMLElement,
-  suggestionsElement: HTMLElement,
+  mentionSuggestionsElement: HTMLElement,
+  hashtagSuggestionsElement: HTMLElement,
 ) => {
   const hashtagPlugin = suggestionsPlugin({
     pattern: /#\w+/g,
@@ -63,7 +64,11 @@ const createEditor = (
       }),
     onSuggest: async (view, suggestion) => {
       const rect = view.coordsAtPos(suggestion.from);
-      positionMenu(suggestionsElement, rect);
+      positionMenu(hashtagSuggestionsElement, rect);
+      toggleHidden(hashtagSuggestionsElement, false);
+    },
+    onExit: () => {
+      toggleHidden(hashtagSuggestionsElement, true);
     },
   });
 
@@ -75,7 +80,11 @@ const createEditor = (
       }),
     onSuggest: async (view, suggestion) => {
       const rect = view.coordsAtPos(suggestion.from);
-      positionMenu(suggestionsElement, rect);
+      positionMenu(mentionSuggestionsElement, rect);
+      toggleHidden(mentionSuggestionsElement, false);
+    },
+    onExit: () => {
+      toggleHidden(mentionSuggestionsElement, true);
     },
   });
 
@@ -161,26 +170,31 @@ export class OsRichTextEditor extends LitElement {
   }
 
   override firstUpdated() {
-    this.#initEditor();
-  }
-
-  #initEditor() {
-    const wrapperEl = document.createElement("div");
-    wrapperEl.classList.add("wrapper");
-
-    const editorEl = document.createElement("div");
-    editorEl.id = "editor";
-    editorEl.classList.add("editor");
-    wrapperEl.append(editorEl);
-
-    const suggestionsEl = document.createElement("div");
-    suggestionsEl.id = "suggestions";
-    suggestionsEl.classList.add("suggestions");
-    suggestionsEl.innerText = "Hello suggestions!";
-    wrapperEl.append(suggestionsEl);
-
-    this.shadowRoot?.append(wrapperEl);
-
-    this.#editor = createEditor(editorEl, suggestionsEl);
+    const elements = html`
+      <div id="wrapper" class="wrapper">
+        <div id="editor" class="editor"></div>
+        <div id="mention-suggestions" class="suggestions">
+          Hello mention suggestions
+        </div>
+        <div id="hashtag-suggestions" class="suggestions">
+          Hello hashtag suggestions
+        </div>
+      </div>
+    `;
+    render(elements, this.renderRoot);
+    const editorElement = this.renderRoot.querySelector(
+      "#editor",
+    ) as HTMLElement;
+    const mentionSuggestionsElement = this.renderRoot.querySelector(
+      "#mention-suggestions",
+    ) as HTMLElement;
+    const hashtagSuggestionsElement = this.renderRoot.querySelector(
+      "#hashtag-suggestions",
+    ) as HTMLElement;
+    this.#editor = createEditor(
+      editorElement,
+      mentionSuggestionsElement,
+      hashtagSuggestionsElement,
+    );
   }
 }
