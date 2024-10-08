@@ -1,16 +1,28 @@
 import { html } from "@commontools/common-html";
-import { recipe, handler, UI, NAME } from "@commontools/common-builder";
+import {
+  recipe,
+  handler,
+  UI,
+  NAME,
+  navigateTo,
+} from "@commontools/common-builder";
 import { iframe } from "./iframe.js";
-import { launch } from "../data.js";
 
-type Position = { x: number; y: number; }
-type Actor = { name: string; position: Position; hp: number; xp: number; inventory: string[]; dialogue: string[]; }
+type Position = { x: number; y: number };
+type Actor = {
+  name: string;
+  position: Position;
+  hp: number;
+  xp: number;
+  inventory: string[];
+  dialogue: string[];
+};
 
 interface DungeonGame {
   dungeonFloor: number;
   width: number;
   height: number;
-  walls: Position[],
+  walls: Position[];
   skeleton: Actor;
   goblin: Actor;
   player: Actor;
@@ -20,19 +32,26 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value)
 );
 
-const cloneRecipe = handler<{}, { state: DungeonGame; subtitle: string; prompt: string }>((_, { prompt, state, subtitle }) => {
+const cloneRecipe = handler<
+  {},
+  { state: DungeonGame; subtitle: string; prompt: string }
+>((_, { prompt, state, subtitle }) => {
   let fieldsToInclude = Object.entries(state).reduce((acc, [key, value]) => {
-    if (!key.startsWith('$') && !key.startsWith('_')) {
+    if (!key.startsWith("$") && !key.startsWith("_")) {
       acc[key] = value;
     }
     return acc;
   }, {} as any);
 
-  launch(iframe, { data: fieldsToInclude, title: `Dungeon: ${subtitle}`, prompt });
+  return navigateTo(
+    iframe({ data: fieldsToInclude, title: `Dungeon: ${subtitle}`, prompt })
+  );
 });
 
 const generateNoise = (x: number, y: number, scale: number = 0.1): number => {
-  const noise = Math.sin(x * scale) * Math.cos(y * scale) + Math.sin(x * scale / 2 + y * scale / 2);
+  const noise =
+    Math.sin(x * scale) * Math.cos(y * scale) +
+    Math.sin((x * scale) / 2 + (y * scale) / 2);
   return noise > 0 ? 1 : 0;
 };
 
@@ -49,25 +68,40 @@ const createNoiseGrid = (w: number, h: number): Position[] => {
 };
 
 export const dungeon = recipe<DungeonGame>("Dungeon Game", (state) => {
-  state.walls.setDefault(createNoiseGrid(10, 10))
+  state.walls.setDefault(createNoiseGrid(10, 10));
   // state.player.setDefault({ x: 5, y: 5})
-  state.width.setDefault(10)
-  state.height.setDefault(10)
+  state.width.setDefault(10);
+  state.height.setDefault(10);
   state.player.setDefault({
     name: "Adventurer",
     position: { x: 5, y: 5 },
     hp: 100,
     xp: 0,
-    inventory: ['sword', 'shield', 'crumpled felt hat'],
-    dialogue: ['Hello, I am an adventurer.', 'Oof, my knee!', 'I need a potion.', 'I am the best.']
+    inventory: ["sword", "shield", "crumpled felt hat"],
+    dialogue: [
+      "Hello, I am an adventurer.",
+      "Oof, my knee!",
+      "I need a potion.",
+      "I am the best.",
+    ],
   });
-  state.dungeonFloor.setDefault(1)
-  state.skeleton.setDefault(
-    { name: "Skeleton", position: { x: 7, y: 4 }, hp: 10, xp: 10, inventory: ['bone', 'skull'], dialogue: ['Rattle rattle.', 'I am a skeleton.', 'I am also the best.'] },
-  )
-  state.goblin.setDefault(
-    { name: "Goblin", position: { x: 5, y: 3 }, hp: 20, xp: 20, inventory: ['club', 'loincloth'], dialogue: ['Gobble gobble.', 'I am a goblin.', 'I am the worst.'] },
-  )
+  state.dungeonFloor.setDefault(1);
+  state.skeleton.setDefault({
+    name: "Skeleton",
+    position: { x: 7, y: 4 },
+    hp: 10,
+    xp: 10,
+    inventory: ["bone", "skull"],
+    dialogue: ["Rattle rattle.", "I am a skeleton.", "I am also the best."],
+  });
+  state.goblin.setDefault({
+    name: "Goblin",
+    position: { x: 5, y: 3 },
+    hp: 20,
+    xp: 20,
+    inventory: ["club", "loincloth"],
+    dialogue: ["Gobble gobble.", "I am a goblin.", "I am the worst."],
+  });
 
   return {
     [NAME]: "Dungeon Adventure",
@@ -82,34 +116,80 @@ export const dungeon = recipe<DungeonGame>("Dungeon Game", (state) => {
           ></common-input>
           </div>
           <h1>Welcome, ${state.player.name}!</h1>
-        <common-button onclick=${cloneRecipe({ state, subtitle: 'Character Status', prompt: 'character status and top down map of the area' })}
+        <common-button onclick=${cloneRecipe({
+          state,
+          subtitle: "Character Status",
+          prompt: "character status and top down map of the area",
+        })}
           >Character Status</common-button
         >
-        <common-button onclick=${cloneRecipe({ state, subtitle: 'Inventory', prompt: 'inventory view' })}
+        <common-button onclick=${cloneRecipe({
+          state,
+          subtitle: "Inventory",
+          prompt: "inventory view",
+        })}
             >Inventory</common-button
         >
-        <common-button onclick=${cloneRecipe({ state, subtitle: 'Skeleton Status', prompt: 'status from skeleton\'s perspective (selectable) with movement controls' })}
+        <common-button onclick=${cloneRecipe({
+          state,
+          subtitle: "Skeleton Status",
+          prompt:
+            "status from skeleton's perspective (selectable) with movement controls",
+        })}
             >Skeleton Status</common-button
         >
-        <common-button onclick=${cloneRecipe({ state, subtitle: 'Battle', prompt: 'battle between player and skeleton with emoji battle graphics and loot' })}
+        <common-button onclick=${cloneRecipe({
+          state,
+          subtitle: "Battle",
+          prompt:
+            "battle between player and skeleton with emoji battle graphics and loot",
+        })}
             >Battle</common-button
         >
-        <common-button onclick=${cloneRecipe({ state, subtitle: 'Chat', prompt: 'retro rpg style dialogue box printing text character by character, you can switch which character you\'re talking to and cycle through the dialogue options. there should be a graphical representation of the character speaking.' })}
+        <common-button onclick=${cloneRecipe({
+          state,
+          subtitle: "Chat",
+          prompt:
+            "retro rpg style dialogue box printing text character by character, you can switch which character you're talking to and cycle through the dialogue options. there should be a graphical representation of the character speaking.",
+        })}
             >Chat</common-button
         >
-        <common-button onclick=${cloneRecipe({ state, subtitle: 'Dragon Battle', prompt: 'epic boss fight where the skeleton, hero and goblin must team up against a dragon - visualized as emoji, mother/earthbound style turn based battle with retro effects' })}
+        <common-button onclick=${cloneRecipe({
+          state,
+          subtitle: "Dragon Battle",
+          prompt:
+            "epic boss fight where the skeleton, hero and goblin must team up against a dragon - visualized as emoji, mother/earthbound style turn based battle with retro effects",
+        })}
             >Dragon Battle</common-button
         >
-        <common-button onclick=${cloneRecipe({ state, subtitle: '3D Viewer', prompt: 'three.js dungeon viewer w/ procedural texture on walls. Add a minimap overlay to the 3D dungeon viewer, showing the player, skeleton and goblin\'s position. custom camera y axis rotation with slider control. nice lighting with torches.' })}
+        <common-button onclick=${cloneRecipe({
+          state,
+          subtitle: "3D Viewer",
+          prompt:
+            "three.js dungeon viewer w/ procedural texture on walls. Add a minimap overlay to the 3D dungeon viewer, showing the player, skeleton and goblin's position. custom camera y axis rotation with slider control. nice lighting with torches.",
+        })}
             >3D Viewer</common-button
         >
-        <common-button onclick=${cloneRecipe({ state, subtitle: 'Map Editor', prompt: 'grid-based map editor for walls' })}
+        <common-button onclick=${cloneRecipe({
+          state,
+          subtitle: "Map Editor",
+          prompt: "grid-based map editor for walls",
+        })}
             >Map Editor</common-button
         >
-        <common-button onclick=${cloneRecipe({ state, subtitle: 'Dialogue Editor', prompt: 'edit dialogue for any actor' })}
+        <common-button onclick=${cloneRecipe({
+          state,
+          subtitle: "Dialogue Editor",
+          prompt: "edit dialogue for any actor",
+        })}
             >Dialogue Script Editor</common-button
         >
-        <common-button onclick=${cloneRecipe({ state, subtitle: 'Campfire', prompt: 'campfire scene with goblin, player and skeleton where they can rest, heal and have idle conversations (using their dialogue) - represent using emoji' })}
+        <common-button onclick=${cloneRecipe({
+          state,
+          subtitle: "Campfire",
+          prompt:
+            "campfire scene with goblin, player and skeleton where they can rest, heal and have idle conversations (using their dialogue) - represent using emoji",
+        })}
             >Campfire</common-button
         >
       </div>
