@@ -35,41 +35,6 @@ const listCollections = JSON.stringify({
   ]
 })
 
-const listCollectionItems = lift(({ selection }: { selection: string }) => {
-  return JSON.stringify({
-    select: {
-      id: "?item",
-      title: "?title",
-      summary: "?summary",
-      'import/time': "?time",
-      'import/url': "?url",
-    },
-    where: [
-      { Case: ["?item", "title", "?title"] },
-      { Case: ["?item", "summary", "?summary"] },
-      { Case: ["?item", "import/url", "?url"] },
-      { Case: ["?item", "import/time", "?time"] },
-      { Case: ["?collection", "member", "?item"] },
-      { Case: ["?collection", "name", selection] },
-    ]
-  })
-});
-
-const onSelectCollection = handler<
-  InputEvent,
-  {
-    selection: string;
-    collection: string;
-  }
->((ev, state) => {
-    state.selection = state.collection
-});
-
-const isSelected = lift(({ selection, collection }: { selection: string, collection: string }) => {
-  console.log('?', selection, collection)
-  return selection === collection;
-});
-
 const stringify = lift(({ obj }) => {
   console.log("stringify", obj);
   return JSON.stringify(obj || {}, null, 2);
@@ -117,7 +82,6 @@ const onWorkbench = handler<
 export const queryCollections = recipe<{  }>(
   "Fetch Collections",
   ({ }) => {
-    const selection = cell<string>('dek');
     const query = cell<any>({ where: [] })
 
     const { result: collectionResults } = streamData({
@@ -190,23 +154,3 @@ export const queryCollections = recipe<{  }>(
     };
   }
 );
-
-
-// <table>
-//     <thead>
-//         <tr>
-//         <th>Action</th>
-//         <th>name</th>
-//         <th>item count</th>
-//         </tr>
-//     </thead>
-//     <tbody>
-//         ${collections.map(row => html`
-//         <tr>
-//             <td><common-button onclick=${onViewCollection({ collection: row.name })}>View</common-button></td>
-//             <td>${row.name || ''}</td>
-//             <td>${row.item.length || ''}</td>
-//         </tr>
-//         `)}
-//     </tbody>
-// </table>
