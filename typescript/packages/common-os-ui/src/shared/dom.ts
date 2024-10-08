@@ -42,3 +42,9 @@ export const withWrites = (write: () => void) => {
     isFlushScheduled = false;
   });
 };
+
+export const toggleHidden = (element: HTMLElement, isHidden: boolean) => {
+  withWrites(() => {
+    element.style.display = isHidden ? "none" : "block";
+  });
+};
