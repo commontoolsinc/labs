@@ -39,6 +39,27 @@ let fetchDataFactory:
     >
   | undefined = undefined;
 
+export function streamData<T>(
+  params: Value<{
+    url: string;
+    options?: RequestInit;
+    result?: T;
+  }>
+): Value<{ pending: boolean; result: T; error: any }> {
+  streamDataFactory ||= createNodeFactory({
+    type: "builtin",
+    implementation: "streamData",
+  });
+  return streamDataFactory(params);
+}
+
+let streamDataFactory:
+  | NodeFactory<
+      { url: string; options?: RequestInit; result?: any },
+      { pending: boolean; result: any; error: any }
+    >
+  | undefined = undefined;
+
 export function ifElse<T, U, V>(
   condition: Value<T>,
   ifTrue: Value<U>,
