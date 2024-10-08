@@ -3,8 +3,9 @@ import {
   recipe,
   lift,
   handler,
+  ifElse,
   str,
-  generateText,
+  llm,
   UI,
   NAME,
 } from "@commontools/common-builder";
@@ -16,13 +17,10 @@ import zodToJsonSchema from 'zod-to-json-schema';
 const LuftBnBPlace = z.object({
   id: z.string().describe('Unique identifier for the listing'),
   title: z.string().describe('Title of the listing'),
-  host: z.string().describe('Host of the listing'),
   location: z.string().describe('Street corner, Neighborhood and city of the listing'),
   propertyType: z.enum(['Apartment', 'House', 'Room']),
   pricePerNight: z.number().min(0),
   numberOfGuests: z.number().int().min(1),
-  latitude: z.number(),
-  longitude: z.number(),
   rating: z.number().min(0).max(5).describe('Average rating of the listing'),
   annotationUI: z.string().describe('empty string - do not add anything here'),
 });
@@ -33,7 +31,7 @@ const LuftBnBPlaces = z.array(LuftBnBPlace);
 
 const jsonSchema = JSON.stringify(zodToJsonSchema(LuftBnBPlaces), null, 2);
 
-const grabPlaces = lift<{ result: string }, LuftBnBPlace[]>(({ result }) => {
+const grabPlaces = lift<{ result?: string }, LuftBnBPlace[]>(({ result }) => {
   if (!result) {
     return [];
   }
@@ -79,12 +77,7 @@ const handleSearchClick = handler<
   state.location = state.locationUI;
 });
 
-const makeBooking = handler<
-  {},
-  {
-    place: LuftBnBPlace;
-  }
->((_, { place }) => {
+const makeBooking = handler<{}, { place: LuftBnBPlace }>((_, { place }) => {
   // TODO: This isn't serializable. Instead we have to add a way to trigger a
   // recipe from an event.
   launch(luftBnBBooking, {
@@ -125,7 +118,8 @@ export const luftBnBSearch = recipe<{
   const endDateUI = copy({ value: endDate });
   const locationUI = copy({ value: location });
 
-  const places = grabPlaces(generateText(buildQuery({ location, startDate, endDate })));
+  const { result, pending } = llm(buildQuery({ location, startDate, endDate }));
+  const places = grabPlaces({ result });
 
   return {
     [UI]: html`
@@ -160,9 +154,11 @@ export const luftBnBSearch = recipe<{
     })}
           >Search</common-button
         >
-        <common-vstack gap="md">
-          ${places.map(
-      (place) => html`
+        ${ifElse(
+          pending,
+          html`<div>Searching...</div>`,
+          places.map(
+            (place) => html`
               <common-vstack gap="xs">
                 <div>${place.title}</div>
                 <div>
@@ -177,8 +173,8 @@ export const luftBnBSearch = recipe<{
                   Book for $${place.pricePerNight} per night
                 </common-button>
                 ${place.annotationUI}
-              </common-vstack>`
-    )}
+              </common-vstack>`)
+          )}
         </common-vstack>
       </common-vstack>
     `,
@@ -270,9 +266,6 @@ const NearbyPlace = z.object({
 
 type NearbyPlace = z.infer<typeof NearbyPlace>;
 
-const NearbyPlaces = z.array(NearbyPlace);
-type NearbyPlaces = z.infer<typeof NearbyPlace>;
-
 const generateNearbyPlaceQuery = lift(({ routine, places }) => {
   const locationType = routine.locations[0] ?? "coffee shop";
 
@@ -281,20 +274,18 @@ const generateNearbyPlaceQuery = lift(({ routine, places }) => {
   }));
 
 
-  const jsonSchema = JSON.stringify(zodToJsonSchema(NearbyPlaces), null, 2);
+  const jsonSchema = JSON.stringify(zodToJsonSchema(NearbyPlace), null, 2);
 
-  let r = {
+  return {
     messages: [`generate ${initialData.length} ${locationType} with pun names`,
       '```json\n['],
     system: `Generate a list of ${locationType} places in json format\n\n<schema>${jsonSchema}</schema>`,
     stop: '```',
   };
-  console.log(JSON.stringify(r, null, 2));
-  return r;
 });
 
 // FIXME(ja): validate that the recommendations work here...
-const grabNearbyPlaces = lift<{ result: string }, NearbyPlaces>(({ result }) => {
+const grabNearbyPlaces = lift<{ result?: string }, NearbyPlace[]>(({ result }) => {
   if (!result) {
     return [];
   }
@@ -330,7 +321,7 @@ const nearbyPlacesForRoutine = recipe<{
   places: LuftBnBPlace[];
 }>("annotate places for routine", ({ routine, places }) => {
 
-  const nearbyPlaces = grabNearbyPlaces(generateText(generateNearbyPlaceQuery({ routine, places })));
+  const nearbyPlaces = grabNearbyPlaces(llm(generateNearbyPlaceQuery({ routine, places })));
 
   annotatePlacesWithNearbyPlaces({ nearbyPlaces, places });
 

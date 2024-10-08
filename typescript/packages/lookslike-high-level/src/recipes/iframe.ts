@@ -4,8 +4,7 @@ import {
   UI,
   NAME,
   lift,
-  ifElse,
-  generateText,
+  llm,
   handler,
   str,
   cell,
@@ -88,7 +87,15 @@ const prepSuggestions = lift(({ src, prompt, schema }) => {
 
   let instructions = `Given the current prompt: "${prompt}"
 
-Given the following schema:
+Suggest 3 prompts to enhance, refine or branch off into a new UI. Keep it simple these add or change a single feature.
+
+Do not ever exceed a single sentence. Prefer terse, suggestions that take one step.`;
+
+  return {
+    messages: [instructions, '```json\n{"suggestions":['],
+    system: `Suggest extensions to the UI either as modifications or forks off into new interfaces. Avoid bloat, focus on the user experience and creative potential.
+
+Using the following schema:
 <view-model-schema>
 ${JSON.stringify(schema, null, 2)}
 </view-model-schema>
@@ -97,14 +104,8 @@ And the current HTML:
 
 ${src}
 
-Suggest 3 prompts to enhance, refine or branch off into a new UI. Keep it simple these add or change a single feature.
+Respond in a json block.
 
-Do not ever exceed a single sentence. Prefer terse, suggestions that take one step.`;
-
-  return {
-    messages: [instructions, '```json\n{"suggestions":['],
-    system: `Suggest extensions to the UI either as modifications or forks off into new interfaces. Avoid bloat, focus on the user experience and creative potential. Respond in a json block.
-    
 \`\`\`json
 {
   "suggestions": [
@@ -120,7 +121,7 @@ Do not ever exceed a single sentence. Prefer terse, suggestions that take one st
 });
 
 
-const grabSuggestions = lift<{ result: string }, Suggestion[]>(({ result }) => {
+const grabSuggestions = lift<{ result?: string }, Suggestion[]>(({ result }) => {
   if (!result) {
     return [];
   }
@@ -223,25 +224,24 @@ const prepHTML = lift(({ prompt, schema, lastSrc }) => {
   }
 });
 
-const grabHTML = lift<{ result: string }, string | undefined>(({ result }) => {
+const grabHTML = lift<{ result?: string }, string | undefined>(({ result }) => {
   if (!result) {
-    return '';
+    return;
   }
   const html = result.match(/```html\n([\s\S]+?)```/)?.[1];
   if (!html) {
     console.error("No HTML found in text", result);
-    return '';
+    return;
   }
   return html
 });
 
-const previewHTML = lift(({ pending, partial }) => {
+const tail = lift<{ pending: boolean, partial?: string, lines: number }, string>(({ pending, partial, lines }) => {
   if (!partial || !pending) {
     return "";
   }
-  return partial.slice(-200);
+  return partial.split('\n').slice(-lines).join('\n');
 });
-
 
 export const iframe = recipe<{
   title: string;
@@ -268,10 +268,10 @@ export const iframe = recipe<{
   //   mode: "json",
   // });
 
-  const suggestions = grabSuggestions(generateText(prepSuggestions({ src, prompt, schema })));
+  const suggestions = grabSuggestions(llm(prepSuggestions({ src, prompt, schema })));
 
   // FIXME(ja): this html is a bit of a mess as changing src triggers suggestions and view (showing streaming)
-  const { result, pending: pendingHTML, partial: partialHTML } = generateText(prepHTML({ prompt, schema, lastSrc }));
+  const { result, pending: pendingHTML, partial: partialHTML } = llm(prepHTML({ prompt, schema, lastSrc }));
 
   let firstSuggestion = getSuggestion({ suggestions, index: 0 });
   let secondSuggestion = getSuggestion({ suggestions, index: 1 });
@@ -286,7 +286,7 @@ export const iframe = recipe<{
         oncommon-input=${updateValue({ value: title })}
       ></common-input>
       <common-iframe src=${grabHTML({ result })} $context=${data}></common-iframe>
-      <pre>${previewHTML({ partial: partialHTML, pending: pendingHTML })}
+      <pre>${tail({ partial: partialHTML, pending: pendingHTML, lines: 5 })}
       <details>
         <summary>View Data</summary>
         <common-input

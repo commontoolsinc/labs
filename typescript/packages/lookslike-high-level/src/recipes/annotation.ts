@@ -9,7 +9,7 @@ import {
   NAME,
   TYPE,
   ifElse,
-  generateData,
+  llm,
 } from "@commontools/common-builder";
 import { type Charm, openCharm } from "../data.js";
 import {
@@ -18,8 +18,16 @@ import {
   getCellReferenceOrValue,
 } from "@commontools/common-runner";
 import { suggestions } from "../suggestions.js";
+import { z } from "zod";
 
 const MINIMUM_CONFIDENCE = -1.0;
+
+const Suggestion = z.object({
+  index: z.number(),
+  confidence: z.number(),
+  reason: z.string(),
+});
+type Suggestion = z.infer<typeof Suggestion>;
 
 type CharmInfo = { id: number; name: string; type: string };
 
@@ -36,11 +44,13 @@ const getCharmInfo = lift(({ charms }) => {
   return charmInfo;
 });
 
-const buildMessages = lift(
+const buildQuery = lift(
   ({ query, charmInfo }) => {
 
-    return [
-      `Given the following user query and list of data charms, return the indices of the charms that are most relevant to the query.
+    return {
+      system: "You are an assistant that helps match user queries to relevant data charms based on their names and types.",
+      messages: [
+        `Given the following user query and list of data charms, return the indices of the charms that are most relevant to the query.
 Consider both the names and types of the charms when making your selection.
 Think broadly, e.g. a stay in a hotel could match a charm called "morning routine", as the user would want to pick a hotel that supports their morning routine.
 
@@ -61,11 +71,32 @@ Respond with only JSON array of suggestions, e.g.
   { index: 5, chosen: "suzy collab", reason: "could this be related to Susan? she appears in several project related lists", confidence: 0.33 }
 ]
 \`\`\`
-`, '```json\n['];
+`, '```json\n['
+      ],
+      stop: '```',
+    };
   });
 
+const grabJson = lift<{ result?: string }, Suggestion[]>(({ result }) => {
+  if (!result) {
+    return [];
+  }
+  const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
+  if (!jsonMatch) {
+    console.error("No JSON found in text:", result);
+    return [];
+  }
+  let rawData = JSON.parse(jsonMatch[1]);
+  let parsedData = z.array(Suggestion).safeParse(rawData);
+  if (!parsedData.success) {
+    console.error("Invalid JSON:", parsedData.error);
+    return [];
+  }
+  return parsedData.data;
+});
+
 const filterMatchingCharms = lift<{
-  matchedIndices: { index: number; confidence: number }[];
+  matchedIndices: Suggestion[];
   charmInfo: CharmInfo[];
 }>(
   ({ matchedIndices, charmInfo }) =>
@@ -168,12 +199,7 @@ export const annotation = recipe<{
   charms: Charm[];
 }>("annotation", ({ query, target, data, charms }) => {
   const charmInfo = getCharmInfo({ charms });
-  const { result: matchedIndices } = generateData<
-    { index: number; confidence: number }[]
-  >({
-    messages: buildMessages({ query, charmInfo }),
-    system: "You are an assistant that helps match user queries to relevant data charms based on their names and types.",
-  });
+  const matchedIndices = grabJson(llm(buildQuery({ query, charmInfo })));
   const matchingCharms = filterMatchingCharms({ matchedIndices, charmInfo });
   const suggestion = findSuggestion({ matchingCharms, data });
 

@@ -23,11 +23,11 @@ import { makeClient, SimpleMessage, SimpleContent } from "../llm-client.js";
  * @param stop - A cell to store (optional) stop sequence.
  * @param max_tokens - A cell to store the maximum number of tokens to generate.
  * 
- * @returns { pending: boolean, result: any, partial: any } - As individual
+ * @returns { pending: boolean, result?: string, partial?: string } - As individual
  *   cells, representing `pending` state, final `result` and incrementally
  *   updating `partial` result.
  */
-export function generateText(
+export function llm(
   recipeCell: CellImpl<any>,
   { inputs, outputs }: Node
 ) {
@@ -41,27 +41,23 @@ export function generateText(
   const inputsCell = cell(inputBindings);
 
   const pending = cell(false);
-  const fullResult = cell<string | undefined>(undefined);
-  const partialResult = cell<string | undefined>(undefined);
+  const result = cell<string | undefined>(undefined);
+  const partial = cell<string | undefined>(undefined);
 
-  const resultCell = cell({
-    pending,
-    result: fullResult,
-    partial: partialResult,
-  });
+  const outputCell = cell({ pending, result, partial });
 
   const outputBindings = mapBindingsToCell(outputs, recipeCell) as any[];
-  sendValueToBinding(recipeCell, outputBindings, resultCell);
+  sendValueToBinding(recipeCell, outputBindings, outputCell);
 
   let currentRun = 0;
 
   const startGeneration: Action = (log: ReactivityLog) => {
     const thisRun = ++currentRun;
 
-    const { system, messages, prompt, stop, max_tokens } = inputsCell.getAsProxy([], log);
+    const { system, messages, prompt, stop, max_tokens } = inputsCell.getAsProxy([], log) ?? {};
 
-    fullResult.setAtPath([], undefined, log);
-    partialResult.setAtPath([], undefined, log);
+    result.setAtPath([], undefined, log);
+    partial.setAtPath([], undefined, log);
 
     if (((prompt === undefined || prompt.length === 0) && (messages === undefined || messages.length === 0)) || system === undefined) {
       pending.setAtPath([], false, log);
@@ -69,9 +65,9 @@ export function generateText(
     }
     pending.setAtPath([], true, log);
 
-    const updatePartial = (t: string) => {
+    const updatePartial = (text: string) => {
       if (thisRun != currentRun) return;
-      partialResult.setAtPath([], t, log);
+      partial.setAtPath([], text, log);
     }
 
     let resultPromise = makeClient().sendRequest({
@@ -83,20 +79,20 @@ export function generateText(
     }, updatePartial)
 
     resultPromise
-      .then((result) => {
+      .then((text) => {
         if (thisRun !== currentRun) return;
         // normalizeToCells(result, undefined, log);
 
         pending.setAtPath([], false, log);
-        fullResult.setAtPath([], result, log);
-        partialResult.setAtPath([], result, log);
+        result.setAtPath([], text, log);
+        partial.setAtPath([], text, log);
       }).catch((error) => {
         if (thisRun !== currentRun) return;
 
         console.error("Error generating data", error);
         pending.setAtPath([], false, log);
-        fullResult.setAtPath([], undefined, log);
-        partialResult.setAtPath([], undefined, log);
+        result.setAtPath([], undefined, log);
+        partial.setAtPath([], undefined, log);
       });
   };
 

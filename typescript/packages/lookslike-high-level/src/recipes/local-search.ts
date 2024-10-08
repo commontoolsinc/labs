@@ -5,29 +5,67 @@ import {
   lift,
   str,
   cell,
-  generateData,
+  llm,
   UI,
   NAME,
   ifElse,
 } from "@commontools/common-builder";
+import { z } from 'zod';
+import zodToJsonSchema from 'zod-to-json-schema';
 
-export interface Place {
-  name: string;
-  description: string;
-  address: string;
-  city: string;
-  state: string;
-  zip: string;
-  latitude: number;
-  longitude: number;
-  rating: number;
-}
+const Place = z.object({
+  name: z.string(),
+  description: z.string(),
+  address: z.string(),
+  city: z.string(),
+  state: z.string(),
+  zip: z.string(),
+  latitude: z.number(),
+  longitude: z.number(),
+  rating: z.number().min(0).max(5),
+});
+
+type Place = z.infer<typeof Place>;
+
+const PlaceList = z.array(Place);
+type PlaceList = z.infer<typeof PlaceList>;
+
+const jsonSchema = JSON.stringify(zodToJsonSchema(PlaceList), null, 2);
+
+const buildPrompt = lift<{ prompt?: string }, { messages: string[], system: string, stop?: string }>(({ prompt }) => {
+  if (!prompt) {
+    return {};
+  }
+  return {
+    messages: [prompt, '```json\n['],
+    system: `Generate place data inspired by the user description using JSON:\n\n<schema>${jsonSchema}</schema>`,
+    stop: '```'
+  }
+});
+
+const grabJson = lift<{ result?: string }, PlaceList | undefined>(({ result }) => {
+  if (!result) {
+    return [];
+  }
+  const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
+  if (!jsonMatch) {
+    console.error("No JSON found in text:", result);
+    return [];
+  }
+  let rawData = JSON.parse(jsonMatch[1]);
+  let parsedData = PlaceList.safeParse(rawData);
+  if (!parsedData.success) {
+    console.error("Invalid JSON:", parsedData.error);
+    return [];
+  }
+  return parsedData.data;
+});
 
 const searchPlaces = handler<
   {},
-  { what: string; where: string; query: { prompt: string } }
->((_, { what, where, query }) => {
-  query.prompt = `generate 10 places that match they query: ${what} in ${where}`;
+  { what: string; where: string; prompt: string }
+>((_, state) => {
+  state.prompt = `generate 10 places that match they query: ${state.what} in ${state.where}`;
 });
 
 const updateValue = handler<{ detail: { value: string } }, { value: string }>(
@@ -44,29 +82,10 @@ export const localSearch = recipe<{
   // TODO: This should be the user's default location, not hardcoded
   where.setDefault("San Francisco");
 
-  const query = cell({
-    prompt: undefined,
-    result: [],
-    schema: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          name: { type: "string" },
-          description: { type: "string" },
-          address: { type: "string" },
-          city: { type: "string" },
-          state: { type: "string" },
-          zip: { type: "string" },
-          latitude: { type: "number" },
-          longitude: { type: "number" },
-          rating: { type: "number", minimum: 0, maximum: 5 },
-        },
-      },
-    },
-  });
+  const prompt = cell<string | undefined>(undefined);
 
-  const { pending, result: places } = generateData<Place[]>(query);
+  const { result, pending } = llm(buildPrompt({prompt}))
+  const places = grabJson({ result });
 
   return {
     [UI]: html`
@@ -89,7 +108,7 @@ export const localSearch = recipe<{
             ></common-input>
           </common-vstack>
         </common-hstack>
-        <common-button onclick=${searchPlaces({ what, where, query })}
+        <common-button onclick=${searchPlaces({ what, where, prompt })}
           >Search</common-button
         >
         <common-vstack gap="md">

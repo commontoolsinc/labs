@@ -57,6 +57,8 @@ export class CommonSuggestionsElement extends LitElement {
       }
     };
 
+    // FIXME(ja): Cannot read properties of undefined (reading 'slice')
+    // broken on main - doesn't seem to be regression of the llm changes
     const suggestions = this.suggestions.slice(0, this.limit);
 
     return html`

@@ -1,19 +1,20 @@
 import { lift, createNodeFactory } from "./module.js";
 import { Value, NodeFactory, CellProxy } from "./types.js";
 
-export function generateText(
+export function llm(
   params: Value<{
-    messages: string[];
+    messages?: string[];
+    prompt?: string;
     system?: string;
     stop?: string;
     max_tokens?: number;
   }>
-): CellProxy<{ pending: boolean; result: string; partial: string; error: any }> {
-  generateTextFactory ||= createNodeFactory({
+): CellProxy<{ pending: boolean; result?: string; partial?: string; error: any }> {
+  llmFactory ||= createNodeFactory({
     type: "builtin",
-    implementation: "generateText",
+    implementation: "llm",
   });
-  return generateTextFactory(params);
+  return llmFactory(params);
 }
 
 export function fetchData<T>(
@@ -52,10 +53,10 @@ export function ifElse<T, U, V>(
 
 let ifElseFactory: NodeFactory<[any, any, any], any> | undefined = undefined;
 
-let generateTextFactory:
+let llmFactory:
   | NodeFactory<
-      { messages: string[]; system?: string; stop?: string; max_tokens?: number },
-      { pending: boolean; result: any; partial: any; error: any }
+      { messages?: string[]; prompt?: string; system?: string; stop?: string; max_tokens?: number },
+      { pending: boolean; result?: string; partial?: string; error: any }
     >
   | undefined = undefined;
 

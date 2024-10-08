@@ -1,5 +1,5 @@
 import { html } from "@commontools/common-html";
-import { recipe, NAME, UI, handler, lift, generateText } from "@commontools/common-builder";
+import { recipe, NAME, UI, handler, lift, llm } from "@commontools/common-builder";
 import { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
 
@@ -17,7 +17,7 @@ const prepText = lift(({ prompt }) => {
     }
     return {};
 });
-const grabText = lift(({ partial }) => { return partial || '' })
+const grabText = lift<{ partial?: string }, string>(({ partial }) => { return partial || '' })
 
 
 const prepHTML = lift(({ prompt }) => {
@@ -30,13 +30,13 @@ const prepHTML = lift(({ prompt }) => {
     }
     return {};
 });
-const grabHtml = lift(({ partial, pending }) => {
+const grabHtml = lift<{ partial?: string; pending?: boolean }, string>(({ partial, pending }) => {
     if (!partial) {
         return ""
     }
 
     if (pending) {
-        return `<code>${partial.slice(-1000).replace(/</g, "&lt;").replace(/>/g, "&gt;").slice(-1000)}</code>`;
+        return `<code>${partial.split('\n').slice(-5).join('\n').replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>`;
     }
 
     const html = partial.match(/```html\n([\s\S]+?)```/)?.[1];
@@ -69,7 +69,7 @@ const prepJSON = lift(({ prompt }) => {
     }
     return {};
 });
-const grabJson = lift<{ result: string }, Character | undefined>(({ result }) => {
+const grabJson = lift<{ result?: string }, Character | undefined>(({ result }) => {
     if (!result) {
         return;
     }
@@ -93,14 +93,13 @@ export const generator = recipe<{ jsonprompt: string; htmlprompt: string; textpr
     ({ jsonprompt, htmlprompt, textprompt, data }) => {
 
         textprompt.setDefault("2 sentence story");
-        const maybeText = grabText(generateText(prepText({ prompt: textprompt })))
+        const maybeText = grabText(llm(prepText({ prompt: textprompt })))
 
         jsonprompt.setDefault("pet");
-        data = grabJson(generateText(prepJSON({ prompt: jsonprompt })));
-        const maybeJSON = jsonify({ data });
+        data = grabJson(llm(prepJSON({ prompt: jsonprompt })));
 
         htmlprompt.setDefault("simple html about recipes");
-        const maybeHTML = grabHtml(generateText(prepHTML({ prompt: htmlprompt })));
+        const maybeHTML = grabHtml(llm(prepHTML({ prompt: htmlprompt })));
 
         return {
             [NAME]: 'data generator',
@@ -119,7 +118,7 @@ export const generator = recipe<{ jsonprompt: string; htmlprompt: string; textpr
                             placeholder="Request to LLM"
                             oncommon-input=${updateValue({ value: jsonprompt })}
                             ></common-input>
-                            <pre>${maybeJSON}</pre>
+                            <pre>${jsonify({ data })}</pre>
 
                             <p>HTML</p>
                             <common-input

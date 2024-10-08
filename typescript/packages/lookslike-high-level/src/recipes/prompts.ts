@@ -2,7 +2,7 @@ import { html } from "@commontools/common-html";
 import {
     recipe,
     lift,
-    generateText,
+    llm,
     handler,
     NAME,
     UI,
@@ -71,7 +71,7 @@ const addToPrompt = handler<
 
 export const prompt = recipe<{ title: string }>("prompt", ({ title }) => {
     title.setDefault("abstract geometric art");
-    const variations = grabPrompts(generateText(buildPrompt({ title })));
+    const variations = grabPrompts(llm(buildPrompt({ title })));
 
     let src = imageUrl({ title });
 
