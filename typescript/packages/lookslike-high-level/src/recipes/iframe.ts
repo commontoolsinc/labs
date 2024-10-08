@@ -13,11 +13,6 @@ import {
 } from "@commontools/common-builder";
 import { z } from "zod";
 
-type Suggestion = {
-  behaviour: "append" | "fork";
-  prompt: string;
-};
-
 const formatData = lift(({ obj }) => {
   console.log("stringify", obj);
   return JSON.stringify(obj, null, 2);
@@ -30,95 +25,6 @@ const tap = lift((x) => {
 
 const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value)
-);
-
-const maybeHTML = lift(({ result, pending }) => {
-  if (pending)
-    return `
-    <div style="display: flex; justify-content: center; align-items: center; height: 100vh;">
-      <div style="border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite;"></div>
-      <p style="margin-left: 10px; font-family: Arial, sans-serif;">Generating...</p>
-    </div>
-    <style>
-      @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-    </style>
-  `;
-  return (
-    result?.html ??
-    `
-    <div style="display: flex; justify-content: center; align-items: center; height: 100vh;">
-      <span style="font-size: 40px;">❌</span>
-      <p style="margin-left: 10px; font-family: Arial, sans-serif; color: #e74c3c;">Error generating content</p>
-    </div>
-  `
-  );
-});
-
-const viewSystemPrompt = lift(
-  ({ schema }) => `generate a complete HTML document within a html block , e.g.
-  \`\`\`html
-  ...
-  \`\`\`
-
-  This must be complete HTML.
-  Import Tailwind (include \`<script src="https://cdn.tailwindcss.com"></script>\`) and style the page using it. Use tasteful, minimal defaults with a consistent style but customize based on the request.
-  Import React (include \`
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  \`) and write the app using it.
-
-  You may not use any other libraries unless requested by the user.
-
-  The document can and should make use of postMessage to read and write data from the host context. e.g.
-
-  document.addEventListener('DOMContentLoaded', function() {
-    console.log('Initialized!');
-
-    window.parent.postMessage({
-        type: 'subscribe',
-        key: 'exampleKey'
-      }, '*');
-
-    window.addEventListener('message', function(event) {
-      if (event.data.type === 'readResponse') {
-        // use response
-        console.log('readResponse', event.data.key,event.data.value);
-      } else if (event.data.type === 'update') {
-        // event.data.value is a JSON object already
-        // refer to schema for structure
-      ...
-    });
-  });
-
-  window.parent.postMessage({
-    type: 'write',
-    key: 'exampleKey',
-    value: 'Example data to write'
-  }, '*');
-
-  You can subscribe and unsubscribe to changes from the keys:
-
-  window.parent.postMessage({
-    type: 'subscribe',
-    key: 'exampleKey'
-  }, '*');
-
-  You receive 'update' messages with a 'key' and 'value' field.
-
-  window.parent.postMessage({
-    type: 'unsubscribe',
-    key: 'exampleKey',
-  }, '*');
-
-  <view-model-schema>
-    ${JSON.stringify(schema, null, 2)}
-  </view-model-schema>
-
-  It's best to access and manage each state reference seperately.`
 );
 
 const deriveJsonSchema = lift(({ data, filter }) => {
@@ -335,15 +241,9 @@ const prepHTML = lift(({ prompt, schema, lastSrc }) => {
   };
 });
 
-const buildSuggestionsPrompt = lift(({ src, prompt, schema }) => {
-  let fullPrompt = `Given the current prompt: "${prompt}"`;
-  fullPrompt += `\n\nGiven the following schema:\n<view-model-schema>\n${JSON.stringify(
-    schema,
-    null,
-    2
-  )}\n</view-model-schema>`;
-  if (src) {
-    fullPrompt += `\n\nAnd the previous HTML:\n\`\`\`html\n${src}\n\`\`\``;
+const grabHTML = lift<{ result?: string }, string | undefined>(({ result }) => {
+  if (!result) {
+    return;
   }
   const html = result.match(/```html\n([\s\S]+?)```/)?.[1];
   if (!html) {
@@ -353,18 +253,20 @@ const buildSuggestionsPrompt = lift(({ src, prompt, schema }) => {
   return html;
 });
 
-const getSuggestions = lift(({ result }) => result?.suggestions ?? []);
-
-const getSuggestion = lift(
-  ({ suggestions, index }: { suggestions: Suggestion[]; index: number }) => {
-    return suggestions[index] || { behaviour: "", prompt: "" };
+const tail = lift<
+  { pending: boolean; partial?: string; lines: number },
+  string
+>(({ pending, partial, lines }) => {
+  if (!partial || !pending) {
+    return "";
   }
-);
+  return partial.split("\n").slice(-lines).join("\n");
+});
 
 export const iframe = recipe<{
-  title?: string;
-  prompt?: string;
-  data?: any;
+  title: string;
+  prompt: string;
+  data: any;
   src?: string;
   filter?: string;
 }>("iframe", ({ title, prompt, filter, data, src }) => {
@@ -386,25 +288,16 @@ export const iframe = recipe<{
   //   mode: "json",
   // });
 
-  const { result: suggestionsResult } = generateData<{
-    suggestions: Suggestion[];
-  }>({
-    prompt: buildSuggestionsPrompt({ src, prompt, schema }),
-    system: `Suggest extensions to the UI either as modifications or forks off into new interfaces. Avoid bloat, focus on the user experience and creative potential. Respond in a json block.`,
-    mode: "json",
-  });
-  const suggestions = getSuggestions({ result: suggestionsResult });
-  tap({ suggestions });
+  const suggestions = grabSuggestions(
+    llm(prepSuggestions({ src, prompt, schema }))
+  );
 
-  const { result: htmlResult, pending: htmlPending } = generateData<{
-    html: string;
-  }>({
-    prompt: buildUiPrompt({ prompt, lastSrc }),
-    system: viewSystemPrompt({ schema }),
-    mode: "html",
-  });
-
-  src = maybeHTML({ result: htmlResult, pending: htmlPending });
+  // FIXME(ja): this html is a bit of a mess as changing src triggers suggestions and view (showing streaming)
+  const {
+    result,
+    pending: pendingHTML,
+    partial: partialHTML,
+  } = llm(prepHTML({ prompt, schema, lastSrc }));
 
   let firstSuggestion = getSuggestion({ suggestions, index: 0 });
   let secondSuggestion = getSuggestion({ suggestions, index: 1 });
@@ -446,8 +339,7 @@ export const iframe = recipe<{
         style="width: 100%; min-height: 128px;"
       ></textarea>
 
-      <button
-        type="button"
+      <button type="button"
         onclick=${acceptSuggestion({
           suggestion: firstSuggestion,
           prompt,
@@ -456,11 +348,8 @@ export const iframe = recipe<{
           query,
           data,
         })}
-      >
-        ${firstSuggestion.behaviour} ${firstSuggestion.prompt}
-      </button>
-      <button
-        type="button"
+      >${firstSuggestion.behaviour} ${firstSuggestion.prompt}</button>
+      <button type="button"
         onclick=${acceptSuggestion({
           suggestion: secondSuggestion,
           prompt,
@@ -469,11 +358,8 @@ export const iframe = recipe<{
           query,
           data,
         })}
-      >
-        ${secondSuggestion.behaviour} ${secondSuggestion.prompt}
-      </button>
-      <button
-        type="button"
+      >${secondSuggestion.behaviour} ${secondSuggestion.prompt}</button>
+      <button type="button"
         onclick=${acceptSuggestion({
           suggestion: thirdSuggestion,
           prompt,
@@ -482,9 +368,7 @@ export const iframe = recipe<{
           query,
           data,
         })}
-      >
-        ${thirdSuggestion.behaviour} ${thirdSuggestion.prompt}
-      </button>
+      >${thirdSuggestion.behaviour} ${thirdSuggestion.prompt}</button>
     </div>`,
     prompt,
     title,

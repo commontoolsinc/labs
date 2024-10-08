@@ -54,7 +54,7 @@ const buildPrompt = lift<
   { title: string },
   { messages: string[]; system: string; stop: string } | {}
 >(({ title }) => {
-  if (!title) return;
+  if (!title) return {};
 
   return {
     system: `Generate 10 image prompt variations when a user sends you a prompt.
