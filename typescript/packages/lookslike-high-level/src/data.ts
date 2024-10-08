@@ -66,7 +66,7 @@ addCharms([
   }),
   run(importCalendar, {}),
   run(queryCollections, {
-    url: "/api/data/",
+    collection: "home",
   }),
   run(todoList, {
     title: "My TODOs",
@@ -168,10 +168,10 @@ function getFridayAndMondayDateStrings() {
   const daysUntilFriday = (5 - today.getDay() + 7) % 7;
 
   const nextFriday = new Date(
-    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000
+    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000,
   );
   const followingMonday = new Date(
-    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000
+    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000,
   );
 
   const formatDate = (date: Date): string => {

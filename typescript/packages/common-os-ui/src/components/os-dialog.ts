@@ -84,6 +84,7 @@ export class OsDialog extends LitElement {
   override render() {
     const closeDialog = () => {
       this.open = false;
+      this.dispatchEvent(new CloseDialogEvent());
     };
 
     const layerClasses = classMap({

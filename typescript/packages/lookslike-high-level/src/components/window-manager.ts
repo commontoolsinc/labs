@@ -1,5 +1,5 @@
 import { LitElement, html, css } from "lit";
-import { customElement, property } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
@@ -12,6 +12,7 @@ import {
 } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
+import { queryCollections } from "../recipes/queryCollections.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -121,6 +122,14 @@ export class CommonWindowManager extends LitElement {
 
   input: string = "";
 
+  @state() searchOpen: boolean = false;
+  @state() location: string = "Home";
+
+  onLocationClicked(event: CustomEvent) {
+    console.log("Location clicked in app.");
+    this.searchOpen = true;
+  }
+
   override render() {
     return html`
       ${repeat(
@@ -140,8 +149,33 @@ export class CommonWindowManager extends LitElement {
             this.newCharmRefs.push([charm, charmRef]);
           }
 
+          const onCloseDialog = () => {
+            this.searchOpen = false;
+          };
+
+          const onSubmit = (event: CustomEvent) => {
+            console.log("Search submitted:", event.detail.value);
+            this.location = event.detail.value;
+            this.searchOpen = false;
+            launch(queryCollections, { collection: event.detail.value });
+          };
+
           return html`
-            <os-chrome>
+            <os-chrome locationtitle=${this.location} @location=${this.onLocationClicked}>
+                <os-dialog .open=${this.searchOpen} @closedialog=${onCloseDialog}>
+                  <os-ai-box @submit=${onSubmit} placeholder="Search or imagine..."></os-ai-box>
+                  <os-charm-chip-group>
+                    <os-charm-chip icon="mail" text="Mail"></os-charm-chip>
+                    <os-charm-chip icon="mail" text="Work"></os-charm-chip>
+                    <os-charm-chip icon="calendar_month" text="Calendar"> </os-charm-chip>
+                    <os-charm-chip icon="map" text="Bike and rail directions">
+                    </os-charm-chip>
+                    <os-charm-chip icon="cloud" text="Weather"> </os-charm-chip>
+                    <os-charm-chip icon="folder" text="CHEM131"> </os-charm-chip>
+                    <os-charm-chip icon="folder" text="Class notes"> </os-charm-chip>
+                    <os-charm-chip icon="folder" text="Creative writing"> </os-charm-chip>
+                  </os-charm-chip-group>
+                </os-dialog>
                 <slot name="main">
                     <div class="window" id="window-${charmId}">
                     <button class="close-button" @click="${this.onClose}">×</button>

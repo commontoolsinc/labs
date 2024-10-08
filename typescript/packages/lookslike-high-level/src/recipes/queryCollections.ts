@@ -87,13 +87,16 @@ export const queryCollections = recipe<{ collectionName: string }>("Fetch Collec
 
   collectionName.setDefault("reminders");
 
-  // const { result: collectionResults } = streamData({
-  //   url: `/api/data`,
-  //   options: {
-  //     method: "PUT",
-  //     body: listCollections,
-  //   },
-  // });
+
+    // const { result: collectionResults } = streamData({
+    //   url: `/api/data`,
+    //   options: {
+    //     method: "PUT",
+    //     body: listCollections,
+    //   },
+    // });
+    //
+    //
 
   const { result } = streamData(buildQuery({ query }));
 
