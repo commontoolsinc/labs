@@ -14,6 +14,7 @@ import {
   pathAffected,
   transformToSimpleCells,
   normalizeToCells,
+  arrayEqual,
 } from "./utils.js";
 import { queueEvent } from "./scheduler.js";
 
@@ -451,24 +452,28 @@ const createProxyForArrayValue = (
 
 const cellToBuilderCellProxy = new WeakMap<
   CellImpl<any>,
-  BuilderCellProxy<any>
+  { path: PropertyKey[]; proxy: BuilderCellProxy<any> }[]
 >();
 
+// Creates aliases to value, used in recipes to refer to this specific cell. We
+// have to memoize these, as conversion happens at multiple places when
+// creaeting the recipe.
 function toBuilderCellProxy(
   valueCell: CellImpl<any>,
   valuePath: PropertyKey[]
 ): BuilderCellProxy<any> {
-  let cell = cellToBuilderCellProxy.get(valueCell);
-  if (!cell) {
-    cell = builderCell();
-    // This will be written into the recipe: An alias to the cell. Note that the
-    // recipe will have another alias into paths where this is at the beginning.
-    // TODO: Make this serialize, maybe by adding .toJSON to CellImpl?
-    cell.setPreExisting({ $alias: { cell: valueCell, path: [] } });
-    cellToBuilderCellProxy.set(valueCell, cell);
+  let proxies = cellToBuilderCellProxy.get(valueCell);
+  if (!proxies) {
+    proxies = [];
+    cellToBuilderCellProxy.set(valueCell, proxies);
   }
-  let proxy = cell;
-  for (const key of valuePath) proxy = proxy.key(key);
+  let proxy = proxies.find((p) => arrayEqual(valuePath, p.path))?.proxy;
+  if (!proxy) {
+    proxy = builderCell();
+    for (const key of valuePath) proxy = proxy.key(key);
+    proxy.setPreExisting({ $alias: { cell: valueCell, path: valuePath } });
+    proxies.push({ path: valuePath, proxy });
+  }
   return proxy;
 }
 

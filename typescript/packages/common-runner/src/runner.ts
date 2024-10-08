@@ -1,10 +1,11 @@
 import {
   ID,
   TYPE,
-  Node,
   Recipe,
   RecipeFactory,
   Module,
+  Alias,
+  JSON,
   isModule,
   isRecipe,
   isAlias,
@@ -103,45 +104,96 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
   charmById.set(id, recipeCell);
 
   for (const node of recipe.nodes) {
-    instantiateNode(node, recipeCell);
+    instantiateNode(node.module, node.inputs, node.outputs, recipeCell);
   }
 
   return recipeCell;
 }
 
-export function instantiateNode(node: Node, recipeCell: CellImpl<any>) {
-  if (isModule(node.module)) {
-    switch (node.module.type) {
+const moduleMap = new Map<string, Module>();
+
+export function addModuleByRef(ref: string, module: Module) {
+  moduleMap.set(ref, module);
+}
+
+function instantiateNode(
+  module: Module | Alias,
+  inputBindings: JSON,
+  outputBindings: JSON,
+  recipeCell: CellImpl<any>
+) {
+  if (isModule(module)) {
+    switch (module.type) {
+      case "ref":
+        if (typeof module.implementation !== "string")
+          throw new Error(`Unknown module ref: ${module.implementation}`);
+        if (!moduleMap.has(module.implementation))
+          throw new Error(`Unknown module ref: ${module.implementation}`);
+        instantiateNode(
+          moduleMap.get(module.implementation)!,
+          inputBindings,
+          outputBindings,
+          recipeCell
+        );
+        break;
       case "javascript":
-        instantiateJavaScriptNode(node, recipeCell);
+        instantiateJavaScriptNode(
+          module,
+          inputBindings,
+          outputBindings,
+          recipeCell
+        );
         break;
       case "builtin":
-        instantiateBuiltinNode(node, recipeCell);
+        instantiateBuiltinNode(
+          module,
+          inputBindings,
+          outputBindings,
+          recipeCell
+        );
         break;
       case "passthrough":
-        instantiatePassthroughNode(node, recipeCell);
+        instantiatePassthroughNode(
+          module,
+          inputBindings,
+          outputBindings,
+          recipeCell
+        );
         break;
       case "isolated":
-        instantiateIsolatedNode(node, recipeCell);
+        instantiateIsolatedNode(
+          module,
+          inputBindings,
+          outputBindings,
+          recipeCell
+        );
         break;
       case "recipe":
-        instantiateRecipeNode(node, recipeCell);
+        instantiateRecipeNode(
+          module,
+          inputBindings,
+          outputBindings,
+          recipeCell
+        );
         break;
       default:
-        throw new Error(`Unknown module type: ${node.module.type}`);
+        throw new Error(`Unknown module type: ${module.type}`);
     }
-  } else if (isAlias(node.module)) {
+  } else if (isAlias(module)) {
     // TODO: Implement, a dynamic node
   } else {
-    throw new Error(`Unknown module type: ${node.module}`);
+    throw new Error(`Unknown module type: ${module}`);
   }
 }
 
-function instantiateJavaScriptNode(node: Node, recipeCell: CellImpl<any>) {
-  const module = node.module as Module;
-
+function instantiateJavaScriptNode(
+  module: Module,
+  inputBindings: JSON,
+  outputBindings: JSON,
+  recipeCell: CellImpl<any>
+) {
   const inputs = mapBindingsToCell(
-    node.inputs as { [key: string]: any },
+    inputBindings as { [key: string]: any },
     recipeCell
   );
 
@@ -150,7 +202,7 @@ function instantiateJavaScriptNode(node: Node, recipeCell: CellImpl<any>) {
   // written.
   const reads = findAllAliasedCells(inputs, recipeCell);
 
-  const outputs = mapBindingsToCell(node.outputs, recipeCell);
+  const outputs = mapBindingsToCell(outputBindings, recipeCell);
   const writes = findAllAliasedCells(outputs, recipeCell);
 
   let fn = (
@@ -225,9 +277,12 @@ function instantiateJavaScriptNode(node: Node, recipeCell: CellImpl<any>) {
   }
 }
 
-function instantiateBuiltinNode(node: Node, recipeCell: CellImpl<any>) {
-  const module = node.module as Module;
-
+function instantiateBuiltinNode(
+  module: Module,
+  inputBindings: JSON,
+  outputBindings: JSON,
+  recipeCell: CellImpl<any>
+) {
   if (typeof module.implementation !== "string")
     throw new Error(`Builtin is not a string`);
   if (!(module.implementation in builtins))
@@ -235,34 +290,46 @@ function instantiateBuiltinNode(node: Node, recipeCell: CellImpl<any>) {
 
   // Built-ins can define their own scheduling logic, so they'll
   // implement parts of the above themselves.
-  builtins[module.implementation](recipeCell, node);
+  builtins[module.implementation](recipeCell, {
+    module,
+    inputs: inputBindings,
+    outputs: outputBindings,
+  });
 }
 
-function instantiatePassthroughNode(node: Node, recipeCell: CellImpl<any>) {
-  const inputs = mapBindingsToCell(node.inputs, recipeCell);
+function instantiatePassthroughNode(
+  _: Module,
+  inputBindings: JSON,
+  outputBindings: JSON,
+  recipeCell: CellImpl<any>
+) {
+  const inputs = mapBindingsToCell(inputBindings, recipeCell);
   const inputsCell = cell(inputs);
   const reads = findAllAliasedCells(inputs, recipeCell);
 
-  const outputs = mapBindingsToCell(node.outputs, recipeCell);
+  const outputs = mapBindingsToCell(outputBindings, recipeCell);
   const writes = findAllAliasedCells(outputs, recipeCell);
 
   const action: Action = (log: ReactivityLog) => {
     const inputsProxy = inputsCell.getAsProxy([], log);
-    sendValueToBinding(recipeCell, node.outputs, inputsProxy, log);
+    sendValueToBinding(recipeCell, outputBindings, inputsProxy, log);
   };
 
   schedule(action, { reads, writes } satisfies ReactivityLog);
 }
 
-function instantiateIsolatedNode(node: Node, recipeCell: CellImpl<any>) {
-  const module = node.module as Module;
-
-  const inputs = mapBindingsToCell(node.inputs, recipeCell);
+function instantiateIsolatedNode(
+  module: Module,
+  inputBindings: JSON,
+  outputBindings: JSON,
+  recipeCell: CellImpl<any>
+) {
+  const inputs = mapBindingsToCell(inputBindings, recipeCell);
   const reads = findAllAliasedCells(inputs, recipeCell);
   const inputsCell = cell(inputs);
   inputsCell.freeze();
 
-  const outputs = mapBindingsToCell(node.outputs, recipeCell);
+  const outputs = mapBindingsToCell(outputBindings, recipeCell);
   const writes = findAllAliasedCells(outputs, recipeCell);
 
   if (!isJavaScriptModuleDefinition(module.implementation))
@@ -276,8 +343,7 @@ function instantiateIsolatedNode(node: Node, recipeCell: CellImpl<any>) {
 
   const fnPromise = runtime.then((rt) =>
     rt.instantiate(
-      (node.module as Module)
-        .implementation as unknown as JavaScriptModuleDefinition
+      module.implementation as unknown as JavaScriptModuleDefinition
     )
   );
 
@@ -293,22 +359,27 @@ function instantiateIsolatedNode(node: Node, recipeCell: CellImpl<any>) {
       Object.entries(fnOutput).map(([key, value]) => [key, value.val])
     );
 
-    sendValueToBinding(recipeCell, node.outputs, result, log);
+    sendValueToBinding(recipeCell, outputBindings, result, log);
   };
 
   schedule(action, { reads, writes } satisfies ReactivityLog);
 }
 
-function instantiateRecipeNode(node: Node, recipeCell: CellImpl<any>) {
-  const module = node.module as Module;
-
+function instantiateRecipeNode(
+  module: Module,
+  inputBindings: JSON,
+  outputBindings: JSON,
+  recipeCell: CellImpl<any>
+) {
   if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
-  const inputs = mapBindingsToCell(node.inputs, recipeCell);
+  const inputs = mapBindingsToCell(inputBindings, recipeCell);
   const result = run(module.implementation, inputs);
-  if (isAlias(node.outputs))
-    sendValueToBinding(recipeCell, node.outputs, result);
+  if (isAlias(outputBindings))
+    sendValueToBinding(recipeCell, outputBindings, result);
   else
-    result.sink((value) => sendValueToBinding(recipeCell, node.outputs, value));
+    result.sink((value) =>
+      sendValueToBinding(recipeCell, outputBindings, value)
+    );
 }
 
 const moduleWrappers = {

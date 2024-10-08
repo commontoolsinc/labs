@@ -70,20 +70,12 @@ export function ifElse<T, U, V>(
   return ifElseFactory([condition, ifTrue, ifFalse]);
 }
 
-export function launch<T>(recipeNode: CellProxy<T>): CellProxy<string> {
-  if (
-    recipeNode.export().nodes.size !== 1 ||
-    recipeNode.export().nodes.values().next().value.module.implementation
-      .type !== "recipe"
-  )
-    throw new Error(
-      "launch: Must be a called recipe, e.g. `launch(myRecipe(...))`"
-    );
-  launchFactory ||= createNodeFactory({
-    type: "builtin",
-    implementation: "launch",
+export function open(id: number): CellProxy<string> {
+  openFactory ||= createNodeFactory({
+    type: "ref",
+    implementation: "open",
   });
-  return launchFactory({ recipeNode: recipeNode });
+  return openFactory(id);
 }
 
 let fetchDataFactory:
@@ -108,9 +100,7 @@ let llmFactory:
     >
   | undefined;
 
-let launchFactory:
-  | NodeFactory<{ recipeNode: CellProxy<any> }, string>
-  | undefined;
+let openFactory: NodeFactory<number, undefined> | undefined;
 
 // Example:
 // str`Hello, ${name}!`

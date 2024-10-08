@@ -6,7 +6,7 @@ import { render } from "@commontools/common-html";
 import { Charm, ID, UI, NAME, addCharms, launch } from "../data.js";
 import { CellImpl, isCell, charmById } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
-import { iframe} from "../recipes/iframe.js";
+import { iframe } from "../recipes/iframe.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -80,25 +80,27 @@ export class CommonWindowManager extends LitElement {
   @property({ type: Array })
   charms: CellImpl<Charm>[] = [];
 
-
   private charmRefs: Map<number, Ref<HTMLElement>> = new Map();
   private newCharmRefs: [CellImpl<Charm>, Ref<HTMLElement>][] = [];
 
   handleUniboxSubmit(event: CustomEvent, charm: CellImpl<Charm>) {
     const value = event.detail.value;
     const shiftHeld = event.detail.shiftHeld;
-    console.log('Unibox submitted:', value);
+    console.log("Unibox submitted:", value);
 
     if (shiftHeld) {
-      charm.asSimpleCell(["addToPrompt"]).send({ prompt: value } as any)
+      charm.asSimpleCell(["addToPrompt"]).send({ prompt: value } as any);
     } else {
-      const charmValues = charm.getAsProxy()
-      let fieldsToInclude = Object.entries(charmValues).reduce((acc, [key, value]) => {
-        if (!key.startsWith('$') && !key.startsWith('_')) {
-          acc[key] = value;
-        }
-        return acc;
-      }, {} as any);
+      const charmValues = charm.getAsProxy();
+      let fieldsToInclude = Object.entries(charmValues).reduce(
+        (acc, [key, value]) => {
+          if (!key.startsWith("$") && !key.startsWith("_")) {
+            acc[key] = value;
+          }
+          return acc;
+        },
+        {} as any
+      );
 
       if (charmValues.data) {
         fieldsToInclude = charmValues.data;
@@ -108,7 +110,7 @@ export class CommonWindowManager extends LitElement {
     }
   }
 
-  input: string = '';
+  input: string = "";
 
   override render() {
     return html`
@@ -136,7 +138,9 @@ export class CommonWindowManager extends LitElement {
                   <div slot="secondary"><common-annotation .query=${
                     charmValues[NAME] ?? ""
                   } .target=${charmId} .data=${charmValues} ></common-annotation></div>
-                  <common-unibox slot="search" value=${this.input} @submit=${(e) => this.handleUniboxSubmit(e, charm)} placeholder="" label=">">
+                  <common-unibox slot="search" value=${this.input} @submit=${(
+            e: CustomEvent
+          ) => this.handleUniboxSubmit(e, charm)} placeholder="" label=">">
                 </common-system-layout>
               </common-screen-element>
             </div>

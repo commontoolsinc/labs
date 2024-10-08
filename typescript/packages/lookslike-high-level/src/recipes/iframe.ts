@@ -1,18 +1,23 @@
 import { html } from "@commontools/common-html";
 import {
   recipe,
+  ID,
   UI,
   NAME,
   lift,
   llm,
   handler,
+  open,
   str,
   cell,
   createJsonSchema,
 } from "@commontools/common-builder";
 import { z } from "zod";
 
-import { launch } from "../data.js";
+type Suggestion = {
+  behaviour: "append" | "fork";
+  prompt: string;
+};
 
 const formatData = lift(({ obj }) => {
   console.log("stringify", obj);
@@ -25,11 +30,100 @@ const tap = lift((x) => {
 });
 
 const updateValue = handler<{ detail: { value: string } }, { value: string }>(
-  ({ detail }, state) => detail?.value && (state.value = detail.value),
+  ({ detail }, state) => detail?.value && (state.value = detail.value)
+);
+
+const maybeHTML = lift(({ result, pending }) => {
+  if (pending)
+    return `
+    <div style="display: flex; justify-content: center; align-items: center; height: 100vh;">
+      <div style="border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite;"></div>
+      <p style="margin-left: 10px; font-family: Arial, sans-serif;">Generating...</p>
+    </div>
+    <style>
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    </style>
+  `;
+  return (
+    result?.html ??
+    `
+    <div style="display: flex; justify-content: center; align-items: center; height: 100vh;">
+      <span style="font-size: 40px;">❌</span>
+      <p style="margin-left: 10px; font-family: Arial, sans-serif; color: #e74c3c;">Error generating content</p>
+    </div>
+  `
+  );
+});
+
+const viewSystemPrompt = lift(
+  ({ schema }) => `generate a complete HTML document within a html block , e.g.
+  \`\`\`html
+  ...
+  \`\`\`
+
+  This must be complete HTML.
+  Import Tailwind (include \`<script src="https://cdn.tailwindcss.com"></script>\`) and style the page using it. Use tasteful, minimal defaults with a consistent style but customize based on the request.
+  Import React (include \`
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  \`) and write the app using it.
+
+  You may not use any other libraries unless requested by the user.
+
+  The document can and should make use of postMessage to read and write data from the host context. e.g.
+
+  document.addEventListener('DOMContentLoaded', function() {
+    console.log('Initialized!');
+
+    window.parent.postMessage({
+        type: 'subscribe',
+        key: 'exampleKey'
+      }, '*');
+
+    window.addEventListener('message', function(event) {
+      if (event.data.type === 'readResponse') {
+        // use response
+        console.log('readResponse', event.data.key,event.data.value);
+      } else if (event.data.type === 'update') {
+        // event.data.value is a JSON object already
+        // refer to schema for structure
+      ...
+    });
+  });
+
+  window.parent.postMessage({
+    type: 'write',
+    key: 'exampleKey',
+    value: 'Example data to write'
+  }, '*');
+
+  You can subscribe and unsubscribe to changes from the keys:
+
+  window.parent.postMessage({
+    type: 'subscribe',
+    key: 'exampleKey'
+  }, '*');
+
+  You receive 'update' messages with a 'key' and 'value' field.
+
+  window.parent.postMessage({
+    type: 'unsubscribe',
+    key: 'exampleKey',
+  }, '*');
+
+  <view-model-schema>
+    ${JSON.stringify(schema, null, 2)}
+  </view-model-schema>
+
+  It's best to access and manage each state reference seperately.`
 );
 
 const deriveJsonSchema = lift(({ data, filter }) => {
-  const schema = createJsonSchema({}, data)?.["properties"];
+  const schema = (createJsonSchema({}, data) as any)?.["properties"];
   if (!schema) return {};
 
   const filterKeys = (filter || "")
@@ -40,7 +134,7 @@ const deriveJsonSchema = lift(({ data, filter }) => {
   if (filterKeys.length === 0) return schema;
 
   return Object.fromEntries(
-    Object.entries(schema).filter(([key]) => filterKeys.includes(key)),
+    Object.entries(schema).filter(([key]) => filterKeys.includes(key))
   );
 });
 
@@ -52,7 +146,7 @@ const copy = lift(({ value }: { value: any }) => value);
 
 const addToPrompt = handler<
   { prompt: string },
-  { prompt: string; lastSrc: string; src: string, query: string }
+  { prompt: string; lastSrc: string; src: string; query: string }
 >((e, state) => {
   state.prompt += "\n" + e.prompt;
   state.lastSrc = state.src;
@@ -61,21 +155,36 @@ const addToPrompt = handler<
 
 const acceptSuggestion = handler<
   void,
-  { suggestion: Suggestion; prompt: string; lastSrc: string; src: string, query: string, data: any; }
+  {
+    suggestion: Suggestion;
+    prompt: string;
+    lastSrc: string;
+    src: string;
+    query: string;
+    data: any;
+  }
 >((_, state) => {
-  if (state.suggestion.behaviour === 'append') {
-    console.log(state.prompt, state.query, state.suggestion.prompt)
+  if (state.suggestion.behaviour === "append") {
+    console.log(state.prompt, state.query, state.suggestion.prompt);
     state.prompt += "\n" + state.suggestion.prompt;
     state.lastSrc = state.src;
     state.query = `${state.prompt}`;
-  } else if (state.suggestion.behaviour === 'fork') {
-    launch(iframe, { data: state.data, title: state.suggestion.prompt, prompt: state.suggestion.prompt });
+    return undefined;
+  } else if (state.suggestion.behaviour === "fork") {
+    return open(
+      iframe({
+        data: state.data,
+        title: state.suggestion.prompt,
+        prompt: state.suggestion.prompt,
+      })[ID]
+    );
+  } else {
+    return undefined;
   }
 });
 
-
 const Suggestion = z.object({
-  behaviour: z.enum(['append', 'fork']),
+  behaviour: z.enum(["append", "fork"]),
   prompt: z.string(),
 });
 type Suggestion = z.infer<typeof Suggestion>;
@@ -116,32 +225,35 @@ Respond in a json block.
   ]
 }
 \`\`\``,
-    stop: '```'
-  }
+    stop: "```",
+  };
 });
 
+const grabSuggestions = lift<{ result?: string }, Suggestion[]>(
+  ({ result }) => {
+    if (!result) {
+      return [];
+    }
+    const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
+    if (!jsonMatch) {
+      console.error("No JSON found in text:", result);
+      return [];
+    }
+    let rawData = JSON.parse(jsonMatch[1]);
+    let parsedData = Suggestion.array().safeParse(rawData["suggestions"] || []);
+    if (!parsedData.success) {
+      console.error("Invalid JSON:", parsedData.error);
+      return [];
+    }
+    return parsedData.data;
+  }
+);
 
-const grabSuggestions = lift<{ result?: string }, Suggestion[]>(({ result }) => {
-  if (!result) {
-    return [];
+const getSuggestion = lift(
+  ({ suggestions, index }: { suggestions: Suggestion[]; index: number }) => {
+    return suggestions[index] || { behaviour: "", prompt: "" };
   }
-  const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
-  if (!jsonMatch) {
-    console.error("No JSON found in text:", result);
-    return [];
-  }
-  let rawData = JSON.parse(jsonMatch[1]);
-  let parsedData = Suggestion.array().safeParse(rawData['suggestions'] || []);
-  if (!parsedData.success) {
-    console.error("Invalid JSON:", parsedData.error);
-    return [];
-  }
-  return parsedData.data;
-})
-
-const getSuggestion = lift(({ suggestions, index }: { suggestions: Suggestion[], index: number }) => {
-  return suggestions[index] || { behaviour: '', prompt: '' };
-});
+);
 
 const prepHTML = lift(({ prompt, schema, lastSrc }) => {
   if (!prompt) {
@@ -159,11 +271,11 @@ const prepHTML = lift(({ prompt, schema, lastSrc }) => {
 <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<title>`
+<title>`;
 
   return {
-    messages: [fullPrompt, '```html\n' + base],
-    stop: '```',
+    messages: [fullPrompt, "```html\n" + base],
+    stop: "```",
     system: `generate a complete HTML document within a html block , e.g.
     \`\`\`html
     ...
@@ -220,35 +332,42 @@ const prepHTML = lift(({ prompt, schema, lastSrc }) => {
       ${JSON.stringify(schema, null, 2)}
     </view-model-schema>
   
-    It's best to access and manage each state reference seperately.`
-  }
+    It's best to access and manage each state reference seperately.`,
+  };
 });
 
-const grabHTML = lift<{ result?: string }, string | undefined>(({ result }) => {
-  if (!result) {
-    return;
+const buildSuggestionsPrompt = lift(({ src, prompt, schema }) => {
+  let fullPrompt = `Given the current prompt: "${prompt}"`;
+  fullPrompt += `\n\nGiven the following schema:\n<view-model-schema>\n${JSON.stringify(
+    schema,
+    null,
+    2
+  )}\n</view-model-schema>`;
+  if (src) {
+    fullPrompt += `\n\nAnd the previous HTML:\n\`\`\`html\n${src}\n\`\`\``;
   }
   const html = result.match(/```html\n([\s\S]+?)```/)?.[1];
   if (!html) {
     console.error("No HTML found in text", result);
     return;
   }
-  return html
+  return html;
 });
 
-const tail = lift<{ pending: boolean, partial?: string, lines: number }, string>(({ pending, partial, lines }) => {
-  if (!partial || !pending) {
-    return "";
+const getSuggestions = lift(({ result }) => result?.suggestions ?? []);
+
+const getSuggestion = lift(
+  ({ suggestions, index }: { suggestions: Suggestion[]; index: number }) => {
+    return suggestions[index] || { behaviour: "", prompt: "" };
   }
-  return partial.split('\n').slice(-lines).join('\n');
-});
+);
 
 export const iframe = recipe<{
-  title: string;
-  prompt: string;
-  data: any;
-  src: string;
-  filter: string;
+  title?: string;
+  prompt?: string;
+  data?: any;
+  src?: string;
+  filter?: string;
 }>("iframe", ({ title, prompt, filter, data, src }) => {
   tap({ data });
   prompt.setDefault("");
@@ -268,10 +387,25 @@ export const iframe = recipe<{
   //   mode: "json",
   // });
 
-  const suggestions = grabSuggestions(llm(prepSuggestions({ src, prompt, schema })));
+  const { result: suggestionsResult } = generateData<{
+    suggestions: Suggestion[];
+  }>({
+    prompt: buildSuggestionsPrompt({ src, prompt, schema }),
+    system: `Suggest extensions to the UI either as modifications or forks off into new interfaces. Avoid bloat, focus on the user experience and creative potential. Respond in a json block.`,
+    mode: "json",
+  });
+  const suggestions = getSuggestions({ result: suggestionsResult });
+  tap({ suggestions });
 
-  // FIXME(ja): this html is a bit of a mess as changing src triggers suggestions and view (showing streaming)
-  const { result, pending: pendingHTML, partial: partialHTML } = llm(prepHTML({ prompt, schema, lastSrc }));
+  const { result: htmlResult, pending: htmlPending } = generateData<{
+    html: string;
+  }>({
+    prompt: buildUiPrompt({ prompt, lastSrc }),
+    system: viewSystemPrompt({ schema }),
+    mode: "html",
+  });
+
+  src = maybeHTML({ result: htmlResult, pending: htmlPending });
 
   let firstSuggestion = getSuggestion({ suggestions, index: 0 });
   let secondSuggestion = getSuggestion({ suggestions, index: 1 });
@@ -285,7 +419,9 @@ export const iframe = recipe<{
         placeholder="title"
         oncommon-input=${updateValue({ value: title })}
       ></common-input>
-      <common-iframe src=${grabHTML({ result })} $context=${data}></common-iframe>
+      <common-iframe src=${grabHTML({
+        result,
+      })} $context=${data}></common-iframe>
       <pre>${tail({ partial: partialHTML, pending: pendingHTML, lines: 5 })}
       <details>
         <summary>View Data</summary>
@@ -311,15 +447,45 @@ export const iframe = recipe<{
         style="width: 100%; min-height: 128px;"
       ></textarea>
 
-      <button type="button"
-        onclick=${acceptSuggestion({ suggestion: firstSuggestion, prompt, src, lastSrc, query, data })}
-      >${firstSuggestion.behaviour} ${firstSuggestion.prompt}</button>
-      <button type="button"
-        onclick=${acceptSuggestion({ suggestion: secondSuggestion, prompt, src, lastSrc, query, data })}
-      >${secondSuggestion.behaviour} ${secondSuggestion.prompt}</button>
-      <button type="button"
-        onclick=${acceptSuggestion({ suggestion: thirdSuggestion, prompt, src, lastSrc, query, data })}
-      >${thirdSuggestion.behaviour} ${thirdSuggestion.prompt}</button>
+      <button
+        type="button"
+        onclick=${acceptSuggestion({
+          suggestion: firstSuggestion,
+          prompt,
+          src,
+          lastSrc,
+          query,
+          data,
+        })}
+      >
+        ${firstSuggestion.behaviour} ${firstSuggestion.prompt}
+      </button>
+      <button
+        type="button"
+        onclick=${acceptSuggestion({
+          suggestion: secondSuggestion,
+          prompt,
+          src,
+          lastSrc,
+          query,
+          data,
+        })}
+      >
+        ${secondSuggestion.behaviour} ${secondSuggestion.prompt}
+      </button>
+      <button
+        type="button"
+        onclick=${acceptSuggestion({
+          suggestion: thirdSuggestion,
+          prompt,
+          src,
+          lastSrc,
+          query,
+          data,
+        })}
+      >
+        ${thirdSuggestion.behaviour} ${thirdSuggestion.prompt}
+      </button>
     </div>`,
     prompt,
     title,

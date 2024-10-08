@@ -434,7 +434,7 @@ function maybeUnwrapProxy(value: any): any {
     : value;
 }
 
-function arrayEqual(a: PropertyKey[], b: PropertyKey[]): boolean {
+export function arrayEqual(a: PropertyKey[], b: PropertyKey[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;

@@ -1,4 +1,4 @@
-export { run, charmById } from "./runner.js";
+export { run, addModuleByRef, charmById } from "./runner.js";
 export {
   run as addAction,
   unschedule as removeAction,

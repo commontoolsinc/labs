@@ -21,6 +21,7 @@ import {
   createJsonSchema,
   moduleToJSON,
   recipeToJSON,
+  connectInputAndOutputs,
 } from "./utils.js";
 
 /** Declare a recipe
@@ -32,20 +33,20 @@ import {
  */
 export function recipe<T>(
   description: string,
-  fn: (input: CellProxy<T>) => any
+  fn: (input: CellProxy<Required<T>>) => any
 ): RecipeFactory<T, ReturnType<typeof fn>>;
 export function recipe<T, R>(
   description: string,
-  fn: (input: CellProxy<T>) => Value<R>
+  fn: (input: CellProxy<Required<T>>) => Value<R>
 ): RecipeFactory<T, R>;
 export function recipe<T, R>(
   description: string,
-  fn: (input: CellProxy<T>) => Value<R>
+  fn: (input: CellProxy<Required<T>>) => Value<R>
 ): RecipeFactory<T, R> {
   // The recipe graph is created by calling `fn` which populates for `inputs`
   // and `outputs` with Value<> (which containts CellProxy<>) and/or default
   // values.
-  const inputs = cell<T & R>();
+  const inputs = cell<Required<T & R>>();
   const outputs = fn(inputs);
 
   // Next we need to traverse the inputs and outputs serialize the graph.
@@ -114,13 +115,18 @@ export function recipe<T, R>(
   cells.forEach((cell) => {
     // Only process roots of extra cells:
     if (cell === inputs) return;
-    const { path, value, defaultValue, external } = cell.export();
+    const { path, value, defaultValue } = cell.export();
     if (path.length > 0) return;
 
-    const cellPath = [...paths.get(cell)!];
+    const cellPath = paths.get(cell)!;
     if (value) setValueAtPath(initial, cellPath, value);
     if (defaultValue) setValueAtPath(defaults, cellPath, defaultValue);
-    if (external) setValueAtPath(initial, cellPath, external);
+  });
+
+  // External cells all have to be added to the initial state
+  cells.forEach((cell) => {
+    const { external } = cell.export();
+    if (external) setValueAtPath(initial, paths.get(cell)!, external);
   });
 
   const schema = createJsonSchema(defaults, initial) as {
@@ -165,7 +171,7 @@ export function recipe<T, R>(
     const outputs = cell<R>();
     const node: NodeProxy = { module, inputs, outputs };
 
-    traverseValue(inputs, (value) => isCellProxy(value) && value.connect(node));
+    connectInputAndOutputs(node);
     outputs.connect(node);
 
     return outputs;

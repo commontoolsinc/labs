@@ -100,7 +100,13 @@ export function isStreamAlias(value: any): value is StreamAlias {
 }
 
 export type Module = {
-  type: "javascript" | "recipe" | "builtin" | "isolated" | "passthrough";
+  type:
+    | "ref"
+    | "javascript"
+    | "recipe"
+    | "builtin"
+    | "isolated"
+    | "passthrough";
   implementation?: Function | Recipe | JavaScriptModuleDefinition | string;
   wrapper?: "handler";
 };

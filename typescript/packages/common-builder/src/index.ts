@@ -2,11 +2,12 @@ export { cell } from "./cell-proxy.js";
 export {
   lift,
   createNodeFactory as builtin,
+  byRef,
   handler,
   isolated,
 } from "./module.js";
 export { recipe } from "./recipe.js";
-export { streamData, fetchData, llm, ifElse, str } from "./built-in.js";
+export { streamData, fetchData, llm, open, ifElse, str } from "./built-in.js";
 export {
   ID,
   TYPE,

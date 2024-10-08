@@ -46,11 +46,7 @@ export function cell<T>(value?: Value<T> | T): CellProxy<T> {
         if (!hasValueAtPath(store, ["defaultValue", ...path]))
           setValueAtPath(store, ["defaultValue", ...path], newValue);
       },
-      setPreExisting: (ref: any) => {
-        if (path.length !== 0)
-          throw new Error("Cannot set external on a nested cell");
-        setValueAtPath(store, ["external"], ref);
-      },
+      setPreExisting: (ref: any) => setValueAtPath(store, ["external"], ref),
       connect: (node: NodeProxy) => store.nodes.add(node),
       export: () => ({
         cell: top,
@@ -58,7 +54,9 @@ export function cell<T>(value?: Value<T> | T): CellProxy<T> {
         ...store,
       }),
       map: <S>(
-        fn: (value: Value<T extends Array<infer U> ? U : T>) => Value<S>
+        fn: (
+          value: Value<Required<T extends Array<infer U> ? U : T>>
+        ) => Value<S>
       ) => {
         // Create the factory if it doesn't exist. Doing it here to avoid
         // circular dependency.

@@ -1,16 +1,13 @@
-import {
+import type {
   Module,
-  NodeFactory,
+  ModuleFactory,
   Value,
   CellProxy,
-  isCellProxy,
   NodeProxy,
   toJSON,
-  canBeCellProxy,
-  makeCellProxy,
 } from "./types.js";
 import { cell } from "./cell-proxy.js";
-import { traverseValue, moduleToJSON } from "./utils.js";
+import { moduleToJSON, connectInputAndOutputs } from "./utils.js";
 import type {
   JavaScriptModuleDefinition,
   JavaScriptValueMap,
@@ -19,7 +16,7 @@ import type {
 
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module
-): NodeFactory<T, R> {
+): ModuleFactory<T, R> {
   const module: Module & toJSON = {
     ...moduleSpec,
     toJSON: () => moduleToJSON(module),
@@ -36,36 +33,40 @@ export function createNodeFactory<T = any, R = any>(
   }, module);
 }
 
-function connectInputAndOutputs(node: NodeProxy) {
-  traverseValue(node.inputs, (value) => {
-    if (canBeCellProxy(value)) value = makeCellProxy(value);
-    if (isCellProxy(value)) value.connect(node);
-  });
-}
-
 /** Declare a module
  *
  * @param implementation A function that takes an input and returns a result
  *
  * @returns A module node factory that also serializes as module.
  */
-export function lift<T, R>(implementation: (input: T) => R): NodeFactory<T, R>;
+export function lift<T, R>(
+  implementation: (input: T) => R
+): ModuleFactory<T, R>;
 export function lift<T>(
   implementation: (input: T) => any
-): NodeFactory<T, ReturnType<typeof implementation>>;
+): ModuleFactory<T, ReturnType<typeof implementation>>;
 export function lift<T extends (...args: any[]) => any>(
   implementation: T
-): NodeFactory<Parameters<T>[0], ReturnType<T>>;
-export function lift<T, R>(implementation: (input: T) => R): NodeFactory<T, R> {
+): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
+export function lift<T, R>(
+  implementation: (input: T) => R
+): ModuleFactory<T, R> {
   return createNodeFactory({
     type: "javascript",
     implementation,
   });
 }
 
+export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
+  return createNodeFactory({
+    type: "ref",
+    implementation: ref,
+  });
+}
+
 export function handler<E, T>(
   handler: (event: E, props: T) => any
-): NodeFactory<T, E> {
+): ModuleFactory<T, E> {
   const module: Module & toJSON = {
     type: "javascript",
     implementation: handler,
@@ -93,22 +94,22 @@ export function isolated<T, R>(
   inputs: JavaScriptValueMap,
   outputs: JavaScriptShapeMap,
   implementation: (input: T) => R
-): NodeFactory<T, R>;
+): ModuleFactory<T, R>;
 export function isolated<T>(
   inputs: JavaScriptValueMap,
   outputs: JavaScriptShapeMap,
   implementation: (input: T) => any
-): NodeFactory<T, ReturnType<typeof implementation>>;
+): ModuleFactory<T, ReturnType<typeof implementation>>;
 export function isolated<T extends (...args: any[]) => any>(
   inputs: JavaScriptValueMap,
   outputs: JavaScriptShapeMap,
   implementation: T
-): NodeFactory<Parameters<T>[0], ReturnType<T>>;
+): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
 export function isolated<T, R>(
   inputs: JavaScriptValueMap,
   outputs: JavaScriptShapeMap,
   implementation: (input: T) => R
-): NodeFactory<T, R> {
+): ModuleFactory<T, R> {
   const body = `import { read, write } from "common:io/state@0.0.1";
 
   export const run = () => {

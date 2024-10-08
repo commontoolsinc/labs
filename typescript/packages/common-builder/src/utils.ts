@@ -3,6 +3,7 @@ import {
   Module,
   Recipe,
   CellProxy,
+  NodeProxy,
   isCellProxy,
   JSONValue,
   JSON,
@@ -209,4 +210,11 @@ export function recipeToJSON(recipe: Recipe) {
     initial: recipe.initial,
     nodes: recipe.nodes,
   };
+}
+
+export function connectInputAndOutputs(node: NodeProxy) {
+  traverseValue(node.inputs, (value) => {
+    if (canBeCellProxy(value)) value = makeCellProxy(value);
+    if (isCellProxy(value)) value.connect(node);
+  });
 }
