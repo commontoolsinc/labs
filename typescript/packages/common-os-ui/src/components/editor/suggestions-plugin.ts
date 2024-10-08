@@ -9,6 +9,8 @@ export type Suggestion = {
   text: string;
 };
 
+export const isSuggestionActive = (suggestion: Suggestion) => suggestion.active;
+
 /// Create a frozen suggestion
 export const createSuggestion = (
   from: number,
@@ -20,13 +22,11 @@ export const createSuggestion = (
 export const suggestionsPlugin = ({
   pattern,
   decoration,
-  onSuggest,
-  onExit,
+  onUpdate,
 }: {
   pattern: RegExp;
   decoration: (suggestion: Suggestion) => Decoration;
-  onSuggest: (view: EditorView, suggestion: Suggestion) => void;
-  onExit: (view: EditorView) => void;
+  onUpdate: (view: EditorView, suggestion: Suggestion | null) => void;
 }) => {
   return new Plugin({
     key: new PluginKey("suggestions"),
@@ -34,14 +34,11 @@ export const suggestionsPlugin = ({
     view(_view: EditorView) {
       return {
         update: (view: EditorView, _prevState: EditorState) => {
+          const state = view.state;
           const suggestions: Array<Suggestion> =
-            this.key!.getState(view.state) ?? [];
-          const active = suggestions.find((suggestion) => suggestion.active);
-          if (active) {
-            onSuggest(view, active);
-          } else {
-            onExit(view);
-          }
+            this.key!.getState(state) ?? [];
+          const active = suggestions.find(isSuggestionActive) ?? null;
+          onUpdate(view, active);
         },
       };
     },

@@ -62,13 +62,14 @@ const createEditor = (
       Decoration.inline(from, to, {
         class: classes({ hashtag: true, "hashtag--active": active }),
       }),
-    onSuggest: async (view, suggestion) => {
-      const rect = view.coordsAtPos(suggestion.from);
-      positionMenu(hashtagSuggestionsElement, rect);
-      toggleHidden(hashtagSuggestionsElement, false);
-    },
-    onExit: () => {
-      toggleHidden(hashtagSuggestionsElement, true);
+    onUpdate: (view, suggestion) => {
+      if (suggestion) {
+        const rect = view.coordsAtPos(suggestion.from);
+        positionMenu(hashtagSuggestionsElement, rect);
+        toggleHidden(hashtagSuggestionsElement, false);
+      } else {
+        toggleHidden(hashtagSuggestionsElement, true);
+      }
     },
   });
 
@@ -78,13 +79,14 @@ const createEditor = (
       Decoration.inline(from, to, {
         class: classes({ mention: true, "mention--active": active }),
       }),
-    onSuggest: async (view, suggestion) => {
-      const rect = view.coordsAtPos(suggestion.from);
-      positionMenu(mentionSuggestionsElement, rect);
-      toggleHidden(mentionSuggestionsElement, false);
-    },
-    onExit: () => {
-      toggleHidden(mentionSuggestionsElement, true);
+    onUpdate: (view, suggestion) => {
+      if (suggestion) {
+        const rect = view.coordsAtPos(suggestion.from);
+        positionMenu(mentionSuggestionsElement, rect);
+        toggleHidden(mentionSuggestionsElement, false);
+      } else {
+        toggleHidden(mentionSuggestionsElement, true);
+      }
     },
   });
 
