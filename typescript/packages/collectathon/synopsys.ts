@@ -11,6 +11,32 @@ type Fact = [Entity, Attribute, Value];
 
 const SYNOPSYS_URL = Deno.env.get("SYNOPSYS_URL") || "http://localhost:8080";
 
+export async function clip(url: string, collections: string[], entity: any) {
+  entity["import/url"] = url;
+  entity["import/source"] = "Webpage";
+  entity["import/tool"] = "clipper";
+  entity["import/time"] = new Date().toISOString();
+
+  const entityCid = await cid(entity);
+  const entityFacts = await jsonToFacts(entity);
+
+  const collectionsFacts = await Promise.all(collections.map(async (collectionName) => {
+    const collection = { name: collectionName, type: 'collection' };
+    return await jsonToFacts(collection);
+  }));
+
+  const mergedCollectionFacts = collectionsFacts.flat();
+
+  const memberFacts = await Promise.all(collections.map(async (collectionName) => {
+    const collection = { name: collectionName, type: 'collection' };
+    const collectionCid = await cid(collection);
+    return [{ "/": collectionCid }, 'member', { "/": entityCid }] as Fact;
+  }));
+
+  const response = await assert(...mergedCollectionFacts, ...entityFacts, ...memberFacts);
+  console.log('assert', response);
+}
+
 export async function cid(data: any) {
   const bytes = json.encode(data);
   const hash = await sha256.digest(bytes);

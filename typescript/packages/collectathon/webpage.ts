@@ -2,7 +2,7 @@ import { getOrCreateCollection } from "./collections.ts";
 import { db } from "./db.ts";
 import { CID, json, sha256 } from "./deps.ts";
 import { completion, fastCompletion } from "./llm.ts";
-import { assert, cid, jsonToFacts } from "./synopsys.ts";
+import { assert, cid, clip, jsonToFacts } from "./synopsys.ts";
 
 export async function extractEntities(html: string, url: string, prompt?: string) {
   const systemPrompt =
@@ -43,11 +43,12 @@ export async function clipWebpage(
 
     let totalItemCount = 0;
 
-    for (const collectionName of collections) {
-      const collectionId = await getOrCreateCollection(collectionName);
-      let itemCount = 0;
+    for (const entity of entities) {
+      await clip(url, collections, entity);
 
-      for (const entity of entities) {
+      for (const collectionName of collections) {
+        const collectionId = await getOrCreateCollection(collectionName);
+
         const result = db.query(
           "INSERT INTO items (url, title, content, raw_content, source) VALUES (?, ?, ?, ?, ?) RETURNING id",
           [
@@ -60,28 +61,15 @@ export async function clipWebpage(
         );
         const itemId = result[0][0] as number;
 
-        entity["import/url"] = url;
-        entity["import/source"] = "Webpage";
-        entity["import/tool"] = "clipper";
-        entity["import/time"] = new Date().toISOString();
-
-        const collection = { name: collectionName, type: 'collection' };
-        const collectionCid = await cid(collection);
-        const entityCid = await cid(entity);
-
-        const collectionFacts = await jsonToFacts(collection);
-        const entityFacts = await jsonToFacts(entity);
-        const response = await assert(...collectionFacts, ...entityFacts, [{ "/": collectionCid }, 'member', { "/": entityCid }]);
-        console.log('assert', response);
-
         db.query(
           "INSERT INTO item_collections (item_id, collection_id) VALUES (?, ?)",
           [itemId, collectionId],
         );
-
-        itemCount++;
       }
+    }
 
+    for (const collectionName of collections) {
+      const itemCount = entities.length;
       console.log(
         `Clipped ${itemCount} entities from webpage to collection: ${collectionName}`,
       );

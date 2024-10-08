@@ -24,6 +24,7 @@ import { addRule, applyRules, deleteRule, listRules } from "./rules.ts";
 import { search } from "./search.ts";
 import { handleActionCommand } from "./action.ts";
 import { handleDreamCommand } from "./dream.ts";
+import { clip } from "./synopsys.ts";
 const app = new Application();
 const router = new Router();
 
@@ -122,7 +123,7 @@ router.post("/clip", async (ctx) => {
       if (content.type === 'webpage') {
         await clipUrl(url, collections, prompt);
       } else {
-        entities = await extractEntities(JSON.stringify(content), url, prompt);
+        entities = await extractEntities(JSON.stringify(content), url, 'If the provided content is already JSON then simply return it. ' + prompt);
         await saveEntities(entities, collections);
       }
 
@@ -152,6 +153,8 @@ async function saveEntities(entities: any[], collections: string[]) {
       ],
     );
     const itemId = result[0][0] as number;
+
+    clip(entity.url, collections, entity);
 
     for (const collectionId of collectionIds) {
       await db.query(
