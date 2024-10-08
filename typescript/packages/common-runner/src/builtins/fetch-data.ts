@@ -16,11 +16,11 @@ import { mapBindingsToCell, normalizeToCells } from "../utils.js";
  */
 export function fetchData(
   recipeCell: CellImpl<any>,
-  { inputs, outputs }: Node
+  { inputs, outputs }: Node,
 ) {
   const inputBindings = mapBindingsToCell(inputs, recipeCell) as {
     url: string;
-    mode?: 'text' | 'json';
+    mode?: "text" | "json";
     options?: { body?: any; method?: string; headers?: Record<string, string> };
     result?: any;
   };
@@ -42,7 +42,7 @@ export function fetchData(
   let currentRun = 0;
 
   const startFetch: Action = (log: ReactivityLog) => {
-    const { url, mode } = inputsCell.getAsProxy([], log);
+    const { url, mode, options } = inputsCell.getAsProxy([], log);
     const processResponse =
       (mode || "json") === "json"
         ? (r: Response) => r.json()
@@ -63,7 +63,7 @@ export function fetchData(
     const thisRun = ++currentRun;
 
     fetch(url, options)
-    .then(processResponse)
+      .then(processResponse)
       .then((data) => {
         if (thisRun !== currentRun) return;
 
