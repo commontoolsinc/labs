@@ -70,12 +70,12 @@ export function ifElse<T, U, V>(
   return ifElseFactory([condition, ifTrue, ifFalse]);
 }
 
-export function navigateTo(id: number): CellProxy<string> {
+export function navigateTo(cell: CellProxy<any>): CellProxy<string> {
   navigateToFactory ||= createNodeFactory({
     type: "ref",
     implementation: "navigateTo",
   });
-  return navigateToFactory(id);
+  return navigateToFactory(cell);
 }
 
 let fetchDataFactory:

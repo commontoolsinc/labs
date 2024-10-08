@@ -1,14 +1,16 @@
 import {
   ID,
   TYPE,
-  Recipe,
-  RecipeFactory,
-  Module,
-  Alias,
-  JSON,
+  type Recipe,
+  type RecipeFactory,
+  type Module,
+  type Alias,
+  type JSON,
+  recipe,
   isModule,
   isRecipe,
   isAlias,
+  isCellProxy,
   isStreamAlias,
 } from "@commontools/common-builder";
 import {
@@ -71,14 +73,19 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
   // where each property is a cell reference.
   // TODO: If new keys are added after first load, this won't work.
   if (isCell(bindings) || isCellReference(bindings)) {
+    // If it's a cell, turn it into a cell reference
     const ref = isCellReference(bindings)
       ? bindings
       : ({ cell: bindings, path: [] } satisfies CellReference);
+
+    // Get value, but just to get the keys. Throw if it isn't an object.
     const value = ref.cell.getAsProxy(ref.path);
     if (typeof value !== "object" || value === null)
       throw new Error(`Invalid bindings: Must be an object`);
+
+    // Create aliases for all the top level keys in the object
     bindings = Object.fromEntries(
-      Object.entries(value).map(([key]) => [
+      Object.keys(value).map((key) => [
         key,
         { $alias: { cell: ref.cell, path: [...ref.path, key] } },
       ])
@@ -257,7 +264,21 @@ function instantiateJavaScriptNode(
       const inputsCell = cell(eventInputs);
       inputsCell.freeze(); // Freezes the bindings, not aliased cells.
 
-      return fn(inputsCell.getAsProxy([]));
+      const result = fn(inputsCell.getAsProxy([]));
+
+      // If handler returns a graph created by builder, run it
+      // TODO: Handle case where the result is a structure with possibly
+      // multiple such nodes
+      if (isCellProxy(result)) {
+        const resultNode = result;
+
+        // Recipe that assigns the result of the returned node to "result"
+        const resultRecipe = recipe("event handler result", () => ({
+          result: resultNode,
+        }));
+
+        run(resultRecipe, {});
+      }
     };
 
     addEventHandler(handler, stream);

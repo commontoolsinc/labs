@@ -200,7 +200,7 @@ openCharm.set = (opener: (charmId: number) => void) => {
 
 addModuleByRef(
   "navigateTo",
-  lift<number>((id) => openCharm(id))
+  lift<Charm>(({ [ID]: id }) => openCharm(id))
 );
 
 export function launch(recipe: Recipe, bindings: any) {

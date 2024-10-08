@@ -322,23 +322,4 @@ describe("event handling", () => {
     expect(actionCount).toBe(3);
     expect(lastEventSeen).toBe(2);
   });
-
-  it("should handle event handlers that return cell proxies", async () => {
-    const eventCell = cell(0);
-    const eventResultCell = cell({ value: 0 });
-    let eventCount = 0;
-
-    const eventHandler: EventHandler = () =>
-      lift((state: { value: number }) => {
-        console.log("eventHandler", state);
-        state.value = state.value + 1;
-      })(eventResultCell.getAsProxy());
-
-    addEventHandler(eventHandler, { cell: eventCell, path: [] });
-
-    queueEvent({ cell: eventCell, path: [] }, 1);
-    await idle();
-
-    expect(eventResultCell.get()).toEqual({ value: 1 });
-  });
 });

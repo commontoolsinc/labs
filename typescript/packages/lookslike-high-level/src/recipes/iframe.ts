@@ -1,7 +1,6 @@
 import { html } from "@commontools/common-html";
 import {
   recipe,
-  ID,
   UI,
   NAME,
   lift,
@@ -176,7 +175,7 @@ const acceptSuggestion = handler<
         data: state.data,
         title: state.suggestion.prompt,
         prompt: state.suggestion.prompt,
-      })[ID]
+      })
     );
   } else {
     return undefined;
