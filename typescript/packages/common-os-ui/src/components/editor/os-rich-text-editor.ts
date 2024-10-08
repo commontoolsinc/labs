@@ -6,7 +6,9 @@ import { history } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap } from "prosemirror-commands";
 import { customElement } from "lit/decorators.js";
-import { base } from "../shared/styles.js";
+import { base } from "../../shared/styles.js";
+import { suggestionsPlugin } from "./suggestions-plugin.js";
+import { classes } from "../../shared/dom.js";
 
 const schema = new Schema({
   nodes: {
@@ -35,41 +37,27 @@ const schema = new Schema({
   },
 });
 
-export const modelessMarkupDecorationPlugin = ({
-  pattern,
-  decoration,
-}: {
-  pattern: RegExp;
-  decoration: (from: number, to: number) => Decoration;
-}) =>
-  new Plugin({
-    props: {
-      decorations(state) {
-        const decorations: Array<Decoration> = [];
-        state.doc.descendants((node, pos) => {
-          if (node.isText && node.text != null) {
-            const text = node.text;
-            const matches = text.matchAll(pattern);
-            for (const match of matches) {
-              const from = pos + match.index;
-              const to = from + match[0].length;
-              decorations.push(decoration(from, to));
-            }
-          }
-        });
-        return DecorationSet.create(state.doc, decorations);
-      },
-    },
-  });
-
-const hashtagPlugin = modelessMarkupDecorationPlugin({
+const hashtagPlugin = suggestionsPlugin({
   pattern: /#\w+/g,
-  decoration: (from, to) => Decoration.inline(from, to, { class: "hashtag" }),
+  decoration: ({ from, to, active }) =>
+    Decoration.inline(from, to, {
+      class: classes({ hashtag: true, "hashtag--active": active }),
+    }),
+  onKeyDown: () => {
+    return false;
+  },
 });
 
-const mentionPlugin = modelessMarkupDecorationPlugin({
+const mentionPlugin = suggestionsPlugin({
   pattern: /@\w+/g,
-  decoration: (from, to) => Decoration.inline(from, to, { class: "mention" }),
+  decoration: ({ from, to, active }) =>
+    Decoration.inline(from, to, {
+      class: classes({ mention: true, "mention--active": active }),
+    }),
+  onKeyDown: (view, keyboardEvent) => {
+    console.log("!!!", view, keyboardEvent);
+    return false;
+  },
 });
 
 const editorClassPlugin = new Plugin({
@@ -88,8 +76,8 @@ const plugins = () => [
   history(),
   keymap(baseKeymap),
   editorClassPlugin,
-  hashtagPlugin,
   mentionPlugin,
+  hashtagPlugin,
 ];
 
 @customElement("os-rich-text-editor")
