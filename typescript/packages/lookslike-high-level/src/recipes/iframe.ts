@@ -7,7 +7,7 @@ import {
   lift,
   llm,
   handler,
-  open,
+  navigateTo,
   str,
   cell,
   createJsonSchema,
@@ -171,7 +171,7 @@ const acceptSuggestion = handler<
     state.query = `${state.prompt}`;
     return undefined;
   } else if (state.suggestion.behaviour === "fork") {
-    return open(
+    return navigateTo(
       iframe({
         data: state.data,
         title: state.suggestion.prompt,

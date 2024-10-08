@@ -7,7 +7,7 @@ export {
   isolated,
 } from "./module.js";
 export { recipe } from "./recipe.js";
-export { streamData, fetchData, llm, open, ifElse, str } from "./built-in.js";
+export { streamData, fetchData, llm, navigateTo, ifElse, str } from "./built-in.js";
 export {
   ID,
   TYPE,

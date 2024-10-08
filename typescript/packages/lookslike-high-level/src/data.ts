@@ -199,7 +199,7 @@ openCharm.set = (opener: (charmId: number) => void) => {
 };
 
 addModuleByRef(
-  "open",
+  "navigateTo",
   lift<number>((id) => openCharm(id))
 );
 
