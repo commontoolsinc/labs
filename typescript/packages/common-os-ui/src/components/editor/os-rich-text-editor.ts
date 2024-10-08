@@ -145,7 +145,7 @@ export class OsRichTextEditor extends LitElement {
         padding: var(--pad-sm);
         border-radius: var(--radius);
         box-shadow: var(--shadow-menu);
-        position: absolute;
+        position: fixed;
         left: 0;
         top: 0;
         width: var(--suggestions-width);
