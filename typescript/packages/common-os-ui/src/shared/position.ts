@@ -1,5 +1,5 @@
-import { computePosition } from "@floating-ui/dom";
-import { withWrites } from "./dom.js";
+import { computePosition, flip } from "@floating-ui/dom";
+import { animationFrame } from "./dom.js";
 
 export type Rect = {
   top: number;
@@ -63,17 +63,22 @@ export class VirtualRect {
   }
 }
 
-export const positionMenu = (
+export const positionMenu = async (
   menu: HTMLElement,
   { top, right, bottom, left }: Rect,
 ) => {
-  computePosition(new VirtualRect(top, right, bottom, left), menu, {
-    placement: "bottom-start",
-  }).then(({ x, y }) => {
-    withWrites(() => {
-      menu.style.position = "absolute";
-      menu.style.left = `${x}px`;
-      menu.style.top = `${y}px`;
-    });
-  });
+  const { x, y } = await computePosition(
+    new VirtualRect(top, right, bottom, left),
+    menu,
+    {
+      placement: "bottom-start",
+      middleware: [flip()],
+    },
+  );
+
+  await animationFrame();
+
+  menu.style.position = "absolute";
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
 };

@@ -115,6 +115,10 @@ export class OsRichTextEditor extends LitElement {
   static override styles = [
     base,
     css`
+      :host {
+        --suggestions-width: calc(var(--u) * 80);
+      }
+
       .wrapper {
         display: block;
         position: relative;
@@ -137,27 +141,21 @@ export class OsRichTextEditor extends LitElement {
       }
 
       .suggestions {
-        border: 1px solid black;
+        background-color: var(--bg);
+        padding: var(--pad-sm);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow-menu);
         position: absolute;
         left: 0;
         top: 0;
+        width: var(--suggestions-width);
+        transition: opacity var(--dur-md) var(--ease-out-expo);
       }
 
-      .mention {
+      :is(.mention, .hashtag) {
         --height: calc(var(--u) * 5);
         font-weight: bold;
-        display: inline-block;
-        background-color: var(--bg-3);
-        height: var(--height);
-        line-height: var(--height);
-        border-radius: calc(var(--height) / 2);
-        padding: 0 calc(var(--u) * 2);
-      }
-
-      .hashtag {
-        --height: calc(var(--u) * 5);
-        font-weight: bold;
-        display: inline-block;
+        display: inline-flex;
         background-color: var(--bg-3);
         height: var(--height);
         line-height: var(--height);

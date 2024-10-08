@@ -52,6 +52,7 @@ export const base = css`
     --xsm-size: calc(var(--u) * 2.75);
     --xsm-line: calc(var(--u) * 4);
     --pad: calc(var(--u) * 6);
+    --pad-sm: calc(var(--u) * 4);
     --gap: calc(var(--u) * 6);
     --gap-sm: calc(var(--u) * 4);
     --gap-xsm: calc(var(--u) * 2);

@@ -6,45 +6,12 @@ export const classes = (classRecord: Record<string, boolean>) => {
   return toggledClasses.join(" ");
 };
 
-let isFlushScheduled = false;
-const writes: Array<() => void> = [];
+export const animationFrame = () =>
+  new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-/**
- * Batch DOM writes to prevent layout thrashing.
- * Use: perform your DOM measurements outside the callback, in ordinary code,
- * then schedule any writes using `withWrites()`.
- * This will cause writes to be batched on next microtask. `withWrites` may
- * be called multiple times, and all writes will be batched.
- *
- * @example
- * let rect1 = el1.getBoundingClientRect();
- * withWrites(() => {
- *   // Do something with rect1
- * });
- *
- * let rect2 = el2.getBoundingClientRect();
- * withWrites(() => {
- *   // Do something with rect2
- * });
- */
-export const withWrites = (write: () => void) => {
-  writes.push(write);
-  if (isFlushScheduled) return;
-
-  isFlushScheduled = true;
-
-  queueMicrotask(() => {
-    for (const write of writes) {
-      write();
-    }
-    writes.length = 0;
-
-    isFlushScheduled = false;
-  });
-};
-
-export const toggleHidden = (element: HTMLElement, isHidden: boolean) => {
-  withWrites(() => {
-    element.style.display = isHidden ? "none" : "block";
-  });
+export const toggleHidden = async (element: HTMLElement, isHidden: boolean) => {
+  await animationFrame();
+  element.ariaHidden = isHidden ? "true" : "false";
+  element.style.opacity = isHidden ? "0" : "1";
+  element.style.pointerEvents = isHidden ? "none" : "all";
 };
