@@ -19,26 +19,18 @@ export class CommonWindowManager extends LitElement {
     style.baseStyles,
     css`
       :host {
-        display: flex;
+        /* display: flex;
         overflow-x: auto;
-        overflow-y: visible;
+        overflow-y: visible; */
         width: 100%;
-        height: 95vh;
-        padding: 20px 0; /* Add vertical padding */
       }
       .window {
-        flex: 0 0 auto;
-        width: 25%;
-        min-width: 512px;
-        height: 95%; /* Make the window full height */
-        margin-left: 20px;
-        margin-bottom: 20px;
+        height: 100%;
+        flex: 1 1 auto;
         border: 1px solid #e0e0e0;
         border-radius: var(--radius);
         background-color: rgba(255, 255, 255, 0.8);
         backdrop-filter: blur(10px);
-        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1), 0 6px 6px rgba(0, 0, 0, 0.1),
-          0 0 0 1px rgba(0, 0, 0, 0.05);
         transition: all 0.3s ease;
         overflow: hidden;
       }
@@ -68,12 +60,16 @@ export class CommonWindowManager extends LitElement {
       @keyframes highlight {
         0%,
         100% {
-          box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1),
-            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow:
+            0 10px 20px rgba(0, 0, 0, 0.1),
+            0 6px 6px rgba(0, 0, 0, 0.1),
+            0 0 0 1px rgba(0, 0, 0, 0.05);
         }
         50% {
-          box-shadow: 0 0 20px 5px rgba(255, 215, 0, 0.5),
-            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow:
+            0 0 20px 5px rgba(255, 215, 0, 0.5),
+            0 6px 6px rgba(0, 0, 0, 0.1),
+            0 0 0 1px rgba(0, 0, 0, 0.05);
         }
       }
       .highlight {
@@ -145,22 +141,24 @@ export class CommonWindowManager extends LitElement {
           }
 
           return html`
-            <div class="window" data-charm-id="${JSON.stringify(charmId)}">
-              <button class="close-button" @click="${this.onClose}">×</button>
-              <common-screen-element>
-                <common-system-layout>
-                  <div ${ref(charmRef)}></div>
-                  <div slot="secondary"><common-annotation .query=${
-                    charmValues[NAME] ?? ""
-                  } .target=${charmId} .data=${charmValues} ></common-annotation></div>
-                  <common-unibox slot="search" value=${this.input} @submit=${(
-            e: CustomEvent
-          ) => this.handleUniboxSubmit(e, charm)} placeholder="" label=">">
-                </common-system-layout>
-              </common-screen-element>
-            </div>
+            <os-chrome>
+                <slot name="main">
+                    <div class="window" id="window-${charmId}">
+                    <button class="close-button" @click="${this.onClose}">×</button>
+                    <common-screen-element>
+                        <common-system-layout>
+                        <div ${ref(charmRef)}></div>
+                        <div slot="secondary"><common-annotation .query=${
+                          charmValues[NAME] ?? ""
+                        } .target=${charmId} .data=${charmValues} ></common-annotation></div>
+                        <common-unibox slot="search" value=${this.input} @submit=${(e) => this.handleUniboxSubmit(e, charm)} placeholder="" label=">">
+                        </common-system-layout>
+                    </common-screen-element>
+                    </div>
+                </slot>
+            </os-chrome>
           `;
-        }
+        },
       )}
     `;
   }
