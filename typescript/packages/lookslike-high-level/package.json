@@ -45,12 +45,14 @@
   },
   "dependencies": {
     "@commontools/common-builder": "^0.0.1",
-    "@commontools/common-runner": "^0.0.1",
     "@commontools/common-frp": "^0.0.1",
     "@commontools/common-html": "^0.0.1",
+    "@commontools/common-runner": "^0.0.1",
     "@commontools/common-ui": "^0.0.1",
     "@commontools/llm-client": "^0.0.1",
-    "@commontools/lookslike-sagas": "^0.0.1"
+    "@commontools/lookslike-sagas": "^0.0.1",
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.23.3"
   },
   "overrides": {
     "tough-cookie": "^5.0.0-rc.4"

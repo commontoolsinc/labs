@@ -2,13 +2,20 @@ import { html } from "@commontools/common-html";
 import {
     recipe,
     lift,
-    generateData,
+    llm,
     handler,
     NAME,
     UI,
-    str,
 } from "@commontools/common-builder";
 import { launch } from '../data.js';
+import { z } from 'zod';
+import zodToJsonSchema from 'zod-to-json-schema';
+
+const Prompt = z.object({
+    prompt: z.string().describe('Image generation prompt'),
+});
+type Prompt = z.infer<typeof Prompt>;
+const jsonSchema = JSON.stringify(zodToJsonSchema(Prompt), null, 2);
 
 const imageUrl = lift(
     ({ title }) => `https://ct-img.m4ke.workers.dev/?prompt=${encodeURIComponent(title)}`
@@ -22,41 +29,50 @@ const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
     ({ detail }, state) => { (state.title = detail?.value ?? "untitled") }
 );
 
-const maybeList = lift(({ result }) => result || []);
+const grabPrompts = lift<{ result: string }, Prompt[]>(({ result }) => {
+    if (!result) {
+        return [];
+    }
+    const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
+    if (!jsonMatch) {
+        console.error("No JSON found in text:", result);
+        return [];
+    }
+    let rawData = JSON.parse(jsonMatch[1]);
+    let parsedData = z.array(Prompt).safeParse(rawData);
+    if (!parsedData.success) {
+        console.error("Invalid JSON:", parsedData.error);
+        return [];
+    }
+    return parsedData.data;
+});
 
-// FIXME(ja): if type Prompt is just a string, the render map fails
-type Prompt = {
-    prompt: string;
-}
+const buildPrompt = lift<{ title: string }, { messages: string[], system: string, stop: string } | {}>(({ title }) => {
+    if (!title) return;
+
+    return {
+        system: `Generate 10 image prompt variations when a user sends you a prompt.
+Some should change just the style, some should change the content, 
+and some should change both. The last should be a completely different prompt.
+
+<schema>${jsonSchema}</schema>`,
+        messages: [`Generate image prompt variations for: ${title}`, '```json\n['],
+        stop: '```'
+    }
+});
 
 const addToPrompt = handler<
-  { prompt: string },
-  { title: string }
+    { prompt: string },
+    { title: string }
 >((e, state) => {
-  state.title += " " + e.prompt;
+    state.title += " " + e.prompt;
 });
 
 export const prompt = recipe<{ title: string }>("prompt", ({ title }) => {
     title.setDefault("abstract geometric art");
-    const { result } = generateData<Prompt[]>({
-        prompt: str`generate 10 image prompt variations for the current prompt: ${title}.  Some should change just the style, some should change the content, and some should change both. The last should be a completely different prompt.`,
-        result: [],
-        schema: {
-            type: "array",
-            items: {
-                type: "object",
-                properties: {
-                    prompt: {
-                        type: "string",
-                    },
-                },
-            },
-        },
-        mode: "json",
-    });
+    const variations = grabPrompts(llm(buildPrompt({ title })));
 
     let src = imageUrl({ title });
-    let variations = maybeList({result});
 
     return {
         [NAME]: title,
@@ -67,10 +83,10 @@ export const prompt = recipe<{ title: string }>("prompt", ({ title }) => {
                 oncommon-input=${updateTitle({ title })}
             ></common-input>
             <img src=${src}} width="100%" />
-            <ul>${variations.map(({ prompt }) => html`<li>${prompt} - <span onclick=${launcher({ title: prompt })}>⏩</span></li>`)}</ul>
+            <ul>${variations.map(({ prompt }) => html`<li onclick=${launcher({ title: prompt })}>${prompt}</li>`)}</ul>
         </common-vstack>`,
         title,
-        variations: result,
+        variations,
         addToPrompt: addToPrompt({ title }),
     };
 });

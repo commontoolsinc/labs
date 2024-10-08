@@ -1,64 +1,136 @@
-#!/usr/bin/env -S deno run --allow-net --allow-read --allow-env
-
-import { crypto } from "https://deno.land/std/crypto/mod.ts";
+import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
+import { streamText } from "npm:ai";
 import { ensureDir } from "https://deno.land/std/fs/mod.ts";
-import { CoreAssistantMessage, CoreMessage, CoreTool } from "npm:ai";
-import { ask } from "./anthropic.ts";
-import {
-  ConversationThread,
-  InMemoryConversationThreadManager,
-} from "./conversation.ts";
-import { serve } from "./deps.ts";
-
-const threadManager = new InMemoryConversationThreadManager();
+import { crypto } from "https://deno.land/std/crypto/mod.ts";
+import { anthropic } from "npm:@ai-sdk/anthropic";
 
 const CACHE_DIR = "./cache";
 
-type CreateConversationThreadRequest = {
-  action: "create";
-  message: string;
-  system: string;
-  activeTools: CoreTool[];
-};
-
-type AppendToConversationThreadRequest = {
-  action: "append";
-  threadId: string;
-  message?: string;
-};
-
-type ConversationThreadRequest =
-  | CreateConversationThreadRequest
-  | AppendToConversationThreadRequest;
-
 const handler = async (request: Request): Promise<Response> => {
   if (request.method === "GET") {
-    return new Response("Planning Server", { status: 200 });
-  }  else if (request.method === "POST") {
-    try {
-      const body: ConversationThreadRequest = await request.json();
-      const { action } = body;
+    return new Response("Hello World");
+  }
 
-      switch (action) {
-        case "create": {
-          const { message, system, activeTools } = body;
-          return handleCreateConversationThread(system, message, activeTools);
-        }
-        case "append": {
-          const { threadId, message } = body;
-          return handleAppendToConversationThread(threadId, message);
-        }
-        default:
-          return new Response(JSON.stringify({ error: "Invalid action" }), {
-            status: 400,
-            headers: { "Content-Type": "application/json" },
-          });
+  if (request.method === "POST") {
+    try {
+      const payload = await request.json() as {
+        messages: Array<{ role: string; content: string }>;
+        system: string;
+        model: string;
+        max_tokens: number;
+        stop?: string;
+        stream: boolean; // LLM streams regardless, this is if we stream to the client
+      };
+
+      const description = JSON.stringify(payload.messages).slice(0, 80);
+
+      const cacheKey = await hashKey(JSON.stringify(payload));
+      const cachedResult = await loadCacheItem(cacheKey);
+      if (cachedResult) {
+        const lastMessage = cachedResult.messages[cachedResult.messages.length - 1];
+        return new Response(JSON.stringify(lastMessage), {
+          headers: { "Content-Type": "application/json" },
+        });
       }
-    } catch (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 400,
+
+      console.log("Generating:", description);
+
+      let messages = payload.messages;
+
+      let params = {
+        model: payload.model,
+        system: payload.system,
+        maxTokens: payload.max_tokens,
+        messages,
+      }
+
+      const llmStream = await streamText({
+        ...params,
+        model: anthropic(payload.model),
+        stopSequences: payload.stop ? [payload.stop] : undefined,
+      });
+
+      let result = "";
+
+      if (messages[messages.length - 1].role === "assistant") {
+        result = messages[messages.length - 1].content;
+      }
+
+      if (payload.stream) {
+        const stream = new ReadableStream({
+          async start(controller) {
+            // NOTE: the llm doesn't send text we put into its mouth, so we need to
+            // manually send it so that streaming client sees everything assistant 'said'
+            if (messages[messages.length - 1].role === "assistant") {
+              controller.enqueue(new TextEncoder().encode(JSON.stringify(result) + '\n'));
+            }
+            for await (const delta of llmStream.textStream) {
+              result += delta;
+              controller.enqueue(new TextEncoder().encode(JSON.stringify(delta) + '\n'));
+            }
+
+            if ((await llmStream.finishReason) === "stop" && payload.stop) {
+              // NOTE(ja): we might have stopped because of a stop sequence, so add it to the result...
+              // this is a hack that helps the client parse the result
+              result += payload.stop;
+              controller.enqueue(new TextEncoder().encode(JSON.stringify(payload.stop) + '\n'));
+            }
+
+            if (messages[messages.length - 1].role === "user") {
+              messages.push({ role: "assistant", content: result });
+            } else {
+              messages[messages.length - 1].content = result;
+            }
+            await saveCacheItem(cacheKey, params); // after finishing, save!
+            controller.close();
+          },
+        });
+
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Transfer-Encoding": "chunked"
+          },
+        });
+      }
+
+      for await (const delta of llmStream.textStream) {
+        result += delta;
+      }
+
+      if (!result) {
+        return new Response(
+          JSON.stringify({ error: "No response from LLM" }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      if ((await llmStream.finishReason) === "stop" && payload.stop) {
+        result += payload.stop;
+      }
+
+      if (messages[messages.length - 1].role === "user") {
+        messages.push({ role: "assistant", content: result });
+      } else {
+        messages[messages.length - 1].content = result;
+      }
+
+      await saveCacheItem(cacheKey, params);
+
+      return new Response(JSON.stringify(params.messages[params.messages.length - 1]), {
         headers: { "Content-Type": "application/json" },
       });
+    } catch (error) {
+      return new Response(
+        JSON.stringify({ error: (error as Error).message }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
     }
   } else {
     return new Response("Please send a POST request", { status: 405 });
@@ -79,6 +151,7 @@ async function loadCacheItem(key: string): Promise<any | null> {
   try {
     await ensureDir(CACHE_DIR);
     const cacheData = await Deno.readTextFile(filePath);
+    console.log(`Loading cache item: ${filePath}`);
     return JSON.parse(cacheData);
   } catch {
     return null;
@@ -88,136 +161,9 @@ async function loadCacheItem(key: string): Promise<any | null> {
 async function saveCacheItem(key: string, data: any): Promise<void> {
   const hash = await hashKey(key);
   const filePath = `${CACHE_DIR}/${hash}.json`;
+  console.log(`Saving cache item: ${filePath}`);
   await ensureDir(CACHE_DIR);
   await Deno.writeTextFile(filePath, JSON.stringify(data, null, 2));
-}
-
-async function handleCreateConversationThread(
-  system: string,
-  message: string,
-  activeTools: CoreTool[]
-): Promise<Response> {
-  const cacheKey = `${system}:${message}`;
-
-  const cachedResult = await loadCacheItem(cacheKey);
-  if (cachedResult) {
-    console.log(
-      "Cache hit!",
-      (cacheKey.slice(0, 20) + "..." + cacheKey.slice(-20)).replaceAll("\n", "")
-    );
-    return new Response(JSON.stringify(cachedResult), {
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const thread = threadManager.create(system, message, activeTools);
-  const result = await processConversationThread(thread);
-  if (result.type === "error") {
-    return new Response(JSON.stringify(result), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  if (result.assistantResponse) {
-    threadManager.update(thread.id, [result.assistantResponse]);
-  }
-
-  await saveCacheItem(cacheKey, result);
-
-  return new Response(JSON.stringify(result), {
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-async function handleAppendToConversationThread(
-  threadId: string,
-  message?: string
-): Promise<Response> {
-  const thread = threadManager.get(threadId);
-  if (!thread) {
-    return new Response(JSON.stringify({ error: "Thread not found" }), {
-      status: 404,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  if (message) {
-    threadManager.update(threadId, [
-      {
-        role: "user",
-        content: message,
-      },
-    ]);
-  }
-
-  const result = await processConversationThread(thread);
-  if (result.type === "error") {
-    return new Response(JSON.stringify(result), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // Update the thread with the assistant's response
-  if (result.assistantResponse) {
-    threadManager.update(threadId, [result.assistantResponse]);
-  }
-
-  // Remove the assistantResponse from the result before sending it to the client
-  const { assistantResponse, ...responseToClient } = result;
-
-  return new Response(JSON.stringify(responseToClient), {
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-type ProcessConversationThreadResult =
-  | {
-      type: "success";
-      threadId: string;
-      output: string;
-      assistantResponse: CoreAssistantMessage;
-      conversation: CoreMessage[];
-    }
-  | { type: "error"; error: string };
-
-async function processConversationThread(
-  thread: ConversationThread
-): Promise<ProcessConversationThreadResult> {
-  console.log("Thread", thread);
-
-  const result = await ask(
-    thread.conversation,
-    thread.system,
-    thread.activeTools
-  );
-  if (!result) {
-    return { type: "error", error: "No response from Anthropic" };
-  }
-
-  // Find the new assistant's response (it should be the last message)
-  const assistantResponse = result[result.length - 1];
-  if (assistantResponse.role !== "assistant") {
-    return { type: "error", error: "No assistant response found" };
-  }
-
-  if (Array.isArray(assistantResponse.content)) {
-    assistantResponse.content = assistantResponse.content
-      .filter((msg) => msg.type == "text")
-      .map((msg) => msg.text)
-      .join(" ");
-  }
-
-  const output = assistantResponse.content;
-  console.log("Output=", output);
-  return {
-    type: "success",
-    threadId: thread.id,
-    output,
-    assistantResponse,
-    conversation: result,
-  };
 }
 
 const port = Deno.env.get("PORT") || "8000";

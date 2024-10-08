@@ -3,52 +3,58 @@ import {
   recipe,
   str,
   lift,
-  generateData,
+  llm,
   ifElse,
   UI,
   NAME,
 } from "@commontools/common-builder";
 import { addSuggestion, description } from "../suggestions.js";
+import { z } from 'zod';
+import zodToJsonSchema from 'zod-to-json-schema';
 
-interface Playlist {
-  title: string;
-  songs: { name: string; artist: string }[];
-}
+const Playlist = z.object({
+  title: z.string().describe('Title of the playlist'),
+  songs: z.array(
+    z.object({
+      name: z.string().describe('Song name'),
+      artist: z.string().describe('Artist name'),
+    })
+  ).describe('List of songs in the playlist'),
+});
+type Playlist = z.infer<typeof Playlist>;
+const jsonSchema = JSON.stringify(zodToJsonSchema(Playlist), null, 2);
+
+
+const grabJson = lift<{ result: string }, Playlist | undefined>(({ result }) => {
+  if (!result) {
+      return {};
+  }
+  const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
+  if (!jsonMatch) {
+      console.error("No JSON found in text:", result);
+      return {};
+  }
+  let rawData = JSON.parse(jsonMatch[1]);
+  let parsedData = Playlist.safeParse(rawData);
+  if (!parsedData.success) {
+      console.error("Invalid JSON:", parsedData.error);
+      return;
+  }
+  return parsedData.data;
+})
+
 
 export const playlistForTrip = recipe<{
   ticket: { show: string };
   booking: any;
 }>("playlist for trip", ({ ticket }) => {
-  const { result: playlist } = generateData<Playlist>({
-    prompt: str`Create a fun playlist in anticipation of a trip to see ${ticket.show}`,
-    schema: {
-      type: "object",
-      properties: {
-        title: {
-          type: "string",
-          title: "Title of the playlist",
-        },
-        songs: {
-          type: "array",
-          title: "Songs",
-          items: {
-            type: "object",
-            properties: {
-              name: {
-                type: "string",
-                title: "Song name",
-              },
-              artist: {
-                type: "string",
-                title: "Artist",
-              },
-            },
-          },
-          description: "10 songs to listen to on the way to the show",
-        },
-      },
-    },
-  });
+
+  const playlist = grabJson(llm({
+    messages: [str`Create a fun playlist in anticipation of a trip to see ${ticket.show}`,
+      '```json\n{'],
+    system: `Generate playlist data inspired by the user description using JSON:\n\n<schema>${jsonSchema}</schema>`,
+    stop: '```'
+  }));
 
   return {
     [UI]: html`

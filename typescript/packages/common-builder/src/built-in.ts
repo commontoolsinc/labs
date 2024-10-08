@@ -1,20 +1,20 @@
 import { lift, createNodeFactory } from "./module.js";
 import { Value, NodeFactory, CellProxy } from "./types.js";
 
-export function generateData<T>(
+export function llm(
   params: Value<{
-    prompt: string;
-    result?: T;
-    schema?: any;
+    messages?: string[];
+    prompt?: string;
     system?: string;
-    mode?: "json" | "html";
+    stop?: string;
+    max_tokens?: number;
   }>
-): CellProxy<{ pending: boolean; result: T; partial: any; error: any }> {
-  generateDataFactory ||= createNodeFactory({
+): CellProxy<{ pending: boolean; result?: string; partial?: string; error: any }> {
+  llmFactory ||= createNodeFactory({
     type: "builtin",
-    implementation: "generateData",
+    implementation: "llm",
   });
-  return generateDataFactory(params);
+  return llmFactory(params);
 }
 
 export function fetchData<T>(
@@ -74,10 +74,10 @@ export function ifElse<T, U, V>(
 
 let ifElseFactory: NodeFactory<[any, any, any], any> | undefined = undefined;
 
-let generateDataFactory:
+let llmFactory:
   | NodeFactory<
-      { prompt: string; result?: any; schema?: any; system?: string },
-      { pending: boolean; result: any; partial: any; error: any }
+      { messages?: string[]; prompt?: string; system?: string; stop?: string; max_tokens?: number },
+      { pending: boolean; result?: string; partial?: string; error: any }
     >
   | undefined = undefined;
 
