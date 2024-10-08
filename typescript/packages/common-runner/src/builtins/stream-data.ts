@@ -5,7 +5,10 @@ import { schedule, Action } from "../scheduler.js";
 import { mapBindingsToCell } from "../utils.js";
 
 /**
- * Stream data from a URL.
+ * Stream data from a URL, used for querying Synopsys.
+ * Ben: This is a hack for demo purposes, we should feel free to delete this file when we have a robust integration.
+ *
+ * This differs from a regular fetch in that we poll in a generator loop to get all the data.
  *
  * Returns the streamed result as `result`. `pending` is true while a request is pending.
  *
@@ -64,6 +67,9 @@ export function streamData(
         throw new Error('Response body is not readable');
       }
 
+      // this reads until we hit the first response frame for now
+      // after that we're ignoring future updates, obviously not where we want to be
+      // but it's enough to get data on the screen
       while (true) {
         if (thisRun !== currentRun) return;
 
