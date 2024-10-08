@@ -20,7 +20,8 @@ export function fetchData(
 ) {
   const inputBindings = mapBindingsToCell(inputs, recipeCell) as {
     url: string;
-    mode?: "text" | "json";
+    mode?: 'text' | 'json';
+    options?: { body?: any; method?: string; headers?: Record<string, string> };
     result?: any;
   };
   const inputsCell = cell(inputBindings);
@@ -61,8 +62,8 @@ export function fetchData(
 
     const thisRun = ++currentRun;
 
-    fetch(url)
-      .then(processResponse)
+    fetch(url, options)
+    .then(processResponse)
       .then((data) => {
         if (thisRun !== currentRun) return;
 

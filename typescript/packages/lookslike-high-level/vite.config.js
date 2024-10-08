@@ -42,7 +42,7 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api\/llm/, ""),
       },
       "/api/data": {
-        target: "http://localhost:8001",
+        target: "http://localhost:8080",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/data/, ""),
       },
