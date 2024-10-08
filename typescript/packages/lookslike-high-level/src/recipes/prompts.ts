@@ -30,7 +30,6 @@ const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
 );
 
 const grabPrompts = lift<{ result: string }, Prompt[]>(({ result }) => {
-    console.log("grabPrompts", result);
     if (!result) {
         return [];
     }
