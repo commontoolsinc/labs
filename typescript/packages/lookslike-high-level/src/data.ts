@@ -1,13 +1,14 @@
 // This file is setting up example data
 
-import { ID, TYPE, NAME, UI, Recipe, lift } from "@commontools/common-builder";
+import { ID, TYPE, NAME, UI, Recipe } from "@commontools/common-builder";
 import {
   run,
   cell,
   isCell,
   CellImpl,
-  getCellReferenceOrValue,
+  raw,
   addModuleByRef,
+  type ReactivityLog,
 } from "@commontools/common-runner";
 
 import { todoList } from "./recipes/todo-list.js";
@@ -22,10 +23,6 @@ import { counters } from "./recipes/counters.js";
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.js";
 import "./recipes/playlist.js";
-import {
-  getCellReferenceOrThrow,
-  isCellProxyForDereferencing,
-} from "@commontools/common-runner";
 import { iframe } from "./recipes/iframe.js";
 import { queryCollections } from "./recipes/queryCollections.js";
 import { importCalendar } from "./recipes/importCalendar.js";
@@ -200,27 +197,11 @@ openCharm.set = (opener: (charmId: number) => void) => {
 
 addModuleByRef(
   "navigateTo",
-  lift<Charm>(({ [ID]: id }) => openCharm(id))
+  raw(
+    (inputsCell: CellImpl<any>) => (log: ReactivityLog) =>
+      openCharm(inputsCell.getAsProxy([], log)[ID] as number)
+  )
 );
-
-export function launch(recipe: Recipe, bindings: any) {
-  if (isCellProxyForDereferencing(bindings)) {
-    const { cell, path } = getCellReferenceOrThrow(bindings);
-    const keys = Object.keys(bindings);
-    bindings = Object.fromEntries(
-      keys.map((key) => [key, { cell, path: [...path, key] }])
-    );
-  } else {
-    bindings = Object.fromEntries(
-      Object.entries(bindings).map(([key, value]) => [
-        key,
-        getCellReferenceOrValue(value),
-      ])
-    );
-  }
-  const charm = run(recipe, bindings);
-  openCharm(charm.get()[ID]);
-}
 
 (window as any).recipes = recipes;
 (window as any).charms = charms;

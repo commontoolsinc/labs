@@ -3,8 +3,8 @@ import { customElement, property } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
-import { Charm, ID, UI, NAME, addCharms, launch } from "../data.js";
-import { CellImpl, isCell, charmById } from "@commontools/common-runner";
+import { Charm, ID, UI, NAME, addCharms } from "../data.js";
+import { run, CellImpl, isCell, charmById } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
 
@@ -106,7 +106,12 @@ export class CommonWindowManager extends LitElement {
         fieldsToInclude = charmValues.data;
       }
 
-      launch(iframe, { data: fieldsToInclude, title: value, prompt: value });
+      this.openCharm(
+        run(iframe, { data: fieldsToInclude, title: value, prompt: value })
+          .asSimpleCell()
+          .key(ID)
+          .get()
+      );
     }
   }
 

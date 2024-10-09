@@ -1,43 +1,20 @@
 import { html } from "@commontools/common-html";
 import {
   recipe,
-  fetchData,
   UI,
   NAME,
   ifElse,
   lift,
   handler,
-  str,
+  navigateTo,
   cell,
 } from "@commontools/common-builder";
-import { launch } from "../data.js";
 import { streamData } from "@commontools/common-builder";
 import { runtimeWorkbench } from "./runtimeWorkbench.js";
 
 const ensureArray = lift(({ data }: { data: any }) =>
-  Array.isArray(data) ? data : [data],
+  Array.isArray(data) ? data : [data]
 );
-
-const tap = lift((x) => {
-  console.log(x, JSON.stringify(x, null, 2));
-  return x;
-});
-
-const listCollections = JSON.stringify({
-  select: {
-    id: "?collection",
-    name: "?name",
-    item: [
-      {
-        id: "?item",
-      },
-    ],
-  },
-  where: [
-    { Case: ["?collection", "name", "?name"] },
-    { Case: ["?collection", "member", "?item"] },
-  ],
-});
 
 const stringify = lift(({ obj }) => {
   console.log("stringify", obj);
@@ -54,7 +31,7 @@ const generateQuery = handler<
     collectionName: string;
     query: any;
   }
->((event, state) => {
+>((_, state) => {
   const query = {
     select: {
       item: [
@@ -80,18 +57,20 @@ const onWorkbench = handler<
   {
     data: any;
   }
->((event, state) => {
-  launch(runtimeWorkbench, {
-    data: state.data,
-  });
-});
+>((_, state) =>
+  navigateTo(
+    runtimeWorkbench({
+      data: state.data,
+    })
+  )
+);
 
 const normalizeData = lift(({ result }) => {
   if (!result || !result.data || !result.data[0] || !result.data[0].item) {
     return [];
   }
   const groupedData = result.data[0].item.reduce(
-    (acc, { item, key, value }) => {
+    (acc: any, { item, key, value }: any) => {
       const itemKey = item["/"];
       if (!acc[itemKey]) {
         acc[itemKey] = {};
@@ -99,7 +78,7 @@ const normalizeData = lift(({ result }) => {
       acc[itemKey][key] = value;
       return acc;
     },
-    {},
+    {}
   );
 
   return Object.values(groupedData);
@@ -165,7 +144,7 @@ export const queryCollections = recipe<{}>("Fetch Collections", ({}) => {
             Open in Workbench
           </common-button>
         </div>`,
-        html`<div>Loading...</div>`,
+        html`<div>Loading...</div>`
       )}
     </div>`,
     result,
