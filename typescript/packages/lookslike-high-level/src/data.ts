@@ -199,7 +199,7 @@ addModuleByRef(
   "navigateTo",
   raw(
     (inputsCell: CellImpl<any>) => (log: ReactivityLog) =>
-      openCharm(inputsCell.asSimpleCell([ID], log).get() as number)
+      openCharm(inputsCell.getAsProxy([], log)[ID] as number)
   )
 );
 
