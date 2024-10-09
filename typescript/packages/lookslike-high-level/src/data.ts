@@ -35,6 +35,8 @@ import { jsonImporter } from "./recipes/jsonImport.js";
 import { prompt } from "./recipes/prompts.js";
 import { wiki } from "./recipes/wiki.js";
 import { helloIsolated } from "./recipes/helloIsolated.js";
+import { coder } from "./recipes/coder.js";
+import { runz } from "./recipes/runz.js";
 
 export type Charm = {
   [ID]: number;
@@ -66,42 +68,27 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 }
 
 addCharms([
-  run(iframe, {
-    title: "two way binding counter",
-    prompt: "counter",
-    data: { counter: 0 },
-  }),
-  run(importCalendar, {}),
-  run(queryCollections, {
-    url: "/api/data/",
-  }),
-  run(todoList, {
-    title: "My TODOs",
-    items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) => ({
-      title: item,
-      done: false,
-    })),
-  }),
-  run(todoList, {
-    title: "My grocery shopping list",
-    items: ["milk", "eggs", "bread"].map((item) => ({
-      title: item,
-      done: false,
-    })),
-  }),
-  run(ticket, {
-    title: "Reservation for 'Counterstrike the Musical'",
-    show: "Counterstrike the Musical",
-    date: getFridayAndMondayDateStrings().startDate,
-    location: "New York",
-  }),
-  run(routine, {
-    title: "Morning routine",
-    // TODO: A lot more missing here, this is just to drive the suggestion.
-    locations: ["coffee shop with great baristas"],
-  }),
-  run(counters, {}),
-]);
+  // run(coder, {
+  //   title: "hello world", src: `const greeting: string = "Hello, TypeScript!";
+  //   console.log(greeting);
+    
+  //   // You can also use TypeScript-specific features
+  //   interface Person {
+  //     name: string;
+  //     age: number;
+  //   }
+    
+  //   const printPerson = (person: Person) => {
+  //     console.log(person.name, 'is', person.age, 'years old');
+  //   };
+    
+  //   printPerson({ name: "Alice", age: 30 });`})
+  // 
+  ]);
+
+  setTimeout(() => {
+    launch(runz, { hash: "ef011d2367e0421df88ef23073fa882557989d7147c3e9f50fb1c42437932e6b" , data: {items: [{title:"hello", count: 123}]}});
+  }, 1000);
 
 export type RecipeManifest = {
   name: string;
@@ -123,50 +110,6 @@ function addRecipe(recipe: Recipe) {
 }
 
 export const recipes: RecipeManifest[] = [
-  {
-    name: "Explore dungeon game",
-    recipeId: addRecipe(dungeon),
-  },
-  {
-    name: "Create a new TODO list",
-    recipeId: addRecipe(todoList),
-  },
-  {
-    name: "Find places",
-    recipeId: addRecipe(localSearch),
-  },
-  {
-    name: "Find a LuftBnB place to stay",
-    recipeId: addRecipe(luftBnBSearch),
-  },
-  {
-    name: "JSON Importer",
-    recipeId: addRecipe(jsonImporter),
-  },
-  {
-    name: "Data Designer",
-    recipeId: addRecipe(dataDesigner),
-  },
-  {
-    name: "Create a counter",
-    recipeId: addRecipe(counter),
-  },
-  {
-    name: "Fetch JSON from a URL",
-    recipeId: addRecipe(fetchExample),
-  },
-  {
-    name: "Explore imagery prompts",
-    recipeId: addRecipe(prompt),
-  },
-  {
-    name: "Explore Halucinated wiki",
-    recipeId: addRecipe(wiki),
-  },
-  {
-    name: "Hello Isolated",
-    recipeId: addRecipe(helloIsolated),
-  },
 ];
 
 // Helper for mock data
@@ -192,7 +135,7 @@ function getFridayAndMondayDateStrings() {
 }
 
 // Terrible hack to open a charm from a recipe
-let openCharmOpener: (charmId: number) => void = () => {};
+let openCharmOpener: (charmId: number) => void = () => { };
 export const openCharm = (charmId: number) => openCharmOpener(charmId);
 openCharm.set = (opener: (charmId: number) => void) => {
   openCharmOpener = opener;
@@ -219,7 +162,24 @@ export function launch(recipe: Recipe, bindings: any) {
     );
   }
   const charm = run(recipe, bindings);
+  persist(charm)  // put in the collection / add a ts to make it unique id
+  
   openCharm(charm.get()[ID]);
+}
+
+import {createJsonSchema} from "@commontools/common-builder";
+
+function persist(charm: CellImpl<any>) {
+  // let data = charm.get()
+  // let schema = createJsonSchema({}, data);
+  // let query = createDataQuery(schema)
+  // assert(id, "query", query)
+  // // asert all the things - if isCellReference is true, then check if the cell has an ID
+  // assert(hash, "hash")
+
+  // from the cells, determine the schema...
+  // write to synopsys both the schema and the data and recipe hash
+  // if shared synopsys ... this ID is enough to re-hydrate the charm ... including the recipe
 }
 
 (window as any).recipes = recipes;
