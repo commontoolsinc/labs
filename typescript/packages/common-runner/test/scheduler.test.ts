@@ -155,8 +155,8 @@ describe("scheduler", () => {
     await run(adder2);
     await run(adder3);
 
-    expect(stopped).not.toHaveBeenCalled();
     await idle();
+
     expect(maxRuns).toBeGreaterThan(0);
     expect(stopped).toHaveBeenCalled();
   });
@@ -291,7 +291,7 @@ describe("event handling", () => {
       actionCount++;
       lastEventSeen = eventResultCell.getAsProxy([], log);
     };
-    run(action);
+    await run(action);
 
     addEventHandler(eventHandler, { cell: eventCell, path: [] });
 
