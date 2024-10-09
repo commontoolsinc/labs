@@ -71,7 +71,7 @@ export const positionMenu = async (
     new VirtualRect(top, right, bottom, left),
     menu,
     {
-      strategy: "fixed",
+      strategy: "absolute",
       placement: "bottom-start",
       middleware: [shift()],
     },
@@ -79,7 +79,7 @@ export const positionMenu = async (
 
   await animationFrame();
 
-  menu.style.position = "fixed";
+  menu.style.position = "absolute";
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
 };

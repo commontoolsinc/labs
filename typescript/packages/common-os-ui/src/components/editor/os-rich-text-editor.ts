@@ -178,7 +178,7 @@ export class OsRichTextEditor extends ReactiveElement {
         padding: var(--pad-sm);
         border-radius: var(--radius);
         box-shadow: var(--shadow-menu);
-        position: fixed;
+        position: absolute;
         left: 0;
         top: 0;
         width: var(--suggestions-width);
