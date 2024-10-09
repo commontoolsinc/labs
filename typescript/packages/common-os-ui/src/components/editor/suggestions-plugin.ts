@@ -53,6 +53,11 @@ export const createUpdateMsg = (suggestion: Suggestion | null) =>
     suggestion,
   });
 
+export const createDestroyMsg = () =>
+  freeze({
+    type: "destroy",
+  });
+
 export const createArrowDownMsg = () =>
   freeze({
     type: "arrowDown",
@@ -78,6 +83,7 @@ export const createEnterMsg = (suggestion: Suggestion) =>
 export type Msg =
   | ReturnType<typeof createInitMsg>
   | ReturnType<typeof createUpdateMsg>
+  | ReturnType<typeof createDestroyMsg>
   | ReturnType<typeof createArrowDownMsg>
   | ReturnType<typeof createArrowUpMsg>
   | ReturnType<typeof createTabMsg>
@@ -107,6 +113,11 @@ export const suggestionsPlugin = ({
           const state = view.state;
           const active = getActiveSuggestion(this.key?.getState(state));
           const msg = createUpdateMsg(active);
+          if (debug()) console.debug(source, msg);
+          reducer(view, msg);
+        },
+        destroy: () => {
+          const msg = createDestroyMsg();
           if (debug()) console.debug(source, msg);
           reducer(view, msg);
         },

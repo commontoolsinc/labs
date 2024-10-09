@@ -1,4 +1,4 @@
-import { LitElement, css, html, render } from "lit";
+import { ReactiveElement, css, html, render } from "lit";
 import { EditorState, Plugin } from "prosemirror-state";
 import { EditorView, Decoration } from "prosemirror-view";
 import { Schema } from "prosemirror-model";
@@ -60,6 +60,8 @@ const suggestionMenuPlugin = ({
     decoration,
     reducer: (view, msg) => {
       if (msg.type === "init") {
+        return false;
+      } else if (msg.type === "destroy") {
         return false;
       } else if (msg.type === "update") {
         const suggestion = msg.suggestion;
@@ -140,7 +142,7 @@ const createEditor = (
 };
 
 @customElement("os-rich-text-editor")
-export class OsRichTextEditor extends LitElement {
+export class OsRichTextEditor extends ReactiveElement {
   #editor: EditorView | null = null;
 
   static override styles = [
