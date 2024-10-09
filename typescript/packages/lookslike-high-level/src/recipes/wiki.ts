@@ -11,7 +11,7 @@ import {
   ifElse,
 } from "@commontools/common-builder";
 import { z } from "zod";
-import zodToJsonSchema from "zod-to-json-schema";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 const ExploreResult = z.object({
   text: z.string().describe("text of the wiki page"),
@@ -79,7 +79,10 @@ const contextify = lift(({ related, canon, text, title, maxLength }) => {
       0,
       maxLength
     );
-  return (related || []).map(({ title }) => ({ title, canon: newCanon }));
+  return (related || []).map(({ title }: { title: string }) => ({
+    title,
+    canon: newCanon,
+  }));
 });
 
 const launcher = handler<PointerEvent, { title: string; canon: string }>(
@@ -119,7 +122,7 @@ export const wiki = recipe<{ title: string; canon: string }>(
         )}
         <ul>
           ${relatedWithClosure.map(
-            ({ title, canon }) =>
+            ({ title, canon }: { title: string; canon: string }) =>
               html`<li onclick=${launcher({ title, canon })}>${title}</li>`
           )}
         </ul>

@@ -13,7 +13,7 @@ import {
 } from "@commontools/common-builder";
 import { addSuggestion, description } from "../suggestions.js";
 import { z } from "zod";
-import zodToJsonSchema from "zod-to-json-schema";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 const LuftBnBPlace = z.object({
   id: z.string().describe("Unique identifier for the listing"),

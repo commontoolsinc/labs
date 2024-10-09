@@ -9,7 +9,7 @@ import {
   UI,
 } from "@commontools/common-builder";
 import { z } from "zod";
-import zodToJsonSchema from "zod-to-json-schema";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 const Prompt = z.object({
   prompt: z.string().describe("Image generation prompt"),
@@ -32,7 +32,7 @@ const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
   }
 );
 
-const grabPrompts = lift<{ result: string }, Prompt[]>(({ result }) => {
+const grabPrompts = lift<{ result?: string }, Prompt[]>(({ result }) => {
   if (!result) {
     return [];
   }
