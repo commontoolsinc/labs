@@ -9,7 +9,6 @@
   "scripts": {
     "dev": "npm run build && npx vite",
     "test": "npm run build && vitest",
-    "bundle-type-defs": "node bundle-type-defs.js",
     "build": "wireit",
     "clean": "wireit"
   },
@@ -38,9 +37,13 @@
         "../common-frp:build",
         "../common-html:build",
         "../lookslike-sagas:build",
-        "../llm-client:build"
+        "../llm-client:build",
+        "bundle-type-defs"
       ],
       "command": "vite build"
+    },
+    "bundle-type-defs": {
+      "command": "node bundle-type-defs.js"
     },
     "clean": {
       "command": "rm -rf ./lib ./dist ./.wireit ./node_modules"

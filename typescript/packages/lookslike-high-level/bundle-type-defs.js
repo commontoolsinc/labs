@@ -13,6 +13,7 @@ const modules = [
   '@commontools/common-html',
   '@commontools/common-builder',
   '@commontools/common-runner',
+  '@commontools/common-runtime',
   '@commontools/common-propagator',
 ];
 
@@ -33,17 +34,22 @@ const moduleTypeDefs = {};
 
 modules.forEach(async (module) => {
   let dtsPath;
-  if (module.startsWith('@commontools/')) {
+  if (module === '@commontools/common-runtime') {
+    dtsPath = path.resolve(__dirname, '..', 'common-runtime');
+  } else if (module.startsWith('@commontools/')) {
     dtsPath = path.resolve(__dirname, '..', module.replace('@commontools/', ''), 'lib');
   } else if (module.startsWith('../') || module.startsWith('./')) {
     dtsPath = path.resolve(__dirname, module.replace('.js', '.d.ts'));
   }
 
-  glob.sync('*.d.ts', { cwd: dtsPath }).forEach((file) => {
+  const dtsFiles = module === '@commontools/common-runtime' 
+    ? ['common_runtime.d.ts', 'common_runtime_bg.wasm.d.ts', 'index.d.ts']
+    : glob.sync('*.d.ts', { cwd: dtsPath });
+
+  dtsFiles.forEach((file) => {
     console.log('file', file);
     moduleTypeDefs[`node_modules/${module}/${file}`] = fs.readFileSync(path.join(dtsPath, file), 'utf-8');
   });
-
 });
 
 const libFiles = glob.sync('lib.*.d.ts', { cwd: tsLibDir });
