@@ -316,10 +316,18 @@ function instantiateBuiltinNode(
 
   // Built-ins can define their own scheduling logic, so they'll
   // implement parts of the above themselves.
-  builtins[module.implementation](recipeCell, {
-    module,
-    inputs: inputBindings,
-    outputs: outputBindings,
+
+  const mappedInputBindings = mapBindingsToCell(inputBindings, recipeCell);
+  const mappedOutputBindings = mapBindingsToCell(outputBindings, recipeCell);
+
+  const action = builtins[module.implementation](
+    cell(mappedInputBindings),
+    (result) => sendValueToBinding(recipeCell, mappedOutputBindings, result)
+  );
+
+  schedule(action, {
+    reads: findAllAliasedCells(mappedInputBindings, recipeCell),
+    writes: findAllAliasedCells(mappedOutputBindings, recipeCell),
   });
 }
 
