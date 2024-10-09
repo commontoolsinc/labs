@@ -3,6 +3,11 @@ import {
   getValueAtPath,
   setValueAtPath,
   deepEqual,
+  toCellProxy,
+  cell as builderCell,
+  type CellProxy as BuilderCellProxy,
+  getTopFrame,
+  type Frame,
 } from "@commontools/common-builder";
 import {
   followCellReferences,
@@ -11,6 +16,7 @@ import {
   pathAffected,
   transformToSimpleCells,
   normalizeToCells,
+  arrayEqual,
 } from "./utils.js";
 import { queueEvent } from "./scheduler.js";
 
@@ -64,6 +70,7 @@ export type CellImpl<T> = {
   freeze(): void;
   isFrozen(): boolean;
   value: T;
+  [toCellProxy]: () => BuilderCellProxy<T>;
   [isCellMarker]: true;
 };
 
@@ -131,6 +138,7 @@ export function cell<T>(value?: T): CellImpl<T> {
     get value(): T {
       return value as T;
     },
+    [toCellProxy]: () => toBuilderCellProxy(self, []),
     [isCellMarker]: true,
   };
 
@@ -306,6 +314,8 @@ export function createValueProxy<T>(
       if (typeof prop === "symbol") {
         if (prop === getCellReference)
           return { cell: valueCell, path: valuePath } satisfies CellReference;
+        if (prop === toCellProxy)
+          return () => toBuilderCellProxy(valueCell, valuePath);
 
         const value = Reflect.get(target, prop, receiver);
         if (typeof value === "function") return value.bind(receiver);
@@ -441,6 +451,40 @@ const createProxyForArrayValue = (
 
   return target;
 };
+
+const cellToBuilderCellProxy = new WeakMap<
+  Frame,
+  WeakMap<
+    CellImpl<any>,
+    { path: PropertyKey[]; proxy: BuilderCellProxy<any> }[]
+  >
+>();
+
+// Creates aliases to value, used in recipes to refer to this specific cell. We
+// have to memoize these, as conversion happens at multiple places when
+// creaeting the recipe.
+function toBuilderCellProxy(
+  valueCell: CellImpl<any>,
+  valuePath: PropertyKey[]
+): BuilderCellProxy<any> {
+  const frame = getTopFrame();
+  if (!frame) throw new Error("No frame");
+  if (!cellToBuilderCellProxy.has(frame))
+    cellToBuilderCellProxy.set(frame, new WeakMap());
+  let proxies = cellToBuilderCellProxy.get(frame)!.get(valueCell);
+  if (!proxies) {
+    proxies = [];
+    cellToBuilderCellProxy.get(frame)!.set(valueCell, proxies);
+  }
+  let proxy = proxies.find((p) => arrayEqual(valuePath, p.path))?.proxy;
+  if (!proxy) {
+    proxy = builderCell();
+    for (const key of valuePath) proxy = proxy.key(key);
+    proxy.setPreExisting({ $alias: { cell: valueCell, path: valuePath } });
+    proxies.push({ path: valuePath, proxy });
+  }
+  return proxy;
+}
 
 function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
   return typeof value === "object" && value !== null && originalIndex in value;

@@ -11,6 +11,7 @@ import {
   queueEvent,
   EventHandler,
 } from "../src/scheduler.js";
+import { lift } from "@commontools/common-builder";
 
 describe("scheduler", () => {
   it("should run actions when cells change", async () => {
@@ -182,6 +183,14 @@ describe("scheduler", () => {
     expect(counter.get()).toBe(3);
 
     expect(stopped).not.toHaveBeenCalled();
+  });
+
+  it("should immediately run actions that have no dependencies", async () => {
+    let runs = 0;
+    const inc: Action = () => runs++;
+    schedule(inc, { reads: [], writes: [] });
+    await idle();
+    expect(runs).toBe(1);
   });
 });
 

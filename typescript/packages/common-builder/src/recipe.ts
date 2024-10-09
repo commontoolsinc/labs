@@ -4,12 +4,15 @@ import {
   NodeProxy,
   Value,
   CellProxy,
-  isCell,
+  isCellProxy,
   Node,
   Module,
   Alias,
   toJSON,
   UI,
+  canBeCellProxy,
+  makeCellProxy,
+  Frame,
 } from "./types.js";
 import { cell } from "./cell-proxy.js";
 import {
@@ -19,6 +22,7 @@ import {
   createJsonSchema,
   moduleToJSON,
   recipeToJSON,
+  connectInputAndOutputs,
 } from "./utils.js";
 
 /** Declare a recipe
@@ -30,47 +34,51 @@ import {
  */
 export function recipe<T>(
   description: string,
-  fn: (input: CellProxy<T>) => any
+  fn: (input: CellProxy<Required<T>>) => any
 ): RecipeFactory<T, ReturnType<typeof fn>>;
 export function recipe<T, R>(
   description: string,
-  fn: (input: CellProxy<T>) => Value<R>
+  fn: (input: CellProxy<Required<T>>) => Value<R>
 ): RecipeFactory<T, R>;
 export function recipe<T, R>(
   description: string,
-  fn: (input: CellProxy<T>) => Value<R>
+  fn: (input: CellProxy<Required<T>>) => Value<R>
 ): RecipeFactory<T, R> {
   // The recipe graph is created by calling `fn` which populates for `inputs`
   // and `outputs` with Value<> (which containts CellProxy<>) and/or default
   // values.
-  const inputs = cell<T & R>();
+
+  const frame = pushFrame();
+  const inputs = cell<Required<T>>();
   const outputs = fn(inputs);
+  const result = factoryFromRecipe<T, R>(description, inputs, outputs);
+  popFrame(frame);
+  return result;
+}
 
-  // Next we need to traverse the inputs and outputs serialize the graph.
+// Same as above, but assumes the caller manages the frame
+export function recipeFromFrame<T, R>(
+  description: string,
+  fn: (input: CellProxy<Required<T>>) => Value<R>
+): RecipeFactory<T, R> {
+  const inputs = cell<Required<T>>();
+  const outputs = fn(inputs);
+  return factoryFromRecipe<T, R>(description, inputs, outputs);
+}
 
-  // First, assign the outputs to the state cell.
-  // TOOD: We assume no default values for top-level output for now.
-  /*
-  const stateValue = inputs.export().value ?? {};
-  if (typeof stateValue !== "object")
-    throw new Error("Inputs must be an object");
-  if (outputs !== undefined && typeof outputs !== "object")
-    throw new Error("Outputs must be an object or undefined");
-  if (outputs) {
-    inputs.set({
-      ...stateValue,
-      ...(outputs as R),
-    } as Value<T & R>);
-  }
-  */
-
-  // Then traverse the value, collect all mentioned nodes and cells
+function factoryFromRecipe<T, R>(
+  description: string,
+  inputs: CellProxy<T>,
+  outputs: Value<R>
+): RecipeFactory<T, R> {
+  // Traverse the value, collect all mentioned nodes and cells
   const cells = new Set<CellProxy<any>>();
   const nodes = new Set<NodeProxy>();
 
   const collectCellsAndNodes = (value: Value<any>) =>
     traverseValue(value, (value) => {
-      if (isCell(value) && !cells.has(value)) {
+      if (canBeCellProxy(value)) value = makeCellProxy(value);
+      if (isCellProxy(value) && !cells.has(value)) {
         cells.add(value);
         value.export().nodes.forEach((node: NodeProxy) => {
           if (!nodes.has(node)) {
@@ -92,9 +100,9 @@ export function recipe<T, R>(
   const paths = new Map<CellProxy<any>, PropertyKey[]>([[inputs, []]]);
 
   let count = 0;
-  cells.forEach((cell) => {
+  cells.forEach((cell: CellProxy<any>) => {
     if (paths.has(cell)) return;
-    const { top, path } = cell.export();
+    const { cell: top, path } = cell.export();
     if (!paths.has(top)) paths.set(top, [`__#${count++}`]);
     if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
   });
@@ -114,9 +122,15 @@ export function recipe<T, R>(
     const { path, value, defaultValue } = cell.export();
     if (path.length > 0) return;
 
-    const cellPath = [...paths.get(cell)!];
+    const cellPath = paths.get(cell)!;
     if (value) setValueAtPath(initial, cellPath, value);
     if (defaultValue) setValueAtPath(defaults, cellPath, defaultValue);
+  });
+
+  // External cells all have to be added to the initial state
+  cells.forEach((cell) => {
+    const { external } = cell.export();
+    if (external) setValueAtPath(initial, paths.get(cell)!, external);
   });
 
   const schema = createJsonSchema(defaults, initial) as {
@@ -137,7 +151,7 @@ export function recipe<T, R>(
   }
 
   const serializedNodes = Array.from(nodes).map((node) => {
-    const module = isCell(node.module)
+    const module = isCellProxy(node.module)
       ? (toJSONWithAliases(node.module, paths) as Alias)
       : (node.module as Module);
     const inputs = toJSONWithAliases(node.inputs, paths)!;
@@ -161,9 +175,26 @@ export function recipe<T, R>(
     const outputs = cell<R>();
     const node: NodeProxy = { module, inputs, outputs };
 
-    traverseValue(inputs, (value) => isCell(value) && value.connect(node));
+    connectInputAndOutputs(node);
     outputs.connect(node);
 
     return outputs;
   }, recipe) satisfies RecipeFactory<T, R>;
+}
+
+const frames: Frame[] = [];
+
+export function pushFrame(frame?: Frame): Frame {
+  if (!frame) frame = { parent: getTopFrame() };
+  frames.push(frame);
+  return frame;
+}
+
+export function popFrame(frame?: Frame): void {
+  if (frame && getTopFrame() !== frame) throw new Error("Frame mismatch");
+  frames.pop();
+}
+
+export function getTopFrame(): Frame | undefined {
+  return frames.length ? frames[frames.length - 1] : undefined;
 }

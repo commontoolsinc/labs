@@ -2,11 +2,25 @@ export { cell } from "./cell-proxy.js";
 export {
   lift,
   createNodeFactory as builtin,
+  byRef,
   handler,
   isolated,
 } from "./module.js";
-export { recipe } from "./recipe.js";
-export { streamData, fetchData, llm, ifElse, str } from "./built-in.js";
+export {
+  recipe,
+  recipeFromFrame,
+  pushFrame,
+  popFrame,
+  getTopFrame,
+} from "./recipe.js";
+export {
+  streamData,
+  fetchData,
+  llm,
+  navigateTo,
+  ifElse,
+  str,
+} from "./built-in.js";
 export {
   ID,
   TYPE,
@@ -23,7 +37,8 @@ export {
   type RecipeFactory,
   type NodeFactory,
   type ModuleFactory,
-  isCell,
+  isCellProxy,
+  toCellProxy,
   isModule,
   isRecipe,
   isAlias,
@@ -31,6 +46,7 @@ export {
   type toJSON,
   type JSONValue,
   type JSON,
+  type Frame,
 } from "./types.js";
 
 // This should be a separate package, but for now it's easier to keep it here.

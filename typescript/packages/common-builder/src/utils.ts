@@ -3,18 +3,26 @@ import {
   Module,
   Recipe,
   CellProxy,
-  isCell,
+  NodeProxy,
+  isCellProxy,
   JSONValue,
   JSON,
   Alias,
   isAlias,
+  canBeCellProxy,
+  makeCellProxy,
 } from "./types.js";
 
 /** traverse a value, _not_ entering cells */
 export function traverseValue(value: Value<any>, fn: (value: any) => any) {
   fn(value);
   if (Array.isArray(value)) value.forEach((v) => traverseValue(v, fn));
-  else if (!isCell(value) && typeof value === "object" && value !== null)
+  else if (
+    !isCellProxy(value) &&
+    !canBeCellProxy(value) &&
+    typeof value === "object" &&
+    value !== null
+  )
     for (const key in value as any) traverseValue(value[key], fn);
 }
 
@@ -86,7 +94,8 @@ export function toJSONWithAliases(
   ignoreSelfAliases: boolean = false,
   path: PropertyKey[] = []
 ): JSONValue | undefined {
-  if (isCell(value)) {
+  if (canBeCellProxy(value)) value = makeCellProxy(value);
+  if (isCellProxy(value)) {
     const pathToCell = paths.get(value);
     if (pathToCell) {
       if (ignoreSelfAliases && deepEqual(path, pathToCell)) return undefined;
@@ -201,4 +210,11 @@ export function recipeToJSON(recipe: Recipe) {
     initial: recipe.initial,
     nodes: recipe.nodes,
   };
+}
+
+export function connectInputAndOutputs(node: NodeProxy) {
+  traverseValue(node.inputs, (value) => {
+    if (canBeCellProxy(value)) value = makeCellProxy(value);
+    if (isCellProxy(value)) value.connect(node);
+  });
 }

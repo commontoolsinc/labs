@@ -1,12 +1,13 @@
 // This file is setting up example data
 
-import { ID, TYPE, NAME, UI, Recipe } from "@commontools/common-builder";
+import { ID, TYPE, NAME, UI, Recipe, lift } from "@commontools/common-builder";
 import {
   run,
   cell,
   isCell,
   CellImpl,
   getCellReferenceOrValue,
+  addModuleByRef,
 } from "@commontools/common-runner";
 
 import { todoList } from "./recipes/todo-list.js";
@@ -196,6 +197,11 @@ export const openCharm = (charmId: number) => openCharmOpener(charmId);
 openCharm.set = (opener: (charmId: number) => void) => {
   openCharmOpener = opener;
 };
+
+addModuleByRef(
+  "navigateTo",
+  lift<Charm>(({ [ID]: id }) => openCharm(id))
+);
 
 export function launch(recipe: Recipe, bindings: any) {
   if (isCellProxyForDereferencing(bindings)) {
