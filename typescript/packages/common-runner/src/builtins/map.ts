@@ -8,9 +8,10 @@ import {
   isCell,
   type CellReference,
 } from "../cell.js";
-import { run } from "../runner.js";
+import { run, cancels } from "../runner.js";
 import { isEqualCellReferences, followCellReferences } from "../utils.js";
 import { type Action } from "../scheduler.js";
+import { type AddCancel } from "../cancel.js";
 
 /**
  * Implemention of built-in map module. Unlike regular modules, this will be
@@ -38,7 +39,8 @@ export function map(
     list: any[];
     op: Recipe;
   }>,
-  sendResult: (result: any) => void
+  sendResult: (result: any) => void,
+  addCancel: AddCancel
 ): Action {
   const result = cell<any[]>([]);
   let sourceRefToResult: { ref: CellReference; resultCell: CellImpl<any> }[] =
@@ -101,6 +103,7 @@ export function map(
           continue;
         }
         const resultCell = run(op, value);
+        addCancel(cancels.get(resultCell));
         itemResult = { ref: value, resultCell };
         sourceRefToResult.push(itemResult);
       }

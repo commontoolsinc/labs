@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Recipe } from "@commontools/common-builder";
-import { run } from "../src/runner.js";
+import { run, stop } from "../src/runner.js";
 import { idle } from "../src/scheduler.js";
 import { cell } from "../src/cell.js";
 
@@ -158,5 +158,45 @@ describe("runRecipe", () => {
       input: { $alias: { cell: inputCell, path: ["input"] } },
     });
     expect(inputCell.get()).toMatchObject({ input: 10, output: 20 });
+  });
+
+  it("should allow stopping a recipe", async () => {
+    const recipe: Recipe = {
+      schema: {},
+      initial: {},
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: (value: number) => value * 2,
+          },
+          inputs: { $alias: { path: ["input"] } },
+          outputs: { $alias: { path: ["output"] } },
+        },
+      ],
+    };
+
+    const inputCell = cell({ input: 10, output: 0 });
+    const result = run(recipe, inputCell);
+
+    await idle();
+    expect(inputCell.get()).toMatchObject({ input: 10, output: 20 });
+
+    inputCell.send({ input: 20, output: 20 });
+    await idle();
+    expect(inputCell.get()).toMatchObject({ input: 20, output: 40 });
+
+    // Stop the recipe
+    stop(result);
+
+    inputCell.send({ input: 40, output: 40 });
+    await idle();
+    expect(inputCell.get()).toMatchObject({ input: 40, output: 40 });
+
+    // Restart the recipe
+    run(recipe, undefined, result);
+
+    await idle();
+    expect(inputCell.get()).toMatchObject({ input: 40, output: 80 });
   });
 });
