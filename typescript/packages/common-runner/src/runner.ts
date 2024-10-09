@@ -34,6 +34,7 @@ import {
   staticDataToNestedCells,
 } from "./utils.js";
 import { getModuleByRef } from "./module.js";
+import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.js";
 import "./builtins/index.js";
 import init, {
   CommonRuntime,
@@ -41,31 +42,32 @@ import init, {
   JavaScriptValueMap,
 } from "@commontools/common-runtime";
 
-let runtime: Promise<CommonRuntime> | undefined;
-const COMMON_RUNTIME_URL = "http://localhost:8081";
-
-// This should be in common-runtime
-function isJavaScriptModuleDefinition(
-  module: any
-): module is JavaScriptModuleDefinition {
-  return (
-    typeof module === "object" &&
-    module !== null &&
-    typeof module.body === "string" &&
-    typeof module.inputs === "object" &&
-    typeof module.outputs === "object"
-  );
-}
-
 export const charmById = new Map<number, CellImpl<any>>();
 let nextCharmId = 0;
 
+export const cancels = new WeakMap<CellImpl<any>, Cancel>();
+
 export function run<T, R>(
   recipeFactory: RecipeFactory<T, R>,
-  bindings: T
+  bindings: T,
+  recipeCell?: CellImpl<R>
 ): CellImpl<R>;
-export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R>;
-export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
+export function run<T, R = any>(
+  recipe: Recipe,
+  bindings: T,
+  recipeCell?: CellImpl<R>
+): CellImpl<R>;
+export function run<T, R = any>(
+  recipe: Recipe,
+  bindings?: T,
+  recipeCell?: CellImpl<R>
+): CellImpl<R> {
+  if (recipeCell) {
+    // If we already have a recipe cell, we are stopping and restarting
+    // the recipe, so we need to stop the old one first.
+    stop(recipeCell);
+  }
+
   // Walk the recipe's schema and extract all default values
   const defaults = extractDefaultValues(recipe.schema);
 
@@ -97,34 +99,53 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
 
   // Generate recipe cell using defaults, bindings, and initial values
   // TODO: Some initial values can be aliases to outside cells
-  const id = nextCharmId++;
-  const recipeCell = cell<R>();
+  const id =
+    recipeCell && recipeCell.getAtPath([ID])
+      ? (recipeCell.getAtPath([ID]) as number)
+      : nextCharmId++;
+  if (!recipeCell) recipeCell = cell<R>();
   recipeCell.send(
     mergeObjects(
+      recipeCell.get(),
       {
         [ID]: id,
         [TYPE]:
           (recipe.schema as { description: string })?.description ?? "unknown",
       },
       recipe.initial,
-      staticDataToNestedCells(bindings),
+      bindings,
       defaults
     )
   );
   charmById.set(id, recipeCell);
 
+  const [cancel, addCancel] = useCancelGroup();
+  cancels.set(recipeCell, cancel);
+
   for (const node of recipe.nodes) {
-    instantiateNode(node.module, node.inputs, node.outputs, recipeCell);
+    instantiateNode(
+      node.module,
+      node.inputs,
+      node.outputs,
+      recipeCell,
+      addCancel
+    );
   }
 
   return recipeCell;
+}
+
+export function stop(recipeCell: CellImpl<any>) {
+  cancels.get(recipeCell)?.();
+  cancels.delete(recipeCell);
 }
 
 function instantiateNode(
   module: Module | Alias,
   inputBindings: JSON,
   outputBindings: JSON,
-  recipeCell: CellImpl<any>
+  recipeCell: CellImpl<any>,
+  addCancel: AddCancel
 ) {
   if (isModule(module)) {
     switch (module.type) {
@@ -133,7 +154,8 @@ function instantiateNode(
           getModuleByRef(module.implementation as string),
           inputBindings,
           outputBindings,
-          recipeCell
+          recipeCell,
+          addCancel
         );
         break;
       case "javascript":
@@ -141,18 +163,26 @@ function instantiateNode(
           module,
           inputBindings,
           outputBindings,
-          recipeCell
+          recipeCell,
+          addCancel
         );
         break;
       case "raw":
-        instantiateRawNode(module, inputBindings, outputBindings, recipeCell);
+        instantiateRawNode(
+          module,
+          inputBindings,
+          outputBindings,
+          recipeCell,
+          addCancel
+        );
         break;
       case "passthrough":
         instantiatePassthroughNode(
           module,
           inputBindings,
           outputBindings,
-          recipeCell
+          recipeCell,
+          addCancel
         );
         break;
       case "isolated":
@@ -160,7 +190,8 @@ function instantiateNode(
           module,
           inputBindings,
           outputBindings,
-          recipeCell
+          recipeCell,
+          addCancel
         );
         break;
       case "recipe":
@@ -168,7 +199,8 @@ function instantiateNode(
           module,
           inputBindings,
           outputBindings,
-          recipeCell
+          recipeCell,
+          addCancel
         );
         break;
       default:
@@ -185,7 +217,8 @@ function instantiateJavaScriptNode(
   module: Module,
   inputBindings: JSON,
   outputBindings: JSON,
-  recipeCell: CellImpl<any>
+  recipeCell: CellImpl<any>,
+  addCancel: AddCancel
 ) {
   const inputs = mapBindingsToCell(
     inputBindings as { [key: string]: any },
@@ -266,13 +299,14 @@ function instantiateJavaScriptNode(
           result: resultNode,
         }));
 
-        run(resultRecipe, {});
+        const resultCell = run(resultRecipe, {});
+        addCancel(cancels.get(resultCell));
       }
 
       popFrame(frame);
     };
 
-    addEventHandler(handler, stream);
+    addCancel(addEventHandler(handler, stream));
   } else {
     // Schedule the action to run when the inputs change
 
@@ -285,7 +319,7 @@ function instantiateJavaScriptNode(
       sendValueToBinding(recipeCell, outputs, result, log);
     };
 
-    schedule(action, { reads, writes } satisfies ReactivityLog);
+    addCancel(schedule(action, { reads, writes } satisfies ReactivityLog));
   }
 }
 
@@ -293,7 +327,8 @@ function instantiateRawNode(
   module: Module,
   inputBindings: JSON,
   outputBindings: JSON,
-  recipeCell: CellImpl<any>
+  recipeCell: CellImpl<any>,
+  addCancel: AddCancel
 ) {
   if (typeof module.implementation !== "function")
     throw new Error(
@@ -309,20 +344,24 @@ function instantiateRawNode(
   const action = module.implementation(
     cell(mappedInputBindings),
     (result: any) =>
-      sendValueToBinding(recipeCell, mappedOutputBindings, result)
+      sendValueToBinding(recipeCell, mappedOutputBindings, result),
+    addCancel
   );
 
-  schedule(action, {
-    reads: findAllAliasedCells(mappedInputBindings, recipeCell),
-    writes: findAllAliasedCells(mappedOutputBindings, recipeCell),
-  });
+  addCancel(
+    schedule(action, {
+      reads: findAllAliasedCells(mappedInputBindings, recipeCell),
+      writes: findAllAliasedCells(mappedOutputBindings, recipeCell),
+    } satisfies ReactivityLog)
+  );
 }
 
 function instantiatePassthroughNode(
   _: Module,
   inputBindings: JSON,
   outputBindings: JSON,
-  recipeCell: CellImpl<any>
+  recipeCell: CellImpl<any>,
+  addCancel: AddCancel
 ) {
   const inputs = mapBindingsToCell(inputBindings, recipeCell);
   const inputsCell = cell(inputs);
@@ -336,14 +375,15 @@ function instantiatePassthroughNode(
     sendValueToBinding(recipeCell, outputBindings, inputsProxy, log);
   };
 
-  schedule(action, { reads, writes } satisfies ReactivityLog);
+  addCancel(schedule(action, { reads, writes } satisfies ReactivityLog));
 }
 
 function instantiateIsolatedNode(
   module: Module,
   inputBindings: JSON,
   outputBindings: JSON,
-  recipeCell: CellImpl<any>
+  recipeCell: CellImpl<any>,
+  addCancel: AddCancel
 ) {
   const inputs = mapBindingsToCell(inputBindings, recipeCell);
   const reads = findAllAliasedCells(inputs, recipeCell);
@@ -383,14 +423,31 @@ function instantiateIsolatedNode(
     sendValueToBinding(recipeCell, outputBindings, result, log);
   };
 
-  schedule(action, { reads, writes } satisfies ReactivityLog);
+  addCancel(schedule(action, { reads, writes } satisfies ReactivityLog));
+}
+
+let runtime: Promise<CommonRuntime> | undefined;
+const COMMON_RUNTIME_URL = "http://localhost:8081";
+
+// This should be in common-runtime
+function isJavaScriptModuleDefinition(
+  module: any
+): module is JavaScriptModuleDefinition {
+  return (
+    typeof module === "object" &&
+    module !== null &&
+    typeof module.body === "string" &&
+    typeof module.inputs === "object" &&
+    typeof module.outputs === "object"
+  );
 }
 
 function instantiateRecipeNode(
   module: Module,
   inputBindings: JSON,
   outputBindings: JSON,
-  recipeCell: CellImpl<any>
+  recipeCell: CellImpl<any>,
+  addCancel: AddCancel
 ) {
   if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
   const inputs = mapBindingsToCell(inputBindings, recipeCell);
@@ -401,6 +458,7 @@ function instantiateRecipeNode(
     result.sink((value) =>
       sendValueToBinding(recipeCell, outputBindings, value)
     );
+  addCancel(cancels.get(recipeCell));
 }
 
 const moduleWrappers = {

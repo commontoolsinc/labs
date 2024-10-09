@@ -5,7 +5,7 @@ import {
 } from "@commontools/common-builder";
 import { type Action } from "./scheduler.js";
 import { type CellImpl } from "./cell.js";
-
+import { type AddCancel } from "./cancel.js";
 const moduleMap = new Map<string, Module>();
 
 export function addModuleByRef(ref: string, module: Module) {
@@ -25,7 +25,8 @@ export function getModuleByRef(ref: string): Module {
 export function raw<T, R>(
   implementation: (
     inputsCell: CellImpl<T>,
-    sendResult: (result: R) => void
+    sendResult: (result: R) => void,
+    addCancel: AddCancel
   ) => Action
 ): ModuleFactory<T, R> {
   return createNodeFactory({

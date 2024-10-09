@@ -1,10 +1,9 @@
 import { CellImpl, CellReference, ReactivityLog } from "./cell.js";
 import { compactifyPaths, pathAffected } from "./utils.js";
+import { type Cancel } from "./cancel.js";
 
 export type Action = (log: ReactivityLog) => any;
 export type EventHandler = (event: any) => any;
-
-type Cancel = () => void;
 
 const pending = new Set<Action>();
 const eventQueue: (() => void)[] = [];
@@ -20,12 +19,14 @@ let scheduled = false;
 
 const MAX_ITERATIONS_PER_RUN = 100;
 
-export function schedule(action: Action, log: ReactivityLog) {
+export function schedule(action: Action, log: ReactivityLog): Cancel {
   setDependencies(action, log);
   log.reads.forEach(({ cell }) => dirty.add(cell));
 
   queueExecution();
   pending.add(action);
+
+  return () => unschedule(action);
 }
 
 export function unschedule(fn: Action): void {
@@ -95,10 +96,12 @@ export function queueEvent(eventRef: CellReference, event: any) {
 export function addEventHandler(
   handler: EventHandler,
   ref: CellReference
-): () => void {
+): Cancel {
   eventHandlers.push([ref, handler]);
   return () => {
-    const index = eventHandlers.findIndex(([r, _]) => r === ref);
+    const index = eventHandlers.findIndex(
+      ([r, h]) => r === ref && h === handler
+    );
     if (index !== -1) eventHandlers.splice(index, 1);
   };
 }

@@ -1,4 +1,4 @@
-export { run, charmById } from "./runner.js";
+export { run, stop, charmById } from "./runner.js";
 export { addModuleByRef, raw } from "./module.js";
 export {
   run as addAction,
