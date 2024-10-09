@@ -105,71 +105,77 @@ const normalizeData = lift(({ result }) => {
   return Object.values(groupedData);
 });
 
-export const queryCollections = recipe<{}>("Fetch Collections", ({}) => {
-  const query = cell<any>({ where: [] });
+export const queryCollections = recipe<{}>(
+  "Fetch Collections",
+  ({ collection }: { collection: string }) => {
+    collection.setDefault("synopsys");
+    const query = cell<any>({ where: [] });
 
-  // const { result: collectionResults } = streamData({
-  //   url: `/api/data`,
-  //   options: {
-  //     method: "PUT",
-  //     body: listCollections,
-  //   },
-  // });
+    // const { result: collectionResults } = streamData({
+    //   url: `/api/data`,
+    //   options: {
+    //     method: "PUT",
+    //     body: listCollections,
+    //   },
+    // });
+    //
+    //
 
-  const { result } = streamData({
-    url: `/api/data`,
-    options: {
-      method: "PUT",
-      body: stringify({ obj: query }),
-    },
-  });
+    const { result } = streamData({
+      url: `/api/data`,
+      options: {
+        method: "PUT",
+        body: stringify({ obj: query }),
+      },
+    });
 
-  // const collections = ensureArray({ data: collectionResults?.data });
-  const data = ensureArray({ data: result });
-  const normalizedData = normalizeData({ result: result });
-  const exportedData = lift((data: any[]) => ({ items: data }))(data);
+    // const collections = ensureArray({ data: collectionResults?.data });
+    const data = ensureArray({ data: result });
+    const normalizedData = normalizeData({ result: result });
+    const exportedData = lift((data: any[]) => ({ items: data }))(data);
 
-  const collectionNameInput = cell<string>("reminders");
+    tap({ result, normalizedData });
 
-  return {
-    [NAME]: "Query Synopsys Collections",
-    [UI]: html`<div>
-      ${ifElse(
-        result,
-        html`<div>
-          <div class="collection-input">
-            <input
-              value=${collectionNameInput}
-              onkeyup=${onInput({ value: collectionNameInput })}
-              type="text"
-              placeholder="Enter collection name"
-            />
+    return {
+      [NAME]: "Query Synopsys Collections",
+      [UI]: html`<div>
+        ${ifElse(
+          result,
+          html`<div>
+            <div class="collection-input">
+              <input
+                value=${collection}
+                onkeyup=${onInput({ value: collection })}
+                type="text"
+                placeholder="Enter collection name"
+              />
 
-            <common-button
-              onclick=${generateQuery({
-                collectionName: collectionNameInput,
-                query,
-              })}
-            >
-              Go
+              <common-button
+                onclick=${generateQuery({
+                  collectionName: collection,
+                  query,
+                })}
+              >
+                Load
+              </common-button>
+            </div>
+
+            <p>Number of items: ${data.length}</p>
+            <pre>${stringify({ obj: normalizedData })}</pre>
+            <details>
+              <summary>Generated Query</summary>
+              <pre>${stringify({ obj: query })}</pre>
+            </details>
+            <common-button onclick=${onWorkbench({ data })}>
+              Open in Workbench
             </common-button>
-          </div>
-
-          <p>Number of items: ${data.length}</p>
-          <pre>${stringify({ obj: normalizedData })}</pre>
-          <details>
-            <summary>Generated Query</summary>
-            <pre>${stringify({ obj: query })}</pre>
-          </details>
-          <common-button onclick=${onWorkbench({ data })}>
-            Open in Workbench
-          </common-button>
-        </div>`,
-        html`<div>Loading...</div>`,
-      )}
-    </div>`,
-    result,
-    // collections,
-    data: exportedData,
-  };
-});
+          </div>`,
+          html`<div>Loading...</div>`,
+        )}
+      </div>`,
+      result,
+      // collections,
+      data: exportedData,
+    };
+  },
+);

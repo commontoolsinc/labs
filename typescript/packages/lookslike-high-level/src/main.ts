@@ -1,4 +1,5 @@
 export { components } from "@commontools/common-ui";
+export { fab } from "@commontools/common-os-ui";
 import { run, CellImpl } from "@commontools/common-runner";
 import { CommonWindowManager } from "./components/window-manager.js";
 export { components as myComponents } from "./components.js";
@@ -8,7 +9,7 @@ import { ID } from "@commontools/common-builder";
 
 document.addEventListener("DOMContentLoaded", () => {
   const windowManager = document.getElementById(
-    "window-manager"
+    "window-manager",
   )! as CommonWindowManager;
   openCharm.set(windowManager.openCharm.bind(windowManager));
   const homeCharm = run(home, { charms, recipes }) as CellImpl<Charm>;
