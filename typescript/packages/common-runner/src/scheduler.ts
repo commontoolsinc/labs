@@ -15,6 +15,8 @@ const cancels = new WeakMap<Action, Cancel[]>();
 const idlePromises: (() => void)[] = [];
 let loopCounter = new WeakMap<Action, number>();
 const errorHandlers = new Set<(error: Error) => void>();
+let running: Promise<void> | undefined = undefined;
+let scheduled = false;
 
 const MAX_ITERATIONS_PER_RUN = 100;
 
@@ -36,7 +38,15 @@ export function unschedule(fn: Action): void {
 export async function run(action: Action): Promise<any> {
   const log: ReactivityLog = { reads: [], writes: [] };
 
-  const result = await action(log);
+  if (running) await running;
+
+  running = new Promise(async (resolve) => {
+    const result = await action(log);
+    running = undefined;
+    resolve(result);
+  });
+
+  const result = await running;
 
   // Note: By adding the listeners after the call we avoid triggering a re-run
   // of the action if it changed a r/w cell. Note that this also means that
@@ -102,7 +112,9 @@ export function addEventHandler(
 }
 
 function queueExecution() {
-  if (pending.size === 0 && eventQueue.length === 0) queueMicrotask(execute);
+  if (scheduled) return;
+  queueMicrotask(execute);
+  scheduled = true;
 }
 
 function setDependencies(action: Action, log: ReactivityLog) {
@@ -118,6 +130,9 @@ function handleError(error: Error) {
 }
 
 async function execute() {
+  // In case a directly invoked `run` is still running, wait for it to finish.
+  if (running) await running;
+
   // Process next event from the event queue. Will mark more cells as dirty.
   eventQueue.shift()?.();
 
@@ -144,6 +159,8 @@ async function execute() {
     idlePromises.length = 0;
 
     loopCounter = new WeakMap();
+
+    scheduled = false;
   } else {
     queueMicrotask(execute);
   }
