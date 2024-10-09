@@ -3,6 +3,8 @@ import { streamText } from "npm:ai";
 import { ensureDir } from "https://deno.land/std/fs/mod.ts";
 import { crypto } from "https://deno.land/std/crypto/mod.ts";
 import { anthropic } from "npm:@ai-sdk/anthropic";
+import { config } from "https://deno.land/x/dotenv/mod.ts";
+await config({ export: true });
 
 const CACHE_DIR = "./cache";
 
