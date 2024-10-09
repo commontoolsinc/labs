@@ -115,7 +115,7 @@ describe("recipe with map node", () => {
   it("correctly serializes to a single map node", () => {
     expect(doubleArray.nodes.length).toBe(1);
     const module = doubleArray.nodes[0].module as Module;
-    expect(module.type).toBe("builtin");
+    expect(module.type).toBe("ref");
     expect(module.implementation).toBe("map");
   });
 
