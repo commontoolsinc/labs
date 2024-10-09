@@ -1,6 +1,8 @@
 import { Decoration, DecorationSet, EditorView } from "prosemirror-view";
 import { EditorState, Plugin, PluginKey } from "prosemirror-state";
 import { isBetweenInclusive } from "../../shared/number.js";
+import { Rect } from "../../shared/position.js";
+import { debug } from "../../shared/debug.js";
 
 export type Suggestion = {
   from: number;
@@ -9,7 +11,7 @@ export type Suggestion = {
   text: string;
 };
 
-export const isSuggestionActive = (suggestion: Suggestion) => suggestion.active;
+const freeze = Object.freeze;
 
 /// Create a frozen suggestion
 export const createSuggestion = (
@@ -17,17 +19,75 @@ export const createSuggestion = (
   to: number,
   active: boolean,
   text: string,
-): Suggestion => Object.freeze({ from, to, active, text });
+): Suggestion => freeze({ from, to, active, text });
+
+export const isSuggestionActive = (suggestion: Suggestion) => suggestion.active;
+
+/** Get the rect representing the suggestion range */
+export const getSuggestionRect = (
+  view: EditorView,
+  suggestion: Suggestion,
+): Rect => {
+  const fromRect = view.coordsAtPos(suggestion.from);
+  const toRect = view.coordsAtPos(suggestion.to);
+  return {
+    left: fromRect.left,
+    right: toRect.right,
+    top: toRect.top,
+    bottom: toRect.bottom,
+  };
+};
+
+export const getActiveSuggestion = (
+  suggestions: Array<Suggestion> | undefined | null,
+): Suggestion | null => suggestions?.find(isSuggestionActive) ?? null;
+
+export const createUpdateMsg = (suggestion: Suggestion | null) =>
+  freeze({
+    type: "update",
+    suggestion,
+  });
+
+export const createArrowDownMsg = () =>
+  freeze({
+    type: "arrowDown",
+  });
+
+export const createArrowUpMsg = () =>
+  freeze({
+    type: "arrowUp",
+  });
+
+export const createTabMsg = (suggestion: Suggestion) =>
+  freeze({
+    type: "tab",
+    suggestion,
+  });
+
+export const createEnterMsg = (suggestion: Suggestion) =>
+  freeze({
+    type: "enter",
+    suggestion,
+  });
+
+export type Msg =
+  | ReturnType<typeof createUpdateMsg>
+  | ReturnType<typeof createArrowDownMsg>
+  | ReturnType<typeof createArrowUpMsg>
+  | ReturnType<typeof createTabMsg>
+  | ReturnType<typeof createEnterMsg>;
 
 export const suggestionsPlugin = ({
   pattern,
   decoration,
-  onUpdate,
+  reducer,
 }: {
   pattern: RegExp;
   decoration: (suggestion: Suggestion) => Decoration;
-  onUpdate: (view: EditorView, suggestion: Suggestion | null) => void;
+  reducer: (view: EditorView, msg: Msg) => boolean;
 }) => {
+  const source = "suggestionsPlugin";
+
   return new Plugin({
     key: new PluginKey("suggestions"),
 
@@ -35,10 +95,10 @@ export const suggestionsPlugin = ({
       return {
         update: (view: EditorView, _prevState: EditorState) => {
           const state = view.state;
-          const suggestions: Array<Suggestion> =
-            this.key!.getState(state) ?? [];
-          const active = suggestions.find(isSuggestionActive) ?? null;
-          onUpdate(view, active);
+          const active = getActiveSuggestion(this.key?.getState(state));
+          const msg = createUpdateMsg(active);
+          if (debug()) console.debug(source, msg);
+          reducer(view, msg);
         },
       };
     },
@@ -78,6 +138,31 @@ export const suggestionsPlugin = ({
     },
 
     props: {
+      handleKeyDown(view, event) {
+        const active = getActiveSuggestion(this.getState(view.state));
+        if (active == null) return false;
+
+        if (event.key === "ArrowDown") {
+          const msg = createArrowDownMsg();
+          if (debug()) console.debug(source, msg);
+          return reducer(view, msg);
+        } else if (event.key === "ArrowUp") {
+          const msg = createArrowDownMsg();
+          if (debug()) console.debug(source, msg);
+          return reducer(view, msg);
+        } else if (event.key === "Tab") {
+          const msg = createTabMsg(active);
+          if (debug()) console.debug(source, msg);
+          return reducer(view, msg);
+        } else if (event.key === "Enter") {
+          const msg = createEnterMsg(active);
+          if (debug()) console.debug(source, msg);
+          return reducer(view, msg);
+        }
+
+        return false;
+      },
+
       decorations(state) {
         const suggestions = this.getState(state) ?? [];
         return DecorationSet.create(state.doc, suggestions.map(decoration));

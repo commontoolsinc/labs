@@ -7,7 +7,7 @@ import { keymap } from "prosemirror-keymap";
 import { baseKeymap } from "prosemirror-commands";
 import { customElement } from "lit/decorators.js";
 import { base } from "../../shared/styles.js";
-import { suggestionsPlugin } from "./suggestions-plugin.js";
+import { suggestionsPlugin, getSuggestionRect } from "./suggestions-plugin.js";
 import { classes, toggleHidden } from "../../shared/dom.js";
 import { positionMenu } from "../../shared/position.js";
 
@@ -62,14 +62,28 @@ const createEditor = (
       Decoration.inline(from, to, {
         class: classes({ hashtag: true, "hashtag--active": active }),
       }),
-    onUpdate: (view, suggestion) => {
-      if (suggestion) {
-        const rect = view.coordsAtPos(suggestion.from);
-        positionMenu(hashtagSuggestionsElement, rect);
-        toggleHidden(hashtagSuggestionsElement, false);
-      } else {
-        toggleHidden(hashtagSuggestionsElement, true);
+    reducer: (view, msg) => {
+      if (msg.type === "update") {
+        const suggestion = msg.suggestion;
+        if (suggestion) {
+          const rect = getSuggestionRect(view, suggestion);
+          positionMenu(hashtagSuggestionsElement, rect);
+          toggleHidden(hashtagSuggestionsElement, false);
+          return false;
+        } else {
+          toggleHidden(hashtagSuggestionsElement, true);
+          return false;
+        }
+      } else if (msg.type === "arrowDown") {
+        return true;
+      } else if (msg.type === "arrowUp") {
+        return true;
+      } else if (msg.type === "tab") {
+        return true;
+      } else if (msg.type === "enter") {
+        return true;
       }
+      return false;
     },
   });
 
@@ -79,23 +93,37 @@ const createEditor = (
       Decoration.inline(from, to, {
         class: classes({ mention: true, "mention--active": active }),
       }),
-    onUpdate: (view, suggestion) => {
-      if (suggestion) {
-        const rect = view.coordsAtPos(suggestion.from);
-        positionMenu(mentionSuggestionsElement, rect);
-        toggleHidden(mentionSuggestionsElement, false);
-      } else {
-        toggleHidden(mentionSuggestionsElement, true);
+    reducer: (view, msg) => {
+      if (msg.type === "update") {
+        const suggestion = msg.suggestion;
+        if (suggestion) {
+          const rect = getSuggestionRect(view, suggestion);
+          positionMenu(mentionSuggestionsElement, rect);
+          toggleHidden(mentionSuggestionsElement, false);
+          return false;
+        } else {
+          toggleHidden(mentionSuggestionsElement, true);
+          return false;
+        }
+      } else if (msg.type === "arrowDown") {
+        return false;
+      } else if (msg.type === "arrowUp") {
+        return false;
+      } else if (msg.type === "tab") {
+        return true;
+      } else if (msg.type === "enter") {
+        return true;
       }
+      return false;
     },
   });
 
   const plugins = [
+    mentionPlugin,
+    hashtagPlugin,
     history(),
     keymap(baseKeymap),
     editorClassPlugin(),
-    mentionPlugin,
-    hashtagPlugin,
   ];
 
   const state = EditorState.create({

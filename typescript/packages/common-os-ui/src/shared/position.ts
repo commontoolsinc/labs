@@ -1,4 +1,4 @@
-import { computePosition, flip } from "@floating-ui/dom";
+import { computePosition, shift } from "@floating-ui/dom";
 import { animationFrame } from "./dom.js";
 
 export type Rect = {
@@ -73,7 +73,7 @@ export const positionMenu = async (
     {
       strategy: "fixed",
       placement: "bottom-start",
-      middleware: [flip()],
+      middleware: [shift()],
     },
   );
 
