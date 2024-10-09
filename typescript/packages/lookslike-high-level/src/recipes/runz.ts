@@ -13,8 +13,8 @@ import { virtualTypeDefs } from '../virtualTypeDefs.js'; // Adjust the path as n
 // Error node_modules/@commontools/common-builder/types.d.ts (1,44): Cannot find module '@commontools/common-runtime' or its corresponding type declarations.
 // Error node_modules/@commontools/common-builder/utils.d.ts (12,46): Cannot find module '@commontools/common-runtime' or its corresponding type declarations.
 
-const runCode = lift<{ src?: string }, string>(({ src }) => {
-    if (!src) {
+const runCode = lift<{ src?: string, data: any }, string>(({ src, data }) => {
+    if (!src || !data) {
         return '';
     }
 
@@ -123,7 +123,7 @@ const runCode = lift<{ src?: string }, string>(({ src }) => {
             `;
 
         const moduleExports = eval(wrappedCode);
-        launch(moduleExports.counters, {})
+        launch(moduleExports.counters, data)
         logs.push('Module exports:', JSON.stringify(moduleExports, null, 2));
     } catch (e) {
         console.log('Runtime Error:', e.message);
@@ -136,12 +136,15 @@ const updateHash = handler<{ detail: { value: string } }, { hash: string }>(
     ({ detail }, state) => { (state.hash = detail?.value ?? "untitled") }
 );
 
+const jsonify = lift(({obj}) => {
+    return JSON.stringify(obj, null, 2);
+});
 
-export const runz = recipe<{ hash: string, output: string }>("run code", ({ hash, output }) => {
+export const runz = recipe<{ hash: string, output: string, data: any }>("run code", ({ hash, output, data }) => {
 
     const url = str`https://commoner.m4ke.workers.dev/${hash}`;
     const { result: src } = fetchData<string>({ url, mode: "text" });
-    output = runCode({ src });
+    output = runCode({ src, data });
 
     return {
         [NAME]: "run code",
@@ -152,6 +155,8 @@ export const runz = recipe<{ hash: string, output: string }>("run code", ({ hash
                 oncommon-input=${updateHash({ hash })}
             ></common-input>
             
+            <h2>data</h2>
+            <pre>${jsonify({obj: data})}</pre>
             <h2>output</h2>
             <pre>${output}</pre>
             <h2>src</h2>

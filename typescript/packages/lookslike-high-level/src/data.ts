@@ -87,7 +87,7 @@ addCharms([
   ]);
 
   setTimeout(() => {
-    launch(runz, { hash: "ef011d2367e0421df88ef23073fa882557989d7147c3e9f50fb1c42437932e6b" });
+    launch(runz, { hash: "ef011d2367e0421df88ef23073fa882557989d7147c3e9f50fb1c42437932e6b" , data: {items: [{title:"hello", count: 123}]}});
   }, 1000);
 
 export type RecipeManifest = {
