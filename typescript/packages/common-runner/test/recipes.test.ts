@@ -115,7 +115,6 @@ describe("Recipe Runner", () => {
       { counter: { value: number }; nested: { a: { b: { c: number } } } }
     >((event, { counter, nested }) => {
       counter.value += event.amount;
-      debugger;
       return incLogger({ counter, amount: event.amount, nested: nested.a.b });
     });
 
