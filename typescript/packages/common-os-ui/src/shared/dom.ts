@@ -1,3 +1,4 @@
+/** Create a class string using a record of classnames to toggle-states */
 export const classes = (classRecord: Record<string, boolean>) => {
   let toggledClasses: Array<string> = [];
   for (const [className, isActive] of Object.entries(classRecord)) {
@@ -6,12 +7,29 @@ export const classes = (classRecord: Record<string, boolean>) => {
   return toggledClasses.join(" ");
 };
 
+/** Get a promise for the next animationframe */
 export const animationFrame = () =>
   new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-export const toggleHidden = async (element: HTMLElement, isHidden: boolean) => {
+export const toggleInvisible = async (
+  element: HTMLElement,
+  isHidden: boolean,
+) => {
   await animationFrame();
   element.ariaHidden = isHidden ? "true" : "false";
-  element.style.opacity = isHidden ? "0" : "1";
-  element.style.pointerEvents = isHidden ? "none" : "all";
+  element.classList.toggle("invisible", isHidden);
+};
+
+/**
+ * Attach an event listener to an element.
+ * @returns a cleanup function to remove the listener.
+ */
+export const on = (
+  element: EventTarget,
+  event: string,
+  callback: (event: unknown) => void,
+  options: AddEventListenerOptions | undefined = undefined,
+) => {
+  element.addEventListener(event, callback, options);
+  return () => element.removeEventListener(event, callback, options);
 };

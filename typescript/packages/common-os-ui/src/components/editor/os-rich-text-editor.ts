@@ -12,7 +12,7 @@ import {
   getSuggestionRect,
   Suggestion,
 } from "./suggestions-plugin.js";
-import { classes, toggleHidden } from "../../shared/dom.js";
+import { classes, toggleInvisible } from "../../shared/dom.js";
 import { positionMenu } from "../../shared/position.js";
 
 const schema = new Schema({
@@ -60,6 +60,7 @@ const suggestionMenuPlugin = ({
     decoration,
     reducer: (view, msg) => {
       if (msg.type === "init") {
+        toggleInvisible(menu, true);
         return false;
       } else if (msg.type === "destroy") {
         return false;
@@ -68,10 +69,10 @@ const suggestionMenuPlugin = ({
         if (suggestion) {
           const rect = getSuggestionRect(view, suggestion);
           positionMenu(menu, rect);
-          toggleHidden(menu, false);
+          toggleInvisible(menu, false);
           return false;
         } else {
-          toggleHidden(menu, true);
+          toggleInvisible(menu, true);
           return false;
         }
       } else if (msg.type === "arrowDown") {
@@ -208,10 +209,10 @@ export class OsRichTextEditor extends ReactiveElement {
     const elements = html`
       <div id="wrapper" class="wrapper">
         <div id="editor" class="editor"></div>
-        <div id="mention-suggestions" class="suggestions">
+        <div id="mention-suggestions" class="suggestions invisible">
           Hello mention suggestions
         </div>
-        <div id="hashtag-suggestions" class="suggestions">
+        <div id="hashtag-suggestions" class="suggestions invisible">
           Hello hashtag suggestions
         </div>
       </div>

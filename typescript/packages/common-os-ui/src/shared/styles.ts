@@ -248,6 +248,11 @@ export const base = css`
     }
   }
 
+  .invisible {
+    opacity: 0;
+    pointer-events: none;
+  }
+
   /*
   Fade out element by toggling ".fade.fade-out".
   Hidden element will have zero opacity and will not be interactable, but will
