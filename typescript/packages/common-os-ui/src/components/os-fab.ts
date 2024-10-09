@@ -1,5 +1,5 @@
 import { LitElement, html, css } from "lit";
-import { customElement, property } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 import { base } from "../shared/styles.js";
 
 @customElement("os-fab")
@@ -86,13 +86,28 @@ export class OsFabgroup extends LitElement {
     `,
   ];
 
+  @state()
+  private expanded = false;
+
   override render() {
+    const onClick = () => {
+      this.expanded = !this.expanded;
+    };
+
+    const onSubmit = (ev: CustomEvent) => {
+      this.expanded = false;
+
+      this.dispatchEvent(new CustomEvent("submit", { detail: ev.detail }));
+    };
+
     return html`
       <div class="fabgroup material-symbols-rounded">
         <div class="bubbles">
           <slot></slot>
         </div>
-        <os-fab></os-fab>
+        ${this.expanded
+          ? html`<os-ai-box @submit=${onSubmit}></os-ai-box>`
+          : html`<os-fab @click=${onClick}></os-fab>`}
       </div>
     `;
   }

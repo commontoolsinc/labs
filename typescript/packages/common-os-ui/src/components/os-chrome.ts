@@ -135,10 +135,7 @@ export class OsChrome extends LitElement {
     return html`
       <div class="chrome" @sidebarclose="${onSidebarClose}">
         <div class="chrome-overlay">
-          <os-fabgroup class="pin-br">
-            <os-bubble icon="add" text="Lorem ipsum dolor sit amet"></os-bubble>
-            <os-bubble icon="note" text="Sumer et"></os-bubble>
-          </os-fabgroup>
+          <slot name="overlay"></slot>
         </div>
         <section class="chrome-main">
           <nav class="chrome-main-toolbar toolbar pad-h">

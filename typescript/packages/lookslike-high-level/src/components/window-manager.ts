@@ -4,7 +4,7 @@ import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
 import { Charm, ID, UI, NAME, addCharms, launch } from "../data.js";
-import { CellImpl, isCell, charmById } from "@commontools/common-runner";
+import { CellImpl, isCell, charmById, cell } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
 import { queryCollections } from "../recipes/queryCollections.js";
@@ -71,6 +71,12 @@ export class CommonWindowManager extends LitElement {
       .highlight {
         animation: highlight 1s ease-in-out;
       }
+
+      .pin-br {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+      }
     `,
   ];
 
@@ -79,31 +85,49 @@ export class CommonWindowManager extends LitElement {
 
   private charmRefs: Map<number, Ref<HTMLElement>> = new Map();
   private newCharmRefs: [CellImpl<Charm>, Ref<HTMLElement>][] = [];
+  private charmLookup: Map<number, CellImpl<Charm>> = new Map();
 
-  handleUniboxSubmit(event: CustomEvent, charm: CellImpl<Charm>) {
+  @state() private focusedCharm: number = -1;
+
+  handleUniboxSubmit(event: CustomEvent) {
+    const charm = this.charmLookup.get(this.focusedCharm);
+
     const value = event.detail.value;
-    const shiftHeld = event.detail.shiftHeld;
-    console.log("Unibox submitted:", value);
+    const shiftKey = event.detail.shiftKey;
+    console.log("Unibox submitted:", value, shiftKey);
 
-    if (shiftHeld) {
-      charm.asSimpleCell(["addToPrompt"]).send({ prompt: value } as any);
-    } else {
-      const charmValues = charm.getAsProxy();
-      let fieldsToInclude = Object.entries(charmValues).reduce(
-        (acc, [key, value]) => {
-          if (!key.startsWith("$") && !key.startsWith("_")) {
-            acc[key] = value;
-          }
-          return acc;
-        },
-        {} as any,
-      );
+    if (charm?.getAsProxy()) {
+      if (shiftKey) {
+        charm.asSimpleCell(["addToPrompt"]).send({ prompt: value } as any);
+      } else {
+        const charmValues = charm.getAsProxy();
+        let fieldsToInclude = Object.entries(charmValues).reduce(
+          (acc, [key, value]) => {
+            if (!key.startsWith("$") && !key.startsWith("_")) {
+              acc[key] = value;
+            }
+            return acc;
+          },
+          {} as any,
+        );
 
-      if (charmValues.data) {
-        fieldsToInclude = charmValues.data;
+        if (charmValues.data) {
+          fieldsToInclude = charmValues.data;
+        }
+        const charm2 = launch(iframe, {
+          data: fieldsToInclude,
+          title: value,
+          prompt: value,
+        });
+        this.focusedCharm = charm2.getAsProxy()[ID];
       }
-
-      launch(iframe, { data: fieldsToInclude, title: value, prompt: value });
+    } else {
+      const charm2 = launch(iframe, {
+        data: {},
+        title: value,
+        prompt: value,
+      });
+      this.focusedCharm = charm2.getAsProxy()[ID];
     }
   }
 
@@ -111,6 +135,7 @@ export class CommonWindowManager extends LitElement {
 
   @state() searchOpen: boolean = false;
   @state() location: string = "Home";
+  @state() sidebar: string = "";
 
   onLocationClicked(event: CustomEvent) {
     console.log("Location clicked in app.");
@@ -118,67 +143,93 @@ export class CommonWindowManager extends LitElement {
   }
 
   override render() {
+    const onCloseDialog = () => {
+      this.searchOpen = false;
+    };
+
+    const onSearchSubmit = (event: CustomEvent) => {
+      console.log("Search submitted:", event.detail.value);
+      this.location = event.detail.value;
+      this.searchOpen = false;
+      const charm = launch(queryCollections, {
+        collection: event.detail.value,
+      });
+      console.log("opened", charm, JSON.stringify(charm.getAsProxy()));
+      this.focusedCharm = charm.getAsProxy()[ID];
+    };
+
+    const onAiBoxSubmit = (event: CustomEvent) => {
+      console.log("AI Box submitted:", event.detail.value);
+      this.handleUniboxSubmit(event);
+    };
+
     return html`
-      ${repeat(
-        this.charms,
-        (charm) => charm.getAsProxy()[ID],
-        (charm) => {
-          const charmValues = charm.getAsProxy();
-          const charmId = charmValues[ID];
+      <os-chrome
+        locationtitle=${this.location}
+        @location=${this.onLocationClicked}
+      >
+        <os-dialog .open=${this.searchOpen} @closedialog=${onCloseDialog}>
+          <os-ai-box
+            @submit=${onSearchSubmit}
+            placeholder="Search or imagine..."
+          ></os-ai-box>
+          <os-charm-chip-group>
+            <os-charm-chip icon="mail" text="Mail"></os-charm-chip>
+            <os-charm-chip icon="mail" text="Work"></os-charm-chip>
+            <os-charm-chip icon="calendar_month" text="Calendar">
+            </os-charm-chip>
+            <os-charm-chip icon="map" text="Bike and rail directions">
+            </os-charm-chip>
+            <os-charm-chip icon="cloud" text="Weather"> </os-charm-chip>
+            <os-charm-chip icon="folder" text="CHEM131"> </os-charm-chip>
+            <os-charm-chip icon="folder" text="Class notes"> </os-charm-chip>
+            <os-charm-chip icon="folder" text="Creative writing">
+            </os-charm-chip>
+          </os-charm-chip-group>
+        </os-dialog>
 
-          // Create a new ref for this charm
-          let charmRef = this.charmRefs.get(charmId);
-          if (!charmRef) {
-            charmRef = createRef<HTMLElement>();
-            this.charmRefs.set(charmId, charmRef);
-            this.newCharmRefs.push([charm, charmRef]);
-          }
+        <os-fabgroup class="pin-br" slot="overlay" @submit=${onAiBoxSubmit}>
+          <os-bubble icon="add" text="Lorem ipsum dolor sit amet"></os-bubble>
+          <os-bubble icon="note" text="Sumer et"></os-bubble>
+        </os-fabgroup>
 
-          const onCloseDialog = () => {
-            this.searchOpen = false;
-          };
+        ${repeat(
+          this.charms,
+          (charm) => charm.getAsProxy()[ID],
+          (charm) => {
+            const charmValues = charm.getAsProxy();
+            const charmId = charmValues[ID];
 
-          const onSubmit = (event: CustomEvent) => {
-            console.log("Search submitted:", event.detail.value);
-            this.location = event.detail.value;
-            this.searchOpen = false;
-            launch(queryCollections, { collection: event.detail.value });
-          };
+            // Create a new ref for this charm
+            let charmRef = this.charmRefs.get(charmId);
+            if (!charmRef) {
+              charmRef = createRef<HTMLElement>();
+              this.charmRefs.set(charmId, charmRef);
+              this.newCharmRefs.push([charm, charmRef]);
+            }
 
-          return html`
-            <os-chrome locationtitle=${this.location} @location=${this.onLocationClicked}>
-                <os-dialog .open=${this.searchOpen} @closedialog=${onCloseDialog}>
-                  <os-ai-box @submit=${onSubmit} placeholder="Search or imagine..."></os-ai-box>
-                  <os-charm-chip-group>
-                    <os-charm-chip icon="mail" text="Mail"></os-charm-chip>
-                    <os-charm-chip icon="mail" text="Work"></os-charm-chip>
-                    <os-charm-chip icon="calendar_month" text="Calendar"> </os-charm-chip>
-                    <os-charm-chip icon="map" text="Bike and rail directions">
-                    </os-charm-chip>
-                    <os-charm-chip icon="cloud" text="Weather"> </os-charm-chip>
-                    <os-charm-chip icon="folder" text="CHEM131"> </os-charm-chip>
-                    <os-charm-chip icon="folder" text="Class notes"> </os-charm-chip>
-                    <os-charm-chip icon="folder" text="Creative writing"> </os-charm-chip>
-                  </os-charm-chip-group>
-                </os-dialog>
-                <slot name="main">
-                    <div class="window" id="window-${charmId}">
-                    <button class="close-button" @click="${this.onClose}">×</button>
-                    <common-screen-element>
-                        <common-system-layout>
-                        <div ${ref(charmRef)}></div>
-                        <div slot="secondary"><common-annotation .query=${
-                          charmValues[NAME] ?? ""
-                        } .target=${charmId} .data=${charmValues} ></common-annotation></div>
-                        <common-unibox slot="search" value=${this.input} @submit=${(e) => this.handleUniboxSubmit(e, charm)} placeholder="" label=">">
-                        </common-system-layout>
-                    </common-screen-element>
+            return html`
+              <div class="window" id="window-${charmId}">
+                <button class="close-button" @click="${this.onClose}">×</button>
+                <common-screen-element>
+                  <common-system-layout>
+                    <div ${ref(charmRef)}></div>
+                    <div slot="secondary">
+                      <common-annotation
+                        .query=${charmValues[NAME] ?? ""}
+                        .target=${charmId}
+                        .data=${charmValues}
+                      ></common-annotation>
                     </div>
-                </slot>
-            </os-chrome>
-          `;
-        },
-      )}
+                  </common-system-layout>
+                </common-screen-element>
+              </div>
+            `;
+          },
+        )}
+
+        <div slot="sidebar">${this.focusedCharm}</div>
+      </os-chrome>
     `;
   }
 
@@ -195,6 +246,7 @@ export class CommonWindowManager extends LitElement {
     }
 
     this.charms = [...this.charms, charm];
+    this.charmLookup.set(charmId, charm);
     this.updateComplete.then(() => {
       while (this.newCharmRefs.length > 0) {
         const [charm, charmRef] = this.newCharmRefs.pop()!;
@@ -230,6 +282,7 @@ export class CommonWindowManager extends LitElement {
         (charm) => charm.getAsProxy()[ID] !== charmId,
       );
       this.charmRefs.delete(charmId);
+      this.charmLookup.delete(charmId);
     }
   }
 

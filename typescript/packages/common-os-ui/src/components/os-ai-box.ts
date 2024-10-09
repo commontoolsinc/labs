@@ -64,7 +64,9 @@ export class OsAiBox extends LitElement {
         new CustomEvent("submit", {
           detail: {
             value: this.value,
+            shiftKey: event.shiftKey,
           },
+          bubbles: true,
         }),
       );
     }

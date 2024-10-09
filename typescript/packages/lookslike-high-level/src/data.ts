@@ -214,6 +214,7 @@ export function launch(recipe: Recipe, bindings: any) {
   }
   const charm = run(recipe, bindings);
   openCharm(charm.get()[ID]);
+  return charm;
 }
 
 (window as any).recipes = recipes;
