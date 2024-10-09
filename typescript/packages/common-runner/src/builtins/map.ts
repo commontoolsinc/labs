@@ -1,4 +1,4 @@
-import { type Recipe, type Node } from "@commontools/common-builder";
+import { type Recipe } from "@commontools/common-builder";
 import {
   cell,
   CellImpl,
@@ -9,14 +9,8 @@ import {
   type CellReference,
 } from "../cell.js";
 import { run } from "../runner.js";
-import {
-  sendValueToBinding,
-  findAllAliasedCells,
-  isEqualCellReferences,
-  followCellReferences,
-} from "../utils.js";
-import { schedule, Action } from "../scheduler.js";
-import { mapBindingsToCell } from "../utils.js";
+import { isEqualCellReferences, followCellReferences } from "../utils.js";
+import { type Action } from "../scheduler.js";
 
 /**
  * Implemention of built-in map module. Unlike regular modules, this will be
@@ -39,19 +33,20 @@ import { mapBindingsToCell } from "../utils.js";
  * @param op - A recipe to apply to each value.
  * @returns A cell containing the mapped values.
  */
-export function map(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
-  const inputBindings = mapBindingsToCell(inputs, recipeCell) as {
+export function map(
+  inputsCell: CellImpl<{
     list: any[];
     op: Recipe;
-  };
-  const outputBindings = mapBindingsToCell(outputs, recipeCell) as any[];
-
-  const inputsCell = cell(inputBindings);
+  }>,
+  sendResult: (result: any) => void
+): Action {
   const result = cell<any[]>([]);
   let sourceRefToResult: { ref: CellReference; resultCell: CellImpl<any> }[] =
     [];
 
-  const mapValuesToOp: Action = (log: ReactivityLog) => {
+  sendResult(result);
+
+  return (log: ReactivityLog) => {
     let { list, op } = inputsCell.getAsProxy([], log);
 
     // If the list is undefined it means the input isn't available yet.
@@ -126,11 +121,4 @@ export function map(recipeCell: CellImpl<any>, { inputs, outputs }: Node) {
     // isEqualCellReferences(seenValue, ref))
     //);
   };
-
-  sendValueToBinding(recipeCell, outputBindings, result);
-
-  schedule(mapValuesToOp, {
-    reads: findAllAliasedCells(inputBindings, recipeCell),
-    writes: findAllAliasedCells(outputBindings, recipeCell),
-  });
 }

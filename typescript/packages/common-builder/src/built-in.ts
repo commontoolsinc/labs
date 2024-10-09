@@ -16,7 +16,7 @@ export function llm(
   error: any;
 }> {
   llmFactory ||= createNodeFactory({
-    type: "builtin",
+    type: "ref",
     implementation: "llm",
   });
   return llmFactory(params);
@@ -31,7 +31,7 @@ export function fetchData<T>(
   }>
 ): Value<{ pending: boolean; result: T; error: any }> {
   fetchDataFactory ||= createNodeFactory({
-    type: "builtin",
+    type: "ref",
     implementation: "fetchData",
   });
   return fetchDataFactory(params);
@@ -45,7 +45,7 @@ export function streamData<T>(
   }>
 ): Value<{ pending: boolean; result: T; error: any }> {
   streamDataFactory ||= createNodeFactory({
-    type: "builtin",
+    type: "ref",
     implementation: "streamData",
   });
   return streamDataFactory(params);
@@ -64,7 +64,7 @@ export function ifElse<T, U, V>(
   ifFalse: Value<V>
 ): CellProxy<T extends true ? U : V> {
   ifElseFactory ||= createNodeFactory({
-    type: "builtin",
+    type: "ref",
     implementation: "ifElse",
   });
   return ifElseFactory([condition, ifTrue, ifFalse]);

@@ -61,7 +61,7 @@ export function cell<T>(value?: Value<T> | T): CellProxy<T> {
         // Create the factory if it doesn't exist. Doing it here to avoid
         // circular dependency.
         mapFactory ||= createNodeFactory({
-          type: "builtin",
+          type: "ref",
           implementation: "map",
         });
         return mapFactory({

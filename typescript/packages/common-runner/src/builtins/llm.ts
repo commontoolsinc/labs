@@ -1,11 +1,8 @@
-import { type Node } from "@commontools/common-builder";
 import { cell, CellImpl, ReactivityLog } from "../cell.js";
-import { sendValueToBinding, findAllAliasedCells } from "../utils.js";
-import { schedule, Action } from "../scheduler.js";
-import { mapBindingsToCell } from "../utils.js";
 import { makeClient, SimpleMessage, SimpleContent } from "../llm-client.js";
+import { type Action } from "../scheduler.js";
 
-// TODO(ja): investigate if generateText should be replaced by 
+// TODO(ja): investigate if generateText should be replaced by
 // fetchData with streaming support
 
 /**
@@ -22,44 +19,43 @@ import { makeClient, SimpleMessage, SimpleContent } from "../llm-client.js";
  * @param system - A cell to store the system message.
  * @param stop - A cell to store (optional) stop sequence.
  * @param max_tokens - A cell to store the maximum number of tokens to generate.
- * 
+ *
  * @returns { pending: boolean, result?: string, partial?: string } - As individual
  *   cells, representing `pending` state, final `result` and incrementally
  *   updating `partial` result.
  */
 export function llm(
-  recipeCell: CellImpl<any>,
-  { inputs, outputs }: Node
-) {
-  const inputBindings = mapBindingsToCell(inputs, recipeCell) as {
+  inputsCell: CellImpl<{
     messages?: SimpleContent[] | SimpleMessage[];
     prompt?: SimpleContent;
     stop?: string;
     system?: string;
     max_tokens?: number;
-  };
-  const inputsCell = cell(inputBindings);
-
+  }>,
+  sendResult: (result: any) => void
+): Action {
   const pending = cell(false);
   const result = cell<string | undefined>(undefined);
   const partial = cell<string | undefined>(undefined);
 
-  const outputCell = cell({ pending, result, partial });
-
-  const outputBindings = mapBindingsToCell(outputs, recipeCell) as any[];
-  sendValueToBinding(recipeCell, outputBindings, outputCell);
+  sendResult({ pending, result, partial });
 
   let currentRun = 0;
 
-  const startGeneration: Action = (log: ReactivityLog) => {
+  return (log: ReactivityLog) => {
     const thisRun = ++currentRun;
 
-    const { system, messages, prompt, stop, max_tokens } = inputsCell.getAsProxy([], log) ?? {};
+    const { system, messages, prompt, stop, max_tokens } =
+      inputsCell.getAsProxy([], log) ?? {};
 
     result.setAtPath([], undefined, log);
     partial.setAtPath([], undefined, log);
 
-    if (((prompt === undefined || prompt.length === 0) && (messages === undefined || messages.length === 0)) || system === undefined) {
+    if (
+      ((prompt === undefined || prompt.length === 0) &&
+        (messages === undefined || messages.length === 0)) ||
+      system === undefined
+    ) {
       pending.setAtPath([], false, log);
       return;
     }
@@ -68,15 +64,18 @@ export function llm(
     const updatePartial = (text: string) => {
       if (thisRun != currentRun) return;
       partial.setAtPath([], text, log);
-    }
+    };
 
-    let resultPromise = makeClient().sendRequest({
-      messages: messages || [prompt as SimpleContent],
-      system,
-      model: "claude-3-5-sonnet-20240620",
-      max_tokens: max_tokens || 4096,
-      stop
-    }, updatePartial)
+    let resultPromise = makeClient().sendRequest(
+      {
+        messages: messages || [prompt as SimpleContent],
+        system,
+        model: "claude-3-5-sonnet-20240620",
+        max_tokens: max_tokens || 4096,
+        stop,
+      },
+      updatePartial
+    );
 
     resultPromise
       .then((text) => {
@@ -86,7 +85,8 @@ export function llm(
         pending.setAtPath([], false, log);
         result.setAtPath([], text, log);
         partial.setAtPath([], text, log);
-      }).catch((error) => {
+      })
+      .catch((error) => {
         if (thisRun !== currentRun) return;
 
         console.error("Error generating data", error);
@@ -95,9 +95,4 @@ export function llm(
         partial.setAtPath([], undefined, log);
       });
   };
-
-  schedule(startGeneration, {
-    reads: findAllAliasedCells(inputBindings, recipeCell),
-    writes: findAllAliasedCells(outputBindings, recipeCell),
-  });
 }

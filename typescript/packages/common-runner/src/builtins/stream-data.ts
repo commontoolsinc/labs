@@ -1,8 +1,6 @@
-import { type Node } from "@commontools/common-builder";
 import { cell, CellImpl, ReactivityLog } from "../cell.js";
-import { sendValueToBinding, findAllAliasedCells } from "../utils.js";
-import { schedule, Action } from "../scheduler.js";
-import { mapBindingsToCell, normalizeToCells } from "../utils.js";
+import { normalizeToCells } from "../utils.js";
+import { type Action } from "../scheduler.js";
 
 /**
  * Stream data from a URL, used for querying Synopsys.
@@ -16,32 +14,24 @@ import { mapBindingsToCell, normalizeToCells } from "../utils.js";
  * @returns { pending: boolean, result: any, error: any } - As individual cells, representing `pending` state, streamed `result`, and any `error`.
  */
 export function streamData(
-  recipeCell: CellImpl<any>,
-  { inputs, outputs }: Node,
-) {
-  const inputBindings = mapBindingsToCell(inputs, recipeCell) as {
+  inputsCell: CellImpl<{
     url: string;
     options?: { body?: any; method?: string; headers?: Record<string, string> };
     result?: any;
-  };
-  const inputsCell = cell(inputBindings);
-
+  }>,
+  sendResult: (result: any) => void
+): Action {
   const pending = cell(false);
   const result = cell<any | undefined>(undefined);
   const error = cell<any | undefined>(undefined);
 
-  const resultCell = cell({
-    pending,
-    result,
-    error,
-  });
-
-  const outputBindings = mapBindingsToCell(outputs, recipeCell) as any[];
-  sendValueToBinding(recipeCell, outputBindings, resultCell);
+  // Since we'll only write into the cells above, we only have to call this once
+  // here, instead of in the action.
+  sendResult({ pending, result, error });
 
   let currentRun = 0;
 
-  const startStream: Action = async (log: ReactivityLog) => {
+  return async (log: ReactivityLog) => {
     const { url, options } = inputsCell.getAsProxy([], log);
 
     if (url === undefined) {
@@ -100,9 +90,4 @@ export function streamData(
       error.setAtPath([], err, log);
     }
   };
-
-  schedule(startStream, {
-    reads: findAllAliasedCells(inputBindings, recipeCell),
-    writes: findAllAliasedCells(outputBindings, recipeCell),
-  });
 }

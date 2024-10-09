@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { recipe, lift, handler, byRef } from "@commontools/common-builder";
-import { addModuleByRef, run } from "../src/runner.js";
+import { run } from "../src/runner.js";
+import { addModuleByRef } from "../src/module.js";
 import { cell } from "../src/cell.js";
 import { idle } from "../src/scheduler.js";
 

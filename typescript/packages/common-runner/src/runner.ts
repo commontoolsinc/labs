@@ -33,7 +33,8 @@ import {
   sendValueToBinding,
   staticDataToNestedCells,
 } from "./utils.js";
-import { builtins } from "./builtins/index.js";
+import { getModuleByRef } from "./module.js";
+import "./builtins/index.js";
 import init, {
   CommonRuntime,
   JavaScriptModuleDefinition,
@@ -119,12 +120,6 @@ export function run<T, R = any>(recipe: Recipe, bindings: T): CellImpl<R> {
   return recipeCell;
 }
 
-const moduleMap = new Map<string, Module>();
-
-export function addModuleByRef(ref: string, module: Module) {
-  moduleMap.set(ref, module);
-}
-
 function instantiateNode(
   module: Module | Alias,
   inputBindings: JSON,
@@ -134,12 +129,8 @@ function instantiateNode(
   if (isModule(module)) {
     switch (module.type) {
       case "ref":
-        if (typeof module.implementation !== "string")
-          throw new Error(`Unknown module ref: ${module.implementation}`);
-        if (!moduleMap.has(module.implementation))
-          throw new Error(`Unknown module ref: ${module.implementation}`);
         instantiateNode(
-          moduleMap.get(module.implementation)!,
+          getModuleByRef(module.implementation as string),
           inputBindings,
           outputBindings,
           recipeCell
@@ -153,13 +144,8 @@ function instantiateNode(
           recipeCell
         );
         break;
-      case "builtin":
-        instantiateBuiltinNode(
-          module,
-          inputBindings,
-          outputBindings,
-          recipeCell
-        );
+      case "raw":
+        instantiateRawNode(module, inputBindings, outputBindings, recipeCell);
         break;
       case "passthrough":
         instantiatePassthroughNode(
@@ -303,23 +289,32 @@ function instantiateJavaScriptNode(
   }
 }
 
-function instantiateBuiltinNode(
+function instantiateRawNode(
   module: Module,
   inputBindings: JSON,
   outputBindings: JSON,
   recipeCell: CellImpl<any>
 ) {
-  if (typeof module.implementation !== "string")
-    throw new Error(`Builtin is not a string`);
-  if (!(module.implementation in builtins))
-    throw new Error(`Unknown builtin: ${module.implementation}`);
+  if (typeof module.implementation !== "function")
+    throw new Error(
+      `Raw module is not a function, got: ${module.implementation}`
+    );
 
   // Built-ins can define their own scheduling logic, so they'll
   // implement parts of the above themselves.
-  builtins[module.implementation](recipeCell, {
-    module,
-    inputs: inputBindings,
-    outputs: outputBindings,
+
+  const mappedInputBindings = mapBindingsToCell(inputBindings, recipeCell);
+  const mappedOutputBindings = mapBindingsToCell(outputBindings, recipeCell);
+
+  const action = module.implementation(
+    cell(mappedInputBindings),
+    (result: any) =>
+      sendValueToBinding(recipeCell, mappedOutputBindings, result)
+  );
+
+  schedule(action, {
+    reads: findAllAliasedCells(mappedInputBindings, recipeCell),
+    writes: findAllAliasedCells(mappedOutputBindings, recipeCell),
   });
 }
 
