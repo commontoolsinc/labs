@@ -7,7 +7,11 @@ import { keymap } from "prosemirror-keymap";
 import { baseKeymap } from "prosemirror-commands";
 import { customElement } from "lit/decorators.js";
 import { base } from "../../shared/styles.js";
-import { suggestionsPlugin, getSuggestionRect } from "./suggestions-plugin.js";
+import {
+  suggestionsPlugin,
+  getSuggestionRect,
+  Suggestion,
+} from "./suggestions-plugin.js";
 import { classes, toggleHidden } from "../../shared/dom.js";
 import { positionMenu } from "../../shared/position.js";
 
@@ -38,6 +42,49 @@ const schema = new Schema({
   },
 });
 
+/**
+ * Specialized version of the suggestion plugin that has more opinions about
+ *
+ */
+const suggestionMenuPlugin = ({
+  menu,
+  pattern,
+  decoration,
+}: {
+  menu: HTMLElement;
+  pattern: RegExp;
+  decoration: (suggestion: Suggestion) => Decoration;
+}) =>
+  suggestionsPlugin({
+    pattern,
+    decoration,
+    reducer: (view, msg) => {
+      if (msg.type === "init") {
+        return false;
+      } else if (msg.type === "update") {
+        const suggestion = msg.suggestion;
+        if (suggestion) {
+          const rect = getSuggestionRect(view, suggestion);
+          positionMenu(menu, rect);
+          toggleHidden(menu, false);
+          return false;
+        } else {
+          toggleHidden(menu, true);
+          return false;
+        }
+      } else if (msg.type === "arrowDown") {
+        return true;
+      } else if (msg.type === "arrowUp") {
+        return true;
+      } else if (msg.type === "tab") {
+        return true;
+      } else if (msg.type === "enter") {
+        return true;
+      }
+      return false;
+    },
+  });
+
 const editorClassPlugin = () =>
   new Plugin({
     view(editorView) {
@@ -56,66 +103,22 @@ const createEditor = (
   mentionSuggestionsElement: HTMLElement,
   hashtagSuggestionsElement: HTMLElement,
 ) => {
-  const hashtagPlugin = suggestionsPlugin({
+  const hashtagPlugin = suggestionMenuPlugin({
+    menu: hashtagSuggestionsElement,
     pattern: /#\w+/g,
     decoration: ({ from, to, active }) =>
       Decoration.inline(from, to, {
         class: classes({ hashtag: true, "hashtag--active": active }),
       }),
-    reducer: (view, msg) => {
-      if (msg.type === "update") {
-        const suggestion = msg.suggestion;
-        if (suggestion) {
-          const rect = getSuggestionRect(view, suggestion);
-          positionMenu(hashtagSuggestionsElement, rect);
-          toggleHidden(hashtagSuggestionsElement, false);
-          return false;
-        } else {
-          toggleHidden(hashtagSuggestionsElement, true);
-          return false;
-        }
-      } else if (msg.type === "arrowDown") {
-        return true;
-      } else if (msg.type === "arrowUp") {
-        return true;
-      } else if (msg.type === "tab") {
-        return true;
-      } else if (msg.type === "enter") {
-        return true;
-      }
-      return false;
-    },
   });
 
-  const mentionPlugin = suggestionsPlugin({
+  const mentionPlugin = suggestionMenuPlugin({
     pattern: /@\w+/g,
+    menu: mentionSuggestionsElement,
     decoration: ({ from, to, active }) =>
       Decoration.inline(from, to, {
         class: classes({ mention: true, "mention--active": active }),
       }),
-    reducer: (view, msg) => {
-      if (msg.type === "update") {
-        const suggestion = msg.suggestion;
-        if (suggestion) {
-          const rect = getSuggestionRect(view, suggestion);
-          positionMenu(mentionSuggestionsElement, rect);
-          toggleHidden(mentionSuggestionsElement, false);
-          return false;
-        } else {
-          toggleHidden(mentionSuggestionsElement, true);
-          return false;
-        }
-      } else if (msg.type === "arrowDown") {
-        return false;
-      } else if (msg.type === "arrowUp") {
-        return false;
-      } else if (msg.type === "tab") {
-        return true;
-      } else if (msg.type === "enter") {
-        return true;
-      }
-      return false;
-    },
   });
 
   const plugins = [
@@ -197,7 +200,9 @@ export class OsRichTextEditor extends LitElement {
     return this.#editor;
   }
 
-  override firstUpdated() {
+  override connectedCallback() {
+    super.connectedCallback();
+
     const elements = html`
       <div id="wrapper" class="wrapper">
         <div id="editor" class="editor"></div>
@@ -210,6 +215,7 @@ export class OsRichTextEditor extends LitElement {
       </div>
     `;
     render(elements, this.renderRoot);
+
     const editorElement = this.renderRoot.querySelector(
       "#editor",
     ) as HTMLElement;
@@ -219,10 +225,16 @@ export class OsRichTextEditor extends LitElement {
     const hashtagSuggestionsElement = this.renderRoot.querySelector(
       "#hashtag-suggestions",
     ) as HTMLElement;
+
     this.#editor = createEditor(
       editorElement,
       mentionSuggestionsElement,
       hashtagSuggestionsElement,
     );
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.#editor?.destroy();
   }
 }
