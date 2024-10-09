@@ -87,6 +87,37 @@ describe("scheduler", () => {
     expect(c.get()).toBe(4);
   });
 
+  it("scheduler should return a cancel function", async () => {
+    let runCount = 0;
+    const a = cell(1);
+    const b = cell(2);
+    const c = cell(0);
+    const adder: Action = (log) => {
+      runCount++;
+      c.asSimpleCell([], log).send(
+        a.getAsProxy([], log) + b.getAsProxy([], log)
+      );
+    };
+    const cancel = schedule(adder, {
+      reads: [
+        { cell: a, path: [] },
+        { cell: b, path: [] },
+      ],
+      writes: [{ cell: c, path: [] }],
+    });
+    expect(runCount).toBe(0);
+    expect(c.get()).toBe(0);
+    a.send(2);
+    await idle();
+    expect(runCount).toBe(1);
+    expect(c.get()).toBe(4);
+    cancel();
+    a.send(3);
+    await idle();
+    expect(runCount).toBe(1);
+    expect(c.get()).toBe(4);
+  });
+
   it("should run actions in topological order", async () => {
     let runs: string[] = [];
     const a = cell(1);
