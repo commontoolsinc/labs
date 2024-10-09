@@ -42,6 +42,11 @@ export const getActiveSuggestion = (
   suggestions: Array<Suggestion> | undefined | null,
 ): Suggestion | null => suggestions?.find(isSuggestionActive) ?? null;
 
+export const createInitMsg = () =>
+  freeze({
+    type: "init",
+  });
+
 export const createUpdateMsg = (suggestion: Suggestion | null) =>
   freeze({
     type: "update",
@@ -71,6 +76,7 @@ export const createEnterMsg = (suggestion: Suggestion) =>
   });
 
 export type Msg =
+  | ReturnType<typeof createInitMsg>
   | ReturnType<typeof createUpdateMsg>
   | ReturnType<typeof createArrowDownMsg>
   | ReturnType<typeof createArrowUpMsg>
@@ -91,7 +97,11 @@ export const suggestionsPlugin = ({
   return new Plugin({
     key: new PluginKey("suggestions"),
 
-    view(_view: EditorView) {
+    view(view: EditorView) {
+      const msg = createInitMsg();
+      if (debug()) console.debug(source, msg);
+      reducer(view, msg);
+
       return {
         update: (view: EditorView, _prevState: EditorState) => {
           const state = view.state;
