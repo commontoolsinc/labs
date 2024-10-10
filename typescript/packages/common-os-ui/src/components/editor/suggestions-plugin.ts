@@ -30,73 +30,46 @@ export const getSuggestionRect = (
 ): Rect => {
   const fromRect = view.coordsAtPos(suggestion.from);
   const toRect = view.coordsAtPos(suggestion.to);
-  return {
+  return freeze({
     left: fromRect.left,
     right: toRect.right,
     top: toRect.top,
     bottom: toRect.bottom,
-  };
+  });
 };
 
 export const getActiveSuggestion = (
   suggestions: Array<Suggestion> | undefined | null,
 ): Suggestion | null => suggestions?.find(isSuggestionActive) ?? null;
 
-export const createInitMsg = () =>
+export const createUpdateMsg = (active: Suggestion, coords: Rect) =>
   freeze({
-    type: "init",
+    active,
+    coords,
   });
 
-export const createUpdateMsg = (suggestion: Suggestion | null) =>
-  freeze({
-    type: "update",
-    suggestion,
-  });
+export type UpdateMsg = ReturnType<typeof createUpdateMsg>;
 
-export const createDestroyMsg = () =>
-  freeze({
-    type: "destroy",
-  });
-
-export const createArrowDownMsg = () =>
-  freeze({
-    type: "arrowDown",
-  });
-
-export const createArrowUpMsg = () =>
-  freeze({
-    type: "arrowUp",
-  });
-
-export const createTabMsg = (suggestion: Suggestion) =>
-  freeze({
-    type: "tab",
-    suggestion,
-  });
-
-export const createEnterMsg = (suggestion: Suggestion) =>
-  freeze({
-    type: "enter",
-    suggestion,
-  });
-
-export type Msg =
-  | ReturnType<typeof createInitMsg>
-  | ReturnType<typeof createUpdateMsg>
-  | ReturnType<typeof createDestroyMsg>
-  | ReturnType<typeof createArrowDownMsg>
-  | ReturnType<typeof createArrowUpMsg>
-  | ReturnType<typeof createTabMsg>
-  | ReturnType<typeof createEnterMsg>;
+const noOp = () => {};
 
 export const suggestionsPlugin = ({
   pattern,
   decoration,
-  reducer,
+  onUpdate = noOp,
+  onDestroy = noOp,
+  onArrowDown = noOp,
+  onArrowUp = noOp,
+  onTab = noOp,
+  onEnter = noOp,
 }: {
   pattern: RegExp;
   decoration: (suggestion: Suggestion) => Decoration;
-  reducer: (view: EditorView, msg: Msg) => boolean;
+  onUpdate?: (view: EditorView, update: UpdateMsg | null) => void;
+  onDestroy?: (view: EditorView) => void;
+  onArrowDown?: (view: EditorView) => void;
+  onArrowUp?: (view: EditorView) => void;
+  onTab?: (view: EditorView) => void;
+  onEnter?: (view: EditorView) => void;
 }) => {
   const source = "suggestionsPlugin";
 
@@ -104,22 +77,23 @@ export const suggestionsPlugin = ({
     key: new PluginKey("suggestions"),
 
     view(view: EditorView) {
-      const msg = createInitMsg();
-      if (debug()) console.debug(source, msg);
-      reducer(view, msg);
-
       return {
         update: (view: EditorView, _prevState: EditorState) => {
           const state = view.state;
           const active = getActiveSuggestion(this.key?.getState(state));
-          const msg = createUpdateMsg(active);
-          if (debug()) console.debug(source, msg);
-          reducer(view, msg);
+          if (active) {
+            const coords = getSuggestionRect(view, active);
+            const msg = createUpdateMsg(active, coords);
+            if (debug()) console.debug(source, "onUpdate", msg);
+            onUpdate(view, msg);
+          } else {
+            if (debug()) console.debug(source, "onUpdate", null);
+            onUpdate(view, null);
+          }
         },
         destroy: () => {
-          const msg = createDestroyMsg();
-          if (debug()) console.debug(source, msg);
-          reducer(view, msg);
+          if (debug()) console.debug(source, "onDestroy");
+          onDestroy(view);
         },
       };
     },
@@ -164,21 +138,17 @@ export const suggestionsPlugin = ({
         if (active == null) return false;
 
         if (event.key === "ArrowDown") {
-          const msg = createArrowDownMsg();
-          if (debug()) console.debug(source, msg);
-          return reducer(view, msg);
+          if (debug()) console.debug(source, "onArrowDown");
+          return onArrowDown(view);
         } else if (event.key === "ArrowUp") {
-          const msg = createArrowDownMsg();
-          if (debug()) console.debug(source, msg);
-          return reducer(view, msg);
+          if (debug()) console.debug(source, "onArrowUp");
+          return onArrowUp(view);
         } else if (event.key === "Tab") {
-          const msg = createTabMsg(active);
-          if (debug()) console.debug(source, msg);
-          return reducer(view, msg);
+          if (debug()) console.debug(source, "onTab");
+          return onTab(view);
         } else if (event.key === "Enter") {
-          const msg = createEnterMsg(active);
-          if (debug()) console.debug(source, msg);
-          return reducer(view, msg);
+          if (debug()) console.debug(source, "onEnter");
+          return onEnter(view);
         }
 
         return false;

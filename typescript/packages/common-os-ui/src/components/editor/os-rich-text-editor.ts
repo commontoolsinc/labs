@@ -1,4 +1,6 @@
-import { ReactiveElement, css, html, render } from "lit";
+import { ReactiveElement, css, html, render, TemplateResult } from "lit";
+import { styleMap } from "lit/directives/style-map.js";
+import { classMap } from "lit/directives/class-map.js";
 import { EditorState, Plugin } from "prosemirror-state";
 import { EditorView, Decoration } from "prosemirror-view";
 import { Schema } from "prosemirror-model";
@@ -7,86 +9,42 @@ import { keymap } from "prosemirror-keymap";
 import { baseKeymap } from "prosemirror-commands";
 import { customElement } from "lit/decorators.js";
 import { base } from "../../shared/styles.js";
-import {
-  suggestionsPlugin,
-  getSuggestionRect,
-  Suggestion,
-} from "./suggestions-plugin.js";
+import { suggestionsPlugin, Suggestion } from "./suggestions-plugin.js";
+import * as suggestions from "./suggestions.js";
 import { classes, toggleInvisible } from "../../shared/dom.js";
 import { positionMenu } from "../../shared/position.js";
+import { createStore, cursor, forward, Fx, Store } from "../../shared/store.js";
+import { createCleanupGroup } from "../../shared/cleanup.js";
+import { Rect, createRect } from "../../shared/position.js";
 
-const schema = new Schema({
-  nodes: {
-    doc: { content: "block+" },
-    paragraph: {
-      group: "block",
-      content: "inline*",
-      parseDOM: [{ tag: "p" }],
-      toDOM: () => ["p", 0],
+const schema = () => {
+  return new Schema({
+    nodes: {
+      doc: { content: "block+" },
+      paragraph: {
+        group: "block",
+        content: "inline*",
+        parseDOM: [{ tag: "p" }],
+        toDOM: () => ["p", 0],
+      },
+      text: { group: "inline" },
     },
-    text: { group: "inline" },
-  },
-  marks: {
-    hashtag: {
-      parseDOM: [{ tag: "span.hashtag" }],
-      toDOM: () => ["span", { class: "hashtag" }, 0],
-    },
-    bold: {
-      parseDOM: [{ tag: "strong" }],
-      toDOM: () => ["strong", 0],
-    },
-    italic: {
-      parseDOM: [{ tag: "em" }],
-      toDOM: () => ["em", 0],
-    },
-  },
-});
-
-/**
- * Specialized version of the suggestion plugin that has more opinions about
- *
- */
-const suggestionMenuPlugin = ({
-  menu,
-  pattern,
-  decoration,
-}: {
-  menu: HTMLElement;
-  pattern: RegExp;
-  decoration: (suggestion: Suggestion) => Decoration;
-}) =>
-  suggestionsPlugin({
-    pattern,
-    decoration,
-    reducer: (view, msg) => {
-      if (msg.type === "init") {
-        toggleInvisible(menu, true);
-        return false;
-      } else if (msg.type === "destroy") {
-        return false;
-      } else if (msg.type === "update") {
-        const suggestion = msg.suggestion;
-        if (suggestion) {
-          const rect = getSuggestionRect(view, suggestion);
-          positionMenu(menu, rect);
-          toggleInvisible(menu, false);
-          return false;
-        } else {
-          toggleInvisible(menu, true);
-          return false;
-        }
-      } else if (msg.type === "arrowDown") {
-        return true;
-      } else if (msg.type === "arrowUp") {
-        return true;
-      } else if (msg.type === "tab") {
-        return true;
-      } else if (msg.type === "enter") {
-        return true;
-      }
-      return false;
+    marks: {
+      hashtag: {
+        parseDOM: [{ tag: "span.hashtag" }],
+        toDOM: () => ["span", { class: "hashtag" }, 0],
+      },
+      bold: {
+        parseDOM: [{ tag: "strong" }],
+        toDOM: () => ["strong", 0],
+      },
+      italic: {
+        parseDOM: [{ tag: "em" }],
+        toDOM: () => ["em", 0],
+      },
     },
   });
+};
 
 const editorClassPlugin = () =>
   new Plugin({
@@ -101,51 +59,78 @@ const editorClassPlugin = () =>
     },
   });
 
-const createEditor = (
-  editorElement: HTMLElement,
-  mentionSuggestionsElement: HTMLElement,
-  hashtagSuggestionsElement: HTMLElement,
-) => {
-  const hashtagPlugin = suggestionMenuPlugin({
-    menu: hashtagSuggestionsElement,
-    pattern: /#\w+/g,
-    decoration: ({ from, to, active }) =>
-      Decoration.inline(from, to, {
-        class: classes({ hashtag: true, "hashtag--active": active }),
-      }),
+const freeze = Object.freeze;
+
+export const createMentionMsg = (value: suggestions.Msg) =>
+  freeze({
+    type: "mention",
+    value,
   });
 
-  const mentionPlugin = suggestionMenuPlugin({
-    pattern: /@\w+/g,
-    menu: mentionSuggestionsElement,
-    decoration: ({ from, to, active }) =>
-      Decoration.inline(from, to, {
-        class: classes({ mention: true, "mention--active": active }),
-      }),
+export const createHashtagMsg = (value: suggestions.Msg) =>
+  freeze({
+    type: "hashtag",
+    value,
   });
 
-  const plugins = [
-    mentionPlugin,
-    hashtagPlugin,
-    history(),
-    keymap(baseKeymap),
-    editorClassPlugin(),
-  ];
+export type Msg =
+  | ReturnType<typeof createHashtagMsg>
+  | ReturnType<typeof createMentionMsg>;
 
-  const state = EditorState.create({
-    schema,
-    plugins,
-  });
+export type State = {
+  mention: suggestions.State;
+  hashtag: suggestions.State;
+};
 
-  return new EditorView(editorElement, {
-    state,
+export const init = (): State => ({
+  mention: suggestions.init(),
+  hashtag: suggestions.init(),
+});
+
+const updateMention = cursor({
+  update: suggestions.update,
+  get: (big: State) => big.mention,
+  put: (big: State, small: suggestions.State) =>
+    freeze({
+      ...big,
+      mention: small,
+    }),
+});
+
+const updateHashtag = cursor({
+  update: suggestions.update,
+  get: (big: State) => big.mention,
+  put: (big: State, small: suggestions.State) =>
+    freeze({
+      ...big,
+      hashtag: small,
+    }),
+});
+
+export const update = (state: State, msg: Msg): State => {
+  switch (msg.type) {
+    case "mention":
+      return updateMention(state, msg.value);
+    case "hashtag":
+      return updateHashtag(state, msg.value);
+    default:
+      console.warn("update", "uknown msg type", msg);
+      return state;
+  }
+};
+
+export const fx = (_msg: Msg): Array<Fx<Msg>> => {
+  return [];
+};
+
+const createMentionDecoration = ({ from, to, active }: Suggestion) => {
+  return Decoration.inline(from, to, {
+    class: classes({ mention: true, "mention--active": active }),
   });
 };
 
 @customElement("os-rich-text-editor")
 export class OsRichTextEditor extends ReactiveElement {
-  #editor: EditorView | null = null;
-
   static override styles = [
     base,
     css`
@@ -199,22 +184,64 @@ export class OsRichTextEditor extends ReactiveElement {
     `,
   ];
 
-  get editor() {
-    return this.#editor;
+  #cleanup = createCleanupGroup();
+  #state: Store<State, Msg>;
+  #editor: EditorView | null = null;
+
+  constructor() {
+    super();
+    this.#state = createStore({
+      state: init(),
+      update,
+      fx,
+    });
   }
 
-  override connectedCallback() {
-    super.connectedCallback();
+  get state() {
+    return this.#state.get();
+  }
 
+  send(msg: Msg) {
+    this.#state.send(msg);
+  }
+
+  set state(_state: State) {
+    // TODO
+    // this.#state.send();
+  }
+
+  render(): TemplateResult {
+    const isMentionActive = this.state.mention.active != null;
+
+    const mentionClasses = classMap({
+      suggestions: true,
+      invisible: !isMentionActive,
+    });
+
+    const mentionStyles = styleMap({
+      left: "0px",
+      top: "0px",
+    });
+
+    const hashtagClasses = classMap({
+      suggestions: true,
+      invisible: true,
+    });
+
+    return html`
+      <div id="mentions" class="${mentionClasses}" style="${mentionStyles}">
+        Hello mentions
+      </div>
+      <div id="hashtags" class="${hashtagClasses}">Hello hashtags</div>
+    `;
+  }
+
+  #createEditor() {
+    // Set up editor DOM
     const elements = html`
       <div id="wrapper" class="wrapper">
         <div id="editor" class="editor"></div>
-        <div id="mention-suggestions" class="suggestions invisible">
-          Hello mention suggestions
-        </div>
-        <div id="hashtag-suggestions" class="suggestions invisible">
-          Hello hashtag suggestions
-        </div>
+        <div id="extras"></div>
       </div>
     `;
     render(elements, this.renderRoot);
@@ -222,18 +249,52 @@ export class OsRichTextEditor extends ReactiveElement {
     const editorElement = this.renderRoot.querySelector(
       "#editor",
     ) as HTMLElement;
-    const mentionSuggestionsElement = this.renderRoot.querySelector(
-      "#mention-suggestions",
-    ) as HTMLElement;
-    const hashtagSuggestionsElement = this.renderRoot.querySelector(
-      "#hashtag-suggestions",
+
+    const extrasElement = this.renderRoot.querySelector(
+      "#extras",
     ) as HTMLElement;
 
-    this.#editor = createEditor(
-      editorElement,
-      mentionSuggestionsElement,
-      hashtagSuggestionsElement,
-    );
+    const sendMentions = forward(this.#state.send, createMentionMsg);
+
+    // NOTE: make sure suggestion plugins come before keymap plugin so they
+    // get a chance to intercept enter and tab.
+    const plugins = [
+      suggestionsPlugin({
+        pattern: /@\w+/g,
+        decoration: createMentionDecoration,
+        onUpdate: (_view, update) =>
+          sendMentions(suggestions.createUpdateMsg(update)),
+        onDestroy: () => sendMentions(suggestions.createDestroyMsg()),
+        onArrowUp: () => sendMentions(suggestions.createArrowUpMsg()),
+        onArrowDown: () => sendMentions(suggestions.createArrowDownMsg()),
+        onEnter: () => sendMentions(suggestions.createEnterMsg()),
+        onTab: () => sendMentions(suggestions.createTabMsg()),
+      }),
+      history(),
+      keymap(baseKeymap),
+      editorClassPlugin(),
+    ];
+
+    const state = EditorState.create({
+      schema: schema(),
+      plugins,
+    });
+
+    const editor = new EditorView(editorElement, {
+      state,
+    });
+    this.#editor = editor;
+
+    const cleanupRender = this.#state.sink(() => {
+      const template = this.render();
+      render(template, extrasElement);
+    });
+    this.#cleanup.add(cleanupRender);
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this.#createEditor();
   }
 
   override disconnectedCallback(): void {

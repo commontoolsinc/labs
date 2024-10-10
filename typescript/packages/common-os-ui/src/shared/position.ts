@@ -8,6 +8,19 @@ export type Rect = {
   left: number;
 };
 
+export const createRect = (
+  top: number,
+  right: number,
+  bottom: number,
+  left: number,
+): Rect =>
+  Object.freeze({
+    top,
+    right,
+    bottom,
+    left,
+  });
+
 /**
  * A rect that can be easily constructed with
  * a ProseMirror rect (https://prosemirror.net/docs/ref/#view.EditorView.coordsAtPos)
