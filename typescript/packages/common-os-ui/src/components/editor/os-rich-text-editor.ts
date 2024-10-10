@@ -1,6 +1,4 @@
 import { ReactiveElement, css, html, render, TemplateResult } from "lit";
-import { styleMap } from "lit/directives/style-map.js";
-import { classMap } from "lit/directives/class-map.js";
 import { EditorState, Plugin } from "prosemirror-state";
 import { EditorView, Decoration } from "prosemirror-view";
 import { Schema } from "prosemirror-model";
@@ -15,7 +13,6 @@ import { classes, toggleInvisible } from "../../shared/dom.js";
 import { positionMenu } from "../../shared/position.js";
 import { createStore, cursor, forward, Fx, Store } from "../../shared/store.js";
 import { createCleanupGroup } from "../../shared/cleanup.js";
-import { Rect, createRect } from "../../shared/position.js";
 
 const schema = () => {
   return new Schema({
@@ -187,6 +184,7 @@ export class OsRichTextEditor extends ReactiveElement {
   #cleanup = createCleanupGroup();
   #state: Store<State, Msg>;
   #editor: EditorView | null = null;
+  #extras: HTMLElement | null = null;
 
   constructor() {
     super();
@@ -210,8 +208,31 @@ export class OsRichTextEditor extends ReactiveElement {
     // this.#state.send();
   }
 
+  #render = () => {
+    if (this.#extras == null) return;
+    const template = this.render();
+    render(template, this.#extras);
+  };
+
   render(): TemplateResult {
-    return html`Hello suggestions`;
+    const hashtagState = this.state.hashtag;
+    const mentionState = this.state.mention;
+    return html`
+      <os-floating-menu
+        id="mention-suggestions"
+        .anchor=${mentionState.coords}
+        .open=${mentionState.active != null}
+      >
+        Hello mentions
+      </os-floating-menu>
+      <os-floating-menu
+        id="hashtag-suggestions"
+        .anchor=${hashtagState.coords}
+        .open=${hashtagState.active != null}
+      >
+        Hello hashtag
+      </os-floating-menu>
+    `;
   }
 
   #createEditor() {
@@ -219,17 +240,15 @@ export class OsRichTextEditor extends ReactiveElement {
     const elements = html`
       <div id="wrapper" class="wrapper">
         <div id="editor" class="editor"></div>
-        <div id="suggestions" class="suggestions invisible"></div>
+        <div id="extras"></div>
       </div>
     `;
     render(elements, this.renderRoot);
 
+    this.#extras = this.renderRoot.querySelector("#extras") as HTMLElement;
+
     const editorElement = this.renderRoot.querySelector(
       "#editor",
-    ) as HTMLElement;
-
-    const suggestionsElement = this.renderRoot.querySelector(
-      "#suggestions",
     ) as HTMLElement;
 
     const sendMentions = forward(this.#state.send, createMentionMsg);
@@ -263,12 +282,7 @@ export class OsRichTextEditor extends ReactiveElement {
     });
     this.#editor = editor;
 
-    const cleanupRender = this.#state.sink((state) => {
-      const template = this.render();
-      render(template, suggestionsElement);
-      positionMenu(suggestionsElement, state.mention.coords);
-      toggleInvisible(suggestionsElement, state.mention.active == null);
-    });
+    const cleanupRender = this.#state.sink(this.#render);
     this.#cleanup.add(cleanupRender);
   }
 
