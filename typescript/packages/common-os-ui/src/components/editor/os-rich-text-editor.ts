@@ -10,7 +10,14 @@ import { base } from "../../shared/styles.js";
 import { suggestionsPlugin, Suggestion } from "./suggestions-plugin.js";
 import * as suggestions from "./suggestions.js";
 import { classes } from "../../shared/dom.js";
-import { createStore, cursor, forward, Fx, Store } from "../../shared/store.js";
+import {
+  createStore,
+  cursor,
+  forward,
+  unknown,
+  Fx,
+  Store,
+} from "../../shared/store.js";
 import { createCleanupGroup } from "../../shared/cleanup.js";
 import { TemplateResult } from "lit";
 
@@ -111,8 +118,7 @@ export const update = (state: State, msg: Msg): State => {
     case "hashtag":
       return updateHashtag(state, msg.value);
     default:
-      console.warn("update", "uknown msg type", msg);
-      return state;
+      return unknown(state, msg);
   }
 };
 
@@ -131,6 +137,10 @@ const createHashtagDecoration = ({ from, to, active }: Suggestion) => {
     class: classes({ hashtag: true, "hashtag--active": active }),
   });
 };
+
+const renderCompletion = (completion: suggestions.Completion) => html`
+  <div class="completion">${completion.text}</div>
+`;
 
 /**
  * Specialized version of `suggestionsPlugin` that takes care of wiring
@@ -155,6 +165,48 @@ const suggestionsStorePlugin = ({
     onEnter: () => send(suggestions.createEnterMsg()),
     onTab: () => send(suggestions.createTabMsg()),
   });
+
+/**
+ * Create and return a configured Prosemirror editor instance/**
+ * @param {Object} options - Configuration options for creating the editor
+ * @param {HTMLElement} options.element - The DOM element where the editor will be rendered
+ * @param {(msg: Msg) => void} options.send - A function to send messages from the editor
+ * @returns {EditorView} A configured Prosemirror editor instance
+ */
+export const createEditor = ({
+  element: editor,
+  send,
+}: {
+  element: HTMLElement;
+  send: (msg: Msg) => void;
+}): EditorView => {
+  // NOTE: make sure suggestion plugins come before keymap plugin so they
+  // get a chance to intercept enter and tab.
+  const plugins = [
+    suggestionsStorePlugin({
+      pattern: /@\w+/g,
+      decoration: createMentionDecoration,
+      send: forward(send, createMentionMsg),
+    }),
+    suggestionsStorePlugin({
+      pattern: /#\w+/g,
+      decoration: createHashtagDecoration,
+      send: forward(send, createHashtagMsg),
+    }),
+    history(),
+    keymap(baseKeymap),
+    editorClassPlugin(),
+  ];
+
+  const state = EditorState.create({
+    schema: schema(),
+    plugins,
+  });
+
+  return new EditorView(editor, {
+    state,
+  });
+};
 
 @customElement("os-rich-text-editor")
 export class OsRichTextEditor extends ReactiveElement {
@@ -211,7 +263,7 @@ export class OsRichTextEditor extends ReactiveElement {
     `,
   ];
 
-  #cleanup = createCleanupGroup();
+  #destroy = createCleanupGroup();
   #store: Store<State, Msg>;
   #editorView?: EditorView;
   #reactiveRoot?: HTMLElement;
@@ -223,6 +275,9 @@ export class OsRichTextEditor extends ReactiveElement {
       update,
       fx,
     });
+    // Drive updates via store changes
+    const cleanupRender = this.#store.sink(() => this.requestUpdate());
+    this.#destroy.add(cleanupRender);
   }
 
   get editor() {
@@ -256,14 +311,14 @@ export class OsRichTextEditor extends ReactiveElement {
         .anchor=${mentionState.coords}
         .open=${mentionState.active != null}
       >
-        Hello mentions
+        ${mentionState.completions.map(renderCompletion)}
       </os-floating-menu>
       <os-floating-menu
         id="hashtag-suggestions"
         .anchor=${hashtagState.coords}
         .open=${hashtagState.active != null}
       >
-        Hello hashtag
+        ${hashtagState.completions.map(renderCompletion)}
       </os-floating-menu>
     `;
   }
@@ -278,12 +333,25 @@ export class OsRichTextEditor extends ReactiveElement {
 
   override firstUpdated(changedProperties: PropertyValues) {
     super.firstUpdated(changedProperties);
+    this.#createSkeleton();
 
-    // Set up a skeleton with:
-    // - a wrapper to create a shared positioning context
-    // - an editor area that will be managed by ProseMirror and will not be
-    //   touched by LitElement reactive rendering.
-    // - a reactive area that will be the `renderRoot` for LitElement
+    const editorView = createEditor({
+      element: this.renderRoot.querySelector("#editor") as HTMLElement,
+      send: this.#store.send,
+    });
+    this.#destroy.add(() => {
+      editorView.destroy();
+    });
+  }
+
+  /** Renders the skeleton of the component. Run once during firstUpdated.
+   * Sets up an HTML skeleton in the renderRoot with:
+   * - a wrapper to create a shared positioning context
+   * - an editor area that will be managed by ProseMirror and will not be
+   *   touched by LitElement reactive rendering.
+   * - a reactive area that will be the `renderRoot` for LitElement
+   */
+  #createSkeleton() {
     const skeleton = html`
       <div id="wrapper" class="wrapper">
         <div id="editor" class="editor"></div>
@@ -297,48 +365,5 @@ export class OsRichTextEditor extends ReactiveElement {
     this.#reactiveRoot = this.renderRoot.querySelector(
       "#reactive",
     ) as HTMLElement;
-
-    // Configure plugins
-
-    const sendMentions = forward(this.#store.send, createMentionMsg);
-    const sendHashtags = forward(this.#store.send, createHashtagMsg);
-
-    // NOTE: make sure suggestion plugins come before keymap plugin so they
-    // get a chance to intercept enter and tab.
-    const plugins = [
-      suggestionsStorePlugin({
-        pattern: /@\w+/g,
-        decoration: createMentionDecoration,
-        send: sendMentions,
-      }),
-      suggestionsStorePlugin({
-        pattern: /#\w+/g,
-        decoration: createHashtagDecoration,
-        send: sendHashtags,
-      }),
-      history(),
-      keymap(baseKeymap),
-      editorClassPlugin(),
-    ];
-
-    const state = EditorState.create({
-      schema: schema(),
-      plugins,
-    });
-
-    const editor = this.renderRoot.querySelector("#editor") as HTMLElement;
-    const editorView = new EditorView(editor, {
-      state,
-    });
-
-    this.#editorView = editorView;
-
-    this.#cleanup.add(() => {
-      editorView.destroy();
-    });
-
-    // Drive updates via store changes
-    const cleanupRender = this.#store.sink(() => this.requestUpdate());
-    this.#cleanup.add(cleanupRender);
   }
 }

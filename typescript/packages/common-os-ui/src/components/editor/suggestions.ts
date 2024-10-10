@@ -2,11 +2,21 @@
 import { Suggestion, UpdateMsg } from "./suggestions-plugin.js";
 import { Rect, createRect } from "../../shared/position.js";
 import { clamp } from "../../shared/number.js";
+import { unknown } from "../../shared/store.js";
+import * as dummy from "../../shared/dummy.js";
+
+const freeze = Object.freeze;
 
 export type Completion = {
   id: string;
   text: string;
 };
+
+export const createCompletion = (id: string, text: string): Completion =>
+  freeze({
+    id,
+    text,
+  });
 
 export type State = {
   active: Suggestion | null;
@@ -14,8 +24,6 @@ export type State = {
   selectedCompletion: number;
   completions: Array<Completion>;
 };
-
-const freeze = Object.freeze;
 
 export const createUpdateMsg = (update: UpdateMsg | null) =>
   freeze({
@@ -68,7 +76,9 @@ const updateUpdate = (state: State, update: UpdateMsg | null): State => {
       active: update.active,
       coords: update.coords,
       selectedCompletion: 0,
-      completions: [],
+      completions: dummy
+        .titles(5)
+        .map((title) => createCompletion(dummy.id(), title)),
     });
   } else {
     return freeze({
@@ -99,6 +109,6 @@ export const update = (state: State, msg: Msg): State => {
     case "arrowDown":
       return updateSelectedCompletion(state, -1);
     default:
-      return state;
+      return unknown(state, msg);
   }
 };

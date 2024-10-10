@@ -86,3 +86,12 @@ export const cursor =
   }) =>
   (big: BigState, msg: SmallMsg) =>
     put(big, update(get(big), msg));
+
+/**
+ * Convenience updater for update function fallthroughs when an unknown
+ * message is encountered.
+ */
+export const unknown = <State>(state: State, msg: unknown) => {
+  console.warn("Unknown message", msg);
+  return state;
+};

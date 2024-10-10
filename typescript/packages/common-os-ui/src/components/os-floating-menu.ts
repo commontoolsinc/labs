@@ -35,7 +35,7 @@ export class OsFloatingMenu extends LitElement {
   open: boolean = false;
 
   override render() {
-    return html` <div class="menu">Hello world</div> `;
+    return html` <div class="menu"><slot></slot></div> `;
   }
 
   protected override updated(changedProperties: PropertyValues): void {
