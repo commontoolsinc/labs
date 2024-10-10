@@ -318,20 +318,22 @@ export class OsRichTextEditor extends ReactiveElement {
     const hashtagState = this.state.hashtag;
     const mentionState = this.state.mention;
     return html`
-      <os-floating-menu
-        id="mention-suggestions"
+      <os-floating-completions
+        id="mention-completions"
         .anchor=${mentionState.coords}
         .open=${mentionState.active != null}
+        .completions=${mentionState.completions}
+        .selected=${mentionState.selectedCompletion}
       >
-        ${mentionState.completions.map(renderCompletion)}
-      </os-floating-menu>
-      <os-floating-menu
-        id="hashtag-suggestions"
+      </os-floating-completions>
+      <os-floating-completions
+        id="hashtag-completions"
         .anchor=${hashtagState.coords}
         .open=${hashtagState.active != null}
+        .completions=${hashtagState.completions}
+        .selected=${hashtagState.selectedCompletion}
       >
-        ${hashtagState.completions.map(renderCompletion)}
-      </os-floating-menu>
+      </os-floating-completions>
     `;
   }
 
