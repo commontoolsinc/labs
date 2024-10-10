@@ -46,9 +46,11 @@ export const charms = cell<CellImpl<Charm>[]>([]);
 
 export function addCharms(newCharms: CellImpl<any>[]) {
   const currentCharms = charms.get();
-  const currentIds = new Set(currentCharms.map((charm) => charm.entityId));
+  const currentIds = new Set(
+    currentCharms.map((charm) => charm.entityId?.toString())
+  );
   const charmsToAdd = newCharms.filter(
-    (charm) => !currentIds.has(charm.entityId)
+    (charm) => !currentIds.has(charm.entityId?.toString())
   );
 
   if (charmsToAdd.length > 0) {
@@ -194,7 +196,7 @@ addModuleByRef(
   raw((inputsCell: CellImpl<any>) => (log: ReactivityLog) => {
     // HACK to follow the cell references to the entityId
     const entityId = getEntityId(inputsCell.getAsProxy([], log));
-    if (entityId) openCharm(entityId);
+    if (entityId) openCharm(entityId.toString());
   })
 );
 
