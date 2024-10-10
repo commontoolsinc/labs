@@ -13,11 +13,10 @@ export const animationFrame = () =>
 
 export const toggleInvisible = async (
   element: HTMLElement,
-  isHidden: boolean,
+  isInvisible: boolean,
 ) => {
-  await animationFrame();
-  element.ariaHidden = isHidden ? "true" : "false";
-  element.classList.toggle("invisible", isHidden);
+  element.ariaHidden = isInvisible ? "true" : "false";
+  element.classList.toggle("invisible", isInvisible);
 };
 
 /**

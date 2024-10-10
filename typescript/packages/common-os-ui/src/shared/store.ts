@@ -37,8 +37,8 @@ export const createStore = <State, Msg>({
     if (debug()) console.debug("store", "msg", msg);
     const next = update(state, msg);
     if (state !== next) {
-      if (debug()) console.log("store", "state", state);
       state = next;
+      if (debug()) console.log("store", "state", state);
       for (const listener of listeners) {
         listener(state);
       }
@@ -80,8 +80,8 @@ export const cursor =
     get,
     put,
   }: {
-    update: (state: SmallState, msg: SmallMsg) => SmallState;
-    get: (state: BigState) => SmallState;
+    update: (small: SmallState, msg: SmallMsg) => SmallState;
+    get: (big: BigState) => SmallState;
     put: (big: BigState, small: SmallState) => BigState;
   }) =>
   (big: BigState, msg: SmallMsg) =>

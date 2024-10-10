@@ -103,7 +103,7 @@ const updateMention = cursor({
 
 const updateHashtag = cursor({
   update: suggestions.update,
-  get: (big: State) => big.mention,
+  get: (big: State) => big.hashtag,
   put: (big: State, small: suggestions.State) =>
     freeze({
       ...big,
@@ -137,10 +137,6 @@ const createHashtagDecoration = ({ from, to, active }: Suggestion) => {
     class: classes({ hashtag: true, "hashtag--active": active }),
   });
 };
-
-const renderCompletion = (completion: suggestions.Completion) => html`
-  <div class="completion">${completion.text}</div>
-`;
 
 /**
  * Specialized version of `suggestionsPlugin` that takes care of wiring
@@ -319,19 +315,19 @@ export class OsRichTextEditor extends ReactiveElement {
     const mentionState = this.state.mention;
     return html`
       <os-floating-completions
-        id="mention-completions"
-        .anchor=${mentionState.coords}
-        .open=${mentionState.active != null}
-        .completions=${mentionState.completions}
-        .selected=${mentionState.selectedCompletion}
+        id="hashtag-completions"
+        .anchor=${hashtagState.coords}
+        .show=${hashtagState.active != null}
+        .completions=${hashtagState.completions}
+        .selected=${hashtagState.selectedCompletion}
       >
       </os-floating-completions>
       <os-floating-completions
-        id="hashtag-completions"
-        .anchor=${hashtagState.coords}
-        .open=${hashtagState.active != null}
-        .completions=${hashtagState.completions}
-        .selected=${hashtagState.selectedCompletion}
+        id="mention-completions"
+        .anchor=${mentionState.coords}
+        .show=${mentionState.active != null}
+        .completions=${mentionState.completions}
+        .selected=${mentionState.selectedCompletion}
       >
       </os-floating-completions>
     `;

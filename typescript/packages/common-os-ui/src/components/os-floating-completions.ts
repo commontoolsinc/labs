@@ -5,7 +5,7 @@ import { createRect, Rect, positionMenu } from "../shared/position.js";
 import { toggleInvisible } from "../shared/dom.js";
 import { Completion } from "./editor/suggestions.js";
 import { classMap } from "lit/directives/class-map.js";
-import { wrapExclusive } from "../shared/number.js";
+import { clamp } from "../shared/number.js";
 
 @customElement("os-floating-completions")
 export class OsFloatingCompletions extends LitElement {
@@ -56,7 +56,7 @@ export class OsFloatingCompletions extends LitElement {
   anchor: Rect = createRect(0, 0, 0, 0);
 
   @property({ attribute: false })
-  open: boolean = false;
+  show: boolean = false;
 
   @property({ type: Number })
   selected: number = 0;
@@ -69,7 +69,7 @@ export class OsFloatingCompletions extends LitElement {
       const classes = classMap({
         completion: true,
         "completion--active":
-          wrapExclusive(this.completions.length, this.selected) === index,
+          clamp(0, this.completions.length - 1, this.selected) === index,
       });
       return html`
         <li class="${classes}">
@@ -87,8 +87,8 @@ export class OsFloatingCompletions extends LitElement {
     if (changedProperties.has("anchor")) {
       positionMenu(this, this.anchor);
     }
-    if (changedProperties.has("open")) {
-      toggleInvisible(this, !this.open);
+    if (changedProperties.has("show")) {
+      toggleInvisible(this, !this.show);
     }
   }
 }

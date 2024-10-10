@@ -89,9 +89,6 @@ export const positionMenu = async (
       middleware: [shift()],
     },
   );
-
-  await animationFrame();
-
   menu.style.position = "absolute";
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;

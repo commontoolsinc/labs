@@ -1,7 +1,7 @@
 /** Suggestion actions, model and update */
 import { Suggestion, UpdateMsg } from "./suggestions-plugin.js";
 import { Rect, createRect } from "../../shared/position.js";
-import { wrapExclusive } from "../../shared/number.js";
+import { clamp } from "../../shared/number.js";
 import { unknown } from "../../shared/store.js";
 import * as dummy from "../../shared/dummy.js";
 
@@ -69,12 +69,12 @@ export const init = () =>
     completions: [],
   });
 
-const updateUpdate = (state: State, update: UpdateMsg | null): State => {
-  if (update) {
+const updateUpdate = (state: State, msg: UpdateMsg | null): State => {
+  if (msg != null) {
     return freeze({
       ...state,
-      active: update.active,
-      coords: update.coords,
+      active: msg.active,
+      coords: msg.coords,
       selectedCompletion: 0,
       completions: dummy
         .titles(3)
@@ -92,8 +92,9 @@ const updateUpdate = (state: State, update: UpdateMsg | null): State => {
 const updateSelectedCompletion = (state: State, offset: number): State => {
   return freeze({
     ...state,
-    selectedCompletion: wrapExclusive(
-      Math.max(state.completions.length, 0),
+    selectedCompletion: clamp(
+      0,
+      Math.max(state.completions.length - 1, 0),
       state.selectedCompletion + offset,
     ),
   });
