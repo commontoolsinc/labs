@@ -211,29 +211,7 @@ export class OsRichTextEditor extends ReactiveElement {
   }
 
   render(): TemplateResult {
-    const isMentionActive = this.state.mention.active != null;
-
-    const mentionClasses = classMap({
-      suggestions: true,
-      invisible: !isMentionActive,
-    });
-
-    const mentionStyles = styleMap({
-      left: "0px",
-      top: "0px",
-    });
-
-    const hashtagClasses = classMap({
-      suggestions: true,
-      invisible: true,
-    });
-
-    return html`
-      <div id="mentions" class="${mentionClasses}" style="${mentionStyles}">
-        Hello mentions
-      </div>
-      <div id="hashtags" class="${hashtagClasses}">Hello hashtags</div>
-    `;
+    return html`Hello suggestions`;
   }
 
   #createEditor() {
@@ -241,7 +219,7 @@ export class OsRichTextEditor extends ReactiveElement {
     const elements = html`
       <div id="wrapper" class="wrapper">
         <div id="editor" class="editor"></div>
-        <div id="extras"></div>
+        <div id="suggestions" class="suggestions invisible"></div>
       </div>
     `;
     render(elements, this.renderRoot);
@@ -250,8 +228,8 @@ export class OsRichTextEditor extends ReactiveElement {
       "#editor",
     ) as HTMLElement;
 
-    const extrasElement = this.renderRoot.querySelector(
-      "#extras",
+    const suggestionsElement = this.renderRoot.querySelector(
+      "#suggestions",
     ) as HTMLElement;
 
     const sendMentions = forward(this.#state.send, createMentionMsg);
@@ -285,9 +263,11 @@ export class OsRichTextEditor extends ReactiveElement {
     });
     this.#editor = editor;
 
-    const cleanupRender = this.#state.sink(() => {
+    const cleanupRender = this.#state.sink((state) => {
       const template = this.render();
-      render(template, extrasElement);
+      render(template, suggestionsElement);
+      positionMenu(suggestionsElement, state.mention.coords);
+      toggleInvisible(suggestionsElement, state.mention.active == null);
     });
     this.#cleanup.add(cleanupRender);
   }
