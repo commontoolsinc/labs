@@ -160,10 +160,22 @@ const suggestionsStorePlugin = ({
     decoration,
     onUpdate: (_view, update) => send(suggestions.createUpdateMsg(update)),
     onDestroy: () => send(suggestions.createDestroyMsg()),
-    onArrowUp: () => send(suggestions.createArrowUpMsg()),
-    onArrowDown: () => send(suggestions.createArrowDownMsg()),
-    onEnter: () => send(suggestions.createEnterMsg()),
-    onTab: () => send(suggestions.createTabMsg()),
+    onArrowUp: () => {
+      send(suggestions.createArrowUpMsg());
+      return true;
+    },
+    onArrowDown: () => {
+      send(suggestions.createArrowDownMsg());
+      return true;
+    },
+    onEnter: () => {
+      send(suggestions.createEnterMsg());
+      return true;
+    },
+    onTab: () => {
+      send(suggestions.createTabMsg());
+      return true;
+    },
   });
 
 /**
@@ -344,7 +356,9 @@ export class OsRichTextEditor extends ReactiveElement {
     });
   }
 
-  /** Renders the skeleton of the component. Run once during firstUpdated.
+  /**
+   * Renders the skeleton of the component.
+   * Run once during firstUpdated.
    * Sets up an HTML skeleton in the renderRoot with:
    * - a wrapper to create a shared positioning context
    * - an editor area that will be managed by ProseMirror and will not be

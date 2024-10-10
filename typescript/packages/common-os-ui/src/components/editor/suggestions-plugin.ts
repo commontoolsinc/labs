@@ -51,25 +51,26 @@ export const createUpdateMsg = (active: Suggestion, coords: Rect) =>
 export type UpdateMsg = ReturnType<typeof createUpdateMsg>;
 
 const noOp = () => {};
+const alwaysFalse = () => false;
 
 export const suggestionsPlugin = ({
   pattern,
   decoration,
   onUpdate = noOp,
   onDestroy = noOp,
-  onArrowDown = noOp,
-  onArrowUp = noOp,
-  onTab = noOp,
-  onEnter = noOp,
+  onArrowDown = alwaysFalse,
+  onArrowUp = alwaysFalse,
+  onTab = alwaysFalse,
+  onEnter = alwaysFalse,
 }: {
   pattern: RegExp;
   decoration: (suggestion: Suggestion) => Decoration;
   onUpdate?: (view: EditorView, update: UpdateMsg | null) => void;
   onDestroy?: (view: EditorView) => void;
-  onArrowDown?: (view: EditorView) => void;
-  onArrowUp?: (view: EditorView) => void;
-  onTab?: (view: EditorView) => void;
-  onEnter?: (view: EditorView) => void;
+  onArrowDown?: (view: EditorView) => boolean;
+  onArrowUp?: (view: EditorView) => boolean;
+  onTab?: (view: EditorView) => boolean;
+  onEnter?: (view: EditorView) => boolean;
 }) => {
   const source = "suggestionsPlugin";
 
