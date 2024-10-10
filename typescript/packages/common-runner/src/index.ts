@@ -1,4 +1,4 @@
-export { run, stop, charmById } from "./runner.js";
+export { run, stop } from "./runner.js";
 export { addModuleByRef, raw } from "./module.js";
 export {
   run as addAction,
@@ -16,6 +16,7 @@ export type {
 export {
   cell,
   isCell,
+  isSimpleCell,
   isCellReference,
   isCellProxy,
   isReactive,
@@ -25,3 +26,4 @@ export {
   getCellReferenceOrThrow,
   isCellProxyForDereferencing,
 } from "./cell.js";
+export { getEntityId, getCellByEntityId } from "./cell-map.js";

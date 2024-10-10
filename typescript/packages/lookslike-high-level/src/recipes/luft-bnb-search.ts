@@ -7,7 +7,6 @@ import {
   str,
   llm,
   navigateTo,
-  ID,
   UI,
   NAME,
 } from "@commontools/common-builder";
@@ -250,7 +249,7 @@ const makeLuftBnBSearch = recipe<{
       <vstack gap="sm">
         ${describeFirstResult({ places: luftBnB.places, startDate, endDate })}
         Or search for other places:
-        <common-charm-link charm=${luftBnB[ID]} />
+        <common-charm-link $charm=${luftBnB} />
       </vstack>
     `,
     reservation,

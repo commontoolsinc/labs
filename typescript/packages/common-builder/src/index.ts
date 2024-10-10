@@ -16,7 +16,6 @@ export {
   str,
 } from "./built-in.js";
 export {
-  ID,
   TYPE,
   NAME,
   UI,

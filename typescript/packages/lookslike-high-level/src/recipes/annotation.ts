@@ -5,7 +5,6 @@ import {
   handler,
   cell,
   UI,
-  ID,
   NAME,
   TYPE,
   ifElse,
@@ -14,8 +13,9 @@ import {
 import { type Charm, openCharm } from "../data.js";
 import {
   run,
-  charmById,
   getCellReferenceOrValue,
+  getEntityId,
+  getCellByEntityId,
 } from "@commontools/common-runner";
 import { suggestions } from "../suggestions.js";
 import { z } from "zod";
@@ -29,28 +29,30 @@ const Suggestion = z.object({
 });
 type Suggestion = z.infer<typeof Suggestion>;
 
-type CharmInfo = { id: number; name: string; type: string };
+type CharmInfo = { index: number; id: string; name: string; type: string };
 
 // Lifted functions at module scope
 const getCharmInfo = lift(({ charms }) => {
   const charmInfo: CharmInfo[] = [];
   for (let i = 0; i < charms.length; i++) {
-    charmInfo.push({
-      id: Number(charms[i][ID]),
-      name: String(charms[i][NAME] ?? "unknown"),
-      type: String(charms[i][TYPE]),
-    });
+    const id = getEntityId([i]);
+    if (id)
+      charmInfo.push({
+        index: i,
+        id,
+        name: String(charms[i][NAME] ?? "unknown"),
+        type: String(charms[i][TYPE]),
+      });
   }
   return charmInfo;
 });
 
-const buildQuery = lift(
-  ({ query, charmInfo }) => {
-
-    return {
-      system: "You are an assistant that helps match user queries to relevant data charms based on their names and types.",
-      messages: [
-        `Given the following user query and list of data charms, return the indices of the charms that are most relevant to the query.
+const buildQuery = lift(({ query, charmInfo }) => {
+  return {
+    system:
+      "You are an assistant that helps match user queries to relevant data charms based on their names and types.",
+    messages: [
+      `Given the following user query and list of data charms, return the indices of the charms that are most relevant to the query.
 Consider both the names and types of the charms when making your selection.
 Think broadly, e.g. a stay in a hotel could match a charm called "morning routine", as the user would want to pick a hotel that supports their morning routine.
 
@@ -71,11 +73,12 @@ Respond with only JSON array of suggestions, e.g.
   { index: 5, chosen: "suzy collab", reason: "could this be related to Susan? she appears in several project related lists", confidence: 0.33 }
 ]
 \`\`\`
-`, '```json\n['
-      ],
-      stop: '```',
-    };
-  });
+`,
+      "```json\n[",
+    ],
+    stop: "```",
+  };
+});
 
 const grabJson = lift<{ result?: string }, Suggestion[]>(({ result }) => {
   if (!result) {
@@ -98,13 +101,11 @@ const grabJson = lift<{ result?: string }, Suggestion[]>(({ result }) => {
 const filterMatchingCharms = lift<{
   matchedIndices: Suggestion[];
   charmInfo: CharmInfo[];
-}>(
-  ({ matchedIndices, charmInfo }) =>
-    (matchedIndices ?? [])
-      .filter((item) => item.confidence > MINIMUM_CONFIDENCE)
-      .map((item) => charmInfo.find((charm) => charm.id === item.index))
-      .filter((charm) => charm !== undefined)
-      .filter((charm) => charm.id !== 0) // TODO: HACK - ignore first todo list
+}>(({ matchedIndices, charmInfo }) =>
+  (matchedIndices ?? [])
+    .filter((item) => item.confidence > MINIMUM_CONFIDENCE)
+    .map((item) => charmInfo.find((charm) => charm.index === item.index))
+    .filter((charm) => charm !== undefined)
 );
 
 const findSuggestion = lift<{
@@ -125,7 +126,7 @@ const findSuggestion = lift<{
     const bindings = Object.entries(suggestion.charms).map(([key, type]) => [
       key,
       matchingCharms.find((charm) => charm.type === type),
-    ]) as [string, { id: number; name: string; type: string }][];
+    ]) as [string, { id: string; name: string; type: string }][];
 
     const nameBindings = Object.fromEntries(
       bindings.map(([key, charm]) => [key, charm.name])
@@ -178,14 +179,14 @@ const acceptSuggestion = handler<
     ...Object.fromEntries(
       Object.entries(suggestion.boundCharms).map(([key, value]) => [
         key,
-        charmById.get(value as number),
+        getCellByEntityId(value as string),
       ])
     ),
   });
 
   // HACK: -1 is home screen and so let's open a new tab
   if (target == -1) {
-    openCharm(accepted.get()[ID]);
+    openCharm(accepted.get().entityId);
     state.acceptedSuggestion = html`<div></div>`;
   } else {
     state.acceptedSuggestion = accepted.asSimpleCell().get()[UI];
