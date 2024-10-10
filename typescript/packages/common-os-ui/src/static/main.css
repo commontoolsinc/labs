@@ -1,7 +1,7 @@
 @font-face {
   font-family: "Material Symbols Rounded";
   font-style: normal;
-  src: url("./material-symbols.woff") format("woff");
+    src: url("https://cdn.jsdelivr.net/npm/material-symbols@0.2.3/material-symbols-rounded.woff2") format("woff");
 }
 
 @layer basic {

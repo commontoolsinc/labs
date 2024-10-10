@@ -6,7 +6,7 @@ import { assert, cid, clip, jsonToFacts } from "./synopsys.ts";
 
 export async function extractEntities(html: string, url: string, prompt?: string) {
   const systemPrompt =
-    "Extract the information the user requested from the provided webpage. You respond only with the entities extracted as an array e.g. ```json [{}, {}]``` block, no commentary.";
+    "Extract the information the user requested from the provided webpage. You respond only with the entities extracted as an array e.g. ```json [{}, {}]``` block, no commentary.  Each object must be flat, no nested object hierarachy is permitted.";
   const userPrompt = `
 ${
   prompt

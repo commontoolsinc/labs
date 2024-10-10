@@ -132,7 +132,7 @@ export const queryCollections = recipe<{}>(
     // const collections = ensureArray({ data: collectionResults?.data });
     const data = ensureArray({ data: result });
     const normalizedData = normalizeData({ result: result });
-    const exportedData = lift((data: any[]) => ({ items: data }))(data);
+    const exportedData = lift((data: any[]) => ({ items: data }))(normalizedData);
 
     tap({ result, normalizedData });
 
@@ -150,25 +150,25 @@ export const queryCollections = recipe<{}>(
                 placeholder="Enter collection name"
               />
 
-              <common-button
+              <button
                 onclick=${generateQuery({
                   collectionName: collection,
                   query,
                 })}
               >
                 Load
-              </common-button>
+              </button>
             </div>
 
-            <p>Number of items: ${data.length}</p>
-            <pre>${stringify({ obj: normalizedData })}</pre>
+            <details open>
+                <summary>Results</summary>
+                <pre>${stringify({ obj: normalizedData })}</pre>
+            </details>
             <details>
               <summary>Generated Query</summary>
               <pre>${stringify({ obj: query })}</pre>
             </details>
-            <common-button onclick=${onWorkbench({ data })}>
-              Open in Workbench
-            </common-button>
+
           </div>`,
           html`<div>Loading...</div>`,
         )}

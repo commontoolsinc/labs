@@ -98,7 +98,7 @@ export class CommonIframe extends LitElement {
         .srcdoc=${this.src}
         height="768px"
         width="100%"
-        style="border: 1px solid #eee;"
+        style="border: none;"
         @load=${this.handleLoad}
       ></iframe>
     `;
