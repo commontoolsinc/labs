@@ -1,4 +1,4 @@
-import { ReactiveElement, css, html, render, TemplateResult } from "lit";
+import { ReactiveElement, css, html, render, PropertyValues } from "lit";
 import { EditorState, Plugin } from "prosemirror-state";
 import { EditorView, Decoration } from "prosemirror-view";
 import { Schema } from "prosemirror-model";
@@ -9,10 +9,10 @@ import { customElement } from "lit/decorators.js";
 import { base } from "../../shared/styles.js";
 import { suggestionsPlugin, Suggestion } from "./suggestions-plugin.js";
 import * as suggestions from "./suggestions.js";
-import { classes, toggleInvisible } from "../../shared/dom.js";
-import { positionMenu } from "../../shared/position.js";
+import { classes } from "../../shared/dom.js";
 import { createStore, cursor, forward, Fx, Store } from "../../shared/store.js";
 import { createCleanupGroup } from "../../shared/cleanup.js";
+import { TemplateResult } from "lit";
 
 const schema = () => {
   return new Schema({
@@ -182,25 +182,29 @@ export class OsRichTextEditor extends ReactiveElement {
   ];
 
   #cleanup = createCleanupGroup();
-  #state: Store<State, Msg>;
-  #editor: EditorView | null = null;
-  #extras: HTMLElement | null = null;
+  #store: Store<State, Msg>;
+  #editorView?: EditorView;
+  #reactiveRoot?: HTMLElement;
 
   constructor() {
     super();
-    this.#state = createStore({
+    this.#store = createStore({
       state: init(),
       update,
       fx,
     });
   }
 
+  get editor() {
+    return this.#editorView;
+  }
+
   get state() {
-    return this.#state.get();
+    return this.#store.get();
   }
 
   send(msg: Msg) {
-    this.#state.send(msg);
+    this.#store.send(msg);
   }
 
   set state(_state: State) {
@@ -208,12 +212,11 @@ export class OsRichTextEditor extends ReactiveElement {
     // this.#state.send();
   }
 
-  #render = () => {
-    if (this.#extras == null) return;
-    const template = this.render();
-    render(template, this.#extras);
-  };
-
+  /**
+   * Render reactive portion of editor.
+   * This gets rendered in a `div#reactive` that is placed immediately
+   * under the editor element.
+   */
   render(): TemplateResult {
     const hashtagState = this.state.hashtag;
     const mentionState = this.state.mention;
@@ -235,24 +238,39 @@ export class OsRichTextEditor extends ReactiveElement {
     `;
   }
 
-  #createEditor() {
-    // Set up editor DOM
-    const elements = html`
+  protected override update(changedProperties: PropertyValues): void {
+    super.update(changedProperties);
+
+    // Wire up reactive rendering
+    const templateResult = this.render();
+    if (this.#reactiveRoot != null) render(templateResult, this.#reactiveRoot);
+  }
+
+  override firstUpdated(changedProperties: PropertyValues) {
+    super.firstUpdated(changedProperties);
+
+    // Set up a skeleton with:
+    // - a wrapper to create a shared positioning context
+    // - an editor area that will be managed by ProseMirror and will not be
+    //   touched by LitElement reactive rendering.
+    // - a reactive area that will be the `renderRoot` for LitElement
+    const skeleton = html`
       <div id="wrapper" class="wrapper">
         <div id="editor" class="editor"></div>
-        <div id="extras"></div>
+        <div id="reactive"></div>
       </div>
     `;
-    render(elements, this.renderRoot);
+    render(skeleton, this.renderRoot);
 
-    this.#extras = this.renderRoot.querySelector("#extras") as HTMLElement;
-
-    const editorElement = this.renderRoot.querySelector(
-      "#editor",
+    // Find the `div#reactive` element we just created and
+    // assign it as reactive root.
+    this.#reactiveRoot = this.renderRoot.querySelector(
+      "#reactive",
     ) as HTMLElement;
 
-    const sendMentions = forward(this.#state.send, createMentionMsg);
+    // Configure plugins
 
+    const sendMentions = forward(this.#store.send, createMentionMsg);
     // NOTE: make sure suggestion plugins come before keymap plugin so they
     // get a chance to intercept enter and tab.
     const plugins = [
@@ -277,22 +295,19 @@ export class OsRichTextEditor extends ReactiveElement {
       plugins,
     });
 
-    const editor = new EditorView(editorElement, {
+    const editor = this.renderRoot.querySelector("#editor") as HTMLElement;
+    const editorView = new EditorView(editor, {
       state,
     });
-    this.#editor = editor;
 
-    const cleanupRender = this.#state.sink(this.#render);
+    this.#editorView = editorView;
+
+    this.#cleanup.add(() => {
+      editorView.destroy();
+    });
+
+    // Drive updates via store changes
+    const cleanupRender = this.#store.sink(() => this.requestUpdate());
     this.#cleanup.add(cleanupRender);
-  }
-
-  override connectedCallback() {
-    super.connectedCallback();
-    this.#createEditor();
-  }
-
-  override disconnectedCallback(): void {
-    super.disconnectedCallback();
-    this.#editor?.destroy();
   }
 }
