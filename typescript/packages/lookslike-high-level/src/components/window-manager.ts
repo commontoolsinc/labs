@@ -28,13 +28,14 @@ export class CommonWindowManager extends LitElement {
       }
       .window {
         height: 100%;
-        flex: 1 1 auto;
-        border: 1px solid #e0e0e0;
-        border-radius: var(--radius);
+        overflow-x: hidden;
+        overflow-y: auto;
+        container-type: size;
+        padding: var(--pad);
+        /* flex: 1 1 auto; */
         background-color: rgba(255, 255, 255, 0.8);
         backdrop-filter: blur(10px);
         transition: all 0.3s ease;
-        overflow: hidden;
       }
       .close-button {
         z-index: 1;
@@ -215,18 +216,7 @@ export class CommonWindowManager extends LitElement {
             return html`
               <div class="window" id="window-${charmId}">
                 <button class="close-button" @click="${this.onClose}">×</button>
-                <common-screen-element>
-                  <common-system-layout>
-                    <div ${ref(charmRef)}></div>
-                    <div slot="secondary">
-                      <common-annotation
-                        .query=${charmValues[NAME] ?? ""}
-                        .target=${charmId}
-                        .data=${charmValues}
-                      ></common-annotation>
-                    </div>
-                  </common-system-layout>
-                </common-screen-element>
+                <div ${ref(charmRef)}></div>
               </div>
             `;
           },

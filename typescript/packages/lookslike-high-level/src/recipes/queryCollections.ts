@@ -100,10 +100,10 @@ export const queryCollections = recipe<{ collectionName: string }>("Fetch Collec
 
   const { result } = streamData(buildQuery({ query }));
 
-  const data = ensureArray({ data: result });
-  const normalizedData = normalizeData({ result });
-  const exportedData = lift((data: any[]) => ({ items: data }))(data);
-  const dataSize = lift((data: any[]) => data?.length || "pending...")(normalizedData);
+    // const collections = ensureArray({ data: collectionResults?.data });
+    const data = ensureArray({ data: result });
+    const normalizedData = normalizeData({ result: result });
+    const exportedData = lift((data: any[]) => ({ items: data }))(normalizedData);
 
   return {
     [NAME]: str`Query ${collectionName}`,

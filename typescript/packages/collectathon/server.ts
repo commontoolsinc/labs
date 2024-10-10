@@ -3,60 +3,15 @@ import { extractEntities } from "./webpage.ts";
 import { db } from "./db.ts";
 import {
   getOrCreateCollection,
-  listCollections,
-  listItems,
-  deleteCollection,
-  addItemToCollection,
-  removeItemFromCollection,
-  moveCollection,
 } from "./collections.ts";
 import { clipUrl } from "./import.ts";
-import { handleViewCommandSingleShot, handleViewCommandUpdate, views } from "./view.ts";
-import {
-  deleteItem,
-  printItem,
-  purge,
-  editItemWeb,
-  createNewItem,
-  getItem,
-} from "./items.ts";
-import { addRule, applyRules, deleteRule, listRules } from "./rules.ts";
-import { search } from "./search.ts";
-import { handleActionCommand } from "./action.ts";
-import { handleDreamCommand } from "./dream.ts";
 import { clip } from "./synopsys.ts";
+import { start as mail } from "./mail.ts";
+
 const app = new Application();
 const router = new Router();
 
-const getJsonBody = async (ctx: any) => {
-  const body = ctx.request.body();
-  if (body.type !== "json") {
-    throw new Error("Invalid request body");
-  }
-  return await body.value;
-};
-
-app.use(oakCors()); // Enable CORS for all routes
-
-router.get("/view/:collection/:viewId", (ctx) => {
-  const { collection, viewId } = ctx.params;
-  const result = db.query<[string]>(
-    "SELECT html FROM views WHERE id = ? AND collection = ?",
-    [viewId, collection]
-  );
-
-  if (result.length > 0) {
-    const [html] = result[0];
-    ctx.response.type = "text/html";
-    ctx.response.body = html;
-
-    // Optionally, remove the view after serving it
-    // db.query("DELETE FROM views WHERE id = ?", [viewId]);
-  } else {
-    ctx.response.status = 404;
-    ctx.response.body = "View not found";
-  }
-});
+app.use(oakCors());
 
 router.get("/suggested-collections", async (ctx) => {
   const currentUrl = ctx.request.url.searchParams.get("url");
@@ -154,7 +109,7 @@ async function saveEntities(entities: any[], collections: string[]) {
     );
     const itemId = result[0][0] as number;
 
-    clip(entity.url, collections, entity);
+    await clip(entity.url || '<unknown>', collections, entity);
 
     for (const collectionId of collectionIds) {
       await db.query(
@@ -192,4 +147,5 @@ if (Deno) {
 
 if (import.meta.main) {
   start();
+  mail();
 }
