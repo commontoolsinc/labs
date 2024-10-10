@@ -126,6 +126,36 @@ const createMentionDecoration = ({ from, to, active }: Suggestion) => {
   });
 };
 
+const createHashtagDecoration = ({ from, to, active }: Suggestion) => {
+  return Decoration.inline(from, to, {
+    class: classes({ hashtag: true, "hashtag--active": active }),
+  });
+};
+
+/**
+ * Specialized version of `suggestionsPlugin` that takes care of wiring
+ * plugin lifecycle callbacks to store
+ */
+const suggestionsStorePlugin = ({
+  pattern,
+  decoration,
+  send,
+}: {
+  pattern: RegExp;
+  decoration: (suggestion: Suggestion) => Decoration;
+  send: (msg: suggestions.Msg) => void;
+}) =>
+  suggestionsPlugin({
+    pattern,
+    decoration,
+    onUpdate: (_view, update) => send(suggestions.createUpdateMsg(update)),
+    onDestroy: () => send(suggestions.createDestroyMsg()),
+    onArrowUp: () => send(suggestions.createArrowUpMsg()),
+    onArrowDown: () => send(suggestions.createArrowDownMsg()),
+    onEnter: () => send(suggestions.createEnterMsg()),
+    onTab: () => send(suggestions.createTabMsg()),
+  });
+
 @customElement("os-rich-text-editor")
 export class OsRichTextEditor extends ReactiveElement {
   static override styles = [
@@ -271,19 +301,20 @@ export class OsRichTextEditor extends ReactiveElement {
     // Configure plugins
 
     const sendMentions = forward(this.#store.send, createMentionMsg);
+    const sendHashtags = forward(this.#store.send, createHashtagMsg);
+
     // NOTE: make sure suggestion plugins come before keymap plugin so they
     // get a chance to intercept enter and tab.
     const plugins = [
-      suggestionsPlugin({
+      suggestionsStorePlugin({
         pattern: /@\w+/g,
         decoration: createMentionDecoration,
-        onUpdate: (_view, update) =>
-          sendMentions(suggestions.createUpdateMsg(update)),
-        onDestroy: () => sendMentions(suggestions.createDestroyMsg()),
-        onArrowUp: () => sendMentions(suggestions.createArrowUpMsg()),
-        onArrowDown: () => sendMentions(suggestions.createArrowDownMsg()),
-        onEnter: () => sendMentions(suggestions.createEnterMsg()),
-        onTab: () => sendMentions(suggestions.createTabMsg()),
+        send: sendMentions,
+      }),
+      suggestionsStorePlugin({
+        pattern: /#\w+/g,
+        decoration: createHashtagDecoration,
+        send: sendHashtags,
       }),
       history(),
       keymap(baseKeymap),
