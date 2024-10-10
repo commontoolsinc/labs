@@ -42,7 +42,6 @@ export class OsNavstack extends LitElement {
       pointer-events: none;
 
       > * {
-        overflow-x: hidden;
         overflow-y: scroll;
         position: absolute;
         top: 0;
