@@ -38,7 +38,7 @@ describe("cell-map", () => {
     });
 
     it("should return the entity ID for a cell", () => {
-      const c = cell(42);
+      const c = cell();
       c.generateEntityId();
 
       expect(getEntityId(c)).toEqual(c.entityId);
@@ -50,7 +50,7 @@ describe("cell-map", () => {
     });
 
     it("should return a different entity ID for reference with paths", () => {
-      const c = cell(42);
+      const c = cell();
       c.generateEntityId();
 
       expect(getEntityId(c.getAsProxy())).toEqual(c.entityId);

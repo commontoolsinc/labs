@@ -39,7 +39,8 @@ export const getEntityId = (value: any): EntityId | undefined => {
 
   if (!ref?.cell.entityId) return undefined;
 
-  if (ref.path.length > 0) return createRef(ref.path, ref.cell.entityId);
+  if (ref.path.length > 0)
+    return createRef({ path: ref.path }, ref.cell.entityId);
   else return ref.cell.entityId;
 };
 
