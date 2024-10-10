@@ -6,12 +6,21 @@ import {
   setCellByEntityId,
   EntityId,
 } from "../src/cell-map";
-import { CellImpl, cell } from "../src/cell.js";
+import { cell } from "../src/cell.js";
+import { refer } from "merkle-reference";
 
 // Mock the crypto.randomUUID function
 vi.mock("crypto", () => ({
   randomUUID: () => "mocked-uuid",
 }));
+
+describe("refer", () => {
+  it("should create a reference that is equal to another reference with the same source", () => {
+    const ref = refer({ hello: "world" });
+    const ref2 = refer({ hello: "world" });
+    expect(ref).toEqual(ref2);
+  });
+});
 
 describe("cell-map", () => {
   describe("createRef", () => {
