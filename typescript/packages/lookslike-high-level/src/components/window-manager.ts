@@ -3,8 +3,13 @@ import { customElement, property } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
-import { Charm, ID, UI, NAME, addCharms } from "../data.js";
-import { run, CellImpl, isCell, charmById } from "@commontools/common-runner";
+import { Charm, UI, NAME, addCharms } from "../data.js";
+import {
+  run,
+  CellImpl,
+  isCell,
+  getCellByEntityId,
+} from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
 
@@ -80,7 +85,7 @@ export class CommonWindowManager extends LitElement {
   @property({ type: Array })
   charms: CellImpl<Charm>[] = [];
 
-  private charmRefs: Map<number, Ref<HTMLElement>> = new Map();
+  private charmRefs: Map<string, Ref<HTMLElement>> = new Map();
   private newCharmRefs: [CellImpl<Charm>, Ref<HTMLElement>][] = [];
 
   handleUniboxSubmit(event: CustomEvent, charm: CellImpl<Charm>) {
@@ -108,9 +113,7 @@ export class CommonWindowManager extends LitElement {
 
       this.openCharm(
         run(iframe, { data: fieldsToInclude, title: value, prompt: value })
-          .asSimpleCell()
-          .key(ID)
-          .get()
+          .entityId!
       );
     }
   }
@@ -121,10 +124,12 @@ export class CommonWindowManager extends LitElement {
     return html`
       ${repeat(
         this.charms,
-        (charm) => charm.getAsProxy()[ID],
+        (charm) => charm.entityId,
         (charm) => {
           const charmValues = charm.getAsProxy();
-          const charmId = charmValues[ID];
+          const charmId = charm.entityId;
+
+          if (!charmId) throw new Error("Charm has no entity ID");
 
           // Create a new ref for this charm
           let charmRef = this.charmRefs.get(charmId);
@@ -155,8 +160,8 @@ export class CommonWindowManager extends LitElement {
     `;
   }
 
-  openCharm(charmId: number) {
-    const charm = charmById.get(charmId) as CellImpl<Charm>;
+  openCharm(charmId: string) {
+    const charm = getCellByEntityId<Charm>(charmId);
     if (!isCell(charm)) throw new Error(`Charm ${charmId} doesn't exist`);
 
     addCharms([charm]); // Make sure any shows charm is in the list of charms
@@ -180,7 +185,7 @@ export class CommonWindowManager extends LitElement {
     });
   }
 
-  private scrollToAndHighlight(charmId: number, animate: boolean) {
+  private scrollToAndHighlight(charmId: string, animate: boolean) {
     const window = this.renderRoot.querySelector(`#window-${charmId}`);
     if (window) {
       window.scrollIntoView({
@@ -198,10 +203,8 @@ export class CommonWindowManager extends LitElement {
   onClose(e: Event) {
     const windowElement = (e.currentTarget as HTMLElement).closest(".window");
     if (windowElement) {
-      const charmId = parseInt(windowElement.id.replace("window-", ""), 10);
-      this.charms = this.charms.filter(
-        (charm) => charm.getAsProxy()[ID] !== charmId
-      );
+      const charmId = windowElement.id.replace("window-", "");
+      this.charms = this.charms.filter((charm) => charm.entityId !== charmId);
       this.charmRefs.delete(charmId);
     }
   }

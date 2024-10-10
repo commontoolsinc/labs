@@ -1,8 +1,7 @@
 import { JavaScriptModuleDefinition } from "@commontools/common-runtime";
 
-// Should be Symbol("ID") or so, but this makes repeat() use these when
+// Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over recipes.
-export const ID = "$ID";
 export const TYPE = "$TYPE";
 export const NAME = "$NAME";
 export const UI = "$UI";

@@ -164,6 +164,8 @@ const bindProps = (
           logger.warn("Could not bind event", propKey, propValue);
         }
       } else if (propKey.startsWith("$")) {
+        // Properties starting with $ get passed in as raw values, useful for
+        // e.g. passing a cell itself instead of its value.
         const key = propKey.slice(1);
         setProp(element, key, replacement);
       } else {

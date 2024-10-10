@@ -1,5 +1,4 @@
 import {
-  ID,
   TYPE,
   type Recipe,
   type RecipeFactory,
@@ -41,9 +40,6 @@ import init, {
   JavaScriptModuleDefinition,
   JavaScriptValueMap,
 } from "@commontools/common-runtime";
-
-export const charmById = new Map<number, CellImpl<any>>();
-let nextCharmId = 0;
 
 export const cancels = new WeakMap<CellImpl<any>, Cancel>();
 
@@ -97,18 +93,18 @@ export function run<T, R = any>(
     ) as T;
   }
 
+  // Create a new recipe cell if it doesn't exist. Assign a random UUID for now.
+  // Eventually this should be something more causal.
+  if (!recipeCell) {
+    recipeCell = cell<R>();
+    recipeCell.entityId = crypto.randomUUID();
+  }
+
   // Generate recipe cell using defaults, bindings, and initial values
-  // TODO: Some initial values can be aliases to outside cells
-  const id =
-    recipeCell && recipeCell.getAtPath([ID])
-      ? (recipeCell.getAtPath([ID]) as number)
-      : nextCharmId++;
-  if (!recipeCell) recipeCell = cell<R>();
   recipeCell.send(
     mergeObjects(
       recipeCell.get(),
       {
-        [ID]: id,
         [TYPE]:
           (recipe.schema as { description: string })?.description ?? "unknown",
       },
@@ -117,7 +113,6 @@ export function run<T, R = any>(
       defaults
     )
   );
-  charmById.set(id, recipeCell);
 
   const [cancel, addCancel] = useCancelGroup();
   cancels.set(recipeCell, cancel);

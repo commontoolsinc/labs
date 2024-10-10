@@ -4,7 +4,6 @@ import { CommonWindowManager } from "./components/window-manager.js";
 export { components as myComponents } from "./components.js";
 import { charms, recipes, openCharm, type Charm } from "./data.js";
 import { home } from "./recipes/home.js";
-import { ID } from "@commontools/common-builder";
 
 document.addEventListener("DOMContentLoaded", () => {
   const windowManager = document.getElementById(
@@ -12,5 +11,5 @@ document.addEventListener("DOMContentLoaded", () => {
   )! as CommonWindowManager;
   openCharm.set(windowManager.openCharm.bind(windowManager));
   const homeCharm = run(home, { charms, recipes }) as CellImpl<Charm>;
-  windowManager.openCharm(homeCharm.get()[ID]);
+  windowManager.openCharm(homeCharm.entityId!);
 });

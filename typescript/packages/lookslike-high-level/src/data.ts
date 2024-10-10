@@ -1,10 +1,10 @@
 // This file is setting up example data
 
-import { ID, TYPE, NAME, UI, Recipe } from "@commontools/common-builder";
+import { TYPE, NAME, UI, Recipe } from "@commontools/common-builder";
 import {
   run,
   cell,
-  isCell,
+  getEntityId,
   CellImpl,
   raw,
   addModuleByRef,
@@ -34,27 +34,21 @@ import { wiki } from "./recipes/wiki.js";
 import { helloIsolated } from "./recipes/helloIsolated.js";
 
 export type Charm = {
-  [ID]: number;
   [NAME]?: string;
   [UI]?: any;
   [TYPE]?: string;
   [key: string]: any;
 };
 
-export { ID, TYPE, NAME, UI };
-
-// TODO: TYPE is now obsolete. Do we still need this?
-export function isCharm(value: any): value is Charm {
-  return isCell(value) && ID in value.get() && TYPE in value.get();
-}
+export { TYPE, NAME, UI };
 
 export const charms = cell<CellImpl<Charm>[]>([]);
 
 export function addCharms(newCharms: CellImpl<any>[]) {
   const currentCharms = charms.get();
-  const currentIds = new Set(currentCharms.map((charm) => charm.get()[ID]));
+  const currentIds = new Set(currentCharms.map((charm) => charm.entityId));
   const charmsToAdd = newCharms.filter(
-    (charm) => !currentIds.has(charm.get()[ID])
+    (charm) => !currentIds.has(charm.entityId)
   );
 
   if (charmsToAdd.length > 0) {
@@ -189,18 +183,19 @@ function getFridayAndMondayDateStrings() {
 }
 
 // Terrible hack to open a charm from a recipe
-let openCharmOpener: (charmId: number) => void = () => {};
-export const openCharm = (charmId: number) => openCharmOpener(charmId);
-openCharm.set = (opener: (charmId: number) => void) => {
+let openCharmOpener: (charmId: string) => void = () => {};
+export const openCharm = (charmId: string) => openCharmOpener(charmId);
+openCharm.set = (opener: (charmId: string) => void) => {
   openCharmOpener = opener;
 };
 
 addModuleByRef(
   "navigateTo",
-  raw(
-    (inputsCell: CellImpl<any>) => (log: ReactivityLog) =>
-      openCharm(inputsCell.getAsProxy([], log)[ID] as number)
-  )
+  raw((inputsCell: CellImpl<any>) => (log: ReactivityLog) => {
+    // HACK to follow the cell references to the entityId
+    const entityId = getEntityId(inputsCell.getAsProxy([], log));
+    if (entityId) openCharm(entityId);
+  })
 );
 
 (window as any).recipes = recipes;

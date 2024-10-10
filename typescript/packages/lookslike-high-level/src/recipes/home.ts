@@ -1,29 +1,21 @@
 import { html } from "@commontools/common-html";
-import { recipe, lift, ID, UI } from "@commontools/common-builder";
+import { recipe, lift, NAME, UI } from "@commontools/common-builder";
 import { Charm, RecipeManifest } from "../data.js";
 
-const getIDsForCharmsWithUI = lift<
-  { charms: Charm[]; homeId: number },
-  { id: number }[]
->(
-  ({ charms, homeId }) =>
-    charms
-      .filter((charm) => charm[UI]) // Only show charms with UI
-      .map((charm) => ({ id: charm[ID] }))
-      .filter((charm) => charm.id != homeId) // Don't include the home screen
+const getCharmsWithNameAndUI = lift<Charm[], { charm: Charm }[]>((charms) =>
+  charms.filter((charm) => charm[UI] && charm[NAME]).map((charm) => ({ charm }))
 );
 
 export const home = recipe<{
   charms: Charm[];
   recipes: RecipeManifest[];
-  [ID]: number;
-}>("home screen", ({ charms, recipes, [ID]: homeId }) => {
+}>("home screen", ({ charms, recipes }) => {
   return {
     [UI]: html`<common-vstack
-      >${getIDsForCharmsWithUI({ charms: charms, homeId }).map(
-        (charm) =>
+      >${getCharmsWithNameAndUI(charms).map(
+        ({ charm }) =>
           html`<div>
-            <common-charm-link charm=${charm.id}></common-charm-link>
+            <common-charm-link $charm=${charm}></common-charm-link>
           </div>`
       )}
       ${recipes.map(

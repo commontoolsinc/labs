@@ -2,7 +2,7 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { render } from "@commontools/common-ui";
 import { NAME } from "../data.js";
-import { charmById, isReactive } from "@commontools/common-runner";
+import { Cell, isReactive } from "@commontools/common-runner";
 
 export const charmLink = render.view("common-charm-link", {
   charm: { type: "object" },
@@ -22,7 +22,7 @@ export class CommonCharmLink extends LitElement {
   `;
 
   @property({ type: Number })
-  charm: number | undefined = undefined;
+  charm: Cell<any> | undefined = undefined;
 
   @property({ type: String })
   name: string | undefined = undefined;
@@ -48,14 +48,13 @@ export class CommonCharmLink extends LitElement {
   }
 
   private maybeListenToName(skipUpdate = false) {
-    const charm = this.charm !== undefined && charmById.get(this.charm);
-    if (!charm) return;
+    if (!this.charm) return;
 
     // Unsubscribe from previous listener
     this.nameEffect?.();
     this.nameEffect = undefined;
 
-    let { [NAME]: name } = charm.asSimpleCell().get();
+    let { [NAME]: name } = this.charm.get();
 
     if (isReactive(name)) {
       this.nameEffect = name.sink((name: string) => {
@@ -72,7 +71,7 @@ export class CommonCharmLink extends LitElement {
     e.preventDefault();
     this.dispatchEvent(
       new CustomEvent("open-charm", {
-        detail: { charmId: this.charm },
+        detail: { charmId: this.charm!.entityId },
         bubbles: true,
         composed: true,
       })
@@ -81,12 +80,12 @@ export class CommonCharmLink extends LitElement {
 
   override render() {
     if (this.charm === undefined) return html``;
-    const charm = charmById.get(this.charm);
-    if (!charm) return html`<div>⚠️ (unknown charm)</div>`;
 
     const name = this.name ?? this.nameFromCharm ?? "(unknown)";
     return html`
-      <a href="#${this.charm}" @click="${this.handleClick}">💎 ${name}</a>
+      <a href="#${this.charm.entityId}" @click="${this.handleClick}"
+        >💎 ${name}</a
+      >
     `;
   }
 }

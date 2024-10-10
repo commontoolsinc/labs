@@ -1,7 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { render } from "@commontools/common-ui";
-import { addCharms, recipeById, ID, type Charm } from "../data.js";
+import { addCharms, recipeById, type Charm } from "../data.js";
 import { run, type CellImpl } from "@commontools/common-runner";
 
 export const recipeLink = render.view("common-recipe-link", {
@@ -35,7 +35,7 @@ export class CommonRecipeLink extends LitElement {
 
     this.dispatchEvent(
       new CustomEvent("open-charm", {
-        detail: { charmId: charm.get()[ID] },
+        detail: { charmId: charm.entityId },
         bubbles: true,
         composed: true,
       })
