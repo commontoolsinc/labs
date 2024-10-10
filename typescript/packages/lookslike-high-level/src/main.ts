@@ -11,5 +11,5 @@ document.addEventListener("DOMContentLoaded", () => {
   )! as CommonWindowManager;
   openCharm.set(windowManager.openCharm.bind(windowManager));
   const homeCharm = run(home, { charms, recipes }) as CellImpl<Charm>;
-  windowManager.openCharm(homeCharm.entityId!);
+  windowManager.openCharm(homeCharm.entityId!.toString());
 });

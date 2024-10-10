@@ -95,10 +95,18 @@ export function run<T, R = any>(
 
   // Create a new recipe cell if it doesn't exist. Assign a random UUID for now.
   // Eventually this should be something more causal.
-  if (!recipeCell) {
-    recipeCell = cell<R>();
-    recipeCell.entityId = crypto.randomUUID();
-  }
+  if (!recipeCell) recipeCell = cell<R>();
+
+  // TODO: Move this below .send to establish at least some causal relationship.
+  // Right now id creation fails if there are any cell references in the cell.
+
+  // TODO: Add a causal relationship. For example a recipe that only transforms
+  // data from a fixed source could have an idea that depends on that source
+  // alone, as any instance of the recipe will do the same thing. The trouble is
+  // though that we support the recipe to change over time, and such a change
+  // might change this condition and we'd need distinct ideas for different
+  // instances of this recipe again.
+  if (!recipeCell.entityId) recipeCell.generateEntityId();
 
   // Generate recipe cell using defaults, bindings, and initial values
   recipeCell.send(

@@ -24,9 +24,10 @@
     "./lib/index.js"
   ],
   "dependencies": {
+    "@commontools/common-builder": "^0.0.1",
     "@commontools/common-runtime": "file:../common-runtime",
     "@commontools/llm-client": "^0.0.1",
-    "@commontools/common-builder": "^0.0.1"
+    "merkle-reference": "^0.0.1"
   },
   "devDependencies": {
     "@commontools/common-html": "^0.0.1",

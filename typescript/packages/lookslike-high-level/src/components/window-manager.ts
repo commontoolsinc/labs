@@ -112,8 +112,11 @@ export class CommonWindowManager extends LitElement {
       }
 
       this.openCharm(
-        run(iframe, { data: fieldsToInclude, title: value, prompt: value })
-          .entityId!
+        run(iframe, {
+          data: fieldsToInclude,
+          title: value,
+          prompt: value,
+        }).entityId!.toString()
       );
     }
   }
@@ -132,10 +135,10 @@ export class CommonWindowManager extends LitElement {
           if (!charmId) throw new Error("Charm has no entity ID");
 
           // Create a new ref for this charm
-          let charmRef = this.charmRefs.get(charmId);
+          let charmRef = this.charmRefs.get(charmId.toString());
           if (!charmRef) {
             charmRef = createRef<HTMLElement>();
-            this.charmRefs.set(charmId, charmRef);
+            this.charmRefs.set(charmId.toString(), charmRef);
             this.newCharmRefs.push([charm, charmRef]);
           }
 
@@ -166,9 +169,11 @@ export class CommonWindowManager extends LitElement {
 
     addCharms([charm]); // Make sure any shows charm is in the list of charms
 
-    const existingWindow = this.renderRoot.querySelector(`#window-${charmId}`);
+    const existingWindow = this.renderRoot.querySelector(
+      `#window-${charmId.toString()}`
+    );
     if (existingWindow) {
-      this.scrollToAndHighlight(charmId, true);
+      this.scrollToAndHighlight(charmId.toString(), true);
       return;
     }
 
@@ -204,7 +209,9 @@ export class CommonWindowManager extends LitElement {
     const windowElement = (e.currentTarget as HTMLElement).closest(".window");
     if (windowElement) {
       const charmId = windowElement.id.replace("window-", "");
-      this.charms = this.charms.filter((charm) => charm.entityId !== charmId);
+      this.charms = this.charms.filter(
+        (charm) => charm.entityId?.toString() !== charmId.toString()
+      );
       this.charmRefs.delete(charmId);
     }
   }
