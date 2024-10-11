@@ -40,10 +40,84 @@ function slugify(text) {
     .replace(/-+$/, ""); // Trim - from end of text
 }
 
+function getPageSource() {
+  return document.documentElement.outerHTML;
+}
+
+async function clipContentToCollection(collections, prompt = "") {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const url = clipContent ? clipContent.pageUrl : tabs[0].url;
+      const content = clipContent || { type: "webpage", url: url };
+      await new Promise((resolveSource) => {
+        let activeTab = tabs[0];
+        chrome.scripting.executeScript(
+          {
+            target: { tabId: activeTab.id },
+            function: getPageSource,
+          },
+          (injectionResults) => {
+            for (const frameResult of injectionResults) {
+              console.log("Frame HTML:", frameResult.result);
+              content.html = frameResult.result;
+              resolveSource();
+            }
+          },
+        );
+      });
+
+      fetch(`${API_URL}/clip`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          url: url,
+          collections: collections,
+          prompt: prompt,
+          content: content,
+        }),
+      })
+        .then((response) => response.json())
+        .then((data) => {
+          clearClipContent();
+          resolve(data);
+        })
+        .catch((error) => {
+          console.error("Error:", error);
+          reject(error);
+        });
+    });
+  });
+}
+
+function openCommonOS() {
+  const COMMON_OS_URL = "http://localhost:5173";
+  const newTab = window.open(COMMON_OS_URL, "_blank");
+  newTab.focus();
+  window.close();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   const searchInput = document.getElementById("searchInput");
   const recentCollections = document.getElementById("recentCollections");
   const searchResults = document.getElementById("searchResults");
+
+  document
+    .getElementById("openCommonOSButton")
+    .addEventListener("click", openCommonOS);
+
+  document
+    .getElementById("openInCommonOSButton")
+    .addEventListener("click", function () {
+      clipContentToCollection(["inbox"])
+        .then(() => {
+          openCommonOS();
+        })
+        .catch((error) => {
+          alert("An error occurred while clipping the content to inbox.");
+        });
+    });
 
   chrome.tabs.query(
     { active: true, currentWindow: true },
@@ -128,51 +202,21 @@ document.getElementById("clipButton").addEventListener("click", () => {
     return;
   }
 
-  function getPageSource() {
-    return document.documentElement.outerHTML;
-  }
+  clipContentToCollection(selectedCollections, prompt)
+    .then((data) => {
+      alert("Content clipped successfully!");
 
-  chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-    const url = clipContent ? clipContent.pageUrl : tabs[0].url;
-    const content = clipContent || { type: "webpage", url: url };
-    await new Promise((resolve) => {
-      let activeTab = tabs[0];
-      chrome.scripting.executeScript(
-        {
-          target: { tabId: activeTab.id },
-          function: getPageSource,
-        },
-        (injectionResults) => {
-          for (const frameResult of injectionResults) {
-            console.log("Frame HTML:", frameResult.result);
-            content.html = frameResult.result;
-            resolve();
-          }
-        },
-      );
-    });
+      // Create a pre element to display the response
+      const responseElement = document.createElement("pre");
+      responseElement.style.height = "200px";
+      responseElement.style.overflowY = "scroll";
+      responseElement.textContent = JSON.stringify(data, null, 2);
 
-    fetch(`${API_URL}/clip`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        url: url,
-        collections: selectedCollections,
-        prompt: prompt,
-        content: content,
-      }),
+      // Append the response element to the body
+      document.body.appendChild(responseElement);
     })
-      .then((response) => response.json())
-      .then((data) => {
-        alert("Content clipped successfully!");
-        clearClipContent(); // Clear the clipped content after successful clipping
-        window.close();
-      })
-      .catch((error) => {
-        console.error("Error:", error);
-        alert("An error occurred while clipping the content.");
-      });
-  });
+    .catch((error) => {
+      console.error("Error:", error);
+      alert("An error occurred while clipping the content.");
+    });
 });
