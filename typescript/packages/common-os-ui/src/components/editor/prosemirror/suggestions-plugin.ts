@@ -1,8 +1,8 @@
 import { Decoration, DecorationSet, EditorView } from "prosemirror-view";
 import { EditorState, Plugin, PluginKey } from "prosemirror-state";
-import { isBetweenInclusive } from "../../shared/number.js";
-import { Rect } from "../../shared/position.js";
-import { debug } from "../../shared/debug.js";
+import { isBetweenInclusive } from "../../../shared/number.js";
+import { Rect } from "../../../shared/position.js";
+import { debug } from "../../../shared/debug.js";
 
 export type Suggestion = {
   from: number;

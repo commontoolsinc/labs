@@ -1,5 +1,5 @@
 /** Suggestion actions, model and update */
-import { Suggestion, UpdateMsg } from "./suggestions-plugin.js";
+import { Suggestion, UpdateMsg } from "./prosemirror/suggestions-plugin.js";
 import { Rect, createRect } from "../../shared/position.js";
 import { clamp } from "../../shared/number.js";
 import { unknown } from "../../shared/store.js";

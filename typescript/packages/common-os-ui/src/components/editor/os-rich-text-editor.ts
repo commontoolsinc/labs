@@ -1,5 +1,5 @@
 import { ReactiveElement, css, html, render, PropertyValues } from "lit";
-import { EditorState, Plugin } from "prosemirror-state";
+import { EditorState } from "prosemirror-state";
 import { EditorView, Decoration } from "prosemirror-view";
 import { Schema } from "prosemirror-model";
 import { history } from "prosemirror-history";
@@ -7,7 +7,11 @@ import { keymap } from "prosemirror-keymap";
 import { baseKeymap } from "prosemirror-commands";
 import { customElement } from "lit/decorators.js";
 import { base } from "../../shared/styles.js";
-import { suggestionsPlugin, Suggestion } from "./suggestions-plugin.js";
+import { editorClassPlugin } from "./prosemirror/editor-class-plugin.js";
+import {
+  suggestionsPlugin,
+  Suggestion,
+} from "./prosemirror/suggestions-plugin.js";
 import * as suggestions from "./suggestions.js";
 import { classes } from "../../shared/dom.js";
 import {
@@ -49,19 +53,6 @@ const schema = () => {
     },
   });
 };
-
-const editorClassPlugin = () =>
-  new Plugin({
-    view(editorView) {
-      editorView.dom.classList.add("editor");
-
-      return {
-        destroy() {
-          editorView.dom.classList.remove("editor");
-        },
-      };
-    },
-  });
 
 const freeze = Object.freeze;
 
