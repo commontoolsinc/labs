@@ -62,7 +62,7 @@ async function main() {
               ? rest.slice(promptIndex + 1).join(" ")
               : undefined;
 
-          clipUrl(url, collection, prompt);
+          clipUrl(url, collection, prompt, undefined);
         }
         break;
       case "collection":

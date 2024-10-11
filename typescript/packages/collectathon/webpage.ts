@@ -4,15 +4,15 @@ import { CID, json, sha256 } from "./deps.ts";
 import { completion, fastCompletion } from "./llm.ts";
 import { assert, cid, clip, jsonToFacts } from "./synopsys.ts";
 
-export async function extractEntities(html: string, url: string, prompt?: string) {
+export async function extractEntities(
+  html: string,
+  url: string,
+  prompt?: string,
+) {
   const systemPrompt =
     "Extract the information the user requested from the provided webpage. You respond only with the entities extracted as an array e.g. ```json [{}, {}]``` block, no commentary.  Each object must be flat, no nested object hierarachy is permitted.";
   const userPrompt = `
-${
-  prompt
-    ? `${prompt}`
-    : `Extract a summary of the page as a JSON blob.`
-}
+${prompt ? `${prompt}` : `Extract a summary of the page as a JSON blob.`}
 
 URL: ${url}
 
@@ -33,11 +33,18 @@ export async function clipWebpage(
   url: string,
   collections: string[],
   prompt?: string,
+  html?: string,
 ) {
   try {
     db.query("BEGIN TRANSACTION");
-    const response = await fetch(url);
-    const html = await response.text();
+
+    if (!html) {
+      console.log("fetching html");
+      const response = await fetch(url);
+      html = await response.text();
+    } else {
+      console.log("using passed html");
+    }
 
     const entities = await extractEntities(html, url, prompt);
 
@@ -81,4 +88,6 @@ export async function clipWebpage(
     db.query("ROLLBACK");
     console.error(`Error clipping webpage: ${error.message}`);
   }
+
+  return entities;
 }
