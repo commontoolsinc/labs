@@ -1,4 +1,4 @@
-import { createStore } from "./store.js";
+import { createStore, cursor, unknown } from "./store.js";
 import * as assert from "node:assert/strict";
 
 describe("createStore", () => {
@@ -112,5 +112,77 @@ describe("createStore", () => {
     await sleep(20);
 
     assert.deepEqual(effectStore.get(), { count: 0 });
+  });
+});
+
+describe("cursor", () => {
+  type BigState = {
+    user: {
+      name: string;
+      age: number;
+    };
+    settings: {
+      theme: string;
+    };
+  };
+
+  type UserState = BigState["user"];
+  type UserMsg =
+    | { type: "changeName"; name: string }
+    | { type: "incrementAge" };
+
+  const initialBigState: BigState = {
+    user: { name: "John", age: 30 },
+    settings: { theme: "light" },
+  };
+
+  const updateName = (state: UserState, name: string): UserState => {
+    if (state.name === name) return state;
+    return { ...state, name };
+  };
+
+  const updateUser = (state: UserState, msg: UserMsg): UserState => {
+    switch (msg.type) {
+      case "changeName":
+        return updateName(state, msg.name);
+      case "incrementAge":
+        return { ...state, age: state.age + 1 };
+      default:
+        return unknown(state, msg);
+    }
+  };
+
+  const userCursor = cursor<BigState, UserState, UserMsg>({
+    update: updateUser,
+    get: (big) => big.user,
+    put: (big, small) => ({ ...big, user: small }),
+  });
+
+  it("should update the correct part of the state", () => {
+    const newState = userCursor(initialBigState, {
+      type: "changeName",
+      name: "Alice",
+    });
+    assert.deepEqual(newState, {
+      ...initialBigState,
+      user: { ...initialBigState.user, name: "Alice" },
+    });
+  });
+
+  it("should not modify other parts of the state", () => {
+    const newState = userCursor(initialBigState, { type: "incrementAge" });
+    assert.deepEqual(newState, {
+      ...initialBigState,
+      user: { ...initialBigState.user, age: 31 },
+    });
+    assert.deepEqual(newState.settings, initialBigState.settings);
+  });
+
+  it("should return the same state object if no changes are made", () => {
+    const newState = userCursor(initialBigState, {
+      type: "changeName",
+      name: "John",
+    });
+    assert.strictEqual(newState, initialBigState);
   });
 });

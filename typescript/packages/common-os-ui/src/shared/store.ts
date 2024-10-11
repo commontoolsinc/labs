@@ -84,8 +84,14 @@ export const cursor =
     get: (big: BigState) => SmallState;
     put: (big: BigState, small: SmallState) => BigState;
   }) =>
-  (big: BigState, msg: SmallMsg) =>
-    put(big, update(get(big), msg));
+  (big: BigState, msg: SmallMsg) => {
+    const small = get(big);
+    const small2 = update(small, msg);
+    if (small === small2) {
+      return big;
+    }
+    return put(big, small2);
+  };
 
 /**
  * Convenience updater for update function fallthroughs when an unknown
