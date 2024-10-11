@@ -63,9 +63,7 @@ export const getEntityId = (value: any): EntityId | undefined => {
 export function getCellByEntityId<T = any>(
   entityId: EntityId | string
 ): CellImpl<T> | undefined {
-  return entityIdToCellMap.get(
-    typeof entityId === "string" ? entityId : JSON.stringify(entityId)
-  );
+  return entityIdToCellMap.get(typeof entityId === "string" ? JSON.stringify(entityId));
 }
 
 export const setCellByEntityId = (entityId: EntityId, cell: CellImpl<any>) => {

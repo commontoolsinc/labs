@@ -47,10 +47,10 @@ export const charms = cell<CellImpl<Charm>[]>([]);
 export function addCharms(newCharms: CellImpl<any>[]) {
   const currentCharms = charms.get();
   const currentIds = new Set(
-    currentCharms.map((charm) => charm.entityId?.toString())
+    currentCharms.map((charm) => JSON.stringify(charm.entityId))
   );
   const charmsToAdd = newCharms.filter(
-    (charm) => !currentIds.has(charm.entityId?.toString())
+    (charm) => !currentIds.has(JSON.stringify(charm.entityId))
   );
 
   if (charmsToAdd.length > 0) {

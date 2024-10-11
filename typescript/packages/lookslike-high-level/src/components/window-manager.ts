@@ -112,11 +112,13 @@ export class CommonWindowManager extends LitElement {
       }
 
       this.openCharm(
-        run(iframe, {
-          data: fieldsToInclude,
-          title: value,
-          prompt: value,
-        }).entityId!.toString()
+        JSON.stringify(
+          run(iframe, {
+            data: fieldsToInclude,
+            title: value,
+            prompt: value,
+          }).entityId
+        )
       );
     }
   }
@@ -127,7 +129,7 @@ export class CommonWindowManager extends LitElement {
     return html`
       ${repeat(
         this.charms,
-        (charm) => charm.entityId,
+        (charm) => JSON.stringify(charm.entityId),
         (charm) => {
           const charmValues = charm.getAsProxy();
           const charmId = charm.entityId;
@@ -135,7 +137,7 @@ export class CommonWindowManager extends LitElement {
           if (!charmId) throw new Error("Charm has no entity ID");
 
           // Create a new ref for this charm
-          let charmRef = this.charmRefs.get(charmId.toString());
+          let charmRef = this.charmRefs.get(JSON.stringify(charmId));
           if (!charmRef) {
             charmRef = createRef<HTMLElement>();
             this.charmRefs.set(charmId.toString(), charmRef);
@@ -143,7 +145,7 @@ export class CommonWindowManager extends LitElement {
           }
 
           return html`
-            <div class="window" id="window-${charmId}">
+            <div class="window" data-charm-id="${JSON.stringify(charmId)}">
               <button class="close-button" @click="${this.onClose}">×</button>
               <common-screen-element>
                 <common-system-layout>
@@ -170,10 +172,10 @@ export class CommonWindowManager extends LitElement {
     addCharms([charm]); // Make sure any shows charm is in the list of charms
 
     const existingWindow = this.renderRoot.querySelector(
-      `#window-${charmId.toString()}`
+      `[data-charm-id="${CSS.escape(charmId)}"]`
     );
     if (existingWindow) {
-      this.scrollToAndHighlight(charmId.toString(), true);
+      this.scrollToAndHighlight(charmId, true);
       return;
     }
 
@@ -191,7 +193,9 @@ export class CommonWindowManager extends LitElement {
   }
 
   private scrollToAndHighlight(charmId: string, animate: boolean) {
-    const window = this.renderRoot.querySelector(`#window-${charmId}`);
+    const window = this.renderRoot.querySelector(
+      `[data-charm-id="${CSS.escape(charmId)}"]`
+    );
     if (window) {
       window.scrollIntoView({
         behavior: "smooth",
@@ -208,11 +212,13 @@ export class CommonWindowManager extends LitElement {
   onClose(e: Event) {
     const windowElement = (e.currentTarget as HTMLElement).closest(".window");
     if (windowElement) {
-      const charmId = windowElement.id.replace("window-", "");
-      this.charms = this.charms.filter(
-        (charm) => charm.entityId?.toString() !== charmId.toString()
-      );
-      this.charmRefs.delete(charmId);
+      const charmId = windowElement.getAttribute("data-charm-id");
+      if (charmId) {
+        this.charms = this.charms.filter(
+          (charm) => JSON.stringify(charm.entityId) !== charmId
+        );
+        this.charmRefs.delete(charmId);
+      }
     }
   }
 
