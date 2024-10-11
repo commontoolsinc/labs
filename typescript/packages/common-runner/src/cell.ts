@@ -538,7 +538,7 @@ export function getCellReferenceOrValue(value: any): CellReference {
 
 export function getCellReferenceOrThrow(value: any): CellReference {
   if (isCellProxy(value)) return value[getCellReference];
-  else throw new Error("Value is not a cell reference");
+  else throw new Error("Value is not a cell proxy");
 }
 
 const isCellMarker = Symbol("isCell");

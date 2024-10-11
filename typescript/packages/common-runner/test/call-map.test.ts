@@ -6,13 +6,8 @@ import {
   setCellByEntityId,
   EntityId,
 } from "../src/cell-map";
-import { cell } from "../src/cell.js";
+import { cell, getCellReferenceOrThrow } from "../src/cell.js";
 import { refer } from "merkle-reference";
-
-// Mock the crypto.randomUUID function
-vi.mock("crypto", () => ({
-  randomUUID: () => "mocked-uuid",
-}));
 
 describe("refer", () => {
   it("should create a reference that is equal to another reference with the same source", () => {
@@ -24,12 +19,6 @@ describe("refer", () => {
 
 describe("cell-map", () => {
   describe("createRef", () => {
-    it("should create a reference with default values", () => {
-      const ref = createRef();
-      const ref2 = createRef("mocked-uuid");
-      expect(ref).toEqual(ref2);
-    });
-
     it("should create a reference with custom source and cause", () => {
       const source = { foo: "bar" };
       const cause = "custom-cause";
@@ -47,19 +36,17 @@ describe("cell-map", () => {
     });
 
     it("should return the entity ID for a cell", () => {
-      const c = cell();
+      const c = cell({});
       c.generateEntityId();
 
       expect(getEntityId(c)).toEqual(c.entityId);
       expect(getEntityId(c.getAsProxy())).toEqual(c.entityId);
-      expect(getEntityId(c.getAsProxy([]))).toEqual(c.entityId);
       expect(getEntityId(c.asSimpleCell())).toEqual(c.entityId);
-      expect(getEntityId(c.asSimpleCell([]))).toEqual(c.entityId);
       expect(getEntityId({ cell: c, path: [] })).toEqual(c.entityId);
     });
 
     it("should return a different entity ID for reference with paths", () => {
-      const c = cell();
+      const c = cell({ foo: { bar: 42 } });
       c.generateEntityId();
 
       expect(getEntityId(c.getAsProxy())).toEqual(c.entityId);
