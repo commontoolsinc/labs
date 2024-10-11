@@ -30,6 +30,7 @@ export const createRef = (
     // @ts-ignore
     if (typeof process !== "undefined" && process.env.VITEST) {
       // We're in Vitest, so use a random UUID
+      console.warn("Using random UUID as fallback for entity ID");
       return crypto.randomUUID() as unknown as EntityId;
     } else {
       // We're not in Vitest, so re-throw the error
