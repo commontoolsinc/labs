@@ -69,7 +69,7 @@ export class OsFloatingCompletions extends LitElement {
       const classes = classMap({
         completion: true,
         "completion--active":
-          clamp(0, this.completions.length - 1, this.selected) === index,
+          clamp(this.selected, 0, this.completions.length - 1) === index,
       });
       return html`
         <li class="${classes}">

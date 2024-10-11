@@ -93,9 +93,9 @@ const updateSelectedCompletion = (state: State, offset: number): State => {
   return freeze({
     ...state,
     selectedCompletion: clamp(
+      state.selectedCompletion + offset,
       0,
       Math.max(state.completions.length - 1, 0),
-      state.selectedCompletion + offset,
     ),
   });
 };

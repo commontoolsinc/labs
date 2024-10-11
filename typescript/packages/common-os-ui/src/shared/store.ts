@@ -23,7 +23,7 @@ export const createStore = <State, Msg>({
   state: State;
   msg?: Msg;
   update: (state: State, msg: Msg) => State;
-  fx: (msg: Msg) => Array<Fx<Msg>>;
+  fx?: (msg: Msg) => Array<Fx<Msg>>;
 }): Store<State, Msg> => {
   const listeners = new Set<(state: State) => void>();
   let state = initial;

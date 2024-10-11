@@ -1,5 +1,4 @@
 import { computePosition, shift } from "@floating-ui/dom";
-import { animationFrame } from "./dom.js";
 
 export type Rect = {
   top: number;

@@ -4,7 +4,7 @@ export const isBetweenInclusive = (min: number, max: number, n: number) => {
 };
 
 /** Clamp number between min and max inclusive */
-export const clamp = (min: number, max: number, n: number) => {
+export const clamp = (n: number, min: number, max: number) => {
   if (max < min) throw TypeError("max must be >= min");
   return Math.min(Math.max(n, min), max);
 };

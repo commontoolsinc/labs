@@ -7,6 +7,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "npm run build && mocha lib/test/**/*.test.js",
     "build": "wireit",
     "clean": "wireit",
     "dev": "vite"
@@ -34,6 +35,8 @@
     "prosemirror-view": "^1.34.3"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.9",
+    "mocha": "^10.7.3",
     "tslib": "^2.6.2",
     "typescript": "^5.2.2",
     "wireit": "^0.14.4"
