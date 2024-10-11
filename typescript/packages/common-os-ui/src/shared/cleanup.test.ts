@@ -1,4 +1,4 @@
-import { createCleanupGroup } from "../shared/cleanup.js";
+import { createCleanupGroup } from "./cleanup.js";
 import * as assert from "node:assert/strict";
 
 describe("cleanupGroup", () => {

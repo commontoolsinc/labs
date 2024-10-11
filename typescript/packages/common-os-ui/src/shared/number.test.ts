@@ -1,4 +1,4 @@
-import { clamp } from "../shared/number.js";
+import { clamp } from "./number.js";
 import * as assert from "node:assert/strict";
 
 describe("clamp", () => {

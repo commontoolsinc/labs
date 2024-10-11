@@ -1,4 +1,4 @@
-import { createStore } from "../shared/store.js";
+import { createStore } from "./store.js";
 import * as assert from "node:assert/strict";
 
 describe("createStore", () => {
