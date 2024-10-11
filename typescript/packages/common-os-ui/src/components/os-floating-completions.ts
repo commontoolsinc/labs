@@ -53,7 +53,7 @@ export class OsFloatingCompletions extends LitElement {
         align-items: center;
         padding: var(--u) var(--pad);
 
-        &.completion--active {
+        :is(&.completion--active, &:hover) {
           background-color: var(--bg-scrim);
         }
 
