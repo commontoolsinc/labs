@@ -2,6 +2,7 @@ import * as assert from "node:assert/strict";
 import { createRect } from "../../shared/position.js";
 import * as suggestions from "./suggestions.js";
 import * as suggestionsPlugin from "./prosemirror/suggestions-plugin.js";
+import * as completion from "./completion.js";
 
 describe("suggestions.update", () => {
   it("should handle update message with non-null update", () => {
@@ -12,7 +13,7 @@ describe("suggestions.update", () => {
       coords: createRect(10, 20, 100, 50),
     });
 
-    const initialState = suggestions.init();
+    const initialState = suggestions.model();
     const newState = suggestions.update(initialState, updateMsg);
 
     assert.deepStrictEqual(newState.active, suggestion);
@@ -24,7 +25,7 @@ describe("suggestions.update", () => {
   it("should handle update message with null update", () => {
     const updateMsg = suggestions.createUpdateMsg(null);
 
-    const initialState = suggestions.init();
+    const initialState = suggestions.model();
     const newState = suggestions.update(initialState, updateMsg);
 
     assert.strictEqual(newState.active, null);
@@ -32,14 +33,14 @@ describe("suggestions.update", () => {
   });
 
   it("should handle arrowUp message", () => {
-    const initialState = suggestions.init();
+    const initialState = suggestions.model();
 
     const stateWithCompletions = {
       ...initialState,
       completions: [
-        suggestions.createCompletion("1", "First"),
-        suggestions.createCompletion("2", "Second"),
-        suggestions.createCompletion("3", "Third"),
+        completion.model({ id: "1", text: "First" }),
+        completion.model({ id: "2", text: "Second" }),
+        completion.model({ id: "3", text: "Third" }),
       ],
       selectedCompletion: 1,
     };
@@ -52,14 +53,14 @@ describe("suggestions.update", () => {
   });
 
   it("should handle arrowDown message", () => {
-    const initialState = suggestions.init();
+    const initialState = suggestions.model();
 
     const stateWithCompletions = {
       ...initialState,
       completions: [
-        suggestions.createCompletion("1", "First"),
-        suggestions.createCompletion("2", "Second"),
-        suggestions.createCompletion("3", "Third"),
+        completion.model({ id: "1", text: "First" }),
+        completion.model({ id: "2", text: "Second" }),
+        completion.model({ id: "3", text: "Third" }),
       ],
       selectedCompletion: 1,
     };
@@ -72,14 +73,14 @@ describe("suggestions.update", () => {
   });
 
   it("should clamp selectedCompletion within bounds", () => {
-    const initialState = suggestions.init();
+    const initialState = suggestions.model();
 
     const stateWithCompletions = {
       ...initialState,
       completions: [
-        suggestions.createCompletion("1", "First"),
-        suggestions.createCompletion("2", "Second"),
-        suggestions.createCompletion("3", "Third"),
+        completion.model({ id: "1", text: "First" }),
+        completion.model({ id: "2", text: "Second" }),
+        completion.model({ id: "3", text: "Third" }),
       ],
       selectedCompletion: 0,
     };
@@ -97,7 +98,7 @@ describe("suggestions.update", () => {
   });
 
   it("should return the same state for unknown message types", () => {
-    const initialState = suggestions.init();
+    const initialState = suggestions.model();
     const unknownMsg = { type: "unknown" } as unknown as suggestions.Msg;
 
     const nextState = suggestions.update(initialState, unknownMsg);

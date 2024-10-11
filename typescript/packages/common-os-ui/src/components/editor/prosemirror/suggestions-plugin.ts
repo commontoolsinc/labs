@@ -4,13 +4,6 @@ import { isBetweenInclusive } from "../../../shared/number.js";
 import { Rect } from "../../../shared/position.js";
 import { debug } from "../../../shared/debug.js";
 
-export type Suggestion = {
-  from: number;
-  to: number;
-  active: boolean;
-  text: string;
-};
-
 const freeze = Object.freeze;
 
 /// Create a frozen suggestion
@@ -19,7 +12,9 @@ export const createSuggestion = (
   to: number,
   active: boolean,
   text: string,
-): Suggestion => freeze({ from, to, active, text });
+) => freeze({ from, to, active, text });
+
+export type Suggestion = ReturnType<typeof createSuggestion>;
 
 export const isSuggestionActive = (suggestion: Suggestion) => suggestion.active;
 

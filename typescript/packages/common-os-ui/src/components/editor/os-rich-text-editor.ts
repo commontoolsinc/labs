@@ -13,7 +13,7 @@ import {
   Suggestion,
 } from "./prosemirror/suggestions-plugin.js";
 import * as suggestions from "./suggestions.js";
-import { classes } from "../../shared/dom.js";
+import { createSelection, TextSelection } from "./selection.js";
 import {
   createStore,
   cursor,
@@ -24,6 +24,8 @@ import {
 } from "../../shared/store.js";
 import { createCleanupGroup } from "../../shared/cleanup.js";
 import { TemplateResult } from "lit";
+import { classes } from "../../shared/dom.js";
+import { ClickCompletion } from "../os-floating-completions.js";
 
 const schema = () => {
   return new Schema({
@@ -72,20 +74,24 @@ export type Msg =
   | ReturnType<typeof createHashtagMsg>
   | ReturnType<typeof createMentionMsg>;
 
-export type State = {
-  mention: suggestions.State;
-  hashtag: suggestions.State;
+export type Model = {
+  text: string;
+  selection: TextSelection;
+  mention: suggestions.Model;
+  hashtag: suggestions.Model;
 };
 
-export const init = (): State => ({
-  mention: suggestions.init(),
-  hashtag: suggestions.init(),
+export const model = (): Model => ({
+  text: "",
+  selection: createSelection({ from: 0, to: 0, anchor: 0, head: 0 }),
+  mention: suggestions.model(),
+  hashtag: suggestions.model(),
 });
 
 const updateMention = cursor({
   update: suggestions.update,
-  get: (big: State) => big.mention,
-  put: (big: State, small: suggestions.State) =>
+  get: (big: Model) => big.mention,
+  put: (big: Model, small: suggestions.Model) =>
     freeze({
       ...big,
       mention: small,
@@ -94,15 +100,15 @@ const updateMention = cursor({
 
 const updateHashtag = cursor({
   update: suggestions.update,
-  get: (big: State) => big.hashtag,
-  put: (big: State, small: suggestions.State) =>
+  get: (big: Model) => big.hashtag,
+  put: (big: Model, small: suggestions.Model) =>
     freeze({
       ...big,
       hashtag: small,
     }),
 });
 
-export const update = (state: State, msg: Msg): State => {
+export const update = (state: Model, msg: Msg): Model => {
   switch (msg.type) {
     case "mention":
       return updateMention(state, msg.value);
@@ -263,14 +269,14 @@ export class OsRichTextEditor extends ReactiveElement {
   ];
 
   #destroy = createCleanupGroup();
-  #store: Store<State, Msg>;
+  #store: Store<Model, Msg>;
   #editorView?: EditorView;
   #reactiveRoot?: HTMLElement;
 
   constructor() {
     super();
     this.#store = createStore({
-      state: init(),
+      state: model(),
       update,
       fx,
     });
@@ -291,7 +297,7 @@ export class OsRichTextEditor extends ReactiveElement {
     this.#store.send(msg);
   }
 
-  set state(_state: State) {
+  set state(_state: Model) {
     // TODO
     // this.#state.send();
   }
@@ -304,6 +310,19 @@ export class OsRichTextEditor extends ReactiveElement {
   render(): TemplateResult {
     const hashtagState = this.state.hashtag;
     const mentionState = this.state.mention;
+
+    const onHashtagClickCompletion = (event: ClickCompletion) => {
+      this.#store.send(
+        createHashtagMsg(suggestions.createClickCompletionMsg(event.detail)),
+      );
+    };
+
+    const onMentionClickCompletion = (event: ClickCompletion) => {
+      this.#store.send(
+        createMentionMsg(suggestions.createClickCompletionMsg(event.detail)),
+      );
+    };
+
     return html`
       <os-floating-completions
         id="hashtag-completions"
@@ -311,6 +330,7 @@ export class OsRichTextEditor extends ReactiveElement {
         .show=${hashtagState.active != null}
         .completions=${hashtagState.completions}
         .selected=${hashtagState.selectedCompletion}
+        @click-completion=${onHashtagClickCompletion}
       >
       </os-floating-completions>
       <os-floating-completions
@@ -319,6 +339,7 @@ export class OsRichTextEditor extends ReactiveElement {
         .show=${mentionState.active != null}
         .completions=${mentionState.completions}
         .selected=${mentionState.selectedCompletion}
+        @click-completion=${onMentionClickCompletion}
       >
       </os-floating-completions>
     `;

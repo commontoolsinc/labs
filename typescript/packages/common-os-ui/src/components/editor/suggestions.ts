@@ -4,26 +4,9 @@ import { Rect, createRect } from "../../shared/position.js";
 import { clamp } from "../../shared/number.js";
 import { unknown } from "../../shared/store.js";
 import * as dummy from "../../shared/dummy.js";
+import * as completion from "./completion.js";
 
 const freeze = Object.freeze;
-
-export type Completion = {
-  id: string;
-  text: string;
-};
-
-export const createCompletion = (id: string, text: string): Completion =>
-  freeze({
-    id,
-    text,
-  });
-
-export type State = {
-  active: Suggestion | null;
-  coords: Rect;
-  selectedCompletion: number;
-  completions: Array<Completion>;
-};
 
 export const createUpdateMsg = (update: UpdateMsg | null) =>
   freeze({
@@ -53,15 +36,29 @@ export const createEnterMsg = () =>
     type: "enter",
   });
 
+export const createClickCompletionMsg = (value: completion.Model) =>
+  freeze({
+    type: "clickCompletion",
+    value,
+  });
+
 export type Msg =
   | ReturnType<typeof createUpdateMsg>
   | ReturnType<typeof createDestroyMsg>
   | ReturnType<typeof createArrowUpMsg>
   | ReturnType<typeof createArrowDownMsg>
   | ReturnType<typeof createTabMsg>
-  | ReturnType<typeof createEnterMsg>;
+  | ReturnType<typeof createEnterMsg>
+  | ReturnType<typeof createClickCompletionMsg>;
 
-export const init = () =>
+export type Model = {
+  active: Suggestion | null;
+  coords: Rect;
+  selectedCompletion: number;
+  completions: Array<completion.Model>;
+};
+
+export const model = (): Model =>
   freeze({
     active: null,
     coords: createRect(0, 0, 0, 0),
@@ -69,7 +66,7 @@ export const init = () =>
     completions: [],
   });
 
-const updateUpdate = (state: State, msg: UpdateMsg | null): State => {
+const updateUpdate = (state: Model, msg: UpdateMsg | null): Model => {
   if (msg != null) {
     return freeze({
       ...state,
@@ -78,7 +75,7 @@ const updateUpdate = (state: State, msg: UpdateMsg | null): State => {
       selectedCompletion: 0,
       completions: dummy
         .titles(3)
-        .map((title) => createCompletion(dummy.id(), title)),
+        .map((text) => completion.model({ id: dummy.id(), text })),
     });
   } else {
     return freeze({
@@ -89,7 +86,7 @@ const updateUpdate = (state: State, msg: UpdateMsg | null): State => {
   }
 };
 
-const updateSelectedCompletion = (state: State, offset: number): State => {
+const updateSelectedCompletion = (state: Model, offset: number): Model => {
   return freeze({
     ...state,
     selectedCompletion: clamp(
@@ -100,7 +97,7 @@ const updateSelectedCompletion = (state: State, offset: number): State => {
   });
 };
 
-export const update = (state: State, msg: Msg): State => {
+export const update = (state: Model, msg: Msg): Model => {
   switch (msg.type) {
     case "update":
       return updateUpdate(state, msg.update);

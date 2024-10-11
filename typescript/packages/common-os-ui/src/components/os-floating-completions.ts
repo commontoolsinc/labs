@@ -3,9 +3,22 @@ import { customElement, property } from "lit/decorators.js";
 import { base } from "../shared/styles.js";
 import { createRect, Rect, positionMenu } from "../shared/position.js";
 import { toggleInvisible } from "../shared/dom.js";
-import { Completion } from "./editor/suggestions.js";
+import * as completion from "./editor/completion.js";
 import { classMap } from "lit/directives/class-map.js";
 import { clamp } from "../shared/number.js";
+
+/** Completion clicked */
+export class ClickCompletion extends Event {
+  detail: completion.Model;
+
+  constructor(completion: completion.Model) {
+    super("click-completion", {
+      bubbles: true,
+      composed: true,
+    });
+    this.detail = completion;
+  }
+}
 
 @customElement("os-floating-completions")
 export class OsFloatingCompletions extends LitElement {
@@ -33,6 +46,7 @@ export class OsFloatingCompletions extends LitElement {
       }
 
       .completion {
+        cursor: pointer;
         display: flex;
         flex-direction: row;
         height: var(--min-touch-size);
@@ -62,17 +76,22 @@ export class OsFloatingCompletions extends LitElement {
   selected: number = 0;
 
   @property({ attribute: false })
-  completions: Array<Completion> = [];
+  completions: Array<completion.Model> = [];
 
   override render() {
-    const renderCompletion = (completion: Completion, index: number) => {
+    const renderCompletion = (completion: completion.Model, index: number) => {
       const classes = classMap({
         completion: true,
         "completion--active":
           clamp(this.selected, 0, this.completions.length - 1) === index,
       });
+
+      const onclick = (_event: MouseEvent) => {
+        this.dispatchEvent(new ClickCompletion(completion));
+      };
+
       return html`
-        <li class="${classes}">
+        <li class="${classes}" @click=${onclick}>
           <div class="completion--text">${completion.text}</div>
         </li>
       `;
