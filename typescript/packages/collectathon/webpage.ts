@@ -12,7 +12,6 @@ export async function extractEntities(
   const systemPrompt =
     "Extract the information the user requested from the provided webpage. You respond only with the entities extracted as an array e.g. ```json [{}, {}]``` block, no commentary.  Each object must be flat, no nested object hierarachy is permitted.";
   const userPrompt = `
-
 URL: ${url}
 
 HTML Content:

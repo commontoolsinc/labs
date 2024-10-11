@@ -2,12 +2,14 @@ import { html } from "@commontools/common-html";
 import {
   recipe,
   UI,
+  llm,
   NAME,
   lift,
   handler,
   navigateTo,
   str,
   cell,
+  ifElse,
 } from "@commontools/common-builder";
 import { streamData } from "@commontools/common-builder";
 import { runtimeWorkbench } from "./runtimeWorkbench.js";
@@ -71,6 +73,95 @@ const normalizeData = lift(({ result }) => {
   return Object.values(groupedData);
 });
 
+const grabKeywords = lift<{ result?: string }, any>(({ result }) => {
+  if (!result) {
+    return [];
+  }
+  const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
+  if (!jsonMatch) {
+    console.error("No JSON found in text:", result);
+    return [];
+  }
+  let rawData = JSON.parse(jsonMatch[1]);
+  return rawData;
+});
+
+const keywordPrompt = lift<{ search: string }>(({ search }) => {
+  return {
+    messages: [
+      `Extract keywords from this search query: "${search}"`,
+      "```json\n[",
+    ],
+    system: "Respond with a JSON array of keywords in a block",
+    stop: "```",
+  };
+});
+
+const guessShapePrompt = lift<{ search: string }>(({ search }) => {
+  return {
+    messages: [
+      `Guess the minimal data shape for this search query: "${search}"`,
+      "```json\n{",
+    ],
+    system:
+      "Respond with a JSON object representing the likely data shape with field names as keys and expected data types as values.",
+    stop: "```",
+  };
+});
+
+const generateFlexibleQuery = lift(
+  ({
+    dataShape,
+    keywords,
+  }: {
+    dataShape: Record<string, string>;
+    keywords: string[];
+  }) => {
+    const select: Record<string, any> = {
+      collection: "?collection",
+      item: [],
+    };
+
+    const where: Array<Record<string, any>> = [
+      { Case: ["?collection", "member", "?item"] },
+    ];
+
+    // Add flexible OR conditions for collection names
+    if (keywords.length > 0) {
+      where.push({
+        Or: keywords.map((keyword) => ({
+          Case: ["?collection", "name", keyword],
+        })),
+      });
+    }
+
+    let names: string[] = [];
+    let fields: any[] = [];
+
+    // Generate flexible conditions for each field in the data shape
+    Object.entries(dataShape).forEach(([field, type]) => {
+      names.push(field);
+
+      fields.push(
+        // Or: [
+        { Case: ["?item", field, `?${field}`] },
+        // { Case: ["?item", "has_" + field, `?${field}`] },
+        // { Case: ["?item", field.toLowerCase(), `?${field}`] },
+        // { Case: ["?item", field.toUpperCase(), `?${field}`] },
+        // ],
+      );
+    });
+
+    select.item.push(Object.fromEntries(names.map((f) => [f, `?${f}`])));
+    where.push({ Or: fields });
+
+    return {
+      select,
+      where,
+    };
+  },
+);
+
 const buildQuery = lift(({ query }) => {
   if (!query) return {};
   return {
@@ -82,58 +173,67 @@ const buildQuery = lift(({ query }) => {
   };
 });
 
-export const queryCollections = recipe<{ collectionName: string }>("Fetch Collections", ({ collectionName }) => {
-  const query = cell<any>();
+export const queryCollections = recipe<{ search: string }>(
+  "Fetch Collections",
+  ({ search }: { search: string }) => {
+    search.setDefault("");
+    const query = cell<any>({ where: [] });
 
-  collectionName.setDefault("reminders");
+    const keywords = grabKeywords(llm(keywordPrompt({ search })));
+    const dataShape = grabKeywords(llm(guessShapePrompt({ search })));
 
+    const flexibleQuery = generateFlexibleQuery({ dataShape, keywords });
 
-    // const { result: collectionResults } = streamData({
-    //   url: `/api/data`,
-    //   options: {
-    //     method: "PUT",
-    //     body: listCollections,
-    //   },
-    // });
-    //
-    //
-
-  const { result } = streamData(buildQuery({ query }));
+    const { result } = streamData(buildQuery({ query: flexibleQuery }));
 
     // const collections = ensureArray({ data: collectionResults?.data });
     const data = ensureArray({ data: result });
     const normalizedData = normalizeData({ result: result });
-    const exportedData = lift((data: any[]) => ({ items: data }))(normalizedData);
+    const exportedData = lift((data: any[]) => ({ items: data }))(
+      normalizedData,
+    );
 
-  return {
-    [NAME]: str`Query ${collectionName}`,
-    [UI]: html`<div>
-          <div class="collection-input">
-            <input
-              value=${collectionName}
-              onkeyup=${onInput({ value: collectionName })}
-              type="text"
-              placeholder="Enter collection name"
-            />
+    return {
+      [NAME]: "Query Synopsys Collections",
+      [UI]: html`<div>
+        ${ifElse(
+          result,
+          html`<div>
+            <div class="collection-input">
+              <input
+                value=${search}
+                onkeyup=${onInput({ value: search })}
+                type="text"
+                placeholder="Enter search query"
+              />
+              <div>Keywords: ${stringify({ obj: keywords })}</div>
+              <pre>${stringify({ obj: dataShape })}</pre>
 
-            <common-button onclick=${generateQuery({ collectionName, query })}>
-              Go
-            </common-button>
-          </div>
+              <button
+                onclick=${generateQuery({
+                  collectionName: search,
+                  query,
+                })}
+              >
+                Load
+              </button>
+            </div>
 
-          <p>Number of items: ${dataSize}</p>
-          <pre>${stringify({ obj: normalizedData })}</pre>
-          <details>
-            <summary>Generated Query</summary>
-            <pre>${stringify({ obj: query })}</pre>
-          </details>
-          <common-button onclick=${onWorkbench({ data })}>
-            Open in Workbench
-          </common-button>
-        </div>`,
-    result,
-    // collections,
-    collectionName,
-    data: exportedData,
-  };
-});
+            <details open>
+              <summary>Results</summary>
+              <pre>${stringify({ obj: normalizedData })}</pre>
+            </details>
+            <details>
+              <summary>Generated Query</summary>
+              <pre>${stringify({ obj: flexibleQuery })}</pre>
+            </details>
+          </div>`,
+          html`<div>Loading...</div>`,
+        )}
+      </div>`,
+      result,
+      // collections,
+      data: exportedData,
+    };
+  },
+);
