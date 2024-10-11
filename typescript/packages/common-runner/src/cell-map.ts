@@ -20,7 +20,23 @@ export type EntityId = ReturnType<typeof refer>;
 export const createRef = (
   source: Object = {},
   cause: any = crypto.randomUUID()
-): EntityId => refer({ ...source, causal: cause });
+): EntityId => {
+  try {
+    return refer({ ...source, causal: cause });
+  } catch (e) {
+    // HACK: merkle-reference currently fails in a jsdom vitest environment, so
+    // we replace the id with a random UUID.
+
+    // @ts-ignore
+    if (typeof process !== "undefined" && process.env.VITEST) {
+      // We're in Vitest, so use a random UUID
+      return crypto.randomUUID() as unknown as EntityId;
+    } else {
+      // We're not in Vitest, so re-throw the error
+      throw e;
+    }
+  }
+};
 
 /**
  * Extracts an entity ID from a cell or cell representation. Creates a stable

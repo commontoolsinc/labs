@@ -160,7 +160,6 @@ export function cell<T>(value?: T): CellImpl<T> {
       setCellByEntityId(id, self);
     },
     generateEntityId: (cause?: any): void => {
-      console.log("entity creation", value);
       entityId = createRef(
         typeof value === "object" && value !== null
           ? (value as Object)
