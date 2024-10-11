@@ -11,7 +11,11 @@ type Fact = [Entity, Attribute, Value];
 
 const SYNOPSYS_URL = Deno.env.get("SYNOPSYS_URL") || "http://localhost:8080";
 
-export async function clipEmail(sender: string, collections: string[], entity: any) {
+export async function clipEmail(
+  sender: string,
+  collections: string[],
+  entity: any,
+) {
   entity["import/sender"] = sender;
   entity["import/source"] = "Email";
   entity["import/tool"] = "ingest";
@@ -20,21 +24,29 @@ export async function clipEmail(sender: string, collections: string[], entity: a
   const entityCid = await cid(entity);
   const entityFacts = await jsonToFacts(entity);
 
-  const collectionsFacts = await Promise.all(collections.map(async (collectionName) => {
-    const collection = { name: collectionName, type: 'collection' };
-    return await jsonToFacts(collection);
-  }));
+  const collectionsFacts = await Promise.all(
+    collections.map(async (collectionName) => {
+      const collection = { name: collectionName, type: "collection" };
+      return await jsonToFacts(collection);
+    }),
+  );
 
   const mergedCollectionFacts = collectionsFacts.flat();
 
-  const memberFacts = await Promise.all(collections.map(async (collectionName) => {
-    const collection = { name: collectionName, type: 'collection' };
-    const collectionCid = await cid(collection);
-    return [{ "/": collectionCid }, 'member', { "/": entityCid }] as Fact;
-  }));
+  const memberFacts = await Promise.all(
+    collections.map(async (collectionName) => {
+      const collection = { name: collectionName, type: "collection" };
+      const collectionCid = await cid(collection);
+      return [{ "/": collectionCid }, "member", { "/": entityCid }] as Fact;
+    }),
+  );
 
-  const response = await assert(...mergedCollectionFacts, ...entityFacts, ...memberFacts);
-  console.log('assert', response);
+  const response = await assert(
+    ...mergedCollectionFacts,
+    ...entityFacts,
+    ...memberFacts,
+  );
+  console.log("assert", response);
 }
 
 export async function clip(url: string, collections: string[], entity: any) {
@@ -46,21 +58,29 @@ export async function clip(url: string, collections: string[], entity: any) {
   const entityCid = await cid(entity);
   const entityFacts = await jsonToFacts(entity);
 
-  const collectionsFacts = await Promise.all(collections.map(async (collectionName) => {
-    const collection = { name: collectionName, type: 'collection' };
-    return await jsonToFacts(collection);
-  }));
+  const collectionsFacts = await Promise.all(
+    collections.map(async (collectionName) => {
+      const collection = { name: collectionName, type: "collection" };
+      return await jsonToFacts(collection);
+    }),
+  );
 
   const mergedCollectionFacts = collectionsFacts.flat();
 
-  const memberFacts = await Promise.all(collections.map(async (collectionName) => {
-    const collection = { name: collectionName, type: 'collection' };
-    const collectionCid = await cid(collection);
-    return [{ "/": collectionCid }, 'member', { "/": entityCid }] as Fact;
-  }));
+  const memberFacts = await Promise.all(
+    collections.map(async (collectionName) => {
+      const collection = { name: collectionName, type: "collection" };
+      const collectionCid = await cid(collection);
+      return [{ "/": collectionCid }, "member", { "/": entityCid }] as Fact;
+    }),
+  );
 
-  const response = await assert(...mergedCollectionFacts, ...entityFacts, ...memberFacts);
-  console.log('assert', response);
+  const response = await assert(
+    ...mergedCollectionFacts,
+    ...entityFacts,
+    ...memberFacts,
+  );
+  console.log("assert", response);
 }
 
 export async function cid(data: any) {
@@ -73,7 +93,11 @@ export async function cid(data: any) {
 
 export async function jsonToFacts(data: any) {
   const facts: Fact[] = [];
-  const processObject = (obj: any, parentEntity?: Entity, prefix: string = '') => {
+  const processObject = (
+    obj: any,
+    parentEntity?: Entity,
+    prefix: string = "",
+  ) => {
     for (const [key, value] of Object.entries(obj)) {
       const fullKey = prefix ? `${prefix}/${key}` : key;
       if (Array.isArray(value)) {
@@ -108,7 +132,7 @@ export async function jsonToFacts(data: any) {
     }
   }
 
-  return facts;
+  return facts.filter((fact) => fact[2] !== null && fact[2] !== undefined);
 }
 
 export async function assert(...facts: Fact[]) {
