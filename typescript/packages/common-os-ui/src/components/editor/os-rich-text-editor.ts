@@ -1,4 +1,4 @@
-import { ReactiveElement, css, html, render, PropertyValues } from "lit";
+import { css, html, render, adoptStyles } from "lit";
 import { EditorState } from "prosemirror-state";
 import { EditorView, Decoration } from "prosemirror-view";
 import { Schema } from "prosemirror-model";
@@ -19,7 +19,6 @@ import {
   cursor,
   forward,
   unknown,
-  Fx,
   Store,
 } from "../../shared/store.js";
 import { createCleanupGroup } from "../../shared/cleanup.js";
@@ -70,9 +69,12 @@ export const createHashtagMsg = (value: suggestions.Msg) =>
     value,
   });
 
+export const createInfoMsg = (value: string) => freeze({ type: "info", value });
+
 export type Msg =
   | ReturnType<typeof createHashtagMsg>
-  | ReturnType<typeof createMentionMsg>;
+  | ReturnType<typeof createMentionMsg>
+  | ReturnType<typeof createInfoMsg>;
 
 export type Model = {
   text: string;
@@ -108,19 +110,22 @@ const updateHashtag = cursor({
     }),
 });
 
+const updateInfo = (state: Model, text: string): Model => {
+  console.info(text);
+  return state;
+};
+
 export const update = (state: Model, msg: Msg): Model => {
   switch (msg.type) {
     case "mention":
       return updateMention(state, msg.value);
     case "hashtag":
       return updateHashtag(state, msg.value);
+    case "info":
+      return updateInfo(state, msg.value);
     default:
       return unknown(state, msg);
   }
-};
-
-export const fx = (_msg: Msg): Array<Fx<Msg>> => {
-  return [];
 };
 
 const createMentionDecoration = ({ from, to, active }: Suggestion) => {
@@ -151,23 +156,32 @@ const suggestionsStorePlugin = ({
   suggestionsPlugin({
     pattern,
     decoration,
-    onUpdate: (_view, update) => send(suggestions.createUpdateMsg(update)),
-    onDestroy: () => send(suggestions.createDestroyMsg()),
-    onArrowUp: () => {
-      send(suggestions.createArrowUpMsg());
-      return true;
-    },
-    onArrowDown: () => {
-      send(suggestions.createArrowDownMsg());
-      return true;
-    },
-    onEnter: () => {
-      send(suggestions.createEnterMsg());
-      return true;
-    },
-    onTab: () => {
-      send(suggestions.createTabMsg());
-      return true;
+    reducer: (_view, msg): boolean => {
+      switch (msg.type) {
+        case "activeUpdate":
+          send(suggestions.createActiveUpdateMsg(msg));
+          return true;
+        case "inactiveUpdate":
+          send(suggestions.createInactiveUpdateMsg());
+          return true;
+        case "destroy":
+          send(suggestions.createDestroyMsg());
+          return true;
+        case "arrowUp":
+          send(suggestions.createArrowUpMsg());
+          return true;
+        case "arrowDown":
+          send(suggestions.createArrowDownMsg());
+          return true;
+        case "enter":
+          send(suggestions.createEnterMsg());
+          return true;
+        case "tab":
+          send(suggestions.createTabMsg());
+          return true;
+        default:
+          return false;
+      }
     },
   });
 
@@ -214,8 +228,8 @@ export const createEditor = ({
 };
 
 @customElement("os-rich-text-editor")
-export class OsRichTextEditor extends ReactiveElement {
-  static override styles = [
+export class OsRichTextEditor extends HTMLElement {
+  static styles = [
     base,
     css`
       :host {
@@ -270,20 +284,53 @@ export class OsRichTextEditor extends ReactiveElement {
 
   #destroy = createCleanupGroup();
   #store: Store<Model, Msg>;
-  #editorView?: EditorView;
-  #reactiveRoot?: HTMLElement;
+  #editorView: EditorView;
+  #reactiveRoot: HTMLElement;
+  #shadow: ShadowRoot;
 
   constructor() {
     super();
+    this.#shadow = this.attachShadow({ mode: "closed" });
+    adoptStyles(this.#shadow, OsRichTextEditor.styles);
+
+    render(
+      html`
+        <div id="wrapper" class="wrapper">
+          <div id="editor" class="editor"></div>
+          <div id="reactive"></div>
+        </div>
+      `,
+      this.#shadow,
+    );
+
+    // Find the `div#reactive` element we just created and
+    // assign it as reactive root.
+    this.#reactiveRoot = this.#shadow.querySelector("#reactive") as HTMLElement;
+    const editorRoot = this.#shadow.querySelector("#editor") as HTMLElement;
+
+    this.#editorView = createEditor({
+      element: editorRoot,
+      send: (msg: Msg) => this.#store.send(msg),
+    });
+
+    this.#destroy.add(() => {
+      this.#editorView.destroy();
+    });
+
     this.#store = createStore({
       state: model(),
       update,
-      fx,
     });
+
     // Drive updates via store changes
-    const cleanupRender = this.#store.sink(() => this.requestUpdate());
+    const cleanupRender = this.#store.sink(this.#render);
     this.#destroy.add(cleanupRender);
   }
+
+  #render = () => {
+    // Wire up reactive rendering
+    render(this.render(), this.#reactiveRoot);
+  };
 
   get editor() {
     return this.#editorView;
@@ -343,51 +390,5 @@ export class OsRichTextEditor extends ReactiveElement {
       >
       </os-floating-completions>
     `;
-  }
-
-  protected override update(changedProperties: PropertyValues): void {
-    super.update(changedProperties);
-
-    // Wire up reactive rendering
-    const templateResult = this.render();
-    if (this.#reactiveRoot != null) render(templateResult, this.#reactiveRoot);
-  }
-
-  override firstUpdated(changedProperties: PropertyValues) {
-    super.firstUpdated(changedProperties);
-    this.#createSkeleton();
-
-    const editorView = createEditor({
-      element: this.renderRoot.querySelector("#editor") as HTMLElement,
-      send: this.#store.send,
-    });
-    this.#destroy.add(() => {
-      editorView.destroy();
-    });
-  }
-
-  /**
-   * Renders the skeleton of the component.
-   * Run once during firstUpdated.
-   * Sets up an HTML skeleton in the renderRoot with:
-   * - a wrapper to create a shared positioning context
-   * - an editor area that will be managed by ProseMirror and will not be
-   *   touched by LitElement reactive rendering.
-   * - a reactive area that will be the `renderRoot` for LitElement
-   */
-  #createSkeleton() {
-    const skeleton = html`
-      <div id="wrapper" class="wrapper">
-        <div id="editor" class="editor"></div>
-        <div id="reactive"></div>
-      </div>
-    `;
-    render(skeleton, this.renderRoot);
-
-    // Find the `div#reactive` element we just created and
-    // assign it as reactive root.
-    this.#reactiveRoot = this.renderRoot.querySelector(
-      "#reactive",
-    ) as HTMLElement;
   }
 }

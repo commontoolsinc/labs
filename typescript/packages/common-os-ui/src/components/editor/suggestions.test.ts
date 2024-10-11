@@ -5,10 +5,10 @@ import * as suggestionsPlugin from "./prosemirror/suggestions-plugin.js";
 import * as completion from "./completion.js";
 
 describe("suggestions.update", () => {
-  it("should handle update message with non-null update", () => {
+  it("should handle activeUpdateMsg", () => {
     const suggestion = suggestionsPlugin.createSuggestion(0, 5, true, "Hello");
 
-    const updateMsg = suggestions.createUpdateMsg({
+    const updateMsg = suggestions.createActiveUpdateMsg({
       active: suggestionsPlugin.createSuggestion(0, 5, true, "Hello"),
       coords: createRect(10, 20, 100, 50),
     });
@@ -22,8 +22,8 @@ describe("suggestions.update", () => {
     assert.strictEqual(newState.completions.length, 3);
   });
 
-  it("should handle update message with null update", () => {
-    const updateMsg = suggestions.createUpdateMsg(null);
+  it("should handle inactiveUpdateMsg", () => {
+    const updateMsg = suggestions.createInactiveUpdateMsg();
 
     const initialState = suggestions.model();
     const newState = suggestions.update(initialState, updateMsg);

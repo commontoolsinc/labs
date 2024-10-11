@@ -1,5 +1,5 @@
 /** Suggestion actions, model and update */
-import { Suggestion, UpdateMsg } from "./prosemirror/suggestions-plugin.js";
+import { Suggestion } from "./prosemirror/suggestions-plugin.js";
 import { Rect, createRect } from "../../shared/position.js";
 import { clamp } from "../../shared/number.js";
 import { unknown } from "../../shared/store.js";
@@ -8,10 +8,22 @@ import * as completion from "./completion.js";
 
 const freeze = Object.freeze;
 
-export const createUpdateMsg = (update: UpdateMsg | null) =>
+export const createActiveUpdateMsg = ({
+  active,
+  coords,
+}: {
+  active: Suggestion;
+  coords: Rect;
+}) =>
   freeze({
-    type: "update",
-    update,
+    type: "activeUpdate",
+    active,
+    coords,
+  });
+
+export const createInactiveUpdateMsg = () =>
+  freeze({
+    type: "inactiveUpdate",
   });
 
 export const createDestroyMsg = () => freeze({ type: "destroy" });
@@ -43,7 +55,8 @@ export const createClickCompletionMsg = (value: completion.Model) =>
   });
 
 export type Msg =
-  | ReturnType<typeof createUpdateMsg>
+  | ReturnType<typeof createActiveUpdateMsg>
+  | ReturnType<typeof createInactiveUpdateMsg>
   | ReturnType<typeof createDestroyMsg>
   | ReturnType<typeof createArrowUpMsg>
   | ReturnType<typeof createArrowDownMsg>
@@ -66,24 +79,28 @@ export const model = (): Model =>
     completions: [],
   });
 
-const updateUpdate = (state: Model, msg: UpdateMsg | null): Model => {
-  if (msg != null) {
-    return freeze({
-      ...state,
-      active: msg.active,
-      coords: msg.coords,
-      selectedCompletion: 0,
-      completions: dummy
-        .titles(3)
-        .map((text) => completion.model({ id: dummy.id(), text })),
-    });
-  } else {
-    return freeze({
-      ...state,
-      active: null,
-      selectedCompletion: 0,
-    });
-  }
+const updateActiveUpdate = (
+  state: Model,
+  active: Suggestion,
+  coords: Rect,
+): Model => {
+  return freeze({
+    ...state,
+    active,
+    coords,
+    selectedCompletion: 0,
+    completions: dummy
+      .titles(3)
+      .map((text) => completion.model({ id: dummy.id(), text })),
+  });
+};
+
+const updateInactiveUpdate = (state: Model): Model => {
+  return freeze({
+    ...state,
+    active: null,
+    selectedCompletion: 0,
+  });
 };
 
 const updateSelectedCompletion = (state: Model, offset: number): Model => {
@@ -99,12 +116,22 @@ const updateSelectedCompletion = (state: Model, offset: number): Model => {
 
 export const update = (state: Model, msg: Msg): Model => {
   switch (msg.type) {
-    case "update":
-      return updateUpdate(state, msg.update);
+    case "activeUpdate":
+      return updateActiveUpdate(state, msg.active, msg.coords);
+    case "inactiveUpdate":
+      return updateInactiveUpdate(state);
     case "arrowUp":
       return updateSelectedCompletion(state, -1);
     case "arrowDown":
       return updateSelectedCompletion(state, 1);
+    case "enter":
+      return state;
+    case "tab":
+      return state;
+    case "clickCompletion":
+      return state;
+    case "destroy":
+      return state;
     default:
       return unknown(state, msg);
   }
