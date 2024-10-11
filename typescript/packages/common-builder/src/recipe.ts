@@ -97,25 +97,33 @@ function factoryFromRecipe<T, R>(
   // incremental counters, since we don't have access to the original variable
   // names. Later we might do something more clever by analyzing the code (we'll
   // want that anyway for extracting schemas from TypeScript).
-  const paths = new Map<CellProxy<any>, PropertyKey[]>([[inputs, []]]);
+  const paths = new Map<CellProxy<any>, PropertyKey[]>();
 
+  // Add the inputs default path
+  paths.set(inputs, ["parameters"]);
+
+  // Add paths for all the internal cells
+  // TODO: Infer more stable identifiers
   let count = 0;
   cells.forEach((cell: CellProxy<any>) => {
     if (paths.has(cell)) return;
     const { cell: top, path } = cell.export();
-    if (!paths.has(top)) paths.set(top, [`__#${count++}`]);
+    if (!paths.has(top)) paths.set(top, ["internal", `__#${count++}`]);
     if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
   });
 
-  // Now serialize the defaults and initial values, copying them from other
-  // cells into the primary cell.
-  const initial = toJSONWithAliases(outputs ?? {}, paths, true)!;
+  // Creates a query (i.e. aliases) into the cells for the result
+  const result = toJSONWithAliases(outputs ?? {}, paths, true)!;
+
+  // Collect default values for the inputs
   const defaults = toJSONWithAliases(
     inputs.export().defaultValue ?? {},
     paths,
     true
   )!;
 
+  // Set initial values for all cells, add non-inputs defaults
+  const internal: any = {};
   cells.forEach((cell) => {
     // Only process roots of extra cells:
     if (cell === inputs) return;
@@ -123,29 +131,31 @@ function factoryFromRecipe<T, R>(
     if (path.length > 0) return;
 
     const cellPath = paths.get(cell)!;
-    if (value) setValueAtPath(initial, cellPath, value);
+    if (value) setValueAtPath(internal, cellPath, value);
     if (defaultValue) setValueAtPath(defaults, cellPath, defaultValue);
   });
 
   // External cells all have to be added to the initial state
   cells.forEach((cell) => {
     const { external } = cell.export();
-    if (external) setValueAtPath(initial, paths.get(cell)!, external);
+    if (external) setValueAtPath(internal, paths.get(cell)!, external);
   });
 
-  const schema = createJsonSchema(defaults, initial) as {
+  // TODO: initial is likely not needed anymore
+  // TODO: But we need a new one for the result
+  const schema = createJsonSchema(defaults, internal) as {
     properties: { [key: string]: any };
     description: string;
   };
   schema.description = description;
 
   delete schema.properties[UI]; // TODO: This should be a schema for views
-  if (schema.properties) {
-    for (const key of Object.keys((schema as { properties: any }).properties)) {
+  if (schema.properties?.internal?.properties) {
+    for (const key of Object.keys(
+      (schema as any).properties.internal.properties
+    )) {
       if (key.startsWith("__#")) {
-        delete (schema as { properties: { [key: string]: any } })["properties"][
-          key
-        ];
+        delete (schema as any).properties.internal.properties[key];
       }
     }
   }
@@ -161,7 +171,8 @@ function factoryFromRecipe<T, R>(
 
   const recipe: Recipe & toJSON = {
     schema,
-    initial,
+    internal,
+    result,
     nodes: serializedNodes,
     toJSON: () => recipeToJSON(recipe),
   };
