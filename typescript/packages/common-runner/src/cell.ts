@@ -51,6 +51,7 @@ export interface Cell<T> {
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
   getAsProxy(path?: PropertyKey[], log?: ReactivityLog): CellProxy<T>;
   getAsCellReference(): CellReference;
+  toJSON(): { "/": string } | undefined;
   value: T;
   entityId: EntityId | undefined;
   [isSimpleCellMarker]: true;
@@ -80,6 +81,7 @@ export type CellImpl<T> = {
   freeze(): void;
   isFrozen(): boolean;
   generateEntityId(cause?: any): void;
+  toJSON(): { "/": string } | undefined;
   value: T;
   entityId?: EntityId | undefined;
   [toCellProxy]: () => BuilderCellProxy<T>;
@@ -170,6 +172,7 @@ export function cell<T>(value?: T): CellImpl<T> {
       );
       setCellByEntityId(entityId, self);
     },
+    toJSON: () => entityId?.toJSON(),
     [toCellProxy]: () => toBuilderCellProxy(self, []),
     [isCellMarker]: true,
   };
@@ -243,6 +246,7 @@ function simpleCell<T>(
         getAsProxy: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
           createValueProxy(cell, [...path, ...subPath], newLog ?? log),
         getAsCellReference: () => ({ cell, path } satisfies CellReference),
+        toJSON: () => cell.toJSON(),
         get value(): T {
           return cell.get();
         },

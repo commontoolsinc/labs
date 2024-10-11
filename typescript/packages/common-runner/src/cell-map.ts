@@ -63,11 +63,11 @@ export const getEntityId = (value: any): EntityId | undefined => {
 export function getCellByEntityId<T = any>(
   entityId: EntityId | string
 ): CellImpl<T> | undefined {
-  return entityIdToCellMap.get(entityId.toString());
+  return entityIdToCellMap.get(JSON.stringify(entityId));
 }
 
 export const setCellByEntityId = (entityId: EntityId, cell: CellImpl<any>) => {
-  entityIdToCellMap.set(entityId.toString(), cell);
+  entityIdToCellMap.set(JSON.stringify(entityId), cell);
 };
 
 /**

@@ -196,7 +196,7 @@ addModuleByRef(
   raw((inputsCell: CellImpl<any>) => (log: ReactivityLog) => {
     // HACK to follow the cell references to the entityId
     const entityId = getEntityId(inputsCell.getAsProxy([], log));
-    if (entityId) openCharm(entityId.toString());
+    if (entityId) openCharm(JSON.stringify(entityId));
   })
 );
 

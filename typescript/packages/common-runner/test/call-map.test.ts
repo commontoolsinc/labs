@@ -78,4 +78,12 @@ describe("cell-map", () => {
       expect(getCellByEntityId(nonExistentId)).toBeUndefined();
     });
   });
+
+  describe("cells as JSON", () => {
+    it("should serialize the entity ID", () => {
+      const c = cell({ value: 42 });
+      c.generateEntityId();
+      expect(JSON.stringify(c)).toEqual(JSON.stringify(c.entityId));
+    });
+  });
 });
