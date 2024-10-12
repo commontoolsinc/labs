@@ -7,6 +7,7 @@ import { Charm, ID, UI, NAME, addCharms, launch } from "../data.js";
 import { CellImpl, isCell, charmById } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
+import { runRemote } from "../runRemote.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -87,6 +88,33 @@ export class CommonWindowManager extends LitElement {
     const value = event.detail.value;
     const shiftHeld = event.detail.shiftHeld;
     console.log("Unibox submitted:", value);
+
+    if (value.startsWith("https://commoner.m4ke.workers.dev/")) {
+      runRemote({ url: value });
+      return;
+    }
+
+    if (value === '' && shiftHeld) {
+      const charmValues = charm.getAsProxy();
+      let fieldsToInclude = Object.entries(charmValues).reduce(
+        (acc, [key, value]) => {
+          if (!key.startsWith("$") && !key.startsWith("_")) {
+            acc[key] = value
+          }
+          return acc;
+        },
+        {} as any
+      );
+      const data = JSON.stringify(fieldsToInclude, null, 2);
+      fetch('https://commoner.m4ke.workers.dev/', {
+        method: 'POST',
+        body: data,
+      }).then(r => r.json()).then(({hash}) => {
+        // console.log('rv', `https://commoner.m4ke.workers.dev/${hash}`)
+        window.open(`https://commoner.m4ke.workers.dev/${hash}`, '_blank');
+      })
+      return;
+    }
 
     if (shiftHeld) {
       charm.asSimpleCell(["addToPrompt"]).send({ prompt: value } as any);
