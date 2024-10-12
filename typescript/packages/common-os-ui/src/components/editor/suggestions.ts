@@ -5,6 +5,8 @@ import { clamp } from "../../shared/number.js";
 import { unknown } from "../../shared/store.js";
 import * as dummy from "../../shared/dummy.js";
 import * as completion from "./completion.js";
+import { executeCommand, replaceWithText } from "./prosemirror/utils.js";
+import { EditorView } from "prosemirror-view";
 
 const freeze = Object.freeze;
 
@@ -54,6 +56,12 @@ export const createClickCompletionMsg = (value: completion.Model) =>
     value,
   });
 
+export const createInfoMsg = (value: string) =>
+  freeze({
+    type: "info",
+    value,
+  });
+
 export type Msg =
   | ReturnType<typeof createActiveUpdateMsg>
   | ReturnType<typeof createInactiveUpdateMsg>
@@ -62,7 +70,8 @@ export type Msg =
   | ReturnType<typeof createArrowDownMsg>
   | ReturnType<typeof createTabMsg>
   | ReturnType<typeof createEnterMsg>
-  | ReturnType<typeof createClickCompletionMsg>;
+  | ReturnType<typeof createClickCompletionMsg>
+  | ReturnType<typeof createInfoMsg>;
 
 export type Model = {
   active: Suggestion | null;
@@ -132,7 +141,24 @@ export const update = (state: Model, msg: Msg): Model => {
       return state;
     case "destroy":
       return state;
+    case "info":
+      console.info(msg.value);
+      return state;
     default:
       return unknown(state, msg);
   }
+};
+
+export const fx = (view: EditorView) => (msg: Msg) => {
+  switch (msg.type) {
+    case "clickCompletion":
+      return [enterFx(view)];
+    default:
+      return [];
+  }
+};
+
+const enterFx = (view: EditorView) => async () => {
+  executeCommand(view, replaceWithText(0, 0, "Hello world"));
+  return createInfoMsg("Inserted text");
 };

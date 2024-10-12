@@ -19,6 +19,8 @@ import {
   cursor,
   forward,
   unknown,
+  mapFx,
+  Fx,
   Store,
 } from "../../shared/store.js";
 import { createCleanupGroup } from "../../shared/cleanup.js";
@@ -126,6 +128,22 @@ export const update = (state: Model, msg: Msg): Model => {
     default:
       return unknown(state, msg);
   }
+};
+
+/** Side effects for the editor */
+export const fx = (view: EditorView) => {
+  const suggestionsFx = suggestions.fx(view);
+
+  return (msg: Msg): Array<Fx<Msg>> => {
+    switch (msg.type) {
+      case "hashtag":
+        return mapFx(suggestionsFx(msg.value), createHashtagMsg);
+      case "mention":
+        return mapFx(suggestionsFx(msg.value), createMentionMsg);
+      default:
+        return [];
+    }
+  };
 };
 
 const createMentionDecoration = ({ from, to, active }: Suggestion) => {
@@ -320,6 +338,7 @@ export class OsRichTextEditor extends HTMLElement {
     this.#store = createStore({
       state: model(),
       update,
+      fx: fx(this.#editorView),
     });
 
     // Drive updates via store changes

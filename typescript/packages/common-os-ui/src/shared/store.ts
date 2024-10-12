@@ -101,3 +101,9 @@ export const unknown = <State>(state: State, msg: unknown) => {
   console.warn("Unknown message", msg);
   return state;
 };
+
+/** Map the eventual messages of an array of fx */
+export const mapFx = <SmallMsg, BigMsg>(
+  fx: Array<Fx<SmallMsg>>,
+  transform: (msg: SmallMsg) => BigMsg,
+) => fx.map((fx) => async () => transform(await fx()));
