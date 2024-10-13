@@ -1,5 +1,5 @@
 import { cell, CellImpl, ReactivityLog } from "../cell.js";
-import { normalizeToCells } from "../utils.js";
+// import { normalizeToCells } from "../utils.js";
 import { type Action } from "../scheduler.js";
 
 /**
@@ -31,8 +31,8 @@ export function streamData(
 
   let currentRun = 0;
 
-  return async (log: ReactivityLog) => {
-    const { url, options } = inputsCell.getAsProxy([], log);
+  return (log: ReactivityLog) => {
+    const { url, options } = inputsCell.getAsProxy([], log) || {};
 
     if (url === undefined) {
       pending.setAtPath([], false, log);
@@ -48,8 +48,7 @@ export function streamData(
 
     const thisRun = ++currentRun;
 
-    try {
-      const response = await fetch(url, options);
+    fetch(url, options).then(async (response) => {
       const reader = response.body?.getReader();
       const utf8 = new TextDecoder();
 
@@ -57,37 +56,58 @@ export function streamData(
         throw new Error("Response body is not readable");
       }
 
-      // this reads until we hit the first response frame for now
-      // after that we're ignoring future updates, obviously not where we want to be
-      // but it's enough to get data on the screen
-      while (true) {
-        if (thisRun !== currentRun) return;
+      let buffer = '';
+      let id: string | undefined = undefined;
+      let event: string | undefined = undefined;
+      let data: string | undefined = undefined;
 
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
+      while (true) {
+        if (thisRun !== currentRun) {
+          reader.cancel();
+          return;
         }
 
-        const [id, event, data] = utf8.decode(value).split("\n");
-        const parsedData = {
-          id: id.slice("id:".length),
-          event: event.slice("event:".length),
-          data: JSON.parse(data.slice("data:".length)),
-        };
+        const { done, value } = await reader.read();
 
-        console.log("parsed", parsedData);
+        buffer += utf8.decode(value);
+        while (buffer.includes("\n")) {
 
-        normalizeToCells(result, undefined, log);
-        result.send(parsedData);
-        break;
+          let line = buffer.split("\n")[0];
+          buffer = buffer.slice(line.length + 1);
+
+          if (line.startsWith("id:")) {
+            id = line.slice("id:".length);
+          } else if (line.startsWith("event:")) {
+            event = line.slice("event:".length);
+          } else if (line.startsWith("data:")) {
+            data = line.slice("data:".length);
+          }
+        }
+
+        if (id && event && data) {
+          const parsedData = {
+            id,
+            event,
+            data: JSON.parse(data),
+          };
+
+          // normalizeToCells(result, undefined, log);
+          result.setAtPath([], parsedData, log);
+          id = undefined;
+          event = undefined;
+          data = undefined;
+        }
+
+        if (done) {
+          reader.cancel();
+          break;
+        }
       }
-
+    }).catch((e) => {
+      console.error(e);
       pending.setAtPath([], false, log);
-    } catch (err) {
-      if (thisRun !== currentRun) return;
-
-      pending.setAtPath([], false, log);
-      error.setAtPath([], err, log);
-    }
+      result.setAtPath([], undefined, log);
+      error.setAtPath([], e, log);
+    });
   };
 }
