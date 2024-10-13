@@ -107,6 +107,7 @@ export const queryCollections = recipe<{}>("Fetch Collections", ({}) => {
   const data = ensureArray({ data: result });
   const normalizedData = normalizeData({ result: result });
   const exportedData = lift((data: any[]) => ({ items: data }))(data);
+  const dataSize = lift((data: any[]) => data.length)(normalizedData);
 
   const collectionNameInput = cell<string>("reminders");
 
@@ -134,7 +135,7 @@ export const queryCollections = recipe<{}>("Fetch Collections", ({}) => {
             </common-button>
           </div>
 
-          <p>Number of items: ${data.length}</p>
+          <p>Number of items: ${dataSize}</p>
           <pre>${stringify({ obj: normalizedData })}</pre>
           <details>
             <summary>Generated Query</summary>
