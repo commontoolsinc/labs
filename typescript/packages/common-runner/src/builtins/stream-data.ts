@@ -29,16 +29,21 @@ export function streamData(
   // here, instead of in the action.
   sendResult({ pending, result, error });
 
-  let currentRun = 0;
+  const status = { run: 0, controller: undefined } as { run: number, controller: AbortController | undefined };
 
   return (log: ReactivityLog) => {
     const { url, options } = inputsCell.getAsProxy([], log) || {};
 
+    if (status.controller) {
+      status.controller.abort();
+      status.controller = undefined;
+    }
+  
     if (url === undefined) {
       pending.setAtPath([], false, log);
       result.setAtPath([], undefined, log);
       error.setAtPath([], undefined, log);
-      ++currentRun;
+      ++status.run;
       return;
     }
 
@@ -46,9 +51,12 @@ export function streamData(
     result.setAtPath([], undefined, log);
     error.setAtPath([], undefined, log);
 
-    const thisRun = ++currentRun;
-
-    fetch(url, options).then(async (response) => {
+    const controller = new AbortController();
+    const signal = controller.signal;
+    status.controller = controller;
+    const thisRun = ++status.run;
+  
+    fetch(url, { ...options, signal }).then(async (response) => {
       const reader = response.body?.getReader();
       const utf8 = new TextDecoder();
 
@@ -62,8 +70,8 @@ export function streamData(
       let data: string | undefined = undefined;
 
       while (true) {
-        if (thisRun !== currentRun) {
-          reader.cancel();
+        if (thisRun !== status.run) {
+          controller.abort();
           return;
         }
 
@@ -99,12 +107,17 @@ export function streamData(
         }
 
         if (done) {
-          reader.cancel();
           break;
         }
       }
     }).catch((e) => {
-      console.error(e);
+      if (e instanceof DOMException && e.name === "AbortError") {
+        return;
+      }
+      // FIXME(ja): I don't think this is the right logic... if the stream
+      // disconnects, we should probably not erase the result.
+      // FIXME(ja): also pending should probably be more like "live"?
+      console.error(e); 
       pending.setAtPath([], false, log);
       result.setAtPath([], undefined, log);
       error.setAtPath([], e, log);
