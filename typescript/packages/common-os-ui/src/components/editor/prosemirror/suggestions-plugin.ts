@@ -3,6 +3,7 @@ import { EditorState, Plugin, PluginKey } from "prosemirror-state";
 import { isBetweenInclusive } from "../../../shared/number.js";
 import { Rect } from "../../../shared/position.js";
 import { debug } from "../../../shared/debug.js";
+import { TypeMsg } from "../../../shared/store.js";
 
 const freeze = Object.freeze;
 
@@ -37,43 +38,61 @@ export const getActiveSuggestion = (
   suggestions: Array<Suggestion> | undefined | null,
 ): Suggestion | null => suggestions?.find(isSuggestionActive) ?? null;
 
+export type ActiveUpdateMsg = {
+  type: "activeUpdate";
+  active: Suggestion;
+  coords: Rect;
+};
+
 export const createActiveUpdateMsg = ({
   active,
   coords,
 }: {
   active: Suggestion;
   coords: Rect;
-}) =>
+}): ActiveUpdateMsg =>
   freeze({
     type: "activeUpdate",
     active,
     coords,
   });
 
-export const createInactiveUpdateMsg = () =>
+export type InactiveUpdateMsg = TypeMsg<"inactiveUpdate">;
+
+export const createInactiveUpdateMsg = (): InactiveUpdateMsg =>
   freeze({
     type: "inactiveUpdate",
   });
 
-export const createEnterMsg = () =>
+export type EnterMsg = TypeMsg<"enter">;
+
+export const createEnterMsg = (): EnterMsg =>
   freeze({
     type: "enter",
   });
 
-export const createDestroyMsg = () =>
+export type DestroyMsg = TypeMsg<"destroy">;
+
+export const createDestroyMsg = (): DestroyMsg =>
   freeze({
     type: "destroy",
   });
 
-export const createArrowDownMsg = () =>
+export type ArrowDownMsg = TypeMsg<"arrowDown">;
+
+export const createArrowDownMsg = (): ArrowDownMsg =>
   freeze({
     type: "arrowDown",
   });
+
+export type ArrowUpMsg = TypeMsg<"arrowUp">;
 
 export const createArrowUpMsg = () =>
   freeze({
     type: "arrowUp",
   });
+
+export type TabMsg = TypeMsg<"tab">;
 
 export const createTabMsg = () =>
   freeze({
@@ -81,13 +100,13 @@ export const createTabMsg = () =>
   });
 
 export type Msg =
-  | ReturnType<typeof createActiveUpdateMsg>
-  | ReturnType<typeof createInactiveUpdateMsg>
-  | ReturnType<typeof createEnterMsg>
-  | ReturnType<typeof createDestroyMsg>
-  | ReturnType<typeof createArrowDownMsg>
-  | ReturnType<typeof createArrowUpMsg>
-  | ReturnType<typeof createTabMsg>;
+  | ActiveUpdateMsg
+  | InactiveUpdateMsg
+  | EnterMsg
+  | DestroyMsg
+  | ArrowDownMsg
+  | ArrowUpMsg
+  | TabMsg;
 
 export const suggestionsPlugin = ({
   pattern,

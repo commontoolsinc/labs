@@ -1,5 +1,16 @@
 import { debug } from "./debug.js";
 
+/** A basic msg with no payload */
+export type TypeMsg<T> = {
+  type: T;
+};
+
+/* A msg with a payload */
+export type ValueMsg<T, U> = {
+  type: T;
+  value: U;
+};
+
 export type Fx<Msg> = () => Promise<Msg>;
 export type Listener<State> = (state: State) => void;
 export type Cleanup = () => void;
