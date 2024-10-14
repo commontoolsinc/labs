@@ -127,9 +127,11 @@ export function run<T, R = any>(
   // Send "query" to results to the result cell
   resultCell.send(mapBindingsToCell<R>(recipe.result as R, processCell));
 
+  // TODO: This will overwrite existing values
   const internal = mergeObjects(
     defaults,
-    processCell.get()?.internal ?? recipe.internal
+    recipe.internal,
+    processCell.get()?.internal
   );
 
   // TODO: Don't overwrite, reuse
