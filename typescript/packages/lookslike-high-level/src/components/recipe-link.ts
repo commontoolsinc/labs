@@ -35,7 +35,7 @@ export class CommonRecipeLink extends LitElement {
 
     this.dispatchEvent(
       new CustomEvent("open-charm", {
-        detail: { charmId: charm.entityId },
+        detail: { charmId: JSON.stringify(charm.entityId) },
         bubbles: true,
         composed: true,
       })

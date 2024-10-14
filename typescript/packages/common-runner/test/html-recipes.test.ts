@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
 import { html, render, View } from "@commontools/common-html";
 import { recipe, lift, str, UI } from "@commontools/common-builder";

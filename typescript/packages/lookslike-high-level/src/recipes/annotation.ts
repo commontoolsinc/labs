@@ -35,11 +35,11 @@ type CharmInfo = { index: number; id: string; name: string; type: string };
 const getCharmInfo = lift(({ charms }) => {
   const charmInfo: CharmInfo[] = [];
   for (let i = 0; i < charms.length; i++) {
-    const id = getEntityId([i]);
+    const id = getEntityId(charms[i]);
     if (id)
       charmInfo.push({
         index: i,
-        id,
+        id: JSON.stringify(id),
         name: String(charms[i][NAME] ?? "unknown"),
         type: String(charms[i][TYPE]),
       });
