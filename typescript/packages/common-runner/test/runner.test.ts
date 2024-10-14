@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Recipe } from "@commontools/common-builder";
+import { Recipe, TYPE } from "@commontools/common-builder";
 import { run, stop } from "../src/runner.js";
 import { idle } from "../src/scheduler.js";
 import { cell } from "../src/cell.js";
@@ -13,25 +13,34 @@ describe("runRecipe", () => {
           input: { type: "number" },
           output: { type: "number" },
         },
+        description: "passthrough",
       },
-      initial: { input: 1 },
+      result: { output: { $alias: { path: ["internal", "output"] } } },
       nodes: [
         {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { path: ["input"] } } },
-          outputs: { value: { $alias: { path: ["output"] } } },
+          inputs: { value: { $alias: { path: ["parameters", "input"] } } },
+          outputs: { value: { $alias: { path: ["internal", "output"] } } },
         },
       ],
     } as Recipe;
 
-    const result = run(recipe, {});
+    const result = run(recipe, { input: 1 });
     await idle();
-    expect(result.get()).toMatchObject({
-      input: 1,
-      output: 1,
+
+    expect(result.sourceCell?.get()).toEqual({
+      [TYPE]: "passthrough",
+      parameters: { input: 1 },
+      internal: { output: 1 },
     });
+    expect(result.get()).toEqual({
+      output: {
+        $alias: { path: ["internal", "output"], cell: result.sourceCell },
+      },
+    });
+    expect(result.getAsProxy()).toEqual({ output: 1 });
   });
 
   it("should work with nested recipes", async () => {
@@ -43,14 +52,14 @@ describe("runRecipe", () => {
           output: { type: "number" },
         },
       },
-      initial: {},
+      result: { output: { $alias: { path: ["internal", "output"] } } },
       nodes: [
         {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { path: ["input"] } } },
-          outputs: { value: { $alias: { path: ["output"] } } },
+          inputs: { value: { $alias: { path: ["parameters", "input"] } } },
+          outputs: { value: { $alias: { path: ["internal", "output"] } } },
         },
       ],
     } as Recipe;
@@ -63,115 +72,122 @@ describe("runRecipe", () => {
           result: { type: "number" },
         },
       },
-      initial: { value: 5 },
+      result: { result: { $alias: { path: ["internal", "output"] } } },
       nodes: [
         {
           module: { type: "recipe", implementation: innerRecipe },
-          inputs: { input: { $alias: { path: ["value"] } } },
-          outputs: { output: { $alias: { path: ["result"] } } },
+          inputs: { input: { $alias: { path: ["parameters", "value"] } } },
+          outputs: { output: { $alias: { path: ["internal", "output"] } } },
         },
       ],
     } as Recipe;
 
-    const result = run(outerRecipe, {});
+    const result = run(outerRecipe, { value: 5 });
     await idle();
-    expect(result.get()).toMatchObject({ value: 5, result: 5 });
+
+    expect(result.getAsProxy()).toEqual({ result: 5 });
   });
 
   it("should run a simple module", async () => {
     const mockRecipe: Recipe = {
       schema: {},
-      initial: { value: 1 },
+      result: { result: { $alias: { path: ["internal", "result"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["value"] } },
-          outputs: { $alias: { path: ["result"] } },
+          inputs: { $alias: { path: ["parameters", "value"] } },
+          outputs: { $alias: { path: ["internal", "result"] } },
         },
       ],
     };
 
-    const result = run(mockRecipe, {});
+    const result = run(mockRecipe, { value: 1 });
     await idle();
-    expect(result.get()).toMatchObject({ value: 1, result: 2 });
+    expect(result.getAsProxy()).toEqual({ result: 2 });
   });
 
   it("should handle nested recipes", async () => {
     const nestedRecipe: Recipe = {
       schema: {},
-      initial: {},
+      internal: { parameters: { value: 1 } },
+      result: { output: { $alias: { path: ["internal", "result"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["input"] } },
-          outputs: { $alias: { path: ["output"] } },
+          inputs: { $alias: { path: ["parameters", "input"] } },
+          outputs: { $alias: { path: ["internal", "result"] } },
         },
       ],
     };
 
     const mockRecipe: Recipe = {
       schema: {},
-      initial: { value: 1 },
+      result: { result: { $alias: { path: ["internal", "result"] } } },
       nodes: [
         {
           module: { type: "recipe", implementation: nestedRecipe },
-          inputs: { input: { $alias: { path: ["value"] } } },
-          outputs: { output: { $alias: { path: ["result"] } } },
+          inputs: { input: { $alias: { path: ["parameters", "value"] } } },
+          outputs: { output: { $alias: { path: ["internal", "result"] } } },
         },
       ],
     };
 
-    const result = run(mockRecipe, {});
+    const result = run(mockRecipe, { value: 1 });
     await idle();
-    expect(result.get()).toMatchObject({ value: 1, result: 2 });
+    expect(result.getAsProxy()).toEqual({ result: 2 });
   });
 
   it("should allow passing a cell as a binding", async () => {
     const recipe: Recipe = {
       schema: {},
-      initial: {},
+      result: { output: { $alias: { path: ["parameters", "output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["input"] } },
-          outputs: { $alias: { path: ["output"] } },
+          inputs: { $alias: { path: ["parameters", "input"] } },
+          outputs: { $alias: { path: ["parameters", "output"] } },
         },
       ],
     };
 
     const inputCell = cell({ input: 10, output: 0 });
+    inputCell.generateEntityId();
     const result = run(recipe, inputCell);
 
     await idle();
 
-    expect(result.get()).toMatchObject({
-      output: { $alias: { cell: inputCell, path: ["output"] } },
-      input: { $alias: { cell: inputCell, path: ["input"] } },
-    });
     expect(inputCell.get()).toMatchObject({ input: 10, output: 20 });
+    expect(result.getAsProxy()).toEqual({ output: 20 });
+
+    // The result should alias the original cell. Let's verify by stopping the
+    // recipe and sending a new value to the input cell.
+    stop(result);
+    inputCell.send({ input: 10, output: 40 });
+    await idle();
+    expect(result.getAsProxy()).toEqual({ output: 40 });
   });
 
   it("should allow stopping a recipe", async () => {
     const recipe: Recipe = {
       schema: {},
-      initial: {},
+      result: { output: { $alias: { path: ["parameters", "output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["input"] } },
-          outputs: { $alias: { path: ["output"] } },
+          inputs: { $alias: { path: ["parameters", "input"] } },
+          outputs: { $alias: { path: ["parameters", "output"] } },
         },
       ],
     };

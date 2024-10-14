@@ -45,39 +45,59 @@ export const cancels = new WeakMap<CellImpl<any>, Cancel>();
 
 export function run<T, R>(
   recipeFactory: RecipeFactory<T, R>,
-  bindings: T,
+  parameters: T,
   resultCell?: CellImpl<R>
 ): CellImpl<R>;
 export function run<T, R = any>(
   recipe: Recipe,
-  bindings: T,
+  parameters: T,
   resultCell?: CellImpl<R>
 ): CellImpl<R>;
 export function run<T, R = any>(
   recipe: Recipe,
-  bindings?: T,
+  parameters?: T,
   resultCell?: CellImpl<R>
 ): CellImpl<R> {
   if (resultCell) {
     // If we already have a recipe cell, we are stopping and restarting
     // the recipe, so we need to stop the old one first.
     stop(resultCell);
+  } else {
+    resultCell = cell<R>();
+  }
+
+  let processCell: CellImpl<{
+    [TYPE]: string;
+    parameters?: T;
+    internal?: { [key: string]: any };
+  }>;
+
+  if (resultCell.sourceCell !== undefined) {
+    processCell = resultCell.sourceCell;
+    // If no new parameters are provided, use the ones from the previous call
+    // TODO: BUG: Passing parameters will now overwrite the internal state for
+    // ommitted parameters
+    if (!parameters) parameters = processCell.get()?.parameters as T;
+  } else {
+    processCell = cell();
+    processCell.generateEntityId(); // TODO: Make this causal
+    resultCell.sourceCell = processCell;
   }
 
   // Walk the recipe's schema and extract all default values
   const defaults = extractDefaultValues(recipe.schema);
 
   // Ensure static data is converted to cell references, e.g. for arrays
-  bindings = staticDataToNestedCells(bindings);
+  parameters = staticDataToNestedCells(parameters);
 
   // If the bindings are a cell or cell reference, convert them to an object
   // where each property is a cell reference.
   // TODO: If new keys are added after first load, this won't work.
-  if (isCell(bindings) || isCellReference(bindings)) {
+  if (isCell(parameters) || isCellReference(parameters)) {
     // If it's a cell, turn it into a cell reference
-    const ref = isCellReference(bindings)
-      ? bindings
-      : ({ cell: bindings, path: [] } satisfies CellReference);
+    const ref = isCellReference(parameters)
+      ? parameters
+      : ({ cell: parameters, path: [] } satisfies CellReference);
 
     // Get value, but just to get the keys. Throw if it isn't an object.
     const value = ref.cell.getAsProxy(ref.path);
@@ -85,7 +105,7 @@ export function run<T, R = any>(
       throw new Error(`Invalid bindings: Must be an object`);
 
     // Create aliases for all the top level keys in the object
-    bindings = Object.fromEntries(
+    parameters = Object.fromEntries(
       Object.keys(value).map((key) => [
         key,
         { $alias: { cell: ref.cell, path: [...ref.path, key] } },
@@ -93,34 +113,33 @@ export function run<T, R = any>(
     ) as T;
   }
 
-  // Create a new recipe cell if it doesn't exist. Assign a random UUID for now.
-  // Eventually this should be something more causal.
-  if (!resultCell) resultCell = cell<R>();
-
-  // TODO: Move this below .send to establish at least some causal relationship.
-  // Right now id creation fails if there are any cell references in the cell.
-
   // TODO: Add a causal relationship. For example a recipe that only transforms
   // data from a fixed source could have an idea that depends on that source
   // alone, as any instance of the recipe will do the same thing. The trouble is
   // though that we support the recipe to change over time, and such a change
   // might change this condition and we'd need distinct ideas for different
   // instances of this recipe again.
+
+  // TODO: Move this below .send to establish at least some causal relationship.
+  // Right now id creation fails if there are any cell references in the cell.
   if (!resultCell.entityId) resultCell.generateEntityId();
 
-  // Generate recipe cell using defaults, bindings, and initial values
-  resultCell.send(
-    mergeObjects(
-      resultCell.get(),
-      {
-        [TYPE]:
-          (recipe.schema as { description: string })?.description ?? "unknown",
-      },
-      recipe.initial,
-      bindings,
-      defaults
-    )
+  // Send "query" to results to the result cell
+  resultCell.send(mapBindingsToCell<R>(recipe.result as R, processCell));
+
+  const internal = mergeObjects(
+    defaults,
+    processCell.get()?.internal ?? recipe.internal
   );
+
+  // TODO: Don't overwrite, reuse
+  if (!processCell.get())
+    processCell.send({
+      [TYPE]:
+        (recipe.schema as { description: string })?.description ?? "unknown",
+      parameters,
+      ...(internal ? { internal } : {}),
+    });
 
   const [cancel, addCancel] = useCancelGroup();
   cancels.set(resultCell, cancel);
@@ -130,7 +149,7 @@ export function run<T, R = any>(
       node.module,
       node.inputs,
       node.outputs,
-      resultCell,
+      processCell,
       addCancel
     );
   }
@@ -147,7 +166,7 @@ function instantiateNode(
   module: Module | Alias,
   inputBindings: JSON,
   outputBindings: JSON,
-  resultCell: CellImpl<any>,
+  processCell: CellImpl<any>,
   addCancel: AddCancel
 ) {
   if (isModule(module)) {
@@ -157,7 +176,7 @@ function instantiateNode(
           getModuleByRef(module.implementation as string),
           inputBindings,
           outputBindings,
-          resultCell,
+          processCell,
           addCancel
         );
         break;
@@ -166,7 +185,7 @@ function instantiateNode(
           module,
           inputBindings,
           outputBindings,
-          resultCell,
+          processCell,
           addCancel
         );
         break;
@@ -175,7 +194,7 @@ function instantiateNode(
           module,
           inputBindings,
           outputBindings,
-          resultCell,
+          processCell,
           addCancel
         );
         break;
@@ -184,7 +203,7 @@ function instantiateNode(
           module,
           inputBindings,
           outputBindings,
-          resultCell,
+          processCell,
           addCancel
         );
         break;
@@ -193,7 +212,7 @@ function instantiateNode(
           module,
           inputBindings,
           outputBindings,
-          resultCell,
+          processCell,
           addCancel
         );
         break;
@@ -202,7 +221,7 @@ function instantiateNode(
           module,
           inputBindings,
           outputBindings,
-          resultCell,
+          processCell,
           addCancel
         );
         break;
@@ -220,21 +239,21 @@ function instantiateJavaScriptNode(
   module: Module,
   inputBindings: JSON,
   outputBindings: JSON,
-  resultCell: CellImpl<any>,
+  processCell: CellImpl<any>,
   addCancel: AddCancel
 ) {
   const inputs = mapBindingsToCell(
     inputBindings as { [key: string]: any },
-    resultCell
+    processCell
   );
 
   // TODO: This isn't correct, as module can write into passed cells. We
   // should look at the schema to find out what cells are read and
   // written.
-  const reads = findAllAliasedCells(inputs, resultCell);
+  const reads = findAllAliasedCells(inputs, processCell);
 
-  const outputs = mapBindingsToCell(outputBindings, resultCell);
-  const writes = findAllAliasedCells(outputs, resultCell);
+  const outputs = mapBindingsToCell(outputBindings, processCell);
+  const writes = findAllAliasedCells(outputs, processCell);
 
   let fn = (
     typeof module.implementation === "string"
@@ -248,11 +267,11 @@ function instantiateJavaScriptNode(
   // Check if any of the read cells is a stream alias
   let streamRef: CellReference | undefined = undefined;
   for (const key in inputs) {
-    let cell = resultCell;
+    let cell = processCell;
     let path: PropertyKey[] = [key];
     let value = inputs[key];
     while (isAlias(value)) {
-      const ref = followAliases(value, resultCell);
+      const ref = followAliases(value, processCell);
       cell = ref.cell;
       path = ref.path;
       value = cell.getAtPath(path);
@@ -319,7 +338,7 @@ function instantiateJavaScriptNode(
     const action: Action = (log: ReactivityLog) => {
       const inputsProxy = inputsCell.getAsProxy([], log);
       const result = fn(inputsProxy);
-      sendValueToBinding(resultCell, outputs, result, log);
+      sendValueToBinding(processCell, outputs, result, log);
     };
 
     addCancel(schedule(action, { reads, writes } satisfies ReactivityLog));
@@ -330,7 +349,7 @@ function instantiateRawNode(
   module: Module,
   inputBindings: JSON,
   outputBindings: JSON,
-  resultCell: CellImpl<any>,
+  processCell: CellImpl<any>,
   addCancel: AddCancel
 ) {
   if (typeof module.implementation !== "function")
@@ -341,20 +360,20 @@ function instantiateRawNode(
   // Built-ins can define their own scheduling logic, so they'll
   // implement parts of the above themselves.
 
-  const mappedInputBindings = mapBindingsToCell(inputBindings, resultCell);
-  const mappedOutputBindings = mapBindingsToCell(outputBindings, resultCell);
+  const mappedInputBindings = mapBindingsToCell(inputBindings, processCell);
+  const mappedOutputBindings = mapBindingsToCell(outputBindings, processCell);
 
   const action = module.implementation(
     cell(mappedInputBindings),
     (result: any) =>
-      sendValueToBinding(resultCell, mappedOutputBindings, result),
+      sendValueToBinding(processCell, mappedOutputBindings, result),
     addCancel
   );
 
   addCancel(
     schedule(action, {
-      reads: findAllAliasedCells(mappedInputBindings, resultCell),
-      writes: findAllAliasedCells(mappedOutputBindings, resultCell),
+      reads: findAllAliasedCells(mappedInputBindings, processCell),
+      writes: findAllAliasedCells(mappedOutputBindings, processCell),
     } satisfies ReactivityLog)
   );
 }
@@ -363,19 +382,19 @@ function instantiatePassthroughNode(
   _: Module,
   inputBindings: JSON,
   outputBindings: JSON,
-  resultCell: CellImpl<any>,
+  processCell: CellImpl<any>,
   addCancel: AddCancel
 ) {
-  const inputs = mapBindingsToCell(inputBindings, resultCell);
+  const inputs = mapBindingsToCell(inputBindings, processCell);
   const inputsCell = cell(inputs);
-  const reads = findAllAliasedCells(inputs, resultCell);
+  const reads = findAllAliasedCells(inputs, processCell);
 
-  const outputs = mapBindingsToCell(outputBindings, resultCell);
-  const writes = findAllAliasedCells(outputs, resultCell);
+  const outputs = mapBindingsToCell(outputBindings, processCell);
+  const writes = findAllAliasedCells(outputs, processCell);
 
   const action: Action = (log: ReactivityLog) => {
     const inputsProxy = inputsCell.getAsProxy([], log);
-    sendValueToBinding(resultCell, outputBindings, inputsProxy, log);
+    sendValueToBinding(processCell, outputBindings, inputsProxy, log);
   };
 
   addCancel(schedule(action, { reads, writes } satisfies ReactivityLog));
@@ -385,16 +404,16 @@ function instantiateIsolatedNode(
   module: Module,
   inputBindings: JSON,
   outputBindings: JSON,
-  resultCell: CellImpl<any>,
+  processCell: CellImpl<any>,
   addCancel: AddCancel
 ) {
-  const inputs = mapBindingsToCell(inputBindings, resultCell);
-  const reads = findAllAliasedCells(inputs, resultCell);
+  const inputs = mapBindingsToCell(inputBindings, processCell);
+  const reads = findAllAliasedCells(inputs, processCell);
   const inputsCell = cell(inputs);
   inputsCell.freeze();
 
-  const outputs = mapBindingsToCell(outputBindings, resultCell);
-  const writes = findAllAliasedCells(outputs, resultCell);
+  const outputs = mapBindingsToCell(outputBindings, processCell);
+  const writes = findAllAliasedCells(outputs, processCell);
 
   if (!isJavaScriptModuleDefinition(module.implementation))
     throw new Error(`Invalid module definition`);
@@ -423,7 +442,7 @@ function instantiateIsolatedNode(
       Object.entries(fnOutput).map(([key, value]) => [key, value.val])
     );
 
-    sendValueToBinding(resultCell, outputBindings, result, log);
+    sendValueToBinding(processCell, outputBindings, result, log);
   };
 
   addCancel(schedule(action, { reads, writes } satisfies ReactivityLog));
@@ -449,19 +468,21 @@ function instantiateRecipeNode(
   module: Module,
   inputBindings: JSON,
   outputBindings: JSON,
-  resultCell: CellImpl<any>,
+  processCell: CellImpl<any>,
   addCancel: AddCancel
 ) {
   if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
-  const inputs = mapBindingsToCell(inputBindings, resultCell);
+  const inputs = mapBindingsToCell(inputBindings, processCell);
   const result = run(module.implementation, inputs);
-  if (isAlias(outputBindings))
-    sendValueToBinding(resultCell, outputBindings, result);
-  else
+  // Update output bindings if the recipe changes. We don't expect the actual
+  // value of the result cell to change otherwise, as it's just a set of aliases
+  // to the corresponding process cell
+  addCancel(
     result.sink((value) =>
-      sendValueToBinding(resultCell, outputBindings, value)
-    );
-  addCancel(cancels.get(resultCell));
+      sendValueToBinding(processCell, outputBindings, value)
+    )
+  );
+  addCancel(cancels.get(processCell));
 }
 
 const moduleWrappers = {
