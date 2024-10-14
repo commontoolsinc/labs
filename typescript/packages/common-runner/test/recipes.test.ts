@@ -5,7 +5,7 @@ import { addModuleByRef } from "../src/module.js";
 import { cell } from "../src/cell.js";
 import { idle } from "../src/scheduler.js";
 
-describe.skip("Recipe Runner", () => {
+describe("Recipe Runner", () => {
   it("should run a simple recipe", async () => {
     const simpleRecipe = recipe<{ value: number }>(
       "Simple Recipe",
