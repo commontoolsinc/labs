@@ -7,6 +7,8 @@ import { TypeMsg } from "../../../shared/store.js";
 
 const freeze = Object.freeze;
 
+export type Suggestion = ReturnType<typeof createSuggestion>;
+
 /// Create a frozen suggestion
 export const createSuggestion = (
   from: number,
@@ -14,8 +16,6 @@ export const createSuggestion = (
   active: boolean,
   text: string,
 ) => freeze({ from, to, active, text });
-
-export type Suggestion = ReturnType<typeof createSuggestion>;
 
 export const isSuggestionActive = (suggestion: Suggestion) => suggestion.active;
 

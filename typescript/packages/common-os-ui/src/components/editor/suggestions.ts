@@ -1,8 +1,8 @@
 /** Suggestion actions, model and update */
-import { Suggestion } from "./prosemirror/suggestions-plugin.js";
+import * as plugin from "./prosemirror/suggestions-plugin.js";
 import { Rect, createRect } from "../../shared/position.js";
 import { clamp } from "../../shared/number.js";
-import { unknown } from "../../shared/store.js";
+import { unknown, ValueMsg } from "../../shared/store.js";
 import * as dummy from "../../shared/dummy.js";
 import * as completion from "./completion.js";
 import { executeCommand, replaceWithText } from "./prosemirror/utils.js";
@@ -10,68 +10,58 @@ import { EditorView } from "prosemirror-view";
 
 const freeze = Object.freeze;
 
-export const createActiveUpdateMsg = ({
-  active,
-  coords,
-}: {
-  active: Suggestion;
-  coords: Rect;
-}) =>
-  freeze({
-    type: "activeUpdate",
-    active,
-    coords,
-  });
+export type Suggestion = plugin.Suggestion;
+export const createSuggestion = plugin.createSuggestion;
 
-export const createInactiveUpdateMsg = () =>
-  freeze({
-    type: "inactiveUpdate",
-  });
+export type ActiveUpdateMsg = plugin.ActiveUpdateMsg;
+export const createActiveUpdateMsg = plugin.createActiveUpdateMsg;
 
-export const createDestroyMsg = () => freeze({ type: "destroy" });
+export type InactiveUpdateMsg = plugin.InactiveUpdateMsg;
+export const createInactiveUpdateMsg = plugin.createInactiveUpdateMsg;
 
-export const createArrowUpMsg = () =>
-  freeze({
-    type: "arrowUp",
-  });
+export type DestroyMsg = plugin.DestroyMsg;
+export const createDestroyMsg = plugin.createDestroyMsg;
 
-export const createArrowDownMsg = () =>
-  freeze({
-    type: "arrowDown",
-  });
+export type EnterMsg = plugin.EnterMsg;
+export const createEnterMsg = plugin.createEnterMsg;
 
-export const createTabMsg = () =>
-  freeze({
-    type: "tab",
-  });
+export type TabMsg = plugin.TabMsg;
+export const createTabMsg = plugin.createTabMsg;
 
-export const createEnterMsg = () =>
-  freeze({
-    type: "enter",
-  });
+export type ArrowUpMsg = plugin.ArrowUpMsg;
+export const createArrowUpMsg = plugin.createArrowUpMsg;
 
-export const createClickCompletionMsg = (value: completion.Model) =>
+export type ArrowDownMsg = plugin.ArrowDownMsg;
+export const createArrowDownMsg = plugin.createArrowDownMsg;
+
+export type ClickCompletionMsg = ValueMsg<"clickCompletion", completion.Model>;
+
+export const createClickCompletionMsg = (
+  value: completion.Model,
+): ClickCompletionMsg =>
   freeze({
     type: "clickCompletion",
     value,
   });
 
-export const createInfoMsg = (value: string) =>
+export type InfoMsg = ValueMsg<"info", string>;
+
+export const createInfoMsg = (value: string): InfoMsg =>
   freeze({
     type: "info",
     value,
   });
 
 export type Msg =
-  | ReturnType<typeof createActiveUpdateMsg>
-  | ReturnType<typeof createInactiveUpdateMsg>
-  | ReturnType<typeof createDestroyMsg>
-  | ReturnType<typeof createArrowUpMsg>
-  | ReturnType<typeof createArrowDownMsg>
-  | ReturnType<typeof createTabMsg>
-  | ReturnType<typeof createEnterMsg>
-  | ReturnType<typeof createClickCompletionMsg>
-  | ReturnType<typeof createInfoMsg>;
+  | ActiveUpdateMsg
+  | InactiveUpdateMsg
+  | DestroyMsg
+  | ArrowUpMsg
+  | ArrowDownMsg
+  | TabMsg
+  | EnterMsg
+  | ClickCompletionMsg
+  | InfoMsg;
 
 export type Model = {
   active: Suggestion | null;
