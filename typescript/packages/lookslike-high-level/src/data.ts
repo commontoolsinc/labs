@@ -24,7 +24,7 @@ import { counters } from "./recipes/counters.js";
 import "./recipes/todo-list-as-task.js";
 import "./recipes/playlist.js";
 import { iframe } from "./recipes/iframe.js";
-import { queryCollections } from "./recipes/queryCollections.js";
+import { search } from "./recipes/search.js";
 import { importCalendar } from "./recipes/importCalendar.js";
 import { dungeon } from "./recipes/dungeon.js";
 import { dataDesigner } from "./recipes/dataDesigner.js";
@@ -32,6 +32,7 @@ import { jsonImporter } from "./recipes/jsonImport.js";
 import { prompt } from "./recipes/prompts.js";
 import { wiki } from "./recipes/wiki.js";
 import { helloIsolated } from "./recipes/helloIsolated.js";
+import { queryCollections } from "./recipes/queryCollections.js";
 
 export type Charm = {
   [NAME]?: string;
@@ -65,8 +66,11 @@ addCharms([
     data: { counter: 0 },
   }),
   run(importCalendar, {}),
+  run(search, {
+    query: "home",
+  }),
   run(queryCollections, {
-    collection: "home",
+    collectionName: 'home'
   }),
   run(todoList, {
     title: "My TODOs",
