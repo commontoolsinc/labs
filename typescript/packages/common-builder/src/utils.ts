@@ -154,7 +154,24 @@ export function createJsonSchema(
         if (Array.isArray(value ?? defaultValue)) {
           schema.type = "array";
           if ((value ?? defaultValue).length > 0) {
-            schema.items = analyzeType(value?.[0], defaultValue?.[0]);
+            let properties: { [key: string]: any } = {}
+            for (let i = 0; i < (value ?? defaultValue).length; i++) {
+              const item = value?.[i] ?? defaultValue?.[i];
+              if (typeof item === 'object' && item !== null) {
+                Object.keys(item).forEach(key => {
+                  if (!(key in properties)) {
+                    properties[key] = analyzeType(
+                      value?.[i]?.[key],
+                      defaultValue?.[i]?.[key]
+                    );
+                  }
+                });
+              }
+            }
+            schema.items = {
+              type: 'object',
+              properties,
+            };
           }
         } else if (value ?? defaultValue !== null) {
           schema.type = "object";
