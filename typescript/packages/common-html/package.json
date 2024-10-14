@@ -42,7 +42,8 @@
   "wireit": {
     "build": {
       "dependencies": [
-        "../common-propagator:build"
+        "../common-propagator:build",
+        "../common-builder:build"
       ],
       "files": [
         "./src/**/*"

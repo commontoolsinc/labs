@@ -1,4 +1,4 @@
-import { isAlias } from "@commontools/common-builder";
+import { isAlias, isStatic } from "@commontools/common-builder";
 import {
   cell,
   isCell,
@@ -50,7 +50,8 @@ export function mergeObjects(...objects: any[]): any {
       obj === null ||
       Array.isArray(obj) ||
       isAlias(obj) ||
-      isCellReference(obj)
+      isCellReference(obj) ||
+      isStatic(obj)
     )
       return obj;
 
@@ -160,16 +161,17 @@ export function setNestedValue(
 // Turn local aliases into explicit aliases to named cell.
 export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
   function convert(binding: any): any {
-    if (isAlias(binding))
+    if (isStatic(binding)) return binding;
+    else if (isAlias(binding))
       return {
         $alias: { ...binding.$alias, cell },
       };
-    if (Array.isArray(binding)) return binding.map(convert);
-    if (typeof binding === "object" && binding !== null)
+    else if (Array.isArray(binding)) return binding.map(convert);
+    else if (typeof binding === "object" && binding !== null)
       return Object.fromEntries(
         Object.entries(binding).map(([key, value]) => [key, convert(value)])
       );
-    return binding;
+    else return binding;
   }
   return convert(binding) as T;
 }
@@ -352,7 +354,9 @@ export function normalizeToCells(
   previous = maybeUnwrapProxy(previous);
 
   let changed = false;
-  if (isCell(value)) {
+  if (isStatic(value)) {
+    // no-op, don't normalize deep static values and assume they don't change
+  } else if (isCell(value)) {
     changed = value !== previous;
   } else if (isCellReference(value)) {
     changed = isCellReference(previous)

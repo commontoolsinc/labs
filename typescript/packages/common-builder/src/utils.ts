@@ -11,6 +11,7 @@ import {
   isAlias,
   canBeCellProxy,
   makeCellProxy,
+  isStatic,
 } from "./types.js";
 
 /** traverse a value, _not_ entering cells */
@@ -94,6 +95,7 @@ export function toJSONWithAliases(
   ignoreSelfAliases: boolean = false,
   path: PropertyKey[] = []
 ): JSONValue | undefined {
+  if (isStatic(value)) return value;
   if (canBeCellProxy(value)) value = makeCellProxy(value);
   if (isCellProxy(value)) {
     const pathToCell = paths.get(value);

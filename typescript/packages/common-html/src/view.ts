@@ -1,6 +1,7 @@
 import { Parser } from "htmlparser2";
 import * as logger from "./logger.js";
 import { path } from "@commontools/common-propagator/path.js";
+import { markAsStatic } from "@commontools/common-builder";
 
 /** Parse a markup string and context into a view */
 export const view = (markup: string, context: Context): View => {
@@ -16,6 +17,8 @@ export const view = (markup: string, context: Context): View => {
   if (!isVNode(template)) {
     throw new ParseError("Template root must be an element");
   }
+
+  markAsStatic(template);
 
   const view: View = {
     type: "view",
@@ -78,7 +81,7 @@ export type VNode = {
 export const vnode = (
   name: string,
   props: Props = {},
-  children: Array<Child> = [],
+  children: Array<Child> = []
 ): VNode => {
   return { type: "vnode", name, props, children };
 };
@@ -198,7 +201,7 @@ export const tokenize = (markup: string): Array<Token> => {
       lowerCaseTags: true,
       lowerCaseAttributeNames: true,
       xmlMode: false,
-    },
+    }
   );
 
   parser.write(markup);
@@ -283,7 +286,7 @@ export const parse = (markup: string): VNode => {
         const top = stack.pop();
         if (!isVNode(top) || top.name !== token.name) {
           throw new ParseError(
-            `Unexpected closing tag ${token.name} in ${top?.name}`,
+            `Unexpected closing tag ${token.name} in ${top?.name}`
           );
         }
         break;
@@ -298,7 +301,7 @@ export const parse = (markup: string): VNode => {
         const top = stack.pop();
         if (!isSection(top) || top.name !== token.name) {
           throw new ParseError(
-            `Unexpected closing block ${token.name} in ${top?.name}`,
+            `Unexpected closing block ${token.name} in ${top?.name}`
           );
         }
         break;

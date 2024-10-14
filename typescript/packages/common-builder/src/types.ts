@@ -156,3 +156,21 @@ export const toCellProxy = Symbol("toCellProxy");
 export type Frame = {
   parent?: Frame;
 };
+
+const isStaticMarker = Symbol("isStatic");
+
+export type Static = {
+  [isStaticMarker]: true;
+};
+
+export function isStatic(value: any): value is Static {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    value[isStaticMarker] === true
+  );
+}
+
+export function markAsStatic(value: any): void {
+  value[isStaticMarker] = true;
+}
