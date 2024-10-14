@@ -259,7 +259,7 @@ function simpleCell<T>(
         getAsCellReference: () => ({ cell, path } satisfies CellReference),
         toJSON: () => cell.toJSON(),
         get value(): T {
-          return cell.get();
+          return self.get();
         },
         get entityId(): EntityId | undefined {
           return getEntityId(self.getAsCellReference());
