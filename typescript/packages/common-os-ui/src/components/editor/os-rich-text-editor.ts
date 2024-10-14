@@ -18,11 +18,13 @@ import {
   mapFx,
   Fx,
   Store,
+  ValueMsg,
 } from "../../shared/store.js";
 import { createCleanupGroup } from "../../shared/cleanup.js";
 import { TemplateResult } from "lit";
 import { classes } from "../../shared/dom.js";
 import { ClickCompletion } from "../os-floating-completions.js";
+import { Suggestion } from "./prosemirror/suggestions-plugin.js";
 
 const schema = () => {
   return new Schema({
@@ -55,24 +57,45 @@ const schema = () => {
 
 const freeze = Object.freeze;
 
-export const createMentionMsg = (value: suggestions.Msg) =>
-  freeze({
-    type: "mention",
-    value,
-  });
+export type EnterMsg = ValueMsg<"enter", Suggestion>;
 
-export const createHashtagMsg = (value: suggestions.Msg) =>
-  freeze({
-    type: "hashtag",
-    value,
-  });
+export const createEnterMsg = (value: Suggestion) =>
+  freeze({ type: "enter", value });
 
-export const createInfoMsg = (value: string) => freeze({ type: "info", value });
+export type TabMsg = ValueMsg<"tab", Suggestion>;
 
-export type Msg =
-  | ReturnType<typeof createHashtagMsg>
-  | ReturnType<typeof createMentionMsg>
-  | ReturnType<typeof createInfoMsg>;
+export const createTabMsg = (value: Suggestion) =>
+  freeze({ type: "tab", value });
+
+export type MentionMsg = ValueMsg<"mention", suggestions.Msg>;
+
+export const createMentionMsg = (value: suggestions.Msg): MentionMsg =>
+  freeze({ type: "mention", value });
+
+export type HashtagMsg = ValueMsg<"hashtag", suggestions.Msg>;
+
+export const createHashtagMsg = (value: suggestions.Msg): HashtagMsg =>
+  freeze({ type: "hashtag", value });
+
+export type InfoMsg = ValueMsg<"info", string>;
+
+export const createInfoMsg = (value: string): InfoMsg =>
+  freeze({ type: "info", value });
+
+export type Msg = MentionMsg | HashtagMsg | EnterMsg | TabMsg | InfoMsg;
+
+export const tagMentionMsg = (msg: suggestions.Msg): Msg => {
+  switch (msg.type) {
+    case "enter":
+      return createEnterMsg(msg.value);
+    case "tab":
+      return createTabMsg(msg.value);
+    default:
+      return createMentionMsg(msg);
+  }
+};
+
+export const tagHashtagMsg = tagMentionMsg;
 
 export type Model = {
   text: string;
@@ -133,9 +156,9 @@ export const fx = (view: EditorView) => {
   return (msg: Msg): Array<Fx<Msg>> => {
     switch (msg.type) {
       case "hashtag":
-        return mapFx(suggestionsFx(msg.value), createHashtagMsg);
+        return mapFx(suggestionsFx(msg.value), tagHashtagMsg);
       case "mention":
-        return mapFx(suggestionsFx(msg.value), createMentionMsg);
+        return mapFx(suggestionsFx(msg.value), tagMentionMsg);
       default:
         return [];
     }
@@ -176,12 +199,12 @@ export const createEditor = ({
     suggestionsStorePlugin({
       pattern: /@\w+/g,
       decoration: createMentionDecoration,
-      send: forward(send, createMentionMsg),
+      send: forward(send, tagMentionMsg),
     }),
     suggestionsStorePlugin({
       pattern: /#\w+/g,
       decoration: createHashtagDecoration,
-      send: forward(send, createHashtagMsg),
+      send: forward(send, tagHashtagMsg),
     }),
     history(),
     keymap(baseKeymap),
