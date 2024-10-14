@@ -207,7 +207,8 @@ export function moduleToJSON(module: Module) {
 export function recipeToJSON(recipe: Recipe) {
   return {
     schema: recipe.schema,
-    initial: recipe.initial,
+    ...(recipe.internal ? { internal: recipe.internal } : {}),
+    result: recipe.result,
     nodes: recipe.nodes,
   };
 }
