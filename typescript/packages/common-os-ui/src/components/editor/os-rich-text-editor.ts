@@ -8,10 +8,6 @@ import { baseKeymap } from "prosemirror-commands";
 import { customElement } from "lit/decorators.js";
 import { base } from "../../shared/styles.js";
 import { editorClassPlugin } from "./prosemirror/editor-class-plugin.js";
-import {
-  suggestionsPlugin,
-  Suggestion,
-} from "./prosemirror/suggestions-plugin.js";
 import * as suggestions from "./suggestions.js";
 import { createSelection, TextSelection } from "./selection.js";
 import {
@@ -158,50 +154,7 @@ const createHashtagDecoration = ({ from, to, active }: Suggestion) => {
   });
 };
 
-/**
- * Specialized version of `suggestionsPlugin` that takes care of wiring
- * plugin lifecycle callbacks to store
- */
-const suggestionsStorePlugin = ({
-  pattern,
-  decoration,
-  send,
-}: {
-  pattern: RegExp;
-  decoration: (suggestion: Suggestion) => Decoration;
-  send: (msg: suggestions.Msg) => void;
-}) =>
-  suggestionsPlugin({
-    pattern,
-    decoration,
-    reducer: (_view, msg): boolean => {
-      switch (msg.type) {
-        case "activeUpdate":
-          send(suggestions.createActiveUpdateMsg(msg));
-          return true;
-        case "inactiveUpdate":
-          send(suggestions.createInactiveUpdateMsg());
-          return true;
-        case "destroy":
-          send(suggestions.createDestroyMsg());
-          return true;
-        case "arrowUp":
-          send(suggestions.createArrowUpMsg());
-          return true;
-        case "arrowDown":
-          send(suggestions.createArrowDownMsg());
-          return true;
-        case "enter":
-          send(suggestions.createEnterMsg());
-          return true;
-        case "tab":
-          send(suggestions.createTabMsg());
-          return true;
-        default:
-          return false;
-      }
-    },
-  });
+const suggestionsStorePlugin = suggestions.suggestionsStorePlugin;
 
 /**
  * Create and return a configured Prosemirror editor instance/**

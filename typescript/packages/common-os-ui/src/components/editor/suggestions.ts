@@ -1,4 +1,4 @@
-/** Suggestion actions, model and update */
+import { EditorView, Decoration } from "prosemirror-view";
 import * as plugin from "./prosemirror/suggestions-plugin.js";
 import { Rect, createRect } from "../../shared/position.js";
 import { clamp } from "../../shared/number.js";
@@ -6,7 +6,6 @@ import { unknown, ValueMsg } from "../../shared/store.js";
 import * as dummy from "../../shared/dummy.js";
 import * as completion from "./completion.js";
 import { executeCommand, replaceWithText } from "./prosemirror/utils.js";
-import { EditorView } from "prosemirror-view";
 
 const freeze = Object.freeze;
 
@@ -152,3 +151,48 @@ const enterFx = (view: EditorView) => async () => {
   executeCommand(view, replaceWithText(0, 0, "Hello world"));
   return createInfoMsg("Inserted text");
 };
+
+/**
+ * Specialized version of `suggestionsPlugin` that takes care of wiring
+ * plugin lifecycle callbacks to store
+ */
+export const suggestionsStorePlugin = ({
+  pattern,
+  decoration,
+  send,
+}: {
+  pattern: RegExp;
+  decoration: (suggestion: Suggestion) => Decoration;
+  send: (msg: Msg) => void;
+}) =>
+  plugin.suggestionsPlugin({
+    pattern,
+    decoration,
+    reducer: (_view, msg): boolean => {
+      switch (msg.type) {
+        case "activeUpdate":
+          send(msg);
+          return true;
+        case "inactiveUpdate":
+          send(msg);
+          return true;
+        case "destroy":
+          send(msg);
+          return true;
+        case "arrowUp":
+          send(msg);
+          return true;
+        case "arrowDown":
+          send(msg);
+          return true;
+        case "enter":
+          send(msg);
+          return true;
+        case "tab":
+          send(msg);
+          return true;
+        default:
+          return false;
+      }
+    },
+  });
