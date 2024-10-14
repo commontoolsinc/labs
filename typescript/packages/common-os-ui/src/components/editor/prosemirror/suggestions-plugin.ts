@@ -3,7 +3,7 @@ import { EditorState, Plugin, PluginKey } from "prosemirror-state";
 import { isBetweenInclusive } from "../../../shared/number.js";
 import { Rect } from "../../../shared/position.js";
 import { debug } from "../../../shared/debug.js";
-import { TypeMsg } from "../../../shared/store.js";
+import { TypeMsg, ValueMsg } from "../../../shared/store.js";
 
 const freeze = Object.freeze;
 
@@ -64,13 +64,6 @@ export const createInactiveUpdateMsg = (): InactiveUpdateMsg =>
     type: "inactiveUpdate",
   });
 
-export type EnterMsg = TypeMsg<"enter">;
-
-export const createEnterMsg = (): EnterMsg =>
-  freeze({
-    type: "enter",
-  });
-
 export type DestroyMsg = TypeMsg<"destroy">;
 
 export const createDestroyMsg = (): DestroyMsg =>
@@ -92,11 +85,20 @@ export const createArrowUpMsg = () =>
     type: "arrowUp",
   });
 
-export type TabMsg = TypeMsg<"tab">;
+export type EnterMsg = ValueMsg<"enter", Suggestion>;
 
-export const createTabMsg = () =>
+export const createEnterMsg = (value: Suggestion): EnterMsg =>
+  freeze({
+    type: "enter",
+    value,
+  });
+
+export type TabMsg = ValueMsg<"tab", Suggestion>;
+
+export const createTabMsg = (value: Suggestion) =>
   freeze({
     type: "tab",
+    value,
   });
 
 export type Msg =
@@ -195,10 +197,10 @@ export const suggestionsPlugin = ({
           const msg = createArrowUpMsg();
           return send(view, msg);
         } else if (event.key === "Tab") {
-          const msg = createTabMsg();
+          const msg = createTabMsg(active);
           return send(view, msg);
         } else if (event.key === "Enter") {
-          const msg = createEnterMsg();
+          const msg = createEnterMsg(active);
           return send(view, msg);
         }
 
