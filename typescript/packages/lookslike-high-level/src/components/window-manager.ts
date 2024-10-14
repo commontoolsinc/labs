@@ -10,10 +10,9 @@ import {
   isCell,
   getCellByEntityId,
 } from "@commontools/common-runner";
-import { Charm, ID, UI, NAME, addCharms, launch } from "../data.js";
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
-import { queryCollections } from "../recipes/queryCollections.js";
+import { search } from "../recipes/search.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -94,7 +93,7 @@ export class CommonWindowManager extends LitElement {
   private newCharmRefs: [CellImpl<Charm>, Ref<HTMLElement>][] = [];
   private charmLookup: Map<number, CellImpl<Charm>> = new Map();
 
-  @state() private focusedCharm: number = -1;
+  @state() private focusedCharm: string = '-';
 
   handleUniboxSubmit(event: CustomEvent) {
     const charm = this.charmLookup.get(this.focusedCharm);
@@ -125,13 +124,11 @@ export class CommonWindowManager extends LitElement {
         const eid = run(iframe, { data: fieldsToInclude, title: value, prompt: value })
           .entityId!;
         this.openCharm( eid );
-        this.focusedCharm = eid;
       }
     } else {
-      const eid = run(iframe, { data: fieldsToInclude, title: value, prompt: value })
+      const eid = run(iframe, { data: {}, title: value, prompt: value })
         .entityId!;
       this.openCharm( eid );
-      this.focusedCharm = eid;
     }
   }
 
@@ -155,11 +152,13 @@ export class CommonWindowManager extends LitElement {
       console.log("Search submitted:", event.detail.value);
       this.location = event.detail.value;
       this.searchOpen = false;
-      const charm = launch(queryCollections, {
+      const charm = run(search, {
         collection: event.detail.value,
-      });
+      })
+      this.openCharm(charm.entityId!);
+
       console.log("opened", charm, JSON.stringify(charm.getAsProxy()));
-      this.focusedCharm = charm.getAsProxy()[ID];
+      this.focusedCharm = charm.entityId!;
     };
 
     const onAiBoxSubmit = (event: CustomEvent) => {
@@ -202,8 +201,7 @@ export class CommonWindowManager extends LitElement {
           this.charms,
           (charm) => charm.entityId!,
           (charm) => {
-            const charmValues = charm.getAsProxy();
-            const charmId = charmValues.entityId!;
+            const charmId = charm.entityId!;
 
             // Create a new ref for this charm
             let charmRef = this.charmRefs.get(charmId);
@@ -228,6 +226,7 @@ export class CommonWindowManager extends LitElement {
   }
 
   openCharm(charmId: string) {
+    this.focusedCharm = charmId;
     const charm = getCellByEntityId<Charm>(charmId);
     if (!isCell(charm)) throw new Error(`Charm ${charmId} doesn't exist`);
 
