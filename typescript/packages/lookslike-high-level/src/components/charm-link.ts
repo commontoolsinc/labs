@@ -71,7 +71,7 @@ export class CommonCharmLink extends LitElement {
     e.preventDefault();
     this.dispatchEvent(
       new CustomEvent("open-charm", {
-        detail: { charmId: this.charm!.entityId },
+        detail: { charmId: JSON.stringify(this.charm!.entityId) },
         bubbles: true,
         composed: true,
       })
@@ -83,7 +83,9 @@ export class CommonCharmLink extends LitElement {
 
     const name = this.name ?? this.nameFromCharm ?? "(unknown)";
     return html`
-      <a href="#${this.charm.entityId}" @click="${this.handleClick}"
+      <a
+        href="#${JSON.stringify(this.charm.entityId)}"
+        @click="${this.handleClick}"
         >💎 ${name}</a
       >
     `;
