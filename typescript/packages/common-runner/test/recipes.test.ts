@@ -97,6 +97,36 @@ describe("Recipe Runner", () => {
     });
   });
 
+  it("should execute handlers", async () => {
+    const incHandler = handler<
+      { amount: number },
+      { counter: { value: number } }
+    >(({ amount }, { counter }) => {
+      counter.value += amount;
+    });
+
+    const incRecipe = recipe<{ counter: { value: number } }>(
+      "Increment counter",
+      ({ counter }) => {
+        return { counter, stream: incHandler({ counter }) };
+      }
+    );
+
+    console.log("recipe", JSON.stringify(incRecipe, null, 2));
+
+    const result = run(incRecipe, { counter: { value: 0 } });
+
+    await idle();
+
+    result.asSimpleCell(["stream"]).send({ amount: 1 });
+    await idle();
+    expect(result.getAsProxy()).toMatchObject({ counter: { value: 1 } });
+
+    result.asSimpleCell(["stream"]).send({ amount: 2 });
+    await idle();
+    expect(result.getAsProxy()).toMatchObject({ counter: { value: 3 } });
+  });
+
   it("should execute recipes returned by handlers", async () => {
     const counter = cell({ value: 0 });
     const nested = cell({ a: { b: { c: 0 } } });
@@ -111,11 +141,13 @@ describe("Recipe Runner", () => {
       values.push([counter.value, amount, nested.c]);
     });
 
+    let n = 0;
     const incHandler = handler<
       { amount: number },
       { counter: { value: number }; nested: { a: { b: { c: number } } } }
     >((event, { counter, nested }) => {
       counter.value += event.amount;
+      console.log("counter", counter.value, event.amount);
       return incLogger({ counter, amount: event.amount, nested: nested.a.b });
     });
 

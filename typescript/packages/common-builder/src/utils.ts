@@ -209,7 +209,7 @@ export function moduleToJSON(module: Module) {
 export function recipeToJSON(recipe: Recipe) {
   return {
     schema: recipe.schema,
-    ...(recipe.internal ? { internal: recipe.internal } : {}),
+    ...(recipe.initial ? { initial: recipe.initial } : {}),
     result: recipe.result,
     nodes: recipe.nodes,
   };

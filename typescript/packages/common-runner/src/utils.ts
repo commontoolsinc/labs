@@ -455,3 +455,14 @@ export function isEqualCellReferences(
     arrayEqual(a.path, b.path)
   );
 }
+
+export function deepCopy(value: any): any {
+  if (isCell(value)) return value;
+  if (typeof value === "object" && value !== null)
+    return Array.isArray(value)
+      ? value.map(deepCopy)
+      : Object.fromEntries(
+          Object.entries(value).map(([key, value]) => [key, deepCopy(value)])
+        );
+  else return value;
+}

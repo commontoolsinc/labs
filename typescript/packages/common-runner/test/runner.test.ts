@@ -112,7 +112,6 @@ describe("runRecipe", () => {
   it("should handle nested recipes", async () => {
     const nestedRecipe: Recipe = {
       schema: {},
-      internal: { parameters: { value: 1 } },
       result: { output: { $alias: { path: ["internal", "result"] } } },
       nodes: [
         {

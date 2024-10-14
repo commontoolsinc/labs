@@ -123,7 +123,7 @@ function factoryFromRecipe<T, R>(
   )!;
 
   // Set initial values for all cells, add non-inputs defaults
-  const internal: any = {};
+  const initial: any = {};
   cells.forEach((cell) => {
     // Only process roots of extra cells:
     if (cell === inputs) return;
@@ -131,19 +131,19 @@ function factoryFromRecipe<T, R>(
     if (path.length > 0) return;
 
     const cellPath = paths.get(cell)!;
-    if (value) setValueAtPath(internal, cellPath, value);
+    if (value) setValueAtPath(initial, cellPath, value);
     if (defaultValue) setValueAtPath(defaults, cellPath, defaultValue);
   });
 
   // External cells all have to be added to the initial state
   cells.forEach((cell) => {
     const { external } = cell.export();
-    if (external) setValueAtPath(internal, paths.get(cell)!, external);
+    if (external) setValueAtPath(initial, paths.get(cell)!, external);
   });
 
   // TODO: initial is likely not needed anymore
   // TODO: But we need a new one for the result
-  const schema = createJsonSchema(defaults, internal) as {
+  const schema = createJsonSchema(defaults, initial) as {
     properties: { [key: string]: any };
     description: string;
   };
@@ -171,7 +171,7 @@ function factoryFromRecipe<T, R>(
 
   const recipe: Recipe & toJSON = {
     schema,
-    internal,
+    initial,
     result,
     nodes: serializedNodes,
     toJSON: () => recipeToJSON(recipe),

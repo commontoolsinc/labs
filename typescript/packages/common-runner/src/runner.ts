@@ -31,6 +31,7 @@ import {
   mergeObjects,
   sendValueToBinding,
   staticDataToNestedCells,
+  deepCopy,
 } from "./utils.js";
 import { getModuleByRef } from "./module.js";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.js";
@@ -128,18 +129,19 @@ export function run<T, R = any>(
   resultCell.send(mapBindingsToCell<R>(recipe.result as R, processCell));
 
   // TODO: This will overwrite existing values
-  const internal = mergeObjects(recipe.internal, processCell.get()?.internal);
+  const internal = mergeObjects(
+    (recipe.initial as { internal: any })?.internal,
+    processCell.get()?.internal
+  );
 
   if (defaults) parameters = mergeObjects(parameters, defaults);
 
-  // TODO: Don't overwrite, reuse
-  if (!processCell.get())
-    processCell.send({
-      [TYPE]:
-        (recipe.schema as { description: string })?.description ?? "unknown",
-      parameters,
-      ...(internal ? { internal } : {}),
-    });
+  processCell.send({
+    [TYPE]:
+      (recipe.schema as { description: string })?.description ?? "unknown",
+    parameters,
+    ...(internal ? { internal: deepCopy(internal) } : {}),
+  });
 
   const [cancel, addCancel] = useCancelGroup();
   cancels.set(resultCell, cancel);
@@ -274,8 +276,17 @@ function instantiateJavaScriptNode(
       const ref = followAliases(value, processCell);
       cell = ref.cell;
       path = ref.path;
+      console.log("alias", path, JSON.stringify(cell.get()));
       value = cell.getAtPath(path);
     }
+    console.log(
+      "isStream?",
+      inputs,
+      key,
+      value,
+      JSON.stringify(cell.get()),
+      path
+    );
     if (isStreamAlias(value)) {
       streamRef = { cell, path };
       break;

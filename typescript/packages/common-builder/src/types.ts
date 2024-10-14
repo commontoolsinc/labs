@@ -122,7 +122,7 @@ export type Node = {
 
 export type Recipe = {
   schema: JSON;
-  internal?: JSON;
+  initial?: JSON;
   result: JSON;
   nodes: Node[];
 };
