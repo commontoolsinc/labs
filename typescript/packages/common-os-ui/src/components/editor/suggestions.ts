@@ -156,6 +156,8 @@ export const fx = (view: EditorView) => (state: Model, msg: Msg) => {
           state.completions.at(state.selectedCompletion)?.text ?? null,
         ),
       ];
+    case "clickCompletion":
+      return [replaceFx(view, state.active, msg.value.text)];
     default:
       return [];
   }
