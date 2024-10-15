@@ -185,23 +185,23 @@ const prepHTML = lift(({ prompt, schema, lastSrc }) => {
     \`\`\`html
     ...
     \`\`\`
-  
+
     This must be complete HTML.
     Import Tailwind and style the page using it. Use tasteful, minimal defaults with a consistent style but customize based on the request.
     Import React and write the app using it.
-  
+
     You may not use any other libraries unless requested by the user (in which case, use a CDN to import them)
-  
+
     The document can and should make use of postMessage to read and write data from the host context. e.g.
-  
+
     document.addEventListener('DOMContentLoaded', function() {
       console.log('Initialized!');
-  
+
       window.parent.postMessage({
           type: 'subscribe',
           key: 'exampleKey'
         }, '*');
-  
+
       window.addEventListener('message', function(event) {
         if (event.data.type === 'readResponse') {
           // use response
@@ -212,31 +212,31 @@ const prepHTML = lift(({ prompt, schema, lastSrc }) => {
         ...
       });
     });
-  
+
     window.parent.postMessage({
       type: 'write',
       key: 'exampleKey',
       value: 'Example data to write'
     }, '*');
-  
+
     You can subscribe and unsubscribe to changes from the keys:
-  
+
     window.parent.postMessage({
       type: 'subscribe',
       key: 'exampleKey'
     }, '*');
-  
+
     You receive 'update' messages with a 'key' and 'value' field.
-  
+
     window.parent.postMessage({
       type: 'unsubscribe',
       key: 'exampleKey',
     }, '*');
-  
+
     <view-model-schema>
       ${JSON.stringify(schema, null, 2)}
     </view-model-schema>
-  
+
     It's best to access and manage each state reference seperately.`,
   };
 });
@@ -306,15 +306,8 @@ export const iframe = recipe<{
   return {
     [NAME]: str`${title} - iframe`,
     [UI]: html`<div>
-      <common-input
-        value=${title}
-        placeholder="title"
-        oncommon-input=${updateValue({ value: title })}
-      ></common-input>
-      <common-iframe src=${grabHTML({
-        result,
-      })} $context=${data}></common-iframe>
-      <pre>${tail({ partial: partialHTML, pending: pendingHTML, lines: 5 })}
+      <pre>${tail({ partial: partialHTML, pending: pendingHTML, lines: 5 })}</pre>
+      <common-iframe src=${grabHTML({ result })} $context=${data}></common-iframe>
       <details>
         <summary>View Data</summary>
         <common-input
@@ -323,9 +316,18 @@ export const iframe = recipe<{
           oncommon-input=${updateValue({ value: filter })}
         ></common-input>
         <pre>${formatData({ obj: data })}</pre>
+        <details>
+          <summary>Derived Schema</summary>
+          <pre>${formatData({ obj: schema })}</pre>
+        </details>
       </details>
       <details>
         <summary>Edit Source</summary>
+        <textarea
+          value=${query}
+          onkeyup=${onInput({ value: query })}
+          style="width: 100%; min-height: 128px;"
+        ></textarea>
         <textarea
           value=${src}
           onkeyup=${onInput({ value: src })}
@@ -333,11 +335,6 @@ export const iframe = recipe<{
         ></textarea>
       </details>
 
-      <textarea
-        value=${query}
-        onkeyup=${onInput({ value: query })}
-        style="width: 100%; min-height: 128px;"
-      ></textarea>
 
       <button type="button"
         onclick=${acceptSuggestion({

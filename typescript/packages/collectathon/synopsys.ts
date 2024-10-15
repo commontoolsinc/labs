@@ -11,6 +11,44 @@ type Fact = [Entity, Attribute, Value];
 
 const SYNOPSYS_URL = Deno.env.get("SYNOPSYS_URL") || "http://localhost:8080";
 
+export async function clipEmail(
+  sender: string,
+  collections: string[],
+  entity: any,
+) {
+  entity["import/sender"] = sender;
+  entity["import/source"] = "Email";
+  entity["import/tool"] = "ingest";
+  entity["import/time"] = new Date().toISOString();
+
+  const entityCid = await cid(entity);
+  const entityFacts = await jsonToFacts(entity);
+
+  const collectionsFacts = await Promise.all(
+    collections.map(async (collectionName) => {
+      const collection = { name: collectionName, type: "collection" };
+      return await jsonToFacts(collection);
+    }),
+  );
+
+  const mergedCollectionFacts = collectionsFacts.flat();
+
+  const memberFacts = await Promise.all(
+    collections.map(async (collectionName) => {
+      const collection = { name: collectionName, type: "collection" };
+      const collectionCid = await cid(collection);
+      return [{ "/": collectionCid }, "member", { "/": entityCid }] as Fact;
+    }),
+  );
+
+  const response = await assert(
+    ...mergedCollectionFacts,
+    ...entityFacts,
+    ...memberFacts,
+  );
+  console.log("assert", response);
+}
+
 export async function clip(url: string, collections: string[], entity: any) {
   entity["import/url"] = url;
   entity["import/source"] = "Webpage";
@@ -20,21 +58,29 @@ export async function clip(url: string, collections: string[], entity: any) {
   const entityCid = await cid(entity);
   const entityFacts = await jsonToFacts(entity);
 
-  const collectionsFacts = await Promise.all(collections.map(async (collectionName) => {
-    const collection = { name: collectionName, type: 'collection' };
-    return await jsonToFacts(collection);
-  }));
+  const collectionsFacts = await Promise.all(
+    collections.map(async (collectionName) => {
+      const collection = { name: collectionName, type: "collection" };
+      return await jsonToFacts(collection);
+    }),
+  );
 
   const mergedCollectionFacts = collectionsFacts.flat();
 
-  const memberFacts = await Promise.all(collections.map(async (collectionName) => {
-    const collection = { name: collectionName, type: 'collection' };
-    const collectionCid = await cid(collection);
-    return [{ "/": collectionCid }, 'member', { "/": entityCid }] as Fact;
-  }));
+  const memberFacts = await Promise.all(
+    collections.map(async (collectionName) => {
+      const collection = { name: collectionName, type: "collection" };
+      const collectionCid = await cid(collection);
+      return [{ "/": collectionCid }, "member", { "/": entityCid }] as Fact;
+    }),
+  );
 
-  const response = await assert(...mergedCollectionFacts, ...entityFacts, ...memberFacts);
-  console.log('assert', response);
+  const response = await assert(
+    ...mergedCollectionFacts,
+    ...entityFacts,
+    ...memberFacts,
+  );
+  console.log("assert", response);
 }
 
 export async function cid(data: any) {
@@ -47,28 +93,30 @@ export async function cid(data: any) {
 
 export async function jsonToFacts(data: any) {
   const facts: Fact[] = [];
-  const processObject = (obj: any, parentEntity?: Entity) => {
+  const processObject = (
+    obj: any,
+    parentEntity?: Entity,
+    prefix: string = "",
+  ) => {
     for (const [key, value] of Object.entries(obj)) {
+      const fullKey = prefix ? `${prefix}/${key}` : key;
       if (Array.isArray(value)) {
         // Handle arrays
         for (const item of value) {
-          if (typeof item === "object" && item !== null && "/" in item) {
-            // This is an Entity in an array
-            facts.push([parentEntity as Entity, key, item as Entity]);
-          } else if (typeof item !== "function") {
-            facts.push([parentEntity as Entity, key, item as Value]);
+          if (typeof item !== "object" && typeof item !== "function") {
+            facts.push([parentEntity as Entity, fullKey, item as Value]);
           }
         }
       } else if (typeof value === "object" && value !== null) {
         if ("/" in value) {
           // This is an Entity
-          facts.push([parentEntity as Entity, key, value as Entity]);
+          facts.push([parentEntity as Entity, fullKey, value as Entity]);
         } else {
-          // Ignore nested objects that are not Entities
-          continue;
+          // Flatten nested objects
+          processObject(value, parentEntity, fullKey);
         }
       } else if (typeof value !== "function") {
-        facts.push([parentEntity as Entity, key, value as Value]);
+        facts.push([parentEntity as Entity, fullKey, value as Value]);
       }
     }
   };
@@ -84,7 +132,7 @@ export async function jsonToFacts(data: any) {
     }
   }
 
-  return facts;
+  return facts.filter((fact) => fact[2] !== null && fact[2] !== undefined);
 }
 
 export async function assert(...facts: Fact[]) {

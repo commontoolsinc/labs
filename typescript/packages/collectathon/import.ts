@@ -6,7 +6,12 @@ import { clipCalendar } from "./calendar.ts";
 import { clipRSS } from "./rss.ts";
 import { clipWebpage } from "./webpage.ts";
 
-export async function clipUrl(url: string, collections: string[], prompt: string | undefined) {
+export async function clipUrl(
+  url: string,
+  collections: string[],
+  prompt: string | undefined,
+  htmlSource: string | undefined,
+) {
   if (url.endsWith(".ics")) {
     await clipCalendar(url, collections);
   } else if (url.includes("github.com")) {
@@ -23,8 +28,10 @@ export async function clipUrl(url: string, collections: string[], prompt: string
   ) {
     await clipRSS(url, collections);
   } else {
-    await clipWebpage(url, collections, prompt);
+    return await clipWebpage(url, collections, prompt, htmlSource);
   }
+
+  return [];
 }
 
 export async function importFiles(

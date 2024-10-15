@@ -99,7 +99,7 @@ export const queryCollections = recipe<{ collectionName: string }>("Fetch Collec
 
   const data = ensureArray({ data: result });
   const normalizedData = normalizeData({ result });
-  const exportedData = lift((data: any[]) => ({ items: data }))(data);
+  const exportedData = lift((data: any[]) => ({ items: data }))(normalizedData);
   const dataSize = lift((data: any[]) => data?.length || "pending...")(normalizedData);
 
   return {

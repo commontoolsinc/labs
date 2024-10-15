@@ -1,38 +1,40 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-  <title>Collectathon Clipper</title>
-  <style>
-    body {
-      width: 300px;
-      padding: 10px;
-    }
-    .collection-list {
-      max-height: 200px;
-      overflow-y: auto;
-    }
-    .collection-item {
-      display: flex;
-      align-items: center;
-      margin-bottom: 5px;
-    }
-    .collection-item input {
-      margin-right: 5px;
-    }
-  </style>
-</head>
-<body>
-  <h1>Collectathon Clipper</h1>
-  <input type="text" id="searchInput" placeholder="Search collections">
-  <div id="recentCollections" class="collection-list">
-    <h3>Suggested Collections</h3>
-  </div>
-  <div id="searchResults" class="collection-list">
-    <h3>Search Results</h3>
-  </div>
-  <input type="text" id="prompt" placeholder="Optional prompt">
-<div id="clippedContent"></div>
-  <button id="clipButton">Clip URL</button>
-  <script src="popup.js"></script>
-</body>
+  <head>
+    <title>Collectathon Clipper</title>
+    <style>
+      body {
+        width: 300px;
+        padding: 10px;
+      }
+      .collection-list {
+        max-height: 200px;
+        overflow-y: auto;
+      }
+      .collection-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 5px;
+      }
+      .collection-item input {
+        margin-right: 5px;
+      }
+    </style>
+  </head>
+  <body>
+    <button id="openCommonOSButton">Open Common OS</button>
+    <h1>Common Clipper</h1>
+    <input type="text" id="searchInput" placeholder="Search collections" />
+    <div id="recentCollections" class="collection-list">
+      <h3>Suggested Collections</h3>
+    </div>
+    <div id="searchResults" class="collection-list">
+      <h3>Search Results</h3>
+    </div>
+    <input type="text" id="prompt" placeholder="Optional prompt" />
+    <div id="clippedContent"></div>
+    <button id="clipButton">Clip URL</button>
+    <button id="openInCommonOSButton">Open in Common OS</button>
+    <script src="popup.js"></script>
+  </body>
 </html>

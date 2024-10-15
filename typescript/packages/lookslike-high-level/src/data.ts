@@ -24,7 +24,7 @@ import { counters } from "./recipes/counters.js";
 import "./recipes/todo-list-as-task.js";
 import "./recipes/playlist.js";
 import { iframe } from "./recipes/iframe.js";
-import { queryCollections } from "./recipes/queryCollections.js";
+import { search } from "./recipes/search.js";
 import { importCalendar } from "./recipes/importCalendar.js";
 import { dungeon } from "./recipes/dungeon.js";
 import { dataDesigner } from "./recipes/dataDesigner.js";
@@ -32,6 +32,7 @@ import { jsonImporter } from "./recipes/jsonImport.js";
 import { prompt } from "./recipes/prompts.js";
 import { wiki } from "./recipes/wiki.js";
 import { helloIsolated } from "./recipes/helloIsolated.js";
+import { queryCollections } from "./recipes/queryCollections.js";
 
 export type Charm = {
   [NAME]?: string;
@@ -65,8 +66,11 @@ addCharms([
     data: { counter: 0 },
   }),
   run(importCalendar, {}),
+  run(search, {
+    query: "home",
+  }),
   run(queryCollections, {
-    url: "/api/data/",
+    collectionName: 'home'
   }),
   run(todoList, {
     title: "My TODOs",
@@ -168,10 +172,10 @@ function getFridayAndMondayDateStrings() {
   const daysUntilFriday = (5 - today.getDay() + 7) % 7;
 
   const nextFriday = new Date(
-    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000
+    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000,
   );
   const followingMonday = new Date(
-    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000
+    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000,
   );
 
   const formatDate = (date: Date): string => {
