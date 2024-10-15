@@ -44,6 +44,22 @@ import init, {
 
 export const cancels = new WeakMap<CellImpl<any>, Cancel>();
 
+/**
+ * Run a recipe.
+ *
+ * When called with a result cell, it'll read from the cell and update the
+ * instance if appropriate. This can be used to rehydrate an instance.
+ *
+ * When called without a result cell, or the result cell is empty, a new
+ * instance is created.
+ *
+ * @param recipeFactory - A function that takes parameters and returns a recipe.
+ * @param parameters - The parameters to pass to the recipe. Can be static data
+ * and/or cell references, including cell value proxies and regular cells.
+ * @param resultCell - Optional cell to run the recipe into. If not given, a new
+ * cell is created.
+ * @returns The result cell.
+ */
 export function run<T, R>(
   recipeFactory: RecipeFactory<T, R>,
   parameters: T,
@@ -156,6 +172,16 @@ export function run<T, R = any>(
   return resultCell;
 }
 
+/**
+ * Stop a recipe. This will cancel the recipe and all its children.
+ *
+ * TODO: This isn't a good strategy, as other instances might depend on behavior
+ * provided here, even if the user might no longer care about e.g. the UI here.
+ * A better strategy would be to schedule based on effects and unregister the
+ * effects driving execution, e.g. the UI.
+ *
+ * @param resultCell - The result cell to stop.
+ */
 export function stop(resultCell: CellImpl<any>) {
   cancels.get(resultCell)?.();
   cancels.delete(resultCell);
