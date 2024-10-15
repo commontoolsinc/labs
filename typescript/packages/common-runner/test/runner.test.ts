@@ -109,6 +109,58 @@ describe("runRecipe", () => {
     expect(result.getAsProxy()).toEqual({ result: 2 });
   });
 
+  it("should run a simple module with no outputs", async () => {
+    let ran = false;
+
+    const mockRecipe: Recipe = {
+      schema: {},
+      result: { result: { $alias: { path: ["internal", "result"] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: () => {
+              ran = true;
+            },
+          },
+          inputs: { $alias: { path: ["parameters", "value"] } },
+          outputs: {},
+        },
+      ],
+    };
+
+    const result = run(mockRecipe, { value: 1 });
+    await idle();
+    expect(result.getAsProxy()).toEqual({ result: undefined });
+    expect(ran).toBe(true);
+  });
+
+  it("should handle incorrect inputs gracefully", async () => {
+    let ran = false;
+
+    const mockRecipe: Recipe = {
+      schema: {},
+      result: { result: { $alias: { path: ["internal", "result"] } } },
+      nodes: [
+        {
+          module: {
+            type: "javascript",
+            implementation: () => {
+              ran = true;
+            },
+          },
+          inputs: { $alias: { path: ["parameters", "other"] } },
+          outputs: {},
+        },
+      ],
+    };
+
+    const result = run(mockRecipe, { value: 1 });
+    await idle();
+    expect(result.getAsProxy()).toEqual({ result: undefined });
+    expect(ran).toBe(true);
+  });
+
   it("should handle nested recipes", async () => {
     const nestedRecipe: Recipe = {
       schema: {},
