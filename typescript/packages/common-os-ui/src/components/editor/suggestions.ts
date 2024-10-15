@@ -33,6 +33,19 @@ export const createArrowUpMsg = plugin.createArrowUpMsg;
 export type ArrowDownMsg = plugin.ArrowDownMsg;
 export const createArrowDownMsg = plugin.createArrowDownMsg;
 
+export type SetCompletionsMsg = ValueMsg<
+  "setCompletions",
+  Array<completion.Model>
+>;
+
+export const createSetCompletionsMsg = (
+  value: Array<completion.Model>,
+): SetCompletionsMsg =>
+  freeze({
+    type: "setCompletions",
+    value,
+  });
+
 export type ClickCompletionMsg = ValueMsg<"clickCompletion", completion.Model>;
 
 export const createClickCompletionMsg = (
@@ -59,6 +72,7 @@ export type Msg =
   | ArrowDownMsg
   | TabMsg
   | EnterMsg
+  | SetCompletionsMsg
   | ClickCompletionMsg
   | InfoMsg;
 
@@ -86,10 +100,6 @@ const updateActiveUpdate = (
     ...state,
     active,
     coords,
-    selectedCompletion: 0,
-    completions: dummy
-      .titles(3)
-      .map((text) => completion.model({ id: dummy.id(), text })),
   });
 };
 
@@ -112,6 +122,17 @@ const updateSelectedCompletion = (state: Model, offset: number): Model => {
   });
 };
 
+const updateSetCompletions = (
+  state: Model,
+  completions: Array<completion.Model>,
+): Model => {
+  return freeze({
+    ...state,
+    selectedCompletion: 0,
+    completions,
+  });
+};
+
 export const update = (state: Model, msg: Msg): Model => {
   switch (msg.type) {
     case "activeUpdate":
@@ -126,6 +147,8 @@ export const update = (state: Model, msg: Msg): Model => {
       return state;
     case "tab":
       return state;
+    case "setCompletions":
+      return updateSetCompletions(state, msg.value);
     case "clickCompletion":
       return state;
     case "destroy":
@@ -140,6 +163,8 @@ export const update = (state: Model, msg: Msg): Model => {
 
 export const fx = (view: EditorView) => (state: Model, msg: Msg) => {
   switch (msg.type) {
+    case "activeUpdate":
+      return [fetchCompletionsFx(msg.active)];
     case "enter":
       return [
         replaceFx(
@@ -161,6 +186,14 @@ export const fx = (view: EditorView) => (state: Model, msg: Msg) => {
     default:
       return [];
   }
+};
+
+const fetchCompletionsFx = (_active: Suggestion) => async () => {
+  // TODO: some fetch request for completions
+  const completions = dummy
+    .titles(3)
+    .map((text) => completion.model({ id: dummy.id(), text }));
+  return createSetCompletionsMsg(completions);
 };
 
 const replaceFx =
