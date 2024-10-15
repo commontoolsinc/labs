@@ -276,17 +276,8 @@ function instantiateJavaScriptNode(
       const ref = followAliases(value, processCell);
       cell = ref.cell;
       path = ref.path;
-      console.log("alias", path, JSON.stringify(cell.get()));
       value = cell.getAtPath(path);
     }
-    console.log(
-      "isStream?",
-      inputs,
-      key,
-      value,
-      JSON.stringify(cell.get()),
-      path
-    );
     if (isStreamAlias(value)) {
       streamRef = { cell, path };
       break;

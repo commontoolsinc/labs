@@ -112,8 +112,6 @@ describe("Recipe Runner", () => {
       }
     );
 
-    console.log("recipe", JSON.stringify(incRecipe, null, 2));
-
     const result = run(incRecipe, { counter: { value: 0 } });
 
     await idle();
@@ -147,7 +145,6 @@ describe("Recipe Runner", () => {
       { counter: { value: number }; nested: { a: { b: { c: number } } } }
     >((event, { counter, nested }) => {
       counter.value += event.amount;
-      console.log("counter", counter.value, event.amount);
       return incLogger({ counter, amount: event.amount, nested: nested.a.b });
     });
 
