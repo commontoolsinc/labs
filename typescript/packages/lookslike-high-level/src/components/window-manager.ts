@@ -229,7 +229,12 @@ export class CommonWindowManager extends LitElement {
           <os-navpanel safearea>
             <os-sidebar-group>
               <div slot="label">Prompt</div>
-              <div slot="content"><pre>${this.sidebar}</pre></div>
+              <div slot="content">
+                <pre style="white-space: pre-wrap;">
+                ${this.sidebar}
+                  </pre
+                >
+              </div>
             </os-sidebar-group>
           </os-navpanel>
         </os-navstack>
