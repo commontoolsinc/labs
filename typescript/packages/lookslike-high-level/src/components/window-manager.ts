@@ -13,7 +13,6 @@ import {
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
-import { CellProxy } from "@commontools/common-builder";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -59,16 +58,12 @@ export class CommonWindowManager extends LitElement {
       @keyframes highlight {
         0%,
         100% {
-          box-shadow:
-            0 10px 20px rgba(0, 0, 0, 0.1),
-            0 6px 6px rgba(0, 0, 0, 0.1),
-            0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1),
+            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
         }
         50% {
-          box-shadow:
-            0 0 20px 5px rgba(255, 215, 0, 0.5),
-            0 6px 6px rgba(0, 0, 0, 0.1),
-            0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow: 0 0 20px 5px rgba(255, 215, 0, 0.5),
+            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
         }
       }
       .highlight {
@@ -114,7 +109,7 @@ export class CommonWindowManager extends LitElement {
             }
             return acc;
           },
-          {} as any,
+          {} as any
         );
 
         if (charmValues.data) {
@@ -227,7 +222,7 @@ export class CommonWindowManager extends LitElement {
                 <div ${ref(charmRef)}></div>
               </div>
             `;
-          },
+          }
         )}
 
         <os-navstack slot="sidebar">
@@ -251,7 +246,7 @@ export class CommonWindowManager extends LitElement {
     addCharms([charm]); // Make sure any shows charm is in the list of charms
 
     const existingWindow = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`,
+      `[data-charm-id="${CSS.escape(charmId)}"]`
     );
     if (existingWindow) {
       this.scrollToAndHighlight(charmId, true);
@@ -274,7 +269,7 @@ export class CommonWindowManager extends LitElement {
 
   private scrollToAndHighlight(charmId: string, animate: boolean) {
     const window = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`,
+      `[data-charm-id="${CSS.escape(charmId)}"]`
     );
     if (window) {
       window.scrollIntoView({
@@ -295,7 +290,7 @@ export class CommonWindowManager extends LitElement {
       const charmId = windowElement.getAttribute("data-charm-id");
       if (charmId) {
         this.charms = this.charms.filter(
-          (charm) => JSON.stringify(charm.entityId) !== charmId,
+          (charm) => JSON.stringify(charm.entityId) !== charmId
         );
         this.charmRefs.delete(charmId);
         this.charmLookup.delete(charmId);
