@@ -24,7 +24,11 @@ import { createCleanupGroup } from "../../shared/cleanup.js";
 import { TemplateResult } from "lit";
 import { classes } from "../../shared/dom.js";
 import { ClickCompletion } from "../os-floating-completions.js";
-import { Suggestion } from "./prosemirror/suggestions-plugin.js";
+import {
+  replaceSuggestionWithText,
+  Suggestion,
+} from "./prosemirror/suggestions-plugin.js";
+import { executeCommand } from "./prosemirror/utils.js";
 
 const schema = () => {
   return new Schema({
@@ -57,16 +61,6 @@ const schema = () => {
 
 const freeze = Object.freeze;
 
-export type EnterMsg = ValueMsg<"enter", Suggestion>;
-
-export const createEnterMsg = (value: Suggestion) =>
-  freeze({ type: "enter", value });
-
-export type TabMsg = ValueMsg<"tab", Suggestion>;
-
-export const createTabMsg = (value: Suggestion) =>
-  freeze({ type: "tab", value });
-
 export type MentionMsg = ValueMsg<"mention", suggestions.Msg>;
 
 export const createMentionMsg = (value: suggestions.Msg): MentionMsg =>
@@ -82,20 +76,21 @@ export type InfoMsg = ValueMsg<"info", string>;
 export const createInfoMsg = (value: string): InfoMsg =>
   freeze({ type: "info", value });
 
-export type Msg = MentionMsg | HashtagMsg | EnterMsg | TabMsg | InfoMsg;
+export type Msg = MentionMsg | HashtagMsg | InfoMsg;
 
 export const tagMentionMsg = (msg: suggestions.Msg): Msg => {
   switch (msg.type) {
-    case "enter":
-      return createEnterMsg(msg.value);
-    case "tab":
-      return createTabMsg(msg.value);
     default:
       return createMentionMsg(msg);
   }
 };
 
-export const tagHashtagMsg = tagMentionMsg;
+export const tagHashtagMsg = (msg: suggestions.Msg): Msg => {
+  switch (msg.type) {
+    default:
+      return createHashtagMsg(msg);
+  }
+};
 
 export type Model = {
   text: string;
@@ -149,16 +144,22 @@ export const update = (state: Model, msg: Msg): Model => {
   }
 };
 
+export const enterFx =
+  (view: EditorView, suggestion: Suggestion, text: string) => async () => {
+    executeCommand(view, replaceSuggestionWithText(suggestion, text));
+    return createInfoMsg(`Replaced suggestion ${suggestion.text} -> ${text}`);
+  };
+
 /** Side effects for the editor */
 export const fx = (view: EditorView) => {
   const suggestionsFx = suggestions.fx(view);
 
-  return (msg: Msg): Array<Fx<Msg>> => {
+  return (state: Model, msg: Msg): Array<Fx<Msg>> => {
     switch (msg.type) {
       case "hashtag":
-        return mapFx(suggestionsFx(msg.value), tagHashtagMsg);
+        return mapFx(suggestionsFx(state.hashtag, msg.value), tagHashtagMsg);
       case "mention":
-        return mapFx(suggestionsFx(msg.value), tagMentionMsg);
+        return mapFx(suggestionsFx(state.mention, msg.value), tagMentionMsg);
       default:
         return [];
     }

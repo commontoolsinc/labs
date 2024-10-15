@@ -34,7 +34,7 @@ export const createStore = <State, Msg>({
   state: State;
   msg?: Msg;
   update: (state: State, msg: Msg) => State;
-  fx?: (msg: Msg) => Array<Fx<Msg>>;
+  fx?: (state: State, msg: Msg) => Array<Fx<Msg>>;
 }): Store<State, Msg> => {
   const listeners = new Set<(state: State) => void>();
   let state = initial;
@@ -46,7 +46,11 @@ export const createStore = <State, Msg>({
 
   const send = (msg: Msg) => {
     if (debug()) console.debug("store", "msg", msg);
+    // Generate fx
+    const effects = fx(state, msg);
+    // Get next state
     const next = update(state, msg);
+    // Update state and notify listeners if it changed
     if (state !== next) {
       state = next;
       if (debug()) console.log("store", "state", state);
@@ -54,7 +58,7 @@ export const createStore = <State, Msg>({
         listener(state);
       }
     }
-    const effects = fx(msg);
+    // Run fx
     for (const effect of effects) {
       performEffect(effect);
     }

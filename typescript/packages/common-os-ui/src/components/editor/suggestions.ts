@@ -138,19 +138,48 @@ export const update = (state: Model, msg: Msg): Model => {
   }
 };
 
-export const fx = (view: EditorView) => (msg: Msg) => {
+export const fx = (view: EditorView) => (state: Model, msg: Msg) => {
   switch (msg.type) {
-    case "clickCompletion":
-      return [enterFx(view)];
+    case "enter":
+      return [
+        replaceFx(
+          view,
+          state.active,
+          state.completions.at(state.selectedCompletion)?.text ?? null,
+        ),
+      ];
+    case "tab":
+      return [
+        replaceFx(
+          view,
+          state.active,
+          state.completions.at(state.selectedCompletion)?.text ?? null,
+        ),
+      ];
     default:
       return [];
   }
 };
 
-const enterFx = (view: EditorView) => async () => {
-  executeCommand(view, replaceWithText(0, 0, "Hello world"));
-  return createInfoMsg("Inserted text");
-};
+const replaceFx =
+  (
+    view: EditorView,
+    suggestion: Suggestion | null,
+    completion: string | null,
+  ) =>
+  async () => {
+    if (suggestion == null) {
+      return createInfoMsg("No active suggestion to replace");
+    }
+    if (completion == null) {
+      return createInfoMsg("No completion to replace");
+    }
+    executeCommand(
+      view,
+      replaceWithText(suggestion.from, suggestion.to, completion),
+    );
+    return createInfoMsg("Replaced suggestion with completion");
+  };
 
 /**
  * Specialized version of `suggestionsPlugin` that takes care of wiring

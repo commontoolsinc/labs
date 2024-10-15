@@ -98,7 +98,7 @@ describe("createStore", () => {
     const effectStore = createStore({
       state: initialState,
       update,
-      fx: (msg: Msg) => {
+      fx: (_state: State, msg: Msg) => {
         if (msg.type === "increment") {
           return [decrementLater];
         }

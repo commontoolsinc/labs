@@ -4,6 +4,7 @@ import { isBetweenInclusive } from "../../../shared/number.js";
 import { Rect } from "../../../shared/position.js";
 import { debug } from "../../../shared/debug.js";
 import { TypeMsg, ValueMsg } from "../../../shared/store.js";
+import { replaceWithText } from "./utils.js";
 
 const freeze = Object.freeze;
 
@@ -214,3 +215,8 @@ export const suggestionsPlugin = ({
     },
   });
 };
+
+export const replaceSuggestionWithText = (
+  suggestion: Suggestion,
+  text: string,
+) => replaceWithText(suggestion.from, suggestion.to, text);
