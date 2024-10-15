@@ -13,6 +13,7 @@ import {
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
+import { CellProxy } from "@commontools/common-builder";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -58,12 +59,16 @@ export class CommonWindowManager extends LitElement {
       @keyframes highlight {
         0%,
         100% {
-          box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1),
-            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow:
+            0 10px 20px rgba(0, 0, 0, 0.1),
+            0 6px 6px rgba(0, 0, 0, 0.1),
+            0 0 0 1px rgba(0, 0, 0, 0.05);
         }
         50% {
-          box-shadow: 0 0 20px 5px rgba(255, 215, 0, 0.5),
-            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow:
+            0 0 20px 5px rgba(255, 215, 0, 0.5),
+            0 6px 6px rgba(0, 0, 0, 0.1),
+            0 0 0 1px rgba(0, 0, 0, 0.05);
         }
       }
       .highlight {
@@ -85,20 +90,23 @@ export class CommonWindowManager extends LitElement {
   private newCharmRefs: [CellImpl<Charm>, Ref<HTMLElement>][] = [];
   private charmLookup: Map<string, CellImpl<Charm>> = new Map();
 
-  @state() private focusedCharm: string = "-";
+  @state() private focusedCharm: CellImpl<Charm> | null = null;
+  @state() private focusedProxy: Charm | null = null;
 
   handleUniboxSubmit(event: CustomEvent) {
-    const charm = this.charmLookup.get(this.focusedCharm);
+    const charm = this.focusedProxy;
 
     const value = event.detail.value;
     const shiftKey = event.detail.shiftKey;
     console.log("Unibox submitted:", value, shiftKey);
 
-    if (charm?.getAsProxy()) {
+    if (charm) {
       if (shiftKey) {
-        charm.asSimpleCell(["addToPrompt"]).send({ prompt: value } as any);
+        this.focusedCharm
+          ?.asSimpleCell(["addToPrompt"])
+          .send({ prompt: value } as any);
       } else {
-        const charmValues = charm.getAsProxy();
+        const charmValues = charm;
         let fieldsToInclude = Object.entries(charmValues).reduce(
           (acc, [key, value]) => {
             if (!key.startsWith("$") && !key.startsWith("_")) {
@@ -106,7 +114,7 @@ export class CommonWindowManager extends LitElement {
             }
             return acc;
           },
-          {} as any
+          {} as any,
         );
 
         if (charmValues.data) {
@@ -146,6 +154,10 @@ export class CommonWindowManager extends LitElement {
       this.searchOpen = false;
     };
 
+    this.focusedCharm?.asSimpleCell(["prompt"])?.sink((prompt) => {
+      this.sidebar = prompt;
+    });
+
     const onSearchSubmit = (event: CustomEvent) => {
       console.log("Search submitted:", event.detail.value);
       this.location = event.detail.value;
@@ -154,8 +166,6 @@ export class CommonWindowManager extends LitElement {
         collection: event.detail.value,
       });
       this.openCharm(JSON.stringify(charm.entityId));
-
-      this.focusedCharm = JSON.stringify(charm.entityId);
     };
 
     const onAiBoxSubmit = (event: CustomEvent) => {
@@ -217,23 +227,31 @@ export class CommonWindowManager extends LitElement {
                 <div ${ref(charmRef)}></div>
               </div>
             `;
-          }
+          },
         )}
 
-        <div slot="sidebar">${this.focusedCharm}</div>
+        <os-navstack slot="sidebar">
+          <os-navpanel safearea>
+            <os-sidebar-group>
+              <div slot="label">Prompt</div>
+              <div slot="content"><pre>${this.sidebar}</pre></div>
+            </os-sidebar-group>
+          </os-navpanel>
+        </os-navstack>
       </os-chrome>
     `;
   }
 
   openCharm(charmId: string) {
-    this.focusedCharm = charmId;
     const charm = getCellByEntityId<Charm>(charmId);
+    this.focusedCharm = charm ?? null;
+    this.focusedProxy = charm?.getAsProxy() ?? null;
     if (!isCell(charm)) throw new Error(`Charm ${charmId} doesn't exist`);
 
     addCharms([charm]); // Make sure any shows charm is in the list of charms
 
     const existingWindow = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`
+      `[data-charm-id="${CSS.escape(charmId)}"]`,
     );
     if (existingWindow) {
       this.scrollToAndHighlight(charmId, true);
@@ -256,7 +274,7 @@ export class CommonWindowManager extends LitElement {
 
   private scrollToAndHighlight(charmId: string, animate: boolean) {
     const window = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`
+      `[data-charm-id="${CSS.escape(charmId)}"]`,
     );
     if (window) {
       window.scrollIntoView({
@@ -277,7 +295,7 @@ export class CommonWindowManager extends LitElement {
       const charmId = windowElement.getAttribute("data-charm-id");
       if (charmId) {
         this.charms = this.charms.filter(
-          (charm) => JSON.stringify(charm.entityId) !== charmId
+          (charm) => JSON.stringify(charm.entityId) !== charmId,
         );
         this.charmRefs.delete(charmId);
         this.charmLookup.delete(charmId);
