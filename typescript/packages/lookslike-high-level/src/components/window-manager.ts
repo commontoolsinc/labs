@@ -3,7 +3,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
-import { Charm, UI, NAME, addCharms } from "../data.js";
+import { Charm, UI, addCharms } from "../data.js";
 import {
   run,
   CellImpl,
@@ -62,16 +62,12 @@ export class CommonWindowManager extends LitElement {
       @keyframes highlight {
         0%,
         100% {
-          box-shadow:
-            0 10px 20px rgba(0, 0, 0, 0.1),
-            0 6px 6px rgba(0, 0, 0, 0.1),
-            0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1),
+            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
         }
         50% {
-          box-shadow:
-            0 0 20px 5px rgba(255, 215, 0, 0.5),
-            0 6px 6px rgba(0, 0, 0, 0.1),
-            0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow: 0 0 20px 5px rgba(255, 215, 0, 0.5),
+            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
         }
       }
       .highlight {
@@ -114,7 +110,7 @@ export class CommonWindowManager extends LitElement {
             }
             return acc;
           },
-          {} as any,
+          {} as any
         );
 
         if (charmValues.data) {
@@ -126,7 +122,7 @@ export class CommonWindowManager extends LitElement {
           title: value,
           prompt: value,
         }).entityId!;
-        this.openCharm(eid.toString());
+        this.openCharm(JSON.stringify(eid));
       }
     } else {
       const eid = run(iframe, {
@@ -134,7 +130,7 @@ export class CommonWindowManager extends LitElement {
         title: value,
         prompt: value,
       }).entityId!;
-      this.openCharm(eid.toString());
+      this.openCharm(JSON.stringify(eid));
     }
   }
 
@@ -144,7 +140,7 @@ export class CommonWindowManager extends LitElement {
   @state() location: string = "Home";
   @state() sidebar: string = "";
 
-  onLocationClicked(event: CustomEvent) {
+  onLocationClicked(_event: CustomEvent) {
     console.log("Location clicked in app.");
     this.searchOpen = true;
   }
@@ -161,10 +157,9 @@ export class CommonWindowManager extends LitElement {
       const charm = run(search, {
         collection: event.detail.value,
       });
-      this.openCharm(charm.entityId!.toString());
+      this.openCharm(JSON.stringify(charm.entityId));
 
-      console.log("opened", charm, JSON.stringify(charm.getAsProxy()));
-      this.focusedCharm = charm.entityId!.toString();
+      this.focusedCharm = JSON.stringify(charm.entityId);
     };
 
     const onAiBoxSubmit = (event: CustomEvent) => {
@@ -204,15 +199,15 @@ export class CommonWindowManager extends LitElement {
 
         ${repeat(
           this.charms,
-          (charm) => charm.entityId!,
+          (charm) => charm.entityId!.toString(),
           (charm) => {
             const charmId = charm.entityId!;
 
             // Create a new ref for this charm
-            let charmRef = this.charmRefs.get(charmId.toString());
+            let charmRef = this.charmRefs.get(JSON.stringify(charmId));
             if (!charmRef) {
               charmRef = createRef<HTMLElement>();
-              this.charmRefs.set(charmId.toString(), charmRef);
+              this.charmRefs.set(JSON.stringify(charmId), charmRef);
               this.newCharmRefs.push([charm, charmRef]);
             }
 
@@ -226,7 +221,7 @@ export class CommonWindowManager extends LitElement {
                 <div ${ref(charmRef)}></div>
               </div>
             `;
-          },
+          }
         )}
 
         <div slot="sidebar">${this.focusedCharm}</div>
@@ -242,7 +237,7 @@ export class CommonWindowManager extends LitElement {
     addCharms([charm]); // Make sure any shows charm is in the list of charms
 
     const existingWindow = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`,
+      `[data-charm-id="${CSS.escape(charmId)}"]`
     );
     if (existingWindow) {
       this.scrollToAndHighlight(charmId, true);
@@ -265,7 +260,7 @@ export class CommonWindowManager extends LitElement {
 
   private scrollToAndHighlight(charmId: string, animate: boolean) {
     const window = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`,
+      `[data-charm-id="${CSS.escape(charmId)}"]`
     );
     if (window) {
       window.scrollIntoView({
@@ -286,7 +281,7 @@ export class CommonWindowManager extends LitElement {
       const charmId = windowElement.getAttribute("data-charm-id");
       if (charmId) {
         this.charms = this.charms.filter(
-          (charm) => JSON.stringify(charm.entityId) !== charmId,
+          (charm) => JSON.stringify(charm.entityId) !== charmId
         );
         this.charmRefs.delete(charmId);
         this.charmLookup.delete(charmId);

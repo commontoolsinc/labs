@@ -186,7 +186,7 @@ const acceptSuggestion = handler<
 
   // HACK: -1 is home screen and so let's open a new tab
   if (target == -1) {
-    openCharm(accepted.get().entityId);
+    openCharm(JSON.stringify(accepted.entityId));
     state.acceptedSuggestion = html`<div></div>`;
   } else {
     state.acceptedSuggestion = accepted.asSimpleCell().get()[UI];
