@@ -49,7 +49,10 @@ export interface Cell<T> {
   send(value: T): void;
   sink(callback: (value: T) => void): () => void;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
-  getAsProxy(path?: PropertyKey[], log?: ReactivityLog): CellProxy<T>;
+  getAsProxy<Path extends PropertyKey[]>(
+    path?: Path,
+    log?: ReactivityLog
+  ): CellProxy<DeepKeyLookup<T, Path>>;
   getAsCellReference(): CellReference;
   toJSON(): { "/": string } | undefined;
   value: T;
@@ -71,12 +74,18 @@ export interface SendableCell<T> {
 
 export type CellImpl<T> = {
   get(): T;
-  getAsProxy(path?: PropertyKey[], log?: ReactivityLog): T;
-  asSimpleCell<Q = T>(path?: PropertyKey[], log?: ReactivityLog): Cell<Q>;
+  getAsProxy<Path extends PropertyKey[]>(
+    path?: Path,
+    log?: ReactivityLog
+  ): CellProxy<DeepKeyLookup<T, Path>>;
+  asSimpleCell<Q = T, Path extends PropertyKey[] = []>(
+    path?: Path,
+    log?: ReactivityLog
+  ): Cell<DeepKeyLookup<Q, Path>>;
   send(value: T, log?: ReactivityLog): boolean;
   updates(callback: (value: T, path: PropertyKey[]) => void): () => void;
   sink(callback: (value: T, path: PropertyKey[]) => void): () => void;
-  getAtPath(path: PropertyKey[]): T;
+  getAtPath<Path extends PropertyKey[]>(path: Path): DeepKeyLookup<T, Path>;
   setAtPath(path: PropertyKey[], newValue: any, log?: ReactivityLog): boolean;
   freeze(): void;
   isFrozen(): boolean;
@@ -105,6 +114,16 @@ export type ReactivityLog = {
   writes: CellReference[];
 };
 
+type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends []
+  ? T
+  : Path extends [infer First, ...infer Rest]
+  ? First extends keyof T
+    ? Rest extends PropertyKey[]
+      ? DeepKeyLookup<T[First], Rest>
+      : any
+    : any
+  : any;
+
 export function cell<T>(value?: T): CellImpl<T> {
   const callbacks = new Set<(value: T, path: PropertyKey[]) => void>();
   let readOnly = false;
@@ -113,8 +132,13 @@ export function cell<T>(value?: T): CellImpl<T> {
 
   const self: CellImpl<T> = {
     get: () => value as T,
-    getAsProxy: (path: PropertyKey[] = [], log?: ReactivityLog) =>
-      createValueProxy(self, path, log),
+    getAsProxy: <Path extends PropertyKey[]>(
+      path?: Path,
+      log?: ReactivityLog
+    ) =>
+      createValueProxy(self, path ?? [], log) as CellProxy<
+        DeepKeyLookup<T, Path>
+      >,
     asSimpleCell: <Q = T>(path: PropertyKey[] = [], log?: ReactivityLog) =>
       simpleCell<Q>(self, path, log),
     send: (newValue: T, log?: ReactivityLog) =>
