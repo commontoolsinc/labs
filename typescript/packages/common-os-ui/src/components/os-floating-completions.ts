@@ -28,11 +28,6 @@ export class OsFloatingCompletions extends LitElement {
       :host {
         --width: calc(var(--u) * 80);
         display: block;
-        left: 0;
-        top: 0;
-        position: absolute;
-        width: var(--width);
-        transition: opacity var(--dur-md) var(--ease-out-expo);
       }
 
       .completions {
@@ -43,6 +38,11 @@ export class OsFloatingCompletions extends LitElement {
         flex-direction: column;
         overflow: hidden;
         padding: calc(var(--u) * 2) 0;
+        left: 0;
+        top: 0;
+        position: absolute;
+        width: var(--width);
+        transition: opacity var(--dur-md) var(--ease-out-expo);
       }
 
       .completion {
@@ -78,36 +78,42 @@ export class OsFloatingCompletions extends LitElement {
   @property({ attribute: false })
   completions: Array<completion.Model> = [];
 
-  override render() {
-    const renderCompletion = (completion: completion.Model, index: number) => {
-      const classes = classMap({
-        completion: true,
-        "completion--active":
-          clamp(this.selected, 0, this.completions.length - 1) === index,
-      });
+  #renderCompletion = (completion: completion.Model, index: number) => {
+    const classes = classMap({
+      completion: true,
+      "completion--active":
+        clamp(this.selected, 0, this.completions.length - 1) === index,
+    });
 
-      const onclick = (_event: MouseEvent) => {
-        this.dispatchEvent(new ClickCompletion(completion));
-      };
-
-      return html`
-        <li class="${classes}" @click=${onclick}>
-          <div class="completion--text">${completion.text}</div>
-        </li>
-      `;
+    const onclick = (_event: MouseEvent) => {
+      this.dispatchEvent(new ClickCompletion(completion));
     };
 
     return html`
-      <menu class="completions">${this.completions.map(renderCompletion)}</menu>
+      <li class="${classes}" @click=${onclick}>
+        <div class="completion--text">${completion.text}</div>
+      </li>
+    `;
+  };
+
+  override render() {
+    const classes = classMap({
+      completions: true,
+      // Hide when no completions
+      invisible: !this.show || this.completions.length === 0,
+    });
+
+    return html`
+      <menu id="completions" class="${classes}">
+        ${this.completions.map(this.#renderCompletion)}
+      </menu>
     `;
   }
 
   protected override updated(changedProperties: PropertyValues): void {
     if (changedProperties.has("anchor")) {
-      positionMenu(this, this.anchor);
-    }
-    if (changedProperties.has("show")) {
-      toggleInvisible(this, !this.show);
+      const menu = this.renderRoot.querySelector("#completions") as HTMLElement;
+      positionMenu(menu, this.anchor);
     }
   }
 }
