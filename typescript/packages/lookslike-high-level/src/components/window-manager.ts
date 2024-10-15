@@ -212,7 +212,7 @@ export class CommonWindowManager extends LitElement {
             }
 
             return html`
-              <div class="window" id="window-${charmId}">
+              <div class="window" id="window-${charmId}" data-charm-id="${JSON.stringify(charmId)}">
                 <button class="close-button" @click="${this.onClose}">×</button>
                 <div ${ref(charmRef)}></div>
               </div>
