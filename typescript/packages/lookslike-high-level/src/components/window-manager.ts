@@ -91,9 +91,9 @@ export class CommonWindowManager extends LitElement {
 
   private charmRefs: Map<string, Ref<HTMLElement>> = new Map();
   private newCharmRefs: [CellImpl<Charm>, Ref<HTMLElement>][] = [];
-  private charmLookup: Map<number, CellImpl<Charm>> = new Map();
+  private charmLookup: Map<string, CellImpl<Charm>> = new Map();
 
-  @state() private focusedCharm: string = '-';
+  @state() private focusedCharm: string = "-";
 
   handleUniboxSubmit(event: CustomEvent) {
     const charm = this.charmLookup.get(this.focusedCharm);
@@ -121,14 +121,20 @@ export class CommonWindowManager extends LitElement {
           fieldsToInclude = charmValues.data;
         }
 
-        const eid = run(iframe, { data: fieldsToInclude, title: value, prompt: value })
-          .entityId!;
-        this.openCharm( eid );
+        const eid = run(iframe, {
+          data: fieldsToInclude,
+          title: value,
+          prompt: value,
+        }).entityId!;
+        this.openCharm(eid.toString());
       }
     } else {
-      const eid = run(iframe, { data: {}, title: value, prompt: value })
-        .entityId!;
-      this.openCharm( eid );
+      const eid = run(iframe, {
+        data: {},
+        title: value,
+        prompt: value,
+      }).entityId!;
+      this.openCharm(eid.toString());
     }
   }
 
@@ -154,11 +160,11 @@ export class CommonWindowManager extends LitElement {
       this.searchOpen = false;
       const charm = run(search, {
         collection: event.detail.value,
-      })
-      this.openCharm(charm.entityId!);
+      });
+      this.openCharm(charm.entityId!.toString());
 
       console.log("opened", charm, JSON.stringify(charm.getAsProxy()));
-      this.focusedCharm = charm.entityId!;
+      this.focusedCharm = charm.entityId!.toString();
     };
 
     const onAiBoxSubmit = (event: CustomEvent) => {
@@ -167,7 +173,6 @@ export class CommonWindowManager extends LitElement {
     };
 
     return html`
-
       <os-chrome
         locationtitle=${this.location}
         @location=${this.onLocationClicked}
@@ -204,15 +209,19 @@ export class CommonWindowManager extends LitElement {
             const charmId = charm.entityId!;
 
             // Create a new ref for this charm
-            let charmRef = this.charmRefs.get(charmId);
+            let charmRef = this.charmRefs.get(charmId.toString());
             if (!charmRef) {
               charmRef = createRef<HTMLElement>();
-              this.charmRefs.set(charmId, charmRef);
+              this.charmRefs.set(charmId.toString(), charmRef);
               this.newCharmRefs.push([charm, charmRef]);
             }
 
             return html`
-              <div class="window" id="window-${charmId}" data-charm-id="${JSON.stringify(charmId)}">
+              <div
+                class="window"
+                id="window-${charmId}"
+                data-charm-id="${JSON.stringify(charmId)}"
+              >
                 <button class="close-button" @click="${this.onClose}">×</button>
                 <div ${ref(charmRef)}></div>
               </div>
@@ -233,7 +242,7 @@ export class CommonWindowManager extends LitElement {
     addCharms([charm]); // Make sure any shows charm is in the list of charms
 
     const existingWindow = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`
+      `[data-charm-id="${CSS.escape(charmId)}"]`,
     );
     if (existingWindow) {
       this.scrollToAndHighlight(charmId, true);
@@ -256,7 +265,7 @@ export class CommonWindowManager extends LitElement {
 
   private scrollToAndHighlight(charmId: string, animate: boolean) {
     const window = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`
+      `[data-charm-id="${CSS.escape(charmId)}"]`,
     );
     if (window) {
       window.scrollIntoView({
@@ -277,7 +286,7 @@ export class CommonWindowManager extends LitElement {
       const charmId = windowElement.getAttribute("data-charm-id");
       if (charmId) {
         this.charms = this.charms.filter(
-          (charm) => JSON.stringify(charm.entityId) !== charmId
+          (charm) => JSON.stringify(charm.entityId) !== charmId,
         );
         this.charmRefs.delete(charmId);
         this.charmLookup.delete(charmId);
