@@ -81,7 +81,6 @@ export function run<T, R = any>(
     if (!parameters) parameters = processCell.get()?.parameters as T;
   } else {
     processCell = cell();
-    processCell.generateEntityId(); // TODO: Make this causal
     resultCell.sourceCell = processCell;
   }
 
@@ -120,18 +119,16 @@ export function run<T, R = any>(
   // though that we support the recipe to change over time, and such a change
   // might change this condition and we'd need distinct ideas for different
   // instances of this recipe again.
-
-  // TODO: Move this below .send to establish at least some causal relationship.
-  // Right now id creation fails if there are any cell references in the cell.
   if (!resultCell.entityId) resultCell.generateEntityId();
+  if (!processCell.entityId) processCell.generateEntityId(resultCell.entityId);
 
   // Send "query" to results to the result cell
   resultCell.send(mapBindingsToCell<R>(recipe.result as R, processCell));
 
   // TODO: This will overwrite existing values
   const internal = mergeObjects(
-    (recipe.initial as { internal: any })?.internal,
-    processCell.get()?.internal
+    processCell.get()?.internal,
+    (recipe.initial as { internal: any })?.internal
   );
 
   if (defaults) parameters = mergeObjects(parameters, defaults);

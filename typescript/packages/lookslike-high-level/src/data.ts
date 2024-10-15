@@ -59,45 +59,79 @@ export function addCharms(newCharms: CellImpl<any>[]) {
   }
 }
 
+function createCellWithCausalId(name: string) {
+  const newCell = cell();
+  newCell.generateEntityId(name);
+  return newCell;
+}
+
 addCharms([
-  run(iframe, {
-    title: "two way binding counter",
-    prompt: "counter",
-    data: { counter: 0 },
-  }),
-  run(importCalendar, {}),
-  run(search, {
-    query: "home",
-  }),
-  run(queryCollections, {
-    collectionName: 'home'
-  }),
-  run(todoList, {
-    title: "My TODOs",
-    items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) => ({
-      title: item,
-      done: false,
-    })),
-  }),
-  run(todoList, {
-    title: "My grocery shopping list",
-    items: ["milk", "eggs", "bread"].map((item) => ({
-      title: item,
-      done: false,
-    })),
-  }),
-  run(ticket, {
-    title: "Reservation for 'Counterstrike the Musical'",
-    show: "Counterstrike the Musical",
-    date: getFridayAndMondayDateStrings().startDate,
-    location: "New York",
-  }),
-  run(routine, {
-    title: "Morning routine",
-    // TODO: A lot more missing here, this is just to drive the suggestion.
-    locations: ["coffee shop with great baristas"],
-  }),
-  run(counters, {}),
+  run(
+    iframe,
+    {
+      title: "two way binding counter",
+      prompt: "counter",
+      data: { counter: 0 },
+    },
+    createCellWithCausalId("iframe")
+  ),
+  run(importCalendar, {}, createCellWithCausalId("importCalendar")),
+  run(
+    search,
+    {
+      query: "home",
+    },
+    createCellWithCausalId("search")
+  ),
+  run(
+    queryCollections,
+    {
+      collectionName: "home",
+    },
+    createCellWithCausalId("queryCollections")
+  ),
+  run(
+    todoList,
+    {
+      title: "My TODOs",
+      items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) => ({
+        title: item,
+        done: false,
+      })),
+    },
+    createCellWithCausalId("todoList")
+  ),
+  run(
+    todoList,
+    {
+      title: "My grocery shopping list",
+      items: ["milk", "eggs", "bread"].map((item) => ({
+        title: item,
+        done: false,
+      })),
+    },
+    createCellWithCausalId("todoList")
+  ),
+  run(
+    ticket,
+    {
+      title: "Reservation for 'Counterstrike the Musical'",
+      show: "Counterstrike the Musical",
+      date: getFridayAndMondayDateStrings().startDate,
+      location: "New York",
+    },
+    createCellWithCausalId("ticket")
+  ),
+  run(
+    routine,
+    {
+      title: "Morning routine",
+      // TODO: A lot more missing here, this is just to drive the suggestion.
+      locations: ["coffee shop with great baristas"],
+    },
+    createCellWithCausalId("routine")
+  ),
+  run(counters, {}, createCellWithCausalId("counters")),
 ]);
 
 export type RecipeManifest = {
@@ -172,10 +206,10 @@ function getFridayAndMondayDateStrings() {
   const daysUntilFriday = (5 - today.getDay() + 7) % 7;
 
   const nextFriday = new Date(
-    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000,
+    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000
   );
   const followingMonday = new Date(
-    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000,
+    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000
   );
 
   const formatDate = (date: Date): string => {
