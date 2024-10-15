@@ -27,7 +27,7 @@ describe("complex recipe function", () => {
     const double = lift<number>((x) => x * 2);
     return { double: double(double(x)) };
   });
-  const { schema, initial, nodes } = doubleRecipe;
+  const { schema, internal, result, nodes } = doubleRecipe;
 
   it("has the correct schema and initial data", () => {
     expect(isRecipe(doubleRecipe)).toBe(true);
@@ -35,11 +35,12 @@ describe("complex recipe function", () => {
       description: "Double a number",
       type: "object",
       properties: {
-        double: {},
         x: { type: "integer", default: 1 },
       },
     });
-    expect(initial).toEqual({ double: { $alias: { path: ["__#1"] } } });
+    expect(result).toEqual({
+      double: { $alias: { path: ["internal", "__#1"] } },
+    });
   });
 
   it("has the correct nodes", () => {
@@ -47,10 +48,14 @@ describe("complex recipe function", () => {
     expect(isModule(nodes[0].module) && nodes[0].module.type).toBe(
       "javascript"
     );
-    expect(nodes[0].inputs).toEqual({ $alias: { path: ["x"] } });
-    expect(nodes[0].outputs).toEqual({ $alias: { path: ["__#0"] } });
-    expect(nodes[1].inputs).toEqual({ $alias: { path: ["__#0"] } });
-    expect(nodes[1].outputs).toEqual({ $alias: { path: ["__#1"] } });
+    expect(nodes[0].inputs).toEqual({ $alias: { path: ["parameters", "x"] } });
+    expect(nodes[0].outputs).toEqual({
+      $alias: { path: ["internal", "__#0"] },
+    });
+    expect(nodes[1].inputs).toEqual({ $alias: { path: ["internal", "__#0"] } });
+    expect(nodes[1].outputs).toEqual({
+      $alias: { path: ["internal", "__#1"] },
+    });
   });
 });
 
@@ -62,7 +67,7 @@ describe("complex recipe with path aliases", () => {
     const result2 = double({ x: result.doubled });
     return { double: result2.doubled };
   });
-  const { schema, initial, nodes } = doubleRecipe;
+  const { schema, internal, result, nodes } = doubleRecipe;
 
   it("has the correct schema and initial values", () => {
     expect(isRecipe(doubleRecipe)).toBe(true);
@@ -70,12 +75,11 @@ describe("complex recipe with path aliases", () => {
       description: "Double a number",
       type: "object",
       properties: {
-        double: {},
         x: { type: "integer", default: 1 },
       },
     });
-    expect(initial).toEqual({
-      double: { $alias: { path: ["__#1", "doubled"] } },
+    expect(result).toEqual({
+      double: { $alias: { path: ["internal", "__#1", "doubled"] } },
     });
   });
 
@@ -84,12 +88,18 @@ describe("complex recipe with path aliases", () => {
     expect(isModule(nodes[0].module) && nodes[0].module.type).toBe(
       "javascript"
     );
-    expect(nodes[0].inputs).toEqual({ x: { $alias: { path: ["x"] } } });
-    expect(nodes[0].outputs).toEqual({ $alias: { path: ["__#0"] } });
-    expect(nodes[1].inputs).toEqual({
-      x: { $alias: { path: ["__#0", "doubled"] } },
+    expect(nodes[0].inputs).toEqual({
+      x: { $alias: { path: ["parameters", "x"] } },
     });
-    expect(nodes[1].outputs).toEqual({ $alias: { path: ["__#1"] } });
+    expect(nodes[0].outputs).toEqual({
+      $alias: { path: ["internal", "__#0"] },
+    });
+    expect(nodes[1].inputs).toEqual({
+      x: { $alias: { path: ["internal", "__#0", "doubled"] } },
+    });
+    expect(nodes[1].outputs).toEqual({
+      $alias: { path: ["internal", "__#1"] },
+    });
   });
 
   it("correctly serializes to JSON", () => {
@@ -122,7 +132,7 @@ describe("recipe with map node", () => {
   it("correctly lists the input array as input to the map node", () => {
     const node = doubleArray.nodes[0];
     expect(node.inputs).toMatchObject({
-      list: { $alias: { path: ["values"] } },
+      list: { $alias: { path: ["parameters", "values"] } },
     });
   });
 

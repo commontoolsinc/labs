@@ -84,6 +84,7 @@ export type CellImpl<T> = {
   toJSON(): { "/": string } | undefined;
   value: T;
   entityId?: EntityId | undefined;
+  sourceCell: CellImpl<any> | undefined;
   [toCellProxy]: () => BuilderCellProxy<T>;
   [isCellMarker]: true;
 };
@@ -108,6 +109,7 @@ export function cell<T>(value?: T): CellImpl<T> {
   const callbacks = new Set<(value: T, path: PropertyKey[]) => void>();
   let readOnly = false;
   let entityId: EntityId | undefined;
+  let sourceCell: CellImpl<any> | undefined;
 
   const self: CellImpl<T> = {
     get: () => value as T,
@@ -150,17 +152,6 @@ export function cell<T>(value?: T): CellImpl<T> {
       proxied, e.g. for aliases. TODO: Consider changing proxy here. */
     },
     isFrozen: () => readOnly,
-    get value(): T {
-      return value as T;
-    },
-    get entityId(): EntityId | undefined {
-      return entityId;
-    },
-    set entityId(id: EntityId) {
-      if (entityId) throw new Error("Entity ID already set");
-      entityId = id;
-      setCellByEntityId(id, self);
-    },
     generateEntityId: (cause?: any): void => {
       entityId = createRef(
         typeof value === "object" && value !== null
@@ -176,6 +167,23 @@ export function cell<T>(value?: T): CellImpl<T> {
     // writing a structure to this that might contain a reference to this cell,
     // and we want to serialize that as am IPLD link to this cell.
     toJSON: () => entityId?.toJSON(),
+    get value(): T {
+      return value as T;
+    },
+    get entityId(): EntityId | undefined {
+      return entityId;
+    },
+    set entityId(id: EntityId) {
+      if (entityId) throw new Error("Entity ID already set");
+      entityId = id;
+      setCellByEntityId(id, self);
+    },
+    get sourceCell(): CellImpl<any> | undefined {
+      return sourceCell;
+    },
+    set sourceCell(cell: CellImpl<any> | undefined) {
+      sourceCell = cell;
+    },
     [toCellProxy]: () => toBuilderCellProxy(self, []),
     [isCellMarker]: true,
   };
@@ -251,7 +259,7 @@ function simpleCell<T>(
         getAsCellReference: () => ({ cell, path } satisfies CellReference),
         toJSON: () => cell.toJSON(),
         get value(): T {
-          return cell.get();
+          return self.get();
         },
         get entityId(): EntityId | undefined {
           return getEntityId(self.getAsCellReference());

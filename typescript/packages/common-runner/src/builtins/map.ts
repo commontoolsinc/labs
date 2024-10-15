@@ -81,7 +81,7 @@ export function map(
       }
 
       if (isCell(value)) value = { cell: value, path: [] };
-      if (!isCellReference(value))
+      else if (!isCellReference(value))
         throw new Error("map requires all values to be cell references");
 
       // TODO: Replace with something that follows aliases as well.
