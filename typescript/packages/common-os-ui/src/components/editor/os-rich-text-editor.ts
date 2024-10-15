@@ -1,13 +1,14 @@
 import { css, html, render, adoptStyles } from "lit";
 import { EditorState } from "prosemirror-state";
 import { EditorView, Decoration } from "prosemirror-view";
-import { Schema } from "prosemirror-model";
+import { Schema, Node } from "prosemirror-model";
 import { history } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap } from "prosemirror-commands";
 import { customElement } from "lit/decorators.js";
 import { base } from "../../shared/styles.js";
 import { editorClassPlugin } from "./prosemirror/editor-class-plugin.js";
+import { verPlugin, updateVerState } from "./prosemirror/ver-plugin.js";
 import * as suggestions from "./suggestions.js";
 import { createSelection, TextSelection } from "./selection.js";
 import {
@@ -22,42 +23,13 @@ import {
 } from "../../shared/store.js";
 import { createCleanupGroup } from "../../shared/cleanup.js";
 import { TemplateResult } from "lit";
-import { classes } from "../../shared/dom.js";
+import { classes, on } from "../../shared/dom.js";
 import { ClickCompletion } from "../os-floating-completions.js";
 import {
   replaceSuggestionWithText,
   Suggestion,
 } from "./prosemirror/suggestions-plugin.js";
 import { executeCommand } from "./prosemirror/utils.js";
-
-const schema = () => {
-  return new Schema({
-    nodes: {
-      doc: { content: "block+" },
-      paragraph: {
-        group: "block",
-        content: "inline*",
-        parseDOM: [{ tag: "p" }],
-        toDOM: () => ["p", 0],
-      },
-      text: { group: "inline" },
-    },
-    marks: {
-      hashtag: {
-        parseDOM: [{ tag: "span.hashtag" }],
-        toDOM: () => ["span", { class: "hashtag" }, 0],
-      },
-      bold: {
-        parseDOM: [{ tag: "strong" }],
-        toDOM: () => ["strong", 0],
-      },
-      italic: {
-        parseDOM: [{ tag: "em" }],
-        toDOM: () => ["em", 0],
-      },
-    },
-  });
-};
 
 const freeze = Object.freeze;
 
@@ -166,6 +138,43 @@ export const fx = (view: EditorView) => {
   };
 };
 
+/** ProseMirror schema */
+const schema = new Schema({
+  nodes: {
+    doc: { content: "block+" },
+    paragraph: {
+      group: "block",
+      content: "inline*",
+      parseDOM: [{ tag: "p" }],
+      toDOM: () => ["p", 0],
+    },
+    text: { group: "inline" },
+  },
+  marks: {
+    hashtag: {
+      parseDOM: [{ tag: "span.hashtag" }],
+      toDOM: () => ["span", { class: "hashtag" }, 0],
+    },
+    bold: {
+      parseDOM: [{ tag: "strong" }],
+      toDOM: () => ["strong", 0],
+    },
+    italic: {
+      parseDOM: [{ tag: "em" }],
+      toDOM: () => ["em", 0],
+    },
+  },
+});
+
+/** Parse a text string into a document of schema type */
+export const parseTextToDoc = (text: string): Node => {
+  const content = text
+    .split("\n")
+    .map((p) => schema.nodes.paragraph.create(null, schema.text(p)));
+
+  return schema.nodes.doc.create(null, content);
+};
+
 const createMentionDecoration = ({ from, to, active }: Suggestion) => {
   return Decoration.inline(from, to, {
     class: classes({ mention: true, "mention--active": active }),
@@ -210,10 +219,11 @@ export const createEditor = ({
     history(),
     keymap(baseKeymap),
     editorClassPlugin(),
+    verPlugin,
   ];
 
   const state = EditorState.create({
-    schema: schema(),
+    schema,
     plugins,
   });
 
@@ -221,6 +231,19 @@ export const createEditor = ({
     state,
   });
 };
+
+/** Custom event for editor state changes */
+export class EditorStateChangeEvent extends Event {
+  detail: EditorState;
+
+  constructor(detail: EditorState) {
+    super("EditorStateChange", {
+      bubbles: true,
+      composed: true,
+    });
+    this.detail = detail;
+  }
+}
 
 @customElement("os-rich-text-editor")
 export class OsRichTextEditor extends HTMLElement {
@@ -285,9 +308,13 @@ export class OsRichTextEditor extends HTMLElement {
 
   constructor() {
     super();
+    // Set up shadow and styles
     this.#shadow = this.attachShadow({ mode: "closed" });
     adoptStyles(this.#shadow, OsRichTextEditor.styles);
 
+    // Set up skeleton
+    // - #editor is managed by ProseMirror
+    // - #reactive is rendered via Lit templates and driven by store updates
     render(
       html`
         <div id="wrapper" class="wrapper">
@@ -303,14 +330,21 @@ export class OsRichTextEditor extends HTMLElement {
     this.#reactiveRoot = this.#shadow.querySelector("#reactive") as HTMLElement;
     const editorRoot = this.#shadow.querySelector("#editor") as HTMLElement;
 
+    // Create ProseMirror instance
     this.#editorView = createEditor({
       element: editorRoot,
       send: (msg: Msg) => this.#store.send(msg),
     });
-
     this.#destroy.add(() => {
       this.#editorView.destroy();
     });
+
+    // Relay input events as custom statechange events
+    const offInput = on(this, "input", (_event) => {
+      const event = new EditorStateChangeEvent(this.#editorView.state);
+      this.dispatchEvent(event);
+    });
+    this.#destroy.add(offInput);
 
     this.#store = createStore({
       state: model(),
@@ -318,7 +352,7 @@ export class OsRichTextEditor extends HTMLElement {
       fx: fx(this.#editorView),
     });
 
-    // Drive updates via store changes
+    // Drive #reactive renders via store changes
     const cleanupRender = this.#store.sink(this.#render);
     this.#destroy.add(cleanupRender);
   }
@@ -329,20 +363,11 @@ export class OsRichTextEditor extends HTMLElement {
   };
 
   get editor() {
-    return this.#editorView;
+    return this.#editorView.state;
   }
 
-  get state() {
-    return this.#store.get();
-  }
-
-  send(msg: Msg) {
-    this.#store.send(msg);
-  }
-
-  set state(_state: Model) {
-    // TODO
-    // this.#state.send();
+  set editor(state: EditorState) {
+    updateVerState(this.#editorView, state);
   }
 
   /**
@@ -351,8 +376,8 @@ export class OsRichTextEditor extends HTMLElement {
    * under the editor element.
    */
   render(): TemplateResult {
-    const hashtagState = this.state.hashtag;
-    const mentionState = this.state.mention;
+    const hashtagState = this.#store.get().hashtag;
+    const mentionState = this.#store.get().mention;
 
     const onHashtagClickCompletion = (event: ClickCompletion) => {
       this.#store.send(

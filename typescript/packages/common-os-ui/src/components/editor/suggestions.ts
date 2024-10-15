@@ -3,7 +3,6 @@ import * as plugin from "./prosemirror/suggestions-plugin.js";
 import { Rect, createRect } from "../../shared/position.js";
 import { clamp } from "../../shared/number.js";
 import { unknown, ValueMsg } from "../../shared/store.js";
-import * as dummy from "../../shared/dummy.js";
 import * as completion from "./completion.js";
 import { executeCommand, replaceWithText } from "./prosemirror/utils.js";
 
@@ -189,11 +188,7 @@ export const fx = (view: EditorView) => (state: Model, msg: Msg) => {
 };
 
 const fetchCompletionsFx = (_active: Suggestion) => async () => {
-  // TODO: some fetch request for completions
-  const completions = dummy
-    .titles(3)
-    .map((text) => completion.model({ id: dummy.id(), text }));
-  return createSetCompletionsMsg(completions);
+  return createSetCompletionsMsg([]);
 };
 
 const replaceFx =
