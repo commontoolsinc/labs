@@ -13,7 +13,7 @@ import {
 } from "@commontools/common-builder";
 import { streamData } from "@commontools/common-builder";
 import { runtimeWorkbench } from "./runtimeWorkbench.js";
-import * as DB from 'datalogia'
+import * as DB from "datalogia";
 
 const ensureArray = lift(({ data }: { data: any }) => {
   if (!data) return [];
@@ -24,36 +24,45 @@ const stringify = lift(({ obj }) => {
   return JSON.stringify(obj, null, 2);
 });
 
+const toPairs = lift(({ obj }) => {
+  return Object.entries(obj)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join("\n");
+});
+
 const onInput = handler<KeyboardEvent, { value: string }>((input, state) => {
   state.value = (input.target as HTMLTextAreaElement).value;
 });
 
-const generateQuery = handler<{}, { collectionName: string; query: any; }>((_, state) => {
-  if (!state.collectionName) {
-    state.query = undefined;
-  } else {
-    const query = {
-      select: {
-        item: [
-          {
-            item: "?item",
-            key: "?key",
-            value: "?value",
-          },
+const generateQuery = handler<{}, { collectionName: string; query: any }>(
+  (_, state) => {
+    if (!state.collectionName) {
+      state.query = undefined;
+    } else {
+      const query = {
+        select: {
+          item: [
+            {
+              item: "?item",
+              key: "?key",
+              value: "?value",
+            },
+          ],
+        },
+        where: [
+          { Case: ["?collection", "name", state.collectionName] },
+          { Case: ["?collection", "member", "?item"] },
+          { Case: ["?item", "?key", "?value"] },
         ],
-      },
-      where: [
-        { Case: ["?collection", "name", state.collectionName] },
-        { Case: ["?collection", "member", "?item"] },
-        { Case: ["?item", "?key", "?value"] },
-      ],
-    };
-    state.query = query;
-  }
-});
+      };
+      state.query = query;
+    }
+  },
+);
 
 const onWorkbench = handler<MouseEvent, { data: any }>((_, state) =>
-  navigateTo(runtimeWorkbench({ data: state.data })));
+  navigateTo(runtimeWorkbench({ data: state.data })),
+);
 
 const normalizeData = lift(({ result }) => {
   if (!result || !result.data || !result.data[0] || !result.data[0].item) {
@@ -68,7 +77,7 @@ const normalizeData = lift(({ result }) => {
       acc[itemKey][key] = value;
       return acc;
     },
-    {}
+    {},
   );
 
   return Object.values(groupedData);
@@ -120,37 +129,39 @@ const generateFlexibleQuery = lift(
   }) => {
     const select: Record<string, any> = {
       collection: "?collection",
-      item: [{
-        item: "?item",
-        key: "?key",
-        value: "?value",
-      },],
+      item: [
+        {
+          item: "?item",
+          key: "?key",
+          value: "?value",
+        },
+      ],
     };
 
     const where: Array<Record<string, any>> = [
       { Case: ["?collection", "member", "?item"] },
-
     ];
 
     // if (keywords.length > 0) {
     //   where.push({ Case: ["?item", "?key", DB.like('?value', '*' + keywords[0] + '*')] });
     // } else {
-      where.push({ Case: ["?item", "?key", "?value"] });
+    where.push({ Case: ["?item", "?key", "?value"] });
     // }
-
-
 
     // Add flexible OR conditions for collection names
     if (keywords.length > 0) {
       where.push({
-        Or: keywords.flatMap((keyword) => ([
+        Or: keywords.flatMap((keyword) => [
           {
-          Case: ["?collection", "name", keyword],
-        },{
-        Case: ["?item", "?meh", keyword],
-      },{
-      Case: ["?item", keyword, "?meh"],
-    }])),
+            Case: ["?collection", "name", keyword],
+          },
+          {
+            Case: ["?item", "?meh", keyword],
+          },
+          {
+            Case: ["?item", keyword, "?meh"],
+          },
+        ]),
       });
     }
 
@@ -190,6 +201,33 @@ const buildQuery = lift(({ query }) => {
       body: JSON.stringify(query),
     },
   };
+});
+
+const printObjectProperties = lift(({ obj }: { obj: any }) => {
+  const properties = Object.entries(JSON.parse(JSON.stringify(obj))).map(
+    ([key, value]) => ({ key, value }),
+  );
+
+  return html`
+    <table>
+      <thead>
+        <tr>
+          <th>Key</th>
+          <th>Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${properties.map(
+          (prop) => html`
+            <tr>
+              <td>${prop.key}</td>
+              <td>${prop.value}</td>
+            </tr>
+          `,
+        )}
+      </tbody>
+    </table>
+  `;
 });
 
 export const search = recipe<{ search: string }>(
@@ -237,10 +275,44 @@ export const search = recipe<{ search: string }>(
               </button>
             </div>
 
-            <details open>
-              <summary>Results</summary>
-              <pre>${stringify({ obj: normalizedData })}</pre>
-            </details>
+            <os-container>
+              <os-colgrid>
+                ${normalizedData.map((item) => {
+                  const subtitle = lift(
+                    ({ item }) =>
+                      item.subject ||
+                      item.summary ||
+                      item.topic ||
+                      item.subtitle ||
+                      item.author,
+                  );
+
+                  const body = lift(
+                    ({ item }) => item.description || item.content || item.body,
+                  );
+
+                  return html`<os-tile style="overflow-y: scroll;">
+                    <div
+                      style="padding: 16px; overflow-y: scroll; aspect-ratio: 1 / 1;"
+                    >
+                      <h3>${item.title}</h3>
+                      <p>${subtitle({ item })}</p>
+                      <p>${body({ item })}</p>
+                      <p>${item["import/url"]}, ${item["import/time"]}</p>
+                      <details>
+                        <summary>Details</summary>
+                        <pre
+                          style="white-space: pre-wrap; word-wrap: break-word; "
+                        >
+${toPairs({ obj: item })}</pre
+                        >
+                      </details>
+                    </div>
+                  </os-tile>`;
+                })}
+              </os-colgrid>
+            </os-container>
+
             <details>
               <summary>Generated Query</summary>
               <pre>${stringify({ obj: flexibleQuery })}</pre>

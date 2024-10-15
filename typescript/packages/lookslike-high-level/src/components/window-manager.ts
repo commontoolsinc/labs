@@ -20,9 +20,6 @@ export class CommonWindowManager extends LitElement {
     style.baseStyles,
     css`
       :host {
-        /* display: flex;
-        overflow-x: auto;
-        overflow-y: visible; */
         width: 100%;
       }
       .window {
@@ -31,7 +28,6 @@ export class CommonWindowManager extends LitElement {
         overflow-y: auto;
         container-type: size;
         padding: var(--pad);
-        /* flex: 1 1 auto; */
         background-color: rgba(255, 255, 255, 0.8);
         backdrop-filter: blur(10px);
         transition: all 0.3s ease;
