@@ -21,6 +21,9 @@ export type Store<State, Msg> = {
   sink: (listener: Listener<State>) => Cleanup;
 };
 
+export type UpdateDriver<Model, Msg> = (state: Model, msg: Msg) => Model;
+export type FxDriver<Model, Msg> = (state: Model, msg: Msg) => Array<Fx<Msg>>;
+
 /** Default fx driver. Produces no effects. */
 const noFx = () => [];
 
@@ -33,8 +36,8 @@ export const createStore = <State, Msg>({
 }: {
   state: State;
   msg?: Msg;
-  update: (state: State, msg: Msg) => State;
-  fx?: (state: State, msg: Msg) => Array<Fx<Msg>>;
+  update: UpdateDriver<State, Msg>;
+  fx?: FxDriver<State, Msg>;
 }): Store<State, Msg> => {
   const listeners = new Set<(state: State) => void>();
   let state = initial;
