@@ -9,6 +9,7 @@ import {
   isCellProxyForDereferencing,
   getCellReferenceOrThrow,
 } from "./cell.js";
+import { createRef } from "./cell-map.js";
 
 export function extractDefaultValues(schema: any): any {
   if (typeof schema !== "object" || schema === null) return undefined;
@@ -81,7 +82,7 @@ export function sendValueToBinding(
   if (isAlias(binding)) {
     const ref = followAliases(binding, cell, log);
     if (!isCellReference(value) && !isCell(value))
-      normalizeToCells(value, ref.cell.getAtPath(ref.path), log);
+      normalizeToCells(value, ref.cell.getAtPath(ref.path), log, binding);
     setNestedValue(ref.cell, ref.path, value, log);
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value))
@@ -326,9 +327,13 @@ export function transformToSimpleCells(
  * cells. NOTE: The passed value is mutated.
  * @returns The (potentially unwrapped) input value
  */
-export function staticDataToNestedCells(value: any, log?: ReactivityLog): any {
+export function staticDataToNestedCells(
+  value: any,
+  log?: ReactivityLog,
+  cause?: any
+): any {
   value = maybeUnwrapProxy(value);
-  normalizeToCells(value, undefined, log);
+  normalizeToCells(value, undefined, log, cause);
   return value;
 }
 
@@ -348,7 +353,8 @@ export function staticDataToNestedCells(value: any, log?: ReactivityLog): any {
 export function normalizeToCells(
   value: any,
   previous?: any,
-  log?: ReactivityLog
+  log?: ReactivityLog,
+  cause: any = createRef()
 ): boolean {
   value = maybeUnwrapProxy(value);
   previous = maybeUnwrapProxy(previous);
@@ -374,15 +380,26 @@ export function normalizeToCells(
     } else if (value.length !== previous.length) {
       changed = true;
     }
+    let itemId = null;
+    let preceedingItemId = null;
     for (let i = 0; i < value.length; i++) {
       const item = maybeUnwrapProxy(value[i]);
       const previousItem = previous ? maybeUnwrapProxy(previous[i]) : undefined;
       if (!(isCell(item) || isCellReference(item) || isAlias(item))) {
+        itemId = createRef(value[i], {
+          parent: cause,
+          index: i,
+          preceeding: preceedingItemId,
+        });
         const different = normalizeToCells(
           value[i],
           isCellReference(previousItem)
             ? previousItem.cell.getAtPath(previousItem.path)
-            : previousItem
+            : previousItem,
+          log,
+          isCellReference(previousItem)
+            ? previousItem.cell.entityId ?? itemId
+            : itemId
         );
         if (
           !different &&
@@ -391,12 +408,15 @@ export function normalizeToCells(
           isCellReference(previous[i])
         ) {
           value[i] = previous[i];
+          preceedingItemId = previousItem.cell.entityId;
           // NOTE: We don't treat making it a cell reference as a change, since
           // we'll still have the same value. This is reusing the cell reference
           // transition from a previous run, but only if the value didn't
           // change as well.
         } else {
           value[i] = { cell: cell(value[i]), path: [] } satisfies CellReference;
+          value[i].cell.entityId = itemId;
+          preceedingItemId = itemId;
           log?.writes.push(value[i]);
           changed = true;
         }
@@ -412,7 +432,10 @@ export function normalizeToCells(
       const previousItem = previous
         ? maybeUnwrapProxy(previous[key])
         : undefined;
-      let change = normalizeToCells(item, previousItem);
+      let change = normalizeToCells(item, previousItem, log, {
+        parent: cause,
+        key,
+      });
       changed ||= change;
     }
     if (!changed) {

@@ -633,7 +633,7 @@ export function createValueProxy<T>(
 
               // Turn any newly added elements into cells. And if there was a
               // change at all, update the cell.
-              normalizeToCells(copy, target, log);
+              normalizeToCells(copy, target, log, valueCell.entityId);
               setNestedValue(valueCell, valuePath, copy, log);
 
               return result;
@@ -668,7 +668,10 @@ export function createValueProxy<T>(
       }
 
       // Make sure that any nested arrays are made of cells.
-      normalizeToCells(value, undefined, log);
+      normalizeToCells(value, undefined, log, {
+        cell: valueCell.entityId,
+        path: [...valuePath, prop],
+      });
 
       if (isCell(value))
         value = { cell: value, path: [] } satisfies CellReference;
