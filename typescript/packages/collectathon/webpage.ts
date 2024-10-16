@@ -10,7 +10,7 @@ export async function extractEntities(
   prompt?: string,
 ) {
   const systemPrompt =
-    "Extract the information the user requested from the provided webpage. You respond only with the entities extracted as an array e.g. ```json [{}, {}]``` block, no commentary.  Each object must be flat, no nested object hierarachy is permitted.";
+    'Extract the information the user requested from the provided webpage. You respond only with the entities extracted as an array e.g. ```json [{}, {}]``` block, no commentary.  Each object must be flat, no nested object hierarachy is permitted. Escape all quotes used within strings, e.g. `"` -> `\\"`.';
   const userPrompt = `
 URL: ${url}
 
@@ -22,7 +22,7 @@ ${prompt ? `${prompt}` : `Extract a summary of the page as a JSON blob.`}
 ${prompt ? "Infer the shape of the data from the request." : `Use well-known keys for the entities from the set: ["title", "content-type" "author", "date", "content", "src", "summary", "name", "location"] but also include others to fulfill the request.`}
   `;
 
-  const response = await fastCompletion(systemPrompt, [
+  const response = await completion(systemPrompt, [
     { role: "user", content: userPrompt },
   ]);
 
