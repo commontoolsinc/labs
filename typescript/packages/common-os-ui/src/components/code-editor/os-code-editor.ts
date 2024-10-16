@@ -4,7 +4,7 @@ import { basicSetup, EditorView } from "codemirror";
 import { EditorState, Compartment } from "@codemirror/state";
 import { javascript } from "@codemirror/lang-javascript";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { createStore, Store, ValueMsg, FxDriver } from "../../shared/store.js";
+import { createStore, Store, ValueMsg, FxDriver } from "../../shared/store";
 import { createCleanupGroup } from "../../shared/cleanup.js";
 
 const freeze = Object.freeze;
