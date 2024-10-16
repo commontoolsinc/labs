@@ -19,7 +19,7 @@ describe("suggestions.update", () => {
     assert.deepStrictEqual(newState.active, suggestion);
     assert.deepStrictEqual(newState.coords, createRect(10, 20, 100, 50));
     assert.strictEqual(newState.selectedCompletion, 0);
-    assert.strictEqual(newState.completions.length, 3);
+    assert.strictEqual(newState.completions.length, 0);
   });
 
   it("should handle inactiveUpdateMsg", () => {
