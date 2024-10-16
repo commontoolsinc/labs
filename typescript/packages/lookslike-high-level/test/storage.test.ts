@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createStorage, Storage } from "../src/storage";
-import { cell, CellImpl } from "../src/cell";
-import { createRef } from "../src/cell-map";
+import { createStorage, Storage } from "../src/storage.js";
+import { cell, CellImpl, createRef } from "@commontools/common-runner";
 
 // Create a mock window object
 const createMockWindow = () => {
