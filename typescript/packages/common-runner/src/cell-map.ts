@@ -9,7 +9,10 @@ import {
 } from "./cell.js";
 import { refer } from "merkle-reference";
 
-export type EntityId = ReturnType<typeof refer>;
+export type EntityId = {
+  "/": string | Uint8Array;
+  toJSON?: () => { "/": string };
+};
 
 /**
  * Generates an entity ID.
