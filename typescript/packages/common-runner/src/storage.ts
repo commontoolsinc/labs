@@ -1,73 +1,150 @@
-import { type CellImpl } from "./cell.js";
+import { type CellImpl, isCell, cell } from "./cell.js";
 import { type EntityId } from "./cell-map.js";
+import { type Cancel, type AddCancel, useCancelGroup } from "./cancel.js";
 
-interface Storage {
-  loadCell(cell: CellImpl<any>): Promise<void>;
-  persistCell(cell: CellImpl<any>): Promise<void>;
+export interface Storage {
+  /**
+   * Load cell from storage. Will also subscribe to new changes.
+   *
+   * This will currently also follow all encountered cell references and load
+   * these cells as well.
+   *
+   * This works also for cells that haven't been persisted yet. In that case,
+   * it'll write the current value into storage. In most cases, this is
+   * preferrable to `persist()`, which will always overwrite the existing value.
+   *
+   * @param cell - Cell to load into, or entity ID as EntityId or string.
+   * @returns Promise that resolves to the cell when it is loaded.
+   * @throws Will throw if called on a cell without an entity ID.
+   */
+  loadCell<T = any>(
+    cell: CellImpl<T> | EntityId | string
+  ): Promise<CellImpl<T>>;
+
+  /**
+   * Persist cell. Most of the time you want to use `load()` instead.
+   *
+   * Writes current state to storage and subscribes to new changes.
+   *
+   * Like `load()`, it will follow cell references and persist them (using
+   * `load()` if they already have an id, otherwise assign an id causal to this
+   * one and call `persist` instead).
+   *
+   * Only call on new cells. Has to be called after `generateEntityId`.
+   *
+   * Use `load()` when restoring from storage, including when the id was
+   * generated in a causal way, so that a previous run would have generated the
+   * same id, but might already progressed further (i.e. the state in storage is
+   * more current than the one currently being spun up, such as when rehydrating
+   * a previous run).
+   *
+   * @throws Will throw if called on a cell without an entity ID.
+   */
+  persistCell<T = any>(cell: CellImpl<T>): Promise<void>;
+
+  /**
+   * Clear all stored data.
+   * @returns Promise that resolves when the operation is complete.
+   */
+  clear(): Promise<void>;
 }
 
 class StorageImpl implements Storage {
-  constructor(private storageProvider: StorageProvider) {}
+  constructor(private storageProvider: StorageProvider) {
+    const [cancel, addCancel] = useCancelGroup();
+    this.cancel = cancel;
+    this.addCancel = addCancel;
+  }
 
-  private loadedCells = new Set<string>();
+  private loadedCells = new Map<string, CellImpl<any>>();
   private loadingCells = new Map<string, Promise<void>>();
 
-  async loadCell(cell: CellImpl<any>): Promise<void> {
-    if (!cell.entityId) throw new Error("Cell has no entity ID");
+  private cancel: Cancel;
+  private addCancel: AddCancel;
 
-    const entityId = JSON.stringify(cell.entityId);
+  async loadCell<T>(
+    subject: CellImpl<T> | EntityId | string
+  ): Promise<CellImpl<T>> {
+    let entityId: string;
+    let entityCell: CellImpl<T>;
+
+    if (isCell(subject)) {
+      entityCell = subject;
+      if (!entityCell.entityId) throw new Error("Cell has no entity ID");
+      entityId = JSON.stringify(entityCell.entityId);
+    } else if (typeof subject === "string") {
+      entityCell = cell<T>();
+      entityCell.entityId = JSON.parse(subject);
+      entityId = subject;
+    } /* assumed to be EntityId */ else {
+      entityCell = cell<T>();
+      entityCell.entityId = subject;
+      entityId = JSON.stringify(subject);
+    }
 
     // If the cell is already loaded, return immediately
-    if (this.loadedCells.has(entityId)) return;
+    if (this.loadedCells.has(entityId)) return this.loadedCells.get(entityId)!;
 
     // If loading is in progress, wait for it to finish
-    if (this.loadingCells.has(entityId)) return this.loadingCells.get(entityId);
+    if (this.loadingCells.has(entityId)) {
+      await this.loadingCells.get(entityId);
+      return this.loadedCells.get(entityId)!;
+    }
 
     // Start loading the cell
-    const loadingPromise = this._loadCell(cell);
+    const loadingPromise = this._loadCell(entityCell);
     this.loadingCells.set(entityId, loadingPromise);
 
-    try {
-      await loadingPromise;
-      this.loadedCells.add(entityId);
-    } finally {
-      // Remove the loading promise when done (success or failure)
-      this.loadingCells.delete(entityId);
-    }
+    await loadingPromise.then(() => this.loadingCells.delete(entityId));
+
+    return entityCell;
   }
 
   private async _loadCell(cell: CellImpl<any>): Promise<void> {
-    const storedValue = await this.storageProvider.read(cell.entityId!);
+    const storedValue = await this.storageProvider.get(cell.entityId!);
 
     if (storedValue !== undefined) {
+      this.subscribeToChanges(cell);
       cell.send(storedValue);
     } else {
       // If the cell doesn't exist in storage, persist the current value
       await this.persistCell(cell);
     }
 
-    this.subscribeToChanges(cell);
+    this.loadedCells.set(JSON.stringify(cell.entityId), cell);
   }
 
   async persistCell(cell: CellImpl<any>): Promise<void> {
     if (!cell.entityId) throw new Error("Cell has no entity ID");
 
-    await this.storageProvider.update(cell.entityId, cell.get());
+    this.subscribeToChanges(cell);
+
+    await this.storageProvider.send(cell.entityId, cell.get());
+  }
+
+  async clear(): Promise<void> {
+    await this.storageProvider.clear();
+    this.loadedCells.clear();
+    this.loadingCells.clear();
+    this.cancel();
   }
 
   private subscribeToChanges(cell: CellImpl<any>): void {
-    cell.updates(async (value) => {
-      await this.storageProvider.update(cell.entityId!, value);
-    });
+    // Send updates to storage
+    this.addCancel(
+      cell.updates((value) => {
+        console.log("got update", cell.entityId, value);
+        this.storageProvider.send(cell.entityId!, value);
+      })
+    );
 
     // Subscribe to storage updates
-    (async () => {
-      for await (const value of this.storageProvider.subscribe(
-        cell.entityId!
-      )) {
+    this.addCancel(
+      this.storageProvider.sink(cell.entityId!, (value) => {
+        console.log("got value", cell.entityId, value, "old", cell.get());
         cell.send(value);
-      }
-    })();
+      })
+    );
   }
 }
 
@@ -86,79 +163,67 @@ export function createStorage(type: "local" | "memory"): Storage {
 }
 
 interface StorageProvider {
-  update<T = any>(entityId: EntityId, value: T): Promise<void>;
-  read<T = any>(entityId: EntityId): Promise<T>;
-  subscribe<T = any>(entityId: EntityId): AsyncGenerator<T>;
+  send<T = any>(entityId: EntityId, value: T): Promise<void>;
+  get<T = any>(entityId: EntityId): Promise<T>;
+  sink<T = any>(entityId: EntityId, callback: (value: T) => void): Cancel;
+  clear(): Promise<void>;
 }
 
 abstract class BaseStorageProvider implements StorageProvider {
   protected subscribers = new Map<string, Set<(value: any) => void>>();
 
-  abstract update(entityId: EntityId, value: any): Promise<void>;
-  abstract read(entityId: EntityId): Promise<any>;
+  abstract send(entityId: EntityId, value: any): Promise<void>;
+  abstract get(entityId: EntityId): Promise<any>;
 
-  async *subscribe<T = any>(entityId: EntityId): AsyncGenerator<T> {
+  sink<T = any>(entityId: EntityId, callback: (value: T) => void): Cancel {
     const key = JSON.stringify(entityId);
-    const queue: any[] = [];
-    let resolve: ((value: any) => void) | null = null;
-    const listener = (value: any) => {
-      if (resolve) {
-        resolve(value);
-        resolve = null;
-      } else {
-        queue.push(value);
-      }
-    };
 
-    if (!this.subscribers.has(key)) {
-      this.subscribers.set(key, new Set());
-    }
+    if (!this.subscribers.has(key)) this.subscribers.set(key, new Set());
     const listeners = this.subscribers.get(key)!;
-    listeners.add(listener);
+    listeners.add(callback);
 
-    return {
-      async next(): Promise<IteratorResult<T>> {
-        if (queue.length > 0) {
-          return { value: queue.shift()!, done: false };
-        }
-        return new Promise((r) => (resolve = r));
-      },
-      async return(): Promise<IteratorResult<T>> {
-        listeners.delete(listener);
-        if (listeners.size === 0) this.subscribers.delete(key);
-        return { value: undefined, done: true };
-      },
-      [Symbol.asyncIterator]() {
-        return this;
-      },
+    return () => {
+      listeners.delete(callback);
+      if (listeners.size === 0) this.subscribers.delete(key);
     };
   }
 
   protected notifySubscribers(key: string, value: any): void {
     const listeners = this.subscribers.get(key);
-    if (listeners) {
-      for (const listener of listeners) {
-        listener(value);
-      }
-    }
+    if (listeners) for (const listener of listeners) listener(value);
   }
+
+  abstract clear(): Promise<void>;
 }
 
+/**
+ * In-memory storage provider. Just for testing.
+ *
+ * It doesn't make much sense,  since it's just a copy of the in memory cells.
+ * But for testing we can create multiple instances that share the memory.
+ */
+const inMemoryStorage = new Map<string, any>();
 class InMemoryStorageProvider extends BaseStorageProvider {
-  private storage = new Map<string, any>();
-
-  async update(entityId: EntityId, value: any): Promise<void> {
+  async send(entityId: EntityId, value: any): Promise<void> {
     const key = JSON.stringify(entityId);
-    this.storage.set(key, value);
+    console.log("inMemoryStorage update", key, value, this.subscribers);
+    inMemoryStorage.set(key, value);
     this.notifySubscribers(key, value);
   }
 
-  async read(entityId: EntityId): Promise<any> {
-    return this.storage.get(JSON.stringify(entityId));
+  async get(entityId: EntityId): Promise<any> {
+    return inMemoryStorage.get(JSON.stringify(entityId));
+  }
+
+  async clear(): Promise<void> {
+    inMemoryStorage.clear();
+    this.subscribers.clear();
   }
 }
 
-// Updated LocalStorageProvider
+/**
+ * Local storage provider for browser.
+ */
 class LocalStorageProvider extends BaseStorageProvider {
   private prefix: string;
 
@@ -182,21 +247,27 @@ class LocalStorageProvider extends BaseStorageProvider {
     }
   };
 
-  async update(entityId: EntityId, value: any): Promise<void> {
+  async send(entityId: EntityId, value: any): Promise<void> {
     const key = this.getKey(entityId);
     localStorage.setItem(key, JSON.stringify(value));
-    this.notifySubscribers(JSON.stringify(entityId), value);
   }
 
-  async read(entityId: EntityId): Promise<any> {
+  async get(entityId: EntityId): Promise<any> {
     const key = this.getKey(entityId);
     const value = localStorage.getItem(key);
     return value ? JSON.parse(value) : undefined;
+  }
+
+  async clear(): Promise<void> {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith(this.prefix)) {
+        localStorage.removeItem(key);
+      }
+    }
+    this.subscribers.clear();
   }
 
   destroy() {
     window.removeEventListener("storage", this.handleStorageEvent);
   }
 }
-
-export const storage = createStorage("memory");
