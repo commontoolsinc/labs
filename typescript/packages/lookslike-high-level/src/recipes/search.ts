@@ -13,7 +13,7 @@ import {
 } from "@commontools/common-builder";
 import { streamData } from "@commontools/common-builder";
 import { runtimeWorkbench } from "./runtimeWorkbench.js";
-import * as DB from "datalogia";
+import { dataDesigner } from "./dataDesigner.js";
 
 const ensureArray = lift(({ data }: { data: any }) => {
   if (!data) return [];
@@ -23,46 +23,6 @@ const ensureArray = lift(({ data }: { data: any }) => {
 const stringify = lift(({ obj }) => {
   return JSON.stringify(obj, null, 2);
 });
-
-const toPairs = lift(({ obj }) => {
-  return Object.entries(obj)
-    .map(([key, value]) => `${key}: ${value}`)
-    .join("\n");
-});
-
-const onInput = handler<KeyboardEvent, { value: string }>((input, state) => {
-  state.value = (input.target as HTMLTextAreaElement).value;
-});
-
-const generateQuery = handler<{}, { collectionName: string; query: any }>(
-  (_, state) => {
-    if (!state.collectionName) {
-      state.query = undefined;
-    } else {
-      const query = {
-        select: {
-          item: [
-            {
-              item: "?item",
-              key: "?key",
-              value: "?value",
-            },
-          ],
-        },
-        where: [
-          { Case: ["?collection", "name", state.collectionName] },
-          { Case: ["?collection", "member", "?item"] },
-          { Case: ["?item", "?key", "?value"] },
-        ],
-      };
-      state.query = query;
-    }
-  },
-);
-
-const onWorkbench = handler<MouseEvent, { data: any }>((_, state) =>
-  navigateTo(runtimeWorkbench({ data: state.data })),
-);
 
 const normalizeData = lift(({ result }) => {
   if (!result || !result.data || !result.data[0] || !result.data[0].item) {
@@ -99,7 +59,7 @@ const grabKeywords = lift<{ result?: string }, any>(({ result }) => {
 const keywordPrompt = lift<{ search: string }>(({ search }) => {
   return {
     messages: [
-      `Generate 5 keywords for this search query, consider fields that may appear in the resulting data: "${search}"`,
+      `Generate 5 possible fields that could be on a JSON document matching this search query: "${search}"`,
       "```json\n[",
     ],
     system: "Respond with a JSON array of keywords in a block",
@@ -209,35 +169,26 @@ const buildQuery = lift(({ query }) => {
   };
 });
 
-const printObjectProperties = lift(({ obj }: { obj: any }) => {
-  const properties = Object.entries(JSON.parse(JSON.stringify(obj))).map(
-    ([key, value]) => ({ key, value }),
-  );
-
-  return html`
-    <table>
-      <thead>
-        <tr>
-          <th>Key</th>
-          <th>Value</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${properties.map(
-          (prop) => html`
-            <tr>
-              <td>${prop.key}</td>
-              <td>${prop.value}</td>
-            </tr>
-          `,
-        )}
-      </tbody>
-    </table>
-  `;
-});
-
 const truncate = lift(({ text, length }) => {
   return text.length > length ? text.substring(0, length) + "…" : text;
+});
+
+const buildTransformPrompt = lift(({ prompt, data }) => {
+  let fullPrompt = prompt;
+  if (data) {
+    fullPrompt += `\n\nHere's the previous JSON for reference:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
+  }
+
+  return {
+    messages: [fullPrompt, "```json\n"],
+    system: `generate/modify a document based on input, respond within a json block , e.g.
+\`\`\`json
+...
+\`\`\`
+
+No field can be set to null or undefined.`,
+    stop: "```",
+  };
 });
 
 export const search = recipe<{ search: string }>(
@@ -260,6 +211,7 @@ export const search = recipe<{ search: string }>(
     // const collections = ensureArray({ data: collectionResults?.data });
     const data = ensureArray({ data: result });
     const normalizedData = normalizeData({ result: result });
+
     const exportedData = lift((data: any[]) => ({ items: data }))(
       normalizedData,
     );

@@ -9,8 +9,9 @@ import {
   str,
   createJsonSchema,
   cell,
+  ifElse,
 } from "@commontools/common-builder";
-
+import { truncateAsciiArt } from "../loader.js";
 
 const formatData = lift(({ obj }) => {
   console.log("stringify", obj);
@@ -26,22 +27,35 @@ const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
   ({ detail }, state) => detail?.value && (state.title = detail.value),
 );
 
+const grabKeywords = lift<{ result?: string }, any>(({ result }) => {
+  if (!result) {
+    return [];
+  }
+  const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
+  if (!jsonMatch) {
+    console.error("No JSON found in text:", result);
+    return [];
+  }
+  let rawData = JSON.parse(jsonMatch[1]);
+  return rawData;
+});
+
 const buildPrompt = lift(({ prompt, data }) => {
   let fullPrompt = prompt;
   if (data) {
-    fullPrompt += `\n\nHere's the previous JSON for reference:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
+    fullPrompt = `\n\nHere's the previous JSON for reference:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
   }
 
   return {
-    messages: [fullPrompt, '```json\n'],
-    system: `generate/modify a document based on input, respond within a json block , e.g.
+    messages: [prompt, "data plz", fullPrompt, "```json\n"],
+    system: `You will transform JSON data as per the user's request, respond within a json block , e.g.
 \`\`\`json
 ...
 \`\`\`
 
 No field can be set to null or undefined.`,
-    stop: '```'
-  }
+    stop: "```",
+  };
 });
 
 const grabJSON = lift<{ result?: string }, any>(({ result }) => {
@@ -79,20 +93,36 @@ const addToPrompt = handler<
   state.query = state.prompt;
 });
 
-const onAcceptData = handler<void, { data: any; lastData: any; generatedData: any }>(
-  (_, state) => {
-    state.lastData = JSON.parse(JSON.stringify(state.data));
-    state.data = JSON.parse(JSON.stringify(state.generatedData))
-  }
-);
+const onAcceptData = handler<
+  void,
+  { data: any; lastData: any; generatedData: any }
+>((_, state) => {
+  state.lastData = JSON.parse(JSON.stringify(state.data));
+  state.data = JSON.parse(JSON.stringify(state.generatedData));
+});
 
-const tail = lift<{ pending: boolean, partial?: string, lines: number }, string>(({ pending, partial, lines }) => {
+const tail = lift<
+  { pending: boolean; partial?: string; lines: number },
+  string
+>(({ pending, partial, lines }) => {
   if (!partial || !pending) {
     return "";
   }
-  return partial.split('\n').slice(-lines).join('\n');
+  return partial.split("\n").slice(-lines).join("\n");
 });
 
+const dots = lift<{ pending: boolean; partial?: string }, string>(
+  ({ pending, partial }) => {
+    if (!partial || !pending) {
+      return "";
+    }
+    return truncateAsciiArt(partial.length / 2.0);
+  },
+);
+
+const truncate = lift(({ text, length }) => {
+  return text.length > length ? text.substring(0, length) + "…" : text;
+});
 
 export const dataDesigner = recipe<{
   title: string;
@@ -100,45 +130,32 @@ export const dataDesigner = recipe<{
   data: any;
 }>("iframe", ({ title, prompt, data }) => {
   prompt.setDefault("");
-  data.setDefault({ key: 'value' });
+  data.setDefault({});
   title.setDefault("Untitled Data Designer");
 
   const schema = deriveJsonSchema({ data });
   const query = copy({ value: prompt });
   // using copy for lastData was causing re-running llm whenever data changed in iframes
-  const lastData = cell({ key: 'value' })
+  const lastData = cell({ key: "value" });
   tap({ lastData });
 
-  const {result, pending, partial} = llm(buildPrompt({ prompt, data: lastData }));
+  const { result, pending, partial } = llm(buildPrompt({ prompt, data }));
   const generatedData = grabJSON({ result });
 
   return {
     [NAME]: str`${title}`,
     [UI]: html`<div>
-      <common-input
-        value=${title}
-        placeholder="title"
-        oncommon-input=${updateTitle({ title })}
-      ></common-input>
-
-      <pre>${formatData({ obj: data })}</pre>
-      <pre>${formatData({ obj: schema })}</pre>
-
-      <textarea
-        value=${query}
-        onkeyup=${onInput({ value: query })}
-        style="width: 100%; min-height: 128px;"
-      ></textarea>
-      <pre>${tail({ partial, pending, lines: 5 })}
-      <pre>${formatData({ obj: generatedData })}</pre>
-      <common-button
-        onclick=${onAcceptData({ data, lastData, generatedData })}
-      >Accept</common-button>
-
+      ${ifElse(
+        pending,
+        html` <pre style="padding: 32px; color: #ccc; text-align: center;">
+${dots({ partial, pending })}</pre
+        >`,
+        html`<pre>${formatData({ obj: generatedData })}</pre>`,
+      )}
     </div>`,
     prompt,
     title,
-    data,
+    data: generatedData,
     addToPrompt: addToPrompt({ prompt, query }),
   };
 });

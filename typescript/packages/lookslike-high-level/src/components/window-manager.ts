@@ -14,6 +14,7 @@ import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
 import { NAME } from "@commontools/common-builder";
+import { dataDesigner } from "../recipes/dataDesigner.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -104,6 +105,14 @@ export class CommonWindowManager extends LitElement {
         this.focusedCharm
           ?.asSimpleCell(["addToPrompt"])
           .send({ prompt: value } as any);
+        if (charm.data && charm.query) {
+          const eid = run(dataDesigner, {
+            data: charm.data,
+            prompt: value,
+            title: value,
+          }).entityId!;
+          this.openCharm(JSON.stringify(eid));
+        }
       } else {
         const charmValues = charm;
         let fieldsToInclude = Object.entries(charmValues).reduce(

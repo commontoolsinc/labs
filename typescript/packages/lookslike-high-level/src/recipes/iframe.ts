@@ -13,6 +13,7 @@ import {
   createJsonSchema,
 } from "@commontools/common-builder";
 import { z } from "zod";
+import { truncateAsciiArt } from "../loader.js";
 
 const formatData = lift(({ obj }) => {
   console.log("stringify", obj);
@@ -32,20 +33,10 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value),
 );
 
-const deriveJsonSchema = lift(({ data, filter }) => {
+const deriveJsonSchema = lift(({ data }) => {
   const schema = (createJsonSchema({}, data) as any)?.["properties"];
   if (!schema) return {};
-
-  const filterKeys = (filter || "")
-    .split(",")
-    .map((key: string) => key.trim())
-    .filter(Boolean);
-
-  if (filterKeys.length === 0) return schema;
-
-  return Object.fromEntries(
-    Object.entries(schema).filter(([key]) => filterKeys.includes(key)),
-  );
+  return schema;
 });
 
 const onInput = handler<KeyboardEvent, { value: string }>((input, state) => {
@@ -165,7 +156,7 @@ const getSuggestion = lift(
   },
 );
 
-const prepHTML = lift(({ prompt, schema, lastSrc }) => {
+const prepHTML = lift(({ prompt, schema, data, lastSrc }) => {
   if (!prompt) {
     return {};
   }
@@ -242,6 +233,10 @@ const prepHTML = lift(({ prompt, schema, lastSrc }) => {
       ${JSON.stringify(schema, null, 2)}
     </view-model-schema>
 
+    <current-data>
+      ${JSON.stringify(data, null, 2)}
+    </current-data>
+
     It's best to access and manage each state reference seperately.`,
   };
 });
@@ -268,65 +263,6 @@ const tail = lift<
   return partial.split("\n").slice(-lines).join("\n");
 });
 
-const asciiArt = `  ___  __   _  _       _  _   __   __ _      ___  __   _  _
-/ __)\\  \\ ( \\/ )     ( \\/ ) /  \\ (  ( \\    / __)\\  \\ ( \\/ )
-( (__(  O )/ \\/ \\     / \\/ \\(  O )/    /   ( (__(  O )/ \\/ \\
-\\___)\\__/ \\_)(_/     \\_)(_/ \\__/ \\_)__)    \\___)\\__/ \\_)(_/
-_  _   __   __ _      ___  __   _  _       _  _   __   __ _
-( \\/ ) /  \\ (  ( \\    / __)\\  \\ ( \\/ )     ( \\/ ) /  \\ (  ( \\
-/ \\/ \\(  O )/    /   ( (__(  O )/ \\/ \\     / \\/ \\(  O )/    /
-\\_)(_/ \\__/ \\_)__)    \\___)\\__/ \\_)(_/     \\_)(_/ \\__/ \\_)__)
-___  __   _  _       _  _   __   __ _      ___  __   _  _
-/ __)\\  \\ ( \\/ )     ( \\/ ) /  \\ (  ( \\    / __)\\  \\ ( \\/ )
-( (__(  O )/ \\/ \\     / \\/ \\(  O )/    /   ( (__(  O )/ \\/ \\
-\\___)\\__/ \\_)(_/     \\_)(_/ \\__/ \\_)__)    \\___)\\__/ \\_)(_/
-_  _   __   __ _      ___  __   _  _       _  _   __   __ _
-( \\/ ) /  \\ (  ( \\    / __)\\  \\ ( \\/ )     ( \\/ ) /  \\ (  ( \\
-/ \\/ \\(  O )/    /   ( (__(  O )/ \\/ \\     / \\/ \\(  O )/    /
-\\_)(_/ \\__/ \\_)__)    \\___)\\__/ \\_)(_/     \\_)(_/ \\__/ \\_)__)
-___  __   _  _       _  _   __   __ _      ___  __   _  _
-/ __)\\  \\ ( \\/ )     ( \\/ ) /  \\ (  ( \\    / __)\\  \\ ( \\/ )
-( (__(  O )/ \\/ \\     / \\/ \\(  O )/    /   ( (__(  O )/ \\/ \\
-\\___)\\__/ \\_)(_/     \\_)(_/ \\__/ \\_)__)    \\___)\\__/ \\_)(_/
-_  _   __   __ _      ___  __   _  _       _  _   __   __ _
-( \\/ ) /  \\ (  ( \\    / __)\\  \\ ( \\/ )     ( \\/ ) /  \\ (  ( \\
-/ \\/ \\(  O )/    /   ( (__(  O )/ \\/ \\     / \\/ \\(  O )/    /
-\\_)(_/ \\__/ \\_)__)    \\___)\\__/ \\_)(_/     \\_)(_/ \\__/ \\_)__)
-___  __   _  _       _  _   __   __ _      ___  __   _  _
-/ __)\\  \\ ( \\/ )     ( \\/ ) /  \\ (  ( \\    / __)\\  \\ ( \\/ )
-( (__(  O )/ \\/ \\     / \\/ \\(  O )/    /   ( (__(  O )/ \\/ \\
-\\___)\\__/ \\_)(_/     \\_)(_/ \\__/ \\_)__)    \\___)\\__/ \\_)(_/
-_  _   __   __ _      ___  __   _  _       _  _   __   __ _
-( \\/ ) /  \\ (  ( \\    / __)\\  \\ ( \\/ )     ( \\/ ) /  \\ (  ( \\
-/ \\/ \\(  O )/    /   ( (__(  O )/ \\/ \\     / \\/ \\(  O )/    /
-\\_)(_/ \\__/ \\_)__)    \\___)\\__/ \\_)(_/     \\_)(_/ \\__/ \\_)__)
-`;
-
-function truncateAsciiArt(n: number) {
-  if (n < 1) return "";
-
-  const lines = asciiArt.trim().split("\n");
-  let result = "";
-  let charCount = 0;
-
-  for (let i = 0; i < lines.length && charCount < n; i++) {
-    for (let j = 0; j < lines[i].length && charCount < n; j++) {
-      result += lines[i][j];
-      charCount++;
-    }
-    if (charCount < n) {
-      result += "\n";
-      charCount++;
-    }
-  }
-
-  if (Number.isInteger(n) === false) {
-    result += ".";
-  }
-
-  return result;
-}
-
 const dots = lift<{ pending: boolean; partial?: string }, string>(
   ({ pending, partial }) => {
     if (!partial || !pending) {
@@ -335,6 +271,37 @@ const dots = lift<{ pending: boolean; partial?: string }, string>(
     return truncateAsciiArt(partial.length / 2.0);
   },
 );
+
+const buildTransformPrompt = lift(({ prompt, data }) => {
+  let fullPrompt = prompt;
+  if (data) {
+    fullPrompt += `\n\nHere's the previous JSON for reference:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
+  }
+
+  return {
+    messages: [fullPrompt, "```json\n"],
+    system: `Transform JSON document  as needed for the user to accomplish their goal, respond within a json block , e.g.
+\`\`\`json
+...
+\`\`\`
+
+No field can be set to null or undefined.`,
+    stop: "```",
+  };
+});
+
+const grabKeywords = lift<{ result?: string }, any>(({ result }) => {
+  if (!result) {
+    return [];
+  }
+  const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
+  if (!jsonMatch) {
+    console.error("No JSON found in text:", result);
+    return [];
+  }
+  let rawData = JSON.parse(jsonMatch[1]);
+  return rawData;
+});
 
 export const iframe = recipe<{
   title: string;
@@ -349,7 +316,12 @@ export const iframe = recipe<{
   src.setDefault("");
 
   filter.setDefault("");
-  const schema = deriveJsonSchema({ data, filter });
+
+  // const transformedData = grabKeywords(
+  //   llm(buildTransformPrompt({ prompt, data: data })),
+  // );
+
+  const schema = deriveJsonSchema({ data });
   tap({ schema });
 
   const query = copy({ value: prompt });
@@ -366,7 +338,7 @@ export const iframe = recipe<{
     result,
     pending: pendingHTML,
     partial: partialHTML,
-  } = llm(prepHTML({ prompt, schema, lastSrc }));
+  } = llm(prepHTML({ prompt, schema, data, lastSrc }));
 
   const suggestions = grabSuggestions(
     llm(prepSuggestions({ src: grabHTML({ result }), prompt, schema })),
