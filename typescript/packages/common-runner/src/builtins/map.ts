@@ -87,9 +87,6 @@ export function map(
       // TODO: Replace with something that follows aliases as well.
       value = followCellReferences(value, log);
 
-      if (typeof value !== "object")
-        throw new Error("map currently only supports objects");
-
       // If the value is new, instantiate the recipe and store the result cell
       let itemResult = sourceRefToResult.find(({ ref }) =>
         isEqualCellReferences(ref, value)

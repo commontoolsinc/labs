@@ -69,6 +69,27 @@ export function cell<T>(value?: Value<T> | T): CellProxy<T> {
           op: recipe("mapping function", fn),
         });
       },
+      /**
+       * We assume the cell is an array and will provide an infinite iterator.
+       * The primary use-case is destructuring a tuple (`[a, b] = ...`). We
+       * hence limit to at most 50 items, which should be enough for that, but
+       * prevents infinite loops if used elsewhere.
+       */
+      [Symbol.iterator]: () => {
+        let index = 0;
+        return {
+          next: () => {
+            if (index >= 50)
+              throw new Error(
+                "Can't use iterator over an opaque value in an unlimited loop."
+              );
+            return {
+              done: false,
+              value: createNestedProxy([...path, index++]),
+            };
+          },
+        };
+      },
       [isCellProxyMarker]: true,
     };
 
