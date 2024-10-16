@@ -24,7 +24,7 @@ export class OsSidebarGroup extends LitElement {
         <heading class="sgroup-heading"
           ><slot class="label" name="label"></slot
         ></heading>
-        <div class="sgroup-content"><slot name="content"></slot></div>
+        <div class="sgroup-content"><slot></slot></div>
       </aside>
     `;
   }

@@ -1,13 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["es2022", "DOM"],
+    "lib": ["ES2023", "DOM"],
     "outDir": "./lib",
     "rootDir": "./src",
     "strict": false,
     "paths": {},
     "useDefineForClassFields": false,
-    "strictNullChecks": true
+    "strictNullChecks": true,
+    "types": ["node", "mocha"]
   },
   "include": ["src/**/*"]
 }

@@ -20,7 +20,6 @@ export class OsNavpanel extends LitElement {
         grid-template-rows: auto 1fr;
         width: 100%;
         height: 100%;
-        overflow: hidden;
       }
 
       .navpanel-toolbar {
@@ -30,7 +29,6 @@ export class OsNavpanel extends LitElement {
       .navpanel-content {
         width: 100%;
         height: 100%;
-        overflow-x: hidden;
         overflow-y: scroll;
       }
 

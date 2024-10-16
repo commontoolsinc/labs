@@ -1,5 +1,7 @@
 let slowAnimations = false;
 
+const freeze = Object.freeze;
+
 /** Set slow animations for debugging */
 export const setSlowAnimations = (isSlow: boolean) => {
   slowAnimations = isSlow;
@@ -30,7 +32,7 @@ export const cubicBezier = (
   y1: number,
   x2: number,
   y2: number,
-): CubicBezier => Object.freeze({ x1, y1, x2, y2 });
+): CubicBezier => freeze({ x1, y1, x2, y2 });
 
 export const easeOutCubic = cubicBezier(0.215, 0.61, 0.355, 1);
 export const easeOutExpo = cubicBezier(0.19, 1, 0.22, 1);
@@ -65,14 +67,15 @@ export const transition = ({
   duration?: number;
   delay?: number;
   easing?: string;
-}): Transition => ({
-  property,
-  from: from != null ? `${from}` : undefined,
-  to: `${to}`,
-  duration: slowable(duration),
-  easing,
-  delay,
-});
+}): Transition =>
+  freeze({
+    property,
+    from: from != null ? `${from}` : undefined,
+    to: `${to}`,
+    duration: slowable(duration),
+    easing,
+    delay,
+  });
 
 /** Get full transition duration by finding the longest duration + delay */
 export const fullTransitionDuration = (
