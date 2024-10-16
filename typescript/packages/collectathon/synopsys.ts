@@ -91,7 +91,8 @@ export async function cid(data: any) {
   return cid.toString();
 }
 
-export async function jsonToFacts(data: any) {
+// send in a parentEntity if you create the item cid somewhere else
+export async function jsonToFacts(data: any, parentEntity?: Entity) {
   const facts: Fact[] = [];
   const processObject = (
     obj: any,
@@ -127,7 +128,7 @@ export async function jsonToFacts(data: any) {
       processObject(data, data as Entity);
     } else {
       // The root object is not an Entity, create a new one
-      const rootEntity = entity(await cid(data));
+      const rootEntity = parentEntity || entity(await cid(data));
       processObject(data, rootEntity);
     }
   }
