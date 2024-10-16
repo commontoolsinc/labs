@@ -48,15 +48,19 @@ export const charms = cell<CellImpl<Charm>[]>([]);
 export function addCharms(newCharms: CellImpl<any>[]) {
   const currentCharms = charms.get();
   const currentIds = new Set(
-    currentCharms.map((charm) => JSON.stringify(charm.entityId))
+    currentCharms.map((charm) => JSON.stringify(charm.entityId)),
   );
   const charmsToAdd = newCharms.filter(
-    (charm) => !currentIds.has(JSON.stringify(charm.entityId))
+    (charm) => !currentIds.has(JSON.stringify(charm.entityId)),
   );
 
   if (charmsToAdd.length > 0) {
     charms.send([...currentCharms, ...charmsToAdd]);
   }
+}
+
+export function setCharms(newCharms: CellImpl<any>[]) {
+  charms.send([...newCharms]);
 }
 
 function createCellWithCausalId(name: string) {
@@ -73,7 +77,7 @@ addCharms([
       prompt: "counter",
       data: { counter: 0 },
     },
-    createCellWithCausalId("iframe")
+    createCellWithCausalId("iframe"),
   ),
   run(importCalendar, {}, createCellWithCausalId("importCalendar")),
   run(
@@ -81,14 +85,14 @@ addCharms([
     {
       query: "home",
     },
-    createCellWithCausalId("search")
+    createCellWithCausalId("search"),
   ),
   run(
     queryCollections,
     {
       collectionName: "home",
     },
-    createCellWithCausalId("queryCollections")
+    createCellWithCausalId("queryCollections"),
   ),
   run(
     todoList,
@@ -99,7 +103,7 @@ addCharms([
         done: false,
       })),
     },
-    createCellWithCausalId("todoList")
+    createCellWithCausalId("todoList"),
   ),
   run(
     todoList,
@@ -110,7 +114,7 @@ addCharms([
         done: false,
       })),
     },
-    createCellWithCausalId("todoList")
+    createCellWithCausalId("todoList"),
   ),
   run(
     ticket,
@@ -120,7 +124,7 @@ addCharms([
       date: getFridayAndMondayDateStrings().startDate,
       location: "New York",
     },
-    createCellWithCausalId("ticket")
+    createCellWithCausalId("ticket"),
   ),
   run(
     routine,
@@ -129,7 +133,7 @@ addCharms([
       // TODO: A lot more missing here, this is just to drive the suggestion.
       locations: ["coffee shop with great baristas"],
     },
-    createCellWithCausalId("routine")
+    createCellWithCausalId("routine"),
   ),
   run(counters, {}, createCellWithCausalId("counters")),
 ]);
@@ -206,10 +210,10 @@ function getFridayAndMondayDateStrings() {
   const daysUntilFriday = (5 - today.getDay() + 7) % 7;
 
   const nextFriday = new Date(
-    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000
+    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000,
   );
   const followingMonday = new Date(
-    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000
+    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000,
   );
 
   const formatDate = (date: Date): string => {
@@ -235,7 +239,7 @@ addModuleByRef(
     // HACK to follow the cell references to the entityId
     const entityId = getEntityId(inputsCell.getAsProxy([], log));
     if (entityId) openCharm(JSON.stringify(entityId));
-  })
+  }),
 );
 
 (window as any).recipes = recipes;

@@ -7,6 +7,7 @@ import {
   llm,
   handler,
   navigateTo,
+  ifElse,
   str,
   cell,
   createJsonSchema,
@@ -263,6 +264,18 @@ const tail = lift<
   return partial.split("\n").slice(-lines).join("\n");
 });
 
+const dots = lift<{ pending: boolean; partial?: string }, string>(
+  ({ pending, partial }) => {
+    if (!partial || !pending) {
+      return "";
+    }
+    return partial
+      .split("\n")
+      .map((_) => ".")
+      .join("");
+  },
+);
+
 export const iframe = recipe<{
   title: string;
   prompt: string;
@@ -305,60 +318,24 @@ export const iframe = recipe<{
 
   return {
     [NAME]: str`${title} - iframe`,
-    [UI]: html`<div>
-      <pre>
-${tail({ partial: partialHTML, pending: pendingHTML, lines: 5 })}</pre
-      >
-      <common-iframe
-        src=${grabHTML({ result })}
-        $context=${data}
-      ></common-iframe>
-
-      <button
-        type="button"
-        onclick=${acceptSuggestion({
-          suggestion: firstSuggestion,
-          prompt,
-          src,
-          lastSrc,
-          query,
-          data,
-        })}
-      >
-        ${firstSuggestion.behaviour} ${firstSuggestion.prompt}
-      </button>
-      <button
-        type="button"
-        onclick=${acceptSuggestion({
-          suggestion: secondSuggestion,
-          prompt,
-          src,
-          lastSrc,
-          query,
-          data,
-        })}
-      >
-        ${secondSuggestion.behaviour} ${secondSuggestion.prompt}
-      </button>
-      <button
-        type="button"
-        onclick=${acceptSuggestion({
-          suggestion: thirdSuggestion,
-          prompt,
-          src,
-          lastSrc,
-          query,
-          data,
-        })}
-      >
-        ${thirdSuggestion.behaviour} ${thirdSuggestion.prompt}
-      </button>
+    [UI]: html`<div style="height: 100%">
+      ${ifElse(
+        grabHTML({ result }),
+        html`<common-iframe
+          src=${grabHTML({ result })}
+          $context=${data}
+        ></common-iframe>`,
+        html`<pre>
+  ${dots({ partial: partialHTML, pending: pendingHTML })}</pre
+        >`,
+      )}
     </div>`,
     prompt,
     title,
     src: grabHTML({ result }),
     data,
     schema,
+    partialHTML,
     addToPrompt: addToPrompt({ prompt, src, lastSrc, query }),
   };
 });

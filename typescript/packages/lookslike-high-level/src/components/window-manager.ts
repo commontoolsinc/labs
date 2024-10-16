@@ -27,7 +27,6 @@ export class CommonWindowManager extends LitElement {
         overflow-x: hidden;
         overflow-y: auto;
         container-type: size;
-        padding: var(--pad);
         background-color: rgba(255, 255, 255, 0.8);
         backdrop-filter: blur(10px);
         transition: all 0.3s ease;
@@ -143,6 +142,7 @@ export class CommonWindowManager extends LitElement {
   @state() data: string = "";
   @state() src: string = "";
   @state() schema: string = "";
+  @state() query: string = "";
 
   onLocationClicked(_event: CustomEvent) {
     console.log("Location clicked in app.");
@@ -159,19 +159,23 @@ export class CommonWindowManager extends LitElement {
     });
 
     this.focusedCharm?.asSimpleCell<any>(["data"])?.sink((data) => {
-      this.data = JSON.stringify(data, null, 2);
+      this.data = JSON.stringify(this.focusedProxy?.data, null, 2);
     });
 
     this.focusedCharm?.asSimpleCell<string>(["src"])?.sink((src) => {
       this.src = src;
     });
 
+    this.focusedCharm?.asSimpleCell<string>(["partialHTML"])?.sink((src) => {
+      this.src = src;
+    });
+
     this.focusedCharm?.asSimpleCell<string>(["schema"])?.sink((schema) => {
-      this.schema = JSON.stringify(schema, null, 2);
+      this.schema = JSON.stringify(this.focusedProxy?.schema, null, 2);
     });
 
     this.focusedCharm?.asSimpleCell<string>(["query"])?.sink((query) => {
-      this.schema = JSON.stringify(query, null, 2);
+      this.query = JSON.stringify(this.focusedProxy?.query, null, 2);
     });
 
     const onSearchSubmit = (event: CustomEvent) => {
@@ -179,7 +183,7 @@ export class CommonWindowManager extends LitElement {
       this.location = event.detail.value;
       this.searchOpen = false;
       const charm = run(search, {
-        collection: event.detail.value,
+        search: event.detail.value,
       });
       this.openCharm(JSON.stringify(charm.entityId));
     };
@@ -195,6 +199,13 @@ export class CommonWindowManager extends LitElement {
         icon="message"
         @click=${() => {
           this.sidebarTab = "prompt";
+        }}
+      ></os-icon-button>
+      <os-icon-button
+        slot="toolbar-end"
+        icon="query_stats"
+        @click=${() => {
+          this.sidebarTab = "query";
         }}
       ></os-icon-button>
       <os-icon-button
@@ -272,23 +283,31 @@ export class CommonWindowManager extends LitElement {
                 data-charm-id="${JSON.stringify(charmId)}"
               >
                 <button class="close-button" @click="${this.onClose}">×</button>
-                <div ${ref(charmRef)}></div>
+                <div style="height: 100%" ${ref(charmRef)}></div>
               </div>
             `;
           }
         )}
 
         <os-navstack slot="sidebar">
+          ${this.sidebarTab === "query"
+            ? html`<os-navpanel safearea>
+                ${sidebarNav}
+                <os-sidebar-group>
+                  <div slot="label">Query</div>
+                  <div slot="content">
+                    <pre style="white-space: pre-wrap;">${this.query}</pre>
+                  </div>
+                </os-sidebar-group>
+              </os-navpanel>`
+            : html``}
           ${this.sidebarTab === "schema"
             ? html`<os-navpanel safearea>
                 ${sidebarNav}
                 <os-sidebar-group>
                   <div slot="label">Schema</div>
                   <div slot="content">
-                    <pre style="white-space: pre-wrap;">
-                      ${this.schema}
-                        </pre
-                    >
+                    <pre style="white-space: pre-wrap;">${this.schema}</pre>
                   </div>
                 </os-sidebar-group>
               </os-navpanel>`
@@ -299,10 +318,7 @@ export class CommonWindowManager extends LitElement {
                 <os-sidebar-group>
                   <div slot="label">Source</div>
                   <div slot="content">
-                    <pre style="white-space: pre-wrap;">
-                      ${this.src}
-                        </pre
-                    >
+                    <pre style="white-space: pre-wrap;">${this.src}</pre>
                   </div>
                 </os-sidebar-group>
               </os-navpanel>`
@@ -313,10 +329,7 @@ export class CommonWindowManager extends LitElement {
                 <os-sidebar-group>
                   <div slot="label">Data</div>
                   <div slot="content">
-                    <pre style="white-space: pre-wrap;">
-                    ${this.data}
-                      </pre
-                    >
+                    <pre style="white-space: pre-wrap;">${this.data}</pre>
                   </div>
                 </os-sidebar-group>
               </os-navpanel>`
@@ -327,10 +340,7 @@ export class CommonWindowManager extends LitElement {
                 <os-sidebar-group>
                   <div slot="label">Prompt</div>
                   <div slot="content">
-                    <pre style="white-space: pre-wrap;">
-                  ${this.prompt}
-                    </pre
-                    >
+                    <pre style="white-space: pre-wrap;">${this.prompt}</pre>
                   </div>
                 </os-sidebar-group>
               </os-navpanel>`
@@ -356,7 +366,7 @@ export class CommonWindowManager extends LitElement {
       return;
     }
 
-    this.charms = [...this.charms, charm];
+    this.charms = [charm];
     this.charmLookup.set(charmId, charm);
     this.updateComplete.then(() => {
       while (this.newCharmRefs.length > 0) {

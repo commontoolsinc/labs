@@ -122,9 +122,11 @@ const guessShapePrompt = lift<{ search: string }>(({ search }) => {
 const generateFlexibleQuery = lift(
   ({
     dataShape,
+    query,
     keywords,
   }: {
     dataShape: Record<string, string>;
+    query: string;
     keywords: string[];
   }) => {
     const select: Record<string, any> = {
@@ -141,6 +143,10 @@ const generateFlexibleQuery = lift(
     const where: Array<Record<string, any>> = [
       { Case: ["?collection", "member", "?item"] },
     ];
+
+    if (query?.trim().split(/\s+/).length === 1) {
+      keywords.push(query.trim());
+    }
 
     // if (keywords.length > 0) {
     //   where.push({ Case: ["?item", "?key", DB.like('?value', '*' + keywords[0] + '*')] });
@@ -243,7 +249,11 @@ export const search = recipe<{ search: string }>(
     const keywords = grabKeywords(llm(keywordPrompt({ search })));
     const dataShape = grabKeywords(llm(guessShapePrompt({ search })));
 
-    const flexibleQuery = generateFlexibleQuery({ dataShape, keywords });
+    const flexibleQuery = generateFlexibleQuery({
+      dataShape,
+      keywords,
+      query: search,
+    });
 
     const { result } = streamData(buildQuery({ query: flexibleQuery }));
 
@@ -266,49 +276,28 @@ export const search = recipe<{ search: string }>(
         ${ifElse(
           result,
           html`<div>
-            <div class="collection-input">
-              <input
-                value=${search}
-                onkeyup=${onInput({ value: search })}
-                type="text"
-                placeholder="Enter search query"
-              />
-              <div>Keywords: ${stringify({ obj: keywords })}</div>
-
-              <button
-                onclick=${generateQuery({
-                  collectionName: search,
-                  query,
-                })}
-              >
-                Load
-              </button>
-            </div>
-
             <os-container>
               <os-colgrid>
                 ${entries.map(({ row }) => {
-                  return html`<div style="">
-                    <table
-                      style="width: 100%; font-size: 0.8rem; font-family: monospace; border-collapse: collapse; overflow-y: hidden; "
+                  return html`<os-tile style="aspect-ratio: 1/1;">
+                    <div
+                      style="width: 100%; height: 100%; overflow-y: auto; overflow-x: hidden; border-radius: 2px; padding: 8px; font-size: 0.8rem;  font-family: monospace;"
                     >
-                      <tbody>
-                        ${row.map(
-                          ({ k, v }) =>
-                            html`<tr>
-                              <td
-                                style="text-align: right; font-weight: bold; padding: 2px; border: 1px solid #ddd;"
-                              >
-                                ${k}
-                              </td>
-                              <td style="padding: 2px; border: 1px solid #ddd;">
-                                ${truncate({ text: v, length: 32 })}
-                              </td>
-                            </tr>`,
-                        )}
-                      </tbody>
-                    </table>
-                  </div>`;
+                      ${row.map(
+                        ({ k, v }) =>
+                          html`<div style="">
+                            <div
+                              style="font-weight: bold; color: #999; font-size: 0.6rem; height: 16px;"
+                            >
+                              ${k}
+                            </div>
+                            <div style="padding: 2px;">
+                              ${truncate({ text: v, length: 32 })}
+                            </div>
+                          </div>`,
+                      )}
+                    </div>
+                  </os-tile>`;
                 })}
               </os-colgrid>
             </os-container>
