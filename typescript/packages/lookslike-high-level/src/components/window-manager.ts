@@ -148,6 +148,9 @@ export class CommonWindowManager extends LitElement {
   @state() src: string = "";
   @state() schema: string = "";
   @state() query: string = "";
+  @state() suggestions: any[] = [];
+
+  subscriptions: ((() => void) | undefined)[] = [];
 
   onLocationClicked(_event: CustomEvent) {
     console.log("Location clicked in app.");
@@ -159,29 +162,58 @@ export class CommonWindowManager extends LitElement {
       this.searchOpen = false;
     };
 
-    this.focusedCharm?.asSimpleCell<string>(["prompt"])?.sink((prompt) => {
-      this.prompt = prompt;
-    });
+    // Unsubscribe from previous subscriptions
+    this.subscriptions.forEach((unsub) => unsub?.());
+    // Log how many subscriptions were cancelled
+    console.log(`Cancelled ${this.subscriptions.length} subscriptions`);
 
-    this.focusedCharm?.asSimpleCell<any>(["data"])?.sink((data) => {
-      this.data = JSON.stringify(this.focusedProxy?.data, null, 2);
-    });
+    this.subscriptions.length = 0;
 
-    this.focusedCharm?.asSimpleCell<string>(["src"])?.sink((src) => {
-      this.src = src;
-    });
+    this.subscriptions.push(
+      this.focusedCharm?.asSimpleCell<string>(["prompt"])?.sink((prompt) => {
+        this.prompt = prompt;
+      }),
+    );
 
-    this.focusedCharm?.asSimpleCell<string>(["partialHTML"])?.sink((src) => {
-      this.src = src;
-    });
+    this.subscriptions.push(
+      this.focusedCharm?.asSimpleCell<any>(["data"])?.sink((data) => {
+        this.data = JSON.stringify(this.focusedProxy?.data, null, 2);
+      }),
+    );
 
-    this.focusedCharm?.asSimpleCell<string>(["schema"])?.sink((schema) => {
-      this.schema = JSON.stringify(this.focusedProxy?.schema, null, 2);
-    });
+    this.subscriptions.push(
+      this.focusedCharm?.asSimpleCell<string>(["src"])?.sink((src) => {
+        this.src = src;
+      }),
+    );
 
-    this.focusedCharm?.asSimpleCell<string>(["query"])?.sink((query) => {
-      this.query = JSON.stringify(this.focusedProxy?.query, null, 2);
-    });
+    this.subscriptions.push(
+      this.focusedCharm?.asSimpleCell<string>(["partialHTML"])?.sink((src) => {
+        this.src = src;
+      }),
+    );
+
+    this.subscriptions.push(
+      this.focusedCharm?.asSimpleCell<string>(["schema"])?.sink((schema) => {
+        this.schema = JSON.stringify(this.focusedProxy?.schema, null, 2);
+      }),
+    );
+
+    this.subscriptions.push(
+      this.focusedCharm?.asSimpleCell<string>(["query"])?.sink((query) => {
+        this.query = JSON.stringify(this.focusedProxy?.query, null, 2);
+      }),
+    );
+
+    this.focusedCharm
+      ?.asSimpleCell<any>(["suggestions"])
+      ?.sink((suggestions) => {
+        const s = this.focusedProxy?.suggestions?.items;
+        if (!s) return;
+
+        this.suggestions = s;
+        console.log("suggest", this.suggestions);
+      });
 
     const onSearchSubmit = (event: CustomEvent) => {
       console.log("Search submitted:", event.detail.value);
@@ -196,6 +228,21 @@ export class CommonWindowManager extends LitElement {
     const onAiBoxSubmit = (event: CustomEvent) => {
       console.log("AI Box submitted:", event.detail.value);
       this.handleUniboxSubmit(event);
+    };
+
+    const onSuggestionsSelected = ({
+      prompt,
+      behavior,
+    }: {
+      prompt: string;
+      behavior: string;
+    }) => {
+      console.log("Suggestion selected:", prompt, behavior);
+      this.handleUniboxSubmit(
+        new CustomEvent("submit", {
+          detail: { value: prompt, behavior, shiftKey: true },
+        }),
+      );
     };
 
     const sidebarNav = html`
@@ -263,8 +310,17 @@ export class CommonWindowManager extends LitElement {
         </os-dialog>
 
         <os-fabgroup class="pin-br" slot="overlay" @submit=${onAiBoxSubmit}>
-          <os-bubble icon="add" text="Lorem ipsum dolor sit amet"></os-bubble>
-          <os-bubble icon="note" text="Sumer et"></os-bubble>
+          ${repeat(
+            this.suggestions,
+            (suggestion) => suggestion.prompt,
+            (suggestion) => html`
+              <os-bubble
+                icon=${suggestion.behavior === "fork" ? "call_split" : "add"}
+                text=${suggestion.prompt}
+                @click=${() => onSuggestionsSelected(suggestion)}
+              ></os-bubble>
+            `,
+          )}
         </os-fabgroup>
 
         ${repeat(
@@ -357,8 +413,8 @@ export class CommonWindowManager extends LitElement {
 
   openCharm(charmId: string) {
     const charm = getCellByEntityId<Charm>(charmId);
-    this.focusedCharm = charm ?? null;
     this.focusedProxy = charm?.getAsProxy() ?? null;
+    this.focusedCharm = charm ?? null;
     if (!isCell(charm)) throw new Error(`Charm ${charmId} doesn't exist`);
 
     addCharms([charm]); // Make sure any shows charm is in the list of charms
