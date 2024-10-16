@@ -5,15 +5,10 @@ import {
   llm,
   NAME,
   lift,
-  handler,
-  navigateTo,
-  str,
   cell,
   ifElse,
 } from "@commontools/common-builder";
 import { streamData } from "@commontools/common-builder";
-import { runtimeWorkbench } from "./runtimeWorkbench.js";
-import { dataDesigner } from "./dataDesigner.js";
 
 const ensureArray = lift(({ data }: { data: any }) => {
   if (!data) return [];
@@ -108,12 +103,7 @@ const generateFlexibleQuery = lift(
       keywords.push(query.trim());
     }
 
-    // if (keywords.length > 0) {
-    //   where.push({ Case: ["?item", "?key", DB.like('?value', '*' + keywords[0] + '*')] });
-    // } else {
     where.push({ Case: ["?item", "?key", "?value"] });
-    // }
-
     // Add flexible OR conditions for collection names
     if (keywords.length > 0) {
       where.push({
@@ -130,26 +120,7 @@ const generateFlexibleQuery = lift(
         ]),
       });
     }
-
-    let names: string[] = [];
-    let fields: any[] = [];
-
-    // Generate flexible conditions for each field in the data shape
-    Object.entries(dataShape).forEach(([field, type]) => {
-      names.push(field);
-
-      fields.push(
-        // Or: [
-        { Case: ["?item", field, `?${field}`] },
-        // { Case: ["?item", "has_" + field, `?${field}`] },
-        // { Case: ["?item", field.toLowerCase(), `?${field}`] },
-        // { Case: ["?item", field.toUpperCase(), `?${field}`] },
-        // ],
-      );
-    });
-
-    // select.item.push(Object.fromEntries(names.map((f) => [f, `?${f}`])));
-    // where.push({ Or: fields });
+    // where.push({ Match: ["?value", "text/like", query.trim()] });
 
     return {
       select,
