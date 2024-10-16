@@ -317,7 +317,7 @@ export const iframe = recipe<{
   let thirdSuggestion = getSuggestion({ suggestions, index: 2 });
 
   return {
-    [NAME]: str`${title} - iframe`,
+    [NAME]: str`${title} UI`,
     [UI]: html`<div style="height: 100%">
       ${ifElse(
         grabHTML({ result }),
@@ -330,6 +330,7 @@ export const iframe = recipe<{
         >`,
       )}
     </div>`,
+    icon: "preview",
     prompt,
     title,
     src: grabHTML({ result }),

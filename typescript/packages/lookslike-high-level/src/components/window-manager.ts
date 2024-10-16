@@ -13,6 +13,7 @@ import {
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
+import { NAME } from "@commontools/common-builder";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -57,12 +58,16 @@ export class CommonWindowManager extends LitElement {
       @keyframes highlight {
         0%,
         100% {
-          box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1),
-            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow:
+            0 10px 20px rgba(0, 0, 0, 0.1),
+            0 6px 6px rgba(0, 0, 0, 0.1),
+            0 0 0 1px rgba(0, 0, 0, 0.05);
         }
         50% {
-          box-shadow: 0 0 20px 5px rgba(255, 215, 0, 0.5),
-            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow:
+            0 0 20px 5px rgba(255, 215, 0, 0.5),
+            0 6px 6px rgba(0, 0, 0, 0.1),
+            0 0 0 1px rgba(0, 0, 0, 0.05);
         }
       }
       .highlight {
@@ -108,7 +113,7 @@ export class CommonWindowManager extends LitElement {
             }
             return acc;
           },
-          {} as any
+          {} as any,
         );
 
         if (charmValues.data) {
@@ -243,17 +248,17 @@ export class CommonWindowManager extends LitElement {
             placeholder="Search or imagine..."
           ></os-ai-box>
           <os-charm-chip-group>
-            <os-charm-chip icon="mail" text="Mail"></os-charm-chip>
-            <os-charm-chip icon="mail" text="Work"></os-charm-chip>
-            <os-charm-chip icon="calendar_month" text="Calendar">
-            </os-charm-chip>
-            <os-charm-chip icon="map" text="Bike and rail directions">
-            </os-charm-chip>
-            <os-charm-chip icon="cloud" text="Weather"> </os-charm-chip>
-            <os-charm-chip icon="folder" text="CHEM131"> </os-charm-chip>
-            <os-charm-chip icon="folder" text="Class notes"> </os-charm-chip>
-            <os-charm-chip icon="folder" text="Creative writing">
-            </os-charm-chip>
+            ${repeat(
+              Array.from(this.charmLookup.entries()),
+              ([id, charm]) => id,
+              ([id, charm]) => html`
+                <os-charm-chip
+                  icon=${charm.getAsProxy().icon || "search"}
+                  text=${charm.getAsProxy()[NAME] || "Untitled"}
+                  @click=${() => this.openCharm(id)}
+                ></os-charm-chip>
+              `,
+            )}
           </os-charm-chip-group>
         </os-dialog>
 
@@ -286,7 +291,7 @@ export class CommonWindowManager extends LitElement {
                 <div style="height: 100%" ${ref(charmRef)}></div>
               </div>
             `;
-          }
+          },
         )}
 
         <os-navstack slot="sidebar">
@@ -359,7 +364,7 @@ export class CommonWindowManager extends LitElement {
     addCharms([charm]); // Make sure any shows charm is in the list of charms
 
     const existingWindow = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`
+      `[data-charm-id="${CSS.escape(charmId)}"]`,
     );
     if (existingWindow) {
       this.scrollToAndHighlight(charmId, true);
@@ -382,7 +387,7 @@ export class CommonWindowManager extends LitElement {
 
   private scrollToAndHighlight(charmId: string, animate: boolean) {
     const window = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`
+      `[data-charm-id="${CSS.escape(charmId)}"]`,
     );
     if (window) {
       window.scrollIntoView({
@@ -403,7 +408,7 @@ export class CommonWindowManager extends LitElement {
       const charmId = windowElement.getAttribute("data-charm-id");
       if (charmId) {
         this.charms = this.charms.filter(
-          (charm) => JSON.stringify(charm.entityId) !== charmId
+          (charm) => JSON.stringify(charm.entityId) !== charmId,
         );
         this.charmRefs.delete(charmId);
         this.charmLookup.delete(charmId);

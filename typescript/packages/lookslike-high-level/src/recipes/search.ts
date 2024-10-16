@@ -271,7 +271,7 @@ export const search = recipe<{ search: string }>(
     });
 
     return {
-      [NAME]: "Search",
+      [NAME]: search,
       [UI]: html`<div>
         ${ifElse(
           result,
