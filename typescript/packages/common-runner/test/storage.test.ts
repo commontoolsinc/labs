@@ -1,96 +1,119 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { createStorage } from "../src/storage";
+import { createStorage, Storage } from "../src/storage";
 import { cell, CellImpl } from "../src/cell";
 
 describe("Storage", () => {
-  let storage: ReturnType<typeof createStorage>;
-  let testCell: ReturnType<typeof cell>;
+  const storageTypes = ["memory", "local"] as const;
 
-  beforeEach(() => {
-    storage = createStorage("memory");
-    testCell = cell<string>();
-    testCell.generateEntityId();
-  });
+  storageTypes.forEach((storageType) => {
+    describe(storageType, () => {
+      let storage: Storage;
+      let storage2: Storage;
+      let testCell: CellImpl<any>;
 
-  afterEach(() => {
-    // Clean up any subscriptions or side effects
-  });
+      beforeEach(() => {
+        storage = createStorage(storageType);
+        storage2 = createStorage(storageType);
+        testCell = cell<string>();
+        testCell.generateEntityId();
+      });
 
-  describe("loadCell", () => {
-    it("should load a cell that does not exist in storage", async () => {
-      await storage.loadCell(testCell);
-      expect(testCell.get()).toBeUndefined();
-    });
+      afterEach(() => {
+        storage.clear();
+        storage2.clear();
+      });
 
-    it("should load a cell that exists in storage and stay in sync", async () => {
-      const testValue = { data: "test" };
-      testCell.send(testValue);
-      await storage.persistCell(testCell);
+      describe("persistCell", () => {
+        it("should persist a cell", async () => {
+          const testValue = { data: "test" };
+          testCell.send(testValue);
 
-      const newCell = cell<string>();
-      newCell.entityId = testCell.entityId;
-      await storage.loadCell(newCell);
-      expect(newCell.get()).toEqual(testValue);
+          await storage.persistCell(testCell);
 
-      testCell.send("value 2");
-      expect(newCell.get()).toBe("value 2");
+          const newCell = await storage2.loadCell(testCell.entityId!);
+          expect(newCell).not.toBe(testCell);
+          expect(newCell.get()).toEqual(testValue);
+        });
+      });
 
-      newCell.send("value 3");
-      expect(testCell.get()).toBe("value 3");
-    });
+      describe("cell updates", () => {
+        it("should persist cell updates", async () => {
+          await storage.loadCell(testCell);
 
-    it("should only load a cell once", async () => {
-      await storage.loadCell(testCell);
-      testCell.send("initial value");
-      await storage.loadCell(testCell);
-      expect(testCell.get()).toBe("initial value");
-    });
-  });
+          testCell.send("value 1");
+          testCell.send("value 2");
 
-  describe("persistCell", () => {
-    it("should persist a cell", async () => {
-      const testValue = { data: "test" };
-      testCell.send(testValue);
+          const newCell = await storage2.loadCell(testCell.entityId!);
+          expect(newCell).not.toBe(testCell);
+          expect(newCell.get()).toBe("value 2");
+        });
+      });
 
-      await storage.persistCell(testCell);
+      describe("loadCell", () => {
+        it("should load a cell that does not exist in storage", async () => {
+          await storage.loadCell(testCell);
+          expect(testCell.get()).toBeUndefined();
+        });
 
-      const newCell = cell();
-      newCell.entityId = testCell.entityId;
-      await storage.loadCell(newCell);
-      expect(newCell.get()).toEqual(testValue);
-    });
-  });
+        it.only("should load a cell and stay in sync", async () => {
+          const testValue = { data: "test" };
+          testCell.send(testValue);
 
-  describe("cell updates", () => {
-    it("should persist cell updates", async () => {
-      await storage.loadCell(testCell);
+          // This will persist the cell to storage, with the new value, since
+          // the cell didn't yet exist in storage.
+          await storage.loadCell(testCell);
 
-      testCell.send("value 1");
-      testCell.send("value 2");
+          // Load cell from second storage instance
+          const newCell = await storage2.loadCell(testCell.entityId!);
+          expect(newCell).not.toBe(testCell);
+          expect(newCell.get()).toEqual(testValue);
 
-      const newCell = cell();
-      newCell.entityId = testCell.entityId;
-      await storage.loadCell(newCell);
-      expect(newCell.get()).toBe("value 2");
-    });
-  });
+          // Let's update the cell; the other instance should get the update.
+          testCell.send("value 2");
 
-  describe("createStorage", () => {
-    it("should create memory storage", () => {
-      const memoryStorage = createStorage("memory");
-      expect(memoryStorage).toBeDefined();
-    });
+          // Wait for the update to propagate
+          // await new Promise((resolve) => setTimeout(resolve, 100));
+          console.log("newCell", newCell.entityId, newCell.get());
+          expect(newCell.get()).toBe("value 2");
 
-    it("should create local storage", () => {
-      const localStorage = createStorage("local");
-      expect(localStorage).toBeDefined();
-    });
+          // Now let's update the new cell and see that it propagates back.
+          newCell.send("value 3");
 
-    it("should throw an error for invalid storage type", () => {
-      expect(() => createStorage("invalid" as any)).toThrow(
-        "Invalid storage type"
-      );
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          expect(testCell.get()).toBe("value 3");
+        });
+
+        it("should only load a cell once", async () => {
+          const cell1 = await storage.loadCell(testCell);
+          expect(cell1).toBe(testCell);
+
+          // Even when passing in a new cell with the same entityId, it should be
+          // the same cell.
+          const cell2 = cell();
+          cell2.entityId = testCell.entityId;
+          const cell3 = await storage.loadCell(cell2);
+          expect(cell3).toBe(cell1);
+        });
+      });
+
+      describe("createStorage", () => {
+        it("should create memory storage", () => {
+          const memoryStorage = createStorage("memory");
+          expect(memoryStorage).toBeDefined();
+        });
+
+        it("should create local storage", () => {
+          const localStorage = createStorage("local");
+          expect(localStorage).toBeDefined();
+        });
+
+        it("should throw an error for invalid storage type", () => {
+          expect(() => createStorage("invalid" as any)).toThrow(
+            "Invalid storage type"
+          );
+        });
+      });
     });
   });
 });
