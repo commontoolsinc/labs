@@ -106,9 +106,10 @@ export function run<T, R = any>(
   // Ensure static data is converted to cell references, e.g. for arrays
   parameters = staticDataToNestedCells(parameters);
 
-  // If the bindings are a cell or cell reference, convert them to an object
-  // where each property is a cell reference.
-  // TODO: If new keys are added after first load, this won't work.
+  // If the bindings are a cell or cell reference and it is an object, convert
+  // them to an object where each property is a cell reference.
+  // TODO: If new keys are added after first load, this won't work. And we only
+  // do this to support defaults. So we could be smarter here.
   if (isCell(parameters) || isCellReference(parameters)) {
     // If it's a cell, turn it into a cell reference
     const ref = isCellReference(parameters)
@@ -117,16 +118,18 @@ export function run<T, R = any>(
 
     // Get value, but just to get the keys. Throw if it isn't an object.
     const value = ref.cell.getAsProxy(ref.path);
-    if (typeof value !== "object" || value === null)
-      throw new Error(`Invalid bindings: Must be an object`);
-
-    // Create aliases for all the top level keys in the object
-    parameters = Object.fromEntries(
-      Object.keys(value).map((key) => [
-        key,
-        { $alias: { cell: ref.cell, path: [...ref.path, key] } },
-      ])
-    ) as T;
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      // Create aliases for all the top level keys in the object
+      parameters = Object.fromEntries(
+        Object.keys(value).map((key) => [
+          key,
+          { $alias: { cell: ref.cell, path: [...ref.path, key] } },
+        ])
+      ) as T;
+    } else {
+      // Otherwise we just alias the whole thing
+      parameters = { $alias: ref } as T;
+    }
   }
 
   // TODO: Add a causal relationship. For example a recipe that only transforms
@@ -147,7 +150,14 @@ export function run<T, R = any>(
     (recipe.initial as { internal: any })?.internal
   );
 
-  if (defaults) parameters = mergeObjects(parameters, defaults);
+  if (
+    defaults &&
+    ((typeof parameters === "object" &&
+      parameters !== null &&
+      !Array.isArray(parameters)) ||
+      parameters === undefined)
+  )
+    parameters = mergeObjects(parameters, defaults);
 
   processCell.send({
     [TYPE]:

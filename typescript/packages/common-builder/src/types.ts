@@ -43,6 +43,7 @@ export type CellProxyMethods<T> = {
   map<S>(
     fn: (value: T extends Array<infer U> ? Value<U> : Value<T>) => Value<S>
   ): Value<S[]>;
+  [Symbol.iterator](): Iterator<T>;
   [isCellProxyMarker]: true;
 };
 

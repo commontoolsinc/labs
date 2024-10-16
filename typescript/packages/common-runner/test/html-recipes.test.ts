@@ -59,7 +59,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asSimpleCell<View>([UI]);
+    const cell = result.asSimpleCell([UI]);
     render(parent, cell.get());
 
     expect(parent.innerHTML).toBe(
@@ -92,7 +92,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asSimpleCell<View>([UI]);
+    const cell = result.asSimpleCell([UI]);
     render(parent, cell.get());
 
     expect(parent.innerHTML).toBe("<div><div>test</div></div>");
@@ -108,9 +108,41 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asSimpleCell<View>([UI]);
+    const cell = result.asSimpleCell([UI]);
     render(parent, cell.get());
 
     expect(parent.innerHTML).toBe("<div>Hello, world!</div>");
+  });
+
+  it("works with nested maps of non-objects", async () => {
+    const entries = lift((row: object) => Object.entries(row));
+
+    const data = [
+      { test: 123, ok: false },
+      { test: 345, another: "xxx" },
+      { test: 456, ok: true },
+    ];
+
+    const nestedMapRecipe = recipe<any[]>("nested map recipe", (data) => ({
+      [UI]: html`<div>
+        ${data.map(
+          (row) => html`<ul>
+            ${entries(row).map(([k, v]) => html`<li>${k}: ${v}</li>`)}
+          </ul>`
+        )}
+      </div>`,
+    }));
+
+    const result = run(nestedMapRecipe, data);
+
+    await idle();
+
+    const parent = document.createElement("div");
+    const cell = result.asSimpleCell([UI]);
+    render(parent, cell.get());
+
+    expect(parent.innerHTML).toBe(
+      "<div><ul><li>test: 123</li><li>ok: false</li></ul><ul><li>test: 345</li><li>another: xxx</li></ul><ul><li>test: 456</li><li>ok: true</li></ul></div>"
+    );
   });
 });
