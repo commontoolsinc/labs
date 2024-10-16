@@ -10,6 +10,7 @@ import { base } from "../../shared/styles.js";
 import { editorClassPlugin } from "./prosemirror/editor-class-plugin.js";
 import { verPlugin, updateVerState } from "./prosemirror/ver-plugin.js";
 import * as suggestions from "./suggestions.js";
+import * as completion from "./completion.js";
 import { createSelection, TextSelection } from "./selection.js";
 import {
   createStore,
@@ -25,11 +26,7 @@ import { createCleanupGroup } from "../../shared/cleanup.js";
 import { TemplateResult } from "lit";
 import { classes, on } from "../../shared/dom.js";
 import { ClickCompletion } from "../os-floating-completions.js";
-import {
-  replaceSuggestionWithText,
-  Suggestion,
-} from "./prosemirror/suggestions-plugin.js";
-import { executeCommand } from "./prosemirror/utils.js";
+import { Suggestion } from "./prosemirror/suggestions-plugin.js";
 
 const freeze = Object.freeze;
 
@@ -116,15 +113,26 @@ export const update = (state: Model, msg: Msg): Model => {
   }
 };
 
-export const enterFx =
-  (view: EditorView, suggestion: Suggestion, text: string) => async () => {
-    executeCommand(view, replaceSuggestionWithText(suggestion, text));
-    return createInfoMsg(`Replaced suggestion ${suggestion.text} -> ${text}`);
-  };
-
-/** Side effects for the editor */
-export const fx = (view: EditorView) => {
-  const suggestionsFx = suggestions.fx(view);
+/**
+ * Create an fx driver that generates fx based on the state and message.
+ * @param {object }options - the options object
+ * @param options.view - the ProseMirror EditorView
+ * @param options.fetchCompletions - an async function that can fetch completion objects
+ * @returns an fx function for store
+ */
+export const createFx = ({
+  view,
+  fetchCompletions,
+}: {
+  view: EditorView;
+  fetchCompletions: (
+    suggestion: Suggestion,
+  ) => Promise<Array<completion.Model>>;
+}) => {
+  const suggestionsFx = suggestions.createFx({
+    view,
+    fetchCompletions,
+  });
 
   return (state: Model, msg: Msg): Array<Fx<Msg>> => {
     switch (msg.type) {
@@ -346,21 +354,26 @@ export class OsRichTextEditor extends HTMLElement {
     });
     this.#destroy.add(offInput);
 
+    // Create fx driver
+    const fx = createFx({
+      view: this.#editorView,
+      fetchCompletions: (suggestion: Suggestion) =>
+        this.fetchCompletions(suggestion),
+    });
+
     this.#store = createStore({
       state: model(),
       update,
-      fx: fx(this.#editorView),
+      fx,
     });
 
     // Drive #reactive renders via store changes
-    const cleanupRender = this.#store.sink(this.#render);
+    const cleanupRender = this.#store.sink(() => {
+      // Wire up reactive rendering
+      render(this.render(), this.#reactiveRoot);
+    });
     this.#destroy.add(cleanupRender);
   }
-
-  #render = () => {
-    // Wire up reactive rendering
-    render(this.render(), this.#reactiveRoot);
-  };
 
   get editor() {
     return this.#editorView.state;
@@ -368,6 +381,11 @@ export class OsRichTextEditor extends HTMLElement {
 
   set editor(state: EditorState) {
     updateVerState(this.#editorView, state);
+  }
+
+  /** TODO implement */
+  async fetchCompletions(_suggestion: Suggestion) {
+    return [];
   }
 
   /**

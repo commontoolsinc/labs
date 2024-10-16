@@ -2,7 +2,7 @@ import { EditorView, Decoration } from "prosemirror-view";
 import * as plugin from "./prosemirror/suggestions-plugin.js";
 import { Rect, createRect } from "../../shared/position.js";
 import { clamp } from "../../shared/number.js";
-import { unknown, ValueMsg } from "../../shared/store.js";
+import { unknown, ValueMsg, FxDriver, Fx } from "../../shared/store.js";
 import * as completion from "./completion.js";
 import { executeCommand, replaceWithText } from "./prosemirror/utils.js";
 
@@ -160,35 +160,53 @@ export const update = (state: Model, msg: Msg): Model => {
   }
 };
 
-export const fx = (view: EditorView) => (state: Model, msg: Msg) => {
-  switch (msg.type) {
-    case "activeUpdate":
-      return [fetchCompletionsFx(msg.active)];
-    case "enter":
-      return [
-        replaceFx(
-          view,
-          state.active,
-          state.completions.at(state.selectedCompletion)?.text ?? null,
-        ),
-      ];
-    case "tab":
-      return [
-        replaceFx(
-          view,
-          state.active,
-          state.completions.at(state.selectedCompletion)?.text ?? null,
-        ),
-      ];
-    case "clickCompletion":
-      return [replaceFx(view, state.active, msg.value.text)];
-    default:
-      return [];
-  }
-};
+/**
+ * Create an fx driver that generates fx based on the state and message.
+ * @param {object }options - the options object
+ * @param options.view - the ProseMirror EditorView
+ * @param options.fetchCompletions - an async function that can fetch completion objects
+ * @returns an fx function for store
+ */
+export const createFx = ({
+  view,
+  fetchCompletions,
+}: {
+  view: EditorView;
+  fetchCompletions: (
+    suggestion: Suggestion,
+  ) => Promise<Array<completion.Model>>;
+}): FxDriver<Model, Msg> => {
+  const fetchCompletionsFx = (active: Suggestion) => async () => {
+    const completions = await fetchCompletions(active);
+    return createSetCompletionsMsg(completions);
+  };
 
-const fetchCompletionsFx = (_active: Suggestion) => async () => {
-  return createSetCompletionsMsg([]);
+  return (state: Model, msg: Msg): Array<Fx<Msg>> => {
+    switch (msg.type) {
+      case "activeUpdate":
+        return [fetchCompletionsFx(msg.active)];
+      case "enter":
+        return [
+          replaceFx(
+            view,
+            state.active,
+            state.completions.at(state.selectedCompletion)?.text ?? null,
+          ),
+        ];
+      case "tab":
+        return [
+          replaceFx(
+            view,
+            state.active,
+            state.completions.at(state.selectedCompletion)?.text ?? null,
+          ),
+        ];
+      case "clickCompletion":
+        return [replaceFx(view, state.active, msg.value.text)];
+      default:
+        return [];
+    }
+  };
 };
 
 const replaceFx =
