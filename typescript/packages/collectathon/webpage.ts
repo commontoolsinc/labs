@@ -10,7 +10,7 @@ export async function extractEntities(
   prompt?: string,
 ) {
   const systemPrompt =
-    'Extract the information the user requested from the provided webpage. You respond only with the entities extracted as an array e.g. ```json [{}, {}]``` block, no commentary.  Each object must be flat, no nested object hierarachy is permitted. Escape all quotes used within strings, e.g. `"` -> `\\"`.';
+    'Process the attached webpage HTML to fulfill the user\'s request. Respond only with the data extracted as an array e.g. ```json [{}, {}]``` block, no commentary.  Each object must be flat, no nested object hierarachy is permitted. Escape all quotes used within strings, e.g. `"` -> `\\"`.';
   const userPrompt = `
 URL: ${url}
 

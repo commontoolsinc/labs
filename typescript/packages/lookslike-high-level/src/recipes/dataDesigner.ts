@@ -10,8 +10,10 @@ import {
   createJsonSchema,
   cell,
   ifElse,
+  navigateTo,
 } from "@commontools/common-builder";
 import { truncateAsciiArt } from "../loader.js";
+import { prompt } from "./prompts.js";
 
 const formatData = lift(({ obj }) => {
   console.log("stringify", obj);
@@ -52,6 +54,10 @@ const buildPrompt = lift(({ prompt, data }) => {
 \`\`\`json
 ...
 \`\`\`
+
+If you would like to use generated images use the following URL:
+
+\`https://ct-img.m4ke.workers.dev/?prompt=<URL_ENCODED_PROMPT>\`
 
 No field can be set to null or undefined.`,
     stop: "```",

@@ -156,7 +156,7 @@ const getSuggestion = lift(
   },
 );
 
-const prepHTML = lift(({ prompt, schema, data, lastSrc }) => {
+const prepHTML = lift(({ prompt, schema, lastSrc }) => {
   if (!prompt) {
     return {};
   }
@@ -233,10 +233,6 @@ const prepHTML = lift(({ prompt, schema, data, lastSrc }) => {
       ${JSON.stringify(schema, null, 2)}
     </view-model-schema>
 
-    <current-data>
-      ${JSON.stringify(data, null, 2)}
-    </current-data>
-
     It's best to access and manage each state reference seperately.`,
   };
 });
@@ -268,7 +264,7 @@ const dots = lift<{ pending: boolean; partial?: string }, string>(
     if (!partial || !pending) {
       return "";
     }
-    return truncateAsciiArt(partial.length / 2.0);
+    return truncateAsciiArt(partial.length / 3.0);
   },
 );
 
@@ -338,7 +334,7 @@ export const iframe = recipe<{
     result,
     pending: pendingHTML,
     partial: partialHTML,
-  } = llm(prepHTML({ prompt, schema, data, lastSrc }));
+  } = llm(prepHTML({ prompt, schema, lastSrc }));
 
   const suggestions = grabSuggestions(
     llm(prepSuggestions({ src: grabHTML({ result }), prompt, schema })),
