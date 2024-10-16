@@ -17,4 +17,5 @@ export * as charmRow from "./components/os-charm-row.js";
 export * as charmChip from "./components/os-charm-chip.js";
 export * as dialog from "./components/os-dialog.js";
 export * as richTextEditor from "./components/editor/os-rich-text-editor.js";
+export * as codeEditor from "./components/code-editor/os-code-editor.js";
 export * as floatingCompletions from "./components/os-floating-completions.js";
