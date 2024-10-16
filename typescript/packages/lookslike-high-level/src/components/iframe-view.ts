@@ -35,13 +35,19 @@ export class CommonIframe extends LitElement {
           : this.context?.[key];
         // TODO: This might cause infinite loops, since the data can be a graph.
         console.log("readResponse", key, value);
-        const copy = typeof value === "string" && value.includes('{') ? JSON.parse(value) : JSON.parse(JSON.stringify(value));
+        const copy =
+          typeof value === "string" && value.includes("{")
+            ? JSON.parse(value)
+            : JSON.parse(JSON.stringify(value));
         this.iframeRef.value?.contentWindow?.postMessage(
           { type: "readResponse", key, value: copy },
-          "*"
+          "*",
         );
       } else if (type === "write" && this.context) {
-        const updated = typeof value === "string" && value.includes('{') ? JSON.parse(value) : JSON.parse(JSON.stringify(value));
+        const updated =
+          typeof value === "string" && value.includes("{")
+            ? JSON.parse(value)
+            : JSON.parse(JSON.stringify(value));
         console.log("write", key, updated);
         this.context.getAsProxy()[key] = updated;
       } else if (type === "subscribe" && this.context) {
@@ -69,7 +75,7 @@ export class CommonIframe extends LitElement {
       value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
     this.iframeRef.value?.contentWindow?.postMessage(
       { type: "update", key, value: copy },
-      "*"
+      "*",
     );
   }
   private boundHandleMessage = this.handleMessage.bind(this);
@@ -87,7 +93,7 @@ export class CommonIframe extends LitElement {
   private handleLoad() {
     console.log("iframe loaded");
     this.iframeRef.value?.contentWindow?.postMessage({ type: "init" }, "*");
-    this.dispatchEvent(new CustomEvent('loaded'));
+    this.dispatchEvent(new CustomEvent("loaded"));
   }
 
   override render() {
@@ -96,7 +102,7 @@ export class CommonIframe extends LitElement {
         ${ref(this.iframeRef)}
         sandbox="allow-scripts allow-forms allow-pointer-lock"
         .srcdoc=${this.src}
-        height="768px"
+        height="100%"
         width="100%"
         style="border: none;"
         @load=${this.handleLoad}

@@ -7,6 +7,7 @@ import {
   llm,
   handler,
   navigateTo,
+  ifElse,
   str,
   cell,
   createJsonSchema,
@@ -24,7 +25,7 @@ const tap = lift((x) => {
 });
 
 const updateValue = handler<{ detail: { value: string } }, { value: string }>(
-  ({ detail }, state) => detail?.value && (state.value = detail.value)
+  ({ detail }, state) => detail?.value && (state.value = detail.value),
 );
 
 const deriveJsonSchema = lift(({ data, filter }) => {
@@ -39,7 +40,7 @@ const deriveJsonSchema = lift(({ data, filter }) => {
   if (filterKeys.length === 0) return schema;
 
   return Object.fromEntries(
-    Object.entries(schema).filter(([key]) => filterKeys.includes(key))
+    Object.entries(schema).filter(([key]) => filterKeys.includes(key)),
   );
 });
 
@@ -81,7 +82,7 @@ const acceptSuggestion = handler<
         data: state.data,
         title: state.suggestion.prompt,
         prompt: state.suggestion.prompt,
-      })
+      }),
     );
   } else {
     return undefined;
@@ -151,13 +152,13 @@ const grabSuggestions = lift<{ result?: string }, Suggestion[]>(
       return [];
     }
     return parsedData.data;
-  }
+  },
 );
 
 const getSuggestion = lift(
   ({ suggestions, index }: { suggestions: Suggestion[]; index: number }) => {
     return suggestions[index] || { behaviour: "", prompt: "" };
-  }
+  },
 );
 
 const prepHTML = lift(({ prompt, schema, lastSrc }) => {
@@ -263,6 +264,18 @@ const tail = lift<
   return partial.split("\n").slice(-lines).join("\n");
 });
 
+const dots = lift<{ pending: boolean; partial?: string }, string>(
+  ({ pending, partial }) => {
+    if (!partial || !pending) {
+      return "";
+    }
+    return partial
+      .split("\n")
+      .map((_) => ".")
+      .join("");
+  },
+);
+
 export const iframe = recipe<{
   title: string;
   prompt: string;
@@ -289,7 +302,7 @@ export const iframe = recipe<{
   // });
 
   const suggestions = grabSuggestions(
-    llm(prepSuggestions({ src, prompt, schema }))
+    llm(prepSuggestions({ src, prompt, schema })),
   );
 
   // FIXME(ja): this html is a bit of a mess as changing src triggers suggestions and view (showing streaming)
@@ -304,73 +317,57 @@ export const iframe = recipe<{
   let thirdSuggestion = getSuggestion({ suggestions, index: 2 });
 
   return {
-    [NAME]: str`${title} - iframe`,
-    [UI]: html`<div>
-      <pre>${tail({ partial: partialHTML, pending: pendingHTML, lines: 5 })}</pre>
-      <common-iframe src=${grabHTML({ result })} $context=${data}></common-iframe>
-      <details>
-        <summary>View Data</summary>
-        <common-input
-          value=${filter}
-          placeholder="Filter keys (comma-separated)"
-          oncommon-input=${updateValue({ value: filter })}
-        ></common-input>
-        <pre>${formatData({ obj: data })}</pre>
-        <details>
-          <summary>Derived Schema</summary>
-          <pre>${formatData({ obj: schema })}</pre>
-        </details>
-      </details>
-      <details>
-        <summary>Edit Source</summary>
-        <textarea
-          value=${query}
-          onkeyup=${onInput({ value: query })}
-          style="width: 100%; min-height: 128px;"
-        ></textarea>
-        <textarea
-          value=${src}
-          onkeyup=${onInput({ value: src })}
-          style="width: 100%; min-height: 192px;"
-        ></textarea>
-      </details>
-
-
-      <button type="button"
-        onclick=${acceptSuggestion({
-          suggestion: firstSuggestion,
-          prompt,
-          src,
-          lastSrc,
-          query,
-          data,
-        })}
-      >${firstSuggestion.behaviour} ${firstSuggestion.prompt}</button>
-      <button type="button"
-        onclick=${acceptSuggestion({
-          suggestion: secondSuggestion,
-          prompt,
-          src,
-          lastSrc,
-          query,
-          data,
-        })}
-      >${secondSuggestion.behaviour} ${secondSuggestion.prompt}</button>
-      <button type="button"
-        onclick=${acceptSuggestion({
-          suggestion: thirdSuggestion,
-          prompt,
-          src,
-          lastSrc,
-          query,
-          data,
-        })}
-      >${thirdSuggestion.behaviour} ${thirdSuggestion.prompt}</button>
+    [NAME]: str`${title} UI`,
+    [UI]: html`<div style="height: 100%">
+      ${ifElse(
+        grabHTML({ result }),
+        html`<common-iframe
+          src=${grabHTML({ result })}
+          $context=${data}
+        ></common-iframe>`,
+        html`<pre>
+  ${dots({ partial: partialHTML, pending: pendingHTML })}</pre
+        >`,
+      )}
     </div>`,
+    icon: "preview",
     prompt,
     title,
-    src,
+    src: grabHTML({ result }),
     data,
+    schema,
+    partialHTML,
     addToPrompt: addToPrompt({ prompt, src, lastSrc, query }),
   };
 });
+
+/**
+
+<details>
+  <summary>View Data</summary>
+  <common-input
+    value=${filter}
+    placeholder="Filter keys (comma-separated)"
+    oncommon-input=${updateValue({ value: filter })}
+  ></common-input>
+  <pre>${formatData({ obj: data })}</pre>
+  <details>
+    <summary>Derived Schema</summary>
+    <pre>${formatData({ obj: schema })}</pre>
+  </details>
+</details>
+<details>
+  <summary>Edit Source</summary>
+  <textarea
+    value=${query}
+    onkeyup=${onInput({ value: query })}
+    style="width: 100%; min-height: 128px;"
+  ></textarea>
+  <textarea
+    value=${src}
+    onkeyup=${onInput({ value: src })}
+    style="width: 100%; min-height: 192px;"
+  ></textarea>
+</details>
+
+*/

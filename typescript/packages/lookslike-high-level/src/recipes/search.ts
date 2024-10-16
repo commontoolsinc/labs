@@ -122,9 +122,11 @@ const guessShapePrompt = lift<{ search: string }>(({ search }) => {
 const generateFlexibleQuery = lift(
   ({
     dataShape,
+    query,
     keywords,
   }: {
     dataShape: Record<string, string>;
+    query: string;
     keywords: string[];
   }) => {
     const select: Record<string, any> = {
@@ -141,6 +143,10 @@ const generateFlexibleQuery = lift(
     const where: Array<Record<string, any>> = [
       { Case: ["?collection", "member", "?item"] },
     ];
+
+    if (query?.trim().split(/\s+/).length === 1) {
+      keywords.push(query.trim());
+    }
 
     // if (keywords.length > 0) {
     //   where.push({ Case: ["?item", "?key", DB.like('?value', '*' + keywords[0] + '*')] });
@@ -230,6 +236,10 @@ const printObjectProperties = lift(({ obj }: { obj: any }) => {
   `;
 });
 
+const truncate = lift(({ text, length }) => {
+  return text.length > length ? text.substring(0, length) + "…" : text;
+});
+
 export const search = recipe<{ search: string }>(
   "Search",
   ({ search }: { search: string }) => {
@@ -239,7 +249,11 @@ export const search = recipe<{ search: string }>(
     const keywords = grabKeywords(llm(keywordPrompt({ search })));
     const dataShape = grabKeywords(llm(guessShapePrompt({ search })));
 
-    const flexibleQuery = generateFlexibleQuery({ dataShape, keywords });
+    const flexibleQuery = generateFlexibleQuery({
+      dataShape,
+      keywords,
+      query: search,
+    });
 
     const { result } = streamData(buildQuery({ query: flexibleQuery }));
 
@@ -250,73 +264,43 @@ export const search = recipe<{ search: string }>(
       normalizedData,
     );
 
+    const entries = lift(({ data }) =>
+      data.map((r) => ({ row: Object.entries(r).map(([k, v]) => ({ k, v })) })),
+    )({
+      data: normalizedData,
+    });
+
     return {
-      [NAME]: "Search",
+      [NAME]: search,
       [UI]: html`<div>
         ${ifElse(
           result,
           html`<div>
-            <div class="collection-input">
-              <input
-                value=${search}
-                onkeyup=${onInput({ value: search })}
-                type="text"
-                placeholder="Enter search query"
-              />
-              <div>Keywords: ${stringify({ obj: keywords })}</div>
-
-              <button
-                onclick=${generateQuery({
-                  collectionName: search,
-                  query,
-                })}
-              >
-                Load
-              </button>
-            </div>
-
             <os-container>
               <os-colgrid>
-                ${normalizedData.map((item) => {
-                  const subtitle = lift(
-                    ({ item }) =>
-                      item.subject ||
-                      item.summary ||
-                      item.topic ||
-                      item.subtitle ||
-                      item.author,
-                  );
-
-                  const body = lift(
-                    ({ item }) => item.description || item.content || item.body,
-                  );
-
-                  return html`<os-tile style="overflow-y: scroll;">
+                ${entries.map(({ row }) => {
+                  return html`<os-tile style="aspect-ratio: 1/1;">
                     <div
-                      style="padding: 16px; overflow-y: scroll; aspect-ratio: 1 / 1;"
+                      style="width: 100%; height: 100%; overflow-y: auto; overflow-x: hidden; border-radius: 2px; padding: 8px; font-size: 0.8rem;  font-family: monospace;"
                     >
-                      <h3>${item.title}</h3>
-                      <p>${subtitle({ item })}</p>
-                      <p>${body({ item })}</p>
-                      <p>${item["import/url"]}, ${item["import/time"]}</p>
-                      <details>
-                        <summary>Details</summary>
-                        <pre
-                          style="white-space: pre-wrap; word-wrap: break-word; "
-                        >
-${toPairs({ obj: item })}</pre
-                        >
-                      </details>
+                      ${row.map(
+                        ({ k, v }) =>
+                          html`<div style="">
+                            <div
+                              style="font-weight: bold; color: #999; font-size: 0.6rem; height: 16px;"
+                            >
+                              ${truncate({ text: k, length: 32 })}
+                            </div>
+                            <div style="padding: 2px;">
+                              ${truncate({ text: v, length: 24 })}
+                            </div>
+                          </div>`,
+                      )}
                     </div>
                   </os-tile>`;
                 })}
               </os-colgrid>
             </os-container>
-
-            <details>
-              <summary>Generated Query</summary>
-              <pre>${stringify({ obj: flexibleQuery })}</pre>
-            </details>
           </div>`,
           html`<div>Loading...</div>`,
         )}
@@ -324,6 +308,7 @@ ${toPairs({ obj: item })}</pre
       result,
       // collections,
       data: exportedData,
+      query: flexibleQuery,
     };
   },
 );

@@ -13,6 +13,7 @@ import {
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
+import { NAME } from "@commontools/common-builder";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -27,7 +28,6 @@ export class CommonWindowManager extends LitElement {
         overflow-x: hidden;
         overflow-y: auto;
         container-type: size;
-        padding: var(--pad);
         background-color: rgba(255, 255, 255, 0.8);
         backdrop-filter: blur(10px);
         transition: all 0.3s ease;
@@ -58,12 +58,16 @@ export class CommonWindowManager extends LitElement {
       @keyframes highlight {
         0%,
         100% {
-          box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1),
-            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow:
+            0 10px 20px rgba(0, 0, 0, 0.1),
+            0 6px 6px rgba(0, 0, 0, 0.1),
+            0 0 0 1px rgba(0, 0, 0, 0.05);
         }
         50% {
-          box-shadow: 0 0 20px 5px rgba(255, 215, 0, 0.5),
-            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow:
+            0 0 20px 5px rgba(255, 215, 0, 0.5),
+            0 6px 6px rgba(0, 0, 0, 0.1),
+            0 0 0 1px rgba(0, 0, 0, 0.05);
         }
       }
       .highlight {
@@ -109,7 +113,7 @@ export class CommonWindowManager extends LitElement {
             }
             return acc;
           },
-          {} as any
+          {} as any,
         );
 
         if (charmValues.data) {
@@ -137,7 +141,13 @@ export class CommonWindowManager extends LitElement {
 
   @state() searchOpen: boolean = false;
   @state() location: string = "Home";
-  @state() sidebar: string = "";
+
+  @state() sidebarTab: string = "prompt";
+  @state() prompt: string = "";
+  @state() data: string = "";
+  @state() src: string = "";
+  @state() schema: string = "";
+  @state() query: string = "";
 
   onLocationClicked(_event: CustomEvent) {
     console.log("Location clicked in app.");
@@ -149,8 +159,28 @@ export class CommonWindowManager extends LitElement {
       this.searchOpen = false;
     };
 
-    this.focusedCharm?.asSimpleCell(["prompt"])?.sink((prompt) => {
-      this.sidebar = prompt;
+    this.focusedCharm?.asSimpleCell<string>(["prompt"])?.sink((prompt) => {
+      this.prompt = prompt;
+    });
+
+    this.focusedCharm?.asSimpleCell<any>(["data"])?.sink((data) => {
+      this.data = JSON.stringify(this.focusedProxy?.data, null, 2);
+    });
+
+    this.focusedCharm?.asSimpleCell<string>(["src"])?.sink((src) => {
+      this.src = src;
+    });
+
+    this.focusedCharm?.asSimpleCell<string>(["partialHTML"])?.sink((src) => {
+      this.src = src;
+    });
+
+    this.focusedCharm?.asSimpleCell<string>(["schema"])?.sink((schema) => {
+      this.schema = JSON.stringify(this.focusedProxy?.schema, null, 2);
+    });
+
+    this.focusedCharm?.asSimpleCell<string>(["query"])?.sink((query) => {
+      this.query = JSON.stringify(this.focusedProxy?.query, null, 2);
     });
 
     const onSearchSubmit = (event: CustomEvent) => {
@@ -158,7 +188,7 @@ export class CommonWindowManager extends LitElement {
       this.location = event.detail.value;
       this.searchOpen = false;
       const charm = run(search, {
-        collection: event.detail.value,
+        search: event.detail.value,
       });
       this.openCharm(JSON.stringify(charm.entityId));
     };
@@ -167,6 +197,45 @@ export class CommonWindowManager extends LitElement {
       console.log("AI Box submitted:", event.detail.value);
       this.handleUniboxSubmit(event);
     };
+
+    const sidebarNav = html`
+      <os-icon-button
+        slot="toolbar-end"
+        icon="message"
+        @click=${() => {
+          this.sidebarTab = "prompt";
+        }}
+      ></os-icon-button>
+      <os-icon-button
+        slot="toolbar-end"
+        icon="query_stats"
+        @click=${() => {
+          this.sidebarTab = "query";
+        }}
+      ></os-icon-button>
+      <os-icon-button
+        slot="toolbar-end"
+        icon="database"
+        @click=${() => {
+          this.sidebarTab = "data";
+        }}
+      ></os-icon-button>
+      <os-icon-button
+        slot="toolbar-end"
+        icon="code"
+        @click=${() => {
+          this.sidebarTab = "source";
+        }}
+      ></os-icon-button>
+      <os-icon-button
+        slot="toolbar-end"
+        icon="schema"
+        @click=${() => {
+          this.sidebarTab = "schema";
+        }}
+      ></os-icon-button>
+      <os-sidebar-close-button slot="toolbar-end"></os-sidebar-close-button>
+    `;
 
     return html`
       <os-chrome
@@ -179,17 +248,17 @@ export class CommonWindowManager extends LitElement {
             placeholder="Search or imagine..."
           ></os-ai-box>
           <os-charm-chip-group>
-            <os-charm-chip icon="mail" text="Mail"></os-charm-chip>
-            <os-charm-chip icon="mail" text="Work"></os-charm-chip>
-            <os-charm-chip icon="calendar_month" text="Calendar">
-            </os-charm-chip>
-            <os-charm-chip icon="map" text="Bike and rail directions">
-            </os-charm-chip>
-            <os-charm-chip icon="cloud" text="Weather"> </os-charm-chip>
-            <os-charm-chip icon="folder" text="CHEM131"> </os-charm-chip>
-            <os-charm-chip icon="folder" text="Class notes"> </os-charm-chip>
-            <os-charm-chip icon="folder" text="Creative writing">
-            </os-charm-chip>
+            ${repeat(
+              Array.from(this.charmLookup.entries()),
+              ([id, charm]) => id,
+              ([id, charm]) => html`
+                <os-charm-chip
+                  icon=${charm.getAsProxy().icon || "search"}
+                  text=${charm.getAsProxy()[NAME] || "Untitled"}
+                  @click=${() => this.openCharm(id)}
+                ></os-charm-chip>
+              `,
+            )}
           </os-charm-chip-group>
         </os-dialog>
 
@@ -219,19 +288,68 @@ export class CommonWindowManager extends LitElement {
                 data-charm-id="${JSON.stringify(charmId)}"
               >
                 <button class="close-button" @click="${this.onClose}">×</button>
-                <div ${ref(charmRef)}></div>
+                <div style="height: 100%" ${ref(charmRef)}></div>
               </div>
             `;
-          }
+          },
         )}
 
         <os-navstack slot="sidebar">
-          <os-navpanel safearea>
-            <os-sidebar-group>
-              <div slot="label">Prompt</div>
-              <div slot="content"><pre>${this.sidebar}</pre></div>
-            </os-sidebar-group>
-          </os-navpanel>
+          ${this.sidebarTab === "query"
+            ? html`<os-navpanel safearea>
+                ${sidebarNav}
+                <os-sidebar-group>
+                  <div slot="label">Query</div>
+                  <div slot="content">
+                    <pre style="white-space: pre-wrap;">${this.query}</pre>
+                  </div>
+                </os-sidebar-group>
+              </os-navpanel>`
+            : html``}
+          ${this.sidebarTab === "schema"
+            ? html`<os-navpanel safearea>
+                ${sidebarNav}
+                <os-sidebar-group>
+                  <div slot="label">Schema</div>
+                  <div slot="content">
+                    <pre style="white-space: pre-wrap;">${this.schema}</pre>
+                  </div>
+                </os-sidebar-group>
+              </os-navpanel>`
+            : html``}
+          ${this.sidebarTab === "source"
+            ? html`<os-navpanel safearea>
+                ${sidebarNav}
+                <os-sidebar-group>
+                  <div slot="label">Source</div>
+                  <div slot="content">
+                    <pre style="white-space: pre-wrap;">${this.src}</pre>
+                  </div>
+                </os-sidebar-group>
+              </os-navpanel>`
+            : html``}
+          ${this.sidebarTab === "data"
+            ? html`<os-navpanel safearea>
+                ${sidebarNav}
+                <os-sidebar-group>
+                  <div slot="label">Data</div>
+                  <div slot="content">
+                    <pre style="white-space: pre-wrap;">${this.data}</pre>
+                  </div>
+                </os-sidebar-group>
+              </os-navpanel>`
+            : html``}
+          ${this.sidebarTab === "prompt"
+            ? html`<os-navpanel safearea>
+                ${sidebarNav}
+                <os-sidebar-group>
+                  <div slot="label">Prompt</div>
+                  <div slot="content">
+                    <pre style="white-space: pre-wrap;">${this.prompt}</pre>
+                  </div>
+                </os-sidebar-group>
+              </os-navpanel>`
+            : html``}
         </os-navstack>
       </os-chrome>
     `;
@@ -246,14 +364,14 @@ export class CommonWindowManager extends LitElement {
     addCharms([charm]); // Make sure any shows charm is in the list of charms
 
     const existingWindow = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`
+      `[data-charm-id="${CSS.escape(charmId)}"]`,
     );
     if (existingWindow) {
       this.scrollToAndHighlight(charmId, true);
       return;
     }
 
-    this.charms = [...this.charms, charm];
+    this.charms = [charm];
     this.charmLookup.set(charmId, charm);
     this.updateComplete.then(() => {
       while (this.newCharmRefs.length > 0) {
@@ -269,7 +387,7 @@ export class CommonWindowManager extends LitElement {
 
   private scrollToAndHighlight(charmId: string, animate: boolean) {
     const window = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`
+      `[data-charm-id="${CSS.escape(charmId)}"]`,
     );
     if (window) {
       window.scrollIntoView({
@@ -290,7 +408,7 @@ export class CommonWindowManager extends LitElement {
       const charmId = windowElement.getAttribute("data-charm-id");
       if (charmId) {
         this.charms = this.charms.filter(
-          (charm) => JSON.stringify(charm.entityId) !== charmId
+          (charm) => JSON.stringify(charm.entityId) !== charmId,
         );
         this.charmRefs.delete(charmId);
         this.charmLookup.delete(charmId);
