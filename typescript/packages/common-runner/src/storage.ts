@@ -1,4 +1,4 @@
-import { type CellImpl, isCell, cell } from "./cell.js";
+import { type CellImpl, isCell, cell, isCellReference } from "./cell.js";
 import { type EntityId } from "./cell-map.js";
 import { type Cancel, type AddCancel, useCancelGroup } from "./cancel.js";
 
@@ -68,6 +68,7 @@ class StorageImpl implements Storage {
     let entityId: string;
     let entityCell: CellImpl<T>;
 
+    // Support referencing as cell, via entity ID or as stringified entity ID
     if (isCell(subject)) {
       entityCell = subject;
       if (!entityCell.entityId) throw new Error("Cell has no entity ID");
@@ -76,13 +77,20 @@ class StorageImpl implements Storage {
       entityCell = cell<T>();
       entityCell.entityId = JSON.parse(subject);
       entityId = subject;
-    } /* assumed to be EntityId */ else {
+    } else if (
+      typeof subject === "object" &&
+      subject !== null &&
+      "/" in subject
+    ) {
       entityCell = cell<T>();
       entityCell.entityId = subject;
       entityId = JSON.stringify(subject);
+    } else {
+      throw new Error(`Invalid cell or entity ID: ${subject}`);
     }
 
-    // If the cell is already loaded, return immediately
+    // If the cell is already loaded, return immediately. Note this returns the
+    // original cell, even if another one was provided as argument.
     if (this.loadedCells.has(entityId)) return this.loadedCells.get(entityId)!;
 
     // If loading is in progress, wait for it to finish
@@ -105,7 +113,7 @@ class StorageImpl implements Storage {
 
     if (storedValue !== undefined) {
       this.subscribeToChanges(cell);
-      cell.send(storedValue);
+      await this._sendToCell(cell, storedValue);
     } else {
       // If the cell doesn't exist in storage, persist the current value
       await this.persistCell(cell);
@@ -119,7 +127,7 @@ class StorageImpl implements Storage {
 
     this.subscribeToChanges(cell);
 
-    await this.storageProvider.send(cell.entityId, cell.get());
+    await this._sendToStorage(cell.entityId, cell.get());
   }
 
   async clear(): Promise<void> {
@@ -129,19 +137,96 @@ class StorageImpl implements Storage {
     this.cancel();
   }
 
+  private async _sendToStorage(entityId: EntityId, value: any): Promise<void> {
+    // Traverse the value and for each cell reference, make sure it's persisted.
+    // This is done recursively.
+    const promises: Promise<any>[] = [];
+
+    const traverse = (value: any, path: PropertyKey[]) => {
+      if (isCellReference(value)) {
+        // Generate a causal ID for the cell if it doesn't have one yet
+        if (!value.cell.entityId) {
+          value.cell.generateEntityId({
+            cell: StorageImpl.maybeToJSON(entityId),
+            path,
+          });
+          promises.push(this.persistCell(value.cell));
+        } else {
+          // Make sure the cell is persisted, allow for pre-existing values
+          promises.push(this.loadCell(value.cell));
+        }
+        return { cell: value.cell.toJSON(), path };
+      } else if (typeof value === "object" && value !== null) {
+        if (Array.isArray(value))
+          return value.map((value, index): any =>
+            traverse(value, [...path, index])
+          );
+        else
+          return Object.fromEntries(
+            Object.entries(value).map(
+              ([key, value]: [PropertyKey, any]): [PropertyKey, any] => {
+                return [key, traverse(value, [...path, key])];
+              }
+            )
+          );
+      } else return value;
+    };
+
+    value = traverse(value, []);
+
+    return await Promise.all([
+      ...promises,
+      this.storageProvider.send(entityId, value),
+    ]).then((): void => {});
+  }
+
+  private async _sendToCell(cell: CellImpl<any>, value: any): Promise<void> {
+    const traverse = async (value: any): Promise<any> => {
+      if (typeof value === "object" && value !== null)
+        if ("cell" in value && "path" in value)
+          return { cell: await this.loadCell(value.cell), path: value.path };
+        else if (Array.isArray(value))
+          return await Promise.all(value.map(traverse));
+        else
+          return Object.fromEntries(
+            await Promise.all(
+              Object.entries(value).map(
+                async ([key, value]): Promise<any> => [
+                  key,
+                  await traverse(value),
+                ]
+              )
+            )
+          );
+      else return value;
+    };
+
+    value = await traverse(value);
+
+    cell.send(value);
+  }
+
+  static maybeToJSON(value: any): any {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      typeof value.toJSON === "function"
+    )
+      return value.toJSON();
+    else return value;
+  }
+
   private subscribeToChanges(cell: CellImpl<any>): void {
     // Send updates to storage
     this.addCancel(
-      cell.updates((value) => {
-        this.storageProvider.send(cell.entityId!, value);
-      })
+      cell.updates((value) => this._sendToStorage(cell.entityId!, value))
     );
 
     // Subscribe to storage updates
     this.addCancel(
-      this.storageProvider.sink(cell.entityId!, (value) => {
-        cell.send(value);
-      })
+      this.storageProvider.sink(cell.entityId!, (value) =>
+        this._sendToCell(cell, value)
+      )
     );
   }
 }
@@ -252,7 +337,6 @@ class LocalStorageProvider extends BaseStorageProvider {
   }
 
   private handleStorageEvent = (event: StorageEvent) => {
-    console.log("storage event", event);
     if (event.key && event.key.startsWith(this.prefix)) {
       const key = event.key.slice(this.prefix.length);
       const value = event.newValue ? JSON.parse(event.newValue) : undefined;

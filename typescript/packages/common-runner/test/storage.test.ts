@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createStorage, Storage } from "../src/storage";
 import { cell, CellImpl } from "../src/cell";
+import { createRef } from "../src/cell-map";
 
 // Create a mock window object
 const createMockWindow = () => {
@@ -133,6 +134,42 @@ describe("Storage", () => {
           expect(newCell).not.toBe(testCell);
           expect(newCell.get()).toEqual(testValue);
         });
+
+        it("should persist a cell and referenced cells within it", async () => {
+          const refCell = cell("hello");
+          refCell.generateEntityId();
+
+          const testValue = {
+            data: "test",
+            ref: { cell: refCell, path: [] },
+          };
+          testCell.send(testValue);
+
+          await storage.persistCell(testCell);
+
+          const newCell = await storage2.loadCell(refCell.entityId!);
+          expect(newCell.get()).toEqual("hello");
+        });
+
+        it("should generate causal IDs for cells that don't have them yet", async () => {
+          const testValue = {
+            data: "test",
+            ref: { cell: cell("hello"), path: [] },
+          };
+          testCell.send(testValue);
+
+          await storage.persistCell(testCell);
+
+          const refId = createRef(
+            { value: "hello" },
+            {
+              cell: testCell.entityId?.toJSON?.(),
+              path: ["ref"],
+            }
+          );
+          const newCell = await storage2.loadCell(refId);
+          expect(newCell.get()).toEqual("hello");
+        });
       });
 
       describe("cell updates", () => {
@@ -172,7 +209,7 @@ describe("Storage", () => {
           testCell.send("value 2");
 
           // Wait for the update to propagate
-          // await new Promise((resolve) => setTimeout(resolve, 100));
+          await new Promise((resolve) => setTimeout(resolve, 100));
           expect(newCell.get()).toBe("value 2");
 
           // Now let's update the new cell and see that it propagates back.

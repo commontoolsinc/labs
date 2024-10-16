@@ -368,7 +368,10 @@ export function cell<T>(value?: T): CellImpl<T> {
     // This is the id and not the contents, because we .toJSON is called when
     // writing a structure to this that might contain a reference to this cell,
     // and we want to serialize that as am IPLD link to this cell.
-    toJSON: () => entityId?.toJSON(),
+    toJSON: () =>
+      typeof entityId?.toJSON === "function"
+        ? entityId.toJSON()
+        : (entityId as { "/": string }),
     get value(): T {
       return value as T;
     },
