@@ -137,7 +137,12 @@ export class CommonWindowManager extends LitElement {
 
   @state() searchOpen: boolean = false;
   @state() location: string = "Home";
-  @state() sidebar: string = "";
+
+  @state() sidebarTab: string = "prompt";
+  @state() prompt: string = "";
+  @state() data: string = "";
+  @state() src: string = "";
+  @state() schema: string = "";
 
   onLocationClicked(_event: CustomEvent) {
     console.log("Location clicked in app.");
@@ -149,8 +154,24 @@ export class CommonWindowManager extends LitElement {
       this.searchOpen = false;
     };
 
-    this.focusedCharm?.asSimpleCell(["prompt"])?.sink((prompt) => {
-      this.sidebar = prompt;
+    this.focusedCharm?.asSimpleCell<string>(["prompt"])?.sink((prompt) => {
+      this.prompt = prompt;
+    });
+
+    this.focusedCharm?.asSimpleCell<any>(["data"])?.sink((data) => {
+      this.data = JSON.stringify(data, null, 2);
+    });
+
+    this.focusedCharm?.asSimpleCell<string>(["src"])?.sink((src) => {
+      this.src = src;
+    });
+
+    this.focusedCharm?.asSimpleCell<string>(["schema"])?.sink((schema) => {
+      this.schema = JSON.stringify(schema, null, 2);
+    });
+
+    this.focusedCharm?.asSimpleCell<string>(["query"])?.sink((query) => {
+      this.schema = JSON.stringify(query, null, 2);
     });
 
     const onSearchSubmit = (event: CustomEvent) => {
@@ -167,6 +188,38 @@ export class CommonWindowManager extends LitElement {
       console.log("AI Box submitted:", event.detail.value);
       this.handleUniboxSubmit(event);
     };
+
+    const sidebarNav = html`
+      <os-icon-button
+        slot="toolbar-end"
+        icon="message"
+        @click=${() => {
+          this.sidebarTab = "prompt";
+        }}
+      ></os-icon-button>
+      <os-icon-button
+        slot="toolbar-end"
+        icon="database"
+        @click=${() => {
+          this.sidebarTab = "data";
+        }}
+      ></os-icon-button>
+      <os-icon-button
+        slot="toolbar-end"
+        icon="code"
+        @click=${() => {
+          this.sidebarTab = "source";
+        }}
+      ></os-icon-button>
+      <os-icon-button
+        slot="toolbar-end"
+        icon="schema"
+        @click=${() => {
+          this.sidebarTab = "schema";
+        }}
+      ></os-icon-button>
+      <os-sidebar-close-button slot="toolbar-end"></os-sidebar-close-button>
+    `;
 
     return html`
       <os-chrome
@@ -226,17 +279,62 @@ export class CommonWindowManager extends LitElement {
         )}
 
         <os-navstack slot="sidebar">
-          <os-navpanel safearea>
-            <os-sidebar-group>
-              <div slot="label">Prompt</div>
-              <div slot="content">
-                <pre style="white-space: pre-wrap;">
-                ${this.sidebar}
-                  </pre
-                >
-              </div>
-            </os-sidebar-group>
-          </os-navpanel>
+          ${this.sidebarTab === "schema"
+            ? html`<os-navpanel safearea>
+                ${sidebarNav}
+                <os-sidebar-group>
+                  <div slot="label">Schema</div>
+                  <div slot="content">
+                    <pre style="white-space: pre-wrap;">
+                      ${this.schema}
+                        </pre
+                    >
+                  </div>
+                </os-sidebar-group>
+              </os-navpanel>`
+            : html``}
+          ${this.sidebarTab === "source"
+            ? html`<os-navpanel safearea>
+                ${sidebarNav}
+                <os-sidebar-group>
+                  <div slot="label">Source</div>
+                  <div slot="content">
+                    <pre style="white-space: pre-wrap;">
+                      ${this.src}
+                        </pre
+                    >
+                  </div>
+                </os-sidebar-group>
+              </os-navpanel>`
+            : html``}
+          ${this.sidebarTab === "data"
+            ? html`<os-navpanel safearea>
+                ${sidebarNav}
+                <os-sidebar-group>
+                  <div slot="label">Data</div>
+                  <div slot="content">
+                    <pre style="white-space: pre-wrap;">
+                    ${this.data}
+                      </pre
+                    >
+                  </div>
+                </os-sidebar-group>
+              </os-navpanel>`
+            : html``}
+          ${this.sidebarTab === "prompt"
+            ? html`<os-navpanel safearea>
+                ${sidebarNav}
+                <os-sidebar-group>
+                  <div slot="label">Prompt</div>
+                  <div slot="content">
+                    <pre style="white-space: pre-wrap;">
+                  ${this.prompt}
+                    </pre
+                    >
+                  </div>
+                </os-sidebar-group>
+              </os-navpanel>`
+            : html``}
         </os-navstack>
       </os-chrome>
     `;

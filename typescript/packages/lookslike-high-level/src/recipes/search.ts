@@ -230,6 +230,10 @@ const printObjectProperties = lift(({ obj }: { obj: any }) => {
   `;
 });
 
+const truncate = lift(({ text, length }) => {
+  return text.length > length ? text.substring(0, length) + "..." : text;
+});
+
 export const search = recipe<{ search: string }>(
   "Search",
   ({ search }: { search: string }) => {
@@ -249,6 +253,12 @@ export const search = recipe<{ search: string }>(
     const exportedData = lift((data: any[]) => ({ items: data }))(
       normalizedData,
     );
+
+    const entries = lift(({ data }) =>
+      data.map((r) => ({ row: Object.entries(r).map(([k, v]) => ({ k, v })) })),
+    )({
+      data: normalizedData,
+    });
 
     return {
       [NAME]: "Search",
@@ -277,46 +287,31 @@ export const search = recipe<{ search: string }>(
 
             <os-container>
               <os-colgrid>
-                ${normalizedData.map((item) => {
-                  const subtitle = lift(
-                    ({ item }) =>
-                      item.subject ||
-                      item.summary ||
-                      item.topic ||
-                      item.subtitle ||
-                      item.author,
-                  );
-
-                  const body = lift(
-                    ({ item }) => item.description || item.content || item.body,
-                  );
-
-                  return html`<os-tile style="overflow-y: scroll;">
-                    <div
-                      style="padding: 16px; overflow-y: scroll; aspect-ratio: 1 / 1;"
+                ${entries.map(({ row }) => {
+                  return html`<div style="">
+                    <table
+                      style="width: 100%; font-size: 0.8rem; font-family: monospace; border-collapse: collapse; overflow-y: hidden; "
                     >
-                      <h3>${item.title}</h3>
-                      <p>${subtitle({ item })}</p>
-                      <p>${body({ item })}</p>
-                      <p>${item["import/url"]}, ${item["import/time"]}</p>
-                      <details>
-                        <summary>Details</summary>
-                        <pre
-                          style="white-space: pre-wrap; word-wrap: break-word; "
-                        >
-${toPairs({ obj: item })}</pre
-                        >
-                      </details>
-                    </div>
-                  </os-tile>`;
+                      <tbody>
+                        ${row.map(
+                          ({ k, v }) =>
+                            html`<tr>
+                              <td
+                                style="text-align: right; font-weight: bold; padding: 2px; border: 1px solid #ddd;"
+                              >
+                                ${k}
+                              </td>
+                              <td style="padding: 2px; border: 1px solid #ddd;">
+                                ${truncate({ text: v, length: 32 })}
+                              </td>
+                            </tr>`,
+                        )}
+                      </tbody>
+                    </table>
+                  </div>`;
                 })}
               </os-colgrid>
             </os-container>
-
-            <details>
-              <summary>Generated Query</summary>
-              <pre>${stringify({ obj: flexibleQuery })}</pre>
-            </details>
           </div>`,
           html`<div>Loading...</div>`,
         )}
@@ -324,6 +319,7 @@ ${toPairs({ obj: item })}</pre
       result,
       // collections,
       data: exportedData,
+      query: flexibleQuery,
     };
   },
 );
