@@ -237,7 +237,7 @@ const printObjectProperties = lift(({ obj }: { obj: any }) => {
 });
 
 const truncate = lift(({ text, length }) => {
-  return text.length > length ? text.substring(0, length) + "..." : text;
+  return text.length > length ? text.substring(0, length) + "…" : text;
 });
 
 export const search = recipe<{ search: string }>(
@@ -289,10 +289,10 @@ export const search = recipe<{ search: string }>(
                             <div
                               style="font-weight: bold; color: #999; font-size: 0.6rem; height: 16px;"
                             >
-                              ${k}
+                              ${truncate({ text: k, length: 32 })}
                             </div>
                             <div style="padding: 2px;">
-                              ${truncate({ text: v, length: 32 })}
+                              ${truncate({ text: v, length: 24 })}
                             </div>
                           </div>`,
                       )}
