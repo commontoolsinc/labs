@@ -103,13 +103,9 @@ export function run<T, R = any>(
   // Walk the recipe's schema and extract all default values
   const defaults = extractDefaultValues(recipe.schema);
 
-  // Ensure static data is converted to cell references, e.g. for arrays
-  parameters = staticDataToNestedCells(parameters);
-
-  // If the bindings are a cell or cell reference and it is an object, convert
-  // them to an object where each property is a cell reference.
-  // TODO: If new keys are added after first load, this won't work. And we only
-  // do this to support defaults. So we could be smarter here.
+  // If the bindings are a cell or cell reference, convert them to an object
+  // where each property is a cell reference.
+  // TODO: If new keys are added after first load, this won't work.
   if (isCell(parameters) || isCellReference(parameters)) {
     // If it's a cell, turn it into a cell reference
     const ref = isCellReference(parameters)
@@ -150,14 +146,13 @@ export function run<T, R = any>(
     (recipe.initial as { internal: any })?.internal
   );
 
-  if (
-    defaults &&
-    ((typeof parameters === "object" &&
-      parameters !== null &&
-      !Array.isArray(parameters)) ||
-      parameters === undefined)
-  )
-    parameters = mergeObjects(parameters, defaults);
+  // Ensure static data is converted to cell references, e.g. for arrays
+  parameters = staticDataToNestedCells(parameters, undefined, resultCell);
+
+  // Ensure static data is converted to cell references, e.g. for arrays
+  parameters = staticDataToNestedCells(parameters, undefined, resultCell);
+
+  if (defaults) parameters = mergeObjects(parameters, defaults);
 
   processCell.send({
     [TYPE]:
