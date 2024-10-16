@@ -170,6 +170,13 @@ export function run<T, R = any>(
   cancels.set(resultCell, cancel);
 
   for (const node of recipe.nodes) {
+    // Generate causal IDs for all cells read and written to by this node, if
+    // they don't have any yet.
+    [node.inputs, node.outputs].forEach((bindings) =>
+      findAllAliasedCells(bindings, processCell).forEach(({ cell, path }) => {
+        if (!cell.entityId) cell.generateEntityId({ cell: processCell, path });
+      })
+    );
     instantiateNode(
       node.module,
       node.inputs,

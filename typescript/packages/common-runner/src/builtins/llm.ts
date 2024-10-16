@@ -38,6 +38,11 @@ export function llm(
   const result = cell<string | undefined>(undefined);
   const partial = cell<string | undefined>(undefined);
 
+  // Generate causal IDs for the cells.
+  pending.generateEntityId({ llm: { pending: inputsCell.get() } });
+  result.generateEntityId({ llm: { result: inputsCell.get() } });
+  partial.generateEntityId({ llm: { partial: inputsCell.get() } });
+
   sendResult({ pending, result, partial });
 
   let currentRun = 0;

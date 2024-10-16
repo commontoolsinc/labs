@@ -9,7 +9,9 @@ import {
   raw,
   addModuleByRef,
   type ReactivityLog,
+  createRef,
 } from "@commontools/common-runner";
+import { createStorage } from "./storage.js";
 
 import { todoList } from "./recipes/todo-list.js";
 import { localSearch } from "./recipes/local-search.js";
@@ -23,6 +25,7 @@ import { counters } from "./recipes/counters.js";
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.js";
 import "./recipes/playlist.js";
+
 import { iframe } from "./recipes/iframe.js";
 import { search } from "./recipes/search.js";
 import { importCalendar } from "./recipes/importCalendar.js";
@@ -43,6 +46,8 @@ export type Charm = {
 
 export { TYPE, NAME, UI };
 
+const storage = createStorage("local");
+
 export const charms = cell<CellImpl<Charm>[]>([]);
 
 export function addCharms(newCharms: CellImpl<any>[]) {
@@ -56,45 +61,51 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 
   if (charmsToAdd.length > 0) {
     charms.send([...currentCharms, ...charmsToAdd]);
+
+    // Make sure it's persisted, if it isn't already
+    charmsToAdd.map((charm) => storage.persistCell(charm));
   }
 }
 
-export function setCharms(newCharms: CellImpl<any>[]) {
-  charms.send([...newCharms]);
-}
-
-function createCellWithCausalId(name: string) {
-  const newCell = cell();
-  newCell.generateEntityId(name);
-  return newCell;
+export async function runPersistent(
+  recipe: Recipe,
+  inputs: any,
+  cause?: any
+): Promise<CellImpl<any>> {
+  const previousCell = cause
+    ? await storage.loadCell(createRef({ recipe, inputs }, cause))
+    : undefined;
+  const resultCell = run(recipe, inputs, previousCell);
+  storage.persistCell(resultCell); // no-op if already persisted
+  return resultCell;
 }
 
 addCharms([
-  run(
+  await runPersistent(
     iframe,
     {
       title: "two way binding counter",
       prompt: "counter",
       data: { counter: 0 },
     },
-    createCellWithCausalId("iframe"),
+    "iframe"
   ),
-  run(importCalendar, {}, createCellWithCausalId("importCalendar")),
-  run(
+  await runPersistent(importCalendar, {}, "importCalendar"),
+  await runPersistent(
     search,
     {
       query: "home",
     },
-    createCellWithCausalId("search"),
+    "search"
   ),
-  run(
+  await runPersistent(
     queryCollections,
     {
       collectionName: "home",
     },
-    createCellWithCausalId("queryCollections"),
+    "queryCollections"
   ),
-  run(
+  await runPersistent(
     todoList,
     {
       title: "My TODOs",
@@ -103,9 +114,9 @@ addCharms([
         done: false,
       })),
     },
-    createCellWithCausalId("todoList"),
+    "todoList"
   ),
-  run(
+  await runPersistent(
     todoList,
     {
       title: "My grocery shopping list",
@@ -114,9 +125,9 @@ addCharms([
         done: false,
       })),
     },
-    createCellWithCausalId("todoList"),
+    "todoList"
   ),
-  run(
+  await runPersistent(
     ticket,
     {
       title: "Reservation for 'Counterstrike the Musical'",
@@ -124,18 +135,18 @@ addCharms([
       date: getFridayAndMondayDateStrings().startDate,
       location: "New York",
     },
-    createCellWithCausalId("ticket"),
+    "ticket"
   ),
-  run(
+  await runPersistent(
     routine,
     {
       title: "Morning routine",
       // TODO: A lot more missing here, this is just to drive the suggestion.
       locations: ["coffee shop with great baristas"],
     },
-    createCellWithCausalId("routine"),
+    "routine"
   ),
-  run(counters, {}, createCellWithCausalId("counters")),
+  await runPersistent(counters, {}, "counters"),
 ]);
 
 export type RecipeManifest = {

@@ -25,7 +25,10 @@ export const createRef = (
   cause: any = crypto.randomUUID()
 ): EntityId => {
   try {
-    return refer({ ...source, causal: cause });
+    // JSON.parse(JSON.stringify(...)) ensures that the object is serializable.
+    // This e.g. calls .toJSON on cells. Warning: Might cause an infinite loop
+    // if the object contains circular references.
+    return refer(JSON.parse(JSON.stringify({ ...source, causal: cause })));
   } catch (e) {
     // HACK: merkle-reference currently fails in a jsdom vitest environment, so
     // we replace the id with a random UUID.

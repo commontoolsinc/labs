@@ -99,7 +99,10 @@ export function map(
           log?.reads.push(value);
           continue;
         }
-        const resultCell = run(op, value);
+        if (!value.cell.entityId) value.cell.generateEntityId();
+        const resultCell = cell();
+        resultCell.generateEntityId({ map: value.cell.entityId });
+        run(op, value, resultCell);
         addCancel(cancels.get(resultCell));
         itemResult = { ref: value, resultCell };
         sourceRefToResult.push(itemResult);

@@ -4,7 +4,7 @@ import { cell, CellImpl, createRef } from "@commontools/common-runner";
 
 // Create a mock window object
 const createMockWindow = () => {
-  let listeners: Record<string, Array<(event: any) => void>> = {};
+  let listeners = new Set<(event: any) => void>();
 
   const mockWindow: any = {
     localStorage: {
@@ -49,21 +49,16 @@ const createMockWindow = () => {
       }),
     },
     addEventListener: vi.fn((event: string, callback: (event: any) => void) => {
-      if (!listeners[event]) {
-        listeners[event] = [];
-      }
-      listeners[event].push(callback);
+      if (event === "storage") listeners.add(callback);
     }),
     removeEventListener: vi.fn(
       (event: string, callback: (event: any) => void) => {
-        if (listeners[event]) {
-          listeners[event] = listeners[event].filter((cb) => cb !== callback);
-        }
+        if (event === "storage") listeners.delete(callback);
       }
     ),
     dispatchEvent: vi.fn((event: any) => {
-      if (listeners[event.type]) {
-        listeners[event.type].forEach((callback) => callback(event));
+      if (event.type === "storage") {
+        listeners.forEach((callback) => callback(event));
       }
     }),
     location: {
@@ -118,8 +113,8 @@ describe("Storage", () => {
       });
 
       afterEach(() => {
-        storage.clear();
-        storage2.clear();
+        storage.destroy();
+        storage2.destroy();
       });
 
       describe("persistCell", () => {
@@ -134,13 +129,29 @@ describe("Storage", () => {
           expect(newCell.get()).toEqual(testValue);
         });
 
-        it("should persist a cell and referenced cells within it", async () => {
+        it("should persist a cells and referenced cell references within it", async () => {
           const refCell = cell("hello");
           refCell.generateEntityId();
 
           const testValue = {
             data: "test",
             ref: { cell: refCell, path: [] },
+          };
+          testCell.send(testValue);
+
+          await storage.persistCell(testCell);
+
+          const newCell = await storage2.loadCell(refCell.entityId!);
+          expect(newCell.get()).toEqual("hello");
+        });
+
+        it("should persist a cells and referenced cells within it", async () => {
+          const refCell = cell("hello");
+          refCell.generateEntityId();
+
+          const testValue = {
+            data: "test",
+            otherCell: refCell,
           };
           testCell.send(testValue);
 
@@ -188,6 +199,14 @@ describe("Storage", () => {
         it("should load a cell that does not exist in storage", async () => {
           await storage.loadCell(testCell);
           expect(testCell.get()).toBeUndefined();
+
+          const newCell = await storage2.loadCell(testCell.entityId!);
+          expect(newCell).not.toBe(testCell);
+          expect(newCell.get()).toBeUndefined();
+
+          testCell.send("value 1");
+          await Promise.resolve(); // Wait for the update to propagate
+          expect(newCell.get()).toBe("value 1");
         });
 
         it("should load a cell and stay in sync", async () => {
@@ -208,13 +227,13 @@ describe("Storage", () => {
           testCell.send("value 2");
 
           // Wait for the update to propagate
-          await new Promise((resolve) => setTimeout(resolve, 100));
+          await Promise.resolve(); // Wait for the update to propagate
           expect(newCell.get()).toBe("value 2");
 
           // Now let's update the new cell and see that it propagates back.
           newCell.send("value 3");
 
-          await new Promise((resolve) => setTimeout(resolve, 100));
+          await Promise.resolve(); // Wait for the update to propagate
           expect(testCell.get()).toBe("value 3");
         });
 
