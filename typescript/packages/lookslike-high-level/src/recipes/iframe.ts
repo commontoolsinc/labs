@@ -19,6 +19,10 @@ const formatData = lift(({ obj }) => {
   return JSON.stringify(obj, null, 2);
 });
 
+const stringify = lift(({ obj }) => {
+  return JSON.stringify(obj, null, 2);
+});
+
 const tap = lift((x) => {
   console.log(x, JSON.stringify(x, null, 2));
   return x;
@@ -293,7 +297,7 @@ export const iframe = recipe<{
   tap({ schema });
 
   const query = copy({ value: prompt });
-  const lastSrc = cell<string>();
+  const lastSrc = copy({ value: src });
 
   // const scopedSchema = generateData<{ html: string }>({
   //   prompt: promptFilterSchema({ schema, prompt }),
@@ -301,16 +305,16 @@ export const iframe = recipe<{
   //   mode: "json",
   // });
 
-  const suggestions = grabSuggestions(
-    llm(prepSuggestions({ src, prompt, schema })),
-  );
-
   // FIXME(ja): this html is a bit of a mess as changing src triggers suggestions and view (showing streaming)
   const {
     result,
     pending: pendingHTML,
     partial: partialHTML,
   } = llm(prepHTML({ prompt, schema, lastSrc }));
+
+  const suggestions = grabSuggestions(
+    llm(prepSuggestions({ src: grabHTML({ result }), prompt, schema })),
+  );
 
   let firstSuggestion = getSuggestion({ suggestions, index: 0 });
   let secondSuggestion = getSuggestion({ suggestions, index: 1 });
@@ -337,6 +341,7 @@ export const iframe = recipe<{
     data,
     schema,
     partialHTML,
+    suggestions: { items: suggestions },
     addToPrompt: addToPrompt({ prompt, src, lastSrc, query }),
   };
 });
