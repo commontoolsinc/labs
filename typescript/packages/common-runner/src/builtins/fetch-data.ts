@@ -24,6 +24,11 @@ export function fetchData(
   const result = cell<any | undefined>(undefined);
   const error = cell<any | undefined>(undefined);
 
+  // Generate causal IDs for the cells.
+  pending.generateEntityId({ fetchData: { pending: inputsCell.get() } });
+  result.generateEntityId({ fetchData: { result: inputsCell.get() } });
+  error.generateEntityId({ fetchData: { error: inputsCell.get() } });
+
   const resultCell = cell({
     pending,
     result,

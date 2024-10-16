@@ -11,6 +11,7 @@ export function ifElse(
   sendResult: (result: any) => void
 ): Action {
   const result = cell<any>(undefined);
+  result.generateEntityId({ ifElse: inputsCell.get() });
   sendResult(result);
 
   return (log: ReactivityLog) => {

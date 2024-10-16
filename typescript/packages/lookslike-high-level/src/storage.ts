@@ -2,12 +2,15 @@ import {
   type CellImpl,
   isCell,
   cell,
+  type CellReference,
   isCellReference,
   type EntityId,
   type Cancel,
   type AddCancel,
   useCancelGroup,
 } from "@commontools/common-runner";
+
+const NoResult = Symbol("NoResult");
 
 export interface Storage {
   /**
@@ -53,7 +56,7 @@ export interface Storage {
    * Clear all stored data.
    * @returns Promise that resolves when the operation is complete.
    */
-  clear(): Promise<void>;
+  destroy(): Promise<void>;
 }
 
 class StorageImpl implements Storage {
@@ -106,6 +109,9 @@ class StorageImpl implements Storage {
       return this.loadedCells.get(entityId)!;
     }
 
+    // If there is an associated source cell, sync it first.
+    if (entityCell.sourceCell) await this.loadCell(entityCell.sourceCell);
+
     // Start loading the cell
     const loadingPromise = this._loadCell(entityCell);
     this.loadingCells.set(entityId, loadingPromise);
@@ -118,7 +124,7 @@ class StorageImpl implements Storage {
   private async _loadCell(cell: CellImpl<any>): Promise<void> {
     const storedValue = await this.storageProvider.get(cell.entityId!);
 
-    if (storedValue !== undefined) {
+    if (storedValue !== NoResult) {
       this.subscribeToChanges(cell);
       await this._sendToCell(cell, storedValue);
     } else {
@@ -132,13 +138,22 @@ class StorageImpl implements Storage {
   async persistCell(cell: CellImpl<any>): Promise<void> {
     if (!cell.entityId) throw new Error("Cell has no entity ID");
 
+    // Nothing to do if this is already loaded. Note that this also means that
+    // the latest state was already synced as well.
+    if (this.loadedCells.has(JSON.stringify(cell.entityId))) return;
+
+    // Subscribe to future changes
     this.subscribeToChanges(cell);
 
+    // If there is an associated source cell, sync it first.
+    if (cell.sourceCell) await this.loadCell(cell.sourceCell);
+
+    // Persist the current state
     await this._sendToStorage(cell.entityId, cell.get());
   }
 
-  async clear(): Promise<void> {
-    await this.storageProvider.clear();
+  async destroy(): Promise<void> {
+    await this.storageProvider.destroy();
     this.loadedCells.clear();
     this.loadingCells.clear();
     this.cancel();
@@ -150,6 +165,8 @@ class StorageImpl implements Storage {
     const promises: Promise<any>[] = [];
 
     const traverse = (value: any, path: PropertyKey[]) => {
+      if (isCell(value))
+        value = { cell: value, path: [] } satisfies CellReference;
       if (isCellReference(value)) {
         // Generate a causal ID for the cell if it doesn't have one yet
         if (!value.cell.entityId) {
@@ -162,7 +179,7 @@ class StorageImpl implements Storage {
           // Make sure the cell is persisted, allow for pre-existing values
           promises.push(this.loadCell(value.cell));
         }
-        return { cell: value.cell.toJSON(), path };
+        return { cell: value.cell.toJSON(), path: value.path };
       } else if (typeof value === "object" && value !== null) {
         if (Array.isArray(value))
           return value.map((value, index): any =>
@@ -254,9 +271,9 @@ export function createStorage(type: "local" | "memory"): Storage {
 
 interface StorageProvider {
   send<T = any>(entityId: EntityId, value: T): Promise<void>;
-  get<T = any>(entityId: EntityId): Promise<T>;
+  get<T = any>(entityId: EntityId): Promise<T | typeof NoResult>;
   sink<T = any>(entityId: EntityId, callback: (value: T) => void): Cancel;
-  clear(): Promise<void>;
+  destroy(): Promise<void>;
 }
 
 abstract class BaseStorageProvider implements StorageProvider {
@@ -283,7 +300,7 @@ abstract class BaseStorageProvider implements StorageProvider {
     if (listeners) for (const listener of listeners) listener(value);
   }
 
-  abstract clear(): Promise<void>;
+  abstract destroy(): Promise<void>;
 }
 
 /**
@@ -295,9 +312,12 @@ abstract class BaseStorageProvider implements StorageProvider {
 const inMemoryStorage = new Map<string, any>();
 const inMemoryStorageSubscribers = new Set<(key: string, value: any) => void>();
 class InMemoryStorageProvider extends BaseStorageProvider {
+  private handleStorageUpdateFn: (key: string, value: any) => void;
+
   constructor() {
     super();
-    inMemoryStorageSubscribers.add(this.handleStorageUpdate.bind(this));
+    this.handleStorageUpdateFn = this.handleStorageUpdate.bind(this);
+    inMemoryStorageSubscribers.add(this.handleStorageUpdateFn);
   }
 
   private handleStorageUpdate(key: string, value: any) {
@@ -312,16 +332,15 @@ class InMemoryStorageProvider extends BaseStorageProvider {
   }
 
   async get(entityId: EntityId): Promise<any> {
-    return inMemoryStorage.get(JSON.stringify(entityId));
+    if (inMemoryStorage.has(JSON.stringify(entityId)))
+      return inMemoryStorage.get(JSON.stringify(entityId));
+    else return NoResult;
   }
 
-  async clear(): Promise<void> {
+  async destroy(): Promise<void> {
+    inMemoryStorageSubscribers.delete(this.handleStorageUpdateFn);
     inMemoryStorage.clear();
     this.subscribers.clear();
-  }
-
-  destroy() {
-    inMemoryStorageSubscribers.delete(this.handleStorageUpdate);
   }
 }
 
@@ -330,13 +349,17 @@ class InMemoryStorageProvider extends BaseStorageProvider {
  */
 class LocalStorageProvider extends BaseStorageProvider {
   private prefix: string;
+  private lastValues = new Map<string, string | undefined>();
+
+  private handleStorageEventFn: (event: StorageEvent) => void;
 
   constructor(prefix: string = "common_storage_") {
     if (typeof window === "undefined" || !window.localStorage)
       throw new Error("LocalStorageProvider is not supported in the browser");
     super();
     this.prefix = prefix;
-    window.addEventListener("storage", this.handleStorageEvent.bind(this));
+    this.handleStorageEventFn = this.handleStorageEvent.bind(this);
+    window.addEventListener("storage", this.handleStorageEventFn);
   }
 
   private getKey(entityId: EntityId): string {
@@ -346,32 +369,58 @@ class LocalStorageProvider extends BaseStorageProvider {
   private handleStorageEvent = (event: StorageEvent) => {
     if (event.key && event.key.startsWith(this.prefix)) {
       const key = event.key.slice(this.prefix.length);
-      const value = event.newValue ? JSON.parse(event.newValue) : undefined;
-      this.notifySubscribers(key, value);
+      if (this.lastValues.get(key) !== event.newValue) {
+        console.log(
+          "storage event",
+          event.key,
+          event.newValue,
+          this.lastValues.get(key)
+        );
+        if (event.newValue === null) this.lastValues.delete(key);
+        else this.lastValues.set(key, event.newValue);
+        const value =
+          event.newValue !== "undefined" && event.newValue !== null
+            ? JSON.parse(event.newValue)
+            : undefined;
+        this.notifySubscribers(key, value);
+      }
     }
   };
 
   async send(entityId: EntityId, value: any): Promise<void> {
     const key = this.getKey(entityId);
-    localStorage.setItem(key, JSON.stringify(value));
+    value = JSON.stringify(value) ?? "undefined";
+    console.log(
+      "send localstorage",
+      JSON.stringify(entityId),
+      value,
+      this.lastValues.get(key)
+    );
+    if (this.lastValues.get(key) !== value) {
+      localStorage.setItem(key, value);
+      this.lastValues.set(key, value);
+    }
   }
 
   async get(entityId: EntityId): Promise<any> {
     const key = this.getKey(entityId);
     const value = localStorage.getItem(key);
-    return value ? JSON.parse(value) : undefined;
+    console.log("get localstorage", JSON.stringify(entityId), value);
+    return value !== null
+      ? value === "undefined"
+        ? undefined
+        : JSON.parse(value)
+      : NoResult;
   }
 
-  async clear(): Promise<void> {
+  async destroy(): Promise<void> {
+    window.removeEventListener("storage", this.handleStorageEventFn);
+    console.log("clear localstorage", this.prefix);
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith(this.prefix)) {
         localStorage.removeItem(key);
       }
     }
     this.subscribers.clear();
-  }
-
-  destroy() {
-    window.removeEventListener("storage", this.handleStorageEvent);
   }
 }
