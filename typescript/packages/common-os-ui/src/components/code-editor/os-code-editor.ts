@@ -3,6 +3,7 @@ import { customElement } from "lit/decorators.js";
 import { basicSetup, EditorView } from "codemirror";
 import { EditorState, Compartment } from "@codemirror/state";
 import { javascript } from "@codemirror/lang-javascript";
+import { ayuLight } from "thememirror";
 import { createStore, Store, ValueMsg, FxDriver } from "../../shared/store";
 import { createCleanupGroup } from "../../shared/cleanup.js";
 import { base } from "../../shared/styles.ts";
@@ -53,7 +54,6 @@ export const createFx =
 @customElement("os-code-editor")
 export class OsCodeEditor extends HTMLElement {
   static styles = [
-    base,
     css`
       :host {
         display: block;
@@ -96,6 +96,7 @@ export class OsCodeEditor extends HTMLElement {
     const state = EditorState.create({
       extensions: [
         basicSetup,
+        ayuLight,
         language.of(javascript()),
         tabSize.of(EditorState.tabSize.of(4)),
       ],
