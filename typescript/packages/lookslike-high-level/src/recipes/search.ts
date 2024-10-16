@@ -281,7 +281,7 @@ export const search = recipe<{ search: string }>(
                 ${entries.map(({ row }) => {
                   return html`<os-tile style="aspect-ratio: 1/1;">
                     <div
-                      style="width: 100%; height: 100%; overflow-y: auto; overflow-x: hidden; border-radius: 2px; padding: 8px; font-size: 0.8rem;  font-family: monospace;"
+                      style="width: 100%; height: 100%; overflow-y: auto; box-sizing: border-box; overflow-x: hidden; border-radius: 2px; padding: 8px; font-size: 0.8rem;  font-family: monospace;"
                     >
                       ${row.map(
                         ({ k, v }) =>
