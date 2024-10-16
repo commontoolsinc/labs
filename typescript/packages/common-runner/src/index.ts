@@ -26,4 +26,10 @@ export {
   getCellReferenceOrThrow,
   isCellProxyForDereferencing,
 } from "./cell.js";
-export { getEntityId, getCellByEntityId } from "./cell-map.js";
+export {
+  getEntityId,
+  getCellByEntityId,
+  createRef,
+  type EntityId,
+} from "./cell-map.js";
+export { type Cancel, type AddCancel, useCancelGroup } from "./cancel.js";
