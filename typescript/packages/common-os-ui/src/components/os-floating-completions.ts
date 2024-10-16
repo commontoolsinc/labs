@@ -2,7 +2,6 @@ import { LitElement, html, css, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { base } from "../shared/styles.js";
 import { createRect, Rect, positionMenu } from "../shared/position.js";
-import { toggleInvisible } from "../shared/dom.js";
 import * as completion from "./editor/completion.js";
 import { classMap } from "lit/directives/class-map.js";
 import { clamp } from "../shared/number.js";
