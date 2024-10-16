@@ -105,6 +105,8 @@ export class CommonWindowManager extends LitElement {
         this.focusedCharm
           ?.asSimpleCell(["addToPrompt"])
           .send({ prompt: value } as any);
+
+        // ben: this is a hack to access the data designer temporarily
         if (charm.data && charm.query) {
           const eid = run(dataDesigner, {
             data: charm.data,
@@ -171,11 +173,9 @@ export class CommonWindowManager extends LitElement {
       this.searchOpen = false;
     };
 
-    // Unsubscribe from previous subscriptions
+    // ben: this is cursed, but it works. let's replace this ASAP
     this.subscriptions.forEach((unsub) => unsub?.());
-    // Log how many subscriptions were cancelled
     console.log(`Cancelled ${this.subscriptions.length} subscriptions`);
-
     this.subscriptions.length = 0;
 
     this.subscriptions.push(
