@@ -133,7 +133,6 @@ class StorageImpl implements Storage {
     // Send updates to storage
     this.addCancel(
       cell.updates((value) => {
-        console.log("got update", cell.entityId, value);
         this.storageProvider.send(cell.entityId!, value);
       })
     );
@@ -141,7 +140,6 @@ class StorageImpl implements Storage {
     // Subscribe to storage updates
     this.addCancel(
       this.storageProvider.sink(cell.entityId!, (value) => {
-        console.log("got value", cell.entityId, value, "old", cell.get());
         cell.send(value);
       })
     );
@@ -203,11 +201,21 @@ abstract class BaseStorageProvider implements StorageProvider {
  * But for testing we can create multiple instances that share the memory.
  */
 const inMemoryStorage = new Map<string, any>();
+const inMemoryStorageSubscribers = new Set<(key: string, value: any) => void>();
 class InMemoryStorageProvider extends BaseStorageProvider {
+  constructor() {
+    super();
+    inMemoryStorageSubscribers.add(this.handleStorageUpdate.bind(this));
+  }
+
+  private handleStorageUpdate(key: string, value: any) {
+    this.notifySubscribers(key, value);
+  }
+
   async send(entityId: EntityId, value: any): Promise<void> {
     const key = JSON.stringify(entityId);
-    console.log("inMemoryStorage update", key, value, this.subscribers);
     inMemoryStorage.set(key, value);
+    inMemoryStorageSubscribers.forEach((listener) => listener(key, value));
     this.notifySubscribers(key, value);
   }
 
@@ -218,6 +226,10 @@ class InMemoryStorageProvider extends BaseStorageProvider {
   async clear(): Promise<void> {
     inMemoryStorage.clear();
     this.subscribers.clear();
+  }
+
+  destroy() {
+    inMemoryStorageSubscribers.delete(this.handleStorageUpdate);
   }
 }
 
@@ -232,7 +244,7 @@ class LocalStorageProvider extends BaseStorageProvider {
       throw new Error("LocalStorageProvider is not supported in the browser");
     super();
     this.prefix = prefix;
-    window.addEventListener("storage", this.handleStorageEvent);
+    window.addEventListener("storage", this.handleStorageEvent.bind(this));
   }
 
   private getKey(entityId: EntityId): string {
@@ -240,6 +252,7 @@ class LocalStorageProvider extends BaseStorageProvider {
   }
 
   private handleStorageEvent = (event: StorageEvent) => {
+    console.log("storage event", event);
     if (event.key && event.key.startsWith(this.prefix)) {
       const key = event.key.slice(this.prefix.length);
       const value = event.newValue ? JSON.parse(event.newValue) : undefined;
