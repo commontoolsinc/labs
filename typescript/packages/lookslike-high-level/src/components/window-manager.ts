@@ -223,12 +223,15 @@ export class CommonWindowManager extends LitElement {
     console.log("Unibox submitted:", value, shiftKey);
 
     if (charm) {
-      if (shiftKey) {
+      // modify in place by default, if possible
+      if (!shiftKey && charm.addToPrompt) {
         this.focusedCharm
           ?.asSimpleCell(["addToPrompt"])
           .send({ prompt: value } as any);
 
-        // ben: this is a hack to access the data designer temporarily
+        // holding shift will fork
+      } else {
+        // ben: this is a hack to access the data designer from search (temporarily)
         if (charm.data && charm.query) {
           const eid = run(dataDesigner, {
             data: charm.data,
@@ -237,7 +240,8 @@ export class CommonWindowManager extends LitElement {
           }).entityId!;
           this.openCharm(JSON.stringify(eid));
         }
-      } else {
+
+        // pass data forward to new charm
         const charmValues = charm;
         let fieldsToInclude = Object.entries(charmValues).reduce(
           (acc, [key, value]) => {
@@ -261,6 +265,7 @@ export class CommonWindowManager extends LitElement {
         this.openCharm(JSON.stringify(eid));
       }
     } else {
+      // there is no existing data
       const eid = run(iframe, {
         data: {},
         title: value,
@@ -276,11 +281,6 @@ export class CommonWindowManager extends LitElement {
   @state() location: string = "Home";
 
   @state() sidebarTab: string = "prompt";
-  @state() prompt: string = "";
-  @state() data: string = "";
-  @state() src: string = "";
-  @state() schema: string = "";
-  @state() query: string = "";
   @state() suggestions: any[] = [];
 
   subscriptions: ((() => void) | undefined)[] = [];
