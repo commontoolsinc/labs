@@ -28,15 +28,21 @@ export class OsCharmChip extends LitElement {
           width: 100%;
         }
       }
+
+      .highlight os-charm-icon {
+        border-radius: var(--radius);
+        outline: 2px solid black;
+      }
     `,
   ];
 
   @property({ type: String }) text = "";
   @property({ type: String }) icon = "";
+  @property({ type: Boolean }) highlight = false;
 
   override render() {
     return html`
-      <div class="os-charm-chip">
+      <div class="os-charm-chip ${this.highlight ? "highlight" : ""}">
         <os-charm-icon icon="${this.icon}"></os-charm-icon>
         <div class="os-charm-chip--text sm">${this.text}</div>
       </div>

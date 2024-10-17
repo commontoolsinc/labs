@@ -19,6 +19,83 @@ import { dataDesigner } from "../recipes/dataDesigner.js";
 import { matchRoute, navigate } from "../router.js";
 import { watchCell } from "../watchCell.js";
 
+@customElement("os-charm-chip-wrapper")
+export class CharmChipWrapper extends LitElement {
+  static override styles = css`
+    :host {
+      position: relative;
+      display: inline-block;
+    }
+    .close-button {
+      position: absolute;
+      top: -5px;
+      right: -5px;
+      width: 16px;
+      height: 16px;
+      background-color: #ff4444;
+      color: white;
+      border: none;
+      border-radius: 50%;
+      font-size: 12px;
+      line-height: 1;
+      cursor: pointer;
+      z-index: 1;
+    }
+    .badge {
+      position: absolute;
+      top: -5px;
+      left: -5px;
+      background-color: #4444ff;
+      color: white;
+      border-radius: 50%;
+      padding: 2px 5px;
+      font-size: 10px;
+      z-index: 1;
+    }
+  `;
+
+  @property({ type: Number })
+  override id: number = 0;
+
+  override render() {
+    return html`
+      <div>
+        <button class="close-button" @click=${this.handleClose}>×</button>
+        <span class="badge">${this.id}</span>
+        <slot></slot>
+      </div>
+    `;
+  }
+
+  handleClose(e: Event) {
+    e.stopPropagation();
+    this.dispatchEvent(
+      new CustomEvent("close", { bubbles: true, composed: true }),
+    );
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    window.addEventListener("keydown", this.handleKeyPress);
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    window.removeEventListener("keydown", this.handleKeyPress);
+  }
+
+  private handleKeyPress = (e: KeyboardEvent) => {
+    if (e.key === this.id.toString()) {
+      this.dispatchEvent(
+        new MouseEvent("click", {
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    }
+  };
+}
+
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
   static override styles = [
@@ -231,6 +308,7 @@ export class CommonWindowManager extends LitElement {
     const onSearchSubmit = (event: CustomEvent) => {
       console.log("Search submitted:", event.detail.value);
       this.searchOpen = false;
+      this.input = "";
       const charm = run(search, {
         search: event.detail.value,
       });
@@ -288,17 +366,13 @@ export class CommonWindowManager extends LitElement {
                   this.searchOpen = false;
                 };
 
-                return html`
-                  <os-charm-chip
-                    icon=${charm.getAsProxy().icon || "search"}
-                    text=${(charm.getAsProxy()[NAME] || "Untitled") +
-                    (JSON.stringify(charm.entityId) ===
-                    JSON.stringify(this.focusedCharm?.entityId)
-                      ? " (current)"
-                      : "")}
-                    @click=${onNavigate}
-                  ></os-charm-chip>
-                `;
+                return html` <os-charm-chip
+                  icon=${charm.getAsProxy().icon || "search"}
+                  text=${charm.getAsProxy()[NAME] || "Untitled"}
+                  .highlight=${JSON.stringify(charm.entityId) ===
+                  JSON.stringify(this.focusedCharm?.entityId)}
+                  @click=${onNavigate}
+                ></os-charm-chip>`;
               },
             )}
           </os-charm-chip-group>
