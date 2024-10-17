@@ -1,3 +1,4 @@
+import "../../common-os-ui/src/static/main.css";
 export { components } from "@commontools/common-ui";
 export { fab } from "@commontools/common-os-ui";
 import { run, CellImpl } from "@commontools/common-runner";
@@ -5,7 +6,6 @@ import { CommonWindowManager } from "./components/window-manager.js";
 export { components as myComponents } from "./components.js";
 import { charms, recipes, openCharm, type Charm } from "./data.js";
 import { home } from "./recipes/home.js";
-import "../../common-os-ui/src/static/main.css";
 import "./router.js";
 
 document.addEventListener("DOMContentLoaded", () => {
