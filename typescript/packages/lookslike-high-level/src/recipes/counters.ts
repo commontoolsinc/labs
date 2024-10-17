@@ -9,7 +9,11 @@ const updateRandomItem = handler<
   {},
   { items: { title: string; count: number }[] }
 >(({}, state) => {
-  state.items[Math.floor(Math.random() * state.items.length)].count += 1;
+  // TODO(ja): if a handler throws an exception recipes
+  // seems to stop updating / future handlers are not called.
+  if (state.items.length > 0) {
+    state.items[Math.floor(Math.random() * state.items.length)].count += 1;
+  }
 });
 
 const addItem = handler<{}, { items: { title: string; count: number }[] }>(
