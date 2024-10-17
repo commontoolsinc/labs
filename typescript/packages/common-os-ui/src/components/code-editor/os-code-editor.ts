@@ -74,7 +74,7 @@ export const createEditor = ({
 
 @customElement("os-code-editor")
 export class OsCodeEditor extends ReactiveElement {
-  static styles = [
+  static override styles = [
     css`
       :host {
         display: block;
@@ -100,7 +100,7 @@ export class OsCodeEditor extends ReactiveElement {
   source = "";
 
   @property({ type: String })
-  lang = MimeType.markdown;
+  language = MimeType.markdown;
 
   get editor(): EditorState | undefined {
     return this.#editorView?.state;
@@ -110,7 +110,7 @@ export class OsCodeEditor extends ReactiveElement {
     this.#editorView?.setState(state);
   }
 
-  protected firstUpdated(changedProperties: PropertyValues): void {
+  protected override firstUpdated(changedProperties: PropertyValues): void {
     super.firstUpdated(changedProperties);
     // Set up skeleton
     // - #editor is managed by ProseMirror
@@ -128,12 +128,12 @@ export class OsCodeEditor extends ReactiveElement {
     this.destroy.add(() => this.#editorView?.destroy());
   }
 
-  protected updated(changedProperties: PropertyValues): void {
+  protected override updated(changedProperties: PropertyValues): void {
     if (changedProperties.has("source")) {
       replaceSourceIfNeeded(this.#editorView!, this.source);
     }
     if (changedProperties.has("lang")) {
-      const lang = getLangExtFromMimeType(this.lang);
+      const lang = getLangExtFromMimeType(this.language);
       this.#editorView?.dispatch({
         effects: this.#lang.reconfigure(lang),
       });
