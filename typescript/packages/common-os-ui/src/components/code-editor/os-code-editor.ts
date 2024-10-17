@@ -4,8 +4,8 @@ import { basicSetup, EditorView } from "codemirror";
 import { EditorState, Compartment } from "@codemirror/state";
 import { javascript } from "@codemirror/lang-javascript";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { createStore, Store, ValueMsg, FxDriver } from "../../shared/store";
-import { createCleanupGroup } from "../../shared/cleanup.js";
+import { createStore, Store, ValueMsg, FxDriver } from "../../shared/store.js";
+import { createCancelGroup } from "../../shared/cancel.js";
 
 const freeze = Object.freeze;
 
@@ -41,14 +41,33 @@ export const model = ({
     text,
   });
 
-export const update = (state: Model, msg: Msg): Model => {
+export const update = (state: Model, _msg: Msg): Model => {
   return state;
 };
 
 export const createFx =
-  (): FxDriver<Model, Msg> => (state: Model, msg: Msg) => {
+  (): FxDriver<Model, Msg> => (_state: Model, _msg: Msg) => {
     return [];
   };
+
+export const createEditor = ({ element }: { element: HTMLElement }) => {
+  const language = new Compartment();
+  const tabSize = new Compartment();
+
+  const state = EditorState.create({
+    extensions: [
+      basicSetup,
+      oneDark,
+      language.of(javascript()),
+      tabSize.of(EditorState.tabSize.of(4)),
+    ],
+  });
+
+  return new EditorView({
+    state,
+    parent: element,
+  });
+};
 
 @customElement("os-code-editor")
 export class OsCodeEditor extends HTMLElement {
@@ -61,11 +80,15 @@ export class OsCodeEditor extends HTMLElement {
       .code-editor {
         display: block;
       }
+
+      .cm-editor.cm-focused {
+        outline: none;
+      }
     `,
   ];
 
   #shadow: ShadowRoot;
-  #destroy = createCleanupGroup();
+  destroy = createCancelGroup();
   #store: Store<Model, Msg>;
   #editorView: EditorView;
 
@@ -87,24 +110,12 @@ export class OsCodeEditor extends HTMLElement {
       update,
     });
     const cleanupRender = this.#store.sink(() => {});
-    this.#destroy.add(cleanupRender);
+    this.destroy.add(cleanupRender);
 
-    const language = new Compartment();
-    const tabSize = new Compartment();
-
-    const state = EditorState.create({
-      extensions: [
-        basicSetup,
-        oneDark,
-        language.of(javascript()),
-        tabSize.of(EditorState.tabSize.of(4)),
-      ],
+    this.#editorView = createEditor({
+      element: editorRoot,
     });
-
-    this.#editorView = new EditorView({
-      state,
-      parent: editorRoot,
-    });
+    this.destroy.add(() => this.#editorView.destroy());
   }
 
   render() {}
