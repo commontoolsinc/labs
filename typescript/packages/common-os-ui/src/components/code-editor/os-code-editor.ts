@@ -1,66 +1,69 @@
-import { css, html, render, adoptStyles } from "lit";
-import { customElement } from "lit/decorators.js";
+import { css, html, render, ReactiveElement, PropertyValues } from "lit";
+import { customElement, property } from "lit/decorators.js";
 import { basicSetup, EditorView } from "codemirror";
-import { EditorState, Compartment } from "@codemirror/state";
-import { javascript } from "@codemirror/lang-javascript";
+import { EditorState, Compartment, Extension } from "@codemirror/state";
+import { LanguageSupport } from "@codemirror/language";
+import { javascript as createJavaScript } from "@codemirror/lang-javascript";
+import { markdown as createMarkdown } from "@codemirror/lang-markdown";
+import { css as createCss } from "@codemirror/lang-css";
+import { html as creatHtml } from "@codemirror/lang-html";
+import { json as createJson } from "@codemirror/lang-json";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { createStore, Store, ValueMsg, FxDriver } from "../../shared/store.js";
+import { replaceSourceIfNeeded } from "./codemirror/utils.js";
 import { createCancelGroup } from "../../shared/cancel.js";
 
 const freeze = Object.freeze;
 
-export const MimeTypes = freeze({
+export const MimeType = freeze({
   css: "text/css",
   html: "text/html",
   javascript: "text/javascript",
+  jsx: "text/x.jsx",
   typescript: "text/x.typescript",
   json: "application/json",
   markdown: "text/markdown",
 } as const);
 
-export type MimeType = (typeof MimeTypes)[keyof typeof MimeTypes];
+export type MimeType = (typeof MimeType)[keyof typeof MimeType];
 
-export type SetText = ValueMsg<"setText", string>;
+export const langRegistry = new Map<MimeType, LanguageSupport>();
+const markdownLang = createMarkdown({
+  defaultCodeLanguage: createJavaScript({ jsx: true }),
+});
+const defaultLang = markdownLang;
 
-export type Msg = SetText;
+langRegistry.set(MimeType.javascript, createJavaScript());
+langRegistry.set(
+  MimeType.jsx,
+  createJavaScript({
+    jsx: true,
+  }),
+);
+langRegistry.set(
+  MimeType.typescript,
+  createJavaScript({
+    jsx: true,
+    typescript: true,
+  }),
+);
+langRegistry.set(MimeType.css, createCss());
+langRegistry.set(MimeType.html, creatHtml());
+langRegistry.set(MimeType.markdown, markdownLang);
+langRegistry.set(MimeType.json, createJson());
 
-export type Model = {
-  lang: MimeType;
-  text: string;
+export const getLangExtFromMimeType = (mime: MimeType) => {
+  return langRegistry.get(mime) ?? defaultLang;
 };
 
-export const model = ({
-  lang = MimeTypes.javascript,
-  text = "",
+export const createEditor = ({
+  element,
+  extensions = [],
 }: {
-  lang?: MimeType;
-  text?: string;
-}): Model =>
-  freeze({
-    lang,
-    text,
-  });
-
-export const update = (state: Model, _msg: Msg): Model => {
-  return state;
-};
-
-export const createFx =
-  (): FxDriver<Model, Msg> => (_state: Model, _msg: Msg) => {
-    return [];
-  };
-
-export const createEditor = ({ element }: { element: HTMLElement }) => {
-  const language = new Compartment();
-  const tabSize = new Compartment();
-
+  element: HTMLElement;
+  extensions?: Array<Extension>;
+}) => {
   const state = EditorState.create({
-    extensions: [
-      basicSetup,
-      oneDark,
-      language.of(javascript()),
-      tabSize.of(EditorState.tabSize.of(4)),
-    ],
+    extensions: [basicSetup, oneDark, ...extensions],
   });
 
   return new EditorView({
@@ -70,7 +73,7 @@ export const createEditor = ({ element }: { element: HTMLElement }) => {
 };
 
 @customElement("os-code-editor")
-export class OsCodeEditor extends HTMLElement {
+export class OsCodeEditor extends ReactiveElement {
   static styles = [
     css`
       :host {
@@ -87,36 +90,45 @@ export class OsCodeEditor extends HTMLElement {
     `,
   ];
 
-  #shadow: ShadowRoot;
+  #editorView: EditorView | undefined = undefined;
+  #lang = new Compartment();
+  #tabSize = new Compartment();
+
   destroy = createCancelGroup();
-  #store: Store<Model, Msg>;
-  #editorView: EditorView;
 
-  constructor() {
-    super();
-    // Set up shadow and styles
-    this.#shadow = this.attachShadow({ mode: "closed" });
-    adoptStyles(this.#shadow, OsCodeEditor.styles);
+  @property({ type: String })
+  source = "";
 
+  @property({ type: String })
+  lang = MimeType.markdown;
+
+  protected firstUpdated(changedProperties: PropertyValues): void {
+    super.firstUpdated(changedProperties);
     // Set up skeleton
     // - #editor is managed by ProseMirror
     // - #reactive is rendered via Lit templates and driven by store updates
-    render(html`<div id="editor" class="code-editor"></div>`, this.#shadow);
-
-    const editorRoot = this.#shadow.querySelector("#editor") as HTMLElement;
-
-    this.#store = createStore({
-      state: model({}),
-      update,
-    });
-    const cleanupRender = this.#store.sink(() => {});
-    this.destroy.add(cleanupRender);
+    render(html`<div id="editor" class="code-editor"></div>`, this.renderRoot);
+    const editorRoot = this.renderRoot.querySelector("#editor") as HTMLElement;
 
     this.#editorView = createEditor({
       element: editorRoot,
+      extensions: [
+        this.#lang.of(defaultLang),
+        this.#tabSize.of(EditorState.tabSize.of(4)),
+      ],
     });
-    this.destroy.add(() => this.#editorView.destroy());
+    this.destroy.add(() => this.#editorView?.destroy());
   }
 
-  render() {}
+  protected updated(changedProperties: PropertyValues): void {
+    if (changedProperties.has("source")) {
+      replaceSourceIfNeeded(this.#editorView!, this.source);
+    }
+    if (changedProperties.has("lang")) {
+      const lang = getLangExtFromMimeType(this.lang);
+      this.#editorView?.dispatch({
+        effects: this.#lang.reconfigure(lang),
+      });
+    }
+  }
 }
