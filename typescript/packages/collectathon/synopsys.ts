@@ -15,14 +15,18 @@ export async function clipEmail(
   sender: string,
   collections: string[],
   entity: any,
+  entityCid?: string,
 ) {
   entity["import/sender"] = sender;
   entity["import/source"] = "Email";
   entity["import/tool"] = "ingest";
   entity["import/time"] = new Date().toISOString();
 
-  const entityCid = await cid(entity);
-  const entityFacts = await jsonToFacts(entity);
+  if (!entityCid) {
+    entityCid = await cid(entity);
+  }
+
+  const entityFacts = await jsonToFacts(entity, { "/": entityCid } as Entity);
 
   const collectionsFacts = await Promise.all(
     collections.map(async (collectionName) => {
