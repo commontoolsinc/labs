@@ -330,7 +330,7 @@ export class CommonWindowManager extends LitElement {
       console.log("Suggestion selected:", prompt, behavior);
       this.handleUniboxSubmit(
         new CustomEvent("submit", {
-          detail: { value: prompt, behavior, shiftKey: true },
+          detail: { value: prompt, behavior, shiftKey: behavior === "fork" },
         }),
       );
     };
