@@ -102,6 +102,14 @@ export class OsCodeEditor extends ReactiveElement {
   @property({ type: String })
   lang = MimeType.markdown;
 
+  get editor(): EditorState | undefined {
+    return this.#editorView?.state;
+  }
+
+  set editor(state: EditorState) {
+    this.#editorView?.setState(state);
+  }
+
   protected firstUpdated(changedProperties: PropertyValues): void {
     super.firstUpdated(changedProperties);
     // Set up skeleton
