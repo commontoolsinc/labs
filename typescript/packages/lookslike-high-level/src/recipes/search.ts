@@ -120,7 +120,9 @@ const generateFlexibleQuery = lift(
         ]),
       });
     }
-    // where.push({ Match: ["?value", "text/like", query.trim()] });
+    // where.push({
+    //   Match: [{ text: "?value", pattern: "email*" }, "text/like"],
+    // });
 
     return {
       select,

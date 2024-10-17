@@ -3,7 +3,9 @@ import { recipe, lift, NAME, UI } from "@commontools/common-builder";
 import { Charm, RecipeManifest } from "../data.js";
 
 const getCharmsWithNameAndUI = lift<Charm[], { charm: Charm }[]>((charms) =>
-  charms.filter((charm) => charm[UI] && charm[NAME]).map((charm) => ({ charm }))
+  charms
+    .filter((charm) => charm[UI] && charm[NAME])
+    .map((charm) => ({ charm })),
 );
 
 export const home = recipe<{
@@ -11,12 +13,13 @@ export const home = recipe<{
   recipes: RecipeManifest[];
 }>("home screen", ({ charms, recipes }) => {
   return {
+    [NAME]: "Home",
     [UI]: html`<common-vstack
       >${getCharmsWithNameAndUI(charms).map(
         ({ charm }) =>
           html`<div>
             <common-charm-link $charm=${charm}></common-charm-link>
-          </div>`
+          </div>`,
       )}
       ${recipes.map(
         (recipe) =>
@@ -24,7 +27,7 @@ export const home = recipe<{
             <common-recipe-link recipe=${recipe.recipeId}>
               👨‍🍳 ${recipe.name}</common-recipe-link
             >
-          </div>`
+          </div>`,
       )}
       <common-annotation-toggle />
       <common-annotation

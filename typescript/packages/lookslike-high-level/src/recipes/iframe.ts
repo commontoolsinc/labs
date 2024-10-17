@@ -188,6 +188,19 @@ const prepHTML = lift(({ prompt, schema, lastSrc }) => {
 
     You may not use any other libraries unless requested by the user (in which case, use a CDN to import them)
 
+    If you would like to use generated images use the following URL: \`https://ct-img.m4ke.workers.dev/?prompt=<URL_ENCODED_PROMPT>\`
+
+    You can make a call to an LLM by POSTing to \`http://localhost:5173/api/llm\` with the following payload:
+
+    \`\`\`json
+    {
+      messages: Array<{ role: string; content: string }>;
+      system: string;
+      model: "claude-3-5-sonnet-20240620";
+      stop?: string;
+    };
+    \`\`\`
+
     The document can and should make use of postMessage to read and write data from the host context. e.g.
 
     document.addEventListener('DOMContentLoaded', function() {
