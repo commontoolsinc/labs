@@ -16,7 +16,7 @@ export class OsContainer extends LitElement {
       .container {
         max-width: var(--container-width);
         margin: 0 auto;
-        padding: var(--pad);
+        padding: 0 var(--pad);
       }
     `,
   ];

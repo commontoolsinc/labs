@@ -22,7 +22,7 @@ import {
   Store,
   ValueMsg,
 } from "../../shared/store.js";
-import { createCleanupGroup } from "../../shared/cleanup.js";
+import { createCancelGroup } from "../../shared/cancel.js";
 import { TemplateResult } from "lit";
 import { classes, on } from "../../shared/dom.js";
 import { ClickCompletion } from "../os-floating-completions.js";
@@ -308,7 +308,7 @@ export class OsRichTextEditor extends HTMLElement {
     `,
   ];
 
-  #destroy = createCleanupGroup();
+  destroy = createCancelGroup();
   #store: Store<Model, Msg>;
   #editorView: EditorView;
   #reactiveRoot: HTMLElement;
@@ -343,7 +343,7 @@ export class OsRichTextEditor extends HTMLElement {
       element: editorRoot,
       send: (msg: Msg) => this.#store.send(msg),
     });
-    this.#destroy.add(() => {
+    this.destroy.add(() => {
       this.#editorView.destroy();
     });
 
@@ -352,7 +352,7 @@ export class OsRichTextEditor extends HTMLElement {
       const event = new EditorStateChangeEvent(this.#editorView.state);
       this.dispatchEvent(event);
     });
-    this.#destroy.add(offInput);
+    this.destroy.add(offInput);
 
     // Create fx driver
     const fx = createFx({
@@ -368,11 +368,11 @@ export class OsRichTextEditor extends HTMLElement {
     });
 
     // Drive #reactive renders via store changes
-    const cleanupRender = this.#store.sink(() => {
+    const cancelRender = this.#store.sink(() => {
       // Wire up reactive rendering
       render(this.render(), this.#reactiveRoot);
     });
-    this.#destroy.add(cleanupRender);
+    this.destroy.add(cancelRender);
   }
 
   get editor() {
