@@ -281,6 +281,15 @@ const dots = lift<{ pending: boolean; partial?: string }, string>(
   },
 );
 
+const progress = lift<{ pending: boolean; partial?: string }, number>(
+  ({ pending, partial }) => {
+    if (!partial || !pending) {
+      return 0;
+    }
+    return Math.min(partial.length / 8096.0, 1);
+  },
+);
+
 const buildTransformPrompt = lift(({ prompt, data }) => {
   let fullPrompt = prompt;
   if (data) {
@@ -366,9 +375,7 @@ export const iframe = recipe<{
           src=${grabHTML({ result })}
           $context=${data}
         ></common-iframe>`,
-        html`<pre style="padding: 32px; color: #ccc; text-align: center;">
-  ${dots({ partial: partialHTML, pending: pendingHTML })}</pre
-        >`,
+        html`<ascii-art-loading-animation progress=${progress({ partial: partialHTML, pending: pendingHTML })}>`,
       )}
     </div>`,
     icon: "preview",
