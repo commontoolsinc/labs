@@ -1,4 +1,3 @@
-import { html } from "@commontools/common-html";
 import {
   recipe,
   UI,
@@ -9,6 +8,7 @@ import {
   ifElse,
 } from "@commontools/common-builder";
 import { streamData } from "@commontools/common-builder";
+import { h, Fragment } from "../jsx";
 
 const ensureArray = lift(({ data }: { data: any }) => {
   if (!data) return [];
@@ -197,39 +197,39 @@ export const search = recipe<{ search: string }>(
 
     return {
       [NAME]: search,
-      [UI]: html`<div>
-        ${ifElse(
+      [UI]: <div>
+        {ifElse(
           result,
-          html`<div>
+          <div>
             <os-container>
               <os-colgrid>
-                ${entries.map(({ row }) => {
-                  return html`<os-tile style="aspect-ratio: 1/1;">
+                {entries.map(({ row }) => {
+                  return <os-tile style="aspect-ratio: 1/1;">
                     <div
                       style="width: 100%; height: 100%; overflow-y: auto; box-sizing: border-box; overflow-x: hidden; border-radius: 2px; padding: 8px; font-size: 0.8rem;  font-family: monospace;"
                     >
-                      ${row.map(
+                      {row.map(
                         ({ k, v }) =>
-                          html`<div style="">
+                          <div style="">
                             <div
                               style="font-weight: bold; color: #999; font-size: 0.6rem; height: 16px;"
                             >
-                              ${truncate({ text: k, length: 32 })}
+                              {truncate({ text: k, length: 32 })}
                             </div>
                             <div style="padding: 2px;">
-                              ${truncate({ text: v, length: 24 })}
+                              {truncate({ text: v, length: 24 })}
                             </div>
-                          </div>`,
+                          </div>
                       )}
                     </div>
-                  </os-tile>`;
+                  </os-tile>;
                 })}
               </os-colgrid>
             </os-container>
-          </div>`,
-          html`<div>Loading...</div>`,
+          </div>,
+          <div>Loading...</div>,
         )}
-      </div>`,
+      </div>,
       result,
       // collections,
       data: exportedData,

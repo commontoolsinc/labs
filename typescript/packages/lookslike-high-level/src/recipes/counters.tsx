@@ -1,14 +1,14 @@
-import { html } from "@commontools/common-html";
 import { recipe, NAME, UI, handler, lift } from "@commontools/common-builder";
+import { h, Fragment } from "../jsx.js";
 
-const inc = handler<{}, { count: number }>(({}, state) => {
+const inc = handler<{}, { count: number }>(({ }, state) => {
   state.count += 1;
 });
 
 const updateRandomItem = handler<
   {},
   { items: { title: string; count: number }[] }
->(({}, state) => {
+>(({ }, state) => {
   // TODO(ja): if a handler throws an exception recipes
   // seems to stop updating / future handlers are not called.
   if (state.items.length > 0) {
@@ -17,7 +17,7 @@ const updateRandomItem = handler<
 });
 
 const addItem = handler<{}, { items: { title: string; count: number }[] }>(
-  ({}, state) => {
+  ({ }, state) => {
     state.items.push({ title: `item ${state.items.length + 1}`, count: 0 });
   }
 );
@@ -30,26 +30,25 @@ export const counters = recipe<{ items: { title: string; count: number }[] }>(
   "counters",
   ({ items }) => {
     items.setDefault([]);
-    //items.setDefault([{ title: "item 1", count: 0 }, { title: "item 2", count: 0 }]);
 
     const total = sum({ items });
 
     return {
       [NAME]: "counters",
-      [UI]: html`<div>
+      [UI]: <div>
         <ul>
-          ${items.map(
+          {items.map(
             ({ title, count }) =>
-              html`<li>
-                ${title} - ${count}
-                <button onclick=${inc({ count })}>Inc</button>
-              </li>`
+              <li>
+                {title} - {count}
+                <button onclick={inc({ count })}>Inc</button>
+              </li>
           )}
         </ul>
-        <p>Total: ${total}</p>
-        <button onclick=${updateRandomItem({ items })}>Inc random item</button>
-        <button onclick=${addItem({ items })}>Add new item</button>
-      </div>`,
+        <p>Total: {total}</p>
+        <button onclick={updateRandomItem({ items })}>Inc random item</button>
+        <button onclick={addItem({ items })}>Add new item</button>
+      </div>,
     };
   }
 );

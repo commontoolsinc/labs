@@ -1,4 +1,3 @@
-import { html } from "@commontools/common-html";
 import {
   recipe,
   UI,
@@ -12,6 +11,7 @@ import {
 } from "@commontools/common-builder";
 import { z } from "zod";
 import { truncateAsciiArt } from "../loader.js";
+import { h } from "../jsx.js";
 
 const stringify = lift(({ obj }) => {
   return JSON.stringify(obj, null, 2);
@@ -318,16 +318,16 @@ export const iframe = recipe<{
 
   return {
     [NAME]: str`${title} UI`,
-    [UI]: html`<div style="height: 100%">
-      ${ifElse(
+    [UI]: <div style="height: 100%">
+      {ifElse(
         grabHTML({ result }),
-        html`<common-iframe
-          src=${grabHTML({ result })}
-          $context=${data}
-        ></common-iframe>`,
-        html`<common-ascii-loader progress=${progress({ partial: partialHTML, pending: pendingHTML })}>`,
+        <common-iframe
+          src={grabHTML({ result })}
+          $context={data}
+        ></common-iframe>,
+        <common-ascii-loader progress={progress({ partial: partialHTML, pending: pendingHTML })} />,
       )}
-    </div>`,
+    </div>,
     icon: "preview",
     prompt,
     title,

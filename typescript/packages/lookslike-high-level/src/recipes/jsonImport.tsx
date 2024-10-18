@@ -1,4 +1,3 @@
-import { html } from "@commontools/common-html";
 import {
   recipe,
   UI,
@@ -9,6 +8,7 @@ import {
   cell,
   createJsonSchema,
 } from "@commontools/common-builder";
+import { h } from "../jsx.js";
 
 const formatData = lift(({ obj }) => {
   console.log("stringify", obj);
@@ -78,19 +78,18 @@ export const jsonImporter = recipe<{
 
   return {
     [NAME]: str`${title}`,
-    [UI]: html`<os-container>
+    [UI]: <os-container>
         <common-input
-          value=${collection}
+          value={collection}
           placeholder="collection"
-          oncommon-input=${updateValue({ value: collection })}
+          oncommon-input={updateValue({ value: collection })}
         ></common-input>
-        <button onclick=${onSave({ data, collection })}>Save</button>
+        <button onclick={onSave({ data, collection })}>Save</button>
 
-      <common-import oncommon-data=${onData({ data })}>
-      </common-import>
+      <common-import oncommon-data={onData({ data })} />
 
-      <pre>${formatData({ obj: schema })}</pre>
-    </os-container>`,
+      <pre>{formatData({ obj: schema })}</pre>
+    </os-container>,
     title,
     data,
   };

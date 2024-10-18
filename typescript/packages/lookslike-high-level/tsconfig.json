@@ -5,8 +5,12 @@
     "lib": ["es2022", "esnext.array", "esnext", "dom"],
     "outDir": "./",
     "experimentalDecorators": true,
+    "declaration": true,
+    "jsx": "preserve",
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "Fragment",
     "useDefineForClassFields": false
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts", "src/recipes/counters.tsx", "src/recipes/local-search.tsx", "src/recipes/luft-bnb-search.tsx", "src/recipes/playlist.tsx", "src/recipes/prompts.tsx", "src/recipes/dungeon.tsx", "src/recipes/helloIsolated.tsx", "src/recipes/fetchExample.tsx", "src/recipes/jsonImport.tsx", "src/recipes/home.tsx", "src/recipes/iframe.tsx", "src/recipes/counter.tsx", "src/recipes/importCalendar.tsx"],
   "exclude": []
 }

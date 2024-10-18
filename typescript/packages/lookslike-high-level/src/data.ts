@@ -27,7 +27,6 @@ import { iframe } from "./recipes/iframe.js";
 import { search } from "./recipes/search.js";
 import { importCalendar } from "./recipes/importCalendar.js";
 import { dungeon } from "./recipes/dungeon.js";
-import { dataDesigner } from "./recipes/dataDesigner.js";
 import { jsonImporter } from "./recipes/jsonImport.js";
 import { prompt } from "./recipes/prompts.js";
 import { wiki } from "./recipes/wiki.js";
@@ -177,10 +176,6 @@ export const recipes: RecipeManifest[] = [
   {
     name: "JSON Importer",
     recipeId: addRecipe(jsonImporter),
-  },
-  {
-    name: "Data Designer",
-    recipeId: addRecipe(dataDesigner),
   },
   {
     name: "Create a counter",

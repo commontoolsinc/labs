@@ -1,4 +1,3 @@
-import { html } from "@commontools/common-html";
 import {
   recipe,
   UI,
@@ -11,6 +10,7 @@ import {
 } from "@commontools/common-builder";
 import { streamData } from "@commontools/common-builder";
 import { runtimeWorkbench } from "./runtimeWorkbench.js";
+import { h, Fragment } from "../jsx";
 
 const ensureArray = lift(({ data }: { data: any }) => {
   if (!data) return [];
@@ -104,30 +104,30 @@ export const queryCollections = recipe<{ collectionName: string }>("Fetch Collec
 
   return {
     [NAME]: str`Query ${collectionName}`,
-    [UI]: html`<div>
-          <div class="collection-input">
-            <input
-              value=${collectionName}
-              onkeyup=${onInput({ value: collectionName })}
-              type="text"
-              placeholder="Enter collection name"
-            />
+    [UI]: <div>
+      <div class="collection-input">
+        <input
+          value={collectionName}
+          onkeyup={onInput({ value: collectionName })}
+          type="text"
+          placeholder="Enter collection name"
+        />
 
-            <common-button onclick=${generateQuery({ collectionName, query })}>
-              Go
-            </common-button>
-          </div>
+        <common-button onclick={generateQuery({ collectionName, query })}>
+          Go
+        </common-button>
+      </div>
 
-          <p>Number of items: ${dataSize}</p>
-          <pre>${stringify({ obj: normalizedData })}</pre>
-          <details>
-            <summary>Generated Query</summary>
-            <pre>${stringify({ obj: query })}</pre>
-          </details>
-          <common-button onclick=${onWorkbench({ data })}>
-            Open in Workbench
-          </common-button>
-        </div>`,
+      <p>Number of items: ${dataSize}</p>
+      <pre>${stringify({ obj: normalizedData })}</pre>
+      <details>
+        <summary>Generated Query</summary>
+        <pre>${stringify({ obj: query })}</pre>
+      </details>
+      <common-button onclick={onWorkbench({ data })}>
+        Open in Workbench
+      </common-button>
+    </div>,
     result,
     // collections,
     collectionName,
