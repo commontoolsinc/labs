@@ -340,6 +340,8 @@ export class CommonWindowManager extends LitElement {
         locationtitle=${this.location}
         @location=${this.onLocationClicked}
       >
+        <os-avatar slot="toolbar-start" name="Ben"></os-avatar>
+
         <os-dialog .open=${this.searchOpen} @closedialog=${onCloseDialog}>
           <os-ai-box
             @submit=${onSearchSubmit}
