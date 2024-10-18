@@ -73,6 +73,10 @@ class CommonSidebar extends LitElement {
   protected override updated(_changedProperties: PropertyValues): void {
     super.updated(_changedProperties);
 
+    if (!this.homeRef.value) {
+      this.homeCharm = null;
+    }
+
     if (!this.homeCharm && this.homeRef.value) {
       this.homeCharm = run(home, { charms, recipes }) as CellImpl<Charm>;
       const view = this.homeCharm.asSimpleCell<Charm>().key(UI).get();

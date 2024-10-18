@@ -45,12 +45,29 @@ const tryParseJson = lift(({ jsonText }) => {
   }
 });
 
+const onData = handler<CustomEvent, { data: any}>(
+  ({ detail }, state) => {
+    console.log("onData", detail);
+
+    state.data = detail;
+  });
+
+const onSave = handler<MouseEvent, { data: any; collection: string; }>((_, state) => {
+  console.log("onSave", state.data);
+  const ok = confirm(`import "${JSON.stringify(state.data)}" to "${state.collection}"?`)
+  if (ok) {
+    alert("imported")
+  }
+});
+
 export const jsonImporter = recipe<{
   title: string;
+  collection: string;
   data: any;
-}>("json importer", ({ title, data }) => {
+}>("json importer", ({ title, data, collection }) => {
   data.setDefault({ key: 'value' });
   title.setDefault("Untitled JSON Importer");
+  collection.setDefault("inbox");
 
   const schema = deriveJsonSchema({ data });
   const jsonText = cell<string>('{}');
@@ -61,28 +78,19 @@ export const jsonImporter = recipe<{
 
   return {
     [NAME]: str`${title}`,
-    [UI]: html`<div>
-      <common-input
-        value=${title}
-        placeholder="title"
-        oncommon-input=${updateValue({ value: title })}
-      ></common-input>
+    [UI]: html`<os-container>
+        <common-input
+          value=${collection}
+          placeholder="collection"
+          oncommon-input=${updateValue({ value: collection })}
+        ></common-input>
+        <button onclick=${onSave({ data, collection })}>Save</button>
 
-      <pre>${formatData({ obj: json })}</pre>
+      <common-import oncommon-data=${onData({ data })}>
+      </common-import>
 
-      <textarea
-        value=${jsonText}
-        onkeyup=${onInput({ value: jsonText })}
-        style="width: 100%; min-height: 128px;"
-      ></textarea>
-
-      <common-button
-            onclick=${onAcceptData({ json, data })}
-        >Import</common-button>
-
-      <h3>schema</h3>
       <pre>${formatData({ obj: schema })}</pre>
-    </div>`,
+    </os-container>`,
     title,
     data,
   };
