@@ -5,8 +5,12 @@
     "lib": ["es2022", "esnext.array", "esnext", "dom"],
     "outDir": "./",
     "experimentalDecorators": true,
+    "declaration": true,
+    "jsx": "preserve",
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "Fragment",
     "useDefineForClassFields": false
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "include": ["src/**/*.js", "test/**/*.ts"],
   "exclude": []
 }
