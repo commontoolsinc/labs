@@ -1,5 +1,5 @@
-import { html } from "@commontools/common-html";
 import { recipe, NAME, UI } from "@commontools/common-builder";
+import { h, Fragment } from "../jsx";
 
 export const ticket = recipe<{
   title: string;
@@ -7,6 +7,6 @@ export const ticket = recipe<{
   location: string;
   date: string;
 }>("ticket", ({ title, show, location, date }) => ({
-  [UI]: html`<div>Ticket: ${show} in ${location} on ${date}</div>`,
+  [UI]: <div>Ticket: {show} in {location} on {date}</div>,
   [NAME]: title,
 }));

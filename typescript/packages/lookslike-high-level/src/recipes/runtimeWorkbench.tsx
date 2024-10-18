@@ -1,4 +1,3 @@
-import { html } from "@commontools/common-html";
 import {
   recipe,
   NAME,
@@ -7,6 +6,7 @@ import {
   str,
   lift,
 } from "@commontools/common-builder";
+import { h, Fragment } from "../jsx";
 
 const uniqueUrls = isolated<{ data: string }, { result: string }>(
   { data: { tag: "string", val: "[]" } },
@@ -44,11 +44,10 @@ export const runtimeWorkbench = recipe<{ a?: string; b?: string; data: any }>(
 
     return {
       [NAME]: str`${a} ${b}`,
-      [UI]: html`<div>
-        <div>${urls}</div>
-
-        <pre>${stringify({ obj: data })}</pre>
-      </div> `,
+      [UI]: <div>
+        <div>{urls}</div>
+        <pre>{stringify({ obj: data })}</pre>
+      </div>,
       urls: urls,
     };
   }

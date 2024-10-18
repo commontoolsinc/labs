@@ -1,7 +1,7 @@
-import { html } from "@commontools/common-html";
 import { recipe, NAME, UI, handler } from "@commontools/common-builder";
+import { h, Fragment } from "../jsx.js";
 
-const inc = handler<{}, { count: number }>(({}, state) => {
+const inc = handler<{}, { count: number }>(({ }, state) => {
   state.count += 1;
 });
 
@@ -19,15 +19,16 @@ export const counter = recipe<{ title: string; count: number }>(
 
     return {
       [NAME]: title,
-      [UI]: html`<div>
-        <common-input
-          value=${title}
-          placeholder="Name of counter"
-          oncommon-input=${updateValue({ value: title })}
-        ></common-input>
-        <p>${count}</p>
-        <button onclick=${inc({ count })}>Inc</button>
-      </div>`,
+      [UI]:
+        <div>
+          <common-input
+            value={title}
+            placeholder="Name of counter"
+            oncommon-input={updateValue({ value: title })}
+          ></common-input>
+          <p>{count}</p>
+          <button onclick={inc({ count })}>Inc</button>
+        </div>,
       count,
     };
   }

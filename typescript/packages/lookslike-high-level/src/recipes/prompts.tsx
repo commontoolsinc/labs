@@ -1,4 +1,3 @@
-import { html } from "@commontools/common-html";
 import {
   recipe,
   lift,
@@ -10,6 +9,7 @@ import {
 } from "@commontools/common-builder";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { h, Fragment } from "../jsx";
 
 const Prompt = z.object({
   prompt: z.string().describe("Image generation prompt"),
@@ -81,20 +81,20 @@ export const prompt = recipe<{ title: string }>("prompt", ({ title }) => {
 
   return {
     [NAME]: title,
-    [UI]: html`<common-vstack gap="sm">
+    [UI]: <common-vstack gap="sm">
       <common-input
-        value=${title}
+        value={title}
         placeholder="List title"
-        oncommon-input=${updateTitle({ title })}
+        oncommon-input={updateTitle({ title })}
       ></common-input>
-      <img src="${src}}" width="100%" />
+      <img src={src} width="100%" />
       <ul>
-        ${variations.map(
+        {variations.map(
           ({ prompt }) =>
-            html`<li onclick=${launcher({ title: prompt })}>${prompt}</li>`
+            <li onclick={launcher({ title: prompt })}>{prompt}</li>
         )}
       </ul>
-    </common-vstack>`,
+    </common-vstack>,
     title,
     variations,
     addToPrompt: addToPrompt({ title }),
