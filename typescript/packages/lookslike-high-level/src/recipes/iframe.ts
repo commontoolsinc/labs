@@ -375,7 +375,7 @@ export const iframe = recipe<{
           src=${grabHTML({ result })}
           $context=${data}
         ></common-iframe>`,
-        html`<ascii-art-loading-animation progress=${progress({ partial: partialHTML, pending: pendingHTML })}>`,
+        html`<common-ascii-loader progress=${progress({ partial: partialHTML, pending: pendingHTML })}>`,
       )}
     </div>`,
     icon: "preview",
