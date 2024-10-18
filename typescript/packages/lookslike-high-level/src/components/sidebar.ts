@@ -1,10 +1,14 @@
-import { LitElement, html, css } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { LitElement, html, css, PropertyValues } from "lit";
+import { customElement, property } from "lit/decorators.js";
 import { when } from "lit/directives/when.js";
 import { style } from "@commontools/common-ui";
-import { Charm, UI, addCharms } from "../data.js";
-import { CellImpl, cell } from "@commontools/common-runner";
+import { Charm, charms, RecipeManifest, recipes, UI } from "../data.js";
+import { CellImpl, cell, run } from "@commontools/common-runner";
 import { watchCell } from "../watchCell.js";
+import { repeat } from "lit/directives/repeat.js";
+import { createRef, ref } from "lit/directives/ref.js";
+import { home } from "../recipes/home.js";
+import { render } from "@commontools/common-html";
 
 @customElement("common-debug")
 class CommonDebug extends LitElement {
@@ -37,8 +41,11 @@ class CommonSidebar extends LitElement {
   @property({ type: Object })
   focusedProxy: Charm | null = null;
 
-  @state()
-  private sidebarTab: string = "prompt";
+  @property({ type: String })
+  sidebarTab: string = "home";
+
+  homeRef = createRef<HTMLElement>();
+  homeCharm: CellImpl<Charm> | null = null;
 
   static override styles = [
     style.baseStyles,
@@ -54,6 +61,26 @@ class CommonSidebar extends LitElement {
     this.focusedCharm?.asSimpleCell([field]) ||
     cell(defaultValue).asSimpleCell();
 
+  private handleSidebarTabChange(tabName: string) {
+    const event = new CustomEvent("tab-changed", {
+      detail: { tab: tabName },
+      bubbles: true,
+      composed: true,
+    });
+    this.dispatchEvent(event);
+  }
+
+  protected override updated(_changedProperties: PropertyValues): void {
+    super.updated(_changedProperties);
+
+    if (!this.homeCharm && this.homeRef.value) {
+      this.homeCharm = run(home, { charms, recipes }) as CellImpl<Charm>;
+      const view = this.homeCharm.asSimpleCell<Charm>().key(UI).get();
+      if (!view) throw new Error("Charm has no UI");
+      render(this.homeRef.value, view);
+    }
+  }
+
   override render() {
     const prompt = this.getFieldOrDefault("prompt", "");
     const data = this.getFieldOrDefault("data", {});
@@ -64,44 +91,51 @@ class CommonSidebar extends LitElement {
     const sidebarNav = html`
       <os-icon-button
         slot="toolbar-end"
+        icon="home"
+        @click=${() => this.handleSidebarTabChange("home")}
+      ></os-icon-button>
+      <os-icon-button
+        slot="toolbar-end"
         icon="message"
-        @click=${() => {
-          this.sidebarTab = "prompt";
-        }}
+        @click=${() => this.handleSidebarTabChange("prompt")}
       ></os-icon-button>
       <os-icon-button
         slot="toolbar-end"
         icon="query_stats"
-        @click=${() => {
-          this.sidebarTab = "query";
-        }}
+        @click=${() => this.handleSidebarTabChange("query")}
       ></os-icon-button>
       <os-icon-button
         slot="toolbar-end"
         icon="database"
-        @click=${() => {
-          this.sidebarTab = "data";
-        }}
+        @click=${() => this.handleSidebarTabChange("data")}
       ></os-icon-button>
       <os-icon-button
         slot="toolbar-end"
         icon="code"
-        @click=${() => {
-          this.sidebarTab = "source";
-        }}
+        @click=${() => this.handleSidebarTabChange("source")}
       ></os-icon-button>
       <os-icon-button
         slot="toolbar-end"
         icon="schema"
-        @click=${() => {
-          this.sidebarTab = "schema";
-        }}
+        @click=${() => this.handleSidebarTabChange("schema")}
       ></os-icon-button>
       <os-sidebar-close-button slot="toolbar-end"></os-sidebar-close-button>
     `;
 
     return html`
       <os-navstack>
+        ${when(
+          this.sidebarTab === "home",
+          () =>
+            html`<os-navpanel safearea>
+              ${sidebarNav}
+              <os-sidebar-group>
+                <div slot="label">Pinned</div>
+                <div ${ref(this.homeRef)}></div>
+              </os-sidebar-group>
+            </os-navpanel>`,
+          () => html``,
+        )}
         ${when(
           this.sidebarTab === "query",
           () =>

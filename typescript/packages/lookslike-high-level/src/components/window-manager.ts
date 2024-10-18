@@ -1,9 +1,10 @@
-import { LitElement, html, css } from "lit";
+import { LitElement, html, css, PropertyValues } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
+import { ifDefined } from "lit/directives/if-defined.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
-import { Charm, UI, addCharms } from "../data.js";
+import { Charm, UI, addCharms, recipes } from "../data.js";
 import {
   run,
   CellImpl,
@@ -280,10 +281,9 @@ export class CommonWindowManager extends LitElement {
   @state() searchOpen: boolean = false;
   @state() location: string = "Home";
 
-  @state() sidebarTab: string = "prompt";
+  @state() sidebarTab: string = "home";
+  @state() wideSidebar: boolean = false;
   @state() suggestions: any[] = [];
-
-  subscriptions: ((() => void) | undefined)[] = [];
 
   onLocationClicked(_event: CustomEvent) {
     console.log("Location clicked in app.");
@@ -335,8 +335,17 @@ export class CommonWindowManager extends LitElement {
       );
     };
 
+    const onSidebarTabChanged = (event: CustomEvent) => {
+      this.sidebarTab = event.detail.tab;
+      this.wideSidebar =
+        this.sidebarTab === "source" ||
+        this.sidebarTab === "data" ||
+        this.sidebarTab === "query";
+    };
+
     return html`
       <os-chrome
+        ?wide=${this.wideSidebar}
         locationtitle=${this.location}
         @location=${this.onLocationClicked}
       >
@@ -438,7 +447,10 @@ export class CommonWindowManager extends LitElement {
           <common-sidebar
             .focusedProxy=${this.focusedProxy}
             .focusedCharm=${this.focusedCharm}
-          ></common-sidebar>
+            sidebarTab=${this.sidebarTab}
+            @tab-changed=${onSidebarTabChanged}
+          >
+          </common-sidebar>
         </os-navstack>
       </os-chrome>
     `;
