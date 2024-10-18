@@ -6,19 +6,12 @@ import {
   lift,
   llm,
   handler,
-  navigateTo,
   ifElse,
   str,
-  cell,
   createJsonSchema,
 } from "@commontools/common-builder";
 import { z } from "zod";
 import { truncateAsciiArt } from "../loader.js";
-
-const formatData = lift(({ obj }) => {
-  console.log("stringify", obj);
-  return JSON.stringify(obj, null, 2);
-});
 
 const stringify = lift(({ obj }) => {
   return JSON.stringify(obj, null, 2);
@@ -28,19 +21,10 @@ const tap = lift((x) => {
   console.log(x, JSON.stringify(x, null, 2));
   return x;
 });
-
-const updateValue = handler<{ detail: { value: string } }, { value: string }>(
-  ({ detail }, state) => detail?.value && (state.value = detail.value),
-);
-
 const deriveJsonSchema = lift(({ data }) => {
   const schema = (createJsonSchema({}, data) as any)?.["properties"];
   if (!schema) return {};
   return schema;
-});
-
-const onInput = handler<KeyboardEvent, { value: string }>((input, state) => {
-  state.value = (input.target as HTMLTextAreaElement).value;
 });
 
 const copy = lift(({ value }: { value: any }) => value);
@@ -52,36 +36,6 @@ const addToPrompt = handler<
   state.prompt += "\n" + e.prompt;
   state.lastSrc = state.src;
   state.query = state.prompt;
-});
-
-const acceptSuggestion = handler<
-  void,
-  {
-    suggestion: Suggestion;
-    prompt: string;
-    lastSrc: string;
-    src: string;
-    query: string;
-    data: any;
-  }
->((_, state) => {
-  if (state.suggestion.behaviour === "append") {
-    console.log(state.prompt, state.query, state.suggestion.prompt);
-    state.prompt += "\n" + state.suggestion.prompt;
-    state.lastSrc = state.src;
-    state.query = `${state.prompt}`;
-    return undefined;
-  } else if (state.suggestion.behaviour === "fork") {
-    return navigateTo(
-      iframe({
-        data: state.data,
-        title: state.suggestion.prompt,
-        prompt: state.suggestion.prompt,
-      }),
-    );
-  } else {
-    return undefined;
-  }
 });
 
 const Suggestion = z.object({
@@ -362,10 +316,6 @@ export const iframe = recipe<{
     llm(prepSuggestions({ src: grabHTML({ result }), prompt, schema })),
   );
 
-  let firstSuggestion = getSuggestion({ suggestions, index: 0 });
-  let secondSuggestion = getSuggestion({ suggestions, index: 1 });
-  let thirdSuggestion = getSuggestion({ suggestions, index: 2 });
-
   return {
     [NAME]: str`${title} UI`,
     [UI]: html`<div style="height: 100%">
@@ -389,34 +339,3 @@ export const iframe = recipe<{
     addToPrompt: addToPrompt({ prompt, src, lastSrc, query }),
   };
 });
-
-/**
-
-<details>
-  <summary>View Data</summary>
-  <common-input
-    value=${filter}
-    placeholder="Filter keys (comma-separated)"
-    oncommon-input=${updateValue({ value: filter })}
-  ></common-input>
-  <pre>${formatData({ obj: data })}</pre>
-  <details>
-    <summary>Derived Schema</summary>
-    <pre>${formatData({ obj: schema })}</pre>
-  </details>
-</details>
-<details>
-  <summary>Edit Source</summary>
-  <textarea
-    value=${query}
-    onkeyup=${onInput({ value: query })}
-    style="width: 100%; min-height: 128px;"
-  ></textarea>
-  <textarea
-    value=${src}
-    onkeyup=${onInput({ value: src })}
-    style="width: 100%; min-height: 192px;"
-  ></textarea>
-</details>
-
-*/

@@ -1,16 +1,14 @@
-import { LitElement, html, css, PropertyValues } from "lit";
+import { LitElement, html, css, } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
-import { ifDefined } from "lit/directives/if-defined.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
-import { Charm, UI, addCharms, recipes } from "../data.js";
+import { Charm, UI, addCharms} from "../data.js";
 import {
   run,
   CellImpl,
   isCell,
   getCellByEntityId,
-  cell,
 } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
