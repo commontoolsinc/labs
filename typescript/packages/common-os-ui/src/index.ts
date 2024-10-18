@@ -19,3 +19,4 @@ export * as dialog from "./components/os-dialog.js";
 export * as richTextEditor from "./components/editor/os-rich-text-editor.js";
 export * as codeEditor from "./components/code-editor/os-code-editor.js";
 export * as floatingCompletions from "./components/os-floating-completions.js";
+export * as avatar from "./components/os-avatar.js";

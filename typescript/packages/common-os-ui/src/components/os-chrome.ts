@@ -139,7 +139,9 @@ export class OsChrome extends LitElement {
         </div>
         <section class="chrome-main">
           <nav class="chrome-main-toolbar toolbar pad-h">
-            <div class="toolbar-start"></div>
+            <div class="toolbar-start">
+              <slot name="toolbar-start"></slot>
+            </div>
             <div class="toolbar-center">
               <os-location
                 @click=${onLocationClick}
