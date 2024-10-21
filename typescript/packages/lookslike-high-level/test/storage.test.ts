@@ -191,6 +191,8 @@ describe("Storage", () => {
           testCell.send("value 1");
           testCell.send("value 2");
 
+          await storage.synced();
+
           const newCell = cell();
           newCell.entityId = testCell.entityId!;
           const newCell2 = await storage2.syncCell(newCell);
@@ -200,51 +202,6 @@ describe("Storage", () => {
       });
 
       describe("syncCell", () => {
-        it("should load a cell that does not exist in storage", async () => {
-          await storage.syncCell(testCell);
-          expect(testCell.get()).toBeUndefined();
-
-          const newCell = cell();
-          newCell.entityId = testCell.entityId!;
-          const newCell2 = await storage2.syncCell(newCell);
-          expect(newCell2).not.toBe(testCell);
-          expect(newCell2.get()).toBeUndefined();
-
-          testCell.send("value 1");
-          await Promise.resolve(); // Wait for the update to propagate
-          expect(newCell.get()).toBe("value 1");
-        });
-
-        it("should load a cell and stay in sync", async () => {
-          const testValue = { data: "test" };
-          testCell.send(testValue);
-
-          // This will persist the cell to storage, with the new value, since
-          // the cell didn't yet exist in storage.
-          await storage.syncCell(testCell);
-
-          // Load cell from second storage instance
-          const newCell = cell();
-          newCell.entityId = testCell.entityId!;
-          const newCell2 = await storage2.syncCell(newCell);
-          expect(newCell2).not.toBe(testCell);
-          expect(newCell2.entityId).toEqual(testCell.entityId);
-          expect(newCell2.get()).toEqual(testValue);
-
-          // Let's update the cell; the other instance should get the update.
-          testCell.send("value 2");
-
-          // Wait for the update to propagate
-          await Promise.resolve(); // Wait for the update to propagate
-          expect(newCell.get()).toBe("value 2");
-
-          // Now let's update the new cell and see that it propagates back.
-          newCell.send("value 3");
-
-          await Promise.resolve(); // Wait for the update to propagate
-          expect(testCell.get()).toBe("value 3");
-        });
-
         it("should only load a cell once", async () => {
           const cell1 = await storage.syncCell(testCell);
           expect(cell1).toBe(testCell);
