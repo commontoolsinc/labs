@@ -1,21 +1,15 @@
-import { LitElement, html, css, } from "lit";
+import { LitElement, html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
-import { Charm, UI, addCharms} from "../data.js";
-import {
-  run,
-  CellImpl,
-  isCell,
-  getCellByEntityId,
-} from "@commontools/common-runner";
+import { Charm, UI, addCharms, syncCharm } from "../data.js";
+import { run, CellImpl, isCell } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
 import { NAME } from "@commontools/common-builder";
 import { matchRoute, navigate } from "../router.js";
-import { watchCell } from "../watchCell.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -103,16 +97,12 @@ export class CommonWindowManager extends LitElement {
       @keyframes highlight {
         0%,
         100% {
-          box-shadow:
-            0 10px 20px rgba(0, 0, 0, 0.1),
-            0 6px 6px rgba(0, 0, 0, 0.1),
-            0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1),
+            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
         }
         50% {
-          box-shadow:
-            0 0 20px 5px rgba(255, 215, 0, 0.5),
-            0 6px 6px rgba(0, 0, 0, 0.1),
-            0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow: 0 0 20px 5px rgba(255, 215, 0, 0.5),
+            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
         }
       }
       .highlight {
@@ -126,14 +116,14 @@ export class CommonWindowManager extends LitElement {
       }
 
       .empty-state {
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          align-items: center;
-          height: 100%;
-          opacity: 0.25;
-          user-select: none;
-          pointer-events: none;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        height: 100%;
+        opacity: 0.25;
+        user-select: none;
+        pointer-events: none;
       }
     `,
   ];
@@ -160,7 +150,6 @@ export class CommonWindowManager extends LitElement {
         this.focusedCharm
           ?.asSimpleCell(["addToPrompt"])
           .send({ prompt: value } as any);
-
       } else {
         // // ben: this is a hack to access the data designer from search (temporarily)
         // if (charm.data && charm.query) {
@@ -181,7 +170,7 @@ export class CommonWindowManager extends LitElement {
             }
             return acc;
           },
-          {} as any,
+          {} as any
         );
 
         if (charmValues.data) {
@@ -226,9 +215,10 @@ export class CommonWindowManager extends LitElement {
     };
 
     this.focusedCharm
-      ?.asSimpleCell<any>(["suggestions"])
+      ?.asSimpleCell()
+      .key("suggestions")
       ?.sink((suggestions) => {
-        const s = this.focusedProxy?.suggestions?.items;
+        const s = suggestions?.items;
         if (!s) return;
 
         this.suggestions = s;
@@ -260,8 +250,12 @@ export class CommonWindowManager extends LitElement {
       console.log("Suggestion selected:", prompt, behavior);
       this.handleUniboxSubmit(
         new CustomEvent("submit", {
-          detail: { value: "- " + prompt, behavior, shiftKey: behavior === "fork" },
-        }),
+          detail: {
+            value: "- " + prompt,
+            behavior,
+            shiftKey: behavior === "fork",
+          },
+        })
       );
     };
 
@@ -292,7 +286,9 @@ export class CommonWindowManager extends LitElement {
         this.focusedCharm.asSimpleCell(["data"]).send(mergedData);
 
         // Update the title to indicate the merge
-        const newTitle = `${this.focusedProxy?.[NAME] || 'Untitled'} (Merged ${new Date().toISOString()})`;
+        const newTitle = `${
+          this.focusedProxy?.[NAME] || "Untitled"
+        } (Merged ${new Date().toISOString()})`;
         this.focusedCharm.asSimpleCell([NAME]).send(newTitle);
 
         // Refresh the UI
@@ -301,148 +297,150 @@ export class CommonWindowManager extends LitElement {
         const eid = run(iframe, {
           data,
           title: `${new Date().toISOString()}-import`,
-          prompt: 'show in a datatable, use an icon to indicate the data type of each row (by looking at data shape / file extension)',
+          prompt:
+            "show in a datatable, use an icon to indicate the data type of each row (by looking at data shape / file extension)",
         }).entityId!;
         this.openCharm(JSON.stringify(eid));
       }
-    }
+    };
 
     return html`
-    <common-import @common-data=${onImportLocalData}>
-      <os-chrome
-        ?wide=${this.wideSidebar}
-        locationtitle=${this.focusedProxy?.[NAME] || 'Untitled'}
-        @location=${this.onLocationClicked}
-      >
-        <os-avatar slot="toolbar-start" name="Ben"></os-avatar>
+      <common-import @common-data=${onImportLocalData}>
+        <os-chrome
+          ?wide=${this.wideSidebar}
+          locationtitle=${this.focusedProxy?.[NAME] || "Untitled"}
+          @location=${this.onLocationClicked}
+        >
+          <os-avatar slot="toolbar-start" name="Ben"></os-avatar>
 
-        <os-dialog .open=${this.searchOpen} @closedialog=${onCloseDialog}>
-          <os-ai-box
-            @submit=${onSearchSubmit}
-            placeholder="Search or imagine..."
-          ></os-ai-box>
+          <os-dialog .open=${this.searchOpen} @closedialog=${onCloseDialog}>
+            <os-ai-box
+              @submit=${onSearchSubmit}
+              placeholder="Search or imagine..."
+            ></os-ai-box>
 
-          <os-charm-chip-group>
-            ${repeat(
-              this.charms,
-              (charm) => charm.entityId!.toString(),
-              (charm) => {
-                const charmId = charm.entityId!;
+            <os-charm-chip-group>
+              ${repeat(
+                this.charms,
+                (charm) => charm.entityId!.toString(),
+                (charm) => {
+                  const charmId = charm.entityId!;
 
-                // Create a new ref for this charm
-                let charmRef = this.charmRefs.get(JSON.stringify(charmId));
-                if (!charmRef) {
-                  charmRef = createRef<HTMLElement>();
-                  this.charmRefs.set(JSON.stringify(charmId), charmRef);
-                  this.newCharmRefs.push([charm, charmRef]);
+                  // Create a new ref for this charm
+                  let charmRef = this.charmRefs.get(JSON.stringify(charmId));
+                  if (!charmRef) {
+                    charmRef = createRef<HTMLElement>();
+                    this.charmRefs.set(JSON.stringify(charmId), charmRef);
+                    this.newCharmRefs.push([charm, charmRef]);
+                  }
+
+                  const onNavigate = () => {
+                    this.openCharm(JSON.stringify(charmId));
+                    this.searchOpen = false;
+                  };
+
+                  return html` <os-charm-chip
+                    icon=${charm.getAsProxy().icon || "search"}
+                    text=${charm.getAsProxy()[NAME] || "Untitled"}
+                    .highlight=${JSON.stringify(charm.entityId) ===
+                    JSON.stringify(this.focusedCharm?.entityId)}
+                    @click=${onNavigate}
+                  ></os-charm-chip>`;
                 }
+              )}
+            </os-charm-chip-group>
+          </os-dialog>
 
-                const onNavigate = () => {
-                  this.openCharm(JSON.stringify(charmId));
-                  this.searchOpen = false;
-                };
-
-                return html` <os-charm-chip
-                  icon=${charm.getAsProxy().icon || "search"}
-                  text=${charm.getAsProxy()[NAME] || "Untitled"}
-                  .highlight=${JSON.stringify(charm.entityId) ===
-                  JSON.stringify(this.focusedCharm?.entityId)}
-                  @click=${onNavigate}
-                ></os-charm-chip>`;
-              },
+          <os-fabgroup class="pin-br" slot="overlay" @submit=${onAiBoxSubmit}>
+            ${repeat(
+              this.suggestions,
+              (suggestion) => suggestion.prompt,
+              (suggestion) => html`
+                <os-bubble
+                  icon=${suggestion.behavior === "fork" ? "call_split" : "add"}
+                  text=${suggestion.prompt}
+                  @click=${() => onSuggestionsSelected(suggestion)}
+                ></os-bubble>
+              `
             )}
-          </os-charm-chip-group>
-        </os-dialog>
+          </os-fabgroup>
 
-        <os-fabgroup class="pin-br" slot="overlay" @submit=${onAiBoxSubmit}>
-          ${repeat(
-            this.suggestions,
-            (suggestion) => suggestion.prompt,
-            (suggestion) => html`
-              <os-bubble
-                icon=${suggestion.behavior === "fork" ? "call_split" : "add"}
-                text=${suggestion.prompt}
-                @click=${() => onSuggestionsSelected(suggestion)}
-              ></os-bubble>
-            `,
-          )}
-        </os-fabgroup>
-
-        ${this.charms.length === 0 ? html`
-          <div class="empty-state">
-              <div style="display: flex; align-items: center;">
-                <os-ai-icon></os-ai-icon>
-                <p style="margin-left: 10px;">Imagine or import to begin</p>
-              </div>
-          </div>
-        ` : html``}
-
-        ${repeat(
-          this.charms,
-          (charm) => charm.entityId!.toString(),
-          (charm) => {
-            const charmId = charm.entityId!;
-
-            // Create a new ref for this charm
-            let charmRef = this.charmRefs.get(JSON.stringify(charmId));
-            if (!charmRef) {
-              charmRef = createRef<HTMLElement>();
-              this.charmRefs.set(JSON.stringify(charmId), charmRef);
-              this.newCharmRefs.push([charm, charmRef]);
-            }
-
-            const onNavigate = () => {
-              this.openCharm(JSON.stringify(charmId));
-            };
-
-            return html`
-              <div
-                class="window ${JSON.stringify(charm.entityId) !==
-                JSON.stringify(this.focusedCharm?.entityId)
-                  ? "minimized"
-                  : ""}"
-                id="window-${charmId}"
-                data-charm-id="${JSON.stringify(charmId)}"
-              >
-                <div class="window-toolbar">
-                  <h1 class="window-title" @click=${onNavigate}>
-                    ${charm.getAsProxy()[NAME]}
-                  </h1>
-                  <button class="close-button" @click="${this.onClose}">
-                    ×
-                  </button>
+          ${this.charms.length === 0
+            ? html`
+                <div class="empty-state">
+                  <div style="display: flex; align-items: center;">
+                    <os-ai-icon></os-ai-icon>
+                    <p style="margin-left: 10px;">Imagine or import to begin</p>
+                  </div>
                 </div>
-                <div class="charm" ${ref(charmRef)}></div>
-              </div>
-            `;
-          },
-        )}
+              `
+            : html``}
+          ${repeat(
+            this.charms,
+            (charm) => charm.entityId!.toString(),
+            (charm) => {
+              const charmId = charm.entityId!;
 
-        <os-navstack slot="sidebar">
-          <common-sidebar
-            .focusedProxy=${this.focusedProxy}
-            .focusedCharm=${this.focusedCharm}
-            sidebarTab=${this.sidebarTab}
-            @tab-changed=${onSidebarTabChanged}
-          >
-          </common-sidebar>
-        </os-navstack>
-      </os-chrome>
-    </common-import>
+              // Create a new ref for this charm
+              let charmRef = this.charmRefs.get(JSON.stringify(charmId));
+              if (!charmRef) {
+                charmRef = createRef<HTMLElement>();
+                this.charmRefs.set(JSON.stringify(charmId), charmRef);
+                this.newCharmRefs.push([charm, charmRef]);
+              }
+
+              const onNavigate = () => {
+                this.openCharm(JSON.stringify(charmId));
+              };
+
+              return html`
+                <div
+                  class="window ${JSON.stringify(charm.entityId) !==
+                  JSON.stringify(this.focusedCharm?.entityId)
+                    ? "minimized"
+                    : ""}"
+                  id="window-${charmId}"
+                  data-charm-id="${JSON.stringify(charmId)}"
+                >
+                  <div class="window-toolbar">
+                    <h1 class="window-title" @click=${onNavigate}>
+                      ${charm.getAsProxy()[NAME]}
+                    </h1>
+                    <button class="close-button" @click="${this.onClose}">
+                      ×
+                    </button>
+                  </div>
+                  <div class="charm" ${ref(charmRef)}></div>
+                </div>
+              `;
+            }
+          )}
+
+          <os-navstack slot="sidebar">
+            <common-sidebar
+              .focusedProxy=${this.focusedProxy}
+              .focusedCharm=${this.focusedCharm}
+              sidebarTab=${this.sidebarTab}
+              @tab-changed=${onSidebarTabChanged}
+            >
+            </common-sidebar>
+          </os-navstack>
+        </os-chrome>
+      </common-import>
     `;
   }
 
-  openCharm(charmId: string) {
-    const charm = getCellByEntityId<Charm>(charmId);
-    this.focusedProxy = charm?.getAsProxy() ?? null;
-    this.focusedCharm = charm ?? null;
+  async openCharm(charmId: string) {
+    const charm = await syncCharm(charmId);
     if (!isCell(charm)) throw new Error(`Charm ${charmId} doesn't exist`);
+    this.focusedCharm = charm;
+    this.focusedProxy = charm?.getAsProxy();
 
     addCharms([charm]);
     this.location = this.focusedProxy?.[NAME] || "-";
 
     const existingWindow = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`,
+      `[data-charm-id="${CSS.escape(charmId)}"]`
     );
     if (existingWindow) {
       this.scrollToAndHighlight(charmId, true);
@@ -468,7 +466,7 @@ export class CommonWindowManager extends LitElement {
 
   private scrollToAndHighlight(charmId: string, animate: boolean) {
     const window = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`,
+      `[data-charm-id="${CSS.escape(charmId)}"]`
     );
     if (window) {
       window.scrollIntoView({
@@ -489,7 +487,7 @@ export class CommonWindowManager extends LitElement {
       const charmId = windowElement.getAttribute("data-charm-id");
       if (charmId) {
         this.charms = this.charms.filter(
-          (charm) => JSON.stringify(charm.entityId) !== charmId,
+          (charm) => JSON.stringify(charm.entityId) !== charmId
         );
         this.charmRefs.delete(charmId);
       }
@@ -501,7 +499,7 @@ export class CommonWindowManager extends LitElement {
     console.log("routeChange", customEvent.detail);
     const match = matchRoute(
       "/charm/:charmId",
-      new URL(customEvent.detail, window.location.href),
+      new URL(customEvent.detail, window.location.href)
     );
     console.log(new URL(customEvent.detail, window.location.href));
     console.log(match);

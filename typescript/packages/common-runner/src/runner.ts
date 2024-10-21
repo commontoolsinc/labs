@@ -94,7 +94,8 @@ export function run<T, R = any>(
     // If no new parameters are provided, use the ones from the previous call
     // TODO: BUG: Passing parameters will now overwrite the internal state for
     // ommitted parameters
-    if (!parameters) parameters = processCell.get()?.parameters as T;
+    //if (!parameters) parameters = processCell.get()?.parameters as T;
+    parameters = (processCell.get()?.parameters as T) ?? parameters;
   } else {
     processCell = cell();
     resultCell.sourceCell = processCell;
@@ -137,21 +138,14 @@ export function run<T, R = any>(
   if (!resultCell.entityId) resultCell.generateEntityId();
   if (!processCell.entityId) processCell.generateEntityId(resultCell.entityId);
 
-  // Send "query" to results to the result cell
-  resultCell.send(mapBindingsToCell<R>(recipe.result as R, processCell));
-
-  // TODO: This will overwrite existing values
-  const internal = mergeObjects(
-    processCell.get()?.internal,
-    (recipe.initial as { internal: any })?.internal
-  );
+  const internal =
+    processCell.get()?.internal ??
+    (recipe.initial as { internal: any })?.internal;
 
   // Ensure static data is converted to cell references, e.g. for arrays
   parameters = staticDataToNestedCells(parameters, undefined, resultCell);
 
-  // Ensure static data is converted to cell references, e.g. for arrays
-  parameters = staticDataToNestedCells(parameters, undefined, resultCell);
-
+  // TODO: Move up, only do this if it's not from the sourceCell
   if (defaults) parameters = mergeObjects(parameters, defaults);
 
   processCell.send({
@@ -161,6 +155,12 @@ export function run<T, R = any>(
     ...(internal ? { internal: deepCopy(internal) } : {}),
   });
 
+  // Send "query" to results to the result cell
+  resultCell.send(mapBindingsToCell<R>(recipe.result as R, processCell));
+
+  // Now start the recipe
+
+  // Keep track of subscriptions to cancel them later
   const [cancel, addCancel] = useCancelGroup();
   cancels.set(resultCell, cancel);
 

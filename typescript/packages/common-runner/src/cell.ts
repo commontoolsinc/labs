@@ -379,6 +379,7 @@ export function cell<T>(value?: T): CellImpl<T> {
       return entityId;
     },
     set entityId(id: EntityId) {
+      console.log("set entityId", JSON.stringify(id));
       if (entityId) throw new Error("Entity ID already set");
       entityId = id;
       setCellByEntityId(id, self);
