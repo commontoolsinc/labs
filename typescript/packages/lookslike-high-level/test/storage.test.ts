@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createStorage, Storage } from "../src/storage.js";
+import {
+  InMemoryStorageProvider,
+  LocalStorageProvider,
+  StorageProvider,
+} from "../src/storage-providers.js";
 import { cell, CellImpl, createRef } from "@commontools/common-runner";
 
 // Create a mock window object
@@ -96,25 +101,33 @@ if (typeof StorageEvent === "undefined") {
     }
   };
 }
+
 describe("Storage", () => {
   const storageTypes = ["memory", "local"] as const;
 
   storageTypes.forEach((storageType) => {
     describe(storageType, () => {
       let storage: Storage;
-      let storage2: Storage;
+      let storage2: StorageProvider;
       let testCell: CellImpl<any>;
 
       beforeEach(() => {
         storage = createStorage(storageType);
-        storage2 = createStorage(storageType);
+        if (storageType === "memory") {
+          storage2 = new InMemoryStorageProvider();
+        } else if (storageType === "local") {
+          console.log("local", LocalStorageProvider);
+          storage2 = new LocalStorageProvider("test_");
+        } else {
+          throw new Error("Invalid storage type: " + storageType);
+        }
         testCell = cell<string>();
         testCell.generateEntityId();
       });
 
-      afterEach(() => {
-        storage.destroy();
-        storage2.destroy();
+      afterEach(async () => {
+        await storage?.destroy();
+        await storage2?.destroy();
       });
 
       describe("persistCell", () => {
@@ -123,12 +136,10 @@ describe("Storage", () => {
           testCell.send(testValue);
 
           await storage.syncCell(testCell);
-          console.log("persisted");
-          const newCell = cell();
-          newCell.entityId = testCell.entityId!;
-          const newCell2 = await storage2.syncCell(newCell);
-          expect(newCell2).not.toBe(testCell);
-          expect(newCell2.get()).toEqual(testValue);
+
+          await storage2.sync(testCell.entityId!);
+          const value = storage2.get(testCell.entityId!);
+          expect(value?.value).toEqual(testValue);
         });
 
         it("should persist a cells and referenced cell references within it", async () => {
@@ -143,8 +154,9 @@ describe("Storage", () => {
 
           await storage.syncCell(testCell);
 
-          const newCell = await storage2.syncCell(refCell.entityId!);
-          expect(newCell.get()).toEqual("hello");
+          await storage2.sync(refCell.entityId!);
+          const value = storage2.get(refCell.entityId!);
+          expect(value?.value).toEqual("hello");
         });
 
         it("should persist a cells and referenced cells within it", async () => {
@@ -159,8 +171,9 @@ describe("Storage", () => {
 
           await storage.syncCell(testCell);
 
-          const newCell = await storage2.syncCell(refCell.entityId!);
-          expect(newCell.get()).toEqual("hello");
+          await storage2.sync(refCell.entityId!);
+          const value = storage2.get(refCell.entityId!);
+          expect(value?.value).toEqual("hello");
         });
 
         it("should generate causal IDs for cells that don't have them yet", async () => {
@@ -179,8 +192,9 @@ describe("Storage", () => {
               path: ["ref"],
             }
           );
-          const newCell = await storage2.syncCell(refId);
-          expect(newCell.get()).toEqual("hello");
+          await storage2.sync(refId);
+          const value = storage2.get(refId);
+          expect(value?.value).toEqual("hello");
         });
       });
 
@@ -193,11 +207,9 @@ describe("Storage", () => {
 
           await storage.synced();
 
-          const newCell = cell();
-          newCell.entityId = testCell.entityId!;
-          const newCell2 = await storage2.syncCell(newCell);
-          expect(newCell2).not.toBe(testCell);
-          expect(newCell2.get()).toBe("value 2");
+          await storage2.sync(testCell.entityId!);
+          const value = storage2.get(testCell.entityId!);
+          expect(value?.value).toBe("value 2");
         });
       });
 
