@@ -122,11 +122,13 @@ describe("Storage", () => {
           const testValue = { data: "test" };
           testCell.send(testValue);
 
-          await storage.persistCell(testCell);
-
-          const newCell = await storage2.loadCell(testCell.entityId!);
-          expect(newCell).not.toBe(testCell);
-          expect(newCell.get()).toEqual(testValue);
+          await storage.syncCell(testCell);
+          console.log("persisted");
+          const newCell = cell();
+          newCell.entityId = testCell.entityId!;
+          const newCell2 = await storage2.syncCell(newCell);
+          expect(newCell2).not.toBe(testCell);
+          expect(newCell2.get()).toEqual(testValue);
         });
 
         it("should persist a cells and referenced cell references within it", async () => {
@@ -139,9 +141,9 @@ describe("Storage", () => {
           };
           testCell.send(testValue);
 
-          await storage.persistCell(testCell);
+          await storage.syncCell(testCell);
 
-          const newCell = await storage2.loadCell(refCell.entityId!);
+          const newCell = await storage2.syncCell(refCell.entityId!);
           expect(newCell.get()).toEqual("hello");
         });
 
@@ -155,9 +157,9 @@ describe("Storage", () => {
           };
           testCell.send(testValue);
 
-          await storage.persistCell(testCell);
+          await storage.syncCell(testCell);
 
-          const newCell = await storage2.loadCell(refCell.entityId!);
+          const newCell = await storage2.syncCell(refCell.entityId!);
           expect(newCell.get()).toEqual("hello");
         });
 
@@ -168,7 +170,7 @@ describe("Storage", () => {
           };
           testCell.send(testValue);
 
-          await storage.persistCell(testCell);
+          await storage.syncCell(testCell);
 
           const refId = createRef(
             { value: "hello" },
@@ -177,32 +179,36 @@ describe("Storage", () => {
               path: ["ref"],
             }
           );
-          const newCell = await storage2.loadCell(refId);
+          const newCell = await storage2.syncCell(refId);
           expect(newCell.get()).toEqual("hello");
         });
       });
 
       describe("cell updates", () => {
         it("should persist cell updates", async () => {
-          await storage.loadCell(testCell);
+          await storage.syncCell(testCell);
 
           testCell.send("value 1");
           testCell.send("value 2");
 
-          const newCell = await storage2.loadCell(testCell.entityId!);
-          expect(newCell).not.toBe(testCell);
-          expect(newCell.get()).toBe("value 2");
+          const newCell = cell();
+          newCell.entityId = testCell.entityId!;
+          const newCell2 = await storage2.syncCell(newCell);
+          expect(newCell2).not.toBe(testCell);
+          expect(newCell2.get()).toBe("value 2");
         });
       });
 
-      describe("loadCell", () => {
+      describe("syncCell", () => {
         it("should load a cell that does not exist in storage", async () => {
-          await storage.loadCell(testCell);
+          await storage.syncCell(testCell);
           expect(testCell.get()).toBeUndefined();
 
-          const newCell = await storage2.loadCell(testCell.entityId!);
-          expect(newCell).not.toBe(testCell);
-          expect(newCell.get()).toBeUndefined();
+          const newCell = cell();
+          newCell.entityId = testCell.entityId!;
+          const newCell2 = await storage2.syncCell(newCell);
+          expect(newCell2).not.toBe(testCell);
+          expect(newCell2.get()).toBeUndefined();
 
           testCell.send("value 1");
           await Promise.resolve(); // Wait for the update to propagate
@@ -215,13 +221,15 @@ describe("Storage", () => {
 
           // This will persist the cell to storage, with the new value, since
           // the cell didn't yet exist in storage.
-          await storage.loadCell(testCell);
+          await storage.syncCell(testCell);
 
           // Load cell from second storage instance
-          const newCell = await storage2.loadCell(testCell.entityId!);
-          expect(newCell).not.toBe(testCell);
-          expect(newCell.entityId).toEqual(testCell.entityId);
-          expect(newCell.get()).toEqual(testValue);
+          const newCell = cell();
+          newCell.entityId = testCell.entityId!;
+          const newCell2 = await storage2.syncCell(newCell);
+          expect(newCell2).not.toBe(testCell);
+          expect(newCell2.entityId).toEqual(testCell.entityId);
+          expect(newCell2.get()).toEqual(testValue);
 
           // Let's update the cell; the other instance should get the update.
           testCell.send("value 2");
@@ -238,14 +246,14 @@ describe("Storage", () => {
         });
 
         it("should only load a cell once", async () => {
-          const cell1 = await storage.loadCell(testCell);
+          const cell1 = await storage.syncCell(testCell);
           expect(cell1).toBe(testCell);
 
           // Even when passing in a new cell with the same entityId, it should be
           // the same cell.
           const cell2 = cell();
           cell2.entityId = testCell.entityId;
-          const cell3 = await storage.loadCell(cell2);
+          const cell3 = await storage.syncCell(cell2);
           expect(cell3).toBe(cell1);
         });
       });

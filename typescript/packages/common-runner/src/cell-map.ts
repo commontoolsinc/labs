@@ -6,6 +6,7 @@ import {
   isCell,
   getCellReferenceOrThrow,
   type CellReference,
+  cell,
 } from "./cell.js";
 import { refer } from "merkle-reference";
 
@@ -68,11 +69,19 @@ export const getEntityId = (value: any): EntityId | undefined => {
 };
 
 export function getCellByEntityId<T = any>(
-  entityId: EntityId | string
+  entityId: EntityId | string,
+  createIfNotFound = true
 ): CellImpl<T> | undefined {
-  return entityIdToCellMap.get(
-    typeof entityId === "string" ? entityId : JSON.stringify(entityId)
-  );
+  const id = typeof entityId === "string" ? entityId : JSON.stringify(entityId);
+  let entityCell = entityIdToCellMap.get(id);
+  if (entityCell) return entityCell;
+  if (!createIfNotFound) return undefined;
+
+  entityCell = cell<T>();
+  if (typeof entityId === "string") entityId = JSON.parse(entityId) as EntityId;
+  else entityCell.entityId = entityId;
+  setCellByEntityId(entityId, entityCell);
+  return entityCell;
 }
 
 export const setCellByEntityId = (entityId: EntityId, cell: CellImpl<any>) => {

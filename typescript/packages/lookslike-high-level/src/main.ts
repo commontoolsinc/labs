@@ -1,9 +1,8 @@
 export { components } from "@commontools/common-ui";
 export { fab } from "@commontools/common-os-ui";
-import { run, CellImpl } from "@commontools/common-runner";
 import { CommonWindowManager } from "./components/window-manager.js";
 export { components as myComponents } from "./components.js";
-import { charms, recipes, openCharm, type Charm } from "./data.js";
+import { charms, recipes, openCharm, runPersistent } from "./data.js";
 import { home } from "./recipes/home.js";
 import "../../common-os-ui/src/static/main.css";
 
@@ -12,6 +11,7 @@ document.addEventListener("DOMContentLoaded", () => {
     "window-manager"
   )! as CommonWindowManager;
   openCharm.set(windowManager.openCharm.bind(windowManager));
-  const homeCharm = run(home, { charms, recipes }) as CellImpl<Charm>;
-  windowManager.openCharm(JSON.stringify(homeCharm.entityId));
+  runPersistent(home, { charms, recipes }, "home").then((homeCharm) => {
+    windowManager.openCharm(JSON.stringify(homeCharm.entityId));
+  });
 });

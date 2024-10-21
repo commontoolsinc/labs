@@ -10,6 +10,7 @@ import {
   addModuleByRef,
   type ReactivityLog,
   createRef,
+  getCellByEntityId,
 } from "@commontools/common-runner";
 import { createStorage } from "./storage.js";
 
@@ -49,6 +50,7 @@ export { TYPE, NAME, UI };
 const storage = createStorage("local");
 
 export const charms = cell<CellImpl<Charm>[]>([]);
+charms.generateEntityId("charms");
 
 export function addCharms(newCharms: CellImpl<any>[]) {
   const currentCharms = charms.get();
@@ -63,7 +65,7 @@ export function addCharms(newCharms: CellImpl<any>[]) {
     charms.send([...currentCharms, ...charmsToAdd]);
 
     // Make sure it's persisted, if it isn't already
-    charmsToAdd.map((charm) => storage.persistCell(charm));
+    charmsToAdd.map((charm) => storage.syncCell(charm));
   }
 }
 
@@ -72,15 +74,19 @@ export async function runPersistent(
   inputs: any,
   cause?: any
 ): Promise<CellImpl<any>> {
-  const previousCell = cause
-    ? await storage.loadCell(createRef({ recipe, inputs }, cause))
-    : undefined;
-  const resultCell = run(recipe, inputs, previousCell);
-  storage.persistCell(resultCell); // no-op if already persisted
-  return resultCell;
+  return run(
+    recipe,
+    inputs,
+    await storage.syncCell(createRef({ recipe, inputs }, cause))
+  );
+}
+
+export async function syncCharm(entityId: string): Promise<CellImpl<Charm>> {
+  return await storage.syncCell(getCellByEntityId<Charm>(entityId) ?? entityId);
 }
 
 addCharms([
+  /*
   await runPersistent(
     iframe,
     {
@@ -145,7 +151,7 @@ addCharms([
       locations: ["coffee shop with great baristas"],
     },
     "routine"
-  ),
+  ),*/
   await runPersistent(counters, {}, "counters"),
 ]);
 
@@ -169,6 +175,7 @@ function addRecipe(recipe: Recipe) {
 }
 
 export const recipes: RecipeManifest[] = [
+  /*
   {
     name: "Explore dungeon game",
     recipeId: addRecipe(dungeon),
@@ -212,7 +219,7 @@ export const recipes: RecipeManifest[] = [
   {
     name: "Hello Isolated",
     recipeId: addRecipe(helloIsolated),
-  },
+  },*/
 ];
 
 // Helper for mock data

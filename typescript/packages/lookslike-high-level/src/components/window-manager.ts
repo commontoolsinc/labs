@@ -3,13 +3,8 @@ import { customElement, property, state } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
-import { Charm, UI, addCharms } from "../data.js";
-import {
-  run,
-  CellImpl,
-  isCell,
-  getCellByEntityId,
-} from "@commontools/common-runner";
+import { Charm, UI, addCharms, syncCharm } from "../data.js";
+import { run, CellImpl, isCell } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
@@ -237,11 +232,11 @@ export class CommonWindowManager extends LitElement {
     `;
   }
 
-  openCharm(charmId: string) {
-    const charm = getCellByEntityId<Charm>(charmId);
-    this.focusedCharm = charm ?? null;
-    this.focusedProxy = charm?.getAsProxy() ?? null;
+  async openCharm(charmId: string) {
+    const charm = await syncCharm(charmId);
     if (!isCell(charm)) throw new Error(`Charm ${charmId} doesn't exist`);
+    this.focusedCharm = charm;
+    this.focusedProxy = charm?.getAsProxy();
 
     addCharms([charm]); // Make sure any shows charm is in the list of charms
 

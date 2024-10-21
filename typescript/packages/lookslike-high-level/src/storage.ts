@@ -1,16 +1,14 @@
 import {
   type CellImpl,
   isCell,
-  cell,
   type CellReference,
   isCellReference,
   type EntityId,
   type Cancel,
   type AddCancel,
   useCancelGroup,
+  getCellByEntityId,
 } from "@commontools/common-runner";
-
-const NoResult = Symbol("NoResult");
 
 export interface Storage {
   /**
@@ -20,37 +18,15 @@ export interface Storage {
    * these cells as well.
    *
    * This works also for cells that haven't been persisted yet. In that case,
-   * it'll write the current value into storage. In most cases, this is
-   * preferrable to `persist()`, which will always overwrite the existing value.
+   * it'll write the current value into storage.
    *
    * @param cell - Cell to load into, or entity ID as EntityId or string.
    * @returns Promise that resolves to the cell when it is loaded.
    * @throws Will throw if called on a cell without an entity ID.
    */
-  loadCell<T = any>(
+  syncCell<T = any>(
     cell: CellImpl<T> | EntityId | string
   ): Promise<CellImpl<T>>;
-
-  /**
-   * Persist cell. Most of the time you want to use `load()` instead.
-   *
-   * Writes current state to storage and subscribes to new changes.
-   *
-   * Like `load()`, it will follow cell references and persist them (using
-   * `load()` if they already have an id, otherwise assign an id causal to this
-   * one and call `persist` instead).
-   *
-   * Only call on new cells. Has to be called after `generateEntityId`.
-   *
-   * Use `load()` when restoring from storage, including when the id was
-   * generated in a causal way, so that a previous run would have generated the
-   * same id, but might already progressed further (i.e. the state in storage is
-   * more current than the one currently being spun up, such as when rehydrating
-   * a previous run).
-   *
-   * @throws Will throw if called on a cell without an entity ID.
-   */
-  persistCell<T = any>(cell: CellImpl<T>): Promise<void>;
 
   /**
    * Clear all stored data.
@@ -66,168 +42,222 @@ class StorageImpl implements Storage {
     this.addCancel = addCancel;
   }
 
-  private loadedCells = new Map<string, CellImpl<any>>();
-  private loadingCells = new Map<string, Promise<void>>();
+  private cellsById = new Map<string, CellImpl<any>>();
+  private loadingCells = new Map<CellImpl<any>, Promise<CellImpl<any>>>();
+  private writeDependentCells = new Map<CellImpl<any>, Set<CellImpl<any>>>();
+  private readDependentCells = new Map<CellImpl<any>, Set<CellImpl<any>>>();
 
   private cancel: Cancel;
   private addCancel: AddCancel;
 
-  async loadCell<T>(
-    subject: CellImpl<T> | EntityId | string
-  ): Promise<CellImpl<T>> {
-    let entityId: string;
-    let entityCell: CellImpl<T>;
+  syncCell<T>(subject: CellImpl<T> | EntityId | string): Promise<CellImpl<T>> {
+    const entityCell = this._ensureIsSynced(subject);
 
-    // Support referencing as cell, via entity ID or as stringified entity ID
-    if (isCell(subject)) {
-      entityCell = subject;
-      if (!entityCell.entityId) throw new Error("Cell has no entity ID");
-      entityId = JSON.stringify(entityCell.entityId);
-    } else if (typeof subject === "string") {
-      entityCell = cell<T>();
-      entityCell.entityId = JSON.parse(subject);
-      entityId = subject;
-    } else if (
-      typeof subject === "object" &&
-      subject !== null &&
-      "/" in subject
-    ) {
-      entityCell = cell<T>();
-      entityCell.entityId = subject;
-      entityId = JSON.stringify(subject);
-    } else {
-      throw new Error(`Invalid cell or entity ID: ${subject}`);
-    }
-
-    // If the cell is already loaded, return immediately. Note this returns the
-    // original cell, even if another one was provided as argument.
-    if (this.loadedCells.has(entityId)) return this.loadedCells.get(entityId)!;
-
-    // If loading is in progress, wait for it to finish
-    if (this.loadingCells.has(entityId)) {
-      await this.loadingCells.get(entityId);
-      return this.loadedCells.get(entityId)!;
-    }
-
-    // If there is an associated source cell, sync it first.
-    if (entityCell.sourceCell) await this.loadCell(entityCell.sourceCell);
-
-    // Start loading the cell
-    const loadingPromise = this._loadCell(entityCell);
-    this.loadingCells.set(entityId, loadingPromise);
-
-    await loadingPromise.then(() => this.loadingCells.delete(entityId));
-
-    return entityCell;
-  }
-
-  private async _loadCell(cell: CellImpl<any>): Promise<void> {
-    const storedValue = await this.storageProvider.get(cell.entityId!);
-
-    if (storedValue !== NoResult) {
-      this.subscribeToChanges(cell);
-      await this._sendToCell(cell, storedValue);
-    } else {
-      // If the cell doesn't exist in storage, persist the current value
-      await this.persistCell(cell);
-    }
-
-    this.loadedCells.set(JSON.stringify(cell.entityId), cell);
-  }
-
-  async persistCell(cell: CellImpl<any>): Promise<void> {
-    if (!cell.entityId) throw new Error("Cell has no entity ID");
-
-    // Nothing to do if this is already loaded. Note that this also means that
-    // the latest state was already synced as well.
-    if (this.loadedCells.has(JSON.stringify(cell.entityId))) return;
-
-    // Subscribe to future changes
-    this.subscribeToChanges(cell);
-
-    // If there is an associated source cell, sync it first.
-    if (cell.sourceCell) await this.loadCell(cell.sourceCell);
-
-    // Persist the current state
-    await this._sendToStorage(cell.entityId, cell.get());
+    // Is loading pending?
+    const loadingPromise = this.loadingCells.get(entityCell);
+    return loadingPromise ? loadingPromise : Promise.resolve(entityCell);
   }
 
   async destroy(): Promise<void> {
     await this.storageProvider.destroy();
-    this.loadedCells.clear();
+    this.cellsById.clear();
     this.loadingCells.clear();
     this.cancel();
   }
 
-  private async _sendToStorage(entityId: EntityId, value: any): Promise<void> {
+  private _ensureIsSynced<T>(
+    subject: CellImpl<T> | EntityId | string
+  ): CellImpl<T> {
+    const entityCell = StorageImpl.fromIdToCell<T>(subject);
+    const entityId = JSON.stringify(entityCell.entityId);
+
+    // If the cell is already loaded or loading, return immediately. Note this
+    // returns the original cell, even if another one was provided as argument.
+    if (this.cellsById.has(entityId)) return this.cellsById.get(entityId)!;
+
+    // Important that we set this _before_ the cell is loaded, as we can already
+    // populate the cell when loading dependencies and thus avoid circular
+    // references.
+    this.cellsById.set(entityId, entityCell);
+    this._subscribeToChanges(entityCell);
+
+    // Start loading the cell
+    const loadingPromise = this.storageProvider
+      .sync(entityCell.entityId!)
+      .then(() => {
+        const result = this.storageProvider.get(entityCell.entityId!);
+        // If the cell doesn't exist in storage, persist the current value,
+        // unless it is undefined. Otherwise, set cell to storage set.
+        return result === undefined
+          ? entityCell.get() !== undefined
+            ? this._sendToStorage(entityCell, this._prepForStorage(entityCell))
+            : Promise.resolve()
+          : this._sendToCell(entityCell, result.value, result.source);
+      })
+      .then(() => {
+        this.loadingCells.delete(entityCell);
+        return entityCell;
+      });
+
+    this.loadingCells.set(entityCell, loadingPromise);
+
+    return entityCell;
+  }
+
+  private _prepForStorage(cell: CellImpl<any>): any {
+    console.log("prep for storage", JSON.stringify(cell.entityId));
+
+    const dependencies = new Set<CellImpl<any>>();
+
     // Traverse the value and for each cell reference, make sure it's persisted.
     // This is done recursively.
-    const promises: Promise<any>[] = [];
-
-    const traverse = (value: any, path: PropertyKey[]) => {
+    const traverse = (value: any, path: PropertyKey[]): any => {
+      // If it's a cell, make it a cell reference
       if (isCell(value))
         value = { cell: value, path: [] } satisfies CellReference;
+
+      // If it's a cell reference, convert it to a cell reference with an id
       if (isCellReference(value)) {
         // Generate a causal ID for the cell if it doesn't have one yet
         if (!value.cell.entityId) {
           value.cell.generateEntityId({
-            cell: StorageImpl.maybeToJSON(entityId),
+            cell: StorageImpl.maybeToJSON(cell.entityId),
             path,
           });
-          promises.push(this.persistCell(value.cell));
-        } else {
-          // Make sure the cell is persisted, allow for pre-existing values
-          promises.push(this.loadCell(value.cell));
         }
-        return { cell: value.cell.toJSON(), path: value.path };
+        dependencies.add(value.cell);
+        return { cell: value.cell.toJSON() /* = the id */, path: value.path };
       } else if (typeof value === "object" && value !== null) {
         if (Array.isArray(value))
-          return value.map((value, index): any =>
-            traverse(value, [...path, index])
-          );
+          return value.map((value, index) => traverse(value, [...path, index]));
         else
           return Object.fromEntries(
-            Object.entries(value).map(
-              ([key, value]: [PropertyKey, any]): [PropertyKey, any] => {
-                return [key, traverse(value, [...path, key])];
-              }
-            )
+            Object.entries(value).map(([key, value]: [PropertyKey, any]) => [
+              key,
+              traverse(value, [...path, key]),
+            ])
           );
       } else return value;
     };
 
-    value = traverse(value, []);
+    // Add source cell as dependent cell
+    if (cell.sourceCell) {
+      // If there is a source cell, make sure it has an entity ID.
+      // It's always the causal child of the result cell.
+      if (!cell.sourceCell.entityId)
+        cell.sourceCell.generateEntityId(cell.entityId!);
+      dependencies.add(cell.sourceCell);
+    }
 
-    return await Promise.all([
-      ...promises,
-      this.storageProvider.send(entityId, value),
-    ]).then((): void => {});
+    // Convert all cell references to ids and remember as dependent cells
+    this.writeDependentCells.set(cell, dependencies);
+    return traverse(cell.get(), []);
   }
 
-  private async _sendToCell(cell: CellImpl<any>, value: any): Promise<void> {
-    const traverse = async (value: any): Promise<any> => {
+  private _sendToStorage(cell: CellImpl<any>, value: any): Promise<void> {
+    return this.storageProvider.send(
+      cell.entityId!,
+      value,
+      cell.sourceCell?.entityId
+    );
+  }
+
+  private _prepForCell(
+    cell: CellImpl<any>,
+    value: any,
+    source?: EntityId
+  ): Promise<void> {
+    console.log(
+      "prep for cell",
+      JSON.stringify(cell.entityId),
+      value,
+      JSON.stringify(source ?? null)
+    );
+
+    const dependencies = new Set<CellImpl<any>>();
+
+    const traverse = (value: any): any => {
       if (typeof value === "object" && value !== null)
-        if ("cell" in value && "path" in value)
-          return { cell: await this.loadCell(value.cell), path: value.path };
-        else if (Array.isArray(value))
-          return await Promise.all(value.map(traverse));
+        if ("cell" in value && "path" in value) {
+          // If we see a cell reference with just an id, then we replace it with
+          // the actual cell:
+          if (
+            typeof value.cell === "object" &&
+            value.cell !== null &&
+            "/" in value.cell &&
+            Array.isArray(value.path)
+          ) {
+            const ref: { cell?: string | CellImpl<any>; path: PropertyKey[] } =
+              {
+                cell: value.cell, // Still the id, but will be replaced by cell
+                path: value.path,
+              };
+            if (!this.cellsById.has(value.cell))
+              this._ensureIsSynced(value.cell);
+            ref.cell = this.cellsById.get(value.cell)!;
+            dependencies.add(ref.cell);
+            return ref;
+          } else {
+            return value;
+          }
+        } else if (Array.isArray(value)) return value.map(traverse);
         else
           return Object.fromEntries(
-            await Promise.all(
-              Object.entries(value).map(
-                async ([key, value]): Promise<any> => [
-                  key,
-                  await traverse(value),
-                ]
-              )
-            )
+            Object.entries(value).map(([key, value]): any => [
+              key,
+              traverse(value),
+            ])
           );
       else return value;
     };
 
-    value = await traverse(value);
+    if (source) {
+      // Make sure the source cell is loaded. Immediately adds it to cellsById.
+      if (!this.cellsById.has(JSON.stringify(source)))
+        this._ensureIsSynced(source);
+      dependencies.add(this.cellsById.get(JSON.stringify(source))!);
+    }
 
+    this.readDependentCells.set(cell, dependencies);
+    return traverse(value);
+  }
+
+  private _sendToCell(
+    cell: CellImpl<any>,
+    value: any,
+    source?: EntityId
+  ): void {
+    if (source) {
+      if (
+        cell.sourceCell &&
+        JSON.stringify(cell.sourceCell.entityId) !== JSON.stringify(source)
+      )
+        throw new Error("Cell already has a different source");
+
+      cell.sourceCell = this.cellsById.get(JSON.stringify(source))!;
+    }
     cell.send(value);
+  }
+
+  // Support referencing as cell, via entity ID or as stringified entity ID
+  static fromIdToCell<T>(
+    subject: CellImpl<any> | EntityId | string
+  ): CellImpl<T> {
+    let entityCell: CellImpl<T> | undefined;
+
+    if (isCell(subject)) {
+      entityCell = subject;
+      if (!entityCell.entityId) throw new Error("Cell has no entity ID");
+    } else if (
+      (typeof subject === "string" && subject.startsWith('{"/":"')) ||
+      (typeof subject === "object" && subject !== null && "/" in subject)
+    ) {
+      entityCell = getCellByEntityId<T>(JSON.stringify(subject))!;
+    } else {
+      throw new Error(`Invalid cell or entity ID: ${subject}`);
+    }
+
+    return entityCell;
   }
 
   static maybeToJSON(value: any): any {
@@ -240,16 +270,16 @@ class StorageImpl implements Storage {
     else return value;
   }
 
-  private subscribeToChanges(cell: CellImpl<any>): void {
+  private _subscribeToChanges(cell: CellImpl<any>): void {
     // Send updates to storage
     this.addCancel(
-      cell.updates((value) => this._sendToStorage(cell.entityId!, value))
+      cell.updates(() => this._sendToStorage(cell, this._prepForStorage(cell)))
     );
 
     // Subscribe to storage updates
     this.addCancel(
-      this.storageProvider.sink(cell.entityId!, (value) =>
-        this._sendToCell(cell, value)
+      this.storageProvider.sink(cell.entityId!, (value, source) =>
+        this._sendToCell(cell, this._prepForCell(cell, value, source), source)
       )
     );
   }
@@ -270,19 +300,74 @@ export function createStorage(type: "local" | "memory"): Storage {
 }
 
 interface StorageProvider {
-  send<T = any>(entityId: EntityId, value: T): Promise<void>;
-  get<T = any>(entityId: EntityId): Promise<T | typeof NoResult>;
-  sink<T = any>(entityId: EntityId, callback: (value: T) => void): Cancel;
+  /**
+   * Send a value to storage.
+   *
+   * @param entityId - Entity ID to send the value to.
+   * @param value - Value to send.
+   * @param source - Optional source entity ID.
+   * @returns Promise that resolves when the value is sent.
+   */
+  send<T = any>(entityId: EntityId, value: T, source?: EntityId): Promise<void>;
+
+  /**
+   * Sync a value from storage. Use `get()` to retrieve the value.
+   *
+   * @param entityId - Entity ID to sync.
+   * @returns Promise that resolves when the value is synced.
+   */
+  sync(entityId: EntityId): Promise<void>;
+
+  /**
+   * Get a value from the local cache reflecting storage. Call `sync()` first.
+   *
+   * @param entityId - Entity ID to get the value for.
+   * @returns Value and source, or undefined if the value is not in storage.
+   */
+  get<T = any>(entityId: EntityId): { value: T; source?: EntityId } | undefined;
+
+  /**
+   * Subscribe to storage updates.
+   *
+   * @param entityId - Entity ID to subscribe to.
+   * @param callback - Callback function.
+   * @returns Cancel function to stop the subscription.
+   */
+  sink<T = any>(
+    entityId: EntityId,
+    callback: (value: T, source?: EntityId) => void
+  ): Cancel;
+
+  /**
+   * Destroy the storage provider. Used for tests only.
+   *
+   * @returns Promise that resolves when the storage provider is destroyed.
+   */
   destroy(): Promise<void>;
 }
 
 abstract class BaseStorageProvider implements StorageProvider {
-  protected subscribers = new Map<string, Set<(value: any) => void>>();
+  protected subscribers = new Map<
+    string,
+    Set<(value: any, source?: EntityId) => void>
+  >();
 
-  abstract send(entityId: EntityId, value: any): Promise<void>;
-  abstract get(entityId: EntityId): Promise<any>;
+  abstract send(
+    entityId: EntityId,
+    value: any,
+    source?: EntityId
+  ): Promise<void>;
 
-  sink<T = any>(entityId: EntityId, callback: (value: T) => void): Cancel {
+  abstract sync(entityId: EntityId): Promise<void>;
+
+  abstract get(
+    entityId: EntityId
+  ): { value: any; source?: EntityId } | undefined;
+
+  sink<T = any>(
+    entityId: EntityId,
+    callback: (value: T, source?: EntityId) => void
+  ): Cancel {
     const key = JSON.stringify(entityId);
 
     if (!this.subscribers.has(key)) this.subscribers.set(key, new Set());
@@ -295,9 +380,19 @@ abstract class BaseStorageProvider implements StorageProvider {
     };
   }
 
-  protected notifySubscribers(key: string, value: any): void {
+  protected notifySubscribers(
+    key: string,
+    value: any,
+    source?: EntityId
+  ): void {
+    console.log(
+      "notify subscribers",
+      key,
+      value,
+      JSON.stringify(source ?? null)
+    );
     const listeners = this.subscribers.get(key);
-    if (listeners) for (const listener of listeners) listener(value);
+    if (listeners) for (const listener of listeners) listener(value, source);
   }
 
   abstract destroy(): Promise<void>;
@@ -310,7 +405,9 @@ abstract class BaseStorageProvider implements StorageProvider {
  * But for testing we can create multiple instances that share the memory.
  */
 const inMemoryStorage = new Map<string, any>();
-const inMemoryStorageSubscribers = new Set<(key: string, value: any) => void>();
+const inMemoryStorageSubscribers = new Set<
+  (key: string, value: any, source?: EntityId) => void
+>();
 class InMemoryStorageProvider extends BaseStorageProvider {
   private handleStorageUpdateFn: (key: string, value: any) => void;
 
@@ -320,21 +417,27 @@ class InMemoryStorageProvider extends BaseStorageProvider {
     inMemoryStorageSubscribers.add(this.handleStorageUpdateFn);
   }
 
-  private handleStorageUpdate(key: string, value: any) {
-    this.notifySubscribers(key, value);
+  private handleStorageUpdate(key: string, value: any, source?: EntityId) {
+    this.notifySubscribers(key, value, source);
   }
 
-  async send(entityId: EntityId, value: any): Promise<void> {
+  async send(entityId: EntityId, value: any, source?: EntityId): Promise<void> {
     const key = JSON.stringify(entityId);
-    inMemoryStorage.set(key, value);
-    inMemoryStorageSubscribers.forEach((listener) => listener(key, value));
-    this.notifySubscribers(key, value);
+    inMemoryStorage.set(key, { value, source });
+    inMemoryStorageSubscribers.forEach((listener) =>
+      listener(key, value, source)
+    );
+    this.notifySubscribers(key, value, source);
   }
 
-  async get(entityId: EntityId): Promise<any> {
+  async sync(_entityId: EntityId): Promise<void> {
+    // No-op
+  }
+
+  get(entityId: EntityId): { value: any; source?: EntityId } | undefined {
     if (inMemoryStorage.has(JSON.stringify(entityId)))
       return inMemoryStorage.get(JSON.stringify(entityId));
-    else return NoResult;
+    else return undefined;
   }
 
   async destroy(): Promise<void> {
@@ -362,6 +465,48 @@ class LocalStorageProvider extends BaseStorageProvider {
     window.addEventListener("storage", this.handleStorageEventFn);
   }
 
+  async send(entityId: EntityId, value: any, source?: EntityId): Promise<void> {
+    const key = this.getKey(entityId);
+    const storeValue = JSON.stringify({ value, source });
+    if (this.lastValues.get(key) !== storeValue) {
+      console.log(
+        "send localstorage",
+        JSON.stringify(entityId),
+        value,
+        this.lastValues.get(key)
+      );
+      localStorage.setItem(key, storeValue);
+      this.lastValues.set(key, storeValue);
+    }
+  }
+
+  async sync(entityId: EntityId): Promise<void> {
+    const key = this.getKey(entityId);
+    const value = localStorage.getItem(key);
+    console.log("sync localstorage", JSON.stringify(entityId), value);
+    if (value === null) this.lastValues.delete(key);
+    else this.lastValues.set(key, value);
+  }
+
+  get<T>(entityId: EntityId): T | undefined {
+    const key = this.getKey(entityId);
+    const value = this.lastValues.get(key);
+    console.log("get localstorage", JSON.stringify(entityId), value);
+    if (value === null || value === undefined) return undefined;
+    else return JSON.parse(value) as T;
+  }
+
+  async destroy(): Promise<void> {
+    window.removeEventListener("storage", this.handleStorageEventFn);
+    console.log("clear localstorage", this.prefix);
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith(this.prefix)) {
+        localStorage.removeItem(key);
+      }
+    }
+    this.subscribers.clear();
+  }
+
   private getKey(entityId: EntityId): string {
     return this.prefix + JSON.stringify(entityId);
   }
@@ -378,49 +523,10 @@ class LocalStorageProvider extends BaseStorageProvider {
         );
         if (event.newValue === null) this.lastValues.delete(key);
         else this.lastValues.set(key, event.newValue);
-        const value =
-          event.newValue !== "undefined" && event.newValue !== null
-            ? JSON.parse(event.newValue)
-            : undefined;
-        this.notifySubscribers(key, value);
+        const result =
+          event.newValue !== null ? JSON.parse(event.newValue) : {};
+        this.notifySubscribers(key, result.value, result.source);
       }
     }
   };
-
-  async send(entityId: EntityId, value: any): Promise<void> {
-    const key = this.getKey(entityId);
-    value = JSON.stringify(value) ?? "undefined";
-    console.log(
-      "send localstorage",
-      JSON.stringify(entityId),
-      value,
-      this.lastValues.get(key)
-    );
-    if (this.lastValues.get(key) !== value) {
-      localStorage.setItem(key, value);
-      this.lastValues.set(key, value);
-    }
-  }
-
-  async get(entityId: EntityId): Promise<any> {
-    const key = this.getKey(entityId);
-    const value = localStorage.getItem(key);
-    console.log("get localstorage", JSON.stringify(entityId), value);
-    return value !== null
-      ? value === "undefined"
-        ? undefined
-        : JSON.parse(value)
-      : NoResult;
-  }
-
-  async destroy(): Promise<void> {
-    window.removeEventListener("storage", this.handleStorageEventFn);
-    console.log("clear localstorage", this.prefix);
-    for (const key of Object.keys(localStorage)) {
-      if (key.startsWith(this.prefix)) {
-        localStorage.removeItem(key);
-      }
-    }
-    this.subscribers.clear();
-  }
 }
