@@ -9,6 +9,7 @@ import {
   ifElse,
   str,
   createJsonSchema,
+  cell,
 } from "@commontools/common-builder";
 import { z } from "zod";
 import { truncateAsciiArt } from "../loader.js";
@@ -110,7 +111,7 @@ const getSuggestion = lift(
   },
 );
 
-const prepHTML = lift(({ prompt, schema, lastSrc }) => {
+const prepHTML = lift(({ prompt, schema, lastSrc, error }) => {
   if (!prompt) {
     return {};
   }
@@ -118,6 +119,10 @@ const prepHTML = lift(({ prompt, schema, lastSrc }) => {
   let fullPrompt = prompt;
   if (lastSrc) {
     fullPrompt += `\n\nHere's the previous HTML for reference:\n\`\`\`html\n${lastSrc}\n\`\`\``;
+  }
+
+  if (error.error) {
+    fullPrompt += `\n\nYou must fix this error in your existing code: <error>${JSON.stringify(error.detail)}</error>`;
   }
 
   const base = `<html>
@@ -308,6 +313,15 @@ const grabKeywords = lift<{ result?: string }, any>(({ result }) => {
   return rawData;
 });
 
+const consoleLogHandler = handler <{ detail: any }, { error: any }>(
+  (event, state) => {
+    debugger
+    console.log('event', event);
+    state.error.error = true;
+    state.error.detail = event.detail;
+  }
+);
+
 export const iframe = recipe<{
   title: string;
   prompt: string;
@@ -338,6 +352,7 @@ export const iframe = recipe<{
 
   const query = copy({ value: prompt });
   const lastSrc = copy({ value: src });
+  const error = cell({ error: false, detail: {}  })
 
   // const scopedSchema = generateData<{ html: string }>({
   //   prompt: promptFilterSchema({ schema, prompt }),
@@ -350,7 +365,7 @@ export const iframe = recipe<{
     result,
     pending: pendingHTML,
     partial: partialHTML,
-  } = llm(prepHTML({ prompt, schema: focusedSchema, lastSrc }));
+  } = llm(prepHTML({ prompt, schema: focusedSchema, lastSrc, error }));
 
   const suggestions = grabSuggestions(
     llm(prepSuggestions({ src: grabHTML({ result }), prompt, schema: focusedSchema })),
@@ -363,6 +378,7 @@ export const iframe = recipe<{
         grabHTML({ result }),
         html`<common-iframe
           src=${grabHTML({ result })}
+          onfix=${consoleLogHandler({ error })}
           $context=${data}
         ></common-iframe>`,
         html`<common-ascii-loader progress=${progress({ partial: partialHTML, pending: pendingHTML })}>`,

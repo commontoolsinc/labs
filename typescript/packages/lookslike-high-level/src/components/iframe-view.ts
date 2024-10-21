@@ -1,5 +1,5 @@
-import { LitElement, html } from "lit-element";
-import { customElement, property } from "lit/decorators.js";
+import { LitElement, html, css } from "lit-element";
+import { customElement, property, state } from "lit/decorators.js";
 import {
   Cell,
   addAction,
@@ -17,9 +17,50 @@ export class CommonIframe extends LitElement {
   // we'll add a an extra level of indirection with the "context" property.
   @property({ type: Object }) context?: Cell<any> | any;
 
+  @state() private errorDetails: {
+    message: string;
+    source: string;
+    lineno: number;
+    colno: number;
+    stacktrace: string;
+  } | null = null;
+
   private iframeRef: Ref<HTMLIFrameElement> = createRef();
 
   private subscriptions: Map<string, Action[]> = new Map();
+
+  static override styles = css`
+    .error-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.5);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .error-content {
+      background-color: white;
+      padding: 20px;
+      border-radius: 5px;
+      max-width: 80%;
+      max-height: 80%;
+      overflow: auto;
+    }
+
+    .error-actions {
+      margin-top: 20px;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .error-actions button {
+      margin-left: 10px;
+    }
+  `;
 
   private handleMessage = (event: MessageEvent) => {
     console.log("Received message", event);
@@ -27,21 +68,20 @@ export class CommonIframe extends LitElement {
       console.log('ignore react devtools')
       return;
     }
-    debugger
 
     if (event.source === this.iframeRef.value?.contentWindow) {
       const { type, key, value } = event.data;
 
       if (type === "error") {
-        const { message, source, lineno, colno, error, stacktrace } = value;
-        alert(`Error: ${message}\nSource: ${source}\nLine: ${lineno}, Column: ${colno}\n Stack: ${stacktrace}`);
+        const { message, source, lineno, colno, stacktrace } = value;
+        this.errorDetails = { message, source, lineno, colno, stacktrace };
         console.error("Error details:", {
           message,
           source,
           lineno,
           colno,
           stacktrace,
-          error: error ? (error.stack || error.toString()) : null
+          error: value.error ? (value.error.stack || value.error.toString()) : null
         });
       }
 
@@ -116,6 +156,15 @@ export class CommonIframe extends LitElement {
     this.dispatchEvent(new CustomEvent("loaded"));
   }
 
+  private dismissError() {
+    this.errorDetails = null;
+  }
+
+  private fixError() {
+    this.dispatchEvent(new CustomEvent("fix", { detail: this.errorDetails, bubbles: true }));
+    this.errorDetails = null;
+  }
+
   override render() {
     return html`
       <iframe
@@ -127,6 +176,24 @@ export class CommonIframe extends LitElement {
         style="border: none;"
         @load=${this.handleLoad}
       ></iframe>
+      ${this.errorDetails
+        ? html`
+            <div class="error-modal">
+              <div class="error-content">
+                <h2>Error</h2>
+                <p><strong>Message:</strong> ${this.errorDetails.message}</p>
+                <p><strong>Source:</strong> ${this.errorDetails.source}</p>
+                <p><strong>Line:</strong> ${this.errorDetails.lineno}</p>
+                <p><strong>Column:</strong> ${this.errorDetails.colno}</p>
+                <pre><code>${this.errorDetails.stacktrace}</code></pre>
+                <div class="error-actions">
+                  <button @click=${this.fixError}>Fix</button>
+                  <button @click=${this.dismissError}>Dismiss</button>
+                </div>
+              </div>
+            </div>
+          `
+        : ""}
     `;
   }
 }
