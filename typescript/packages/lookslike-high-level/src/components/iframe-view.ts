@@ -23,8 +23,28 @@ export class CommonIframe extends LitElement {
 
   private handleMessage = (event: MessageEvent) => {
     console.log("Received message", event);
+    if (event.data?.source == 'react-devtools-content-script') {
+      console.log('ignore react devtools')
+      return;
+    }
+    debugger
+
     if (event.source === this.iframeRef.value?.contentWindow) {
       const { type, key, value } = event.data;
+
+      if (type === "error") {
+        const { message, source, lineno, colno, error, stacktrace } = value;
+        alert(`Error: ${message}\nSource: ${source}\nLine: ${lineno}, Column: ${colno}\n Stack: ${stacktrace}`);
+        console.error("Error details:", {
+          message,
+          source,
+          lineno,
+          colno,
+          stacktrace,
+          error: error ? (error.stack || error.toString()) : null
+        });
+      }
+
       if (typeof key !== "string") {
         console.error("Invalid key type. Expected string.");
         return;

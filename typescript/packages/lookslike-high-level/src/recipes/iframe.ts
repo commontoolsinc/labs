@@ -126,6 +126,23 @@ const prepHTML = lift(({ prompt, schema, lastSrc }) => {
 <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script>
+window.onerror = function(message, source, lineno, colno, error) {
+  window.parent.postMessage({
+    type: 'error',
+    key: 'error-details',
+    value: {
+      message: message,
+      source: source,
+      lineno: lineno,
+      colno: colno,
+      error: error ? error.stack : null,
+      stacktrace: error && error.stack ? error.stack : new Error().stack
+    }
+  }, '*');
+  return false;
+};
+</script>
 <title>`;
 
   return {
@@ -196,6 +213,8 @@ const prepHTML = lift(({ prompt, schema, lastSrc }) => {
       key: 'exampleKey',
     }, '*');
 
+    Consider that _any_ data you read may be undefined at first, or may be updated at any time. You should handle this gracefully.
+
     <view-model-schema>
       ${JSON.stringify(schema, null, 2)}
     </view-model-schema>
@@ -262,6 +281,20 @@ No field can be set to null or undefined.`,
   };
 });
 
+const mostRelevantFields = lift(({ prompt, schema }) => {
+  let fullPrompt = prompt;
+  if (schema) {
+    fullPrompt += `\n\n<schema>\n\`\`\`json\n${JSON.stringify(schema, null, 2)}\n</schema>\`\`\``;
+  }
+
+  return {
+    messages: [fullPrompt, "```json\n"],
+    system: `Transform this JSON schema to include only the fields relevant to the user's task. Respond with a valid JSON schema.`,
+    stop: "```",
+  };
+});
+
+
 const grabKeywords = lift<{ result?: string }, any>(({ result }) => {
   if (!result) {
     return [];
@@ -287,14 +320,21 @@ export const iframe = recipe<{
   data.setDefault({});
   src.setDefault("");
 
+  const initialData = copy({ value: data });
+
   filter.setDefault("");
 
   // const transformedData = grabKeywords(
   //   llm(buildTransformPrompt({ prompt, data: data })),
   // );
 
-  const schema = deriveJsonSchema({ data });
+  const schema = deriveJsonSchema({ data: initialData });
   tap({ schema });
+
+
+  const focusedSchema = grabKeywords(
+    llm(mostRelevantFields({ prompt, schema })),
+  );
 
   const query = copy({ value: prompt });
   const lastSrc = copy({ value: src });
@@ -310,10 +350,10 @@ export const iframe = recipe<{
     result,
     pending: pendingHTML,
     partial: partialHTML,
-  } = llm(prepHTML({ prompt, schema, lastSrc }));
+  } = llm(prepHTML({ prompt, schema: focusedSchema, lastSrc }));
 
   const suggestions = grabSuggestions(
-    llm(prepSuggestions({ src: grabHTML({ result }), prompt, schema })),
+    llm(prepSuggestions({ src: grabHTML({ result }), prompt, schema: focusedSchema })),
   );
 
   return {
@@ -333,7 +373,7 @@ export const iframe = recipe<{
     title,
     src: grabHTML({ result }),
     data,
-    schema,
+    schema: focusedSchema,
     partialHTML,
     suggestions: { items: suggestions },
     addToPrompt: addToPrompt({ prompt, src, lastSrc, query }),
