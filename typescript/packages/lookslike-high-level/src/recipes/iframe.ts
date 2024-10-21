@@ -313,10 +313,11 @@ const grabKeywords = lift<{ result?: string }, any>(({ result }) => {
   return rawData;
 });
 
-const consoleLogHandler = handler <{ detail: any }, { error: any }>(
+const consoleLogHandler = handler<{ detail: any }, { error: any; lastSrc: string; src: string; }>(
   (event, state) => {
     debugger
     console.log('event', event);
+    state.lastSrc = state.src;
     state.error.error = true;
     state.error.detail = event.detail;
   }
@@ -378,7 +379,7 @@ export const iframe = recipe<{
         grabHTML({ result }),
         html`<common-iframe
           src=${grabHTML({ result })}
-          onfix=${consoleLogHandler({ error })}
+          onfix=${consoleLogHandler({ error, lastSrc, src })}
           $context=${data}
         ></common-iframe>`,
         html`<common-ascii-loader progress=${progress({ partial: partialHTML, pending: pendingHTML })}>`,
