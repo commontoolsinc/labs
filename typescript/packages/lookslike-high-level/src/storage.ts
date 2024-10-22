@@ -32,7 +32,7 @@ export interface Storage {
    */
   syncCell<T = any>(
     cell: CellImpl<T> | EntityId | string
-  ): Promise<CellImpl<T>>;
+  ): Promise<CellImpl<T>> | CellImpl<T>;
 
   /**
    * Wait for all cells to be synced.
@@ -48,11 +48,10 @@ export interface Storage {
   destroy(): Promise<void>;
 }
 
-type Batch = {
+type Job = {
   cell: CellImpl<any>;
-  value: { value: any; source?: EntityId };
   type: "cell" | "storage" | "sync";
-}[];
+};
 
 /**
  * Storage implementation.
@@ -93,13 +92,27 @@ class StorageImpl implements Storage {
     this.addCancel = addCancel;
   }
 
+  // Map from entity ID to cell, set at stage 2, i.e. already while loading
   private cellsById = new Map<string, CellImpl<any>>();
-  private loadingCells = new Map<CellImpl<any>, Promise<CellImpl<any>>>();
-  private syncingCells = new Map<CellImpl<any>, Promise<CellImpl<any>>>();
-  private writeDependentCells = new Map<CellImpl<any>, Set<CellImpl<any>>>();
-  private readDependentCells = new Map<CellImpl<any>, Set<CellImpl<any>>>();
 
-  private currentBatch: Batch = [];
+  // Map from cell to promise of loading cell, set at stage 2. Resolves when
+  // cell and all it's dependencies are loaded.
+  private cellIsLoading = new Map<CellImpl<any>, Promise<CellImpl<any>>>();
+
+  // Resolves for the promises above. Only called by batch processor.
+  private loadingPromises = new Map<CellImpl<any>, Promise<CellImpl<any>>>();
+  private loadingResolves = new Map<CellImpl<any>, () => void>();
+
+  // Map from cell to latest transformed values and set of cells that depend on
+  // it. "Write" is from cell to storage, "read" is from storage to cell. For
+  // values that means either all cell ids (write) or all cells (read) in cell
+  // references.
+  private writeDependentCells = new Map<CellImpl<any>, Set<CellImpl<any>>>();
+  private writeValues = new Map<CellImpl<any>, StorageValue<any>>();
+  private readDependentCells = new Map<CellImpl<any>, Set<CellImpl<any>>>();
+  private readValues = new Map<CellImpl<any>, StorageValue<any>>();
+
+  private currentBatch: Job[] = [];
   private currentBatchProcessing = false;
   private currentBatchResolve: () => void = () => {};
   private currentBatchPromise: Promise<void> = new Promise(
@@ -109,26 +122,13 @@ class StorageImpl implements Storage {
   private cancel: Cancel;
   private addCancel: AddCancel;
 
-  syncCell<T>(subject: CellImpl<T> | EntityId | string): Promise<CellImpl<T>> {
-    const entityCell = this._fromIdToCell<T>(subject);
+  syncCell<T>(
+    subject: CellImpl<T> | EntityId | string
+  ): Promise<CellImpl<T>> | CellImpl<T> {
+    const entityCell = this._ensureIsSynced(subject);
 
-    // If the cell is already syncing, return the promise. Or if the cell is
-    // already loaded, return immediately
-    if (this.syncingCells.has(entityCell))
-      return this.syncingCells.get(entityCell)!;
-    else if (this.cellsById.has(JSON.stringify(entityCell.entityId)))
-      return Promise.resolve(entityCell);
-
-    const promise = this._addToBatch([
-      { cell: entityCell, value: { value: undefined }, type: "sync" },
-    ]).then(() => {
-      this.syncingCells.delete(entityCell);
-      return entityCell;
-    });
-
-    this.syncingCells.set(entityCell, promise);
-
-    return promise;
+    // If cell is loading, return the promise. Otherwise return immediately.
+    return this.cellIsLoading.get(entityCell) ?? entityCell;
   }
 
   synced(): Promise<void> {
@@ -138,7 +138,7 @@ class StorageImpl implements Storage {
   async destroy(): Promise<void> {
     await this.storageProvider.destroy();
     this.cellsById.clear();
-    this.loadingCells.clear();
+    this.cellIsLoading.clear();
     this.cancel();
   }
 
@@ -155,28 +155,29 @@ class StorageImpl implements Storage {
     // populate the cell when loading dependencies and thus avoid circular
     // references.
     this.cellsById.set(entityId, entityCell);
-    this._subscribeToChanges(entityCell);
 
-    // Start loading the cell
+    // Start loading the cell and safe the promise for processBatch to await for
     const loadingPromise = this.storageProvider
       .sync(entityCell.entityId!)
-      .then(() => {
-        this.loadingCells.delete(entityCell);
-        return entityCell;
-      });
+      .then(() => entityCell);
+    this.loadingPromises.set(entityCell, loadingPromise);
 
-    // Being in this set means that we need to wait for the cell to load before
-    // calling .get() on storage. Afterwards, it'll always be sync, because we
-    // subscribed to the cell.
-    this.loadingCells.set(entityCell, loadingPromise);
+    // Create a promise that gets resolved once the cell and all its
+    // dependencies are loaded. It'll return the cell when done.
+    const cellIsLoadingPromise = new Promise<void>((r) =>
+      this.loadingResolves.set(entityCell, r)
+    ).then(() => entityCell);
+    this.cellIsLoading.set(entityCell, cellIsLoadingPromise);
 
+    this._addToBatch([{ cell: entityCell, type: "sync" }]);
+
+    // Return the cell, to make calls chainable.
     return entityCell;
   }
 
-  private _prepForStorage(cell: CellImpl<any>): {
-    value: any;
-    source?: EntityId;
-  } {
+  // Prepares value for storage, and updates dependencies, triggering cell loads
+  // if necessary. Updates this.writeValues and this.writeDependentCells.
+  private _prepForStorage(cell: CellImpl<any>): void {
     const dependencies = new Set<CellImpl<any>>();
 
     // Traverse the value and for each cell reference, make sure it's persisted.
@@ -197,7 +198,7 @@ class StorageImpl implements Storage {
             path,
           });
         }
-        dependencies.add(value.cell);
+        dependencies.add(this._ensureIsSynced(value.cell));
         return { cell: value.cell.toJSON() /* = the id */, path: value.path };
       } else if (typeof value === "object" && value !== null) {
         if (Array.isArray(value))
@@ -224,6 +225,7 @@ class StorageImpl implements Storage {
     // Convert all cell references to ids and remember as dependent cells
     const value = traverse(cell.get(), []);
     this.writeDependentCells.set(cell, dependencies);
+    this.writeValues.set(cell, { value, source: cell.sourceCell?.entityId });
 
     console.log(
       "prep for storage",
@@ -231,20 +233,24 @@ class StorageImpl implements Storage {
       value,
       [...dependencies].map((c) => JSON.stringify(c.entityId))
     );
-
-    return { value, source: cell.sourceCell?.entityId };
   }
 
-  private _sendToStorage(cell: CellImpl<any>, value: any): Promise<void> {
+  private _sendToStorage(
+    cell: CellImpl<any>,
+    value: StorageValue<any>
+  ): Promise<void> {
+    if (!value) throw new Error("No value to send to storage");
     console.log("send to storage", JSON.stringify(cell.entityId), value);
     return this.storageProvider.send(cell.entityId!, value);
   }
 
+  // Prepares value for cells, and updates dependencies, triggering cell loads
+  // if necessary. Updates this.readValues and this.readDependentCells.
   private _prepForCell(
     cell: CellImpl<any>,
     value: any,
     source?: EntityId
-  ): StorageValue<any> {
+  ): void {
     console.log(
       "prep for cell",
       JSON.stringify(cell.entityId),
@@ -272,14 +278,16 @@ class StorageImpl implements Storage {
             console.warn("unexpected cell reference", value);
             return value;
           }
-        } else if (Array.isArray(value)) return value.map(traverse);
-        else
+        } else if (Array.isArray(value)) {
+          return value.map(traverse);
+        } else {
           return Object.fromEntries(
             Object.entries(value).map(([key, value]): any => [
               key,
               traverse(value),
             ])
           );
+        }
       else return value;
     };
 
@@ -287,135 +295,173 @@ class StorageImpl implements Storage {
     if (source) dependencies.add(this._ensureIsSynced(source));
 
     value = traverse(value);
+
     this.readDependentCells.set(cell, dependencies);
-    return { value, source };
+    this.readValues.set(cell, { value, source });
   }
 
-  private _sendToCell(
-    cell: CellImpl<any>,
-    value: any,
-    source?: EntityId
-  ): void {
-    console.log("send to cell", JSON.stringify(cell.entityId), value, source);
-    if (source) {
+  private _sendToCell(cell: CellImpl<any>, value: StorageValue<any>): void {
+    if (!value) throw new Error("No value to send to cell");
+    console.log("send to cell", JSON.stringify(cell.entityId), value);
+
+    if (value.source) {
       if (
         cell.sourceCell &&
-        JSON.stringify(cell.sourceCell.entityId) !== JSON.stringify(source)
+        JSON.stringify(cell.sourceCell.entityId) !==
+          JSON.stringify(value.source)
       )
         throw new Error("Cell already has a different source");
 
-      cell.sourceCell = this.cellsById.get(JSON.stringify(source))!;
+      cell.sourceCell = this.cellsById.get(JSON.stringify(value.source))!;
     }
+
     cell.send(value);
   }
 
-  private _deduplicateBatch(batch: Batch): Batch {
-    // TODO: Implement
+  // Processes the current batch, returns final operations to apply all at once
+  // while clearing the batch.
+  //
+  // In a loop will:
+  // - For all loaded cells, collect dependencies and add those to list of cells
+  // - Await loading of all remaining cells, then add read/write to batch,
+  //   install listeners, resolve loading promise
+  // - Once no cells are left to load, convert batch jobs to ops by copying over
+  //   the current values
+  //
+  // An invariant we can use: If a cell is loaded and _not_ in the batch, then
+  // it is current, and we don't need to verify it's dependencies. That's
+  // because once a cell is loaded, updates come in via listeners only, and they
+  // add entries to tbe batch.
+  private async _processCurrentBatch(): Promise<void> {
+    const loading = new Set<CellImpl<any>>();
+    const loadedCells = new Set<CellImpl<any>>();
 
-    return batch;
-  }
+    console.log(
+      "processing batch",
+      this.currentBatch.map(
+        ({ cell, type }) => `${JSON.stringify(cell.entityId)}:${type}`
+      )
+    );
 
-  private async _processBatch(batch: Batch): Promise<Batch> {
-    const tracking = new Set<CellImpl<any>>();
-    const queue = new Set(batch.map(({ cell }) => cell));
-
-    // Ensure all cells are being loaded if they aren't already
-    batch.forEach(({ cell }) => this._ensureIsSynced(cell));
-
-    while (queue.size > 0) {
-      // Wait for cells that are still loading, but only once per cell
-      const promises: Promise<CellImpl<any>>[] = Array.from(queue)
-        .filter((cell) => this.loadingCells.has(cell))
-        .map((cell) => this.loadingCells.get(cell)!);
-
-      // TODO: Problem is that a cell can be already loaded by the time we get here, and then we never did the saving step.
-
-      const loadedCells = await Promise.all(promises);
-      queue.clear();
-
-      // Process loaded cells, they'll end up on the batch
-      for (const cell of loadedCells) {
-        // If the cell isn't already associated with a read or write operation,
-        // let's create one
-        if (!batch.find(({ cell: c, type }) => c === cell && type !== "sync")) {
-          // After first load, we set up sync: If storage doesn't know about the
-          // cell, we need to persist the current value. If it does, we need to
-          // update the cell value.
-          const value = this.storageProvider.get(cell.entityId!);
-          if (value === undefined)
-            batch.push({
-              cell,
-              value: this._prepForStorage(cell),
-              type: "storage",
-            });
-          else
-            batch.push({
-              cell,
-              value: this._prepForCell(cell, value.value, value.source),
-              type: "cell",
-            });
-        }
-      }
-
-      for (const { cell, type } of batch) {
-        if (tracking.has(cell)) continue;
-        else if (this.loadingCells.has(cell)) queue.add(cell);
-        else {
-          // Once a cell is loaded, add all its dependent cells to the queue
-          tracking.add(cell);
-
-          if (type === "cell")
-            this.readDependentCells
-              .get(cell)
-              ?.forEach((dependent) => queue.add(dependent));
-          else if (type === "storage")
-            this.writeDependentCells
-              .get(cell)
-              ?.forEach((dependent) => queue.add(dependent));
-        }
-      }
-    }
-
-    return batch;
-  }
-
-  private async _applyBatch(batch: Batch): Promise<void> {
-    const promises: Promise<void>[] = batch
-      .filter(({ type: destination }) => destination === "storage")
-      .map(({ cell, value }) => this._sendToStorage(cell, value));
-    await Promise.all(promises);
-
-    batch
-      .filter(({ type: destination }) => destination === "cell")
-      .forEach(({ cell, value }) =>
-        this._sendToCell(cell, value.value, value.source)
+    do {
+      // Load everything in loading
+      const loaded = await Promise.all(
+        Array.from(loading).map((cell) => this.loadingPromises.get(cell)!)
       );
-  }
+      loading.clear();
 
-  private _processCurrentBatch(): void {
-    console.log("process current batch", JSON.stringify(this.currentBatch));
+      for (const cell of loaded) {
+        loadedCells.add(cell);
 
-    const resolve = this.currentBatchResolve;
+        // After first load, we set up sync: If storage doesn't know about the
+        // cell, we need to persist the current value. If it does, we need to
+        // update the cell value.
+        const value = this.storageProvider.get(cell.entityId!);
+        if (value === undefined) {
+          this._prepForStorage(cell);
+          this.currentBatch.push({ cell, type: "storage" });
+        } else {
+          this._prepForCell(cell, value.value, value.source);
+          this.currentBatch.push({ cell, type: "cell" });
+        }
+      }
 
-    const batchToApply = this.currentBatch;
+      // For each entry in the batch, find all dependent not yet loaded cells.
+      // Note that this includes both cells just added above, after loading and
+      // cells that were updated in the meantime and possibly gained
+      // dependencies.
+      for (const { cell, type } of this.currentBatch) {
+        if (type === "sync") {
+          if (this.cellIsLoading.has(cell) && !loadedCells.has(cell))
+            loading.add(cell);
+        } else {
+          // Invariant: Jobs with "cell" or "storage" type are already loaded.
+          // But dependencies might change, even while this loop is running.
+          const dependentCells =
+            type === "cell"
+              ? this.readDependentCells.get(cell)
+              : this.writeDependentCells.get(cell);
+          console.log(
+            "dependent cells",
+            JSON.stringify(cell.entityId),
+            [...dependentCells!].map((c) => JSON.stringify(c.entityId))
+          );
+          if (dependentCells)
+            Array.from(dependentCells)
+              .filter(
+                (dependent) =>
+                  this.cellIsLoading.has(dependent) &&
+                  !loadedCells.has(dependent)
+              )
+              .forEach((dependent) => loading.add(dependent));
+        }
 
-    // Reset the current batch, set up the promise for the next batch
+        // From now on, we'll get updates via listeners
+        this._subscribeToChanges(cell);
+      }
+      console.log(
+        "loading",
+        [...loading].map((c) => JSON.stringify(c.entityId))
+      );
+      console.log(
+        "cellIsLoading",
+        [...this.cellIsLoading.keys()].map((c) => JSON.stringify(c.entityId))
+      );
+      console.log(
+        "currentBatch",
+        this.currentBatch.map(
+          ({ cell, type }) => `${JSON.stringify(cell.entityId)}:${type}`
+        )
+      );
+    } while (loading.size > 0);
+
+    // Convert batch jobs to operations:
+
+    // First, filter out "sync" jobs, as they were either no-op (already loaded)
+    // or generated new jobs
+    const jobs = this.currentBatch.filter(({ type }) => type !== "sync");
+
+    // Reset batch: Everything coming in now will be processed in the next round
+    const currentResolve = this.currentBatchResolve;
     this.currentBatch = [];
     this.currentBatchPromise = new Promise(
       (r) => (this.currentBatchResolve = r)
     );
 
-    this._processBatch(this._deduplicateBatch(batchToApply))
-      .then((batch) => this._applyBatch(batch))
-      .then(() => {
-        // Let everyone waiting for the batch continue their work
-        resolve();
+    // Split between cell and storage jobs
+    const cellJobs = new Map(
+      jobs
+        .filter(({ type }) => type === "cell")
+        .map(({ cell }) => [cell, this.readValues.get(cell)!])
+    );
+    const storageJobs = new Map(
+      jobs
+        .filter(({ type }) => type === "storage")
+        .map(({ cell }) => [cell, this.writeValues.get(cell)!])
+    );
 
-        // Trigger the next batch processing, if batch is not empty.
-        if (this.currentBatch.length > 0)
-          queueMicrotask(() => this._processCurrentBatch());
-        else this.currentBatchProcessing = false;
-      });
+    // Storage jobs override cell jobs. Write remaining cell jobs to cell.
+    cellJobs.forEach((value, cell) => {
+      if (!storageJobs.has(cell)) this._sendToCell(cell, value);
+    });
+
+    // Write all storage jobs to storage
+    await Promise.all(
+      Array.from(storageJobs).map(([cell, value]) =>
+        this._sendToStorage(cell, value)
+      )
+    );
+
+    // Finally, clear and resolve loading promise for all loaded cells
+    for (const cell of loadedCells) {
+      const resolve = this.loadingResolves.get(cell);
+      this.loadingPromises.delete(cell);
+      this.cellIsLoading.delete(cell);
+      resolve?.();
+    }
+
+    // Notify everyone waiting for the batch to finish
+    currentResolve();
   }
 
   /**
@@ -432,12 +478,21 @@ class StorageImpl implements Storage {
    * @param batch - Batch to add.
    * @returns Promise that resolves when the batch is processed.
    */
-  private _addToBatch(batch: Batch): Promise<void> {
+  private _addToBatch(batch: Job[]): Promise<void> {
     this.currentBatch.push(...batch);
 
     if (!this.currentBatchProcessing) {
       this.currentBatchProcessing = true;
-      queueMicrotask(() => this._processCurrentBatch());
+
+      queueMicrotask(() =>
+        this._processCurrentBatch().then(() => {
+          this.currentBatchProcessing = false;
+
+          // Trigger processing of next batch, if we got new ones while
+          // applying operations or after resolving the current batch promise
+          if (this.currentBatch.length > 0) this._addToBatch([]);
+        })
+      );
     }
 
     return this.currentBatchPromise;
@@ -446,28 +501,22 @@ class StorageImpl implements Storage {
   private _subscribeToChanges(cell: CellImpl<any>): void {
     // Subscribe to cell changes, send updates to storage
     this.addCancel(
-      cell.updates((value) =>
-        this._addToBatch([
-          {
-            cell,
-            value: { value, source: cell.sourceCell?.entityId },
-            type: "storage",
-          },
-        ])
-      )
+      cell.updates(() => {
+        // Update value and dependencies
+        this._prepForStorage(cell);
+        // Schedule to write that update. It'll also await dependencies.
+        this._addToBatch([{ cell, type: "storage" }]);
+      })
     );
 
     // Subscribe to storage updates, send results to cell
     this.addCancel(
-      this.storageProvider.sink(cell.entityId!, (value) =>
-        this._addToBatch([
-          {
-            cell,
-            value: this._prepForCell(cell, value.value, value.source),
-            type: "cell",
-          },
-        ])
-      )
+      this.storageProvider.sink(cell.entityId!, (value) => {
+        // Update value and dependencies
+        this._prepForCell(cell, value.value, value.source);
+        // Schedule to write that update. It'll also await dependencies.
+        this._addToBatch([{ cell, type: "cell" }]);
+      })
     );
   }
 

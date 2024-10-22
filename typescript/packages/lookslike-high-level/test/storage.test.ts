@@ -117,7 +117,7 @@ describe("Storage", () => {
           storage2 = new InMemoryStorageProvider();
         } else if (storageType === "local") {
           console.log("local", LocalStorageProvider);
-          storage2 = new LocalStorageProvider("test_");
+          storage2 = new LocalStorageProvider();
         } else {
           throw new Error("Invalid storage type: " + storageType);
         }
@@ -142,7 +142,7 @@ describe("Storage", () => {
           expect(value?.value).toEqual(testValue);
         });
 
-        it.only("should persist a cells and referenced cell references within it", async () => {
+        it("should persist a cells and referenced cell references within it", async () => {
           const refCell = cell("hello");
           refCell.generateEntityId();
 
@@ -152,7 +152,9 @@ describe("Storage", () => {
           };
           testCell.send(testValue);
 
+          console.log("syncing testCell");
           await storage.syncCell(testCell);
+          console.log("synced testCell");
 
           await storage2.sync(refCell.entityId!);
           const value = storage2.get(refCell.entityId!);

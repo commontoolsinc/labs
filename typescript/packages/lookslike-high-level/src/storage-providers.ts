@@ -120,7 +120,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     const key = JSON.stringify(entityId);
     const valueString = JSON.stringify(value);
     if (this.lastValues.get(key) !== valueString) {
-      console.log("send inmemory", JSON.stringify(entityId), value);
+      console.log("send in memory", key, valueString);
       this.lastValues.set(key, valueString);
       inMemoryStorage.set(key, value);
       inMemoryStorageSubscribers.forEach((listener) => listener(key, value));
@@ -132,12 +132,13 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     if (inMemoryStorage.has(key))
       this.lastValues.set(key, JSON.stringify(inMemoryStorage.get(key)!));
     else this.lastValues.delete(key);
+    console.log("sync in memory", key, this.lastValues.get(key));
     return Promise.resolve();
   }
 
   get(entityId: EntityId): StorageValue<any> | undefined {
     const key = JSON.stringify(entityId);
-    console.log("get inmemory", JSON.stringify(entityId));
+    console.log("get in memory", key, this.lastValues.get(key));
     return this.lastValues.has(key)
       ? (JSON.parse(this.lastValues.get(key)!) as StorageValue<any>)
       : undefined;
@@ -149,10 +150,10 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     this.subscribers.clear();
   }
 }
+
 /**
  * Local storage provider for browser.
  */
-
 export class LocalStorageProvider extends BaseStorageProvider {
   private prefix: string;
   private lastValues = new Map<string, string | undefined>();
@@ -174,19 +175,14 @@ export class LocalStorageProvider extends BaseStorageProvider {
     if (this.lastValues.get(key) !== storeValue) {
       localStorage.setItem(key, storeValue);
       this.lastValues.set(key, storeValue);
-      console.log(
-        "send localstorage",
-        JSON.stringify(entityId),
-        storeValue,
-        this.lastValues
-      );
+      console.log("send localstorage", key, storeValue, this.lastValues);
     }
   }
 
   async sync(entityId: EntityId): Promise<void> {
     const key = this.getKey(entityId);
     const value = localStorage.getItem(key);
-    console.log("sync localstorage", JSON.stringify(entityId), value);
+    console.log("sync localstorage", key, value);
     if (value === null) this.lastValues.delete(key);
     else this.lastValues.set(key, value);
   }
@@ -194,7 +190,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
   get<T>(entityId: EntityId): StorageValue<T> | undefined {
     const key = this.getKey(entityId);
     const value = this.lastValues.get(key);
-    console.log("get localstorage", JSON.stringify(entityId), value);
+    console.log("get localstorage", key, value);
     if (value === null || value === undefined) return undefined;
     else return JSON.parse(value) as StorageValue<T>;
   }
