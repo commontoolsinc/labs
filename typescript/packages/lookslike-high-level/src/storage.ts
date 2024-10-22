@@ -54,6 +54,38 @@ type Batch = {
   type: "cell" | "storage" | "sync";
 }[];
 
+/**
+ * Storage implementation.
+ *
+ * Life-cycle of a cell: (1) not known to storage – a cell might just be a
+ *  temporary cell, e.g. holding input bindings or so (2) known to storage, but
+ *  not yet loaded – we know about the cell, but don't have the data yet. (3)
+ *  Once loaded, if there was data in storage, we overwrite the current value of
+ *  the cell, and if there was no data in storage, we use the current value of
+ *  the cell and write it to storage. (4) The cell is subscribed to updates from
+ *  storage and cells, and each time the cell changes, the new value is written
+ *  to storage, and vice versa.
+ *
+ * But reading and writing don't happen in one step: We follow all cell
+ * references and make sure all cells are loaded before we start writing. This
+ * is recursive, so if cell A references cell B, and cell B references cell C,
+ * then cell C will also be loaded when we process cell A. We might receive
+ * updates for cells (either locally or from storage), while we wait for the
+ * cells to load, and this might introduce more dependencies, and we'll pick
+ * those up as well. For now, we wait until we reach a stable point, i.e. no
+ * loading cells pending, but we might instead want to eventually queue up
+ * changes instead.
+ *
+ * Following references depends on the direction of the write: When writing from
+ * a cell to storage, we turn cell references into ids. When writing from
+ * storage to a cell, we turn ids into cell references.
+ *
+ * In the future we should be smarter about whether the local state or remote
+ * state is more up to date. For now we assume that the remote state is always
+ * more current. The idea is that the local state is optimistically executing
+ * on possibly stale state, while if there is something in storage, another node
+ * is probably already further ahead.
+ */
 class StorageImpl implements Storage {
   constructor(private storageProvider: StorageProvider) {
     const [cancel, addCancel] = useCancelGroup();
