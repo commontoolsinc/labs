@@ -51,7 +51,7 @@ export interface Storage {
 type Batch = {
   cell: CellImpl<any>;
   value: { value: any; source?: EntityId };
-  destination: "cell" | "storage" | "sync";
+  type: "cell" | "storage" | "sync";
 }[];
 
 class StorageImpl implements Storage {
@@ -88,7 +88,7 @@ class StorageImpl implements Storage {
       return Promise.resolve(entityCell);
 
     const promise = this._addToBatch([
-      { cell: entityCell, value: { value: undefined }, destination: "sync" },
+      { cell: entityCell, value: { value: undefined }, type: "sync" },
     ]).then(() => {
       this.syncingCells.delete(entityCell);
       return entityCell;
@@ -145,8 +145,6 @@ class StorageImpl implements Storage {
     value: any;
     source?: EntityId;
   } {
-    console.log("prep for storage", JSON.stringify(cell.entityId), cell.get());
-
     const dependencies = new Set<CellImpl<any>>();
 
     // Traverse the value and for each cell reference, make sure it's persisted.
@@ -161,7 +159,9 @@ class StorageImpl implements Storage {
         // Generate a causal ID for the cell if it doesn't have one yet
         if (!value.cell.entityId) {
           value.cell.generateEntityId({
-            cell: StorageImpl.maybeToJSON(cell.entityId),
+            cell: cell.entityId?.toJSON
+              ? cell.entityId.toJSON()
+              : cell.entityId,
             path,
           });
         }
@@ -192,6 +192,14 @@ class StorageImpl implements Storage {
     // Convert all cell references to ids and remember as dependent cells
     const value = traverse(cell.get(), []);
     this.writeDependentCells.set(cell, dependencies);
+
+    console.log(
+      "prep for storage",
+      JSON.stringify(cell.entityId),
+      value,
+      [...dependencies].map((c) => JSON.stringify(c.entityId))
+    );
+
     return { value, source: cell.sourceCell?.entityId };
   }
 
@@ -277,54 +285,61 @@ class StorageImpl implements Storage {
 
   private async _processBatch(batch: Batch): Promise<Batch> {
     const tracking = new Set<CellImpl<any>>();
-    const queue = [...batch.map(({ cell }) => cell)];
+    const queue = new Set(batch.map(({ cell }) => cell));
 
-    // Process sync operations: Ensure they are synced, then remove from the
-    // batch. They were added to the queue above, so they'll be processed below.
-    batch
-      .filter(({ destination }) => destination === "sync")
-      .forEach(({ cell }) => this._ensureIsSynced(cell));
-    batch = batch.filter(({ destination }) => destination !== "sync");
+    // Ensure all cells are being loaded if they aren't already
+    batch.forEach(({ cell }) => this._ensureIsSynced(cell));
 
-    while (queue.length > 0) {
+    while (queue.size > 0) {
       // Wait for cells that are still loading, but only once per cell
-      const promises: Promise<CellImpl<any>>[] = [...new Set(queue)]
+      const promises: Promise<CellImpl<any>>[] = Array.from(queue)
         .filter((cell) => this.loadingCells.has(cell))
         .map((cell) => this.loadingCells.get(cell)!);
 
+      // TODO: Problem is that a cell can be already loaded by the time we get here, and then we never did the saving step.
+
       const loadedCells = await Promise.all(promises);
-      queue.length = 0;
+      queue.clear();
 
       // Process loaded cells, they'll end up on the batch
       for (const cell of loadedCells) {
-        // After first load, we set up sync: If storage doesn't know about the
-        // cell, we need to persist the current value. If it does, we need to
-        // update the cell value.
-        const value = this.storageProvider.get(cell.entityId!);
-        if (value === undefined)
-          batch.push({
-            cell,
-            value: this._prepForStorage(cell),
-            destination: "storage",
-          });
-        else
-          batch.push({
-            cell,
-            value: this._prepForCell(cell, value.value, value.source),
-            destination: "cell",
-          });
+        // If the cell isn't already associated with a read or write operation,
+        // let's create one
+        if (!batch.find(({ cell: c, type }) => c === cell && type !== "sync")) {
+          // After first load, we set up sync: If storage doesn't know about the
+          // cell, we need to persist the current value. If it does, we need to
+          // update the cell value.
+          const value = this.storageProvider.get(cell.entityId!);
+          if (value === undefined)
+            batch.push({
+              cell,
+              value: this._prepForStorage(cell),
+              type: "storage",
+            });
+          else
+            batch.push({
+              cell,
+              value: this._prepForCell(cell, value.value, value.source),
+              type: "cell",
+            });
+        }
       }
 
-      for (const { cell, destination } of batch) {
+      for (const { cell, type } of batch) {
         if (tracking.has(cell)) continue;
-        else if (this.loadingCells.has(cell)) queue.push(cell);
+        else if (this.loadingCells.has(cell)) queue.add(cell);
         else {
+          // Once a cell is loaded, add all its dependent cells to the queue
           tracking.add(cell);
-          queue.push(
-            ...(destination === "cell"
-              ? this.readDependentCells.get(cell) ?? []
-              : this.writeDependentCells.get(cell) ?? [])
-          );
+
+          if (type === "cell")
+            this.readDependentCells
+              .get(cell)
+              ?.forEach((dependent) => queue.add(dependent));
+          else if (type === "storage")
+            this.writeDependentCells
+              .get(cell)
+              ?.forEach((dependent) => queue.add(dependent));
         }
       }
     }
@@ -334,12 +349,12 @@ class StorageImpl implements Storage {
 
   private async _applyBatch(batch: Batch): Promise<void> {
     const promises: Promise<void>[] = batch
-      .filter(({ destination }) => destination === "storage")
+      .filter(({ type: destination }) => destination === "storage")
       .map(({ cell, value }) => this._sendToStorage(cell, value));
     await Promise.all(promises);
 
     batch
-      .filter(({ destination }) => destination === "cell")
+      .filter(({ type: destination }) => destination === "cell")
       .forEach(({ cell, value }) =>
         this._sendToCell(cell, value.value, value.source)
       );
@@ -404,7 +419,7 @@ class StorageImpl implements Storage {
           {
             cell,
             value: { value, source: cell.sourceCell?.entityId },
-            destination: "storage",
+            type: "storage",
           },
         ])
       )
@@ -417,7 +432,7 @@ class StorageImpl implements Storage {
           {
             cell,
             value: this._prepForCell(cell, value.value, value.source),
-            destination: "cell",
+            type: "cell",
           },
         ])
       )
@@ -440,16 +455,6 @@ class StorageImpl implements Storage {
     } else {
       throw new Error(`Invalid cell or entity ID: ${subject}`);
     }
-  }
-
-  static maybeToJSON(value: any): any {
-    if (
-      typeof value === "object" &&
-      value !== null &&
-      typeof value.toJSON === "function"
-    )
-      return value.toJSON();
-    else return value;
   }
 }
 

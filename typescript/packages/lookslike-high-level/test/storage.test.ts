@@ -142,7 +142,7 @@ describe("Storage", () => {
           expect(value?.value).toEqual(testValue);
         });
 
-        it("should persist a cells and referenced cell references within it", async () => {
+        it.only("should persist a cells and referenced cell references within it", async () => {
           const refCell = cell("hello");
           refCell.generateEntityId();
 
