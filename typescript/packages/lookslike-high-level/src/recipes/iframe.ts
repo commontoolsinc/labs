@@ -111,6 +111,93 @@ const getSuggestion = lift(
   },
 );
 
+const responsePrefill = `<html>
+<head>
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://unpkg.com/react/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script>
+window.onerror = function(message, source, lineno, colno, error) {
+window.parent.postMessage({
+  type: 'error',
+  key: 'error-details',
+  value: {
+    message: message,
+    source: source,
+    lineno: lineno,
+    colno: colno,
+    error: error ? error.stack : null,
+    stacktrace: error && error.stack ? error.stack : new Error().stack
+  }
+}, '*');
+return false;
+};
+
+/* You will receive a \`readResponse\` poistMessage event with the value. */
+window.readData = function(key, value) {
+  console.log('iframe: Reading data', key);
+  window.parent.postMessage({
+    type: 'read',
+    key
+  }, '*');
+}
+
+window.writeData = function(key, value) {
+  console.log('iframe: Writing data', key, value);
+  window.parent.postMessage({
+    type: 'write',
+    key,
+    value,
+  }, '*');
+}
+
+/* Subscribing to a key will immediately send an \`update\` event that contains the current value. Future mutations will re-trigger \`update\`. */
+window.subscribeToKey = function(key) {
+  console.log('iframe: Subscribing to', key);
+  window.parent.postMessage({
+    type: 'subscribe',
+    key,
+  }, '*');
+}
+
+window.unsubscribeFromKey = function(key) {
+  console.log('iframe: unsubscribing to', key);
+  window.parent.postMessage({
+    type: 'unsubscribe',
+    key,
+  }, '*');
+}
+
+window.generateImage = function(prompt) {
+  return 'https://ct-img.m4ke.workers.dev/?prompt=' + encodeURIComponent(prompt);
+}
+
+window.llm = async function(system, messages) {
+  console.log('iframe: Asking LLM', system, messages);
+const response = await fetch('http://localhost:5173/api/llm', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    messages: messages.map(m => ({ role: m.role, content: m.content })),
+    system: system,
+    model: "claude-3-5-sonnet-20240620",
+    stop: stop
+  }),
+});
+
+if (!response.ok) {
+  throw new Error(\`HTTP error! status: \${response.status}\`);
+}
+
+// this will be { role: "assistant", content: "..." }
+return await response.json();
+}
+</script>
+<title>`;
+
 const prepHTML = lift(({ prompt, schema, lastSrc, error }) => {
   if (!prompt) {
     return {};
@@ -125,106 +212,46 @@ const prepHTML = lift(({ prompt, schema, lastSrc, error }) => {
     fullPrompt += `\n\nYou must fix this error in your existing code: <error>${JSON.stringify(error.detail)}</error>`;
   }
 
-  const base = `<html>
-<head>
-<script src="https://cdn.tailwindcss.com"></script>
-<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script>
-window.onerror = function(message, source, lineno, colno, error) {
-  window.parent.postMessage({
-    type: 'error',
-    key: 'error-details',
-    value: {
-      message: message,
-      source: source,
-      lineno: lineno,
-      colno: colno,
-      error: error ? error.stack : null,
-      stacktrace: error && error.stack ? error.stack : new Error().stack
-    }
-  }, '*');
-  return false;
-};
-</script>
-<title>`;
+
 
   return {
-    messages: [fullPrompt, "```html\n" + base],
+    messages: [fullPrompt, "```html\n" + responsePrefill],
     stop: "```",
     system: `generate a complete HTML document within a html block , e.g.
     \`\`\`html
     ...
     \`\`\`
 
-    This must be complete HTML.
+    This must be a complete HTML page.
     Import Tailwind and style the page using it. Use tasteful, minimal defaults with a consistent style but customize based on the request.
-    Import React and write the app using it.
+    Import React and write the app using it. Consult the rules of React closely to avoid common mistakes (effects running twice, undefined).
 
     You may not use any other libraries unless requested by the user (in which case, use a CDN to import them)
 
-    If you would like to use generated images use the following URL: \`https://ct-img.m4ke.workers.dev/?prompt=<URL_ENCODED_PROMPT>\`
+    Use your familiar set of functions to work with data from the host context.
 
-    You can make a call to an LLM by POSTing to \`http://localhost:5173/api/llm\` with the following payload:
+    \`\`\`js
+    function handleMessage(event) {
+      if (event.data.type === 'update') {
+        console.log('iframe: got updated', event.data.key, event.data.value);
+        // changed key is event.data.key
+        // data is event.data.value, already deserialized
+      }
+    }
 
-    \`\`\`json
-    {
-      messages: Array<{ role: string; content: string }>;
-      system: string;
-      model: "claude-3-5-sonnet-20240620";
-      stop?: string;
-    };
+    useEffect(() => {
+      window.addEventListener('message', handleMessage, []);
+      return () => window.removeEventListener('message', handleMessage);
+    , []);
     \`\`\`
 
-    The document can and should make use of postMessage to read and write data from the host context. e.g.
+    Consider that _any_ data you request may be undefined at first, or may be updated at any time. You should handle this gracefully.
 
-    document.addEventListener('DOMContentLoaded', function() {
-      console.log('Initialized!');
-
-      window.parent.postMessage({
-          type: 'subscribe',
-          key: 'exampleKey'
-        }, '*');
-
-      window.addEventListener('message', function(event) {
-        if (event.data.type === 'readResponse') {
-          // use response
-          console.log('readResponse', event.data.key,event.data.value);
-        } else if (event.data.type === 'update') {
-          // event.data.value is a JSON object already
-          // refer to schema for structure
-        ...
-      });
-    });
-
-    window.parent.postMessage({
-      type: 'write',
-      key: 'exampleKey',
-      value: 'Example data to write'
-    }, '*');
-
-    You can subscribe and unsubscribe to changes from the keys:
-
-    window.parent.postMessage({
-      type: 'subscribe',
-      key: 'exampleKey'
-    }, '*');
-
-    You receive 'update' messages with a 'key' and 'value' field.
-
-    window.parent.postMessage({
-      type: 'unsubscribe',
-      key: 'exampleKey',
-    }, '*');
-
-    Consider that _any_ data you read may be undefined at first, or may be updated at any time. You should handle this gracefully.
+    When using React ref's, always handle the undefined or null case. If you're using a ref for setup, include it the dependencies for useEffect.
 
     <view-model-schema>
       ${JSON.stringify(schema, null, 2)}
-    </view-model-schema>
-
-    It's best to access and manage each state reference seperately.`,
+    </view-model-schema>`,
   };
 });
 
@@ -264,7 +291,7 @@ const progress = lift<{ pending: boolean; partial?: string }, number>(
     if (!partial || !pending) {
       return 0;
     }
-    return Math.min(partial.length / 8096.0, 1);
+    return (partial.length - responsePrefill.length) / 2048.0;
   },
 );
 
@@ -294,7 +321,7 @@ const mostRelevantFields = lift(({ prompt, schema }) => {
 
   return {
     messages: [fullPrompt, "```json\n"],
-    system: `Transform this JSON schema to include only the fields relevant to the user's task. Respond with a valid JSON schema.`,
+    system: `Filter this JSON schema to include only the fields relevant to the user's task. Do not restructure or change the schema other than removing irrelevant details. However, if there is no current schema at all, imagine one. Respond with a valid JSON schema.`,
     stop: "```",
   };
 });
@@ -347,9 +374,9 @@ export const iframe = recipe<{
   tap({ schema });
 
 
-  const focusedSchema = grabKeywords(
-    llm(mostRelevantFields({ prompt, schema })),
-  );
+  // const focusedSchema = grabKeywords(
+  //   llm(mostRelevantFields({ prompt, schema })),
+  // );
 
   const query = copy({ value: prompt });
   const lastSrc = copy({ value: src });
@@ -366,10 +393,10 @@ export const iframe = recipe<{
     result,
     pending: pendingHTML,
     partial: partialHTML,
-  } = llm(prepHTML({ prompt, schema: focusedSchema, lastSrc, error }));
+  } = llm(prepHTML({ prompt, schema, lastSrc, error }));
 
   const suggestions = grabSuggestions(
-    llm(prepSuggestions({ src: grabHTML({ result }), prompt, schema: focusedSchema })),
+    llm(prepSuggestions({ src: grabHTML({ result }), prompt, schema})),
   );
 
   return {
@@ -390,7 +417,7 @@ export const iframe = recipe<{
     title,
     src: grabHTML({ result }),
     data,
-    schema: focusedSchema,
+    schema,
     partialHTML,
     suggestions: { items: suggestions },
     addToPrompt: addToPrompt({ prompt, src, lastSrc, query }),
