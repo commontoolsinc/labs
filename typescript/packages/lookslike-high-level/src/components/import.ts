@@ -45,19 +45,36 @@ export class JsonFileDrop extends LitElement {
     e.preventDefault();
     this.classList.remove('dragover');
 
-    const file = e.dataTransfer?.files[0];
-    if (file && file.type === 'application/json') {
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) {
+      const jsonFiles = Array.from(files).filter(file => file.type === 'application/json');
+
+      if (jsonFiles.length > 0) {
+        Promise.all(jsonFiles.map(file => this.readFileAsJson(file)))
+          .then(contents => {
+            this.jsonContent = { items: contents };
+            this.dispatchEvent(new CustomEvent('common-data', { detail: this.jsonContent }));
+          })
+          .catch(error => {
+            console.error('Error parsing JSON:', error);
+          });
+      }
+    }
+  }
+
+  private readFileAsJson(file: File): Promise<any> {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (event) => {
         try {
-          this.jsonContent = JSON.parse(event.target?.result as string);
-          this.dispatchEvent(new CustomEvent('common-data', { detail: this.jsonContent }));
+          const content = JSON.parse(event.target?.result as string);
+          resolve(content);
         } catch (error) {
-          console.error('Error parsing JSON:', error);
+          reject(error);
         }
       };
       reader.readAsText(file);
-    }
+    });
   }
 
   override render() {
