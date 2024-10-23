@@ -2,6 +2,7 @@ import { isAlias, isStatic, markAsStatic } from "@commontools/common-builder";
 import {
   cell,
   isCell,
+  isSimpleCell,
   CellImpl,
   ReactivityLog,
   CellReference,
@@ -120,7 +121,9 @@ export function setNestedValue(
     typeof value === "object" &&
     value !== null &&
     Array.isArray(value) === Array.isArray(destValue) &&
-    !isCellReference(value)
+    !isCell(value) &&
+    !isCellReference(value) &&
+    !isSimpleCell(value)
   ) {
     let success = true;
     for (const key in value)
@@ -196,7 +199,8 @@ export function findAllAliasedCells(
       typeof binding === "object" &&
       binding !== null &&
       !isCellReference(binding) &&
-      !isCell(binding)
+      !isCell(binding) &&
+      !isSimpleCell(binding)
     ) {
       for (const value of Object.values(binding)) find(value, origCell);
     }
@@ -302,6 +306,8 @@ export function transformToSimpleCells(
   } else if (isCellReference(value)) {
     const ref = followCellReferences(value);
     return ref.cell.asSimpleCell(ref.path, log);
+  } else if (isSimpleCell(value)) {
+    return value;
   }
 
   if (typeof value === "object" && value !== null)
@@ -362,7 +368,7 @@ export function normalizeToCells(
   let changed = false;
   if (isStatic(value)) {
     // no-op, don't normalize deep static values and assume they don't change
-  } else if (isCell(value)) {
+  } else if (isCell(value) || isSimpleCell(value)) {
     changed = value !== previous;
   } else if (isCellReference(value)) {
     changed = isCellReference(previous)
@@ -385,7 +391,14 @@ export function normalizeToCells(
     for (let i = 0; i < value.length; i++) {
       const item = maybeUnwrapProxy(value[i]);
       const previousItem = previous ? maybeUnwrapProxy(previous[i]) : undefined;
-      if (!(isCell(item) || isCellReference(item) || isAlias(item))) {
+      if (
+        !(
+          isCell(item) ||
+          isCellReference(item) ||
+          isAlias(item) ||
+          isSimpleCell(item)
+        )
+      ) {
         itemId = createRef(value[i], {
           parent: cause,
           index: i,
@@ -480,7 +493,7 @@ export function isEqualCellReferences(
 }
 
 export function deepCopy(value: any): any {
-  if (isCell(value)) return value;
+  if (isCell(value) || isSimpleCell(value)) return value;
   if (typeof value === "object" && value !== null)
     return Array.isArray(value)
       ? value.map(deepCopy)
