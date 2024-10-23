@@ -431,7 +431,10 @@ describe("makeArrayElementsAllCells", () => {
     const changed = normalizeToCells(newInput, previousInput);
 
     expect(changed).toBe(true);
-    expect(newInput[0]).not.toBe(previousInput[0]);
+    expect(
+      (newInput[0] as unknown as CellReference).cell !==
+        (previousInput[0] as unknown as CellReference).cell
+    ).toBeTruthy();
     expect(isCellReference(newInput[0])).toBe(true);
     expect((newInput[0] as unknown as CellReference).cell.get()).toBe(43);
   });
