@@ -9,6 +9,7 @@ import {
   useCancelGroup,
   getCellByEntityId,
 } from "@commontools/common-runner";
+import { isStatic, markAsStatic } from "@commontools/common-builder";
 import {
   StorageProvider,
   StorageValue,
@@ -110,7 +111,10 @@ class StorageImpl implements Storage {
   private writeDependentCells = new Map<CellImpl<any>, Set<CellImpl<any>>>();
   private writeValues = new Map<CellImpl<any>, StorageValue<any>>();
   private readDependentCells = new Map<CellImpl<any>, Set<CellImpl<any>>>();
-  private readValues = new Map<CellImpl<any>, StorageValue<any>>();
+  private readValues = new Map<
+    CellImpl<any>,
+    { value: any; source?: CellImpl<any> }
+  >();
 
   private currentBatch: Job[] = [];
   private currentBatchProcessing = false;
@@ -177,12 +181,16 @@ class StorageImpl implements Storage {
 
   // Prepares value for storage, and updates dependencies, triggering cell loads
   // if necessary. Updates this.writeValues and this.writeDependentCells.
-  private _prepForStorage(cell: CellImpl<any>): void {
+  private _batchForStorage(cell: CellImpl<any>): void {
     const dependencies = new Set<CellImpl<any>>();
 
     // Traverse the value and for each cell reference, make sure it's persisted.
     // This is done recursively.
-    const traverse = (value: any, path: PropertyKey[]): any => {
+    const traverse = (
+      value: any,
+      path: PropertyKey[],
+      processStatic: boolean = false
+    ): any => {
       // If it's a cell, make it a cell reference
       if (isCell(value))
         value = { cell: value, path: [] } satisfies CellReference;
@@ -200,6 +208,8 @@ class StorageImpl implements Storage {
         }
         dependencies.add(this._ensureIsSynced(value.cell));
         return { cell: value.cell.toJSON() /* = the id */, path: value.path };
+      } else if (isStatic(value) && !processStatic) {
+        return { $static: traverse(value, path, true) };
       } else if (typeof value === "object" && value !== null) {
         if (Array.isArray(value))
           return value.map((value, index) => traverse(value, [...path, index]));
@@ -223,30 +233,31 @@ class StorageImpl implements Storage {
     }
 
     // Convert all cell references to ids and remember as dependent cells
-    const value = traverse(cell.get(), []);
-    this.writeDependentCells.set(cell, dependencies);
-    this.writeValues.set(cell, { value, source: cell.sourceCell?.entityId });
+    const value: { value: any; source?: EntityId } = {
+      value: traverse(cell.get(), []),
+    };
+    if (cell.sourceCell) value.source = cell.sourceCell.entityId;
 
-    console.log(
-      "prep for storage",
-      JSON.stringify(cell.entityId),
-      value,
-      [...dependencies].map((c) => JSON.stringify(c.entityId))
-    );
-  }
+    if (
+      JSON.stringify(value) !== JSON.stringify(this.writeValues.get(cell) ?? {})
+    ) {
+      this.writeDependentCells.set(cell, dependencies);
+      this.writeValues.set(cell, value);
 
-  private _sendToStorage(
-    cell: CellImpl<any>,
-    value: StorageValue<any>
-  ): Promise<void> {
-    if (!value) throw new Error("No value to send to storage");
-    console.log("send to storage", JSON.stringify(cell.entityId), value);
-    return this.storageProvider.send(cell.entityId!, value);
+      this._addToBatch([{ cell, type: "storage" }]);
+
+      console.log(
+        "prep for storage",
+        JSON.stringify(cell.entityId),
+        value,
+        [...dependencies].map((c) => JSON.stringify(c.entityId))
+      );
+    }
   }
 
   // Prepares value for cells, and updates dependencies, triggering cell loads
   // if necessary. Updates this.readValues and this.readDependentCells.
-  private _prepForCell(
+  private _batchForCell(
     cell: CellImpl<any>,
     value: any,
     source?: EntityId
@@ -278,6 +289,10 @@ class StorageImpl implements Storage {
             console.warn("unexpected cell reference", value);
             return value;
           }
+        } else if ("$static" in value) {
+          const staticValue = traverse(value.$static);
+          markAsStatic(staticValue);
+          return staticValue;
         } else if (Array.isArray(value)) {
           return value.map(traverse);
         } else {
@@ -292,30 +307,24 @@ class StorageImpl implements Storage {
     };
 
     // Make sure the source cell is loaded, and add it as a dependency
-    if (source) dependencies.add(this._ensureIsSynced(source));
+    const newValue: { value: any; source?: CellImpl<any> } = {
+      value: traverse(value),
+    };
 
-    value = traverse(value);
-
-    this.readDependentCells.set(cell, dependencies);
-    this.readValues.set(cell, { value, source });
-  }
-
-  private _sendToCell(cell: CellImpl<any>, value: StorageValue<any>): void {
-    if (!value) throw new Error("No value to send to cell");
-    console.log("send to cell", JSON.stringify(cell.entityId), value);
-
-    if (value.source) {
-      if (
-        cell.sourceCell &&
-        JSON.stringify(cell.sourceCell.entityId) !==
-          JSON.stringify(value.source)
-      )
-        throw new Error("Cell already has a different source");
-
-      cell.sourceCell = this.cellsById.get(JSON.stringify(value.source))!;
+    if (source) {
+      const sourceCell = this._ensureIsSynced(source);
+      dependencies.add(sourceCell);
+      newValue.source = sourceCell;
     }
 
-    cell.send(value);
+    if (
+      JSON.stringify(newValue) !== JSON.stringify(this.readValues.get(cell))
+    ) {
+      this.readDependentCells.set(cell, dependencies);
+      this.readValues.set(cell, newValue);
+
+      this._addToBatch([{ cell, type: "cell" }]);
+    }
   }
 
   // Processes the current batch, returns final operations to apply all at once
@@ -357,13 +366,8 @@ class StorageImpl implements Storage {
         // cell, we need to persist the current value. If it does, we need to
         // update the cell value.
         const value = this.storageProvider.get(cell.entityId!);
-        if (value === undefined) {
-          this._prepForStorage(cell);
-          this.currentBatch.push({ cell, type: "storage" });
-        } else {
-          this._prepForCell(cell, value.value, value.source);
-          this.currentBatch.push({ cell, type: "cell" });
-        }
+        if (value === undefined) this._batchForStorage(cell);
+        else this._batchForCell(cell, value.value, value.source);
       }
 
       // For each entry in the batch, find all dependent not yet loaded cells.
@@ -441,14 +445,19 @@ class StorageImpl implements Storage {
     );
 
     // Storage jobs override cell jobs. Write remaining cell jobs to cell.
-    cellJobs.forEach((value, cell) => {
-      if (!storageJobs.has(cell)) this._sendToCell(cell, value);
+    cellJobs.forEach(({ value, source }, cell) => {
+      if (!storageJobs.has(cell)) {
+        if (source)
+          cell.sourceCell = this.cellsById.get(JSON.stringify(source))!;
+
+        cell.send(value);
+      }
     });
 
     // Write all storage jobs to storage
     await Promise.all(
       Array.from(storageJobs).map(([cell, value]) =>
-        this._sendToStorage(cell, value)
+        this.storageProvider.send(cell.entityId!, value)
       )
     );
 
@@ -500,23 +509,13 @@ class StorageImpl implements Storage {
 
   private _subscribeToChanges(cell: CellImpl<any>): void {
     // Subscribe to cell changes, send updates to storage
-    this.addCancel(
-      cell.updates(() => {
-        // Update value and dependencies
-        this._prepForStorage(cell);
-        // Schedule to write that update. It'll also await dependencies.
-        this._addToBatch([{ cell, type: "storage" }]);
-      })
-    );
+    this.addCancel(cell.updates(() => this._batchForStorage(cell)));
 
     // Subscribe to storage updates, send results to cell
     this.addCancel(
-      this.storageProvider.sink(cell.entityId!, (value) => {
-        // Update value and dependencies
-        this._prepForCell(cell, value.value, value.source);
-        // Schedule to write that update. It'll also await dependencies.
-        this._addToBatch([{ cell, type: "cell" }]);
-      })
+      this.storageProvider.sink(cell.entityId!, (value) =>
+        this._batchForCell(cell, value.value, value.source)
+      )
     );
   }
 
