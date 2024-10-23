@@ -9,19 +9,20 @@ export interface StorageProvider {
   /**
    * Send a value to storage.
    *
-   * @param entityId - Entity ID to send the value to.
-   * @param value - Value to send.
+   * @param batch - Batch of entity IDs & values to send.
    * @returns Promise that resolves when the value is sent.
    */
-  send<T = any>(entityId: EntityId, value: StorageValue<T>): Promise<void>;
+  send<T = any>(
+    batch: { entityId: EntityId; value: StorageValue<T> }[]
+  ): Promise<void>;
 
   /**
    * Sync a value from storage. Use `get()` to retrieve the value.
    *
-   * @param entityId - Entity ID to sync.
+   * @param entityIds - Entity IDs to sync.
    * @returns Promise that resolves when the value is synced.
    */
-  sync(entityId: EntityId): Promise<void>;
+  sync(entityIds: EntityId[]): Promise<void>;
 
   /**
    * Get a value from the local cache reflecting storage. Call `sync()` first.
@@ -54,11 +55,13 @@ export interface StorageProvider {
 abstract class BaseStorageProvider implements StorageProvider {
   protected subscribers = new Map<string, Set<(value: StorageValue) => void>>();
 
-  abstract send(entityId: EntityId, value: StorageValue): Promise<void>;
+  abstract send<T = any>(
+    batch: { entityId: EntityId; value: StorageValue<T> }[]
+  ): Promise<void>;
 
-  abstract sync(entityId: EntityId): Promise<void>;
+  abstract sync(entityIds: EntityId[]): Promise<void>;
 
-  abstract get(entityId: EntityId): StorageValue | undefined;
+  abstract get<T = any>(entityId: EntityId): StorageValue<T> | undefined;
 
   sink<T = any>(
     entityId: EntityId,
@@ -113,27 +116,32 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async send(entityId: EntityId, value: StorageValue): Promise<void> {
-    const key = JSON.stringify(entityId);
-    const valueString = JSON.stringify(value);
-    if (this.lastValues.get(key) !== valueString) {
-      console.log("send in memory", key, valueString);
-      this.lastValues.set(key, valueString);
-      inMemoryStorage.set(key, value);
-      inMemoryStorageSubscribers.forEach((listener) => listener(key, value));
+  async send<T = any>(
+    batch: { entityId: EntityId; value: StorageValue<T> }[]
+  ): Promise<void> {
+    for (const { entityId, value } of batch) {
+      const key = JSON.stringify(entityId);
+      const valueString = JSON.stringify(value);
+      if (this.lastValues.get(key) !== valueString) {
+        console.log("send in memory", key, valueString);
+        this.lastValues.set(key, valueString);
+        inMemoryStorage.set(key, value);
+        inMemoryStorageSubscribers.forEach((listener) => listener(key, value));
+      }
     }
   }
 
-  sync(entityId: EntityId): Promise<void> {
-    const key = JSON.stringify(entityId);
-    if (inMemoryStorage.has(key))
-      this.lastValues.set(key, JSON.stringify(inMemoryStorage.get(key)!));
-    else this.lastValues.delete(key);
-    console.log("sync in memory", key, this.lastValues.get(key));
-    return Promise.resolve();
+  async sync(entityIds: EntityId[]): Promise<void> {
+    for (const entityId of entityIds) {
+      const key = JSON.stringify(entityId);
+      if (inMemoryStorage.has(key))
+        this.lastValues.set(key, JSON.stringify(inMemoryStorage.get(key)!));
+      else this.lastValues.delete(key);
+      console.log("sync in memory", key, this.lastValues.get(key));
+    }
   }
 
-  get(entityId: EntityId): StorageValue | undefined {
+  get<T>(entityId: EntityId): StorageValue<T> | undefined {
     const key = JSON.stringify(entityId);
     console.log("get in memory", key, this.lastValues.get(key));
     return this.lastValues.has(key)
@@ -166,22 +174,28 @@ export class LocalStorageProvider extends BaseStorageProvider {
     window.addEventListener("storage", this.handleStorageEventFn);
   }
 
-  async send(entityId: EntityId, value: StorageValue): Promise<void> {
-    const key = this.getKey(entityId);
-    const storeValue = JSON.stringify(value);
-    if (this.lastValues.get(key) !== storeValue) {
-      localStorage.setItem(key, storeValue);
-      this.lastValues.set(key, storeValue);
-      console.log("send localstorage", key, storeValue, this.lastValues);
+  async send<T = any>(
+    batch: { entityId: EntityId; value: StorageValue<T> }[]
+  ): Promise<void> {
+    for (const { entityId, value } of batch) {
+      const key = this.getKey(entityId);
+      const storeValue = JSON.stringify(value);
+      if (this.lastValues.get(key) !== storeValue) {
+        localStorage.setItem(key, storeValue);
+        this.lastValues.set(key, storeValue);
+        console.log("send localstorage", key, storeValue);
+      }
     }
   }
 
-  async sync(entityId: EntityId): Promise<void> {
-    const key = this.getKey(entityId);
-    const value = localStorage.getItem(key);
-    console.log("sync localstorage", key, value);
-    if (value === null) this.lastValues.delete(key);
-    else this.lastValues.set(key, value);
+  async sync(entityIds: EntityId[]): Promise<void> {
+    for (const entityId of entityIds) {
+      const key = this.getKey(entityId);
+      const value = localStorage.getItem(key);
+      console.log("sync localstorage", key, value);
+      if (value === null) this.lastValues.delete(key);
+      else this.lastValues.set(key, value);
+    }
   }
 
   get<T>(entityId: EntityId): StorageValue<T> | undefined {
