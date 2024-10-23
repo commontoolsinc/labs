@@ -2,7 +2,7 @@ import { CoreMessage } from "npm:ai@3.3.21";
 import { ai, anthropic, openai } from "./deps.ts";
 const { streamText, generateText } = ai;
 
-const SONNET = "claude-3-5-sonnet-20240620";
+const SONNET = "claude-3-5-sonnet-latest";
 const HAIKU = "claude-3-haiku-20240307";
 const O1_MINI = "o1-mini";
 const O1_PREVIEW = "o1-preview";
