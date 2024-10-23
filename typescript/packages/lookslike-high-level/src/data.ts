@@ -5,7 +5,8 @@ import {
   run,
   cell,
   getEntityId,
-  CellImpl,
+  type CellImpl,
+  type CellReference,
   raw,
   addModuleByRef,
   type ReactivityLog,
@@ -49,20 +50,24 @@ export { TYPE, NAME, UI };
 
 const storage = createStorage("local");
 
-export const charms = cell<CellImpl<Charm>[]>([]);
+export const charms = cell<CellReference[]>([]);
 charms.generateEntityId("charms");
 
 export function addCharms(newCharms: CellImpl<any>[]) {
-  const currentCharms = charms.get();
-  const currentIds = new Set(
-    currentCharms.map((charm) => JSON.stringify(charm.entityId))
-  );
+  const currentCharmsIds = charms
+    .get()
+    .map(({ cell }) => JSON.stringify(cell.entityId));
   const charmsToAdd = newCharms.filter(
-    (charm) => !currentIds.has(JSON.stringify(charm.entityId))
+    (cell) => !currentCharmsIds.includes(JSON.stringify(cell.entityId))
   );
 
   if (charmsToAdd.length > 0) {
-    charms.send([...currentCharms, ...charmsToAdd]);
+    charms.send([
+      ...charms.get(),
+      ...charmsToAdd.map(
+        (cell) => ({ cell, path: [] } satisfies CellReference)
+      ),
+    ]);
 
     // Make sure it's persisted, if it isn't already
     charmsToAdd.map((charm) => storage.syncCell(charm));
