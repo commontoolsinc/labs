@@ -1,5 +1,5 @@
 import { LitElement, html, css } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { customElement, state } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
@@ -128,9 +128,7 @@ export class CommonWindowManager extends LitElement {
     `,
   ];
 
-  @property({ type: Array })
-  charms: CellImpl<Charm>[] = [];
-
+  private charms: CellImpl<Charm>[] = [];
   private charmRefs: Map<string, Ref<HTMLElement>> = new Map();
   private newCharmRefs: [CellImpl<Charm>, Ref<HTMLElement>][] = [];
 
