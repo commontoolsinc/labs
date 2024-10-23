@@ -46,7 +46,7 @@ export function map(
   let sourceRefToResult: { ref: CellReference; resultCell: CellImpl<any> }[] =
     [];
 
-  sendResult(result);
+  sendResult({ cell: result, path: [] });
 
   return (log: ReactivityLog) => {
     let { list, op } = inputsCell.getAsProxy([], log);
