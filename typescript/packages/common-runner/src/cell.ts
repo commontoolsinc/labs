@@ -79,6 +79,7 @@ export interface Cell<T> {
   value: T;
   entityId: EntityId | undefined;
   [isSimpleCellMarker]: true;
+  copyTrap: boolean;
 }
 
 export interface ReactiveCell<T> {
@@ -258,6 +259,11 @@ export type CellImpl<T> = {
    * Internal only: Marker for cells. Used by e.g. `isCell`, etc.
    */
   [isCellMarker]: true;
+
+  /**
+   * Internal only: Trap for copy operations.
+   */
+  copyTrap: boolean;
 };
 
 /**
@@ -393,6 +399,9 @@ export function cell<T>(value?: T): CellImpl<T> {
     },
     [toCellProxy]: () => toBuilderCellProxy(self, []),
     [isCellMarker]: true,
+    get copyTrap(): boolean {
+      throw new Error("Copy trap: Don't copy cells, create references instead");
+    },
   };
 
   return self;
@@ -472,6 +481,11 @@ function simpleCell<T>(
           return getEntityId(self.getAsCellReference());
         },
         [isSimpleCellMarker]: true,
+        get copyTrap(): boolean {
+          throw new Error(
+            "Copy trap: Don't copy simple cells. Create references instead."
+          );
+        },
       };
   return self;
 }
