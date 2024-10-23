@@ -291,9 +291,7 @@ class StorageImpl implements Storage {
           return value;
         }
       } else if ("$static" in value) {
-        const staticValue = traverse(value.$static);
-        markAsStatic(staticValue);
-        return staticValue;
+        return markAsStatic(traverse(value.$static));
       } else if (Array.isArray(value)) {
         return value.map(traverse);
       } else {
@@ -417,28 +415,22 @@ class StorageImpl implements Storage {
     } while (loading.size > 0);
 
     // Convert batch jobs to operations:
-
-    // First, filter out "sync" jobs, as they were either no-op (already loaded)
-    // or generated new jobs
-    const jobs = this.currentBatch.filter(({ type }) => type !== "sync");
+    const cellJobs = new Map(
+      this.currentBatch
+        .filter(({ type }) => type === "cell")
+        .map(({ cell }) => [cell, this.readValues.get(cell)!])
+    );
+    const storageJobs = new Map(
+      this.currentBatch
+        .filter(({ type }) => type === "storage")
+        .map(({ cell }) => [cell, this.writeValues.get(cell)!])
+    );
 
     // Reset batch: Everything coming in now will be processed in the next round
     const currentResolve = this.currentBatchResolve;
     this.currentBatch = [];
     this.currentBatchPromise = new Promise(
       (r) => (this.currentBatchResolve = r)
-    );
-
-    // Split between cell and storage jobs
-    const cellJobs = new Map(
-      jobs
-        .filter(({ type }) => type === "cell")
-        .map(({ cell }) => [cell, this.readValues.get(cell)!])
-    );
-    const storageJobs = new Map(
-      jobs
-        .filter(({ type }) => type === "storage")
-        .map(({ cell }) => [cell, this.writeValues.get(cell)!])
     );
 
     // Storage jobs override cell jobs. Write remaining cell jobs to cell.
