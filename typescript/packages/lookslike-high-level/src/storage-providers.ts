@@ -1,6 +1,6 @@
 import type { EntityId, Cancel } from "@commontools/common-runner";
 
-export interface StorageValue<T> {
+export interface StorageValue<T = any> {
   value: T;
   source?: EntityId;
 }
@@ -11,7 +11,6 @@ export interface StorageProvider {
    *
    * @param entityId - Entity ID to send the value to.
    * @param value - Value to send.
-   * @param source - Optional source entity ID.
    * @returns Promise that resolves when the value is sent.
    */
   send<T = any>(entityId: EntityId, value: StorageValue<T>): Promise<void>;
@@ -28,7 +27,7 @@ export interface StorageProvider {
    * Get a value from the local cache reflecting storage. Call `sync()` first.
    *
    * @param entityId - Entity ID to get the value for.
-   * @returns Value and source, or undefined if the value is not in storage.
+   * @returns Value or undefined if the value is not in storage.
    */
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined;
 
@@ -53,16 +52,13 @@ export interface StorageProvider {
 }
 
 abstract class BaseStorageProvider implements StorageProvider {
-  protected subscribers = new Map<
-    string,
-    Set<(value: any, source?: EntityId) => void>
-  >();
+  protected subscribers = new Map<string, Set<(value: StorageValue) => void>>();
 
-  abstract send(entityId: EntityId, value: StorageValue<any>): Promise<void>;
+  abstract send(entityId: EntityId, value: StorageValue): Promise<void>;
 
   abstract sync(entityId: EntityId): Promise<void>;
 
-  abstract get(entityId: EntityId): StorageValue<any> | undefined;
+  abstract get(entityId: EntityId): StorageValue | undefined;
 
   sink<T = any>(
     entityId: EntityId,
@@ -70,7 +66,8 @@ abstract class BaseStorageProvider implements StorageProvider {
   ): Cancel {
     const key = JSON.stringify(entityId);
 
-    if (!this.subscribers.has(key)) this.subscribers.set(key, new Set());
+    if (!this.subscribers.has(key))
+      this.subscribers.set(key, new Set<(value: StorageValue) => void>());
     const listeners = this.subscribers.get(key)!;
     listeners.add(callback);
 
@@ -80,7 +77,7 @@ abstract class BaseStorageProvider implements StorageProvider {
     };
   }
 
-  protected notifySubscribers(key: string, value: StorageValue<any>): void {
+  protected notifySubscribers(key: string, value: StorageValue): void {
     console.log("notify subscribers", key, JSON.stringify(value));
     const listeners = this.subscribers.get(key);
     if (listeners) for (const listener of listeners) listener(value);
@@ -94,9 +91,9 @@ abstract class BaseStorageProvider implements StorageProvider {
  * It doesn't make much sense,  since it's just a copy of the in memory cells.
  * But for testing we can create multiple instances that share the memory.
  */
-const inMemoryStorage = new Map<string, StorageValue<any>>();
+const inMemoryStorage = new Map<string, StorageValue>();
 const inMemoryStorageSubscribers = new Set<
-  (key: string, value: StorageValue<any>) => void
+  (key: string, value: StorageValue) => void
 >();
 export class InMemoryStorageProvider extends BaseStorageProvider {
   private handleStorageUpdateFn: (key: string, value: any) => void;
@@ -108,7 +105,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     inMemoryStorageSubscribers.add(this.handleStorageUpdateFn);
   }
 
-  private handleStorageUpdate(key: string, value: StorageValue<any>) {
+  private handleStorageUpdate(key: string, value: StorageValue) {
     const valueString = JSON.stringify(value);
     if (this.lastValues.get(key) !== valueString) {
       this.lastValues.set(key, valueString);
@@ -116,7 +113,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async send(entityId: EntityId, value: StorageValue<any>): Promise<void> {
+  async send(entityId: EntityId, value: StorageValue): Promise<void> {
     const key = JSON.stringify(entityId);
     const valueString = JSON.stringify(value);
     if (this.lastValues.get(key) !== valueString) {
@@ -136,11 +133,11 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     return Promise.resolve();
   }
 
-  get(entityId: EntityId): StorageValue<any> | undefined {
+  get(entityId: EntityId): StorageValue | undefined {
     const key = JSON.stringify(entityId);
     console.log("get in memory", key, this.lastValues.get(key));
     return this.lastValues.has(key)
-      ? (JSON.parse(this.lastValues.get(key)!) as StorageValue<any>)
+      ? (JSON.parse(this.lastValues.get(key)!) as StorageValue)
       : undefined;
   }
 
@@ -169,7 +166,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
     window.addEventListener("storage", this.handleStorageEventFn);
   }
 
-  async send(entityId: EntityId, value: StorageValue<any>): Promise<void> {
+  async send(entityId: EntityId, value: StorageValue): Promise<void> {
     const key = this.getKey(entityId);
     const storeValue = JSON.stringify(value);
     if (this.lastValues.get(key) !== storeValue) {
