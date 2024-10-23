@@ -163,7 +163,7 @@ class StorageImpl implements Storage {
 
     // Start loading the cell and safe the promise for processBatch to await for
     const loadingPromise = this.storageProvider
-      .sync(entityCell.entityId!)
+      .sync([entityCell.entityId!])
       .then(() => entityCell);
     this.loadingPromises.set(entityCell, loadingPromise);
 
@@ -448,10 +448,11 @@ class StorageImpl implements Storage {
     });
 
     // Write all storage jobs to storage
-    await Promise.all(
-      Array.from(storageJobs).map(([cell, value]) =>
-        this.storageProvider.send(cell.entityId!, value)
-      )
+    await this.storageProvider.send(
+      Array.from(storageJobs).map(([cell, value]) => ({
+        entityId: cell.entityId!,
+        value,
+      }))
     );
 
     // Finally, clear and resolve loading promise for all loaded cells
