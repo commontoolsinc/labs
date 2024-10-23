@@ -1,4 +1,4 @@
-import { isAlias, isStatic } from "@commontools/common-builder";
+import { isAlias, isStatic, markAsStatic } from "@commontools/common-builder";
 import {
   cell,
   isCell,
@@ -161,13 +161,17 @@ export function setNestedValue(
 
 // Turn local aliases into explicit aliases to named cell.
 export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
-  function convert(binding: any): any {
-    if (isStatic(binding)) return binding;
-    else if (isAlias(binding))
+  function convert(binding: any, processStatic = false): any {
+    if (isStatic(binding) && !processStatic) {
+      binding = convert(binding, true);
+      markAsStatic(binding);
+      return binding;
+    } else if (isAlias(binding))
       return {
         $alias: { cell, ...binding.$alias },
       };
-    else if (Array.isArray(binding)) return binding.map(convert);
+    else if (Array.isArray(binding))
+      return binding.map((value) => convert(value));
     else if (typeof binding === "object" && binding !== null)
       return Object.fromEntries(
         Object.entries(binding).map(([key, value]) => [key, convert(value)])

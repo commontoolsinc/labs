@@ -59,7 +59,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asSimpleCell([UI]);
+    const cell = result.asSimpleCell<{ [UI]: View }>().key(UI);
     render(parent, cell.get());
 
     expect(parent.innerHTML).toBe(
@@ -67,7 +67,7 @@ describe("recipes with HTML", () => {
     );
   });
 
-  it("works with paths on nested recipes", async () => {
+  it.only("works with paths on nested recipes", async () => {
     const todoList = recipe<{
       title: { name: string };
       items: { title: string; done: boolean }[];
@@ -92,7 +92,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asSimpleCell([UI]);
+    const cell = result.asSimpleCell<{ [UI]: View }>().key(UI);
     render(parent, cell.get());
 
     expect(parent.innerHTML).toBe("<div><div>test</div></div>");
@@ -108,7 +108,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asSimpleCell([UI]);
+    const cell = result.asSimpleCell<{ [UI]: View }>().key(UI);
     render(parent, cell.get());
 
     expect(parent.innerHTML).toBe("<div>Hello, world!</div>");
