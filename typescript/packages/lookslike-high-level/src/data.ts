@@ -61,17 +61,13 @@ export function addCharms(newCharms: CellImpl<any>[]) {
     (cell) => !currentCharmsIds.includes(JSON.stringify(cell.entityId))
   );
 
-  if (charmsToAdd.length > 0) {
+  if (charmsToAdd.length > 0)
     charms.send([
       ...charms.get(),
       ...charmsToAdd.map(
         (cell) => ({ cell, path: [] } satisfies CellReference)
       ),
     ]);
-
-    // Make sure it's persisted, if it isn't already
-    charmsToAdd.map((charm) => storage.syncCell(charm));
-  }
 }
 
 export async function runPersistent(
@@ -87,7 +83,7 @@ export async function runPersistent(
 }
 
 export async function syncCharm(entityId: string): Promise<CellImpl<Charm>> {
-  return await storage.syncCell(getCellByEntityId<Charm>(entityId) ?? entityId);
+  return await storage.syncCell(entityId);
 }
 
 addCharms([
