@@ -124,6 +124,13 @@ const bindChildren = (
             logger.warn("Could not render view", replacement);
           }
         } else {
+          if (typeof replacement === "object") {
+            console.warn(
+              "unexpected object when value was expected",
+              replacement
+            );
+            replacement = JSON.stringify(replacement);
+          }
           const text = document.createTextNode(`${replacement}`);
           anchor.replaceWith(text);
           anchor = text;
