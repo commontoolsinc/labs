@@ -4,6 +4,7 @@ export {
   run as addAction,
   unschedule as removeAction,
   type Action,
+  idle,
 } from "./scheduler.js";
 export type {
   Cell,

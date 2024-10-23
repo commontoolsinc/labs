@@ -176,7 +176,6 @@ function addRecipe(recipe: Recipe) {
 }
 
 export const recipes: RecipeManifest[] = [
-  /*
   {
     name: "Explore dungeon game",
     recipeId: addRecipe(dungeon),
@@ -220,7 +219,7 @@ export const recipes: RecipeManifest[] = [
   {
     name: "Hello Isolated",
     recipeId: addRecipe(helloIsolated),
-  },*/
+  },
 ];
 
 // Helper for mock data
