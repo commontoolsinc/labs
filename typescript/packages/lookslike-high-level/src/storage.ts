@@ -8,6 +8,7 @@ import {
   type AddCancel,
   useCancelGroup,
   getCellByEntityId,
+  idle,
 } from "@commontools/common-runner";
 import { isStatic, markAsStatic } from "@commontools/common-builder";
 import {
@@ -432,6 +433,9 @@ class StorageImpl implements Storage {
     this.currentBatchPromise = new Promise(
       (r) => (this.currentBatchResolve = r)
     );
+
+    // Don't update cells while they might be updating.
+    await idle();
 
     // Storage jobs override cell jobs. Write remaining cell jobs to cell.
     cellJobs.forEach(({ value, source }, cell) => {
