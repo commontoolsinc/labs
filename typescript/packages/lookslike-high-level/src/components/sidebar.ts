@@ -148,7 +148,7 @@ class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Query</div>
                 <div>
-                  <os-code-editor slot="content" .source=${watchCell(query)}></os-code-editor>
+                  <os-code-editor slot="content" language="text/html" .source=${watchCell(query)}></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,

@@ -15,6 +15,7 @@ import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
 import { NAME } from "@commontools/common-builder";
 import { matchRoute, navigate } from "../router.js";
+import { watchCell } from "../watchCell.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -262,22 +263,44 @@ export class CommonWindowManager extends LitElement {
     };
 
     const onImportLocalData = (event: CustomEvent) => {
-      const data = event.detail;
+      const data = event.detail.data;
       console.log("Importing local data:", data);
 
-      const eid = run(iframe, {
-        data,
-        title:`${new Date().toISOString()}-import`,
-        prompt: 'show in a table',
-      }).entityId!;
-      this.openCharm(JSON.stringify(eid));
+      if (event.detail.shiftKey && this.focusedCharm) {
+        const existingData = this.focusedProxy?.data || {};
+        const mergedData = { ...existingData };
+
+        for (const [key, value] of Object.entries(data)) {
+          if (Array.isArray(value) && Array.isArray(existingData[key])) {
+            mergedData[key] = [...existingData[key], ...value];
+          } else {
+            mergedData[key] = value;
+          }
+        }
+
+        this.focusedCharm.asSimpleCell(["data"]).send(mergedData);
+
+        // Update the title to indicate the merge
+        const newTitle = `${this.focusedProxy?.[NAME] || 'Untitled'} (Merged ${new Date().toISOString()})`;
+        this.focusedCharm.asSimpleCell([NAME]).send(newTitle);
+
+        // Refresh the UI
+        this.requestUpdate();
+      } else {
+        const eid = run(iframe, {
+          data,
+          title: `${new Date().toISOString()}-import`,
+          prompt: 'show in a datatable, use an icon to indicate the data type of each row (by looking at data shape / file extension)',
+        }).entityId!;
+        this.openCharm(JSON.stringify(eid));
+      }
     }
 
     return html`
     <common-import @common-data=${onImportLocalData}>
       <os-chrome
         ?wide=${this.wideSidebar}
-        locationtitle=${this.location}
+        locationtitle=${this.focusedProxy?.[NAME] || 'Untitled'}
         @location=${this.onLocationClicked}
       >
         <os-avatar slot="toolbar-start" name="Ben"></os-avatar>
@@ -415,6 +438,7 @@ export class CommonWindowManager extends LitElement {
         const view = charm.asSimpleCell<Charm>().key(UI).get();
         if (!view) throw new Error("Charm has no UI");
         render(charmRef.value!, view);
+        this.requestUpdate();
       }
 
       this.scrollToAndHighlight(charmId, false);

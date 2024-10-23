@@ -66,12 +66,25 @@ export class CommonFileImporter extends LitElement {
         .then(contents => {
           this.importedContent = contents;
           console.log(this.importedContent)
-          this.dispatchEvent(new CustomEvent('common-data', { detail: { items: this.importedContent } }));
+          this.dispatchEvent(new CustomEvent('common-data', { detail: { shiftKey: e.shiftKey, data: { items: this.importedContent } }}));
         })
         .catch(error => {
           console.error('Error processing files:', error);
         });
     }
+  }
+
+  private parseICSDate(dateString?: string): string | undefined {
+    if (!dateString) return undefined;
+
+    const year = parseInt(dateString.slice(0, 4));
+    const month = parseInt(dateString.slice(4, 6)) - 1; // JavaScript months are 0-indexed
+    const day = parseInt(dateString.slice(6, 8));
+    const hour = parseInt(dateString.slice(9, 11));
+    const minute = parseInt(dateString.slice(11, 13));
+    const second = parseInt(dateString.slice(13, 15));
+
+    return new Date(Date.UTC(year, month, day, hour, minute, second)).toUTCString();
   }
 
   private readFile(file: File): Promise<any> {
@@ -107,17 +120,20 @@ export class CommonFileImporter extends LitElement {
             const events = content.split('BEGIN:VEVENT').slice(1).map(event => {
               const lines = event.split('\n');
               return {
+                contentType: 'calendar-event',
                 summary: lines.find(line => line.startsWith('SUMMARY:'))?.slice(8),
-                dtstart: lines.find(line => line.startsWith('DTSTART:'))?.slice(8),
-                dtend: lines.find(line => line.startsWith('DTEND:'))?.slice(6),
+                dtstart: this.parseICSDate(lines.find(line => line.startsWith('DTSTART:'))?.slice(8)),
+                dtend: this.parseICSDate(lines.find(line => line.startsWith('DTEND:'))?.slice(6)),
                 description: lines.find(line => line.startsWith('DESCRIPTION:'))?.slice(12),
                 location: lines.find(line => line.startsWith('LOCATION:'))?.slice(9),
+                category: lines.find(line => line.startsWith('CATEGORIES:'))?.slice(11)?.split(',')[0]?.trim(),
               };
             });
             resolve({ events });
           } else if (extension === 'eml') {
             const headers = content.split('\n\n')[0].split('\n');
             const emailObject = {
+              contentType: 'email',
               from: headers.find(line => line.toLowerCase().startsWith('from:'))?.slice(5).trim(),
               to: headers.find(line => line.toLowerCase().startsWith('to:'))?.slice(3).trim(),
               subject: headers.find(line => line.toLowerCase().startsWith('subject:'))?.slice(8).trim(),

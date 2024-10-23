@@ -135,25 +135,9 @@ window.parent.postMessage({
 return false;
 };
 
-/* You will receive a \`readResponse\` poistMessage event with the value. */
-window.readData = function(key, value) {
-  console.log('iframe: Reading data', key);
-  window.parent.postMessage({
-    type: 'read',
-    key
-  }, '*');
-}
-
-window.writeData = function(key, value) {
-  console.log('iframe: Writing data', key, value);
-  window.parent.postMessage({
-    type: 'write',
-    key,
-    value,
-  }, '*');
-}
-
-/* Subscribing to a key will immediately send an \`update\` event that contains the current value. Future mutations will re-trigger \`update\`. */
+/* Access data by subscribing to it. Re-render whenever the data sends a new \`update\` message.
+Subscribing to a key will immediately send an \`update\` event that contains the current value.
+Future mutations will re-trigger \`update\`. */
 window.subscribeToKey = function(key) {
   console.log('iframe: Subscribing to', key);
   window.parent.postMessage({
@@ -170,31 +154,84 @@ window.unsubscribeFromKey = function(key) {
   }, '*');
 }
 
+window.writeData = function(key, value) {
+  console.log('iframe: Writing data', key, value);
+  window.parent.postMessage({
+    type: 'write',
+    key,
+    value,
+  }, '*');
+}
+
 window.generateImage = function(prompt) {
   return 'https://ct-img.m4ke.workers.dev/?prompt=' + encodeURIComponent(prompt);
 }
 
-window.llm = async function(system, messages) {
-  console.log('iframe: Asking LLM', system, messages);
-const response = await fetch('http://localhost:5173/api/llm', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    messages: messages.map(m => ({ role: m.role, content: m.content })),
-    system: system,
-    model: "claude-3-5-sonnet-20240620",
-    stop: stop
-  }),
-});
 
-if (!response.ok) {
-  throw new Error(\`HTTP error! status: \${response.status}\`);
+/**
+ * Sends a request to the LLM API.
+ * @param {string} system - The system message for the LLM.
+ * @param {Array} messages - The array of messages for the LLM.
+ * @returns {Promise<any>} - The raw response from the LLM.
+ */
+window.sendLLMRequest = async function(system, messages) {
+  console.log('iframe: Asking LLM', system, messages);
+  const response = await fetch('http://localhost:5173/api/llm', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      system: system,
+      model: "claude-3-5-sonnet-latest"
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(\`HTTP error! status: \${response.status}\`);
+  }
+
+  return await response.json();
 }
 
-// this will be { role: "assistant", content: "..." }
-return await response.json();
+/**
+ * Processes the LLM response based on the specified mode.
+ * @param {string} responseText - The raw response text from the LLM.
+ * @param {string} mode - The mode for processing the response: 'json', 'html', or 'text'.
+ * @returns {any} - The processed response.
+ */
+window.processLLMResponse = function(responseText, mode) {
+  switch (mode) {
+    case 'json':
+      try {
+        return JSON.parse(responseText);
+      } catch (e) {
+        const jsonMatch = responseText.match(/{[\\w\\W]+?}/);
+        if (jsonMatch) {
+          return JSON.parse(jsonMatch[1]);
+        }
+        throw new Error('Failed to parse JSON response');
+      }
+    case 'html':
+      const htmlMatch = responseText.match(/<html>(.*?)<\\/html>/);
+      return htmlMatch ? htmlMatch[1] : responseText;
+    default:
+      return responseText;
+  }
+}
+
+/**
+ * Sends a request to the LLM API and processes the response based on the specified mode.
+ * @param {string} system - The system message for the LLM.
+ * @param {Array} messages - The array of messages for the LLM.
+ * @param {string} mode - The mode for processing the response: 'json', 'html', or 'text'.
+ * @returns {Promise<any>} - The processed response from the LLM.
+ */
+window.llm = async function(system, messages, mode = 'text') {
+  const responseJson = await window.sendLLMRequest(system, messages);
+  const responseText = responseJson.content;
+  return window.processLLMResponse(responseText, mode);
 }
 </script>
 <title>`;
@@ -400,6 +437,8 @@ export const iframe = recipe<{
     llm(prepSuggestions({ src: grabHTML({ result }), prompt, schema})),
   );
 
+  const loadingProgress = progress({ partial: partialHTML, pending: pendingHTML });
+
   return {
     [NAME]: str`${title} UI`,
     [UI]: html`<div style="height: 100%">
@@ -422,5 +461,6 @@ export const iframe = recipe<{
     partialHTML,
     suggestions: { items: suggestions },
     addToPrompt: addToPrompt({ prompt, src, lastSrc, query }),
+    loadingProgress
   };
 });
