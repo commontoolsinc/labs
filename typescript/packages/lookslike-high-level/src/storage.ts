@@ -272,38 +272,35 @@ class StorageImpl implements Storage {
     const dependencies = new Set<CellImpl<any>>();
 
     const traverse = (value: any): any => {
-      if (typeof value === "object" && value !== null)
-        if ("cell" in value && "path" in value) {
-          // If we see a cell reference with just an id, then we replace it with
-          // the actual cell:
-          if (
-            typeof value.cell === "object" &&
-            value.cell !== null &&
-            "/" in value.cell &&
-            Array.isArray(value.path)
-          ) {
-            const cell = this._ensureIsSynced(value.cell);
-            dependencies.add(cell);
-            return { cell, path: value.path };
-          } else {
-            console.warn("unexpected cell reference", value);
-            return value;
-          }
-        } else if ("$static" in value) {
-          const staticValue = traverse(value.$static);
-          markAsStatic(staticValue);
-          return staticValue;
-        } else if (Array.isArray(value)) {
-          return value.map(traverse);
+      if (typeof value !== "object" || value === null) {
+        return value;
+      } else if ("cell" in value && "path" in value) {
+        // If we see a cell reference with just an id, then we replace it with
+        // the actual cell:
+        if (
+          typeof value.cell === "object" &&
+          value.cell !== null &&
+          "/" in value.cell &&
+          Array.isArray(value.path)
+        ) {
+          const cell = this._ensureIsSynced(value.cell);
+          dependencies.add(cell);
+          return { cell, path: value.path };
         } else {
-          return Object.fromEntries(
-            Object.entries(value).map(([key, value]): any => [
-              key,
-              traverse(value),
-            ])
-          );
+          console.warn("unexpected cell reference", value);
+          return value;
         }
-      else return value;
+      } else if ("$static" in value) {
+        const staticValue = traverse(value.$static);
+        markAsStatic(staticValue);
+        return staticValue;
+      } else if (Array.isArray(value)) {
+        return value.map(traverse);
+      } else {
+        return Object.fromEntries(
+          Object.entries(value).map(([k, v]): any => [k, traverse(v)])
+        );
+      }
     };
 
     // Make sure the source cell is loaded, and add it as a dependency
