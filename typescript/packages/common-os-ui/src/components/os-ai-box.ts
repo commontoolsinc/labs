@@ -16,14 +16,18 @@ export class OsAiBox extends LitElement {
       }
 
       .plain-input {
-        background: transparent;
-        box-sizing: border-box;
-        -webkit-appearance: none;
-        appearance: none;
-        width: 100%;
-        height: var(--height);
-        border: 0;
-        display: block;
+          background: transparent;
+          box-sizing: border-box;
+          -webkit-appearance: none;
+          appearance: none;
+          width: 100%;
+          height: var(--height);
+          border: 0;
+          display: block;
+          padding-top: calc((var(--height) - 1.2em) / 2);
+          padding-bottom: calc((var(--height) - 1.2em) / 2);
+          resize: none;
+          line-height: 1.2em;
       }
 
       .plain-input:focus {
@@ -52,7 +56,7 @@ export class OsAiBox extends LitElement {
 
   #onInput = (event: InputEvent) => {
     if (event.target != null) {
-      const target = event.target as HTMLInputElement;
+      const target = event.target as HTMLTextAreaElement;
       this.value = target.value;
     }
   };
@@ -60,6 +64,7 @@ export class OsAiBox extends LitElement {
   #onKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Enter") {
       console.log("Enter key pressed");
+      debugger
       this.dispatchEvent(
         new CustomEvent("submit", {
           detail: {
@@ -76,14 +81,13 @@ export class OsAiBox extends LitElement {
     return html`
       <div class="ai-box">
         <os-ai-icon iconsize="lg"></os-ai-icon>
-        <input
+        <textarea
           class="plain-input"
-          type="text"
-          value="${this.value}"
+          .value="${this.value}"
           placeholder=${this.placeholder}
           @input=${this.#onInput}
           @keydown=${this.#onKeyDown}
-        />
+        ></textarea>
         <os-icon iconsize="lg" icon="apps"></os-icon>
       </div>
     `;
