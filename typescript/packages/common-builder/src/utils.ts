@@ -12,6 +12,7 @@ import {
   canBeCellProxy,
   makeCellProxy,
   isStatic,
+  markAsStatic,
 } from "./types.js";
 
 /** traverse a value, _not_ entering cells */
@@ -93,10 +94,14 @@ export function toJSONWithAliases(
   value: Value<any>,
   paths: Map<CellProxy<any>, PropertyKey[]>,
   ignoreSelfAliases: boolean = false,
-  path: PropertyKey[] = []
+  path: PropertyKey[] = [],
+  processStatic = false
 ): JSONValue | undefined {
-  if (isStatic(value)) return value;
-  if (canBeCellProxy(value)) value = makeCellProxy(value);
+  if (isStatic(value) && !processStatic)
+    return markAsStatic(
+      toJSONWithAliases(value, paths, ignoreSelfAliases, path, true)
+    );
+  else if (canBeCellProxy(value)) value = makeCellProxy(value);
   if (isCellProxy(value)) {
     const pathToCell = paths.get(value);
     if (pathToCell) {
@@ -156,11 +161,11 @@ export function createJsonSchema(
         if (Array.isArray(value ?? defaultValue)) {
           schema.type = "array";
           if ((value ?? defaultValue).length > 0) {
-            let properties: { [key: string]: any } = {}
+            let properties: { [key: string]: any } = {};
             for (let i = 0; i < (value ?? defaultValue).length; i++) {
               const item = value?.[i] ?? defaultValue?.[i];
-              if (typeof item === 'object' && item !== null) {
-                Object.keys(item).forEach(key => {
+              if (typeof item === "object" && item !== null) {
+                Object.keys(item).forEach((key) => {
                   if (!(key in properties)) {
                     properties[key] = analyzeType(
                       value?.[i]?.[key],
@@ -171,7 +176,7 @@ export function createJsonSchema(
               }
             }
             schema.items = {
-              type: 'object',
+              type: "object",
               properties,
             };
           }

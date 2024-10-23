@@ -162,14 +162,10 @@ export function setNestedValue(
 // Turn local aliases into explicit aliases to named cell.
 export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
   function convert(binding: any, processStatic = false): any {
-    if (isStatic(binding) && !processStatic) {
-      binding = convert(binding, true);
-      markAsStatic(binding);
-      return binding;
-    } else if (isAlias(binding))
-      return {
-        $alias: { cell, ...binding.$alias },
-      };
+    if (isStatic(binding) && !processStatic)
+      return markAsStatic(convert(binding, true));
+    else if (isAlias(binding)) return { $alias: { cell, ...binding.$alias } };
+    else if (isCell(binding)) return binding; // Don't enter cells
     else if (Array.isArray(binding))
       return binding.map((value) => convert(value));
     else if (typeof binding === "object" && binding !== null)
@@ -294,7 +290,7 @@ export function transformToSimpleCells(
   log?: ReactivityLog
 ): any {
   if (isCellProxyForDereferencing(value)) {
-    const ref = getCellReferenceOrThrow(value);
+    const ref = followCellReferences(getCellReferenceOrThrow(value));
     if (cell === ref.cell)
       return transformToSimpleCells(cell, cell.getAtPath(ref.path), log);
     else return ref.cell.asSimpleCell(ref.path, log);
