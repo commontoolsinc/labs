@@ -387,6 +387,8 @@ export function cell<T>(value?: T): CellImpl<T> {
       return sourceCell;
     },
     set sourceCell(cell: CellImpl<any> | undefined) {
+      if (sourceCell && sourceCell !== cell)
+        throw new Error("Source cell already set");
       sourceCell = cell;
     },
     [toCellProxy]: () => toBuilderCellProxy(self, []),
