@@ -221,7 +221,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
         else this.lastValues.set(event.key, event.newValue);
         const result =
           event.newValue !== null ? JSON.parse(event.newValue) : {};
-        this.notifySubscribers(event.key, result);
+        this.notifySubscribers(event.key.slice(this.prefix.length), result);
       }
     }
   };
