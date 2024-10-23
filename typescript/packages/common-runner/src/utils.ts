@@ -165,7 +165,7 @@ export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
     if (isStatic(binding)) return binding;
     else if (isAlias(binding))
       return {
-        $alias: { ...binding.$alias, cell },
+        $alias: { cell, ...binding.$alias },
       };
     else if (Array.isArray(binding)) return binding.map(convert);
     else if (typeof binding === "object" && binding !== null)
