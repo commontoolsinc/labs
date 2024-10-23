@@ -14,7 +14,6 @@ import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
 import { NAME } from "@commontools/common-builder";
-import { dataDesigner } from "../recipes/dataDesigner.js";
 import { matchRoute, navigate } from "../router.js";
 
 @customElement("common-window-manager")
@@ -150,17 +149,16 @@ export class CommonWindowManager extends LitElement {
           ?.asSimpleCell(["addToPrompt"])
           .send({ prompt: value } as any);
 
-        // holding shift will fork
       } else {
-        // ben: this is a hack to access the data designer from search (temporarily)
-        if (charm.data && charm.query) {
-          const eid = run(dataDesigner, {
-            data: charm.data,
-            prompt: value,
-            title: value,
-          }).entityId!;
-          this.openCharm(JSON.stringify(eid));
-        }
+        // // ben: this is a hack to access the data designer from search (temporarily)
+        // if (charm.data && charm.query) {
+        //   const eid = run(dataDesigner, {
+        //     data: charm.data,
+        //     prompt: value,
+        //     title: value,
+        //   }).entityId!;
+        //   this.openCharm(JSON.stringify(eid));
+        // }
 
         // pass data forward to new charm
         const charmValues = charm;
@@ -263,7 +261,20 @@ export class CommonWindowManager extends LitElement {
         this.sidebarTab === "query";
     };
 
+    const onImportLocalData = (event: CustomEvent) => {
+      const data = event.detail;
+      console.log("Importing local data:", data);
+
+      const eid = run(iframe, {
+        data,
+        title:`${new Date().toISOString()}-import`,
+        prompt: 'show in a table',
+      }).entityId!;
+      this.openCharm(JSON.stringify(eid));
+    }
+
     return html`
+    <common-import @common-data=${onImportLocalData}>
       <os-chrome
         ?wide=${this.wideSidebar}
         locationtitle=${this.location}
@@ -373,6 +384,7 @@ export class CommonWindowManager extends LitElement {
           </common-sidebar>
         </os-navstack>
       </os-chrome>
+    </common-import>
     `;
   }
 

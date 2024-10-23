@@ -148,10 +148,7 @@ class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Query</div>
                 <div>
-                  <common-debug
-                    slot="content"
-                    .content=${watchCell(query)}
-                  ></common-debug>
+                  <os-code-editor slot="content" .source=${watchCell(query)}></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
@@ -165,10 +162,10 @@ class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Schema</div>
                 <div>
-                  <common-debug
-                    slot="content"
-                    .content=${watchCell(schema)}
-                  ></common-debug>
+                    <common-debug
+                      slot="content"
+                      .content=${watchCell(schema)}
+                    ></common-debug>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
@@ -182,10 +179,7 @@ class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Source</div>
                 <div>
-                  <common-debug
-                    slot="content"
-                    .content=${watchCell(src)}
-                  ></common-debug>
+                  <os-code-editor slot="content" .source=${watchCell(src)}></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
@@ -216,10 +210,7 @@ class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Prompt</div>
                 <div>
-                  <common-debug
-                    slot="content"
-                    .content=${watchCell(prompt)}
-                  ></common-debug>
+                  <common-markdown slot="content" markdown=${watchCell(prompt)}></common-markdown>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,

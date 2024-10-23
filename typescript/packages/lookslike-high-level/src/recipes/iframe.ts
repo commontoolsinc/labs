@@ -23,7 +23,8 @@ const tap = lift((x) => {
   return x;
 });
 const deriveJsonSchema = lift(({ data }) => {
-  const schema = (createJsonSchema({}, data) as any)?.["properties"];
+  const realized = JSON.parse(JSON.stringify(data));
+  const schema = (createJsonSchema({}, realized) as any)?.["properties"];
   if (!schema) return {};
   return schema;
 });
