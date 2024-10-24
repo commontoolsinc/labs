@@ -17,6 +17,8 @@ export class CommonAsciiLoader extends LitElement {
       font-size: 16px;
       line-height: 1;
       padding: 1rem;
+      user-select: none;
+      pointer-events: none;
     }
   `;
 

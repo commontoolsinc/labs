@@ -124,6 +124,17 @@ export class CommonWindowManager extends LitElement {
         right: 0;
         bottom: 0;
       }
+
+      .empty-state {
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          height: 100%;
+          opacity: 0.25;
+          user-select: none;
+          pointer-events: none;
+      }
     `,
   ];
 
@@ -249,7 +260,7 @@ export class CommonWindowManager extends LitElement {
       console.log("Suggestion selected:", prompt, behavior);
       this.handleUniboxSubmit(
         new CustomEvent("submit", {
-          detail: { value: prompt, behavior, shiftKey: behavior === "fork" },
+          detail: { value: "- " + prompt, behavior, shiftKey: behavior === "fork" },
         }),
       );
     };
@@ -356,6 +367,16 @@ export class CommonWindowManager extends LitElement {
             `,
           )}
         </os-fabgroup>
+
+        ${this.charms.length === 0 ? html`
+          <div class="empty-state">
+              <div style="display: flex; align-items: center;">
+                <os-ai-icon></os-ai-icon>
+                <p style="margin-left: 10px;">Imagine or import to begin</p>
+              </div>
+          </div>
+        ` : html``}
+
         ${repeat(
           this.charms,
           (charm) => charm.entityId!.toString(),

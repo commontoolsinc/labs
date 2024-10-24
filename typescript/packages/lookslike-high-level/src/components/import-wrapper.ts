@@ -84,7 +84,7 @@ export class CommonFileImporter extends LitElement {
     const minute = parseInt(dateString.slice(11, 13));
     const second = parseInt(dateString.slice(13, 15));
 
-    return new Date(Date.UTC(year, month, day, hour, minute, second)).toUTCString();
+    return new Date(Date.UTC(year, month, day, hour, minute, second)).toString();
   }
 
   private readFile(file: File): Promise<any> {

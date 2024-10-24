@@ -208,7 +208,7 @@ class CommonSidebar extends LitElement {
             html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
-                <div slot="label">Prompt</div>
+                <div slot="label">Spell</div>
                 <div>
                   <common-markdown slot="content" markdown=${watchCell(prompt)}></common-markdown>
                 </div>
