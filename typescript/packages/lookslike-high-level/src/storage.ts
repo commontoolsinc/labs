@@ -364,6 +364,9 @@ class StorageImpl implements Storage {
         const value = this.storageProvider.get(cell.entityId!);
         if (value === undefined) this._batchForStorage(cell);
         else this._batchForCell(cell, value.value, value.source);
+
+        // From now on, we'll get updates via listeners
+        this._subscribeToChanges(cell);
       }
 
       // For each entry in the batch, find all dependent not yet loaded cells.
@@ -395,9 +398,6 @@ class StorageImpl implements Storage {
               )
               .forEach((dependent) => loading.add(dependent));
         }
-
-        // From now on, we'll get updates via listeners
-        this._subscribeToChanges(cell);
       }
       console.log(
         "loading",
@@ -502,6 +502,8 @@ class StorageImpl implements Storage {
   }
 
   private _subscribeToChanges(cell: CellImpl<any>): void {
+    console.log("subscribe to changes", JSON.stringify(cell.entityId));
+
     // Subscribe to cell changes, send updates to storage
     this.addCancel(cell.updates(() => this._batchForStorage(cell)));
 
