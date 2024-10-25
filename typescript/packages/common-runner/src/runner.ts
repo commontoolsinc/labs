@@ -77,9 +77,15 @@ export function run<T, R = any>(
   resultCell?: CellImpl<R>
 ): CellImpl<R> {
   if (resultCell) {
-    // If we already have a recipe cell, we are stopping and restarting
-    // the recipe, so we need to stop the old one first.
-    stop(resultCell);
+    if (cancels.has(resultCell)) {
+      // If it's already running and no new recipe or parameters are given,
+      // we are just returning the result cell
+      if (recipe === undefined && parameters === undefined) return resultCell;
+
+      // Otherwise stop execution of the old recipe. TODO: Await, but this will
+      // make all this async.
+      stop(resultCell);
+    }
   } else {
     resultCell = cell<R>();
   }
