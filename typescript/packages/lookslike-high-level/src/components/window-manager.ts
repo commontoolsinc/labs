@@ -4,7 +4,13 @@ import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
 import { Charm, UI, addCharms, syncCharm } from "../data.js";
-import { run, CellImpl, isCell, idle } from "@commontools/common-runner";
+import {
+  run,
+  CellImpl,
+  isCell,
+  idle,
+  EntityId,
+} from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
@@ -428,8 +434,9 @@ export class CommonWindowManager extends LitElement {
     `;
   }
 
-  async openCharm(charmId: string) {
-    const charm = await syncCharm(charmId);
+  async openCharm(charmToOpen: string | EntityId | CellImpl<any>) {
+    const charm = await syncCharm(charmToOpen);
+    const charmId = JSON.stringify(charm.entityId!);
     await idle();
     run(undefined, undefined, charm);
     if (!isCell(charm)) throw new Error(`Charm ${charmId} doesn't exist`);
@@ -508,7 +515,10 @@ export class CommonWindowManager extends LitElement {
       match &&
       JSON.stringify(this.focusedCharm?.entityId) !== match.params.charmId
     ) {
-      this.openCharm(match.params.charmId);
+      // TODO: Add a timeout here, show loading state and error state
+      syncCharm(match.params.charmId, true).then((charm) =>
+        this.openCharm(charm)
+      );
     }
   }
 
