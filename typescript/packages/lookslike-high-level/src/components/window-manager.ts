@@ -3,7 +3,7 @@ import { customElement, state } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
-import { Charm, UI, addCharms, syncCharm } from "../data.js";
+import { Charm, UI, addCharms, runPersistent, syncCharm } from "../data.js";
 import {
   run,
   CellImpl,
@@ -181,21 +181,19 @@ export class CommonWindowManager extends LitElement {
           fieldsToInclude = charmValues.data;
         }
 
-        const eid = run(iframe, {
+        runPersistent(iframe, {
           data: fieldsToInclude,
           title: value,
           prompt: value,
-        }).entityId!;
-        this.openCharm(JSON.stringify(eid));
+        }).then((charm) => this.openCharm(charm));
       }
     } else {
       // there is no existing data
-      const eid = run(iframe, {
+      runPersistent(iframe, {
         data: {},
         title: value,
         prompt: value,
-      }).entityId!;
-      this.openCharm(JSON.stringify(eid));
+      }).then((charm) => this.openCharm(charm));
     }
   }
 
@@ -233,10 +231,9 @@ export class CommonWindowManager extends LitElement {
       console.log("Search submitted:", event.detail.value);
       this.searchOpen = false;
       this.input = "";
-      const charm = run(search, {
+      runPersistent(search, {
         search: event.detail.value,
-      });
-      this.openCharm(JSON.stringify(charm.entityId));
+      }).then((charm) => this.openCharm(charm));
     };
 
     const onAiBoxSubmit = (event: CustomEvent) => {
@@ -298,13 +295,12 @@ export class CommonWindowManager extends LitElement {
         // Refresh the UI
         this.requestUpdate();
       } else {
-        const eid = run(iframe, {
+        runPersistent(iframe, {
           data,
           title: `${new Date().toISOString()}-import`,
           prompt:
             "show in a datatable, use an icon to indicate the data type of each row (by looking at data shape / file extension)",
-        }).entityId!;
-        this.openCharm(JSON.stringify(eid));
+        }).then((charm) => this.openCharm(charm));
       }
     };
 
@@ -511,6 +507,11 @@ export class CommonWindowManager extends LitElement {
     console.log(new URL(customEvent.detail, window.location.href));
     console.log(match);
 
+    console.log(
+      "onroutechange",
+      JSON.stringify(this.focusedCharm?.entityId),
+      match?.params.charmId
+    );
     if (
       match &&
       JSON.stringify(this.focusedCharm?.entityId) !== match.params.charmId
