@@ -44,7 +44,7 @@ export class CommonSidebar extends LitElement {
   sidebarTab: string = "home";
 
   homeRef = createRef<HTMLElement>();
-  homeCharm: CellImpl<Charm> | null = null;
+  homeCharm: Promise<CellImpl<Charm>> | null = null;
 
   static override styles = [
     style.baseStyles,
@@ -74,19 +74,15 @@ export class CommonSidebar extends LitElement {
   ): Promise<void> {
     super.updated(_changedProperties);
 
-    if (!this.homeRef.value) {
-      this.homeCharm = null;
-    }
-
     if (!this.homeCharm && this.homeRef.value) {
-      this.homeCharm = (await runPersistent(
-        home,
-        { charms, recipes },
-        "home"
-      )) as CellImpl<Charm>;
-      const view = this.homeCharm.asSimpleCell<Charm>().key(UI).get();
-      if (!view) throw new Error("Charm has no UI");
-      render(this.homeRef.value, view);
+      this.homeCharm = runPersistent(home, { charms, recipes }, "home").then(
+        (home) => {
+          const view = home.asSimpleCell<Charm>().key(UI).get();
+          if (!view) throw new Error("Charm has no UI");
+          render(this.homeRef.value!, view);
+          return home;
+        }
+      );
     }
   }
 
