@@ -79,7 +79,7 @@ export function getCellByEntityId<T = any>(
 
   entityCell = cell<T>();
   if (typeof entityId === "string") entityId = JSON.parse(entityId) as EntityId;
-  else entityCell.entityId = entityId;
+  entityCell.entityId = entityId;
   setCellByEntityId(entityId, entityCell);
   return entityCell;
 }
