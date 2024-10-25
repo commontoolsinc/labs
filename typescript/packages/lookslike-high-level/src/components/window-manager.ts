@@ -4,7 +4,7 @@ import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
 import { Charm, UI, addCharms, syncCharm } from "../data.js";
-import { run, CellImpl, isCell } from "@commontools/common-runner";
+import { run, CellImpl, isCell, idle } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
@@ -430,6 +430,7 @@ export class CommonWindowManager extends LitElement {
 
   async openCharm(charmId: string) {
     const charm = await syncCharm(charmId);
+    await idle();
     run(undefined, undefined, charm);
     if (!isCell(charm)) throw new Error(`Charm ${charmId} doesn't exist`);
     this.focusedCharm = charm;
