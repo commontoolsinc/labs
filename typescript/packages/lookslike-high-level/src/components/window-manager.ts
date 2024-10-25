@@ -430,6 +430,7 @@ export class CommonWindowManager extends LitElement {
 
   async openCharm(charmId: string) {
     const charm = await syncCharm(charmId);
+    run(undefined, undefined, charm);
     if (!isCell(charm)) throw new Error(`Charm ${charmId} doesn't exist`);
     this.focusedCharm = charm;
     this.focusedProxy = charm?.getAsProxy();
@@ -514,6 +515,9 @@ export class CommonWindowManager extends LitElement {
     super.connectedCallback();
     this.addEventListener("open-charm", this.handleAddWindow);
     window.addEventListener("routeChange", this.#onRouteChange.bind(this));
+    this.#onRouteChange(
+      new CustomEvent("routeChange", { detail: window.location.href })
+    );
   }
 
   override disconnectedCallback() {

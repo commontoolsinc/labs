@@ -11,7 +11,7 @@ import {
   addModuleByRef,
   type ReactivityLog,
   createRef,
-  getCellByEntityId,
+  addRecipe,
 } from "@commontools/common-runner";
 import { createStorage } from "./storage.js";
 
@@ -161,20 +161,6 @@ export type RecipeManifest = {
   recipeId: string;
 };
 
-// TODO: Make this a map of hashes that get persisted
-export const recipeById = new Map<string, Recipe>();
-
-let unknownCounter = 0;
-function addRecipe(recipe: Recipe) {
-  const id =
-    (recipe.schema as { description: string })?.description ??
-    `unknown-${unknownCounter++}`;
-
-  recipeById.set(id, recipe);
-
-  return id;
-}
-
 export const recipes: RecipeManifest[] = [
   {
     name: "Explore dungeon game",
@@ -203,6 +189,10 @@ export const recipes: RecipeManifest[] = [
   {
     name: "Create a counter",
     recipeId: addRecipe(counter),
+  },
+  {
+    name: "Create multiple counters",
+    recipeId: addRecipe(counters),
   },
   {
     name: "Fetch JSON from a URL",
