@@ -18,16 +18,18 @@ export function fetchData(
     options?: { body?: any; method?: string; headers?: Record<string, string> };
     result?: any;
   }>,
-  sendResult: (result: any) => void
+  sendResult: (result: any) => void,
+  _addCancel: (cancel: () => void) => void,
+  cause: CellImpl<any>[]
 ): Action {
   const pending = cell(false);
   const result = cell<any | undefined>(undefined);
   const error = cell<any | undefined>(undefined);
 
   // Generate causal IDs for the cells.
-  pending.generateEntityId({ fetchData: { pending: inputsCell.get() } });
-  result.generateEntityId({ fetchData: { result: inputsCell.get() } });
-  error.generateEntityId({ fetchData: { error: inputsCell.get() } });
+  pending.generateEntityId({ fetchData: { pending: cause } });
+  result.generateEntityId({ fetchData: { result: cause } });
+  error.generateEntityId({ fetchData: { error: cause } });
 
   const resultCell = cell({
     pending,

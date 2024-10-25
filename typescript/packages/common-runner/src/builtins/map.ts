@@ -103,6 +103,7 @@ export function map(
         const resultCell = cell();
         resultCell.generateEntityId({ map: value.cell.entityId });
         run(op, value, resultCell);
+        // TODO: Have `run` return cancel, once we make resultCell required
         addCancel(cancels.get(resultCell));
         itemResult = { ref: value, resultCell };
         sourceRefToResult.push(itemResult);

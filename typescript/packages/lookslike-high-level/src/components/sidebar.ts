@@ -2,16 +2,15 @@ import { LitElement, html, css, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { when } from "lit/directives/when.js";
 import { style } from "@commontools/common-ui";
-import { Charm, charms, RecipeManifest, recipes, UI } from "../data.js";
-import { CellImpl, cell, run } from "@commontools/common-runner";
+import { Charm, charms, recipes, UI, runPersistent } from "../data.js";
+import { CellImpl, cell } from "@commontools/common-runner";
 import { watchCell } from "../watchCell.js";
-import { repeat } from "lit/directives/repeat.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.js";
 import { render } from "@commontools/common-html";
 
 @customElement("common-debug")
-class CommonDebug extends LitElement {
+export class CommonDebug extends LitElement {
   @property({ type: Object })
   content: any;
 
@@ -34,7 +33,7 @@ ${typeof this.content === "string"
 }
 
 @customElement("common-sidebar")
-class CommonSidebar extends LitElement {
+export class CommonSidebar extends LitElement {
   @property({ type: Object })
   focusedCharm: CellImpl<Charm> | null = null;
 
@@ -70,7 +69,9 @@ class CommonSidebar extends LitElement {
     this.dispatchEvent(event);
   }
 
-  protected override updated(_changedProperties: PropertyValues): void {
+  protected override async updated(
+    _changedProperties: PropertyValues
+  ): Promise<void> {
     super.updated(_changedProperties);
 
     if (!this.homeRef.value) {
@@ -78,7 +79,11 @@ class CommonSidebar extends LitElement {
     }
 
     if (!this.homeCharm && this.homeRef.value) {
-      this.homeCharm = run(home, { charms, recipes }) as CellImpl<Charm>;
+      this.homeCharm = (await runPersistent(
+        home,
+        { charms, recipes },
+        "home"
+      )) as CellImpl<Charm>;
       const view = this.homeCharm.asSimpleCell<Charm>().key(UI).get();
       if (!view) throw new Error("Charm has no UI");
       render(this.homeRef.value, view);
@@ -138,7 +143,7 @@ class CommonSidebar extends LitElement {
                 <div ${ref(this.homeRef)}></div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``,
+          () => html``
         )}
         ${when(
           this.sidebarTab === "query",
@@ -148,11 +153,15 @@ class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Query</div>
                 <div>
-                  <os-code-editor slot="content" language="text/html" .source=${watchCell(query)}></os-code-editor>
+                  <os-code-editor
+                    slot="content"
+                    language="text/html"
+                    .source=${watchCell(query)}
+                  ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``,
+          () => html``
         )}
         ${when(
           this.sidebarTab === "schema",
@@ -162,14 +171,14 @@ class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Schema</div>
                 <div>
-                    <common-debug
-                      slot="content"
-                      .content=${watchCell(schema)}
-                    ></common-debug>
+                  <common-debug
+                    slot="content"
+                    .content=${watchCell(schema)}
+                  ></common-debug>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``,
+          () => html``
         )}
         ${when(
           this.sidebarTab === "source",
@@ -179,11 +188,14 @@ class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Source</div>
                 <div>
-                  <os-code-editor slot="content" .source=${watchCell(src)}></os-code-editor>
+                  <os-code-editor
+                    slot="content"
+                    .source=${watchCell(src)}
+                  ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``,
+          () => html``
         )}
         ${when(
           this.sidebarTab === "data",
@@ -200,7 +212,7 @@ class CommonSidebar extends LitElement {
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``,
+          () => html``
         )}
         ${when(
           this.sidebarTab === "prompt",
@@ -210,11 +222,14 @@ class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Spell</div>
                 <div>
-                  <common-markdown slot="content" markdown=${watchCell(prompt)}></common-markdown>
+                  <common-markdown
+                    slot="content"
+                    markdown=${watchCell(prompt)}
+                  ></common-markdown>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``,
+          () => html``
         )}
       </os-navstack>
     `;

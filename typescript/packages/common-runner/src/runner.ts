@@ -41,6 +41,7 @@ import init, {
   JavaScriptModuleDefinition,
   JavaScriptValueMap,
 } from "@commontools/common-runtime";
+import { getRecipe } from "./recipe-map.js";
 
 export const cancels = new WeakMap<CellImpl<any>, Cancel>();
 
@@ -61,17 +62,17 @@ export const cancels = new WeakMap<CellImpl<any>, Cancel>();
  * @returns The result cell.
  */
 export function run<T, R>(
-  recipeFactory: RecipeFactory<T, R>,
-  parameters: T,
+  recipeFactory?: RecipeFactory<T, R>,
+  parameters?: T,
   resultCell?: CellImpl<R>
 ): CellImpl<R>;
 export function run<T, R = any>(
-  recipe: Recipe,
-  parameters: T,
+  recipe?: Recipe,
+  parameters?: T,
   resultCell?: CellImpl<R>
 ): CellImpl<R>;
 export function run<T, R = any>(
-  recipe: Recipe,
+  recipe?: Recipe,
   parameters?: T,
   resultCell?: CellImpl<R>
 ): CellImpl<R> {
@@ -99,6 +100,11 @@ export function run<T, R = any>(
   } else {
     processCell = cell();
     resultCell.sourceCell = processCell;
+  }
+
+  if (!recipe) {
+    recipe = getRecipe(processCell.get()[TYPE] as string);
+    if (!recipe) throw new Error(`Unknown recipe: ${processCell.get()[TYPE]}`);
   }
 
   // Walk the recipe's schema and extract all default values
@@ -400,19 +406,18 @@ function instantiateRawNode(
   const mappedInputBindings = mapBindingsToCell(inputBindings, processCell);
   const mappedOutputBindings = mapBindingsToCell(outputBindings, processCell);
 
+  const inputCells = findAllAliasedCells(mappedInputBindings, processCell);
+  const outputCells = findAllAliasedCells(mappedOutputBindings, processCell);
+
   const action = module.implementation(
     cell(mappedInputBindings),
     (result: any) =>
       sendValueToBinding(processCell, mappedOutputBindings, result),
-    addCancel
+    addCancel,
+    inputCells // cause
   );
 
-  addCancel(
-    schedule(action, {
-      reads: findAllAliasedCells(mappedInputBindings, processCell),
-      writes: findAllAliasedCells(mappedOutputBindings, processCell),
-    } satisfies ReactivityLog)
-  );
+  addCancel(schedule(action, { reads: inputCells, writes: outputCells }));
 }
 
 function instantiatePassthroughNode(
