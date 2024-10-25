@@ -12,6 +12,8 @@ import {
   type ReactivityLog,
   createRef,
   addRecipe,
+  idle,
+  EntityId,
 } from "@commontools/common-runner";
 import { createStorage } from "./storage.js";
 
@@ -72,9 +74,10 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 
 export async function runPersistent(
   recipe: Recipe,
-  inputs: any,
+  inputs?: any,
   cause?: any
 ): Promise<CellImpl<any>> {
+  await idle();
   return run(
     recipe,
     inputs,
@@ -82,8 +85,11 @@ export async function runPersistent(
   );
 }
 
-export async function syncCharm(entityId: string): Promise<CellImpl<Charm>> {
-  return await storage.syncCell(entityId);
+export async function syncCharm(
+  entityId: string | EntityId | CellImpl<any>,
+  waitForStorage: boolean = false
+): Promise<CellImpl<Charm>> {
+  return storage.syncCell(entityId, waitForStorage);
 }
 
 addCharms([
