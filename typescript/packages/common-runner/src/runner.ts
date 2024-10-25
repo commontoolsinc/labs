@@ -90,6 +90,10 @@ export function run<T, R = any>(
     resultCell = cell<R>();
   }
 
+  // Keep track of subscriptions to cancel them later
+  const [cancel, addCancel] = useCancelGroup();
+  cancels.set(resultCell, cancel);
+
   let processCell: CellImpl<{
     [TYPE]: string;
     parameters?: T;
@@ -98,19 +102,21 @@ export function run<T, R = any>(
 
   if (resultCell.sourceCell !== undefined) {
     processCell = resultCell.sourceCell;
-    // If no new parameters are provided, use the ones from the previous call
-    // TODO: BUG: Passing parameters will now overwrite the internal state for
-    // ommitted parameters
-    //if (!parameters) parameters = processCell.get()?.parameters as T;
+    // TODO: Allow updating of parameters, even if there were previous ones
     parameters = (processCell.get()?.parameters as T) ?? parameters;
   } else {
     processCell = cell();
     resultCell.sourceCell = processCell;
   }
 
-  if (!recipe) {
-    recipe = getRecipe(processCell.get()[TYPE] as string);
+  if (!recipe && processCell.get()?.[TYPE]) {
+    recipe = getRecipe(processCell.get()[TYPE]);
     if (!recipe) throw new Error(`Unknown recipe: ${processCell.get()[TYPE]}`);
+  } else if (!recipe) {
+    console.warn(
+      "No recipe provided and no recipe found in process cell. Not running."
+    );
+    return resultCell;
   }
 
   // Walk the recipe's schema and extract all default values
@@ -171,11 +177,6 @@ export function run<T, R = any>(
   resultCell.send(mapBindingsToCell<R>(recipe.result as R, processCell));
 
   // Now start the recipe
-
-  // Keep track of subscriptions to cancel them later
-  const [cancel, addCancel] = useCancelGroup();
-  cancels.set(resultCell, cancel);
-
   for (const node of recipe.nodes) {
     // Generate causal IDs for all cells read and written to by this node, if
     // they don't have any yet.
