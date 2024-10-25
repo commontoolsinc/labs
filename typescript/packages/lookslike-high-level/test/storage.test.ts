@@ -137,7 +137,7 @@ describe("Storage", () => {
 
           await storage.syncCell(testCell);
 
-          await storage2.sync([testCell.entityId!]);
+          await storage2.sync(testCell.entityId!);
           const value = storage2.get(testCell.entityId!);
           expect(value?.value).toEqual(testValue);
         });
@@ -156,7 +156,7 @@ describe("Storage", () => {
           await storage.syncCell(testCell);
           console.log("synced testCell");
 
-          await storage2.sync([refCell.entityId!]);
+          await storage2.sync(refCell.entityId!);
           const value = storage2.get(refCell.entityId!);
           expect(value?.value).toEqual("hello");
         });
@@ -173,7 +173,7 @@ describe("Storage", () => {
 
           await storage.syncCell(testCell);
 
-          await storage2.sync([refCell.entityId!]);
+          await storage2.sync(refCell.entityId!);
           const value = storage2.get(refCell.entityId!);
           expect(value?.value).toEqual("hello");
         });
@@ -194,7 +194,7 @@ describe("Storage", () => {
               path: ["ref"],
             }
           );
-          await storage2.sync([refId]);
+          await storage2.sync(refId);
           const value = storage2.get(refId);
           expect(value?.value).toEqual("hello");
         });
@@ -209,7 +209,7 @@ describe("Storage", () => {
 
           await storage.synced();
 
-          await storage2.sync([testCell.entityId!]);
+          await storage2.sync(testCell.entityId!);
           const value = storage2.get(testCell.entityId!);
           expect(value?.value).toBe("value 2");
         });
@@ -226,6 +226,25 @@ describe("Storage", () => {
           cell2.entityId = testCell.entityId;
           const cell3 = await storage.syncCell(cell2);
           expect(cell3).toBe(cell1);
+        });
+
+        it("should wait for a cell to appear", async () => {
+          let synced = false;
+          storage2.sync(testCell.entityId!, true).then(() => (synced = true));
+          expect(synced).toBe(false);
+
+          testCell.send("test");
+          await storage.syncCell(testCell);
+          expect(synced).toBe(true);
+        });
+
+        it("should wait for a undefined cell to appear", async () => {
+          let synced = false;
+          storage2.sync(testCell.entityId!, true).then(() => (synced = true));
+          expect(synced).toBe(false);
+
+          await storage.syncCell(testCell);
+          expect(synced).toBe(true);
         });
       });
 

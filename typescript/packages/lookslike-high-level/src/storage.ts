@@ -33,7 +33,8 @@ export interface Storage {
    * @throws Will throw if called on a cell without an entity ID.
    */
   syncCell<T = any>(
-    cell: CellImpl<T> | EntityId | string
+    cell: CellImpl<T> | EntityId | string,
+    expectedInStorage?: boolean
   ): Promise<CellImpl<T>> | CellImpl<T>;
 
   /**
@@ -128,9 +129,10 @@ class StorageImpl implements Storage {
   private addCancel: AddCancel;
 
   syncCell<T>(
-    subject: CellImpl<T> | EntityId | string
+    subject: CellImpl<T> | EntityId | string,
+    expectedInStorage: boolean = false
   ): Promise<CellImpl<T>> | CellImpl<T> {
-    const entityCell = this._ensureIsSynced(subject);
+    const entityCell = this._ensureIsSynced(subject, expectedInStorage);
 
     // If cell is loading, return the promise. Otherwise return immediately.
     return this.cellIsLoading.get(entityCell) ?? entityCell;
@@ -148,7 +150,8 @@ class StorageImpl implements Storage {
   }
 
   private _ensureIsSynced<T>(
-    subject: CellImpl<T> | EntityId | string
+    subject: CellImpl<T> | EntityId | string,
+    expectedInStorage: boolean = false
   ): CellImpl<T> {
     const entityCell = this._fromIdToCell<T>(subject);
     const entityId = JSON.stringify(entityCell.entityId);
@@ -163,7 +166,7 @@ class StorageImpl implements Storage {
 
     // Start loading the cell and safe the promise for processBatch to await for
     const loadingPromise = this.storageProvider
-      .sync([entityCell.entityId!])
+      .sync(entityCell.entityId!, expectedInStorage)
       .then(() => entityCell);
     this.loadingPromises.set(entityCell, loadingPromise);
 
@@ -230,18 +233,16 @@ class StorageImpl implements Storage {
       // It's always the causal child of the result cell.
       if (!cell.sourceCell.entityId)
         cell.sourceCell.generateEntityId(cell.entityId!);
-      dependencies.add(cell.sourceCell);
+      dependencies.add(this._ensureIsSynced(cell.sourceCell));
     }
 
     // Convert all cell references to ids and remember as dependent cells
-    const value: { value: any; source?: EntityId } = {
+    const value: StorageValue = {
       value: traverse(cell.get(), []),
+      source: cell.sourceCell?.entityId,
     };
-    if (cell.sourceCell) value.source = cell.sourceCell.entityId;
 
-    if (
-      JSON.stringify(value) !== JSON.stringify(this.writeValues.get(cell) ?? {})
-    ) {
+    if (JSON.stringify(value) !== JSON.stringify(this.writeValues.get(cell))) {
       this.writeDependentCells.set(cell, dependencies);
       this.writeValues.set(cell, value);
 
@@ -284,7 +285,10 @@ class StorageImpl implements Storage {
           "/" in value.cell &&
           Array.isArray(value.path)
         ) {
-          const cell = this._ensureIsSynced(value.cell);
+          // If the cell is not yet loaded, load it. As it's referenced in
+          // something that came from storage, the id is known in storage and so
+          // we have to wait for it to load. Hence true as second parameter.
+          const cell = this._ensureIsSynced(value.cell, true);
           dependencies.add(cell);
           return { cell, path: value.path };
         } else {
@@ -308,7 +312,7 @@ class StorageImpl implements Storage {
     };
 
     if (source) {
-      const sourceCell = this._ensureIsSynced(source);
+      const sourceCell = this._ensureIsSynced(source, true);
       dependencies.add(sourceCell);
       newValue.source = sourceCell;
     }

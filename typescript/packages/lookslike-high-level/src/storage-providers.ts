@@ -19,10 +19,12 @@ export interface StorageProvider {
   /**
    * Sync a value from storage. Use `get()` to retrieve the value.
    *
-   * @param entityIds - Entity IDs to sync.
+   * @param entityId - Entity ID to sync.
+   * @param expectedInStorage - Wait for the value, it's assumed to be in
+   *   storage eventually.
    * @returns Promise that resolves when the value is synced.
    */
-  sync(entityIds: EntityId[]): Promise<void>;
+  sync(entityId: EntityId, expectedInStorage?: boolean): Promise<void>;
 
   /**
    * Get a value from the local cache reflecting storage. Call `sync()` first.
@@ -54,12 +56,14 @@ export interface StorageProvider {
 
 abstract class BaseStorageProvider implements StorageProvider {
   protected subscribers = new Map<string, Set<(value: StorageValue) => void>>();
+  protected waitingForSync = new Map<string, Promise<void>>();
+  protected waitingForSyncResolvers = new Map<string, () => void>();
 
   abstract send<T = any>(
     batch: { entityId: EntityId; value: StorageValue<T> }[]
   ): Promise<void>;
 
-  abstract sync(entityIds: EntityId[]): Promise<void>;
+  abstract sync(entityId: EntityId, expectedInStorage: boolean): Promise<void>;
 
   abstract get<T = any>(entityId: EntityId): StorageValue<T> | undefined;
 
@@ -83,7 +87,30 @@ abstract class BaseStorageProvider implements StorageProvider {
   protected notifySubscribers(key: string, value: StorageValue): void {
     console.log("notify subscribers", key, JSON.stringify(value));
     const listeners = this.subscribers.get(key);
+    if (this.waitingForSync.has(key) && listeners && listeners.size > 0)
+      throw new Error(
+        "Subscribers are expected to only start after first sync."
+      );
+    this.resolveWaitingForSync(key);
     if (listeners) for (const listener of listeners) listener(value);
+  }
+
+  protected waitForSync(key: string): Promise<void> {
+    if (!this.waitingForSync.has(key))
+      this.waitingForSync.set(
+        key,
+        new Promise((r) => this.waitingForSyncResolvers.set(key, r))
+      );
+    console.log("waiting for sync", key, [...this.waitingForSync.keys()]);
+    return this.waitingForSync.get(key)!;
+  }
+
+  protected resolveWaitingForSync(key: string): void {
+    const resolver = this.waitingForSyncResolvers.get(key);
+    if (resolver) {
+      resolver();
+      this.waitingForSync.delete(key);
+    }
   }
 
   abstract destroy(): Promise<void>;
@@ -131,14 +158,16 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async sync(entityIds: EntityId[]): Promise<void> {
-    for (const entityId of entityIds) {
-      const key = JSON.stringify(entityId);
-      if (inMemoryStorage.has(key))
-        this.lastValues.set(key, JSON.stringify(inMemoryStorage.get(key)!));
-      else this.lastValues.delete(key);
-      console.log("sync in memory", key, this.lastValues.get(key));
-    }
+  async sync(
+    entityId: EntityId,
+    expectedInStorage: boolean = false
+  ): Promise<void> {
+    const key = JSON.stringify(entityId);
+    console.log("sync in memory", key, this.lastValues.get(key));
+    if (inMemoryStorage.has(key))
+      this.lastValues.set(key, JSON.stringify(inMemoryStorage.get(key)!));
+    else if (expectedInStorage) return this.waitForSync(key);
+    else this.lastValues.delete(key);
   }
 
   get<T>(entityId: EntityId): StorageValue<T> | undefined {
@@ -188,14 +217,18 @@ export class LocalStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async sync(entityIds: EntityId[]): Promise<void> {
-    for (const entityId of entityIds) {
-      const key = this.getKey(entityId);
-      const value = localStorage.getItem(key);
-      console.log("sync localstorage", key, value);
-      if (value === null) this.lastValues.delete(key);
-      else this.lastValues.set(key, value);
-    }
+  async sync(
+    entityId: EntityId,
+    expectedInStorage: boolean = false
+  ): Promise<void> {
+    const key = this.getKey(entityId);
+    const value = localStorage.getItem(key);
+    console.log("sync localstorage", key, value);
+    if (value === null)
+      if (expectedInStorage)
+        return this.waitForSync(this.entityIdStrFromKey(key));
+      else this.lastValues.delete(key);
+    else this.lastValues.set(key, value);
   }
 
   get<T>(entityId: EntityId): StorageValue<T> | undefined {
@@ -221,8 +254,12 @@ export class LocalStorageProvider extends BaseStorageProvider {
     return this.prefix + JSON.stringify(entityId);
   }
 
+  private entityIdStrFromKey(key: string): string {
+    return key.slice(this.prefix.length);
+  }
+
   private handleStorageEvent = (event: StorageEvent) => {
-    if (event.key && event.key.startsWith(this.prefix)) {
+    if (event.key?.startsWith(this.prefix)) {
       if (this.lastValues.get(event.key) !== event.newValue) {
         console.log(
           "storage event",
@@ -235,7 +272,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
         else this.lastValues.set(event.key, event.newValue);
         const result =
           event.newValue !== null ? JSON.parse(event.newValue) : {};
-        this.notifySubscribers(event.key.slice(this.prefix.length), result);
+        this.notifySubscribers(this.entityIdStrFromKey(event.key), result);
       }
     }
   };
