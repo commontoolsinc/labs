@@ -324,6 +324,8 @@ export class CommonWindowManager extends LitElement {
                 this.charms,
                 (charm) => charm.entityId!.toString(),
                 (charm) => {
+                  if (!charm.get()) return;
+
                   const charmId = charm.entityId!;
 
                   // Create a new ref for this charm
@@ -379,6 +381,8 @@ export class CommonWindowManager extends LitElement {
             this.charms,
             (charm) => charm.entityId!.toString(),
             (charm) => {
+              if (!charm.get()) return;
+
               const charmId = charm.entityId!;
 
               // Create a new ref for this charm
