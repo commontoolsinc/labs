@@ -521,8 +521,8 @@ export class CommonWindowManager extends LitElement {
       JSON.stringify(this.focusedCharm?.entityId) !== match.params.charmId
     ) {
       // TODO: Add a timeout here, show loading state and error state
-      syncCharm(match.params.charmId, true).then((charm) =>
-        this.openCharm(charm)
+      syncCharm(match.params.charmId, true).then(
+        (charm) => charm && charm.get() && this.openCharm(charm)
       );
     }
   }
