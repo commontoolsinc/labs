@@ -225,9 +225,18 @@ export class LocalStorageProvider extends BaseStorageProvider {
     const value = localStorage.getItem(key);
     console.log("sync localstorage", key, value);
     if (value === null)
-      if (expectedInStorage)
+      if (expectedInStorage) {
+        // Timeout of 1 second to allow for the value to be set by another tab.
+        // This is more than enough, since the race condition we're looking for
+        // is just that a batch is written by the other tab, and we encounter a
+        // dependency in the beginning of the batch before the whole batch is
+        // written.
+        setTimeout(
+          () => this.resolveWaitingForSync(this.entityIdStrFromKey(key)),
+          1000
+        );
         return this.waitForSync(this.entityIdStrFromKey(key));
-      else this.lastValues.delete(key);
+      } else this.lastValues.delete(key);
     else this.lastValues.set(key, value);
   }
 
