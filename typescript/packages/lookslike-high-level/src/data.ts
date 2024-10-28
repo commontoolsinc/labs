@@ -12,6 +12,7 @@ import {
   type ReactivityLog,
   createRef,
   addRecipe,
+  getRecipe,
   idle,
   EntityId,
 } from "@commontools/common-runner";
@@ -50,7 +51,7 @@ export type Charm = {
 
 export { TYPE, NAME, UI };
 
-const storage = createStorage("local");
+const storage = createStorage("memory");
 
 export const charms = cell<CellReference[]>([]);
 charms.generateEntityId("charms");
@@ -93,7 +94,6 @@ export async function syncCharm(
 }
 
 addCharms([
-  /*
   await runPersistent(
     iframe,
     {
@@ -158,7 +158,7 @@ addCharms([
       locations: ["coffee shop with great baristas"],
     },
     "routine"
-  ),*/
+  ),
   await runPersistent(counters, {}, "counters"),
 ]);
 
@@ -218,6 +218,9 @@ export const recipes: RecipeManifest[] = [
   },
 ];
 
+// Register `iframe` recipe (but can't be started from recipe list)
+addRecipe(iframe);
+
 // Helper for mock data
 function getFridayAndMondayDateStrings() {
   const today = new Date();
@@ -258,6 +261,7 @@ addModuleByRef(
 
 (window as any).recipes = recipes;
 (window as any).charms = charms;
+(window as any).getRecipe = getRecipe;
 
 export let annotationsEnabled = cell<boolean>(false);
 export const toggleAnnotations = () => {
