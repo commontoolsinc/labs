@@ -100,7 +100,7 @@ describe("sendValueToBinding", () => {
   it("should send value to a simple binding", () => {
     const testCell = cell({ value: 0 });
     sendValueToBinding(testCell, { $alias: { path: ["value"] } }, 42);
-    expect(testCell.get()).toEqual({ value: 42 });
+    expect(testCell.getAsProxy()).toEqual({ value: 42 });
   });
 
   it("should handle array bindings", () => {
@@ -146,7 +146,7 @@ describe("sendValueToBinding", () => {
 
     sendValueToBinding(testCell, binding, value);
 
-    expect(testCell.get()).toEqual({
+    expect(testCell.getAsProxy()).toEqual({
       user: {
         name: {
           first: "Jane",
@@ -431,7 +431,10 @@ describe("makeArrayElementsAllCells", () => {
     const changed = normalizeToCells(newInput, previousInput);
 
     expect(changed).toBe(true);
-    expect(newInput[0]).not.toBe(previousInput[0]);
+    expect(
+      (newInput[0] as unknown as CellReference).cell !==
+        (previousInput[0] as unknown as CellReference).cell
+    ).toBeTruthy();
     expect(isCellReference(newInput[0])).toBe(true);
     expect((newInput[0] as unknown as CellReference).cell.get()).toBe(43);
   });

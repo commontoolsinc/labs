@@ -18,11 +18,18 @@ export function fetchData(
     options?: { body?: any; method?: string; headers?: Record<string, string> };
     result?: any;
   }>,
-  sendResult: (result: any) => void
+  sendResult: (result: any) => void,
+  _addCancel: (cancel: () => void) => void,
+  cause: CellImpl<any>[]
 ): Action {
   const pending = cell(false);
   const result = cell<any | undefined>(undefined);
   const error = cell<any | undefined>(undefined);
+
+  // Generate causal IDs for the cells.
+  pending.generateEntityId({ fetchData: { pending: cause } });
+  result.generateEntityId({ fetchData: { result: cause } });
+  error.generateEntityId({ fetchData: { error: cause } });
 
   const resultCell = cell({
     pending,
@@ -60,7 +67,7 @@ export function fetchData(
       .then((data) => {
         if (thisRun !== currentRun) return;
 
-        normalizeToCells(result, undefined, log);
+        normalizeToCells(data, undefined, log, url);
 
         pending.setAtPath([], false, log);
         result.setAtPath([], data, log);

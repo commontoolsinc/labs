@@ -46,7 +46,7 @@ export function map(
   let sourceRefToResult: { ref: CellReference; resultCell: CellImpl<any> }[] =
     [];
 
-  sendResult(result);
+  sendResult({ cell: result, path: [] });
 
   return (log: ReactivityLog) => {
     let { list, op } = inputsCell.getAsProxy([], log);
@@ -99,7 +99,11 @@ export function map(
           log?.reads.push(value);
           continue;
         }
-        const resultCell = run(op, value);
+        if (!value.cell.entityId) value.cell.generateEntityId();
+        const resultCell = cell();
+        resultCell.generateEntityId({ map: value.cell.entityId });
+        run(op, value, resultCell);
+        // TODO: Have `run` return cancel, once we make resultCell required
         addCancel(cancels.get(resultCell));
         itemResult = { ref: value, resultCell };
         sourceRefToResult.push(itemResult);

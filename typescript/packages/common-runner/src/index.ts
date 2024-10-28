@@ -4,6 +4,7 @@ export {
   run as addAction,
   unschedule as removeAction,
   type Action,
+  idle,
 } from "./scheduler.js";
 export type {
   Cell,
@@ -26,4 +27,11 @@ export {
   getCellReferenceOrThrow,
   isCellProxyForDereferencing,
 } from "./cell.js";
-export { getEntityId, getCellByEntityId } from "./cell-map.js";
+export {
+  getEntityId,
+  getCellByEntityId,
+  createRef,
+  type EntityId,
+} from "./cell-map.js";
+export { addRecipe, getRecipe } from "./recipe-map.js";
+export { type Cancel, type AddCancel, useCancelGroup } from "./cancel.js";

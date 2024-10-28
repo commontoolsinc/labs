@@ -13,4 +13,4 @@ export {
 } from "./view.js";
 export { html } from "./html.js";
 export { render, setNodeSanitizer, setEventSanitizer } from "./render.js";
-export { setDebug } from "./logger.js";
+export { setDebug, debug } from "./logger.js";

@@ -30,10 +30,13 @@ describe("runRecipe", () => {
     const result = run(recipe, { input: 1 });
     await idle();
 
-    expect(result.sourceCell?.get()).toEqual({
+    expect(result.sourceCell?.getAsProxy()).toMatchObject({
       [TYPE]: "passthrough",
       parameters: { input: 1 },
       internal: { output: 1 },
+    });
+    expect(result.sourceCell?.get().internal.output).toMatchObject({
+      $alias: { path: [] },
     });
     expect(result.get()).toEqual({
       output: {

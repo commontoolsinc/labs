@@ -5,11 +5,18 @@ import {
   run,
   cell,
   getEntityId,
-  CellImpl,
+  type CellImpl,
+  type CellReference,
   raw,
   addModuleByRef,
   type ReactivityLog,
+  createRef,
+  addRecipe,
+  getRecipe,
+  idle,
+  EntityId,
 } from "@commontools/common-runner";
+import { createStorage } from "./storage.js";
 
 import { todoList } from "./recipes/todo-list.js";
 import { localSearch } from "./recipes/local-search.js";
@@ -23,6 +30,7 @@ import { counters } from "./recipes/counters.js";
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.js";
 import "./recipes/playlist.js";
+
 import { iframe } from "./recipes/iframe.js";
 import { search } from "./recipes/search.js";
 import { importCalendar } from "./recipes/importCalendar.js";
@@ -43,58 +51,74 @@ export type Charm = {
 
 export { TYPE, NAME, UI };
 
-export const charms = cell<CellImpl<Charm>[]>([]);
+const storage = createStorage("memory");
+
+export const charms = cell<CellReference[]>([]);
+charms.generateEntityId("charms");
 
 export function addCharms(newCharms: CellImpl<any>[]) {
-  const currentCharms = charms.get();
-  const currentIds = new Set(
-    currentCharms.map((charm) => JSON.stringify(charm.entityId)),
-  );
+  const currentCharmsIds = charms
+    .get()
+    .map(({ cell }) => JSON.stringify(cell.entityId));
   const charmsToAdd = newCharms.filter(
-    (charm) => !currentIds.has(JSON.stringify(charm.entityId)),
+    (cell) => !currentCharmsIds.includes(JSON.stringify(cell.entityId))
   );
 
-  if (charmsToAdd.length > 0) {
-    charms.send([...currentCharms, ...charmsToAdd]);
-  }
+  if (charmsToAdd.length > 0)
+    charms.send([
+      ...charms.get(),
+      ...charmsToAdd.map(
+        (cell) => ({ cell, path: [] } satisfies CellReference)
+      ),
+    ]);
 }
 
-export function setCharms(newCharms: CellImpl<any>[]) {
-  charms.send([...newCharms]);
+export async function runPersistent(
+  recipe: Recipe,
+  inputs?: any,
+  cause?: any
+): Promise<CellImpl<any>> {
+  await idle();
+  return run(
+    recipe,
+    inputs,
+    await storage.syncCell(createRef({ recipe, inputs }, cause))
+  );
 }
 
-function createCellWithCausalId(name: string) {
-  const newCell = cell();
-  newCell.generateEntityId(name);
-  return newCell;
+export async function syncCharm(
+  entityId: string | EntityId | CellImpl<any>,
+  waitForStorage: boolean = false
+): Promise<CellImpl<Charm>> {
+  return storage.syncCell(entityId, waitForStorage);
 }
 
 addCharms([
-  run(
+  await runPersistent(
     iframe,
     {
       title: "two way binding counter",
       prompt: "counter",
       data: { counter: 0 },
     },
-    createCellWithCausalId("iframe"),
+    "iframe"
   ),
-  run(importCalendar, {}, createCellWithCausalId("importCalendar")),
-  run(
+  await runPersistent(importCalendar, {}, "importCalendar"),
+  await runPersistent(
     search,
     {
       query: "home",
     },
-    createCellWithCausalId("search"),
+    "search"
   ),
-  run(
+  await runPersistent(
     queryCollections,
     {
       collectionName: "home",
     },
-    createCellWithCausalId("queryCollections"),
+    "queryCollections"
   ),
-  run(
+  await runPersistent(
     todoList,
     {
       title: "My TODOs",
@@ -103,9 +127,9 @@ addCharms([
         done: false,
       })),
     },
-    createCellWithCausalId("todoList"),
+    "todoList"
   ),
-  run(
+  await runPersistent(
     todoList,
     {
       title: "My grocery shopping list",
@@ -114,9 +138,9 @@ addCharms([
         done: false,
       })),
     },
-    createCellWithCausalId("todoList"),
+    "todoList"
   ),
-  run(
+  await runPersistent(
     ticket,
     {
       title: "Reservation for 'Counterstrike the Musical'",
@@ -124,38 +148,24 @@ addCharms([
       date: getFridayAndMondayDateStrings().startDate,
       location: "New York",
     },
-    createCellWithCausalId("ticket"),
+    "ticket"
   ),
-  run(
+  await runPersistent(
     routine,
     {
       title: "Morning routine",
       // TODO: A lot more missing here, this is just to drive the suggestion.
       locations: ["coffee shop with great baristas"],
     },
-    createCellWithCausalId("routine"),
+    "routine"
   ),
-  run(counters, {}, createCellWithCausalId("counters")),
+  await runPersistent(counters, {}, "counters"),
 ]);
 
 export type RecipeManifest = {
   name: string;
   recipeId: string;
 };
-
-// TODO: Make this a map of hashes that get persisted
-export const recipeById = new Map<string, Recipe>();
-
-let unknownCounter = 0;
-function addRecipe(recipe: Recipe) {
-  const id =
-    (recipe.schema as { description: string })?.description ??
-    `unknown-${unknownCounter++}`;
-
-  recipeById.set(id, recipe);
-
-  return id;
-}
 
 export const recipes: RecipeManifest[] = [
   {
@@ -187,6 +197,10 @@ export const recipes: RecipeManifest[] = [
     recipeId: addRecipe(counter),
   },
   {
+    name: "Create multiple counters",
+    recipeId: addRecipe(counters),
+  },
+  {
     name: "Fetch JSON from a URL",
     recipeId: addRecipe(fetchExample),
   },
@@ -204,16 +218,19 @@ export const recipes: RecipeManifest[] = [
   },
 ];
 
+// Register `iframe` recipe (but can't be started from recipe list)
+addRecipe(iframe);
+
 // Helper for mock data
 function getFridayAndMondayDateStrings() {
   const today = new Date();
   const daysUntilFriday = (5 - today.getDay() + 7) % 7;
 
   const nextFriday = new Date(
-    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000,
+    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000
   );
   const followingMonday = new Date(
-    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000,
+    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000
   );
 
   const formatDate = (date: Date): string => {
@@ -239,11 +256,12 @@ addModuleByRef(
     // HACK to follow the cell references to the entityId
     const entityId = getEntityId(inputsCell.getAsProxy([], log));
     if (entityId) openCharm(JSON.stringify(entityId));
-  }),
+  })
 );
 
 (window as any).recipes = recipes;
 (window as any).charms = charms;
+(window as any).getRecipe = getRecipe;
 
 export let annotationsEnabled = cell<boolean>(false);
 export const toggleAnnotations = () => {

@@ -172,6 +172,7 @@ export function isStatic(value: any): value is Static {
   );
 }
 
-export function markAsStatic(value: any): void {
+export function markAsStatic(value: any): any {
   value[isStaticMarker] = true;
+  return value;
 }

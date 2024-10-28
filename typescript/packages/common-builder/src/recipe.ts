@@ -143,22 +143,17 @@ function factoryFromRecipe<T, R>(
 
   // TODO: initial is likely not needed anymore
   // TODO: But we need a new one for the result
-  const schema = createJsonSchema(defaults, initial) as {
+  const schema = createJsonSchema(defaults, {}) as {
     properties: { [key: string]: any };
     description: string;
   };
   schema.description = description;
 
   delete schema.properties[UI]; // TODO: This should be a schema for views
-  if (schema.properties?.internal?.properties) {
-    for (const key of Object.keys(
-      (schema as any).properties.internal.properties
-    )) {
-      if (key.startsWith("__#")) {
+  if (schema.properties?.internal?.properties)
+    for (const key of Object.keys(schema.properties.internal.properties as any))
+      if (key.startsWith("__#"))
         delete (schema as any).properties.internal.properties[key];
-      }
-    }
-  }
 
   const serializedNodes = Array.from(nodes).map((node) => {
     const module = isCellProxy(node.module)

@@ -79,6 +79,7 @@ export interface Cell<T> {
   value: T;
   entityId: EntityId | undefined;
   [isSimpleCellMarker]: true;
+  copyTrap: boolean;
 }
 
 export interface ReactiveCell<T> {
@@ -258,6 +259,11 @@ export type CellImpl<T> = {
    * Internal only: Marker for cells. Used by e.g. `isCell`, etc.
    */
   [isCellMarker]: true;
+
+  /**
+   * Internal only: Trap for copy operations.
+   */
+  copyTrap: boolean;
 };
 
 /**
@@ -368,7 +374,10 @@ export function cell<T>(value?: T): CellImpl<T> {
     // This is the id and not the contents, because we .toJSON is called when
     // writing a structure to this that might contain a reference to this cell,
     // and we want to serialize that as am IPLD link to this cell.
-    toJSON: () => entityId?.toJSON(),
+    toJSON: () =>
+      typeof entityId?.toJSON === "function"
+        ? entityId.toJSON()
+        : (entityId as { "/": string }),
     get value(): T {
       return value as T;
     },
@@ -384,10 +393,15 @@ export function cell<T>(value?: T): CellImpl<T> {
       return sourceCell;
     },
     set sourceCell(cell: CellImpl<any> | undefined) {
+      if (sourceCell && sourceCell !== cell)
+        throw new Error("Source cell already set");
       sourceCell = cell;
     },
     [toCellProxy]: () => toBuilderCellProxy(self, []),
     [isCellMarker]: true,
+    get copyTrap(): boolean {
+      throw new Error("Copy trap: Don't copy cells, create references instead");
+    },
   };
 
   return self;
@@ -467,6 +481,11 @@ function simpleCell<T>(
           return getEntityId(self.getAsCellReference());
         },
         [isSimpleCellMarker]: true,
+        get copyTrap(): boolean {
+          throw new Error(
+            "Copy trap: Don't copy simple cells. Create references instead."
+          );
+        },
       };
   return self;
 }
@@ -630,7 +649,7 @@ export function createValueProxy<T>(
 
               // Turn any newly added elements into cells. And if there was a
               // change at all, update the cell.
-              normalizeToCells(copy, target, log);
+              normalizeToCells(copy, target, log, valueCell.entityId);
               setNestedValue(valueCell, valuePath, copy, log);
 
               return result;
@@ -665,7 +684,10 @@ export function createValueProxy<T>(
       }
 
       // Make sure that any nested arrays are made of cells.
-      normalizeToCells(value, undefined, log);
+      normalizeToCells(value, undefined, log, {
+        cell: valueCell.entityId,
+        path: [...valuePath, prop],
+      });
 
       if (isCell(value))
         value = { cell: value, path: [] } satisfies CellReference;

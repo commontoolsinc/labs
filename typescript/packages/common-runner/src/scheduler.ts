@@ -33,6 +33,7 @@ export function unschedule(fn: Action): void {
   cancels.get(fn)?.forEach((cancel) => cancel());
   cancels.delete(fn);
   dependencies.delete(fn);
+  pending.delete(fn);
 }
 
 // Like schedule, but runs the action immediately to gather dependencies

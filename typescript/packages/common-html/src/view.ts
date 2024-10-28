@@ -18,8 +18,6 @@ export const view = (markup: string, context: Context): View => {
     throw new ParseError("Template root must be an element");
   }
 
-  markAsStatic(template);
-
   const view: View = {
     type: "view",
     template,
@@ -27,6 +25,8 @@ export const view = (markup: string, context: Context): View => {
   };
 
   logger.debug("view", view);
+
+  markAsStatic(view);
 
   return view;
 };

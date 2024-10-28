@@ -26,7 +26,7 @@ const tap = lift((x) => {
 });
 
 const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
-  ({ detail }, state) => detail?.value && (state.title = detail.value),
+  ({ detail }, state) => detail?.value && (state.title = detail.value)
 );
 
 const grabKeywords = lift<{ result?: string }, any>(({ result }) => {
@@ -45,7 +45,11 @@ const grabKeywords = lift<{ result?: string }, any>(({ result }) => {
 const buildPrompt = lift(({ prompt, data }) => {
   let fullPrompt = prompt;
   if (data) {
-    fullPrompt = `\n\nHere's the previous JSON for reference:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
+    fullPrompt = `\n\nHere's the previous JSON for reference:\n\`\`\`json\n${JSON.stringify(
+      data,
+      null,
+      2
+    )}\n\`\`\``;
   }
 
   return {
@@ -123,7 +127,7 @@ const dots = lift<{ pending: boolean; partial?: string }, string>(
       return "";
     }
     return truncateAsciiArt(partial.length / 2.0);
-  },
+  }
 );
 
 const truncate = lift(({ text, length }) => {
@@ -134,7 +138,7 @@ export const dataDesigner = recipe<{
   title: string;
   prompt: string;
   data: any;
-}>("iframe", ({ title, prompt, data }) => {
+}>("dataDesigner", ({ title, prompt, data }) => {
   prompt.setDefault("");
   data.setDefault({});
   title.setDefault("Untitled Data Designer");
@@ -156,7 +160,7 @@ export const dataDesigner = recipe<{
         html` <pre style="padding: 32px; color: #ccc; text-align: center;">
 ${dots({ partial, pending })}</pre
         >`,
-        html`<pre>${formatData({ obj: generatedData })}</pre>`,
+        html`<pre>${formatData({ obj: generatedData })}</pre>`
       )}
     </div>`,
     prompt,

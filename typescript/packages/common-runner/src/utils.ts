@@ -1,7 +1,8 @@
-import { isAlias, isStatic } from "@commontools/common-builder";
+import { isAlias, isStatic, markAsStatic } from "@commontools/common-builder";
 import {
   cell,
   isCell,
+  isSimpleCell,
   CellImpl,
   ReactivityLog,
   CellReference,
@@ -9,6 +10,7 @@ import {
   isCellProxyForDereferencing,
   getCellReferenceOrThrow,
 } from "./cell.js";
+import { createRef } from "./cell-map.js";
 
 export function extractDefaultValues(schema: any): any {
   if (typeof schema !== "object" || schema === null) return undefined;
@@ -81,7 +83,7 @@ export function sendValueToBinding(
   if (isAlias(binding)) {
     const ref = followAliases(binding, cell, log);
     if (!isCellReference(value) && !isCell(value))
-      normalizeToCells(value, ref.cell.getAtPath(ref.path), log);
+      normalizeToCells(value, ref.cell.getAtPath(ref.path), log, binding);
     setNestedValue(ref.cell, ref.path, value, log);
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value))
@@ -119,7 +121,9 @@ export function setNestedValue(
     typeof value === "object" &&
     value !== null &&
     Array.isArray(value) === Array.isArray(destValue) &&
-    !isCellReference(value)
+    !isCell(value) &&
+    !isCellReference(value) &&
+    !isSimpleCell(value)
   ) {
     let success = true;
     for (const key in value)
@@ -160,13 +164,13 @@ export function setNestedValue(
 
 // Turn local aliases into explicit aliases to named cell.
 export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
-  function convert(binding: any): any {
-    if (isStatic(binding)) return binding;
-    else if (isAlias(binding))
-      return {
-        $alias: { ...binding.$alias, cell },
-      };
-    else if (Array.isArray(binding)) return binding.map(convert);
+  function convert(binding: any, processStatic = false): any {
+    if (isStatic(binding) && !processStatic)
+      return markAsStatic(convert(binding, true));
+    else if (isAlias(binding)) return { $alias: { cell, ...binding.$alias } };
+    else if (isCell(binding)) return binding; // Don't enter cells
+    else if (Array.isArray(binding))
+      return binding.map((value) => convert(value));
     else if (typeof binding === "object" && binding !== null)
       return Object.fromEntries(
         Object.entries(binding).map(([key, value]) => [key, convert(value)])
@@ -195,7 +199,8 @@ export function findAllAliasedCells(
       typeof binding === "object" &&
       binding !== null &&
       !isCellReference(binding) &&
-      !isCell(binding)
+      !isCell(binding) &&
+      !isSimpleCell(binding)
     ) {
       for (const value of Object.values(binding)) find(value, origCell);
     }
@@ -289,7 +294,7 @@ export function transformToSimpleCells(
   log?: ReactivityLog
 ): any {
   if (isCellProxyForDereferencing(value)) {
-    const ref = getCellReferenceOrThrow(value);
+    const ref = followCellReferences(getCellReferenceOrThrow(value));
     if (cell === ref.cell)
       return transformToSimpleCells(cell, cell.getAtPath(ref.path), log);
     else return ref.cell.asSimpleCell(ref.path, log);
@@ -301,6 +306,8 @@ export function transformToSimpleCells(
   } else if (isCellReference(value)) {
     const ref = followCellReferences(value);
     return ref.cell.asSimpleCell(ref.path, log);
+  } else if (isSimpleCell(value)) {
+    return value;
   }
 
   if (typeof value === "object" && value !== null)
@@ -326,9 +333,13 @@ export function transformToSimpleCells(
  * cells. NOTE: The passed value is mutated.
  * @returns The (potentially unwrapped) input value
  */
-export function staticDataToNestedCells(value: any, log?: ReactivityLog): any {
+export function staticDataToNestedCells(
+  value: any,
+  log?: ReactivityLog,
+  cause?: any
+): any {
   value = maybeUnwrapProxy(value);
-  normalizeToCells(value, undefined, log);
+  normalizeToCells(value, undefined, log, cause);
   return value;
 }
 
@@ -348,7 +359,8 @@ export function staticDataToNestedCells(value: any, log?: ReactivityLog): any {
 export function normalizeToCells(
   value: any,
   previous?: any,
-  log?: ReactivityLog
+  log?: ReactivityLog,
+  cause: any = createRef()
 ): boolean {
   value = maybeUnwrapProxy(value);
   previous = maybeUnwrapProxy(previous);
@@ -356,7 +368,7 @@ export function normalizeToCells(
   let changed = false;
   if (isStatic(value)) {
     // no-op, don't normalize deep static values and assume they don't change
-  } else if (isCell(value)) {
+  } else if (isCell(value) || isSimpleCell(value)) {
     changed = value !== previous;
   } else if (isCellReference(value)) {
     changed = isCellReference(previous)
@@ -374,15 +386,33 @@ export function normalizeToCells(
     } else if (value.length !== previous.length) {
       changed = true;
     }
+    let itemId = null;
+    let preceedingItemId = null;
     for (let i = 0; i < value.length; i++) {
       const item = maybeUnwrapProxy(value[i]);
       const previousItem = previous ? maybeUnwrapProxy(previous[i]) : undefined;
-      if (!(isCell(item) || isCellReference(item) || isAlias(item))) {
+      if (
+        !(
+          isCell(item) ||
+          isCellReference(item) ||
+          isAlias(item) ||
+          isSimpleCell(item)
+        )
+      ) {
+        itemId = createRef(value[i], {
+          parent: cause,
+          index: i,
+          preceeding: preceedingItemId,
+        });
         const different = normalizeToCells(
           value[i],
           isCellReference(previousItem)
             ? previousItem.cell.getAtPath(previousItem.path)
-            : previousItem
+            : previousItem,
+          log,
+          isCellReference(previousItem)
+            ? previousItem.cell.entityId ?? itemId
+            : itemId
         );
         if (
           !different &&
@@ -391,12 +421,15 @@ export function normalizeToCells(
           isCellReference(previous[i])
         ) {
           value[i] = previous[i];
+          preceedingItemId = previousItem.cell.entityId;
           // NOTE: We don't treat making it a cell reference as a change, since
           // we'll still have the same value. This is reusing the cell reference
           // transition from a previous run, but only if the value didn't
           // change as well.
         } else {
           value[i] = { cell: cell(value[i]), path: [] } satisfies CellReference;
+          value[i].cell.entityId = itemId;
+          preceedingItemId = itemId;
           log?.writes.push(value[i]);
           changed = true;
         }
@@ -412,7 +445,10 @@ export function normalizeToCells(
       const previousItem = previous
         ? maybeUnwrapProxy(previous[key])
         : undefined;
-      let change = normalizeToCells(item, previousItem);
+      let change = normalizeToCells(item, previousItem, log, {
+        parent: cause,
+        key,
+      });
       changed ||= change;
     }
     if (!changed) {
@@ -457,7 +493,7 @@ export function isEqualCellReferences(
 }
 
 export function deepCopy(value: any): any {
-  if (isCell(value)) return value;
+  if (isCell(value) || isSimpleCell(value)) return value;
   if (typeof value === "object" && value !== null)
     return Array.isArray(value)
       ? value.map(deepCopy)

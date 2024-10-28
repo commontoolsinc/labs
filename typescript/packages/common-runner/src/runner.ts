@@ -41,6 +41,7 @@ import init, {
   JavaScriptModuleDefinition,
   JavaScriptValueMap,
 } from "@commontools/common-runtime";
+import { getRecipe } from "./recipe-map.js";
 
 export const cancels = new WeakMap<CellImpl<any>, Cancel>();
 
@@ -61,27 +62,37 @@ export const cancels = new WeakMap<CellImpl<any>, Cancel>();
  * @returns The result cell.
  */
 export function run<T, R>(
-  recipeFactory: RecipeFactory<T, R>,
-  parameters: T,
+  recipeFactory?: RecipeFactory<T, R>,
+  parameters?: T,
   resultCell?: CellImpl<R>
 ): CellImpl<R>;
 export function run<T, R = any>(
-  recipe: Recipe,
-  parameters: T,
+  recipe?: Recipe,
+  parameters?: T,
   resultCell?: CellImpl<R>
 ): CellImpl<R>;
 export function run<T, R = any>(
-  recipe: Recipe,
+  recipe?: Recipe,
   parameters?: T,
   resultCell?: CellImpl<R>
 ): CellImpl<R> {
   if (resultCell) {
-    // If we already have a recipe cell, we are stopping and restarting
-    // the recipe, so we need to stop the old one first.
-    stop(resultCell);
+    if (cancels.has(resultCell)) {
+      // If it's already running and no new recipe or parameters are given,
+      // we are just returning the result cell
+      if (recipe === undefined && parameters === undefined) return resultCell;
+
+      // Otherwise stop execution of the old recipe. TODO: Await, but this will
+      // make all this async.
+      stop(resultCell);
+    }
   } else {
     resultCell = cell<R>();
   }
+
+  // Keep track of subscriptions to cancel them later
+  const [cancel, addCancel] = useCancelGroup();
+  cancels.set(resultCell, cancel);
 
   let processCell: CellImpl<{
     [TYPE]: string;
@@ -91,25 +102,29 @@ export function run<T, R = any>(
 
   if (resultCell.sourceCell !== undefined) {
     processCell = resultCell.sourceCell;
-    // If no new parameters are provided, use the ones from the previous call
-    // TODO: BUG: Passing parameters will now overwrite the internal state for
-    // ommitted parameters
-    if (!parameters) parameters = processCell.get()?.parameters as T;
+    // TODO: Allow updating of parameters, even if there were previous ones
+    parameters = (processCell.get()?.parameters as T) ?? parameters;
   } else {
     processCell = cell();
     resultCell.sourceCell = processCell;
   }
 
+  if (!recipe && processCell.get()?.[TYPE]) {
+    recipe = getRecipe(processCell.get()[TYPE]);
+    if (!recipe) throw new Error(`Unknown recipe: ${processCell.get()[TYPE]}`);
+  } else if (!recipe) {
+    console.warn(
+      "No recipe provided and no recipe found in process cell. Not running."
+    );
+    return resultCell;
+  }
+
   // Walk the recipe's schema and extract all default values
   const defaults = extractDefaultValues(recipe.schema);
 
-  // Ensure static data is converted to cell references, e.g. for arrays
-  parameters = staticDataToNestedCells(parameters);
-
-  // If the bindings are a cell or cell reference and it is an object, convert
-  // them to an object where each property is a cell reference.
-  // TODO: If new keys are added after first load, this won't work. And we only
-  // do this to support defaults. So we could be smarter here.
+  // If the bindings are a cell or cell reference, convert them to an object
+  // where each property is a cell reference.
+  // TODO: If new keys are added after first load, this won't work.
   if (isCell(parameters) || isCellReference(parameters)) {
     // If it's a cell, turn it into a cell reference
     const ref = isCellReference(parameters)
@@ -141,23 +156,15 @@ export function run<T, R = any>(
   if (!resultCell.entityId) resultCell.generateEntityId();
   if (!processCell.entityId) processCell.generateEntityId(resultCell.entityId);
 
-  // Send "query" to results to the result cell
-  resultCell.send(mapBindingsToCell<R>(recipe.result as R, processCell));
+  const internal =
+    processCell.get()?.internal ??
+    (recipe.initial as { internal: any })?.internal;
 
-  // TODO: This will overwrite existing values
-  const internal = mergeObjects(
-    processCell.get()?.internal,
-    (recipe.initial as { internal: any })?.internal
-  );
+  // Ensure static data is converted to cell references, e.g. for arrays
+  parameters = staticDataToNestedCells(parameters, undefined, resultCell);
 
-  if (
-    defaults &&
-    ((typeof parameters === "object" &&
-      parameters !== null &&
-      !Array.isArray(parameters)) ||
-      parameters === undefined)
-  )
-    parameters = mergeObjects(parameters, defaults);
+  // TODO: Move up, only do this if it's not from the sourceCell
+  if (defaults) parameters = mergeObjects(parameters, defaults);
 
   processCell.send({
     [TYPE]:
@@ -166,10 +173,18 @@ export function run<T, R = any>(
     ...(internal ? { internal: deepCopy(internal) } : {}),
   });
 
-  const [cancel, addCancel] = useCancelGroup();
-  cancels.set(resultCell, cancel);
+  // Send "query" to results to the result cell
+  resultCell.send(mapBindingsToCell<R>(recipe.result as R, processCell));
 
+  // Now start the recipe
   for (const node of recipe.nodes) {
+    // Generate causal IDs for all cells read and written to by this node, if
+    // they don't have any yet.
+    [node.inputs, node.outputs].forEach((bindings) =>
+      findAllAliasedCells(bindings, processCell).forEach(({ cell, path }) => {
+        if (!cell.entityId) cell.generateEntityId({ cell: processCell, path });
+      })
+    );
     instantiateNode(
       node.module,
       node.inputs,
@@ -398,19 +413,18 @@ function instantiateRawNode(
   const mappedInputBindings = mapBindingsToCell(inputBindings, processCell);
   const mappedOutputBindings = mapBindingsToCell(outputBindings, processCell);
 
+  const inputCells = findAllAliasedCells(mappedInputBindings, processCell);
+  const outputCells = findAllAliasedCells(mappedOutputBindings, processCell);
+
   const action = module.implementation(
     cell(mappedInputBindings),
     (result: any) =>
       sendValueToBinding(processCell, mappedOutputBindings, result),
-    addCancel
+    addCancel,
+    inputCells // cause
   );
 
-  addCancel(
-    schedule(action, {
-      reads: findAllAliasedCells(mappedInputBindings, processCell),
-      writes: findAllAliasedCells(mappedOutputBindings, processCell),
-    } satisfies ReactivityLog)
-  );
+  addCancel(schedule(action, { reads: inputCells, writes: outputCells }));
 }
 
 function instantiatePassthroughNode(

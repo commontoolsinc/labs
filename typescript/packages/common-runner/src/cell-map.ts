@@ -6,10 +6,14 @@ import {
   isCell,
   getCellReferenceOrThrow,
   type CellReference,
+  cell,
 } from "./cell.js";
 import { refer } from "merkle-reference";
 
-export type EntityId = ReturnType<typeof refer>;
+export type EntityId = {
+  "/": string | Uint8Array;
+  toJSON?: () => { "/": string };
+};
 
 /**
  * Generates an entity ID.
@@ -22,7 +26,10 @@ export const createRef = (
   cause: any = crypto.randomUUID()
 ): EntityId => {
   try {
-    return refer({ ...source, causal: cause });
+    // JSON.parse(JSON.stringify(...)) ensures that the object is serializable.
+    // This e.g. calls .toJSON on cells. Warning: Might cause an infinite loop
+    // if the object contains circular references.
+    return refer(JSON.parse(JSON.stringify({ ...source, causal: cause })));
   } catch (e) {
     // HACK: merkle-reference currently fails in a jsdom vitest environment, so
     // we replace the id with a random UUID.
@@ -62,11 +69,19 @@ export const getEntityId = (value: any): EntityId | undefined => {
 };
 
 export function getCellByEntityId<T = any>(
-  entityId: EntityId | string
+  entityId: EntityId | string,
+  createIfNotFound = true
 ): CellImpl<T> | undefined {
-  return entityIdToCellMap.get(
-    typeof entityId === "string" ? entityId : JSON.stringify(entityId)
-  );
+  const id = typeof entityId === "string" ? entityId : JSON.stringify(entityId);
+  let entityCell = entityIdToCellMap.get(id);
+  if (entityCell) return entityCell;
+  if (!createIfNotFound) return undefined;
+
+  entityCell = cell<T>();
+  if (typeof entityId === "string") entityId = JSON.parse(entityId) as EntityId;
+  entityCell.entityId = entityId;
+  setCellByEntityId(entityId, entityCell);
+  return entityCell;
 }
 
 export const setCellByEntityId = (entityId: EntityId, cell: CellImpl<any>) => {

@@ -75,7 +75,7 @@ describe("cell-map", () => {
 
     it("should return undefined for non-existent entity ID", () => {
       const nonExistentId = createRef() as EntityId;
-      expect(getCellByEntityId(nonExistentId)).toBeUndefined();
+      expect(getCellByEntityId(nonExistentId, false)).toBeUndefined();
     });
   });
 

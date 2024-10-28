@@ -19,17 +19,27 @@ export function streamData(
     options?: { body?: any; method?: string; headers?: Record<string, string> };
     result?: any;
   }>,
-  sendResult: (result: any) => void
+  sendResult: (result: any) => void,
+  _addCancel: (cancel: () => void) => void,
+  cause: CellImpl<any>[]
 ): Action {
   const pending = cell(false);
   const result = cell<any | undefined>(undefined);
   const error = cell<any | undefined>(undefined);
 
+  // Generate causal IDs for the cells.
+  pending.generateEntityId({ streamData: { pending: cause } });
+  result.generateEntityId({ streamData: { result: cause } });
+  error.generateEntityId({ streamData: { error: cause } });
+
   // Since we'll only write into the cells above, we only have to call this once
   // here, instead of in the action.
   sendResult({ pending, result, error });
 
-  const status = { run: 0, controller: undefined } as { run: number, controller: AbortController | undefined };
+  const status = { run: 0, controller: undefined } as {
+    run: number;
+    controller: AbortController | undefined;
+  };
 
   return (log: ReactivityLog) => {
     const { url, options } = inputsCell.getAsProxy([], log) || {};
@@ -38,7 +48,7 @@ export function streamData(
       status.controller.abort();
       status.controller = undefined;
     }
-  
+
     if (url === undefined) {
       pending.setAtPath([], false, log);
       result.setAtPath([], undefined, log);
@@ -55,72 +65,73 @@ export function streamData(
     const signal = controller.signal;
     status.controller = controller;
     const thisRun = ++status.run;
-  
-    fetch(url, { ...options, signal }).then(async (response) => {
-      const reader = response.body?.getReader();
-      const utf8 = new TextDecoder();
 
-      if (!reader) {
-        throw new Error("Response body is not readable");
-      }
+    fetch(url, { ...options, signal })
+      .then(async (response) => {
+        const reader = response.body?.getReader();
+        const utf8 = new TextDecoder();
 
-      let buffer = '';
-      let id: string | undefined = undefined;
-      let event: string | undefined = undefined;
-      let data: string | undefined = undefined;
-
-      while (true) {
-        if (thisRun !== status.run) {
-          controller.abort();
-          return;
+        if (!reader) {
+          throw new Error("Response body is not readable");
         }
 
-        const { done, value } = await reader.read();
+        let buffer = "";
+        let id: string | undefined = undefined;
+        let event: string | undefined = undefined;
+        let data: string | undefined = undefined;
 
-        buffer += utf8.decode(value);
-        while (buffer.includes("\n")) {
+        while (true) {
+          if (thisRun !== status.run) {
+            controller.abort();
+            return;
+          }
 
-          let line = buffer.split("\n")[0];
-          buffer = buffer.slice(line.length + 1);
+          const { done, value } = await reader.read();
 
-          if (line.startsWith("id:")) {
-            id = line.slice("id:".length);
-          } else if (line.startsWith("event:")) {
-            event = line.slice("event:".length);
-          } else if (line.startsWith("data:")) {
-            data = line.slice("data:".length);
+          buffer += utf8.decode(value);
+          while (buffer.includes("\n")) {
+            let line = buffer.split("\n")[0];
+            buffer = buffer.slice(line.length + 1);
+
+            if (line.startsWith("id:")) {
+              id = line.slice("id:".length);
+            } else if (line.startsWith("event:")) {
+              event = line.slice("event:".length);
+            } else if (line.startsWith("data:")) {
+              data = line.slice("data:".length);
+            }
+          }
+
+          if (id && event && data) {
+            const parsedData = {
+              id,
+              event,
+              data: JSON.parse(data),
+            };
+
+            // normalizeToCells(result, undefined, log);
+            result.setAtPath([], parsedData, log);
+            id = undefined;
+            event = undefined;
+            data = undefined;
+          }
+
+          if (done) {
+            break;
           }
         }
-
-        if (id && event && data) {
-          const parsedData = {
-            id,
-            event,
-            data: JSON.parse(data),
-          };
-
-          // normalizeToCells(result, undefined, log);
-          result.setAtPath([], parsedData, log);
-          id = undefined;
-          event = undefined;
-          data = undefined;
+      })
+      .catch((e) => {
+        if (e instanceof DOMException && e.name === "AbortError") {
+          return;
         }
-
-        if (done) {
-          break;
-        }
-      }
-    }).catch((e) => {
-      if (e instanceof DOMException && e.name === "AbortError") {
-        return;
-      }
-      // FIXME(ja): I don't think this is the right logic... if the stream
-      // disconnects, we should probably not erase the result.
-      // FIXME(ja): also pending should probably be more like "live"?
-      console.error(e); 
-      pending.setAtPath([], false, log);
-      result.setAtPath([], undefined, log);
-      error.setAtPath([], e, log);
-    });
+        // FIXME(ja): I don't think this is the right logic... if the stream
+        // disconnects, we should probably not erase the result.
+        // FIXME(ja): also pending should probably be more like "live"?
+        console.error(e);
+        pending.setAtPath([], false, log);
+        result.setAtPath([], undefined, log);
+        error.setAtPath([], e, log);
+      });
   };
 }

@@ -45,7 +45,7 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    expect(result.getAsProxy()).toMatchObject({ result: 17 });
+    expect(result.getAsProxy()).toEqual({ result: 17 });
   });
 
   it("should handle recipes with default values", async () => {
