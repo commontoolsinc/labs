@@ -1,4 +1,5 @@
 import type { EntityId, Cancel } from "@commontools/common-runner";
+import { debug } from "@commontools/common-html";
 
 export interface StorageValue<T = any> {
   value: T;
@@ -85,7 +86,7 @@ abstract class BaseStorageProvider implements StorageProvider {
   }
 
   protected notifySubscribers(key: string, value: StorageValue): void {
-    console.log("notify subscribers", key, JSON.stringify(value));
+    debug("notify subscribers", key, JSON.stringify(value));
     const listeners = this.subscribers.get(key);
     if (this.waitingForSync.has(key) && listeners && listeners.size > 0)
       throw new Error(
@@ -101,7 +102,7 @@ abstract class BaseStorageProvider implements StorageProvider {
         key,
         new Promise((r) => this.waitingForSyncResolvers.set(key, r))
       );
-    console.log("waiting for sync", key, [...this.waitingForSync.keys()]);
+    debug("waiting for sync", key, [...this.waitingForSync.keys()]);
     return this.waitingForSync.get(key)!;
   }
 
@@ -150,7 +151,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
       const key = JSON.stringify(entityId);
       const valueString = JSON.stringify(value);
       if (this.lastValues.get(key) !== valueString) {
-        console.log("send in memory", key, valueString);
+        debug("send in memory", key, valueString);
         this.lastValues.set(key, valueString);
         inMemoryStorage.set(key, value);
         inMemoryStorageSubscribers.forEach((listener) => listener(key, value));
@@ -163,7 +164,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     expectedInStorage: boolean = false
   ): Promise<void> {
     const key = JSON.stringify(entityId);
-    console.log("sync in memory", key, this.lastValues.get(key));
+    debug("sync in memory", key, this.lastValues.get(key));
     if (inMemoryStorage.has(key))
       this.lastValues.set(key, JSON.stringify(inMemoryStorage.get(key)!));
     else if (expectedInStorage) return this.waitForSync(key);
@@ -172,7 +173,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
 
   get<T>(entityId: EntityId): StorageValue<T> | undefined {
     const key = JSON.stringify(entityId);
-    console.log("get in memory", key, this.lastValues.get(key));
+    debug("get in memory", key, this.lastValues.get(key));
     return this.lastValues.has(key)
       ? (JSON.parse(this.lastValues.get(key)!) as StorageValue)
       : undefined;
@@ -212,7 +213,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
       if (this.lastValues.get(key) !== storeValue) {
         localStorage.setItem(key, storeValue);
         this.lastValues.set(key, storeValue);
-        console.log("send localstorage", key, storeValue.length, storeValue);
+        debug("send localstorage", key, storeValue.length, storeValue);
       }
     }
   }
@@ -223,7 +224,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
   ): Promise<void> {
     const key = this.getKey(entityId);
     const value = localStorage.getItem(key);
-    console.log("sync localstorage", key, value);
+    debug("sync localstorage", key, value);
     if (value === null)
       if (expectedInStorage) {
         // Timeout of 1 second to allow for the value to be set by another tab.
@@ -243,14 +244,14 @@ export class LocalStorageProvider extends BaseStorageProvider {
   get<T>(entityId: EntityId): StorageValue<T> | undefined {
     const key = this.getKey(entityId);
     const value = this.lastValues.get(key);
-    console.log("get localstorage", key, value);
+    debug("get localstorage", key, value);
     if (value === null || value === undefined) return undefined;
     else return JSON.parse(value) as StorageValue<T>;
   }
 
   async destroy(): Promise<void> {
     window.removeEventListener("storage", this.handleStorageEventFn);
-    console.log("clear localstorage", this.prefix);
+    debug("clear localstorage", this.prefix);
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith(this.prefix)) {
         localStorage.removeItem(key);
@@ -270,7 +271,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
   private handleStorageEvent = (event: StorageEvent) => {
     if (event.key?.startsWith(this.prefix)) {
       if (this.lastValues.get(event.key) !== event.newValue) {
-        console.log(
+        debug(
           "storage event",
           event.key,
           event.newValue?.length,

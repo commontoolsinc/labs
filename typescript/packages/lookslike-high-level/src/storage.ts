@@ -17,6 +17,7 @@ import {
   LocalStorageProvider,
   InMemoryStorageProvider,
 } from "./storage-providers.js";
+import { debug } from "@commontools/common-html";
 
 export interface Storage {
   /**
@@ -248,7 +249,7 @@ class StorageImpl implements Storage {
 
       this._addToBatch([{ cell, type: "storage" }]);
 
-      console.log(
+      debug(
         "prep for storage",
         JSON.stringify(cell.entityId),
         value,
@@ -264,7 +265,7 @@ class StorageImpl implements Storage {
     value: any,
     source?: EntityId
   ): void {
-    console.log(
+    debug(
       "prep for cell",
       JSON.stringify(cell.entityId),
       value,
@@ -345,7 +346,7 @@ class StorageImpl implements Storage {
     const loading = new Set<CellImpl<any>>();
     const loadedCells = new Set<CellImpl<any>>();
 
-    console.log(
+    debug(
       "processing batch",
       this.currentBatch.map(
         ({ cell, type }) => `${JSON.stringify(cell.entityId)}:${type}`
@@ -388,7 +389,7 @@ class StorageImpl implements Storage {
             type === "cell"
               ? this.readDependentCells.get(cell)
               : this.writeDependentCells.get(cell);
-          console.log(
+          debug(
             "dependent cells",
             JSON.stringify(cell.entityId),
             [...dependentCells!].map((c) => JSON.stringify(c.entityId))
@@ -403,15 +404,15 @@ class StorageImpl implements Storage {
               .forEach((dependent) => loading.add(dependent));
         }
       }
-      console.log(
+      debug(
         "loading",
         [...loading].map((c) => JSON.stringify(c.entityId))
       );
-      console.log(
+      debug(
         "cellIsLoading",
         [...this.cellIsLoading.keys()].map((c) => JSON.stringify(c.entityId))
       );
-      console.log(
+      debug(
         "currentBatch",
         this.currentBatch.map(
           ({ cell, type }) => `${JSON.stringify(cell.entityId)}:${type}`
@@ -506,7 +507,7 @@ class StorageImpl implements Storage {
   }
 
   private _subscribeToChanges(cell: CellImpl<any>): void {
-    console.log("subscribe to changes", JSON.stringify(cell.entityId));
+    debug("subscribe to changes", JSON.stringify(cell.entityId));
 
     // Subscribe to cell changes, send updates to storage
     this.addCancel(cell.updates(() => this._batchForStorage(cell)));
