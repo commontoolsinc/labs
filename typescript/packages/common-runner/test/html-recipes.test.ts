@@ -67,7 +67,7 @@ describe("recipes with HTML", () => {
     );
   });
 
-  it.only("works with paths on nested recipes", async () => {
+  it("works with paths on nested recipes", async () => {
     const todoList = recipe<{
       title: { name: string };
       items: { title: string; done: boolean }[];
