@@ -355,7 +355,7 @@ export class CommonWindowManager extends LitElement {
 
           <os-fabgroup class="pin-br" slot="overlay" @submit=${onAiBoxSubmit}>
             ${repeat(
-              this.suggestions,
+              Array.isArray(this.suggestions) ? this.suggestions : [],
               (suggestion) => suggestion.prompt,
               (suggestion) => html`
                 <os-bubble
