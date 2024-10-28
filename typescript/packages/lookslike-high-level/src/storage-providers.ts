@@ -212,7 +212,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
       if (this.lastValues.get(key) !== storeValue) {
         localStorage.setItem(key, storeValue);
         this.lastValues.set(key, storeValue);
-        console.log("send localstorage", key, storeValue);
+        console.log("send localstorage", key, storeValue.length, storeValue);
       }
     }
   }
@@ -273,9 +273,10 @@ export class LocalStorageProvider extends BaseStorageProvider {
         console.log(
           "storage event",
           event.key,
+          event.newValue?.length,
+          this.lastValues.get(event.key)?.length,
           event.newValue,
-          this.lastValues.get(event.key),
-          this.lastValues
+          this.lastValues.get(event.key)
         );
         if (event.newValue === null) this.lastValues.delete(event.key);
         else this.lastValues.set(event.key, event.newValue);
