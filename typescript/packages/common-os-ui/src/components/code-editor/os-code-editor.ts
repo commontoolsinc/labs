@@ -132,7 +132,7 @@ export class OsCodeEditor extends ReactiveElement {
     if (changedProperties.has("source")) {
       replaceSourceIfNeeded(this.#editorView!, this.source);
     }
-    if (changedProperties.has("lang")) {
+    if (changedProperties.has("language")) {
       const lang = getLangExtFromMimeType(this.language);
       this.#editorView?.dispatch({
         effects: this.#lang.reconfigure(lang),
