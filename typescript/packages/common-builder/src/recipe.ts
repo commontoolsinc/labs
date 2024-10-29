@@ -1,20 +1,20 @@
 import {
   Recipe,
   RecipeFactory,
-  NodeProxy,
+  NodeRef,
   Value,
-  CellProxy,
-  isCellProxy,
+  OpaqueRef,
+  isOpaqueRef,
   Node,
   Module,
   Alias,
   toJSON,
   UI,
-  canBeCellProxy,
-  makeCellProxy,
+  canBeOpaqueRef,
+  makeOpaqueRef,
   Frame,
 } from "./types.js";
-import { cell } from "./cell-proxy.js";
+import { opaqueRef } from "./opaque-ref.js";
 import {
   traverseValue,
   setValueAtPath,
@@ -34,22 +34,22 @@ import {
  */
 export function recipe<T>(
   description: string,
-  fn: (input: CellProxy<Required<T>>) => any
+  fn: (input: OpaqueRef<Required<T>>) => any
 ): RecipeFactory<T, ReturnType<typeof fn>>;
 export function recipe<T, R>(
   description: string,
-  fn: (input: CellProxy<Required<T>>) => Value<R>
+  fn: (input: OpaqueRef<Required<T>>) => Value<R>
 ): RecipeFactory<T, R>;
 export function recipe<T, R>(
   description: string,
-  fn: (input: CellProxy<Required<T>>) => Value<R>
+  fn: (input: OpaqueRef<Required<T>>) => Value<R>
 ): RecipeFactory<T, R> {
   // The recipe graph is created by calling `fn` which populates for `inputs`
-  // and `outputs` with Value<> (which containts CellProxy<>) and/or default
+  // and `outputs` with Value<> (which containts OpaqueRef<>) and/or default
   // values.
 
   const frame = pushFrame();
-  const inputs = cell<Required<T>>();
+  const inputs = opaqueRef<Required<T>>();
   const outputs = fn(inputs);
   const result = factoryFromRecipe<T, R>(description, inputs, outputs);
   popFrame(frame);
@@ -59,28 +59,28 @@ export function recipe<T, R>(
 // Same as above, but assumes the caller manages the frame
 export function recipeFromFrame<T, R>(
   description: string,
-  fn: (input: CellProxy<Required<T>>) => Value<R>
+  fn: (input: OpaqueRef<Required<T>>) => Value<R>
 ): RecipeFactory<T, R> {
-  const inputs = cell<Required<T>>();
+  const inputs = opaqueRef<Required<T>>();
   const outputs = fn(inputs);
   return factoryFromRecipe<T, R>(description, inputs, outputs);
 }
 
 function factoryFromRecipe<T, R>(
   description: string,
-  inputs: CellProxy<T>,
+  inputs: OpaqueRef<T>,
   outputs: Value<R>
 ): RecipeFactory<T, R> {
   // Traverse the value, collect all mentioned nodes and cells
-  const cells = new Set<CellProxy<any>>();
-  const nodes = new Set<NodeProxy>();
+  const cells = new Set<OpaqueRef<any>>();
+  const nodes = new Set<NodeRef>();
 
   const collectCellsAndNodes = (value: Value<any>) =>
     traverseValue(value, (value) => {
-      if (canBeCellProxy(value)) value = makeCellProxy(value);
-      if (isCellProxy(value) && !cells.has(value)) {
+      if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
+      if (isOpaqueRef(value) && !cells.has(value)) {
         cells.add(value);
-        value.export().nodes.forEach((node: NodeProxy) => {
+        value.export().nodes.forEach((node: NodeRef) => {
           if (!nodes.has(node)) {
             nodes.add(node);
             collectCellsAndNodes(node.inputs);
@@ -97,7 +97,7 @@ function factoryFromRecipe<T, R>(
   // incremental counters, since we don't have access to the original variable
   // names. Later we might do something more clever by analyzing the code (we'll
   // want that anyway for extracting schemas from TypeScript).
-  const paths = new Map<CellProxy<any>, PropertyKey[]>();
+  const paths = new Map<OpaqueRef<any>, PropertyKey[]>();
 
   // Add the inputs default path
   paths.set(inputs, ["parameters"]);
@@ -105,7 +105,7 @@ function factoryFromRecipe<T, R>(
   // Add paths for all the internal cells
   // TODO: Infer more stable identifiers
   let count = 0;
-  cells.forEach((cell: CellProxy<any>) => {
+  cells.forEach((cell: OpaqueRef<any>) => {
     if (paths.has(cell)) return;
     const { cell: top, path } = cell.export();
     if (!paths.has(top)) paths.set(top, ["internal", `__#${count++}`]);
@@ -156,7 +156,7 @@ function factoryFromRecipe<T, R>(
         delete (schema as any).properties.internal.properties[key];
 
   const serializedNodes = Array.from(nodes).map((node) => {
-    const module = isCellProxy(node.module)
+    const module = isOpaqueRef(node.module)
       ? (toJSONWithAliases(node.module, paths) as Alias)
       : (node.module as Module);
     const inputs = toJSONWithAliases(node.inputs, paths)!;
@@ -177,9 +177,9 @@ function factoryFromRecipe<T, R>(
     toJSON: () => moduleToJSON(module),
   };
 
-  return Object.assign((inputs: Value<T>): CellProxy<R> => {
-    const outputs = cell<R>();
-    const node: NodeProxy = { module, inputs, outputs };
+  return Object.assign((inputs: Value<T>): OpaqueRef<R> => {
+    const outputs = opaqueRef<R>();
+    const node: NodeRef = { module, inputs, outputs };
 
     connectInputAndOutputs(node);
     outputs.connect(node);

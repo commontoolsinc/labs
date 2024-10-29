@@ -8,7 +8,7 @@ import {
   isModule,
   isRecipe,
   isAlias,
-  isCellProxy,
+  isOpaqueRef,
   isStreamAlias,
   pushFrame,
   popFrame,
@@ -363,7 +363,7 @@ function instantiateJavaScriptNode(
       // If handler returns a graph created by builder, run it
       // TODO: Handle case where the result is a structure with possibly
       // multiple such nodes
-      if (isCellProxy(result)) {
+      if (isOpaqueRef(result)) {
         const resultNode = result;
 
         // Recipe that assigns the result of the returned node to "result"

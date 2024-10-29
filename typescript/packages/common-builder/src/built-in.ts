@@ -1,5 +1,5 @@
 import { lift, createNodeFactory } from "./module.js";
-import { Value, NodeFactory, CellProxy } from "./types.js";
+import { Value, NodeFactory, OpaqueRef } from "./types.js";
 
 export function llm(
   params: Value<{
@@ -9,7 +9,7 @@ export function llm(
     stop?: string;
     max_tokens?: number;
   }>
-): CellProxy<{
+): OpaqueRef<{
   pending: boolean;
   result?: string;
   partial?: string;
@@ -62,7 +62,7 @@ export function ifElse<T, U, V>(
   condition: Value<T>,
   ifTrue: Value<U>,
   ifFalse: Value<V>
-): CellProxy<T extends true ? U : V> {
+): OpaqueRef<T extends true ? U : V> {
   ifElseFactory ||= createNodeFactory({
     type: "ref",
     implementation: "ifElse",
@@ -70,7 +70,7 @@ export function ifElse<T, U, V>(
   return ifElseFactory([condition, ifTrue, ifFalse]);
 }
 
-export function navigateTo(cell: CellProxy<any>): CellProxy<string> {
+export function navigateTo(cell: OpaqueRef<any>): OpaqueRef<string> {
   navigateToFactory ||= createNodeFactory({
     type: "ref",
     implementation: "navigateTo",
@@ -109,7 +109,7 @@ let navigateToFactory: NodeFactory<number, undefined> | undefined;
 export function str(
   strings: TemplateStringsArray,
   ...values: any[]
-): CellProxy<string> {
+): OpaqueRef<string> {
   const interpolatedString = ({
     strings,
     values,

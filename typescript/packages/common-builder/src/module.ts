@@ -2,11 +2,11 @@ import type {
   Module,
   ModuleFactory,
   Value,
-  CellProxy,
-  NodeProxy,
+  OpaqueRef,
+  NodeRef,
   toJSON,
 } from "./types.js";
-import { cell } from "./cell-proxy.js";
+import { opaqueRef } from "./opaque-ref.js";
 import { moduleToJSON, connectInputAndOutputs } from "./utils.js";
 import type {
   JavaScriptModuleDefinition,
@@ -22,9 +22,9 @@ export function createNodeFactory<T = any, R = any>(
     toJSON: () => moduleToJSON(module),
   };
 
-  return Object.assign((inputs: Value<T>): CellProxy<R> => {
-    const outputs = cell<R>();
-    const node: NodeProxy = { module, inputs, outputs };
+  return Object.assign((inputs: Value<T>): OpaqueRef<R> => {
+    const outputs = opaqueRef<R>();
+    const node: NodeRef = { module, inputs, outputs };
 
     connectInputAndOutputs(node);
     outputs.connect(node);
@@ -74,10 +74,10 @@ export function handler<E, T>(
     toJSON: () => moduleToJSON(module),
   };
 
-  return Object.assign((props: Value<T>): CellProxy<E> => {
-    const stream = cell();
+  return Object.assign((props: Value<T>): OpaqueRef<E> => {
+    const stream = opaqueRef();
     stream.set({ $stream: true });
-    const node: NodeProxy = {
+    const node: NodeRef = {
       module,
       inputs: { ...(props as object), $event: stream },
       outputs: {},
@@ -86,7 +86,7 @@ export function handler<E, T>(
     connectInputAndOutputs(node);
     stream.connect(node);
 
-    return stream as unknown as CellProxy<E>;
+    return stream as unknown as OpaqueRef<E>;
   }, module);
 }
 
