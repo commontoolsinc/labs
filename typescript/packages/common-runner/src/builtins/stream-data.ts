@@ -42,7 +42,7 @@ export function streamData(
   };
 
   return (log: ReactivityLog) => {
-    const { url, options } = inputsCell.getAsProxy([], log) || {};
+    const { url, options } = inputsCell.getAsQueryResult([], log) || {};
 
     if (status.controller) {
       status.controller.abort();

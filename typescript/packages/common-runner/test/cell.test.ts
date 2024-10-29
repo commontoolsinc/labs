@@ -3,7 +3,7 @@ import {
   cell,
   isCell,
   isCellReference,
-  isCellProxy,
+  isQueryResult,
   ReactivityLog,
 } from "../src/cell.js";
 import { compactifyPaths } from "../src/utils.js";
@@ -23,14 +23,14 @@ describe("Cell", () => {
 
   it("should create a proxy for the cell", () => {
     const c = cell({ x: 1, y: 2 });
-    const proxy = c.getAsProxy();
+    const proxy = c.getAsQueryResult();
     expect(proxy.x).toBe(1);
     expect(proxy.y).toBe(2);
   });
 
   it("should update cell value through proxy", () => {
     const c = cell({ x: 1, y: 2 });
-    const proxy = c.getAsProxy();
+    const proxy = c.getAsQueryResult();
     proxy.x = 10;
     expect(c.get()).toEqual({ x: 10, y: 2 });
   });
@@ -75,35 +75,35 @@ describe("Cell utility functions", () => {
 
   it("should identify a cell proxy", () => {
     const c = cell({ x: 1 });
-    const proxy = c.getAsProxy();
-    expect(isCellProxy(proxy)).toBe(true);
-    expect(isCellProxy({})).toBe(false);
+    const proxy = c.getAsQueryResult();
+    expect(isQueryResult(proxy)).toBe(true);
+    expect(isQueryResult({})).toBe(false);
   });
 });
 
 describe("createProxy", () => {
   it("should create a proxy for nested objects", () => {
     const c = cell({ a: { b: { c: 42 } } });
-    const proxy = c.getAsProxy();
+    const proxy = c.getAsQueryResult();
     expect(proxy.a.b.c).toBe(42);
   });
 
   it("should support regular assigments", () => {
     const c = cell({ x: 1 });
-    const proxy = c.getAsProxy();
+    const proxy = c.getAsQueryResult();
     proxy.x = 2;
     expect(c.get()).toStrictEqual({ x: 2 });
   });
 
   it("should handle $alias in objects", () => {
     const c = cell({ x: { $alias: { path: ["y"] } }, y: 42 });
-    const proxy = c.getAsProxy();
+    const proxy = c.getAsQueryResult();
     expect(proxy.x).toBe(42);
   });
 
   it("should handle aliases when writing", () => {
     const c = cell<any>({ x: { $alias: { path: ["y"] } }, y: 42 });
-    const proxy = c.getAsProxy();
+    const proxy = c.getAsQueryResult();
     proxy.x = 100;
     expect(c.get().y).toBe(100);
   });
@@ -111,14 +111,14 @@ describe("createProxy", () => {
   it("should handle nested cells", () => {
     const innerCell = cell(42);
     const outerCell = cell({ x: innerCell });
-    const proxy = outerCell.getAsProxy();
+    const proxy = outerCell.getAsQueryResult();
     expect(proxy.x).toBe(42);
   });
 
   it("should handle cell references", () => {
     const c = cell<any>({ x: 42 });
     const ref = { cell: c, path: ["x"] };
-    const proxy = c.getAsProxy();
+    const proxy = c.getAsQueryResult();
     proxy.y = ref;
     expect(proxy.y).toBe(42);
   });
@@ -126,7 +126,7 @@ describe("createProxy", () => {
   it("should handle infinite loops in cell references", () => {
     const c = cell<any>({ x: 42 });
     const ref = { cell: c, path: ["x"] };
-    const proxy = c.getAsProxy();
+    const proxy = c.getAsQueryResult();
     proxy.x = ref;
     expect(() => proxy.x).toThrow();
   });
@@ -134,7 +134,7 @@ describe("createProxy", () => {
   it("should support modifying array methods and log reads and writes", () => {
     const c = cell<any>([]);
     const log: ReactivityLog = { reads: [], writes: [] };
-    const proxy = c.getAsProxy([], log);
+    const proxy = c.getAsQueryResult([], log);
     proxy[0] = 1;
     proxy.push(2);
     expect(c.get()).toHaveLength(2);
@@ -154,7 +154,7 @@ describe("createProxy", () => {
   it("should support pop() and only read the popped element", () => {
     const c = cell({ a: [] as number[] });
     const log: ReactivityLog = { reads: [], writes: [] };
-    const proxy = c.getAsProxy([], log);
+    const proxy = c.getAsQueryResult([], log);
     proxy.a = [1, 2, 3];
     const result = proxy.a.pop();
     const pathsRead = log.reads.map((r) => r.path.join("."));
@@ -168,7 +168,7 @@ describe("createProxy", () => {
   it("should correctly sort() with cell references", () => {
     const c = cell({ a: [] as number[] });
     const log: ReactivityLog = { reads: [], writes: [] };
-    const proxy = c.getAsProxy([], log);
+    const proxy = c.getAsQueryResult([], log);
     proxy.a = [3, 1, 2];
     const result = proxy.a.sort();
     expect(result).toEqual([1, 2, 3]);
@@ -178,7 +178,7 @@ describe("createProxy", () => {
   it("should support readonly array methods and log reads", () => {
     const c = cell<any>([1, 2, 3]);
     const log: ReactivityLog = { reads: [], writes: [] };
-    const proxy = c.getAsProxy([], log);
+    const proxy = c.getAsQueryResult([], log);
     const result = proxy.find((x: any) => x === 2);
     expect(result).toBe(2);
     expect(c.get()).toEqual([1, 2, 3]);
@@ -194,7 +194,7 @@ describe("createProxy", () => {
   it("should support mapping over a proxied array", () => {
     const c = cell({ a: [1, 2, 3] });
     const log: ReactivityLog = { reads: [], writes: [] };
-    const proxy = c.getAsProxy([], log);
+    const proxy = c.getAsQueryResult([], log);
     const result = proxy.a.map((x) => x + 1);
     expect(result).toEqual([2, 3, 4]);
     expect(log.reads).toEqual([
@@ -209,7 +209,7 @@ describe("createProxy", () => {
   it("should allow changig array lengts by writing length", () => {
     const c = cell([1, 2, 3]);
     const log: ReactivityLog = { reads: [], writes: [] };
-    const proxy = c.getAsProxy([], log);
+    const proxy = c.getAsQueryResult([], log);
     proxy.length = 2;
     expect(c.get()).toEqual([1, 2]);
     expect(log.writes).toEqual([
@@ -231,7 +231,7 @@ describe("createProxy", () => {
 describe("asSimpleCell", () => {
   it("should create a simple cell interface", () => {
     const c = cell({ x: 1, y: 2 });
-    const simpleCell = c.asSimpleCell();
+    const simpleCell = c.asRendererCell();
 
     expect(simpleCell.get()).toEqual({ x: 1, y: 2 });
 
@@ -244,7 +244,7 @@ describe("asSimpleCell", () => {
 
   it("should create a simple cell for nested properties", () => {
     const c = cell({ nested: { value: 42 } });
-    const nestedCell = c.asSimpleCell(["nested", "value"]);
+    const nestedCell = c.asRendererCell(["nested", "value"]);
 
     expect(nestedCell.get()).toBe(42);
 
@@ -254,7 +254,7 @@ describe("asSimpleCell", () => {
 
   it("should support the key method for nested access", () => {
     const c = cell({ a: { b: { c: 42 } } });
-    const simpleCell = c.asSimpleCell();
+    const simpleCell = c.asRendererCell();
 
     const nestedCell = simpleCell.key("a").key("b").key("c");
     expect(nestedCell.get()).toBe(42);
@@ -265,7 +265,7 @@ describe("asSimpleCell", () => {
 
   it("should return a Sendable for stream aliases", async () => {
     const c = cell({ stream: { $stream: true } });
-    const streamCell = c.asSimpleCell(["stream"]);
+    const streamCell = c.asRendererCell(["stream"]);
 
     expect(streamCell).toHaveProperty("send");
     expect(streamCell).not.toHaveProperty("get");
@@ -294,7 +294,7 @@ describe("asSimpleCell", () => {
   it("should call sink only when the cell changes on the subpath", () => {
     const c = cell({ a: { b: 42, c: 10 }, d: 5 });
     const values: number[] = [];
-    c.asSimpleCell(["a", "b"]).sink((value) => values.push(value));
+    c.asRendererCell(["a", "b"]).sink((value) => values.push(value));
     c.setAtPath(["d"], 50);
     c.setAtPath(["a", "c"], 100);
     c.setAtPath(["a", "b"], 42);

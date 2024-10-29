@@ -1,6 +1,6 @@
 import { directive } from "lit/directive.js";
 import { AsyncDirective } from "lit/async-directive.js";
-import { Cell } from "@commontools/common-runner";
+import { RendererCell } from "@commontools/common-runner";
 
 const id = <T>(x: T) => x;
 
@@ -9,14 +9,14 @@ class WatchCellDirective<T> extends AsyncDirective {
 
   isWatching = true;
 
-  override render(signal: Cell<T>, mapFn: (v: T) => any = id) {
+  override render(signal: RendererCell<T>, mapFn: (v: T) => any = id) {
     this.#cancel?.();
-    this.#cancel = signal.sink((v: any) => {
+    this.#cancel = signal.sink(() => {
       if (this.isWatching) {
-        this.setValue(mapFn(signal.getAsProxy()));
+        this.setValue(mapFn(signal.getAsQueryResult()));
       }
     });
-    return mapFn(signal.getAsProxy());
+    return mapFn(signal.getAsQueryResult());
   }
 
   protected override disconnected(): void {

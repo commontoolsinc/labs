@@ -132,7 +132,7 @@ export function run<T, R = any>(
       : ({ cell: parameters, path: [] } satisfies CellReference);
 
     // Get value, but just to get the keys. Throw if it isn't an object.
-    const value = ref.cell.getAsProxy(ref.path);
+    const value = ref.cell.getAsQueryResult(ref.path);
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
       // Create aliases for all the top level keys in the object
       parameters = Object.fromEntries(
@@ -358,7 +358,7 @@ function instantiateJavaScriptNode(
       inputsCell.freeze(); // Freezes the bindings, not aliased cells.
 
       const frame = pushFrame();
-      const result = fn(inputsCell.getAsProxy([]));
+      const result = fn(inputsCell.getAsQueryResult([]));
 
       // If handler returns a graph created by builder, run it
       // TODO: Handle case where the result is a structure with possibly
@@ -386,7 +386,7 @@ function instantiateJavaScriptNode(
     inputsCell.freeze(); // Freezes the bindings, not aliased cells.
 
     const action: Action = (log: ReactivityLog) => {
-      const inputsProxy = inputsCell.getAsProxy([], log);
+      const inputsProxy = inputsCell.getAsQueryResult([], log);
       const result = fn(inputsProxy);
       sendValueToBinding(processCell, outputs, result, log);
     };
@@ -442,7 +442,7 @@ function instantiatePassthroughNode(
   const writes = findAllAliasedCells(outputs, processCell);
 
   const action: Action = (log: ReactivityLog) => {
-    const inputsProxy = inputsCell.getAsProxy([], log);
+    const inputsProxy = inputsCell.getAsQueryResult([], log);
     sendValueToBinding(processCell, outputBindings, inputsProxy, log);
   };
 
@@ -480,7 +480,7 @@ function instantiateIsolatedNode(
   );
 
   const action: Action = async (log: ReactivityLog) => {
-    const inputsProxy = inputsCell.getAsProxy([], log);
+    const inputsProxy = inputsCell.getAsQueryResult([], log);
     if (typeof inputsProxy !== "object")
       throw new Error(`Invalid inputs: Must be an object`);
 

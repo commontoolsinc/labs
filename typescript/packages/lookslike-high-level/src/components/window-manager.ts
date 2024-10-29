@@ -152,7 +152,7 @@ export class CommonWindowManager extends LitElement {
       // modify in place by default, if possible
       if (!shiftKey && charm.addToPrompt) {
         this.focusedCharm
-          ?.asSimpleCell(["addToPrompt"])
+          ?.asRendererCell(["addToPrompt"])
           .send({ prompt: value } as any);
       } else {
         // // ben: this is a hack to access the data designer from search (temporarily)
@@ -217,7 +217,7 @@ export class CommonWindowManager extends LitElement {
     };
 
     this.focusedCharm
-      ?.asSimpleCell()
+      ?.asRendererCell()
       .key("suggestions")
       ?.sink((suggestions) => {
         const s = suggestions?.items;
@@ -284,13 +284,13 @@ export class CommonWindowManager extends LitElement {
           }
         }
 
-        this.focusedCharm.asSimpleCell(["data"]).send(mergedData);
+        this.focusedCharm.asRendererCell(["data"]).send(mergedData);
 
         // Update the title to indicate the merge
         const newTitle = `${
           this.focusedProxy?.[NAME] || "Untitled"
         } (Merged ${new Date().toISOString()})`;
-        this.focusedCharm.asSimpleCell([NAME]).send(newTitle);
+        this.focusedCharm.asRendererCell([NAME]).send(newTitle);
 
         // Refresh the UI
         this.requestUpdate();
@@ -342,8 +342,8 @@ export class CommonWindowManager extends LitElement {
                   };
 
                   return html` <os-charm-chip
-                    icon=${charm.getAsProxy().icon || "search"}
-                    text=${charm.getAsProxy()[NAME] || "Untitled"}
+                    icon=${charm.getAsQueryResult().icon || "search"}
+                    text=${charm.getAsQueryResult()[NAME] || "Untitled"}
                     .highlight=${JSON.stringify(charm.entityId) ===
                     JSON.stringify(this.focusedCharm?.entityId)}
                     @click=${onNavigate}
@@ -408,7 +408,7 @@ export class CommonWindowManager extends LitElement {
                 >
                   <div class="window-toolbar">
                     <h1 class="window-title" @click=${onNavigate}>
-                      ${charm.getAsProxy()[NAME]}
+                      ${charm.getAsQueryResult()[NAME]}
                     </h1>
                     <button class="close-button" @click="${this.onClose}">
                       ×
@@ -441,7 +441,7 @@ export class CommonWindowManager extends LitElement {
     run(undefined, undefined, charm);
     if (!isCell(charm)) throw new Error(`Charm ${charmId} doesn't exist`);
     this.focusedCharm = charm;
-    this.focusedProxy = charm?.getAsProxy();
+    this.focusedProxy = charm?.getAsQueryResult();
 
     addCharms([charm]);
     this.location = this.focusedProxy?.[NAME] || "-";
@@ -461,7 +461,7 @@ export class CommonWindowManager extends LitElement {
     this.updateComplete.then(() => {
       while (this.newCharmRefs.length > 0) {
         const [charm, charmRef] = this.newCharmRefs.pop()!;
-        const view = charm.asSimpleCell<Charm>().key(UI).get();
+        const view = charm.asRendererCell<Charm>().key(UI).get();
         if (!view) throw new Error("Charm has no UI");
         render(charmRef.value!, view);
         this.requestUpdate();

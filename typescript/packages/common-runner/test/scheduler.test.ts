@@ -21,8 +21,8 @@ describe("scheduler", () => {
     const c = cell(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asSimpleCell([], log).send(
-        a.getAsProxy([], log) + b.getAsProxy([], log)
+      c.asRendererCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log)
       );
     };
     await run(adder);
@@ -41,8 +41,8 @@ describe("scheduler", () => {
     const c = cell(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asSimpleCell([], log).send(
-        a.getAsProxy([], log) + b.getAsProxy([], log)
+      c.asRendererCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log)
       );
     };
     schedule(adder, {
@@ -67,8 +67,8 @@ describe("scheduler", () => {
     const c = cell(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asSimpleCell([], log).send(
-        a.getAsProxy([], log) + b.getAsProxy([], log)
+      c.asRendererCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log)
       );
     };
     await run(adder);
@@ -94,8 +94,8 @@ describe("scheduler", () => {
     const c = cell(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asSimpleCell([], log).send(
-        a.getAsProxy([], log) + b.getAsProxy([], log)
+      c.asRendererCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log)
       );
     };
     const cancel = schedule(adder, {
@@ -127,14 +127,14 @@ describe("scheduler", () => {
     const e = cell(0);
     const adder1: Action = (log) => {
       runs.push("adder1");
-      c.asSimpleCell([], log).send(
-        a.getAsProxy([], log) + b.getAsProxy([], log)
+      c.asRendererCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log)
       );
     };
     const adder2: Action = (log) => {
       runs.push("adder2");
-      e.asSimpleCell([], log).send(
-        c.getAsProxy([], log) + d.getAsProxy([], log)
+      e.asRendererCell([], log).send(
+        c.getAsQueryResult([], log) + d.getAsQueryResult([], log)
       );
     };
     await run(adder1);
@@ -164,19 +164,19 @@ describe("scheduler", () => {
     const d = cell(1);
     const e = cell(0);
     const adder1: Action = (log) => {
-      c.asSimpleCell([], log).send(
-        a.getAsProxy([], log) + b.getAsProxy([], log)
+      c.asRendererCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log)
       );
     };
     const adder2: Action = (log) => {
-      e.asSimpleCell([], log).send(
-        c.getAsProxy([], log) + d.getAsProxy([], log)
+      e.asRendererCell([], log).send(
+        c.getAsQueryResult([], log) + d.getAsQueryResult([], log)
       );
     };
     const adder3: Action = (log) => {
       if (--maxRuns <= 0) return;
-      c.asSimpleCell([], log).send(
-        e.getAsProxy([], log) + b.getAsProxy([], log)
+      c.asRendererCell([], log).send(
+        e.getAsQueryResult([], log) + b.getAsQueryResult([], log)
       );
     };
 
@@ -198,8 +198,8 @@ describe("scheduler", () => {
     const by = cell(1);
     const inc: Action = (log) =>
       counter
-        .asSimpleCell([], log)
-        .send(counter.getAsProxy([], log) + by.getAsProxy([], log));
+        .asRendererCell([], log)
+        .send(counter.getAsQueryResult([], log) + by.getAsQueryResult([], log));
 
     const stopped = vi.fn();
     onError(() => stopped());
@@ -329,7 +329,7 @@ describe("event handling", () => {
 
     const action = (log: ReactivityLog) => {
       actionCount++;
-      lastEventSeen = eventResultCell.getAsProxy([], log);
+      lastEventSeen = eventResultCell.getAsQueryResult([], log);
     };
     await run(action);
 

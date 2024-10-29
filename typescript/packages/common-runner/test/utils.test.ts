@@ -100,7 +100,7 @@ describe("sendValueToBinding", () => {
   it("should send value to a simple binding", () => {
     const testCell = cell({ value: 0 });
     sendValueToBinding(testCell, { $alias: { path: ["value"] } }, 42);
-    expect(testCell.getAsProxy()).toEqual({ value: 42 });
+    expect(testCell.getAsQueryResult()).toEqual({ value: 42 });
   });
 
   it("should handle array bindings", () => {
@@ -110,7 +110,7 @@ describe("sendValueToBinding", () => {
       [{ $alias: { path: ["arr", 0] } }, { $alias: { path: ["arr", 2] } }],
       [1, 3]
     );
-    expect(testCell.getAsProxy()).toEqual({ arr: [1, 0, 3] });
+    expect(testCell.getAsQueryResult()).toEqual({ arr: [1, 0, 3] });
   });
 
   it("should handle bindings with multiple levels", () => {
@@ -146,7 +146,7 @@ describe("sendValueToBinding", () => {
 
     sendValueToBinding(testCell, binding, value);
 
-    expect(testCell.getAsProxy()).toEqual({
+    expect(testCell.getAsQueryResult()).toEqual({
       user: {
         name: {
           first: "Jane",
@@ -204,14 +204,14 @@ describe("setNestedValue", () => {
     const testCell = cell({ a: [1, 2, 3] });
     const success = setNestedValue(testCell, ["a"], [1, 2]);
     expect(success).toBe(true);
-    expect(testCell.getAsProxy()).toEqual({ a: [1, 2] });
+    expect(testCell.getAsQueryResult()).toEqual({ a: [1, 2] });
   });
 
   it("should correctly update with a longer arrays", () => {
     const testCell = cell({ a: [1, 2, 3] });
     const success = setNestedValue(testCell, ["a"], [1, 2, 3, 4]);
     expect(success).toBe(true);
-    expect(testCell.getAsProxy()).toEqual({ a: [1, 2, 3, 4] });
+    expect(testCell.getAsQueryResult()).toEqual({ a: [1, 2, 3, 4] });
   });
 
   it("should overwrite an object with an array", () => {
@@ -220,7 +220,7 @@ describe("setNestedValue", () => {
     expect(success).toBeTruthy();
     expect(testCell.get()).toHaveProperty("a");
     expect(testCell.get().a).toHaveLength(3);
-    expect(testCell.getAsProxy().a).toEqual([1, 2, 3]);
+    expect(testCell.getAsQueryResult().a).toEqual([1, 2, 3]);
   });
 });
 

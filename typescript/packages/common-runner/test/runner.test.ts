@@ -30,7 +30,7 @@ describe("runRecipe", () => {
     const result = run(recipe, { input: 1 });
     await idle();
 
-    expect(result.sourceCell?.getAsProxy()).toMatchObject({
+    expect(result.sourceCell?.getAsQueryResult()).toMatchObject({
       [TYPE]: "passthrough",
       parameters: { input: 1 },
       internal: { output: 1 },
@@ -41,7 +41,7 @@ describe("runRecipe", () => {
         $alias: { path: ["internal", "output"], cell: result.sourceCell },
       },
     });
-    expect(result.getAsProxy()).toEqual({ output: 1 });
+    expect(result.getAsQueryResult()).toEqual({ output: 1 });
   });
 
   it("should work with nested recipes", async () => {
@@ -86,7 +86,7 @@ describe("runRecipe", () => {
     const result = run(outerRecipe, { value: 5 });
     await idle();
 
-    expect(result.getAsProxy()).toEqual({ result: 5 });
+    expect(result.getAsQueryResult()).toEqual({ result: 5 });
   });
 
   it("should run a simple module", async () => {
@@ -107,7 +107,7 @@ describe("runRecipe", () => {
 
     const result = run(mockRecipe, { value: 1 });
     await idle();
-    expect(result.getAsProxy()).toEqual({ result: 2 });
+    expect(result.getAsQueryResult()).toEqual({ result: 2 });
   });
 
   it("should run a simple module with no outputs", async () => {
@@ -132,7 +132,7 @@ describe("runRecipe", () => {
 
     const result = run(mockRecipe, { value: 1 });
     await idle();
-    expect(result.getAsProxy()).toEqual({ result: undefined });
+    expect(result.getAsQueryResult()).toEqual({ result: undefined });
     expect(ran).toBe(true);
   });
 
@@ -158,7 +158,7 @@ describe("runRecipe", () => {
 
     const result = run(mockRecipe, { value: 1 });
     await idle();
-    expect(result.getAsProxy()).toEqual({ result: undefined });
+    expect(result.getAsQueryResult()).toEqual({ result: undefined });
     expect(ran).toBe(true);
   });
 
@@ -192,7 +192,7 @@ describe("runRecipe", () => {
 
     const result = run(mockRecipe, { value: 1 });
     await idle();
-    expect(result.getAsProxy()).toEqual({ result: 2 });
+    expect(result.getAsQueryResult()).toEqual({ result: 2 });
   });
 
   it("should allow passing a cell as a binding", async () => {
@@ -218,14 +218,14 @@ describe("runRecipe", () => {
     await idle();
 
     expect(inputCell.get()).toMatchObject({ input: 10, output: 20 });
-    expect(result.getAsProxy()).toEqual({ output: 20 });
+    expect(result.getAsQueryResult()).toEqual({ output: 20 });
 
     // The result should alias the original cell. Let's verify by stopping the
     // recipe and sending a new value to the input cell.
     stop(result);
     inputCell.send({ input: 10, output: 40 });
     await idle();
-    expect(result.getAsProxy()).toEqual({ output: 40 });
+    expect(result.getAsQueryResult()).toEqual({ output: 40 });
   });
 
   it("should allow stopping a recipe", async () => {

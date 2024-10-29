@@ -1,7 +1,7 @@
 import { LitElement, html, css } from "lit-element";
 import { customElement, property, state } from "lit/decorators.js";
 import {
-  Cell,
+  RendererCell,
   addAction,
   removeAction,
   type Action,
@@ -15,7 +15,7 @@ export class CommonIframe extends LitElement {
   // HACK: The UI framework already translates the top level cell into updated
   // properties, but we want to only have to deal with one type of listening, so
   // we'll add a an extra level of indirection with the "context" property.
-  @property({ type: Object }) context?: Cell<any> | any;
+  @property({ type: Object }) context?: RendererCell<any> | any;
 
   @state() private errorDetails: {
     message: string;
@@ -64,8 +64,8 @@ export class CommonIframe extends LitElement {
 
   private handleMessage = (event: MessageEvent) => {
     console.log("Received message", event);
-    if (event.data?.source == 'react-devtools-content-script') {
-      console.log('ignore react devtools')
+    if (event.data?.source == "react-devtools-content-script") {
+      console.log("ignore react devtools");
       return;
     }
 
@@ -81,7 +81,9 @@ export class CommonIframe extends LitElement {
           lineno,
           colno,
           stacktrace,
-          error: value.error ? (value.error.stack || value.error.toString()) : null
+          error: value.error
+            ? value.error.stack || value.error.toString()
+            : null,
         });
       }
 
@@ -90,8 +92,8 @@ export class CommonIframe extends LitElement {
         return;
       }
       if (type === "read" && this.context) {
-        const value = this.context?.getAsProxy
-          ? this.context?.getAsProxy([key])
+        const value = this.context?.getAsQueryResult
+          ? this.context?.getAsQueryResult([key])
           : this.context?.[key];
         // TODO: This might cause infinite loops, since the data can be a graph.
         console.log("readResponse", key, value);
@@ -101,7 +103,7 @@ export class CommonIframe extends LitElement {
             : JSON.parse(JSON.stringify(value));
         this.iframeRef.value?.contentWindow?.postMessage(
           { type: "readResponse", key, value: copy },
-          "*",
+          "*"
         );
       } else if (type === "write" && this.context) {
         const updated =
@@ -109,12 +111,15 @@ export class CommonIframe extends LitElement {
             ? JSON.parse(value)
             : JSON.parse(JSON.stringify(value));
         console.log("write", key, updated);
-        this.context.getAsProxy()[key] = updated;
+        this.context.getAsQueryResult()[key] = updated;
       } else if (type === "subscribe" && this.context) {
         console.log("subscribing", key, this.context);
 
         const action: Action = (log: ReactivityLog) =>
-          this.notifySubscribers(key, this.context.getAsProxy([key], log));
+          this.notifySubscribers(
+            key,
+            this.context.getAsQueryResult([key], log)
+          );
 
         addAction(action);
         if (!this.subscriptions.has(key)) this.subscriptions.set(key, [action]);
@@ -135,7 +140,7 @@ export class CommonIframe extends LitElement {
       value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
     this.iframeRef.value?.contentWindow?.postMessage(
       { type: "update", key, value: copy },
-      "*",
+      "*"
     );
   }
   private boundHandleMessage = this.handleMessage.bind(this);
@@ -161,7 +166,9 @@ export class CommonIframe extends LitElement {
   }
 
   private fixError() {
-    this.dispatchEvent(new CustomEvent("fix", { detail: this.errorDetails, bubbles: true }));
+    this.dispatchEvent(
+      new CustomEvent("fix", { detail: this.errorDetails, bubbles: true })
+    );
     this.errorDetails = null;
   }
 

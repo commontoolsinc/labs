@@ -19,7 +19,7 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    expect(result.getAsProxy()).toMatchObject({ result: 10 });
+    expect(result.getAsQueryResult()).toMatchObject({ result: 10 });
   });
 
   it("should handle nested recipes", async () => {
@@ -45,7 +45,7 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    expect(result.getAsProxy()).toEqual({ result: 17 });
+    expect(result.getAsQueryResult()).toEqual({ result: 17 });
   });
 
   it("should handle recipes with default values", async () => {
@@ -63,13 +63,13 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    expect(result1.getAsProxy()).toMatchObject({ sum: 15 });
+    expect(result1.getAsQueryResult()).toMatchObject({ sum: 15 });
 
     const result2 = run(recipeWithDefaults, { a: 20 });
 
     await idle();
 
-    expect(result2.getAsProxy()).toMatchObject({ sum: 30 });
+    expect(result2.getAsQueryResult()).toMatchObject({ sum: 30 });
   });
 
   it("should handle recipes with map nodes", async () => {
@@ -92,7 +92,7 @@ describe("Recipe Runner", () => {
     // TODO: Get await idle() to work for this case as well
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    expect(result.getAsProxy()).toMatchObject({
+    expect(result.getAsQueryResult()).toMatchObject({
       doubled: [{ double: 2 }, { double: 4 }, { double: 6 }],
     });
   });
@@ -116,13 +116,13 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    result.asSimpleCell(["stream"]).send({ amount: 1 });
+    result.asRendererCell(["stream"]).send({ amount: 1 });
     await idle();
-    expect(result.getAsProxy()).toMatchObject({ counter: { value: 1 } });
+    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
 
-    result.asSimpleCell(["stream"]).send({ amount: 2 });
+    result.asRendererCell(["stream"]).send({ amount: 2 });
     await idle();
-    expect(result.getAsProxy()).toMatchObject({ counter: { value: 3 } });
+    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
   });
 
   it("should execute recipes returned by handlers", async () => {
@@ -160,11 +160,11 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    result.asSimpleCell(["stream"]).send({ amount: 1 });
+    result.asRendererCell(["stream"]).send({ amount: 1 });
     await idle();
     expect(values).toEqual([[1, 1, 0]]);
 
-    result.asSimpleCell(["stream"]).send({ amount: 2 });
+    result.asRendererCell(["stream"]).send({ amount: 2 });
     await idle();
     expect(values).toEqual([
       [1, 1, 0],
@@ -193,6 +193,6 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    expect(result.getAsProxy()).toMatchObject({ result: 10 });
+    expect(result.getAsQueryResult()).toMatchObject({ result: 10 });
   });
 });

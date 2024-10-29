@@ -189,7 +189,10 @@ const acceptSuggestion = handler<
     openCharm(JSON.stringify(accepted.entityId));
     state.acceptedSuggestion = html`<div></div>`;
   } else {
-    state.acceptedSuggestion = accepted.asSimpleCell().get()[UI];
+    state.acceptedSuggestion = accepted
+      .asRendererCell<{ [UI]: View }>()
+      .key(UI)
+      .get();
   }
 });
 

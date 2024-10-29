@@ -7,25 +7,25 @@ export {
   idle,
 } from "./scheduler.js";
 export type {
-  Cell,
+  RendererCell,
   ReactiveCell,
   CellImpl,
-  CellProxy,
+  QueryResult,
   CellReference,
   ReactivityLog,
 } from "./cell.js";
 export {
   cell,
   isCell,
-  isSimpleCell,
+  isRendererCell,
   isCellReference,
-  isCellProxy,
+  isQueryResult,
   isReactive,
   isGettable,
   isSendable,
   getCellReferenceOrValue,
   getCellReferenceOrThrow,
-  isCellProxyForDereferencing,
+  isQueryResultForDereferencing,
 } from "./cell.js";
 export {
   getEntityId,

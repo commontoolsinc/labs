@@ -15,11 +15,11 @@ import { annotation } from "../recipes/annotation.js";
 export class CommonAnnotationToggle extends LitElement {
   override render() {
     return html`<div>
-      ${!annotationsEnabled.get() &&
-          html`<button @click=${toggleAnnotations}>
-            Enable Annotation Suggestions
-          </button>` || html`<div></div>`
-      }
+      ${(!annotationsEnabled.get() &&
+        html`<button @click=${toggleAnnotations}>
+          Enable Annotation Suggestions
+        </button>`) ||
+      html`<div></div>`}
     </div>`;
   }
 
@@ -72,7 +72,7 @@ export class CommonAnnotation extends LitElement {
 
       render(
         this.annotationRef.value,
-        this.annotation.asSimpleCell<{ [UI]: View }>().key(UI).get()
+        this.annotation.asRendererCell<{ [UI]: View }>().key(UI).get()
       );
     }
   }

@@ -49,7 +49,7 @@ export function map(
   sendResult({ cell: result, path: [] });
 
   return (log: ReactivityLog) => {
-    let { list, op } = inputsCell.getAsProxy([], log);
+    let { list, op } = inputsCell.getAsQueryResult([], log);
 
     // If the list is undefined it means the input isn't available yet.
     // Correspondingly, the result should be []. TODO: Maybe it's important to

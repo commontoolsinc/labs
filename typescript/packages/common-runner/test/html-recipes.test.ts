@@ -59,7 +59,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asSimpleCell<{ [UI]: View }>().key(UI);
+    const cell = result.asRendererCell<{ [UI]: View }>().key(UI);
     render(parent, cell.get());
 
     expect(parent.innerHTML).toBe(
@@ -92,7 +92,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asSimpleCell<{ [UI]: View }>().key(UI);
+    const cell = result.asRendererCell<{ [UI]: View }>().key(UI);
     render(parent, cell.get());
 
     expect(parent.innerHTML).toBe("<div><div>test</div></div>");
@@ -108,7 +108,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asSimpleCell<{ [UI]: View }>().key(UI);
+    const cell = result.asRendererCell<{ [UI]: View }>().key(UI);
     render(parent, cell.get());
 
     expect(parent.innerHTML).toBe("<div>Hello, world!</div>");
@@ -138,7 +138,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asSimpleCell([UI]);
+    const cell = result.asRendererCell([UI]);
     render(parent, cell.get());
 
     expect(parent.innerHTML).toBe(
