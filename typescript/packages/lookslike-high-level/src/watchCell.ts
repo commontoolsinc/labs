@@ -1,22 +1,22 @@
-import { signal } from "@commontools/common-frp";
 import { directive } from "lit/directive.js";
 import { AsyncDirective } from "lit/async-directive.js";
-import { state } from "lit/decorators.js";
 import { Cell } from "@commontools/common-runner";
+
+const id = <T>(x: T) => x;
 
 class WatchCellDirective<T> extends AsyncDirective {
   #cancel: (() => void) | undefined = undefined;
 
   isWatching = true;
 
-  override render(signal: Cell<T>) {
+  override render(signal: Cell<T>, mapFn: (v: T) => any = id) {
     this.#cancel?.();
     this.#cancel = signal.sink((v: any) => {
       if (this.isWatching) {
-        this.setValue(signal.getAsProxy());
+        this.setValue(mapFn(signal.getAsProxy()));
       }
     });
-    return signal.getAsProxy();
+    return mapFn(signal.getAsProxy());
   }
 
   protected override disconnected(): void {
