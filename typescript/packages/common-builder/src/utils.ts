@@ -2,15 +2,15 @@ import {
   Value,
   Module,
   Recipe,
-  CellProxy,
-  NodeProxy,
-  isCellProxy,
+  OpaqueRef,
+  NodeRef,
+  isOpaqueRef,
   JSONValue,
   JSON,
   Alias,
   isAlias,
-  canBeCellProxy,
-  makeCellProxy,
+  canBeOpaqueRef,
+  makeOpaqueRef,
   isStatic,
   markAsStatic,
 } from "./types.js";
@@ -20,8 +20,8 @@ export function traverseValue(value: Value<any>, fn: (value: any) => any) {
   fn(value);
   if (Array.isArray(value)) value.forEach((v) => traverseValue(v, fn));
   else if (
-    !isCellProxy(value) &&
-    !canBeCellProxy(value) &&
+    !isOpaqueRef(value) &&
+    !canBeOpaqueRef(value) &&
     typeof value === "object" &&
     value !== null
   )
@@ -92,7 +92,7 @@ export const deepEqual = (a: any, b: any): boolean => {
 
 export function toJSONWithAliases(
   value: Value<any>,
-  paths: Map<CellProxy<any>, PropertyKey[]>,
+  paths: Map<OpaqueRef<any>, PropertyKey[]>,
   ignoreSelfAliases: boolean = false,
   path: PropertyKey[] = [],
   processStatic = false
@@ -101,8 +101,8 @@ export function toJSONWithAliases(
     return markAsStatic(
       toJSONWithAliases(value, paths, ignoreSelfAliases, path, true)
     );
-  else if (canBeCellProxy(value)) value = makeCellProxy(value);
-  if (isCellProxy(value)) {
+  else if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
+  if (isOpaqueRef(value)) {
     const pathToCell = paths.get(value);
     if (pathToCell) {
       if (ignoreSelfAliases && deepEqual(path, pathToCell)) return undefined;
@@ -237,9 +237,9 @@ export function recipeToJSON(recipe: Recipe) {
   };
 }
 
-export function connectInputAndOutputs(node: NodeProxy) {
+export function connectInputAndOutputs(node: NodeRef) {
   traverseValue(node.inputs, (value) => {
-    if (canBeCellProxy(value)) value = makeCellProxy(value);
-    if (isCellProxy(value)) value.connect(node);
+    if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
+    if (isOpaqueRef(value)) value.connect(node);
   });
 }

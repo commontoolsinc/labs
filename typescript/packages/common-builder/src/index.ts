@@ -1,4 +1,4 @@
-export { cell } from "./cell-proxy.js";
+export { opaqueRef as cell } from "./opaque-ref.js";
 export { createNodeFactory, lift, byRef, handler, isolated } from "./module.js";
 export {
   recipe,
@@ -20,8 +20,8 @@ export {
   NAME,
   UI,
   type Value,
-  type CellProxy,
-  type CellProxyMethods,
+  type OpaqueRef,
+  type OpaqueRefMethods,
   type Module,
   type Recipe,
   type Node,
@@ -30,8 +30,8 @@ export {
   type RecipeFactory,
   type NodeFactory,
   type ModuleFactory,
-  isCellProxy,
-  toCellProxy,
+  isOpaqueRef,
+  toOpaqueRef,
   isModule,
   isRecipe,
   isAlias,

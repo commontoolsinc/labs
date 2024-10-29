@@ -1,10 +1,10 @@
 import {
-  CellProxy,
-  CellProxyMethods,
+  OpaqueRef,
+  OpaqueRefMethods,
   Value,
-  NodeProxy,
+  NodeRef,
   NodeFactory,
-  isCellProxyMarker,
+  isOpaqueRefMarker,
 } from "./types.js";
 import { setValueAtPath, hasValueAtPath } from "./utils.js";
 import { recipe } from "./recipe.js";
@@ -12,7 +12,7 @@ import { createNodeFactory } from "./module.js";
 
 let mapFactory: NodeFactory<any, any>;
 
-// A cell factory that creates a future cell with an optional default value.
+// A opaque ref factory that creates future cells with optional default values.
 //
 // It's a proxy object representing a future cell that will eventually be
 // created. It supports nested values and .set(), .get() and .setDefault()
@@ -25,18 +25,18 @@ let mapFactory: NodeFactory<any, any>;
 //
 // The proxy yields another proxy for each nested value, but still allows the
 // methods to be called. Setters just call .set() on the nested cell.
-export function cell<T>(value?: Value<T> | T): CellProxy<T> {
+export function opaqueRef<T>(value?: Value<T> | T): OpaqueRef<T> {
   const store = {
     value,
     defaultValue: undefined,
-    nodes: new Set<NodeProxy>(),
+    nodes: new Set<NodeRef>(),
   };
 
   function createNestedProxy(
     path: PropertyKey[],
     target?: any
-  ): CellProxy<any> {
-    const methods: CellProxyMethods<any> = {
+  ): OpaqueRef<any> {
+    const methods: OpaqueRefMethods<any> = {
       get: () => proxy,
       set: (newValue: Value<any>) => {
         setValueAtPath(store, ["value", ...path], newValue);
@@ -47,7 +47,7 @@ export function cell<T>(value?: Value<T> | T): CellProxy<T> {
           setValueAtPath(store, ["defaultValue", ...path], newValue);
       },
       setPreExisting: (ref: any) => setValueAtPath(store, ["external"], ref),
-      connect: (node: NodeProxy) => store.nodes.add(node),
+      connect: (node: NodeRef) => store.nodes.add(node),
       export: () => ({
         cell: top,
         path,
@@ -90,17 +90,17 @@ export function cell<T>(value?: Value<T> | T): CellProxy<T> {
           },
         };
       },
-      [isCellProxyMarker]: true,
+      [isOpaqueRefMarker]: true,
     };
 
     const proxy = new Proxy(target || {}, {
       get(_, prop) {
         if (typeof prop === "symbol") {
-          return methods[prop as keyof CellProxyMethods<any>];
+          return methods[prop as keyof OpaqueRefMethods<any>];
         } else if (prop in methods) {
           return createNestedProxy(
             [...path, prop],
-            methods[prop as keyof CellProxyMethods<any>]
+            methods[prop as keyof OpaqueRefMethods<any>]
           );
         } else return createNestedProxy([...path, prop]);
       },
@@ -113,6 +113,6 @@ export function cell<T>(value?: Value<T> | T): CellProxy<T> {
     return proxy;
   }
 
-  const top = createNestedProxy([]) as CellProxy<T>;
+  const top = createNestedProxy([]) as OpaqueRef<T>;
   return top;
 }

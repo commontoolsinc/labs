@@ -6,11 +6,11 @@ export const TYPE = "$TYPE";
 export const NAME = "$NAME";
 export const UI = "$UI";
 
-export type CellProxy<T> = CellProxyMethods<T> &
+export type OpaqueRef<T> = OpaqueRefMethods<T> &
   (T extends Array<infer U>
-    ? Array<CellProxy<U>>
+    ? Array<OpaqueRef<U>>
     : T extends object
-    ? { [K in keyof T]: CellProxy<T[K]> }
+    ? { [K in keyof T]: OpaqueRef<T[K]> }
     : T);
 
 // Any CellProxy is also a Value, but a Value can have static values as well.
@@ -18,60 +18,60 @@ export type CellProxy<T> = CellProxyMethods<T> &
 // when data gets passed into what developers see (either recipe inputs or
 // module outputs).
 export type Value<T> =
-  | CellProxy<T>
+  | OpaqueRef<T>
   | (T extends Array<infer U>
       ? Array<Value<U>>
       : T extends object
       ? { [K in keyof T]: Value<T[K]> }
       : T);
 
-export type CellProxyMethods<T> = {
-  get(): CellProxy<T>;
+export type OpaqueRefMethods<T> = {
+  get(): OpaqueRef<T>;
   set(value: Value<T> | T): void;
-  key<K extends keyof T>(key: K): CellProxy<T[K]>;
+  key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
   setDefault(value: Value<T> | T): void;
   setPreExisting(ref: any): void;
-  connect(node: NodeProxy): void;
+  connect(node: NodeRef): void;
   export(): {
-    cell: CellProxy<any>;
+    cell: OpaqueRef<any>;
     path: PropertyKey[];
     value?: Value<T>;
     defaultValue?: Value<T>;
-    nodes: Set<NodeProxy>;
+    nodes: Set<NodeRef>;
     external?: any;
   };
   map<S>(
     fn: (value: T extends Array<infer U> ? Value<U> : Value<T>) => Value<S>
   ): Value<S[]>;
   [Symbol.iterator](): Iterator<T>;
-  [isCellProxyMarker]: true;
+  [isOpaqueRefMarker]: true;
 };
 
-export const isCellProxyMarker = Symbol("isCellProxy");
+export const isOpaqueRefMarker = Symbol("isOpaqueRef");
 
-export function isCellProxy(value: any): value is CellProxy<any> {
-  return value && typeof value[isCellProxyMarker] === "boolean";
+export function isOpaqueRef(value: any): value is OpaqueRef<any> {
+  return value && typeof value[isOpaqueRefMarker] === "boolean";
 }
 
-export type NodeProxy = {
-  module: Module | Recipe | CellProxy<Module | Recipe>;
+export type NodeRef = {
+  module: Module | Recipe | OpaqueRef<Module | Recipe>;
   inputs: Value<any>;
-  outputs: CellProxy<any>;
+  outputs: OpaqueRef<any>;
 };
 
 export type toJSON = {
   toJSON(): any;
 };
 
-export type NodeFactory<T, R> = ((inputs: Value<T>) => CellProxy<R>) &
+export type NodeFactory<T, R> = ((inputs: Value<T>) => OpaqueRef<R>) &
   (Module | Recipe) &
   toJSON;
 
-export type RecipeFactory<T, R> = ((inputs: Value<T>) => CellProxy<R>) &
+export type RecipeFactory<T, R> = ((inputs: Value<T>) => OpaqueRef<R>) &
   Recipe &
   toJSON;
 
-export type ModuleFactory<T, R> = ((inputs: Value<T>) => CellProxy<R>) &
+export type ModuleFactory<T, R> = ((inputs: Value<T>) => OpaqueRef<R>) &
   Module &
   toJSON;
 
@@ -138,21 +138,21 @@ export function isRecipe(value: any): value is Recipe {
   );
 }
 
-type CanBeCellProxy = { [toCellProxy]: () => CellProxy<any> };
+type CanBeOpaqueRef = { [toOpaqueRef]: () => OpaqueRef<any> };
 
-export function canBeCellProxy(value: any): value is CanBeCellProxy {
+export function canBeOpaqueRef(value: any): value is CanBeOpaqueRef {
   return (
     !!value &&
     (typeof value === "object" || typeof value === "function") &&
-    typeof value[toCellProxy] === "function"
+    typeof value[toOpaqueRef] === "function"
   );
 }
 
-export function makeCellProxy(value: CanBeCellProxy): CellProxy<any> {
-  return value[toCellProxy]();
+export function makeOpaqueRef(value: CanBeOpaqueRef): OpaqueRef<any> {
+  return value[toOpaqueRef]();
 }
 
-export const toCellProxy = Symbol("toCellProxy");
+export const toOpaqueRef = Symbol("toOpaqueRef");
 
 export type Frame = {
   parent?: Frame;

@@ -35,9 +35,7 @@ describe("runRecipe", () => {
       parameters: { input: 1 },
       internal: { output: 1 },
     });
-    expect(result.sourceCell?.get().internal.output).toMatchObject({
-      $alias: { path: [] },
-    });
+    expect(result.sourceCell?.get().internal.output).toBe(1);
     expect(result.get()).toEqual({
       output: {
         $alias: { path: ["internal", "output"], cell: result.sourceCell },

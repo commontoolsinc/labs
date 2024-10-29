@@ -27,7 +27,7 @@ describe("complex recipe function", () => {
     const double = lift<number>((x) => x * 2);
     return { double: double(double(x)) };
   });
-  const { schema, internal, result, nodes } = doubleRecipe;
+  const { schema, result, nodes } = doubleRecipe;
 
   it("has the correct schema and initial data", () => {
     expect(isRecipe(doubleRecipe)).toBe(true);
@@ -67,7 +67,7 @@ describe("complex recipe with path aliases", () => {
     const result2 = double({ x: result.doubled });
     return { double: result2.doubled };
   });
-  const { schema, internal, result, nodes } = doubleRecipe;
+  const { schema, result, nodes } = doubleRecipe;
 
   it("has the correct schema and initial values", () => {
     expect(isRecipe(doubleRecipe)).toBe(true);

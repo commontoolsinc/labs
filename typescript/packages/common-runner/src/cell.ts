@@ -3,9 +3,9 @@ import {
   getValueAtPath,
   setValueAtPath,
   deepEqual,
-  toCellProxy,
-  cell as builderCell,
-  type CellProxy as BuilderCellProxy,
+  cell as opaqueRef,
+  toOpaqueRef,
+  type OpaqueRef,
   getTopFrame,
   type Frame,
 } from "@commontools/common-builder";
@@ -253,7 +253,7 @@ export type CellImpl<T> = {
    * Useful when building a recipe that directly refers to existing cells, such
    * as a recipe created and returned by a handler.
    */
-  [toCellProxy]: () => BuilderCellProxy<T>;
+  [toOpaqueRef]: () => OpaqueRef<T>;
 
   /**
    * Internal only: Marker for cells. Used by e.g. `isCell`, etc.
@@ -397,7 +397,7 @@ export function cell<T>(value?: T): CellImpl<T> {
         throw new Error("Source cell already set");
       sourceCell = cell;
     },
-    [toCellProxy]: () => toBuilderCellProxy(self, []),
+    [toOpaqueRef]: () => makeOpaqueRef(self, []),
     [isCellMarker]: true,
     get copyTrap(): boolean {
       throw new Error("Copy trap: Don't copy cells, create references instead");
@@ -590,8 +590,8 @@ export function createValueProxy<T>(
       if (typeof prop === "symbol") {
         if (prop === getCellReference)
           return { cell: valueCell, path: valuePath } satisfies CellReference;
-        if (prop === toCellProxy)
-          return () => toBuilderCellProxy(valueCell, valuePath);
+        if (prop === toOpaqueRef)
+          return () => makeOpaqueRef(valueCell, valuePath);
 
         const value = Reflect.get(target, prop, receiver);
         if (typeof value === "function") return value.bind(receiver);
@@ -731,33 +731,29 @@ const createProxyForArrayValue = (
   return target;
 };
 
-const cellToBuilderCellProxy = new WeakMap<
+const cellToOpaqueRef = new WeakMap<
   Frame,
-  WeakMap<
-    CellImpl<any>,
-    { path: PropertyKey[]; proxy: BuilderCellProxy<any> }[]
-  >
+  WeakMap<CellImpl<any>, { path: PropertyKey[]; proxy: OpaqueRef<any> }[]>
 >();
 
 // Creates aliases to value, used in recipes to refer to this specific cell. We
 // have to memoize these, as conversion happens at multiple places when
 // creaeting the recipe.
-function toBuilderCellProxy(
+function makeOpaqueRef(
   valueCell: CellImpl<any>,
   valuePath: PropertyKey[]
-): BuilderCellProxy<any> {
+): OpaqueRef<any> {
   const frame = getTopFrame();
   if (!frame) throw new Error("No frame");
-  if (!cellToBuilderCellProxy.has(frame))
-    cellToBuilderCellProxy.set(frame, new WeakMap());
-  let proxies = cellToBuilderCellProxy.get(frame)!.get(valueCell);
+  if (!cellToOpaqueRef.has(frame)) cellToOpaqueRef.set(frame, new WeakMap());
+  let proxies = cellToOpaqueRef.get(frame)!.get(valueCell);
   if (!proxies) {
     proxies = [];
-    cellToBuilderCellProxy.get(frame)!.set(valueCell, proxies);
+    cellToOpaqueRef.get(frame)!.set(valueCell, proxies);
   }
   let proxy = proxies.find((p) => arrayEqual(valuePath, p.path))?.proxy;
   if (!proxy) {
-    proxy = builderCell();
+    proxy = opaqueRef();
     for (const key of valuePath) proxy = proxy.key(key);
     proxy.setPreExisting({ $alias: { cell: valueCell, path: valuePath } });
     proxies.push({ path: valuePath, proxy });
