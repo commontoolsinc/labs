@@ -2,7 +2,7 @@ import {
   type CellImpl,
   isCellProxyForDereferencing,
   isCellReference,
-  isSimpleCell,
+  isRendererCell,
   isCell,
   getCellReferenceOrThrow,
   type CellReference,
@@ -58,7 +58,7 @@ export const getEntityId = (value: any): EntityId | undefined => {
 
   if (isCellProxyForDereferencing(value)) ref = getCellReferenceOrThrow(value);
   else if (isCellReference(value)) ref = value;
-  else if (isSimpleCell(value)) ref = value.getAsCellReference();
+  else if (isRendererCell(value)) ref = value.getAsCellReference();
   else if (isCell(value)) ref = { cell: value, path: [] };
 
   if (!ref?.cell.entityId) return undefined;

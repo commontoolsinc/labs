@@ -41,7 +41,7 @@ describe("cell-map", () => {
 
       expect(getEntityId(c)).toEqual(c.entityId);
       expect(getEntityId(c.getAsProxy())).toEqual(c.entityId);
-      expect(getEntityId(c.asSimpleCell())).toEqual(c.entityId);
+      expect(getEntityId(c.asRendererCell())).toEqual(c.entityId);
       expect(getEntityId({ cell: c, path: [] })).toEqual(c.entityId);
     });
 
@@ -51,11 +51,11 @@ describe("cell-map", () => {
 
       expect(getEntityId(c.getAsProxy())).toEqual(c.entityId);
       expect(getEntityId(c.getAsProxy(["foo"]))).not.toEqual(c.entityId);
-      expect(getEntityId(c.asSimpleCell(["foo"]))).not.toEqual(c.entityId);
+      expect(getEntityId(c.asRendererCell(["foo"]))).not.toEqual(c.entityId);
       expect(getEntityId({ cell: c, path: ["foo"] })).not.toEqual(c.entityId);
 
       expect(getEntityId(c.getAsProxy(["foo"]))).toEqual(
-        getEntityId(c.asSimpleCell(["foo"]))
+        getEntityId(c.asRendererCell(["foo"]))
       );
       expect(getEntityId(c.getAsProxy(["foo"]))).toEqual(
         getEntityId({ cell: c, path: ["foo"] })

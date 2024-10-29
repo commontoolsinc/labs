@@ -2,7 +2,7 @@ import { isAlias, isStatic, markAsStatic } from "@commontools/common-builder";
 import {
   cell,
   isCell,
-  isSimpleCell,
+  isRendererCell,
   CellImpl,
   ReactivityLog,
   CellReference,
@@ -123,7 +123,7 @@ export function setNestedValue(
     Array.isArray(value) === Array.isArray(destValue) &&
     !isCell(value) &&
     !isCellReference(value) &&
-    !isSimpleCell(value)
+    !isRendererCell(value)
   ) {
     let success = true;
     for (const key in value)
@@ -200,7 +200,7 @@ export function findAllAliasedCells(
       binding !== null &&
       !isCellReference(binding) &&
       !isCell(binding) &&
-      !isSimpleCell(binding)
+      !isRendererCell(binding)
     ) {
       for (const value of Object.values(binding)) find(value, origCell);
     }
@@ -288,7 +288,7 @@ export function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
   );
 }
 
-export function transformToSimpleCells(
+export function transformToRendererCells(
   cell: CellImpl<any>,
   value: any,
   log?: ReactivityLog
@@ -296,28 +296,28 @@ export function transformToSimpleCells(
   if (isCellProxyForDereferencing(value)) {
     const ref = followCellReferences(getCellReferenceOrThrow(value));
     if (cell === ref.cell)
-      return transformToSimpleCells(cell, cell.getAtPath(ref.path), log);
-    else return ref.cell.asSimpleCell(ref.path, log);
+      return transformToRendererCells(cell, cell.getAtPath(ref.path), log);
+    else return ref.cell.asRendererCell(ref.path, log);
   } else if (isAlias(value)) {
     const ref = followCellReferences(followAliases(value, cell, log), log);
-    return ref.cell.asSimpleCell(ref.path, log);
+    return ref.cell.asRendererCell(ref.path, log);
   } else if (isCell(value)) {
-    return value.asSimpleCell([], log);
+    return value.asRendererCell([], log);
   } else if (isCellReference(value)) {
     const ref = followCellReferences(value);
-    return ref.cell.asSimpleCell(ref.path, log);
-  } else if (isSimpleCell(value)) {
+    return ref.cell.asRendererCell(ref.path, log);
+  } else if (isRendererCell(value)) {
     return value;
   }
 
   if (typeof value === "object" && value !== null)
     if (Array.isArray(value))
-      return value.map((value) => transformToSimpleCells(cell, value, log));
+      return value.map((value) => transformToRendererCells(cell, value, log));
     else
       return Object.fromEntries(
         Object.entries(value).map(([key, value]) => [
           key,
-          transformToSimpleCells(cell, value, log),
+          transformToRendererCells(cell, value, log),
         ])
       );
   else return value;
@@ -368,7 +368,7 @@ export function normalizeToCells(
   let changed = false;
   if (isStatic(value)) {
     // no-op, don't normalize deep static values and assume they don't change
-  } else if (isCell(value) || isSimpleCell(value)) {
+  } else if (isCell(value) || isRendererCell(value)) {
     changed = value !== previous;
   } else if (isCellReference(value)) {
     changed = isCellReference(previous)
@@ -396,7 +396,7 @@ export function normalizeToCells(
           isCell(item) ||
           isCellReference(item) ||
           isAlias(item) ||
-          isSimpleCell(item)
+          isRendererCell(item)
         )
       ) {
         itemId = createRef(value[i], {
@@ -493,7 +493,7 @@ export function isEqualCellReferences(
 }
 
 export function deepCopy(value: any): any {
-  if (isCell(value) || isSimpleCell(value)) return value;
+  if (isCell(value) || isRendererCell(value)) return value;
   if (typeof value === "object" && value !== null)
     return Array.isArray(value)
       ? value.map(deepCopy)

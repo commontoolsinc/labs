@@ -57,8 +57,8 @@ export class CommonSidebar extends LitElement {
   ];
 
   private getFieldOrDefault = <T>(field: string, defaultValue: T) =>
-    this.focusedCharm?.asSimpleCell([field]) ||
-    cell(defaultValue).asSimpleCell();
+    this.focusedCharm?.asRendererCell([field]) ||
+    cell(defaultValue).asRendererCell();
 
   private handleSidebarTabChange(tabName: string) {
     const event = new CustomEvent("tab-changed", {
@@ -77,7 +77,7 @@ export class CommonSidebar extends LitElement {
     if (!this.homeCharm && this.homeRef.value) {
       this.homeCharm = runPersistent(home, { charms, recipes }, "home").then(
         (home) => {
-          const view = home.asSimpleCell<Charm>().key(UI).get();
+          const view = home.asRendererCell<Charm>().key(UI).get();
           if (!view) throw new Error("Charm has no UI");
           render(this.homeRef.value!, view);
           return home;
@@ -149,7 +149,13 @@ export class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Query</div>
                 <div>
-                  <os-code-editor slot="content" language="application/json" .source=${watchCell(query, q => JSON.stringify(q, null, 2))}></os-code-editor>
+                  <os-code-editor
+                    slot="content"
+                    language="application/json"
+                    .source=${watchCell(query, (q) =>
+                      JSON.stringify(q, null, 2)
+                    )}
+                  ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
@@ -163,7 +169,13 @@ export class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Schema</div>
                 <div>
-                  <os-code-editor slot="content" language="application/json" .source=${watchCell(schema, q => JSON.stringify(q, null, 2))}></os-code-editor>
+                  <os-code-editor
+                    slot="content"
+                    language="application/json"
+                    .source=${watchCell(schema, (q) =>
+                      JSON.stringify(q, null, 2)
+                    )}
+                  ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
@@ -177,7 +189,11 @@ export class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Source</div>
                 <div>
-                  <os-code-editor slot="content" language="text/html" .source=${watchCell(src)}></os-code-editor>
+                  <os-code-editor
+                    slot="content"
+                    language="text/html"
+                    .source=${watchCell(src)}
+                  ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
@@ -191,7 +207,13 @@ export class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Data</div>
                 <div>
-                  <os-code-editor slot="content" language="application/json" .source=${watchCell(data, q => JSON.stringify(q, null, 2))}></os-code-editor>
+                  <os-code-editor
+                    slot="content"
+                    language="application/json"
+                    .source=${watchCell(data, (q) =>
+                      JSON.stringify(q, null, 2)
+                    )}
+                  ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
@@ -205,7 +227,11 @@ export class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Spec</div>
                 <div>
-                  <os-code-editor slot="content" language="text/markdown" .source=${watchCell(prompt)}></os-code-editor>
+                  <os-code-editor
+                    slot="content"
+                    language="text/markdown"
+                    .source=${watchCell(prompt)}
+                  ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,

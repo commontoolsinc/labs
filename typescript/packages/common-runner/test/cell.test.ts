@@ -231,7 +231,7 @@ describe("createProxy", () => {
 describe("asSimpleCell", () => {
   it("should create a simple cell interface", () => {
     const c = cell({ x: 1, y: 2 });
-    const simpleCell = c.asSimpleCell();
+    const simpleCell = c.asRendererCell();
 
     expect(simpleCell.get()).toEqual({ x: 1, y: 2 });
 
@@ -244,7 +244,7 @@ describe("asSimpleCell", () => {
 
   it("should create a simple cell for nested properties", () => {
     const c = cell({ nested: { value: 42 } });
-    const nestedCell = c.asSimpleCell(["nested", "value"]);
+    const nestedCell = c.asRendererCell(["nested", "value"]);
 
     expect(nestedCell.get()).toBe(42);
 
@@ -254,7 +254,7 @@ describe("asSimpleCell", () => {
 
   it("should support the key method for nested access", () => {
     const c = cell({ a: { b: { c: 42 } } });
-    const simpleCell = c.asSimpleCell();
+    const simpleCell = c.asRendererCell();
 
     const nestedCell = simpleCell.key("a").key("b").key("c");
     expect(nestedCell.get()).toBe(42);
@@ -265,7 +265,7 @@ describe("asSimpleCell", () => {
 
   it("should return a Sendable for stream aliases", async () => {
     const c = cell({ stream: { $stream: true } });
-    const streamCell = c.asSimpleCell(["stream"]);
+    const streamCell = c.asRendererCell(["stream"]);
 
     expect(streamCell).toHaveProperty("send");
     expect(streamCell).not.toHaveProperty("get");
@@ -294,7 +294,7 @@ describe("asSimpleCell", () => {
   it("should call sink only when the cell changes on the subpath", () => {
     const c = cell({ a: { b: 42, c: 10 }, d: 5 });
     const values: number[] = [];
-    c.asSimpleCell(["a", "b"]).sink((value) => values.push(value));
+    c.asRendererCell(["a", "b"]).sink((value) => values.push(value));
     c.setAtPath(["d"], 50);
     c.setAtPath(["a", "c"], 100);
     c.setAtPath(["a", "b"], 42);

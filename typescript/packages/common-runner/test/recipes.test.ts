@@ -116,11 +116,11 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    result.asSimpleCell(["stream"]).send({ amount: 1 });
+    result.asRendererCell(["stream"]).send({ amount: 1 });
     await idle();
     expect(result.getAsProxy()).toMatchObject({ counter: { value: 1 } });
 
-    result.asSimpleCell(["stream"]).send({ amount: 2 });
+    result.asRendererCell(["stream"]).send({ amount: 2 });
     await idle();
     expect(result.getAsProxy()).toMatchObject({ counter: { value: 3 } });
   });
@@ -160,11 +160,11 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    result.asSimpleCell(["stream"]).send({ amount: 1 });
+    result.asRendererCell(["stream"]).send({ amount: 1 });
     await idle();
     expect(values).toEqual([[1, 1, 0]]);
 
-    result.asSimpleCell(["stream"]).send({ amount: 2 });
+    result.asRendererCell(["stream"]).send({ amount: 2 });
     await idle();
     expect(values).toEqual([
       [1, 1, 0],

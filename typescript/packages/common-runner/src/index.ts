@@ -7,7 +7,7 @@ export {
   idle,
 } from "./scheduler.js";
 export type {
-  Cell,
+  RendererCell,
   ReactiveCell,
   CellImpl,
   CellProxy,
@@ -17,7 +17,7 @@ export type {
 export {
   cell,
   isCell,
-  isSimpleCell,
+  isRendererCell,
   isCellReference,
   isCellProxy,
   isReactive,

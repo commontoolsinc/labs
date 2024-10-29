@@ -21,7 +21,7 @@ describe("scheduler", () => {
     const c = cell(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asSimpleCell([], log).send(
+      c.asRendererCell([], log).send(
         a.getAsProxy([], log) + b.getAsProxy([], log)
       );
     };
@@ -41,7 +41,7 @@ describe("scheduler", () => {
     const c = cell(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asSimpleCell([], log).send(
+      c.asRendererCell([], log).send(
         a.getAsProxy([], log) + b.getAsProxy([], log)
       );
     };
@@ -67,7 +67,7 @@ describe("scheduler", () => {
     const c = cell(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asSimpleCell([], log).send(
+      c.asRendererCell([], log).send(
         a.getAsProxy([], log) + b.getAsProxy([], log)
       );
     };
@@ -94,7 +94,7 @@ describe("scheduler", () => {
     const c = cell(0);
     const adder: Action = (log) => {
       runCount++;
-      c.asSimpleCell([], log).send(
+      c.asRendererCell([], log).send(
         a.getAsProxy([], log) + b.getAsProxy([], log)
       );
     };
@@ -127,13 +127,13 @@ describe("scheduler", () => {
     const e = cell(0);
     const adder1: Action = (log) => {
       runs.push("adder1");
-      c.asSimpleCell([], log).send(
+      c.asRendererCell([], log).send(
         a.getAsProxy([], log) + b.getAsProxy([], log)
       );
     };
     const adder2: Action = (log) => {
       runs.push("adder2");
-      e.asSimpleCell([], log).send(
+      e.asRendererCell([], log).send(
         c.getAsProxy([], log) + d.getAsProxy([], log)
       );
     };
@@ -164,18 +164,18 @@ describe("scheduler", () => {
     const d = cell(1);
     const e = cell(0);
     const adder1: Action = (log) => {
-      c.asSimpleCell([], log).send(
+      c.asRendererCell([], log).send(
         a.getAsProxy([], log) + b.getAsProxy([], log)
       );
     };
     const adder2: Action = (log) => {
-      e.asSimpleCell([], log).send(
+      e.asRendererCell([], log).send(
         c.getAsProxy([], log) + d.getAsProxy([], log)
       );
     };
     const adder3: Action = (log) => {
       if (--maxRuns <= 0) return;
-      c.asSimpleCell([], log).send(
+      c.asRendererCell([], log).send(
         e.getAsProxy([], log) + b.getAsProxy([], log)
       );
     };
@@ -198,7 +198,7 @@ describe("scheduler", () => {
     const by = cell(1);
     const inc: Action = (log) =>
       counter
-        .asSimpleCell([], log)
+        .asRendererCell([], log)
         .send(counter.getAsProxy([], log) + by.getAsProxy([], log));
 
     const stopped = vi.fn();
