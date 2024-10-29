@@ -1,6 +1,6 @@
 import {
   type CellImpl,
-  isCellProxyForDereferencing,
+  isQueryResultForDereferencing,
   isCellReference,
   isRendererCell,
   isCell,
@@ -56,7 +56,8 @@ export const createRef = (
 export const getEntityId = (value: any): EntityId | undefined => {
   let ref: CellReference | undefined = undefined;
 
-  if (isCellProxyForDereferencing(value)) ref = getCellReferenceOrThrow(value);
+  if (isQueryResultForDereferencing(value))
+    ref = getCellReferenceOrThrow(value);
   else if (isCellReference(value)) ref = value;
   else if (isRendererCell(value)) ref = value.getAsCellReference();
   else if (isCell(value)) ref = { cell: value, path: [] };

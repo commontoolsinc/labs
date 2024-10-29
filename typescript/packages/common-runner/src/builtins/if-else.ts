@@ -15,11 +15,11 @@ export function ifElse(
   sendResult(result);
 
   return (log: ReactivityLog) => {
-    const condition = inputsCell.getAsProxy([0], log);
+    const condition = inputsCell.getAsQueryResult([0], log);
 
     const ref = getCellReferenceOrThrow(
-      inputsCell.getAsProxy([condition ? 1 : 2], log)
+      inputsCell.getAsQueryResult([condition ? 1 : 2], log)
     );
-    result.send(ref.cell.getAsProxy(ref.path), log);
+    result.send(ref.cell.getAsQueryResult(ref.path), log);
   };
 }

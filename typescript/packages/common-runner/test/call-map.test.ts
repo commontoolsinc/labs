@@ -40,7 +40,7 @@ describe("cell-map", () => {
       c.generateEntityId();
 
       expect(getEntityId(c)).toEqual(c.entityId);
-      expect(getEntityId(c.getAsProxy())).toEqual(c.entityId);
+      expect(getEntityId(c.getAsQueryResult())).toEqual(c.entityId);
       expect(getEntityId(c.asRendererCell())).toEqual(c.entityId);
       expect(getEntityId({ cell: c, path: [] })).toEqual(c.entityId);
     });
@@ -49,15 +49,15 @@ describe("cell-map", () => {
       const c = cell({ foo: { bar: 42 } });
       c.generateEntityId();
 
-      expect(getEntityId(c.getAsProxy())).toEqual(c.entityId);
-      expect(getEntityId(c.getAsProxy(["foo"]))).not.toEqual(c.entityId);
+      expect(getEntityId(c.getAsQueryResult())).toEqual(c.entityId);
+      expect(getEntityId(c.getAsQueryResult(["foo"]))).not.toEqual(c.entityId);
       expect(getEntityId(c.asRendererCell(["foo"]))).not.toEqual(c.entityId);
       expect(getEntityId({ cell: c, path: ["foo"] })).not.toEqual(c.entityId);
 
-      expect(getEntityId(c.getAsProxy(["foo"]))).toEqual(
+      expect(getEntityId(c.getAsQueryResult(["foo"]))).toEqual(
         getEntityId(c.asRendererCell(["foo"]))
       );
-      expect(getEntityId(c.getAsProxy(["foo"]))).toEqual(
+      expect(getEntityId(c.getAsQueryResult(["foo"]))).toEqual(
         getEntityId({ cell: c, path: ["foo"] })
       );
     });

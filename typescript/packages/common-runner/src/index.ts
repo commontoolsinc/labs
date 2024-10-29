@@ -10,7 +10,7 @@ export type {
   RendererCell,
   ReactiveCell,
   CellImpl,
-  CellProxy,
+  QueryResult,
   CellReference,
   ReactivityLog,
 } from "./cell.js";
@@ -19,13 +19,13 @@ export {
   isCell,
   isRendererCell,
   isCellReference,
-  isCellProxy,
+  isQueryResult,
   isReactive,
   isGettable,
   isSendable,
   getCellReferenceOrValue,
   getCellReferenceOrThrow,
-  isCellProxyForDereferencing,
+  isQueryResultForDereferencing,
 } from "./cell.js";
 export {
   getEntityId,

@@ -42,7 +42,7 @@ export function fetchData(
   let currentRun = 0;
 
   return (log: ReactivityLog) => {
-    const { url, mode, options } = inputsCell.getAsProxy([], log);
+    const { url, mode, options } = inputsCell.getAsQueryResult([], log);
     const processResponse =
       (mode || "json") === "json"
         ? (r: Response) => r.json()

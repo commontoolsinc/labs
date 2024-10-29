@@ -342,8 +342,8 @@ export class CommonWindowManager extends LitElement {
                   };
 
                   return html` <os-charm-chip
-                    icon=${charm.getAsProxy().icon || "search"}
-                    text=${charm.getAsProxy()[NAME] || "Untitled"}
+                    icon=${charm.getAsQueryResult().icon || "search"}
+                    text=${charm.getAsQueryResult()[NAME] || "Untitled"}
                     .highlight=${JSON.stringify(charm.entityId) ===
                     JSON.stringify(this.focusedCharm?.entityId)}
                     @click=${onNavigate}
@@ -408,7 +408,7 @@ export class CommonWindowManager extends LitElement {
                 >
                   <div class="window-toolbar">
                     <h1 class="window-title" @click=${onNavigate}>
-                      ${charm.getAsProxy()[NAME]}
+                      ${charm.getAsQueryResult()[NAME]}
                     </h1>
                     <button class="close-button" @click="${this.onClose}">
                       ×
@@ -441,7 +441,7 @@ export class CommonWindowManager extends LitElement {
     run(undefined, undefined, charm);
     if (!isCell(charm)) throw new Error(`Charm ${charmId} doesn't exist`);
     this.focusedCharm = charm;
-    this.focusedProxy = charm?.getAsProxy();
+    this.focusedProxy = charm?.getAsQueryResult();
 
     addCharms([charm]);
     this.location = this.focusedProxy?.[NAME] || "-";

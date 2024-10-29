@@ -51,7 +51,7 @@ export function llm(
     const thisRun = ++currentRun;
 
     const { system, messages, prompt, stop, max_tokens } =
-      inputsCell.getAsProxy([], log) ?? {};
+      inputsCell.getAsQueryResult([], log) ?? {};
 
     result.setAtPath([], undefined, log);
     partial.setAtPath([], undefined, log);

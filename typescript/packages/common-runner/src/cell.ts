@@ -50,7 +50,7 @@ import { type Cancel } from "./cancel.js";
  *
  * @method getAsProxy Returns a value proxy for the cell.
  * @param {Path} path - The path to follow.
- * @returns {CellProxy<DeepKeyLookup<T, Path>>}
+ * @returns {QueryResult<DeepKeyLookup<T, Path>>}
  *
  * @method getAsCellReference Returns a cell reference for the cell.
  * @returns {CellReference}
@@ -70,10 +70,10 @@ export interface RendererCell<T> {
   send(value: T): void;
   sink(callback: (value: T) => void): () => void;
   key<K extends keyof T>(valueKey: K): RendererCell<T[K]>;
-  getAsProxy<Path extends PropertyKey[]>(
+  getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
     log?: ReactivityLog
-  ): CellProxy<DeepKeyLookup<T, Path>>;
+  ): QueryResult<DeepKeyLookup<T, Path>>;
   getAsCellReference(): CellReference;
   toJSON(): { "/": string } | undefined;
   value: T;
@@ -132,10 +132,10 @@ export type CellImpl<T> = {
    * @param log - Reactivity log.
    * @returns Value proxy.
    */
-  getAsProxy<Path extends PropertyKey[]>(
+  getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
     log?: ReactivityLog
-  ): CellProxy<DeepKeyLookup<T, Path>>;
+  ): QueryResult<DeepKeyLookup<T, Path>>;
 
   /**
    * Get as simple cell, which is following query (i.e. aliases), but not cell
@@ -281,11 +281,11 @@ export type CellReference = {
   path: PropertyKey[];
 };
 
-export type CellProxyInternals = {
+export type QueryResultInternals = {
   [getCellReference]: CellReference;
 };
 
-export type CellProxy<T> = T & CellProxyInternals;
+export type QueryResult<T> = T & QueryResultInternals;
 
 /**
  * Reactivity log.
@@ -316,11 +316,11 @@ export function cell<T>(value?: T): CellImpl<T> {
 
   const self: CellImpl<T> = {
     get: () => value as T,
-    getAsProxy: <Path extends PropertyKey[]>(
+    getAsQueryResult: <Path extends PropertyKey[]>(
       path?: Path,
       log?: ReactivityLog
     ) =>
-      createValueProxy(self, path ?? [], log) as CellProxy<
+      createQueryResultProxy(self, path ?? [], log) as QueryResult<
         DeepKeyLookup<T, Path>
       >,
     asRendererCell: <Q = T>(path: PropertyKey[] = [], log?: ReactivityLog) =>
@@ -433,7 +433,7 @@ function rendererCell<T>(
       }
 
       ref = undefined;
-      if (isCellProxyForDereferencing(target)) ref = target[getCellReference];
+      if (isQueryResultForDereferencing(target)) ref = target[getCellReference];
       else if (isCellReference(target)) ref = followCellReferences(target, log);
       else if (isCell(target))
         ref = { cell: target, path: [] } satisfies CellReference;
@@ -471,8 +471,10 @@ function rendererCell<T>(
         },
         key: <K extends keyof T>(key: K) =>
           cell.asRendererCell([...path, key], log) as RendererCell<T[K]>,
-        getAsProxy: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
-          createValueProxy(cell, [...path, ...subPath], newLog ?? log),
+        getAsQueryResult: (
+          subPath: PropertyKey[] = [],
+          newLog?: ReactivityLog
+        ) => createQueryResultProxy(cell, [...path, ...subPath], newLog ?? log),
         getAsCellReference: () => ({ cell, path } satisfies CellReference),
         toJSON: () => cell.toJSON(),
         get value(): T {
@@ -532,7 +534,7 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
   with: ArrayMethodType.ReadOnly,
 };
 
-export function createValueProxy<T>(
+export function createQueryResultProxy<T>(
   valueCell: CellImpl<T>,
   valuePath: PropertyKey[],
   log?: ReactivityLog
@@ -545,7 +547,7 @@ export function createValueProxy<T>(
   valuePath = [];
   while (keys.length) {
     const key = keys.shift()!;
-    if (isCellProxyForDereferencing(target)) {
+    if (isQueryResultForDereferencing(target)) {
       const ref = target[getCellReference];
       valueCell = ref.cell;
       valuePath = ref.path;
@@ -573,17 +575,17 @@ export function createValueProxy<T>(
 
   // Now target is the end of the path. It might still be a cell, alias or cell
   // reference, so we follow these as well.
-  if (isCellProxy(target)) {
+  if (isQueryResult(target)) {
     const ref = target[getCellReference];
-    return createValueProxy(ref.cell, ref.path, log);
+    return createQueryResultProxy(ref.cell, ref.path, log);
   } else if (isCell(target)) {
-    return createValueProxy(target, [], log);
+    return createQueryResultProxy(target, [], log);
   } else if (isAlias(target)) {
     const ref = followAliases(target, valueCell, log);
-    return createValueProxy(ref.cell, ref.path, log);
+    return createQueryResultProxy(ref.cell, ref.path, log);
   } else if (isCellReference(target)) {
     const ref = followCellReferences(target, log);
-    return createValueProxy(ref.cell, ref.path, log);
+    return createQueryResultProxy(ref.cell, ref.path, log);
   } else if (typeof target !== "object" || target === null) return target;
 
   return new Proxy(target as object, {
@@ -609,7 +611,7 @@ export function createValueProxy<T>(
               // methods implicitly read all elements. TODO: Deal with
               // exceptions like at().
               const copy = target.map((_, index) =>
-                createValueProxy(valueCell, [...valuePath, index], log)
+                createQueryResultProxy(valueCell, [...valuePath, index], log)
               );
 
               return method.apply(copy, args);
@@ -657,10 +659,10 @@ export function createValueProxy<T>(
             };
       }
 
-      return createValueProxy(valueCell, [...valuePath, prop], log);
+      return createQueryResultProxy(valueCell, [...valuePath, prop], log);
     },
     set: (target, prop, value) => {
-      if (isCellProxy(value)) value = value[getCellReference];
+      if (isQueryResult(value)) value = value[getCellReference];
 
       if (Array.isArray(target) && prop === "length") {
         const oldLength = target.length;
@@ -721,10 +723,10 @@ const createProxyForArrayValue = (
 ): { [originalIndex]: number } => {
   const target = {
     valueOf: function () {
-      return createValueProxy(valueCell, valuePath, log);
+      return createQueryResultProxy(valueCell, valuePath, log);
     },
     toString: function () {
-      return String(createValueProxy(valueCell, valuePath, log));
+      return String(createQueryResultProxy(valueCell, valuePath, log));
     },
     [originalIndex]: source,
   };
@@ -773,7 +775,7 @@ function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
  * @returns {CellReference | any}
  */
 export function getCellReferenceOrValue(value: any): CellReference {
-  if (isCellProxy(value)) return value[getCellReference];
+  if (isQueryResult(value)) return value[getCellReference];
   else return value;
 }
 
@@ -785,7 +787,7 @@ export function getCellReferenceOrValue(value: any): CellReference {
  * @throws {Error} If the value is not a cell value proxy.
  */
 export function getCellReferenceOrThrow(value: any): CellReference {
-  if (isCellProxy(value)) return value[getCellReference];
+  if (isQueryResult(value)) return value[getCellReference];
   else throw new Error("Value is not a cell proxy");
 }
 
@@ -840,7 +842,7 @@ export function isCellReference(value: any): value is CellReference {
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export function isCellProxy(value: any): value is CellProxy<any> {
+export function isQueryResult(value: any): value is QueryResult<any> {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -848,7 +850,7 @@ export function isCellProxy(value: any): value is CellProxy<any> {
   );
 }
 
-const getCellReference = Symbol("isCellProxy");
+const getCellReference = Symbol("isQueryResultProxy");
 
 /**
  * Check if value is a cell proxy. Return as type that allows dereferencing, but
@@ -857,10 +859,10 @@ const getCellReference = Symbol("isCellProxy");
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export function isCellProxyForDereferencing(
+export function isQueryResultForDereferencing(
   value: any
-): value is CellProxyInternals {
-  return isCellProxy(value);
+): value is QueryResultInternals {
+  return isQueryResult(value);
 }
 
 /**

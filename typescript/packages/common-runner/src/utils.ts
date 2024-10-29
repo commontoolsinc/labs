@@ -7,7 +7,7 @@ import {
   ReactivityLog,
   CellReference,
   isCellReference,
-  isCellProxyForDereferencing,
+  isQueryResultForDereferencing,
   getCellReferenceOrThrow,
 } from "./cell.js";
 import { createRef } from "./cell-map.js";
@@ -293,7 +293,7 @@ export function transformToRendererCells(
   value: any,
   log?: ReactivityLog
 ): any {
-  if (isCellProxyForDereferencing(value)) {
+  if (isQueryResultForDereferencing(value)) {
     const ref = followCellReferences(getCellReferenceOrThrow(value));
     if (cell === ref.cell)
       return transformToRendererCells(cell, cell.getAtPath(ref.path), log);
@@ -469,7 +469,7 @@ export function normalizeToCells(
 }
 
 function maybeUnwrapProxy(value: any): any {
-  return isCellProxyForDereferencing(value)
+  return isQueryResultForDereferencing(value)
     ? getCellReferenceOrThrow(value)
     : value;
 }
