@@ -736,7 +736,7 @@ const createProxyForArrayValue = (
 
 const cellToOpaqueRef = new WeakMap<
   Frame,
-  WeakMap<CellImpl<any>, { path: PropertyKey[]; proxy: OpaqueRef<any> }[]>
+  WeakMap<CellImpl<any>, { path: PropertyKey[]; opaqueRef: OpaqueRef<any> }[]>
 >();
 
 // Creates aliases to value, used in recipes to refer to this specific cell. We
@@ -749,19 +749,19 @@ function makeOpaqueRef(
   const frame = getTopFrame();
   if (!frame) throw new Error("No frame");
   if (!cellToOpaqueRef.has(frame)) cellToOpaqueRef.set(frame, new WeakMap());
-  let proxies = cellToOpaqueRef.get(frame)!.get(valueCell);
-  if (!proxies) {
-    proxies = [];
-    cellToOpaqueRef.get(frame)!.set(valueCell, proxies);
+  let opaqueRefs = cellToOpaqueRef.get(frame)!.get(valueCell);
+  if (!opaqueRefs) {
+    opaqueRefs = [];
+    cellToOpaqueRef.get(frame)!.set(valueCell, opaqueRefs);
   }
-  let proxy = proxies.find((p) => arrayEqual(valuePath, p.path))?.proxy;
-  if (!proxy) {
-    proxy = opaqueRef();
-    for (const key of valuePath) proxy = proxy.key(key);
-    proxy.setPreExisting({ $alias: { cell: valueCell, path: valuePath } });
-    proxies.push({ path: valuePath, proxy });
+  let ref = opaqueRefs.find((p) => arrayEqual(valuePath, p.path))?.opaqueRef;
+  if (!ref) {
+    ref = opaqueRef();
+    for (const key of valuePath) ref = ref.key(key);
+    ref.setPreExisting({ $alias: { cell: valueCell, path: valuePath } });
+    opaqueRefs.push({ path: valuePath, opaqueRef: ref });
   }
-  return proxy;
+  return ref;
 }
 
 function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
