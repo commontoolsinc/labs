@@ -89,7 +89,7 @@ export class CommonSidebar extends LitElement {
   override render() {
     const prompt = this.getFieldOrDefault("prompt", "");
     const data = this.getFieldOrDefault("data", {});
-    const src = this.getFieldOrDefault("partialHTML", {});
+    const src = this.getFieldOrDefault("partialHTML", "");
     const schema = this.getFieldOrDefault("schema", {});
     const query = this.getFieldOrDefault("query", {});
 
@@ -149,11 +149,7 @@ export class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Query</div>
                 <div>
-                  <os-code-editor
-                    slot="content"
-                    language="text/html"
-                    .source=${watchCell(query)}
-                  ></os-code-editor>
+                  <os-code-editor slot="content" language="application/json" .source=${watchCell(query, q => JSON.stringify(q, null, 2))}></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
@@ -167,10 +163,7 @@ export class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Schema</div>
                 <div>
-                  <common-debug
-                    slot="content"
-                    .content=${watchCell(schema)}
-                  ></common-debug>
+                  <os-code-editor slot="content" language="application/json" .source=${watchCell(schema, q => JSON.stringify(q, null, 2))}></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
@@ -184,10 +177,7 @@ export class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Source</div>
                 <div>
-                  <os-code-editor
-                    slot="content"
-                    .source=${watchCell(src)}
-                  ></os-code-editor>
+                  <os-code-editor slot="content" language="text/html" .source=${watchCell(src)}></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
@@ -201,10 +191,7 @@ export class CommonSidebar extends LitElement {
               <os-sidebar-group>
                 <div slot="label">Data</div>
                 <div>
-                  <common-debug
-                    slot="content"
-                    .content=${watchCell(data)}
-                  ></common-debug>
+                  <os-code-editor slot="content" language="application/json" .source=${watchCell(data, q => JSON.stringify(q, null, 2))}></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
@@ -216,12 +203,9 @@ export class CommonSidebar extends LitElement {
             html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
-                <div slot="label">Spell</div>
+                <div slot="label">Spec</div>
                 <div>
-                  <common-markdown
-                    slot="content"
-                    markdown=${watchCell(prompt)}
-                  ></common-markdown>
+                  <os-code-editor slot="content" language="text/markdown" .source=${watchCell(prompt)}></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
