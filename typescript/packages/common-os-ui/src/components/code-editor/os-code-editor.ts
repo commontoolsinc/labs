@@ -93,6 +93,7 @@ export class OsCodeEditor extends ReactiveElement {
   #editorView: EditorView | undefined = undefined;
   #lang = new Compartment();
   #tabSize = new Compartment();
+  #docChangeTimeout: number | undefined = undefined;
 
   destroy = createCancelGroup();
 
@@ -118,14 +119,31 @@ export class OsCodeEditor extends ReactiveElement {
     render(html`<div id="editor" class="code-editor"></div>`, this.renderRoot);
     const editorRoot = this.renderRoot.querySelector("#editor") as HTMLElement;
 
+    const ext = EditorView.updateListener.of((update) => {
+      if (update.docChanged) {
+        if (this.#docChangeTimeout) {
+          window.clearTimeout(this.#docChangeTimeout);
+        }
+        this.#docChangeTimeout = window.setTimeout(() => {
+          this.dispatchEvent(new CustomEvent("doc-change", { detail: update }));
+        }, 500);
+      }
+    });
     this.#editorView = createEditor({
       element: editorRoot,
       extensions: [
         this.#lang.of(defaultLang),
         this.#tabSize.of(EditorState.tabSize.of(4)),
+        ext
       ],
     });
-    this.destroy.add(() => this.#editorView?.destroy());
+
+    this.destroy.add(() => {
+      this.#editorView?.destroy();
+      if (this.#docChangeTimeout) {
+        window.clearTimeout(this.#docChangeTimeout);
+      }
+    });
   }
 
   protected override updated(changedProperties: PropertyValues): void {
