@@ -1,6 +1,5 @@
 import { html} from "@commontools/common-html";
 import {
-  recipe,
   UI,
   NAME,
   lift,

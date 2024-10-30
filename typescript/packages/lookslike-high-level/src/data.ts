@@ -1,6 +1,6 @@
 // This file is setting up example data
 
-import { TYPE, NAME, UI, Recipe, handler } from "@commontools/common-builder";
+import { TYPE, NAME, UI, Recipe } from "@commontools/common-builder";
 import {
   run,
   cell,
@@ -16,7 +16,6 @@ import {
   idle,
   EntityId,
 } from "@commontools/common-runner";
-import * as z from 'zod'
 import { createStorage } from "./storage.js";
 
 import { todoList } from "./recipes/todo-list.js";
@@ -42,8 +41,6 @@ import { prompt } from "./recipes/prompts.js";
 import { wiki } from "./recipes/wiki.js";
 import { helloIsolated } from "./recipes/helloIsolated.js";
 import { queryCollections } from "./recipes/queryCollections.js";
-import { query } from "./recipes/query.js";
-import { html } from "@commontools/common-html";
 import { evalJs } from "./recipes/eval.js";
 import { articleQuery } from "./recipes/articleQuery.js";
 
@@ -119,44 +116,6 @@ addCharms([
     "eval"
   ),
   await runPersistent(
-    query,
-    {
-      schema: z.object({
-        title: z.string(),
-      }),
-      render: (result: any) => {
-        return html`
-        <ul>
-          ${result.data.map((item: { title: string }) => html`<li>${item.title}</li>`)}
-        </ul>
-        `
-      }
-    },
-    "test"
-  ),
-  await runPersistent(
-    query,
-    {
-      schema: z.object({
-        title: z.string(),
-      }),
-      render: (result: any) => {
-        const whatever = handler((e, state) => {
-          console.log(e)
-        });
-
-        return html`
-        <ul>
-            ${result.data.map((item: { title: string }) => html`<li>
-                <input type="text" value=${item.title} >
-            </li>`)}
-        </ul>
-        `
-      }
-    },
-    "input test"
-  ),
-  await runPersistent(
     iframe,
     {
       title: "two way binding counter",
@@ -230,10 +189,6 @@ export type RecipeManifest = {
 };
 
 export const recipes: RecipeManifest[] = [
-  {
-    name: "Query test",
-    recipeId: addRecipe(query),
-  },
   {
     name: "Explore dungeon game",
     recipeId: addRecipe(dungeon),
