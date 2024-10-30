@@ -3,6 +3,7 @@ import {
   lift,
   RecipeFactory,
   Value,
+  OpaqueRef,
 } from "@commontools/common-builder";
 import { streamData } from "@commontools/common-builder";
 import * as z from "zod";
@@ -67,4 +68,4 @@ export const querySynopsys = recipe(z.any(), (schema) => {
   tapStringify({ result: result.data, schema })
 
   return result.data;
-});
+}) as <T>(schema: z.ZodType<T>) => OpaqueRef<T>;
