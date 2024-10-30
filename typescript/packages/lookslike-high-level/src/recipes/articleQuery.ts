@@ -4,9 +4,10 @@ import {
   NAME,
   lift,
   handler,
+  recipe,
 } from "@commontools/common-builder";
 import * as z from "zod";
-import { queryRecipe } from "../query.js";
+import { queryRecipe, querySynopsys } from "../query.js";
 
 export const schema = z.object({
   title: z.string(),
@@ -23,11 +24,21 @@ export const listItems = lift(({ items } : { items: Article[] }) => {
 
 const onAddRandomItem = handler<{}, { items: Article[] }>((e, state) => {
   state.items.push({ title: "New article", author: "New author" });
+
+  // post to synopsys here
 })
 
-export const articleQuery = queryRecipe(
-  schema,
-  (items) => {
+const tap = lift((x) => {
+  console.log(x, JSON.stringify(x, null, 2));
+  return x;
+});
+
+export const articleQuery = recipe(
+  z.object({}),
+  ({ }) => {
+    const items = querySynopsys(schema)
+    tap({ obj: items })
+
     return {
       [NAME]: 'Article query',
       [UI]: html`<ul>

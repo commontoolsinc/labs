@@ -19,6 +19,19 @@ const buildQueryRequest = lift(({ query }) => {
   };
 });
 
+
+const buildTransactionRequest = lift(({ changes }) => {
+  if (!changes) return {};
+  return {
+    url: `/api/data`,
+    options: {
+      method: "PATCH",
+      body: JSON.stringify(changes),
+    },
+  };
+});
+
+
 const schemaToQuery = lift(({ schema }) => {
   return jsonToDatalogQuery(zodSchemaToPlaceholder(schema))
 })
@@ -46,3 +59,12 @@ export function queryRecipe<T extends z.ZodTypeAny>(
     }
   )
 }
+
+
+export const querySynopsys = recipe(z.any(), (schema) => {
+  const query = schemaToQuery({ schema });
+  const { result } = streamData<{ id: string, event: string, data: any[] }>(buildQueryRequest({ query }));
+  tapStringify({ result: result.data, schema })
+
+  return result.data;
+});
