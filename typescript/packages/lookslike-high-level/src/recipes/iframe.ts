@@ -380,7 +380,6 @@ const grabKeywords = lift<{ result?: string }, any>(({ result }) => {
 
 const consoleLogHandler = handler<{ detail: any }, { error: any; lastSrc: string; src: string; }>(
   (event, state) => {
-    debugger
     console.log('event', event);
     state.lastSrc = state.src;
     state.error.error = true;
