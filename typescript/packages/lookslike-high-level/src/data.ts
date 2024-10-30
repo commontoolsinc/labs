@@ -45,7 +45,7 @@ import { queryCollections } from "./recipes/queryCollections.js";
 import { query } from "./recipes/query.js";
 import { html } from "@commontools/common-html";
 import { evalJs } from "./recipes/eval.js";
-import { taskQuery } from "./recipes/taskQuery.js";
+import { articleQuery } from "./recipes/articleQuery.js";
 
 export type Charm = {
   [NAME]?: string;
@@ -100,9 +100,11 @@ export async function syncCharm(
 
 addCharms([
   await runPersistent(
-    taskQuery,
-    { },
-    "todo query test"
+    articleQuery,
+    {
+      "hello": "world"
+    },
+    "article query test"
   ),
   await runPersistent(
     evalJs,
