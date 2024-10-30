@@ -44,6 +44,7 @@ import { helloIsolated } from "./recipes/helloIsolated.js";
 import { queryCollections } from "./recipes/queryCollections.js";
 import { query } from "./recipes/query.js";
 import { html } from "@commontools/common-html";
+import { evalJs } from "./recipes/eval.js";
 
 export type Charm = {
   [NAME]?: string;
@@ -97,6 +98,18 @@ export async function syncCharm(
 }
 
 addCharms([
+  await runPersistent(
+    evalJs,
+    {
+      data: { todos: [
+        { title: "Buy groceries" },
+        { title: "Walk the dog" },
+        { title: "Wash the car" },
+      ] },
+      prompt: "list of three items",
+    },
+    "eval"
+  ),
   await runPersistent(
     query,
     {
