@@ -61,8 +61,8 @@ export class CommonSidebar extends LitElement {
     cell(defaultValue).asRendererCell();
 
   private setField = <T>(field: string, value: T) => {
-    this.focusedCharm?.asSimpleCell([field]).send(value);
-  }
+    this.focusedCharm?.asRendererCell([field]).send(value);
+  };
 
   private handleSidebarTabChange(tabName: string) {
     const event = new CustomEvent("tab-changed", {
@@ -132,8 +132,8 @@ export class CommonSidebar extends LitElement {
     `;
 
     const onSpecChanged = (e: CustomEvent) => {
-      this.setField("prompt", e.detail.state.doc.toString())
-    }
+      this.setField("prompt", e.detail.state.doc.toString());
+    };
 
     return html`
       <os-navstack>
@@ -236,10 +236,10 @@ export class CommonSidebar extends LitElement {
                 <div slot="label">Spec</div>
                 <div>
                   <os-code-editor
-                      slot="content"
-                      language="text/markdown"
-                      .source=${watchCell(prompt)}
-                      @doc-change=${onSpecChanged}
+                    slot="content"
+                    language="text/markdown"
+                    .source=${watchCell(prompt)}
+                    @doc-change=${onSpecChanged}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
