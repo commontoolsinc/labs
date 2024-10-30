@@ -56,7 +56,7 @@ export function zodSchemaToPlaceholder(schema: any): any {
 
 
 export const jsonToDatalogQuery = (jsonObj: any) => {
-  const item: Record<string, any> = {};
+  const select: Record<string, any> = {};
   const where: Array<any> = [];
 
   function processObject(obj: any, path: string, selectObj: any) {
@@ -77,13 +77,11 @@ export const jsonToDatalogQuery = (jsonObj: any) => {
     }
   }
 
-  item.id = '?item';
-  processObject(jsonObj, '', item);
+  select.id = '?item';
+  processObject(jsonObj, '', select);
 
   return {
-    select: {
-      item: [item],
-    },
+    select,
     where
   };
 };
