@@ -150,8 +150,15 @@ export function toJSONWithAliases(
     if (isShadowRef(alias.cell)) {
       const cell = alias.cell.shadowOf;
       console.log("shadow ref alias", value, cell.export?.());
-      if (isShadowRef(cell)) {
-        throw new Error("Not yet implemented: Nested shadow refs");
+      if (cell.export().frame !== getTopFrame()) {
+        let frame = getTopFrame();
+        while (frame && frame.parent !== cell.export().frame)
+          frame = frame.parent;
+        if (!frame)
+          throw new Error(
+            `Shadow ref alias with parent cell not found in current frame`
+          );
+        return value;
       }
       if (!paths.has(cell)) throw new Error(`Cell not found in paths`);
       return {
@@ -302,8 +309,7 @@ export function connectInputAndOutputs(node: NodeRef) {
       // Return shadow ref it this is a parent opaque ref. Note: No need to
       // connect to the cell. The connection is there to traverse the graph to
       // find all other nodes, but this points to the parent graph instead.
-      if (value.export().frame !== node.frame)
-        return createShadowRef(value, node.frame);
+      if (value.export().frame !== node.frame) return createShadowRef(value);
       value.connect(node);
     }
     return undefined;

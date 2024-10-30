@@ -5,7 +5,6 @@ import {
   NodeRef,
   NodeFactory,
   isOpaqueRefMarker,
-  Frame,
   ShadowRef,
 } from "./types.js";
 import { setValueAtPath, hasValueAtPath } from "./utils.js";
@@ -120,13 +119,6 @@ export function opaqueRef<T>(value?: Value<T> | T): OpaqueRef<T> {
   return top;
 }
 
-export function createShadowRef(ref: OpaqueRef<any>, frame?: Frame): ShadowRef {
-  const refFrame = ref.export().frame;
-  if (!refFrame || !frame || !frame.parent)
-    throw new Error("Can't create shadow ref for non-parent ref");
-  const parentShadow =
-    frame.parent === refFrame ? undefined : createShadowRef(ref, frame.parent);
-  const shadowRef = { shadowOf: parentShadow ?? ref };
-  if (parentShadow) frame.parent.shadows.push(parentShadow);
-  return shadowRef;
+export function createShadowRef(ref: OpaqueRef<any>): ShadowRef {
+  return { shadowOf: ref };
 }

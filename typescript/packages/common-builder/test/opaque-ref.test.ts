@@ -75,7 +75,7 @@ describe("shadowRef function", () => {
   it("creates a shadow ref", () => {
     const ref = opaqueRef();
     const frame = pushFrame();
-    const shadow = createShadowRef(ref, frame);
+    const shadow = createShadowRef(ref);
     popFrame(frame);
     expect(isShadowRef(shadow)).toBe(true);
     expect(shadow.shadowOf).toBe(ref);
@@ -85,10 +85,10 @@ describe("shadowRef function", () => {
     const ref = opaqueRef();
     const frame1 = pushFrame();
     const frame2 = pushFrame();
-    const shadow = createShadowRef(ref, frame2);
+    const shadow = createShadowRef(ref);
     popFrame(frame2);
     popFrame(frame1);
     expect(isShadowRef(shadow)).toBe(true);
-    expect(shadow.shadowOf.shadowOf).toBe(ref);
+    expect(shadow.shadowOf).toBe(ref);
   });
 });

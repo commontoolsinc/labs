@@ -75,7 +75,7 @@ function factoryFromRecipe<T, R>(
 ): RecipeFactory<T, R> {
   // Traverse the value, collect all mentioned nodes and cells
   const cells = new Set<OpaqueRef<any>>();
-  const shadows = new Set<ShadowRef>(getTopFrame()?.shadows ?? []);
+  const shadows = new Set<ShadowRef>();
   const nodes = new Set<NodeRef>();
 
   const collectCellsAndNodes = (value: Value<any>) =>
@@ -87,7 +87,7 @@ function factoryFromRecipe<T, R>(
         !shadows.has(value)
       ) {
         if (isOpaqueRef(value) && value.export().frame !== getTopFrame())
-          value = createShadowRef(value.export().value, getTopFrame());
+          value = createShadowRef(value.export().value);
         if (isShadowRef(value)) {
           shadows.add(value);
           if (
@@ -129,10 +129,6 @@ function factoryFromRecipe<T, R>(
     const { cell: top, path } = cell.export();
     if (!paths.has(top)) paths.set(top, ["internal", `__#${count++}`]);
     if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
-  });
-  getTopFrame()?.shadows.forEach((shadow) => {
-    if (paths.has(shadow)) return;
-    paths.set(shadow, ["internal", `__#shadow${count++}`]);
   });
   shadows.forEach((shadow) => {
     if (paths.has(shadow)) return;
@@ -223,11 +219,7 @@ function factoryFromRecipe<T, R>(
 const frames: Frame[] = [];
 
 export function pushFrame(frame?: Frame): Frame {
-  if (!frame)
-    frame = {
-      parent: getTopFrame(),
-      shadows: [],
-    };
+  if (!frame) frame = { parent: getTopFrame() };
   frames.push(frame);
   return frame;
 }

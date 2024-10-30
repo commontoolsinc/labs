@@ -174,8 +174,7 @@ describe("recipe with map node that references a parent cell", () => {
   });
 });
 
-describe.skip("recipe with map node that references a parent cell in another recipe", () => {
-  /*
+describe("recipe with map node that references a parent cell in another recipe", () => {
   const multiplyArray = recipe<{ values: { x: number }[]; factor: number }>(
     "Double numbers",
     ({ values, factor }) => {
@@ -202,5 +201,5 @@ describe.skip("recipe with map node that references a parent cell in another rec
       x: { $alias: { cell: 1, path: ["parameters", "x"] } },
       factor: { $alias: { path: ["parameters", "factor"] } },
     });
-  });*/
+  });
 });

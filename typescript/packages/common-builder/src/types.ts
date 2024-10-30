@@ -171,7 +171,6 @@ export function isShadowRef(value: any): value is ShadowRef {
 
 export type Frame = {
   parent?: Frame;
-  shadows: ShadowRef[];
 };
 
 const isStaticMarker = Symbol("isStatic");
