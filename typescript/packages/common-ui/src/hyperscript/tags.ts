@@ -16,3 +16,4 @@ export { button } from "../components/button.js";
 export { include } from "../components/include.js";
 export { input, textInput, checkbox, radio } from "../components/input.js";
 export { sendInput } from "../components/send-input.js";
+export * as shoelace from "../components/shoelace/index.js";
