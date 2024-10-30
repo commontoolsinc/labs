@@ -59,26 +59,38 @@ export const jsonToDatalogQuery = (jsonObj: any) => {
   const select: Record<string, any> = {};
   const where: Array<any> = [];
 
-  function processObject(obj: any, path: string, selectObj: any) {
+  function processObject(root: string, obj: any, path: string, selectObj: any) {
     for (const [key, value] of Object.entries(obj)) {
       const currentPath = path ? `${path}/${key}` : key;
       const varName = `?${currentPath}`.replace(/\//g, '_');
 
       if (Array.isArray(value)) {
-        selectObj[key] = [{}];
-        processObject(value[0], currentPath, selectObj[key][0]);
+        if (value[0] === null) {
+          throw new Error('Cannot handle null values in arrays');
+        }
+
+        where.push({ Case: ["?item", key, `?${key}[]`] });
+        where.push({ Case: [`?${key}[]`, `?.${key}`, `?${key}`]});
+
+        if (typeof value[0] === 'object') {
+          selectObj[key] = [{ '/': `?${key}` }];
+          processObject(`?${key}`, value[0], currentPath, selectObj[key][0]);
+        } else {
+          selectObj[key] = [`?${key}`];
+        }
+
       } else if (typeof value === 'object' && value !== null) {
         selectObj[key] = {};
-        processObject(value, currentPath, selectObj[key]);
+        processObject(root, value, currentPath, selectObj[key]);
       } else {
         selectObj[key] = varName;
-        where.push({ Case: ['?item', currentPath, varName]});
+        where.push({ Case: [root, key, varName]});
       }
     }
   }
 
   select.id = '?item';
-  processObject(jsonObj, '', select);
+  processObject('?item', jsonObj, '', select);
 
   return {
     select,

@@ -12,6 +12,7 @@ import { queryRecipe, querySynopsys } from "../query.js";
 export const schema = z.object({
   title: z.string(),
   author: z.string(),
+  tags: z.array(z.string()),
 })
 
 type Article = z.infer<typeof schema>;
@@ -23,7 +24,7 @@ export const listItems = lift(({ items } : { items: Article[] }) => {
 })
 
 const onAddRandomItem = handler<{}, { items: Article[] }>((e, state) => {
-  state.items.push({ title: "New article", author: "New author" });
+  state.items.push({ title: "New article", author: "New author", tags: [] });
 
   // post to synopsys here
 })
@@ -42,7 +43,12 @@ export const articleQuery = recipe(
     return {
       [NAME]: 'Article query',
       [UI]: html`<ul>
-          ${items.map(({ title, author }) => html`<li>${title} - ${author}</li>`)}
+          ${items.map(({ title, author, tags }) => html`<li>
+            ${title} - ${author}
+            <ul>
+              ${tags.map(tag => html`<li>${tag}</li>`)}
+            </ul>
+          </li>`)}
           <li><button onclick=${onAddRandomItem({ items })}>Add</button></li>
       </ul>`,
       data: items,
