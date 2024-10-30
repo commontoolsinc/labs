@@ -323,7 +323,7 @@ export function transformToRendererCells(
   } else if (isCell(value)) {
     return value.asRendererCell([], log);
   } else if (isCellReference(value)) {
-    const ref = followCellReferences(value);
+    const ref = followCellReferences(value, log);
     return ref.cell.asRendererCell(ref.path, log);
   } else if (isRendererCell(value)) {
     return value;
