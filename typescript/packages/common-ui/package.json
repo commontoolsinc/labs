@@ -51,7 +51,9 @@
     "@cfworker/json-schema": "^1.12.8",
     "@shoelace-style/shoelace": "^2.15.1",
     "@types/node": "^20.14.2",
-    "lit": "^3.1.4"
+    "franken-ui": "^1.1.0",
+    "lit": "^3.1.4",
+    "postcss": "^8.4.47"
   },
   "devDependencies": {
     "@web/test-runner": "^0.18.2",
