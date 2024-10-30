@@ -1,4 +1,4 @@
-import { html } from "@commontools/common-html";
+import { h } from "@commontools/common-html";
 import {
   recipe,
   handler,
@@ -8,10 +8,9 @@ import {
   llm,
   UI,
   NAME,
-  ifElse,
 } from "@commontools/common-builder";
 import { z } from 'zod';
-import zodToJsonSchema from 'zod-to-json-schema';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 
 const Place = z.object({
   name: z.string(),
@@ -24,6 +23,8 @@ const Place = z.object({
   longitude: z.number(),
   rating: z.number().min(0).max(5),
 });
+
+const imageUrl = lift(({ prompt }) => `/api/img/?prompt=${encodeURIComponent(prompt)}`);
 
 type Place = z.infer<typeof Place>;
 
@@ -39,11 +40,11 @@ const buildPrompt = lift<{ prompt?: string }, { messages: string[], system: stri
   return {
     messages: [prompt, '```json\n['],
     system: `Generate place data inspired by the user description using JSON:\n\n<schema>${jsonSchema}</schema>`,
-    stop: '```'
+    stop: '\n```\n'
   }
 });
 
-const grabJson = lift<{ result?: string }, PlaceList | undefined>(({ result }) => {
+const grabJson = lift<{ result?: string }, PlaceList>(({ result }) => {
   if (!result) {
     return [];
   }
@@ -61,12 +62,10 @@ const grabJson = lift<{ result?: string }, PlaceList | undefined>(({ result }) =
   return parsedData.data;
 });
 
-const searchPlaces = handler<
-  {},
-  { what: string; where: string; prompt: string }
->((_, state) => {
-  state.prompt = `generate 10 places that match they query: ${state.what} in ${state.where}`;
-});
+const searchPlaces = handler<{}, { prompt: string, what: string; where: string }>(
+  ({ }, state) => {
+    state.prompt = `generate 10 places that match they query: ${state.what} in ${state.where}`;
+  });
 
 const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value)
@@ -74,62 +73,62 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
 
 const asStars = lift((rating: number) => "⭐".repeat(Math.round(rating)));
 
-export const localSearch = recipe<{
-  what: string;
-  where: string;
-}>("local search", ({ what, where }) => {
-  what.setDefault("restaurants");
-  // TODO: This should be the user's default location, not hardcoded
-  where.setDefault("San Francisco");
+// TODO: This should be the user's default location, not hardcoded
+const Search = z.object({
+  what: z.string().describe("Type of place").default("restaurants"),
+  where: z.string().describe("Location").default("San Francisco"),
+}).describe("Local search");
+type Search = z.infer<typeof Search>;
 
-  const prompt = cell<string | undefined>(undefined);
+const placePrompt = lift(({ name, description, what, where }) => {return {
+    prompt: `a photo of ${name}, ${what} at ${where} that matches the description: ${description}`
+  };
+});
 
-  const { result, pending } = llm(buildPrompt({prompt}))
+export const localSearch = recipe(Search, ({ what, where }) => {
+
+  const prompt = cell<string>("");
+
+  const { result } = llm(buildPrompt({ prompt }))
   const places = grabJson({ result });
 
   return {
-    [UI]: html`
-      <common-vstack gap="sm">
+    [UI]:
+      <os-container>
         <common-hstack gap="sm">
           <common-vstack gap="xs">
             <div>What</div>
             <common-input
-              value=${what}
+              value={what}
               placeholder="Type of place"
-              oncommon-input=${updateValue({ value: what })}
-            ></common-input>
+              oncommon-input={updateValue({ value: what })} />
           </common-vstack>
           <common-vstack gap="xs">
             <div>Where</div>
             <common-input
-              value=${where}
+              value={where}
               placeholder="Location"
-              oncommon-input=${updateValue({ value: where })}
-            ></common-input>
+              oncommon-input={updateValue({ value: where })} />
           </common-vstack>
         </common-hstack>
-        <common-button onclick=${searchPlaces({ what, where, prompt })}
-          >Search</common-button
-        >
+        <common-button onclick={searchPlaces({ what, where, prompt })}>Search</common-button>
         <common-vstack gap="md">
-          ${ifElse(
-            pending,
-            html`<div>Loading...</div>`,
-            places.map(
-              (place) => html`
-                <common-vstack gap="xs">
-                  <div>${place.name}</div>
-                  <div>${place.description}</div>
-                  <div>${place.address}</div>
-                  <div>${place.city}, ${place.state} ${place.zip}</div>
-                  <div>${asStars(place.rating)}</div>
+          {places.map(
+            (place) => <common-vstack gap="xs">
+              <common-hstack>
+                <img src={imageUrl(placePrompt({ name: place.name, description: place.description, what, where }))} width="20%" />
+                <common-vstack>
+                  <div>{place.name}</div>
+                  <div>{place.description}</div>
+                  <div>{place.address}</div>
+                  <div>{place.city}, {place.state} {place.zip}</div>
+                  <div>{asStars(place.rating)}</div>
                 </common-vstack>
-              `
-            )
+              </common-hstack>
+            </common-vstack>
           )}
         </common-vstack>
-      </common-vstack>
-    `,
+      </os-container>,
     what,
     where,
     places,
