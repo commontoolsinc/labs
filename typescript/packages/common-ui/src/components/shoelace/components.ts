@@ -154,7 +154,7 @@ export const details = view("sl-details", {
   "@sl-hide": binding(),
   "@sl-after-hide": binding(),
   "@sl-initial-focus": binding(),
-  "@sl-request-close": @binding(),
+  "@sl-request-close": binding(),
   open: t("boolean"),
   summary: t("string"),
   disabled: t("boolean"),
@@ -348,7 +348,7 @@ export const popup = view("sl-popup", {
   shiftBoundary: t("object"),
   shiftPadding: t("number"),
   autoSizePadding: t("number"),
-  hoverBridge: t("boolean")
+  hoverBridge: t("boolean"),
 });
 
 export const progressBar = view("sl-progress-bar", {
@@ -496,7 +496,7 @@ export const splitPanel = view("sl-split-panel", {
   disabled: t("boolean"),
   primary: t("string"),
   snap: t("string"),
-  snapThreshold: t("number")
+  snapThreshold: t("number"),
 });
 
 export const toggleSwitch = view("sl-switch", {
@@ -531,7 +531,7 @@ export const tabGroup = view("sl-tab-group", {
   placement: t("string"),
   activation: t("string"),
   noScrollControls: t("boolean"),
-  fixedScrollControls: t("boolean")
+  fixedScrollControls: t("boolean"),
 });
 
 export const tabPanel = view("sl-tab-panel", {
@@ -577,7 +577,7 @@ export const textarea = view("sl-textarea", {
   enterkeyhint: t("string"),
   spellcheck: t("boolean"),
   inputmode: t("string"),
-  defaultValue: t("string")
+  defaultValue: t("string"),
 });
 
 export const tooltip = view("sl-tooltip", {
