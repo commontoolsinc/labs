@@ -47,6 +47,10 @@ export function recipe<T>(
 export function recipe<T, R>(
   inputSchema: string,
   fn: (input: OpaqueRef<Required<T>>) => Value<R>
+): RecipeFactory<T, R>;
+export function recipe<T, R>(
+  inputSchema: string,
+  fn: (input: OpaqueRef<Required<T>>) => Value<R>
 ): RecipeFactory<T, R> {
   // The recipe graph is created by calling `fn` which populates for `inputs`
   // and `outputs` with Value<> (which containts OpaqueRef<>) and/or default
@@ -166,13 +170,12 @@ function factoryFromRecipe<T, R>(
     if (external) setValueAtPath(initial, paths.get(cell)!, external);
   });
 
-
   let schema: {
     properties: { [key: string]: any };
     description: string;
   };
 
-  if (typeof inputSchema === 'string') {
+  if (typeof inputSchema === "string") {
     // TODO: initial is likely not needed anymore
     // TODO: But we need a new one for the result
     schema = createJsonSchema(defaults, {}) as {
@@ -183,7 +186,9 @@ function factoryFromRecipe<T, R>(
 
     delete schema.properties[UI]; // TODO: This should be a schema for views
     if (schema.properties?.internal?.properties)
-      for (const key of Object.keys(schema.properties.internal.properties as any))
+      for (const key of Object.keys(
+        schema.properties.internal.properties as any
+      ))
         if (key.startsWith("__#"))
           delete (schema as any).properties.internal.properties[key];
   } else {
