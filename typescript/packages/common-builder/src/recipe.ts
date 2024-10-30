@@ -39,11 +39,11 @@ export function recipe<T extends z.ZodTypeAny>(
   fn: (input: OpaqueRef<Required<z.infer<T>>>) => Value<any>
 ): RecipeFactory<z.infer<T>, ReturnType<typeof fn>>;
 export function recipe<T>(
-  inputSchema: string | z.ZodTypeAny,
+  inputSchema: string,
   fn: (input: OpaqueRef<Required<T>>) => any
 ): RecipeFactory<T, ReturnType<typeof fn>>;
 export function recipe<T, R>(
-  inputSchema: string | z.ZodTypeAny,
+  inputSchema: string,
   fn: (input: OpaqueRef<Required<T>>) => Value<R>
 ): RecipeFactory<T, R> {
   // The recipe graph is created by calling `fn` which populates for `inputs`
