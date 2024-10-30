@@ -3,20 +3,8 @@
 // https://shoelace.style/tutorials/integrating-with-laravel/
 import { resolve } from "path";
 import { defineConfig } from "vite";
-import { viteStaticCopy } from "vite-plugin-static-copy";
-
-const iconsPath =
-  "../../node_modules/@shoelace-style/shoelace/dist/assets/icons";
 
 export default defineConfig({
-  resolve: {
-    alias: [
-      {
-        find: /\/assets\/icons\/(.+)/,
-        replacement: `${iconsPath}/$1`,
-      },
-    ],
-  },
   build: {
     rollupOptions: {
       input: {
@@ -25,14 +13,4 @@ export default defineConfig({
       },
     },
   },
-  plugins: [
-    viteStaticCopy({
-      targets: [
-        {
-          src: iconsPath,
-          dest: "assets",
-        },
-      ],
-    }),
-  ],
 });
