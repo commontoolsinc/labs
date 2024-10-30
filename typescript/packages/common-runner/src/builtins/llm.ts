@@ -1,4 +1,4 @@
-import { cell, CellImpl, ReactivityLog } from "../cell.js";
+import { cell, CellImpl, CellReference, ReactivityLog } from "../cell.js";
 import { makeClient, SimpleMessage, SimpleContent } from "../llm-client.js";
 import { type Action } from "../scheduler.js";
 
@@ -32,26 +32,39 @@ export function llm(
     system?: string;
     max_tokens?: number;
   }>,
-  sendResult: (result: any) => void
+  sendResult: (result: any) => void,
+  _addCancel: (cancel: () => void) => void,
+  cause: CellReference[]
 ): Action {
   const pending = cell(false);
   const result = cell<string | undefined>(undefined);
   const partial = cell<string | undefined>(undefined);
 
   // Generate causal IDs for the cells.
-  pending.generateEntityId({ llm: { pending: inputsCell.get() } });
-  result.generateEntityId({ llm: { result: inputsCell.get() } });
-  partial.generateEntityId({ llm: { partial: inputsCell.get() } });
+  pending.generateEntityId({ llm: { pending: cause } });
+  result.generateEntityId({ llm: { result: cause } });
+  partial.generateEntityId({ llm: { partial: cause } });
 
   sendResult({ pending, result, partial });
 
   let currentRun = 0;
+
+  let previousInput = "";
 
   return (log: ReactivityLog) => {
     const thisRun = ++currentRun;
 
     const { system, messages, prompt, stop, max_tokens } =
       inputsCell.getAsQueryResult([], log) ?? {};
+
+    const currentInput = JSON.stringify(inputsCell.getAsQueryResult([]));
+    if (currentInput === previousInput) {
+      console.log("Same input, skipping");
+      return;
+    } else {
+      console.log("New input, running", currentInput, previousInput);
+    }
+    previousInput = currentInput;
 
     result.setAtPath([], undefined, log);
     partial.setAtPath([], undefined, log);
