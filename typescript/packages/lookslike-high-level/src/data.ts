@@ -53,7 +53,7 @@ export type Charm = {
 
 export { TYPE, NAME, UI };
 
-const storage = createStorage("memory");
+const storage = createStorage("local");
 
 export const charms = cell<CellReference[]>([]);
 charms.generateEntityId("charms");
@@ -96,25 +96,27 @@ export async function syncCharm(
 }
 
 addCharms([
-  await runPersistent(
+  /*  await runPersistent(
     articleQuery,
     {
-      "hello": "world"
+      hello: "world",
     },
     "article query test"
   ),
   await runPersistent(
     evalJs,
     {
-      data: { todos: [
-        { title: "Buy groceries" },
-        { title: "Walk the dog" },
-        { title: "Wash the car" },
-      ] },
+      data: {
+        todos: [
+          { title: "Buy groceries" },
+          { title: "Walk the dog" },
+          { title: "Wash the car" },
+        ],
+      },
       prompt: "list of three items",
     },
     "eval"
-  ),
+  ),*/
   await runPersistent(
     iframe,
     {
@@ -123,7 +125,7 @@ addCharms([
       data: { counter: 0 },
     },
     "iframe"
-  ),
+  ) /*
   await runPersistent(importCalendar, {}, "importCalendar"),
   await runPersistent(
     search,
@@ -179,7 +181,7 @@ addCharms([
       locations: ["coffee shop with great baristas"],
     },
     "routine"
-  ),
+  ),*/,
   await runPersistent(counters, {}, "counters"),
 ]);
 
