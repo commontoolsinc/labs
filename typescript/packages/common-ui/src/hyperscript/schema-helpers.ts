@@ -60,7 +60,14 @@ export const eventProps = () => ({
 
 export const basicProps = () => ({
   ...eventProps(),
-  id: { type: "string" },
+  accesskey: { type: "string" },
+  autocapitalize: { type: "string" },
   class: { type: "string" },
+  disabled: { type: "boolean" },
+  id: { type: "string" },
+  name: { type: "string" },
+  role: { type: "string" },
+  spellcheck: { type: "boolean" },
   slot: { type: "string" },
+  title: { type: "string" },
 });

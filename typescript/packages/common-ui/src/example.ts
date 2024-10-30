@@ -1,14 +1,7 @@
 import "./index.js";
 import { subject } from "@commontools/common-frp/stream";
 import { state } from "@commontools/common-frp/signal";
-import {
-  dict,
-  datatable,
-  vstack,
-  div,
-  alert,
-  avatar,
-} from "./hyperscript/tags.js";
+import { datatable, dict, vstack, div, shoelace } from "./hyperscript/tags.js";
 import { binding, repeat } from "./hyperscript/view.js";
 import render from "./hyperscript/render.js";
 
@@ -82,19 +75,27 @@ const listNode = vstack(
   repeat("items", div({ id: binding("id") }, binding("value"))),
 );
 
-const al = alert(
-  {
-    open: true,
-    variant: "primary",
-  },
-  ["Hello"],
-);
-
-const av = avatar({
-  initials: "GB",
-});
-
-const tree = vstack({}, [al, av, datatableNode, dictNode, listNode]);
+const tree = vstack({}, [
+  shoelace.alert(
+    {
+      open: true,
+      variant: "primary",
+    },
+    ["Hello"],
+  ),
+  shoelace.avatar({
+    initials: "GB",
+  }),
+  shoelace.badge({}, ["Badge"]),
+  shoelace.breadcrumb({}, [
+    shoelace.breadcrumbItem({}, ["Hello"]),
+    shoelace.breadcrumbItem({}, ["World"]),
+  ]),
+  shoelace.button({}, ["Button"]),
+  datatableNode,
+  dictNode,
+  listNode,
+]);
 
 const clicks = subject();
 
