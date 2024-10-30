@@ -21,8 +21,8 @@ import {
 } from "@commontools/common-propagator/cancel.js";
 import * as logger from "./logger.js";
 
-export const render = (parent: HTMLElement, view: View): Cancel => {
-  const { template, context } = view;
+export const render = (parent: HTMLElement, view: View | VNode): Cancel => {
+  let { template, context } = isVNode(view) ? { template: view, context: {} } : view;
   const [root, cancel] = renderNode(template, context);
   if (!root) {
     logger.warn("Could not render view", view);
@@ -76,9 +76,9 @@ const bindChildren = (
       if (childElement) {
         element.append(childElement);
       }
-    } else if (isBinding(child)) {
+    } else if (isBinding(child) || isReactive(child)) {
       // Bind dynamic content
-      const replacement = getContext(context, child.path);
+      const replacement = (isReactive(child)) ? child : getContext(context, child.path);
       // Anchor for reactive replacement
       let anchor: ChildNode = document.createTextNode("");
       let endAnchor: ChildNode | undefined = undefined;
@@ -111,11 +111,11 @@ const bindChildren = (
             replace(item);
           }
           anchor = originalAnchor;
-        } else if (isView(replacement)) {
-          const [childElement, cancel] = renderNode(
+        } else if (isView(replacement) || isVNode(replacement)) {
+          const [childElement, cancel] = isView(replacement) ? renderNode(
             replacement.template,
             replacement.context
-          );
+          ) : renderNode(replacement, {});
           addCancel(cancel);
           if (childElement != null) {
             anchor.replaceWith(childElement);
@@ -151,8 +151,8 @@ const bindProps = (
 ): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
   for (const [propKey, propValue] of Object.entries(props)) {
-    if (isBinding(propValue)) {
-      const replacement = getContext(context, propValue.path);
+    if (isBinding(propValue) || isReactive(propValue) || isSendable(propValue)) {
+      const replacement = (isReactive(propValue) || isSendable(propValue)) ? propValue : getContext(context, propValue.path);
       // If prop is an event, we need to add an event listener
       if (isEventProp(propKey)) {
         if (!isSendable(replacement)) {
