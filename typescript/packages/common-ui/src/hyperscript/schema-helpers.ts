@@ -10,6 +10,8 @@ export type AnyJSONObjectSchema = {
   additionalProperties?: boolean;
 };
 
+export const t = (type: string) => ({ type });
+
 // NOTE: these are written as factories for JSONSchema objects, rather than
 // frozen schema objects because the JSONSchema validator mutates the object
 // to add metadata about the schema.
@@ -54,4 +56,11 @@ export const eventProps = () => ({
   "@todo-input": binding(),
   "@select-suggestion": binding(),
   "@common-input": binding(),
+});
+
+export const basicProps = () => ({
+  ...eventProps(),
+  id: { type: "string" },
+  class: { type: "string" },
+  slot: { type: "string" },
 });
