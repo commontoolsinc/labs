@@ -3,6 +3,7 @@ import {
   UI,
   NAME,
   lift,
+  handler,
 } from "@commontools/common-builder";
 import * as z from "zod";
 import { queryRecipe } from "../query.js";
@@ -20,14 +21,19 @@ export const listItems = lift(({ items } : { items: Article[] }) => {
     </ul>`;
 })
 
+const onAddRandomItem = handler<{}, { items: Article[] }>((e, state) => {
+  state.items.push({ title: "New article", author: "New author" });
+})
+
 export const articleQuery = queryRecipe(
   schema,
   (items) => {
     return {
       [NAME]: 'Article query',
-      [UI]: html`<div>
-        ${listItems({ items })}
-      </div>`,
+      [UI]: html`<ul>
+          ${listItems({ items })}
+          <li><button onclick=${onAddRandomItem({ items })}>Add</button></li>
+      </ul>`,
       data: items,
     };
   },
