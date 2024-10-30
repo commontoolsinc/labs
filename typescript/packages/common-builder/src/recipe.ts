@@ -210,7 +210,7 @@ function factoryFromRecipe<T, R>(
       module,
       inputs,
       outputs,
-      frame: getTopFrame()?.parent,
+      frame: getTopFrame(),
     };
 
     connectInputAndOutputs(node);
