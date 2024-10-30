@@ -1,0 +1,83 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { Frame, isOpaqueRef, isShadowRef } from "../src/types.js";
+import { createShadowRef, opaqueRef } from "../src/opaque-ref.js";
+import { popFrame, pushFrame } from "../src/recipe.js";
+
+describe("opaqueRef function", () => {
+  let frame: Frame;
+
+  beforeEach(() => {
+    frame = pushFrame();
+  });
+
+  afterEach(() => {
+    popFrame(frame);
+  });
+
+  it("creates an opaque ref", () => {
+    const c = opaqueRef<number>();
+    expect(isOpaqueRef(c)).toBe(true);
+  });
+
+  it("supports set methods", () => {
+    const c = opaqueRef<number>();
+    c.set(5);
+    const v = c.export();
+    expect(v.path).toEqual([]);
+    expect(v.value).toBe(5);
+  });
+
+  it("supports default value methods", () => {
+    const c = opaqueRef<number>();
+    c.setDefault(5);
+    const v = c.export();
+    expect(v.path).toEqual([]);
+    expect(v.value).toBe(undefined);
+    expect(v.defaultValue).toBe(5);
+    expect(v.nodes.size).toBe(0);
+  });
+
+  it("returns itself on get", () => {
+    const c = opaqueRef<number>();
+    expect(c.get() === c).toBe(true);
+  });
+
+  it("supports nested values", () => {
+    const c = opaqueRef<{ a: number; b: string }>();
+    c.a.set(5);
+    c.b.set("test");
+    const v = c.export();
+    expect(v.path).toEqual([]);
+    expect(v.value).toEqual({ a: 5, b: "test" });
+  });
+
+  it("supports nested default values", () => {
+    const c = opaqueRef<{ a: number; b: string }>();
+    c.a.setDefault(5);
+    c.b.setDefault("test");
+    const v = c.export();
+    expect(v.path).toEqual([]);
+    expect(v.defaultValue).toEqual({ a: 5, b: "test" });
+  });
+});
+
+describe("shadowRef function", () => {
+  let frame: Frame;
+
+  beforeEach(() => {
+    frame = pushFrame();
+  });
+
+  afterEach(() => {
+    popFrame(frame);
+  });
+
+  it("creates a shadow ref", () => {
+    const ref = opaqueRef();
+    const frame = pushFrame();
+    const shadow = createShadowRef(ref, frame);
+    popFrame(frame);
+    expect(isShadowRef(shadow)).toBe(true);
+    expect(shadow.shadowOf).toBe(ref);
+  });
+});

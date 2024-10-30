@@ -5,6 +5,8 @@ import {
   NodeRef,
   NodeFactory,
   isOpaqueRefMarker,
+  Frame,
+  ShadowRef,
 } from "./types.js";
 import { setValueAtPath, hasValueAtPath } from "./utils.js";
 import { getTopFrame, recipe } from "./recipe.js";
@@ -116,4 +118,17 @@ export function opaqueRef<T>(value?: Value<T> | T): OpaqueRef<T> {
 
   const top = createNestedProxy([]) as OpaqueRef<T>;
   return top;
+}
+
+export function createShadowRef(ref: OpaqueRef<any>, frame?: Frame): ShadowRef {
+  console.log("createShadowRef");
+  const refFrame = ref.export().frame;
+  if (!refFrame || !frame || !frame.parent)
+    throw new Error("Can't create shadow ref for non-parent ref");
+  const shadowRef = {
+    shadowOf:
+      frame.parent === refFrame ? ref : createShadowRef(ref, frame.parent),
+  };
+  frame.shadows.push(shadowRef);
+  return shadowRef;
 }
