@@ -97,6 +97,36 @@ describe("Recipe Runner", () => {
     });
   });
 
+  it("should handle recipes with map nodes with closures", async () => {
+    const doubleArray = recipe<{ values: { x: number }[]; factor: number }>(
+      "Double numbers",
+      ({ values, factor }) => {
+        const doubled = values.map(({ x }) => {
+          const double = lift<{ x: number; factor: number }>(
+            ({ x, factor }) => x * factor
+          );
+          return { double: double({ x, factor }) };
+        });
+        return { doubled };
+      }
+    );
+
+    const result = run(doubleArray, {
+      values: [{ x: 1 }, { x: 2 }, { x: 3 }],
+      factor: 3,
+    });
+
+    await idle();
+
+    // This is necessary to ensure the recipe has time to run
+    // TODO: Get await idle() to work for this case as well
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(result.getAsQueryResult()).toMatchObject({
+      doubled: [{ double: 3 }, { double: 6 }, { double: 9 }],
+    });
+  });
+
   it("should execute handlers", async () => {
     const incHandler = handler<
       { amount: number },
