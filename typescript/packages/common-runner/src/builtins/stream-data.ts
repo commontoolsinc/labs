@@ -1,5 +1,5 @@
 import { cell, CellImpl, ReactivityLog } from "../cell.js";
-// import { normalizeToCells } from "../utils.js";
+import { normalizeToCells } from "../utils.js";
 import { type Action } from "../scheduler.js";
 
 /**
@@ -109,7 +109,7 @@ export function streamData(
               data: JSON.parse(data),
             };
 
-            // normalizeToCells(result, undefined, log);
+            normalizeToCells(parsedData, undefined, log);
             result.setAtPath([], parsedData, log);
             id = undefined;
             event = undefined;
