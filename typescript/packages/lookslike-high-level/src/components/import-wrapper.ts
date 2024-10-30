@@ -62,7 +62,7 @@ export class CommonFileImporter extends LitElement {
 
     const result = await fetch(`/api/data`, {
       method: "PATCH",
-      body: JSON.stringify([{ Import: data}]),
+      body: JSON.stringify([{ Import: data }]),
     }).then(res => res.json())
 
     console.log('synopsys import', result)
@@ -77,10 +77,10 @@ export class CommonFileImporter extends LitElement {
     if (files && files.length > 0) {
       Promise.all(Array.from(files).map(file => this.readFile(file)))
         .then(contents => {
-          this.importedContent = contents;
+          this.importedContent = contents.flat();
           this.importToSynopsys(contents);
           console.log(this.importedContent)
-          this.dispatchEvent(new CustomEvent('common-data', { detail: { shiftKey: e.shiftKey, data: { items: this.importedContent } }}));
+          this.dispatchEvent(new CustomEvent('common-data', { detail: { shiftKey: e.shiftKey, data: this.importedContent }}));
         })
         .catch(error => {
           console.error('Error processing files:', error);

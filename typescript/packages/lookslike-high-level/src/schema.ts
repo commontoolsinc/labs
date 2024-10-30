@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 export function zodSchemaToPlaceholder(schema: any): any {
   // Handle primitive types
   if (schema._def.typeName === 'ZodString') return 'string';
@@ -98,3 +100,45 @@ export const jsonToDatalogQuery = (jsonObj: any) => {
     where
   };
 };
+
+export function inferZodSchema(data: unknown): z.ZodTypeAny {
+  // Handle null
+  if (data === null) {
+    return z.null();
+  }
+
+  // Handle basic types
+  switch (typeof data) {
+    case 'string':
+      return z.string();
+    case 'number':
+      return Number.isInteger(data) ? z.number().int() : z.number();
+    case 'boolean':
+      return z.boolean();
+    case 'undefined':
+      return z.undefined();
+  }
+
+  // Handle arrays
+  if (Array.isArray(data)) {
+    if (data.length === 0) {
+      return z.array(z.unknown());
+    }
+    // Infer schema from first element
+    return z.array(inferZodSchema(data[0]));
+  }
+
+  // Handle objects
+  if (typeof data === 'object') {
+    const shape: { [k: string]: z.ZodTypeAny } = {};
+
+    for (const [key, value] of Object.entries(data)) {
+      shape[key] = inferZodSchema(value);
+    }
+
+    return z.object(shape);
+  }
+
+  // Fallback
+  return z.unknown();
+}
