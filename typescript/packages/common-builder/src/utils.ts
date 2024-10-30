@@ -27,12 +27,15 @@ import { getTopFrame } from "./recipe.js";
  * @returns Transformed value
  */
 export function traverseValue(value: Value<any>, fn: (value: any) => any): any {
+  const staticWrap = isStatic(value) ? markAsStatic : (v: any) => v;
+
   // Perform operation, replaces value if non-undefined is returned
   const result = fn(value);
   if (result !== undefined) value = result;
 
   // Traverse value
-  if (Array.isArray(value)) return value.map((v) => traverseValue(v, fn));
+  if (Array.isArray(value))
+    return staticWrap(value.map((v) => traverseValue(v, fn)));
   else if (
     (!isOpaqueRef(value) &&
       !canBeOpaqueRef(value) &&
@@ -41,10 +44,12 @@ export function traverseValue(value: Value<any>, fn: (value: any) => any): any {
       value !== null) ||
     isRecipe(value)
   )
-    return Object.fromEntries(
-      Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)])
+    return staticWrap(
+      Object.fromEntries(
+        Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)])
+      )
     );
-  else return value;
+  else return staticWrap(value);
 }
 
 export function setValueAtPath(
