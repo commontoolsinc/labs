@@ -98,21 +98,20 @@ describe("Recipe Runner", () => {
   });
 
   it("should handle recipes with map nodes with closures", async () => {
-    const doubleArray = recipe<{ values: { x: number }[]; factor: number }>(
+    const double = lift<{ x: number; factor: number }>(
+      ({ x, factor }) => x * factor
+    );
+
+    const doubleArray = recipe<{ values: number[]; factor: number }>(
       "Double numbers",
       ({ values, factor }) => {
-        const doubled = values.map(({ x }) => {
-          const double = lift<{ x: number; factor: number }>(
-            ({ x, factor }) => x * factor
-          );
-          return { double: double({ x, factor }) };
-        });
+        const doubled = values.map((x) => double({ x, factor }));
         return { doubled };
       }
     );
 
     const result = run(doubleArray, {
-      values: [{ x: 1 }, { x: 2 }, { x: 3 }],
+      values: [1, 2, 3],
       factor: 3,
     });
 
@@ -123,7 +122,7 @@ describe("Recipe Runner", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
 
     expect(result.getAsQueryResult()).toMatchObject({
-      doubled: [{ double: 3 }, { double: 6 }, { double: 9 }],
+      doubled: [3, 6, 9],
     });
   });
 
