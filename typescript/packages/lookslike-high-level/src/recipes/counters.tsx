@@ -11,6 +11,13 @@ const Counters = z.object({
 }).describe("Counters");
 type Counters = z.infer<typeof Counters>;
 
+const updateValue = handler<{ detail: { value: string } }, { value: string }>(
+  ({ detail }, state) => {
+    console.log("updateValue", detail, state);
+    detail?.value && (state.value = detail.value);
+  }
+);
+
 const inc = handler<{}, { item: Counter }>(({ }, { item }) => {
   item.count += 1;
 });
@@ -44,7 +51,11 @@ export const counters = recipe(
     return {
       [NAME]: str`${title} counters`,
       [UI]: <os-container>
-        <h1>{title}</h1>
+        <common-input
+          value={title}
+          placeholder="Name of counter"
+          oncommon-input={updateValue({ value: title })}
+        />
         <ul>
           {items.map(
             (item) =>

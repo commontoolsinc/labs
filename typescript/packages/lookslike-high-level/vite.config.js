@@ -41,6 +41,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/llm/, ""),
       },
+      "/api/img": {
+        target: "https://ct-img.m4ke.workers.dev",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/img/, ""),
+      },
       "/api/data": {
         target: "http://localhost:8080",
         changeOrigin: true,
