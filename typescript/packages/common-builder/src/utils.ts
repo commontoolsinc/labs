@@ -15,6 +15,7 @@ import {
   isStatic,
   markAsStatic,
   isShadowRef,
+  isRecipe,
 } from "./types.js";
 import { getTopFrame } from "./recipe.js";
 
@@ -33,11 +34,12 @@ export function traverseValue(value: Value<any>, fn: (value: any) => any): any {
   // Traverse value
   if (Array.isArray(value)) return value.map((v) => traverseValue(v, fn));
   else if (
-    !isOpaqueRef(value) &&
-    !canBeOpaqueRef(value) &&
-    !isShadowRef(value) &&
-    typeof value === "object" &&
-    value !== null
+    (!isOpaqueRef(value) &&
+      !canBeOpaqueRef(value) &&
+      !isShadowRef(value) &&
+      typeof value === "object" &&
+      value !== null) ||
+    isRecipe(value)
   )
     return Object.fromEntries(
       Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)])
@@ -124,33 +126,9 @@ export function toJSONWithAliases(
   else if (isOpaqueRef(value) && value.export().frame !== getTopFrame())
     value = createShadowRef(value);
 
-  if (isAlias(value)) {
-    console.log(value);
-    if (isShadowRef(value.$alias.cell)) {
-      const cell = value.$alias.cell.shadowOf;
-      if (!paths.has(cell)) throw new Error(`Cell not found in paths`);
-      return {
-        $alias: {
-          path: [...paths.get(cell)!, ...value.$alias.path] as (
-            | string
-            | number
-          )[],
-        },
-      } satisfies Alias;
-    } else if (
-      !("cell" in value.$alias) ||
-      typeof value.$alias.cell === "number"
-    ) {
-      return {
-        $alias: {
-          cell: (value.$alias.cell ?? 0) + 1,
-          path: value.$alias.path as (string | number)[],
-        },
-      } satisfies Alias;
-    } else {
-      throw new Error(`Invalid alias cell`);
-    }
-  } else if (isOpaqueRef(value) || isShadowRef(value)) {
+  if (isOpaqueRef(value) || isShadowRef(value)) {
+    if (isShadowRef(value))
+      console.log("shadow ref", value, value.shadowOf.export?.());
     const pathToCell = paths.get(value);
     if (pathToCell) {
       if (ignoreSelfAliases && deepEqual(path, pathToCell)) return undefined;
@@ -162,6 +140,30 @@ export function toJSONWithAliases(
         },
       } satisfies Alias;
     } else throw new Error(`Cell not found in paths`);
+  } else if (isAlias(value)) {
+    const alias = (value as Alias).$alias;
+    if (isShadowRef(alias.cell)) {
+      const cell = alias.cell.shadowOf;
+      console.log("shadow ref alias", value, cell.export?.());
+      if (isShadowRef(cell)) {
+        throw new Error("Not yet implemented: Nested shadow refs");
+      }
+      if (!paths.has(cell)) throw new Error(`Cell not found in paths`);
+      return {
+        $alias: {
+          path: [...paths.get(cell)!, ...alias.path] as (string | number)[],
+        },
+      } satisfies Alias;
+    } else if (!("cell" in alias) || typeof alias.cell === "number") {
+      return {
+        $alias: {
+          cell: (alias.cell ?? 0) + 1,
+          path: alias.path as (string | number)[],
+        },
+      } satisfies Alias;
+    } else {
+      throw new Error(`Invalid alias cell`);
+    }
   }
 
   if (Array.isArray(value))
@@ -169,7 +171,7 @@ export function toJSONWithAliases(
       toJSONWithAliases(v, paths, ignoreSelfAliases, [...path, i])
     );
 
-  if (typeof value === "object") {
+  if (typeof value === "object" || isRecipe(value)) {
     const result: any = {};
     let hasValue = false;
     for (const key in value as any) {

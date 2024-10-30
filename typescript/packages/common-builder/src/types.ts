@@ -164,7 +164,7 @@ export function isShadowRef(value: any): value is ShadowRef {
   return (
     !!value &&
     typeof value === "object" &&
-    value.shadowOf &&
+    "shadowOf" in value &&
     (isOpaqueRef(value.shadowOf) || isShadowRef(value.shadowOf))
   );
 }

@@ -75,7 +75,7 @@ function factoryFromRecipe<T, R>(
 ): RecipeFactory<T, R> {
   // Traverse the value, collect all mentioned nodes and cells
   const cells = new Set<OpaqueRef<any>>();
-  const shadows = new Set<ShadowRef>();
+  const shadows = new Set<ShadowRef>(getTopFrame()?.shadows ?? []);
   const nodes = new Set<NodeRef>();
 
   const collectCellsAndNodes = (value: Value<any>) =>
@@ -88,8 +88,14 @@ function factoryFromRecipe<T, R>(
       ) {
         if (isOpaqueRef(value) && value.export().frame !== getTopFrame())
           value = createShadowRef(value.export().value, getTopFrame());
-        if (isShadowRef(value)) shadows.add(value);
-        if (isOpaqueRef(value)) {
+        if (isShadowRef(value)) {
+          shadows.add(value);
+          if (
+            isOpaqueRef(value.shadowOf) &&
+            value.shadowOf.export().frame === getTopFrame()
+          )
+            cells.add(value.shadowOf);
+        } else if (isOpaqueRef(value)) {
           cells.add(value);
           value.export().nodes.forEach((node: NodeRef) => {
             if (!nodes.has(node)) {
@@ -110,7 +116,7 @@ function factoryFromRecipe<T, R>(
   // incremental counters, since we don't have access to the original variable
   // names. Later we might do something more clever by analyzing the code (we'll
   // want that anyway for extracting schemas from TypeScript).
-  const paths = new Map<OpaqueRef<any>, PropertyKey[]>();
+  const paths = new Map<OpaqueRef<any> | ShadowRef, PropertyKey[]>();
 
   // Add the inputs default path
   paths.set(inputs, ["parameters"]);
@@ -124,10 +130,13 @@ function factoryFromRecipe<T, R>(
     if (!paths.has(top)) paths.set(top, ["internal", `__#${count++}`]);
     if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
   });
-
+  getTopFrame()?.shadows.forEach((shadow) => {
+    if (paths.has(shadow)) return;
+    paths.set(shadow, ["internal", `__#shadow${count++}`]);
+  });
   shadows.forEach((shadow) => {
     if (paths.has(shadow)) return;
-    paths.set(shadow, ["internal", `__#${count++}`]);
+    paths.set(shadow, []);
   });
 
   // Creates a query (i.e. aliases) into the cells for the result
@@ -201,7 +210,7 @@ function factoryFromRecipe<T, R>(
       module,
       inputs,
       outputs,
-      frame: getTopFrame().parent,
+      frame: getTopFrame()?.parent,
     };
 
     connectInputAndOutputs(node);
@@ -216,7 +225,7 @@ const frames: Frame[] = [];
 export function pushFrame(frame?: Frame): Frame {
   if (!frame)
     frame = {
-      parent: frames.length ? frames[frames.length - 1] : undefined,
+      parent: getTopFrame(),
       shadows: [],
     };
   frames.push(frame);
@@ -228,7 +237,6 @@ export function popFrame(frame?: Frame): void {
   frames.pop();
 }
 
-export function getTopFrame(): Frame {
-  if (!frames.length) throw new Error("No frame");
-  return frames[frames.length - 1];
+export function getTopFrame(): Frame | undefined {
+  return frames.length ? frames[frames.length - 1] : undefined;
 }

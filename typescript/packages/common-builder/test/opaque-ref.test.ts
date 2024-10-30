@@ -80,4 +80,15 @@ describe("shadowRef function", () => {
     expect(isShadowRef(shadow)).toBe(true);
     expect(shadow.shadowOf).toBe(ref);
   });
+
+  it("creates a shadow ref two levels deep", () => {
+    const ref = opaqueRef();
+    const frame1 = pushFrame();
+    const frame2 = pushFrame();
+    const shadow = createShadowRef(ref, frame2);
+    popFrame(frame2);
+    popFrame(frame1);
+    expect(isShadowRef(shadow)).toBe(true);
+    expect(shadow.shadowOf.shadowOf).toBe(ref);
+  });
 });

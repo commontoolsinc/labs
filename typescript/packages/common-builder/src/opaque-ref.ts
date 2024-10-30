@@ -32,7 +32,7 @@ export function opaqueRef<T>(value?: Value<T> | T): OpaqueRef<T> {
     value,
     defaultValue: undefined,
     nodes: new Set<NodeRef>(),
-    frame: getTopFrame(),
+    frame: getTopFrame()!,
   };
 
   function createNestedProxy(
@@ -121,14 +121,12 @@ export function opaqueRef<T>(value?: Value<T> | T): OpaqueRef<T> {
 }
 
 export function createShadowRef(ref: OpaqueRef<any>, frame?: Frame): ShadowRef {
-  console.log("createShadowRef");
   const refFrame = ref.export().frame;
   if (!refFrame || !frame || !frame.parent)
     throw new Error("Can't create shadow ref for non-parent ref");
-  const shadowRef = {
-    shadowOf:
-      frame.parent === refFrame ? ref : createShadowRef(ref, frame.parent),
-  };
-  frame.shadows.push(shadowRef);
+  const parentShadow =
+    frame.parent === refFrame ? undefined : createShadowRef(ref, frame.parent);
+  const shadowRef = { shadowOf: parentShadow ?? ref };
+  if (parentShadow) frame.parent.shadows.push(parentShadow);
   return shadowRef;
 }
