@@ -31,7 +31,7 @@ export const articleQuery = queryRecipe(
     return {
       [NAME]: 'Article query',
       [UI]: html`<ul>
-          ${listItems({ items })}
+          ${items.map(({ title, author }) => html`<li>${title} - ${author}</li>`)}
           <li><button onclick=${onAddRandomItem({ items })}>Add</button></li>
       </ul>`,
       data: items,
