@@ -1,4 +1,3 @@
-import { html } from "@commontools/common-html";
 import {
   UI,
   NAME,
@@ -6,7 +5,6 @@ import {
   handler,
   recipe,
   fetchData,
-  cell,
 } from "@commontools/common-builder";
 import * as z from "zod";
 import { buildTransactionRequest, queryRecipe, querySynopsys } from "../query.js";
@@ -19,12 +17,6 @@ export const schema = z.object({
 })
 
 type Article = z.infer<typeof schema>;
-
-export const listItems = lift(({ items }: { items: Article[] }) => {
-  return html`<ul>
-        ${(items || []).map(({ title, author }) => html`<li>${title} - ${author}</li>`)}
-    </ul>`;
-})
 
 const onAddItem = handler<{}, { titleInput: string, authorInput: string }>((e, state) => {
   const titleInput = state.titleInput;
