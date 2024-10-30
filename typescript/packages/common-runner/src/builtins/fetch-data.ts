@@ -1,4 +1,4 @@
-import { cell, CellImpl, ReactivityLog } from "../cell.js";
+import { cell, CellImpl, CellReference, ReactivityLog } from "../cell.js";
 import { normalizeToCells } from "../utils.js";
 import { type Action } from "../scheduler.js";
 /**
@@ -20,7 +20,7 @@ export function fetchData(
   }>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
-  cause: CellImpl<any>[]
+  cause: CellReference[]
 ): Action {
   const pending = cell(false);
   const result = cell<any | undefined>(undefined);
