@@ -78,6 +78,7 @@ export const jsonToDatalogQuery = (jsonObj: any) => {
         } else {
           selectObj[key] = [`?${key}`];
         }
+        selectObj[`${key}/`] = `?${key}`;
 
       } else if (typeof value === 'object' && value !== null) {
         selectObj[key] = {};
