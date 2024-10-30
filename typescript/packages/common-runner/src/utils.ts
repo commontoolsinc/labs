@@ -167,8 +167,25 @@ export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
   function convert(binding: any, processStatic = false): any {
     if (isStatic(binding) && !processStatic)
       return markAsStatic(convert(binding, true));
-    else if (isAlias(binding)) return { $alias: { cell, ...binding.$alias } };
-    else if (isCell(binding)) return binding; // Don't enter cells
+    else if (isAlias(binding)) {
+      if (typeof binding.$alias.cell === "number")
+        if (binding.$alias.cell === 1)
+          return { $alias: { path: binding.$alias.path } };
+        else
+          return {
+            $alias: {
+              cell: binding.$alias.cell - 1,
+              path: binding.$alias.path,
+            },
+          };
+      else
+        return {
+          $alias: {
+            cell: binding.$alias.cell ?? cell,
+            path: binding.$alias.path,
+          },
+        };
+    } else if (isCell(binding)) return binding; // Don't enter cells
     else if (Array.isArray(binding))
       return binding.map((value) => convert(value));
     else if (typeof binding === "object" && binding !== null)
@@ -188,6 +205,8 @@ export function findAllAliasedCells(
   const cells: CellReference[] = [];
   function find(binding: any, origCell: CellImpl<any>) {
     if (isAlias(binding)) {
+      // Numbered cells are yet to be unwrapped nested recipes. Ignore them.
+      if (typeof binding.$alias.cell === "number") return;
       const cell = binding.$alias.cell ?? origCell;
       const path = binding.$alias.path;
       if (cells.find((c) => c.cell === cell && c.path === path)) return;

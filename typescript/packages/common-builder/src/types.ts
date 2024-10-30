@@ -39,6 +39,7 @@ export type OpaqueRefMethods<T> = {
     defaultValue?: Value<T>;
     nodes: Set<NodeRef>;
     external?: any;
+    frame: Frame;
   };
   map<S>(
     fn: (value: T extends Array<infer U> ? Value<U> : Value<T>) => Value<S>
@@ -57,6 +58,7 @@ export type NodeRef = {
   module: Module | Recipe | OpaqueRef<Module | Recipe>;
   inputs: Value<any>;
   outputs: OpaqueRef<any>;
+  frame: Frame | undefined;
 };
 
 export type toJSON = {
@@ -153,6 +155,19 @@ export function makeOpaqueRef(value: CanBeOpaqueRef): OpaqueRef<any> {
 }
 
 export const toOpaqueRef = Symbol("toOpaqueRef");
+
+export type ShadowRef = {
+  shadowOf: OpaqueRef<any> | ShadowRef;
+};
+
+export function isShadowRef(value: any): value is ShadowRef {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "shadowOf" in value &&
+    (isOpaqueRef(value.shadowOf) || isShadowRef(value.shadowOf))
+  );
+}
 
 export type Frame = {
   parent?: Frame;

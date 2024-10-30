@@ -13,8 +13,10 @@ import {
   canBeOpaqueRef,
   makeOpaqueRef,
   Frame,
+  ShadowRef,
+  isShadowRef,
 } from "./types.js";
-import { opaqueRef } from "./opaque-ref.js";
+import { createShadowRef, opaqueRef } from "./opaque-ref.js";
 import {
   traverseValue,
   setValueAtPath,
@@ -75,31 +77,48 @@ function factoryFromRecipe<T, R>(
 ): RecipeFactory<T, R> {
   // Traverse the value, collect all mentioned nodes and cells
   const cells = new Set<OpaqueRef<any>>();
+  const shadows = new Set<ShadowRef>();
   const nodes = new Set<NodeRef>();
 
   const collectCellsAndNodes = (value: Value<any>) =>
     traverseValue(value, (value) => {
       if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
-      if (isOpaqueRef(value) && !cells.has(value)) {
-        cells.add(value);
-        value.export().nodes.forEach((node: NodeRef) => {
-          if (!nodes.has(node)) {
-            nodes.add(node);
-            collectCellsAndNodes(node.inputs);
-            collectCellsAndNodes(node.outputs);
-          }
-        });
-        collectCellsAndNodes(value.export().value);
+      if (
+        (isOpaqueRef(value) || isShadowRef(value)) &&
+        !cells.has(value) &&
+        !shadows.has(value)
+      ) {
+        if (isOpaqueRef(value) && value.export().frame !== getTopFrame())
+          value = createShadowRef(value.export().value);
+        if (isShadowRef(value)) {
+          shadows.add(value);
+          if (
+            isOpaqueRef(value.shadowOf) &&
+            value.shadowOf.export().frame === getTopFrame()
+          )
+            cells.add(value.shadowOf);
+        } else if (isOpaqueRef(value)) {
+          cells.add(value);
+          value.export().nodes.forEach((node: NodeRef) => {
+            if (!nodes.has(node)) {
+              nodes.add(node);
+              node.inputs = collectCellsAndNodes(node.inputs);
+              node.outputs = collectCellsAndNodes(node.outputs);
+            }
+          });
+          value.set(collectCellsAndNodes(value.export().value));
+        }
       }
+      return value;
     });
-  collectCellsAndNodes(inputs);
-  collectCellsAndNodes(outputs);
+  inputs = collectCellsAndNodes(inputs);
+  outputs = collectCellsAndNodes(outputs);
 
   // Then assign paths on the recipe cell for all cells. For now we just assign
   // incremental counters, since we don't have access to the original variable
   // names. Later we might do something more clever by analyzing the code (we'll
   // want that anyway for extracting schemas from TypeScript).
-  const paths = new Map<OpaqueRef<any>, PropertyKey[]>();
+  const paths = new Map<OpaqueRef<any> | ShadowRef, PropertyKey[]>();
 
   // Add the inputs default path
   paths.set(inputs, ["parameters"]);
@@ -112,6 +131,10 @@ function factoryFromRecipe<T, R>(
     const { cell: top, path } = cell.export();
     if (!paths.has(top)) paths.set(top, ["internal", `__#${count++}`]);
     if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
+  });
+  shadows.forEach((shadow) => {
+    if (paths.has(shadow)) return;
+    paths.set(shadow, []);
   });
 
   // Creates a query (i.e. aliases) into the cells for the result
@@ -194,7 +217,12 @@ function factoryFromRecipe<T, R>(
 
   return Object.assign((inputs: Value<T>): OpaqueRef<R> => {
     const outputs = opaqueRef<R>();
-    const node: NodeRef = { module, inputs, outputs };
+    const node: NodeRef = {
+      module,
+      inputs,
+      outputs,
+      frame: getTopFrame(),
+    };
 
     connectInputAndOutputs(node);
     outputs.connect(node);
