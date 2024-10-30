@@ -39,6 +39,7 @@ export type OpaqueRefMethods<T> = {
     defaultValue?: Value<T>;
     nodes: Set<NodeRef>;
     external?: any;
+    frame?: Frame;
   };
   map<S>(
     fn: (value: T extends Array<infer U> ? Value<U> : Value<T>) => Value<S>
@@ -57,6 +58,7 @@ export type NodeRef = {
   module: Module | Recipe | OpaqueRef<Module | Recipe>;
   inputs: Value<any>;
   outputs: OpaqueRef<any>;
+  frame?: Frame;
 };
 
 export type toJSON = {
