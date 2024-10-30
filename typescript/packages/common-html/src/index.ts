@@ -14,3 +14,4 @@ export {
 export { html } from "./html.js";
 export { render, setNodeSanitizer, setEventSanitizer } from "./render.js";
 export { setDebug, debug } from "./logger.js";
+export { h, Fragment } from "./jsx.js";

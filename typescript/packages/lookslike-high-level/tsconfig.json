@@ -4,9 +4,13 @@
   "compilerOptions": {
     "lib": ["es2022", "esnext.array", "esnext", "dom"],
     "outDir": "./",
+    "declaration": true,
+    "jsx": "preserve",
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "Fragment",
     "experimentalDecorators": true,
     "useDefineForClassFields": false
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "include": ["src/**/*.ts", "test/**/*.ts", "src/**/*.tsx"],
   "exclude": []
 }

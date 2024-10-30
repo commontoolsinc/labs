@@ -1,4 +1,4 @@
-import { html } from "@commontools/common-html";
+import { h } from "@commontools/common-html";
 import { recipe, NAME, UI, handler, lift } from "@commontools/common-builder";
 
 const inc = handler<{}, { count: number }>(({}, state) => {
@@ -30,26 +30,25 @@ export const counters = recipe<{ items: { title: string; count: number }[] }>(
   "counters",
   ({ items }) => {
     items.setDefault([]);
-    //items.setDefault([{ title: "item 1", count: 0 }, { title: "item 2", count: 0 }]);
 
     const total = sum({ items });
 
     return {
       [NAME]: "counters",
-      [UI]: html`<div>
+      [UI]: <div>
         <ul>
-          ${items.map(
+          {items.map(
             ({ title, count }) =>
-              html`<li>
-                ${title} - ${count}
-                <button onclick=${inc({ count })}>Inc</button>
-              </li>`
+              <li>
+                {title} - {count}
+                <button onclick={inc({ count })}>Inc</button>
+              </li>
           )}
         </ul>
-        <p>Total: ${total}</p>
-        <button onclick=${updateRandomItem({ items })}>Inc random item</button>
-        <button onclick=${addItem({ items })}>Add new item</button>
-      </div>`,
+        <p>Total: {total}</p>
+        <button onclick={updateRandomItem({ items })}>Inc random item</button>
+        <button onclick={addItem({ items })}>Add new item</button>
+      </div>,
     };
   }
 );
