@@ -78,9 +78,8 @@ const addToPrompt = handler<{ prompt: string }, { title: string }>(
 const Title = z.object({
   title: z.string().describe("Image generation prompt").default("abstract geometric art"),
 });
-type Title = z.infer<typeof Title>;
 
-export const prompt = recipe<Title>(Title, ({ title }) => {
+export const prompt = recipe(Title, ({ title }) => {
   const variations = grabPrompts(llm(buildPrompt({ title })));
 
   let src = imageUrl({ title });

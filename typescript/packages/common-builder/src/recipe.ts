@@ -34,16 +34,16 @@ import { zodToJsonSchema } from "zod-to-json-schema";
  *
  * @returns A recipe node factory that also serializes as recipe.
  */
+export function recipe<T extends z.ZodTypeAny>(
+  inputSchema: T,
+  fn: (input: OpaqueRef<Required<z.infer<T>>>) => Value<any>
+): RecipeFactory<z.infer<T>, ReturnType<typeof fn>>;
 export function recipe<T>(
-  schema: string | z.ZodTypeAny,
+  inputSchema: string | z.ZodTypeAny,
   fn: (input: OpaqueRef<Required<T>>) => any
 ): RecipeFactory<T, ReturnType<typeof fn>>;
 export function recipe<T, R>(
-  schema: string | z.ZodTypeAny,
-  fn: (input: OpaqueRef<Required<T>>) => Value<R>
-): RecipeFactory<T, R>;
-export function recipe<T, R>(
-  schema: string | z.ZodTypeAny,
+  inputSchema: string | z.ZodTypeAny,
   fn: (input: OpaqueRef<Required<T>>) => Value<R>
 ): RecipeFactory<T, R> {
   // The recipe graph is created by calling `fn` which populates for `inputs`
@@ -53,19 +53,19 @@ export function recipe<T, R>(
   const frame = pushFrame();
   const inputs = opaqueRef<Required<T>>();
   const outputs = fn(inputs);
-  const result = factoryFromRecipe<T, R>(schema, inputs, outputs);
+  const result = factoryFromRecipe<T, R>(inputSchema, inputs, outputs);
   popFrame(frame);
   return result;
 }
 
 // Same as above, but assumes the caller manages the frame
 export function recipeFromFrame<T, R>(
-  schema: string | z.ZodTypeAny,
+  inputSchema: string | z.ZodTypeAny,
   fn: (input: OpaqueRef<Required<T>>) => Value<R>
 ): RecipeFactory<T, R> {
   const inputs = opaqueRef<Required<T>>();
   const outputs = fn(inputs);
-  return factoryFromRecipe<T, R>(schema, inputs, outputs);
+  return factoryFromRecipe<T, R>(inputSchema, inputs, outputs);
 }
 
 function factoryFromRecipe<T, R>(
