@@ -5,9 +5,10 @@ import {
   NodeRef,
   NodeFactory,
   isOpaqueRefMarker,
+  ShadowRef,
 } from "./types.js";
 import { setValueAtPath, hasValueAtPath } from "./utils.js";
-import { recipe } from "./recipe.js";
+import { getTopFrame, recipe } from "./recipe.js";
 import { createNodeFactory } from "./module.js";
 
 let mapFactory: NodeFactory<any, any>;
@@ -30,6 +31,7 @@ export function opaqueRef<T>(value?: Value<T> | T): OpaqueRef<T> {
     value,
     defaultValue: undefined,
     nodes: new Set<NodeRef>(),
+    frame: getTopFrame()!,
   };
 
   function createNestedProxy(
@@ -115,4 +117,8 @@ export function opaqueRef<T>(value?: Value<T> | T): OpaqueRef<T> {
 
   const top = createNestedProxy([]) as OpaqueRef<T>;
   return top;
+}
+
+export function createShadowRef(ref: OpaqueRef<any>): ShadowRef {
+  return { shadowOf: ref };
 }

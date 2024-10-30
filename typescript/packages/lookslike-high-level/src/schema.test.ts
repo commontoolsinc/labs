@@ -8,6 +8,20 @@ const schema = z.object({
   email: z.string().email()
 });
 
+const articleSchema = z.object({
+  title: z.string(),
+  author: z.string(),
+  tags: z.array(z.string()),
+})
+
+const articleWithCommentsSchema = z.object({
+  title: z.string(),
+  author: z.string(),
+  comments: z.array(z.object({
+    message: z.string()
+  }))
+})
+
 const complexSchema = z.object({
   name: z.string().describe("Full name of the user"),
   age: z.number().describe("Age in years"),
@@ -38,6 +52,61 @@ describe("zodSchemaToPlaceholder", () => {
     const output = zodSchemaToPlaceholder(schema);
     console.log(output);
     expect(output).toMatchObject(expected);
+  })
+
+
+  it.only("should make an article placeholder", () => {
+    const expected = {
+      "title": "string",
+      "author": "string",
+      "tags": ["string"]
+    };
+
+    const output = zodSchemaToPlaceholder(articleSchema);
+    expect(output).toMatchObject(expected);
+  })
+
+  it.only("should make an article query", () => {
+    const expected = {
+      select: {
+        title: "?title",
+        author: "?author",
+        tags: ["?tags"]
+      },
+      where: [
+        { Case: ["?item", "title", "?title"] },
+        { Case: ["?item", "author", "?author"] },
+        { Case: ["?item", "tags", "?tags[]"] },
+        { Case: ["?tags[]", "?.tags", "?tags"] }
+      ]
+    };
+
+    const output = zodSchemaToPlaceholder(articleSchema);
+    const query = jsonToDatalogQuery(output);
+    expect(query).toMatchObject(expected);
+  })
+
+  it.only("should make an article with comments query", () => {
+    const expected = {
+      select: {
+        title: "?title",
+        author: "?author",
+        comments: [{
+          message: "?comments_message"
+        }]
+      },
+      where: [
+        { Case: ["?item", "title", "?title"] },
+        { Case: ["?item", "author", "?author"] },
+        { Case: ["?item", "comments", "?comments[]"] },
+        { Case: ["?comments[]", "?.comments", "?comments"] },
+        { Case: ["?comments", "message", "?comments_message"] }
+      ]
+    };
+
+    const output = zodSchemaToPlaceholder(articleWithCommentsSchema);
+    const query = jsonToDatalogQuery(output);
+    expect(query).toMatchObject(expected);
   })
 
   it("should make a complex placeholder", () => {

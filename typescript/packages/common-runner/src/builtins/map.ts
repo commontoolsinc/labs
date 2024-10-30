@@ -66,6 +66,13 @@ export function map(
     const listRef = getCellReferenceOrThrow(list);
     list = listRef.cell.getAtPath(listRef.path);
 
+    // Same for op, but here it's so that the proxy doesn't follow the aliases
+    // in the recipe instead of returning the recipe.
+    // TODO: Instead we should reify the recipe as a NodeFactory and teach the
+    // query result proxy to not enter those.
+    const opRef = getCellReferenceOrThrow(op);
+    op = opRef.cell.getAtPath(opRef.path);
+
     const seen: any[] = [];
 
     // Update values that are new or have changed

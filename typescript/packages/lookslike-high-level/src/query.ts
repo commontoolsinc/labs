@@ -3,6 +3,7 @@ import {
   lift,
   RecipeFactory,
   Value,
+  OpaqueRef,
 } from "@commontools/common-builder";
 import { streamData } from "@commontools/common-builder";
 import * as z from "zod";
@@ -18,6 +19,19 @@ const buildQueryRequest = lift(({ query }) => {
     },
   };
 });
+
+
+export const buildTransactionRequest = lift(({ changes }) => {
+  if (!changes) return {};
+  return {
+    url: `/api/data`,
+    options: {
+      method: "PATCH",
+      body: JSON.stringify(changes),
+    },
+  };
+});
+
 
 const schemaToQuery = lift(({ schema }) => {
   return jsonToDatalogQuery(zodSchemaToPlaceholder(schema))
@@ -46,3 +60,12 @@ export function queryRecipe<T extends z.ZodTypeAny>(
     }
   )
 }
+
+
+export const querySynopsys = recipe(z.any(), (schema) => {
+  const query = schemaToQuery({ schema });
+  const { result } = streamData<{ id: string, event: string, data: any[] }>(buildQueryRequest({ query }));
+  tapStringify({ result: result.data, schema })
+
+  return { result: result.data, query };
+}) as <T>(schema: z.ZodType<T>) => { result: OpaqueRef<T[]>, query: OpaqueRef<any> };

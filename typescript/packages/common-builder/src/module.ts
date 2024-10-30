@@ -8,6 +8,7 @@ import type {
 } from "./types.js";
 import { opaqueRef } from "./opaque-ref.js";
 import { moduleToJSON, connectInputAndOutputs } from "./utils.js";
+import { getTopFrame } from "./recipe.js";
 import type {
   JavaScriptModuleDefinition,
   JavaScriptValueMap,
@@ -24,7 +25,7 @@ export function createNodeFactory<T = any, R = any>(
 
   return Object.assign((inputs: Value<T>): OpaqueRef<R> => {
     const outputs = opaqueRef<R>();
-    const node: NodeRef = { module, inputs, outputs };
+    const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
 
     connectInputAndOutputs(node);
     outputs.connect(node);
@@ -81,6 +82,7 @@ export function handler<E, T>(
       module,
       inputs: { ...(props as object), $event: stream },
       outputs: {},
+      frame: getTopFrame(),
     };
 
     connectInputAndOutputs(node);

@@ -366,7 +366,6 @@ export class CommonWindowManager extends LitElement {
               `
             )}
           </os-fabgroup>
-
           ${this.charms.length === 0
             ? html`
                 <div class="empty-state">
@@ -521,9 +520,11 @@ export class CommonWindowManager extends LitElement {
       JSON.stringify(this.focusedCharm?.entityId) !== match.params.charmId
     ) {
       // TODO: Add a timeout here, show loading state and error state
-      syncCharm(match.params.charmId, true).then(
-        (charm) => charm && charm.get() && this.openCharm(charm)
-      );
+      setTimeout(() => {
+        syncCharm(match.params.charmId, true).then(
+          (charm) => charm && charm.get() && this.openCharm(charm)
+        );
+      }, 100);
     }
   }
 

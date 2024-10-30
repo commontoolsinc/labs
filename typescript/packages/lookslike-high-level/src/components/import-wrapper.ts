@@ -55,6 +55,19 @@ export class CommonFileImporter extends LitElement {
     this.requestUpdate();
   }
 
+  private async importToSynopsys(data: any) {
+    if (!data) {
+      throw new Error('No data to import');
+    }
+
+    const result = await fetch(`/api/data`, {
+      method: "PATCH",
+      body: JSON.stringify([{ Import: data}]),
+    }).then(res => res.json())
+
+    console.log('synopsys import', result)
+  }
+
   private onDrop(e: DragEvent) {
     e.preventDefault();
     this.classList.remove('dragover');
@@ -65,6 +78,7 @@ export class CommonFileImporter extends LitElement {
       Promise.all(Array.from(files).map(file => this.readFile(file)))
         .then(contents => {
           this.importedContent = contents;
+          this.importToSynopsys(contents);
           console.log(this.importedContent)
           this.dispatchEvent(new CustomEvent('common-data', { detail: { shiftKey: e.shiftKey, data: { items: this.importedContent } }}));
         })

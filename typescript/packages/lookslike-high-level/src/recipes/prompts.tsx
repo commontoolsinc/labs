@@ -1,34 +1,25 @@
-import { html } from "@commontools/common-html";
+import { h } from "@commontools/common-html";
 import {
   recipe,
   lift,
   llm,
   handler,
-  navigateTo,
   NAME,
   UI,
 } from "@commontools/common-builder";
 import { z } from "zod";
-import { zodToJsonSchema } from "zod-to-json-schema";
 
 const Prompt = z.object({
   prompt: z.string().describe("Image generation prompt"),
 });
 type Prompt = z.infer<typeof Prompt>;
-const jsonSchema = JSON.stringify(zodToJsonSchema(Prompt), null, 2);
 
-const imageUrl = lift(
-  ({ title }) =>
-    `https://ct-img.m4ke.workers.dev/?prompt=${encodeURIComponent(title)}`
-);
+const imageUrl = lift(({ title }) => `/api/img/?prompt=${encodeURIComponent(title)}`);
 
-const launcher = handler<PointerEvent, { title: string }>((_, { title }) =>
-  navigateTo(prompt({ title }))
-);
-
-const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
+// FIXME(ja): allowing both detail.value and newTitle is a bit of a hack
+const updateTitle = handler<{ detail: { value: string } }, { title: string, newTitle?: string }>(
   ({ detail }, state) => {
-    state.title = detail?.value ?? "untitled";
+    state.title = detail?.value || state.newTitle || "";
   }
 );
 
@@ -86,20 +77,20 @@ export const prompt = recipe(Title, ({ title }) => {
 
   return {
     [NAME]: title,
-    [UI]: html`<common-vstack gap="sm">
+    [UI]: <common-vstack gap="sm">
       <common-input
-        value=${title}
+        value={title}
         placeholder="List title"
-        oncommon-input=${updateTitle({ title })}
-      ></common-input>
-      <img src="${src}}" width="100%" />
+        oncommon-input={updateTitle({ title })}
+      />
+      <img src={src} width="50%" />
       <ul>
-        ${variations.map(
-          ({ prompt }) =>
-            html`<li onclick=${launcher({ title: prompt })}>${prompt}</li>`
+        {variations.map(
+          (v) =>
+            <img title={v.prompt} src={imageUrl({ title: v.prompt })} width="20%" onclick={updateTitle({ title, newTitle: v.prompt })} />
         )}
       </ul>
-    </common-vstack>`,
+    </common-vstack>,
     title,
     variations,
     addToPrompt: addToPrompt({ title }),

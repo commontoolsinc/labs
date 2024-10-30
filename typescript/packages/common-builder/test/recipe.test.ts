@@ -148,3 +148,58 @@ describe("recipe with map node", () => {
     expect(typeof module.implementation).toBe("function");
   });
 });
+
+describe("recipe with map node that references a parent cell", () => {
+  const multiplyArray = recipe<{ values: { x: number }[]; factor: number }>(
+    "Double numbers",
+    ({ values, factor }) => {
+      const doubled = values.map(({ x }) => {
+        const double = lift<{ x: number; factor: number }>(({ x, factor }) => ({
+          x: x * factor,
+        }));
+        return { doubled: double({ x, factor }) };
+      });
+      return { doubled };
+    }
+  );
+
+  it("correctly creates references to the parent cells", () => {
+    console.log(JSON.stringify(multiplyArray, null, 2));
+    expect(
+      (multiplyArray.nodes[0].inputs as { op: Recipe }).op.nodes[0].inputs
+    ).toEqual({
+      x: { $alias: { cell: 1, path: ["parameters", "x"] } },
+      factor: { $alias: { path: ["parameters", "factor"] } },
+    });
+  });
+});
+
+describe("recipe with map node that references a parent cell in another recipe", () => {
+  const multiplyArray = recipe<{ values: { x: number }[]; factor: number }>(
+    "Double numbers",
+    ({ values, factor }) => {
+      const wrapper = recipe("Wrapper", () => {
+        const doubled = values.map(({ x }) => {
+          const double = lift<{ x: number; factor: number }>(
+            ({ x, factor }) => ({
+              x: x * factor,
+            })
+          );
+          return { doubled: double({ x, factor }) };
+        });
+        return { doubled };
+      });
+      return wrapper({ values, factor });
+    }
+  );
+
+  it("correctly creates references to the parent cells", () => {
+    console.log(JSON.stringify(multiplyArray, null, 2));
+    expect(
+      (multiplyArray.nodes[0].inputs as { op: Recipe }).op.nodes[0].inputs
+    ).toEqual({
+      x: { $alias: { cell: 1, path: ["parameters", "x"] } },
+      factor: { $alias: { path: ["parameters", "factor"] } },
+    });
+  });
+});

@@ -1,3 +1,4 @@
+import { createShadowRef } from "./opaque-ref.js";
 import {
   Value,
   Module,
@@ -13,19 +14,42 @@ import {
   makeOpaqueRef,
   isStatic,
   markAsStatic,
+  isShadowRef,
+  isRecipe,
 } from "./types.js";
+import { getTopFrame } from "./recipe.js";
 
-/** traverse a value, _not_ entering cells */
-export function traverseValue(value: Value<any>, fn: (value: any) => any) {
-  fn(value);
-  if (Array.isArray(value)) value.forEach((v) => traverseValue(v, fn));
+/**
+ * Traverse a value, _not_ entering cells
+ *
+ * @param value - The value to traverse
+ * @param fn - The function to apply to each value, which can return a new value
+ * @returns Transformed value
+ */
+export function traverseValue(value: Value<any>, fn: (value: any) => any): any {
+  const staticWrap = isStatic(value) ? markAsStatic : (v: any) => v;
+
+  // Perform operation, replaces value if non-undefined is returned
+  const result = fn(value);
+  if (result !== undefined) value = result;
+
+  // Traverse value
+  if (Array.isArray(value))
+    return staticWrap(value.map((v) => traverseValue(v, fn)));
   else if (
-    !isOpaqueRef(value) &&
-    !canBeOpaqueRef(value) &&
-    typeof value === "object" &&
-    value !== null
+    (!isOpaqueRef(value) &&
+      !canBeOpaqueRef(value) &&
+      !isShadowRef(value) &&
+      typeof value === "object" &&
+      value !== null) ||
+    isRecipe(value)
   )
-    for (const key in value as any) traverseValue(value[key], fn);
+    return staticWrap(
+      Object.fromEntries(
+        Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)])
+      )
+    );
+  else return staticWrap(value);
 }
 
 export function setValueAtPath(
@@ -101,16 +125,57 @@ export function toJSONWithAliases(
     return markAsStatic(
       toJSONWithAliases(value, paths, ignoreSelfAliases, path, true)
     );
+  // Convert regular cells to opaque refs
   else if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
-  if (isOpaqueRef(value)) {
+  // Convert parent opaque refs to shadow refs
+  else if (isOpaqueRef(value) && value.export().frame !== getTopFrame())
+    value = createShadowRef(value);
+
+  if (isOpaqueRef(value) || isShadowRef(value)) {
+    if (isShadowRef(value))
+      console.log("shadow ref", value, value.shadowOf.export?.());
     const pathToCell = paths.get(value);
     if (pathToCell) {
       if (ignoreSelfAliases && deepEqual(path, pathToCell)) return undefined;
 
       return {
-        $alias: { path: pathToCell as (string | number)[] },
+        $alias: {
+          ...(isShadowRef(value) ? { cell: value } : {}),
+          path: pathToCell as (string | number)[],
+        },
       } satisfies Alias;
     } else throw new Error(`Cell not found in paths`);
+  } else if (isAlias(value)) {
+    const alias = (value as Alias).$alias;
+    if (isShadowRef(alias.cell)) {
+      const cell = alias.cell.shadowOf;
+      console.log("shadow ref alias", value, cell.export?.());
+      if (cell.export().frame !== getTopFrame()) {
+        let frame = getTopFrame();
+        while (frame && frame.parent !== cell.export().frame)
+          frame = frame.parent;
+        if (!frame)
+          throw new Error(
+            `Shadow ref alias with parent cell not found in current frame`
+          );
+        return value;
+      }
+      if (!paths.has(cell)) throw new Error(`Cell not found in paths`);
+      return {
+        $alias: {
+          path: [...paths.get(cell)!, ...alias.path] as (string | number)[],
+        },
+      } satisfies Alias;
+    } else if (!("cell" in alias) || typeof alias.cell === "number") {
+      return {
+        $alias: {
+          cell: (alias.cell ?? 0) + 1,
+          path: alias.path as (string | number)[],
+        },
+      } satisfies Alias;
+    } else {
+      throw new Error(`Invalid alias cell`);
+    }
   }
 
   if (Array.isArray(value))
@@ -118,7 +183,7 @@ export function toJSONWithAliases(
       toJSONWithAliases(v, paths, ignoreSelfAliases, [...path, i])
     );
 
-  if (typeof value === "object") {
+  if (typeof value === "object" || isRecipe(value)) {
     const result: any = {};
     let hasValue = false;
     for (const key in value as any) {
@@ -238,8 +303,18 @@ export function recipeToJSON(recipe: Recipe) {
 }
 
 export function connectInputAndOutputs(node: NodeRef) {
-  traverseValue(node.inputs, (value) => {
+  function connect(value: any): any {
     if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
-    if (isOpaqueRef(value)) value.connect(node);
-  });
+    if (isOpaqueRef(value)) {
+      // Return shadow ref it this is a parent opaque ref. Note: No need to
+      // connect to the cell. The connection is there to traverse the graph to
+      // find all other nodes, but this points to the parent graph instead.
+      if (value.export().frame !== node.frame) return createShadowRef(value);
+      value.connect(node);
+    }
+    return undefined;
+  }
+
+  node.inputs = traverseValue(node.inputs, connect);
+  node.outputs = traverseValue(node.outputs, connect);
 }
