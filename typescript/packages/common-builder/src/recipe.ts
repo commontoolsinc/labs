@@ -24,6 +24,8 @@ import {
   recipeToJSON,
   connectInputAndOutputs,
 } from "./utils.js";
+import { z } from "zod";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 /** Declare a recipe
  *
@@ -33,15 +35,15 @@ import {
  * @returns A recipe node factory that also serializes as recipe.
  */
 export function recipe<T>(
-  description: string,
+  schema: string | z.ZodTypeAny,
   fn: (input: OpaqueRef<Required<T>>) => any
 ): RecipeFactory<T, ReturnType<typeof fn>>;
 export function recipe<T, R>(
-  description: string,
+  schema: string | z.ZodTypeAny,
   fn: (input: OpaqueRef<Required<T>>) => Value<R>
 ): RecipeFactory<T, R>;
 export function recipe<T, R>(
-  description: string,
+  schema: string | z.ZodTypeAny,
   fn: (input: OpaqueRef<Required<T>>) => Value<R>
 ): RecipeFactory<T, R> {
   // The recipe graph is created by calling `fn` which populates for `inputs`
@@ -51,23 +53,23 @@ export function recipe<T, R>(
   const frame = pushFrame();
   const inputs = opaqueRef<Required<T>>();
   const outputs = fn(inputs);
-  const result = factoryFromRecipe<T, R>(description, inputs, outputs);
+  const result = factoryFromRecipe<T, R>(schema, inputs, outputs);
   popFrame(frame);
   return result;
 }
 
 // Same as above, but assumes the caller manages the frame
 export function recipeFromFrame<T, R>(
-  description: string,
+  schema: string | z.ZodTypeAny,
   fn: (input: OpaqueRef<Required<T>>) => Value<R>
 ): RecipeFactory<T, R> {
   const inputs = opaqueRef<Required<T>>();
   const outputs = fn(inputs);
-  return factoryFromRecipe<T, R>(description, inputs, outputs);
+  return factoryFromRecipe<T, R>(schema, inputs, outputs);
 }
 
 function factoryFromRecipe<T, R>(
-  description: string,
+  inputSchema: string | z.ZodTypeAny,
   inputs: OpaqueRef<T>,
   outputs: Value<R>
 ): RecipeFactory<T, R> {
@@ -141,19 +143,32 @@ function factoryFromRecipe<T, R>(
     if (external) setValueAtPath(initial, paths.get(cell)!, external);
   });
 
-  // TODO: initial is likely not needed anymore
-  // TODO: But we need a new one for the result
-  const schema = createJsonSchema(defaults, {}) as {
+
+  let schema: {
     properties: { [key: string]: any };
     description: string;
   };
-  schema.description = description;
 
-  delete schema.properties[UI]; // TODO: This should be a schema for views
-  if (schema.properties?.internal?.properties)
-    for (const key of Object.keys(schema.properties.internal.properties as any))
-      if (key.startsWith("__#"))
-        delete (schema as any).properties.internal.properties[key];
+  if (typeof inputSchema === 'string') {
+    // TODO: initial is likely not needed anymore
+    // TODO: But we need a new one for the result
+    schema = createJsonSchema(defaults, {}) as {
+      properties: { [key: string]: any };
+      description: string;
+    };
+    schema.description = inputSchema;
+
+    delete schema.properties[UI]; // TODO: This should be a schema for views
+    if (schema.properties?.internal?.properties)
+      for (const key of Object.keys(schema.properties.internal.properties as any))
+        if (key.startsWith("__#"))
+          delete (schema as any).properties.internal.properties[key];
+  } else {
+    schema = zodToJsonSchema(inputSchema) as {
+      properties: { [key: string]: any };
+      description: string;
+    };
+  }
 
   const serializedNodes = Array.from(nodes).map((node) => {
     const module = isOpaqueRef(node.module)

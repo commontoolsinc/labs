@@ -61,9 +61,11 @@ const buildPrompt = lift<
 Some should change just the style, some should change the content, 
 and some should change both. The last should be a completely different prompt.
 
-<schema>${jsonSchema}</schema>`,
+<schema>
+[{"prompt": "string"}, ...]
+</schema>`,
     messages: [`Generate image prompt variations for: ${title}`, "```json\n["],
-    stop: "```",
+    stop: "\n```\n",
   };
 });
 
@@ -73,8 +75,12 @@ const addToPrompt = handler<{ prompt: string }, { title: string }>(
   }
 );
 
-export const prompt = recipe<{ title: string }>("prompt", ({ title }) => {
-  title.setDefault("abstract geometric art");
+const Title = z.object({
+  title: z.string().describe("Image generation prompt").default("abstract geometric art"),
+});
+type Title = z.infer<typeof Title>;
+
+export const prompt = recipe<Title>(Title, ({ title }) => {
   const variations = grabPrompts(llm(buildPrompt({ title })));
 
   let src = imageUrl({ title });
