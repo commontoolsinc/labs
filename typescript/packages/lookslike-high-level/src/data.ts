@@ -42,7 +42,7 @@ import { wiki } from "./recipes/wiki.js";
 import { helloIsolated } from "./recipes/helloIsolated.js";
 import { queryCollections } from "./recipes/queryCollections.js";
 import { evalJs } from "./recipes/eval.js";
-import { articleQuery } from "./recipes/articleQuery.js";
+import { articleQuery } from "./recipes/articleQuery.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -99,7 +99,7 @@ addCharms([
   await runPersistent(
     articleQuery,
     {
-      "hello": "world"
+      "input": "default"
     },
     "article query test"
   ),

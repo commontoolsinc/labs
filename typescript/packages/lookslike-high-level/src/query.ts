@@ -21,7 +21,7 @@ const buildQueryRequest = lift(({ query }) => {
 });
 
 
-const buildTransactionRequest = lift(({ changes }) => {
+export const buildTransactionRequest = lift(({ changes }) => {
   if (!changes) return {};
   return {
     url: `/api/data`,
@@ -67,5 +67,5 @@ export const querySynopsys = recipe(z.any(), (schema) => {
   const { result } = streamData<{ id: string, event: string, data: any[] }>(buildQueryRequest({ query }));
   tapStringify({ result: result.data, schema })
 
-  return result.data;
-}) as <T>(schema: z.ZodType<T>) => OpaqueRef<T>;
+  return { result: result.data, query };
+}) as <T>(schema: z.ZodType<T>) => { result: OpaqueRef<T[]>, query: OpaqueRef<any> };
