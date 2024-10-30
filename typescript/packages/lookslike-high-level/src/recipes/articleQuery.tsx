@@ -26,10 +26,12 @@ export const listItems = lift(({ items }: { items: Article[] }) => {
     </ul>`;
 })
 
-const onAddItem = handler<{}, { input: string }>((e, state) => {
-  const input = state.input;
-  state.input = ''
-  return fetchData(buildTransactionRequest(prepChanges({ input })));
+const onAddItem = handler<{}, { titleInput: string, authorInput: string }>((e, state) => {
+  const titleInput = state.titleInput;
+  const authorInput = state.authorInput;
+  state.titleInput = '';
+  state.authorInput = '';
+  return fetchData(buildTransactionRequest(prepChanges({ titleInput, authorInput })));
 })
 
 const tap = lift((x) => {
@@ -37,13 +39,13 @@ const tap = lift((x) => {
   return x;
 });
 
-const prepChanges = lift(({ input }) => {
+const prepChanges = lift(({ titleInput, authorInput }) => {
   return {
     changes: [
       {
         Import: {
-          title: input,
-          author: "New author",
+          title: titleInput,
+          author: authorInput,
           tags: ["tag1"]
         }
       }
@@ -52,21 +54,26 @@ const prepChanges = lift(({ input }) => {
 })
 
 export const articleQuery = recipe(
-  z.object({ input: z.string() }),
-  ({ input }) => {
+  z.object({ titleInput: z.string(), authorInput: z.string() }),
+  ({ titleInput, authorInput }) => {
     const { result: items, query } = querySynopsys(schema)
     tap({ obj: items })
 
-    const onChange = handler<InputEvent, { input: string }>((e, state) => {
-      state.input = (e.target as HTMLInputElement).value;
+    const onChange = handler<InputEvent, { titleInput: string }>((e, state) => {
+      state.titleInput = (e.target as HTMLInputElement).value;
+    });
+
+    const onAuthorChange = handler<InputEvent, { authorInput: string }>((e, state) => {
+      state.authorInput = (e.target as HTMLInputElement).value;
     });
 
     return {
       [NAME]: 'Article query',
       [UI]: <div>
         <div>
-          <input value={input} placeholder="Article title" oninput={onChange({ input })} ></input>
-          <button onclick={onAddItem({ input })}>Add</button></div>
+          <input value={titleInput} placeholder="Article title" oninput={onChange({ titleInput })}></input>
+          <input value={authorInput} placeholder="Article author" oninput={onAuthorChange({ authorInput })}></input>
+          <button onclick={onAddItem({ titleInput, authorInput })}>Add</button></div>
         <ul>
           {items.map(({ title, author, tags }) => <li>
             {title} - {author}

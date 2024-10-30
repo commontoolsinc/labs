@@ -99,7 +99,8 @@ addCharms([
   await runPersistent(
     articleQuery,
     {
-      "input": "default"
+      "titleInput": "title",
+      "authorInput": "author",
     },
     "article query test"
   ),
