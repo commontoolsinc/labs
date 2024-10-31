@@ -67,7 +67,11 @@ const storage = createStorage(
 export const charms = cell<CellReference[]>([]);
 charms.generateEntityId("charms");
 
-export function addCharms(newCharms: CellImpl<any>[]) {
+export async function addCharms(newCharms: CellImpl<any>[]) {
+  await storage.syncCell(charms);
+
+  await idle();
+
   const currentCharmsIds = charms
     .get()
     .map(({ cell }) => JSON.stringify(cell.entityId));
@@ -105,11 +109,7 @@ export async function syncCharm(
 }
 
 addCharms([
-  await runPersistent(
-    todoQuery,
-    { titleInput: "" },
-    "Persisted Todos"
-  ),
+  await runPersistent(todoQuery, { titleInput: "" }, "Persisted Todos"),
   await runPersistent(
     datalogQueryExample,
     {
