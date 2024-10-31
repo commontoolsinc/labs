@@ -64,7 +64,6 @@ export class OsAiBox extends LitElement {
   #onKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Enter") {
       console.log("Enter key pressed");
-      debugger
       this.dispatchEvent(
         new CustomEvent("submit", {
           detail: {

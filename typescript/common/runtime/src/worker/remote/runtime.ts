@@ -3,7 +3,6 @@ import { DuplexState } from '../../state/io/duplex.js';
 import { LocalRuntime, ThreadLocalModule } from '../index.js';
 import * as api from '@commontools/usuba-api';
 
-debugger;
 export class RuntimeRemoteWorker implements LocalRuntime {
   async eval(
     contentType: 'text/javascript',
