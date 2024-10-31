@@ -16,10 +16,13 @@ const buildQueryRequest = lift(({ query }) => {
     options: {
       method: "PUT",
       body: JSON.stringify(query),
+      headers: {
+        "content-type": "application/synopsys-query+json",
+        accept: "text/event-stream",
+      },
     },
   };
 });
-
 
 export const buildTransactionRequest = lift(({ changes }) => {
   if (!changes) return {};

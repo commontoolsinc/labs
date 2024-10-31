@@ -78,6 +78,10 @@ const buildQuery = lift(({ query }) => {
     options: {
       method: "PUT",
       body: JSON.stringify(query),
+      headers: {
+        "content-type": "application/synopsys-query+json",
+        accept: "text/event-stream",
+      },
     },
   };
 });
