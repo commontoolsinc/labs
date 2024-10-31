@@ -523,7 +523,14 @@ function instantiateRecipeNode(
   if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
   const inputs = mapBindingsToCell(inputBindings, processCell);
   const result = run(module.implementation, inputs);
-  sendValueToBinding(processCell, outputBindings, { cell: result, path: [] });
+  // Update output bindings if the recipe changes. We don't expect the actual
+  // value of the result cell to change otherwise, as it's just a set of aliases
+  // to the corresponding process cell
+  addCancel(
+    result.sink((value) =>
+      sendValueToBinding(processCell, outputBindings, value)
+    )
+  );
   addCancel(cancels.get(processCell));
 }
 
