@@ -8,7 +8,7 @@ export function llm(
     system?: string;
     stop?: string;
     max_tokens?: number;
-  }>
+  }>,
 ): OpaqueRef<{
   pending: boolean;
   result?: string;
@@ -28,7 +28,7 @@ export function fetchData<T>(
     mode?: "json" | "text";
     options?: RequestInit;
     result?: T;
-  }>
+  }>,
 ): Value<{ pending: boolean; result: T; error: any }> {
   fetchDataFactory ||= createNodeFactory({
     type: "ref",
@@ -42,7 +42,7 @@ export function streamData<T>(
     url: string;
     options?: RequestInit;
     result?: T;
-  }>
+  }>,
 ): Value<{ pending: boolean; result: T; error: any }> {
   streamDataFactory ||= createNodeFactory({
     type: "ref",
@@ -58,10 +58,10 @@ let streamDataFactory:
     >
   | undefined = undefined;
 
-export function ifElse<T, U, V>(
+export function ifElse<T = any, U = any, V = any>(
   condition: Value<T>,
   ifTrue: Value<U>,
-  ifFalse: Value<V>
+  ifFalse: Value<V>,
 ): OpaqueRef<T extends true ? U : V> {
   ifElseFactory ||= createNodeFactory({
     type: "ref",
@@ -119,7 +119,7 @@ export function str(
   }) =>
     strings.reduce(
       (result, str, i) => result + str + (i < values.length ? values[i] : ""),
-      ""
+      "",
     );
 
   return lift(interpolatedString)({ strings, values });
