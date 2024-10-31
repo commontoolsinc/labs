@@ -1,6 +1,6 @@
 import * as z from "zod";
-import { jsonToDatalogQuery, zodSchemaToPlaceholder } from './schema.js'
 import { describe, expect, it } from "vitest";
+import { jsonToDatalogQuery, zodSchemaToPlaceholder } from "../src/schema.js";
 
 const schema = z.object({
   name: z.string(),
@@ -77,7 +77,7 @@ describe("zodSchemaToPlaceholder", () => {
         { Case: ["?item", "title", "?title"] },
         { Case: ["?item", "author", "?author"] },
         { Case: ["?item", "tags", "?tags[]"] },
-        { Case: ["?tags[]", "?.tags", "?tags"] }
+        { Case: ["?tags[]", "?[tags]", "?tags"] }
       ]
     };
 
@@ -99,7 +99,7 @@ describe("zodSchemaToPlaceholder", () => {
         { Case: ["?item", "title", "?title"] },
         { Case: ["?item", "author", "?author"] },
         { Case: ["?item", "comments", "?comments[]"] },
-        { Case: ["?comments[]", "?.comments", "?comments"] },
+        { Case: ["?comments[]", "?[comments]", "?comments"] },
         { Case: ["?comments", "message", "?comments_message"] }
       ]
     };
