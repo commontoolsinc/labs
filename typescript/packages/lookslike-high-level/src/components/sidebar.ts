@@ -78,6 +78,10 @@ export class CommonSidebar extends LitElement {
   ): Promise<void> {
     super.updated(_changedProperties);
 
+    if (_changedProperties.has('sidebarTab') && this.homeCharm) {
+      this.homeCharm = null;
+    }
+
     if (!this.homeCharm && this.homeRef.value) {
       this.homeCharm = runPersistent(home, { charms, recipes }, "home").then(
         (home) => {
