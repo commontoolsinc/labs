@@ -98,6 +98,23 @@ const deleteItem = handler<{}, { item: Book; items: Book[] }>((_, state) => {
 
 const imageUrl = lift(({ title }) => `/api/img/?prompt=${encodeURIComponent(title)}`);
 
+/*
+
+TODO: instead of using an AI-generated image for each book, fetch the actual
+book cover from the internet, and store its url in a property of the book entity
+called coverURL.
+
+https://claude.ai/share/7bbde1b1-1eb0-4334-8eed-0eab43dbe3bd has a sketch of
+what that would look like. When a book's title or author is changed (or when
+it's first added), fetch the ISBN from Google Books, and then use the ISBN to
+create the image URL. 
+
+This is hard to do today because we can't await the ISBN fetch inside of a
+recipe. There's presuambly some way to use cells and fetchData, but it's not
+clear how to do that yet.
+
+*/
+
 export const bookshelfQuery = recipe(
   z.object({ titleInput: z.string().default(''), authorInput: z.string().default('') }),
   ({ titleInput, authorInput }) => {
