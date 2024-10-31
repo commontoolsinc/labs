@@ -31,6 +31,10 @@ export function streamData(
     streamData: { error: cause },
   });
 
+  pending.ephemeral = true;
+  result.ephemeral = true;
+  error.ephemeral = true;
+
   // Since we'll only write into the cells above, we only have to call this once
   // here, instead of in the action.
   sendResult({ pending, result, error });

@@ -250,6 +250,15 @@ export type CellImpl<T> = {
   sourceCell: CellImpl<any> | undefined;
 
   /**
+   * Whether the cell is ephemeral.
+   *
+   * Ephemeral cells are not persisted to storage.
+   *
+   * @returns Whether the cell is ephemeral.
+   */
+  ephemeral: boolean;
+
+  /**
    * Internal only: Used by builder to turn cells into proxies tied to them.
    * Useful when building a recipe that directly refers to existing cells, such
    * as a recipe created and returned by a handler.
@@ -314,6 +323,7 @@ export function cell<T>(value?: T, cause?: any): CellImpl<T> {
   let readOnly = false;
   let entityId: EntityId | undefined;
   let sourceCell: CellImpl<any> | undefined;
+  let ephemeral = false;
 
   // If cause is provided, generate ID and return pre-existing cell if any.
   if (cause) {
@@ -397,6 +407,12 @@ export function cell<T>(value?: T, cause?: any): CellImpl<T> {
       if (sourceCell && sourceCell !== cell)
         throw new Error("Source cell already set");
       sourceCell = cell;
+    },
+    get ephemeral(): boolean {
+      return ephemeral;
+    },
+    set ephemeral(value: boolean) {
+      ephemeral = value;
     },
     [toOpaqueRef]: () => makeOpaqueRef(self, []),
     [isCellMarker]: true,
