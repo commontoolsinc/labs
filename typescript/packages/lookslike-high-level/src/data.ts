@@ -46,6 +46,7 @@ import { importCalendar } from "./recipes/archive/importCalendar.js";
 import { dungeon } from "./recipes/archive/dungeon.js";
 import { jsonImporter } from "./recipes/archive/jsonImport.js";
 import { helloIsolated } from "./recipes/examples/helloIsolated.js";
+import { shoelaceDemo } from "./recipes/examples/shoelace.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -99,6 +100,11 @@ export async function syncCharm(
 }
 
 addCharms([
+  await runPersistent(
+    shoelaceDemo,
+    { },
+    "shoelace"
+  ),
   await runPersistent(
     iframe,
     {
