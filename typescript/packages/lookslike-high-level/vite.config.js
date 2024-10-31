@@ -46,6 +46,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/img/, ""),
       },
+      "/api/reader": {
+        target: "https://r.jina.ai/",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/reader/, ""),
+      },
       "/api/data": {
         target: "http://localhost:8080",
         changeOrigin: true,
