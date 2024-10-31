@@ -15,13 +15,23 @@ export class OsSidebarGroup extends LitElement {
       .sgroup {
         gap: var(--u);
       }
+
+      .sgroup-heading {
+        padding-left: var(--pad);
+        padding-right: var(--pad);
+      }
+
+      :host([safearea]) .sgroup-content {
+        padding-left: var(--pad);
+        padding-right: var(--pad);
+      }
     `,
   ];
 
   override render() {
     return html`
       <aside class="sgroup vstack">
-        <heading class="sgroup-heading pad-h"
+        <heading class="sgroup-heading"
           ><slot class="label" name="label"></slot
         ></heading>
         <div class="sgroup-content"><slot></slot></div>
