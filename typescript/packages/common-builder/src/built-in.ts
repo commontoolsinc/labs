@@ -1,7 +1,10 @@
 import { lift, createNodeFactory } from "./module.js";
-import { Value, NodeFactory, OpaqueRef } from "./types.js";
+import { Value, OpaqueRef, NodeFactory } from "./types.js";
 
-export function llm(
+export const llm = createNodeFactory({
+  type: "ref",
+  implementation: "llm",
+}) as <T = string>(
   params: Value<{
     messages?: string[];
     prompt?: string;
@@ -9,60 +12,41 @@ export function llm(
     stop?: string;
     max_tokens?: number;
   }>,
-): OpaqueRef<{
+) => OpaqueRef<{
   pending: boolean;
-  result?: string;
+  result?: T;
   partial?: string;
   error: any;
-}> {
-  llmFactory ||= createNodeFactory({
-    type: "ref",
-    implementation: "llm",
-  });
-  return llmFactory(params);
-}
+}>;
 
-export function fetchData<T>(
+export const fetchData = createNodeFactory({
+  type: "ref",
+  implementation: "fetchData",
+}) as <T>(
   params: Value<{
     url: string;
     mode?: "json" | "text";
     options?: RequestInit;
     result?: T;
   }>,
-): Value<{ pending: boolean; result: T; error: any }> {
-  fetchDataFactory ||= createNodeFactory({
-    type: "ref",
-    implementation: "fetchData",
-  });
-  return fetchDataFactory(params);
-}
+) => Value<{ pending: boolean; result: T; error: any }>;
 
-export function streamData<T>(
+export const streamData = createNodeFactory({
+  type: "ref",
+  implementation: "streamData",
+}) as <T>(
   params: Value<{
     url: string;
     options?: RequestInit;
     result?: T;
   }>,
-): Value<{ pending: boolean; result: T; error: any }> {
-  streamDataFactory ||= createNodeFactory({
-    type: "ref",
-    implementation: "streamData",
-  });
-  return streamDataFactory(params);
-}
-
-let streamDataFactory:
-  | NodeFactory<
-      { url: string; options?: RequestInit; result?: any },
-      { pending: boolean; result: any; error: any }
-    >
-  | undefined = undefined;
+) => Value<{ pending: boolean; result: T; error: any }>;
 
 export function ifElse<T = any, U = any, V = any>(
   condition: Value<T>,
   ifTrue: Value<U>,
   ifFalse: Value<V>,
-): OpaqueRef<T extends true ? U : V> {
+): OpaqueRef<U | V> {
   ifElseFactory ||= createNodeFactory({
     type: "ref",
     implementation: "ifElse",
@@ -70,37 +54,12 @@ export function ifElse<T = any, U = any, V = any>(
   return ifElseFactory([condition, ifTrue, ifFalse]);
 }
 
-export function navigateTo(cell: OpaqueRef<any>): OpaqueRef<string> {
-  navigateToFactory ||= createNodeFactory({
-    type: "ref",
-    implementation: "navigateTo",
-  });
-  return navigateToFactory(cell);
-}
-
-let fetchDataFactory:
-  | NodeFactory<
-      { url: string; options?: RequestInit; result?: any },
-      { pending: boolean; result: any; error: any }
-    >
-  | undefined;
-
 let ifElseFactory: NodeFactory<[any, any, any], any> | undefined;
 
-let llmFactory:
-  | NodeFactory<
-      {
-        messages?: string[];
-        prompt?: string;
-        system?: string;
-        stop?: string;
-        max_tokens?: number;
-      },
-      { pending: boolean; result?: string; partial?: string; error: any }
-    >
-  | undefined;
-
-let navigateToFactory: NodeFactory<number, undefined> | undefined;
+export const navigateTo = createNodeFactory({
+  type: "ref",
+  implementation: "navigateTo",
+}) as (cell: OpaqueRef<any>) => OpaqueRef<string>;
 
 // Example:
 // str`Hello, ${name}!`
