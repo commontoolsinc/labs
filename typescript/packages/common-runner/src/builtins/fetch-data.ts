@@ -20,16 +20,15 @@ export function fetchData(
   }>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
-  cause: CellImpl<any>[]
+  cause: CellImpl<any>[],
 ): Action {
-  const pending = cell(false);
-  const result = cell<any | undefined>(undefined);
-  const error = cell<any | undefined>(undefined);
-
-  // Generate causal IDs for the cells.
-  pending.generateEntityId({ fetchData: { pending: cause } });
-  result.generateEntityId({ fetchData: { result: cause } });
-  error.generateEntityId({ fetchData: { error: cause } });
+  const pending = cell(false, { fetchData: { pending: cause } });
+  const result = cell<any | undefined>(undefined, {
+    fetchData: { result: cause },
+  });
+  const error = cell<any | undefined>(undefined, {
+    fetchData: { error: cause },
+  });
 
   const resultCell = cell({
     pending,

@@ -32,16 +32,17 @@ export function llm(
     system?: string;
     max_tokens?: number;
   }>,
-  sendResult: (result: any) => void
+  sendResult: (result: any) => void,
+  _addCancel: (cancel: () => void) => void,
+  cause?: any,
 ): Action {
-  const pending = cell(false);
-  const result = cell<string | undefined>(undefined);
-  const partial = cell<string | undefined>(undefined);
-
-  // Generate causal IDs for the cells.
-  pending.generateEntityId({ llm: { pending: inputsCell.get() } });
-  result.generateEntityId({ llm: { result: inputsCell.get() } });
-  partial.generateEntityId({ llm: { partial: inputsCell.get() } });
+  const pending = cell(false, { llm: { pending: cause } });
+  const result = cell<string | undefined>(undefined, {
+    llm: { result: cause },
+  });
+  const partial = cell<string | undefined>(undefined, {
+    llm: { partial: cause },
+  });
 
   sendResult({ pending, result, partial });
 
@@ -79,7 +80,7 @@ export function llm(
         max_tokens: max_tokens || 4096,
         stop,
       },
-      updatePartial
+      updatePartial,
     );
 
     resultPromise
