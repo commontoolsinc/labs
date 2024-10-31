@@ -213,6 +213,10 @@ export class CommonWindowManager extends LitElement {
     this.searchOpen = true;
   }
 
+  onHome(_event: CustomEvent) {
+    window.location.pathname = "/";
+  }
+
   override render() {
     const onCloseDialog = () => {
       this.searchOpen = false;
@@ -310,7 +314,7 @@ export class CommonWindowManager extends LitElement {
           locationtitle=${this.focusedProxy?.[NAME] || "Untitled"}
           @location=${this.onLocationClicked}
         >
-          <os-avatar slot="toolbar-start" name="Ben"></os-avatar>
+          <os-avatar slot="toolbar-start" name="Ben" .onclick=${this.onHome}></os-avatar>
 
           <os-dialog .open=${this.searchOpen} @closedialog=${onCloseDialog}>
             <os-ai-box
