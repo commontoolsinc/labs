@@ -6,7 +6,7 @@ import {
   NAME,
   navigateTo,
 } from "@commontools/common-builder";
-import { iframe } from "./iframe.js";
+import { iframe } from "../iframe.js";
 
 type Position = { x: number; y: number };
 type Actor = {

@@ -100,44 +100,6 @@ export async function syncCharm(
 
 addCharms([
   await runPersistent(
-    debounceExample,
-    { },
-    "debounced"
-  ),
-  await runPersistent(
-    calc,
-    {
-      fahrenheit: 32,
-      celsius: 0,
-    },
-    "calc"
-  ),
-  await runPersistent(
-    rectangleQuery,
-    { },
-    "rectangle query test"
-  ),
-  await runPersistent(
-    articleQuery,
-    {
-      "titleInput": "title",
-      "authorInput": "author",
-    },
-    "article query test"
-  ),
-  await runPersistent(
-    evalJs,
-    {
-      data: { todos: [
-        { title: "Buy groceries" },
-        { title: "Walk the dog" },
-        { title: "Wash the car" },
-      ] },
-      prompt: "list of three items",
-    },
-    "eval"
-  ),
-  await runPersistent(
     iframe,
     {
       title: "two way binding counter",
@@ -145,21 +107,6 @@ addCharms([
       data: { counter: 0 },
     },
     "iframe"
-  ),
-  await runPersistent(importCalendar, {}, "importCalendar"),
-  await runPersistent(
-    search,
-    {
-      query: "home",
-    },
-    "search"
-  ),
-  await runPersistent(
-    queryCollections,
-    {
-      collectionName: "home",
-    },
-    "queryCollections"
   ),
   await runPersistent(
     todoList,
@@ -212,10 +159,6 @@ export type RecipeManifest = {
 
 export const recipes: RecipeManifest[] = [
   {
-    name: "Explore dungeon game",
-    recipeId: addRecipe(dungeon),
-  },
-  {
     name: "Create a new TODO list",
     recipeId: addRecipe(todoList),
   },
@@ -226,14 +169,6 @@ export const recipes: RecipeManifest[] = [
   {
     name: "Find a LuftBnB place to stay",
     recipeId: addRecipe(luftBnBSearch),
-  },
-  {
-    name: "JSON Importer",
-    recipeId: addRecipe(jsonImporter),
-  },
-  {
-    name: "Data Designer",
-    recipeId: addRecipe(dataDesigner),
   },
   {
     name: "Create a counter",
