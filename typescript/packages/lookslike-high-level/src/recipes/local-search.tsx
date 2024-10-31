@@ -39,6 +39,7 @@ const buildPrompt = lift<{ prompt?: string }, { messages: string[], system: stri
   }
   return {
     messages: [prompt, '```json\n['],
+    model: 'claude-3-5-hiaku-latest',
     system: `Generate place data inspired by the user description using JSON:\n\n<schema>${jsonSchema}</schema>`,
     stop: '\n```\n'
   }
@@ -71,8 +72,6 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value)
 );
 
-const asStars = lift((rating: number) => "⭐".repeat(Math.round(rating)));
-
 // TODO: This should be the user's default location, not hardcoded
 const Search = z.object({
   what: z.string().describe("Type of place").default("restaurants"),
@@ -80,8 +79,9 @@ const Search = z.object({
 }).describe("Local search");
 type Search = z.infer<typeof Search>;
 
-const placePrompt = lift(({ name, description, what, where }) => {return {
-    prompt: `a photo of ${name}, ${what} at ${where} that matches the description: ${description}`
+const placePrompt = lift(({ name, description, what, where }) => {
+  return {
+    prompt: `a photo of ${name}, a ${what} in ${where} that matches the description: ${description}`
   };
 });
 
@@ -114,18 +114,20 @@ export const localSearch = recipe(Search, ({ what, where }) => {
         <common-button onclick={searchPlaces({ what, where, prompt })}>Search</common-button>
         <common-vstack gap="md">
           {places.map(
-            (place) => <common-vstack gap="xs">
+            (place) =>
               <common-hstack>
-                <img src={imageUrl(placePrompt({ name: place.name, description: place.description, what, where }))} width="20%" />
-                <common-vstack>
-                  <div>{place.name}</div>
+                <img src={imageUrl(placePrompt({ name: place.name, description: place.description, what, where }))} width='300px' />
+                <sl-card class="card-overview">
+                  <strong>{place.name}</strong>
                   <div>{place.description}</div>
-                  <div>{place.address}</div>
-                  <div>{place.city}, {place.state} {place.zip}</div>
-                  <div>{asStars(place.rating)}</div>
-                </common-vstack>
+                  <small>
+                    {place.address}
+                    <br />
+                    {place.city}, {place.state} {place.zip}
+                  </small>
+                  <sl-rating label="Rating" readonly value={place.rating}></sl-rating>
+                </sl-card>
               </common-hstack>
-            </common-vstack>
           )}
         </common-vstack>
       </os-container>,
