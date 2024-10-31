@@ -4,6 +4,7 @@ import { state } from "@commontools/common-frp/signal";
 import { datatable, dict, vstack, div, shoelace } from "./hyperscript/tags.js";
 import { binding, repeat } from "./hyperscript/view.js";
 import render from "./hyperscript/render.js";
+import library from "@shoelace-style/shoelace/dist/components/icon/library.default.js";
 
 const datatableNode = datatable({
   "@click": binding("clicks"),
@@ -92,6 +93,11 @@ const tree = vstack({}, [
     shoelace.breadcrumbItem({}, ["World"]),
   ]),
   shoelace.button({}, ["Button"]),
+  shoelace.icon({
+    library: "material",
+    name: "settings",
+    label: "Settings",
+  }),
   datatableNode,
   dictNode,
   listNode,
