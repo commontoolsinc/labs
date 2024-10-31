@@ -21,7 +21,7 @@ export default defineConfig({
       commonPackages.map((pkg) => [
         pkg,
         path.resolve(__dirname, "..", pkg.replace("@commontools/", "")),
-      ])
+      ]),
     ),
   },
   optimizeDeps: {
@@ -37,7 +37,7 @@ export default defineConfig({
     },
     proxy: {
       "/api/llm": {
-        target: "http://localhost:8000",
+        target: process.env.PLANNING_API_URL ?? "http://localhost:8000",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/llm/, ""),
       },
@@ -52,7 +52,7 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api\/reader/, ""),
       },
       "/api/data": {
-        target: "http://localhost:8080",
+        target: process.env.SYNOPSYS_API_URL ?? "http://localhost:8080",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/data/, ""),
       },
