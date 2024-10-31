@@ -72,15 +72,15 @@ export const jsonToDatalogQuery = (jsonObj: any) => {
         }
 
         where.push({ Case: ["?item", key, `?${key}[]`] });
-        where.push({ Case: [`?${key}[]`, `?.${key}`, `?${key}`]});
+        where.push({ Case: [`?${key}[]`, `?[${key}]`, `?${key}`]});
 
         if (typeof value[0] === 'object') {
-          selectObj[key] = [{ '/': `?${key}` }];
+          selectObj[key] = [{ '.': `?${key}` }];
           processObject(`?${key}`, value[0], currentPath, selectObj[key][0]);
+          selectObj[`.${key}`] = `?${key}[]`;
         } else {
           selectObj[key] = [`?${key}`];
         }
-        selectObj[`${key}/`] = `?${key}`;
 
       } else if (typeof value === 'object' && value !== null) {
         selectObj[key] = {};
@@ -92,7 +92,7 @@ export const jsonToDatalogQuery = (jsonObj: any) => {
     }
   }
 
-  select.id = '?item';
+  select['.'] = '?item';
   processObject('?item', jsonObj, '', select);
 
   return {
