@@ -26,6 +26,7 @@ import { routine } from "./recipes/routine.js";
 import { fetchExample } from "./recipes/fetchExample.js";
 import { counter } from "./recipes/counter.js";
 import { counters } from "./recipes/counters.js";
+import { tweets } from "./recipes/tweets.jsx";
 
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.js";
@@ -69,14 +70,14 @@ export function addCharms(newCharms: CellImpl<any>[]) {
     .get()
     .map(({ cell }) => JSON.stringify(cell.entityId));
   const charmsToAdd = newCharms.filter(
-    (cell) => !currentCharmsIds.includes(JSON.stringify(cell.entityId))
+    (cell) => !currentCharmsIds.includes(JSON.stringify(cell.entityId)),
   );
 
   if (charmsToAdd.length > 0)
     charms.send([
       ...charms.get(),
       ...charmsToAdd.map(
-        (cell) => ({ cell, path: [] } satisfies CellReference)
+        (cell) => ({ cell, path: [] }) satisfies CellReference,
       ),
     ]);
 }
@@ -84,19 +85,19 @@ export function addCharms(newCharms: CellImpl<any>[]) {
 export async function runPersistent(
   recipe: Recipe,
   inputs?: any,
-  cause?: any
+  cause?: any,
 ): Promise<CellImpl<any>> {
   await idle();
   return run(
     recipe,
     inputs,
-    await storage.syncCell(createRef({ recipe, inputs }, cause))
+    await storage.syncCell(createRef({ recipe, inputs }, cause)),
   );
 }
 
 export async function syncCharm(
   entityId: string | EntityId | CellImpl<any>,
-  waitForStorage: boolean = false
+  waitForStorage: boolean = false,
 ): Promise<CellImpl<Charm>> {
   return storage.syncCell(entityId, waitForStorage);
 }
@@ -106,28 +107,20 @@ addCharms([
     datalogQueryExample,
     {
       query: {
-        "select": {
+        select: {
           ".": "?item",
-          "title": "?title"
+          title: "?title",
         },
-        "where": [
+        where: [
           {
-            "Case": [
-              "?item",
-              "title",
-              "?title"
-            ]
-          }
-        ]
-      }
+            Case: ["?item", "title", "?title"],
+          },
+        ],
+      },
     },
-    "Datalog Query Playground"
+    "Datalog Query Playground",
   ),
-  await runPersistent(
-    shoelaceDemo,
-    { },
-    "shoelace"
-  ),
+  await runPersistent(shoelaceDemo, {}, "shoelace"),
   await runPersistent(
     iframe,
     {
@@ -135,7 +128,7 @@ addCharms([
       prompt: "counter",
       data: { counter: 0 },
     },
-    "iframe"
+    "iframe",
   ),
   await runPersistent(
     todoList,
@@ -146,7 +139,7 @@ addCharms([
         done: false,
       })),
     },
-    "todoList"
+    "todoList",
   ),
   await runPersistent(
     todoList,
@@ -157,7 +150,7 @@ addCharms([
         done: false,
       })),
     },
-    "todoList"
+    "todoList",
   ),
   await runPersistent(
     ticket,
@@ -167,7 +160,7 @@ addCharms([
       date: getFridayAndMondayDateStrings().startDate,
       location: "New York",
     },
-    "ticket"
+    "ticket",
   ),
   await runPersistent(
     routine,
@@ -176,9 +169,16 @@ addCharms([
       // TODO: A lot more missing here, this is just to drive the suggestion.
       locations: ["coffee shop with great baristas"],
     },
-    "routine"
+    "routine",
   ),
   await runPersistent(counters, {}, "counters"),
+  await runPersistent(
+    tweets,
+    {
+      username: "@gordonbrander",
+    },
+    "tweets",
+  ),
 ]);
 
 export type RecipeManifest = {
@@ -226,10 +226,10 @@ function getFridayAndMondayDateStrings() {
   const daysUntilFriday = (5 - today.getDay() + 7) % 7;
 
   const nextFriday = new Date(
-    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000
+    today.getTime() + daysUntilFriday * 24 * 60 * 60 * 1000,
   );
   const followingMonday = new Date(
-    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000
+    nextFriday.getTime() + 3 * 24 * 60 * 60 * 1000,
   );
 
   const formatDate = (date: Date): string => {
@@ -255,7 +255,7 @@ addModuleByRef(
     // HACK to follow the cell references to the entityId
     const entityId = getEntityId(inputsCell.getAsQueryResult([], log));
     if (entityId) openCharm(JSON.stringify(entityId));
-  })
+  }),
 );
 
 (window as any).recipes = recipes;
