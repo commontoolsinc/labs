@@ -179,20 +179,12 @@ export const recipes: RecipeManifest[] = [
     recipeId: addRecipe(counters),
   },
   {
-    name: "Fetch JSON from a URL",
-    recipeId: addRecipe(fetchExample),
-  },
-  {
     name: "Explore imagery prompts",
     recipeId: addRecipe(prompt),
   },
   {
     name: "Explore Halucinated wiki",
     recipeId: addRecipe(wiki),
-  },
-  {
-    name: "Hello Isolated",
-    recipeId: addRecipe(helloIsolated),
   },
 ];
 
