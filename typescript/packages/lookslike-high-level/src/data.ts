@@ -33,17 +33,19 @@ import "./recipes/playlist.js";
 
 import { iframe } from "./recipes/iframe.js";
 import { search } from "./recipes/search.js";
-import { importCalendar } from "./recipes/importCalendar.js";
-import { dungeon } from "./recipes/dungeon.js";
 import { dataDesigner } from "./recipes/dataDesigner.js";
-import { jsonImporter } from "./recipes/jsonImport.js";
 import { prompt } from "./recipes/prompts.js";
 import { wiki } from "./recipes/wiki.js";
-import { helloIsolated } from "./recipes/helloIsolated.js";
 import { queryCollections } from "./recipes/queryCollections.js";
-import { evalJs } from "./recipes/eval.js";
 import { articleQuery } from "./recipes/articleQuery.jsx";
-import { rectangleQuery } from "./recipes/rectangleQuery.jsx";
+import { debounceExample } from "./recipes/examples/debounce.jsx";
+import { calc } from "./recipes/examples/calculator.jsx";
+import { rectangleQuery } from "./recipes/examples/rectangleQuery.jsx";
+import { evalJs } from "./recipes/examples/eval.js";
+import { importCalendar } from "./recipes/archive/importCalendar.js";
+import { dungeon } from "./recipes/archive/dungeon.js";
+import { jsonImporter } from "./recipes/archive/jsonImport.js";
+import { helloIsolated } from "./recipes/examples/helloIsolated.js";
 
 export type Charm = {
   [NAME]?: string;
@@ -97,6 +99,19 @@ export async function syncCharm(
 }
 
 addCharms([
+  await runPersistent(
+    debounceExample,
+    { },
+    "debounced"
+  ),
+  await runPersistent(
+    calc,
+    {
+      fahrenheit: 32,
+      celsius: 0,
+    },
+    "calc"
+  ),
   await runPersistent(
     rectangleQuery,
     { },

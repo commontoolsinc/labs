@@ -7,8 +7,8 @@ import {
   fetchData,
 } from "@commontools/common-builder";
 import * as z from "zod";
-import { buildTransactionRequest, queryRecipe, querySynopsys } from "../query.js";
 import { h } from "@commontools/common-html";
+import { querySynopsys } from "../../query.js";
 
 export const schema = z.object({
   width: z.string(),
