@@ -47,6 +47,8 @@ import { dungeon } from "./recipes/archive/dungeon.js";
 import { jsonImporter } from "./recipes/archive/jsonImport.js";
 import { helloIsolated } from "./recipes/examples/helloIsolated.js";
 import { shoelaceDemo } from "./recipes/examples/shoelace.jsx";
+import { z } from "zod";
+import { datalogQueryExample } from "./recipes/datalogQuery.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -100,6 +102,27 @@ export async function syncCharm(
 }
 
 addCharms([
+  await runPersistent(
+    datalogQueryExample,
+    {
+      query: {
+        "select": {
+          ".": "?item",
+          "title": "?title"
+        },
+        "where": [
+          {
+            "Case": [
+              "?item",
+              "title",
+              "?title"
+            ]
+          }
+        ]
+      }
+    },
+    "Datalog Query Playground"
+  ),
   await runPersistent(
     shoelaceDemo,
     { },

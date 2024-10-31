@@ -16,8 +16,8 @@ import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
 import { NAME } from "@commontools/common-builder";
 import { matchRoute, navigate } from "../router.js";
-import { query } from "../recipes/query.jsx";
 import { inferZodSchema } from "../schema.js";
+import { schemaQueryExample } from "../recipes/schemaQuery.jsx";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -303,7 +303,7 @@ export class CommonWindowManager extends LitElement {
       } else {
         // Create a new charm and query for the imported data
         const schema = inferZodSchema(data[0])
-        runPersistent(query, { schema }).then((charm) => this.openCharm(charm));
+        runPersistent(schemaQueryExample, { schema }).then((charm) => this.openCharm(charm));
       }
     };
 

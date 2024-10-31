@@ -8,7 +8,7 @@ import {
 } from "@commontools/common-builder";
 import * as z from "zod";
 import { h } from "@commontools/common-html";
-import { querySynopsys } from "../../query.js";
+import { schemaQuery } from "../../query.js";
 
 export const schema = z.object({
   width: z.string(),
@@ -27,7 +27,7 @@ const tap = lift((x) => {
 export const rectangleQuery = recipe(
   z.object({}),
   ({ }) => {
-    const { result: items, query } = querySynopsys(schema)
+    const { result: items, query } = schemaQuery(schema)
     tap({ obj: items })
 
     const getInlineStyles = lift(({ style }) => `width: ${style.width}; height: ${style.height}; background-color: ${style.backgroundColor}; border: ${style.border}`);
