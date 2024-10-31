@@ -1,11 +1,11 @@
 import { lift, createNodeFactory } from "./module.js";
-import { Value, OpaqueRef, NodeFactory } from "./types.js";
+import { Opaque, OpaqueRef, NodeFactory } from "./types.js";
 
 export const llm = createNodeFactory({
   type: "ref",
   implementation: "llm",
 }) as <T = string>(
-  params: Value<{
+  params: Opaque<{
     messages?: string[];
     prompt?: string;
     system?: string;
@@ -23,29 +23,29 @@ export const fetchData = createNodeFactory({
   type: "ref",
   implementation: "fetchData",
 }) as <T>(
-  params: Value<{
+  params: Opaque<{
     url: string;
     mode?: "json" | "text";
     options?: RequestInit;
     result?: T;
   }>,
-) => Value<{ pending: boolean; result: T; error: any }>;
+) => Opaque<{ pending: boolean; result: T; error: any }>;
 
 export const streamData = createNodeFactory({
   type: "ref",
   implementation: "streamData",
 }) as <T>(
-  params: Value<{
+  params: Opaque<{
     url: string;
     options?: RequestInit;
     result?: T;
   }>,
-) => Value<{ pending: boolean; result: T; error: any }>;
+) => Opaque<{ pending: boolean; result: T; error: any }>;
 
 export function ifElse<T = any, U = any, V = any>(
-  condition: Value<T>,
-  ifTrue: Value<U>,
-  ifFalse: Value<V>,
+  condition: Opaque<T>,
+  ifTrue: Opaque<U>,
+  ifFalse: Opaque<V>,
 ): OpaqueRef<U | V> {
   ifElseFactory ||= createNodeFactory({
     type: "ref",

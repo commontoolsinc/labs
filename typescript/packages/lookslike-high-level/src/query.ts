@@ -2,7 +2,7 @@ import {
   recipe,
   lift,
   RecipeFactory,
-  Value,
+  Opaque,
   OpaqueRef,
 } from "@commontools/common-builder";
 import { streamData } from "@commontools/common-builder";
@@ -35,48 +35,57 @@ export const buildTransactionRequest = lift(({ changes }) => {
   };
 });
 
-
 const schemaToQuery = lift(({ schema }) => {
-  return jsonToDatalogQuery(zodSchemaToPlaceholder(schema))
-})
+  return jsonToDatalogQuery(zodSchemaToPlaceholder(schema));
+});
 
 const tapStringify = lift(({ result, schema, query }) => {
-  console.groupCollapsed('queryRecipe result');
+  console.groupCollapsed("queryRecipe result");
   console.log(JSON.stringify(schema, null, 2));
   console.log(JSON.stringify(query, null, 2));
   console.log(JSON.stringify(result, null, 2));
   console.groupEnd();
-})
+});
 
 export function queryRecipe<T extends z.ZodTypeAny>(
   schema: T,
-  fn: (input: Value<z.infer<typeof schema>[]>) => Value<any>
+  fn: (input: Opaque<z.infer<typeof schema>[]>) => Opaque<any>,
 ): RecipeFactory<z.infer<T>, ReturnType<typeof fn>> {
-  return recipe(
-    schema,
-    (args) => {
-      console.log('original args', args)
-      const query = schemaToQuery({ schema });
-      const { result } = streamData<{ id: string, event: string, data: z.infer<typeof schema>[] }>(buildQueryRequest({ query }));
-      tapStringify({ result: result.data, query, schema })
+  return recipe(schema, (args) => {
+    console.log("original args", args);
+    const query = schemaToQuery({ schema });
+    const { result } = streamData<{
+      id: string;
+      event: string;
+      data: z.infer<typeof schema>[];
+    }>(buildQueryRequest({ query }));
+    tapStringify({ result: result.data, query, schema });
 
-      return fn(result.data)
-    }
-  )
+    return fn(result.data);
+  });
 }
 
 export const schemaQuery = recipe(z.any(), (schema) => {
   const query = schemaToQuery({ schema });
-  const { result } = streamData<{ id: string, event: string, data: any[] }>(buildQueryRequest({ query }));
-  tapStringify({ result: result.data, query, schema })
+  const { result } = streamData<{ id: string; event: string; data: any[] }>(
+    buildQueryRequest({ query }),
+  );
+  tapStringify({ result: result.data, query, schema });
 
   return { result: result.data, query };
-}) as <T>(schema: z.ZodType<T>) => { result: OpaqueRef<T[]>, query: OpaqueRef<any> };
-
+}) as <T>(schema: z.ZodType<T>) => {
+  result: OpaqueRef<T[]>;
+  query: OpaqueRef<any>;
+};
 
 export const datalogQuery = recipe(z.any(), (query) => {
-  const { result } = streamData<{ id: string, event: string, data: any[] }>(buildQueryRequest({ query }));
-  tapStringify({ result: result.data, query, schema: {} })
+  const { result } = streamData<{ id: string; event: string; data: any[] }>(
+    buildQueryRequest({ query }),
+  );
+  tapStringify({ result: result.data, query, schema: {} });
 
   return { result: result.data, query };
-}) as <T>(schema: z.ZodType<T>) => { result: OpaqueRef<T[]>, query: OpaqueRef<any> };
+}) as <T>(schema: z.ZodType<T>) => {
+  result: OpaqueRef<T[]>;
+  query: OpaqueRef<any>;
+};

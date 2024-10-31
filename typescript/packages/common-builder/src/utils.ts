@@ -1,6 +1,6 @@
 import { createShadowRef } from "./opaque-ref.js";
 import {
-  Value,
+  Opaque,
   Module,
   Recipe,
   OpaqueRef,
@@ -26,7 +26,10 @@ import { getTopFrame } from "./recipe.js";
  * @param fn - The function to apply to each value, which can return a new value
  * @returns Transformed value
  */
-export function traverseValue(value: Value<any>, fn: (value: any) => any): any {
+export function traverseValue(
+  value: Opaque<any>,
+  fn: (value: any) => any,
+): any {
   const staticWrap = isStatic(value) ? markAsStatic : (v: any) => v;
 
   // Perform operation, replaces value if non-undefined is returned
@@ -46,8 +49,8 @@ export function traverseValue(value: Value<any>, fn: (value: any) => any): any {
   )
     return staticWrap(
       Object.fromEntries(
-        Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)])
-      )
+        Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)]),
+      ),
     );
   else return staticWrap(value);
 }
@@ -55,7 +58,7 @@ export function traverseValue(value: Value<any>, fn: (value: any) => any): any {
 export function setValueAtPath(
   obj: any,
   path: PropertyKey[],
-  value: any
+  value: any,
 ): boolean {
   let parent = obj;
   for (let i = 0; i < path.length - 1; i++) {
@@ -115,15 +118,15 @@ export const deepEqual = (a: any, b: any): boolean => {
 };
 
 export function toJSONWithAliases(
-  value: Value<any>,
+  value: Opaque<any>,
   paths: Map<OpaqueRef<any>, PropertyKey[]>,
   ignoreSelfAliases: boolean = false,
   path: PropertyKey[] = [],
-  processStatic = false
+  processStatic = false,
 ): JSONValue | undefined {
   if (isStatic(value) && !processStatic)
     return markAsStatic(
-      toJSONWithAliases(value, paths, ignoreSelfAliases, path, true)
+      toJSONWithAliases(value, paths, ignoreSelfAliases, path, true),
     );
   // Convert regular cells to opaque refs
   else if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
@@ -156,7 +159,7 @@ export function toJSONWithAliases(
           frame = frame.parent;
         if (!frame)
           throw new Error(
-            `Shadow ref alias with parent cell not found in current frame`
+            `Shadow ref alias with parent cell not found in current frame`,
           );
         return value;
       }
@@ -179,8 +182,8 @@ export function toJSONWithAliases(
   }
 
   if (Array.isArray(value))
-    return (value as Value<any>).map((v: Value<any>, i: number) =>
-      toJSONWithAliases(v, paths, ignoreSelfAliases, [...path, i])
+    return (value as Opaque<any>).map((v: Opaque<any>, i: number) =>
+      toJSONWithAliases(v, paths, ignoreSelfAliases, [...path, i]),
     );
 
   if (typeof value === "object" || isRecipe(value)) {
@@ -191,7 +194,7 @@ export function toJSONWithAliases(
         value[key],
         paths,
         ignoreSelfAliases,
-        [...path, key]
+        [...path, key],
       );
       if (jsonValue !== undefined) {
         result[key] = jsonValue;
@@ -207,14 +210,14 @@ export function toJSONWithAliases(
 
 export function createJsonSchema(
   defaultValues: any,
-  referenceValues: any
+  referenceValues: any,
 ): JSON {
   function analyzeType(value: any, defaultValue: any): JSON {
     if (isAlias(value)) {
       const path = value.$alias.path;
       return analyzeType(
         getValueAtPath(defaultValues, path),
-        getValueAtPath(referenceValues, path)
+        getValueAtPath(referenceValues, path),
       );
     }
 
@@ -234,7 +237,7 @@ export function createJsonSchema(
                   if (!(key in properties)) {
                     properties[key] = analyzeType(
                       value?.[i]?.[key],
-                      defaultValue?.[i]?.[key]
+                      defaultValue?.[i]?.[key],
                     );
                   }
                 });
@@ -254,7 +257,7 @@ export function createJsonSchema(
           ])) {
             schema.properties[key] = analyzeType(
               value?.[key],
-              defaultValue?.[key]
+              defaultValue?.[key],
             );
           }
         } else {
