@@ -94,7 +94,7 @@ const placePrompt = lift(({ name, description, what, where }) => {
   };
 });
 
-export const localSearch = recipe(Search, ({ what, where }) => {
+export const localSearch = recipe<typeof Search>(Search, ({ what, where }) => {
   const prompt = cell<string>("");
 
   const { result } = llm(buildPrompt({ prompt }));
