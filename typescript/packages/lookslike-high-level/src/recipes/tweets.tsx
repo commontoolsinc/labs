@@ -1,7 +1,14 @@
 import { h } from "@commontools/common-html";
-import { recipe, UI, NAME, lift, ifElse } from "@commontools/common-builder";
+import {
+  recipe,
+  UI,
+  NAME,
+  lift,
+  ifElse,
+  str,
+} from "@commontools/common-builder";
 import { z } from "zod";
-import { buildTransactionRequest, queryRecipe, schemaQuery } from "../query.js";
+import { schemaQuery } from "../query.js";
 
 const Tweet = z
   .object({
@@ -14,14 +21,9 @@ const Tweet = z
   })
   .describe("Tweet");
 
-const TweetItem = z.object({
-  tweet: z.array(Tweet),
-});
-
 const Tweets = z
   .object({
-    title: z.string(),
-    items: z.array(TweetItem),
+    username: z.string().default(""),
   })
   .describe("Tweets");
 
@@ -30,36 +32,52 @@ const dateStringToNiceDateString = lift((dateString: string) => {
   return date.toDateString();
 });
 
-export const tweets = recipe(Tweets, ({ title }) => {
+const tap = lift((x) => {
+  console.log("tap!", JSON.stringify(x));
+  return x;
+});
+
+export const tweets = recipe(Tweets, ({ username }) => {
   const { result: items } = schemaQuery(Tweet);
+
   return {
-    [NAME]: "Tweets",
+    [NAME]: str`Tweets: ${username}`,
     [UI]: (
       <os-container>
         <common-vstack gap="md">
-          {items.map((item) => {
-            return (
-              <sl-card class="tweet">
-                <common-hstack slot="header">
-                  <sl-avatar></sl-avatar>
-                </common-hstack>
-                <div class="tweet-content">{item.full_text}</div>
-                <common-hstack slot="footer" gap="md">
+          {items.map((item) => (
+            <sl-card class="tweet">
+              <common-hstack slot="header" gap="md">
+                <sl-avatar></sl-avatar>
+                <div>{username}</div>
+              </common-hstack>
+              <div class="tweet-content">{item.full_text}</div>
+              <common-hstack slot="footer" gap="md">
+                <common-hstack>
                   {ifElse(
                     item.favorited,
-                    <sl-button>Favorite</sl-button>,
-                    <sl-button>Not favorite</sl-button>,
+                    <sl-icon-button
+                      library="material"
+                      name="favorite"
+                      label="Favorite"
+                      fill
+                    ></sl-icon-button>,
+                    <sl-icon-button
+                      library="material"
+                      name="favorite"
+                      label="Favorite"
+                    ></sl-icon-button>,
                   )}
-                  <sl-button>{item.favorite_count}</sl-button>
-                  <div>{dateStringToNiceDateString(item.created_at)}</div>
+                  <div>{item.favorite_count}</div>
                 </common-hstack>
-              </sl-card>
-            );
-          })}
+                <div>{dateStringToNiceDateString(item.created_at)}</div>
+              </common-hstack>
+            </sl-card>
+          ))}
         </common-vstack>
       </os-container>
     ),
-    title,
+    username,
     items,
   };
 });
