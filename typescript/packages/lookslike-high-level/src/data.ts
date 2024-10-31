@@ -33,17 +33,22 @@ import "./recipes/playlist.js";
 
 import { iframe } from "./recipes/iframe.js";
 import { search } from "./recipes/search.js";
-import { importCalendar } from "./recipes/importCalendar.js";
-import { dungeon } from "./recipes/dungeon.js";
 import { dataDesigner } from "./recipes/dataDesigner.js";
-import { jsonImporter } from "./recipes/jsonImport.js";
 import { prompt } from "./recipes/prompts.js";
 import { wiki } from "./recipes/wiki.js";
-import { helloIsolated } from "./recipes/helloIsolated.js";
 import { queryCollections } from "./recipes/queryCollections.js";
-import { evalJs } from "./recipes/eval.js";
 import { articleQuery } from "./recipes/articleQuery.jsx";
-import { rectangleQuery } from "./recipes/rectangleQuery.jsx";
+import { debounceExample } from "./recipes/examples/debounce.jsx";
+import { calc } from "./recipes/examples/calculator.jsx";
+import { rectangleQuery } from "./recipes/examples/rectangleQuery.jsx";
+import { evalJs } from "./recipes/examples/eval.js";
+import { importCalendar } from "./recipes/archive/importCalendar.js";
+import { dungeon } from "./recipes/archive/dungeon.js";
+import { jsonImporter } from "./recipes/archive/jsonImport.js";
+import { helloIsolated } from "./recipes/examples/helloIsolated.js";
+import { shoelaceDemo } from "./recipes/examples/shoelace.jsx";
+import { z } from "zod";
+import { datalogQueryExample } from "./recipes/datalogQuery.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -98,29 +103,30 @@ export async function syncCharm(
 
 addCharms([
   await runPersistent(
-    rectangleQuery,
+    datalogQueryExample,
+    {
+      query: {
+        "select": {
+          ".": "?item",
+          "title": "?title"
+        },
+        "where": [
+          {
+            "Case": [
+              "?item",
+              "title",
+              "?title"
+            ]
+          }
+        ]
+      }
+    },
+    "Datalog Query Playground"
+  ),
+  await runPersistent(
+    shoelaceDemo,
     { },
-    "rectangle query test"
-  ),
-  await runPersistent(
-    articleQuery,
-    {
-      "titleInput": "title",
-      "authorInput": "author",
-    },
-    "article query test"
-  ),
-  await runPersistent(
-    evalJs,
-    {
-      data: { todos: [
-        { title: "Buy groceries" },
-        { title: "Walk the dog" },
-        { title: "Wash the car" },
-      ] },
-      prompt: "list of three items",
-    },
-    "eval"
+    "shoelace"
   ),
   await runPersistent(
     iframe,
@@ -130,21 +136,6 @@ addCharms([
       data: { counter: 0 },
     },
     "iframe"
-  ),
-  await runPersistent(importCalendar, {}, "importCalendar"),
-  await runPersistent(
-    search,
-    {
-      query: "home",
-    },
-    "search"
-  ),
-  await runPersistent(
-    queryCollections,
-    {
-      collectionName: "home",
-    },
-    "queryCollections"
   ),
   await runPersistent(
     todoList,
@@ -197,10 +188,6 @@ export type RecipeManifest = {
 
 export const recipes: RecipeManifest[] = [
   {
-    name: "Explore dungeon game",
-    recipeId: addRecipe(dungeon),
-  },
-  {
     name: "Create a new TODO list",
     recipeId: addRecipe(todoList),
   },
@@ -213,14 +200,6 @@ export const recipes: RecipeManifest[] = [
     recipeId: addRecipe(luftBnBSearch),
   },
   {
-    name: "JSON Importer",
-    recipeId: addRecipe(jsonImporter),
-  },
-  {
-    name: "Data Designer",
-    recipeId: addRecipe(dataDesigner),
-  },
-  {
     name: "Create a counter",
     recipeId: addRecipe(counter),
   },
@@ -229,20 +208,12 @@ export const recipes: RecipeManifest[] = [
     recipeId: addRecipe(counters),
   },
   {
-    name: "Fetch JSON from a URL",
-    recipeId: addRecipe(fetchExample),
-  },
-  {
     name: "Explore imagery prompts",
     recipeId: addRecipe(prompt),
   },
   {
     name: "Explore Halucinated wiki",
     recipeId: addRecipe(wiki),
-  },
-  {
-    name: "Hello Isolated",
-    recipeId: addRecipe(helloIsolated),
   },
 ];
 

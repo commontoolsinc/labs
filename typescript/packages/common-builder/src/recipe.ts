@@ -38,7 +38,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
  */
 export function recipe<T extends z.ZodTypeAny>(
   inputSchema: T,
-  fn: (input: OpaqueRef<Required<z.infer<T>>>) => Value<any>
+  fn: (input: OpaqueRef<Required<z.infer<T>>>) => any
 ): RecipeFactory<z.infer<T>, ReturnType<typeof fn>>;
 export function recipe<T>(
   inputSchema: string,

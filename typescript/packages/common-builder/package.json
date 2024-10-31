@@ -24,7 +24,8 @@
     "./lib/index.js"
   ],
   "dependencies": {
-    "@commontools/common-runtime": "file:../common-runtime"
+    "@commontools/common-runtime": "file:../common-runtime",
+    "zod": "^3.x.x"
   },
   "devDependencies": {
     "typescript": "^5.2.2",

@@ -7,7 +7,7 @@ import {
   fetchData,
 } from "@commontools/common-builder";
 import * as z from "zod";
-import { buildTransactionRequest, queryRecipe, querySynopsys } from "../query.js";
+import { buildTransactionRequest, schemaQuery } from "../query.js";
 import { h } from "@commontools/common-html";
 
 export const schema = z.object({
@@ -48,7 +48,7 @@ const prepChanges = lift(({ titleInput, authorInput }) => {
 export const articleQuery = recipe(
   z.object({ titleInput: z.string(), authorInput: z.string() }),
   ({ titleInput, authorInput }) => {
-    const { result: items, query } = querySynopsys(schema)
+    const { result: items, query } = schemaQuery(schema)
     tap({ obj: items })
 
     const onChange = handler<InputEvent, { titleInput: string }>((e, state) => {

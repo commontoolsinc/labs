@@ -5,25 +5,25 @@ import {
   recipe,
 } from "@commontools/common-builder";
 import * as z from "zod";
-import { querySynopsys } from "../query.js";
+import { schemaQuery } from "../query.js";
 import { h } from "@commontools/common-html";
 
 const stringify = lift(({ obj }) => {
   return JSON.stringify(obj, null, 2);
 });
 
-export const query = recipe(
+export const schemaQueryExample = recipe(
   z.object({ schema: z.any() }),
   ({ schema }) => {
-    const { result: items, query } = querySynopsys(schema)
+    const { result: items, query } = schemaQuery(schema)
 
     return {
-      [NAME]: 'generic query',
+      [NAME]: 'Schema Query Playground',
       [UI]: <div>
         <pre>{stringify({ obj: items })}</pre>
       </div>,
       data: items,
-      query
+      query,
     };
   },
 );

@@ -1,7 +1,5 @@
 import { html } from "@commontools/common-html";
-import { recipe, handler, UI, NAME, cell, ifElse, lift } from "@commontools/common-builder";
-import { iframe} from "./iframe.js";
-import { launch } from "../data.js";
+import { recipe, handler, UI, NAME, ifElse, lift } from "@commontools/common-builder";
 
 interface CalendarEvent {
   datetime: string;

@@ -523,15 +523,10 @@ function instantiateRecipeNode(
   if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
   const inputs = mapBindingsToCell(inputBindings, processCell);
   const result = run(module.implementation, inputs);
-  // Update output bindings if the recipe changes. We don't expect the actual
-  // value of the result cell to change otherwise, as it's just a set of aliases
-  // to the corresponding process cell
-  addCancel(
-    result.sink((value) =>
-      sendValueToBinding(processCell, outputBindings, value)
-    )
-  );
-  addCancel(cancels.get(processCell));
+  sendValueToBinding(processCell, outputBindings, result);
+  // TODO: Make sure to not cancel after a recipe is elevated to a charm, e.g.
+  // via navigateTo. Nothing is cancelling right now, so leaving this as TODO.
+  addCancel(cancels.get(result.sourceCell!));
 }
 
 const moduleWrappers = {
