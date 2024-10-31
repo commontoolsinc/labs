@@ -17,6 +17,8 @@ export const schema = z.object({
 
 type TodoItem = z.infer<typeof schema>;
 
+const eid = (e: any) => (e as any)['.'];
+
 const onAddItem = handler<{}, { titleInput: string }>((e, state) => {
   const titleInput = state.titleInput;
   state.titleInput = '';
@@ -70,31 +72,30 @@ const prepRename = lift(({ prevTitle, title, id }) => {
 
 const toggleItem = handler<{}, { item: TodoItem }>((e, state) => {
   const item = state.item;
-  return fetchData(buildTransactionRequest(prepToggle({ done: item.done, id: (item as any)['.'] })));
+  return fetchData(buildTransactionRequest(prepToggle({ done: item.done, id: eid(item) })));
 })
 
 const renameItem = handler<{ detail: { checked: boolean; value: string } }, { item: TodoItem }>((e, state) => {
   const item = state.item;
-  return fetchData(buildTransactionRequest(prepRename({ title: e.detail.value, prevTitle: item.title, id: (item as any)['.'] })));
+  return fetchData(buildTransactionRequest(prepRename({ title: e.detail.value, prevTitle: item.title, id: eid(item) })));
 })
 
 const deleteItem = handler<{}, { item: TodoItem; items: TodoItem[] }>((e, state) => {
   const item = state.item;
-  const id = (item as any)['.']
   return fetchData(buildTransactionRequest({
     changes: [
       {
-        Retract: [id, "title", item.title],
+        Retract: [eid(item), "title", item.title],
       },
       {
-        Retract: [id, "done", item.done],
+        Retract: [eid(item), "done", item.done],
       }
     ]
   }));
 })
 
 export const todoQuery = recipe(
-  z.object({ titleInput: z.string() }),
+  z.object({ titleInput: z.string() }).describe("todo query"),
   ({ titleInput }) => {
     const { result: items, query } = schemaQuery(schema)
     tap({ obj: items })
