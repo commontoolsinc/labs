@@ -43,6 +43,7 @@ import { helloIsolated } from "./recipes/helloIsolated.js";
 import { queryCollections } from "./recipes/queryCollections.js";
 import { evalJs } from "./recipes/eval.js";
 import { articleQuery } from "./recipes/articleQuery.jsx";
+import { rectangleQuery } from "./recipes/rectangleQuery.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -96,6 +97,11 @@ export async function syncCharm(
 }
 
 addCharms([
+  await runPersistent(
+    rectangleQuery,
+    { },
+    "rectangle query test"
+  ),
   await runPersistent(
     articleQuery,
     {
