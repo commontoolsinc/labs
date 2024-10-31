@@ -139,6 +139,10 @@ export class CommonSidebar extends LitElement {
       this.setField("prompt", e.detail.state.doc.toString());
     };
 
+    const onQueryChanged = (e: CustomEvent) => {
+      this.setField("query", JSON.parse(e.detail.state.doc.toString()));
+    };
+
     return html`
       <os-navstack>
         ${when(
@@ -167,6 +171,7 @@ export class CommonSidebar extends LitElement {
                     .source=${watchCell(query, (q) =>
                       JSON.stringify(q, null, 2)
                     )}
+                    @doc-change=${onQueryChanged}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>

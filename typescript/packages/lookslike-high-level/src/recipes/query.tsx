@@ -23,7 +23,7 @@ export const query = recipe(
         <pre>{stringify({ obj: items })}</pre>
       </div>,
       data: items,
-      query
+      query,
     };
   },
 );
