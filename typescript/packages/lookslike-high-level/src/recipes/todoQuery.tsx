@@ -9,6 +9,7 @@ import {
 import * as z from "zod";
 import { buildTransactionRequest, schemaQuery } from "../query.js";
 import { h } from "@commontools/common-html";
+import { extractKeysFromZodSchema } from "../schema.js";
 
 export const schema = z.object({
   title: z.string(),
@@ -82,15 +83,11 @@ const renameItem = handler<{ detail: { checked: boolean; value: string } }, { it
 
 const deleteItem = handler<{}, { item: TodoItem; items: TodoItem[] }>((e, state) => {
   const item = state.item;
+  const keys = extractKeysFromZodSchema(schema);
   return fetchData(buildTransactionRequest({
-    changes: [
-      {
-        Retract: [eid(item), "title", item.title],
-      },
-      {
-        Retract: [eid(item), "done", item.done],
-      }
-    ]
+    changes: keys.map(key => ({
+      Retract: [eid(item), key, item[key as keyof TodoItem]]
+    }))
   }));
 })
 

@@ -56,6 +56,56 @@ export function zodSchemaToPlaceholder(schema: any): any {
   return undefined;
 }
 
+export function extractKeysFromZodSchema(schema: z.ZodTypeAny): string[] {
+  // For primitive types, return empty array as they don't have nested keys
+  if (
+    schema._def.typeName === 'ZodString' ||
+    schema._def.typeName === 'ZodNumber' ||
+    schema._def.typeName === 'ZodBoolean' ||
+    schema._def.typeName === 'ZodDate' ||
+    schema._def.typeName === 'ZodNull' ||
+    schema._def.typeName === 'ZodUndefined' ||
+    schema._def.typeName === 'ZodEnum' ||
+    schema._def.typeName === 'ZodLiteral'
+  ) {
+    return [];
+  }
+
+  // Handle arrays
+  if (schema._def.typeName === 'ZodArray') {
+    return extractKeysFromZodSchema(schema._def.type);
+  }
+
+  // Handle objects
+  if (schema._def.typeName === 'ZodObject') {
+    const shape = schema._def.shape();
+    const keys: string[] = [];
+
+    for (const [key, value] of Object.entries(shape)) {
+      // Add the current key
+      keys.push(key);
+      // Recursively get nested keys and prefix them with current key
+      const nestedKeys = extractKeysFromZodSchema(value).map(k => `${key}.${k}`);
+      keys.push(...nestedKeys);
+    }
+
+    return keys;
+  }
+
+  // Handle unions
+  if (schema._def.typeName === 'ZodUnion') {
+    // Get keys from first option
+    return extractKeysFromZodSchema(schema._def.options[0]);
+  }
+
+  // Handle optional and nullable
+  if (schema._def.typeName === 'ZodOptional' || schema._def.typeName === 'ZodNullable') {
+    return extractKeysFromZodSchema(schema._def.innerType);
+  }
+
+  return [];
+}
+
 
 export const jsonToDatalogQuery = (jsonObj: any) => {
   const select: Record<string, any> = {};
