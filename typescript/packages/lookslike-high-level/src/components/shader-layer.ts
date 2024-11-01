@@ -7,6 +7,7 @@ export class ShaderLayer extends LitElement {
   @property({ type: String }) shader = '';
   @property({ type: Number }) width = 640;
   @property({ type: Number }) height = 480;
+  @property({ type: String }) blendMode = 'hard-light';
 
   private canvasRef = createRef<HTMLCanvasElement>();
   private gl?: WebGLRenderingContext;
@@ -33,7 +34,7 @@ export class ShaderLayer extends LitElement {
       position: absolute;
       top: 0;
       left: 0;
-      mix-blend-mode: hard-light;
+      mix-blend-mode: var(--blend-mode, hard-light);
     }
   `;
 
@@ -43,6 +44,7 @@ export class ShaderLayer extends LitElement {
 
     canvas.width = this.width;
     canvas.height = this.height;
+    canvas.style.setProperty('--blend-mode', this.blendMode);
 
     this.gl = canvas.getContext('webgl', {
       alpha: true,
