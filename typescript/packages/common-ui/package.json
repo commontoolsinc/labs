@@ -9,7 +9,8 @@
   "scripts": {
     "build": "wireit",
     "clean": "wireit",
-    "test": "npm run build && web-test-runner \"test/**/*.test.js\" --node-resolve",
+    "test": "npm run build && mocha \"lib/**/*.test.js\"",
+    "test-web": "npm run build && web-test-runner \"test/**/*.test.js\" --node-resolve",
     "watch": "web-test-runner test/**/*.test.js --node-resolve --watch",
     "dev": "vite"
   },
@@ -50,6 +51,7 @@
   "dependencies": {
     "@cfworker/json-schema": "^1.12.8",
     "@shoelace-style/shoelace": "^2.18.0",
+    "@types/mocha": "^10.0.9",
     "@types/node": "^20.14.2",
     "lit": "^3.1.4",
     "vite-plugin-static-copy": "^2.0.0"
