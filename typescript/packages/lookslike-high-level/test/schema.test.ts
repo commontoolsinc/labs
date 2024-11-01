@@ -1,6 +1,6 @@
 import * as z from "zod";
-import { jsonToDatalogQuery, zodSchemaToPlaceholder } from './schema.js'
 import { describe, expect, it } from "vitest";
+import { extractKeysFromZodSchema, jsonToDatalogQuery, zodSchemaToPlaceholder } from "../src/schema.js";
 
 const schema = z.object({
   name: z.string(),
@@ -55,7 +55,7 @@ describe("zodSchemaToPlaceholder", () => {
   })
 
 
-  it.only("should make an article placeholder", () => {
+  it("should make an article placeholder", () => {
     const expected = {
       "title": "string",
       "author": "string",
@@ -66,7 +66,7 @@ describe("zodSchemaToPlaceholder", () => {
     expect(output).toMatchObject(expected);
   })
 
-  it.only("should make an article query", () => {
+  it("should make an article query", () => {
     const expected = {
       select: {
         title: "?title",
@@ -77,7 +77,7 @@ describe("zodSchemaToPlaceholder", () => {
         { Case: ["?item", "title", "?title"] },
         { Case: ["?item", "author", "?author"] },
         { Case: ["?item", "tags", "?tags[]"] },
-        { Case: ["?tags[]", "?.tags", "?tags"] }
+        { Case: ["?tags[]", "?[tags]", "?tags"] }
       ]
     };
 
@@ -86,7 +86,7 @@ describe("zodSchemaToPlaceholder", () => {
     expect(query).toMatchObject(expected);
   })
 
-  it.only("should make an article with comments query", () => {
+  it("should make an article with comments query", () => {
     const expected = {
       select: {
         title: "?title",
@@ -99,7 +99,7 @@ describe("zodSchemaToPlaceholder", () => {
         { Case: ["?item", "title", "?title"] },
         { Case: ["?item", "author", "?author"] },
         { Case: ["?item", "comments", "?comments[]"] },
-        { Case: ["?comments[]", "?.comments", "?comments"] },
+        { Case: ["?comments[]", "?[comments]", "?comments"] },
         { Case: ["?comments", "message", "?comments_message"] }
       ]
     };
@@ -108,6 +108,11 @@ describe("zodSchemaToPlaceholder", () => {
     const query = jsonToDatalogQuery(output);
     expect(query).toMatchObject(expected);
   })
+
+  it("can list keys of a zod schema", () => {
+    const keys = extractKeysFromZodSchema(articleSchema);
+    expect(keys).toMatchObject(["title", "author", "tags"]);
+  });
 
   it("should make a complex placeholder", () => {
       const expected = {

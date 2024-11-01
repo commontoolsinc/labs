@@ -1,6 +1,8 @@
 import { cell, CellImpl, ReactivityLog } from "../cell.js";
 import { normalizeToCells } from "../utils.js";
 import { type Action } from "../scheduler.js";
+import { refer } from "merkle-reference";
+
 /**
  * Fetch data from a URL.
  *
@@ -20,29 +22,41 @@ export function fetchData(
   }>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
-  cause: CellImpl<any>[]
+  cause: CellImpl<any>[],
 ): Action {
-  const pending = cell(false);
-  const result = cell<any | undefined>(undefined);
-  const error = cell<any | undefined>(undefined);
+  const pending = cell(false, { fetchData: { pending: cause } });
+  const result = cell<any | undefined>(undefined, {
+    fetchData: { result: cause },
+  });
+  const error = cell<any | undefined>(undefined, {
+    fetchData: { error: cause },
+  });
+  const requestHash = cell<string | undefined>(undefined, {
+    fetchData: { requestHash: cause },
+  });
 
-  // Generate causal IDs for the cells.
-  pending.generateEntityId({ fetchData: { pending: cause } });
-  result.generateEntityId({ fetchData: { result: cause } });
-  error.generateEntityId({ fetchData: { error: cause } });
-
-  const resultCell = cell({
+  sendResult({
     pending,
     result,
     error,
+    requestHash,
   });
 
-  sendResult(resultCell);
-
   let currentRun = 0;
+  let previousCallHash: string | undefined = undefined;
 
   return (log: ReactivityLog) => {
     const { url, mode, options } = inputsCell.getAsQueryResult([], log);
+
+    const hash = refer({
+      url: url ?? "",
+      mode: mode ?? "json",
+      options: options ?? {},
+    }).toString();
+
+    if (hash === previousCallHash || hash === requestHash.get()) return;
+    previousCallHash = hash;
+
     const processResponse =
       (mode || "json") === "json"
         ? (r: Response) => r.json()
@@ -71,12 +85,17 @@ export function fetchData(
 
         pending.setAtPath([], false, log);
         result.setAtPath([], data, log);
+        requestHash.setAtPath([], hash, log);
       })
       .catch((err) => {
         if (thisRun !== currentRun) return;
 
         pending.setAtPath([], false, log);
         error.setAtPath([], err, log);
+
+        // TODO: Not writing now, so we retry the request after failure. Replace
+        // this with more fine-grained retry logic.
+        // requestHash.setAtPath([], hash, log);
       });
   };
 }

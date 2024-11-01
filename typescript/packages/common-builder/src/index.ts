@@ -26,7 +26,7 @@ export {
   TYPE,
   NAME,
   UI,
-  type Value,
+  type Opaque,
   type OpaqueRef,
   type OpaqueRefMethods,
   type Module,

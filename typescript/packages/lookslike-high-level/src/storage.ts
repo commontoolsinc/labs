@@ -35,7 +35,7 @@ export interface Storage {
    */
   syncCell<T = any>(
     cell: CellImpl<T> | EntityId | string,
-    expectedInStorage?: boolean
+    expectedInStorage?: boolean,
   ): Promise<CellImpl<T>> | CellImpl<T>;
 
   /**
@@ -123,7 +123,7 @@ class StorageImpl implements Storage {
   private currentBatchProcessing = false;
   private currentBatchResolve: () => void = () => {};
   private currentBatchPromise: Promise<void> = new Promise(
-    (r) => (this.currentBatchResolve = r)
+    (r) => (this.currentBatchResolve = r),
   );
 
   private cancel: Cancel;
@@ -131,7 +131,7 @@ class StorageImpl implements Storage {
 
   syncCell<T>(
     subject: CellImpl<T> | EntityId | string,
-    expectedInStorage: boolean = false
+    expectedInStorage: boolean = false,
   ): Promise<CellImpl<T>> | CellImpl<T> {
     const entityCell = this._ensureIsSynced(subject, expectedInStorage);
 
@@ -152,10 +152,18 @@ class StorageImpl implements Storage {
 
   private _ensureIsSynced<T>(
     subject: CellImpl<T> | EntityId | string,
-    expectedInStorage: boolean = false
+    expectedInStorage: boolean = false,
   ): CellImpl<T> {
     const entityCell = this._fromIdToCell<T>(subject);
     const entityId = JSON.stringify(entityCell.entityId);
+
+    // If the cell is ephemeral, we don't need to load it from storage. We still
+    // add it to the map of known cells, so that we don't try to keep loading
+    // it.
+    if (entityCell.ephemeral) {
+      this.cellsById.set(entityId, entityCell);
+      return entityCell;
+    }
 
     // If the cell is already loaded or loading, return immediately.
     if (this.cellsById.has(entityId)) return entityCell;
@@ -174,7 +182,7 @@ class StorageImpl implements Storage {
     // Create a promise that gets resolved once the cell and all its
     // dependencies are loaded. It'll return the cell when done.
     const cellIsLoadingPromise = new Promise<void>((r) =>
-      this.loadingResolves.set(entityCell, r)
+      this.loadingResolves.set(entityCell, r),
     ).then(() => entityCell);
     this.cellIsLoading.set(entityCell, cellIsLoadingPromise);
 
@@ -187,6 +195,15 @@ class StorageImpl implements Storage {
   // Prepares value for storage, and updates dependencies, triggering cell loads
   // if necessary. Updates this.writeValues and this.writeDependentCells.
   private _batchForStorage(cell: CellImpl<any>): void {
+    // If the cell is ephemeral, this is a no-op.
+    if (cell.ephemeral) {
+      console.warn(
+        "attempted to batch write to ephemeral cell in storage: ",
+        JSON.stringify(cell.entityId),
+      );
+      return;
+    }
+
     const dependencies = new Set<CellImpl<any>>();
 
     // Traverse the value and for each cell reference, make sure it's persisted.
@@ -194,7 +211,7 @@ class StorageImpl implements Storage {
     const traverse = (
       value: any,
       path: PropertyKey[],
-      processStatic: boolean = false
+      processStatic: boolean = false,
     ): any => {
       // If it's a cell, make it a cell reference
       if (isCell(value))
@@ -223,7 +240,7 @@ class StorageImpl implements Storage {
             Object.entries(value).map(([key, value]: [PropertyKey, any]) => [
               key,
               traverse(value, [...path, key]),
-            ])
+            ]),
           );
       } else return value;
     };
@@ -253,7 +270,7 @@ class StorageImpl implements Storage {
         "prep for storage",
         JSON.stringify(cell.entityId),
         value,
-        [...dependencies].map((c) => JSON.stringify(c.entityId))
+        [...dependencies].map((c) => JSON.stringify(c.entityId)),
       );
     }
   }
@@ -263,13 +280,13 @@ class StorageImpl implements Storage {
   private _batchForCell(
     cell: CellImpl<any>,
     value: any,
-    source?: EntityId
+    source?: EntityId,
   ): void {
     debug(
       "prep for cell",
       JSON.stringify(cell.entityId),
       value,
-      JSON.stringify(source ?? null)
+      JSON.stringify(source ?? null),
     );
 
     const dependencies = new Set<CellImpl<any>>();
@@ -302,7 +319,7 @@ class StorageImpl implements Storage {
         return value.map(traverse);
       } else {
         return Object.fromEntries(
-          Object.entries(value).map(([k, v]): any => [k, traverse(v)])
+          Object.entries(value).map(([k, v]): any => [k, traverse(v)]),
         );
       }
     };
@@ -349,14 +366,14 @@ class StorageImpl implements Storage {
     debug(
       "processing batch",
       this.currentBatch.map(
-        ({ cell, type }) => `${JSON.stringify(cell.entityId)}:${type}`
-      )
+        ({ cell, type }) => `${JSON.stringify(cell.entityId)}:${type}`,
+      ),
     );
 
     do {
       // Load everything in loading
       const loaded = await Promise.all(
-        Array.from(loading).map((cell) => this.loadingPromises.get(cell)!)
+        Array.from(loading).map((cell) => this.loadingPromises.get(cell)!),
       );
       loading.clear();
 
@@ -392,31 +409,31 @@ class StorageImpl implements Storage {
           debug(
             "dependent cells",
             JSON.stringify(cell.entityId),
-            [...dependentCells!].map((c) => JSON.stringify(c.entityId))
+            [...dependentCells!].map((c) => JSON.stringify(c.entityId)),
           );
           if (dependentCells)
             Array.from(dependentCells)
               .filter(
                 (dependent) =>
                   this.cellIsLoading.has(dependent) &&
-                  !loadedCells.has(dependent)
+                  !loadedCells.has(dependent),
               )
               .forEach((dependent) => loading.add(dependent));
         }
       }
       debug(
         "loading",
-        [...loading].map((c) => JSON.stringify(c.entityId))
+        [...loading].map((c) => JSON.stringify(c.entityId)),
       );
       debug(
         "cellIsLoading",
-        [...this.cellIsLoading.keys()].map((c) => JSON.stringify(c.entityId))
+        [...this.cellIsLoading.keys()].map((c) => JSON.stringify(c.entityId)),
       );
       debug(
         "currentBatch",
         this.currentBatch.map(
-          ({ cell, type }) => `${JSON.stringify(cell.entityId)}:${type}`
-        )
+          ({ cell, type }) => `${JSON.stringify(cell.entityId)}:${type}`,
+        ),
       );
     } while (loading.size > 0);
 
@@ -424,19 +441,19 @@ class StorageImpl implements Storage {
     const cellJobs = new Map(
       this.currentBatch
         .filter(({ type }) => type === "cell")
-        .map(({ cell }) => [cell, this.readValues.get(cell)!])
+        .map(({ cell }) => [cell, this.readValues.get(cell)!]),
     );
     const storageJobs = new Map(
       this.currentBatch
         .filter(({ type }) => type === "storage")
-        .map(({ cell }) => [cell, this.writeValues.get(cell)!])
+        .map(({ cell }) => [cell, this.writeValues.get(cell)!]),
     );
 
     // Reset batch: Everything coming in now will be processed in the next round
     const currentResolve = this.currentBatchResolve;
     this.currentBatch = [];
     this.currentBatchPromise = new Promise(
-      (r) => (this.currentBatchResolve = r)
+      (r) => (this.currentBatchResolve = r),
     );
 
     // Don't update cells while they might be updating.
@@ -457,7 +474,7 @@ class StorageImpl implements Storage {
       Array.from(storageJobs).map(([cell, value]) => ({
         entityId: cell.entityId!,
         value,
-      }))
+      })),
     );
 
     // Finally, clear and resolve loading promise for all loaded cells
@@ -499,7 +516,7 @@ class StorageImpl implements Storage {
           // Trigger processing of next batch, if we got new ones while
           // applying operations or after resolving the current batch promise
           if (this.currentBatch.length > 0) this._addToBatch([]);
-        })
+        }),
       );
     }
 
@@ -515,14 +532,14 @@ class StorageImpl implements Storage {
     // Subscribe to storage updates, send results to cell
     this.addCancel(
       this.storageProvider.sink(cell.entityId!, (value) =>
-        this._batchForCell(cell, value.value, value.source)
-      )
+        this._batchForCell(cell, value.value, value.source),
+      ),
     );
   }
 
   // Support referencing as cell, via entity ID or as stringified entity ID
   private _fromIdToCell<T>(
-    subject: CellImpl<any> | EntityId | string
+    subject: CellImpl<any> | EntityId | string,
   ): CellImpl<T> {
     if (isCell(subject)) {
       if (!subject.entityId) throw new Error("Cell has no entity ID");

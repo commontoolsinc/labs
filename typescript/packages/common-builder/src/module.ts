@@ -1,7 +1,7 @@
 import type {
   Module,
   ModuleFactory,
-  Value,
+  Opaque,
   OpaqueRef,
   NodeRef,
   toJSON,
@@ -16,14 +16,14 @@ import type {
 } from "@commontools/common-runtime";
 
 export function createNodeFactory<T = any, R = any>(
-  moduleSpec: Module
+  moduleSpec: Module,
 ): ModuleFactory<T, R> {
   const module: Module & toJSON = {
     ...moduleSpec,
     toJSON: () => moduleToJSON(module),
   };
 
-  return Object.assign((inputs: Value<T>): OpaqueRef<R> => {
+  return Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
     const outputs = opaqueRef<R>();
     const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
 
@@ -41,16 +41,16 @@ export function createNodeFactory<T = any, R = any>(
  * @returns A module node factory that also serializes as module.
  */
 export function lift<T, R>(
-  implementation: (input: T) => R
+  implementation: (input: T) => R,
 ): ModuleFactory<T, R>;
 export function lift<T>(
-  implementation: (input: T) => any
+  implementation: (input: T) => any,
 ): ModuleFactory<T, ReturnType<typeof implementation>>;
 export function lift<T extends (...args: any[]) => any>(
-  implementation: T
+  implementation: T,
 ): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
 export function lift<T, R>(
-  implementation: (input: T) => R
+  implementation: (input: T) => R,
 ): ModuleFactory<T, R> {
   return createNodeFactory({
     type: "javascript",
@@ -71,7 +71,7 @@ export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
 }
 
 export function handler<E, T>(
-  handler: (event: E, props: T) => any
+  handler: (event: E, props: T) => any,
 ): ModuleFactory<T, E> {
   const module: Module & toJSON = {
     type: "javascript",
@@ -80,7 +80,7 @@ export function handler<E, T>(
     toJSON: () => moduleToJSON(module),
   };
 
-  return Object.assign((props: Value<T>): OpaqueRef<E> => {
+  return Object.assign((props: Opaque<T>): OpaqueRef<E> => {
     const stream = opaqueRef();
     stream.set({ $stream: true });
     const node: NodeRef = {
@@ -100,22 +100,22 @@ export function handler<E, T>(
 export function isolated<T, R>(
   inputs: JavaScriptValueMap,
   outputs: JavaScriptShapeMap,
-  implementation: (input: T) => R
+  implementation: (input: T) => R,
 ): ModuleFactory<T, R>;
 export function isolated<T>(
   inputs: JavaScriptValueMap,
   outputs: JavaScriptShapeMap,
-  implementation: (input: T) => any
+  implementation: (input: T) => any,
 ): ModuleFactory<T, ReturnType<typeof implementation>>;
 export function isolated<T extends (...args: any[]) => any>(
   inputs: JavaScriptValueMap,
   outputs: JavaScriptShapeMap,
-  implementation: T
+  implementation: T,
 ): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
 export function isolated<T, R>(
   inputs: JavaScriptValueMap,
   outputs: JavaScriptShapeMap,
-  implementation: (input: T) => R
+  implementation: (input: T) => R,
 ): ModuleFactory<T, R> {
   const body = `import { read, write } from "common:io/state@0.0.1";
 
@@ -129,7 +129,7 @@ export function isolated<T, R>(
     ${Object.keys(outputs)
       .map(
         (key) =>
-          `write("${key}", { tag: typeof result["${key}"], val: result["${key}"] })`
+          `write("${key}", { tag: typeof result["${key}"], val: result["${key}"] })`,
       )
       .join("\n")}
   };

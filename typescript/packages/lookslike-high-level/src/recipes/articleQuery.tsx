@@ -46,7 +46,7 @@ const prepChanges = lift(({ titleInput, authorInput }) => {
 })
 
 export const articleQuery = recipe(
-  z.object({ titleInput: z.string(), authorInput: z.string() }),
+  z.object({ titleInput: z.string(), authorInput: z.string() }).describe("article query"),
   ({ titleInput, authorInput }) => {
     const { result: items, query } = schemaQuery(schema)
     tap({ obj: items })

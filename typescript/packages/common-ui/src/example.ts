@@ -92,6 +92,11 @@ const tree = vstack({}, [
     shoelace.breadcrumbItem({}, ["World"]),
   ]),
   shoelace.button({}, ["Button"]),
+  shoelace.icon({
+    library: "material",
+    name: "settings",
+    label: "Settings",
+  }),
   datatableNode,
   dictNode,
   listNode,

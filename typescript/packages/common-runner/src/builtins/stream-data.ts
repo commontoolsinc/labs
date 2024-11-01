@@ -21,16 +21,19 @@ export function streamData(
   }>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
-  cause: CellImpl<any>[]
+  cause: CellImpl<any>[],
 ): Action {
-  const pending = cell(false);
-  const result = cell<any | undefined>(undefined);
-  const error = cell<any | undefined>(undefined);
+  const pending = cell(false, { streamData: { pending: cause } });
+  const result = cell<any | undefined>(undefined, {
+    streamData: { result: cause },
+  });
+  const error = cell<any | undefined>(undefined, {
+    streamData: { error: cause },
+  });
 
-  // Generate causal IDs for the cells.
-  pending.generateEntityId({ streamData: { pending: cause } });
-  result.generateEntityId({ streamData: { result: cause } });
-  error.generateEntityId({ streamData: { error: cause } });
+  pending.ephemeral = true;
+  result.ephemeral = true;
+  error.ephemeral = true;
 
   // Since we'll only write into the cells above, we only have to call this once
   // here, instead of in the action.

@@ -24,6 +24,7 @@ import {
   getEntityId,
   createRef,
   type EntityId,
+  getCellByEntityId,
 } from "./cell-map.js";
 import { type Cancel } from "./cancel.js";
 
@@ -72,7 +73,7 @@ export interface RendererCell<T> {
   key<K extends keyof T>(valueKey: K): RendererCell<T[K]>;
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
-    log?: ReactivityLog
+    log?: ReactivityLog,
   ): QueryResult<DeepKeyLookup<T, Path>>;
   getAsCellReference(): CellReference;
   toJSON(): { "/": string } | undefined;
@@ -134,7 +135,7 @@ export type CellImpl<T> = {
    */
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
-    log?: ReactivityLog
+    log?: ReactivityLog,
   ): QueryResult<DeepKeyLookup<T, Path>>;
 
   /**
@@ -149,7 +150,7 @@ export type CellImpl<T> = {
    */
   asRendererCell<Q = T, Path extends PropertyKey[] = []>(
     path?: Path,
-    log?: ReactivityLog
+    log?: ReactivityLog,
   ): RendererCell<DeepKeyLookup<Q, Path>>;
 
   /**
@@ -249,6 +250,15 @@ export type CellImpl<T> = {
   sourceCell: CellImpl<any> | undefined;
 
   /**
+   * Whether the cell is ephemeral.
+   *
+   * Ephemeral cells are not persisted to storage.
+   *
+   * @returns Whether the cell is ephemeral.
+   */
+  ephemeral: boolean;
+
+  /**
    * Internal only: Used by builder to turn cells into proxies tied to them.
    * Useful when building a recipe that directly refers to existing cells, such
    * as a recipe created and returned by a handler.
@@ -301,24 +311,32 @@ export type ReactivityLog = {
 export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends []
   ? T
   : Path extends [infer First, ...infer Rest]
-  ? First extends keyof T
-    ? Rest extends PropertyKey[]
-      ? DeepKeyLookup<T[First], Rest>
+    ? First extends keyof T
+      ? Rest extends PropertyKey[]
+        ? DeepKeyLookup<T[First], Rest>
+        : any
       : any
-    : any
-  : any;
+    : any;
 
-export function cell<T>(value?: T): CellImpl<T> {
+export function cell<T>(value?: T, cause?: any): CellImpl<T> {
   const callbacks = new Set<(value: T, path: PropertyKey[]) => void>();
   let readOnly = false;
   let entityId: EntityId | undefined;
   let sourceCell: CellImpl<any> | undefined;
+  let ephemeral = false;
+
+  // If cause is provided, generate ID and return pre-existing cell if any.
+  if (cause) {
+    entityId = generateEntityId(value, cause);
+    const existing = getCellByEntityId(entityId, false);
+    if (existing) return existing;
+  }
 
   const self: CellImpl<T> = {
     get: () => value as T,
     getAsQueryResult: <Path extends PropertyKey[]>(
       path?: Path,
-      log?: ReactivityLog
+      log?: ReactivityLog,
     ) =>
       createQueryResultProxy(self, path ?? [], log) as QueryResult<
         DeepKeyLookup<T, Path>
@@ -361,14 +379,7 @@ export function cell<T>(value?: T): CellImpl<T> {
     },
     isFrozen: () => readOnly,
     generateEntityId: (cause?: any): void => {
-      entityId = createRef(
-        typeof value === "object" && value !== null
-          ? (value as Object)
-          : value !== undefined
-          ? { value }
-          : {},
-        cause
-      );
+      entityId = generateEntityId(value, cause);
       setCellByEntityId(entityId, self);
     },
     // This is the id and not the contents, because we .toJSON is called when
@@ -397,6 +408,12 @@ export function cell<T>(value?: T): CellImpl<T> {
         throw new Error("Source cell already set");
       sourceCell = cell;
     },
+    get ephemeral(): boolean {
+      return ephemeral;
+    },
+    set ephemeral(value: boolean) {
+      ephemeral = value;
+    },
     [toOpaqueRef]: () => makeOpaqueRef(self, []),
     [isCellMarker]: true,
     get copyTrap(): boolean {
@@ -404,13 +421,25 @@ export function cell<T>(value?: T): CellImpl<T> {
     },
   };
 
+  if (entityId) setCellByEntityId(entityId, self);
   return self;
+}
+
+function generateEntityId(value: any, cause?: any): EntityId {
+  return createRef(
+    typeof value === "object" && value !== null
+      ? (value as Object)
+      : value !== undefined
+        ? { value }
+        : {},
+    cause,
+  );
 }
 
 function rendererCell<T>(
   cell: CellImpl<any>,
   path: PropertyKey[],
-  log?: ReactivityLog
+  log?: ReactivityLog,
 ): RendererCell<T> {
   // Follow aliases, cell references, etc. in path. Note that
   // transformToRendererCells will follow aliases, but not cell references, so
@@ -465,17 +494,21 @@ function rendererCell<T>(
             (value, changedPath) =>
               pathAffected(changedPath, path) &&
               callback(
-                transformToRendererCells(cell, getValueAtPath(value, path), log)
-              )
+                transformToRendererCells(
+                  cell,
+                  getValueAtPath(value, path),
+                  log,
+                ),
+              ),
           );
         },
         key: <K extends keyof T>(key: K) =>
           cell.asRendererCell([...path, key], log) as RendererCell<T[K]>,
         getAsQueryResult: (
           subPath: PropertyKey[] = [],
-          newLog?: ReactivityLog
+          newLog?: ReactivityLog,
         ) => createQueryResultProxy(cell, [...path, ...subPath], newLog ?? log),
-        getAsCellReference: () => ({ cell, path } satisfies CellReference),
+        getAsCellReference: () => ({ cell, path }) satisfies CellReference,
         toJSON: () => cell.toJSON(),
         get value(): T {
           return self.get();
@@ -486,7 +519,7 @@ function rendererCell<T>(
         [isRendererCellMarker]: true,
         get copyTrap(): boolean {
           throw new Error(
-            "Copy trap: Don't copy renderer cells. Create references instead."
+            "Copy trap: Don't copy renderer cells. Create references instead.",
           );
         },
       };
@@ -537,7 +570,7 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
 export function createQueryResultProxy<T>(
   valueCell: CellImpl<T>,
   valuePath: PropertyKey[],
-  log?: ReactivityLog
+  log?: ReactivityLog,
 ): T {
   log?.reads.push({ cell: valueCell, path: valuePath });
 
@@ -611,7 +644,7 @@ export function createQueryResultProxy<T>(
               // methods implicitly read all elements. TODO: Deal with
               // exceptions like at().
               const copy = target.map((_, index) =>
-                createQueryResultProxy(valueCell, [...valuePath, index], log)
+                createQueryResultProxy(valueCell, [...valuePath, index], log),
               );
 
               return method.apply(copy, args);
@@ -629,8 +662,8 @@ export function createQueryResultProxy<T>(
                     index,
                     valueCell,
                     [...valuePath, index],
-                    log
-                  )
+                    log,
+                  ),
                 );
 
               let result = method.apply(copy, args);
@@ -639,7 +672,7 @@ export function createQueryResultProxy<T>(
               if (isProxyForArrayValue(result)) result = result.valueOf();
               else if (Array.isArray(result))
                 result = result.map((value) =>
-                  isProxyForArrayValue(value) ? value.valueOf() : value
+                  isProxyForArrayValue(value) ? value.valueOf() : value,
                 );
 
               if (isReadWrite === ArrayMethodType.ReadWrite)
@@ -647,7 +680,7 @@ export function createQueryResultProxy<T>(
                 copy = copy.map((value: any) =>
                   isProxyForArrayValue(value)
                     ? target[value[originalIndex]]
-                    : value
+                    : value,
                 );
 
               // Turn any newly added elements into cells. And if there was a
@@ -670,7 +703,7 @@ export function createQueryResultProxy<T>(
           valueCell,
           [...valuePath, prop],
           value,
-          log
+          log,
         );
         const newLength = value;
         if (result) {
@@ -719,7 +752,7 @@ const createProxyForArrayValue = (
   source: number,
   valueCell: CellImpl<any>,
   valuePath: PropertyKey[],
-  log?: ReactivityLog
+  log?: ReactivityLog,
 ): { [originalIndex]: number } => {
   const target = {
     valueOf: function () {
@@ -744,7 +777,7 @@ const cellToOpaqueRef = new WeakMap<
 // creaeting the recipe.
 function makeOpaqueRef(
   valueCell: CellImpl<any>,
-  valuePath: PropertyKey[]
+  valuePath: PropertyKey[],
 ): OpaqueRef<any> {
   const frame = getTopFrame();
   if (!frame) throw new Error("No frame");
@@ -860,7 +893,7 @@ const getCellReference = Symbol("isQueryResultProxy");
  * @returns {boolean}
  */
 export function isQueryResultForDereferencing(
-  value: any
+  value: any,
 ): value is QueryResultInternals {
   return isQueryResult(value);
 }
@@ -872,7 +905,7 @@ export function isQueryResultForDereferencing(
  * @returns {boolean}
  */
 export const isReactive = <T = any>(
-  value: ReactiveCell<T>
+  value: ReactiveCell<T>,
 ): value is ReactiveCell<T> => {
   return (
     typeof value === "object" &&
@@ -888,7 +921,7 @@ export const isReactive = <T = any>(
  * @returns {boolean}
  */
 export const isGettable = <T = any>(
-  value: GettableCell<T>
+  value: GettableCell<T>,
 ): value is GettableCell<T> => {
   return (
     typeof value === "object" &&
@@ -904,7 +937,7 @@ export const isGettable = <T = any>(
  * @returns {boolean}
  */
 export const isSendable = <T = any>(
-  value: SendableCell<T>
+  value: SendableCell<T>,
 ): value is SendableCell<T> => {
   return (
     typeof value === "object" &&

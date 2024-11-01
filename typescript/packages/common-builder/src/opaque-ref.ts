@@ -1,7 +1,7 @@
 import {
   OpaqueRef,
   OpaqueRefMethods,
-  Value,
+  Opaque,
   NodeRef,
   NodeFactory,
   isOpaqueRefMarker,
@@ -26,7 +26,7 @@ let mapFactory: NodeFactory<any, any>;
 //
 // The proxy yields another proxy for each nested value, but still allows the
 // methods to be called. Setters just call .set() on the nested cell.
-export function opaqueRef<T>(value?: Value<T> | T): OpaqueRef<T> {
+export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
   const store = {
     value,
     defaultValue: undefined,
@@ -36,15 +36,15 @@ export function opaqueRef<T>(value?: Value<T> | T): OpaqueRef<T> {
 
   function createNestedProxy(
     path: PropertyKey[],
-    target?: any
+    target?: any,
   ): OpaqueRef<any> {
     const methods: OpaqueRefMethods<any> = {
       get: () => proxy,
-      set: (newValue: Value<any>) => {
+      set: (newValue: Opaque<any>) => {
         setValueAtPath(store, ["value", ...path], newValue);
       },
       key: (key: PropertyKey) => createNestedProxy([...path, key]),
-      setDefault: (newValue: Value<any>) => {
+      setDefault: (newValue: Opaque<any>) => {
         if (!hasValueAtPath(store, ["defaultValue", ...path]))
           setValueAtPath(store, ["defaultValue", ...path], newValue);
       },
@@ -57,8 +57,8 @@ export function opaqueRef<T>(value?: Value<T> | T): OpaqueRef<T> {
       }),
       map: <S>(
         fn: (
-          value: Value<Required<T extends Array<infer U> ? U : T>>
-        ) => Value<S>
+          value: Opaque<Required<T extends Array<infer U> ? U : T>>,
+        ) => Opaque<S>,
       ) => {
         // Create the factory if it doesn't exist. Doing it here to avoid
         // circular dependency.
@@ -83,7 +83,7 @@ export function opaqueRef<T>(value?: Value<T> | T): OpaqueRef<T> {
           next: () => {
             if (index >= 50)
               throw new Error(
-                "Can't use iterator over an opaque value in an unlimited loop."
+                "Can't use iterator over an opaque value in an unlimited loop.",
               );
             return {
               done: false,
@@ -102,7 +102,7 @@ export function opaqueRef<T>(value?: Value<T> | T): OpaqueRef<T> {
         } else if (prop in methods) {
           return createNestedProxy(
             [...path, prop],
-            methods[prop as keyof OpaqueRefMethods<any>]
+            methods[prop as keyof OpaqueRefMethods<any>],
           );
         } else return createNestedProxy([...path, prop]);
       },

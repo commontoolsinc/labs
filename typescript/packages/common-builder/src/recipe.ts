@@ -2,7 +2,7 @@ import {
   Recipe,
   RecipeFactory,
   NodeRef,
-  Value,
+  Opaque,
   OpaqueRef,
   isOpaqueRef,
   Node,
@@ -38,19 +38,19 @@ import { zodToJsonSchema } from "zod-to-json-schema";
  */
 export function recipe<T extends z.ZodTypeAny>(
   inputSchema: T,
-  fn: (input: OpaqueRef<Required<z.infer<T>>>) => any
+  fn: (input: OpaqueRef<Required<z.infer<T>>>) => any,
 ): RecipeFactory<z.infer<T>, ReturnType<typeof fn>>;
 export function recipe<T>(
   inputSchema: string,
-  fn: (input: OpaqueRef<Required<T>>) => any
+  fn: (input: OpaqueRef<Required<T>>) => any,
 ): RecipeFactory<T, ReturnType<typeof fn>>;
 export function recipe<T, R>(
   inputSchema: string,
-  fn: (input: OpaqueRef<Required<T>>) => Value<R>
+  fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R>;
 export function recipe<T, R>(
   inputSchema: string,
-  fn: (input: OpaqueRef<Required<T>>) => Value<R>
+  fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R> {
   // The recipe graph is created by calling `fn` which populates for `inputs`
   // and `outputs` with Value<> (which containts OpaqueRef<>) and/or default
@@ -67,7 +67,7 @@ export function recipe<T, R>(
 // Same as above, but assumes the caller manages the frame
 export function recipeFromFrame<T, R>(
   inputSchema: string | z.ZodTypeAny,
-  fn: (input: OpaqueRef<Required<T>>) => Value<R>
+  fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R> {
   const inputs = opaqueRef<Required<T>>();
   const outputs = fn(inputs);
@@ -77,14 +77,14 @@ export function recipeFromFrame<T, R>(
 function factoryFromRecipe<T, R>(
   inputSchema: string | z.ZodTypeAny,
   inputs: OpaqueRef<T>,
-  outputs: Value<R>
+  outputs: Opaque<R>,
 ): RecipeFactory<T, R> {
   // Traverse the value, collect all mentioned nodes and cells
   const cells = new Set<OpaqueRef<any>>();
   const shadows = new Set<ShadowRef>();
   const nodes = new Set<NodeRef>();
 
-  const collectCellsAndNodes = (value: Value<any>) =>
+  const collectCellsAndNodes = (value: Opaque<any>) =>
     traverseValue(value, (value) => {
       if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
       if (
@@ -148,7 +148,7 @@ function factoryFromRecipe<T, R>(
   const defaults = toJSONWithAliases(
     inputs.export().defaultValue ?? {},
     paths,
-    true
+    true,
   )!;
 
   // Set initial values for all cells, add non-inputs defaults
@@ -187,7 +187,7 @@ function factoryFromRecipe<T, R>(
     delete schema.properties[UI]; // TODO: This should be a schema for views
     if (schema.properties?.internal?.properties)
       for (const key of Object.keys(
-        schema.properties.internal.properties as any
+        schema.properties.internal.properties as any,
       ))
         if (key.startsWith("__#"))
           delete (schema as any).properties.internal.properties[key];
@@ -220,7 +220,7 @@ function factoryFromRecipe<T, R>(
     toJSON: () => moduleToJSON(module),
   };
 
-  return Object.assign((inputs: Value<T>): OpaqueRef<R> => {
+  return Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
     const outputs = opaqueRef<R>();
     const node: NodeRef = {
       module,

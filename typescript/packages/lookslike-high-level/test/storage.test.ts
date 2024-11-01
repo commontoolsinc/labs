@@ -24,7 +24,7 @@ const createMockWindow = () => {
             newValue: value,
             storageArea: mockWindow.localStorage,
             url: mockWindow.location.href,
-          })
+          }),
         );
       }),
       removeItem: vi.fn((key: string) => {
@@ -37,7 +37,7 @@ const createMockWindow = () => {
             newValue: null,
             storageArea: mockWindow.localStorage,
             url: mockWindow.location.href,
-          })
+          }),
         );
       }),
       clear: vi.fn(() => {
@@ -49,7 +49,7 @@ const createMockWindow = () => {
             newValue: null,
             storageArea: mockWindow.localStorage,
             url: mockWindow.location.href,
-          })
+          }),
         );
       }),
     },
@@ -59,7 +59,7 @@ const createMockWindow = () => {
     removeEventListener: vi.fn(
       (event: string, callback: (event: any) => void) => {
         if (event === "storage") listeners.delete(callback);
-      }
+      },
     ),
     dispatchEvent: vi.fn((event: any) => {
       if (event.type === "storage") {
@@ -192,7 +192,7 @@ describe("Storage", () => {
             {
               cell: testCell.entityId?.toJSON?.(),
               path: ["ref"],
-            }
+            },
           );
           await storage2.sync(refId);
           const value = storage2.get(refId);
@@ -248,6 +248,18 @@ describe("Storage", () => {
         });
       });
 
+      describe("ephemeral cells", () => {
+        it("should not be loaded from storage", async () => {
+          const ephemeralCell = cell("transient", "ephemeral");
+          ephemeralCell.ephemeral = true;
+          await storage.syncCell(ephemeralCell);
+
+          await storage2.sync(ephemeralCell.entityId!);
+          const value = storage2.get(ephemeralCell.entityId!);
+          expect(value).toBeUndefined();
+        });
+      });
+
       describe("createStorage", () => {
         it("should create memory storage", () => {
           const memoryStorage = createStorage("memory");
@@ -261,7 +273,7 @@ describe("Storage", () => {
 
         it("should throw an error for invalid storage type", () => {
           expect(() => createStorage("invalid" as any)).toThrow(
-            "Invalid storage type"
+            "Invalid storage type",
           );
         });
       });

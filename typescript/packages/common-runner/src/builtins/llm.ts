@@ -1,6 +1,7 @@
 import { cell, CellImpl, ReactivityLog } from "../cell.js";
 import { makeClient, SimpleMessage, SimpleContent } from "../llm-client.js";
 import { type Action } from "../scheduler.js";
+import { refer } from "merkle-reference";
 
 // TODO(ja): investigate if generateText should be replaced by
 // fetchData with streaming support
@@ -32,26 +33,45 @@ export function llm(
     system?: string;
     max_tokens?: number;
   }>,
-  sendResult: (result: any) => void
+  sendResult: (result: any) => void,
+  _addCancel: (cancel: () => void) => void,
+  cause?: any,
 ): Action {
-  const pending = cell(false);
-  const result = cell<string | undefined>(undefined);
-  const partial = cell<string | undefined>(undefined);
+  const pending = cell(false, { llm: { pending: cause } });
+  const result = cell<string | undefined>(undefined, {
+    llm: { result: cause },
+  });
+  const partial = cell<string | undefined>(undefined, {
+    llm: { partial: cause },
+  });
+  const requestHash = cell<string | undefined>(undefined, {
+    llm: { requestHash: cause },
+  });
 
-  // Generate causal IDs for the cells.
-  pending.generateEntityId({ llm: { pending: inputsCell.get() } });
-  result.generateEntityId({ llm: { result: inputsCell.get() } });
-  partial.generateEntityId({ llm: { partial: inputsCell.get() } });
-
-  sendResult({ pending, result, partial });
+  sendResult({ pending, result, partial, requestHash });
 
   let currentRun = 0;
+  let previousCallHash: string | undefined = undefined;
 
   return (log: ReactivityLog) => {
     const thisRun = ++currentRun;
 
     const { system, messages, prompt, stop, max_tokens } =
       inputsCell.getAsQueryResult([], log) ?? {};
+
+    const hash = refer({
+      system: system ?? "",
+      messages: messages ?? [],
+      prompt: prompt ?? "",
+      stop: stop ?? "",
+      max_tokens: max_tokens ?? 4096,
+    }).toString();
+
+    // Return if the same request is being made again, either concurrently (same
+    // as previousCallHash) or when rehydrated from storage (same as the
+    // contents of the requestHash cell).
+    if (hash === previousCallHash || hash === requestHash.get()) return;
+    previousCallHash = hash;
 
     result.setAtPath([], undefined, log);
     partial.setAtPath([], undefined, log);
@@ -79,7 +99,7 @@ export function llm(
         max_tokens: max_tokens || 4096,
         stop,
       },
-      updatePartial
+      updatePartial,
     );
 
     resultPromise
@@ -90,6 +110,7 @@ export function llm(
         pending.setAtPath([], false, log);
         result.setAtPath([], text, log);
         partial.setAtPath([], text, log);
+        requestHash.setAtPath([], hash, log);
       })
       .catch((error) => {
         if (thisRun !== currentRun) return;
@@ -98,6 +119,10 @@ export function llm(
         pending.setAtPath([], false, log);
         result.setAtPath([], undefined, log);
         partial.setAtPath([], undefined, log);
+
+        // TODO: Not writing now, so we retry the request after failure. Replace
+        // this with more fine-grained retry logic.
+        // requestHash.setAtPath([], hash, log);
       });
   };
 }

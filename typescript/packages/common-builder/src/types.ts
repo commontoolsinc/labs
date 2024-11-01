@@ -10,40 +10,40 @@ export type OpaqueRef<T> = OpaqueRefMethods<T> &
   (T extends Array<infer U>
     ? Array<OpaqueRef<U>>
     : T extends object
-    ? { [K in keyof T]: OpaqueRef<T[K]> }
-    : T);
+      ? { [K in keyof T]: OpaqueRef<T[K]> }
+      : T);
 
-// Any CellProxy is also a Value, but a Value can have static values as well.
-// Use Value<T> in APIs that get inputs from the developer and use CellProxy
+// Any OpaqueRef is also an Opaque, but can also have static values.
+// Use Opaque<T> in APIs that get inputs from the developer and use OpaqueRef
 // when data gets passed into what developers see (either recipe inputs or
 // module outputs).
-export type Value<T> =
+export type Opaque<T> =
   | OpaqueRef<T>
   | (T extends Array<infer U>
-      ? Array<Value<U>>
+      ? Array<Opaque<U>>
       : T extends object
-      ? { [K in keyof T]: Value<T[K]> }
-      : T);
+        ? { [K in keyof T]: Opaque<T[K]> }
+        : T);
 
 export type OpaqueRefMethods<T> = {
   get(): OpaqueRef<T>;
-  set(value: Value<T> | T): void;
+  set(value: Opaque<T> | T): void;
   key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
-  setDefault(value: Value<T> | T): void;
+  setDefault(value: Opaque<T> | T): void;
   setPreExisting(ref: any): void;
   connect(node: NodeRef): void;
   export(): {
     cell: OpaqueRef<any>;
     path: PropertyKey[];
-    value?: Value<T>;
-    defaultValue?: Value<T>;
+    value?: Opaque<T>;
+    defaultValue?: Opaque<T>;
     nodes: Set<NodeRef>;
     external?: any;
     frame: Frame;
   };
   map<S>(
-    fn: (value: T extends Array<infer U> ? Value<U> : Value<T>) => Value<S>
-  ): Value<S[]>;
+    fn: (value: T extends Array<infer U> ? Opaque<U> : Opaque<T>) => Opaque<S>,
+  ): Opaque<S[]>;
   [Symbol.iterator](): Iterator<T>;
   [isOpaqueRefMarker]: true;
 };
@@ -56,7 +56,7 @@ export function isOpaqueRef(value: any): value is OpaqueRef<any> {
 
 export type NodeRef = {
   module: Module | Recipe | OpaqueRef<Module | Recipe>;
-  inputs: Value<any>;
+  inputs: Opaque<any>;
   outputs: OpaqueRef<any>;
   frame: Frame | undefined;
 };
@@ -65,15 +65,15 @@ export type toJSON = {
   toJSON(): any;
 };
 
-export type NodeFactory<T, R> = ((inputs: Value<T>) => OpaqueRef<R>) &
+export type NodeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
   (Module | Recipe) &
   toJSON;
 
-export type RecipeFactory<T, R> = ((inputs: Value<T>) => OpaqueRef<R>) &
+export type RecipeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
   Recipe &
   toJSON;
 
-export type ModuleFactory<T, R> = ((inputs: Value<T>) => OpaqueRef<R>) &
+export type ModuleFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
   Module &
   toJSON;
 
