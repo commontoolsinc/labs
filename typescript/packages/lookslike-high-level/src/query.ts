@@ -9,6 +9,8 @@ import { streamData } from "@commontools/common-builder";
 import * as z from "zod";
 import { jsonToDatalogQuery, zodSchemaToPlaceholder } from "./schema.js";
 
+export const eid = (e: any) => (e as any)["."];
+
 const buildQueryRequest = lift(({ query }) => {
   if (!query) return {};
   return {
