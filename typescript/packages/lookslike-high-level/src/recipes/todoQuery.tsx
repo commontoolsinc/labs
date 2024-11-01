@@ -7,9 +7,14 @@ import {
   fetchData,
 } from "@commontools/common-builder";
 import * as z from "zod";
-import { buildTransactionRequest, eid, schemaQuery } from "../query.js";
+import { eid, schemaQuery } from "../query.js";
 import { h } from "@commontools/common-html";
-import { prepDelete, prepInsert, prepUpdate } from "../mutatation.js";
+import { prepDeleteRequest, prepInsertRequest, prepUpdateRequest } from "../mutation.js";
+
+const tap = lift((x) => {
+  console.log(x, JSON.stringify(x, null, 2));
+  return x;
+});
 
 export const schema = z.object({
   title: z.string(),
@@ -18,37 +23,28 @@ export const schema = z.object({
 
 type TodoItem = z.infer<typeof schema>;
 
-const onAddItem = handler<{}, { titleInput: string }>((e, state) => {
+const onAddItem = handler<{}, { titleInput: string }>((_, state) => {
   const titleInput = state.titleInput;
   state.titleInput = "";
   return fetchData(
-    buildTransactionRequest(
-      prepInsert({
-        entity: {
-          title: titleInput,
-          done: false
-        }
-      }),
-    ),
+    prepInsertRequest({
+      entity: {
+        title: titleInput,
+        done: false
+      }
+    }),
   );
-});
-
-const tap = lift((x) => {
-  console.log(x, JSON.stringify(x, null, 2));
-  return x;
 });
 
 const toggleItem = handler<{}, { item: TodoItem }>((e, state) => {
   const item = state.item;
   return fetchData(
-    buildTransactionRequest(
-      prepUpdate({
-        eid: eid(item),
-        attribute: "done",
-        prev: item.done,
-        current: !item.done,
-      }),
-    ),
+    prepUpdateRequest({
+      eid: eid(item),
+      attribute: "done",
+      prev: item.done,
+      current: !item.done,
+    }),
   );
 });
 
@@ -58,22 +54,20 @@ const renameItem = handler<
 >((e, state) => {
   const item = state.item;
   return fetchData(
-    buildTransactionRequest(
-      prepUpdate({
-        eid: eid(item),
-        attribute: "title",
-        prev: item.title,
-        current: e.detail.value,
-      }),
-    ),
+    prepUpdateRequest({
+      eid: eid(item),
+      attribute: "title",
+      prev: item.title,
+      current: e.detail.value,
+    }),
   );
 });
 
 const deleteItem = handler<{}, { item: TodoItem; items: TodoItem[] }>(
-  (e, state) => {
+  (_, state) => {
     const item = state.item;
     return fetchData(
-      buildTransactionRequest(prepDelete({ entity: item, schema })),
+      prepDeleteRequest({ entity: item, schema }),
     );
   },
 );

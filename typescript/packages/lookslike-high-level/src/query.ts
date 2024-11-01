@@ -26,16 +26,16 @@ const buildQueryRequest = lift(({ query }) => {
   };
 });
 
-export const buildTransactionRequest = lift(({ changes }) => {
-  if (!changes) return {};
-  return {
-    url: `/api/data`,
-    options: {
-      method: "PATCH",
-      body: JSON.stringify(changes),
-    },
-  };
-});
+// export const buildTransactionRequest = lift(({ changes }) => {
+//   if (!changes) return {};
+//   return {
+//     url: `/api/data`,
+//     options: {
+//       method: "PATCH",
+//       body: JSON.stringify(changes),
+//     },
+//   };
+// });
 
 const schemaToQuery = lift(({ schema }) => {
   return jsonToDatalogQuery(zodSchemaToPlaceholder(schema));
