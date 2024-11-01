@@ -43,7 +43,7 @@ type Picture = z.infer<typeof Picture>;
 const picture = recipe(Picture, ({ prompt, item }) => {
     return {
         [NAME]: "prompt",
-        [UI]: <span class="item">
+        [UI]: <span class="latentItem">
             <img src={genImage({ prompt })} width="200" height="200" />
             <button onclick={deleteItem({ item })}>Remove</button>
         </span>
@@ -63,16 +63,16 @@ export const latentExplorer = recipe(LatentExplorer,
             [UI]: <os-container>
                 <style type="text/css">
                     {`
-                    .item {
+                    .latentItem {
                         display: inline-block;
                         background-color: #f0f0f0;
                         margin: 10px;
                         position: relative;
                     }
-                    .item button {
+                    .latentItem button {
                         display: none;
                     }
-                    .item:hover button {
+                    .latentItem:hover button {
                         display: block;
                         position: absolute;
                         top: 5px;
