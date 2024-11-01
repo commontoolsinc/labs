@@ -132,6 +132,5 @@ export const compileStylesheet = (sheet: StyleSheet): CSSStyleSheet => {
   const stylesheet = new CSSStyleSheet();
   const styleString = toStylesheetString(sheet);
   stylesheet.replaceSync(styleString);
-  console.log(styleString);
   return stylesheet;
 };
