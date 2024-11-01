@@ -1,31 +1,42 @@
 import { h } from "@commontools/common-html";
-import { recipe, NAME, UI, handler, lift, llm } from "@commontools/common-builder";
+import { recipe, NAME, UI, handler, lift, llm, fetchData, ifElse } from "@commontools/common-builder";
 import { z } from "zod";
+import { schemaQuery, buildTransactionRequest } from "../query.js";
 
-const add = handler<{ detail: { value: string, key: string } }, { prompts: string[] }>(
-    ({ detail }, state) => {
+const eid = (e: any) => (e as any)['.'];
+
+const prepChanges = lift(({ prompt }) => {
+    return 
+});
+
+const deleteItem = handler<{}, { item: Picture }>((e, state) => {
+    console.log("deleteItem", state);
+    return fetchData(buildTransactionRequest({
+        changes: [
+            {
+                Retract: [eid(state.item), "prompt", state.item.prompt],
+            },
+        ]
+    }));
+})
+
+const add = handler<{ detail: { value: string, key: string } }, {}>(
+    ({ detail }, { }) => {
         console.log("add", detail);
-        detail?.key === "Enter" && detail?.value && state.prompts.push(detail.value);
-    }
-);
-
-const remove = handler<{}, { prompt: string, prompts: string[] }>(
-    ({ }, state) => {
-        const index = state.prompts.findIndex((p) => p === state.prompt);
-        if (index !== -1) {
-            state.prompts.splice(index, 1);
-        }
+        if (detail?.key !== "Enter") return;
+        return fetchData(buildTransactionRequest({
+            changes: [
+                {
+                    Import: {
+                        prompt: detail.value
+                    }
+                }
+            ]
+        }));
     }
 );
 
 const genImage = lift(({ prompt }) => `/api/img/?prompt=${encodeURIComponent(prompt)}`);
-
-const addToPrompt = handler<
-    { prompt: string },
-    { prompts: string[] }
->((e, state) => {
-    state.prompts.push(e.prompt);
-});
 
 const tap = lift((x) => { console.log(JSON.stringify(x, null, 2)) });
 
@@ -39,12 +50,13 @@ const Picture = z.object({
 }).describe("Picture");
 type Picture = z.infer<typeof Picture>;
 
-const picture = recipe(Picture, ({ prompt, remove }) => {
+const picture = recipe(Picture, ({ prompt, item }) => {
     return {
         [NAME]: "prompt",
         [UI]: <span>
+            <p>{prompt}</p>
             <img src={genImage({ prompt })} width="200" height="200" style="border: 10px solid black;" />
-            <button onclick={remove}>Remove</button>
+            <button onclick={deleteItem({ item })}>Remove</button>
         </span>
     }
 });
@@ -52,8 +64,10 @@ const picture = recipe(Picture, ({ prompt, remove }) => {
 export const latentExplorer = recipe(LatentExplorer,
     ({ prompts }) => {
 
+        const { result, query } = schemaQuery(Picture)
+
         // const suggestions = grabSuggestions(llm(prepSuggestions({ prompts })));
-        // tap({ recipes });
+        tap({ result })
 
         return {
             [NAME]: "Latent Explorer",
@@ -61,9 +75,12 @@ export const latentExplorer = recipe(LatentExplorer,
                 <common-input
                     placeholder="prompt"
                     oncommon-keydown={add({ prompts })} />
-                {prompts.map((prompt) => picture({ prompt, remove: remove({ prompts, prompt }) })[UI])}
+                {
+                    result.map((item) => picture({ prompt: item.prompt, item })[UI])
+                }
             </os-container>,
-            addToPrompt: addToPrompt({ prompts }),
+            query,
+            data: result,
             // suggestions: { items: suggestions },
         }
     });
