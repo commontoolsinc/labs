@@ -1,38 +1,28 @@
 import { h } from "@commontools/common-html";
 import { recipe, NAME, UI, handler, lift, llm, fetchData, ifElse } from "@commontools/common-builder";
 import { z } from "zod";
-import { schemaQuery, buildTransactionRequest } from "../query.js";
+import { schemaQuery, eid } from "../query.js";
+import { prepDeleteRequest, prepInsertRequest, prepUpdateRequest } from "../mutation.js";
 
-const eid = (e: any) => (e as any)['.'];
 
-const prepChanges = lift(({ prompt }) => {
-    return 
-});
 
 const deleteItem = handler<{}, { item: Picture }>((e, state) => {
     console.log("deleteItem", state);
-    return fetchData(buildTransactionRequest({
-        changes: [
-            {
-                Retract: [eid(state.item), "prompt", state.item.prompt],
-            },
-        ]
-    }));
+    return fetchData(prepDeleteRequest({ entity: state.item, schema: Picture }));
 })
 
 const add = handler<{ detail: { value: string, key: string } }, {}>(
     ({ detail }, { }) => {
         console.log("add", detail);
         if (detail?.key !== "Enter") return;
-        return fetchData(buildTransactionRequest({
-            changes: [
-                {
-                    Import: {
-                        prompt: detail.value
-                    }
+        const prompt = detail.value;
+        return fetchData(
+            prepInsertRequest({
+                entity: {
+                    prompt: prompt,
                 }
-            ]
-        }));
+            }),
+        );
     }
 );
 
@@ -53,9 +43,8 @@ type Picture = z.infer<typeof Picture>;
 const picture = recipe(Picture, ({ prompt, item }) => {
     return {
         [NAME]: "prompt",
-        [UI]: <span>
-            <p>{prompt}</p>
-            <img src={genImage({ prompt })} width="200" height="200" style="border: 10px solid black;" />
+        [UI]: <span class="item">
+            <img src={genImage({ prompt })} width="200" height="200" />
             <button onclick={deleteItem({ item })}>Remove</button>
         </span>
     }
@@ -72,6 +61,29 @@ export const latentExplorer = recipe(LatentExplorer,
         return {
             [NAME]: "Latent Explorer",
             [UI]: <os-container>
+                <style type="text/css">
+                    {`
+                    .item {
+                        display: inline-block;
+                        background-color: #f0f0f0;
+                        margin: 10px;
+                        position: relative;
+                    }
+                    .item button {
+                        display: none;
+                    }
+                    .item:hover button {
+                        display: block;
+                        position: absolute;
+                        top: 5px;
+                        right: 5px;
+                        background-color: rgba(255, 255, 255, 0.7);
+                        border: none;
+                        padding: 5px 10px;
+                        cursor: pointer;
+                    }
+                  `}
+                </style>
                 <common-input
                     placeholder="prompt"
                     oncommon-keydown={add({ prompts })} />
