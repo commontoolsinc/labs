@@ -8,3 +8,4 @@ export * as CommonFileImporter from "./import-wrapper.js";
 // export * as CommonImport from "./import.js";
 export * as CommonAsciiLoader from "./ascii-loader.js";
 export * as CommonMarkdown from "./markdown.js";
+export * as CommonShaderLayer from "./shader-layer.js";
