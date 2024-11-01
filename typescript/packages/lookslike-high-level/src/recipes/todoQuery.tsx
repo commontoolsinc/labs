@@ -72,6 +72,21 @@ const deleteItem = handler<{}, { item: TodoItem; items: TodoItem[] }>(
   },
 );
 
+
+const addToPrompt = handler<
+  { prompt: string },
+  {}
+>((e, state) => {
+  return fetchData(
+    prepInsertRequest({
+      entity: {
+        title: e.prompt,
+        done: false
+      }
+    }),
+  );
+});
+
 export const todoQuery = recipe(
   z.object({ titleInput: z.string() }).describe("todo query"),
   ({ titleInput }) => {
@@ -119,6 +134,7 @@ export const todoQuery = recipe(
       ),
       data: items,
       query,
+      addToPrompt: addToPrompt({})
     };
   },
 );
