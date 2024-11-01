@@ -26,6 +26,7 @@ import { routine } from "./recipes/routine.js";
 import { fetchExample } from "./recipes/fetchExample.js";
 import { counter } from "./recipes/counter.js";
 import { counters } from "./recipes/counters.js";
+import { tweets } from "./recipes/tweets.jsx";
 
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.js";
@@ -179,6 +180,13 @@ addCharms([
     "routine",
   ),
   await runPersistent(counters, {}, "counters"),
+  await runPersistent(
+    tweets,
+    {
+      username: "@gordonbrander",
+    },
+    "tweets",
+  ),
 ]);
 
 export type RecipeManifest = {
