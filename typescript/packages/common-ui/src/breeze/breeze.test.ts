@@ -2,15 +2,14 @@ import assert from "node:assert/strict";
 import {
   camelCaseToKababCase,
   toCssValue,
-  prop,
-  ruleset,
-  stylesheet,
-  atoms,
+  toPropString,
+  toRulesetString,
+  toStylesheetString,
   padding,
   margin,
   paddingStep,
   marginStep,
-} from "./css.js";
+} from "./breeze.js";
 
 describe("CSS Utilities", () => {
   describe("camelCaseToKababCase", () => {
@@ -33,17 +32,17 @@ describe("CSS Utilities", () => {
     });
   });
 
-  describe("prop", () => {
+  describe("toPropString", () => {
     it("should format CSS property-value pairs", () => {
-      assert.equal(prop("marginTop", 10), "margin-top: 10px;");
-      assert.equal(prop("color", "red"), "color: red;");
+      assert.equal(toPropString("marginTop", 10), "margin-top: 10px;");
+      assert.equal(toPropString("color", "red"), "color: red;");
     });
   });
 
-  describe("ruleset", () => {
+  describe("toRulesetString", () => {
     it("should create CSS rulesets", () => {
-      const result = ruleset(".test", { marginTop: 10, color: "red" });
-      const expected = `.test {\nmargin-top: 10px;\ncolor: red;\n}`;
+      const result = toRulesetString(".test", { marginTop: 10, color: "red" });
+      const expected = `.test {margin-top: 10px;color: red;}`;
       assert.equal(result.trim(), expected.trim());
     });
   });
@@ -54,23 +53,9 @@ describe("CSS Utilities", () => {
         ".test1": { marginTop: 10 },
         ".test2": { color: "blue" },
       };
-      const result = stylesheet(styles);
-      const expected = `.test1 {\nmargin-top: 10px;\n}\n.test2 {\ncolor: blue;\n}`;
+      const result = toStylesheetString(styles);
+      const expected = `.test1 {margin-top: 10px;}.test2 {color: blue;}`;
       assert.equal(result.trim(), expected.trim());
-    });
-  });
-
-  describe("atoms", () => {
-    it("should transform class names to selector format", () => {
-      const input = {
-        btn: { padding: "10px" },
-        primary: { color: "blue" },
-      };
-      const result = atoms(input);
-      assert.deepStrictEqual(result, {
-        ".btn": { padding: "10px" },
-        ".primary": { color: "blue" },
-      });
     });
   });
 

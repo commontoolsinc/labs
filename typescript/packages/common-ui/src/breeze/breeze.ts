@@ -1,64 +1,7 @@
-export const camelCaseToKababCase = (camelCase: string) => {
-  return camelCase.replace(/([A-Z])/g, "-$1").toLowerCase();
-};
-
 export type CssValue = string | number;
-
-export const toCssValue = (value: CssValue) =>
-  typeof value === "string" ? value : `${value}px`;
-
-export const prop = (key: string, value: CssValue) =>
-  `${camelCaseToKababCase(key)}: ${toCssValue(value)};`;
-
 export type CssRules = Record<string, CssValue>;
-
 export type CssSelector = string;
-
-export const ruleset = (selector: CssSelector, rules: CssRules) => {
-  const cssRules = Object.entries(rules).map((pair) => {
-    const [key, value] = pair;
-    return prop(key, value);
-  });
-  const body = cssRules.join("\n");
-  return `${selector} {\n${body}\n}`;
-};
-
 export type StyleSheet = Record<string, CssRules>;
-
-export const stylesheet = (stylesheet: StyleSheet) => {
-  return Object.entries(stylesheet)
-    .map((pair) => {
-      const [className, rules] = pair;
-      return ruleset(className, rules);
-    })
-    .join("\n");
-};
-
-export const atoms = (atoms: Record<string, CssRules>) => {
-  return Object.fromEntries(
-    Object.entries(atoms).map((pair) => {
-      const [className, rules] = pair;
-      return [`.${className}`, rules];
-    }),
-  );
-};
-
-const createClassScope = () => {
-  const atoms: Set<string> = new Set();
-
-  const classes = (classes: string) => {
-    for (const className of classes.split(" ")) {
-      atoms.add(className);
-    }
-  };
-
-  const clear = () => {
-    atoms.clear();
-  };
-  return { classes, clear };
-};
-
-export const { classes, clear: clearClasses } = createClassScope();
 
 export type Option<T> = T | null | undefined;
 
@@ -99,7 +42,7 @@ export const margin = (
   });
 
 export const paddingStep = (step: number) => {
-  const size = `calc(--unit * ${step})`;
+  const size = `calc(var(--unit) * ${step})`;
   return {
     [`.p-${step}`]: padding(size, size, size, size),
     [`.pt-${step}`]: padding(size, null, null, null),
@@ -112,7 +55,7 @@ export const paddingStep = (step: number) => {
 };
 
 export const marginStep = (step: number) => {
-  const size = `calc(--unit * ${step})`;
+  const size = `calc(var(--unit) * ${step})`;
   return {
     [`.m-${step}`]: margin(size, size, size, size),
     [`.mt-${step}`]: margin(size, null, null, null),
@@ -137,8 +80,8 @@ const stepRulesWith = <T>(
 
 export const spacing = () => {
   const steps = [
-    0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16, 20,
-    24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 72, 80, 96,
+    0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16,
+    20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64, 72, 80, 96,
   ];
   return {
     ...stepRulesWith(steps, marginStep),
@@ -146,8 +89,49 @@ export const spacing = () => {
   };
 };
 
-export const base = {
+export const base = () => ({
   ":root": {
     "--unit": 4,
   },
+});
+
+export const all = () => ({
+  ...base(),
+  ...spacing(),
+});
+
+export const camelCaseToKababCase = (camelCase: string) => {
+  return camelCase.replace(/([A-Z])/g, "-$1").toLowerCase();
+};
+
+export const toCssValue = (value: CssValue) =>
+  typeof value === "string" ? value : `${value}px`;
+
+export const toPropString = (key: string, value: CssValue) =>
+  `${camelCaseToKababCase(key)}: ${toCssValue(value)};`;
+
+export const toRulesetString = (selector: CssSelector, rules: CssRules) => {
+  const cssRules = Object.entries(rules).map((pair) => {
+    const [key, value] = pair;
+    return toPropString(key, value);
+  });
+  const body = cssRules.join("");
+  return `${selector} {${body}}`;
+};
+
+export const toStylesheetString = (stylesheet: StyleSheet) => {
+  return Object.entries(stylesheet)
+    .map((pair) => {
+      const [className, rules] = pair;
+      return toRulesetString(className, rules);
+    })
+    .join("");
+};
+
+export const compileStylesheet = (sheet: StyleSheet): CSSStyleSheet => {
+  const stylesheet = new CSSStyleSheet();
+  const styleString = toStylesheetString(sheet);
+  stylesheet.replaceSync(styleString);
+  console.log(styleString);
+  return stylesheet;
 };

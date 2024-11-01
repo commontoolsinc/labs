@@ -10,7 +10,7 @@ import { registerIconLibrary } from "@shoelace-style/shoelace";
 export const adoptShoelaceStyles = (
   host: Document | ShadowRoot = window.document,
 ) => {
-  host.adoptedStyleSheets = [theme.styleSheet];
+  host.adoptedStyleSheets.push(theme.styleSheet);
 };
 
 export const registerShoelaceIcons = () => {
