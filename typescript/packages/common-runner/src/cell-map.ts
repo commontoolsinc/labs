@@ -23,13 +23,33 @@ export type EntityId = {
  */
 export const createRef = (
   source: Object = {},
-  cause: any = crypto.randomUUID()
+  cause: any = crypto.randomUUID(),
 ): EntityId => {
   try {
-    // JSON.parse(JSON.stringify(...)) ensures that the object is serializable.
-    // This e.g. calls .toJSON on cells. Warning: Might cause an infinite loop
-    // if the object contains circular references.
-    return refer(JSON.parse(JSON.stringify({ ...source, causal: cause })));
+    // Unwrap query result proxies, replace cells with their ids and remove
+    // functions and undefined values, since `merkle-reference` doesn't support
+    // them.
+    function traverse(obj: any): any {
+      // Don't traverse into ids.
+      if (typeof obj === "object" && obj !== null && "/" in obj) return obj;
+
+      if (isQueryResultForDereferencing(obj))
+        // It'll traverse this and call .toJSON on the cell in the reference.
+        obj = getCellReferenceOrThrow(obj);
+
+      // If referencing other cells, return their ids (or random as fallback).
+      if (isCell(obj) || isRendererCell(obj))
+        return obj.entityId ?? crypto.randomUUID();
+      else if (Array.isArray(obj)) return obj.map(traverse);
+      else if (typeof obj === "object" && obj !== null)
+        return Object.fromEntries(
+          Object.entries(obj).map(([key, value]) => [key, traverse(value)]),
+        );
+      else if (typeof obj === "function") return null;
+      else if (obj === undefined) return null;
+      else return obj;
+    }
+    return refer(traverse({ ...source, causal: cause }));
   } catch (e) {
     // HACK: merkle-reference currently fails in a jsdom vitest environment, so
     // we replace the id with a random UUID.
@@ -71,7 +91,7 @@ export const getEntityId = (value: any): EntityId | undefined => {
 
 export function getCellByEntityId<T = any>(
   entityId: EntityId | string,
-  createIfNotFound = true
+  createIfNotFound = true,
 ): CellImpl<T> | undefined {
   const id = typeof entityId === "string" ? entityId : JSON.stringify(entityId);
   let entityCell = entityIdToCellMap.get(id);
