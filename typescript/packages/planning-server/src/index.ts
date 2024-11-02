@@ -4,6 +4,8 @@ import { ensureDir } from "https://deno.land/std/fs/mod.ts";
 import { crypto } from "https://deno.land/std/crypto/mod.ts";
 import { anthropic } from "npm:@ai-sdk/anthropic";
 import { config } from "https://deno.land/x/dotenv/mod.ts";
+import { groq } from "npm:@ai-sdk/groq";
+
 await config({ export: true });
 
 const CACHE_DIR = "./cache";
@@ -46,9 +48,16 @@ const handler = async (request: Request): Promise<Response> => {
         messages,
       }
 
+      let modelProvider;
+      if (payload.model.startsWith('groq:')) {
+        modelProvider = groq(payload.model.replace('groq:', ''));
+      } else {
+        modelProvider = anthropic(payload.model);
+      }
+
       const llmStream = await streamText({
         ...params,
-        model: anthropic(payload.model),
+        model: modelProvider,
         stopSequences: payload.stop ? [payload.stop] : undefined,
       });
 

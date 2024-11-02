@@ -17,6 +17,7 @@ import { refer } from "merkle-reference";
  *  - if you end with an assistant message, the LLM will continue from there.
  *  - if both prompt and messages are empty, no LLM call will be made,
  *    result and partial will be undefined.
+ * @param model - A cell to store the model to use.
  * @param system - A cell to store the system message.
  * @param stop - A cell to store (optional) stop sequence.
  * @param max_tokens - A cell to store the maximum number of tokens to generate.
@@ -32,6 +33,7 @@ export function llm(
     stop?: string;
     system?: string;
     max_tokens?: number;
+    model?: string;
   }>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
@@ -56,7 +58,7 @@ export function llm(
   return (log: ReactivityLog) => {
     const thisRun = ++currentRun;
 
-    const { system, messages, prompt, stop, max_tokens } =
+    const { system, messages, prompt, stop, max_tokens, model } =
       inputsCell.getAsQueryResult([], log) ?? {};
 
     const hash = refer({
@@ -65,6 +67,7 @@ export function llm(
       prompt: prompt ?? "",
       stop: stop ?? "",
       max_tokens: max_tokens ?? 4096,
+      model: model ?? "claude-3-5-sonnet-latest",
     }).toString();
 
     // Return if the same request is being made again, either concurrently (same
@@ -95,8 +98,8 @@ export function llm(
       {
         messages: messages || [prompt as SimpleContent],
         system,
-        model: "claude-3-5-sonnet-latest",
-        max_tokens: max_tokens || 4096,
+        model: model ?? "claude-3-5-sonnet-latest",
+        max_tokens: max_tokens ?? 4096,
         stop,
       },
       updatePartial,
