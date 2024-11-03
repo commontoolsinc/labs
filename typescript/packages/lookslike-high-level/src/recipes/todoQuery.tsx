@@ -5,7 +5,6 @@ import {
   handler,
   recipe,
   fetchData,
-  cell,
 } from "@commontools/common-builder";
 import * as z from "zod";
 import { eid, schemaQuery } from "../query.js";
@@ -21,29 +20,19 @@ const tap = lift((x) => {
   return x;
 });
 
-export const schema = z.object({
+export const todoItem = z.object({
   title: z.string(),
   done: z.boolean(),
 });
 
-type TodoItem = z.infer<typeof schema>;
-
-const addToPrompt = handler<{ prompt: string }, {}>((e, state) => {
-  return fetchData(
-    prepInsertRequest({
-      entity: {
-        title: e.prompt,
-        done: false,
-      },
-    }),
-  );
-});
+type TodoItem = z.infer<typeof todoItem>;
 
 type Message =
   | { type: "add-item"; title: string }
   | { type: "remove-item"; item: TodoItem }
   | { type: "toggle-item"; item: TodoItem }
-  | { type: "rename-item"; item: TodoItem; title: string };
+  | { type: "rename-item"; item: TodoItem; title: string }
+  | { type: "add-prompt"; prompt: string };
 
 const createDispatch = <E, S>(fn: (e: E, s: S) => Message) =>
   handler<E, S>((e, s) => reducer({ msg: fn(e, s) }));
@@ -61,7 +50,7 @@ const reducer = ({ msg }: { msg: Message }) => {
         }),
       );
     case "remove-item":
-      return fetchData(prepDeleteRequest({ entity: msg.item, schema }));
+      return fetchData(prepDeleteRequest({ entity: msg.item, schema: todoItem }));
     case "toggle-item":
       return fetchData(
         prepUpdateRequest({
@@ -80,10 +69,19 @@ const reducer = ({ msg }: { msg: Message }) => {
           current: msg.title,
         }),
       );
+    case "add-prompt":
+      return fetchData(
+        prepInsertRequest({
+          entity: {
+            title: msg.prompt,
+            done: false,
+          },
+        }),
+      );
   }
 };
 
-const input = recipe("input", ({ value }) => {
+const input = recipe("input", ({ value }: { value: string }) => {
   const onChange = handler<InputEvent, { value: string }>((e, state) => {
     state.value = (e.target as HTMLInputElement).value;
   });
@@ -94,9 +92,8 @@ const input = recipe("input", ({ value }) => {
 export const todoQuery = recipe(
   z.object({ titleInput: z.string() }).describe("todo query"),
   ({ titleInput }) => {
-    const { result: items, query } = schemaQuery(schema);
+    const { result: items, query } = schemaQuery(todoItem);
     tap({ obj: items });
-
 
     const onAddItem = createDispatch<{}, { titleInput: string }>((_, state) => {
       const titleInput = state.titleInput;
@@ -120,6 +117,11 @@ export const todoQuery = recipe(
     const onDeleteItem = createDispatch<{}, { item: TodoItem }>(
       (_, state) => ({ type: "remove-item", item: state.item })
     );
+
+    const onAddToPrompt = createDispatch<{ prompt: string }, {}>((e, _) => ({
+      type: "add-prompt",
+      prompt: e.prompt,
+    }))({}); // so many braces!
 
     return {
       [NAME]: "Todo query",
@@ -154,7 +156,7 @@ export const todoQuery = recipe(
       ),
       data: items,
       query,
-      addToPrompt: addToPrompt({}),
+      addToPrompt: onAddToPrompt,
     };
   },
 );
