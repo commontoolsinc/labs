@@ -81,7 +81,10 @@ export function fetchData(
       .then((data) => {
         if (thisRun !== currentRun) return;
 
-        normalizeToCells(data, undefined, log, url);
+        normalizeToCells(data, undefined, log, {
+          fetchData: { url },
+          cause,
+        });
 
         pending.setAtPath([], false, log);
         result.setAtPath([], data, log);

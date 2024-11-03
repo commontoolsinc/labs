@@ -405,7 +405,9 @@ export function cell<T>(value?: T, cause?: any): CellImpl<T> {
     },
     set sourceCell(cell: CellImpl<any> | undefined) {
       if (sourceCell && sourceCell !== cell)
-        throw new Error("Source cell already set");
+        throw new Error(
+          `Source cell already set: ${JSON.stringify(sourceCell)} -> ${JSON.stringify(cell)}`,
+        );
       sourceCell = cell;
     },
     get ephemeral(): boolean {
@@ -583,11 +585,15 @@ export function createQueryResultProxy<T>(
     if (isQueryResultForDereferencing(target)) {
       const ref = target[getCellReference];
       valueCell = ref.cell;
-      valuePath = ref.path;
+      valuePath = [...ref.path];
+      log?.reads.push({ cell: valueCell, path: valuePath });
+      target = ref.cell.getAtPath(ref.path);
     } else if (isAlias(target)) {
       const ref = followAliases(target, valueCell, log);
       valueCell = ref.cell;
-      valuePath = ref.path;
+      valuePath = [...ref.path];
+      log?.reads.push({ cell: valueCell, path: valuePath });
+      target = ref.cell.getAtPath(ref.path);
     } else if (isCell(target)) {
       valueCell = target;
       valuePath = [];
@@ -596,7 +602,9 @@ export function createQueryResultProxy<T>(
     } else if (isCellReference(target)) {
       const ref = followCellReferences(target, log);
       valueCell = ref.cell;
-      valuePath = ref.path;
+      valuePath = [...ref.path];
+      log?.reads.push({ cell: valueCell, path: valuePath });
+      target = ref.cell.getAtPath(ref.path);
     }
     valuePath.push(key);
     if (typeof target === "object" && target !== null) {
@@ -605,6 +613,9 @@ export function createQueryResultProxy<T>(
       target = undefined;
     }
   }
+
+  if (valuePath.length > 30)
+    console.warn("Query result with long path [2]", JSON.stringify(valuePath));
 
   // Now target is the end of the path. It might still be a cell, alias or cell
   // reference, so we follow these as well.
@@ -626,7 +637,7 @@ export function createQueryResultProxy<T>(
       if (typeof prop === "symbol") {
         if (prop === getCellReference)
           return { cell: valueCell, path: valuePath } satisfies CellReference;
-        if (prop === toOpaqueRef)
+        else if (prop === toOpaqueRef)
           return () => makeOpaqueRef(valueCell, valuePath);
 
         const value = Reflect.get(target, prop, receiver);
@@ -685,8 +696,21 @@ export function createQueryResultProxy<T>(
 
               // Turn any newly added elements into cells. And if there was a
               // change at all, update the cell.
-              normalizeToCells(copy, target, log, valueCell.entityId);
+              normalizeToCells(copy, target, log, {
+                parent: valueCell.entityId,
+                method: prop,
+                call: new Error().stack,
+                context: getTopFrame()?.cause ?? "unknown",
+              });
               setNestedValue(valueCell, valuePath, copy, log);
+
+              if (Array.isArray(result))
+                normalizeToCells(result, undefined, log, {
+                  parent: valueCell.entityId,
+                  resultOf: prop,
+                  call: new Error().stack,
+                  context: getTopFrame()?.cause ?? "unknown",
+                });
 
               return result;
             };
@@ -861,6 +885,14 @@ const isRendererCellMarker = Symbol("isRendererCell");
  * @returns {boolean}
  */
 export function isCellReference(value: any): value is CellReference {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    isCell(value.cell) &&
+    Array.isArray(value.path) &&
+    value.path.length > 30
+  )
+    console.warn("Cell reference with long path", JSON.stringify(value));
   return (
     typeof value === "object" &&
     value !== null &&

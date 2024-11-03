@@ -112,7 +112,10 @@ export function streamData(
               data: JSON.parse(data),
             };
 
-            normalizeToCells(parsedData, undefined, log);
+            normalizeToCells(parsedData, undefined, log, {
+              streamData: { url },
+              cause,
+            });
             result.setAtPath([], parsedData, log);
             id = undefined;
             event = undefined;

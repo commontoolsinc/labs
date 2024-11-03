@@ -244,6 +244,12 @@ export function pushFrame(frame?: Frame): Frame {
   return frame;
 }
 
+export function pushFrameFromCause(cause: any): Frame {
+  const frame = { parent: getTopFrame(), cause };
+  frames.push(frame);
+  return frame;
+}
+
 export function popFrame(frame?: Frame): void {
   if (frame && getTopFrame() !== frame) throw new Error("Frame mismatch");
   frames.pop();

@@ -4,6 +4,7 @@ export {
   recipe,
   recipeFromFrame,
   pushFrame,
+  pushFrameFromCause,
   popFrame,
   getTopFrame,
 } from "./recipe.js";
