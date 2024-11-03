@@ -5,11 +5,16 @@ import {
   handler,
   recipe,
   fetchData,
+  cell,
 } from "@commontools/common-builder";
 import * as z from "zod";
 import { eid, schemaQuery } from "../query.js";
 import { h } from "@commontools/common-html";
-import { prepDeleteRequest, prepInsertRequest, prepUpdateRequest } from "../mutation.js";
+import {
+  prepDeleteRequest,
+  prepInsertRequest,
+  prepUpdateRequest,
+} from "../mutation.js";
 
 const tap = lift((x) => {
   console.log(x, JSON.stringify(x, null, 2));
@@ -23,68 +28,67 @@ export const schema = z.object({
 
 type TodoItem = z.infer<typeof schema>;
 
-const onAddItem = handler<{}, { titleInput: string }>((_, state) => {
-  const titleInput = state.titleInput;
-  state.titleInput = "";
-  return fetchData(
-    prepInsertRequest({
-      entity: {
-        title: titleInput,
-        done: false
-      }
-    }),
-  );
-});
-
-const toggleItem = handler<{}, { item: TodoItem }>((e, state) => {
-  const item = state.item;
-  return fetchData(
-    prepUpdateRequest({
-      eid: eid(item),
-      attribute: "done",
-      prev: item.done,
-      current: !item.done,
-    }),
-  );
-});
-
-const renameItem = handler<
-  { detail: { checked: boolean; value: string } },
-  { item: TodoItem }
->((e, state) => {
-  const item = state.item;
-  return fetchData(
-    prepUpdateRequest({
-      eid: eid(item),
-      attribute: "title",
-      prev: item.title,
-      current: e.detail.value,
-    }),
-  );
-});
-
-const deleteItem = handler<{}, { item: TodoItem; items: TodoItem[] }>(
-  (_, state) => {
-    const item = state.item;
-    return fetchData(
-      prepDeleteRequest({ entity: item, schema }),
-    );
-  },
-);
-
-
-const addToPrompt = handler<
-  { prompt: string },
-  {}
->((e, state) => {
+const addToPrompt = handler<{ prompt: string }, {}>((e, state) => {
   return fetchData(
     prepInsertRequest({
       entity: {
         title: e.prompt,
-        done: false
-      }
+        done: false,
+      },
     }),
   );
+});
+
+type Message =
+  | { type: "add-item"; title: string }
+  | { type: "remove-item"; item: TodoItem }
+  | { type: "toggle-item"; item: TodoItem }
+  | { type: "rename-item"; item: TodoItem; title: string };
+
+const createDispatch = <E, S>(fn: (e: E, s: S) => Message) =>
+  handler<E, S>((e, s) => reducer({ msg: fn(e, s) }));
+
+const reducer = ({ msg }: { msg: Message }) => {
+  console.log({ msg });
+  switch (msg.type) {
+    case "add-item":
+      return fetchData(
+        prepInsertRequest({
+          entity: {
+            title: msg.title,
+            done: false,
+          },
+        }),
+      );
+    case "remove-item":
+      return fetchData(prepDeleteRequest({ entity: msg.item, schema }));
+    case "toggle-item":
+      return fetchData(
+        prepUpdateRequest({
+          eid: eid(msg.item),
+          attribute: "done",
+          prev: msg.item.done,
+          current: !msg.item.done,
+        }),
+      );
+    case "rename-item":
+      return fetchData(
+        prepUpdateRequest({
+          eid: eid(msg.item),
+          attribute: "title",
+          prev: msg.item.title,
+          current: msg.title,
+        }),
+      );
+  }
+};
+
+const input = recipe("input", ({ value }) => {
+  const onChange = handler<InputEvent, { value: string }>((e, state) => {
+    state.value = (e.target as HTMLInputElement).value;
+  });
+
+  return <input value={value} oninput={onChange({ value })}></input>;
 });
 
 export const todoQuery = recipe(
@@ -93,20 +97,36 @@ export const todoQuery = recipe(
     const { result: items, query } = schemaQuery(schema);
     tap({ obj: items });
 
-    const onChange = handler<InputEvent, { titleInput: string }>((e, state) => {
-      state.titleInput = (e.target as HTMLInputElement).value;
+
+    const onAddItem = createDispatch<{}, { titleInput: string }>((_, state) => {
+      const titleInput = state.titleInput;
+      state.titleInput = "";
+      return { type: "add-item", title: titleInput };
     });
+
+    const onToggleItem = createDispatch<{}, { item: TodoItem }>(
+      (_, state) => ({ type: "toggle-item", item: state.item })
+    );
+
+    const onRenameItem = createDispatch<
+      { detail: { checked: boolean; value: string } },
+      { item: TodoItem }
+    >((e, state) => ({
+      type: "rename-item",
+      item: state.item,
+      title: e.detail.value,
+    }));
+
+    const onDeleteItem = createDispatch<{}, { item: TodoItem }>(
+      (_, state) => ({ type: "remove-item", item: state.item })
+    );
 
     return {
       [NAME]: "Todo query",
       [UI]: (
         <div>
           <div>
-            <input
-              value={titleInput}
-              placeholder="Todo title"
-              oninput={onChange({ titleInput })}
-            ></input>
+            {input({ value: titleInput })}
             <button onclick={onAddItem({ titleInput })}>Add</button>
           </div>
           <ul>
@@ -116,13 +136,13 @@ export const todoQuery = recipe(
                   <common-todo
                     checked={item.done}
                     value={item.title}
-                    ontodo-checked={toggleItem({ item })}
-                    ontodo-input={renameItem({ item })}
+                    ontodo-checked={onToggleItem({ item })}
+                    ontodo-input={onRenameItem({ item })}
                   />
                   <sl-button
                     outline
                     variant="danger"
-                    onclick={deleteItem({ item, items })}
+                    onclick={onDeleteItem({ item })}
                   >
                     Delete
                   </sl-button>
@@ -134,7 +154,7 @@ export const todoQuery = recipe(
       ),
       data: items,
       query,
-      addToPrompt: addToPrompt({})
+      addToPrompt: addToPrompt({}),
     };
   },
 );
