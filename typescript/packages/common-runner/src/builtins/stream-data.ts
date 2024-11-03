@@ -44,8 +44,14 @@ export function streamData(
     controller: AbortController | undefined;
   };
 
+  let previousCall = "";
   return (log: ReactivityLog) => {
     const { url, options } = inputsCell.getAsQueryResult([], log) || {};
+
+    // Re-entrancy guard: Don't restart the stream if it's the same request.
+    const currentCall = `${url}${JSON.stringify(options)}`;
+    if (currentCall === previousCall) return;
+    previousCall = currentCall;
 
     if (status.controller) {
       status.controller.abort();
@@ -138,6 +144,9 @@ export function streamData(
         pending.setAtPath([], false, log);
         result.setAtPath([], undefined, log);
         error.setAtPath([], e, log);
+
+        // Allow retrying the same request.
+        previousCall = "";
       });
   };
 }
