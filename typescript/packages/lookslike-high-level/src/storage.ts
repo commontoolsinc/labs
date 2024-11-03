@@ -9,6 +9,8 @@ import {
   useCancelGroup,
   getCellByEntityId,
   idle,
+  isQueryResultForDereferencing,
+  getCellReferenceOrThrow,
 } from "@commontools/common-runner";
 import { isStatic, markAsStatic } from "@commontools/common-builder";
 import {
@@ -18,6 +20,26 @@ import {
   InMemoryStorageProvider,
 } from "./storage-providers.js";
 import { debug } from "@commontools/common-html";
+
+export function log(...args: any[]) {
+  // Get absolute time in milliseconds since Unix epoch
+  const absoluteMs = performance.timeOrigin + performance.now();
+
+  // Extract components
+  const totalSeconds = Math.floor(absoluteMs / 1000);
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+    .toString()
+    .padStart(2, "0");
+  const seconds = (totalSeconds % 60).toString().padStart(2, "0");
+  const millis = Math.floor(absoluteMs % 1000)
+    .toString()
+    .padStart(3, "0");
+  const nanos = Math.floor((absoluteMs % 1) * 1000000)
+    .toString()
+    .padStart(6, "0");
+
+  debug(`${minutes}:${seconds}:${millis}:${nanos}`, ...args);
+}
 
 export interface Storage {
   /**
@@ -217,6 +239,10 @@ class StorageImpl implements Storage {
       if (isCell(value))
         value = { cell: value, path: [] } satisfies CellReference;
 
+      // If it's a query result proxy, make it a cell reference
+      if (isQueryResultForDereferencing(value))
+        value = getCellReferenceOrThrow(value);
+
       // If it's a cell reference, convert it to a cell reference with an id
       if (isCellReference(value)) {
         // Generate a causal ID for the cell if it doesn't have one yet
@@ -266,7 +292,7 @@ class StorageImpl implements Storage {
 
       this._addToBatch([{ cell, type: "storage" }]);
 
-      debug(
+      log(
         "prep for storage",
         JSON.stringify(cell.entityId),
         value,
@@ -282,7 +308,7 @@ class StorageImpl implements Storage {
     value: any,
     source?: EntityId,
   ): void {
-    debug(
+    log(
       "prep for cell",
       JSON.stringify(cell.entityId),
       value,
@@ -363,7 +389,7 @@ class StorageImpl implements Storage {
     const loading = new Set<CellImpl<any>>();
     const loadedCells = new Set<CellImpl<any>>();
 
-    debug(
+    log(
       "processing batch",
       this.currentBatch.map(
         ({ cell, type }) => `${JSON.stringify(cell.entityId)}:${type}`,
@@ -375,6 +401,10 @@ class StorageImpl implements Storage {
       const loaded = await Promise.all(
         Array.from(loading).map((cell) => this.loadingPromises.get(cell)!),
       );
+      if (loading.size === 0)
+        // If there was nothing queued, let the event loop settle before
+        // continuing. We might have gotten new data from storage.
+        await new Promise((r) => setTimeout(r, 0));
       loading.clear();
 
       for (const cell of loaded) {
@@ -406,7 +436,7 @@ class StorageImpl implements Storage {
             type === "cell"
               ? this.readDependentCells.get(cell)
               : this.writeDependentCells.get(cell);
-          debug(
+          log(
             "dependent cells",
             JSON.stringify(cell.entityId),
             [...dependentCells!].map((c) => JSON.stringify(c.entityId)),
@@ -421,15 +451,15 @@ class StorageImpl implements Storage {
               .forEach((dependent) => loading.add(dependent));
         }
       }
-      debug(
+      log(
         "loading",
         [...loading].map((c) => JSON.stringify(c.entityId)),
       );
-      debug(
+      log(
         "cellIsLoading",
         [...this.cellIsLoading.keys()].map((c) => JSON.stringify(c.entityId)),
       );
-      debug(
+      log(
         "currentBatch",
         this.currentBatch.map(
           ({ cell, type }) => `${JSON.stringify(cell.entityId)}:${type}`,
@@ -465,6 +495,11 @@ class StorageImpl implements Storage {
         if (source)
           cell.sourceCell = this.cellsById.get(JSON.stringify(source))!;
 
+        log(
+          "send to cell",
+          JSON.stringify(cell.entityId),
+          JSON.stringify(value),
+        );
         cell.send(value);
       }
     });
@@ -524,10 +559,19 @@ class StorageImpl implements Storage {
   }
 
   private _subscribeToChanges(cell: CellImpl<any>): void {
-    debug("subscribe to changes", JSON.stringify(cell.entityId));
+    log("subscribe to changes", JSON.stringify(cell.entityId));
 
     // Subscribe to cell changes, send updates to storage
-    this.addCancel(cell.updates(() => this._batchForStorage(cell)));
+    this.addCancel(
+      cell.updates((value) => {
+        log(
+          "got from cell",
+          JSON.stringify(cell.entityId),
+          JSON.stringify(value),
+        );
+        return this._batchForStorage(cell);
+      }),
+    );
 
     // Subscribe to storage updates, send results to cell
     this.addCancel(
