@@ -1,9 +1,4 @@
-import {
-  isAlias,
-  isStatic,
-  markAsStatic,
-  getTopFrame,
-} from "@commontools/common-builder";
+import { isAlias, isStatic, markAsStatic } from "@commontools/common-builder";
 import {
   cell,
   isCell,
