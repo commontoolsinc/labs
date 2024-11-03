@@ -410,6 +410,7 @@ export function normalizeToCells(
     let preceedingItemId = null;
     for (let i = 0; i < value.length; i++) {
       const item = maybeUnwrapProxy(value[i]);
+      if (item !== value[i]) value[i] = item; // Capture unwrapped value
       const previousItem = previous ? maybeUnwrapProxy(previous[i]) : undefined;
       if (
         !(
@@ -419,11 +420,16 @@ export function normalizeToCells(
           isRendererCell(item)
         )
       ) {
-        itemId = createRef(value[i], {
-          parent: cause,
-          index: i,
-          preceeding: preceedingItemId,
-        });
+        // TODO: Should this depend on the value if there is no id provided?
+        // This is probably generating extra churn on ids.
+        itemId =
+          typeof item === "object" && item !== null && "id" in item
+            ? createRef({ id: item.id }, { parent: cause })
+            : createRef(value[i], {
+                parent: cause,
+                index: i,
+                preceeding: preceedingItemId,
+              });
         const different = normalizeToCells(
           value[i],
           isCellReference(previousItem)
@@ -462,6 +468,7 @@ export function normalizeToCells(
     }
     for (const key in value) {
       const item = maybeUnwrapProxy(value[key]);
+      if (item !== value[key]) value[key] = item; // Capture unwrapped value
       const previousItem = previous
         ? maybeUnwrapProxy(previous[key])
         : undefined;
