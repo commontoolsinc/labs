@@ -203,6 +203,9 @@ export const jsonToDatalogQuery = (jsonObj: any) => {
   const select: Record<string, any> = {};
   const where: Array<any> = [];
 
+  if (typeof jsonObj !== "object" || jsonObj === null)
+    return { select: {}, where: [] };
+
   function processObject(root: string, obj: any, path: string, selectObj: any) {
     for (const [key, value] of Object.entries(obj)) {
       const currentPath = path ? `${path}/${key}` : key;
