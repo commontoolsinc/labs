@@ -15,6 +15,7 @@ import {
   getRecipe,
   idle,
   EntityId,
+  getCellByEntityId,
 } from "@commontools/common-runner";
 import { createStorage } from "./storage.js";
 
@@ -95,6 +96,7 @@ export async function runPersistent(
   inputs?: any,
   cause?: any,
 ): Promise<CellImpl<any>> {
+  addRecipe(recipe);
   await idle();
   return run(
     recipe,
@@ -271,6 +273,7 @@ addModuleByRef(
 (window as any).recipes = recipes;
 (window as any).charms = charms;
 (window as any).getRecipe = getRecipe;
+(window as any).getCellByEntityId = getCellByEntityId;
 
 export let annotationsEnabled = cell<boolean>(false);
 export const toggleAnnotations = () => {
