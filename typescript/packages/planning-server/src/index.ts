@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
-import { streamText } from "npm:ai";
+import { streamText, generateText } from "npm:ai";
 import { ensureDir } from "https://deno.land/std/fs/mod.ts";
 import { crypto } from "https://deno.land/std/crypto/mod.ts";
 import { anthropic } from "npm:@ai-sdk/anthropic";
@@ -67,12 +67,12 @@ const MODELS: Record<
     maxOutputTokens: 65536,
   },
   "google:gemini-1.5-flash": {
-    model: vertex("gemini-1.5-flash"),
+    model: vertex("gemini-1.5-flash-002"),
     contextWindow: 1000000,
     maxOutputTokens: 8192,
   },
   "google:gemini-1.5-pro": {
-    model: vertex("gemini-1.5-pro"),
+    model: vertex("gemini-1.5-pro-002"),
     contextWindow: 1000000,
     maxOutputTokens: 8192,
   },
@@ -125,7 +125,28 @@ const handler = async (request: Request): Promise<Response> => {
         messages,
       };
 
-      const llmStream = await streamText(params);
+      // console.log("params", params);
+
+      console.log("payload.model", payload.model);
+      console.log("params.model", params.model);
+
+      const wat = await generateText({
+        model: params.model,
+        system: params.system,
+        maxTokens: params.maxTokens,
+        stopSequences: params.stopSequences,
+        messages: params.messages,
+        prompt: "hello",
+      });
+      console.log("wat", wat);
+
+      if (payload.model.startsWith("google:")) {
+        const llmStream = await generateText(params);
+        console.log("hrmmm", llmStream);
+      } else {
+        const llmStream = await streamText(params);
+        console.log("uhm", llmStream);
+      }
 
       let result = "";
 
