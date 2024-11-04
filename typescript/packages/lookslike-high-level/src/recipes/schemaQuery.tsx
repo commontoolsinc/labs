@@ -1,11 +1,6 @@
-import {
-  UI,
-  NAME,
-  lift,
-  recipe,
-} from "@commontools/common-builder";
+import { UI, NAME, lift, recipe } from "@commontools/common-builder";
 import * as z from "zod";
-import { schemaQuery } from "../query.js";
+import { jsonSchemaQuery } from "../query.js";
 import { h } from "@commontools/common-html";
 
 const stringify = lift(({ obj }) => {
@@ -15,13 +10,15 @@ const stringify = lift(({ obj }) => {
 export const schemaQueryExample = recipe(
   z.object({ schema: z.any() }),
   ({ schema }) => {
-    const { result: items, query } = schemaQuery(schema)
+    const { result: items, query } = jsonSchemaQuery(schema);
 
     return {
-      [NAME]: 'Schema Query Playground',
-      [UI]: <div>
-        <pre>{stringify({ obj: items })}</pre>
-      </div>,
+      [NAME]: "JSON Schema Query Playground",
+      [UI]: (
+        <div>
+          <pre>{stringify({ obj: items })}</pre>
+        </div>
+      ),
       data: items,
       query,
     };

@@ -7,7 +7,7 @@ import {
   fetchData,
 } from "@commontools/common-builder";
 import * as z from "zod";
-import { eid, schemaQuery } from "../query.js";
+import { eid, zodSchemaQuery } from "../query.js";
 import { h } from "@commontools/common-html";
 import {
   prepDeleteRequest,
@@ -50,7 +50,9 @@ const reducer = ({ msg }: { msg: Message }) => {
         }),
       );
     case "remove-item":
-      return fetchData(prepDeleteRequest({ entity: msg.item, schema: todoItem }));
+      return fetchData(
+        prepDeleteRequest({ entity: msg.item, schema: todoItem }),
+      );
     case "toggle-item":
       return fetchData(
         prepUpdateRequest({
@@ -92,7 +94,7 @@ const input = recipe("input", ({ value }: { value: string }) => {
 export const todoQuery = recipe(
   z.object({ titleInput: z.string() }).describe("todo query"),
   ({ titleInput }) => {
-    const { result: items, query } = schemaQuery(todoItem);
+    const { result: items, query } = zodSchemaQuery(todoItem);
     tap({ obj: items });
 
     const onAddItem = createDispatch<{}, { titleInput: string }>((_, state) => {
@@ -101,9 +103,10 @@ export const todoQuery = recipe(
       return { type: "add-item", title: titleInput };
     });
 
-    const onToggleItem = createDispatch<{}, { item: TodoItem }>(
-      (_, state) => ({ type: "toggle-item", item: state.item })
-    );
+    const onToggleItem = createDispatch<{}, { item: TodoItem }>((_, state) => ({
+      type: "toggle-item",
+      item: state.item,
+    }));
 
     const onRenameItem = createDispatch<
       { detail: { checked: boolean; value: string } },
@@ -114,9 +117,10 @@ export const todoQuery = recipe(
       title: e.detail.value,
     }));
 
-    const onDeleteItem = createDispatch<{}, { item: TodoItem }>(
-      (_, state) => ({ type: "remove-item", item: state.item })
-    );
+    const onDeleteItem = createDispatch<{}, { item: TodoItem }>((_, state) => ({
+      type: "remove-item",
+      item: state.item,
+    }));
 
     const onAddToPrompt = createDispatch<{ prompt: string }, {}>((e, _) => ({
       type: "add-prompt",
@@ -156,7 +160,7 @@ export const todoQuery = recipe(
       ),
       data: items,
       query,
-      addToPrompt: onAddToPrompt,
+      //addToPrompt: onAddToPrompt,
     };
   },
 );

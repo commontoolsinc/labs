@@ -1,15 +1,8 @@
-import {
-  isQueryResultForDereferencing,
-  getCellReferenceOrThrow,
-} from "@commontools/common-runner";
+import { isQueryResultForDereferencing } from "@commontools/common-runner";
+import { getCellReferenceOrThrow } from "@commontools/common-runner";
 import { z } from "zod";
 
 export function jsonSchemaToPlaceholder(schema: any): any {
-  if (isQueryResultForDereferencing(schema)) {
-    const ref = getCellReferenceOrThrow(schema);
-    schema = ref.cell.getAtPath(ref.path);
-  }
-
   // Handle primitive types
   if (schema.type === "string") return "string";
   if (schema.type === "number" || schema.type === "integer") return 0;
