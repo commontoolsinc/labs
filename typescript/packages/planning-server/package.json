@@ -27,7 +27,12 @@
     "./lib/*.js"
   ],
   "dependencies": {
-    "@ai-sdk/groq": "^0.0.3"
+    "@ai-sdk/anthropic": "^0.0.55",
+    "@ai-sdk/google-vertex": "^0.0.43",
+    "@ai-sdk/groq": "^0.0.3",
+    "@ai-sdk/mistral": "^0.0.46",
+    "@ai-sdk/openai": "^0.0.71",
+    "ollama-ai-provider": "^0.16.0"
   },
   "devDependencies": {
     "tslib": "^2.6.2",

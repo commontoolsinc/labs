@@ -17,7 +17,7 @@ const handler = async (request: Request): Promise<Response> => {
 
   if (request.method === "POST") {
     try {
-      const payload = await request.json() as {
+      const payload = (await request.json()) as {
         messages: Array<{ role: string; content: string }>;
         system: string;
         model: string;
@@ -31,7 +31,8 @@ const handler = async (request: Request): Promise<Response> => {
       const cacheKey = await hashKey(JSON.stringify(payload));
       const cachedResult = await loadCacheItem(cacheKey);
       if (cachedResult) {
-        const lastMessage = cachedResult.messages[cachedResult.messages.length - 1];
+        const lastMessage =
+          cachedResult.messages[cachedResult.messages.length - 1];
         return new Response(JSON.stringify(lastMessage), {
           headers: { "Content-Type": "application/json" },
         });
@@ -46,11 +47,11 @@ const handler = async (request: Request): Promise<Response> => {
         system: payload.system,
         maxTokens: payload.max_tokens,
         messages,
-      }
+      };
 
       let modelProvider;
-      if (payload.model.startsWith('groq:')) {
-        modelProvider = groq(payload.model.replace('groq:', ''));
+      if (payload.model.startsWith("groq:")) {
+        modelProvider = groq(payload.model.replace("groq:", ""));
       } else {
         modelProvider = anthropic(payload.model);
       }
@@ -73,18 +74,24 @@ const handler = async (request: Request): Promise<Response> => {
             // NOTE: the llm doesn't send text we put into its mouth, so we need to
             // manually send it so that streaming client sees everything assistant 'said'
             if (messages[messages.length - 1].role === "assistant") {
-              controller.enqueue(new TextEncoder().encode(JSON.stringify(result) + '\n'));
+              controller.enqueue(
+                new TextEncoder().encode(JSON.stringify(result) + "\n"),
+              );
             }
             for await (const delta of llmStream.textStream) {
               result += delta;
-              controller.enqueue(new TextEncoder().encode(JSON.stringify(delta) + '\n'));
+              controller.enqueue(
+                new TextEncoder().encode(JSON.stringify(delta) + "\n"),
+              );
             }
 
             if ((await llmStream.finishReason) === "stop" && payload.stop) {
               // NOTE(ja): we might have stopped because of a stop sequence, so add it to the result...
               // this is a hack that helps the client parse the result
               result += payload.stop;
-              controller.enqueue(new TextEncoder().encode(JSON.stringify(payload.stop) + '\n'));
+              controller.enqueue(
+                new TextEncoder().encode(JSON.stringify(payload.stop) + "\n"),
+              );
             }
 
             if (messages[messages.length - 1].role === "user") {
@@ -100,7 +107,7 @@ const handler = async (request: Request): Promise<Response> => {
         return new Response(stream, {
           headers: {
             "Content-Type": "text/event-stream",
-            "Transfer-Encoding": "chunked"
+            "Transfer-Encoding": "chunked",
           },
         });
       }
@@ -110,13 +117,10 @@ const handler = async (request: Request): Promise<Response> => {
       }
 
       if (!result) {
-        return new Response(
-          JSON.stringify({ error: "No response from LLM" }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
+        return new Response(JSON.stringify({ error: "No response from LLM" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
       }
 
       if ((await llmStream.finishReason) === "stop" && payload.stop) {
@@ -131,17 +135,17 @@ const handler = async (request: Request): Promise<Response> => {
 
       await saveCacheItem(cacheKey, params);
 
-      return new Response(JSON.stringify(params.messages[params.messages.length - 1]), {
+      return new Response(
+        JSON.stringify(params.messages[params.messages.length - 1]),
+        {
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    } catch (error) {
+      return new Response(JSON.stringify({ error: (error as Error).message }), {
+        status: 400,
         headers: { "Content-Type": "application/json" },
       });
-    } catch (error) {
-      return new Response(
-        JSON.stringify({ error: (error as Error).message }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
     }
   } else {
     return new Response("Please send a POST request", { status: 405 });
@@ -153,7 +157,7 @@ async function hashKey(key: string): Promise<string> {
   const data = encoder.encode(key);
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 async function loadCacheItem(key: string): Promise<any | null> {
