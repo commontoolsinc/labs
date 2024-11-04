@@ -23,7 +23,8 @@ import { debug } from "@commontools/common-html";
 
 export function log(...args: any[]) {
   // Get absolute time in milliseconds since Unix epoch
-  const absoluteMs = performance.timeOrigin + performance.now();
+  const absoluteMs =
+    (performance.timeOrigin % 3600000) + (performance.now() % 1000);
 
   // Extract components
   const totalSeconds = Math.floor(absoluteMs / 1000);
@@ -557,12 +558,14 @@ class StorageImpl implements Storage {
 
       const now = Date.now();
       if (now - this.lastBatchTime < 100) {
-        if (this.lastBatchDebounceCount < 8) this.lastBatchDebounceCount++;
-        else console.warn("reached max debounce delay");
+        if (this.lastBatchDebounceCount < 17) this.lastBatchDebounceCount++;
 
-        const exp = this.lastBatchDebounceCount ** 2;
-        // Randomize so not all tabs debounce by the same interval
-        const delay = 10 * exp + 100 * (1 + Math.random());
+        // First 10 have no delay, then it's 50, 100, 200, 400, ..., 1600
+        // + random to next interval so not all tabs debounce synchronously
+        const exp = Math.max(0, this.lastBatchDebounceCount - 10) ** 2;
+        const delay = 50 * exp * (1 + Math.random());
+
+        if (delay > 1000) console.warn(`debouncing by ${delay}ms`);
 
         setTimeout(() => {
           this.lastBatchTime = Date.now();
