@@ -453,17 +453,24 @@ function rendererCell<T>(
 
       ref = undefined;
       if (isQueryResultForDereferencing(target)) ref = target[getCellReference];
-      else if (isCellReference(target)) ref = followCellReferences(target, log);
+      else if (isCellReference(target)) ref = target;
       else if (isCell(target))
         ref = { cell: target, path: [] } satisfies CellReference;
-      else if (isAlias(target)) ref = followAliases(target, cell, log);
+      else if (isAlias(target))
+        ref = {
+          cell: target.$alias.cell ?? cell,
+          path: target.$alias.path,
+        } satisfies CellReference;
 
       if (ref) {
+        log?.reads.push({ cell: ref.cell, path: ref.path });
         target = ref.cell.getAtPath(ref.path);
         cell = ref.cell;
         path = [...ref.path, ...keys];
       }
-    } while (ref);
+      // Follow all aliases and cell references for path resolution, but only go
+      // one level deep on the last key.
+    } while (ref && keys.length);
   }
 
   const self: RendererCell<T> = isStreamAlias(cell.getAtPath(path))
