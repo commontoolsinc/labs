@@ -5,10 +5,78 @@ import { crypto } from "https://deno.land/std/crypto/mod.ts";
 import { anthropic } from "npm:@ai-sdk/anthropic";
 import { config } from "https://deno.land/x/dotenv/mod.ts";
 import { groq } from "npm:@ai-sdk/groq";
+import { openai } from "npm:@ai-sdk/openai";
+import { vertex } from "npm:@ai-sdk/google-vertex";
 
 await config({ export: true });
 
 const CACHE_DIR = "./cache";
+
+const MODELS: Record<
+  string,
+  { model: any; contextWindow: number; maxOutputTokens: number }
+> = {
+  "anthropic:claude-3.5-haiku": {
+    model: anthropic("claude-3-5-haiku-20241022"),
+    contextWindow: 200000,
+    maxOutputTokens: 8192,
+  },
+  "anthropic:claude-3.5-sonnet": {
+    model: anthropic("claude-3-5-sonnet-20241022"),
+    contextWindow: 200000,
+    maxOutputTokens: 8192,
+  },
+  "anthropic:claude-3-opus": {
+    model: anthropic("claude-opus-20240229"),
+    contextWindow: 200000,
+    maxOutputTokens: 4096,
+  },
+  "groq:llama-3.1-70b": {
+    model: groq("llama-3.1-70b-versatile"),
+    contextWindow: 128000,
+    maxOutputTokens: 8192,
+  },
+  "groq:llama-3.2-11b-vision": {
+    model: groq("llama-3.2-11b-vision-preview"),
+    contextWindow: 128000,
+    maxOutputTokens: 8192,
+  },
+  "groq:llama-3.2-90b-vision": {
+    model: groq("llama-3.2-90b-vision-preview"),
+    contextWindow: 128000,
+    maxOutputTokens: 8192,
+  },
+  "openai:gpt-4o": {
+    model: openai("gpt-4o"),
+    contextWindow: 128000,
+    maxOutputTokens: 16384,
+  },
+  "openai:gpt-4o-mini": {
+    model: openai("gpt-4o-mini"),
+    contextWindow: 128000,
+    maxOutputTokens: 16384,
+  },
+  "openai:o1-preview": {
+    model: openai("o1-preview-2024-09-12"),
+    contextWindow: 128000,
+    maxOutputTokens: 32768,
+  },
+  "openai:o1-mini": {
+    model: openai("o1-mini-2024-09-12"),
+    contextWindow: 128000,
+    maxOutputTokens: 65536,
+  },
+  "google:gemini-1.5-flash": {
+    model: vertex("gemini-1.5-flash"),
+    contextWindow: 1000000,
+    maxOutputTokens: 8192,
+  },
+  "google:gemini-1.5-pro": {
+    model: vertex("gemini-1.5-pro"),
+    contextWindow: 1000000,
+    maxOutputTokens: 8192,
+  },
+};
 
 const handler = async (request: Request): Promise<Response> => {
   if (request.method === "GET") {
@@ -38,29 +106,26 @@ const handler = async (request: Request): Promise<Response> => {
         });
       }
 
+      const modelConfig = MODELS[payload.model];
+      if (!modelConfig) {
+        console.log(
+          `You are using an unsupported model, ping jake to add it if you intend for others to use it!: ${payload.model}`,
+        );
+      }
+
       console.log("Generating:", description);
 
       let messages = payload.messages;
 
       let params = {
-        model: payload.model,
+        model: modelConfig.model || payload.model,
         system: payload.system,
-        maxTokens: payload.max_tokens,
+        maxTokens: modelConfig.maxOutputTokens || payload.max_tokens,
+        stopSequences: payload.stop ? [payload.stop] : undefined,
         messages,
       };
 
-      let modelProvider;
-      if (payload.model.startsWith("groq:")) {
-        modelProvider = groq(payload.model.replace("groq:", ""));
-      } else {
-        modelProvider = anthropic(payload.model);
-      }
-
-      const llmStream = await streamText({
-        ...params,
-        model: modelProvider,
-        stopSequences: payload.stop ? [payload.stop] : undefined,
-      });
+      const llmStream = await streamText(params);
 
       let result = "";
 
