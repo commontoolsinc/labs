@@ -30,7 +30,6 @@
     "merkle-reference": "^0.0.2"
   },
   "devDependencies": {
-    "@commontools/common-html": "^0.0.1",
     "jsdom": "^25.0.0",
     "typescript": "^5.2.2",
     "vitest": "^1.6.0",
@@ -40,7 +39,6 @@
     "build": {
       "dependencies": [
         "../common-builder:build",
-        "../common-html:build",
         "../llm-client:build"
       ],
       "files": [

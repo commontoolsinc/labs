@@ -83,18 +83,6 @@ export interface RendererCell<T> {
   copyTrap: boolean;
 }
 
-export interface ReactiveCell<T> {
-  sink(callback: (value: T) => void): () => void;
-}
-
-export interface GettableCell<T> {
-  get(): T;
-}
-
-export interface SendableCell<T> {
-  send(value: T): void;
-}
-
 /**
  * Lowest level cell implementation.
  *
@@ -929,51 +917,3 @@ export function isQueryResultForDereferencing(
 ): value is QueryResultInternals {
   return isQueryResult(value);
 }
-
-/**
- * Check if value is a reactive cell.
- *
- * @param {any} value - The value to check.
- * @returns {boolean}
- */
-export const isReactive = <T = any>(
-  value: ReactiveCell<T>,
-): value is ReactiveCell<T> => {
-  return (
-    typeof value === "object" &&
-    "sink" in value &&
-    typeof value.sink === "function"
-  );
-};
-
-/**
- * Check if value is a gettable cell.
- *
- * @param {any} value - The value to check.
- * @returns {boolean}
- */
-export const isGettable = <T = any>(
-  value: GettableCell<T>,
-): value is GettableCell<T> => {
-  return (
-    typeof value === "object" &&
-    "get" in value &&
-    typeof value.get === "function"
-  );
-};
-
-/**
- * Check if value is a sendable cell.
- *
- * @param {any} value - The value to check.
- * @returns {boolean}
- */
-export const isSendable = <T = any>(
-  value: SendableCell<T>,
-): value is SendableCell<T> => {
-  return (
-    typeof value === "object" &&
-    "send" in value &&
-    typeof value.send === "function"
-  );
-};

@@ -42,7 +42,7 @@
   "wireit": {
     "build": {
       "dependencies": [
-        "../common-propagator:build",
+        "../common-runner:build",
         "../common-builder:build"
       ],
       "files": [

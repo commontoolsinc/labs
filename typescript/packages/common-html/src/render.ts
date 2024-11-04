@@ -14,15 +14,15 @@ import {
   effect,
   isSendable,
   isReactive,
-} from "@commontools/common-propagator/reactive.js";
-import {
   useCancelGroup,
   Cancel,
-} from "@commontools/common-propagator/cancel.js";
+} from "@commontools/common-runner";
 import * as logger from "./logger.js";
 
 export const render = (parent: HTMLElement, view: View | VNode): Cancel => {
-  let { template, context } = isVNode(view) ? { template: view, context: {} } : view;
+  let { template, context } = isVNode(view)
+    ? { template: view, context: {} }
+    : view;
   const [root, cancel] = renderNode(template, context);
   if (!root) {
     logger.warn("Could not render view", view);
@@ -37,7 +37,7 @@ export default render;
 
 const renderNode = (
   node: VNode,
-  context: Context
+  context: Context,
 ): [HTMLElement | null, Cancel] => {
   const [cancel, addCancel] = useCancelGroup();
 
@@ -61,7 +61,7 @@ const renderNode = (
 const bindChildren = (
   element: HTMLElement,
   children: Array<Child>,
-  context: Context
+  context: Context,
 ): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
 
@@ -78,7 +78,9 @@ const bindChildren = (
       }
     } else if (isBinding(child) || isReactive(child)) {
       // Bind dynamic content
-      const replacement = (isReactive(child)) ? child : getContext(context, child.path);
+      const replacement = isReactive(child)
+        ? child
+        : getContext(context, child.path);
       // Anchor for reactive replacement
       let anchor: ChildNode = document.createTextNode("");
       let endAnchor: ChildNode | undefined = undefined;
@@ -112,10 +114,9 @@ const bindChildren = (
           }
           anchor = originalAnchor;
         } else if (isView(replacement) || isVNode(replacement)) {
-          const [childElement, cancel] = isView(replacement) ? renderNode(
-            replacement.template,
-            replacement.context
-          ) : renderNode(replacement, {});
+          const [childElement, cancel] = isView(replacement)
+            ? renderNode(replacement.template, replacement.context)
+            : renderNode(replacement, {});
           addCancel(cancel);
           if (childElement != null) {
             anchor.replaceWith(childElement);
@@ -127,7 +128,7 @@ const bindChildren = (
           if (typeof replacement === "object") {
             console.warn(
               "unexpected object when value was expected",
-              replacement
+              replacement,
             );
             replacement = JSON.stringify(replacement);
           }
@@ -147,17 +148,24 @@ const bindChildren = (
 const bindProps = (
   element: HTMLElement,
   props: Props,
-  context: Context
+  context: Context,
 ): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
   for (const [propKey, propValue] of Object.entries(props)) {
-    if (isBinding(propValue) || isReactive(propValue) || isSendable(propValue)) {
-      const replacement = (isReactive(propValue) || isSendable(propValue)) ? propValue : getContext(context, propValue.path);
+    if (
+      isBinding(propValue) ||
+      isReactive(propValue) ||
+      isSendable(propValue)
+    ) {
+      const replacement =
+        isReactive(propValue) || isSendable(propValue)
+          ? propValue
+          : getContext(context, propValue.path);
       // If prop is an event, we need to add an event listener
       if (isEventProp(propKey)) {
         if (!isSendable(replacement)) {
           throw new TypeError(
-            `Event prop "${propKey}" does not have a send method`
+            `Event prop "${propKey}" does not have a send method`,
           );
         }
         const key = cleanEventProp(propKey);
@@ -203,7 +211,7 @@ const cleanEventProp = (key: string) => {
 const listen = (
   element: HTMLElement,
   key: string,
-  callback: (event: Event) => void
+  callback: (event: Event) => void,
 ) => {
   element.addEventListener(key, callback);
   return () => {

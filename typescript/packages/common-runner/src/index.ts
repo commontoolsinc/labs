@@ -8,7 +8,6 @@ export {
 } from "./scheduler.js";
 export type {
   RendererCell,
-  ReactiveCell,
   CellImpl,
   QueryResult,
   CellReference,
@@ -20,13 +19,19 @@ export {
   isRendererCell,
   isCellReference,
   isQueryResult,
-  isReactive,
-  isGettable,
-  isSendable,
   getCellReferenceOrValue,
   getCellReferenceOrThrow,
   isQueryResultForDereferencing,
 } from "./cell.js";
+export {
+  effect,
+  isReactive,
+  isGettable,
+  isSendable,
+  type ReactiveCell,
+  type GettableCell,
+  type SendableCell,
+} from "./reactivity.js";
 export {
   getEntityId,
   getCellByEntityId,
