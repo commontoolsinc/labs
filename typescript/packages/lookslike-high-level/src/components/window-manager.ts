@@ -16,7 +16,7 @@ import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
 import { NAME } from "@commontools/common-builder";
 import { matchRoute, navigate } from "../router.js";
-import { inferZodSchema } from "../schema.js";
+import { inferJsonSchema } from "../schema.js";
 import { schemaQueryExample } from "../recipes/schemaQuery.jsx";
 
 @customElement("common-window-manager")
@@ -105,12 +105,16 @@ export class CommonWindowManager extends LitElement {
       @keyframes highlight {
         0%,
         100% {
-          box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1),
-            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow:
+            0 10px 20px rgba(0, 0, 0, 0.1),
+            0 6px 6px rgba(0, 0, 0, 0.1),
+            0 0 0 1px rgba(0, 0, 0, 0.05);
         }
         50% {
-          box-shadow: 0 0 20px 5px rgba(255, 215, 0, 0.5),
-            0 6px 6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.05);
+          box-shadow:
+            0 0 20px 5px rgba(255, 215, 0, 0.5),
+            0 6px 6px rgba(0, 0, 0, 0.1),
+            0 0 0 1px rgba(0, 0, 0, 0.05);
         }
       }
       .highlight {
@@ -176,7 +180,7 @@ export class CommonWindowManager extends LitElement {
             }
             return acc;
           },
-          {} as any
+          {} as any,
         );
 
         if (charmValues.data) {
@@ -262,7 +266,7 @@ export class CommonWindowManager extends LitElement {
             behavior,
             shiftKey: behavior === "fork",
           },
-        })
+        }),
       );
     };
 
@@ -302,8 +306,10 @@ export class CommonWindowManager extends LitElement {
         this.requestUpdate();
       } else {
         // Create a new charm and query for the imported data
-        const schema = inferZodSchema(data[0])
-        runPersistent(schemaQueryExample, { schema }).then((charm) => this.openCharm(charm));
+        const schema = inferJsonSchema(data[0]);
+        runPersistent(schemaQueryExample, { schema }).then((charm) =>
+          this.openCharm(charm),
+        );
       }
     };
 
@@ -314,7 +320,11 @@ export class CommonWindowManager extends LitElement {
           locationtitle=${this.focusedProxy?.[NAME] || "Untitled"}
           @location=${this.onLocationClicked}
         >
-          <os-avatar slot="toolbar-start" name="Ben" .onclick=${this.onHome}></os-avatar>
+          <os-avatar
+            slot="toolbar-start"
+            name="Ben"
+            .onclick=${this.onHome}
+          ></os-avatar>
 
           <os-dialog .open=${this.searchOpen} @closedialog=${onCloseDialog}>
             <os-ai-box
@@ -351,7 +361,7 @@ export class CommonWindowManager extends LitElement {
                     JSON.stringify(this.focusedCharm?.entityId)}
                     @click=${onNavigate}
                   ></os-charm-chip>`;
-                }
+                },
               )}
             </os-charm-chip-group>
           </os-dialog>
@@ -366,7 +376,7 @@ export class CommonWindowManager extends LitElement {
                   text=${suggestion.prompt}
                   @click=${() => onSuggestionsSelected(suggestion)}
                 ></os-bubble>
-              `
+              `,
             )}
           </os-fabgroup>
           ${this.charms.length === 0
@@ -419,7 +429,7 @@ export class CommonWindowManager extends LitElement {
                   <div class="charm" ${ref(charmRef)}></div>
                 </div>
               `;
-            }
+            },
           )}
 
           <os-navstack slot="sidebar">
@@ -449,7 +459,7 @@ export class CommonWindowManager extends LitElement {
     this.location = this.focusedProxy?.[NAME] || "-";
 
     const existingWindow = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`
+      `[data-charm-id="${CSS.escape(charmId)}"]`,
     );
     if (existingWindow) {
       this.scrollToAndHighlight(charmId, true);
@@ -463,8 +473,8 @@ export class CommonWindowManager extends LitElement {
     this.updateComplete.then(() => {
       while (this.newCharmRefs.length > 0) {
         const [charm, charmRef] = this.newCharmRefs.pop()!;
-        const view = charm.asRendererCell<Charm>().key(UI).get();
-        if (!view) throw new Error("Charm has no UI");
+        const view = charm.asRendererCell<Charm>().key(UI);
+        if (!view.getAsQueryResult()) throw new Error("Charm has no UI");
         render(charmRef.value!, view);
         this.requestUpdate();
       }
@@ -475,7 +485,7 @@ export class CommonWindowManager extends LitElement {
 
   private scrollToAndHighlight(charmId: string, animate: boolean) {
     const window = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`
+      `[data-charm-id="${CSS.escape(charmId)}"]`,
     );
     if (window) {
       window.scrollIntoView({
@@ -496,7 +506,7 @@ export class CommonWindowManager extends LitElement {
       const charmId = windowElement.getAttribute("data-charm-id");
       if (charmId) {
         this.charms = this.charms.filter(
-          (charm) => JSON.stringify(charm.entityId) !== charmId
+          (charm) => JSON.stringify(charm.entityId) !== charmId,
         );
         this.charmRefs.delete(charmId);
       }
@@ -508,7 +518,7 @@ export class CommonWindowManager extends LitElement {
     console.log("routeChange", customEvent.detail);
     const match = matchRoute(
       "/charm/:charmId",
-      new URL(customEvent.detail, window.location.href)
+      new URL(customEvent.detail, window.location.href),
     );
     console.log(new URL(customEvent.detail, window.location.href));
     console.log(match);
@@ -516,7 +526,7 @@ export class CommonWindowManager extends LitElement {
     console.log(
       "onroutechange",
       JSON.stringify(this.focusedCharm?.entityId),
-      match?.params.charmId
+      match?.params.charmId,
     );
     if (
       match &&
@@ -525,7 +535,7 @@ export class CommonWindowManager extends LitElement {
       // TODO: Add a timeout here, show loading state and error state
       setTimeout(() => {
         syncCharm(match.params.charmId, true).then(
-          (charm) => charm && charm.get() && this.openCharm(charm)
+          (charm) => charm && charm.get() && this.openCharm(charm),
         );
       }, 100);
     }
@@ -536,7 +546,7 @@ export class CommonWindowManager extends LitElement {
     this.addEventListener("open-charm", this.handleAddWindow);
     window.addEventListener("routeChange", this.#onRouteChange.bind(this));
     this.#onRouteChange(
-      new CustomEvent("routeChange", { detail: window.location.href })
+      new CustomEvent("routeChange", { detail: window.location.href }),
     );
   }
 

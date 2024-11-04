@@ -15,11 +15,19 @@ import {
   isSendable,
   isReactive,
   useCancelGroup,
-  Cancel,
+  type Cancel,
+  type RendererCell,
 } from "@commontools/common-runner";
 import * as logger from "./logger.js";
 
-export const render = (parent: HTMLElement, view: View | VNode): Cancel => {
+export const render = (
+  parent: HTMLElement,
+  view: View | VNode | RendererCell<View | VNode>,
+): Cancel => {
+  return effect(view, (view: View | VNode) => renderImpl(parent, view));
+};
+
+export const renderImpl = (parent: HTMLElement, view: View | VNode): Cancel => {
   let { template, context } = isVNode(view)
     ? { template: view, context: {} }
     : view;

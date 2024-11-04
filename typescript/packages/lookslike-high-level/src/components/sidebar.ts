@@ -74,22 +74,22 @@ export class CommonSidebar extends LitElement {
   }
 
   protected override async updated(
-    _changedProperties: PropertyValues
+    _changedProperties: PropertyValues,
   ): Promise<void> {
     super.updated(_changedProperties);
 
-    if (_changedProperties.has('sidebarTab') && this.homeCharm) {
+    if (_changedProperties.has("sidebarTab") && this.homeCharm) {
       this.homeCharm = null;
     }
 
     if (!this.homeCharm && this.homeRef.value) {
       this.homeCharm = runPersistent(home, { charms, recipes }, "home").then(
         (home) => {
-          const view = home.asRendererCell<Charm>().key(UI).get();
-          if (!view) throw new Error("Charm has no UI");
+          const view = home.asRendererCell<Charm>().key(UI);
+          if (!view.getAsQueryResult()) throw new Error("Charm has no UI");
           render(this.homeRef.value!, view);
           return home;
-        }
+        },
       );
     }
   }
@@ -159,7 +159,7 @@ export class CommonSidebar extends LitElement {
                 <div ${ref(this.homeRef)}></div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``
+          () => html``,
         )}
         ${when(
           this.sidebarTab === "query",
@@ -173,14 +173,14 @@ export class CommonSidebar extends LitElement {
                     slot="content"
                     language="application/json"
                     .source=${watchCell(query, (q) =>
-                      JSON.stringify(q, null, 2)
+                      JSON.stringify(q, null, 2),
                     )}
                     @doc-change=${onQueryChanged}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``
+          () => html``,
         )}
         ${when(
           this.sidebarTab === "schema",
@@ -194,13 +194,13 @@ export class CommonSidebar extends LitElement {
                     slot="content"
                     language="application/json"
                     .source=${watchCell(schema, (q) =>
-                      JSON.stringify(q, null, 2)
+                      JSON.stringify(q, null, 2),
                     )}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``
+          () => html``,
         )}
         ${when(
           this.sidebarTab === "source",
@@ -218,7 +218,7 @@ export class CommonSidebar extends LitElement {
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``
+          () => html``,
         )}
         ${when(
           this.sidebarTab === "data",
@@ -232,14 +232,14 @@ export class CommonSidebar extends LitElement {
                     slot="content"
                     language="application/json"
                     .source=${watchCell(data, (q) =>
-                      JSON.stringify(q, null, 2)
+                      JSON.stringify(q, null, 2),
                     )}
                     @doc-change=${onDataChanged}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``
+          () => html``,
         )}
         ${when(
           this.sidebarTab === "prompt",
@@ -258,7 +258,7 @@ export class CommonSidebar extends LitElement {
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``
+          () => html``,
         )}
       </os-navstack>
     `;
