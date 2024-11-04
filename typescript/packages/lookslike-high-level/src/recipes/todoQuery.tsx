@@ -4,7 +4,6 @@ import {
   lift,
   handler,
   recipe,
-  fetchData,
 } from "@commontools/common-builder";
 import * as z from "zod";
 import { eid, schemaQuery } from "../query.js";
@@ -14,6 +13,8 @@ import {
   prepInsertRequest,
   prepUpdateRequest,
 } from "../mutation.js";
+import { resource } from "./resource.js";
+import { input } from "./input.jsx";
 
 const tap = lift((x) => {
   console.log(x, JSON.stringify(x, null, 2));
@@ -41,53 +42,47 @@ const reducer = ({ msg }: { msg: Message }) => {
   console.log({ msg });
   switch (msg.type) {
     case "add-item":
-      return fetchData(
-        prepInsertRequest({
+      return resource({
+        request: prepInsertRequest({
           entity: {
             title: msg.title,
             done: false,
           },
         }),
-      );
+      });
     case "remove-item":
-      return fetchData(prepDeleteRequest({ entity: msg.item, schema: todoItem }));
+      return resource({
+        request: prepDeleteRequest({ entity: msg.item, schema: todoItem }),
+      });
     case "toggle-item":
-      return fetchData(
-        prepUpdateRequest({
+      return resource({
+        request: prepUpdateRequest({
           eid: eid(msg.item),
           attribute: "done",
           prev: msg.item.done,
           current: !msg.item.done,
         }),
-      );
+      });
     case "rename-item":
-      return fetchData(
-        prepUpdateRequest({
+      return resource({
+        request: prepUpdateRequest({
           eid: eid(msg.item),
           attribute: "title",
           prev: msg.item.title,
           current: msg.title,
         }),
-      );
+      });
     case "add-prompt":
-      return fetchData(
-        prepInsertRequest({
+      return resource({
+        request: prepInsertRequest({
           entity: {
             title: msg.prompt,
             done: false,
           },
         }),
-      );
+      });
   }
 };
-
-const input = recipe("input", ({ value }: { value: string }) => {
-  const onChange = handler<InputEvent, { value: string }>((e, state) => {
-    state.value = (e.target as HTMLInputElement).value;
-  });
-
-  return <input value={value} oninput={onChange({ value })}></input>;
-});
 
 export const todoQuery = recipe(
   z.object({ titleInput: z.string() }).describe("todo query"),
