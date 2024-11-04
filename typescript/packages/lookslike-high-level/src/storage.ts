@@ -147,6 +147,8 @@ class StorageImpl implements Storage {
   private currentBatchPromise: Promise<void> = new Promise(
     (r) => (this.currentBatchResolve = r),
   );
+  private lastBatchTime: number = 0;
+  private lastBatchDebounceCount: number = 0;
 
   private cancel: Cancel;
   private addCancel: AddCancel;
@@ -544,15 +546,33 @@ class StorageImpl implements Storage {
     if (!this.currentBatchProcessing) {
       this.currentBatchProcessing = true;
 
-      queueMicrotask(() =>
+      const task = () =>
         this._processCurrentBatch().then(() => {
           this.currentBatchProcessing = false;
 
           // Trigger processing of next batch, if we got new ones while
           // applying operations or after resolving the current batch promise
           if (this.currentBatch.length > 0) this._addToBatch([]);
-        }),
-      );
+        });
+
+      const now = Date.now();
+      if (now - this.lastBatchTime < 100) {
+        if (this.lastBatchDebounceCount < 8) this.lastBatchDebounceCount++;
+        else console.warn("reached max debounce delay");
+
+        const exp = this.lastBatchDebounceCount ** 2;
+        // Randomize so not all tabs debounce by the same interval
+        const delay = 10 * exp + 100 * (1 + Math.random());
+
+        setTimeout(() => {
+          this.lastBatchTime = Date.now();
+          task();
+        }, delay);
+      } else {
+        this.lastBatchTime = now;
+        this.lastBatchDebounceCount = 0;
+        queueMicrotask(task);
+      }
     }
 
     return this.currentBatchPromise;
