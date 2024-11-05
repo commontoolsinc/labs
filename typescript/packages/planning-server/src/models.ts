@@ -86,6 +86,15 @@ if (Deno.env.get("GROQ_API_KEY")) {
 
     addModel({
         provider: groq,
+        name: "groq:llama-3.1-8b-instant",
+        contextWindow: 128000,
+        maxOutputTokens: 8000,
+        aliases: [
+        ],
+    });
+
+    addModel({
+        provider: groq,
         name: "groq:llama-3.2-11b-vision-preview",
         contextWindow: 128000,
         maxOutputTokens: 8000,
@@ -103,6 +112,14 @@ if (Deno.env.get("GROQ_API_KEY")) {
             "groq:llama-3.2-90b-vision",
         ],
     });
+
+    addModel({
+        provider: groq,
+        name: "groq:llama-3.2-3b-preview",
+        contextWindow: 128000,
+        maxOutputTokens: 8000,
+        aliases: []
+    });
 }
 
 if (Deno.env.get("OPENAI_API_KEY")) {
@@ -114,6 +131,7 @@ if (Deno.env.get("OPENAI_API_KEY")) {
         aliases: [
             "openai:gpt-4o",
             "openai:gpt-4o-latest",
+            "gpt-4o",
         ],
     });
 
@@ -125,6 +143,7 @@ if (Deno.env.get("OPENAI_API_KEY")) {
         aliases: [
             "openai:gpt-4o-mini-latest",
             "openai:gpt-4o-mini",
+            "gpt-4o-mini",
         ],
     });
 
@@ -136,6 +155,7 @@ if (Deno.env.get("OPENAI_API_KEY")) {
         aliases: [
             "openai:o1-preview-latest",
             "openai:o1-preview",
+            "o1-preview",
         ],
     });
 
@@ -147,6 +167,7 @@ if (Deno.env.get("OPENAI_API_KEY")) {
         aliases: [
             "openai:o1-mini-latest",
             "openai:o1-mini",
+            "o1-mini",
         ],
     });
 }
