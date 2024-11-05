@@ -80,16 +80,24 @@ export const jsonSchemaQuery = recipe(
 
     return { result: result.data, query };
   },
-) as <T>(schema: any) => {
-  result: OpaqueRef<T[]>;
-  query: OpaqueRef<any>;
+) as <T>(schema: any) => OpaqueRef<{
+  result: T[];
+  query: any;
+}>;
+
+addRecipe(jsonSchemaQuery as RecipeFactory<any, any>);
+
+export const JsonSchemaFromZod = (schema: z.ZodTypeAny): any => {
+  const jsonSchema = zodToJsonSchema(schema);
+  delete jsonSchema.$schema;
+  return jsonSchema;
 };
 
 export const zodSchemaQuery = <T>(schema: z.ZodType<T>) =>
-  jsonSchemaQuery(zodToJsonSchema(schema)) as {
-    result: OpaqueRef<T[]>;
-    query: OpaqueRef<any>;
-  };
+  jsonSchemaQuery(JsonSchemaFromZod(schema)) as OpaqueRef<{
+    result: T[];
+    query: any;
+  }>;
 
 export const datalogQuery = recipe(
   z.any().describe("datalogQuery"),
