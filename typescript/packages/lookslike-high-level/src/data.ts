@@ -27,6 +27,42 @@ import { createStorage } from "./storage.js";
 import * as allRecipes from "./recipes/index.js";
 import { buildRecipe } from "./localBuild.js";
 
+import { todoList } from "./recipes/todo-list.js";
+import { localSearch } from "./recipes/local-search.js";
+import { luftBnBSearch } from "./recipes/luft-bnb-search.js";
+import { ticket } from "./recipes/ticket.js";
+import { routine } from "./recipes/routine.js";
+import { fetchExample } from "./recipes/fetchExample.js";
+import { counter } from "./recipes/counter.js";
+import { counters } from "./recipes/counters.js";
+import { tweets } from "./recipes/tweets.jsx";
+
+// Necessary, so that suggestions are indexed.
+import "./recipes/todo-list-as-task.js";
+import "./recipes/playlist.js";
+
+import { iframe } from "./recipes/iframe.js";
+import { search } from "./recipes/search.js";
+import { dataDesigner } from "./recipes/dataDesigner.js";
+import { prompt } from "./recipes/prompts.js";
+import { wiki } from "./recipes/wiki.js";
+import { queryCollections } from "./recipes/queryCollections.js";
+import { articleQuery } from "./recipes/articleQuery.jsx";
+import { debounceExample } from "./recipes/examples/debounce.jsx";
+import { calc } from "./recipes/examples/calculator.jsx";
+import { rectangleQuery } from "./recipes/examples/rectangleQuery.jsx";
+import { evalJs } from "./recipes/examples/eval.js";
+import { importCalendar } from "./recipes/archive/importCalendar.js";
+import { dungeon } from "./recipes/archive/dungeon.js";
+import { jsonImporter } from "./recipes/archive/jsonImport.js";
+import { helloIsolated } from "./recipes/examples/helloIsolated.js";
+import { shoelaceDemo } from "./recipes/examples/shoelace.jsx";
+import { z } from "zod";
+import { datalogQueryExample } from "./recipes/datalogQuery.jsx";
+import { todoQuery } from "./recipes/todoQuery.jsx";
+import { mealExample } from "./recipes/meal.jsx";
+import { charmExample } from "./recipes/charm.jsx";
+
 export type Charm = {
   [NAME]?: string;
   [UI]?: any;
