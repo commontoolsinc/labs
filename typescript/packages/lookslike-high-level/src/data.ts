@@ -12,10 +12,9 @@ import {
   type ReactivityLog,
   createRef,
   addRecipe,
-  getRecipe,
+  allRecipesByName,
   idle,
   EntityId,
-  getCellByEntityId,
 } from "@commontools/common-runner";
 import { createStorage } from "./storage.js";
 import * as allRecipes from "./recipes/index.js";
@@ -62,7 +61,6 @@ export async function runPersistent(
   inputs?: any,
   cause?: any,
 ): Promise<CellImpl<any>> {
-  addRecipe(recipe);
   await idle();
   return run(
     recipe,
@@ -78,6 +76,10 @@ export async function syncCharm(
   return storage.syncCell(entityId, waitForStorage);
 }
 
+addCharms([
+  //runPersistent(<recipe>, <default inputs>, <unique name for a stable id>)
+]);
+
 export type RecipeManifest = {
   name: string;
   recipeId: string;
@@ -89,6 +91,8 @@ export const recipes: RecipeManifest[] = Object.entries(allRecipes).map(
     recipeId: addRecipe(recipe),
   }),
 );
+
+(window as any).recipes = allRecipesByName();
 
 /* TODO: Recreate test data for reservations that used to use this
 // Helper for mock data

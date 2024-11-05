@@ -33,6 +33,15 @@ export const createRef = (
       // Don't traverse into ids.
       if (typeof obj === "object" && obj !== null && "/" in obj) return obj;
 
+      // If there is a .toJSON method, replace obj with it, then descend.
+      if (
+        typeof obj === "object" &&
+        obj !== null &&
+        typeof obj.toJSON === "function"
+      ) {
+        obj = obj.toJSON();
+      }
+
       if (isQueryResultForDereferencing(obj))
         // It'll traverse this and call .toJSON on the cell in the reference.
         obj = getCellReferenceOrThrow(obj);
@@ -45,7 +54,7 @@ export const createRef = (
         return Object.fromEntries(
           Object.entries(obj).map(([key, value]) => [key, traverse(value)]),
         );
-      else if (typeof obj === "function") return null;
+      else if (typeof obj === "function") return obj.toString();
       else if (obj === undefined) return null;
       else return obj;
     }

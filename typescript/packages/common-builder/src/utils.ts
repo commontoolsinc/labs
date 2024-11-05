@@ -287,6 +287,7 @@ export function createJsonSchema(
 }
 
 export function moduleToJSON(module: Module) {
+  console.log("moduleToJSON", module, typeof module.implementation);
   return {
     type: module.type,
     implementation:

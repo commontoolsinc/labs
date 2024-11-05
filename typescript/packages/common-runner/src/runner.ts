@@ -41,7 +41,7 @@ import init, {
   JavaScriptModuleDefinition,
   JavaScriptValueMap,
 } from "@commontools/common-runtime";
-import { getRecipe } from "./recipe-map.js";
+import { addRecipe, getRecipe } from "./recipe-map.js";
 
 export const cancels = new WeakMap<CellImpl<any>, Cancel>();
 
@@ -163,8 +163,7 @@ export function run<T, R = any>(
   if (defaults) parameters = mergeObjects(parameters, defaults);
 
   processCell.send({
-    [TYPE]:
-      (recipe.schema as { description: string })?.description ?? "unknown",
+    [TYPE]: addRecipe(recipe),
     parameters,
     ...(internal ? { internal: deepCopy(internal) } : {}),
   });
