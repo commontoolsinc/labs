@@ -1,27 +1,28 @@
 export type SimpleMessage = {
   role: "user" | "assistant";
   content: SimpleContent;
-}
+};
 
-export type SimpleContent = string | TypedContent[]
+export type SimpleContent = string | TypedContent[];
 
-type TypedContent = {
-  type: "text",
-  text: string,
-} | {
-  type: "image",
-  url: string,
-}
-
+type TypedContent =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "image";
+      url: string;
+    };
 
 type LLMRequest = {
-  messages: SimpleMessage[] | SimpleContent[],
-  system: string,
-  model: string,
-  max_tokens?: number,
-  stream?: boolean,
-  stop?: string,
-}
+  messages: SimpleMessage[] | SimpleContent[];
+  system?: string;
+  model: string;
+  max_tokens?: number;
+  stream?: boolean;
+  stop?: string;
+};
 
 export class LLMClient {
   private serverUrl: string;
@@ -30,12 +31,15 @@ export class LLMClient {
     this.serverUrl = serverUrl;
   }
 
-  async sendRequest(userRequest: LLMRequest, partialCB?: (text: string) => void): Promise<string> {
+  async sendRequest(
+    userRequest: LLMRequest,
+    partialCB?: (text: string) => void,
+  ): Promise<string> {
     const fullRequest: LLMRequest = {
       ...userRequest,
       stream: partialCB ? true : false,
       messages: userRequest.messages.map(processMessage),
-    }
+    };
 
     const response = await fetch(this.serverUrl, {
       method: "POST",
@@ -56,15 +60,18 @@ export class LLMClient {
 
     // the server might return cached data instead of a stream
     if (response.headers.get("content-type") === "application/json") {
-      let data = await response.json() as SimpleMessage;
+      let data = (await response.json()) as SimpleMessage;
       // FIXME(ja): can the LLM ever return anything other than a string?
-      return data.content as string; 
+      return data.content as string;
     }
 
     return await this.stream(response.body, partialCB);
   }
 
-  private async stream(body: ReadableStream, cb?: (partial: string) => void): Promise<string> {
+  private async stream(
+    body: ReadableStream,
+    cb?: (partial: string) => void,
+  ): Promise<string> {
     const reader = body.getReader();
     const decoder = new TextDecoder();
 
@@ -80,7 +87,7 @@ export class LLMClient {
         buffer += chunk;
 
         let newlineIndex: number;
-        while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+        while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
           const line = buffer.slice(0, newlineIndex).trim();
           buffer = buffer.slice(newlineIndex + 1);
 
@@ -112,7 +119,10 @@ export class LLMClient {
   }
 }
 
-function processMessage(m: SimpleMessage | SimpleContent, idx: number): SimpleMessage {
+function processMessage(
+  m: SimpleMessage | SimpleContent,
+  idx: number,
+): SimpleMessage {
   if (typeof m === "string" || Array.isArray(m)) {
     return {
       role: idx % 2 === 0 ? "user" : "assistant",

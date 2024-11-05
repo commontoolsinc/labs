@@ -115,11 +115,12 @@ const handler = async (request: Request): Promise<Response> => {
     try {
       const payload = (await request.json()) as {
         messages: Array<{ role: string; content: string }>;
-        system: string;
+        system?: string;
         model: string;
         max_tokens: number;
         stop?: string;
         stream: boolean;
+        max_completion_tokens?: number;
       };
 
       // Log request details with colors
@@ -127,7 +128,7 @@ const handler = async (request: Request): Promise<Response> => {
         `${timestamp()} ${requestId} ${colors.blue}📝 New request:${colors.reset} ${colors.bright}${payload.model}${colors.reset} | ${timeTrack(startTime)}`,
       );
       console.log(
-        `${timestamp()} ${requestId} ${colors.magenta}💭 System:${colors.reset} ${payload.system.slice(0, 100)}...`,
+        `${timestamp()} ${requestId} ${colors.magenta}💭 System:${colors.reset} ${payload.system?.slice(0, 100)}...`,
       );
       console.log(
         `${timestamp()} ${requestId} ${colors.yellow}💬 Last message:${colors.reset} ${payload.messages[payload.messages.length - 1].content.slice(0, 100)}...`,
@@ -161,12 +162,31 @@ const handler = async (request: Request): Promise<Response> => {
 
       let params = {
         model: modelConfig.model || payload.model,
-        system: payload.system,
-        maxTokens: modelConfig.maxOutputTokens || payload.max_tokens,
-        stopSequences: payload.stop ? [payload.stop] : undefined,
         messages,
         stream: payload.stream,
+      } as {
+        model: any;
+        messages: Array<{ role: string; content: string }>;
+        stream: boolean;
+        system?: string;
+        stopSequences?: string[];
       };
+
+      // NOTE(jake): Unfortunately the o1 model is a unique snowflake, and requires
+      // a distinctly different request payload than the other models..
+      //
+      // We can't send a system prompt, stop sequences, or max_tokens.
+      if (payload.model?.startsWith("openai:o1")) {
+        if (payload.system && messages.length > 0) {
+          messages[0].content = `${payload.system}\n\n${messages[0].content}`;
+        }
+      } else {
+        params = {
+          ...params,
+          system: payload.system,
+          stopSequences: payload.stop ? [payload.stop] : undefined,
+        };
+      }
 
       const llmStream = await streamText(params);
 
