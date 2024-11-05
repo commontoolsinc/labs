@@ -184,7 +184,7 @@ window.sendLLMRequest = async function(system, messages) {
     body: JSON.stringify({
       messages: messages.map(m => ({ role: m.role, content: m.content })),
       system: system,
-      model: "anthropic:claude-3.5-sonnet"
+      model: "anthropic:claude-3-5-sonnet"
     }),
   });
 

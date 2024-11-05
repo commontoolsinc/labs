@@ -1,106 +1,13 @@
 import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
 import { streamText, generateText } from "npm:ai";
-import { ensureDir } from "https://deno.land/std/fs/mod.ts";
 import { crypto } from "https://deno.land/std/crypto/mod.ts";
-import { anthropic } from "npm:@ai-sdk/anthropic";
 import { config } from "https://deno.land/x/dotenv/mod.ts";
-import { groq } from "npm:@ai-sdk/groq";
-import { openai } from "npm:@ai-sdk/openai";
-import { vertex } from "npm:@ai-sdk/google-vertex";
+import { findModel, MODELS } from "./models.ts";
+import * as cache from "./cache.ts";
+import { colors, timestamp, timeTrack } from "./cli.ts";
 
 await config({ export: true });
 
-const CACHE_DIR = "./cache";
-
-const MODELS: Record<
-  string,
-  { model: any; contextWindow: number; maxOutputTokens: number }
-> = {
-  "anthropic:claude-3.5-haiku": {
-    model: anthropic("claude-3-5-haiku-20241022"),
-    contextWindow: 200000,
-    maxOutputTokens: 8192,
-  },
-  "anthropic:claude-3.5-sonnet": {
-    model: anthropic("claude-3-5-sonnet-20241022"),
-    contextWindow: 200000,
-    maxOutputTokens: 8192,
-  },
-  "anthropic:claude-3-opus": {
-    model: anthropic("claude-3-opus-20240229"),
-    contextWindow: 200000,
-    maxOutputTokens: 4096,
-  },
-  "groq:llama-3.1-70b": {
-    model: groq("llama-3.1-70b-versatile"),
-    contextWindow: 128000,
-    maxOutputTokens: 8000,
-  },
-  "groq:llama-3.2-11b-vision": {
-    model: groq("llama-3.2-11b-vision-preview"),
-    contextWindow: 128000,
-    maxOutputTokens: 8000,
-  },
-  "groq:llama-3.2-90b-vision": {
-    model: groq("llama-3.2-90b-vision-preview"),
-    contextWindow: 128000,
-    maxOutputTokens: 8000,
-  },
-  "openai:gpt-4o": {
-    // TODO
-    model: openai("gpt-4o"),
-    contextWindow: 128000,
-    maxOutputTokens: 16384,
-  },
-  "openai:gpt-4o-mini": {
-    // TODO
-    model: openai("gpt-4o-mini"),
-    contextWindow: 128000,
-    maxOutputTokens: 16384,
-  },
-  "openai:o1-preview": {
-    // TODO
-    model: openai("o1-preview-2024-09-12"),
-    contextWindow: 128000,
-    maxOutputTokens: 32768,
-  },
-  "openai:o1-mini": {
-    // TODO
-    model: openai("o1-mini-2024-09-12"),
-    contextWindow: 128000,
-    maxOutputTokens: 65536,
-  },
-  "google:gemini-1.5-flash": {
-    model: vertex("gemini-1.5-flash-002"),
-    contextWindow: 1000000,
-    maxOutputTokens: 8192,
-  },
-  "google:gemini-1.5-pro": {
-    model: vertex("gemini-1.5-pro-002"),
-    contextWindow: 1000000,
-    maxOutputTokens: 8192,
-  },
-};
-
-// Add color utility functions at the top
-const colors = {
-  reset: "\x1b[0m",
-  bright: "\x1b[1m",
-  dim: "\x1b[2m",
-  cyan: "\x1b[36m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  blue: "\x1b[34m",
-  magenta: "\x1b[35m",
-  red: "\x1b[31m",
-  gray: "\x1b[90m",
-};
-
-// Helper for timestamps
-const timestamp = () =>
-  colors.dim + new Date().toLocaleTimeString() + colors.reset;
-const timeTrack = (start: number) =>
-  colors.gray + `${(Date.now() - start).toFixed(0)}ms` + colors.reset;
 
 const handler = async (request: Request): Promise<Response> => {
   const startTime = Date.now();
@@ -121,6 +28,7 @@ const handler = async (request: Request): Promise<Response> => {
         stop?: string;
         stream: boolean;
         max_completion_tokens?: number;
+        abortSignal?: AbortSignal;
       };
 
       // Log request details with colors
@@ -134,8 +42,8 @@ const handler = async (request: Request): Promise<Response> => {
         `${timestamp()} ${requestId} ${colors.yellow}💬 Last message:${colors.reset} ${payload.messages[payload.messages.length - 1].content.slice(0, 100)}...`,
       );
 
-      const cacheKey = await hashKey(JSON.stringify(payload));
-      const cachedResult = await loadCacheItem(cacheKey);
+      const cacheKey = await cache.hashKey(JSON.stringify(payload));
+      const cachedResult = await cache.loadItem(cacheKey);
       if (cachedResult) {
         console.log(
           `${timestamp()} ${requestId} ${colors.green}⚡️ Cache hit!${colors.reset} | ${timeTrack(startTime)}`,
@@ -147,11 +55,15 @@ const handler = async (request: Request): Promise<Response> => {
         });
       }
 
-      const modelConfig = MODELS[payload.model];
+      const modelConfig = findModel(payload.model);
       if (!modelConfig) {
         console.warn(
           `${timestamp()} ${requestId} ${colors.yellow}⚠️  Unsupported model:${colors.reset} ${payload.model}`,
         );
+        return new Response(JSON.stringify({ error: "Unsupported model" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
       }
 
       console.log(
@@ -170,6 +82,7 @@ const handler = async (request: Request): Promise<Response> => {
         stream: boolean;
         system?: string;
         stopSequences?: string[];
+        abortSignal?: AbortSignal;
       };
 
       // NOTE(jake): Unfortunately the o1 model is a unique snowflake, and requires
@@ -185,12 +98,17 @@ const handler = async (request: Request): Promise<Response> => {
           ...params,
           system: payload.system,
           stopSequences: payload.stop ? [payload.stop] : undefined,
+          abortSignal: request.signal,
         };
       }
 
       const llmStream = await streamText(params);
 
       let result = "";
+      if (messages[messages.length - 1].role === "assistant") {
+        result = messages[messages.length - 1].content;
+      }
+
       let tokenCount = 0;
 
       if (payload.stream) {
@@ -230,7 +148,7 @@ const handler = async (request: Request): Promise<Response> => {
             } else {
               messages[messages.length - 1].content = result;
             }
-            await saveCacheItem(cacheKey, params);
+            await cache.saveItem(cacheKey, params);
             controller.close();
           },
         });
@@ -272,7 +190,7 @@ const handler = async (request: Request): Promise<Response> => {
         messages[messages.length - 1].content = result;
       }
 
-      await saveCacheItem(cacheKey, params);
+      await cache.saveItem(cacheKey, params);
 
       return new Response(
         JSON.stringify(params.messages[params.messages.length - 1]),
@@ -294,43 +212,11 @@ const handler = async (request: Request): Promise<Response> => {
   }
 };
 
-async function hashKey(key: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(key);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function loadCacheItem(key: string): Promise<any | null> {
-  const hash = await hashKey(key);
-  const filePath = `${CACHE_DIR}/${hash}.json`;
-  try {
-    const cacheData = await Deno.readTextFile(filePath);
-    console.log(
-      `${timestamp()} ${colors.green}📦 Cache loaded:${colors.reset} ${filePath.slice(-12)}`,
-    );
-    return JSON.parse(cacheData);
-  } catch {
-    return null;
-  }
-}
-
-async function saveCacheItem(key: string, data: any): Promise<void> {
-  const hash = await hashKey(key);
-  const filePath = `${CACHE_DIR}/${hash}.json`;
-  console.log(
-    `${timestamp()} ${colors.green}💾 Cache saved:${colors.reset} ${filePath}`,
-  );
-  await ensureDir(CACHE_DIR);
-  await Deno.writeTextFile(filePath, JSON.stringify(data, null, 2));
-}
-
 const port = Deno.env.get("PORT") || "8000";
 console.log(`
 ${colors.bright}${colors.blue}🚀 Planning Server Ready${colors.reset}
 ${colors.cyan}🌍 http://localhost:${port}/${colors.reset}
-${colors.yellow}📝 Cache directory: ${CACHE_DIR}${colors.reset}
+${colors.yellow}📝 Cache directory: ${cache.CACHE_DIR}${colors.reset}
 ${colors.magenta}🤖 Available models: ${Object.keys(MODELS).join(", ")}${colors.reset}
 `);
 await serve(handler, { port: parseInt(port) });
