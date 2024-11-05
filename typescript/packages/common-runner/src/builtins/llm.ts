@@ -67,7 +67,7 @@ export function llm(
       prompt: prompt ?? "",
       stop: stop ?? "",
       max_tokens: max_tokens ?? 4096,
-      model: model ?? "google:gemini-1.5-flash",
+      model: model ?? "google:gemini-1.5-pro",
     }).toString();
 
     // Return if the same request is being made again, either concurrently (same
@@ -98,7 +98,7 @@ export function llm(
       {
         messages: messages || [prompt as SimpleContent],
         system,
-        model: model ?? "google:gemini-1.5-flash",
+        model: model ?? "google:gemini-1.5-pro",
         max_tokens: max_tokens ?? 4096,
         stop,
       },

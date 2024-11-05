@@ -123,30 +123,10 @@ const handler = async (request: Request): Promise<Response> => {
         maxTokens: modelConfig.maxOutputTokens || payload.max_tokens,
         stopSequences: payload.stop ? [payload.stop] : undefined,
         messages,
+        stream: payload.stream,
       };
 
-      // console.log("params", params);
-
-      console.log("payload.model", payload.model);
-      console.log("params.model", params.model);
-
-      const wat = await generateText({
-        model: params.model,
-        system: params.system,
-        maxTokens: params.maxTokens,
-        stopSequences: params.stopSequences,
-        messages: params.messages,
-        prompt: "hello",
-      });
-      console.log("wat", wat);
-
-      if (payload.model.startsWith("google:")) {
-        const llmStream = await generateText(params);
-        console.log("hrmmm", llmStream);
-      } else {
-        const llmStream = await streamText(params);
-        console.log("uhm", llmStream);
-      }
+      const llmStream = await streamText(params);
 
       let result = "";
 
