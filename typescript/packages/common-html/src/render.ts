@@ -200,7 +200,7 @@ const bindProps = (
         addCancel(cancel);
       }
     } else {
-      element.setAttribute(propKey, propValue);
+      setProp(element, propKey, propValue);
     }
   }
   return cancel;
