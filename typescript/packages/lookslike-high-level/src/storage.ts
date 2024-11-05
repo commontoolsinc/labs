@@ -258,7 +258,7 @@ class StorageImpl implements Storage {
           });
         }
         dependencies.add(this._ensureIsSynced(value.cell));
-        return { cell: value.cell.toJSON() /* = the id */, path: value.path };
+        return { ...value, cell: value.cell.toJSON() /* = the id */ };
       } else if (isStatic(value) && !processStatic) {
         return { $static: traverse(value, path, true) };
       } else if (typeof value === "object" && value !== null) {
@@ -337,7 +337,7 @@ class StorageImpl implements Storage {
           // we have to wait for it to load. Hence true as second parameter.
           const cell = this._ensureIsSynced(value.cell, true);
           dependencies.add(cell);
-          return { cell, path: value.path };
+          return { ...value, cell };
         } else {
           console.warn("unexpected cell reference", value);
           return value;
