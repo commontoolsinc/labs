@@ -82,7 +82,7 @@ export function sendValueToBinding(
 ) {
   if (isAlias(binding)) {
     const ref = followAliases(binding, cell, log);
-    if (!isCellReference(value) && !isCell(value))
+    if (!isCellReference(value) && !isCell(value) && !isAlias(value))
       normalizeToCells(value, ref.cell.getAtPath(ref.path), log, binding);
     setNestedValue(ref.cell, ref.path, value, log);
   } else if (Array.isArray(binding)) {
