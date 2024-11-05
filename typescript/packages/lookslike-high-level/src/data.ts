@@ -54,6 +54,9 @@ import { datalogQueryExample } from "./recipes/datalogQuery.jsx";
 import { todoQuery } from "./recipes/todoQuery.jsx";
 import { shaderQuery } from "./recipes/shaderQuery.jsx";
 
+(window as any).getRecipe = getRecipe;
+(window as any).getCellByEntityId = getCellByEntityId;
+
 export type Charm = {
   [NAME]?: string;
   [UI]?: any;
@@ -67,8 +70,8 @@ const storage = createStorage(
   (import.meta as any).env.VITE_STORAGE_TYPE ?? "memory",
 );
 
-export const charms = cell<CellReference[]>([]);
-charms.generateEntityId("charms");
+export const charms = cell<CellReference[]>([], "charms");
+(window as any).charms = charms;
 
 export async function addCharms(newCharms: CellImpl<any>[]) {
   await storage.syncCell(charms);
@@ -114,7 +117,11 @@ export async function syncCharm(
 
 addCharms([
   await runPersistent(todoQuery, { titleInput: "" }, "Persisted Todos"),
-  await runPersistent(shaderQuery, { sourceCode: '', prompt: '', focused: '', triggerPrompt: '' }, "Persisted Shaders"),
+  await runPersistent(
+    shaderQuery,
+    { sourceCode: "", prompt: "", focused: "", triggerPrompt: "" },
+    "Persisted Shaders",
+  ),
   await runPersistent(
     datalogQueryExample,
     {
@@ -229,6 +236,8 @@ export const recipes: RecipeManifest[] = [
   },
 ];
 
+(window as any).recipes = recipes;
+
 // Register `iframe` recipe (but can't be started from recipe list)
 addRecipe(iframe);
 
@@ -269,11 +278,6 @@ addModuleByRef(
     if (entityId) openCharm(JSON.stringify(entityId));
   }),
 );
-
-(window as any).recipes = recipes;
-(window as any).charms = charms;
-(window as any).getRecipe = getRecipe;
-(window as any).getCellByEntityId = getCellByEntityId;
 
 export let annotationsEnabled = cell<boolean>(false);
 export const toggleAnnotations = () => {
