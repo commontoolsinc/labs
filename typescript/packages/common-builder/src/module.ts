@@ -59,7 +59,7 @@ export function lift<T, R>(
 }
 
 export const derive = <In, Out>(
-  input: Value<In>,
+  input: Opaque<In>,
   f: (input: In) => Out,
 ): OpaqueRef<Out> => lift(f)(input);
 
