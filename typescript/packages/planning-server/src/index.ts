@@ -82,7 +82,31 @@ const MODELS: Record<
   },
 };
 
+// Add color utility functions at the top
+const colors = {
+  reset: "\x1b[0m",
+  bright: "\x1b[1m",
+  dim: "\x1b[2m",
+  cyan: "\x1b[36m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  blue: "\x1b[34m",
+  magenta: "\x1b[35m",
+  red: "\x1b[31m",
+  gray: "\x1b[90m",
+};
+
+// Helper for timestamps
+const timestamp = () =>
+  colors.dim + new Date().toLocaleTimeString() + colors.reset;
+const timeTrack = (start: number) =>
+  colors.gray + `${(Date.now() - start).toFixed(0)}ms` + colors.reset;
+
 const handler = async (request: Request): Promise<Response> => {
+  const startTime = Date.now();
+  const requestId =
+    colors.cyan + `[${crypto.randomUUID().slice(0, 8)}]` + colors.reset;
+
   if (request.method === "GET") {
     return new Response("Hello World");
   }
@@ -95,14 +119,26 @@ const handler = async (request: Request): Promise<Response> => {
         model: string;
         max_tokens: number;
         stop?: string;
-        stream: boolean; // LLM streams regardless, this is if we stream to the client
+        stream: boolean;
       };
 
-      const description = JSON.stringify(payload.messages).slice(0, 80);
+      // Log request details with colors
+      console.log(
+        `${timestamp()} ${requestId} ${colors.blue}📝 New request:${colors.reset} ${colors.bright}${payload.model}${colors.reset} | ${timeTrack(startTime)}`,
+      );
+      console.log(
+        `${timestamp()} ${requestId} ${colors.magenta}💭 System:${colors.reset} ${payload.system.slice(0, 100)}...`,
+      );
+      console.log(
+        `${timestamp()} ${requestId} ${colors.yellow}💬 Last message:${colors.reset} ${payload.messages[payload.messages.length - 1].content.slice(0, 100)}...`,
+      );
 
       const cacheKey = await hashKey(JSON.stringify(payload));
       const cachedResult = await loadCacheItem(cacheKey);
       if (cachedResult) {
+        console.log(
+          `${timestamp()} ${requestId} ${colors.green}⚡️ Cache hit!${colors.reset} | ${timeTrack(startTime)}`,
+        );
         const lastMessage =
           cachedResult.messages[cachedResult.messages.length - 1];
         return new Response(JSON.stringify(lastMessage), {
@@ -112,13 +148,14 @@ const handler = async (request: Request): Promise<Response> => {
 
       const modelConfig = MODELS[payload.model];
       if (!modelConfig) {
-        console.log(
-          `You are using an unsupported model, ping jake to add it if you intend for others to use it!: ${payload.model}`,
+        console.warn(
+          `${timestamp()} ${requestId} ${colors.yellow}⚠️  Unsupported model:${colors.reset} ${payload.model}`,
         );
       }
 
-      console.log("modelConfig", { ...modelConfig, model: payload.model });
-      console.log("Generating:", description);
+      console.log(
+        `${timestamp()} ${requestId} ${colors.blue}🚀 Starting generation${colors.reset} | ${timeTrack(startTime)}`,
+      );
 
       let messages = payload.messages;
 
@@ -133,34 +170,30 @@ const handler = async (request: Request): Promise<Response> => {
 
       const llmStream = await streamText(params);
 
-      // console.log("llmStream", llmStream);
-
       let result = "";
-
-      if (messages[messages.length - 1].role === "assistant") {
-        result = messages[messages.length - 1].content;
-      }
+      let tokenCount = 0;
 
       if (payload.stream) {
         const stream = new ReadableStream({
           async start(controller) {
-            // NOTE: the llm doesn't send text we put into its mouth, so we need to
-            // manually send it so that streaming client sees everything assistant 'said'
-            if (messages[messages.length - 1].role === "assistant") {
-              controller.enqueue(
-                new TextEncoder().encode(JSON.stringify(result) + "\n"),
-              );
-            }
             for await (const delta of llmStream.textStream) {
               result += delta;
+              tokenCount++;
+              if (tokenCount % 100 === 0) {
+                console.log(
+                  `${timestamp()} ${requestId} ${colors.blue}📊 Generated${colors.reset} ${colors.bright}${tokenCount}${colors.reset} tokens | ${timeTrack(startTime)}`,
+                );
+              }
               controller.enqueue(
                 new TextEncoder().encode(JSON.stringify(delta) + "\n"),
               );
             }
 
+            console.log(
+              `${timestamp()} ${requestId} ${colors.green}✅ Stream complete:${colors.reset} ${colors.bright}${tokenCount}${colors.reset} tokens | ${timeTrack(startTime)}`,
+            );
+
             if ((await llmStream.finishReason) === "stop" && payload.stop) {
-              // NOTE(ja): we might have stopped because of a stop sequence, so add it to the result...
-              // this is a hack that helps the client parse the result
               result += payload.stop;
               controller.enqueue(
                 new TextEncoder().encode(JSON.stringify(payload.stop) + "\n"),
@@ -172,7 +205,7 @@ const handler = async (request: Request): Promise<Response> => {
             } else {
               messages[messages.length - 1].content = result;
             }
-            await saveCacheItem(cacheKey, params); // after finishing, save!
+            await saveCacheItem(cacheKey, params);
             controller.close();
           },
         });
@@ -187,9 +220,17 @@ const handler = async (request: Request): Promise<Response> => {
 
       for await (const delta of llmStream.textStream) {
         result += delta;
+        tokenCount++;
       }
 
+      console.log(
+        `${timestamp()} ${requestId} ${colors.green}✅ Generation complete:${colors.reset} ${colors.bright}${tokenCount}${colors.reset} tokens | ${timeTrack(startTime)}`,
+      );
+
       if (!result) {
+        console.error(
+          `${timestamp()} ${requestId} ${colors.red}❌ No response from LLM${colors.reset} | ${timeTrack(startTime)}`,
+        );
         return new Response(JSON.stringify({ error: "No response from LLM" }), {
           status: 500,
           headers: { "Content-Type": "application/json" },
@@ -215,6 +256,9 @@ const handler = async (request: Request): Promise<Response> => {
         },
       );
     } catch (error) {
+      console.error(
+        `${timestamp()} ${requestId} ${colors.red}❌ Error: ${(error as Error).message}${colors.reset} | ${timeTrack(startTime)}`,
+      );
       return new Response(JSON.stringify({ error: (error as Error).message }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
@@ -237,9 +281,10 @@ async function loadCacheItem(key: string): Promise<any | null> {
   const hash = await hashKey(key);
   const filePath = `${CACHE_DIR}/${hash}.json`;
   try {
-    await ensureDir(CACHE_DIR);
     const cacheData = await Deno.readTextFile(filePath);
-    console.log(`Loading cache item: ${filePath}`);
+    console.log(
+      `${timestamp()} ${colors.green}📦 Cache loaded:${colors.reset} ${filePath.slice(-12)}`,
+    );
     return JSON.parse(cacheData);
   } catch {
     return null;
@@ -249,11 +294,18 @@ async function loadCacheItem(key: string): Promise<any | null> {
 async function saveCacheItem(key: string, data: any): Promise<void> {
   const hash = await hashKey(key);
   const filePath = `${CACHE_DIR}/${hash}.json`;
-  console.log(`Saving cache item: ${filePath}`);
+  console.log(
+    `${timestamp()} ${colors.green}💾 Cache saved:${colors.reset} ${filePath.slice(-12)}`,
+  );
   await ensureDir(CACHE_DIR);
   await Deno.writeTextFile(filePath, JSON.stringify(data, null, 2));
 }
 
 const port = Deno.env.get("PORT") || "8000";
-console.log(`HTTP webserver running. Access it at: http://localhost:${port}/`);
+console.log(`
+${colors.bright}${colors.blue}🚀 Planning Server Ready${colors.reset}
+${colors.cyan}🌍 http://localhost:${port}/${colors.reset}
+${colors.yellow}📝 Cache directory: ${CACHE_DIR}${colors.reset}
+${colors.magenta}🤖 Available models: ${Object.keys(MODELS).join(", ")}${colors.reset}
+`);
 await serve(handler, { port: parseInt(port) });
