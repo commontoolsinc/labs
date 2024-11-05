@@ -202,6 +202,10 @@ export const recipes: RecipeManifest[] = [
     recipeId: addRecipe(todoList),
   },
   {
+    name: "Explore query",
+    recipeId: addRecipe(datalogQueryExample),
+  },
+  {
     name: "Find places",
     recipeId: addRecipe(localSearch),
   },

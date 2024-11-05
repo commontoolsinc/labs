@@ -15,6 +15,20 @@ const stringify = lift(({ obj }) => {
 export const datalogQueryExample = recipe(
   z.object({ query: z.any() }),
   ({ query }) => {
+    query.setDefault({
+      query: {
+        select: {
+          ".": "?item",
+          title: "?title",
+        },
+        where: [
+          {
+            Case: ["?item", "title", "?title"],
+          },
+        ],
+      },
+    });
+
     const { result: items } = datalogQuery(query)
 
     return {
