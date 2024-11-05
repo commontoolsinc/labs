@@ -44,34 +44,34 @@ export async function run(action: Action): Promise<any> {
 
   running = new Promise(async (resolve) => {
     const result = await action(log);
+
+    // Note: By adding the listeners after the call we avoid triggering a re-run
+    // of the action if it changed a r/w cell. Note that this also means that
+    // those actions can't loop on themselves.
+    setDependencies(action, log);
+    cancels.set(
+      action,
+      Array.from(log.reads).map(({ cell, path }) =>
+        cell.updates((_newValue, changedPath) => {
+          if (pathAffected(changedPath, path)) {
+            dirty.add(cell);
+            queueExecution();
+            pending.add(action);
+          }
+        }),
+      ),
+    );
+
     running = undefined;
     resolve(result);
   });
 
-  const result = await running;
-
-  // Note: By adding the listeners after the call we avoid triggering a re-run
-  // of the action if it changed a r/w cell. Note that this also means that
-  // those actions can't loop on themselves.
-  setDependencies(action, log);
-  cancels.set(
-    action,
-    Array.from(log.reads).map(({ cell, path }) =>
-      cell.updates((_newValue, changedPath) => {
-        if (pathAffected(changedPath, path)) {
-          dirty.add(cell);
-          queueExecution();
-          pending.add(action);
-        }
-      })
-    )
-  );
-
-  return result;
+  return running;
 }
 
 export async function idle() {
-  return new Promise<void>((resolve) => {
+  return new Promise<void>(async (resolve) => {
+    if (running) await running;
     if (pending.size === 0 && eventQueue.length === 0) resolve();
     idlePromises.push(resolve);
   });
@@ -96,12 +96,12 @@ export function queueEvent(eventRef: CellReference, event: any) {
 
 export function addEventHandler(
   handler: EventHandler,
-  ref: CellReference
+  ref: CellReference,
 ): Cancel {
   eventHandlers.push([ref, handler]);
   return () => {
     const index = eventHandlers.findIndex(
-      ([r, h]) => r === ref && h === handler
+      ([r, h]) => r === ref && h === handler,
     );
     if (index !== -1) eventHandlers.splice(index, 1);
   };
@@ -165,7 +165,7 @@ async function execute() {
 function topologicalSort(
   actions: Set<Action>,
   dependencies: WeakMap<Action, ReactivityLog>,
-  dirty: Set<CellImpl<any>>
+  dirty: Set<CellImpl<any>>,
 ): Action[] {
   const relevantActions = new Set<Action>();
   const graph = new Map<Action, Set<Action>>();
@@ -198,8 +198,8 @@ function topologicalSort(
                 .get(relevantAction)!
                 .reads.some(
                   ({ cell, path }) =>
-                    cell === write.cell && pathAffected(write.path, path)
-                )
+                    cell === write.cell && pathAffected(write.path, path),
+                ),
             )
           ) {
             relevantActions.add(action);
@@ -226,7 +226,7 @@ function topologicalSort(
           if (
             reads.some(
               ({ cell, path }) =>
-                cell === write.cell && pathAffected(write.path, path)
+                cell === write.cell && pathAffected(write.path, path),
             )
           ) {
             graph.get(actionA)!.add(actionB);

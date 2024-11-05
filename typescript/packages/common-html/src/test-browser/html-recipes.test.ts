@@ -1,9 +1,7 @@
-// @vitest-environment jsdom
-import { describe, it, expect } from "vitest";
 import { html, render, View } from "@commontools/common-html";
 import { recipe, lift, str, UI } from "@commontools/common-builder";
-import { run } from "../src/runner.js";
-import { idle } from "../src/scheduler.js";
+import { run, idle } from "@commontools/common-runner";
+import * as assert from "./assert.js";
 
 describe("recipes with HTML", () => {
   it("renders a simple UI", async () => {
@@ -12,14 +10,14 @@ describe("recipes with HTML", () => {
       ({ value }) => {
         const doubled = lift((x: number) => x * 2)(value);
         return { [UI]: html`<div>${doubled}</div>` };
-      }
+      },
     );
 
     const result = run(simpleRecipe, { value: 5 });
 
     await idle();
 
-    expect(result.get()).toMatchObject({
+    assert.matchObject(result.get(), {
       [UI]: {
         type: "view",
         template: {
@@ -62,8 +60,9 @@ describe("recipes with HTML", () => {
     const cell = result.asRendererCell<{ [UI]: View }>().key(UI);
     render(parent, cell.get());
 
-    expect(parent.innerHTML).toBe(
-      "<div><h1>test</h1><ul><li>item 1</li><li>item 2</li></ul></div>"
+    assert.equal(
+      parent.innerHTML,
+      "<div><h1>test</h1><ul><li>item 1</li><li>item 2</li></ul></div>",
     );
   });
 
@@ -95,7 +94,7 @@ describe("recipes with HTML", () => {
     const cell = result.asRendererCell<{ [UI]: View }>().key(UI);
     render(parent, cell.get());
 
-    expect(parent.innerHTML).toBe("<div><div>test</div></div>");
+    assert.equal(parent.innerHTML, "<div><div>test</div></div>");
   });
 
   it("works with str", async () => {
@@ -111,7 +110,7 @@ describe("recipes with HTML", () => {
     const cell = result.asRendererCell<{ [UI]: View }>().key(UI);
     render(parent, cell.get());
 
-    expect(parent.innerHTML).toBe("<div>Hello, world!</div>");
+    assert.equal(parent.innerHTML, "<div>Hello, world!</div>");
   });
 
   it("works with nested maps of non-objects", async () => {
@@ -126,9 +125,10 @@ describe("recipes with HTML", () => {
     const nestedMapRecipe = recipe<any[]>("nested map recipe", (data) => ({
       [UI]: html`<div>
         ${data.map(
-          (row) => html`<ul>
-            ${entries(row).map(([k, v]) => html`<li>${k}: ${v}</li>`)}
-          </ul>`
+          (row) =>
+            html`<ul>
+              ${entries(row).map(([k, v]) => html`<li>${k}: ${v}</li>`)}
+            </ul>`,
         )}
       </div>`,
     }));
@@ -141,8 +141,9 @@ describe("recipes with HTML", () => {
     const cell = result.asRendererCell([UI]);
     render(parent, cell.get());
 
-    expect(parent.innerHTML).toBe(
-      "<div><ul><li>test: 123</li><li>ok: false</li></ul><ul><li>test: 345</li><li>another: xxx</li></ul><ul><li>test: 456</li><li>ok: true</li></ul></div>"
+    assert.equal(
+      parent.innerHTML,
+      "<div><ul><li>test: 123</li><li>ok: false</li></ul><ul><li>test: 345</li><li>another: xxx</li></ul><ul><li>test: 456</li><li>ok: true</li></ul></div>",
     );
   });
 });

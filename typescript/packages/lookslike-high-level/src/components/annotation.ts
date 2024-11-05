@@ -14,7 +14,7 @@ import { annotation } from "../recipes/annotation.js";
 @customElement("common-annotation-toggle")
 export class CommonAnnotationToggle extends LitElement {
   override render() {
-    return html`<div></div>`
+    return html`<div></div>`;
     //   ${(!annotationsEnabled.get() &&
     //     html`<button @click=${toggleAnnotations}>
     //       Enable Annotation Suggestions
@@ -72,7 +72,7 @@ export class CommonAnnotation extends LitElement {
 
       render(
         this.annotationRef.value,
-        this.annotation.asRendererCell<{ [UI]: View }>().key(UI).get()
+        this.annotation.asRendererCell<{ [UI]: View }>().key(UI),
       );
     }
   }

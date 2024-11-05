@@ -83,18 +83,6 @@ export interface RendererCell<T> {
   copyTrap: boolean;
 }
 
-export interface ReactiveCell<T> {
-  sink(callback: (value: T) => void): () => void;
-}
-
-export interface GettableCell<T> {
-  get(): T;
-}
-
-export interface SendableCell<T> {
-  send(value: T): void;
-}
-
 /**
  * Lowest level cell implementation.
  *
@@ -405,7 +393,9 @@ export function cell<T>(value?: T, cause?: any): CellImpl<T> {
     },
     set sourceCell(cell: CellImpl<any> | undefined) {
       if (sourceCell && sourceCell !== cell)
-        throw new Error("Source cell already set");
+        throw new Error(
+          `Source cell already set: ${JSON.stringify(sourceCell)} -> ${JSON.stringify(cell)}`,
+        );
       sourceCell = cell;
     },
     get ephemeral(): boolean {
@@ -463,17 +453,24 @@ function rendererCell<T>(
 
       ref = undefined;
       if (isQueryResultForDereferencing(target)) ref = target[getCellReference];
-      else if (isCellReference(target)) ref = followCellReferences(target, log);
+      else if (isCellReference(target)) ref = target;
       else if (isCell(target))
         ref = { cell: target, path: [] } satisfies CellReference;
-      else if (isAlias(target)) ref = followAliases(target, cell, log);
+      else if (isAlias(target))
+        ref = {
+          cell: target.$alias.cell ?? cell,
+          path: target.$alias.path,
+        } satisfies CellReference;
 
       if (ref) {
+        log?.reads.push({ cell: ref.cell, path: ref.path });
         target = ref.cell.getAtPath(ref.path);
         cell = ref.cell;
         path = [...ref.path, ...keys];
       }
-    } while (ref);
+      // Follow all aliases and cell references for path resolution, but only go
+      // one level deep on the last key.
+    } while (ref && keys.length);
   }
 
   const self: RendererCell<T> = isStreamAlias(cell.getAtPath(path))
@@ -583,11 +580,15 @@ export function createQueryResultProxy<T>(
     if (isQueryResultForDereferencing(target)) {
       const ref = target[getCellReference];
       valueCell = ref.cell;
-      valuePath = ref.path;
+      valuePath = [...ref.path];
+      log?.reads.push({ cell: valueCell, path: valuePath });
+      target = ref.cell.getAtPath(ref.path);
     } else if (isAlias(target)) {
       const ref = followAliases(target, valueCell, log);
       valueCell = ref.cell;
-      valuePath = ref.path;
+      valuePath = [...ref.path];
+      log?.reads.push({ cell: valueCell, path: valuePath });
+      target = ref.cell.getAtPath(ref.path);
     } else if (isCell(target)) {
       valueCell = target;
       valuePath = [];
@@ -596,7 +597,9 @@ export function createQueryResultProxy<T>(
     } else if (isCellReference(target)) {
       const ref = followCellReferences(target, log);
       valueCell = ref.cell;
-      valuePath = ref.path;
+      valuePath = [...ref.path];
+      log?.reads.push({ cell: valueCell, path: valuePath });
+      target = ref.cell.getAtPath(ref.path);
     }
     valuePath.push(key);
     if (typeof target === "object" && target !== null) {
@@ -605,6 +608,9 @@ export function createQueryResultProxy<T>(
       target = undefined;
     }
   }
+
+  if (valuePath.length > 30)
+    console.warn("Query result with long path [2]", JSON.stringify(valuePath));
 
   // Now target is the end of the path. It might still be a cell, alias or cell
   // reference, so we follow these as well.
@@ -626,7 +632,7 @@ export function createQueryResultProxy<T>(
       if (typeof prop === "symbol") {
         if (prop === getCellReference)
           return { cell: valueCell, path: valuePath } satisfies CellReference;
-        if (prop === toOpaqueRef)
+        else if (prop === toOpaqueRef)
           return () => makeOpaqueRef(valueCell, valuePath);
 
         const value = Reflect.get(target, prop, receiver);
@@ -685,8 +691,21 @@ export function createQueryResultProxy<T>(
 
               // Turn any newly added elements into cells. And if there was a
               // change at all, update the cell.
-              normalizeToCells(copy, target, log, valueCell.entityId);
+              normalizeToCells(copy, target, log, {
+                parent: valueCell.entityId,
+                method: prop,
+                call: new Error().stack,
+                context: getTopFrame()?.cause ?? "unknown",
+              });
               setNestedValue(valueCell, valuePath, copy, log);
+
+              if (Array.isArray(result))
+                normalizeToCells(result, undefined, log, {
+                  parent: valueCell.entityId,
+                  resultOf: prop,
+                  call: new Error().stack,
+                  context: getTopFrame()?.cause ?? "unknown",
+                });
 
               return result;
             };
@@ -861,6 +880,14 @@ const isRendererCellMarker = Symbol("isRendererCell");
  * @returns {boolean}
  */
 export function isCellReference(value: any): value is CellReference {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    isCell(value.cell) &&
+    Array.isArray(value.path) &&
+    value.path.length > 30
+  )
+    console.warn("Cell reference with long path", JSON.stringify(value));
   return (
     typeof value === "object" &&
     value !== null &&
@@ -897,51 +924,3 @@ export function isQueryResultForDereferencing(
 ): value is QueryResultInternals {
   return isQueryResult(value);
 }
-
-/**
- * Check if value is a reactive cell.
- *
- * @param {any} value - The value to check.
- * @returns {boolean}
- */
-export const isReactive = <T = any>(
-  value: ReactiveCell<T>,
-): value is ReactiveCell<T> => {
-  return (
-    typeof value === "object" &&
-    "sink" in value &&
-    typeof value.sink === "function"
-  );
-};
-
-/**
- * Check if value is a gettable cell.
- *
- * @param {any} value - The value to check.
- * @returns {boolean}
- */
-export const isGettable = <T = any>(
-  value: GettableCell<T>,
-): value is GettableCell<T> => {
-  return (
-    typeof value === "object" &&
-    "get" in value &&
-    typeof value.get === "function"
-  );
-};
-
-/**
- * Check if value is a sendable cell.
- *
- * @param {any} value - The value to check.
- * @returns {boolean}
- */
-export const isSendable = <T = any>(
-  value: SendableCell<T>,
-): value is SendableCell<T> => {
-  return (
-    typeof value === "object" &&
-    "send" in value &&
-    typeof value.send === "function"
-  );
-};

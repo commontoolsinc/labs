@@ -1,6 +1,6 @@
 import { cell, CellImpl, ReactivityLog } from "../cell.js";
 import { normalizeToCells } from "../utils.js";
-import { type Action } from "../scheduler.js";
+import { idle, type Action } from "../scheduler.js";
 import { refer } from "merkle-reference";
 
 /**
@@ -78,17 +78,24 @@ export function fetchData(
 
     fetch(url, options)
       .then(processResponse)
-      .then((data) => {
+      .then(async (data) => {
         if (thisRun !== currentRun) return;
 
-        normalizeToCells(data, undefined, log, url);
+        normalizeToCells(data, undefined, log, {
+          fetchData: { url },
+          cause,
+        });
+
+        await idle();
 
         pending.setAtPath([], false, log);
         result.setAtPath([], data, log);
         requestHash.setAtPath([], hash, log);
       })
-      .catch((err) => {
+      .catch(async (err) => {
         if (thisRun !== currentRun) return;
+
+        await idle();
 
         pending.setAtPath([], false, log);
         error.setAtPath([], err, log);

@@ -280,7 +280,7 @@ describe("asSimpleCell", () => {
         eventCount++;
         lastEventSeen = event;
       },
-      { cell: c, path: ["stream"] }
+      { cell: c, path: ["stream"] },
     );
 
     streamCell.send("event");
@@ -301,5 +301,35 @@ describe("asSimpleCell", () => {
     c.setAtPath(["a", "b"], 300);
     expect(values).toEqual([42, 300]);
     expect(c.get()).toEqual({ a: { b: 300, c: 100 }, d: 50 });
+  });
+});
+
+describe("JSON.stringify bug", () => {
+  it("should not modify the value of the cell", () => {
+    const c = cell({ result: { data: 1 } }, "json-test");
+    const d = cell(
+      { internal: { "__#2": { cell: c, path: ["result"] } } },
+      "json-test2",
+    );
+    const e = cell(
+      {
+        internal: {
+          a: { $alias: { cell: d, path: ["internal", "__#2", "data"] } },
+        },
+      },
+      "json-test3",
+    );
+    const proxy = e.getAsQueryResult();
+    const y = proxy.internal;
+    const x = proxy.internal.a;
+    const json = JSON.stringify(proxy);
+    expect(json).toEqual('{"internal":{"a":1}}');
+    expect(JSON.stringify(c.get())).toEqual('{"result":{"data":1}}');
+    expect(JSON.stringify(d.get())).toEqual(
+      '{"internal":{"__#2":{"cell":{"/":"baedreiegj763p2gzfblgw7mayzbacgjenzsyjtld2tdbxqjpofhbbtfgay"},"path":["result"]}}}',
+    );
+    expect(JSON.stringify(e.get())).toEqual(
+      '{"internal":{"a":{"$alias":{"cell":{"/":"baedreig7stoanix5pjstgdwsy2lavvb22iyj2fk7huu5idryxx4cuz4cze"},"path":["internal","__#2","data"]}}}}',
+    );
   });
 });

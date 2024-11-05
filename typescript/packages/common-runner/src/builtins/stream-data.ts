@@ -1,6 +1,6 @@
 import { cell, CellImpl, ReactivityLog } from "../cell.js";
 import { normalizeToCells } from "../utils.js";
-import { type Action } from "../scheduler.js";
+import { idle, type Action } from "../scheduler.js";
 
 /**
  * Stream data from a URL, used for querying Synopsys.
@@ -44,8 +44,14 @@ export function streamData(
     controller: AbortController | undefined;
   };
 
+  let previousCall = "";
   return (log: ReactivityLog) => {
     const { url, options } = inputsCell.getAsQueryResult([], log) || {};
+
+    // Re-entrancy guard: Don't restart the stream if it's the same request.
+    const currentCall = `${url}${JSON.stringify(options)}`;
+    if (currentCall === previousCall) return;
+    previousCall = currentCall;
 
     if (status.controller) {
       status.controller.abort();
@@ -112,7 +118,13 @@ export function streamData(
               data: JSON.parse(data),
             };
 
-            normalizeToCells(parsedData, undefined, log);
+            normalizeToCells(parsedData, undefined, log, {
+              streamData: { url },
+              cause,
+            });
+
+            await idle();
+
             result.setAtPath([], parsedData, log);
             id = undefined;
             event = undefined;
@@ -124,7 +136,7 @@ export function streamData(
           }
         }
       })
-      .catch((e) => {
+      .catch(async (e) => {
         if (e instanceof DOMException && e.name === "AbortError") {
           return;
         }
@@ -132,9 +144,14 @@ export function streamData(
         // disconnects, we should probably not erase the result.
         // FIXME(ja): also pending should probably be more like "live"?
         console.error(e);
+
+        await idle();
         pending.setAtPath([], false, log);
         result.setAtPath([], undefined, log);
         error.setAtPath([], e, log);
+
+        // Allow retrying the same request.
+        previousCall = "";
       });
   };
 }

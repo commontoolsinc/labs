@@ -8,7 +8,7 @@ import {
   str,
 } from "@commontools/common-builder";
 import { z } from "zod";
-import { schemaQuery } from "../query.js";
+import { zodSchemaQuery } from "../query.js";
 
 const Tweet = z
   .object({
@@ -38,7 +38,7 @@ const tap = lift((x) => {
 });
 
 export const tweets = recipe(Tweets, ({ username }) => {
-  const { result: items } = schemaQuery(Tweet);
+  const { result: items } = zodSchemaQuery(Tweet);
 
   return {
     [NAME]: str`Tweets: ${username}`,

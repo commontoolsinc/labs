@@ -10,9 +10,9 @@ import {
   isAlias,
   isOpaqueRef,
   isStreamAlias,
-  pushFrame,
   popFrame,
   recipeFromFrame,
+  pushFrameFromCause,
 } from "@commontools/common-builder";
 import {
   cell,
@@ -64,30 +64,26 @@ export const cancels = new WeakMap<CellImpl<any>, Cancel>();
 export function run<T, R>(
   recipeFactory?: RecipeFactory<T, R>,
   parameters?: T,
-  resultCell?: CellImpl<R>
+  resultCell?: CellImpl<R>,
 ): CellImpl<R>;
 export function run<T, R = any>(
   recipe?: Recipe,
   parameters?: T,
-  resultCell?: CellImpl<R>
+  resultCell?: CellImpl<R>,
 ): CellImpl<R>;
 export function run<T, R = any>(
   recipe?: Recipe,
   parameters?: T,
-  resultCell?: CellImpl<R>
+  resultCell: CellImpl<R> = cell<R>(),
 ): CellImpl<R> {
-  if (resultCell) {
-    if (cancels.has(resultCell)) {
-      // If it's already running and no new recipe or parameters are given,
-      // we are just returning the result cell
-      if (recipe === undefined && parameters === undefined) return resultCell;
+  if (cancels.has(resultCell)) {
+    // If it's already running and no new recipe or parameters are given,
+    // we are just returning the result cell
+    if (recipe === undefined && parameters === undefined) return resultCell;
 
-      // Otherwise stop execution of the old recipe. TODO: Await, but this will
-      // make all this async.
-      stop(resultCell);
-    }
-  } else {
-    resultCell = cell<R>();
+    // Otherwise stop execution of the old recipe. TODO: Await, but this will
+    // make all this async.
+    stop(resultCell);
   }
 
   // Keep track of subscriptions to cancel them later
@@ -114,7 +110,7 @@ export function run<T, R = any>(
     if (!recipe) throw new Error(`Unknown recipe: ${processCell.get()[TYPE]}`);
   } else if (!recipe) {
     console.warn(
-      "No recipe provided and no recipe found in process cell. Not running."
+      "No recipe provided and no recipe found in process cell. Not running.",
     );
     return resultCell;
   }
@@ -139,7 +135,7 @@ export function run<T, R = any>(
         Object.keys(value).map((key) => [
           key,
           { $alias: { cell: ref.cell, path: [...ref.path, key] } },
-        ])
+        ]),
       ) as T;
     } else {
       // Otherwise we just alias the whole thing
@@ -183,14 +179,14 @@ export function run<T, R = any>(
     [node.inputs, node.outputs].forEach((bindings) =>
       findAllAliasedCells(bindings, processCell).forEach(({ cell, path }) => {
         if (!cell.entityId) cell.generateEntityId({ cell: processCell, path });
-      })
+      }),
     );
     instantiateNode(
       node.module,
       node.inputs,
       node.outputs,
       processCell,
-      addCancel
+      addCancel,
     );
   }
 
@@ -217,7 +213,7 @@ function instantiateNode(
   inputBindings: JSON,
   outputBindings: JSON,
   processCell: CellImpl<any>,
-  addCancel: AddCancel
+  addCancel: AddCancel,
 ) {
   if (isModule(module)) {
     switch (module.type) {
@@ -227,7 +223,7 @@ function instantiateNode(
           inputBindings,
           outputBindings,
           processCell,
-          addCancel
+          addCancel,
         );
         break;
       case "javascript":
@@ -236,7 +232,7 @@ function instantiateNode(
           inputBindings,
           outputBindings,
           processCell,
-          addCancel
+          addCancel,
         );
         break;
       case "raw":
@@ -245,7 +241,7 @@ function instantiateNode(
           inputBindings,
           outputBindings,
           processCell,
-          addCancel
+          addCancel,
         );
         break;
       case "passthrough":
@@ -254,7 +250,7 @@ function instantiateNode(
           inputBindings,
           outputBindings,
           processCell,
-          addCancel
+          addCancel,
         );
         break;
       case "isolated":
@@ -263,7 +259,7 @@ function instantiateNode(
           inputBindings,
           outputBindings,
           processCell,
-          addCancel
+          addCancel,
         );
         break;
       case "recipe":
@@ -272,7 +268,7 @@ function instantiateNode(
           inputBindings,
           outputBindings,
           processCell,
-          addCancel
+          addCancel,
         );
         break;
       default:
@@ -290,11 +286,11 @@ function instantiateJavaScriptNode(
   inputBindings: JSON,
   outputBindings: JSON,
   processCell: CellImpl<any>,
-  addCancel: AddCancel
+  addCancel: AddCancel,
 ) {
   const inputs = mapBindingsToCell(
     inputBindings as { [key: string]: any },
-    processCell
+    processCell,
   );
 
   // TODO: This isn't correct, as module can write into passed cells. We
@@ -341,23 +337,25 @@ function instantiateJavaScriptNode(
     const handler = (event: any) => {
       if (event.preventDefault) event.preventDefault();
       const eventInputs = { ...inputs };
+      const cause = { ...inputs };
       for (const key in eventInputs) {
         if (
           isAlias(eventInputs[key]) &&
           eventInputs[key].$alias.cell === stream.cell &&
           eventInputs[key].$alias.path.length === stream.path.length &&
           eventInputs[key].$alias.path.every(
-            (value: PropertyKey, index: number) => value === stream.path[index]
+            (value: PropertyKey, index: number) => value === stream.path[index],
           )
         ) {
           eventInputs[key] = event;
+          cause[key] = crypto.randomUUID(); // TODO: Track this ID for integrity
         }
       }
 
-      const inputsCell = cell(eventInputs);
+      const inputsCell = cell(eventInputs, cause);
       inputsCell.freeze(); // Freezes the bindings, not aliased cells.
 
-      const frame = pushFrame();
+      const frame = pushFrameFromCause(cause);
       const result = fn(inputsCell.getAsQueryResult([]));
 
       // If handler returns a graph created by builder, run it
@@ -387,7 +385,11 @@ function instantiateJavaScriptNode(
 
     const action: Action = (log: ReactivityLog) => {
       const inputsProxy = inputsCell.getAsQueryResult([], log);
+
+      const frame = pushFrameFromCause({ inputs, outputs, fn: fn.toString() });
       const result = fn(inputsProxy);
+      popFrame(frame);
+
       sendValueToBinding(processCell, outputs, result, log);
     };
 
@@ -400,11 +402,11 @@ function instantiateRawNode(
   inputBindings: JSON,
   outputBindings: JSON,
   processCell: CellImpl<any>,
-  addCancel: AddCancel
+  addCancel: AddCancel,
 ) {
   if (typeof module.implementation !== "function")
     throw new Error(
-      `Raw module is not a function, got: ${module.implementation}`
+      `Raw module is not a function, got: ${module.implementation}`,
     );
 
   // Built-ins can define their own scheduling logic, so they'll
@@ -421,7 +423,7 @@ function instantiateRawNode(
     (result: any) =>
       sendValueToBinding(processCell, mappedOutputBindings, result),
     addCancel,
-    inputCells // cause
+    inputCells, // cause
   );
 
   addCancel(schedule(action, { reads: inputCells, writes: outputCells }));
@@ -432,7 +434,7 @@ function instantiatePassthroughNode(
   inputBindings: JSON,
   outputBindings: JSON,
   processCell: CellImpl<any>,
-  addCancel: AddCancel
+  addCancel: AddCancel,
 ) {
   const inputs = mapBindingsToCell(inputBindings, processCell);
   const inputsCell = cell(inputs);
@@ -454,7 +456,7 @@ function instantiateIsolatedNode(
   inputBindings: JSON,
   outputBindings: JSON,
   processCell: CellImpl<any>,
-  addCancel: AddCancel
+  addCancel: AddCancel,
 ) {
   const inputs = mapBindingsToCell(inputBindings, processCell);
   const reads = findAllAliasedCells(inputs, processCell);
@@ -470,13 +472,13 @@ function instantiateIsolatedNode(
   // Initialize web runtime wasm artifact.
   // Needed only once.
   runtime ||= (init as unknown as () => Promise<any>)().then(
-    () => new CommonRuntime(COMMON_RUNTIME_URL)
+    () => new CommonRuntime(COMMON_RUNTIME_URL),
   );
 
   const fnPromise = runtime.then((rt) =>
     rt.instantiate(
-      module.implementation as unknown as JavaScriptModuleDefinition
-    )
+      module.implementation as unknown as JavaScriptModuleDefinition,
+    ),
   );
 
   const action: Action = async (log: ReactivityLog) => {
@@ -488,7 +490,7 @@ function instantiateIsolatedNode(
     const fnOutput = await fn.run(inputsProxy as unknown as JavaScriptValueMap);
 
     const result: any = Object.fromEntries(
-      Object.entries(fnOutput).map(([key, value]) => [key, value.val])
+      Object.entries(fnOutput).map(([key, value]) => [key, value.val]),
     );
 
     sendValueToBinding(processCell, outputBindings, result, log);
@@ -502,7 +504,7 @@ const COMMON_RUNTIME_URL = "http://localhost:8081";
 
 // This should be in common-runtime
 function isJavaScriptModuleDefinition(
-  module: any
+  module: any,
 ): module is JavaScriptModuleDefinition {
   return (
     typeof module === "object" &&
@@ -518,15 +520,24 @@ function instantiateRecipeNode(
   inputBindings: JSON,
   outputBindings: JSON,
   processCell: CellImpl<any>,
-  addCancel: AddCancel
+  addCancel: AddCancel,
 ) {
   if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
   const inputs = mapBindingsToCell(inputBindings, processCell);
-  const result = run(module.implementation, inputs);
-  sendValueToBinding(processCell, outputBindings, result);
+  const resultCell = cell(undefined, {
+    recipe: module.implementation,
+    parent: processCell,
+    inputBindings,
+    outputBindings,
+  });
+  run(module.implementation, inputs, resultCell);
+  sendValueToBinding(processCell, outputBindings, {
+    cell: resultCell,
+    path: [],
+  });
   // TODO: Make sure to not cancel after a recipe is elevated to a charm, e.g.
   // via navigateTo. Nothing is cancelling right now, so leaving this as TODO.
-  addCancel(cancels.get(result.sourceCell!));
+  addCancel(cancels.get(resultCell.sourceCell!));
 }
 
 const moduleWrappers = {

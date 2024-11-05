@@ -78,11 +78,11 @@ export function sendValueToBinding(
   cell: CellImpl<any>,
   binding: any,
   value: any,
-  log?: ReactivityLog
+  log?: ReactivityLog,
 ) {
   if (isAlias(binding)) {
     const ref = followAliases(binding, cell, log);
-    if (!isCellReference(value) && !isCell(value))
+    if (!isCellReference(value) && !isCell(value) && !isAlias(value))
       normalizeToCells(value, ref.cell.getAtPath(ref.path), log, binding);
     setNestedValue(ref.cell, ref.path, value, log);
   } else if (Array.isArray(binding)) {
@@ -105,7 +105,7 @@ export function setNestedValue(
   currentCell: CellImpl<any>,
   path: PropertyKey[],
   value: any,
-  log?: ReactivityLog
+  log?: ReactivityLog,
 ): boolean {
   let destValue = currentCell.getAtPath(path);
   if (isAlias(destValue)) {
@@ -132,7 +132,7 @@ export function setNestedValue(
           currentCell,
           [...path, key],
           value[key],
-          log
+          log,
         );
       else {
         if (currentCell.isFrozen()) success = false;
@@ -185,12 +185,13 @@ export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
             path: binding.$alias.path,
           },
         };
-    } else if (isCell(binding)) return binding; // Don't enter cells
+    } else if (isCell(binding))
+      return binding; // Don't enter cells
     else if (Array.isArray(binding))
       return binding.map((value) => convert(value));
     else if (typeof binding === "object" && binding !== null)
       return Object.fromEntries(
-        Object.entries(binding).map(([key, value]) => [key, convert(value)])
+        Object.entries(binding).map(([key, value]) => [key, convert(value)]),
       );
     else return binding;
   }
@@ -200,7 +201,7 @@ export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
 // Traverses binding and returns all cells reacheable through aliases.
 export function findAllAliasedCells(
   binding: any,
-  cell: CellImpl<any>
+  cell: CellImpl<any>,
 ): CellReference[] {
   const cells: CellReference[] = [];
   function find(binding: any, origCell: CellImpl<any>) {
@@ -231,7 +232,7 @@ export function findAllAliasedCells(
 // Follows cell references and returns the last one
 export function followCellReferences(
   reference: CellReference,
-  log?: ReactivityLog
+  log?: ReactivityLog,
 ): any {
   const seen = new Set<CellReference>();
   let result = reference;
@@ -251,7 +252,7 @@ export function followCellReferences(
 export function followAliases(
   alias: any,
   cell: CellImpl<any>,
-  log?: ReactivityLog
+  log?: ReactivityLog,
 ): CellReference {
   const seen = new Set<any>();
   let result: CellReference;
@@ -289,7 +290,7 @@ export function compactifyPaths(entries: CellReference[]): CellReference[] {
       const earlier = paths.slice(0, i);
       if (
         earlier.some((path) =>
-          path.every((key, index) => key === paths[i][index])
+          path.every((key, index) => key === paths[i][index]),
         )
       )
         continue;
@@ -310,7 +311,7 @@ export function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
 export function transformToRendererCells(
   cell: CellImpl<any>,
   value: any,
-  log?: ReactivityLog
+  log?: ReactivityLog,
 ): any {
   if (isQueryResultForDereferencing(value)) {
     const ref = followCellReferences(getCellReferenceOrThrow(value));
@@ -337,7 +338,7 @@ export function transformToRendererCells(
         Object.entries(value).map(([key, value]) => [
           key,
           transformToRendererCells(cell, value, log),
-        ])
+        ]),
       );
   else return value;
 }
@@ -355,7 +356,7 @@ export function transformToRendererCells(
 export function staticDataToNestedCells(
   value: any,
   log?: ReactivityLog,
-  cause?: any
+  cause?: any,
 ): any {
   value = maybeUnwrapProxy(value);
   normalizeToCells(value, undefined, log, cause);
@@ -379,7 +380,7 @@ export function normalizeToCells(
   value: any,
   previous?: any,
   log?: ReactivityLog,
-  cause: any = createRef()
+  cause: any = createRef(),
 ): boolean {
   value = maybeUnwrapProxy(value);
   previous = maybeUnwrapProxy(previous);
@@ -409,6 +410,7 @@ export function normalizeToCells(
     let preceedingItemId = null;
     for (let i = 0; i < value.length; i++) {
       const item = maybeUnwrapProxy(value[i]);
+      if (item !== value[i]) value[i] = item; // Capture unwrapped value
       const previousItem = previous ? maybeUnwrapProxy(previous[i]) : undefined;
       if (
         !(
@@ -418,11 +420,16 @@ export function normalizeToCells(
           isRendererCell(item)
         )
       ) {
-        itemId = createRef(value[i], {
-          parent: cause,
-          index: i,
-          preceeding: preceedingItemId,
-        });
+        // TODO: Should this depend on the value if there is no id provided?
+        // This is probably generating extra churn on ids.
+        itemId =
+          typeof item === "object" && item !== null && "id" in item
+            ? createRef({ id: item.id }, { parent: cause })
+            : createRef(value[i], {
+                parent: cause,
+                index: i,
+                preceeding: preceedingItemId,
+              });
         const different = normalizeToCells(
           value[i],
           isCellReference(previousItem)
@@ -431,7 +438,7 @@ export function normalizeToCells(
           log,
           isCellReference(previousItem)
             ? previousItem.cell.entityId ?? itemId
-            : itemId
+            : itemId,
         );
         if (
           !different &&
@@ -461,6 +468,7 @@ export function normalizeToCells(
     }
     for (const key in value) {
       const item = maybeUnwrapProxy(value[key]);
+      if (item !== value[key]) value[key] = item; // Capture unwrapped value
       const previousItem = previous
         ? maybeUnwrapProxy(previous[key])
         : undefined;
@@ -501,7 +509,7 @@ export function arrayEqual(a: PropertyKey[], b: PropertyKey[]): boolean {
 
 export function isEqualCellReferences(
   a: CellReference,
-  b: CellReference
+  b: CellReference,
 ): boolean {
   return (
     isCellReference(a) &&
@@ -517,7 +525,7 @@ export function deepCopy(value: any): any {
     return Array.isArray(value)
       ? value.map(deepCopy)
       : Object.fromEntries(
-          Object.entries(value).map(([key, value]) => [key, deepCopy(value)])
+          Object.entries(value).map(([key, value]) => [key, deepCopy(value)]),
         );
   else return value;
 }
