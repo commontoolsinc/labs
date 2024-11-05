@@ -60,7 +60,7 @@ const handler = async (request: Request): Promise<Response> => {
         console.warn(
           `${timestamp()} ${requestId} ${colors.yellow}⚠️  Unsupported model:${colors.reset} ${payload.model}`,
         );
-        return new Response(JSON.stringify({ error: "Unsupported model" }), {
+        return new Response(JSON.stringify({ error: `Unsupported model: ${payload.model}`, availableModels: Object.keys(MODELS) }), {
           status: 400,
           headers: { "Content-Type": "application/json" },
         });

@@ -2,6 +2,7 @@ import { anthropic } from "npm:@ai-sdk/anthropic";
 import { groq } from "npm:@ai-sdk/groq";
 import { openai } from "npm:@ai-sdk/openai";
 import { vertex } from "npm:@ai-sdk/google-vertex";
+import { ollama } from 'ollama-ai-provider';
 
 type ModelConfig = {
     model: any;
@@ -24,7 +25,7 @@ const addModel = ({
     maxOutputTokens: number;
     aliases: string[];
 }) => {
-    const model = provider(name.split(":")[1]);
+    const model = provider(name.includes(":") ? name.split(":").slice(1).join(":") : name);
     const config: ModelConfig = {
         model,
         contextWindow,
@@ -45,6 +46,7 @@ if (Deno.env.get("ANTHROPIC_API_KEY")) {
         maxOutputTokens: 8192,
         aliases: [
             "anthropic:claude-3-5-haiku-latest",
+            "claude-3-5-haiku",
         ],
     });
 
@@ -55,6 +57,7 @@ if (Deno.env.get("ANTHROPIC_API_KEY")) {
         maxOutputTokens: 8192,
         aliases: [
             "anthropic:claude-3-5-sonnet-latest",
+            "claude-3-5-sonnet",
         ],
     });
 
@@ -65,6 +68,7 @@ if (Deno.env.get("ANTHROPIC_API_KEY")) {
         maxOutputTokens: 4096,
         aliases: [
             "anthropic:claude-3-opus-latest",
+            "claude-3-opus",
         ],
     });
 }
@@ -147,6 +151,18 @@ if (Deno.env.get("OPENAI_API_KEY")) {
     });
 }
 
+if (Deno.env.get("OLLAMA_API_MODEL")) {
+    addModel({
+        provider: ollama,
+        name: `ollama:${Deno.env.get("OLLAMA_API_MODEL")}`,
+        contextWindow: 128000,
+        maxOutputTokens: 8000,
+        aliases: [
+            `ollama`,
+        ],
+    });
+}
+
 if (Deno.env.get("GOOGLE_API_KEY")) {
     addModel({
         provider: vertex,
@@ -170,12 +186,5 @@ if (Deno.env.get("GOOGLE_API_KEY")) {
 }
 
 export const findModel = (name: string) => {
-    // FIXME(ja): should we remove this "anthropic" by default ...
-    if (!name.includes(":")) {
-        name = `anthropic:${name}`;
-    }
-
-    console.log("searching for model", name);
-
     return MODELS[name];
 };
