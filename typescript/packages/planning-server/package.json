@@ -7,7 +7,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "deno run --allow-env --allow-read --allow-write --allow-net src/index.ts",
+    "start": "deno run --allow-env --allow-read --allow-write --allow-net --allow-run --allow-sys src/index.ts",
     "test": "deno test --no-check",
     "build": "tsc --build -f",
     "prebuild": "npm run clean",
@@ -27,7 +27,12 @@
     "./lib/*.js"
   ],
   "dependencies": {
-    "@ai-sdk/groq": "^0.0.3"
+    "@ai-sdk/anthropic": "^0.0.55",
+    "@ai-sdk/google-vertex": "^0.0.43",
+    "@ai-sdk/groq": "^0.0.3",
+    "@ai-sdk/mistral": "^0.0.46",
+    "@ai-sdk/openai": "^0.0.71",
+    "ollama-ai-provider": "^0.16.0"
   },
   "devDependencies": {
     "tslib": "^2.6.2",

@@ -184,7 +184,7 @@ window.sendLLMRequest = async function(system, messages) {
     body: JSON.stringify({
       messages: messages.map(m => ({ role: m.role, content: m.content })),
       system: system,
-      model: "claude-3-5-sonnet-latest"
+      model: "anthropic:claude-3-5-sonnet"
     }),
   });
 
@@ -249,8 +249,6 @@ const prepHTML = lift(({ prompt, schema, lastSrc, error }) => {
   if (error.error) {
     fullPrompt += `\n\nYou must fix this error in your existing code: <error>${JSON.stringify(error.detail)}</error>`;
   }
-
-
 
   return {
     messages: [fullPrompt, "```html\n" + responsePrefill],
@@ -364,7 +362,6 @@ const mostRelevantFields = lift(({ prompt, schema }) => {
   };
 });
 
-
 const grabKeywords = lift<{ result?: string }, any>(({ result }) => {
   if (!result) {
     return [];
@@ -378,14 +375,15 @@ const grabKeywords = lift<{ result?: string }, any>(({ result }) => {
   return rawData;
 });
 
-const consoleLogHandler = handler<{ detail: any }, { error: any; lastSrc: string; src: string; }>(
-  (event, state) => {
-    console.log('event', event);
-    state.lastSrc = state.src;
-    state.error.error = true;
-    state.error.detail = event.detail;
-  }
-);
+const consoleLogHandler = handler<
+  { detail: any },
+  { error: any; lastSrc: string; src: string }
+>((event, state) => {
+  console.log("event", event);
+  state.lastSrc = state.src;
+  state.error.error = true;
+  state.error.detail = event.detail;
+});
 
 export const iframe = recipe<{
   title: string;
@@ -410,14 +408,13 @@ export const iframe = recipe<{
   const schema = deriveJsonSchema({ data: initialData });
   tap({ schema });
 
-
   // const focusedSchema = grabKeywords(
   //   llm(mostRelevantFields({ prompt, schema })),
   // );
 
   const query = copy({ value: prompt });
   const lastSrc = copy({ value: src });
-  const error = cell({ error: false, detail: {}  })
+  const error = cell({ error: false, detail: {} });
 
   // const scopedSchema = generateData<{ html: string }>({
   //   prompt: promptFilterSchema({ schema, prompt }),
@@ -433,10 +430,13 @@ export const iframe = recipe<{
   } = llm(prepHTML({ prompt, schema, lastSrc, error }));
 
   const suggestions = grabSuggestions(
-    llm(prepSuggestions({ src: grabHTML({ result }), prompt, schema})),
+    llm(prepSuggestions({ src: grabHTML({ result }), prompt, schema })),
   );
 
-  const loadingProgress = progress({ partial: partialHTML, pending: pendingHTML });
+  const loadingProgress = progress({
+    partial: partialHTML,
+    pending: pendingHTML,
+  });
 
   return {
     [NAME]: str`${title} UI`,
@@ -448,7 +448,9 @@ export const iframe = recipe<{
           onfix=${consoleLogHandler({ error, lastSrc, src })}
           $context=${data}
         ></common-iframe>`,
-        html`<common-ascii-loader progress=${progress({ partial: partialHTML, pending: pendingHTML })}>`,
+        html`<common-ascii-loader
+          progress=${progress({ partial: partialHTML, pending: pendingHTML })}
+        ></common-ascii-loader>`,
       )}
     </div>`,
     icon: "preview",
@@ -460,6 +462,6 @@ export const iframe = recipe<{
     partialHTML,
     suggestions: { items: suggestions },
     addToPrompt: addToPrompt({ prompt, src, lastSrc, query }),
-    loadingProgress
+    loadingProgress,
   };
 });

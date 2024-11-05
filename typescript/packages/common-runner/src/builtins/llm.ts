@@ -61,14 +61,44 @@ export function llm(
     const { system, messages, prompt, stop, max_tokens, model } =
       inputsCell.getAsQueryResult([], log) ?? {};
 
-    const hash = refer({
+    // Define types for our parameters
+    type BaseParams = {
+      model: string;
+      messages: SimpleContent[] | SimpleMessage[];
+      max_tokens: number;
+    };
+
+    type StandardParams = BaseParams & {
+      system: string;
+      prompt: string;
+      stop: string;
+    };
+
+    type O1Params = BaseParams;
+
+    let llmParams: StandardParams | O1Params = {
       system: system ?? "",
       messages: messages ?? [],
       prompt: prompt ?? "",
       stop: stop ?? "",
       max_tokens: max_tokens ?? 4096,
-      model: model ?? "claude-3-5-sonnet-latest",
-    }).toString();
+      model: model ?? "openai:o1-preview",
+    } as StandardParams;
+
+    if (model?.startsWith("openai:o1")) {
+      const combinedMessage =
+        system && prompt
+          ? (`${system}\n\n${prompt}` as SimpleContent)
+          : ((system || prompt) as SimpleContent);
+
+      llmParams = {
+        messages: messages ?? (combinedMessage ? [combinedMessage] : []),
+        model: model,
+        max_tokens: max_tokens ?? 4096,
+      };
+    }
+
+    const hash = refer(llmParams).toString();
 
     // Return if the same request is being made again, either concurrently (same
     // as previousCallHash) or when rehydrated from storage (same as the
@@ -94,16 +124,7 @@ export function llm(
       partial.setAtPath([], text, log);
     };
 
-    let resultPromise = makeClient().sendRequest(
-      {
-        messages: messages || [prompt as SimpleContent],
-        system,
-        model: model ?? "claude-3-5-sonnet-latest",
-        max_tokens: max_tokens ?? 4096,
-        stop,
-      },
-      updatePartial,
-    );
+    let resultPromise = makeClient().sendRequest(llmParams, updatePartial);
 
     resultPromise
       .then(async (text) => {
