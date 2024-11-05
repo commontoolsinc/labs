@@ -1,6 +1,6 @@
 import { cell, CellImpl, ReactivityLog } from "../cell.js";
 import { normalizeToCells } from "../utils.js";
-import { type Action } from "../scheduler.js";
+import { idle, type Action } from "../scheduler.js";
 
 /**
  * Stream data from a URL, used for querying Synopsys.
@@ -122,6 +122,9 @@ export function streamData(
               streamData: { url },
               cause,
             });
+
+            await idle();
+
             result.setAtPath([], parsedData, log);
             id = undefined;
             event = undefined;
@@ -133,7 +136,7 @@ export function streamData(
           }
         }
       })
-      .catch((e) => {
+      .catch(async (e) => {
         if (e instanceof DOMException && e.name === "AbortError") {
           return;
         }
@@ -141,6 +144,8 @@ export function streamData(
         // disconnects, we should probably not erase the result.
         // FIXME(ja): also pending should probably be more like "live"?
         console.error(e);
+
+        await idle();
         pending.setAtPath([], false, log);
         result.setAtPath([], undefined, log);
         error.setAtPath([], e, log);

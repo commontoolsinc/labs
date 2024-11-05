@@ -1,6 +1,6 @@
 import { cell, CellImpl, ReactivityLog } from "../cell.js";
 import { makeClient, SimpleMessage, SimpleContent } from "../llm-client.js";
-import { type Action } from "../scheduler.js";
+import { idle, type Action } from "../scheduler.js";
 import { refer } from "merkle-reference";
 
 // TODO(ja): investigate if generateText should be replaced by
@@ -106,19 +106,24 @@ export function llm(
     );
 
     resultPromise
-      .then((text) => {
+      .then(async (text) => {
         if (thisRun !== currentRun) return;
-        // normalizeToCells(result, undefined, log);
+
+        //normalizeToCells(text, undefined, log);
+        await idle();
 
         pending.setAtPath([], false, log);
         result.setAtPath([], text, log);
         partial.setAtPath([], text, log);
         requestHash.setAtPath([], hash, log);
       })
-      .catch((error) => {
+      .catch(async (error) => {
         if (thisRun !== currentRun) return;
 
         console.error("Error generating data", error);
+
+        await idle();
+
         pending.setAtPath([], false, log);
         result.setAtPath([], undefined, log);
         partial.setAtPath([], undefined, log);
