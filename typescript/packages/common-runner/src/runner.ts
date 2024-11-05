@@ -74,20 +74,16 @@ export function run<T, R = any>(
 export function run<T, R = any>(
   recipe?: Recipe,
   parameters?: T,
-  resultCell?: CellImpl<R>,
+  resultCell: CellImpl<R> = cell<R>(),
 ): CellImpl<R> {
-  if (resultCell) {
-    if (cancels.has(resultCell)) {
-      // If it's already running and no new recipe or parameters are given,
-      // we are just returning the result cell
-      if (recipe === undefined && parameters === undefined) return resultCell;
+  if (cancels.has(resultCell)) {
+    // If it's already running and no new recipe or parameters are given,
+    // we are just returning the result cell
+    if (recipe === undefined && parameters === undefined) return resultCell;
 
-      // Otherwise stop execution of the old recipe. TODO: Await, but this will
-      // make all this async.
-      stop(resultCell);
-    }
-  } else {
-    resultCell = cell<R>();
+    // Otherwise stop execution of the old recipe. TODO: Await, but this will
+    // make all this async.
+    stop(resultCell);
   }
 
   // Keep track of subscriptions to cancel them later
@@ -535,7 +531,10 @@ function instantiateRecipeNode(
     outputBindings,
   });
   run(module.implementation, inputs, resultCell);
-  sendValueToBinding(processCell, outputBindings, resultCell);
+  sendValueToBinding(processCell, outputBindings, {
+    cell: resultCell,
+    path: [],
+  });
   // TODO: Make sure to not cancel after a recipe is elevated to a charm, e.g.
   // via navigateTo. Nothing is cancelling right now, so leaving this as TODO.
   addCancel(cancels.get(resultCell.sourceCell!));
