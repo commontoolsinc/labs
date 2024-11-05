@@ -196,6 +196,11 @@ const handler = async (request: Request): Promise<Response> => {
       if (payload.stream) {
         const stream = new ReadableStream({
           async start(controller) {
+            // NOTE: the llm doesn't send text we put into its mouth, so we need to
+            // manually send it so that streaming client sees everything assistant 'said'
+            if (messages[messages.length - 1].role === "assistant") {
+              controller.enqueue(new TextEncoder().encode(JSON.stringify(result) + '\n'));
+            }
             for await (const delta of llmStream.textStream) {
               result += delta;
               tokenCount++;
