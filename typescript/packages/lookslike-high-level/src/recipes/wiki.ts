@@ -18,7 +18,7 @@ const ExploreResult = z.object({
   related: z.array(
     z.object({
       title: z.string().describe("title"),
-    })
+    }),
   ),
 });
 type ExploreResult = z.infer<typeof ExploreResult>;
@@ -77,7 +77,7 @@ const contextify = lift(({ related, canon, text, title, maxLength }) => {
   const newCanon =
     `<title>${title}</title>\n<text>${text}</text>\n\n${canon}`.slice(
       0,
-      maxLength
+      maxLength,
     );
   return (related || []).map(({ title }: { title: string }) => ({
     title,
@@ -86,15 +86,15 @@ const contextify = lift(({ related, canon, text, title, maxLength }) => {
 });
 
 const launcher = handler<PointerEvent, { title: string; canon: string }>(
-  (_, { title, canon }) => navigateTo(wiki({ title, canon }))
+  (_, { title, canon }) => navigateTo(wiki({ title, canon })),
 );
 
 export const wiki = recipe<{ title: string; canon: string }>(
-  "wiki",
+  "Wiki",
   ({ title, canon }) => {
     title.setDefault("Mystical Creatures");
     canon.setDefault(
-      "A mythical creature is a creature that is not real.  But let's pretend they are real."
+      "A mythical creature is a creature that is not real.  But let's pretend they are real.",
     );
 
     const { result, pending } = llm(prep({ title, canon }));
@@ -118,12 +118,12 @@ export const wiki = recipe<{ title: string; canon: string }>(
         ${ifElse(
           pending,
           html`<p><i>generating...</i></p>`,
-          html`<p>${text}</p>`
+          html`<p>${text}</p>`,
         )}
         <ul>
           ${relatedWithClosure.map(
             ({ title, canon }: { title: string; canon: string }) =>
-              html`<li onclick=${launcher({ title, canon })}>${title}</li>`
+              html`<li onclick=${launcher({ title, canon })}>${title}</li>`,
           )}
         </ul>
         <h4>Debug (Canon)</h4>
@@ -133,7 +133,7 @@ export const wiki = recipe<{ title: string; canon: string }>(
       text: str`${text}`, // FIXME(ja): if don't use str`, the [NAME] doesn't get set correctly/show up in the sidebar?
       canon,
     };
-  }
+  },
 );
 
 // export const wikiToPrompt = recipe<{ wiki: { title: string; text: string } }>(

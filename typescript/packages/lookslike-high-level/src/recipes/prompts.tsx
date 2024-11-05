@@ -14,14 +14,17 @@ const Prompt = z.object({
 });
 type Prompt = z.infer<typeof Prompt>;
 
-const imageUrl = lift(({ title }) => `/api/img/?prompt=${encodeURIComponent(title)}`);
+const imageUrl = lift(
+  ({ title }) => `/api/img/?prompt=${encodeURIComponent(title)}`,
+);
 
 // FIXME(ja): allowing both detail.value and newTitle is a bit of a hack
-const updateTitle = handler<{ detail: { value: string } }, { title: string, newTitle?: string }>(
-  ({ detail }, state) => {
-    state.title = detail?.value || state.newTitle || "";
-  }
-);
+const updateTitle = handler<
+  { detail: { value: string } },
+  { title: string; newTitle?: string }
+>(({ detail }, state) => {
+  state.title = detail?.value || state.newTitle || "";
+});
 
 const grabPrompts = lift<{ result?: string }, Prompt[]>(({ result }) => {
   if (!result) {
@@ -63,12 +66,17 @@ and some should change both. The last should be a completely different prompt.
 const addToPrompt = handler<{ prompt: string }, { title: string }>(
   (e, state) => {
     state.title += " " + e.prompt;
-  }
+  },
 );
 
-const Title = z.object({
-  title: z.string().describe("Image generation prompt").default("abstract geometric art"),
-});
+const Title = z
+  .object({
+    title: z
+      .string()
+      .describe("Image generation prompt")
+      .default("abstract geometric art"),
+  })
+  .describe("Image generation prompt");
 
 export const prompt = recipe(Title, ({ title }) => {
   const variations = grabPrompts(llm(buildPrompt({ title })));
@@ -77,20 +85,26 @@ export const prompt = recipe(Title, ({ title }) => {
 
   return {
     [NAME]: title,
-    [UI]: <common-vstack gap="sm">
-      <common-input
-        value={title}
-        placeholder="List title"
-        oncommon-input={updateTitle({ title })}
-      />
-      <img src={src} width="50%" />
-      <ul>
-        {variations.map(
-          (v) =>
-            <img title={v.prompt} src={imageUrl({ title: v.prompt })} width="20%" onclick={updateTitle({ title, newTitle: v.prompt })} />
-        )}
-      </ul>
-    </common-vstack>,
+    [UI]: (
+      <common-vstack gap="sm">
+        <common-input
+          value={title}
+          placeholder="List title"
+          oncommon-input={updateTitle({ title })}
+        />
+        <img src={src} width="50%" />
+        <ul>
+          {variations.map((v) => (
+            <img
+              title={v.prompt}
+              src={imageUrl({ title: v.prompt })}
+              width="20%"
+              onclick={updateTitle({ title, newTitle: v.prompt })}
+            />
+          ))}
+        </ul>
+      </common-vstack>
+    ),
     title,
     variations,
     addToPrompt: addToPrompt({ title }),

@@ -105,7 +105,7 @@ const filterMatchingCharms = lift<{
   (matchedIndices ?? [])
     .filter((item) => item.confidence > MINIMUM_CONFIDENCE)
     .map((item) => charmInfo.find((charm) => charm.index === item.index))
-    .filter((charm) => charm !== undefined)
+    .filter((charm) => charm !== undefined),
 );
 
 const findSuggestion = lift<{
@@ -115,11 +115,11 @@ const findSuggestion = lift<{
   const suggestion = suggestions.find(
     (suggestion) =>
       Object.values(suggestion.charms ?? {}).every((type) =>
-        matchingCharms.find((charm) => charm.type === type)
+        matchingCharms.find((charm) => charm.type === type),
       ) &&
       Object.values(suggestion.bindings ?? {}).every((binding) =>
-        Object.keys(data ?? {}).includes(binding)
-      )
+        Object.keys(data ?? {}).includes(binding),
+      ),
   );
 
   if (suggestion) {
@@ -129,10 +129,10 @@ const findSuggestion = lift<{
     ]) as [string, { id: string; name: string; type: string }][];
 
     const nameBindings = Object.fromEntries(
-      bindings.map(([key, charm]) => [key, charm.name])
+      bindings.map(([key, charm]) => [key, charm.name]),
     );
     const charmBindings = Object.fromEntries(
-      bindings.map(([key, charm]) => [key, charm.id])
+      bindings.map(([key, charm]) => [key, charm.id]),
     );
 
     const description = suggestion.description
@@ -173,14 +173,14 @@ const acceptSuggestion = handler<
   const accepted = run<any, Charm>(acceptedRecipe, {
     ...Object.fromEntries(
       Object.entries(suggestion.bindings as { [key: string]: string }).map(
-        ([key, value]) => [key, getCellReferenceOrValue(data[value])]
-      )
+        ([key, value]) => [key, getCellReferenceOrValue(data[value])],
+      ),
     ),
     ...Object.fromEntries(
       Object.entries(suggestion.boundCharms).map(([key, value]) => [
         key,
         getCellByEntityId(value as string),
-      ])
+      ]),
     ),
   });
 
@@ -201,7 +201,7 @@ export const annotation = recipe<{
   target: number;
   data: { [key: string]: any };
   charms: Charm[];
-}>("annotation", ({ query, target, data, charms }) => {
+}>("Generate suggestions", ({ query, target, data, charms }) => {
   const charmInfo = getCharmInfo({ charms });
   const matchedIndices = grabJson(llm(buildQuery({ query, charmInfo })));
   const matchingCharms = filterMatchingCharms({ matchedIndices, charmInfo });
@@ -223,7 +223,7 @@ export const annotation = recipe<{
             data,
             target,
           })}
-        />`
+        />`,
       )}
     </div>`,
   };

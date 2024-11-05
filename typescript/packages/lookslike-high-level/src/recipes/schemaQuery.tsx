@@ -8,7 +8,7 @@ const stringify = lift(({ obj }) => {
 });
 
 export const schemaQueryExample = recipe(
-  z.object({ schema: z.any() }),
+  z.object({ schema: z.any() }).describe("JSON Schema Query Playground"),
   ({ schema }) => {
     const { result: items, query } = jsonSchemaQuery(schema);
 

@@ -1,9 +1,4 @@
-import {
-  UI,
-  NAME,
-  lift,
-  recipe,
-} from "@commontools/common-builder";
+import { UI, NAME, lift, recipe } from "@commontools/common-builder";
 import * as z from "zod";
 import { h } from "@commontools/common-html";
 import { datalogQuery } from "../query.js";
@@ -13,7 +8,7 @@ const stringify = lift(({ obj }) => {
 });
 
 export const datalogQueryExample = recipe(
-  z.object({ query: z.any() }),
+  z.object({ query: z.any() }).describe("Datalog Query Playground"),
   ({ query }) => {
     query.setDefault({
       query: {
@@ -29,13 +24,15 @@ export const datalogQueryExample = recipe(
       },
     });
 
-    const { result: items } = datalogQuery(query)
+    const { result: items } = datalogQuery(query);
 
     return {
-      [NAME]: 'Datalog Query Playground',
-      [UI]: <div>
-        <pre>{stringify({ obj: items })}</pre>
-      </div>,
+      [NAME]: "Datalog Query Playground",
+      [UI]: (
+        <div>
+          <pre>{stringify({ obj: items })}</pre>
+        </div>
+      ),
       data: items,
       query,
     };

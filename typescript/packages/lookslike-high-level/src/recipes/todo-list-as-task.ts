@@ -5,7 +5,7 @@ import { type TodoItem } from "./todo-list.js";
 
 const getListSummary = lift((items: TodoItem[]) => {
   const notDoneTitles = items.flatMap((item) =>
-    item.done ? [] : [item.title]
+    item.done ? [] : [item.title],
   );
 
   return (
@@ -22,7 +22,7 @@ const allDone = lift((items: TodoItem[]) => items.every((item) => item.done));
 export const todoListAsTask = recipe<{
   list: { [UI]: any; items: TodoItem[] };
   task: TodoItem;
-}>("todo list as task", ({ list, task }) => {
+}>("Todo List as Task", ({ list, task }) => {
   task.done = allDone(list.items);
 
   return {
