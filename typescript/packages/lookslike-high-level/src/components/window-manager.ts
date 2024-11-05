@@ -18,6 +18,7 @@ import { NAME } from "@commontools/common-builder";
 import { matchRoute, navigate } from "../router.js";
 import { inferZodSchema } from "../schema.js";
 import { schemaQueryExample } from "../recipes/schemaQuery.jsx";
+import { Clicker, entity } from "../recipes/charm.jsx";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -369,58 +370,8 @@ export class CommonWindowManager extends LitElement {
               `
             )}
           </os-fabgroup>
-          ${this.charms.length === 0
-            ? html`
-                <div class="empty-state">
-                  <div style="display: flex; align-items: center;">
-                    <os-ai-icon></os-ai-icon>
-                    <p style="margin-left: 10px;">Imagine or import to begin</p>
-                  </div>
-                </div>
-              `
-            : html``}
-          ${repeat(
-            this.charms,
-            (charm) => charm.entityId!.toString(),
-            (charm) => {
-              if (!charm.get()) return;
 
-              const charmId = charm.entityId!;
-
-              // Create a new ref for this charm
-              let charmRef = this.charmRefs.get(JSON.stringify(charmId));
-              if (!charmRef) {
-                charmRef = createRef<HTMLElement>();
-                this.charmRefs.set(JSON.stringify(charmId), charmRef);
-                this.newCharmRefs.push([charm, charmRef]);
-              }
-
-              const onNavigate = () => {
-                this.openCharm(JSON.stringify(charmId));
-              };
-
-              return html`
-                <div
-                  class="window ${JSON.stringify(charm.entityId) !==
-                  JSON.stringify(this.focusedCharm?.entityId)
-                    ? "minimized"
-                    : ""}"
-                  id="window-${charmId}"
-                  data-charm-id="${JSON.stringify(charmId)}"
-                >
-                  <div class="window-toolbar">
-                    <h1 class="window-title" @click=${onNavigate}>
-                      ${charm.getAsQueryResult()[NAME]}
-                    </h1>
-                    <button class="close-button" @click="${this.onClose}">
-                      ×
-                    </button>
-                  </div>
-                  <div class="charm" ${ref(charmRef)}></div>
-                </div>
-              `;
-            }
-          )}
+          <common-charm .spell=${Clicker} .entity=${entity}></common-charm>
 
           <os-navstack slot="sidebar">
             <common-sidebar

@@ -89,10 +89,10 @@ export class CommonCharm extends HTMLElement {
   }
 
   set spell(value: Behavior) {
-    this.#spell = (value as any)();
+    this.#spell = value;
   }
   set entity(value: DB.API.Link) {
-    this.#entity = (value as any)();
+    this.#entity = value;
   }
   get entity() {
     return this.#entity;

@@ -4,13 +4,13 @@ import * as DOM from "@gozala/co-dom";
 import { h } from "@commontools/common-html";
 import z from "zod";
 
-const entity = refer({ clicker: {} });
+export const entity = refer({ clicker: {} });
 
-const Clicker = {
+export const Clicker = {
   init: {
     select: {},
     where: [{ Not: { Case: [entity, "clicks", $.count] } }],
-    update: ({}) => {
+    update: ({ }) => {
       return [{ Assert: [entity, "clicks", 0] }];
     },
   },
