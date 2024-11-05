@@ -39,7 +39,7 @@ export const createRef = (
         obj !== null &&
         typeof obj.toJSON === "function"
       ) {
-        obj = obj.toJSON();
+        obj = obj.toJSON() ?? obj;
       }
 
       if (isQueryResultForDereferencing(obj))
