@@ -3,7 +3,14 @@ import { customElement, state } from "lit/decorators.js";
 import { ref, createRef, Ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
-import { Charm, UI, addCharms, runPersistent, syncCharm } from "../data.js";
+import {
+  Charm,
+  UI,
+  addCharms,
+  runPersistent,
+  syncCharm,
+  openCharm,
+} from "../data.js";
 import {
   run,
   CellImpl,
@@ -548,6 +555,7 @@ export class CommonWindowManager extends LitElement {
     this.#onRouteChange(
       new CustomEvent("routeChange", { detail: window.location.href }),
     );
+    openCharm.set(this.openCharm.bind(this));
   }
 
   override disconnectedCallback() {
