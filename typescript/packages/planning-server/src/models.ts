@@ -184,7 +184,7 @@ if (Deno.env.get("OLLAMA_API_MODEL")) {
     });
 }
 
-if (Deno.env.get("GOOGLE_API_KEY")) {
+if (Deno.env.get("GOOGLE_API_KEY") || Deno.env.get("GOOGLE_APPLICATION_CREDENTIALS")) {
     addModel({
         provider: vertex,
         name: "google:gemini-1.5-flash-002",
