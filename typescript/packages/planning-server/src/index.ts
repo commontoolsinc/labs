@@ -295,7 +295,7 @@ async function saveCacheItem(key: string, data: any): Promise<void> {
   const hash = await hashKey(key);
   const filePath = `${CACHE_DIR}/${hash}.json`;
   console.log(
-    `${timestamp()} ${colors.green}💾 Cache saved:${colors.reset} ${filePath.slice(-12)}`,
+    `${timestamp()} ${colors.green}💾 Cache saved:${colors.reset} ${filePath}`,
   );
   await ensureDir(CACHE_DIR);
   await Deno.writeTextFile(filePath, JSON.stringify(data, null, 2));
