@@ -61,13 +61,14 @@ export function llm(
     const { system, messages, prompt, stop, max_tokens, model } =
       inputsCell.getAsQueryResult([], log) ?? {};
 
+    // TODO(jake): When using llama models, we need to add a stop token like "\n\n"
     const hash = refer({
       system: system ?? "",
       messages: messages ?? [],
       prompt: prompt ?? "",
       stop: stop ?? "",
       max_tokens: max_tokens ?? 4096,
-      model: model ?? "google:gemini-1.5-pro",
+      model: model ?? "openai:gpt-4o",
     }).toString();
 
     // Return if the same request is being made again, either concurrently (same
@@ -98,7 +99,7 @@ export function llm(
       {
         messages: messages || [prompt as SimpleContent],
         system,
-        model: model ?? "google:gemini-1.5-pro",
+        model: model ?? "openai:gpt-4o",
         max_tokens: max_tokens ?? 4096,
         stop,
       },

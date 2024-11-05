@@ -27,41 +27,45 @@ const MODELS: Record<
     maxOutputTokens: 8192,
   },
   "anthropic:claude-3-opus": {
-    model: anthropic("claude-opus-20240229"),
+    model: anthropic("claude-3-opus-20240229"),
     contextWindow: 200000,
     maxOutputTokens: 4096,
   },
   "groq:llama-3.1-70b": {
     model: groq("llama-3.1-70b-versatile"),
     contextWindow: 128000,
-    maxOutputTokens: 8192,
+    maxOutputTokens: 8000,
   },
   "groq:llama-3.2-11b-vision": {
     model: groq("llama-3.2-11b-vision-preview"),
     contextWindow: 128000,
-    maxOutputTokens: 8192,
+    maxOutputTokens: 8000,
   },
   "groq:llama-3.2-90b-vision": {
     model: groq("llama-3.2-90b-vision-preview"),
     contextWindow: 128000,
-    maxOutputTokens: 8192,
+    maxOutputTokens: 8000,
   },
   "openai:gpt-4o": {
+    // TODO
     model: openai("gpt-4o"),
     contextWindow: 128000,
     maxOutputTokens: 16384,
   },
   "openai:gpt-4o-mini": {
+    // TODO
     model: openai("gpt-4o-mini"),
     contextWindow: 128000,
     maxOutputTokens: 16384,
   },
   "openai:o1-preview": {
+    // TODO
     model: openai("o1-preview-2024-09-12"),
     contextWindow: 128000,
     maxOutputTokens: 32768,
   },
   "openai:o1-mini": {
+    // TODO
     model: openai("o1-mini-2024-09-12"),
     contextWindow: 128000,
     maxOutputTokens: 65536,
@@ -113,6 +117,7 @@ const handler = async (request: Request): Promise<Response> => {
         );
       }
 
+      console.log("modelConfig", { ...modelConfig, model: payload.model });
       console.log("Generating:", description);
 
       let messages = payload.messages;
@@ -127,6 +132,8 @@ const handler = async (request: Request): Promise<Response> => {
       };
 
       const llmStream = await streamText(params);
+
+      // console.log("llmStream", llmStream);
 
       let result = "";
 
