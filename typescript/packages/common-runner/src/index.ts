@@ -38,5 +38,5 @@ export {
   createRef,
   type EntityId,
 } from "./cell-map.js";
-export { addRecipe, getRecipe } from "./recipe-map.js";
+export { addRecipe, getRecipe, allRecipesByName } from "./recipe-map.js";
 export { type Cancel, type AddCancel, useCancelGroup } from "./cancel.js";

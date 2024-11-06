@@ -85,8 +85,6 @@ export const jsonSchemaQuery = recipe(
   query: any;
 }>;
 
-addRecipe(jsonSchemaQuery as RecipeFactory<any, any>);
-
 export const JsonSchemaFromZod = (schema: z.ZodTypeAny): any => {
   const jsonSchema = zodToJsonSchema(schema);
   delete jsonSchema.$schema;
@@ -113,6 +111,3 @@ export const datalogQuery = recipe(
   result: OpaqueRef<T[]>;
   query: OpaqueRef<any>;
 };
-
-addRecipe(zodSchemaQuery as RecipeFactory<any, any>);
-addRecipe(datalogQuery as RecipeFactory<any, any>);

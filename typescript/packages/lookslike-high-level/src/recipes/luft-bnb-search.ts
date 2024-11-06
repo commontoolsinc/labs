@@ -56,11 +56,11 @@ const copy = lift(({ value }: { value: string }) => value);
 const asStars = lift((rating: number) => "⭐".repeat(Math.round(rating)));
 
 const justMonthAndDay = lift((isoDate: string) =>
-  isoDate.split("T")[0].slice(5)
+  isoDate.split("T")[0].slice(5),
 );
 
 const updateValue = handler<{ detail: { value: string } }, { value: string }>(
-  ({ detail }, state) => detail?.value && (state.value = detail.value)
+  ({ detail }, state) => detail?.value && (state.value = detail.value),
 );
 
 const handleSearchClick = handler<
@@ -93,7 +93,7 @@ const makeBooking = handler<{}, { place: LuftBnBPlace }>((_, { place }) => {
       // currying of the recipe for this to work.
       startDate: "2024-09-06",
       endDate: "2024-09-08",
-    })
+    }),
   );
 });
 
@@ -109,14 +109,14 @@ export const luftBnBSearch = recipe<{
   startDate: string;
   endDate: string;
   location: string;
-}>("luft bnb search", ({ startDate, endDate, location }) => {
+}>("Luft BnB Search", ({ startDate, endDate, location }) => {
   // TODO: This works because we recreate the recipe every time, but really this
   // should be dynamically generated at runtime.
   startDate.setDefault(
-    new Date(new Date().getTime() + 86400).toISOString().split("T")[0]
+    new Date(new Date().getTime() + 86400).toISOString().split("T")[0],
   );
   endDate.setDefault(
-    new Date(new Date().getTime() + 3 * 86400).toISOString().split("T")[0]
+    new Date(new Date().getTime() + 3 * 86400).toISOString().split("T")[0],
   );
   // TODO: This should be the user's default location, not hardcoded
   location.setDefault("San Francisco");
@@ -180,8 +180,8 @@ export const luftBnBSearch = recipe<{
                   Book for $${place.pricePerNight} per night
                 </common-button>
                 ${place.annotationUI}
-              </common-vstack>`
-          )
+              </common-vstack>`,
+          ),
         )}
         </common-vstack>
       </common-vstack>
@@ -189,7 +189,7 @@ export const luftBnBSearch = recipe<{
     location,
     places,
     [NAME]: str`LuftBnB ${justMonthAndDay(startDate)} - ${justMonthAndDay(
-      endDate
+      endDate,
     )} in ${location}`,
   };
 });
@@ -313,7 +313,7 @@ const grabNearbyPlaces = lift<{ result?: string }, NearbyPlace[]>(
       return [];
     }
     return parsedData.data;
-  }
+  },
 );
 
 // NOTE: This writes results into `places`
@@ -324,7 +324,7 @@ const annotatePlacesWithNearbyPlaces = lift(({ nearbyPlaces, places }) => {
         places[i].annotationUI = html`<div>
           ${place.name} is ${place.walkingDistance} min away
         </div>`;
-    }
+    },
   );
 });
 
@@ -333,7 +333,7 @@ const nearbyPlacesForRoutine = recipe<{
   places: LuftBnBPlace[];
 }>("annotate places for routine", ({ routine, places }) => {
   const nearbyPlaces = grabNearbyPlaces(
-    llm(generateNearbyPlaceQuery({ routine, places }))
+    llm(generateNearbyPlaceQuery({ routine, places })),
   );
 
   annotatePlacesWithNearbyPlaces({ nearbyPlaces, places });

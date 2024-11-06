@@ -6,7 +6,7 @@ export const ticket = recipe<{
   show: string;
   location: string;
   date: string;
-}>("ticket", ({ title, show, location, date }) => ({
+}>("Ticket", ({ title, show, location, date }) => ({
   [UI]: html`<div>Ticket: ${show} in ${location} on ${date}</div>`,
   [NAME]: title,
 }));

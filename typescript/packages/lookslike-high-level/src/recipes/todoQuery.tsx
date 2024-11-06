@@ -1,10 +1,4 @@
-import {
-  UI,
-  NAME,
-  lift,
-  handler,
-  recipe,
-} from "@commontools/common-builder";
+import { UI, NAME, lift, handler, recipe } from "@commontools/common-builder";
 import * as z from "zod";
 import { eid, zodSchemaQuery } from "../query.js";
 import { h } from "@commontools/common-html";
@@ -85,7 +79,7 @@ const reducer = ({ msg }: { msg: Message }) => {
 };
 
 export const todoQuery = recipe(
-  z.object({ titleInput: z.string() }).describe("todo query"),
+  z.object({ titleInput: z.string() }).describe("Todo Query"),
   ({ titleInput }) => {
     const { result: items, query } = zodSchemaQuery(todoItem);
     tap({ obj: items });

@@ -391,7 +391,7 @@ export const iframe = recipe<{
   data: any;
   src?: string;
   filter?: string;
-}>("iframe", ({ title, prompt, filter, data, src }) => {
+}>("Iframe", ({ title, prompt, filter, data, src }) => {
   tap({ data });
   prompt.setDefault("");
   data.setDefault({});

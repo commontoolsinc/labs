@@ -23,7 +23,7 @@ const uniqueUrls = isolated<{ data: string }, { result: string }>(
     }
     const urls = Array.from(uniqueUrls);
     return { result: "unique URLs: " + JSON.stringify(urls) };
-  }
+  },
 );
 
 const stringify = lift(({ obj }) => {
@@ -32,7 +32,7 @@ const stringify = lift(({ obj }) => {
 });
 
 export const runtimeWorkbench = recipe<{ a?: string; b?: string; data: any }>(
-  "isolated hello world",
+  "Runtime Workbench",
   ({ a, b, data }) => {
     a.setDefault("hello");
     b.setDefault("world");
@@ -51,5 +51,5 @@ export const runtimeWorkbench = recipe<{ a?: string; b?: string; data: any }>(
       </div> `,
       urls: urls,
     };
-  }
+  },
 );

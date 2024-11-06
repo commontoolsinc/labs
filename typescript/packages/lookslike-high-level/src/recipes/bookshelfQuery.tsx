@@ -148,10 +148,12 @@ clear how to do that yet.
 */
 
 export const bookshelfQuery = recipe(
-  z.object({
-    titleInput: z.string().default(""),
-    authorInput: z.string().default(""),
-  }),
+  z
+    .object({
+      titleInput: z.string().default(""),
+      authorInput: z.string().default(""),
+    })
+    .describe("Bookshelf query"),
   ({ titleInput, authorInput }) => {
     const { result: items, query } = zodSchemaQuery(schema);
     tap({ obj: items });

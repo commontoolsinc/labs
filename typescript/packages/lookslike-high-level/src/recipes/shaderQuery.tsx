@@ -110,11 +110,13 @@ const onUpdateShaderBlendMode = handler<InputEvent, { shader: ShaderItem }>(
 const copy = lift(({ value }: { value: any }) => value);
 const stringify = lift((value: any) => JSON.stringify(value, null, 2));
 const shaderEditor = recipe(
-  z.object({
-    shader: schema,
-    sourceCode: z.string(),
-    blendMode: z.string(),
-  }),
+  z
+    .object({
+      shader: schema,
+      sourceCode: z.string(),
+      blendMode: z.string(),
+    })
+    .describe("Shader Editor"),
   ({ shader, sourceCode, blendMode }) => {
     const onCodeChange = handler<InputEvent, { newSource: string }>(
       (e, state) => {

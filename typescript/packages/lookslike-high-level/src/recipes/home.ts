@@ -11,7 +11,7 @@ const getCharmsWithNameAndUI = lift<Charm[], { charm: Charm }[]>((charms) =>
 export const home = recipe<{
   charms: Charm[];
   recipes: RecipeManifest[];
-}>("home screen", ({ charms, recipes }) => {
+}>("Home Screen", ({ charms, recipes }) => {
   return {
     [NAME]: "Home",
     [UI]: html`<common-vstack

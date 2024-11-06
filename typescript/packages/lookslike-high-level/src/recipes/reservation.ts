@@ -1,8 +1,8 @@
 import { recipe, NAME } from "@commontools/common-builder";
 
 export const reservation = recipe<{ title: string }>(
-  "reservation",
+  "Reservation",
   ({ title }) => ({
     [NAME]: title,
-  })
+  }),
 );

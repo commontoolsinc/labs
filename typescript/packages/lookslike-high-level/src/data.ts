@@ -12,50 +12,12 @@ import {
   type ReactivityLog,
   createRef,
   addRecipe,
-  getRecipe,
+  allRecipesByName,
   idle,
   EntityId,
-  getCellByEntityId,
 } from "@commontools/common-runner";
 import { createStorage } from "./storage.js";
-
-import { todoList } from "./recipes/todo-list.js";
-import { localSearch } from "./recipes/local-search.js";
-import { luftBnBSearch } from "./recipes/luft-bnb-search.js";
-import { ticket } from "./recipes/ticket.js";
-import { routine } from "./recipes/routine.js";
-import { fetchExample } from "./recipes/fetchExample.js";
-import { counter } from "./recipes/counter.js";
-import { counters } from "./recipes/counters.js";
-import { tweets } from "./recipes/tweets.jsx";
-
-// Necessary, so that suggestions are indexed.
-import "./recipes/todo-list-as-task.js";
-import "./recipes/playlist.js";
-
-import { iframe } from "./recipes/iframe.js";
-import { search } from "./recipes/search.js";
-import { dataDesigner } from "./recipes/dataDesigner.js";
-import { prompt } from "./recipes/prompts.js";
-import { wiki } from "./recipes/wiki.js";
-import { queryCollections } from "./recipes/queryCollections.js";
-import { articleQuery } from "./recipes/articleQuery.jsx";
-import { debounceExample } from "./recipes/examples/debounce.jsx";
-import { calc } from "./recipes/examples/calculator.jsx";
-import { rectangleQuery } from "./recipes/examples/rectangleQuery.jsx";
-import { evalJs } from "./recipes/examples/eval.js";
-import { importCalendar } from "./recipes/archive/importCalendar.js";
-import { dungeon } from "./recipes/archive/dungeon.js";
-import { jsonImporter } from "./recipes/archive/jsonImport.js";
-import { helloIsolated } from "./recipes/examples/helloIsolated.js";
-import { shoelaceDemo } from "./recipes/examples/shoelace.jsx";
-import { z } from "zod";
-import { datalogQueryExample } from "./recipes/datalogQuery.jsx";
-import { todoQuery } from "./recipes/todoQuery.jsx";
-import { shaderQuery } from "./recipes/shaderQuery.jsx";
-
-(window as any).getRecipe = getRecipe;
-(window as any).getCellByEntityId = getCellByEntityId;
+import * as allRecipes from "./recipes/index.js";
 
 export type Charm = {
   [NAME]?: string;
@@ -99,7 +61,6 @@ export async function runPersistent(
   inputs?: any,
   cause?: any,
 ): Promise<CellImpl<any>> {
-  addRecipe(recipe);
   await idle();
   return run(
     recipe,
@@ -116,88 +77,7 @@ export async function syncCharm(
 }
 
 addCharms([
-  await runPersistent(todoQuery, { titleInput: "" }, "Persisted Todos"),
-  await runPersistent(
-    shaderQuery,
-    { sourceCode: "", prompt: "", focused: "", triggerPrompt: "" },
-    "Persisted Shaders",
-  ),
-  await runPersistent(
-    datalogQueryExample,
-    {
-      query: {
-        select: {
-          ".": "?item",
-          title: "?title",
-        },
-        where: [
-          {
-            Case: ["?item", "title", "?title"],
-          },
-        ],
-      },
-    },
-    "Datalog Query Playground",
-  ),
-  await runPersistent(shoelaceDemo, {}, "shoelace"),
-  await runPersistent(
-    iframe,
-    {
-      title: "two way binding counter",
-      prompt: "counter",
-      data: { counter: 0 },
-    },
-    "iframe",
-  ),
-  await runPersistent(
-    todoList,
-    {
-      title: "My TODOs",
-      items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) => ({
-        title: item,
-        done: false,
-      })),
-    },
-    "todoList",
-  ),
-  await runPersistent(
-    todoList,
-    {
-      title: "My grocery shopping list",
-      items: ["milk", "eggs", "bread"].map((item) => ({
-        title: item,
-        done: false,
-      })),
-    },
-    "todoList",
-  ),
-  await runPersistent(
-    ticket,
-    {
-      title: "Reservation for 'Counterstrike the Musical'",
-      show: "Counterstrike the Musical",
-      date: getFridayAndMondayDateStrings().startDate,
-      location: "New York",
-    },
-    "ticket",
-  ),
-  await runPersistent(
-    routine,
-    {
-      title: "Morning routine",
-      // TODO: A lot more missing here, this is just to drive the suggestion.
-      locations: ["coffee shop with great baristas"],
-    },
-    "routine",
-  ),
-  await runPersistent(counters, {}, "counters"),
-  await runPersistent(
-    tweets,
-    {
-      username: "@gordonbrander",
-    },
-    "tweets",
-  ),
+  //runPersistent(<recipe>, <default inputs>, <unique name for a stable id>)
 ]);
 
 export type RecipeManifest = {
@@ -205,46 +85,16 @@ export type RecipeManifest = {
   recipeId: string;
 };
 
-export const recipes: RecipeManifest[] = [
-  {
-    name: "Create a new TODO list",
-    recipeId: addRecipe(todoList),
-  },
-  {
-    name: "Explore query",
-    recipeId: addRecipe(datalogQueryExample),
-  },
-  {
-    name: "Find places",
-    recipeId: addRecipe(localSearch),
-  },
-  {
-    name: "Find a LuftBnB place to stay",
-    recipeId: addRecipe(luftBnBSearch),
-  },
-  {
-    name: "Create a counter",
-    recipeId: addRecipe(counter),
-  },
-  {
-    name: "Create multiple counters",
-    recipeId: addRecipe(counters),
-  },
-  {
-    name: "Explore imagery prompts",
-    recipeId: addRecipe(prompt),
-  },
-  {
-    name: "Explore Halucinated wiki",
-    recipeId: addRecipe(wiki),
-  },
-];
+export const recipes: RecipeManifest[] = Object.entries(allRecipes).map(
+  ([name, recipe]) => ({
+    name: (recipe.schema as { description: string })?.description ?? name,
+    recipeId: addRecipe(recipe),
+  }),
+);
 
-(window as any).recipes = recipes;
+(window as any).recipes = allRecipesByName();
 
-// Register `iframe` recipe (but can't be started from recipe list)
-addRecipe(iframe);
-
+/* TODO: Recreate test data for reservations that used to use this
 // Helper for mock data
 function getFridayAndMondayDateStrings() {
   const today = new Date();
@@ -266,6 +116,7 @@ function getFridayAndMondayDateStrings() {
     endDate: formatDate(followingMonday),
   };
 }
+*/
 
 // Terrible hack to open a charm from a recipe
 let openCharmOpener: (charmId: string) => void = () => {};

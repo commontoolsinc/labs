@@ -16,10 +16,8 @@ export const schema = z.object({
   tags: z.array(z.string()),
 });
 
-type Article = z.infer<typeof schema>;
-
 const onAddItem = handler<{}, { titleInput: string; authorInput: string }>(
-  (e, state) => {
+  (_e, state) => {
     const titleInput = state.titleInput;
     const authorInput = state.authorInput;
     state.titleInput = "";
@@ -52,7 +50,7 @@ const prepChanges = lift(({ titleInput, authorInput }) => {
 export const articleQuery = recipe(
   z
     .object({ titleInput: z.string(), authorInput: z.string() })
-    .describe("article query"),
+    .describe("Articles query"),
   ({ titleInput, authorInput }) => {
     const { result: items, query } = zodSchemaQuery(schema);
     tap({ obj: items });
