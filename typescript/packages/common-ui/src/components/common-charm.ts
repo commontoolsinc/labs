@@ -105,22 +105,19 @@ export class CommonCharm extends HTMLElement {
   }
 
   upsert(attribute: string, value: unknown) {
-    const changes = [] as DB.API.Instruction[];
+    const changes = [] as DB.Instruction[];
     let state = this.state.get(attribute);
     if (state) {
-      changes.push({
-        Retract: [this.entity, attribute, `${attribute}@${state.remote}`],
-      });
       state.local++;
-      state.remote = state.local;
       state.value = value;
     } else {
       state = { local: 1, remote: 1, value };
       this.state.set(attribute, state);
     }
+    state.remote = state.local;
 
     changes.push({
-      Assert: [this.entity, attribute, `${attribute}@${state.remote}`],
+      Upsert: [this.entity, attribute, `${attribute}@${state.remote}`],
     });
     return changes;
   }
@@ -230,6 +227,13 @@ export function* drive<Selection extends DB.Selector>(
               } else {
                 commit.push(change);
               }
+            } else if (change.Upsert) {
+              const [_entity, attribute, value] = change.Upsert;
+              if (String(attribute).startsWith("~/")) {
+                commit.push(...charm.upsert(String(attribute), value));
+              } else {
+                commit.push(change);
+              }
             } else if (change.Retract) {
               const [_entity, attribute, value] = change.Retract;
               if (String(attribute).startsWith("~/")) {
@@ -271,6 +275,7 @@ const read = (
     // to it again.
     if (revision && revision.local === remote.version) {
       revision.local++;
+      delete revision.value;
       return { ok: revision.value };
     } else {
       return { error: new Error("Inconsistent") };
