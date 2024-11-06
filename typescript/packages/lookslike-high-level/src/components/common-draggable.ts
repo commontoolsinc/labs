@@ -22,6 +22,7 @@ export default class DraggableElement extends LitElement {
 
     .draggable.dragging .draggable-scrim {
       display: block;
+      cursor: move;
     }
   `;
 
