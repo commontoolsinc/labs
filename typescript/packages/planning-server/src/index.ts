@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
-import { streamText, generateText } from "npm:ai";
+import { generateText, streamText } from "npm:ai";
 import { crypto } from "https://deno.land/std/crypto/mod.ts";
 import { config } from "https://deno.land/x/dotenv/mod.ts";
 import { findModel, MODELS } from "./models.ts";
@@ -8,11 +8,10 @@ import { colors, timestamp, timeTrack } from "./cli.ts";
 
 await config({ export: true });
 
-
 const handler = async (request: Request): Promise<Response> => {
   const startTime = Date.now();
-  const requestId =
-    colors.cyan + `[${crypto.randomUUID().slice(0, 8)}]` + colors.reset;
+  const requestId = colors.cyan + `[${crypto.randomUUID().slice(0, 8)}]` +
+    colors.reset;
 
   if (request.method === "GET") {
     return new Response("Hello World");
@@ -33,20 +32,28 @@ const handler = async (request: Request): Promise<Response> => {
 
       // Log request details with colors
       console.log(
-        `${timestamp()} ${requestId} ${colors.blue}📝 New request:${colors.reset} ${colors.bright}${payload.model}${colors.reset} | ${timeTrack(startTime)}`,
+        `${timestamp()} ${requestId} ${colors.blue}📝 New request:${colors.reset} ${colors.bright}${payload.model}${colors.reset} | ${
+          timeTrack(startTime)
+        }`,
       );
       console.log(
-        `${timestamp()} ${requestId} ${colors.magenta}💭 System:${colors.reset} ${payload.system?.slice(0, 100)}...`,
+        `${timestamp()} ${requestId} ${colors.magenta}💭 System:${colors.reset} ${
+          payload.system?.slice(0, 100)
+        }...`,
       );
       console.log(
-        `${timestamp()} ${requestId} ${colors.yellow}💬 Last message:${colors.reset} ${payload.messages[payload.messages.length - 1].content.slice(0, 100)}...`,
+        `${timestamp()} ${requestId} ${colors.yellow}💬 Last message:${colors.reset} ${
+          payload.messages[payload.messages.length - 1].content.slice(0, 100)
+        }...`,
       );
 
       const cacheKey = await cache.hashKey(JSON.stringify(payload));
       const cachedResult = await cache.loadItem(cacheKey);
       if (cachedResult) {
         console.log(
-          `${timestamp()} ${requestId} ${colors.green}⚡️ Cache hit!${colors.reset} | ${timeTrack(startTime)}`,
+          `${timestamp()} ${requestId} ${colors.green}⚡️ Cache hit!${colors.reset} | ${
+            timeTrack(startTime)
+          }`,
         );
         const lastMessage =
           cachedResult.messages[cachedResult.messages.length - 1];
@@ -60,14 +67,22 @@ const handler = async (request: Request): Promise<Response> => {
         console.warn(
           `${timestamp()} ${requestId} ${colors.yellow}⚠️  Unsupported model:${colors.reset} ${payload.model}`,
         );
-        return new Response(JSON.stringify({ error: `Unsupported model: ${payload.model}`, availableModels: Object.keys(MODELS) }), {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify({
+            error: `Unsupported model: ${payload.model}`,
+            availableModels: Object.keys(MODELS),
+          }),
+          {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
       }
 
       console.log(
-        `${timestamp()} ${requestId} ${colors.blue}🚀 Starting generation${colors.reset} | ${timeTrack(startTime)}`,
+        `${timestamp()} ${requestId} ${colors.blue}🚀 Starting generation${colors.reset} | ${
+          timeTrack(startTime)
+        }`,
       );
 
       let messages = payload.messages;
@@ -117,14 +132,18 @@ const handler = async (request: Request): Promise<Response> => {
             // NOTE: the llm doesn't send text we put into its mouth, so we need to
             // manually send it so that streaming client sees everything assistant 'said'
             if (messages[messages.length - 1].role === "assistant") {
-              controller.enqueue(new TextEncoder().encode(JSON.stringify(result) + '\n'));
+              controller.enqueue(
+                new TextEncoder().encode(JSON.stringify(result) + "\n"),
+              );
             }
             for await (const delta of llmStream.textStream) {
               result += delta;
               tokenCount++;
               if (tokenCount % 100 === 0) {
                 console.log(
-                  `${timestamp()} ${requestId} ${colors.blue}📊 Generated${colors.reset} ${colors.bright}${tokenCount}${colors.reset} tokens | ${timeTrack(startTime)}`,
+                  `${timestamp()} ${requestId} ${colors.blue}📊 Generated${colors.reset} ${colors.bright}${tokenCount}${colors.reset} tokens | ${
+                    timeTrack(startTime)
+                  }`,
                 );
               }
               controller.enqueue(
@@ -133,7 +152,9 @@ const handler = async (request: Request): Promise<Response> => {
             }
 
             console.log(
-              `${timestamp()} ${requestId} ${colors.green}✅ Stream complete:${colors.reset} ${colors.bright}${tokenCount}${colors.reset} tokens | ${timeTrack(startTime)}`,
+              `${timestamp()} ${requestId} ${colors.green}✅ Stream complete:${colors.reset} ${colors.bright}${tokenCount}${colors.reset} tokens | ${
+                timeTrack(startTime)
+              }`,
             );
 
             if ((await llmStream.finishReason) === "stop" && payload.stop) {
@@ -167,12 +188,16 @@ const handler = async (request: Request): Promise<Response> => {
       }
 
       console.log(
-        `${timestamp()} ${requestId} ${colors.green}✅ Generation complete:${colors.reset} ${colors.bright}${tokenCount}${colors.reset} tokens | ${timeTrack(startTime)}`,
+        `${timestamp()} ${requestId} ${colors.green}✅ Generation complete:${colors.reset} ${colors.bright}${tokenCount}${colors.reset} tokens | ${
+          timeTrack(startTime)
+        }`,
       );
 
       if (!result) {
         console.error(
-          `${timestamp()} ${requestId} ${colors.red}❌ No response from LLM${colors.reset} | ${timeTrack(startTime)}`,
+          `${timestamp()} ${requestId} ${colors.red}❌ No response from LLM${colors.reset} | ${
+            timeTrack(startTime)
+          }`,
         );
         return new Response(JSON.stringify({ error: "No response from LLM" }), {
           status: 500,
@@ -200,7 +225,9 @@ const handler = async (request: Request): Promise<Response> => {
       );
     } catch (error) {
       console.error(
-        `${timestamp()} ${requestId} ${colors.red}❌ Error: ${(error as Error).message}${colors.reset} | ${timeTrack(startTime)}`,
+        `${timestamp()} ${requestId} ${colors.red}❌ Error: ${
+          (error as Error).message
+        }${colors.reset} | ${timeTrack(startTime)}`,
       );
       return new Response(JSON.stringify({ error: (error as Error).message }), {
         status: 400,
@@ -217,6 +244,8 @@ console.log(`
 ${colors.bright}${colors.blue}🚀 Planning Server Ready${colors.reset}
 ${colors.cyan}🌍 http://localhost:${port}/${colors.reset}
 ${colors.yellow}📝 Cache directory: ${cache.CACHE_DIR}${colors.reset}
-${colors.magenta}🤖 Available models: ${Object.keys(MODELS).join(", ")}${colors.reset}
+${colors.magenta}🤖 Available models: ${
+  Object.keys(MODELS).join(", ")
+}${colors.reset}
 `);
 await serve(handler, { port: parseInt(port) });

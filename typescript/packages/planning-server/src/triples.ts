@@ -184,7 +184,7 @@ async function storeMemoryWithConnections(newMemory: any) {
   const relatedMemories = datascript.q(
     relatedMemoriesQuery,
     datascript.db(conn),
-    newMemory["note/tag"]
+    newMemory["note/tag"],
   );
 
   console.log("Related Memories:", relatedMemories);
@@ -202,7 +202,7 @@ async function storeMemoryWithConnections(newMemory: any) {
   const newMemoryId = datascript.q(
     newMemoryIdQuery,
     datascript.db(conn),
-    newMemory["note/timestamp"]
+    newMemory["note/timestamp"],
   );
 
   console.log("New Memory ID:", newMemoryId);
