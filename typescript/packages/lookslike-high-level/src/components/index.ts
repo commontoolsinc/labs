@@ -9,3 +9,5 @@ export * as CommonFileImporter from "./import-wrapper.js";
 export * as CommonAsciiLoader from "./ascii-loader.js";
 export * as CommonMarkdown from "./markdown.js";
 export * as CommonShaderLayer from "./shader-layer.js";
+export * as CommonDroppable from "./common-droppable.js";
+export * as CommonDraggable from "./common-draggable.js";

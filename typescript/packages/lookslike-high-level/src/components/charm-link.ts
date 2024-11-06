@@ -57,8 +57,8 @@ export class CommonCharmLink extends LitElement {
     let { [NAME]: name } = this.charm.get();
 
     if (isReactive(name)) {
-      this.nameEffect = name.sink((name: string) => {
-        this.nameFromCharm = name;
+      this.nameEffect = name.sink((name: unknown) => {
+        this.nameFromCharm = name as string;
         if (!skipUpdate) this.requestUpdate();
         skipUpdate = false;
       });
@@ -74,7 +74,7 @@ export class CommonCharmLink extends LitElement {
         detail: { charmId: JSON.stringify(this.charm!.entityId) },
         bubbles: true,
         composed: true,
-      })
+      }),
     );
   }
 
