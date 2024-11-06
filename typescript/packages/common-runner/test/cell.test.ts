@@ -326,10 +326,10 @@ describe("JSON.stringify bug", () => {
     expect(json).toEqual('{"internal":{"a":1}}');
     expect(JSON.stringify(c.get())).toEqual('{"result":{"data":1}}');
     expect(JSON.stringify(d.get())).toEqual(
-      '{"internal":{"__#2":{"cell":{"/":"baedreiegj763p2gzfblgw7mayzbacgjenzsyjtld2tdbxqjpofhbbtfgay"},"path":["result"]}}}',
+      `{"internal":{"__#2":{"cell":${JSON.stringify(c.entityId)},"path":["result"]}}}`,
     );
     expect(JSON.stringify(e.get())).toEqual(
-      '{"internal":{"a":{"$alias":{"cell":{"/":"baedreig7stoanix5pjstgdwsy2lavvb22iyj2fk7huu5idryxx4cuz4cze"},"path":["internal","__#2","data"]}}}}',
+      `{"internal":{"a":{"$alias":{"cell":${JSON.stringify(d.entityId)},"path":["internal","__#2","data"]}}}}`,
     );
   });
 });
