@@ -31,7 +31,6 @@ describe("runRecipe", () => {
     await idle();
 
     expect(result.sourceCell?.getAsQueryResult()).toMatchObject({
-      [TYPE]: "passthrough",
       parameters: { input: 1 },
       internal: { output: 1 },
     });
@@ -53,7 +52,7 @@ describe("runRecipe", () => {
           output: { type: "number" },
         },
       },
-      result: { output: { $alias: { path: ["internal", "output"] } } },
+      result: { $alias: { path: ["internal", "output"] } },
       nodes: [
         {
           module: {
@@ -78,7 +77,7 @@ describe("runRecipe", () => {
         {
           module: { type: "recipe", implementation: innerRecipe },
           inputs: { input: { $alias: { path: ["parameters", "value"] } } },
-          outputs: { output: { $alias: { path: ["internal", "output"] } } },
+          outputs: { $alias: { path: ["internal", "output"] } },
         },
       ],
     } as Recipe;
@@ -165,7 +164,7 @@ describe("runRecipe", () => {
   it("should handle nested recipes", async () => {
     const nestedRecipe: Recipe = {
       schema: {},
-      result: { output: { $alias: { path: ["internal", "result"] } } },
+      result: { $alias: { path: ["internal", "result"] } },
       nodes: [
         {
           module: {
@@ -185,7 +184,7 @@ describe("runRecipe", () => {
         {
           module: { type: "recipe", implementation: nestedRecipe },
           inputs: { input: { $alias: { path: ["parameters", "value"] } } },
-          outputs: { output: { $alias: { path: ["internal", "result"] } } },
+          outputs: { $alias: { path: ["internal", "result"] } },
         },
       ],
     };
