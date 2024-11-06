@@ -288,7 +288,7 @@ export function createJsonSchema(
 
 export function moduleToJSON(module: Module) {
   return {
-    type: module.type,
+    ...module,
     implementation:
       typeof module.implementation === "function"
         ? module.implementation.toString()
