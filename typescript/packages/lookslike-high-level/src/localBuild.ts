@@ -6,7 +6,12 @@ import * as zod from "zod";
 
 
 // NOTE(ja): this isn't currently doing typechecking, but it could...
-export const buildRecipe = ({ src }: { src: string }): { recipe: commonBuilder.Recipe } | { errors: string } => {
+
+// NOTE(ja): we should probably send JSON of graph, not the function... but...
+// 1. unsure how to run a JSON graph from a recipe
+// 2. converting to JSON loses closures (which is we will want, but we 
+//    currently use closures to get around gaps in the current implementation)
+export const buildRecipe = (src: string): { recipe?: commonBuilder.Recipe, errors?: string } => {
     if (!src) {
         return { errors: "No source code provided" }
     }
