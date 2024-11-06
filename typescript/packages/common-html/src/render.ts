@@ -94,10 +94,7 @@ const bindChildren = (
       let endAnchor: ChildNode | undefined = undefined;
       element.append(anchor);
       const replace = (replacement: any) => {
-        if (isReactive(replacement)) {
-          const cancel = effect(replacement, replace);
-          addCancel(cancel);
-        } else if (Array.isArray(replacement)) {
+        if (Array.isArray(replacement)) {
           // TODO: Probably should move this up and instead only support the
           // case where all the children are dynamic. That is, call bindChildren
           // again from effect.
