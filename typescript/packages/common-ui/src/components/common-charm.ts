@@ -22,6 +22,11 @@ export const cardContainer = view("common-charm", {
   ...eventProps(),
 });
 
+export type LocalState = Map<
+  string,
+  { local: number; remote: number; value: unknown }
+>;
+
 @customElement("common-charm")
 export class CommonCharm extends HTMLElement {
   #root: ShadowRoot;
@@ -31,7 +36,7 @@ export class CommonCharm extends HTMLElement {
   #vdom: DOM.Node<{}> | null;
   mount: HTMLElement;
 
-  nodes: Map<string, DOM.Node<{}>>;
+  state: LocalState;
   constructor() {
     super();
     // Set up shadow and styles
@@ -42,7 +47,7 @@ export class CommonCharm extends HTMLElement {
 
     this.#spell = null;
     this.#entity = null;
-    this.nodes = new Map();
+    this.state = new Map();
     this.#vdom = null;
   }
   get vdom() {
@@ -56,10 +61,29 @@ export class CommonCharm extends HTMLElement {
     const replica = await DB.Task.perform(
       DB.open({
         remote: {
-          url: new URL("/api/data/", location.href),
+          // url: new URL("/api/data/", location.href),
+          url: new URL("http://localhost:8080/"),
 
-          fetch: ((init, options) => {
-            return fetch(init, options);
+          fetch: (async (init: Request) => {
+            const { method, headers, url } = init;
+            const body =
+              method === "GET"
+                ? undefined
+                : method === "HEAD"
+                  ? undefined
+                  : new Uint8Array(await init.arrayBuffer());
+
+            while (true) {
+              let request = await fetch(url, {
+                headers,
+                method,
+                body,
+              });
+              if (request.status != 0) {
+                return request;
+              }
+              await new Promise((resolve) => setTimeout(resolve, 100));
+            }
           }) as typeof fetch,
         },
       }),
@@ -76,12 +100,43 @@ export class CommonCharm extends HTMLElement {
   }
 
   dispatch([attribute, event]: [string, Event]) {
-    const remote = box(event);
-    this.replica.transact([
-      {
-        Assert: [this.entity, attribute, remote] as DB.Fact,
-      },
-    ]);
+    const changes = this.upsert(attribute, event);
+    DB.Task.perform(this.transact(changes));
+  }
+
+  upsert(attribute: string, value: unknown) {
+    const changes = [] as DB.API.Instruction[];
+    let state = this.state.get(attribute);
+    if (state) {
+      changes.push({
+        Retract: [this.entity, attribute, `${attribute}@${state.remote}`],
+      });
+      state.local++;
+      state.remote = state.local;
+      state.value = value;
+    } else {
+      state = { local: 1, remote: 1, value };
+      this.state.set(attribute, state);
+    }
+
+    changes.push({
+      Assert: [this.entity, attribute, `${attribute}@${state.remote}`],
+    });
+    return changes;
+  }
+  retract(attribute: string, value: any) {
+    const changes = [] as DB.API.Instruction[];
+    const state = this.state.get(attribute);
+    if (state) {
+      changes.push({
+        Retract: [this.entity, attribute, `${attribute}@${state.remote}`],
+      });
+      state.local++;
+      state.remote = state.local;
+    } else {
+      changes.push({ Retract: [this.entity, attribute, value] });
+    }
+    return changes;
   }
 
   get replica() {
@@ -104,6 +159,11 @@ export class CommonCharm extends HTMLElement {
 
   get root() {
     return this.#root;
+  }
+
+  *transact(changes: DB.Transaction) {
+    yield* this.replica.transact(changes);
+    render(this);
   }
 }
 
@@ -134,9 +194,6 @@ export const spell = <Source extends Record<string, any>>(behavior: {
   [K in keyof Source]: Rule<Source[K]>;
 }): { [K in keyof Source]: Rule<Source[K]> } => behavior;
 
-const isVDOM = (node: unknown): node is DOM.Node<{}> =>
-  typeof node === "object" && node !== null && "nodeType" in node;
-
 export function* drive<Selection extends DB.Selector>(
   charm: CommonCharm,
   rule: Rule<Selection>,
@@ -160,24 +217,23 @@ export function* drive<Selection extends DB.Selector>(
         throw new RangeError(
           `Expected single match but got ${selection.length}`,
         );
-      } else {
-        const changes = rule.update(selection[0]);
-        const commit = [];
-        for (const change of changes) {
-          if (change.Assert) {
-            const [entity, attribute, value] = change.Assert;
-            if (String(attribute).startsWith("~/")) {
-              if (isVDOM(value)) {
-                charm.nodes.set(String(attribute), value);
-              }
-              commit.push({ Assert: [entity, attribute, box(value)] } as const);
-            } else if (change.Retract) {
-              const [entity, attribute, value] = change.Retract;
+      } else if (selection.length === 1) {
+        const match = read(selection[0], charm.state);
+        if (match.ok) {
+          const changes = rule.update(match.ok);
+          const commit = [];
+          for (const change of changes) {
+            if (change.Assert) {
+              const [_entity, attribute, value] = change.Assert;
               if (String(attribute).startsWith("~/")) {
-                const remote = box(value as any);
-                REFS.delete(remote);
-                charm.nodes.delete(String(attribute));
-                commit.push({ Retract: [entity, attribute, remote] } as const);
+                commit.push(...charm.upsert(String(attribute), value));
+              } else {
+                commit.push(change);
+              }
+            } else if (change.Retract) {
+              const [_entity, attribute, value] = change.Retract;
+              if (String(attribute).startsWith("~/")) {
+                commit.push(...charm.retract(String(attribute), value));
               } else {
                 commit.push(change);
               }
@@ -185,31 +241,70 @@ export function* drive<Selection extends DB.Selector>(
               commit.push(change);
             }
           }
-          yield* replica.transact(commit);
+          yield* charm.transact(commit);
         }
       }
     }
   }
 }
 
-export const on = (
-  event: DOM.EncodedEvent["type"],
-  attribute: string = `~/on/${event}`,
-) =>
-  DOM.on(event, {
-    /**
-     *
-     * @param {DOM.EncodedEvent} event
-     */
-    decode(event) {
-      return {
-        message: /** @type {DB.Fact} */ [
-          attribute,
-          /** @type {any & DB.Entity} */ event,
-        ],
-      };
-    },
-  });
+const isLocalReference = (input: unknown): input is string =>
+  typeof input === "string" && input.startsWith("~/") && input.includes("@");
+
+export const parseReference = (source: unknown) => {
+  if (isLocalReference(source)) {
+    const [attribute, version] = source.split("@");
+    return { attribute, version: Number(version) };
+  } else {
+    return {};
+  }
+};
+
+const read = (
+  selection: unknown,
+  state: LocalState,
+): DB.API.Result<any, Error> => {
+  if (isLocalReference(selection)) {
+    const remote = parseReference(selection);
+    const revision = state.get(remote.attribute);
+    // We made a round trip so we increment local version to avoid reacting
+    // to it again.
+    if (revision && revision.local === remote.version) {
+      revision.local++;
+      return { ok: revision.value };
+    } else {
+      return { error: new Error("Inconsistent") };
+    }
+  } else if (selection === null) {
+    return { ok: null };
+  } else if (ArrayBuffer.isView(selection)) {
+    return { ok: selection };
+  } else if (Array.isArray(selection)) {
+    const members = [];
+    for (const element of selection) {
+      const member = read(element, state);
+      if (member.ok) {
+        members.push(member.ok);
+      } else {
+        return member;
+      }
+    }
+    return { ok: members };
+  } else if (typeof selection === "object") {
+    const result = {} as Record<string, any>;
+    for (const [key, value] of Object.entries(selection)) {
+      const member = read(value, state);
+      if (member.error) {
+        return member;
+      } else {
+        result[key] = member.ok;
+      }
+    }
+    return { ok: result };
+  } else {
+    return { ok: selection };
+  }
+};
 
 export const UI = "~/common/ui";
 /**
@@ -218,18 +313,20 @@ export const UI = "~/common/ui";
  *
  */
 export const render = (charm: CommonCharm) => {
-  /** @type {DB.Term<UI.Ref<UI.Node<[DB.Entity, string, object]>>>} */
-  const ui = charm.nodes.get(UI);
-  if (ui) {
+  const local = charm.state.get(UI);
+  if (local) {
+    const vdom = local.value as DOM.Node<{}>;
     if (charm.vdom === null) {
       charm.vdom = DOM.virtualize(charm.mount);
-    } else if (ui !== charm.vdom) {
-      const delta = DOM.diff(charm.vdom, ui as DOM.Node<{}>);
+    }
+    if (vdom !== charm.vdom) {
+      const delta = DOM.diff(charm.vdom, vdom);
       DOM.patch(charm.mount, charm.vdom, delta, {
         send(fact: [attribute: string, event: Event]) {
           charm.dispatch(fact);
         },
       });
+      charm.vdom = vdom;
     }
   }
 };
