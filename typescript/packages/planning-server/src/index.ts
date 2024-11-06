@@ -100,21 +100,19 @@ const handler = async (request: Request): Promise<Response> => {
         abortSignal?: AbortSignal;
       };
 
-      // NOTE(jake): Unfortunately the o1 model is a unique snowflake, and requires
-      // a distinctly different request payload than the other models..
-      //
-      // We can't send a system prompt, stop sequences, or max_tokens.
-      if (payload.model?.startsWith("openai:o1")) {
+      params = {
+        ...params,
+        system: payload.system,
+        stopSequences: payload.stop ? [payload.stop] : undefined,
+        abortSignal: request.signal,
+      };
+
+      // If the model doesn't support system prompts, we need to prepend the system
+      // prompt to the first message.
+      if (!modelConfig.capabilities.systemPrompt) {
         if (payload.system && messages.length > 0) {
           messages[0].content = `${payload.system}\n\n${messages[0].content}`;
         }
-      } else {
-        params = {
-          ...params,
-          system: payload.system,
-          stopSequences: payload.stop ? [payload.stop] : undefined,
-          abortSignal: request.signal,
-        };
       }
 
       const llmStream = await streamText(params);
