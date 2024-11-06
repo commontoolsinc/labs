@@ -8,7 +8,7 @@ import {
   prepUpdateRequest,
 } from "../mutation.js";
 import { resource } from "./resource.js";
-import { input } from "./input.jsx";
+import { input } from "./examples/input.jsx";
 
 const tap = lift((x) => {
   console.log(x, JSON.stringify(x, null, 2));

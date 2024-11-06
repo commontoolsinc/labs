@@ -44,7 +44,7 @@ const deleteItem = handler<{}, { items: TodoItem[]; item: TodoItem }>(
   },
 );
 
-export const todoList = recipe(TodoList, ({ title, items }) => {
+export default recipe(TodoList, ({ title, items }) => {
   return {
     [NAME]: title,
     [UI]: (
