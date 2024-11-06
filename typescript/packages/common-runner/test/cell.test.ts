@@ -166,7 +166,7 @@ describe("createProxy", () => {
   });
 
   it("should correctly sort() with cell references", () => {
-    const c = cell({ a: [] as number[] });
+    const c = cell({ a: [] as number[] }, "sort-test");
     const log: ReactivityLog = { reads: [], writes: [] };
     const proxy = c.getAsQueryResult([], log);
     proxy.a = [3, 1, 2];

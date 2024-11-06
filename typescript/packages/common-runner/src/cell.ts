@@ -699,13 +699,24 @@ export function createQueryResultProxy<T>(
               });
               setNestedValue(valueCell, valuePath, copy, log);
 
-              if (Array.isArray(result))
-                normalizeToCells(result, undefined, log, {
+              if (Array.isArray(result)) {
+                if (!valueCell.entityId)
+                  throw new Error("No entity id for cell holding array");
+
+                const cause = {
                   parent: valueCell.entityId,
+                  path: valuePath,
                   resultOf: prop,
                   call: new Error().stack,
                   context: getTopFrame()?.cause ?? "unknown",
-                });
+                };
+                normalizeToCells(result, undefined, log, cause);
+
+                const resultCell = cell<any[]>(undefined, cause);
+                resultCell.send(result);
+
+                result = resultCell.getAsQueryResult([], log);
+              }
 
               return result;
             };
