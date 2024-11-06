@@ -23,7 +23,7 @@ export const on = (
     },
   });
 
-const entity = refer({ clicker: { v: 10 } });
+const entity = refer({ clicker: { v: 22 } });
 
 const Clicker = {
   init: {
@@ -73,10 +73,7 @@ const Clicker = {
     update: ({ count, event }: { count: number; event: any }) => {
       return [
         {
-          Retract: [entity, "clicks", count],
-        },
-        {
-          Assert: [entity, "clicks", count + 1],
+          Upsert: [entity, "clicks", count + 1],
         },
       ];
     },
