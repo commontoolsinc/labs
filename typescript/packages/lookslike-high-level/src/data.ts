@@ -77,7 +77,7 @@ export async function syncCharm(
 }
 
 addCharms([
-  //runPersistent(<recipe>, <default inputs>, <unique name for a stable id>)
+  //await runPersistent(<recipe>, <default inputs>, <unique name for a stable id>)
 ]);
 
 export type RecipeManifest = {
