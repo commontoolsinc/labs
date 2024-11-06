@@ -6,3 +6,11 @@ services:
         progress: plain
     ports:
       - "8000:8000"
+    environment:
+      - ANTHROPIC_API_KEY
+      - GOOGLE_API_KEY
+      - OPENAI_API_KEY
+      - GOOGLE_APPLICATION_CREDENTIALS
+      - GOOGLE_VERTEX_PROJECT
+      - GOOGLE_VERTEX_LOCATION
+      - GROQ_API_KEY
