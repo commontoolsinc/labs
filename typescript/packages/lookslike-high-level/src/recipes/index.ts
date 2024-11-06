@@ -15,6 +15,16 @@ import { chat } from "./chatty.js";
 addRecipe(chat, chatSrc);
 export { chat };
 
+import counterSrc from "./counter.tsx?raw";
+import counter from "./counter.js";
+addRecipe(counter, counterSrc);
+export { counter };
+
+import countersSrc from "./counters.tsx?raw";
+import counters from "./counters.js";
+addRecipe(counters, countersSrc);
+export { counters };
+
 import dataDesignerSrc from "./dataDesigner.ts?raw";
 import { dataDesigner } from "./dataDesigner.js";
 addRecipe(dataDesigner, dataDesignerSrc);
@@ -76,7 +86,7 @@ addRecipe(shoelaceDemo, shoelaceDemoSrc);
 export { shoelaceDemo };
 
 import todoListSrc from "./todo-list.tsx?raw";
-import { todoList } from "./todo-list.js";
+import todoList from "./todo-list.js";
 addRecipe(todoList, todoListSrc);
 export { todoList };
 
