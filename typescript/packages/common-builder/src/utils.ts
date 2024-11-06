@@ -135,8 +135,6 @@ export function toJSONWithAliases(
     value = createShadowRef(value);
 
   if (isOpaqueRef(value) || isShadowRef(value)) {
-    if (isShadowRef(value))
-      console.log("shadow ref", value, value.shadowOf.export?.());
     const pathToCell = paths.get(value);
     if (pathToCell) {
       if (ignoreSelfAliases && deepEqual(path, pathToCell)) return undefined;
@@ -152,7 +150,6 @@ export function toJSONWithAliases(
     const alias = (value as Alias).$alias;
     if (isShadowRef(alias.cell)) {
       const cell = alias.cell.shadowOf;
-      console.log("shadow ref alias", value, cell.export?.());
       if (cell.export().frame !== getTopFrame()) {
         let frame = getTopFrame();
         while (frame && frame.parent !== cell.export().frame)
@@ -287,7 +284,6 @@ export function createJsonSchema(
 }
 
 export function moduleToJSON(module: Module) {
-  console.log("moduleToJSON", module, typeof module.implementation);
   return {
     ...module,
     implementation:
