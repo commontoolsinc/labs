@@ -21,7 +21,7 @@ const build = lift<{ src: string, recipe: any, errors: string }>((state) => {
     console.log("build", state.src, state.errors, state.recipe)
 })
 
-const run = handler<{  }, { recipe: any }>(({ }, state) => {
+const run = handler<{}, { recipe: any }>(({ }, state) => {
     const data = {}; // FIXME(ja): this should be sent ...
     return navigateTo(state.recipe(data))
 })
@@ -30,7 +30,6 @@ const jsonify = lift(({ recipe }) => JSON.stringify(recipe, null, 2))
 
 export const coder = recipe<{
     src: string;
-    errors: string;
 }>("coder", ({ src }) => {
 
     const recipe = cell({})
@@ -44,17 +43,16 @@ export const coder = recipe<{
             {ifElse(
                 errors,
                 <pre>${errors}</pre>,
-                <span></span>
-            )}
-            {ifElse(
-                errors,
-                <span></span>,
-                <div>
-                    <button onclick={run({ recipe })}>Run</button>
-                    <os-code-editor source={jsonify({ recipe })}
-                        language="application/json"></os-code-editor>
-                </div>
-            )}
+                ifElse(
+                    recipe,
+                    <div>
+                        <button onclick={run({ recipe })}>Run</button>
+                        <os-code-editor source={jsonify({ recipe })}
+                            language="application/json"></os-code-editor>
+                    </div>,
+                    <span>no recipe graph.. are you missing the default export?</span>
+                ))
+            }
         </os-container>,
         [NAME]: "coder",
         recipeSrc: src,
