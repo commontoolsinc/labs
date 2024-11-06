@@ -51,7 +51,8 @@ export const coder = recipe<{
                 <span></span>,
                 <div>
                     <button onclick={run({ recipe })}>Run</button>
-                    <pre>{jsonify({ recipe })}</pre>
+                    <os-code-editor source={jsonify({ recipe })}
+                        language="application/json"></os-code-editor>
                 </div>
             )}
         </os-container>,
