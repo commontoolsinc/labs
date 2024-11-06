@@ -11,6 +11,6 @@
     "experimentalDecorators": true,
     "useDefineForClassFields": false
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "src/**/*.tsx"],
+  "include": ["src/**/*.ts", "test/**/*.ts", "src/**/*.tsx", "vite-env.d.ts"],
   "exclude": []
 }
