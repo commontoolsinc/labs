@@ -321,7 +321,7 @@ export class CommonWindowManager extends LitElement {
     };
 
     return html`
-      <common-import @common-data=${onImportLocalData}>
+      <common-xxx-import @common-data=${onImportLocalData}>
         <os-chrome
           ?wide=${this.wideSidebar}
           locationtitle=${this.focusedProxy?.[NAME] || "Untitled"}
@@ -449,7 +449,7 @@ export class CommonWindowManager extends LitElement {
             </common-sidebar>
           </os-navstack>
         </os-chrome>
-      </common-import>
+      </common-xxx-import>
     `;
   }
 

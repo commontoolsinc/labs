@@ -18,7 +18,12 @@ export const home = recipe<{
       >${getCharmsWithNameAndUI(charms).map(
         ({ charm }) =>
           html`<div>
-            <common-charm-link $charm=${charm}></common-charm-link>
+            <common-droppable
+              $droppable=${charm["action/drop/handler"]}
+              $schema=${charm["action/drop/schema"]}
+            >
+              <common-charm-link $charm=${charm}></common-charm-link>
+            </common-droppable>
           </div>`,
       )}
       ${recipes.map(
