@@ -97,7 +97,7 @@ export class CommonSidebar extends LitElement {
   override render() {
     const prompt = this.getFieldOrDefault("prompt", "");
     const data = this.getFieldOrDefault("data", {});
-    const src = this.getFieldOrDefault("partialHTML", "");
+    const src = this.getFieldOrDefault("recipeSrc", "");
     const schema = this.getFieldOrDefault("schema", {});
     const query = this.getFieldOrDefault("query", {});
 
@@ -145,6 +145,10 @@ export class CommonSidebar extends LitElement {
 
     const onDataChanged = (e: CustomEvent) => {
       this.setField("data", JSON.parse(e.detail.state.doc.toString()));
+    };
+
+    const onSrcChanged = (e: CustomEvent) => {
+      this.setField("recipeSrc", e.detail.state.doc.toString());
     };
 
     return html`
@@ -212,8 +216,9 @@ export class CommonSidebar extends LitElement {
                 <div>
                   <os-code-editor
                     slot="content"
-                    language="text/html"
+                    language="text/x.typescript"
                     .source=${watchCell(src)}
+                    @doc-change=${onSrcChanged}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
