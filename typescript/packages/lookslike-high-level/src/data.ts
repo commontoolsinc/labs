@@ -113,77 +113,77 @@ export async function syncCharm(
 
 addCharms([
   await runPersistent(charmExample, {}, "Charm Example"),
-  await runPersistent(mealExample, {}, "Meal Example"),
-  await runPersistent(todoQuery, { titleInput: "" }, "Persisted Todos"),
-  await runPersistent(
-    datalogQueryExample,
-    {
-      query: {
-        select: {
-          ".": "?item",
-          title: "?title",
-        },
-        where: [
-          {
-            Case: ["?item", "title", "?title"],
-          },
-        ],
-      },
-    },
-    "Datalog Query Playground",
-  ),
-  await runPersistent(shoelaceDemo, {}, "shoelace"),
-  await runPersistent(
-    iframe,
-    {
-      title: "two way binding counter",
-      prompt: "counter",
-      data: { counter: 0 },
-    },
-    "iframe",
-  ),
-  await runPersistent(
-    todoList,
-    {
-      title: "My TODOs",
-      items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) => ({
-        title: item,
-        done: false,
-      })),
-    },
-    "todoList",
-  ),
-  await runPersistent(
-    todoList,
-    {
-      title: "My grocery shopping list",
-      items: ["milk", "eggs", "bread"].map((item) => ({
-        title: item,
-        done: false,
-      })),
-    },
-    "todoList",
-  ),
-  await runPersistent(
-    ticket,
-    {
-      title: "Reservation for 'Counterstrike the Musical'",
-      show: "Counterstrike the Musical",
-      date: getFridayAndMondayDateStrings().startDate,
-      location: "New York",
-    },
-    "ticket",
-  ),
-  await runPersistent(
-    routine,
-    {
-      title: "Morning routine",
-      // TODO: A lot more missing here, this is just to drive the suggestion.
-      locations: ["coffee shop with great baristas"],
-    },
-    "routine",
-  ),
-  await runPersistent(counters, {}, "counters"),
+  // await runPersistent(mealExample, {}, "Meal Example"),
+  // await runPersistent(todoQuery, { titleInput: "" }, "Persisted Todos"),
+  // await runPersistent(
+  //   datalogQueryExample,
+  //   {
+  //     query: {
+  //       select: {
+  //         ".": "?item",
+  //         title: "?title",
+  //       },
+  //       where: [
+  //         {
+  //           Case: ["?item", "title", "?title"],
+  //         },
+  //       ],
+  //     },
+  //   },
+  //   "Datalog Query Playground",
+  // ),
+  // await runPersistent(shoelaceDemo, {}, "shoelace"),
+  // await runPersistent(
+  //   iframe,
+  //   {
+  //     title: "two way binding counter",
+  //     prompt: "counter",
+  //     data: { counter: 0 },
+  //   },
+  //   "iframe",
+  // ),
+  // await runPersistent(
+  //   todoList,
+  //   {
+  //     title: "My TODOs",
+  //     items: ["Buy groceries", "Walk the dog", "Wash the car"].map((item) => ({
+  //       title: item,
+  //       done: false,
+  //     })),
+  //   },
+  //   "todoList",
+  // ),
+  // await runPersistent(
+  //   todoList,
+  //   {
+  //     title: "My grocery shopping list",
+  //     items: ["milk", "eggs", "bread"].map((item) => ({
+  //       title: item,
+  //       done: false,
+  //     })),
+  //   },
+  //   "todoList",
+  // ),
+  // await runPersistent(
+  //   ticket,
+  //   {
+  //     title: "Reservation for 'Counterstrike the Musical'",
+  //     show: "Counterstrike the Musical",
+  //     date: getFridayAndMondayDateStrings().startDate,
+  //     location: "New York",
+  //   },
+  //   "ticket",
+  // ),
+  // await runPersistent(
+  //   routine,
+  //   {
+  //     title: "Morning routine",
+  //     // TODO: A lot more missing here, this is just to drive the suggestion.
+  //     locations: ["coffee shop with great baristas"],
+  //   },
+  //   "routine",
+  // ),
+  // await runPersistent(counters, {}, "counters"),
   // await runPersistent(
   //   tweets,
   //   {
