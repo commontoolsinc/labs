@@ -79,8 +79,4 @@ export default class DraggableElement extends LitElement {
       e.dataTransfer?.setData("application/json", data);
     }
   }
-
-  #handleDragEnd(e: DragEvent) {
-    console.log("draggable dragend", e);
-  }
 }
