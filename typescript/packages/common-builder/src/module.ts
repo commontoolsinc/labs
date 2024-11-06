@@ -65,6 +65,11 @@ export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
   });
 }
 
+export const derive = <In, Out>(
+  input: Opaque<In>,
+  f: (input: In) => Out,
+): OpaqueRef<Out> => lift(f)(input);
+
 export function handler<E, T>(
   handler: (event: E, props: T) => any,
 ): ModuleFactory<T, E> {
