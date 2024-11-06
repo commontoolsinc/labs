@@ -1,8 +1,8 @@
 import ts from 'typescript';
 import * as commonHtml from "@commontools/common-html";
 import * as commonBuilder from "@commontools/common-builder";
-import * as commonRunner from "@commontools/common-runner";
 import * as zod from "zod";
+import * as zodToJsonSchema from 'zod-to-json-schema';
 
 
 // NOTE(ja): this isn't currently doing typechecking, but it could...
@@ -23,10 +23,10 @@ export const buildRecipe = (src: string): { recipe?: commonBuilder.Recipe, error
                 return commonHtml;
             case "@commontools/common-builder":
                 return commonBuilder;
-            case "@commontools/common-runner":
-                return commonRunner;
             case "zod":
                 return zod;
+            case "zod-to-json-schema":
+                return zodToJsonSchema;
             default:
                 throw new Error(`Module not found: ${moduleName}`);
         }
