@@ -132,7 +132,42 @@ returns an object like
     },
     "aliases": ["anthropic:claude-3-opus-latest", "claude-3-opus"]
   }
+  ...
 }
+```
+
+You can also search this endpoint by using the `search` query parameter
+
+```bash
+curl http://localhost:8000/models?search=o1-mini
+```
+
+returns
+
+```json
+{
+  "openai:o1-mini-2024-09-12": {
+    "capabilities": {
+      "contextWindow": 128000,
+      "maxOutputTokens": 65536,
+      "images": false,
+      "prefill": false,
+      "systemPrompt": false,
+      "stopSequences": false,
+      "streaming": false
+    },
+    "aliases": ["openai:o1-mini-latest", "openai:o1-mini", "o1-mini"]
+  }
+}
+```
+
+This also supports searching by provider name or any part of an alias like:
+
+```bash
+curl http://localhost:8000/models?search=anthropic
+curl http://localhost:8000/models?search=google
+curl http://localhost:8000/models?search=openai
+curl http://localhost:8000/models?search=claude
 ```
 
 ## Tool calling

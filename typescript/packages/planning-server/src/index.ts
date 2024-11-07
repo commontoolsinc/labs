@@ -14,9 +14,15 @@ const handler = async (request: Request): Promise<Response> => {
     colors.reset;
 
   if (request.method === "GET" && new URL(request.url).pathname === "/models") {
+    const url = new URL(request.url);
+    const search = url.searchParams.get("search")?.toLowerCase();
+
     const modelInfo = Object.entries(MODELS).reduce(
       (acc, [name, config]) => {
-        if (!ALIAS_NAMES.includes(name)) {
+        if (
+          !ALIAS_NAMES.includes(name) &&
+          (!search || name.toLowerCase().includes(search))
+        ) {
           acc[name] = {
             capabilities: config.capabilities,
             aliases: Object.entries(MODELS)
