@@ -1,1 +1,1 @@
-export { h, Fragment } from "./jsx.js";
+export { h, Fragment, Node } from "./jsx.js";
