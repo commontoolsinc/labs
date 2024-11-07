@@ -2,8 +2,9 @@ import { LitElement, html, css, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { when } from "lit/directives/when.js";
 import { style } from "@commontools/common-ui";
-import { Charm, charms, recipes, UI, runPersistent } from "../data.js";
-import { CellImpl, cell } from "@commontools/common-runner";
+import { Charm, charms, recipes, UI, runPersistent, TYPE, addCharms } from "../data.js";
+import { CellImpl, addRecipe, cell, getRecipeSrc, run } from "@commontools/common-runner";
+import { buildRecipe } from "../localBuild.js";
 import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.js";
@@ -25,8 +26,8 @@ export class CommonDebug extends LitElement {
     return html`
       <pre slot="content">
 ${typeof this.content === "string"
-          ? this.content
-          : JSON.stringify(this.content, null, 2)}</pre
+        ? this.content
+        : JSON.stringify(this.content, null, 2)}</pre
       >
     `;
   }
@@ -42,6 +43,12 @@ export class CommonSidebar extends LitElement {
 
   @property({ type: String })
   sidebarTab: string = "home";
+
+  @property({ type: String })
+  compileErrors: string = "";
+
+  @property({ type: String })
+  workingSrc: string = "";
 
   homeRef = createRef<HTMLElement>();
   homeCharm: Promise<CellImpl<Charm>> | null = null;
@@ -97,7 +104,8 @@ export class CommonSidebar extends LitElement {
   override render() {
     const prompt = this.getFieldOrDefault("prompt", "");
     const data = this.getFieldOrDefault("data", {});
-    const src = this.getFieldOrDefault("recipeSrc", "");
+    const recipeId = this.focusedCharm?.sourceCell?.get()?.[TYPE];
+    const src = getRecipeSrc(recipeId);
     const schema = this.getFieldOrDefault("schema", {});
     const query = this.getFieldOrDefault("query", {});
 
@@ -148,27 +156,72 @@ export class CommonSidebar extends LitElement {
     };
 
     const onSrcChanged = (e: CustomEvent) => {
-      this.setField("recipeSrc", e.detail.state.doc.toString());
+      this.workingSrc = e.detail.state.doc.toString();
     };
+
+    const compile = () => {
+      console.log("compile", this.workingSrc);
+      const { recipe, errors } = buildRecipe(this.workingSrc);
+      console.log("recipe", recipe);
+      this.compileErrors = errors || "";
+
+      if (!recipe) return;
+      addRecipe(recipe, this.workingSrc);
+
+      const charm = run(recipe, {});
+
+      console.log("charm", charm);
+      addCharms([charm]);
+      const charmId = JSON.stringify(charm.entityId);
+      console.log("open-charm", { charmId });
+      this.dispatchEvent(
+        new CustomEvent("open-charm", {
+          detail: { charmId },
+          bubbles: true,
+          composed: true,
+        })
+      );
+    }
+
+    const copyRecipeLink = (event: Event) => {
+      const target = event.target as HTMLAnchorElement;
+      navigator.clipboard.writeText(target.href);
+      event.preventDefault();
+      const toast = document.createElement('div');
+      toast.textContent = 'Copied link to clipboard!';
+      toast.style.cssText = `
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #333;
+        color: white;
+        padding: 8px 16px;
+        border-radius: 4px;
+        z-index: 1000;
+      `;
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
 
     return html`
       <os-navstack>
         ${when(
-          this.sidebarTab === "home",
-          () =>
-            html`<os-navpanel safearea>
+      this.sidebarTab === "home",
+      () =>
+        html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">Pinned</div>
                 <div ${ref(this.homeRef)}></div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``,
-        )}
+      () => html``,
+    )}
         ${when(
-          this.sidebarTab === "query",
-          () =>
-            html`<os-navpanel safearea>
+      this.sidebarTab === "query",
+      () =>
+        html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">Query</div>
@@ -177,19 +230,19 @@ export class CommonSidebar extends LitElement {
                     slot="content"
                     language="application/json"
                     .source=${watchCell(query, (q) =>
-                      JSON.stringify(q, null, 2),
-                    )}
+          JSON.stringify(q, null, 2),
+        )}
                     @doc-change=${onQueryChanged}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``,
-        )}
+      () => html``,
+    )}
         ${when(
-          this.sidebarTab === "schema",
-          () =>
-            html`<os-navpanel safearea>
+      this.sidebarTab === "schema",
+      () =>
+        html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">Schema</div>
@@ -198,37 +251,43 @@ export class CommonSidebar extends LitElement {
                     slot="content"
                     language="application/json"
                     .source=${watchCell(schema, (q) =>
-                      JSON.stringify(q, null, 2),
-                    )}
+          JSON.stringify(q, null, 2),
+        )}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``,
-        )}
+      () => html``,
+    )}
         ${when(
-          this.sidebarTab === "source",
-          () =>
-            html`<os-navpanel safearea>
+      this.sidebarTab === "source",
+      () =>
+        html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
-                <div slot="label">Source</div>
+                <div slot="label">Source
+                
+                <a href="/recipe/${recipeId}" 
+                    target="_blank" 
+                    @click=${copyRecipeLink}
+                    style="float: right">🔗 Share</a></div>
                 <div>
+                  <button @click=${compile}>🔄 Compile + Run</button>
                   <os-code-editor
                     slot="content"
                     language="text/x.typescript"
-                    .source=${watchCell(src)}
+                    .source=${src}
                     @doc-change=${onSrcChanged}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``,
-        )}
+      () => html``,
+    )}
         ${when(
-          this.sidebarTab === "data",
-          () =>
-            html`<os-navpanel safearea>
+      this.sidebarTab === "data",
+      () =>
+        html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">Data</div>
@@ -237,22 +296,27 @@ export class CommonSidebar extends LitElement {
                     slot="content"
                     language="application/json"
                     .source=${watchCell(data, (q) =>
-                      JSON.stringify(q, null, 2),
-                    )}
+          JSON.stringify(q, null, 2),
+        )}
                     @doc-change=${onDataChanged}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``,
-        )}
+      () => html``,
+    )}
         ${when(
-          this.sidebarTab === "prompt",
-          () =>
-            html`<os-navpanel safearea>
+      this.sidebarTab === "prompt",
+      () =>
+        html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
-                <div slot="label">Spec</div>
+                <div slot="label">Spec
+                  <a href="/recipe/${recipeId}" 
+                    target="_blank" 
+                    @click=${copyRecipeLink}
+                    style="float: right">🔗 Share</a>
+</div>
                 <div>
                   <os-code-editor
                     slot="content"
@@ -263,8 +327,8 @@ export class CommonSidebar extends LitElement {
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-          () => html``,
-        )}
+      () => html``,
+    )}
       </os-navstack>
     `;
   }
