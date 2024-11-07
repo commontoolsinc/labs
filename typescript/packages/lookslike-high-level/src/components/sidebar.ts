@@ -163,6 +163,7 @@ export class CommonSidebar extends LitElement {
       console.log("compile", this.workingSrc);
       const { recipe, errors } = buildRecipe(this.workingSrc);
       console.log("recipe", recipe);
+      console.log("errors", errors);
       this.compileErrors = errors || "";
 
       if (!recipe) return;
