@@ -218,7 +218,7 @@ export class CommonSidebar extends LitElement {
       () =>
         html`<os-navpanel safearea>
               ${sidebarNav}
-              <os-sidebar-group>
+              <os-sidebar-group safearea>
                 <div slot="label">Pinned</div>
                 <div ${ref(this.homeRef)}></div>
               </os-sidebar-group>
