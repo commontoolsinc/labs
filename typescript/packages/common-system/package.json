@@ -52,7 +52,7 @@
       "command": "tsc --build -f"
     },
     "clean": {
-      "command": "rm -rf ./lib ./.wireit"
+      "command": "rm -rf ./lib ./dist ./.wireit ./node_modules tsconfig.tsbuildinfo"
     }
   }
 }
