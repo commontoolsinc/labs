@@ -157,9 +157,14 @@ function getFridayAndMondayDateStrings() {
 */
 
 // Terrible hack to open a charm from a recipe
-let openCharmOpener: (charmId: string) => void = () => {};
-export const openCharm = (charmId: string) => openCharmOpener(charmId);
-openCharm.set = (opener: (charmId: string) => void) => {
+let openCharmOpener: (
+  charmId: string | EntityId | CellImpl<any>,
+) => void = () => {};
+export const openCharm = (charmId: string | EntityId | CellImpl<any>) =>
+  openCharmOpener(charmId);
+openCharm.set = (
+  opener: (charmId: string | EntityId | CellImpl<any>) => void,
+) => {
   openCharmOpener = opener;
 };
 
@@ -168,7 +173,7 @@ addModuleByRef(
   raw((inputsCell: CellImpl<any>) => (log: ReactivityLog) => {
     // HACK to follow the cell references to the entityId
     const entityId = getEntityId(inputsCell.getAsQueryResult([], log));
-    if (entityId) openCharm(JSON.stringify(entityId));
+    if (entityId) openCharm(entityId);
   }),
 );
 
