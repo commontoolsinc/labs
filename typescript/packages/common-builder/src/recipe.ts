@@ -165,7 +165,7 @@ function factoryFromRecipe<T, R>(
   const paths = new Map<OpaqueRef<any> | ShadowRef, PropertyKey[]>();
 
   // Add the inputs default path
-  paths.set(inputs, ["parameters"]);
+  paths.set(inputs, ["argument"]);
 
   // Add paths for all the internal cells
   // TODO: Infer more stable identifiers

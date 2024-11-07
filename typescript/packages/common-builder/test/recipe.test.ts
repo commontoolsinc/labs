@@ -49,7 +49,7 @@ describe("complex recipe function", () => {
     expect(isModule(nodes[0].module) && nodes[0].module.type).toBe(
       "javascript",
     );
-    expect(nodes[0].inputs).toEqual({ $alias: { path: ["parameters", "x"] } });
+    expect(nodes[0].inputs).toEqual({ $alias: { path: ["argument", "x"] } });
     expect(nodes[0].outputs).toEqual({
       $alias: { path: ["internal", "__#0"] },
     });
@@ -132,7 +132,7 @@ describe("complex recipe with path aliases", () => {
       "javascript",
     );
     expect(nodes[0].inputs).toEqual({
-      x: { $alias: { path: ["parameters", "x"] } },
+      x: { $alias: { path: ["argument", "x"] } },
     });
     expect(nodes[0].outputs).toEqual({
       $alias: { path: ["internal", "__#0"] },
@@ -175,7 +175,7 @@ describe("recipe with map node", () => {
   it("correctly lists the input array as input to the map node", () => {
     const node = doubleArray.nodes[0];
     expect(node.inputs).toMatchObject({
-      list: { $alias: { path: ["parameters", "values"] } },
+      list: { $alias: { path: ["argument", "values"] } },
     });
   });
 
@@ -211,8 +211,8 @@ describe("recipe with map node that references a parent cell", () => {
     expect(
       (multiplyArray.nodes[0].inputs as { op: Recipe }).op.nodes[0].inputs,
     ).toEqual({
-      x: { $alias: { cell: 1, path: ["parameters", "x"] } },
-      factor: { $alias: { path: ["parameters", "factor"] } },
+      x: { $alias: { cell: 1, path: ["argument", "x"] } },
+      factor: { $alias: { path: ["argument", "factor"] } },
     });
   });
 });
@@ -241,8 +241,8 @@ describe("recipe with map node that references a parent cell in another recipe",
     expect(
       (multiplyArray.nodes[0].inputs as { op: Recipe }).op.nodes[0].inputs,
     ).toEqual({
-      x: { $alias: { cell: 1, path: ["parameters", "x"] } },
-      factor: { $alias: { path: ["parameters", "factor"] } },
+      x: { $alias: { cell: 1, path: ["argument", "x"] } },
+      factor: { $alias: { path: ["argument", "factor"] } },
     });
   });
 });
