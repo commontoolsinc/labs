@@ -9,7 +9,7 @@ import {
   on as handler,
 } from "@gozala/co-dom";
 
-export { Node } from "@gozala/co-dom";
+export type { Node } from "@gozala/co-dom";
 
 declare global {
   namespace JSX {
