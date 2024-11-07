@@ -4,7 +4,7 @@ import { openai } from "npm:@ai-sdk/openai";
 import { vertex } from "npm:@ai-sdk/google-vertex";
 import { ollama } from "ollama-ai-provider";
 
-type Capabilities = {
+export type Capabilities = {
   contextWindow: number;
   maxOutputTokens: number;
   streaming: boolean;

@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
 import { generateText, streamText } from "npm:ai";
 import { crypto } from "https://deno.land/std/crypto/mod.ts";
 import { config } from "https://deno.land/x/dotenv/mod.ts";
-import { ALIAS_NAMES, findModel, MODELS } from "./models.ts";
+import { ALIAS_NAMES, type Capabilities, findModel, MODELS } from "./models.ts";
 import * as cache from "./cache.ts";
 import { colors, timestamp, timeTrack } from "./cli.ts";
 
@@ -16,25 +16,36 @@ const handler = async (request: Request): Promise<Response> => {
   if (request.method === "GET" && new URL(request.url).pathname === "/models") {
     const url = new URL(request.url);
     const search = url.searchParams.get("search")?.toLowerCase();
+    const capabilities = url.searchParams.get("capability")?.split(",");
 
     const modelInfo = Object.entries(MODELS).reduce(
-      (acc, [name, config]) => {
-        if (
-          !ALIAS_NAMES.includes(name) &&
-          (!search || name.toLowerCase().includes(search))
-        ) {
-          acc[name] = {
-            capabilities: config.capabilities,
-            aliases: Object.entries(MODELS)
-              .filter(([_, m]) => m === config && name !== _)
-              .map(([alias]) => alias),
-          };
+      (acc, [name, modelConfig]) => {
+        // Skip aliases
+        if (!ALIAS_NAMES.includes(name)) {
+          // Apply name/provider search filter
+          const nameMatches = !search || name.toLowerCase().includes(search);
+
+          // Apply capability filters
+          const capabilitiesMatch = !capabilities || capabilities.every(
+            (cap) =>
+              modelConfig
+                .capabilities[cap as keyof typeof modelConfig.capabilities],
+          );
+
+          if (nameMatches && capabilitiesMatch) {
+            acc[name] = {
+              capabilities: modelConfig.capabilities,
+              aliases: Object.entries(MODELS)
+                .filter(([_, m]) => m === modelConfig && name !== _)
+                .map(([alias]) => alias),
+            };
+          }
         }
         return acc;
       },
       {} as Record<
         string,
-        { capabilities: typeof config.capabilities; aliases: string[] }
+        { capabilities: Capabilities; aliases: string[] }
       >,
     );
 

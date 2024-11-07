@@ -84,7 +84,7 @@ For example
 PLANNING_API_URL="https://paas.saga-castor.ts.net/planning-service" npm run livetest:anthropic
 ```
 
-## Listing available models
+## Searching available models
 
 To list the available models for a given `planning-server` instance, you can simply `GET /models` for a list of all supported models and their capabilities.
 
@@ -168,6 +168,16 @@ curl http://localhost:8000/models?search=anthropic
 curl http://localhost:8000/models?search=google
 curl http://localhost:8000/models?search=openai
 curl http://localhost:8000/models?search=claude
+```
+
+There is also a very primitive way of searching by capability, for example if you want to search for openai models that support the `systemPrompt` capability and streaming, you can use:
+
+```bash
+curl http://localhost:8000/models?search=groq&capability=images
+
+or multiple capabilities.
+
+curl http://localhost:8000/models?search=openai&capability=systemPrompt,streaming
 ```
 
 ## Tool calling
