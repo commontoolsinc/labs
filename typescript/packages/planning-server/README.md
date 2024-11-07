@@ -180,6 +180,12 @@ or multiple capabilities.
 curl http://localhost:8000/models?search=openai&capability=systemPrompt,streaming
 ```
 
+You can also search by `task`, for example `coding`, `json`, `creative`, or `vision`.
+
+```bash
+curl http://localhost:8000/models?task=coding
+```
+
 ## Calling a language model by name
 
 Simple CURL example of calling a language model.

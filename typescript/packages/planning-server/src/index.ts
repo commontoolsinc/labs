@@ -41,6 +41,7 @@ const handleGetModels = async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
   const search = url.searchParams.get("search")?.toLowerCase();
   const capabilities = url.searchParams.get("capability")?.split(",");
+  const task = url.searchParams.get("task") as TaskType | undefined;
 
   const modelInfo = Object.entries(MODELS).reduce(
     (acc, [name, modelConfig]) => {
@@ -56,7 +57,10 @@ const handleGetModels = async (request: Request): Promise<Response> => {
               .capabilities[cap as keyof typeof modelConfig.capabilities],
         );
 
-        if (nameMatches && capabilitiesMatch) {
+        // Apply task filter
+        const taskMatches = !task || TASK_MODELS[task] === name;
+
+        if (nameMatches && capabilitiesMatch && taskMatches) {
           acc[name] = {
             capabilities: modelConfig.capabilities,
             aliases: Object.entries(MODELS)
@@ -140,6 +144,7 @@ const handleLLMPost = async (request: Request): Promise<Response> => {
       }...`,
     );
 
+    // FIXME(jake): revisit the payload hashing, we maybe want just the model and prompt?
     const cacheKey = await cache.hashKey(JSON.stringify(payload));
     const cachedResult = await cache.loadItem(cacheKey);
     if (cachedResult) {
