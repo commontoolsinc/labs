@@ -1,51 +1,127 @@
-# Planning Server
+# planning-server
 
-A simple `deno` server that exposes an API to interact with LLMs.
+`planning-server` is an HTTP service with an API for calling many LLMs.
 
-It supports tool calling collaboratively between the client and server, with the client providing a set of tools to the server in addition to the server's inbuilt toolkit.
+## Available models
 
-This enables AI collaboration via standard function calls in the frontend application.
+We currently support a variety of LLM providers; including anthropic, groq, openai, and google. Below is a list of all of the available models.
 
-## Start
+NOTE: This list is bound to be stale, to find the latest-and-greatest list of available models, check out the `models.ts` file.
 
-`npm run start`
+```
+anthropic:claude-3-5-haiku-20241022
+anthropic:claude-3-5-sonnet-20241022
+anthropic:claude-3-opus-20240229
+
+groq:llama-3.1-70b-versatile
+groq:llama-3.1-8b-instant
+groq:llama-3.2-11b-vision-preview
+groq:llama-3.2-90b-vision-preview
+groq:llama-3.2-3b-preview
+
+openai:gpt-4o-2024-08-06
+openai:gpt-4o-mini-2024-07-18
+openai:o1-preview-2024-09-12
+openai:o1-mini-2024-09-12
+
+google:gemini-1.5-flash-002
+google:gemini-1.5-pro-002
+```
 
 ## Configure `.env`
 
-Create a `.env` file in the root of the project (copying `.env.local`) and substitute the values with your own.
+To configure `planning-server` to use various providers, you'll need to setup some environment variables. To get started, run following command, then fill in the blanks in `.env`
 
-## Memory Cache
+```bash
+cp .env.local .env
+```
 
-The server retains a lookup of all threads since startup _and_ will cache responses for identical system + message pairs it encounters. **This is not fit for deployment.**
+If you plan to use google, you'll need to first fetch a default application credentials bundle. You can do that by running the following.
 
-## Create Client
+```bash
+gcloud auth application-default login
+```
+
+## Run the server
+
+```bash
+npm run start
+```
+
+## Testing language models
+
+To run a quick battery of tests on all configured live LLMs, use the `livetest.ts` cli script.
+
+```bash
+# Run tests against ALL configured models
+npm run livetest
+
+or
+
+npm run livetest:all
+```
+
+Run tests against all models from a specific provider, run one of the following
+
+```bash
+npm run livetest:anthropic
+npm run livetest:openai
+npm run livetest:google
+npm run livetest:groq
+```
+
+To get a list of all available models, run
+
+```bash
+deno run --allow-env --allow-read --allow-net  ./src/livetest.ts
+```
+
+Finally, you can test a remote `planning-server` endpoint by overriding the URL with the `PLANNING_SERVER_BASE_URL` environment variable.
+
+For example
+
+```bash
+PLANNING_API_URL="https://paas.saga-castor.ts.net/planning-service" npm run livetest:anthropic
+```
+
+## Tool calling
+
+`planning-server` supports tool calling collaboratively between the client and server, with the client providing a set of tools to the server in addition to the server's inbuilt toolkit.
+
+This enables AI collaboration via standard function calls in the frontend application.
+
+See below for an example of how to do this.
 
 ```ts
 import { LLMClient } from "@commontools/llm-client";
 const client = new LLMClient({
-	serverUrl: "http://localhost:8000", // Assumes default port
-	tools: [
-		// These are the tools the _client_ is making available to the server
-		{
-			name: "calculator",
-			input_schema: {
-				type: "object",
-				properties: {
-					expression: {
-						type: "string",
-						description: "A mathematical expression to evaluate",
-					},
-				},
-				required: ["expression"],
-			},
-			implementation: async ({ expression }) => {
-				return `${await eval(expression)}`;
-			},
-		},
-	],
-	system: "use your tools to answer the request",
+  serverUrl: "http://localhost:8000", // Assumes default port
+  tools: [
+    // These are the tools the _client_ is making available to the server
+    {
+      name: "calculator",
+      input_schema: {
+        type: "object",
+        properties: {
+          expression: {
+            type: "string",
+            description: "A mathematical expression to evaluate",
+          },
+        },
+        required: ["expression"],
+      },
+      implementation: async ({ expression }) => {
+        return `${await eval(expression)}`;
+      },
+    },
+  ],
+  system: "use your tools to answer the request",
 });
 ```
+
+## Memory Cache
+
+The server retains a lookup of all threads since startup _and_ will cache responses for identical system + message pairs it encounters. **This is not fit for deployment.**
 
 ## Create a Thread
 
@@ -62,7 +138,7 @@ console.log(thread.conversation[1]);
 
 ```ts
 const thread = await client.createThread(
-	"can you exaggerate this: I am having a _day_"
+  "can you exaggerate this: I am having a _day_",
 );
 
 await client.continueThread(thread.id, "I am having a _great_ day");
@@ -98,87 +174,3 @@ The Docker image is built using a multi-stage process and is pushed to Docker Hu
 - A short commit hash (e.g., `abcdef123456`)
 
 The image is built for both `linux/amd64` and `linux/arm64` platforms.
-
-## Deployment
-
-The Planning Server can be deployed to a Kubernetes cluster using the provided Terraform configurations. The deployment process uses the Kubernetes provider for Terraform and includes options for Tailscale integration.
-
-### Deployment Configuration
-
-The deployment is managed by two main components in the [`infrastructure`](https://github.com/commontoolsinc/infrastructure) repo.
-
-1. `KubernetesStack`: Handles the overall Kubernetes configuration.
-2. `KubernetesTcpService`: Sets up the specific service for the Planning Server.
-
-#### KubernetesTcpService Configuration
-
-The `KubernetesTcpService` can be configured with the following options:
-
-- `applicationName`: Name of the application (e.g., "planning-server").
-- `applicationVersion`: Version of the application to deploy.
-- `containerImageUrl`: URL of the container image.
-- `tcpPort`: Port number for the service.
-- `containerCommand`: (Optional) Command to run in the container.
-- `imagePullPolicy`: (Optional) Kubernetes image pull policy.
-- `serviceAccountPrivateKey`: (Optional) Private key for the service account.
-- `containerEnvironment`: (Optional) Environment variables for the container.
-- `secrets`: (Optional) Key-value pairs of secrets to be created.
-- `args`: (Optional) Arguments to pass to the container.
-- `tailscaleAuthKey`: (Optional) Auth key for Tailscale integration.
-- `blockExternalAccess`: (Optional) Boolean to block external access to the service.
-
-### Deployment Process
-
-1. The `KubernetesStack` sets up the basic Kubernetes configuration, including providers for Kubernetes, Helm, and Tailscale.
-
-2. A `KubernetesTcpService` is created for the Planning Server, which:
-
-   - Creates a new namespace for the service.
-   - Sets up necessary secrets and service accounts.
-   - Deploys a pod with the Planning Server container.
-   - Creates a Kubernetes service to expose the pod.
-   - Optionally sets up Tailscale integration for secure access.
-
-3. If Tailscale integration is enabled:
-
-   - A Tailscale container is added to the pod.
-   - Necessary roles and role bindings are created for Tailscale operation.
-   - The service can be configured to block external access.
-
-4. The deployment process outputs several values, including:
-   - Cluster IP
-   - Load balancer address (if not Tailscale-only)
-   - Tailscale device information (if Tailscale is enabled)
-   - Ingress port
-
-### Tailscale Integration
-
-Tailscale integration provides secure, easy-to-manage access to your deployed Planning Server. When enabled:
-
-- The Planning Server pod runs an additional Tailscale container.
-- The Tailscale container is configured with the provided auth key.
-- You can optionally block external access to the service by setting `blockExternalAccess` to true.
-
-### Deployment Commands
-
-The deployment of the Planning Server is currently not as automated as the other services.
-
-When the `builder` and `runtime` services are built and pushed on the `system` repo `main` branch, a PR is automatically triggered on the `infrastructure` repo to update the digests for the images used to deploy the `builder` and `runtime` services.
-
-For the Planning Server, docker images are built and pushed to Docker Hub automatically on the `main` branch.
-In order to deploy the Planning Server, create a PR on the `infrastructure` repo to update the `planning-server` image digest in the `infrastructure/cdktf/versions.auto.tfvars.json` file.
-
-The PR will trigger a workflow that performs a `speculative plan` of the changes and outputs the changes that will be applied.
-
-Once the PR is merged, the `apply` workflow will be triggered and the changes will be applied to the Kubernetes cluster.
-
-### Post-Deployment
-
-After deployment, you can access your Planning Server using either:
-
-- The load balancer IP (if not using Tailscale-only access)
-- The Tailscale device name (if using Tailscale)
-
-The specific address and port will be provided in the Terraform output.
-
-The Planning Server includes a health check endpoint that responds to all `GET` requests with a `200 OK` status code.

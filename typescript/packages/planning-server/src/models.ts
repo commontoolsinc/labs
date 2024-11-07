@@ -22,6 +22,7 @@ type ModelConfig = {
 
 export const MODELS: Record<string, ModelConfig> = {};
 export const ALIAS_NAMES: string[] = [];
+export const PROVIDER_NAMES: Set<string> = new Set();
 
 const addModel = ({
   provider,
@@ -46,6 +47,7 @@ const addModel = ({
     MODELS[alias] = config;
     ALIAS_NAMES.push(alias);
   }
+  PROVIDER_NAMES.add(name.split(":")[0]);
 };
 
 if (Deno.env.get("ANTHROPIC_API_KEY")) {
