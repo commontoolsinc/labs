@@ -24,6 +24,24 @@ import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.js";
 import { render } from "@commontools/common-html";
 
+const toasty = (message: string) => {
+  const toastEl = document.createElement('div');
+  toastEl.textContent = message;
+  toastEl.style.cssText = `
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #333;
+    color: white;
+    padding: 8px 16px;
+    border-radius: 4px;
+    z-index: 1000;
+  `;
+  document.body.appendChild(toastEl);
+  setTimeout(() => toastEl.remove(), 3000);
+};
+
 @customElement("common-debug")
 export class CommonDebug extends LitElement {
   @property({ type: Object })
@@ -173,11 +191,8 @@ export class CommonSidebar extends LitElement {
       this.workingSrc = e.detail.state.doc.toString();
     };
 
-    const compile = () => {
-      console.log("compile", this.workingSrc);
+    const runRecipe = (newData: boolean = false) => {
       const { recipe, errors } = buildRecipe(this.workingSrc);
-      console.log("recipe", recipe);
-      console.log("errors", errors);
       this.compileErrors = errors || "";
 
       if (!recipe) return;
@@ -186,12 +201,11 @@ export class CommonSidebar extends LitElement {
       // TODO(ja): we should check if the recipe arguments have changed
       // TODO(ja): if default values have changed and source still has to old
       //           defaults, update to new defaults
-      const charm = run(recipe, this.focusedCharm?.sourceCell?.get()?.argument);
+      const data = newData ? {} : this.focusedCharm?.sourceCell?.get()?.argument;
+      const charm = run(recipe, data);
 
-      console.log("charm", charm);
       addCharms([charm]);
       const charmId = JSON.stringify(charm.entityId);
-      console.log("open-charm", { charmId });
       this.dispatchEvent(
         new CustomEvent("open-charm", {
           detail: { charmId },
@@ -199,28 +213,19 @@ export class CommonSidebar extends LitElement {
           composed: true,
         }),
       );
-    };
+      if (newData) {
+        toasty("Welcome to a new charm!");
+      } else {
+        toasty("Welcome to a new version of this charm!");
+      }
+    }
 
     const copyRecipeLink = (event: Event) => {
       const target = event.target as HTMLAnchorElement;
       navigator.clipboard.writeText(target.href);
       event.preventDefault();
-      const toast = document.createElement("div");
-      toast.textContent = "Copied link to clipboard!";
-      toast.style.cssText = `
-        position: fixed;
-        top: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: #333;
-        color: white;
-        padding: 8px 16px;
-        border-radius: 4px;
-        z-index: 1000;
-      `;
-      document.body.appendChild(toast);
-      setTimeout(() => toast.remove(), 3000);
-    };
+      toasty("Copied recipe link to clipboard");
+    }
 
     return html`
       <os-navstack>
@@ -229,7 +234,7 @@ export class CommonSidebar extends LitElement {
           () =>
             html`<os-navpanel safearea>
               ${sidebarNav}
-              <os-sidebar-group>
+              <os-sidebar-group safearea>
                 <div slot="label">Pinned</div>
                 <div ${ref(this.homeRef)}></div>
               </os-sidebar-group>
@@ -295,7 +300,9 @@ export class CommonSidebar extends LitElement {
                   >
                 </div>
                 <div>
-                  <button @click=${compile}>🔄 Compile + Run</button>
+                  <button @click=${() => runRecipe(false)}>🔄 Run w/Current Data</button>
+                  <button @click=${() => runRecipe(true)}>🐣 Run w/New Data</button>
+                  <pre>${this.compileErrors}</pre>
                   <os-code-editor
                     slot="content"
                     language="text/x.typescript"
