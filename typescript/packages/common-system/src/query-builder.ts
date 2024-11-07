@@ -34,7 +34,6 @@ export type EditStep<Match extends Selector> = {
 export class Select<Match extends Selector = Selector> {
   #select: Match;
   #where: Array<Clause> = [];
-  #steps: Array<EditStep<Match>> = [];
   #negation = false;
 
   constructor(select: Match) {
@@ -64,24 +63,20 @@ export class Select<Match extends Selector = Selector> {
     return this;
   }
 
-  edit(operation: "Assert" | "Retract" | "Upsert", edit: Edit<Match>) {
-    this.#steps.push({
-      operation,
-      edit,
-    });
-    return this;
+  get transaction() {
+    return new Transaction(this.#select, this.#where);
   }
 
   assert(edit: Edit<Match>) {
-    return this.edit("Assert", edit);
+    return this.transaction.assert(edit);
   }
 
   retract(edit: Edit<Match>) {
-    return this.edit("Retract", edit);
+    return this.transaction.retract(edit);
   }
 
   upsert(edit: Edit<Match>) {
-    return this.edit("Upsert", edit);
+    return this.transaction.upsert(edit);
   }
 
   render(view: View<Match>) {
@@ -117,6 +112,67 @@ export class Select<Match extends Selector = Selector> {
  */
 export const select = <Match extends Selector = Selector>(select: Match) =>
   new Select(select);
+
+export class Transaction<Match extends Selector = Selector> {
+  #select: Match;
+  #where: Array<Clause>;
+  #steps: Array<EditStep<Match>> = [];
+
+  constructor(select: Match, where: Array<Clause>) {
+    this.#select = select;
+    this.#where = where;
+  }
+
+  #edit(operation: "Assert" | "Retract" | "Upsert", edit: Edit<Match>) {
+    this.#steps.push({
+      operation,
+      edit,
+    });
+    return this;
+  }
+
+  assert(edit: Edit<Match>) {
+    return this.#edit("Assert", edit);
+  }
+
+  retract(edit: Edit<Match>) {
+    return this.#edit("Retract", edit);
+  }
+
+  upsert(edit: Edit<Match>) {
+    return this.#edit("Upsert", edit);
+  }
+
+  commit() {
+    return new Commit(this.#select, this.#where, this.#steps);
+  }
+}
+
+export class Commit<Match extends Selector = Selector> {
+  select: Match;
+  where: Array<Clause>;
+  #steps: Array<EditStep<Match>>;
+
+  constructor(
+    select: Match,
+    where: Array<Clause>,
+    steps: Array<EditStep<Match>>,
+  ) {
+    this.select = select;
+    this.where = where;
+    this.#steps = steps;
+  }
+
+  update(selection: InferBindings<Match>): Array<Instruction> {
+    const changes: Array<Instruction> = [];
+    for (const { edit, operation } of this.#steps) {
+      changes.push({
+        [operation]: edit(selection),
+      } as unknown as Instruction);
+    }
+    return changes;
+  }
+}
 
 export const and = (...clauses: Array<Clause>): Clause => ({
   And: clauses,

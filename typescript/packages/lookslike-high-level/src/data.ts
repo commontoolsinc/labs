@@ -113,7 +113,7 @@ export async function syncCharm(
 
 addCharms([
   charmExample.spawn({
-    v5: true,
+    v6: true,
   }),
   // await runPersistent(charmExample, {}, "Charm Example"),
   // await runPersistent(mealExample, {}, "Meal Example"),
