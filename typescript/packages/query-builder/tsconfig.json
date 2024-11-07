@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["es2022", "DOM"],
+    "outDir": "./lib",
+    "rootDir": "./src",
+    "strict": false,
+    "paths": {},
+    "types": ["mocha", "node"]
+  },
+  "include": ["src/**/*"]
+}
