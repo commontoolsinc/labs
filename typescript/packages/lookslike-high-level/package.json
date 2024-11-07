@@ -37,6 +37,7 @@
         "../common-html:build",
         "../common-ui:build",
         "../common-os-ui:build",
+        "../common-system:build",
         "../lookslike-sagas:build",
         "../llm-client:build"
       ],
@@ -47,6 +48,7 @@
     }
   },
   "dependencies": {
+    "@commontools/common-system": "^0.0.1",
     "@commontools/common-builder": "^0.0.1",
     "@commontools/common-frp": "^0.0.1",
     "@commontools/common-frp-lit": "^0.0.1",
@@ -58,7 +60,8 @@
     "@commontools/lookslike-sagas": "^0.0.1",
     "marked": "^14.1.3",
     "zod": "^3.x.x",
-    "zod-to-json-schema": "^3.23.3"
+    "zod-to-json-schema": "^3.23.3",
+    "synopsys": "^2.3.0"
   },
   "overrides": {
     "tough-cookie": "^5.0.0-rc.4"
