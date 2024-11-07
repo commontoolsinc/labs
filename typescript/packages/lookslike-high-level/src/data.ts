@@ -241,7 +241,7 @@ export async function saveRecipe(
 
 addCharms([
   charmExample.spawn({
-    v5: true,
+    v6: true,
   }),
 ]);
 

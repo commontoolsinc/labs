@@ -4,9 +4,8 @@ export const source = { clicker: { v: 30 } };
 
 const init = select({ self: $.self })
   .not.match($.self, "clicks", $._)
-  .update(({ self }) => {
-    return [{ Assert: [self, "clicks", 0] }];
-  });
+  .assert(({ self }) => [self, "clicks", 0])
+  .commit();
 
 const view = select({ self: $.self, count: $.count })
   .match($.self, "clicks", $.count)
@@ -26,13 +25,8 @@ const onclick = select({
 })
   .match($.self, "clicks", $.count)
   .match($.self, "~/on/click", $.event)
-  .update(({ self, count }) => {
-    return [
-      {
-        Upsert: [self, "clicks", count + 1],
-      },
-    ];
-  });
+  .upsert(({ self, count }) => [self, "clicks", count + 1])
+  .commit();
 
 export const rules = behavior({
   init,
