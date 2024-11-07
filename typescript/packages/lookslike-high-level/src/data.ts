@@ -113,6 +113,7 @@ export async function syncCharm(
 
 addCharms([
   charmExample.spawn(),
+  charmExample.spawn({ another: {} }),
   // await runPersistent(charmExample, {}, "Charm Example"),
   // await runPersistent(mealExample, {}, "Meal Example"),
   // await runPersistent(todoQuery, { titleInput: "" }, "Persisted Todos"),

@@ -38,6 +38,7 @@ export class CommonCharm extends HTMLElement {
     this.state = new Map();
     this.#vdom = null;
   }
+
   get vdom() {
     return this.#vdom;
   }
@@ -198,7 +199,13 @@ export function* drive<Selection extends DB.Selector>(
   const { replica } = charm;
   const subscription = yield* replica.subscribe({
     select: rule.select,
-    where: rule.where,
+    where: [
+      // TODO: Figure out why `Is` is not working.
+      //{ Is: [DB.$.self, charm.entity] },
+      { Match: [charm.entity, "==", DB.$.self] },
+      // ...
+      ...rule.where,
+    ],
   });
 
   const stream = subscription.fork();
@@ -295,6 +302,11 @@ const read = (
       }
     }
     return { ok: members };
+  } else if (
+    typeof selection === "object" &&
+    (selection as any)["/"] instanceof Uint8Array
+  ) {
+    return { ok: selection };
   } else if (typeof selection === "object") {
     const result = {} as Record<string, any>;
     for (const [key, value] of Object.entries(selection)) {
