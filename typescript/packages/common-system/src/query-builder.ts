@@ -2,7 +2,6 @@ import {
   Query,
   Selector,
   Clause,
-  Transaction,
   InferBindings,
   Term,
   Entity,
@@ -12,20 +11,31 @@ import {
   Confirmation,
   Formula,
 } from "datalogia";
-import { Reference } from "synopsys";
+import { $, Instruction, Fact } from "synopsys";
 import { Node } from "./jsx.js";
 
 export type Update<Match extends Selector> = (
   props: InferBindings<Match>,
-) => Transaction;
+) => Array<Instruction>;
+
+export type Edit<Match extends Selector> = (
+  props: InferBindings<Match>,
+) => Fact;
 
 export type View<Match extends Selector> = (
   props: InferBindings<Match>,
 ) => Node<any>;
 
+export type EditStep<Match extends Selector> = {
+  operation: "Assert" | "Retract" | "Upsert";
+  edit: Edit<Match>;
+};
+
 export class Select<Match extends Selector = Selector> {
   #select: Match;
   #where: Array<Clause> = [];
+  #steps: Array<EditStep<Match>> = [];
+  #negation = false;
 
   constructor(select: Match) {
     this.#select = select;
@@ -36,23 +46,64 @@ export class Select<Match extends Selector = Selector> {
     return this;
   }
 
-  update(func: Update<Match>) {
+  match(
+    entity: Term<Entity>,
+    attribute: Term<Attribute>,
+    value: Term<API.Constant> = $._,
+  ): Select<Match> {
+    if (this.#negation) {
+      this.#negation = false;
+      return this.where(not(match(entity, attribute, value)));
+    } else {
+      return this.where(match(entity, attribute, value));
+    }
+  }
+
+  get not() {
+    this.#negation = true;
+    return this;
+  }
+
+  edit(operation: "Assert" | "Retract" | "Upsert", edit: Edit<Match>) {
+    this.#steps.push({
+      operation,
+      edit,
+    });
+    return this;
+  }
+
+  assert(edit: Edit<Match>) {
+    return this.edit("Assert", edit);
+  }
+
+  retract(edit: Edit<Match>) {
+    return this.edit("Retract", edit);
+  }
+
+  upsert(edit: Edit<Match>) {
+    return this.edit("Upsert", edit);
+  }
+
+  render(view: View<Match>) {
+    return this.update((props) => {
+      const vnode = view(props);
+      return [
+        {
+          Assert: [(props as any).self, "~/common/ui", vnode as any] as const,
+        },
+      ];
+    });
+  }
+
+  update(update: Update<Match>) {
     return {
       select: this.#select,
       where: this.#where,
-      update: func,
+      update,
     };
   }
 
-  render(entity: Reference, view: View<Match>) {
-    return this.update((props) => [
-      {
-        Assert: [entity, "~/common/ui", view(props) as any] as const,
-      },
-    ]);
-  }
-
-  done(): Query<Match> {
+  commit(): Query<Match> {
     return {
       select: this.#select,
       where: this.#where,
@@ -118,43 +169,3 @@ export const is = (
 export const formula = (formula: Formula): Clause => ({
   Match: formula,
 });
-
-export class ClauseBuilder {
-  #clause: Clause;
-
-  constructor(clause: Clause) {
-    this.#clause = clause;
-  }
-
-  and(
-    entity: Term<Entity>,
-    attribute: Term<Attribute>,
-    value: Term<API.Constant>,
-  ) {
-    return new ClauseBuilder(
-      and(this.#clause, match(entity, attribute, value)),
-    );
-  }
-
-  or(
-    entity: Term<Entity>,
-    attribute: Term<Attribute>,
-    value: Term<API.Constant>,
-  ) {
-    return new ClauseBuilder(or(this.#clause, match(entity, attribute, value)));
-  }
-
-  not() {
-    return new ClauseBuilder(not(this.#clause));
-  }
-
-  done() {
-    return this.#clause;
-  }
-}
-
-export const matching = (
-  entity: Term<Entity>,
-  attribute: Term<Attribute>,
-  value: Term<API.Constant>,
-) => new ClauseBuilder(match(entity, attribute, value));

@@ -240,7 +240,9 @@ export async function saveRecipe(
 }
 
 addCharms([
-  charmExample.spawn({ another: {} }),
+  charmExample.spawn({
+    v5: true,
+  }),
 ]);
 
 export type RecipeManifest = {
