@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { Recipe, isRecipe, Module, isModule } from "../src/types.js";
+import { Recipe, isRecipe, Module, isModule, Opaque } from "../src/types.js";
 import { lift } from "../src/module.js";
 import { recipe } from "../src/recipe.js";
+import { z } from "zod";
 
 describe("recipe function", () => {
   it("creates a recipe", () => {
@@ -27,11 +28,11 @@ describe("complex recipe function", () => {
     const double = lift<number>((x) => x * 2);
     return { double: double(double(x)) };
   });
-  const { schema, result, nodes } = doubleRecipe;
+  const { argumentSchema, result, nodes } = doubleRecipe;
 
   it("has the correct schema and initial data", () => {
     expect(isRecipe(doubleRecipe)).toBe(true);
-    expect(schema).toMatchObject({
+    expect(argumentSchema).toMatchObject({
       description: "Double a number",
       type: "object",
       properties: {
@@ -46,15 +47,57 @@ describe("complex recipe function", () => {
   it("has the correct nodes", () => {
     expect(nodes.length).toBe(2);
     expect(isModule(nodes[0].module) && nodes[0].module.type).toBe(
-      "javascript"
+      "javascript",
     );
-    expect(nodes[0].inputs).toEqual({ $alias: { path: ["parameters", "x"] } });
+    expect(nodes[0].inputs).toEqual({ $alias: { path: ["argument", "x"] } });
     expect(nodes[0].outputs).toEqual({
       $alias: { path: ["internal", "__#0"] },
     });
     expect(nodes[1].inputs).toEqual({ $alias: { path: ["internal", "__#0"] } });
     expect(nodes[1].outputs).toEqual({
       $alias: { path: ["internal", "__#1"] },
+    });
+  });
+});
+
+describe("schemas", () => {
+  it("can be Zod, should become JSON", () => {
+    const schema = z.object({ x: z.number() }).describe("A number");
+    const testRecipe = recipe(schema, schema, ({ x }) => ({ x }));
+    expect(isRecipe(testRecipe)).toBe(true);
+    expect(testRecipe.argumentSchema).toMatchObject({
+      description: "A number",
+      type: "object",
+      properties: {
+        x: { type: "number" },
+      },
+    });
+    expect(testRecipe.resultSchema).toMatchObject(
+      testRecipe.argumentSchema as unknown as JSON,
+    );
+  });
+
+  it("also works for lifted functions", () => {
+    const double = lift(
+      z.number().describe("A number"),
+      z.number().describe("Doubled"),
+      (x) => x * 2,
+    );
+    // @ts-ignore-error ZodNumber and number clash to be investigated
+    const testRecipe = recipe(
+      z.object({ x: z.number() }),
+      z.object({ doubled: z.number() }),
+      // @ts-ignore-error
+      ({ x }) => ({ doubled: double(x) }),
+    );
+    const module = testRecipe.nodes[0].module as Module;
+    expect(module.argumentSchema).toMatchObject({
+      description: "A number",
+      type: "number",
+    });
+    expect(module.resultSchema).toMatchObject({
+      description: "Doubled",
+      type: "number",
     });
   });
 });
@@ -67,11 +110,11 @@ describe("complex recipe with path aliases", () => {
     const result2 = double({ x: result.doubled });
     return { double: result2.doubled };
   });
-  const { schema, result, nodes } = doubleRecipe;
+  const { argumentSchema, result, nodes } = doubleRecipe;
 
   it("has the correct schema and initial values", () => {
     expect(isRecipe(doubleRecipe)).toBe(true);
-    expect(schema).toMatchObject({
+    expect(argumentSchema).toMatchObject({
       description: "Double a number",
       type: "object",
       properties: {
@@ -86,10 +129,10 @@ describe("complex recipe with path aliases", () => {
   it("has the correct nodes", () => {
     expect(nodes.length).toBe(2);
     expect(isModule(nodes[0].module) && nodes[0].module.type).toBe(
-      "javascript"
+      "javascript",
     );
     expect(nodes[0].inputs).toEqual({
-      x: { $alias: { path: ["parameters", "x"] } },
+      x: { $alias: { path: ["argument", "x"] } },
     });
     expect(nodes[0].outputs).toEqual({
       $alias: { path: ["internal", "__#0"] },
@@ -119,7 +162,7 @@ describe("recipe with map node", () => {
         return { doubled: double(x) };
       });
       return { doubled };
-    }
+    },
   );
 
   it("correctly serializes to a single map node", () => {
@@ -132,7 +175,7 @@ describe("recipe with map node", () => {
   it("correctly lists the input array as input to the map node", () => {
     const node = doubleArray.nodes[0];
     expect(node.inputs).toMatchObject({
-      list: { $alias: { path: ["parameters", "values"] } },
+      list: { $alias: { path: ["argument", "values"] } },
     });
   });
 
@@ -160,46 +203,46 @@ describe("recipe with map node that references a parent cell", () => {
         return { doubled: double({ x, factor }) };
       });
       return { doubled };
-    }
+    },
   );
 
   it("correctly creates references to the parent cells", () => {
     console.log(JSON.stringify(multiplyArray, null, 2));
     expect(
-      (multiplyArray.nodes[0].inputs as { op: Recipe }).op.nodes[0].inputs
+      (multiplyArray.nodes[0].inputs as { op: Recipe }).op.nodes[0].inputs,
     ).toEqual({
-      x: { $alias: { cell: 1, path: ["parameters", "x"] } },
-      factor: { $alias: { path: ["parameters", "factor"] } },
+      x: { $alias: { cell: 1, path: ["argument", "x"] } },
+      factor: { $alias: { path: ["argument", "factor"] } },
     });
   });
 });
 
 describe("recipe with map node that references a parent cell in another recipe", () => {
-  const multiplyArray = recipe<{ values: { x: number }[]; factor: number }>(
-    "Double numbers",
-    ({ values, factor }) => {
-      const wrapper = recipe("Wrapper", () => {
-        const doubled = values.map(({ x }) => {
-          const double = lift<{ x: number; factor: number }>(
-            ({ x, factor }) => ({
-              x: x * factor,
-            })
-          );
-          return { doubled: double({ x, factor }) };
-        });
-        return { doubled };
-      });
-      return wrapper({ values, factor });
-    }
-  );
-
   it("correctly creates references to the parent cells", () => {
+    const multiplyArray = recipe<{ values: { x: number }[]; factor: number }>(
+      "Double numbers",
+      ({ values, factor }) => {
+        const wrapper = recipe("Wrapper", () => {
+          const doubled = values.map(({ x }) => {
+            const double = lift<{ x: number; factor: number }>(
+              ({ x, factor }) => ({
+                x: x * factor,
+              }),
+            );
+            return { doubled: double({ x, factor }) };
+          });
+          return { doubled };
+        });
+        return wrapper({ values, factor });
+      },
+    );
+
     console.log(JSON.stringify(multiplyArray, null, 2));
     expect(
-      (multiplyArray.nodes[0].inputs as { op: Recipe }).op.nodes[0].inputs
+      (multiplyArray.nodes[0].inputs as { op: Recipe }).op.nodes[0].inputs,
     ).toEqual({
-      x: { $alias: { cell: 1, path: ["parameters", "x"] } },
-      factor: { $alias: { path: ["parameters", "factor"] } },
+      x: { $alias: { cell: 1, path: ["argument", "x"] } },
+      factor: { $alias: { path: ["argument", "factor"] } },
     });
   });
 });

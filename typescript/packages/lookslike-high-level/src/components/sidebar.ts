@@ -2,8 +2,22 @@ import { LitElement, html, css, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { when } from "lit/directives/when.js";
 import { style } from "@commontools/common-ui";
-import { Charm, charms, recipes, UI, runPersistent, TYPE, addCharms } from "../data.js";
-import { CellImpl, addRecipe, cell, getRecipeSrc, run } from "@commontools/common-runner";
+import {
+  Charm,
+  charms,
+  recipes,
+  UI,
+  runPersistent,
+  TYPE,
+  addCharms,
+} from "../data.js";
+import {
+  CellImpl,
+  addRecipe,
+  cell,
+  getRecipeSrc,
+  run,
+} from "@commontools/common-runner";
 import { buildRecipe } from "../localBuild.js";
 import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
@@ -44,8 +58,8 @@ export class CommonDebug extends LitElement {
     return html`
       <pre slot="content">
 ${typeof this.content === "string"
-        ? this.content
-        : JSON.stringify(this.content, null, 2)}</pre
+          ? this.content
+          : JSON.stringify(this.content, null, 2)}</pre
       >
     `;
   }
@@ -184,8 +198,10 @@ export class CommonSidebar extends LitElement {
       if (!recipe) return;
       addRecipe(recipe, this.workingSrc);
 
-      // TODO(ja): we should check if the recipe parameters have changed
-      const data = newData ? {} : this.focusedCharm?.sourceCell?.get().parameters;
+      // TODO(ja): we should check if the recipe arguments have changed
+      // TODO(ja): if default values have changed and source still has to old
+      //           defaults, update to new defaults
+      const data = newData ? {} : this.focusedCharm?.sourceCell?.get()?.argument;
       const charm = run(recipe, data);
 
       addCharms([charm]);
@@ -195,7 +211,7 @@ export class CommonSidebar extends LitElement {
           detail: { charmId },
           bubbles: true,
           composed: true,
-        })
+        }),
       );
       if (newData) {
         toasty("Welcome to a new charm!");
@@ -214,21 +230,21 @@ export class CommonSidebar extends LitElement {
     return html`
       <os-navstack>
         ${when(
-      this.sidebarTab === "home",
-      () =>
-        html`<os-navpanel safearea>
+          this.sidebarTab === "home",
+          () =>
+            html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group safearea>
                 <div slot="label">Pinned</div>
                 <div ${ref(this.homeRef)}></div>
               </os-sidebar-group>
             </os-navpanel>`,
-      () => html``,
-    )}
+          () => html``,
+        )}
         ${when(
-      this.sidebarTab === "query",
-      () =>
-        html`<os-navpanel safearea>
+          this.sidebarTab === "query",
+          () =>
+            html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">Query</div>
@@ -237,19 +253,19 @@ export class CommonSidebar extends LitElement {
                     slot="content"
                     language="application/json"
                     .source=${watchCell(query, (q) =>
-          JSON.stringify(q, null, 2),
-        )}
+                      JSON.stringify(q, null, 2),
+                    )}
                     @doc-change=${onQueryChanged}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-      () => html``,
-    )}
+          () => html``,
+        )}
         ${when(
-      this.sidebarTab === "schema",
-      () =>
-        html`<os-navpanel safearea>
+          this.sidebarTab === "schema",
+          () =>
+            html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">Schema</div>
@@ -258,26 +274,31 @@ export class CommonSidebar extends LitElement {
                     slot="content"
                     language="application/json"
                     .source=${watchCell(schema, (q) =>
-          JSON.stringify(q, null, 2),
-        )}
+                      JSON.stringify(q, null, 2),
+                    )}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-      () => html``,
-    )}
+          () => html``,
+        )}
         ${when(
-      this.sidebarTab === "source",
-      () =>
-        html`<os-navpanel safearea>
+          this.sidebarTab === "source",
+          () =>
+            html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
-                <div slot="label">Source
-                
-                <a href="/recipe/${recipeId}" 
-                    target="_blank" 
+                <div slot="label">
+                  Source
+
+                  <a
+                    href="/recipe/${recipeId}"
+                    target="_blank"
                     @click=${copyRecipeLink}
-                    style="float: right">🔗 Share</a></div>
+                    style="float: right"
+                    >🔗 Share</a
+                  >
+                </div>
                 <div>
                   <button @click=${() => runRecipe(false)}>🔄 Run w/Current Data</button>
                   <button @click=${() => runRecipe(true)}>🐣 Run w/New Data</button>
@@ -291,12 +312,12 @@ export class CommonSidebar extends LitElement {
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-      () => html``,
-    )}
+          () => html``,
+        )}
         ${when(
-      this.sidebarTab === "data",
-      () =>
-        html`<os-navpanel safearea>
+          this.sidebarTab === "data",
+          () =>
+            html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">Data</div>
@@ -305,27 +326,31 @@ export class CommonSidebar extends LitElement {
                     slot="content"
                     language="application/json"
                     .source=${watchCell(data, (q) =>
-          JSON.stringify(q, null, 2),
-        )}
+                      JSON.stringify(q, null, 2),
+                    )}
                     @doc-change=${onDataChanged}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-      () => html``,
-    )}
+          () => html``,
+        )}
         ${when(
-      this.sidebarTab === "prompt",
-      () =>
-        html`<os-navpanel safearea>
+          this.sidebarTab === "prompt",
+          () =>
+            html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
-                <div slot="label">Spec
-                  <a href="/recipe/${recipeId}" 
-                    target="_blank" 
+                <div slot="label">
+                  Spec
+                  <a
+                    href="/recipe/${recipeId}"
+                    target="_blank"
                     @click=${copyRecipeLink}
-                    style="float: right">🔗 Share</a>
-</div>
+                    style="float: right"
+                    >🔗 Share</a
+                  >
+                </div>
                 <div>
                   <os-code-editor
                     slot="content"
@@ -336,8 +361,8 @@ export class CommonSidebar extends LitElement {
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-      () => html``,
-    )}
+          () => html``,
+        )}
       </os-navstack>
     `;
   }

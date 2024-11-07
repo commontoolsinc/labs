@@ -9,6 +9,7 @@ import {
   Module,
   Alias,
   toJSON,
+  JSON,
   UI,
   canBeOpaqueRef,
   makeOpaqueRef,
@@ -34,48 +35,87 @@ import { zodToJsonSchema } from "zod-to-json-schema";
  * @param description A human-readable description of the recipe
  * @param fn A function that creates the recipe graph
  *
+ * or
+ *
+ * @param argumentSchema A schema for the recipe inputs, either JSON or Zod
+ * @param fn A function that creates the recipe graph
+ *
+ * or
+ *
+ * @param argumentSchema A schema for the recipe inputs, either JSON or Zod
+ * @param resultSchema A schema for the recipe outputs, either JSON or Zod
+ * @param fn A function that creates the recipe graph
+ *
  * @returns A recipe node factory that also serializes as recipe.
  */
+
 export function recipe<T extends z.ZodTypeAny>(
-  inputSchema: T,
+  argumentSchema: T,
   fn: (input: OpaqueRef<Required<z.infer<T>>>) => any,
 ): RecipeFactory<z.infer<T>, ReturnType<typeof fn>>;
+export function recipe<T extends z.ZodTypeAny, R extends z.ZodTypeAny>(
+  argumentSchema: T,
+  resultSchema: R,
+  fn: (input: OpaqueRef<Required<z.infer<T>>>) => Opaque<z.infer<R>>,
+): RecipeFactory<z.infer<T>, z.infer<R>>;
 export function recipe<T>(
-  inputSchema: string,
+  argumentSchema: string | JSON,
   fn: (input: OpaqueRef<Required<T>>) => any,
 ): RecipeFactory<T, ReturnType<typeof fn>>;
 export function recipe<T, R>(
-  inputSchema: string,
+  argumentSchema: string | JSON,
   fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R>;
 export function recipe<T, R>(
-  inputSchema: string,
+  argumentSchema: string | JSON,
+  resultSchema: JSON,
   fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
+): RecipeFactory<T, R>;
+export function recipe<T, R>(
+  argumentSchema: string | JSON | z.ZodTypeAny,
+  resultSchema:
+    | JSON
+    | z.ZodTypeAny
+    | undefined
+    | ((input: OpaqueRef<Required<T>>) => Opaque<R>),
+  fn?: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R> {
+  // Cover the overload that just provides input schema
+  if (typeof resultSchema === "function") {
+    fn = resultSchema;
+    resultSchema = undefined;
+  }
+
   // The recipe graph is created by calling `fn` which populates for `inputs`
   // and `outputs` with Value<> (which containts OpaqueRef<>) and/or default
   // values.
-
   const frame = pushFrame();
   const inputs = opaqueRef<Required<T>>();
-  const outputs = fn(inputs);
-  const result = factoryFromRecipe<T, R>(inputSchema, inputs, outputs);
+  const outputs = fn!(inputs);
+  const result = factoryFromRecipe<T, R>(
+    argumentSchema,
+    resultSchema,
+    inputs,
+    outputs,
+  );
   popFrame(frame);
   return result;
 }
 
 // Same as above, but assumes the caller manages the frame
 export function recipeFromFrame<T, R>(
-  inputSchema: string | z.ZodTypeAny,
+  argumentSchema: string | JSON | z.ZodTypeAny,
+  resultSchema: JSON | z.ZodTypeAny | undefined,
   fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R> {
   const inputs = opaqueRef<Required<T>>();
   const outputs = fn(inputs);
-  return factoryFromRecipe<T, R>(inputSchema, inputs, outputs);
+  return factoryFromRecipe<T, R>(argumentSchema, resultSchema, inputs, outputs);
 }
 
 function factoryFromRecipe<T, R>(
-  inputSchema: string | z.ZodTypeAny,
+  argumentSchemaArg: string | JSON | z.ZodTypeAny,
+  resultSchemaArg: JSON | z.ZodTypeAny | undefined,
   inputs: OpaqueRef<T>,
   outputs: Opaque<R>,
 ): RecipeFactory<T, R> {
@@ -125,7 +165,7 @@ function factoryFromRecipe<T, R>(
   const paths = new Map<OpaqueRef<any> | ShadowRef, PropertyKey[]>();
 
   // Add the inputs default path
-  paths.set(inputs, ["parameters"]);
+  paths.set(inputs, ["argument"]);
 
   // Add paths for all the internal cells
   // TODO: Infer more stable identifiers
@@ -170,33 +210,43 @@ function factoryFromRecipe<T, R>(
     if (external) setValueAtPath(initial, paths.get(cell)!, external);
   });
 
-  let schema: {
+  let argumentSchema: {
     properties: { [key: string]: any };
     description: string;
   };
 
-  if (typeof inputSchema === "string") {
+  if (typeof argumentSchemaArg === "string") {
     // TODO: initial is likely not needed anymore
     // TODO: But we need a new one for the result
-    schema = createJsonSchema(defaults, {}) as {
+    argumentSchema = createJsonSchema(defaults, {}) as {
       properties: { [key: string]: any };
       description: string;
     };
-    schema.description = inputSchema;
+    argumentSchema.description = argumentSchemaArg;
 
-    delete schema.properties[UI]; // TODO: This should be a schema for views
-    if (schema.properties?.internal?.properties)
+    delete argumentSchema.properties[UI]; // TODO: This should be a schema for views
+    if (argumentSchema.properties?.internal?.properties)
       for (const key of Object.keys(
-        schema.properties.internal.properties as any,
+        argumentSchema.properties.internal.properties as any,
       ))
         if (key.startsWith("__#"))
-          delete (schema as any).properties.internal.properties[key];
+          delete (argumentSchema as any).properties.internal.properties[key];
+  } else if (argumentSchemaArg instanceof z.ZodType) {
+    argumentSchema = zodToJsonSchema(argumentSchemaArg) as {
+      properties: { [key: string]: any };
+      description: string;
+    };
   } else {
-    schema = zodToJsonSchema(inputSchema) as {
+    argumentSchema = argumentSchemaArg as unknown as {
       properties: { [key: string]: any };
       description: string;
     };
   }
+
+  const resultSchema: JSON =
+    resultSchemaArg instanceof z.ZodType
+      ? (zodToJsonSchema(resultSchemaArg) as JSON)
+      : resultSchemaArg ?? ({} as JSON);
 
   const serializedNodes = Array.from(nodes).map((node) => {
     const module = isOpaqueRef(node.module)
@@ -208,7 +258,8 @@ function factoryFromRecipe<T, R>(
   });
 
   const recipe: Recipe & toJSON = {
-    schema,
+    argumentSchema,
+    resultSchema,
     initial,
     result,
     nodes: serializedNodes,

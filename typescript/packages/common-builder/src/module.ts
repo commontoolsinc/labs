@@ -5,6 +5,7 @@ import type {
   OpaqueRef,
   NodeRef,
   toJSON,
+  JSON,
 } from "./types.js";
 import { opaqueRef } from "./opaque-ref.js";
 import { moduleToJSON, connectInputAndOutputs } from "./utils.js";
@@ -14,6 +15,8 @@ import type {
   JavaScriptValueMap,
   JavaScriptShapeMap,
 } from "@commontools/common-runtime";
+import { z } from "zod";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,
@@ -41,6 +44,16 @@ export function createNodeFactory<T = any, R = any>(
  * @returns A module node factory that also serializes as module.
  */
 export function lift<T, R>(
+  argumentSchema: JSON,
+  resultSchema: JSON,
+  implementation: (input: T) => R,
+): ModuleFactory<T, R>;
+export function lift<T extends z.ZodTypeAny, R extends z.ZodTypeAny>(
+  argumentSchema: T,
+  resultSchema: R,
+  implementation: (input: z.infer<T>) => z.infer<R>,
+): ModuleFactory<T, R>;
+export function lift<T, R>(
   implementation: (input: T) => R,
 ): ModuleFactory<T, R>;
 export function lift<T>(
@@ -50,11 +63,24 @@ export function lift<T extends (...args: any[]) => any>(
   implementation: T,
 ): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
 export function lift<T, R>(
-  implementation: (input: T) => R,
+  argumentSchema?: z.ZodTypeAny | JSON | ((input: any) => any),
+  resultSchema?: z.ZodTypeAny | JSON,
+  implementation?: (input: T) => R,
 ): ModuleFactory<T, R> {
+  if (typeof argumentSchema === "function") {
+    implementation = argumentSchema;
+    argumentSchema = resultSchema = undefined;
+  }
+  if (argumentSchema instanceof z.ZodType)
+    argumentSchema = zodToJsonSchema(argumentSchema) as JSON;
+  if (resultSchema instanceof z.ZodType)
+    resultSchema = zodToJsonSchema(resultSchema) as JSON;
+
   return createNodeFactory({
     type: "javascript",
     implementation,
+    ...(argumentSchema ? { argumentSchema } : {}),
+    ...(resultSchema ? { resultSchema } : {}),
   });
 }
 

@@ -295,7 +295,8 @@ export function moduleToJSON(module: Module) {
 
 export function recipeToJSON(recipe: Recipe) {
   return {
-    schema: recipe.schema,
+    argumentSchema: recipe.argumentSchema,
+    resultSchema: recipe.resultSchema,
     ...(recipe.initial ? { initial: recipe.initial } : {}),
     result: recipe.result,
     nodes: recipe.nodes,

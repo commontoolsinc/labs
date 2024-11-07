@@ -7,7 +7,7 @@ import { cell } from "../src/cell.js";
 describe("runRecipe", () => {
   it("should work with passthrough", async () => {
     const recipe = {
-      schema: {
+      argumentSchema: {
         type: "object",
         properties: {
           input: { type: "number" },
@@ -15,13 +15,14 @@ describe("runRecipe", () => {
         },
         description: "passthrough",
       },
+      resultSchema: {},
       result: { output: { $alias: { path: ["internal", "output"] } } },
       nodes: [
         {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { path: ["parameters", "input"] } } },
+          inputs: { value: { $alias: { path: ["argument", "input"] } } },
           outputs: { value: { $alias: { path: ["internal", "output"] } } },
         },
       ],
@@ -31,7 +32,7 @@ describe("runRecipe", () => {
     await idle();
 
     expect(result.sourceCell?.getAsQueryResult()).toMatchObject({
-      parameters: { input: 1 },
+      argument: { input: 1 },
       internal: { output: 1 },
     });
     expect(result.sourceCell?.get().internal.output).toBe(1);
@@ -45,38 +46,40 @@ describe("runRecipe", () => {
 
   it("should work with nested recipes", async () => {
     const innerRecipe = {
-      schema: {
+      argumentSchema: {
         type: "object",
         properties: {
           input: { type: "number" },
           output: { type: "number" },
         },
       },
+      resultSchema: {},
       result: { $alias: { path: ["internal", "output"] } },
       nodes: [
         {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { path: ["parameters", "input"] } } },
+          inputs: { value: { $alias: { path: ["argument", "input"] } } },
           outputs: { value: { $alias: { path: ["internal", "output"] } } },
         },
       ],
     } as Recipe;
 
     const outerRecipe = {
-      schema: {
+      argumentSchema: {
         type: "object",
         properties: {
           value: { type: "number" },
           result: { type: "number" },
         },
       },
+      resultSchema: {},
       result: { result: { $alias: { path: ["internal", "output"] } } },
       nodes: [
         {
           module: { type: "recipe", implementation: innerRecipe },
-          inputs: { input: { $alias: { path: ["parameters", "value"] } } },
+          inputs: { input: { $alias: { path: ["argument", "value"] } } },
           outputs: { $alias: { path: ["internal", "output"] } },
         },
       ],
@@ -90,7 +93,8 @@ describe("runRecipe", () => {
 
   it("should run a simple module", async () => {
     const mockRecipe: Recipe = {
-      schema: {},
+      argumentSchema: {},
+      resultSchema: {},
       result: { result: { $alias: { path: ["internal", "result"] } } },
       nodes: [
         {
@@ -98,7 +102,7 @@ describe("runRecipe", () => {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["parameters", "value"] } },
+          inputs: { $alias: { path: ["argument", "value"] } },
           outputs: { $alias: { path: ["internal", "result"] } },
         },
       ],
@@ -113,7 +117,8 @@ describe("runRecipe", () => {
     let ran = false;
 
     const mockRecipe: Recipe = {
-      schema: {},
+      argumentSchema: {},
+      resultSchema: {},
       result: { result: { $alias: { path: ["internal", "result"] } } },
       nodes: [
         {
@@ -123,7 +128,7 @@ describe("runRecipe", () => {
               ran = true;
             },
           },
-          inputs: { $alias: { path: ["parameters", "value"] } },
+          inputs: { $alias: { path: ["argument", "value"] } },
           outputs: {},
         },
       ],
@@ -139,7 +144,8 @@ describe("runRecipe", () => {
     let ran = false;
 
     const mockRecipe: Recipe = {
-      schema: {},
+      argumentSchema: {},
+      resultSchema: {},
       result: { result: { $alias: { path: ["internal", "result"] } } },
       nodes: [
         {
@@ -149,7 +155,7 @@ describe("runRecipe", () => {
               ran = true;
             },
           },
-          inputs: { $alias: { path: ["parameters", "other"] } },
+          inputs: { $alias: { path: ["argument", "other"] } },
           outputs: {},
         },
       ],
@@ -163,7 +169,8 @@ describe("runRecipe", () => {
 
   it("should handle nested recipes", async () => {
     const nestedRecipe: Recipe = {
-      schema: {},
+      argumentSchema: {},
+      resultSchema: {},
       result: { $alias: { path: ["internal", "result"] } },
       nodes: [
         {
@@ -171,19 +178,20 @@ describe("runRecipe", () => {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["parameters", "input"] } },
+          inputs: { $alias: { path: ["argument", "input"] } },
           outputs: { $alias: { path: ["internal", "result"] } },
         },
       ],
     };
 
     const mockRecipe: Recipe = {
-      schema: {},
+      argumentSchema: {},
+      resultSchema: {},
       result: { result: { $alias: { path: ["internal", "result"] } } },
       nodes: [
         {
           module: { type: "recipe", implementation: nestedRecipe },
-          inputs: { input: { $alias: { path: ["parameters", "value"] } } },
+          inputs: { input: { $alias: { path: ["argument", "value"] } } },
           outputs: { $alias: { path: ["internal", "result"] } },
         },
       ],
@@ -196,16 +204,17 @@ describe("runRecipe", () => {
 
   it("should allow passing a cell as a binding", async () => {
     const recipe: Recipe = {
-      schema: {},
-      result: { output: { $alias: { path: ["parameters", "output"] } } },
+      argumentSchema: {},
+      resultSchema: {},
+      result: { output: { $alias: { path: ["argument", "output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["parameters", "input"] } },
-          outputs: { $alias: { path: ["parameters", "output"] } },
+          inputs: { $alias: { path: ["argument", "input"] } },
+          outputs: { $alias: { path: ["argument", "output"] } },
         },
       ],
     };
@@ -229,16 +238,17 @@ describe("runRecipe", () => {
 
   it("should allow stopping a recipe", async () => {
     const recipe: Recipe = {
-      schema: {},
-      result: { output: { $alias: { path: ["parameters", "output"] } } },
+      argumentSchema: {},
+      resultSchema: {},
+      result: { output: { $alias: { path: ["argument", "output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["parameters", "input"] } },
-          outputs: { $alias: { path: ["parameters", "output"] } },
+          inputs: { $alias: { path: ["argument", "input"] } },
+          outputs: { $alias: { path: ["argument", "output"] } },
         },
       ],
     };

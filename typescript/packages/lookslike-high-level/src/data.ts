@@ -124,7 +124,8 @@ export type RecipeManifest = {
 
 export const recipes: RecipeManifest[] = Object.entries(allRecipes).map(
   ([name, recipe]) => ({
-    name: (recipe.schema as { description: string })?.description ?? name,
+    name:
+      (recipe.argumentSchema as { description: string })?.description ?? name,
     recipeId: addRecipe(recipe),
   }),
 );

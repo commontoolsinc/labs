@@ -17,7 +17,7 @@ export function addRecipe(recipe: Recipe, src?: string): string {
 
   if (src) srcById.set(id, src);
 
-  const name = (recipe.schema as { description: string })?.description;
+  const name = (recipe.argumentSchema as { description: string })?.description;
   if (name) recipeByName.set(name, recipe);
 
   return id;
