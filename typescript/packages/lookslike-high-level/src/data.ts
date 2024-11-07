@@ -240,8 +240,7 @@ export async function saveRecipe(
 }
 
 addCharms([
-  await runPersistent(charmExample, {}, "Charm Example")
-  charmExample.spawn(),
+  charmExample.spawn({ another: {} }),
 ]);
 
 export type RecipeManifest = {
