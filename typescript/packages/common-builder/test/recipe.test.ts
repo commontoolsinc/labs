@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { Recipe, isRecipe, Module, isModule } from "../src/types.js";
+import { Recipe, isRecipe, Module, isModule, Opaque } from "../src/types.js";
 import { lift } from "../src/module.js";
 import { recipe } from "../src/recipe.js";
+import { z } from "zod";
 
 describe("recipe function", () => {
   it("creates a recipe", () => {
@@ -55,6 +56,48 @@ describe("complex recipe function", () => {
     expect(nodes[1].inputs).toEqual({ $alias: { path: ["internal", "__#0"] } });
     expect(nodes[1].outputs).toEqual({
       $alias: { path: ["internal", "__#1"] },
+    });
+  });
+});
+
+describe("schemas", () => {
+  it("can be Zod, should become JSON", () => {
+    const schema = z.object({ x: z.number() }).describe("A number");
+    const testRecipe = recipe(schema, schema, ({ x }) => ({ x }));
+    expect(isRecipe(testRecipe)).toBe(true);
+    expect(testRecipe.argumentSchema).toMatchObject({
+      description: "A number",
+      type: "object",
+      properties: {
+        x: { type: "number" },
+      },
+    });
+    expect(testRecipe.resultSchema).toMatchObject(
+      testRecipe.argumentSchema as unknown as JSON,
+    );
+  });
+
+  it("also works for lifted functions", () => {
+    const double = lift(
+      z.number().describe("A number"),
+      z.number().describe("Doubled"),
+      (x) => x * 2,
+    );
+    // @ts-ignore-error ZodNumber and number clash to be investigated
+    const testRecipe = recipe(
+      z.object({ x: z.number() }),
+      z.object({ doubled: z.number() }),
+      // @ts-ignore-error
+      ({ x }) => ({ doubled: double(x) }),
+    );
+    const module = testRecipe.nodes[0].module as Module;
+    expect(module.argumentSchema).toMatchObject({
+      description: "A number",
+      type: "number",
+    });
+    expect(module.resultSchema).toMatchObject({
+      description: "Doubled",
+      type: "number",
     });
   });
 });
