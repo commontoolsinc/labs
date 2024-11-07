@@ -4,19 +4,6 @@ import { view } from "../hyperscript/render.js";
 import * as DOM from "@gozala/co-dom";
 import * as DB from "synopsys";
 
-let LAST_ID = 0;
-let REFS = new Map();
-
-export const box = <T>(local: T) => {
-  const id = LAST_ID++;
-  REFS.set(id, local);
-  return id;
-};
-
-export const unbox = (remote: number) => {
-  return REFS.get(remote);
-};
-
 export const cardContainer = view("common-charm", {
   spell: { type: "object" },
   ...eventProps(),
@@ -34,6 +21,7 @@ export class CommonCharm extends HTMLElement {
   #entity: DB.API.Link | null;
   #replica: DB.Type.Replica;
   #vdom: DOM.Node<{}> | null;
+  #cell: { send(data: { name: string }): void };
   mount: HTMLElement;
 
   state: LocalState;
@@ -55,6 +43,10 @@ export class CommonCharm extends HTMLElement {
   }
   set vdom(vdom) {
     this.#vdom = vdom;
+  }
+
+  set cell(value: any) {
+    this.#cell = value;
   }
 
   async activate() {
@@ -161,6 +153,14 @@ export class CommonCharm extends HTMLElement {
   *transact(changes: DB.Transaction) {
     yield* this.replica.transact(changes);
     render(this);
+
+    this.propagate();
+  }
+  get name() {
+    return this.mount.title;
+  }
+  propagate() {
+    this.#cell.send({ name: this.name });
   }
 }
 

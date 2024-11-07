@@ -1,12 +1,10 @@
-import { NAME, UI, recipe } from "@commontools/common-builder";
-import { refer, $ } from "synopsys";
-import { html } from "@commontools/common-html";
-import { h } from "@commontools/common-system";
-import z from "zod";
+import { h, behavior, refer, $ } from "@commontools/common-system";
 
-const entity = refer({ clicker: { v: 22 } });
+export const source = { clicker: { v: 22 } };
 
-const Clicker = {
+const entity = refer(source);
+
+export const rules = behavior({
   init: {
     select: {},
     where: [{ Not: { Case: [entity, "clicks", $.count] } }],
@@ -23,7 +21,7 @@ const Clicker = {
           Assert: [
             entity,
             "~/common/ui",
-            <div>
+            <div title={`Clicks ${count}`}>
               <div>{count}</div>
               <button onclick="~/on/click">Click me!</button>
             </div>,
@@ -53,11 +51,6 @@ const Clicker = {
       ];
     },
   },
-};
-
-export const charmExample = recipe(z.object({}), () => {
-  return {
-    [NAME]: "Charm",
-    [UI]: html`<common-charm spell=${() => Clicker} entity=${() => entity} />`,
-  };
 });
+
+export const spawn = (input = source) => rules.spawn(input);

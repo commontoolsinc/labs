@@ -61,7 +61,7 @@ import { z } from "zod";
 import { datalogQueryExample } from "./recipes/datalogQuery.jsx";
 import { todoQuery } from "./recipes/todoQuery.jsx";
 import { mealExample } from "./recipes/meal.jsx";
-import { charmExample } from "./recipes/charm.jsx";
+import * as charmExample from "./recipes/charm.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -241,6 +241,7 @@ export async function saveRecipe(
 
 addCharms([
   await runPersistent(charmExample, {}, "Charm Example")
+  charmExample.spawn(),
 ]);
 
 export type RecipeManifest = {
