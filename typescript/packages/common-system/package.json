@@ -27,6 +27,8 @@
   ],
   "dependencies": {
     "synopsys": "^2.3.0",
+    "@commontools/common-runner": "^0.0.1",
+    "@commontools/common-builder": "^0.0.1",
     "@gozala/co-dom": "^0.4.0"
   },
   "devDependencies": {
@@ -42,7 +44,10 @@
   },
   "wireit": {
     "build": {
-      "dependencies": [],
+      "dependencies": [
+        "../common-runner:build",
+        "../common-builder:build"
+      ],
       "files": [
         "./src/**/*"
       ],
