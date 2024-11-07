@@ -41,13 +41,20 @@ describe("utility functions", () => {
 
   it("isModule correctly identifies modules", () => {
     expect(isModule({ type: "javascript", implementation: () => {} })).toBe(
-      true
+      true,
     );
     expect(isModule({ notModule: "something" })).toBe(false);
   });
 
   it("isRecipe correctly identifies recipes", () => {
-    expect(isRecipe({ schema: {}, initial: {}, nodes: [] })).toBe(true);
+    expect(
+      isRecipe({
+        argumentSchema: {},
+        resultSchema: {},
+        initial: {},
+        nodes: [],
+      }),
+    ).toBe(true);
     expect(isRecipe({ notRecipe: "something" })).toBe(false);
   });
 });
