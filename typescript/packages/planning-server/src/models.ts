@@ -21,6 +21,7 @@ type ModelConfig = {
 };
 
 export const MODELS: Record<string, ModelConfig> = {};
+export const ALIAS_NAMES: string[] = [];
 
 const addModel = ({
   provider,
@@ -43,6 +44,7 @@ const addModel = ({
   MODELS[name] = config;
   for (const alias of aliases) {
     MODELS[alias] = config;
+    ALIAS_NAMES.push(alias);
   }
 };
 

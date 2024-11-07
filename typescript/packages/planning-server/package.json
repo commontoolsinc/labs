@@ -9,6 +9,7 @@
   "scripts": {
     "start": "deno run --allow-all src/index.ts",
     "test": "deno test --no-check",
+    "livetest": "deno run --allow-all src/livetest.ts",
     "build": "tsc --build -f",
     "prebuild": "npm run clean",
     "clean": "rm -rf ./lib"
