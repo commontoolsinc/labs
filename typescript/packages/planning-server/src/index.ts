@@ -2,7 +2,14 @@ import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
 import { generateText, streamText } from "npm:ai";
 import { crypto } from "https://deno.land/std/crypto/mod.ts";
 import { config } from "https://deno.land/x/dotenv/mod.ts";
-import { ALIAS_NAMES, type Capabilities, findModel, MODELS } from "./models.ts";
+import {
+  ALIAS_NAMES,
+  type Capabilities,
+  findModel,
+  MODELS,
+  TASK_MODELS,
+  TaskType,
+} from "./models.ts";
 import * as cache from "./cache.ts";
 import { colors, timestamp, timeTrack } from "./cli.ts";
 
@@ -80,13 +87,45 @@ const handleLLMPost = async (request: Request): Promise<Response> => {
     const payload = (await request.json()) as {
       messages: Array<{ role: string; content: string }>;
       system?: string;
-      model: string;
+      model?: string;
+      task?: TaskType;
       max_tokens: number;
       stop?: string;
       stream: boolean;
       max_completion_tokens?: number;
       abortSignal?: AbortSignal;
     };
+
+    if (!payload.model && !payload.task) {
+      return new Response(
+        JSON.stringify({ error: "You must specify a `model` or `task`." }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    // NOTE: This is a sketch of a higher-level hueristic model selection, based on the task you're trying to accomplish.
+    if (payload.task) {
+      const taskModel = TASK_MODELS[payload.task];
+      if (!taskModel) {
+        console.warn(
+          `${timestamp()} ${requestId} ${colors.yellow}⚠️  Unsupported task:${colors.reset} ${payload.task}`,
+        );
+        return new Response(
+          JSON.stringify({
+            error: `Unsupported task: ${payload.task}`,
+            availableTasks: Object.keys(TASK_MODELS),
+          }),
+          {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+      payload.model = taskModel;
+      console.log(
+        `${timestamp()} ${requestId} ${colors.blue}🎯 Task ${colors.bright}${payload.task}${colors.reset} mapped to model ${colors.bright}${taskModel}${colors.reset}`,
+      );
+    }
 
     // Log request details with colors
     console.log(
@@ -241,6 +280,7 @@ const handleLLMPost = async (request: Request): Promise<Response> => {
         headers: {
           "Content-Type": "text/event-stream",
           "Transfer-Encoding": "chunked",
+          "CT-Task-Selected-Model": modelConfig.model.modelId,
         },
       });
     }
@@ -283,7 +323,10 @@ const handleLLMPost = async (request: Request): Promise<Response> => {
     return new Response(
       JSON.stringify(params.messages[params.messages.length - 1]),
       {
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "CT-Task-Selected-Model": modelConfig.model.modelId,
+        },
       },
     );
   } catch (error) {

@@ -24,6 +24,15 @@ export const MODELS: Record<string, ModelConfig> = {};
 export const ALIAS_NAMES: string[] = [];
 export const PROVIDER_NAMES: Set<string> = new Set();
 
+export const TASK_MODELS = {
+  coding: "anthropic:claude-3-5-sonnet-20241022", // Best for code
+  json: "anthropic:claude-3-5-sonnet-20241022", // Fast & good at structured output
+  creative: "openai:gpt-4o-2024-08-06", // Best for creative tasks
+  vision: "google:gemini-1.5-pro-002", // Best for vision tasks
+} as const;
+
+export type TaskType = keyof typeof TASK_MODELS;
+
 const addModel = ({
   provider,
   name,

@@ -180,6 +180,74 @@ or multiple capabilities.
 curl http://localhost:8000/models?search=openai&capability=systemPrompt,streaming
 ```
 
+## Calling a language model by name
+
+Simple CURL example of calling a language model.
+
+```bash
+curl -X POST http://localhost:8000/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "anthropic:claude-3-5-sonnet-20241022",
+    "system": "Think deeply, be creative.",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What'\''s your favorite color? One word."
+      }
+    ],
+    "stream": false
+  }'
+```
+
+```json
+{ "role": "assistant", "content": "Blue." }
+```
+
+## Calling a language model by task
+
+If you have a particular task in mind (like coding, creative writing, or visual understanding), you can use the `task` query parameter for an opinionated model selection.
+
+For example in the request below, we say `"task": "coding"`, and you can see in the HTTP response header `ct-task-selected-model` that the model selected was `anthropic:claude-3-5-sonnet-20241022`.
+
+```bash
+curl -v -X POST http://localhost:8000/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task": "coding",
+    "system": "Think deeply, be creative.",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What'\''s your favorite color? One word."
+      }
+    ],
+    "stream": false
+  }'
+
+*   Trying [::1]:8000...
+* connect to ::1 port 8000 failed: Connection refused
+*   Trying 127.0.0.1:8000...
+* Connected to localhost (127.0.0.1) port 8000
+> POST / HTTP/1.1
+> Host: localhost:8000
+> User-Agent: curl/8.4.0
+> Accept: */*
+> Content-Type: application/json
+> Content-Length: 215
+>
+< HTTP/1.1 200 OK
+< content-type: application/json
+< ct-task-selected-model: claude-3-5-sonnet-20241022
+< vary: Accept-Encoding
+< content-length: 37
+< date: Thu, 07 Nov 2024 21:24:18 GMT
+<
+* Connection #0 to host localhost left intact
+
+{"role":"assistant","content":"Blue"}
+```
+
 ## Tool calling
 
 `planning-server` supports tool calling collaboratively between the client and server, with the client providing a set of tools to the server in addition to the server's inbuilt toolkit.
