@@ -159,7 +159,7 @@ export class CommonSidebar extends LitElement {
       this.workingSrc = e.detail.state.doc.toString();
     };
 
-    const compile = () => {
+    const compile = (newData: boolean = false) => {
       console.log("compile", this.workingSrc);
       const { recipe, errors } = buildRecipe(this.workingSrc);
       console.log("recipe", recipe);
@@ -170,7 +170,8 @@ export class CommonSidebar extends LitElement {
       addRecipe(recipe, this.workingSrc);
 
       // TODO(ja): we should check if the recipe parameters have changed
-      const charm = run(recipe, this.focusedCharm?.sourceCell?.get().parameters);
+      const data = newData ? {} : this.focusedCharm?.sourceCell?.get().parameters;
+      const charm = run(recipe, data);
 
       console.log("charm", charm);
       addCharms([charm]);
@@ -274,7 +275,8 @@ export class CommonSidebar extends LitElement {
                     @click=${copyRecipeLink}
                     style="float: right">🔗 Share</a></div>
                 <div>
-                  <button @click=${compile}>🔄 Compile + Run</button>
+                  <button @click=${() => compile(false)}>🔄 Run w/Current Data</button>
+                  <button @click=${() => compile(true)}>🐣 Run w/New Data</button>
                   <os-code-editor
                     slot="content"
                     language="text/x.typescript"
