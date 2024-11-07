@@ -21,6 +21,7 @@ export const home = recipe<{
             <common-droppable
               $droppable=${charm["action/drop/handler"]}
               $schema=${charm["action/drop/schema"]}
+              $opentarget=${charm}
             >
               <common-charm-link $charm=${charm}></common-charm-link>
             </common-droppable>

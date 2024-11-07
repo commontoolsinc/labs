@@ -6,12 +6,15 @@ import {
   isSendable,
   RendererCell,
 } from "@commontools/common-runner";
-
+import { openCharm } from "../data.js";
 @customElement("common-droppable")
 export default class DroppableElement extends LitElement {
-  @property({ type: Object })
-  droppable: RendererCell<any[]> | undefined;
+  @property({ type: Object }) droppable: RendererCell<any[]> | undefined;
   @property({ type: Object }) schema: RendererCell<any> | undefined;
+  @property({ type: Object }) opentarget: RendererCell<any> | undefined;
+
+  private _hoverTimeout: number | undefined;
+  private _openedTarget: boolean = false;
 
   override render() {
     console.log("droppable", this.droppable);
@@ -94,13 +97,30 @@ export default class DroppableElement extends LitElement {
 
     console.log("droppable", items);
     if (items.length > 0) this.droppable.send(items);
+
+    if (this.opentarget && !this._openedTarget)
+      openCharm(this.opentarget!.getAsCellReference().cell);
   }
 
   #handleDragLeave(e: DragEvent) {
     e.preventDefault();
+    console.log("on leave", this._openedTarget, this.opentarget);
+    if (this._hoverTimeout) {
+      clearTimeout(this._hoverTimeout);
+      this._hoverTimeout = undefined;
+    }
   }
 
   #handleDragEnter(e: DragEvent) {
     e.preventDefault();
+    console.log("on enter", this._openedTarget, this.opentarget);
+    if (!this.opentarget) return;
+
+    this._hoverTimeout = setTimeout(() => {
+      console.log("hover timeout", this._openedTarget, this.opentarget);
+      if (this._openedTarget || !this.opentarget) return;
+      this._openedTarget = true;
+      openCharm(this.opentarget.getAsCellReference().cell);
+    }, 1000) as unknown as number;
   }
 }
