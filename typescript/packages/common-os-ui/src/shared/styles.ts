@@ -228,6 +228,7 @@ export const base = css`
       align-items: center;
       justify-content: flex-start;
       min-width: 104px;
+      flex: 1;
     }
 
     .toolbar-end {
@@ -236,7 +237,7 @@ export const base = css`
       gap: var(--button-gap);
       align-items: center;
       justify-content: flex-end;
-      min-width: 100px;
+      flex-shrink: 1;
     }
 
     .toolbar-center {

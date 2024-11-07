@@ -15,6 +15,7 @@ import {
   CellImpl,
   addRecipe,
   cell,
+  getRecipe,
   getRecipeSrc,
   run,
 } from "@commontools/common-runner";
@@ -25,7 +26,7 @@ import { home } from "../recipes/home.js";
 import { render } from "@commontools/common-html";
 
 const toasty = (message: string) => {
-  const toastEl = document.createElement('div');
+  const toastEl = document.createElement("div");
   toastEl.textContent = message;
   toastEl.style.cssText = `
     position: fixed;
@@ -92,6 +93,22 @@ export class CommonSidebar extends LitElement {
         display: block;
         height: 100%;
       }
+
+      .nav-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 4px;
+        text-align: justify;
+        text-justify: distribute;
+      }
+
+      os-icon-button,
+      os-sidebar-close-button {
+        scale: 0.9;
+        width: 40px;
+        flex: 0 0 auto;
+      }
     `,
   ];
 
@@ -141,39 +158,41 @@ export class CommonSidebar extends LitElement {
     const schema = this.getFieldOrDefault("schema", {});
     const query = this.getFieldOrDefault("query", {});
 
-    const sidebarNav = html`
-      <os-icon-button
-        slot="toolbar-end"
-        icon="home"
-        @click=${() => this.handleSidebarTabChange("home")}
-      ></os-icon-button>
-      <os-icon-button
-        slot="toolbar-end"
-        icon="message"
-        @click=${() => this.handleSidebarTabChange("prompt")}
-      ></os-icon-button>
-      <os-icon-button
-        slot="toolbar-end"
-        icon="query_stats"
-        @click=${() => this.handleSidebarTabChange("query")}
-      ></os-icon-button>
-      <os-icon-button
-        slot="toolbar-end"
-        icon="database"
-        @click=${() => this.handleSidebarTabChange("data")}
-      ></os-icon-button>
-      <os-icon-button
-        slot="toolbar-end"
-        icon="code"
-        @click=${() => this.handleSidebarTabChange("source")}
-      ></os-icon-button>
-      <os-icon-button
-        slot="toolbar-end"
-        icon="schema"
-        @click=${() => this.handleSidebarTabChange("schema")}
-      ></os-icon-button>
-      <os-sidebar-close-button slot="toolbar-end"></os-sidebar-close-button>
-    `;
+    const sidebarNav = html`<div class="nav-buttons" slot="toolbar-start">
+        <os-icon-button
+          icon="home"
+          @click=${() => this.handleSidebarTabChange("home")}
+        ></os-icon-button>
+        <os-icon-button
+          icon="message"
+          @click=${() => this.handleSidebarTabChange("prompt")}
+        ></os-icon-button>
+        <os-icon-button
+          icon="sync_alt"
+          @click=${() => this.handleSidebarTabChange("links")}
+        ></os-icon-button>
+        <os-icon-button
+          icon="query_stats"
+          @click=${() => this.handleSidebarTabChange("query")}
+        ></os-icon-button>
+        <os-icon-button
+          icon="database"
+          @click=${() => this.handleSidebarTabChange("data")}
+        ></os-icon-button>
+        <os-icon-button
+          icon="schema"
+          @click=${() => this.handleSidebarTabChange("schema")}
+        ></os-icon-button>
+        <os-icon-button
+          icon="code"
+          @click=${() => this.handleSidebarTabChange("source")}
+        ></os-icon-button>
+        <os-icon-button
+          icon="data_object"
+          @click=${() => this.handleSidebarTabChange("recipe-json")}
+        ></os-icon-button>
+      </div>
+      <os-sidebar-close-button slot="toolbar-end"></os-sidebar-close-button> `;
 
     const onSpecChanged = (e: CustomEvent) => {
       this.setField("prompt", e.detail.state.doc.toString());
@@ -201,7 +220,9 @@ export class CommonSidebar extends LitElement {
       // TODO(ja): we should check if the recipe arguments have changed
       // TODO(ja): if default values have changed and source still has to old
       //           defaults, update to new defaults
-      const data = newData ? {} : this.focusedCharm?.sourceCell?.get()?.argument;
+      const data = newData
+        ? {}
+        : this.focusedCharm?.sourceCell?.get()?.argument;
       const charm = run(recipe, data);
 
       addCharms([charm]);
@@ -218,14 +239,14 @@ export class CommonSidebar extends LitElement {
       } else {
         toasty("Welcome to a new version of this charm!");
       }
-    }
+    };
 
     const copyRecipeLink = (event: Event) => {
       const target = event.target as HTMLAnchorElement;
       navigator.clipboard.writeText(target.href);
       event.preventDefault();
       toasty("Copied recipe link to clipboard");
-    }
+    };
 
     return html`
       <os-navstack>
@@ -239,6 +260,11 @@ export class CommonSidebar extends LitElement {
                 <div ${ref(this.homeRef)}></div>
               </os-sidebar-group>
             </os-navpanel>`,
+          () => html``,
+        )}
+        ${when(
+          this.sidebarTab === "links",
+          () => html`<os-navpanel safearea> ${sidebarNav} </os-navpanel>`,
           () => html``,
         )}
         ${when(
@@ -300,14 +326,36 @@ export class CommonSidebar extends LitElement {
                   >
                 </div>
                 <div>
-                  <button @click=${() => runRecipe(false)}>🔄 Run w/Current Data</button>
-                  <button @click=${() => runRecipe(true)}>🐣 Run w/New Data</button>
+                  <button @click=${() => runRecipe(false)}>
+                    🔄 Run w/Current Data
+                  </button>
+                  <button @click=${() => runRecipe(true)}>
+                    🐣 Run w/New Data
+                  </button>
                   <pre>${this.compileErrors}</pre>
                   <os-code-editor
                     slot="content"
                     language="text/x.typescript"
                     .source=${src}
                     @doc-change=${onSrcChanged}
+                  ></os-code-editor>
+                </div>
+              </os-sidebar-group>
+            </os-navpanel>`,
+          () => html``,
+        )}
+        ${when(
+          this.sidebarTab === "recipe-json",
+          () =>
+            html`<os-navpanel safearea>
+              ${sidebarNav}
+              <os-sidebar-group>
+                <div slot="label">Recipe JSON</div>
+                <div>
+                  <os-code-editor
+                    slot="content"
+                    language="application/json"
+                    .source=${JSON.stringify(getRecipe(recipeId), null, 2)}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
