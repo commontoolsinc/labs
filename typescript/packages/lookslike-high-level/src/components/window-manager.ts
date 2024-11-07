@@ -537,7 +537,9 @@ export class CommonWindowManager extends LitElement {
       // TODO: Add a timeout here, show loading state and error state
       setTimeout(() => {
         syncCharm(charmMatch.params.charmId, true).then(
-          (charm) => charm && charm.get() && this.openCharm(charm),
+          (charm) =>
+            (charm && charm.get() && this.openCharm(charm)) ||
+            navigate(`/charm/${charmMatch.params.charmId}`),
         );
       }, 100);
     }
@@ -548,7 +550,7 @@ export class CommonWindowManager extends LitElement {
       syncRecipe(recipeId).then(() => {
         const recipe = getRecipe(recipeId);
         if (recipe) {
-          const charm = run(recipe, {}).entityId!;
+          const charm = run(recipe, {});
           this.openCharm(charm);
         }
       });
