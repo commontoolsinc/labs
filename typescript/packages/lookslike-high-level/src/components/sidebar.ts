@@ -169,7 +169,8 @@ export class CommonSidebar extends LitElement {
       if (!recipe) return;
       addRecipe(recipe, this.workingSrc);
 
-      const charm = run(recipe, {});
+      // TODO(ja): we should check if the recipe parameters have changed
+      const charm = run(recipe, this.focusedCharm?.sourceCell?.get().parameters);
 
       console.log("charm", charm);
       addCharms([charm]);
