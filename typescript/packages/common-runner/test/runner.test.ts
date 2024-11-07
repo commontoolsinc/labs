@@ -22,7 +22,7 @@ describe("runRecipe", () => {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { path: ["parameters", "input"] } } },
+          inputs: { value: { $alias: { path: ["argument", "input"] } } },
           outputs: { value: { $alias: { path: ["internal", "output"] } } },
         },
       ],
@@ -32,7 +32,7 @@ describe("runRecipe", () => {
     await idle();
 
     expect(result.sourceCell?.getAsQueryResult()).toMatchObject({
-      parameters: { input: 1 },
+      argument: { input: 1 },
       internal: { output: 1 },
     });
     expect(result.sourceCell?.get().internal.output).toBe(1);
@@ -60,7 +60,7 @@ describe("runRecipe", () => {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { path: ["parameters", "input"] } } },
+          inputs: { value: { $alias: { path: ["argument", "input"] } } },
           outputs: { value: { $alias: { path: ["internal", "output"] } } },
         },
       ],
@@ -79,7 +79,7 @@ describe("runRecipe", () => {
       nodes: [
         {
           module: { type: "recipe", implementation: innerRecipe },
-          inputs: { input: { $alias: { path: ["parameters", "value"] } } },
+          inputs: { input: { $alias: { path: ["argument", "value"] } } },
           outputs: { $alias: { path: ["internal", "output"] } },
         },
       ],
@@ -102,7 +102,7 @@ describe("runRecipe", () => {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["parameters", "value"] } },
+          inputs: { $alias: { path: ["argument", "value"] } },
           outputs: { $alias: { path: ["internal", "result"] } },
         },
       ],
@@ -128,7 +128,7 @@ describe("runRecipe", () => {
               ran = true;
             },
           },
-          inputs: { $alias: { path: ["parameters", "value"] } },
+          inputs: { $alias: { path: ["argument", "value"] } },
           outputs: {},
         },
       ],
@@ -155,7 +155,7 @@ describe("runRecipe", () => {
               ran = true;
             },
           },
-          inputs: { $alias: { path: ["parameters", "other"] } },
+          inputs: { $alias: { path: ["argument", "other"] } },
           outputs: {},
         },
       ],
@@ -178,7 +178,7 @@ describe("runRecipe", () => {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["parameters", "input"] } },
+          inputs: { $alias: { path: ["argument", "input"] } },
           outputs: { $alias: { path: ["internal", "result"] } },
         },
       ],
@@ -191,7 +191,7 @@ describe("runRecipe", () => {
       nodes: [
         {
           module: { type: "recipe", implementation: nestedRecipe },
-          inputs: { input: { $alias: { path: ["parameters", "value"] } } },
+          inputs: { input: { $alias: { path: ["argument", "value"] } } },
           outputs: { $alias: { path: ["internal", "result"] } },
         },
       ],
@@ -206,15 +206,15 @@ describe("runRecipe", () => {
     const recipe: Recipe = {
       argumentSchema: {},
       resultSchema: {},
-      result: { output: { $alias: { path: ["parameters", "output"] } } },
+      result: { output: { $alias: { path: ["argument", "output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["parameters", "input"] } },
-          outputs: { $alias: { path: ["parameters", "output"] } },
+          inputs: { $alias: { path: ["argument", "input"] } },
+          outputs: { $alias: { path: ["argument", "output"] } },
         },
       ],
     };
@@ -240,15 +240,15 @@ describe("runRecipe", () => {
     const recipe: Recipe = {
       argumentSchema: {},
       resultSchema: {},
-      result: { output: { $alias: { path: ["parameters", "output"] } } },
+      result: { output: { $alias: { path: ["argument", "output"] } } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["parameters", "input"] } },
-          outputs: { $alias: { path: ["parameters", "output"] } },
+          inputs: { $alias: { path: ["argument", "input"] } },
+          outputs: { $alias: { path: ["argument", "output"] } },
         },
       ],
     };

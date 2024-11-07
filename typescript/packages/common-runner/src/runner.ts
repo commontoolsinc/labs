@@ -54,8 +54,8 @@ export const cancels = new WeakMap<CellImpl<any>, Cancel>();
  * When called without a result cell, or the result cell is empty, a new
  * instance is created.
  *
- * @param recipeFactory - A function that takes parameters and returns a recipe.
- * @param parameters - The parameters to pass to the recipe. Can be static data
+ * @param recipeFactory - Function that takes the argument and returns a recipe.
+ * @param argument - The argument to pass to the recipe. Can be static data
  * and/or cell references, including cell value proxies and regular cells.
  * @param resultCell - Optional cell to run the recipe into. If not given, a new
  * cell is created.
@@ -63,23 +63,23 @@ export const cancels = new WeakMap<CellImpl<any>, Cancel>();
  */
 export function run<T, R>(
   recipeFactory?: RecipeFactory<T, R>,
-  parameters?: T,
+  argument?: T,
   resultCell?: CellImpl<R>,
 ): CellImpl<R>;
 export function run<T, R = any>(
   recipe?: Recipe,
-  parameters?: T,
+  argument?: T,
   resultCell?: CellImpl<R>,
 ): CellImpl<R>;
 export function run<T, R = any>(
   recipe?: Recipe,
-  parameters?: T,
+  argument?: T,
   resultCell: CellImpl<R> = cell<R>(),
 ): CellImpl<R> {
   if (cancels.has(resultCell)) {
-    // If it's already running and no new recipe or parameters are given,
+    // If it's already running and no new recipe or argument are given,
     // we are just returning the result cell
-    if (recipe === undefined && parameters === undefined) return resultCell;
+    if (recipe === undefined && argument === undefined) return resultCell;
 
     // Otherwise stop execution of the old recipe. TODO: Await, but this will
     // make all this async.
@@ -92,14 +92,14 @@ export function run<T, R = any>(
 
   let processCell: CellImpl<{
     [TYPE]: string;
-    parameters?: T;
+    argument?: T;
     internal?: { [key: string]: any };
   }>;
 
   if (resultCell.sourceCell !== undefined) {
     processCell = resultCell.sourceCell;
-    // TODO: Allow keeping of previous parameters but still supply defaults
-    parameters = parameters ?? (processCell.get()?.parameters as T);
+    // TODO: Allow keeping of previous argument but still supply defaults
+    argument = argument ?? (processCell.get()?.argument as T);
   } else {
     processCell = cell();
     resultCell.sourceCell = processCell;
@@ -121,17 +121,17 @@ export function run<T, R = any>(
   // If the bindings are a cell or cell reference, convert them to an object
   // where each property is a cell reference.
   // TODO: If new keys are added after first load, this won't work.
-  if (isCell(parameters) || isCellReference(parameters)) {
+  if (isCell(argument) || isCellReference(argument)) {
     // If it's a cell, turn it into a cell reference
-    const ref = isCellReference(parameters)
-      ? parameters
-      : ({ cell: parameters, path: [] } satisfies CellReference);
+    const ref = isCellReference(argument)
+      ? argument
+      : ({ cell: argument, path: [] } satisfies CellReference);
 
     // Get value, but just to get the keys. Throw if it isn't an object.
     const value = ref.cell.getAsQueryResult(ref.path);
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
       // Create aliases for all the top level keys in the object
-      parameters = Object.fromEntries(
+      argument = Object.fromEntries(
         Object.keys(value).map((key) => [
           key,
           { $alias: { cell: ref.cell, path: [...ref.path, key] } },
@@ -139,7 +139,7 @@ export function run<T, R = any>(
       ) as T;
     } else {
       // Otherwise we just alias the whole thing
-      parameters = { $alias: ref } as T;
+      argument = { $alias: ref } as T;
     }
   }
 
@@ -157,14 +157,14 @@ export function run<T, R = any>(
     (recipe.initial as { internal: any })?.internal;
 
   // Ensure static data is converted to cell references, e.g. for arrays
-  parameters = staticDataToNestedCells(parameters, undefined, resultCell);
+  argument = staticDataToNestedCells(argument, undefined, resultCell);
 
   // TODO: Move up, only do this if it's not from the sourceCell
-  if (defaults) parameters = mergeObjects(parameters, defaults);
+  if (defaults) argument = mergeObjects(argument, defaults);
 
   processCell.send({
     [TYPE]: addRecipe(recipe),
-    parameters,
+    argument,
     ...(internal ? { internal: deepCopy(internal) } : {}),
   });
 

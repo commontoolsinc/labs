@@ -230,7 +230,7 @@ export type CellImpl<T> = {
   /**
    * Get and set the source cell, that is the cell that populates this cell.
    * `run` sets this up by writing a query corresponding to the results into
-   * this cell and pointing to the a cell containing the recipe, the parameters
+   * this cell and pointing to the a cell containing the recipe, the argument
    * and all intermediate cells as source cell.
    *
    * @returns Source cell.

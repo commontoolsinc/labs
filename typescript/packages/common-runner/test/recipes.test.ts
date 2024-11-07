@@ -12,9 +12,10 @@ describe("Recipe Runner", () => {
       ({ value }) => {
         const doubled = lift((x: number) => x * 2)(value);
         return { result: doubled };
-      }
+      },
     );
 
+    console.log("simpleRecipe", JSON.stringify(simpleRecipe.toJSON(), null, 2));
     const result = run(simpleRecipe, { value: 5 });
 
     await idle();
@@ -38,7 +39,7 @@ describe("Recipe Runner", () => {
           return n + 1;
         })(squared);
         return { result };
-      }
+      },
     );
 
     const result = run(outerRecipe, { value: 4 });
@@ -56,7 +57,7 @@ describe("Recipe Runner", () => {
         b.setDefault(10);
         const { sum } = lift(({ x, y }) => ({ sum: x + y }))({ x: a, y: b });
         return { sum };
-      }
+      },
     );
 
     const result1 = run(recipeWithDefaults, {});
@@ -81,7 +82,7 @@ describe("Recipe Runner", () => {
           return { double: double(x) };
         });
         return { doubled };
-      }
+      },
     );
 
     const result = run(doubleArray, { values: [{ x: 1 }, { x: 2 }, { x: 3 }] });
@@ -99,7 +100,7 @@ describe("Recipe Runner", () => {
 
   it("should handle recipes with map nodes with closures", async () => {
     const double = lift<{ x: number; factor: number }>(
-      ({ x, factor }) => x * factor
+      ({ x, factor }) => x * factor,
     );
 
     const doubleArray = recipe<{ values: number[]; factor: number }>(
@@ -107,7 +108,7 @@ describe("Recipe Runner", () => {
       ({ values, factor }) => {
         const doubled = values.map((x) => double({ x, factor }));
         return { doubled };
-      }
+      },
     );
 
     const result = run(doubleArray, {
@@ -138,7 +139,7 @@ describe("Recipe Runner", () => {
       "Increment counter",
       ({ counter }) => {
         return { counter, stream: incHandler({ counter }) };
-      }
+      },
     );
 
     const result = run(incRecipe, { counter: { value: 0 } });
@@ -205,7 +206,7 @@ describe("Recipe Runner", () => {
   it("should support referenced modules", async () => {
     addModuleByRef(
       "double",
-      lift((x: number) => x * 2)
+      lift((x: number) => x * 2),
     );
 
     const double = byRef("double");
@@ -215,7 +216,7 @@ describe("Recipe Runner", () => {
       ({ value }) => {
         const doubled = double(value);
         return { result: doubled };
-      }
+      },
     );
 
     const result = run(simpleRecipe, { value: 5 });
