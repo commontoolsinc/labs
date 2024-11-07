@@ -107,6 +107,8 @@ export type Module = {
   type: "ref" | "javascript" | "recipe" | "raw" | "isolated" | "passthrough";
   implementation?: Function | Recipe | JavaScriptModuleDefinition | string;
   wrapper?: "handler";
+  argumentSchema?: JSON;
+  resultSchema?: JSON;
 };
 
 export function isModule(value: any): value is Module {
@@ -124,7 +126,8 @@ export type Node = {
 };
 
 export type Recipe = {
-  schema: JSON;
+  argumentSchema: JSON;
+  resultSchema: JSON;
   initial?: JSON;
   result: JSON;
   nodes: Node[];

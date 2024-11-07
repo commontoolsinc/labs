@@ -7,7 +7,7 @@ import { cell } from "../src/cell.js";
 describe("runRecipe", () => {
   it("should work with passthrough", async () => {
     const recipe = {
-      schema: {
+      argumentSchema: {
         type: "object",
         properties: {
           input: { type: "number" },
@@ -15,6 +15,7 @@ describe("runRecipe", () => {
         },
         description: "passthrough",
       },
+      resultSchema: {},
       result: { output: { $alias: { path: ["internal", "output"] } } },
       nodes: [
         {
@@ -45,13 +46,14 @@ describe("runRecipe", () => {
 
   it("should work with nested recipes", async () => {
     const innerRecipe = {
-      schema: {
+      argumentSchema: {
         type: "object",
         properties: {
           input: { type: "number" },
           output: { type: "number" },
         },
       },
+      resultSchema: {},
       result: { $alias: { path: ["internal", "output"] } },
       nodes: [
         {
@@ -65,13 +67,14 @@ describe("runRecipe", () => {
     } as Recipe;
 
     const outerRecipe = {
-      schema: {
+      argumentSchema: {
         type: "object",
         properties: {
           value: { type: "number" },
           result: { type: "number" },
         },
       },
+      resultSchema: {},
       result: { result: { $alias: { path: ["internal", "output"] } } },
       nodes: [
         {
@@ -90,7 +93,8 @@ describe("runRecipe", () => {
 
   it("should run a simple module", async () => {
     const mockRecipe: Recipe = {
-      schema: {},
+      argumentSchema: {},
+      resultSchema: {},
       result: { result: { $alias: { path: ["internal", "result"] } } },
       nodes: [
         {
@@ -113,7 +117,8 @@ describe("runRecipe", () => {
     let ran = false;
 
     const mockRecipe: Recipe = {
-      schema: {},
+      argumentSchema: {},
+      resultSchema: {},
       result: { result: { $alias: { path: ["internal", "result"] } } },
       nodes: [
         {
@@ -139,7 +144,8 @@ describe("runRecipe", () => {
     let ran = false;
 
     const mockRecipe: Recipe = {
-      schema: {},
+      argumentSchema: {},
+      resultSchema: {},
       result: { result: { $alias: { path: ["internal", "result"] } } },
       nodes: [
         {
@@ -163,7 +169,8 @@ describe("runRecipe", () => {
 
   it("should handle nested recipes", async () => {
     const nestedRecipe: Recipe = {
-      schema: {},
+      argumentSchema: {},
+      resultSchema: {},
       result: { $alias: { path: ["internal", "result"] } },
       nodes: [
         {
@@ -178,7 +185,8 @@ describe("runRecipe", () => {
     };
 
     const mockRecipe: Recipe = {
-      schema: {},
+      argumentSchema: {},
+      resultSchema: {},
       result: { result: { $alias: { path: ["internal", "result"] } } },
       nodes: [
         {
@@ -196,7 +204,8 @@ describe("runRecipe", () => {
 
   it("should allow passing a cell as a binding", async () => {
     const recipe: Recipe = {
-      schema: {},
+      argumentSchema: {},
+      resultSchema: {},
       result: { output: { $alias: { path: ["parameters", "output"] } } },
       nodes: [
         {
@@ -229,7 +238,8 @@ describe("runRecipe", () => {
 
   it("should allow stopping a recipe", async () => {
     const recipe: Recipe = {
-      schema: {},
+      argumentSchema: {},
+      resultSchema: {},
       result: { output: { $alias: { path: ["parameters", "output"] } } },
       nodes: [
         {

@@ -116,7 +116,7 @@ export function run<T, R = any>(
   }
 
   // Walk the recipe's schema and extract all default values
-  const defaults = extractDefaultValues(recipe.schema);
+  const defaults = extractDefaultValues(recipe.argumentSchema);
 
   // If the bindings are a cell or cell reference, convert them to an object
   // where each property is a cell reference.
@@ -364,9 +364,13 @@ function instantiateJavaScriptNode(
         const resultNode = result;
 
         // Recipe that assigns the result of the returned node to "result"
-        const resultRecipe = recipeFromFrame("event handler result", () => ({
-          result: resultNode,
-        }));
+        const resultRecipe = recipeFromFrame(
+          "event handler result",
+          undefined,
+          () => ({
+            result: resultNode,
+          }),
+        );
 
         const resultCell = run(resultRecipe, {});
         addCancel(cancels.get(resultCell));
