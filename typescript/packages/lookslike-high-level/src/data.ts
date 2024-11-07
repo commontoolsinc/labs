@@ -15,9 +15,12 @@ import {
   allRecipesByName,
   idle,
   EntityId,
+  getRecipe,
+  getRecipeSrc,
 } from "@commontools/common-runner";
 import { createStorage } from "./storage.js";
 import * as allRecipes from "./recipes/index.js";
+import { buildRecipe } from "./localBuild.js";
 
 export type Charm = {
   [NAME]?: string;
@@ -74,6 +77,40 @@ export async function syncCharm(
   waitForStorage: boolean = false,
 ): Promise<CellImpl<Charm>> {
   return storage.syncCell(entityId, waitForStorage);
+}
+
+const recipesKnownToStorage = new Set<string>();
+
+export async function syncRecipe(id: string) {
+  if (getRecipe(id)) {
+    if (recipesKnownToStorage.has(id)) return;
+    const src = getRecipeSrc(id);
+    if (src) saveRecipe(id, src);
+    return;
+  }
+
+  const response = await fetch(`https://up.commontools.dev/${id}`);
+  const src = await response.text();
+
+  const { recipe, errors } = buildRecipe(src);
+  if (errors) throw new Error(errors);
+
+  const recipeId = addRecipe(recipe!, src);
+  if (id !== recipeId)
+    throw new Error(`Recipe ID mismatch: ${id} !== ${recipeId}`);
+  recipesKnownToStorage.add(recipeId);
+}
+
+export async function saveRecipe(id: string, src: string) {
+  if (recipesKnownToStorage.has(id)) return;
+  recipesKnownToStorage.add(id);
+
+  console.log("Saving recipe", id);
+  const response = await fetch(`https://up.commontools.dev/${id}`, {
+    method: "POST",
+    body: src,
+  });
+  return response.ok;
 }
 
 addCharms([

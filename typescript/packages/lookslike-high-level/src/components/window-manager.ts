@@ -10,6 +10,7 @@ import {
   runPersistent,
   syncCharm,
   openCharm,
+  syncRecipe,
 } from "../data.js";
 import {
   run,
@@ -17,11 +18,12 @@ import {
   isCell,
   idle,
   EntityId,
+  getRecipe,
 } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
-import { NAME } from "@commontools/common-builder";
+import { NAME, TYPE } from "@commontools/common-builder";
 import { matchRoute, navigate } from "../router.js";
 import { inferJsonSchema } from "../schema.js";
 import { schemaQueryExample } from "../recipes/schemaQuery.jsx";
@@ -455,6 +457,8 @@ export class CommonWindowManager extends LitElement {
 
   async openCharm(charmToOpen: string | EntityId | CellImpl<any>) {
     const charm = await syncCharm(charmToOpen);
+    const recipeId = charm?.sourceCell?.get()[TYPE];
+    if (recipeId) await syncRecipe(recipeId);
     const charmId = JSON.stringify(charm.entityId!);
     await idle();
     run(undefined, undefined, charm);
@@ -522,29 +526,32 @@ export class CommonWindowManager extends LitElement {
 
   #onRouteChange(e: Event) {
     const customEvent = e as CustomEvent;
-    console.log("routeChange", customEvent.detail);
-    const match = matchRoute(
-      "/charm/:charmId",
-      new URL(customEvent.detail, window.location.href),
-    );
-    console.log(new URL(customEvent.detail, window.location.href));
-    console.log(match);
+    const url = new URL(customEvent.detail, window.location.href);
 
-    console.log(
-      "onroutechange",
-      JSON.stringify(this.focusedCharm?.entityId),
-      match?.params.charmId,
-    );
+    const charmMatch = matchRoute("/charm/:charmId", url);
+
     if (
-      match &&
-      JSON.stringify(this.focusedCharm?.entityId) !== match.params.charmId
+      charmMatch &&
+      JSON.stringify(this.focusedCharm?.entityId) !== charmMatch.params.charmId
     ) {
       // TODO: Add a timeout here, show loading state and error state
       setTimeout(() => {
-        syncCharm(match.params.charmId, true).then(
+        syncCharm(charmMatch.params.charmId, true).then(
           (charm) => charm && charm.get() && this.openCharm(charm),
         );
       }, 100);
+    }
+
+    const recipeMatch = matchRoute("/recipe/:recipeId", url);
+    if (recipeMatch) {
+      const recipeId = recipeMatch.params.recipeId;
+      syncRecipe(recipeId).then(() => {
+        const recipe = getRecipe(recipeId);
+        if (recipe) {
+          const charm = run(recipe, {}).entityId!;
+          this.openCharm(charm);
+        }
+      });
     }
   }
 

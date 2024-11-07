@@ -31,6 +31,10 @@ export function getRecipeId(recipe: Recipe) {
   return idByRecipe.get(recipe);
 }
 
+export function getRecipeSrc(id: string) {
+  return srcById.get(id);
+}
+
 export function allRecipesByName() {
   return recipeByName;
 }
