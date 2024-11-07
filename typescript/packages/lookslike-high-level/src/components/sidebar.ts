@@ -281,6 +281,7 @@ export class CommonSidebar extends LitElement {
                 <div>
                   <button @click=${() => runRecipe(false)}>🔄 Run w/Current Data</button>
                   <button @click=${() => runRecipe(true)}>🐣 Run w/New Data</button>
+                  <pre>${this.compileErrors}</pre>
                   <os-code-editor
                     slot="content"
                     language="text/x.typescript"
