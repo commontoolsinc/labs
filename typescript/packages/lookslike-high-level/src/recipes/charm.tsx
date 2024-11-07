@@ -1,70 +1,43 @@
-import { h, behavior, $, Reference } from "@commontools/common-system";
+import { h, behavior, $, Reference, select } from "@commontools/common-system";
 
 export const source = { clicker: { v: 30 } };
 
-export const rules = behavior({
-  init: {
-    select: {
-      self: $.self,
-    },
-    where: [
-      // ...
-      { Not: { Case: [$.self, "clicks", $._] } },
-    ],
-    update: ({ self }) => {
-      console.log(self);
+const init = select({ self: $.self })
+  .not.match($.self, "clicks", $._)
+  .update(({ self }) => {
+    return [{ Assert: [self, "clicks", 0] }];
+  });
 
-      return [{ Assert: [self, "clicks", 0] }];
-    },
-  },
-  view: {
-    select: { self: $.self, count: $.count },
-    where: [{ Case: [$.self, "clicks", $.count] }],
-    update: ({ count, self }: { count: number; self: Reference }) => {
-      return [
-        {
-          Assert: [
-            self,
-            "~/common/ui",
-            <div title={`Clicks ${count}`} data-source={`${self}`}>
-              <div>{count}</div>
-              <button onclick="~/on/click">Click me!</button>
-            </div>,
-          ],
-        },
-      ];
-    },
-  },
-  onclick: {
-    select: {
-      self: $.self,
-      count: $.count,
-      event: $.event,
-    },
-    where: [
+const view = select({ self: $.self, count: $.count })
+  .match($.self, "clicks", $.count)
+  .render(({ count, self }: { count: number; self: Reference }) => {
+    return (
+      <div title={`Clicks ${count}`} entity={self}>
+        <div>{count}</div>
+        <button onclick="~/on/click">Click me!</button>
+      </div>
+    );
+  });
+
+const onclick = select({
+  self: $.self,
+  count: $.count,
+  event: $.event,
+})
+  .match($.self, "clicks", $.count)
+  .match($.self, "~/on/click", $.event)
+  .update(({ self, count }) => {
+    return [
       {
-        Case: [$.self, "clicks", $.count],
+        Upsert: [self, "clicks", count + 1],
       },
-      {
-        Case: [$.self, "~/on/click", $.event],
-      },
-    ],
-    update: ({
-      self,
-      count,
-      event,
-    }: {
-      self: Reference;
-      count: number;
-      event: any;
-    }) => {
-      return [
-        {
-          Upsert: [self, "clicks", count + 1],
-        },
-      ];
-    },
-  },
+    ];
+  });
+
+export const rules = behavior({
+  init,
+  view,
+  onclick,
 });
 
 export const spawn = (input: {} = source) => rules.spawn(input);
