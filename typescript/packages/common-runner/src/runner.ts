@@ -98,8 +98,8 @@ export function run<T, R = any>(
 
   if (resultCell.sourceCell !== undefined) {
     processCell = resultCell.sourceCell;
-    // TODO: Allow updating of parameters, even if there were previous ones
-    parameters = (processCell.get()?.parameters as T) ?? parameters;
+    // TODO: Allow keeping of previous parameters but still supply defaults
+    parameters = parameters ?? (processCell.get()?.parameters as T);
   } else {
     processCell = cell();
     resultCell.sourceCell = processCell;
