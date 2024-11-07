@@ -8,7 +8,7 @@ import {
 } from "@commontools/common-builder";
 import { html } from "@commontools/common-html";
 
-export { refer, Reference, $ } from "synopsys";
+export { refer, Reference, $, _ } from "synopsys";
 
 /**
  * Behavior is a collection of rules that define behavior for a specific
@@ -59,12 +59,14 @@ class System<Rules extends Record<string, Rule>> {
   }
   spawn(source: {}) {
     const entity = DB.refer(source);
+    const charm = DB.refer({ entity, rules: this.id });
     return run(
-      recipe(this.id.toString(), () => {
+      recipe(charm.toString(), () => {
         const cell = createCell({ name: "" });
         return {
           [NAME]: cell.name,
           [UI]: html`<common-charm
+            id=${charm.toString()}
             spell=${() => this.rules}
             entity=${() => entity}
             $cell=${cell}

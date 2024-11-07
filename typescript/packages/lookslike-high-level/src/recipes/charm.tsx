@@ -1,27 +1,32 @@
-import { h, behavior, refer, $ } from "@commontools/common-system";
+import { h, behavior, $, Reference } from "@commontools/common-system";
 
-export const source = { clicker: { v: 22 } };
-
-const entity = refer(source);
+export const source = { clicker: { v: 30 } };
 
 export const rules = behavior({
   init: {
-    select: {},
-    where: [{ Not: { Case: [entity, "clicks", $.count] } }],
-    update: () => {
-      return [{ Assert: [entity, "clicks", 0] }];
+    select: {
+      self: $.self,
+    },
+    where: [
+      // ...
+      { Not: { Case: [$.self, "clicks", $._] } },
+    ],
+    update: ({ self }) => {
+      console.log(self);
+
+      return [{ Assert: [self, "clicks", 0] }];
     },
   },
   view: {
-    select: { count: $.count },
-    where: [{ Case: [entity, "clicks", $.count] }],
-    update: ({ count }: { count: number }) => {
+    select: { self: $.self, count: $.count },
+    where: [{ Case: [$.self, "clicks", $.count] }],
+    update: ({ count, self }: { count: number; self: Reference }) => {
       return [
         {
           Assert: [
-            entity,
+            self,
             "~/common/ui",
-            <div title={`Clicks ${count}`}>
+            <div title={`Clicks ${count}`} data-source={`${self}`}>
               <div>{count}</div>
               <button onclick="~/on/click">Click me!</button>
             </div>,
@@ -32,25 +37,34 @@ export const rules = behavior({
   },
   onclick: {
     select: {
+      self: $.self,
       count: $.count,
       event: $.event,
     },
     where: [
       {
-        Case: [entity, "clicks", $.count],
+        Case: [$.self, "clicks", $.count],
       },
       {
-        Case: [entity, "~/on/click", $.event],
+        Case: [$.self, "~/on/click", $.event],
       },
     ],
-    update: ({ count, event }: { count: number; event: any }) => {
+    update: ({
+      self,
+      count,
+      event,
+    }: {
+      self: Reference;
+      count: number;
+      event: any;
+    }) => {
       return [
         {
-          Upsert: [entity, "clicks", count + 1],
+          Upsert: [self, "clicks", count + 1],
         },
       ];
     },
   },
 });
 
-export const spawn = (input = source) => rules.spawn(input);
+export const spawn = (input: {} = source) => rules.spawn(input);
