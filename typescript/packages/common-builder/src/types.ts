@@ -137,7 +137,8 @@ export function isRecipe(value: any): value is Recipe {
   return (
     (typeof value === "function" || typeof value === "object") &&
     value !== null &&
-    !!value.schema &&
+    !!value.argumentSchema &&
+    !!value.resultSchema &&
     !!value.nodes &&
     Array.isArray(value.nodes)
   );
