@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
 import { generateText, streamText } from "npm:ai";
 import { crypto } from "https://deno.land/std/crypto/mod.ts";
 import { config } from "https://deno.land/x/dotenv/mod.ts";
-import { findModel, MODELS } from "./models.ts";
+import { ALIAS_NAMES, findModel, MODELS } from "./models.ts";
 import * as cache from "./cache.ts";
 import { colors, timestamp, timeTrack } from "./cli.ts";
 
@@ -12,6 +12,30 @@ const handler = async (request: Request): Promise<Response> => {
   const startTime = Date.now();
   const requestId = colors.cyan + `[${crypto.randomUUID().slice(0, 8)}]` +
     colors.reset;
+
+  if (request.method === "GET" && new URL(request.url).pathname === "/models") {
+    const modelInfo = Object.entries(MODELS).reduce(
+      (acc, [name, config]) => {
+        if (!ALIAS_NAMES.includes(name)) {
+          acc[name] = {
+            capabilities: config.capabilities,
+            aliases: Object.entries(MODELS)
+              .filter(([_, m]) => m === config && name !== _)
+              .map(([alias]) => alias),
+          };
+        }
+        return acc;
+      },
+      {} as Record<
+        string,
+        { capabilities: typeof config.capabilities; aliases: string[] }
+      >,
+    );
+
+    return new Response(JSON.stringify(modelInfo, null, 2), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 
   if (request.method === "GET") {
     return new Response("Hello World");

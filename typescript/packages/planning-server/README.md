@@ -84,6 +84,57 @@ For example
 PLANNING_API_URL="https://paas.saga-castor.ts.net/planning-service" npm run livetest:anthropic
 ```
 
+## Listing available models
+
+To list the available models for a given `planning-server` instance, you can simply `GET /models` for a list of all supported models and their capabilities.
+
+```bash
+curl http://localhost:8000/models
+```
+
+returns an object like
+
+```json
+{
+  "anthropic:claude-3-5-haiku-20241022": {
+    "capabilities": {
+      "contextWindow": 200000,
+      "maxOutputTokens": 8192,
+      "images": true,
+      "prefill": true,
+      "systemPrompt": true,
+      "stopSequences": true,
+      "streaming": true
+    },
+    "aliases": ["anthropic:claude-3-5-haiku-latest", "claude-3-5-haiku"]
+  },
+  "anthropic:claude-3-5-sonnet-20241022": {
+    "capabilities": {
+      "contextWindow": 200000,
+      "maxOutputTokens": 8192,
+      "images": true,
+      "prefill": true,
+      "systemPrompt": true,
+      "stopSequences": true,
+      "streaming": true
+    },
+    "aliases": ["anthropic:claude-3-5-sonnet-latest", "claude-3-5-sonnet"]
+  },
+  "anthropic:claude-3-opus-20240229": {
+    "capabilities": {
+      "contextWindow": 200000,
+      "maxOutputTokens": 4096,
+      "images": true,
+      "prefill": true,
+      "systemPrompt": true,
+      "stopSequences": true,
+      "streaming": true
+    },
+    "aliases": ["anthropic:claude-3-opus-latest", "claude-3-opus"]
+  }
+}
+```
+
 ## Tool calling
 
 `planning-server` supports tool calling collaboratively between the client and server, with the client providing a set of tools to the server in addition to the server's inbuilt toolkit.
