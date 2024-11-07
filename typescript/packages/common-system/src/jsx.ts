@@ -9,6 +9,8 @@ import {
   on as handler,
 } from "@gozala/co-dom";
 
+export { Node } from "@gozala/co-dom";
+
 declare global {
   namespace JSX {
     interface IntrinsicElements {
