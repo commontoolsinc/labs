@@ -38,14 +38,14 @@ export class CommonRecipeLink extends LitElement {
         detail: { charmId: JSON.stringify(charm.entityId) },
         bubbles: true,
         composed: true,
-      })
+      }),
     );
   }
 
   override render() {
     return html`
       <a
-        href="#open-recipe-${this.recipe ?? "unknown"}"
+        href="/recipe/${this.recipe ?? "unknown"}"
         @click="${this.handleClick}"
       >
         <slot></slot>
