@@ -9,6 +9,10 @@ import { colors, timestamp, timeTrack } from "./cli.ts";
 await config({ export: true });
 
 const handler = async (request: Request): Promise<Response> => {
+  const host = request.headers.get("host");
+  const protocol = request.headers.get("x-forwarded-proto") || "http";
+  const requestBaseURL = `${protocol}://${host}`;
+
   const startTime = Date.now();
   const requestId = colors.cyan + `[${crypto.randomUUID().slice(0, 8)}]` +
     colors.reset;
@@ -55,7 +59,22 @@ const handler = async (request: Request): Promise<Response> => {
   }
 
   if (request.method === "GET") {
-    return new Response("Hello World");
+    const indexRepsonse = {
+      "GET": {
+        "/models": `${requestBaseURL}/models`,
+        "/models?search=anthropic": `${requestBaseURL}/models?search=anthropic`,
+        "/models?capability=images":
+          `${requestBaseURL}/models?capability=images`,
+        "/models?search=groq&capability=images":
+          `${requestBaseURL}/models?search=groq&capability=images`,
+      },
+      "POST": {
+        "/": `${requestBaseURL}/`,
+      },
+    };
+    return new Response(JSON.stringify(indexRepsonse, null, 2), {
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   if (request.method === "POST") {
