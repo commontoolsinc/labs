@@ -32,18 +32,14 @@ const handler = async (request: Request): Promise<Response> => {
 
       // Log request details with colors
       console.log(
-        `${timestamp()} ${requestId} ${colors.blue}📝 New request:${colors.reset} ${colors.bright}${payload.model}${colors.reset} | ${
-          timeTrack(startTime)
-        }`,
+        `${timestamp()} ${requestId} ${colors.blue}📝 New request:${colors.reset} ${colors.bright}${payload.model}\n${
+          JSON.stringify(payload, null, 2)
+        }${colors.reset} | ${timeTrack(startTime)}`,
       );
+
       console.log(
         `${timestamp()} ${requestId} ${colors.magenta}💭 System:${colors.reset} ${
           payload.system?.slice(0, 100)
-        }...`,
-      );
-      console.log(
-        `${timestamp()} ${requestId} ${colors.yellow}💬 Last message:${colors.reset} ${
-          payload.messages[payload.messages.length - 1].content.slice(0, 100)
         }...`,
       );
 
@@ -110,10 +106,21 @@ const handler = async (request: Request): Promise<Response> => {
       // If the model doesn't support system prompts, we need to prepend the system
       // prompt to the first message.
       if (!modelConfig.capabilities.systemPrompt) {
+        console.log(
+          `${timestamp()} ${requestId} ${colors.yellow}🤔 LLM ${payload.model} doesn't support system prompts. Adding to first message.${colors.reset}`,
+        );
+
         if (payload.system && messages.length > 0) {
           messages[0].content = `${payload.system}\n\n${messages[0].content}`;
+          params.system = undefined;
         }
       }
+
+      console.log(
+        `${timestamp()} ${requestId} ${colors.blue}🎸 LLM Request Params:\n${colors.reset} ${
+          JSON.stringify(params, null, 2)
+        }`,
+      );
 
       const llmStream = await streamText(params);
 
