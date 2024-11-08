@@ -72,35 +72,6 @@ app.get("/", (c) => {
   return c.html(template);
 });
 
-app.get("/upload", (c) => {
-  const template = Deno.readTextFileSync(
-    join(import.meta.dirname!, "templates/upload.html"),
-  );
-  return c.html(template);
-});
-
-app.get("/:hash", async (c) => {
-  const hash = c.req.param("hash");
-  const object = await c.env.R2.get(hash);
-
-  if (!object) {
-    return c.text("Not Found", 404);
-  }
-
-  return c.body(object.body);
-});
-
-app.post("/:hash", async (c) => {
-  const hash = c.req.param("hash");
-  const content = await c.req.text();
-  // FIXME(ja): verify the hash of the content is correct
-  // const hash = createHash('sha256').update(content).digest('hex')
-
-  await c.env.R2.put(hash, content);
-
-  return c.json({ hash });
-});
-
 app.put("/blob/:hash", async (c) => {
   const redis = c.get("redis");
   const hash = c.req.param("hash");
