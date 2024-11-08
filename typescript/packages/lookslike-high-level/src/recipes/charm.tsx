@@ -1,4 +1,6 @@
 import { h, behavior, $, Reference, select } from "@commontools/common-system";
+import { z } from "zod";
+import { query } from "../sugar.jsx";
 
 export const source = { clicker: { v: 30 } };
 
@@ -21,16 +23,16 @@ const view = query(z.object({
     );
   });
 
-const view = select({ self: $.self, count: $.count })
-  .match($.self, "clicks", $.count)
-  .render(({ count, self }: { count: number; self: Reference }) => {
-    return (
-      <div title={`Clicks ${count}`} entity={self}>
-        <div>{count}</div>
-        <button onclick="~/on/click">Click me!</button>
-      </div>
-    );
-  });
+// const view = select({ self: $.self, count: $.count })
+//   .match($.self, "clicks", $.count)
+//   .render(({ count, self }: { count: number; self: Reference }) => {
+//     return (
+//       <div title={`Clicks ${count}`} entity={self}>
+//         <div>{count}</div>
+//         <button onclick="~/on/click">Click me!</button>
+//       </div>
+//     );
+//   });
 
 const onclick = select({
   self: $.self,
