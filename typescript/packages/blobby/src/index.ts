@@ -2,7 +2,6 @@ import { cors } from "@hono/hono/cors";
 import { Hono } from "@hono/hono";
 import { logger } from "@hono/hono/logger";
 import { createClient } from "redis";
-import { ensureDirSync } from "@std/fs";
 import { join } from "@std/path";
 
 import { DiskStorage } from "./lib/storage.ts";
