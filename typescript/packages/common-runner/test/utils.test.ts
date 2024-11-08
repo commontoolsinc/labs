@@ -108,7 +108,7 @@ describe("sendValueToBinding", () => {
     sendValueToBinding(
       testCell,
       [{ $alias: { path: ["arr", 0] } }, { $alias: { path: ["arr", 2] } }],
-      [1, 3]
+      [1, 3],
     );
     expect(testCell.getAsQueryResult()).toEqual({ arr: [1, 0, 3] });
   });
@@ -267,7 +267,7 @@ describe("followCellReferences", () => {
     cellB.send({ ref: { cell: cellA, path: ["ref"] } });
     const reference: CellReference = { cell: cellA, path: ["ref"] };
     expect(() => followCellReferences(reference)).toThrow(
-      "Reference cycle detected"
+      "Reference cycle detected",
     );
   });
 });
@@ -354,7 +354,7 @@ describe("compactifyPaths", () => {
 describe("makeArrayElementsAllCells", () => {
   it("should convert non-cell array elements to cell references", () => {
     const input = [1, 2, 3];
-    normalizeToCells(input);
+    normalizeToCells(cell(), input);
 
     expect(input.length).toBe(3);
     input.forEach((item) => {
@@ -368,7 +368,7 @@ describe("makeArrayElementsAllCells", () => {
     const alias = { $alias: { path: ["some", "path"] } };
     const input = [cellRef, cellInstance, alias];
 
-    normalizeToCells(input);
+    normalizeToCells(cell(), input);
 
     expect(input[0]).toBe(cellRef);
     expect(input[1]).toBe(cellInstance);
@@ -377,15 +377,15 @@ describe("makeArrayElementsAllCells", () => {
 
   it("should handle nested arrays", () => {
     const input = [1, [2, 3], 4];
-    normalizeToCells(input);
+    normalizeToCells(cell(), input);
 
     expect(isCellReference(input[0])).toBe(true);
     expect(isCellReference(input[1])).toBe(true);
-    const { cell, path } = input[1] as unknown as CellReference;
-    expect(cell).toBeDefined();
+    const { cell: refCell, path } = input[1] as unknown as CellReference;
+    expect(refCell).toBeDefined();
     expect(path).toEqual([]);
-    expect(Array.isArray(cell.get())).toBe(true);
-    (cell.get() as any[]).forEach((item) => {
+    expect(Array.isArray(refCell.get())).toBe(true);
+    (refCell.get() as any[]).forEach((item) => {
       expect(isCellReference(item)).toBe(true);
     });
     expect(isCellReference(input[2])).toBe(true);
@@ -393,7 +393,7 @@ describe("makeArrayElementsAllCells", () => {
 
   it("should handle objects with array properties", () => {
     const input = { arr: [1, 2, 3], nested: { arr: [4, 5] } };
-    const changed = normalizeToCells(input);
+    const changed = normalizeToCells(cell(), input);
 
     expect(changed).toBe(true);
     input.arr.forEach((item) => {
@@ -406,7 +406,7 @@ describe("makeArrayElementsAllCells", () => {
 
   it("should not modify non-array, non-object values", () => {
     const input = 42;
-    normalizeToCells(input);
+    normalizeToCells(cell(), input);
     expect(input).toBe(42);
   });
 
@@ -415,7 +415,7 @@ describe("makeArrayElementsAllCells", () => {
     const previousInput = [{ cell: previousCell, path: [] }];
     const newInput = [42];
 
-    const changed = normalizeToCells(newInput, previousInput);
+    const changed = normalizeToCells(cell(), newInput, previousInput);
 
     expect(changed).toBe(false);
     expect(newInput[0]).toBe(previousInput[0]);
@@ -428,12 +428,12 @@ describe("makeArrayElementsAllCells", () => {
     const previousInput = [{ cell: previousCell, path: [] }];
     const newInput = [43];
 
-    const changed = normalizeToCells(newInput, previousInput);
+    const changed = normalizeToCells(cell(), newInput, previousInput);
 
     expect(changed).toBe(true);
     expect(
       (newInput[0] as unknown as CellReference).cell !==
-        (previousInput[0] as unknown as CellReference).cell
+        (previousInput[0] as unknown as CellReference).cell,
     ).toBeTruthy();
     expect(isCellReference(newInput[0])).toBe(true);
     expect((newInput[0] as unknown as CellReference).cell.get()).toBe(43);
@@ -452,12 +452,12 @@ describe("makeArrayElementsAllCells", () => {
       nested: { value: 3 },
     };
 
-    const changed = normalizeToCells(newInput, previousInput);
+    const changed = normalizeToCells(cell(), newInput, previousInput);
 
     expect(changed).toBe(true);
     expect(isCellReference(newInput.arr[0])).toBe(true);
     expect((newInput.arr[0] as unknown as CellReference).cell).toBe(
-      previousInput.arr[0].cell
+      previousInput.arr[0].cell,
     );
     expect(isCellReference(newInput.arr[1])).toBe(true);
     expect((newInput.arr[1] as unknown as CellReference).cell.get()).toBe(3);
@@ -471,7 +471,7 @@ describe("makeArrayElementsAllCells", () => {
     const previousInput = { cell: cell1, path: ["a"] };
     const newInput = { cell: cell2, path: ["b"] };
 
-    const changed = normalizeToCells(newInput, previousInput);
+    const changed = normalizeToCells(cell(), newInput, previousInput);
 
     expect(changed).toBe(true);
   });
@@ -482,7 +482,7 @@ describe("makeArrayElementsAllCells", () => {
     const previousInput = { $alias: { cell: cell1, path: ["a"] } };
     const newInput = { $alias: { cell: cell2, path: ["b"] } };
 
-    const changed = normalizeToCells(newInput, previousInput);
+    const changed = normalizeToCells(cell(), newInput, previousInput);
 
     expect(changed).toBe(true);
   });
@@ -491,7 +491,7 @@ describe("makeArrayElementsAllCells", () => {
     const previousInput = { foo: null };
     const newInput = { foo: null };
 
-    const changed = normalizeToCells(newInput, previousInput);
+    const changed = normalizeToCells(cell(), newInput, previousInput);
 
     expect(changed).toBe(false);
   });
@@ -500,7 +500,7 @@ describe("makeArrayElementsAllCells", () => {
     const previousInput = { foo: "bar" };
     const newInput = { foo: "baz" };
 
-    const changed = normalizeToCells(newInput, previousInput);
+    const changed = normalizeToCells(cell(), newInput, previousInput);
 
     expect(changed).toBe(true);
   });
@@ -509,7 +509,7 @@ describe("makeArrayElementsAllCells", () => {
     const previousInput = { foo: "bar" };
     const newInput = { foo: "bar", baz: "qux" };
 
-    const changed = normalizeToCells(newInput, previousInput);
+    const changed = normalizeToCells(cell(), newInput, previousInput);
 
     expect(changed).toBe(true);
   });
@@ -518,7 +518,7 @@ describe("makeArrayElementsAllCells", () => {
     const previousInput = { foo: "bar", baz: "qux" };
     const newInput = { foo: "bar" };
 
-    const changed = normalizeToCells(newInput, previousInput);
+    const changed = normalizeToCells(cell(), newInput, previousInput);
 
     expect(changed).toBe(true);
   });
