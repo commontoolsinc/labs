@@ -1,10 +1,10 @@
 import { cors } from "@hono/hono/cors";
+import { Hono } from "@hono/hono";
+import { logger } from "@hono/hono/logger";
 import { createClient } from "redis";
 import { ensureDirSync } from "@std/fs";
-import { Hono } from "@hono/hono";
 import { join } from "@std/path";
 
-import { sha256 } from "./utils/hash.ts";
 import { DiskStorage } from "./lib/storage.ts";
 import {
   addBlobToUser,
@@ -12,6 +12,7 @@ import {
   getUserBlobs,
   type RedisClient,
 } from "./lib/redis.ts";
+import { sha256 } from "./utils/hash.ts";
 
 // Ensure data directory exists
 const dataDir = join(Deno.cwd(), "data");
@@ -24,6 +25,8 @@ interface Variables {
 }
 
 const app = new Hono<{ Variables: Variables }>();
+
+app.use("*", logger());
 
 app.use(
   "*",
