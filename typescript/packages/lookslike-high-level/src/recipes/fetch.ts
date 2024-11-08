@@ -26,7 +26,7 @@ export default service({
     select: {
       request: $.request,
     },
-    where: [{ Case: [provider, "~/send", $.request] }],
+    where: [{ Case: [provider, `~/send`, $.request] }],
     *perform({ request }: { request: Reference }): Task.Task<Instruction[]> {
       const effect = effects.get(request);
       if (effect?.status === "Open") {
@@ -39,7 +39,8 @@ export default service({
         return [
           { Retract: [provider, "~/send", request] },
           { Upsert: [provider, "~/receive", request] },
-          { Upsert: [effect.source.consumer, "request/status", "Sending"] },
+          { Upsert: [request, "request/status", "Receiving"] },
+          { Upsert: [effect.source.consumer, effect.source.port, request] },
         ];
       }
       return [];
@@ -110,7 +111,7 @@ export default service({
           changes.push({
             Upsert: [
               request,
-              `response/${effect.source.expect}`,
+              `response/bytes`,
               new Uint8Array(content as ArrayBuffer),
             ],
           });
@@ -162,13 +163,13 @@ export class Fetch {
 
     effects.set(request, { status: "Open", source: this });
 
-    return [provider, `~/fetch`, request];
+    return [provider, `~/send`, request];
   }
 
-  get text() {
+  text() {
     return new Fetch(this.consumer, this.port, this.request, "text");
   }
-  get json() {
+  json() {
     return new Fetch(this.consumer, this.port, this.request, "json");
   }
 }
