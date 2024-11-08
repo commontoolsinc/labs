@@ -1,50 +1,21 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-// import { createHash } from 'crypto'
+import { createHash } from "crypto";
+import { join } from "@std/path";
+import { ensureDirSync } from "@std/fs";
+import { createClient } from "redis";
 
-const html = `<!DOCTYPE html>
-<html lang="en">
+// Ensure data directory exists
+const dataDir = join(Deno.cwd(), "data");
+await ensureDirSync(dataDir);
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upload Content</title>
-</head>
-
-<body>
-    <h1>Upload Content</h1>
-    <textarea id="content" rows="10" cols="50"></textarea><br>
-    <button onclick="upload()">Upload</button>
-    <p id="result"></p>
-
-    <script>
-        async function upload() {
-            const content = document.getElementById('content').value;
-            
-            // Calculate SHA-256 hash
-            const msgBuffer = new TextEncoder().encode(content);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-            
-            // Send content to /:hash endpoint
-            const response = await fetch(\`/\${hash}\`, {
-                method: 'POST',
-                body: content
-            });
-            
-            const data = await response.json();
-            const link = \`\${window.location.origin}/\${hash}\`;
-            document.getElementById('result').innerHTML = \`Your link: <a href="\${link}">\${link}</a>\`;
-        }
-    </script>
-</body>
-
-</html>`;
+// Initialize Redis Client
+const redisClient = createClient();
+redisClient.on("error", (err) => console.error("Redis Client Error", err));
+await redisClient.connect();
 
 const app = new Hono();
 
-// Add CORS middleware
 app.use(
   "*",
   cors({
@@ -57,8 +28,37 @@ app.use(
   }),
 );
 
+app.use("", async (c, next) => {
+  const redis = createClient({
+    url: "redis://localhost:6379",
+  });
+  redis.on("error", (err) => console.error("Redis Client Error", err));
+
+  // Connect if not connected
+  if (!redis.isOpen) {
+    await redis.connect();
+  }
+
+  // Attach to context
+  c.set("redis", redis);
+
+  await next();
+});
+
+// Middleware to extract Tailscale user
+app.use(async (c, next) => {
+  const user = c.req.header("Tailscale-User-Login") ||
+    c.req.header("X-Tailscale-User");
+  if (!user) {
+    return c.text("Unauthorized", 401);
+  }
+  c.set("user", user);
+  await next();
+});
+
 app.get("/upload", (c) => {
-  return c.html(html);
+  const template = Deno.readTextFileSync("./templates/upload.html");
+  return c.html(template);
 });
 
 app.get("/:hash", async (c) => {
