@@ -79,7 +79,6 @@ export const effect = (
   const listener = () => {
     let cleanup: Cancel = noOp;
     return (value: unknown) => {
-      console.log("listener", value, isReactive(value));
       cleanup();
       const next = isReactive(value) ? value.sink(listener()) : callback(value);
       cleanup = isCancel(next) ? next : noOp;
