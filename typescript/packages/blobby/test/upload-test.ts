@@ -1,16 +1,19 @@
 import { sha256 } from "../src/utils/hash.ts";
 
+const BASE_URL = Deno.env.get("BASE_URL") || "http://localhost:3000";
+
 async function test() {
   const content = `This is a test blob created at ${new Date().toISOString()}`;
   const hash = await sha256(content);
   const exampleEmail = "test@example.com";
   
+  console.log("Testing against:", BASE_URL);
   console.log("Content:", content);
   console.log("Hash:", hash);
 
   // PUT the blob
   console.log("\nPutting blob...");
-  const putResponse = await fetch(`http://localhost:3000/blob/${hash}`, {
+  const putResponse = await fetch(`${BASE_URL}/blob/${hash}`, {
     method: "PUT",
     body: content,
     headers: {
@@ -23,7 +26,7 @@ async function test() {
 
   // GET the blob
   console.log("\nGetting blob...");
-  const getResponse = await fetch(`http://localhost:3000/blob/${hash}`, {
+  const getResponse = await fetch(`${BASE_URL}/blob/${hash}`, {
     headers: {
       "Tailscale-User-Login": exampleEmail,
     },
@@ -34,7 +37,7 @@ async function test() {
 
   // List ALL blobs
   console.log("\nListing all blobs...");
-  const allBlobsResponse = await fetch("http://localhost:3000/blobs", {
+  const allBlobsResponse = await fetch(`${BASE_URL}/blobs`, {
     headers: {
       "Tailscale-User-Login": exampleEmail,
     },
@@ -45,7 +48,7 @@ async function test() {
 
   // List blobs for specific user
   console.log(`\nListing blobs for user ${exampleEmail}...`);
-  const userBlobsResponse = await fetch(`http://localhost:3000/blobs?user=${exampleEmail}`, {
+  const userBlobsResponse = await fetch(`${BASE_URL}/blobs?user=${exampleEmail}`, {
     headers: {
       "Tailscale-User-Login": exampleEmail,
     },
