@@ -7,7 +7,6 @@
     "proseWrap": "always",
     "include": ["src/"]
   },
-
   "lint": {
     "include": ["src/"],
     "exclude": ["src/testdata/", "src/fixtures/**/*.ts"],
@@ -16,5 +15,11 @@
       "include": ["ban-untagged-todo"],
       "exclude": ["no-unused-vars"]
     }
+  },
+  "imports": {
+    "@std/fs": "jsr:@std/fs@^1.0.5",
+    "@std/path": "jsr:@std/path@^1.0.8",
+    "redis": "npm:redis@^4.7.0",
+    "vitest": "npm:vitest@^2.1.4"
   }
 }
