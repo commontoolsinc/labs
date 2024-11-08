@@ -14,6 +14,43 @@ export type LocalState = Map<
   { local: number; remote: number; value: unknown }
 >;
 
+const local: LocalState = new Map();
+
+const upsert = (entity: DB.API.Entity, attribute: string, value: unknown) => {
+  const changes = [] as DB.Instruction[];
+  const id = `${attribute}@${entity}`;
+  let state = local.get(id);
+  if (state) {
+    state.local++;
+    state.value = value;
+  } else {
+    state = { local: 1, remote: 1, value };
+    local.set(id, state);
+  }
+  state.remote = state.local;
+
+  changes.push({
+    Upsert: [entity, attribute, `${id}:${state.remote}`],
+  });
+  return changes;
+};
+
+const retract = (entity: DB.API.Entity, attribute: string, value: any) => {
+  const changes = [] as DB.API.Instruction[];
+  const id = `${attribute}@${entity}`;
+  const state = local.get(id);
+  if (state) {
+    changes.push({
+      Retract: [entity, attribute, `${id}:${state.remote}`],
+    });
+    state.local++;
+    state.remote = state.local;
+  } else {
+    changes.push({ Retract: [entity, attribute, value] });
+  }
+  return changes;
+};
+
 @customElement("common-charm")
 export class CommonCharm extends HTMLElement {
   #root: ShadowRoot;
@@ -35,7 +72,6 @@ export class CommonCharm extends HTMLElement {
 
     this.#spell = null;
     this.#entity = null;
-    this.state = new Map();
     this.#vdom = null;
   }
 
@@ -94,40 +130,8 @@ export class CommonCharm extends HTMLElement {
   }
 
   dispatch([attribute, event]: [string, Event]) {
-    const changes = this.upsert(attribute, event);
+    const changes = upsert(this.entity, attribute, event);
     DB.Task.perform(this.transact(changes));
-  }
-
-  upsert(attribute: string, value: unknown) {
-    const changes = [] as DB.Instruction[];
-    let state = this.state.get(attribute);
-    if (state) {
-      state.local++;
-      state.value = value;
-    } else {
-      state = { local: 1, remote: 1, value };
-      this.state.set(attribute, state);
-    }
-    state.remote = state.local;
-
-    changes.push({
-      Upsert: [this.entity, attribute, `${attribute}@${state.remote}`],
-    });
-    return changes;
-  }
-  retract(attribute: string, value: any) {
-    const changes = [] as DB.API.Instruction[];
-    const state = this.state.get(attribute);
-    if (state) {
-      changes.push({
-        Retract: [this.entity, attribute, `${attribute}@${state.remote}`],
-      });
-      state.local++;
-      state.remote = state.local;
-    } else {
-      changes.push({ Retract: [this.entity, attribute, value] });
-    }
-    return changes;
   }
 
   get replica() {
@@ -229,29 +233,29 @@ export function* spawn<Selection extends DB.Selector>(
           `Expected single match but got ${selection.length}`,
         );
       } else if (selection.length === 1) {
-        const match = read(selection[0], charm.state);
+        const match = resolve(selection[0]);
         if (match.ok) {
           const changes = yield* rule.perform(match.ok);
           const commit = [];
           for (const change of changes) {
             if (change.Assert) {
-              const [_entity, attribute, value] = change.Assert;
+              const [entity, attribute, value] = change.Assert;
               if (String(attribute).startsWith("~/")) {
-                commit.push(...charm.upsert(String(attribute), value));
+                commit.push(...upsert(entity, String(attribute), value));
               } else {
                 commit.push(change);
               }
             } else if (change.Upsert) {
-              const [_entity, attribute, value] = change.Upsert;
+              const [entity, attribute, value] = change.Upsert;
               if (String(attribute).startsWith("~/")) {
-                commit.push(...charm.upsert(String(attribute), value));
+                commit.push(...upsert(entity, String(attribute), value));
               } else {
                 commit.push(change);
               }
             } else if (change.Retract) {
-              const [_entity, attribute, value] = change.Retract;
+              const [entity, attribute, value] = change.Retract;
               if (String(attribute).startsWith("~/")) {
-                commit.push(...charm.retract(String(attribute), value));
+                commit.push(...retract(entity, String(attribute), value));
               } else {
                 commit.push(change);
               }
@@ -267,30 +271,28 @@ export function* spawn<Selection extends DB.Selector>(
 }
 
 const isLocalReference = (input: unknown): input is string =>
-  typeof input === "string" && input.startsWith("~/") && input.includes("@");
+  typeof input === "string" && input.startsWith("~/") && input.includes(":");
 
 export const parseReference = (source: unknown) => {
   if (isLocalReference(source)) {
-    const [attribute, version] = source.split("@");
-    return { attribute, version: Number(version) };
+    const [id, version] = source.split(":");
+    return { id, version: Number(version) };
   } else {
     return {};
   }
 };
 
-const read = (
-  selection: unknown,
-  state: LocalState,
-): DB.API.Result<any, Error> => {
+const resolve = (selection: unknown): DB.API.Result<any, Error> => {
   if (isLocalReference(selection)) {
     const remote = parseReference(selection);
-    const revision = state.get(remote.attribute);
+    const state = local.get(remote.id);
     // We made a round trip so we increment local version to avoid reacting
     // to it again.
-    if (revision && revision.local === remote.version) {
-      revision.local++;
-      delete revision.value;
-      return { ok: revision.value };
+    if (state && state.local === remote.version) {
+      const { value } = state;
+      state.local++;
+      delete state.value;
+      return { ok: value };
     } else {
       return { error: new Error("Inconsistent") };
     }
@@ -301,7 +303,7 @@ const read = (
   } else if (Array.isArray(selection)) {
     const members = [];
     for (const element of selection) {
-      const member = read(element, state);
+      const member = resolve(element);
       if (member.ok) {
         members.push(member.ok);
       } else {
@@ -317,7 +319,7 @@ const read = (
   } else if (typeof selection === "object") {
     const result = {} as Record<string, any>;
     for (const [key, value] of Object.entries(selection)) {
-      const member = read(value, state);
+      const member = resolve(value);
       if (member.error) {
         return member;
       } else {
@@ -337,9 +339,9 @@ export const UI = "~/common/ui";
  *
  */
 export const render = (charm: CommonCharm) => {
-  const local = charm.state.get(UI);
-  if (local) {
-    const vdom = local.value as DOM.Node<{}>;
+  const state = local.get(`${UI}@${charm.entity}`);
+  if (state) {
+    const vdom = state.value as DOM.Node<{}>;
     if (charm.vdom === null) {
       charm.vdom = DOM.virtualize(charm.mount);
     }
