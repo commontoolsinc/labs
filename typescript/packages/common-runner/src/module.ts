@@ -27,8 +27,9 @@ export function raw<T, R>(
     inputsCell: CellImpl<T>,
     sendResult: (result: R) => void,
     addCancel: AddCancel,
-    cause: any
-  ) => Action
+    cause: any,
+    parentCell: CellImpl<any>,
+  ) => Action,
 ): ModuleFactory<T, R> {
   return createNodeFactory({
     type: "raw",

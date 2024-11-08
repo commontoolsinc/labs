@@ -23,6 +23,7 @@ export function fetchData(
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: CellImpl<any>[],
+  parentCell: CellImpl<any>,
 ): Action {
   const pending = cell(false, { fetchData: { pending: cause } });
   const result = cell<any | undefined>(undefined, {
@@ -34,6 +35,11 @@ export function fetchData(
   const requestHash = cell<string | undefined>(undefined, {
     fetchData: { requestHash: cause },
   });
+
+  pending.sourceCell = parentCell;
+  result.sourceCell = parentCell;
+  error.sourceCell = parentCell;
+  requestHash.sourceCell = parentCell;
 
   sendResult({
     pending,
@@ -81,7 +87,7 @@ export function fetchData(
       .then(async (data) => {
         if (thisRun !== currentRun) return;
 
-        normalizeToCells(data, undefined, log, {
+        normalizeToCells(parentCell, data, undefined, log, {
           fetchData: { url },
           cause,
         });

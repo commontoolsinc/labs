@@ -10,6 +10,7 @@ import {
   runPersistent,
   TYPE,
   addCharms,
+  NAME,
 } from "../data.js";
 import {
   CellImpl,
@@ -17,6 +18,7 @@ import {
   cell,
   getRecipe,
   getRecipeSrc,
+  isCell,
   run,
 } from "@commontools/common-runner";
 import { buildRecipe } from "../localBuild.js";
@@ -83,8 +85,9 @@ export class CommonSidebar extends LitElement {
   @property({ type: String })
   workingSrc: string = "";
 
-  homeRef = createRef<HTMLElement>();
-  homeCharm: Promise<CellImpl<Charm>> | null = null;
+  private homeRef = createRef<HTMLElement>();
+  private homeCharm: Promise<CellImpl<Charm>> | null = null;
+  private linkedCharms: CellImpl<Charm>[] = [];
 
   static override styles = [
     style.baseStyles,
@@ -147,6 +150,35 @@ export class CommonSidebar extends LitElement {
           return home;
         },
       );
+    }
+
+    if (_changedProperties.has("focusedCharm")) {
+      const processCell = this.focusedCharm?.sourceCell?.get();
+      if (processCell) {
+        const linkedCharms = new Set<CellImpl<Charm>>();
+        const traverse = (value: any, parents: any[] = []) => {
+          if (isCell(value)) {
+            const initialCell = value;
+
+            while (value.sourceCell) value = value.sourceCell;
+            if (value.get()?.resultRef) value = value.get().resultRef.cell;
+
+            if (value !== this.focusedCharm) {
+              if (value.get()?.[NAME] && value.get()?.[UI])
+                linkedCharms.add(value);
+              else {
+                console.log("not a charm", initialCell, value.get(), parents);
+              }
+            }
+          } else if (typeof value === "object" && value !== null) {
+            for (const key in value) {
+              traverse(value[key], [...parents, value]);
+            }
+          }
+        };
+        traverse(processCell);
+        this.linkedCharms = Array.from(linkedCharms);
+      }
     }
   }
 
@@ -264,7 +296,20 @@ export class CommonSidebar extends LitElement {
         )}
         ${when(
           this.sidebarTab === "links",
-          () => html`<os-navpanel safearea> ${sidebarNav} </os-navpanel>`,
+          () =>
+            html`<os-navpanel safearea>
+              ${sidebarNav}
+              <os-sidebar-group>
+                <div slot="label">Linked Charms</div>
+                <div>
+                  ${this.linkedCharms.map(
+                    (charm) => html`
+                      <common-charm-link .charm=${charm}></common-charm-link>
+                    `,
+                  )}
+                </div>
+              </os-sidebar-group>
+            </os-navpanel>`,
           () => html``,
         )}
         ${when(

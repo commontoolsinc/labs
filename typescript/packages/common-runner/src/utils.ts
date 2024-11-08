@@ -83,7 +83,7 @@ export function sendValueToBinding(
   if (isAlias(binding)) {
     const ref = followAliases(binding, cell, log);
     if (!isCellReference(value) && !isCell(value) && !isAlias(value))
-      normalizeToCells(value, ref.cell.getAtPath(ref.path), log, binding);
+      normalizeToCells(cell, value, ref.cell.getAtPath(ref.path), log, binding);
     setNestedValue(ref.cell, ref.path, value, log);
   } else if (Array.isArray(binding)) {
     if (Array.isArray(value))
@@ -354,12 +354,13 @@ export function transformToRendererCells(
  * @returns The (potentially unwrapped) input value
  */
 export function staticDataToNestedCells(
+  parentCell: CellImpl<any>,
   value: any,
   log?: ReactivityLog,
   cause?: any,
 ): any {
   value = maybeUnwrapProxy(value);
-  normalizeToCells(value, undefined, log, cause);
+  normalizeToCells(parentCell, value, undefined, log, cause);
   return value;
 }
 
@@ -377,6 +378,7 @@ export function staticDataToNestedCells(
  * @returns Whether the value was changed.
  */
 export function normalizeToCells(
+  parentCell: CellImpl<any>,
   value: any,
   previous?: any,
   log?: ReactivityLog,
@@ -431,6 +433,7 @@ export function normalizeToCells(
                 preceeding: preceedingItemId,
               });
         const different = normalizeToCells(
+          parentCell,
           value[i],
           isCellReference(previousItem)
             ? previousItem.cell.getAtPath(previousItem.path)
@@ -455,6 +458,9 @@ export function normalizeToCells(
         } else {
           value[i] = { cell: cell(value[i]), path: [] } satisfies CellReference;
           value[i].cell.entityId = itemId;
+          value[i].cell.sourceCell = parentCell;
+          if (Array.isArray(parentCell.get())) debugger;
+
           preceedingItemId = itemId;
           log?.writes.push(value[i]);
           changed = true;
@@ -472,7 +478,7 @@ export function normalizeToCells(
       const previousItem = previous
         ? maybeUnwrapProxy(previous[key])
         : undefined;
-      let change = normalizeToCells(item, previousItem, log, {
+      let change = normalizeToCells(parentCell, item, previousItem, log, {
         parent: cause,
         key,
       });

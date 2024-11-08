@@ -2,7 +2,7 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { render } from "@commontools/common-ui";
 import { NAME } from "../data.js";
-import { RendererCell, isReactive } from "@commontools/common-runner";
+import { RendererCell, effect } from "@commontools/common-runner";
 
 export const charmLink = render.view("common-charm-link", {
   charm: { type: "object" },
@@ -54,17 +54,13 @@ export class CommonCharmLink extends LitElement {
     this.nameEffect?.();
     this.nameEffect = undefined;
 
-    let { [NAME]: name } = this.charm.get();
+    let { [NAME]: name } = this.charm.get() ?? {};
 
-    if (isReactive(name)) {
-      this.nameEffect = name.sink((name: unknown) => {
-        this.nameFromCharm = name as string;
-        if (!skipUpdate) this.requestUpdate();
-        skipUpdate = false;
-      });
-    } else {
-      this.nameFromCharm = name;
-    }
+    effect(name, (name) => {
+      this.nameFromCharm = name as string;
+      if (!skipUpdate) this.requestUpdate();
+      skipUpdate = false;
+    });
   }
 
   handleClick(e: Event) {
@@ -84,7 +80,7 @@ export class CommonCharmLink extends LitElement {
     const name = this.name ?? this.nameFromCharm ?? "(unknown)";
     return html`
       <a
-        href="#${JSON.stringify(this.charm.entityId)}"
+        href="/charm/${JSON.stringify(this.charm.entityId)}"
         @click="${this.handleClick}"
         >💎 ${name}</a
       >

@@ -40,9 +40,17 @@ export function map(
     op: Recipe;
   }>,
   sendResult: (result: any) => void,
-  addCancel: AddCancel
+  addCancel: AddCancel,
+  cause: any,
+  parentCell: CellImpl<any>,
 ): Action {
   const result = cell<any[]>([]);
+  result.generateEntityId({
+    map: parentCell.entityId,
+    op: inputsCell.getAsQueryResult([])?.op,
+    cause,
+  });
+  result.sourceCell = parentCell;
   let sourceRefToResult: { ref: CellReference; resultCell: CellImpl<any> }[] =
     [];
 
@@ -96,7 +104,7 @@ export function map(
 
       // If the value is new, instantiate the recipe and store the result cell
       let itemResult = sourceRefToResult.find(({ ref }) =>
-        isEqualCellReferences(ref, value)
+        isEqualCellReferences(ref, value),
       );
 
       if (!itemResult) {
@@ -110,6 +118,9 @@ export function map(
         const resultCell = cell();
         resultCell.generateEntityId({ map: value.cell.entityId });
         run(op, value, resultCell);
+        resultCell.sourceCell!.sourceCell = parentCell;
+        if (Array.isArray(parentCell.get())) debugger;
+
         // TODO: Have `run` return cancel, once we make resultCell required
         addCancel(cancels.get(resultCell));
         itemResult = { ref: value, resultCell };

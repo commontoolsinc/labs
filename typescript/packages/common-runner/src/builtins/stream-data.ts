@@ -22,6 +22,7 @@ export function streamData(
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
   cause: CellImpl<any>[],
+  parentCell: CellImpl<any>,
 ): Action {
   const pending = cell(false, { streamData: { pending: cause } });
   const result = cell<any | undefined>(undefined, {
@@ -34,6 +35,10 @@ export function streamData(
   pending.ephemeral = true;
   result.ephemeral = true;
   error.ephemeral = true;
+
+  pending.sourceCell = parentCell;
+  result.sourceCell = parentCell;
+  error.sourceCell = parentCell;
 
   // Since we'll only write into the cells above, we only have to call this once
   // here, instead of in the action.
@@ -118,7 +123,7 @@ export function streamData(
               data: JSON.parse(data),
             };
 
-            normalizeToCells(parsedData, undefined, log, {
+            normalizeToCells(parentCell, parsedData, undefined, log, {
               streamData: { url },
               cause,
             });

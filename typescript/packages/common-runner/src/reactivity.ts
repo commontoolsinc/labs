@@ -75,25 +75,20 @@ export const isSendable = <T = unknown>(
 export const effect = (
   value: unknown,
   callback: (value: unknown) => Cancel | void,
-) => {
-  let cleanup: Cancel = noOp;
-
-  if (isReactive(value)) {
-    const cancelSink = value.sink((value: unknown) => {
+): Cancel => {
+  const listener = () => {
+    let cleanup: Cancel = noOp;
+    return (value: unknown) => {
+      console.log("listener", value, isReactive(value));
       cleanup();
-      const next = isReactive(value)
-        ? effect(value, callback)
-        : callback(value);
+      const next = isReactive(value) ? value.sink(listener()) : callback(value);
       cleanup = isCancel(next) ? next : noOp;
-    });
-    return () => {
-      cancelSink();
-      cleanup();
+      return next;
     };
-  } else {
-    const maybeCleanup = callback(value);
-    return isCancel(maybeCleanup) ? maybeCleanup : noOp;
-  }
+  };
+
+  const next = listener()(value);
+  return isCancel(next) ? next : noOp;
 };
 
 const noOp = () => {};

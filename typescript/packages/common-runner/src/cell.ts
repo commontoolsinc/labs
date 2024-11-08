@@ -691,7 +691,7 @@ export function createQueryResultProxy<T>(
 
               // Turn any newly added elements into cells. And if there was a
               // change at all, update the cell.
-              normalizeToCells(copy, target, log, {
+              normalizeToCells(valueCell, copy, target, log, {
                 parent: valueCell.entityId,
                 method: prop,
                 call: new Error().stack,
@@ -710,7 +710,7 @@ export function createQueryResultProxy<T>(
                   call: new Error().stack,
                   context: getTopFrame()?.cause ?? "unknown",
                 };
-                normalizeToCells(result, undefined, log, cause);
+                normalizeToCells(valueCell, result, undefined, log, cause);
 
                 const resultCell = cell<any[]>(undefined, cause);
                 resultCell.send(result);
@@ -750,7 +750,7 @@ export function createQueryResultProxy<T>(
       }
 
       // Make sure that any nested arrays are made of cells.
-      normalizeToCells(value, undefined, log, {
+      normalizeToCells(valueCell, value, undefined, log, {
         cell: valueCell.entityId,
         path: [...valuePath, prop],
       });
@@ -760,8 +760,23 @@ export function createQueryResultProxy<T>(
 
       // When setting a value in an array, make sure it's a cell reference.
       if (Array.isArray(target) && !isCellReference(value)) {
-        value = { cell: cell(value), path: [] };
-        log?.writes.push(value);
+        const ref = {
+          cell: cell(undefined, {
+            list: { cell: valueCell.entityId, path: valuePath },
+            previous:
+              Number(prop) > 0
+                ? target[Number(prop) - 1].cell?.entityId ?? Number(prop) - 1
+                : null,
+          }),
+          path: [],
+        };
+        ref.cell.send(value);
+        ref.cell.sourceCell = valueCell;
+        if (Array.isArray(valueCell.get())) debugger;
+
+        log?.writes.push(ref);
+
+        value = ref;
       }
 
       return setNestedValue(valueCell, [...valuePath, prop], value, log);

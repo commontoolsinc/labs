@@ -94,6 +94,7 @@ export function run<T, R = any>(
     [TYPE]: string;
     argument?: T;
     internal?: { [key: string]: any };
+    resultRef: { cell: CellImpl<R>; path: PropertyKey[] };
   }>;
 
   if (resultCell.sourceCell !== undefined) {
@@ -157,7 +158,12 @@ export function run<T, R = any>(
     (recipe.initial as { internal: any })?.internal;
 
   // Ensure static data is converted to cell references, e.g. for arrays
-  argument = staticDataToNestedCells(argument, undefined, resultCell);
+  argument = staticDataToNestedCells(
+    processCell,
+    deepCopy(argument),
+    undefined,
+    resultCell,
+  );
 
   // TODO: Move up, only do this if it's not from the sourceCell
   if (defaults) argument = mergeObjects(argument, defaults);
@@ -166,6 +172,7 @@ export function run<T, R = any>(
     [TYPE]: addRecipe(recipe),
     argument,
     ...(internal ? { internal: deepCopy(internal) } : {}),
+    resultRef: { cell: resultCell, path: [] },
   });
 
   // Send "query" to results to the result cell
@@ -427,6 +434,7 @@ function instantiateRawNode(
       sendValueToBinding(processCell, mappedOutputBindings, result),
     addCancel,
     inputCells, // cause
+    processCell,
   );
 
   addCancel(schedule(action, { reads: inputCells, writes: outputCells }));
