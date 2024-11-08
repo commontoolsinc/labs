@@ -7,11 +7,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "deno run --allow-env --allow-read --allow-write --allow-net --allow-run --allow-sys src/index.ts",
+    "start": "deno run --allow-all src/index.ts",
     "test": "deno test --no-check",
     "build": "tsc --build -f",
     "prebuild": "npm run clean",
-    "clean": "rm -rf ./lib"
+    "clean": "rm -rf ./lib",
+    "livetest": "deno run --allow-env --allow-read --allow-net  ./src/livetest.ts all",
+    "livetest:all": "deno run --allow-env --allow-read --allow-net  ./src/livetest.ts all",
+    "livetest:variety": "deno run --allow-env --allow-read --allow-net  ./src/livetest.ts variety",
+    "livetest:anthropic": "deno run --allow-env --allow-read --allow-net  ./src/livetest.ts anthropic",
+    "livetest:openai": "deno run --allow-env --allow-read --allow-net  ./src/livetest.ts openai",
+    "livetest:google": "deno run --allow-env --allow-read --allow-net  ./src/livetest.ts google",
+    "livetest:groq": "deno run --allow-env --allow-read --allow-net  ./src/livetest.ts groq"
   },
   "repository": {
     "type": "git",

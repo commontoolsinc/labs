@@ -82,7 +82,7 @@ export function llm(
       prompt: prompt ?? "",
       stop: stop ?? "",
       max_tokens: max_tokens ?? 4096,
-      model: model ?? "openai:o1-preview",
+      model: model ?? "claude-3-5-sonnet",
     } as StandardParams;
 
     if (model?.startsWith("openai:o1")) {
