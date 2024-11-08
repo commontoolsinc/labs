@@ -1,26 +1,35 @@
-import { z } from "zod";
-import { jsonToDatalogQuery, zodSchemaToPlaceholder } from "./schema.js";
-import { h, behavior, $, Reference, select } from "@commontools/common-system";
+import { $, Reference } from "../../common-system/lib/adapter.js";
+import { h, Select, select, View } from '@commontools/common-system'
 
-export function query(schema: z.ZodTypeAny) {
-  const query = jsonToDatalogQuery(zodSchemaToPlaceholder(schema))
+type SchemaType = { [key: string]: { type: 'number' | 'string' | 'boolean' } }
 
-  return {
-    render: (fn: any) => {
-      return {
-        ...query,
-        update: fn
-      }
-    }
-  }
+type InferSchemaType<T extends SchemaType> = {
+  [K in keyof T]: T[K]['type'] extends 'number' ? number :
+  T[K]['type'] extends 'string' ? string :
+  T[K]['type'] extends 'boolean' ? boolean :
+  never
+}
+export function createQueryFromSchema<T extends SchemaType>(schema: T) {
+  // Build the select object with all properties
+  const selectObj = Object.keys(schema).reduce((acc, key) => {
+    return { ...acc, [key]: $[key] }
+  }, { self: $.self } as const);
+
+  // Create the base select
+  let queryBuilder = select(selectObj);
+
+  // Add match for each property
+  Object.keys(schema).forEach(key => {
+    queryBuilder = queryBuilder.match($.self, key, $[key]);
+  });
+
+  return queryBuilder as Select<InferSchemaType<T> & { self: unknown }>;
 }
 
-export const view1 = query(z.object({ id: z.object({}), count: z.number() }))
-  .render(({ count, self }: { count: number; self: Reference }) => {
-    return (
-      <div title={`Clicks ${count}`} entity={self}>
-        <div>{count}</div>
-        <button onclick="~/on/click">Click me!</button>
-      </div>
-    );
-  });
+// Helper function to make the schema definition more ergonomic
+export const b = {
+  object: <T extends SchemaType>(schema: T) => createQueryFromSchema(schema),
+  number: () => ({ type: 'number' as const }),
+  string: () => ({ type: 'string' as const }),
+  boolean: () => ({ type: 'boolean' as const }),
+};
