@@ -9,22 +9,10 @@ const init = select({ self: $.self })
   .assert(({ self }) => [self, "clicks", 0])
   .commit();
 
-
-const view = query(z.object({
-  id: z.object({}),
-  count: z.number(),
-}))
-  .render(({ count, self }: { count: number; self: Reference }) => {
-    return (
-      <div title={`Clicks ${count}`} entity={self}>
-        <div>{count}</div>
-        <button onclick="~/on/click">Click me!</button>
-      </div>
-    );
-  });
-
-// const view = select({ self: $.self, count: $.count })
-//   .match($.self, "clicks", $.count)
+// const view = query(z.object({
+//   id: z.object({}),
+//   count: z.number(),
+// }))
 //   .render(({ count, self }: { count: number; self: Reference }) => {
 //     return (
 //       <div title={`Clicks ${count}`} entity={self}>
@@ -33,6 +21,17 @@ const view = query(z.object({
 //       </div>
 //     );
 //   });
+
+const view = select({ self: $.self, count: $.count })
+  .match($.self, "clicks", $.count)
+  .render(({ count, self }: { count: number; self: Reference }) => {
+    return (
+      <div title={`Clicks ${count}`} entity={self}>
+        <div>{count}</div>
+        <button onclick="~/on/click">Click me!</button>
+      </div>
+    );
+  });
 
 const onclick = select({
   self: $.self,

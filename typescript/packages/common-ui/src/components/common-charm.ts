@@ -55,7 +55,8 @@ export class CommonCharm extends HTMLElement {
       DB.open({
         remote: {
           // url: new URL("/api/data/", location.href),
-          url: new URL("http://localhost:8080/"),
+          // url: new URL("http://localhost:8080/"),
+          url: new URL("https://komshi.saga-castor.ts.net/"),
 
           fetch: (async (init: Request) => {
             const { method, headers, url } = init;
@@ -84,7 +85,7 @@ export class CommonCharm extends HTMLElement {
 
     this.#replica = replica;
     for (const [_name, rule] of Object.entries(this.spell)) {
-      DB.Task.perform(drive(this, rule));
+      DB.Task.perform(spawn(this, rule));
     }
   }
 
@@ -165,18 +166,24 @@ export class CommonCharm extends HTMLElement {
   }
 }
 
+export interface Effect<Select extends DB.API.Selector = DB.API.Selector> {
+  select: Select;
+  where: DB.API.Query["where"];
+  perform: (
+    input: DB.API.InferBindings<Select>,
+  ) => DB.Task.Task<DB.Transaction, never>;
+}
+
 /**
  * Rule defines a specific behavior for an entity referenced by the `?`
  * variable. It provides a selector to query entity and relevant relations
  * and provides an update logic that submits new facts to the database when
  * when result of the selector changes.
  */
-export interface Rule<Select extends DB.API.Selector = DB.API.Selector> {
-  select: Select;
-  where: DB.API.Query["where"];
+export interface Rule<Select extends DB.API.Selector = DB.API.Selector>
+  extends Effect<Select> {
   update: (input: DB.API.InferBindings<Select>) => DB.Transaction;
 }
-
 /**
  * Behavior is a collection of rules that define behavior for a specific
  * entity. This roughly corresponds to "spell".
@@ -192,9 +199,9 @@ export const spell = <Source extends Record<string, any>>(behavior: {
   [K in keyof Source]: Rule<Source[K]>;
 }): { [K in keyof Source]: Rule<Source[K]> } => behavior;
 
-export function* drive<Selection extends DB.Selector>(
+export function* spawn<Selection extends DB.Selector>(
   charm: CommonCharm,
-  rule: Rule<Selection>,
+  rule: Effect<Selection>,
 ) {
   const { replica } = charm;
   const subscription = yield* replica.subscribe({
@@ -224,7 +231,7 @@ export function* drive<Selection extends DB.Selector>(
       } else if (selection.length === 1) {
         const match = read(selection[0], charm.state);
         if (match.ok) {
-          const changes = rule.update(match.ok);
+          const changes = yield* rule.perform(match.ok);
           const commit = [];
           for (const change of changes) {
             if (change.Assert) {
