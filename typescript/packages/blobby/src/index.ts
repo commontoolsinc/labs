@@ -1,20 +1,27 @@
-import { Hono } from "hono";
-import { cors } from "hono/cors";
-import { createHash } from "crypto";
-import { join } from "@std/path";
+import { cors } from "@hono/hono/cors";
+import {
+  createClient,
+  type RedisClientType,
+  type RedisFunctions,
+  type RedisModules,
+  type RedisScripts,
+} from "redis";
 import { ensureDirSync } from "@std/fs";
-import { createClient } from "redis";
+import { Hono } from "@hono/hono";
+import { join } from "@std/path";
+
+import { sha256 } from "./utils/hash.ts";
 
 // Ensure data directory exists
 const dataDir = join(Deno.cwd(), "data");
 await ensureDirSync(dataDir);
 
-// Initialize Redis Client
-const redisClient = createClient();
-redisClient.on("error", (err) => console.error("Redis Client Error", err));
-await redisClient.connect();
+interface Variables {
+  redis: RedisClientType<RedisModules, RedisFunctions, RedisScripts>;
+  user: string;
+}
 
-const app = new Hono();
+const app = new Hono<{ Variables: Variables }>();
 
 app.use(
   "*",
@@ -28,7 +35,7 @@ app.use(
   }),
 );
 
-app.use("", async (c, next) => {
+app.use("*", async (c, next) => {
   const redis = createClient({
     url: "redis://localhost:6379",
   });
@@ -56,8 +63,17 @@ app.use(async (c, next) => {
   await next();
 });
 
+app.get("/", (c) => {
+  const template = Deno.readTextFileSync(
+    join(import.meta.dirname!, "templates/upload.html"),
+  );
+  return c.html(template);
+});
+
 app.get("/upload", (c) => {
-  const template = Deno.readTextFileSync("./templates/upload.html");
+  const template = Deno.readTextFileSync(
+    join(import.meta.dirname!, "templates/upload.html"),
+  );
   return c.html(template);
 });
 
@@ -83,4 +99,6 @@ app.post("/:hash", async (c) => {
   return c.json({ hash });
 });
 
-export default app;
+const PORT = Deno.env.get("PORT") || 3000;
+
+Deno.serve(app.fetch);

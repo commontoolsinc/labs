@@ -1,6 +1,11 @@
 {
   "version": "4",
   "specifiers": {
+    "jsr:@hono/hono@^4.6.9": "4.6.9",
+    "jsr:@std/crypto@*": "1.0.3",
+    "jsr:@std/crypto@^1.0.3": "1.0.3",
+    "jsr:@std/encoding@*": "1.0.5",
+    "jsr:@std/encoding@^1.0.5": "1.0.5",
     "jsr:@std/fs@^1.0.5": "1.0.5",
     "jsr:@std/path@^1.0.7": "1.0.8",
     "jsr:@std/path@^1.0.8": "1.0.8",
@@ -8,6 +13,15 @@
     "npm:vitest@^2.1.4": "2.1.4_vite@5.4.10"
   },
   "jsr": {
+    "@hono/hono@4.6.9": {
+      "integrity": "4d4975f5c023d4416d26e6dd4a498c56e59958561733f56f55a9be57f023603b"
+    },
+    "@std/crypto@1.0.3": {
+      "integrity": "a2a32f51ddef632d299e3879cd027c630dcd4d1d9a5285d6e6788072f4e51e7f"
+    },
+    "@std/encoding@1.0.5": {
+      "integrity": "ecf363d4fc25bd85bd915ff6733a7e79b67e0e7806334af15f4645c569fefc04"
+    },
     "@std/fs@1.0.5": {
       "integrity": "41806ad6823d0b5f275f9849a2640d87e4ef67c51ee1b8fb02426f55e02fd44e",
       "dependencies": [
@@ -464,6 +478,9 @@
   },
   "workspace": {
     "dependencies": [
+      "jsr:@hono/hono@^4.6.9",
+      "jsr:@std/crypto@^1.0.3",
+      "jsr:@std/encoding@^1.0.5",
       "jsr:@std/fs@^1.0.5",
       "jsr:@std/path@^1.0.8",
       "npm:redis@^4.7.0",
