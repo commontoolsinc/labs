@@ -31,25 +31,27 @@ export default recipe(
             placeholder="List title"
             oncommon-input={updateTitle({ title })}
           />
-          <common-vstack gap="sm">
+          <os-colgrid>
             {items.map((item) => (
               <common-draggable $entity={item}>
-                {derive(item, (item) =>
-                  typeof item === "object" && item !== null ? (
-                    item[UI] ? (
-                      item[UI]
-                    ) : item.type === "view" || item.type === "vnode" ? (
-                      item
+                <common-card>
+                  {derive(item, (item) =>
+                    typeof item === "object" && item !== null ? (
+                      item[UI] ? (
+                        item[UI]
+                      ) : item.type === "view" || item.type === "vnode" ? (
+                        item
+                      ) : (
+                        <pre>{JSON.stringify(item, null, 2)}</pre>
+                      )
                     ) : (
-                      <pre>{JSON.stringify(item, null, 2)}</pre>
-                    )
-                  ) : (
-                    item
-                  ),
-                )}
+                      item
+                    ),
+                  )}
+                </common-card>
               </common-draggable>
             ))}
-          </common-vstack>
+          </os-colgrid>
         </os-container>
       ),
       title,
