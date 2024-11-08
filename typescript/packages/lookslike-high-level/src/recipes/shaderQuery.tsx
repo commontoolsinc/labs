@@ -8,7 +8,6 @@ import {
   llm,
   cell,
   ifElse,
-  str,
 } from "@commontools/common-builder";
 import * as z from "zod";
 import { zodSchemaQuery } from "../query.js";
@@ -28,7 +27,7 @@ type ShaderItem = z.infer<typeof schema>;
 
 const eid = (e: any) => (e as any)["."];
 
-const onAddItem = handler<{}, { sourceCode: string }>((e, state) => {
+const onAddItem = handler<{}, { sourceCode: string }>((_e, state) => {
   const sourceCode = state.sourceCode;
   state.sourceCode = "";
   return fetchData(
@@ -37,7 +36,7 @@ const onAddItem = handler<{}, { sourceCode: string }>((e, state) => {
 });
 
 const onGenerateShader = handler<{}, { prompt: string; triggerPrompt: string }>(
-  (e, state) => {
+  (_e, state) => {
     state.triggerPrompt = state.prompt;
   },
 );
@@ -81,7 +80,7 @@ const onDeleteShader = handler<{}, { shader: ShaderItem }>((_, state) => {
 const onUpdateShaderSource = handler<
   {},
   { shader: ShaderItem; newSource: string }
->((e, state) => {
+>((_e, state) => {
   const shader = state.shader;
   return fetchData(
     prepUpdateRequest({
@@ -142,7 +141,7 @@ const shaderEditor = recipe(
     const onNextBlendMode = handler<
       {},
       { shader: ShaderItem; blendMode: string }
-    >((e, state) => {
+    >((_e, state) => {
       const currentIndex = blendModes.indexOf(state.blendMode || "multiply");
       const nextIndex = (currentIndex + 1) % blendModes.length;
       return fetchData(
@@ -158,7 +157,7 @@ const shaderEditor = recipe(
     const onPrevBlendMode = handler<
       {},
       { shader: ShaderItem; blendMode: string }
-    >((e, state) => {
+    >((_e, state) => {
       const currentIndex = blendModes.indexOf(state.blendMode || "multiply");
       const prevIndex =
         (currentIndex - 1 + blendModes.length) % blendModes.length;
@@ -261,7 +260,7 @@ export const shaderQuery = recipe(
                   shaderEditor({
                     shader,
                     sourceCode: shader.sourceCode,
-                    blendMode: shader.blendMode,
+                    blendMode: shader.blendMode!,
                   }),
                 );
               })}

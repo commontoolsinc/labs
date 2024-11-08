@@ -2,7 +2,6 @@ import { h } from "@commontools/common-html";
 import { recipe, handler, UI, NAME, derive } from "@commontools/common-builder";
 import { z } from "zod";
 import {
-  getRecipe,
   getCellReferenceOrThrow,
   run,
   isCellReference,

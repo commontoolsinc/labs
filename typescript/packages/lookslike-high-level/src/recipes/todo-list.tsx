@@ -1,7 +1,6 @@
 import { h } from "@commontools/common-html";
-import { recipe, handler, UI, NAME, cell } from "@commontools/common-builder";
+import { recipe, handler, UI, NAME } from "@commontools/common-builder";
 import { z } from "zod";
-import { addRecipe } from "@commontools/common-runner";
 
 const TodoItem = z.object({
   title: z.string(),

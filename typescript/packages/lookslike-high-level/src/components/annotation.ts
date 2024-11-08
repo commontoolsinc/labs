@@ -2,7 +2,7 @@ import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ref, createRef } from "lit/directives/ref.js";
 import { render, View } from "@commontools/common-html";
-import { charms, UI, annotationsEnabled, toggleAnnotations } from "../data.js";
+import { charms, UI, annotationsEnabled } from "../data.js";
 import {
   run,
   cell,
