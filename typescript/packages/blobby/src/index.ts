@@ -1,23 +1,25 @@
 import { cors } from "@hono/hono/cors";
-import {
-  createClient,
-  type RedisClientType,
-  type RedisFunctions,
-  type RedisModules,
-  type RedisScripts,
-} from "redis";
+import { createClient } from "redis";
 import { ensureDirSync } from "@std/fs";
 import { Hono } from "@hono/hono";
 import { join } from "@std/path";
 
 import { sha256 } from "./utils/hash.ts";
+import { DiskStorage } from "./lib/storage.ts";
+import {
+  addBlobToUser,
+  getAllBlobs,
+  getUserBlobs,
+  type RedisClient,
+} from "./lib/redis.ts";
 
 // Ensure data directory exists
 const dataDir = join(Deno.cwd(), "data");
-await ensureDirSync(dataDir);
+const storage = new DiskStorage(dataDir);
+await storage.init();
 
 interface Variables {
-  redis: RedisClientType<RedisModules, RedisFunctions, RedisScripts>;
+  redis: RedisClient;
   user: string;
 }
 
@@ -99,6 +101,49 @@ app.post("/:hash", async (c) => {
   return c.json({ hash });
 });
 
+app.put("/blob/:hash", async (c) => {
+  const redis = c.get("redis");
+  const hash = c.req.param("hash");
+  const content = await c.req.text();
+
+  // Verify hash matches content
+  const calculatedHash = await sha256(content);
+  if (calculatedHash !== hash) {
+    return c.json({ error: "Hash mismatch" }, 400);
+  }
+
+  // Save blob
+  await storage.saveBlob(hash, content);
+
+  // Associate blob with user
+  const user = c.get("user");
+  await addBlobToUser(redis, hash, user);
+
+  return c.json({ hash });
+});
+
+app.get("/blob/:hash", async (c) => {
+  const hash = c.req.param("hash");
+  const content = await storage.getBlob(hash);
+
+  if (!content) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  return c.body(content);
+});
+
+app.get("/blobs", async (c) => {
+  const user = c.req.query("user");
+  const redis = c.get("redis");
+
+  const blobs = user
+    ? await getUserBlobs(redis, user)
+    : await getAllBlobs(redis);
+
+  return c.json({ blobs });
+});
+
 const PORT = Deno.env.get("PORT") || 3000;
 
-Deno.serve(app.fetch);
+Deno.serve({ port: Number(PORT) }, app.fetch);
