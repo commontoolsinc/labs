@@ -94,8 +94,8 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
           [NAME]: cell.name,
           [UI]: html`<common-charm
             id=${charm.toString()}
-            spell=${() => this}
             entity=${() => entity}
+            spell=${() => this}
             $cell=${cell}
           />`,
         };
