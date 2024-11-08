@@ -1,38 +1,23 @@
-import { h, behavior, $, Reference, select } from "@commontools/common-system";
-import { z } from "zod";
-import { query } from "../sugar.jsx";
+import { h, behavior, $, Reference, select, View } from "@commontools/common-system";
+import { b } from "../sugar.jsx";
 
-export const source = { clicker: { v: 30 } };
+export const source = { clicker: { v: 32 } };
 
 const init = select({ self: $.self })
   .not.match($.self, "clicks", $._)
   .assert(({ self }) => [self, "clicks", 0])
   .commit();
 
-
-const view = query(z.object({
-  id: z.object({}),
-  count: z.number(),
-}))
-  .render(({ count, self }: { count: number; self: Reference }) => {
-    return (
-      <div title={`Clicks ${count}`} entity={self}>
-        <div>{count}</div>
-        <button onclick="~/on/click">Click me!</button>
-      </div>
-    );
-  });
-
-// const view = select({ self: $.self, count: $.count })
-//   .match($.self, "clicks", $.count)
-//   .render(({ count, self }: { count: number; self: Reference }) => {
-//     return (
-//       <div title={`Clicks ${count}`} entity={self}>
-//         <div>{count}</div>
-//         <button onclick="~/on/click">Click me!</button>
-//       </div>
-//     );
-//   });
+const view =
+  b.object({ clicks: b.number(), })
+    .render(({ self, clicks }: { self: Reference; clicks: number; }) => {
+      return (
+        <div title={`Clicks ${clicks}`} entity={self}>
+          <div>{clicks}</div>
+          <button onclick="~/on/click">Click me!</button>
+        </div>
+      );
+    });
 
 const onclick = select({
   self: $.self,
