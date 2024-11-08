@@ -64,6 +64,8 @@ export default class DroppableElement extends LitElement {
   #handleDrop(e: DragEvent) {
     console.log("droppable drop", e);
     e.preventDefault();
+    if (this._hoverTimeout) clearTimeout(this._hoverTimeout);
+
     if (!e.dataTransfer?.items || !this.droppable) return;
 
     const items: any[] = [];
@@ -115,6 +117,8 @@ export default class DroppableElement extends LitElement {
     e.preventDefault();
     console.log("on enter", this._openedTarget, this.opentarget);
     if (!this.opentarget) return;
+
+    if (this._hoverTimeout) clearTimeout(this._hoverTimeout);
 
     this._hoverTimeout = setTimeout(() => {
       console.log("hover timeout", this._openedTarget, this.opentarget);
