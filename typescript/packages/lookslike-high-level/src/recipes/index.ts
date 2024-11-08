@@ -70,6 +70,11 @@ import { playlistForTrip } from "./playlist.js";
 addRecipe(playlistForTrip, playlistForTripSrc);
 export { playlistForTrip };
 
+import readingListSrc from "./reading-list.tsx?raw";
+import readingList from "./reading-list.js";
+addRecipe(readingList, readingListSrc);
+export { readingList };
+
 import routineSrc from "./routine.ts?raw";
 import { routine } from "./routine.js";
 addRecipe(routine, routineSrc);

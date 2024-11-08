@@ -154,6 +154,11 @@ export const bookshelfQuery = recipe(
       authorInput: z.string().default(""),
     })
     .describe("Bookshelf query"),
+  z.object({
+    data: z
+      .array(z.object({ title: z.string(), author: z.string() }))
+      .describe("#booklist"),
+  }),
   ({ titleInput, authorInput }) => {
     const { result: items, query } = zodSchemaQuery(schema);
     tap({ obj: items });
