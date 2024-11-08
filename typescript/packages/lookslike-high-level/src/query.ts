@@ -6,7 +6,6 @@ import {
   OpaqueRef,
 } from "@commontools/common-builder";
 import { streamData } from "@commontools/common-builder";
-import { addRecipe } from "@commontools/common-runner";
 import * as z from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { jsonToDatalogQuery, jsonSchemaToPlaceholder } from "./schema.js";
