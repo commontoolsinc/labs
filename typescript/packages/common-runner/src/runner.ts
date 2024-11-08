@@ -160,13 +160,13 @@ export function run<T, R = any>(
   // Ensure static data is converted to cell references, e.g. for arrays
   argument = staticDataToNestedCells(
     processCell,
-    deepCopy(argument),
+    argument,
     undefined,
     resultCell,
   );
 
   // TODO: Move up, only do this if it's not from the sourceCell
-  if (defaults) argument = mergeObjects(argument, defaults);
+  if (defaults) argument = mergeObjects(argument, deepCopy(defaults));
 
   processCell.send({
     [TYPE]: addRecipe(recipe),

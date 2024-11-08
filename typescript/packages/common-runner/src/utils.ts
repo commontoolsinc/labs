@@ -360,6 +360,7 @@ export function staticDataToNestedCells(
   cause?: any,
 ): any {
   value = maybeUnwrapProxy(value);
+  value = deepCopy(value);
   normalizeToCells(parentCell, value, undefined, log, cause);
   return value;
 }
