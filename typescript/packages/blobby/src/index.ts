@@ -1,5 +1,5 @@
-import { Hono } from 'hono'
-import { cors } from 'hono/cors'
+import { Hono } from "hono";
+import { cors } from "hono/cors";
 // import { createHash } from 'crypto'
 
 const html = `<!DOCTYPE html>
@@ -42,43 +42,45 @@ const html = `<!DOCTYPE html>
 
 </html>`;
 
-const app = new Hono()
+const app = new Hono();
 
 // Add CORS middleware
-app.use('*', cors({
-	origin: '*',
-	allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-	allowHeaders: ['Content-Type', 'Authorization'],
-	exposeHeaders: ['Content-Length', 'X-Kuma-Revision'],
-	maxAge: 600,
-	credentials: true,
-}))
+app.use(
+  "*",
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+    exposeHeaders: ["Content-Length", "X-Kuma-Revision"],
+    maxAge: 600,
+    credentials: true,
+  }),
+);
 
-app.get('/upload', (c) => {
-	return c.html(html);
-})
+app.get("/upload", (c) => {
+  return c.html(html);
+});
 
-app.get('/:hash', async (c) => {
-	const hash = c.req.param('hash')
-	const object = await c.env.R2.get(hash)
+app.get("/:hash", async (c) => {
+  const hash = c.req.param("hash");
+  const object = await c.env.R2.get(hash);
 
-	if (!object) {
-		return c.text('Not Found', 404)
-	}
+  if (!object) {
+    return c.text("Not Found", 404);
+  }
 
-	return c.body(object.body)
-})
+  return c.body(object.body);
+});
 
-app.post('/:hash', async (c) => {
-	const hash = c.req.param('hash')
-	const content = await c.req.text()
-	// FIXME(ja): verify the hash of the content is correct
-	// const hash = createHash('sha256').update(content).digest('hex')
+app.post("/:hash", async (c) => {
+  const hash = c.req.param("hash");
+  const content = await c.req.text();
+  // FIXME(ja): verify the hash of the content is correct
+  // const hash = createHash('sha256').update(content).digest('hex')
 
-	await c.env.R2.put(hash, content)
+  await c.env.R2.put(hash, content);
 
-	return c.json({ hash })
-})
+  return c.json({ hash });
+});
 
-
-export default app
+export default app;

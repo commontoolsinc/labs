@@ -1,41 +1,41 @@
 <!DOCTYPE html>
 <html lang="en">
-
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Upload Content</title>
-</head>
+  </head>
 
-<body>
+  <body>
     <h1>Upload Content</h1>
-    <textarea id="content" rows="10" cols="50"></textarea><br>
+    <textarea id="content" rows="10" cols="50"></textarea>
+    <br />
     <button onclick="upload()">Upload</button>
     <p id="result"></p>
 
     <script>
-        async function upload() {
-            const content = document.getElementById('content').value;
-            
-            // Calculate SHA-256 hash
-            const msgBuffer = new TextEncoder().encode(content);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      async function upload() {
+        const content = document.getElementById("content").value;
 
-            console.log('hash', hash)
-            
-            // Send content to /:hash endpoint
-            const response = await fetch(`/${hash}`, {
-                method: 'POST',
-                body: content
-            });
-            
-            const data = await response.json();
-            const link = `${window.location.origin}/${hash}`;
-            document.getElementById('result').innerHTML = `Your link: <a href="${link}">${link}</a>`;
-        }
+        // Calculate SHA-256 hash
+        const msgBuffer = new TextEncoder().encode(content);
+        const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hash = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+
+        console.log("hash", hash);
+
+        // Send content to /:hash endpoint
+        const response = await fetch(`/${hash}`, {
+          method: "POST",
+          body: content,
+        });
+
+        const data = await response.json();
+        const link = `${window.location.origin}/${hash}`;
+        document.getElementById("result").innerHTML =
+          `Your link: <a href="${link}">${link}</a>`;
+      }
     </script>
-</body>
-
+  </body>
 </html>
