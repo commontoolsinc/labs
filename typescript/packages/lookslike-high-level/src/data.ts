@@ -63,7 +63,7 @@ import { todoQuery } from "./recipes/todoQuery.jsx";
 import { mealExample } from "./recipes/meal.jsx";
 import * as charmExample from "./recipes/charm.jsx";
 import Fetcher from "./recipes/fetcher.jsx";
-import Fetch from "./recipes/fetch.js";
+import Fetch from "./effects/fetch.js";
 
 export type Charm = {
   [NAME]?: string;
