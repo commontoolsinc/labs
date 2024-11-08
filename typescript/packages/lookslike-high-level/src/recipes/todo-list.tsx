@@ -1,6 +1,7 @@
 import { h } from "@commontools/common-html";
-import { recipe, handler, UI, NAME } from "@commontools/common-builder";
+import { recipe, handler, UI, NAME, cell } from "@commontools/common-builder";
 import { z } from "zod";
+import { addRecipe } from "@commontools/common-runner";
 
 const TodoItem = z.object({
   title: z.string(),
@@ -56,7 +57,21 @@ export default recipe(TodoList, ({ title, items }) => {
         />
         <common-vstack gap="sm">
           {items.map((item: TodoItem) => (
-            <common-draggable $entity={item}>
+            <common-draggable
+              $entity={item}
+              spell={JSON.stringify(
+                recipe(TodoItem, (item) => ({
+                  [UI]: (
+                    <common-todo
+                      checked={item.done}
+                      value={item.title}
+                      ontodo-checked={updateItem({ item })}
+                      ontodo-input={updateItem({ item })}
+                    />
+                  ),
+                })),
+              )}
+            >
               <common-hstack>
                 <common-todo
                   checked={item.done}

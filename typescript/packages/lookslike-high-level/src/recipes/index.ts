@@ -15,6 +15,11 @@ import { chat } from "./chatty.js";
 addRecipe(chat, chatSrc);
 export { chat };
 
+import collectionSrc from "./collection.tsx?raw";
+import collection from "./collection.js";
+addRecipe(collection, collectionSrc);
+export { collection };
+
 import counterSrc from "./counter.tsx?raw";
 import counter from "./counter.js";
 addRecipe(counter, counterSrc);

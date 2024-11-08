@@ -17,7 +17,6 @@ export default class DroppableElement extends LitElement {
   private _openedTarget: boolean = false;
 
   override render() {
-    console.log("droppable", this.droppable);
     return html`
       <div
         @dragover=${this.#handleDragOver}

@@ -28,6 +28,7 @@ export default class DraggableElement extends LitElement {
 
   @state() _altKey = false;
   @property({ type: Object }) entity: RendererCell<any> | undefined = undefined;
+  @property({ type: Object }) spell: string | undefined = undefined;
 
   override connectedCallback() {
     super.connectedCallback();
@@ -69,12 +70,15 @@ export default class DraggableElement extends LitElement {
   };
 
   #handleDragStart(e: DragEvent) {
-    console.log("draggable dragstart", e, this.entity);
+    console.log("draggable dragstart", e, this.entity, this.spell);
     const entityId = this.entity?.entityId;
 
     if (entityId) {
       // TODO: Replace with something more unique
-      const data = JSON.stringify(this.entity?.getAsCellReference());
+      const data = JSON.stringify({
+        ...this.entity?.getAsCellReference(),
+        ...(this.spell ? { spell: this.spell } : {}),
+      });
       console.log("draggable data", data, e.dataTransfer);
       e.dataTransfer?.setData("application/json", data);
     }
