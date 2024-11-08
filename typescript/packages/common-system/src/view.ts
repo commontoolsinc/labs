@@ -1,62 +1,13 @@
 import * as DOM from "@gozala/co-dom";
 import * as DB from "synopsys";
 import type { Reference } from "synopsys";
-import { Effect, toEffect, Behavior, Rule } from "./adapter.js";
-
-export type LocalState = Map<
-  string,
-  { local: number; remote: number; value: unknown }
->;
-
-const local: LocalState = new Map();
-
-export const upsert = (
-  entity: DB.API.Entity,
-  attribute: string,
-  value: unknown,
-) => {
-  const changes = [] as DB.Instruction[];
-  const id = `${attribute}@${entity}`;
-  let state = local.get(id);
-  if (state) {
-    state.local++;
-    state.value = value;
-  } else {
-    state = { local: 1, remote: 1, value };
-    local.set(id, state);
-  }
-  state.remote = state.local;
-
-  changes.push({
-    Upsert: [entity, attribute, `${id}:${state.remote}`],
-  });
-  return changes;
-};
-
-export const retract = (
-  entity: DB.API.Entity,
-  attribute: string,
-  value: any,
-) => {
-  const changes = [] as DB.API.Instruction[];
-  const id = `${attribute}@${entity}`;
-  const state = local.get(id);
-  if (state) {
-    changes.push({
-      Retract: [entity, attribute, `${id}:${state.remote}`],
-    });
-    state.local++;
-    state.remote = state.local;
-  } else {
-    changes.push({ Retract: [entity, attribute, value] });
-  }
-  return changes;
-};
+import { Effect, toEffect, Behavior } from "./adapter.js";
+import * as Memory from "./memory.js";
 
 export class Charm extends HTMLElement {
   #root: ShadowRoot;
   #behavior: Behavior | null;
-  #entity: DB.API.Link | null;
+  #entity: Reference | null;
   #replica: DB.Type.Replica | null;
   #vdom: DOM.Node<{}> | null;
   #cell: null | { send(data: { name: string }): void };
@@ -132,7 +83,7 @@ export class Charm extends HTMLElement {
   }
 
   dispatch([attribute, event]: [string, Event]) {
-    const changes = upsert(this.entity, attribute, event);
+    const changes = Memory.upsert(this.entity, attribute, event);
     DB.Task.perform(this.transact(changes));
   }
 
@@ -140,7 +91,7 @@ export class Charm extends HTMLElement {
     return this.#replica as DB.Type.Replica;
   }
 
-  set entity(value: DB.API.Link) {
+  set entity(value: Reference) {
     this.#entity = (value as any)();
   }
   get entity() {
@@ -172,26 +123,24 @@ export class Charm extends HTMLElement {
   }
 }
 
-/**
- * This function does not serve any other purpose but to activate TS type
- * inference specifically it ensures that rule `update` functions infer it's
- * arguments from the rules `select`.
- */
-export const spell = <Source extends Record<string, any>>(behavior: {
-  [K in keyof Source]: Rule<Source[K]>;
-}): { [K in keyof Source]: Rule<Source[K]> } => behavior;
+export interface Session {
+  entity: Reference;
+  replica: DB.Type.Replica;
+
+  transact: (changes: DB.Transaction) => DB.API.Task<unknown, Error>;
+}
 
 export function* spawn<Selection extends DB.Selector>(
-  view: Charm,
+  session: Session,
   rule: Effect<Selection>,
 ) {
-  const { replica } = view;
+  const { replica } = session;
   const subscription = yield* replica.subscribe({
     select: rule.select,
     where: [
       // TODO: Figure out why `Is` is not working.
       //{ Is: [DB.$.self, charm.entity] },
-      { Match: [view.entity, "==", DB.$.self] },
+      { Match: [session.entity, "==", DB.$.self] },
       // ...
       ...rule.where,
     ],
@@ -219,21 +168,39 @@ export function* spawn<Selection extends DB.Selector>(
             if (change.Assert) {
               const [entity, attribute, value] = change.Assert;
               if (String(attribute).startsWith("~/")) {
-                commit.push(...upsert(entity, String(attribute), value));
+                commit.push(
+                  ...Memory.upsert(
+                    entity as Reference,
+                    String(attribute),
+                    value,
+                  ),
+                );
               } else {
                 commit.push(change);
               }
             } else if (change.Upsert) {
               const [entity, attribute, value] = change.Upsert;
               if (String(attribute).startsWith("~/")) {
-                commit.push(...upsert(entity, String(attribute), value));
+                commit.push(
+                  ...Memory.upsert(
+                    entity as Reference,
+                    String(attribute),
+                    value,
+                  ),
+                );
               } else {
                 commit.push(change);
               }
             } else if (change.Retract) {
               const [entity, attribute, value] = change.Retract;
               if (String(attribute).startsWith("~/")) {
-                commit.push(...retract(entity, String(attribute), value));
+                commit.push(
+                  ...Memory.retract(
+                    entity as Reference,
+                    String(attribute),
+                    value,
+                  ),
+                );
               } else {
                 commit.push(change);
               }
@@ -241,7 +208,7 @@ export function* spawn<Selection extends DB.Selector>(
               commit.push(change);
             }
           }
-          yield* view.transact(commit);
+          yield* session.transact(commit);
         }
       }
     }
@@ -263,7 +230,7 @@ export const parseReference = (source: unknown) => {
 const resolve = (selection: unknown): DB.API.Result<any, Error> => {
   if (isLocalReference(selection)) {
     const remote = parseReference(selection);
-    const state = local.get(remote.id ?? "");
+    const state = Memory.resolve(remote.id ?? "");
     // We made a round trip so we increment local version to avoid reacting
     // to it again.
     if (state && state.local === remote.version) {
@@ -317,7 +284,7 @@ export const UI = "~/common/ui";
  *
  */
 export const render = (view: Charm) => {
-  const state = local.get(`${UI}@${view.entity}`);
+  const state = Memory.resolve(`${UI}@${view.entity}`);
   if (state) {
     const vdom = state.value as DOM.Node<{}>;
     if (view.vdom === null) {
