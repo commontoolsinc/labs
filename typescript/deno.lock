@@ -793,6 +793,18 @@
           ]
         }
       },
+      "packages/blobby": {
+        "packageJson": {
+          "dependencies": [
+            "npm:@cloudflare/vitest-pool-workers@~0.5.2",
+            "npm:@cloudflare/workers-types@^4.20240925.0",
+            "npm:hono@^4.6.3",
+            "npm:typescript@^5.5.2",
+            "npm:vitest@2.0.5",
+            "npm:wrangler@^3.60.3"
+          ]
+        }
+      },
       "packages/collectathon": {
         "packageJson": {
           "dependencies": [
