@@ -130,7 +130,7 @@ class SystemService<Effects extends Record<string, Effect>> {
           [NAME]: cell.name,
           [UI]: html`<common-charm
             id=${charm.toString()}
-            spell=${() => this.rules}
+            spell=${() => this}
             entity=${() => entity}
             $cell=${cell}
           />`,
