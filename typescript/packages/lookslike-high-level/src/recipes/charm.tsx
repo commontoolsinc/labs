@@ -10,7 +10,7 @@ const init = select({ self: $.self })
 
 const view =
   b.object({ clicks: b.number(), })
-    .render(({ self, clicks }: { self: Reference; clicks: number; }) => {
+    .render(({ self, clicks }) => {
       return (
         <div title={`Clicks ${clicks}`} entity={self}>
           <div>{clicks}</div>
