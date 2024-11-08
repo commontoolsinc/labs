@@ -29,12 +29,12 @@ const onReset = select({
 
 const onClick = select({
   self: $.self,
-  count: $.count,
+  clicks: $.clicks,
   event: $.event,
 })
-  .match($.self, "clicks", $.count)
+  .match($.self, "clicks", $.clicks)
   .match($.self, "~/on/click", $.event)
-  .upsert(({ self, count }) => [self, "clicks", count + 1])
+  .upsert(({ self, clicks }) => [self, "clicks", clicks + 1])
   .commit();
 
 export const rules = behavior({
@@ -44,8 +44,7 @@ export const rules = behavior({
   onReset
 });
 
-const clauses = rules.rules;
 const mermaid = analyzeRuleDependencies(rules.rules as any)
-debugger
+console.log(mermaid)
 
 export const spawn = (input: {} = source) => rules.spawn(input);
