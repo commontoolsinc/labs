@@ -1,25 +1,33 @@
 import { h, behavior, $, Reference, select, View } from "@commontools/common-system";
-import { b } from "../sugar.jsx";
+import { view } from "../sugar.jsx";
+import { analyzeRuleDependencies } from "../viz.js";
 
-export const source = { clicker: { v: 32 } };
+export const source = { clicker: { v: 33 } };
 
 const init = select({ self: $.self })
   .not.match($.self, "clicks", $._)
   .assert(({ self }) => [self, "clicks", 0])
   .commit();
 
-const view =
-  b.object({ clicks: b.number(), })
-    .render(({ self, clicks }) => {
-      return (
-        <div title={`Clicks ${clicks}`} entity={self}>
-          <div>{clicks}</div>
-          <button onclick="~/on/click">Click me!</button>
-        </div>
-      );
-    });
+// // can use q.clicks(0) to express the default
+const viewCount = view(q => {
+  return (
+    <div title={`Clicks ${q.clicks}`} entity={q.self}>
+      <div>{q.clicks}</div>
+      <button onclick="~/on/click">Click me!</button>
+    </div>
+  );
+});
 
-const onclick = select({
+const onReset = select({
+  self: $.self,
+  event: $.event,
+})
+  .match($.self, "~/on/reset", $.event)
+  .upsert(({ self }) => [self, "clicks", 0])
+  .commit();
+
+const onClick = select({
   self: $.self,
   count: $.count,
   event: $.event,
@@ -31,8 +39,13 @@ const onclick = select({
 
 export const rules = behavior({
   init,
-  view,
-  onclick,
+  viewCount,
+  onClick,
+  onReset
 });
+
+const clauses = rules.rules;
+const mermaid = analyzeRuleDependencies(rules.rules as any)
+debugger
 
 export const spawn = (input: {} = source) => rules.spawn(input);
