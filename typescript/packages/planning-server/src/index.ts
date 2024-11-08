@@ -22,14 +22,18 @@ const handleGetIndex = async (request: Request): Promise<Response> => {
 
   const indexRepsonse = {
     "GET": {
-      "/models": `${requestBaseURL}/models`,
-      "/models?search=anthropic": `${requestBaseURL}/models?search=anthropic`,
-      "/models?capability=images": `${requestBaseURL}/models?capability=images`,
-      "/models?search=groq&capability=images":
+      "list all models": `${requestBaseURL}/models`,
+      "list models by provider": `${requestBaseURL}/models?search=anthropic`,
+      "list models by capability": `${requestBaseURL}/models?capability=images`,
+      "list models by provider and capability":
         `${requestBaseURL}/models?search=groq&capability=images`,
+      "list models by task (coding)": `${requestBaseURL}/models?task=coding`,
+      "list models by task (creative)":
+        `${requestBaseURL}/models?task=creative`,
+      "list models by task (vision)": `${requestBaseURL}/models?task=vision`,
     },
     "POST": {
-      "/": `${requestBaseURL}/`,
+      "generate text": `${requestBaseURL}/`,
     },
   };
   return new Response(JSON.stringify(indexRepsonse, null, 2), {
