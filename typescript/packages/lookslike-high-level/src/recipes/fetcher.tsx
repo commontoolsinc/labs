@@ -7,7 +7,7 @@ import {
   View,
 } from "@commontools/common-system";
 
-import { fetch } from "./fetch.js";
+import { fetch } from "../effects/fetch.js";
 
 export default behavior({
   request: select({ self: $.self })

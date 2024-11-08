@@ -46,6 +46,13 @@ export interface Rule<Select extends DB.API.Selector = DB.API.Selector> {
   update: (input: DB.API.InferBindings<Select>) => DB.Transaction;
 }
 
+export const toEffect = <Select extends DB.API.Selector = DB.API.Selector>(
+  rule: Rule<Select>,
+): Effect<Select> => {
+  const effect = rule as (Rule<Select> & { perform?: void }) | Effect<Select>;
+  return effect.perform ? (effect as Effect<Select>) : new RuleEffect(rule);
+};
+
 /**
  * This function does not serve any other purpose but to activate TS type
  * inference specifically it ensures that rule `update` functions infer it's
@@ -53,20 +60,51 @@ export interface Rule<Select extends DB.API.Selector = DB.API.Selector> {
  */
 export const behavior = <Source extends Record<string, any>>(rules: {
   [K in keyof Source]: Rule<Source[K]>;
-}): Behavior<{ [K in keyof Source]: FX<Source[K]> }> => {
-  const effects = Object.entries(rules).map(([key, rule]) => [
-    key,
-    FX.from(rule),
-  ]);
-  return new BehaviorEngine(Object.fromEntries(effects));
-};
+}): Behavior<{ [K in keyof Source]: Rule<Source[K]> }> =>
+  new SystemBehavior(rules);
 
 export const service = <Source extends Record<string, any>>(effects: {
   [K in keyof Source]: Effect<Source[K]>;
 }): Service<{ [K in keyof Source]: Effect<Source[K]> }> =>
-  new BehaviorEngine(effects);
+  new SystemService(effects);
 
-class BehaviorEngine<Effects extends Record<string, Effect>> {
+class SystemBehavior<Rules extends Record<string, Rule>> {
+  rules: Rules;
+  id: DB.Reference;
+  constructor(rules: Rules) {
+    this.rules = rules;
+    this.id = DB.refer({
+      rules: Object.fromEntries(
+        Object.entries(this.rules).map(([name, rule]) => [
+          name,
+          { select: rule.select, where: rule.where },
+        ]),
+      ),
+    });
+  }
+  spawn(source: {} = this.id) {
+    const entity = DB.refer(source);
+    const charm = DB.refer({ entity, rules: this.id });
+
+    return run(
+      recipe(charm.toString(), () => {
+        const cell = createCell({ name: "" });
+
+        return {
+          [NAME]: cell.name,
+          [UI]: html`<common-charm
+            id=${charm.toString()}
+            spell=${() => this}
+            entity=${() => entity}
+            $cell=${cell}
+          />`,
+        };
+      }),
+    );
+  }
+}
+
+class SystemService<Effects extends Record<string, Effect>> {
   rules: Effects;
   id: DB.Reference;
   constructor(rules: Effects) {
@@ -102,13 +140,7 @@ class BehaviorEngine<Effects extends Record<string, Effect>> {
   }
 }
 
-class FX<Select extends DB.API.Selector = DB.API.Selector> {
-  static from<Select extends DB.API.Selector = DB.API.Selector>(
-    rule: Rule<Select>,
-  ): Effect<Select> {
-    return new this(rule);
-  }
-
+class RuleEffect<Select extends DB.API.Selector = DB.API.Selector> {
   rule: Rule<Select>;
   constructor(rule: Rule<Select>) {
     this.rule = rule;
