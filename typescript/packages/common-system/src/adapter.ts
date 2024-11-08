@@ -20,12 +20,12 @@ export interface Behavior<
 > {
   readonly rules: Rules;
 
-  spawn(source: {}): CellImpl<{}>;
+  spawn(source?: {}): CellImpl<{}>;
 }
 
 export interface Service<Effects extends Record<string, Effect>> {
   readonly rules: Effects;
-  spawn(source: {}): CellImpl<{}>;
+  spawn(source?: {}): CellImpl<{}>;
 }
 
 export interface Effect<Select extends DB.API.Selector = DB.API.Selector> {
@@ -83,9 +83,11 @@ class BehaviorEngine<Effects extends Record<string, Effect>> {
   spawn(source: {} = this.id) {
     const entity = DB.refer(source);
     const charm = DB.refer({ entity, rules: this.id });
+
     return run(
       recipe(charm.toString(), () => {
         const cell = createCell({ name: "" });
+
         return {
           [NAME]: cell.name,
           [UI]: html`<common-charm

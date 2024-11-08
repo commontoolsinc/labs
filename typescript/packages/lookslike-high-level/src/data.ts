@@ -62,6 +62,8 @@ import { datalogQueryExample } from "./recipes/datalogQuery.jsx";
 import { todoQuery } from "./recipes/todoQuery.jsx";
 import { mealExample } from "./recipes/meal.jsx";
 import * as charmExample from "./recipes/charm.jsx";
+import Fetcher from "./recipes/fetcher.jsx";
+import Fetch from "./recipes/fetch.js";
 
 export type Charm = {
   [NAME]?: string;
@@ -243,6 +245,8 @@ addCharms([
   charmExample.spawn({
     v6: true,
   }),
+  Fetcher.spawn(),
+  Fetch.spawn(),
 ]);
 
 export type RecipeManifest = {
