@@ -44,8 +44,8 @@ export class Charm extends HTMLElement {
       DB.open({
         remote: {
           // url: new URL("/api/data/", location.href),
-          // url: new URL("http://localhost:8080/"),
-          url: new URL("https://komshi.saga-castor.ts.net/"),
+          url: new URL("http://localhost:8080/"),
+          // url: new URL("https://komshi.saga-castor.ts.net/"),
 
           fetch: (async (init: Request) => {
             const { method, headers, url } = init;
