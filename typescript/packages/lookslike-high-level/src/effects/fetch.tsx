@@ -6,6 +6,7 @@ import {
   Instruction,
   Task,
   Fact,
+  h,
 } from "@commontools/common-system";
 export type { Reference };
 
@@ -94,6 +95,7 @@ export default service({
         effects.delete(request);
         changes.push(
           { Retract: [provider, `~/complete`, request] },
+          { Assert: [provider, "effect/log", request] },
           { Upsert: [request, "request/status", "Complete"] },
         );
 
@@ -121,6 +123,100 @@ export default service({
       return changes;
     },
   },
+
+  idle: {
+    select: {
+      self: $.self,
+    },
+    where: [{ Not: { Case: [provider, `effect/log`, $._] } }],
+    *perform({ self }: { self: Reference }) {
+      return [
+        {
+          Upsert: [
+            self,
+            "~/common/ui",
+            <div title="Fetch Effect UI" entity={self}>
+              🚧 🏗️
+            </div>,
+          ],
+        },
+      ];
+    },
+  },
+
+  active: {
+    select: {
+      self: $.self,
+      requests: [{ request: $.request, state: $.state }],
+    },
+    where: [
+      { Case: [provider, "effect/log", $.request] },
+      { Case: [$.request, `request/status`, $.state] },
+      // { Match: ["unknown", "==", $.status] },
+    ],
+    *perform({
+      self,
+      requests,
+    }: {
+      self: Reference;
+      requests: { request: Reference; state: string }[];
+    }) {
+      return [
+        {
+          Upsert: [
+            self,
+            "~/common/ui",
+            <div title="Fetch Effect UI" entity={self}>
+              <ul>
+                {...requests.map(({ request, state }) => (
+                  <li>
+                    {state} {String(request)}
+                  </li>
+                ))}
+              </ul>
+            </div>,
+          ],
+        },
+      ];
+    },
+  },
+
+  // view: {
+  //   select: {
+  //     self: $.self,
+  //     effects: [
+  //       {
+  //         request: $.request,
+  //         // status: $.status,
+  //       },
+  //     ],
+  //   },
+  //   where: [
+  //     {
+  //       Or: [
+  //         { Case: [provider, "~/send", $.request] },
+  //         // { Case: [provider, "~/receive", $.request] },
+  //         // { Case: [provider, "~/complete", $.request] },
+  //       ],
+  //     },
+  //     // { Case: [$.request, "request/status", $.status] },
+  //   ],
+  //   *perform({
+  //     self,
+  //     effects,
+  //   }: {
+  //     self: Reference;
+  //     effects: { request: Reference }[];
+  //   }) {
+  //     const view = (
+  //       <div title="Fetch Effect UI" entity={self}>
+  //         {effects.length}
+  //       </div>
+  //     );
+
+  //     return [{ Upsert: [self, "~/common/ui", view] }];
+  //   },
+  // },
 });
 
 export const fetch = (consumer: Reference, port: string, request: Request) =>
