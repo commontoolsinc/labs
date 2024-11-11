@@ -41,7 +41,7 @@ app.use(
 
 app.use("*", async (c, next) => {
   const redis = createClient({
-    url: "redis://localhost:6379",
+    url: Deno.env.get("REDIS_URL") || "redis://localhost:6379",
   });
   redis.on("error", (err) => console.error("Redis Client Error", err));
 

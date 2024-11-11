@@ -13,16 +13,16 @@ async function test() {
 
   // PUT the blob
   console.log("\nPutting blob...");
-  const putResponse = await fetch(`${BASE_URL}/blob/${hash}`, {
-    method: "PUT",
+  const postResponse = await fetch(`${BASE_URL}/blob/${hash}`, {
+    method: "POST",
     body: content,
     headers: {
       "Tailscale-User-Login": exampleEmail,
     },
   });
 
-  console.log("PUT Status:", putResponse.status);
-  console.log("PUT Response:", await putResponse.json());
+  console.log("POST Status:", postResponse.status);
+  console.log("POST Response:", await postResponse.json());
 
   // GET the blob
   console.log("\nGetting blob...");

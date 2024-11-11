@@ -1,4 +1,9 @@
 {
+  "tasks": {
+    "dev": "deno run --watch --env --allow-env=PORT,REDIS_URL --allow-net --allow-read=. --allow-write=./data src/index.ts",
+    "start": "deno run --env --allow-env=PORT,REDIS_URL --allow-net --allow-read=. --allow-write=./data src/index.ts",
+    "upload-test": "deno run --env --allow-env=BASE_URL --allow-net test/upload-test.ts"
+  },
   "fmt": {
     "indentWidth": 2,
     "lineWidth": 80,
