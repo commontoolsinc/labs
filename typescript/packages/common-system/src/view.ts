@@ -125,7 +125,6 @@ export class Charm extends HTMLElement {
       }
     }
     console.groupEnd();
-    this.#log.push(changes);
     this.dispatchEvent(new CustomEvent("transact", { detail: changes }));
 
     yield* this.replica.transact(changes);
