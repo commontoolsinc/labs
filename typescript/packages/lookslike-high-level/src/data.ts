@@ -135,7 +135,7 @@ export async function syncRecipe(id: string) {
     return;
   }
 
-  const response = await fetch(`https://up.commontools.dev/${id}`);
+  const response = await fetch(`https://paas.saga-castor.ts.net/blobby/blob/${id}`);
   const src = await response.text();
 
   const { recipe, errors } = buildRecipe(src);
@@ -152,7 +152,7 @@ export async function saveRecipe(id: string, src: string) {
   recipesKnownToStorage.add(id);
 
   console.log("Saving recipe", id);
-  const response = await fetch(`https://up.commontools.dev/${id}`, {
+  const response = await fetch(`https://paas.saga-castor.ts.net/blobby/blob/${id}`, {
     method: "POST",
     body: src,
   });
