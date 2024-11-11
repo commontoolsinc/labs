@@ -74,16 +74,16 @@ app.get("/", (c) => {
   return c.html(template);
 });
 
-app.put("/blob/:hash", async (c) => {
+app.post("/blob/:hash", async (c) => {
   const redis = c.get("redis");
   const hash = c.req.param("hash");
   const content = await c.req.text();
 
-  // Verify hash matches content
-  const calculatedHash = await sha256(content);
-  if (calculatedHash !== hash) {
-    return c.json({ error: "Hash mismatch" }, 400);
-  }
+  // TODO(jake): Verify hash matches content, requires clients to properly sha2 recipe code
+  // const calculatedHash = await sha256(content);
+  // if (calculatedHash !== hash) {
+  //   return c.json({ error: "Hash mismatch" }, 400);
+  // }
 
   // Save blob
   await storage.saveBlob(hash, content);
