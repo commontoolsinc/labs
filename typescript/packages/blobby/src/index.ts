@@ -1,84 +1,122 @@
-import { Hono } from 'hono'
-import { cors } from 'hono/cors'
-// import { createHash } from 'crypto'
+import { cors } from "@hono/hono/cors";
+import { Hono } from "@hono/hono";
+import { logger } from "@hono/hono/logger";
+import { createClient } from "redis";
+import { join } from "@std/path";
 
-const html = `<!DOCTYPE html>
-<html lang="en">
+import { DiskStorage } from "./lib/storage.ts";
+import {
+  addBlobToUser,
+  getAllBlobs,
+  getUserBlobs,
+  type RedisClient,
+} from "./lib/redis.ts";
+import { sha256 } from "./utils/hash.ts";
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upload Content</title>
-</head>
+// Ensure data directory exists
+const dataDir = join(Deno.cwd(), "data");
+const storage = new DiskStorage(dataDir);
+await storage.init();
 
-<body>
-    <h1>Upload Content</h1>
-    <textarea id="content" rows="10" cols="50"></textarea><br>
-    <button onclick="upload()">Upload</button>
-    <p id="result"></p>
+interface Variables {
+  redis: RedisClient;
+  user: string;
+}
 
-    <script>
-        async function upload() {
-            const content = document.getElementById('content').value;
-            
-            // Calculate SHA-256 hash
-            const msgBuffer = new TextEncoder().encode(content);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-            
-            // Send content to /:hash endpoint
-            const response = await fetch(\`/\${hash}\`, {
-                method: 'POST',
-                body: content
-            });
-            
-            const data = await response.json();
-            const link = \`\${window.location.origin}/\${hash}\`;
-            document.getElementById('result').innerHTML = \`Your link: <a href="\${link}">\${link}</a>\`;
-        }
-    </script>
-</body>
+const app = new Hono<{ Variables: Variables }>();
 
-</html>`;
+app.use("*", logger());
 
-const app = new Hono()
+app.use(
+  "*",
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+    exposeHeaders: ["Content-Length", "X-Kuma-Revision"],
+    maxAge: 600,
+    credentials: true,
+  }),
+);
 
-// Add CORS middleware
-app.use('*', cors({
-	origin: '*',
-	allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-	allowHeaders: ['Content-Type', 'Authorization'],
-	exposeHeaders: ['Content-Length', 'X-Kuma-Revision'],
-	maxAge: 600,
-	credentials: true,
-}))
+app.use("*", async (c, next) => {
+  const redis = createClient({
+    url: Deno.env.get("REDIS_URL") || "redis://localhost:6379",
+  });
+  redis.on("error", (err) => console.error("Redis Client Error", err));
 
-app.get('/upload', (c) => {
-	return c.html(html);
-})
+  // Connect if not connected
+  if (!redis.isOpen) {
+    await redis.connect();
+  }
 
-app.get('/:hash', async (c) => {
-	const hash = c.req.param('hash')
-	const object = await c.env.R2.get(hash)
+  // Attach to context
+  c.set("redis", redis);
 
-	if (!object) {
-		return c.text('Not Found', 404)
-	}
+  await next();
+});
 
-	return c.body(object.body)
-})
+// Middleware to extract Tailscale user
+app.use(async (c, next) => {
+  const user = c.req.header("Tailscale-User-Login") ||
+    c.req.header("X-Tailscale-User");
+  if (!user) {
+    return c.text("Unauthorized", 401);
+  }
+  c.set("user", user);
+  await next();
+});
 
-app.post('/:hash', async (c) => {
-	const hash = c.req.param('hash')
-	const content = await c.req.text()
-	// FIXME(ja): verify the hash of the content is correct
-	// const hash = createHash('sha256').update(content).digest('hex')
+app.get("/", (c) => {
+  const template = Deno.readTextFileSync(
+    join(import.meta.dirname!, "templates/upload.html"),
+  );
+  return c.html(template);
+});
 
-	await c.env.R2.put(hash, content)
+app.post("/blob/:hash", async (c) => {
+  const redis = c.get("redis");
+  const hash = c.req.param("hash");
+  const content = await c.req.text();
 
-	return c.json({ hash })
-})
+  // TODO(jake): Verify hash matches content, requires clients to properly sha2 recipe code
+  // const calculatedHash = await sha256(content);
+  // if (calculatedHash !== hash) {
+  //   return c.json({ error: "Hash mismatch" }, 400);
+  // }
 
+  // Save blob
+  await storage.saveBlob(hash, content);
 
-export default app
+  // Associate blob with user
+  const user = c.get("user");
+  await addBlobToUser(redis, hash, user);
+
+  return c.json({ hash });
+});
+
+app.get("/blob/:hash", async (c) => {
+  const hash = c.req.param("hash");
+  const content = await storage.getBlob(hash);
+
+  if (!content) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  return c.body(content);
+});
+
+app.get("/blobs", async (c) => {
+  const user = c.req.query("user");
+  const redis = c.get("redis");
+
+  const blobs = user
+    ? await getUserBlobs(redis, user)
+    : await getAllBlobs(redis);
+
+  return c.json({ blobs });
+});
+
+const PORT = Deno.env.get("PORT") || 3000;
+
+Deno.serve({ port: Number(PORT) }, app.fetch);
