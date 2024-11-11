@@ -40,7 +40,7 @@ export default service({
         return [
           { Retract: [provider, "~/send", request] },
           { Upsert: [provider, "~/receive", request] },
-          { Upsert: [request, "request/status", "Receiving"] },
+          { Upsert: [request, "request/status", "Sending"] },
           { Upsert: [effect.source.consumer, effect.source.port, request] },
         ];
       }
