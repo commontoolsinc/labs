@@ -83,6 +83,7 @@ export class Charm extends HTMLElement {
   }
 
   dispatch([attribute, event]: [string, Event]) {
+    console.log(this.entity.toString(), "dispatch", attribute, event);
     const changes = Memory.upsert(this.entity, attribute, event);
     DB.Task.perform(this.transact(changes));
   }
@@ -110,6 +111,23 @@ export class Charm extends HTMLElement {
   }
 
   *transact(changes: DB.Transaction) {
+    console.group(this.entity.toString());
+    for (const change of changes) {
+      console.log("change", change);
+      if (change.Assert) {
+        console.log('assert', change.Assert[0].toString(), change.Assert[1].toString(), change.Assert[2]);
+      } else if (change.Import) {
+        console.log('import', change.Import);
+      } else if (change.Retract) {
+        console.log('retract', change.Retract[0].toString(), change.Retract[1].toString(), change.Retract[2]);
+      } else if (change.Upsert) {
+        console.log('upsert', change.Upsert[0].toString(), change.Upsert[1].toString(), change.Upsert[2]);
+      }
+    }
+    console.groupEnd();
+    this.#log.push(changes);
+    this.dispatchEvent(new CustomEvent("transact", { detail: changes }));
+
     yield* this.replica.transact(changes);
     render(this);
 
