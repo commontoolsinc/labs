@@ -5,7 +5,7 @@ import { join } from "@std/path";
 import { ensureDir, exists } from "@std/fs";
 import { sha256 } from "./lib/hash.ts";
 
-import { takeScreenshot } from "./lib/puppeteer.ts";
+import { takeScreenshot } from "./lib/playwright.ts";
 
 
 // Ensure data directory exists

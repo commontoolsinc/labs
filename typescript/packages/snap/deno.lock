@@ -12,6 +12,7 @@
     "jsr:@std/path@*": "1.0.8",
     "jsr:@std/path@^1.0.7": "1.0.8",
     "jsr:@std/path@^1.0.8": "1.0.8",
+    "npm:playwright@*": "1.48.2",
     "npm:playwright@^1.48.2": "1.48.2",
     "npm:puppeteer@^23.7.1": "23.7.1_devtools-protocol@0.0.1354347"
   },
