@@ -242,6 +242,11 @@ export class CommonSidebar extends LitElement {
       this.workingSrc = e.detail.state.doc.toString();
     };
 
+    if (this.workingSrc) {
+      const { errors } = buildRecipe(this.workingSrc);
+      this.compileErrors = errors || "";
+    }
+
     const runRecipe = (newData: boolean = false) => {
       const { recipe, errors } = buildRecipe(this.workingSrc);
       this.compileErrors = errors || "";
@@ -377,7 +382,11 @@ export class CommonSidebar extends LitElement {
                   <button @click=${() => runRecipe(true)}>
                     🐣 Run w/New Data
                   </button>
-                  <pre>${this.compileErrors}</pre>
+                  ${when(
+                    this.compileErrors,
+                    () => html`<pre style='color: white; background: #800; padding: 4px'>${this.compileErrors}</pre>`,
+                    () => html``,
+                  )}
                   <os-code-editor
                     slot="content"
                     language="text/x.typescript"
