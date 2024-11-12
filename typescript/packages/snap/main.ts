@@ -3,8 +3,8 @@ import { Hono } from "@hono/hono";
 import { logger } from "@hono/hono/logger";
 import { join } from "@std/path";
 import { ensureDir, exists } from "@std/fs";
-import { sha256 } from "./lib/hash.ts";
 
+import { sha256 } from "./lib/hash.ts";
 import { takeScreenshot } from "./lib/playwright.ts";
 
 
@@ -26,7 +26,7 @@ app.use(
     origin: "*",
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization"],
-    exposeHeaders: ["Content-Length", "X-Kuma-Revision"],
+    exposeHeaders: ["Content-Length"],
     maxAge: 600,
     credentials: true,
   }),
