@@ -44,7 +44,6 @@ import { calc } from "./recipes/examples/calculator.jsx";
 import { rectangleQuery } from "./recipes/examples/rectangleQuery.jsx";
 import { evalJs } from "./recipes/examples/eval.js";
 import { importCalendar } from "./recipes/archive/importCalendar.js";
-import { dungeon } from "./recipes/archive/dungeon.js";
 import { jsonImporter } from "./recipes/archive/jsonImport.js";
 import { helloIsolated } from "./recipes/examples/helloIsolated.js";
 import { shoelaceDemo } from "./recipes/examples/shoelace.jsx";
@@ -52,7 +51,9 @@ import { z } from "zod";
 import { datalogQueryExample } from "./recipes/datalogQuery.jsx";
 import { todoQuery } from "./recipes/todoQuery.jsx";
 import { mealExample } from "./recipes/meal.jsx";
-import * as charmExample from "./recipes/charm.jsx";
+
+import * as dungeon from "./recipes/dungeon.jsx";
+import * as charmExample from './recipes/charm.jsx'
 import Fetcher from "./recipes/fetcher.jsx";
 import Fetch from "./effects/fetch.js";
 
@@ -116,6 +117,9 @@ export async function syncCharm(
 addCharms([
   charmExample.spawn({
     v6: true,
+  }),
+  dungeon.spawn({
+    v: 2
   }),
   Fetcher.spawn(),
   Fetch.spawn(),
