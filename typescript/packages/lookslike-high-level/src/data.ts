@@ -136,7 +136,13 @@ export async function syncRecipe(id: string) {
   }
 
   const response = await fetch(`https://paas.saga-castor.ts.net/blobby/blob/${id}`);
-  const src = await response.text();
+  let src: string;
+  try {
+    const resp = await response.json();
+    src = resp.src;
+  } catch (e) {
+    src = await response.text();
+  }
 
   const { recipe, errors } = buildRecipe(src);
   if (errors) throw new Error(errors);
@@ -154,7 +160,13 @@ export async function saveRecipe(id: string, src: string) {
   console.log("Saving recipe", id);
   const response = await fetch(`https://paas.saga-castor.ts.net/blobby/blob/${id}`, {
     method: "POST",
-    body: src,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      src,
+      recipe: JSON.parse(JSON.stringify(getRecipe(id))),
+    }),
   });
   return response.ok;
 }
@@ -205,7 +217,7 @@ function getFridayAndMondayDateStrings() {
 // Terrible hack to open a charm from a recipe
 let openCharmOpener: (
   charmId: string | EntityId | CellImpl<any>,
-) => void = () => {};
+) => void = () => { };
 export const openCharm = (charmId: string | EntityId | CellImpl<any>) =>
   openCharmOpener(charmId);
 openCharm.set = (
