@@ -9,8 +9,7 @@
     "@std/encoding": "jsr:@std/encoding@^1.0.5",
     "@std/fs": "jsr:@std/fs@^1.0.5",
     "@std/path": "jsr:@std/path@^1.0.8",
-    "playwright": "npm:playwright@^1.48.2",
-    "puppeteer": "npm:puppeteer@^23.7.1"
+    "playwright": "npm:playwright@^1.48.2"
   },
   "nodeModulesDir": "auto",
   "fmt": {
