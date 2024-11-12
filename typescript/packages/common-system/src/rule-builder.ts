@@ -90,6 +90,17 @@ export class Select<Match extends Selector = Selector> {
     });
   }
 
+  view(attribute: string, view: View<Match>) {
+    return this.update((props) => {
+      const vnode = view(props);
+      return [
+        {
+          Assert: [(props as any).self, attribute, vnode as any] as const,
+        },
+      ];
+    });
+  }
+
   update(update: Update<Match>) {
     return {
       select: this.#select,
