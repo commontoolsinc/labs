@@ -82,6 +82,15 @@ export class OsCodeEditor extends ReactiveElement {
 
       .code-editor {
         display: block;
+        height: 100%;
+      }
+
+      .cm-editor {
+        height: 100%;
+      }
+
+      .cm-scroller {
+        overflow: auto;
       }
 
       .cm-editor.cm-focused {
