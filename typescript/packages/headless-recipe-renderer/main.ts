@@ -1,32 +1,87 @@
-import puppeteer from "puppeteer";
+import { cors } from "@hono/hono/cors";
+import { Hono } from "@hono/hono";
+import { logger } from "@hono/hono/logger";
+import { join } from "@std/path";
+import { ensureDir, exists } from "@std/fs";
+import { sha256 } from "./lib/hash.ts";
 
-async function takeScreenshot(url: string, outputPath: string) {
-  const browser = await puppeteer.launch({
-    defaultViewport: {
-      width: 1920,
-      height: 1080,
-      deviceScaleFactor: 2, // Retina-quality
-    },
-  });
+import { takeScreenshot } from "./lib/puppeteer.ts";
 
-  const page = await browser.newPage();
 
-  // Wait for network to be idle to ensure all content is loaded
-  await page.goto(url, {
-    waitUntil: "networkidle0",
-  });
+// Ensure data directory exists
+const dataDir = join(Deno.cwd(), "data");
+ensureDir(dataDir);
 
-  // Take full-page screenshot
-  await page.screenshot({
-    path: outputPath,
-    // fullPage: true,
-  });
-
-  await browser.close();
+interface Variables {
+  user: string;
 }
 
-// Usage
-await takeScreenshot(
-  "http://localhost:5173/recipe/ba4jcb3r4lpjo2fub6ra5sv3eejgyjsoozsz5r5n5ztsoebquco6ksv4y",
-  "screenshot.png",
+const app = new Hono<{ Variables: Variables }>();
+
+app.use("*", logger());
+
+app.use(
+  "*",
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+    exposeHeaders: ["Content-Length", "X-Kuma-Revision"],
+    maxAge: 600,
+    credentials: true,
+  }),
 );
+
+// Middleware to extract Tailscale user
+app.use(async (c, next) => {
+  if (Deno.env.get("TAILSCALE_AUTH") === "false") {
+    return next();
+  }
+
+  const user = c.req.header("Tailscale-User-Login");
+  if (!user) {
+    return c.text("Unauthorized", 401);
+  }
+  c.set("user", user);
+  await next();
+});
+
+
+app.get("/screenshot/*", async (c) => {
+  const uri = c.req.path.substring("/screenshot/".length);
+  const fullPage = c.req.query('fullpage') === 'true';
+
+  let requestURL: URL;
+
+  try {
+    requestURL = new URL(uri);
+  } catch {
+    // If the uri is not a valid URL, we assume that it is a recipe ID
+    requestURL = new URL(`http://localhost:5173/recipe/${uri}`);
+  }
+  
+  const urlHash = await sha256(requestURL.toString());
+  const outputPath = join(dataDir, `${urlHash}.png`);
+
+  if (await exists(outputPath)) {
+    console.log('Fetching cached screenshot for', requestURL.toString(), 'path: ', outputPath);
+    const screenshot = await Deno.readFile(outputPath);
+    c.header('Content-Type', 'image/png');
+    c.header('CT-Cached-Image', 'true');
+    return c.body(screenshot);
+  }
+
+  console.log('Fetching screenshot for', requestURL.toString());
+
+  const screenshot = await takeScreenshot(requestURL.toString(), { outputPath, fullPage });
+
+  // Set the content type to PNG and return the buffer directly
+  c.header('Content-Type', 'image/png');
+  return c.body(screenshot);
+});
+
+
+
+const PORT = Deno.env.get("PORT") || 3000;
+
+Deno.serve({ port: Number(PORT) }, app.fetch);

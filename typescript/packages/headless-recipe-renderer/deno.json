@@ -1,9 +1,15 @@
 {
   "tasks": {
-    "dev": "deno run -A --watch main.ts"
+    "dev": "deno run --env -A --watch main.ts"
   },
   "imports": {
+    "@hono/hono": "jsr:@hono/hono@^4.6.9",
     "@std/assert": "jsr:@std/assert@1",
+    "@std/crypto": "jsr:@std/crypto@^1.0.3",
+    "@std/encoding": "jsr:@std/encoding@^1.0.5",
+    "@std/fs": "jsr:@std/fs@^1.0.5",
+    "@std/path": "jsr:@std/path@^1.0.8",
+    "playwright": "npm:playwright@^1.48.2",
     "puppeteer": "npm:puppeteer@^23.7.1"
   },
   "nodeModulesDir": "auto",
