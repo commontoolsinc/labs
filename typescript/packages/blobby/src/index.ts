@@ -58,8 +58,11 @@ app.use("*", async (c, next) => {
 
 // Middleware to extract Tailscale user
 app.use(async (c, next) => {
-  const user = c.req.header("Tailscale-User-Login") ||
-    c.req.header("X-Tailscale-User");
+  if (Deno.env.get("TAILSCALE_AUTH") === "false") {
+    return next();
+  }
+
+  const user = c.req.header("Tailscale-User-Login");
   if (!user) {
     return c.text("Unauthorized", 401);
   }
@@ -104,6 +107,18 @@ app.get("/blob/:hash", async (c) => {
   }
 
   return c.body(content);
+});
+
+app.get("/blob/:hash/png", async (c) => {
+  const hash = c.req.param("hash");
+  const snapURL = `https://paas.saga-castor.ts.net/snap/screenshot/${hash}`;
+
+  const snap = await fetch(snapURL);
+  const snapBlob = await snap.blob();
+  const arrayBuffer = await snapBlob.arrayBuffer();
+
+  c.header("Content-Type", "image/png");
+  return c.body(arrayBuffer);
 });
 
 app.get("/blobs", async (c) => {
