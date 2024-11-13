@@ -123,6 +123,41 @@ app.get("/blob/:hash/png", async (c) => {
   return c.body(arrayBuffer);
 });
 
+app.get("/blob/:hash/*", async (c) => {
+  const hash = c.req.param("hash");
+  const path = c.req.path.split(`/blob/${hash}/`)[1];
+
+  const content = await storage.getBlob(hash);
+  if (!content) {
+    return c.json({ error: "Not found" }, 404);
+  }
+
+  try {
+    const jsonContent = JSON.parse(content);
+    const pathParts = path.split("/");
+
+    // Navigate through the JSON object
+    let result = jsonContent;
+    for (const part of pathParts) {
+      if (part && result[part] !== undefined) {
+        result = result[part];
+      } else {
+        return c.json({ error: "Path not found" }, 404);
+      }
+    }
+
+    // If result is null or not an object (string, number, boolean, undefined), return as text
+    if (typeof result !== "object" || result === null) {
+      return c.text(String(result));
+    }
+
+    // If it's an object or array, return as JSON
+    return c.json(result);
+  } catch (error) {
+    return c.json({ error: "Invalid JSON content" }, 400);
+  }
+});
+
 app.get("/blobs", async (c) => {
   const showAll = c.req.query("all") === "true";
   const redis = c.get("redis");
