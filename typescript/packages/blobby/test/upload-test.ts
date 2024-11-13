@@ -11,8 +11,8 @@ async function test() {
   console.log("Content:", content);
   console.log("Hash:", hash);
 
-  // PUT the blob
-  console.log("\nPutting blob...");
+  // POST the blob
+  console.log("\nPOSTing blob...");
   const postResponse = await fetch(`${BASE_URL}/blob/${hash}`, {
     method: "POST",
     body: content,
@@ -37,7 +37,7 @@ async function test() {
 
   // List ALL blobs
   console.log("\nListing all blobs...");
-  const allBlobsResponse = await fetch(`${BASE_URL}/blobs`, {
+  const allBlobsResponse = await fetch(`${BASE_URL}/blobs?all=true`, {
     headers: {
       "Tailscale-User-Login": exampleEmail,
     },
@@ -48,7 +48,7 @@ async function test() {
 
   // List blobs for specific user
   console.log(`\nListing blobs for user ${exampleEmail}...`);
-  const userBlobsResponse = await fetch(`${BASE_URL}/blobs?user=${exampleEmail}`, {
+  const userBlobsResponse = await fetch(`${BASE_URL}/blobs`, {
     headers: {
       "Tailscale-User-Login": exampleEmail,
     },

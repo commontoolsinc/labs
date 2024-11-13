@@ -58,11 +58,13 @@ app.use("*", async (c, next) => {
 
 // Middleware to extract Tailscale user
 app.use(async (c, next) => {
+  const user = c.req.header("Tailscale-User-Login");
+
   if (Deno.env.get("TAILSCALE_AUTH") === "false") {
+    c.set("user", user || "anonymous");
     return next();
   }
 
-  const user = c.req.header("Tailscale-User-Login");
   if (!user) {
     return c.text("Unauthorized", 401);
   }
@@ -122,12 +124,13 @@ app.get("/blob/:hash/png", async (c) => {
 });
 
 app.get("/blobs", async (c) => {
-  const user = c.req.query("user");
+  const showAll = c.req.query("all") === "true";
   const redis = c.get("redis");
+  const user = c.get("user");
 
-  const blobs = user
-    ? await getUserBlobs(redis, user)
-    : await getAllBlobs(redis);
+  const blobs = showAll
+    ? await getAllBlobs(redis)
+    : await getUserBlobs(redis, user);
 
   return c.json({ blobs });
 });

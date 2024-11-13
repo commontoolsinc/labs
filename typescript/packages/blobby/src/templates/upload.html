@@ -35,7 +35,7 @@
 
           // Send content to new blob PUT endpoint with correct base path
           const response = await fetch(`${basePath}/blob/${hash}`, {
-            method: "PUT",
+            method: "POST",
             body: content,
           });
 
