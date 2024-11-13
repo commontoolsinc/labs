@@ -7,6 +7,7 @@ import {
   isOpaqueRefMarker,
   ShadowRef,
   Recipe,
+  UnsafeBinding,
 } from "./types.js";
 import { setValueAtPath, hasValueAtPath } from "./utils.js";
 import { getTopFrame, recipe } from "./recipe.js";
@@ -42,10 +43,10 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
     target?: any,
   ): OpaqueRef<any> {
     const methods: OpaqueRefMethods<any> = {
-      get: () => unsafe_materialize(unsafe_binding),
+      get: () => unsafe_materialize(unsafe_binding, path),
       set: (newValue: Opaque<any>) => {
         if (unsafe_binding)
-          unsafe_materialize(unsafe_binding); // TODO: Set value
+          unsafe_materialize(unsafe_binding, path); // TODO: Set value
         else setValueAtPath(store, ["value", ...path], newValue);
       },
       key: (key: PropertyKey) => createNestedProxy([...path, key]),
@@ -100,7 +101,7 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
         };
       },
       // unsafe way to materialize opaque references at runtime
-      [Symbol.toPrimitive]: () => unsafe_materialize(unsafe_binding),
+      [Symbol.toPrimitive]: () => unsafe_materialize(unsafe_binding, path),
       [isOpaqueRefMarker]: true,
     };
 
@@ -125,6 +126,9 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
   }
 
   const top = createNestedProxy([]) as OpaqueRef<T>;
+
+  store.frame.opaqueRefs.add(top);
+
   return top;
 }
 
@@ -132,15 +136,25 @@ export function createShadowRef(ref: OpaqueRef<any>): ShadowRef {
   return { shadowOf: ref };
 }
 
-function unsafe_materialize(binding?: { recipe: Recipe; path: PropertyKey[] }) {
+function unsafe_materialize(
+  binding: { recipe: Recipe; path: PropertyKey[] } | undefined,
+  path: PropertyKey[],
+) {
   if (!binding) throw new Error("Can't read value during recipe creation.");
 
+  // Find first frame with unsafe binding
   let frame = getTopFrame();
-  while (frame) {
-    if (frame.unsafe_binding?.recipe === binding.recipe)
-      return frame.unsafe_binding.materialize!(binding.path);
+  let unsafe_binding: UnsafeBinding | undefined;
+  while (frame && !unsafe_binding) {
+    unsafe_binding = frame.unsafe_binding;
     frame = frame.parent;
   }
 
-  throw new Error("Can't find recipe in parent frames.");
+  // Walk up the chain until we find the original recipe
+  while (unsafe_binding && unsafe_binding.parent?.recipe === binding.recipe)
+    unsafe_binding = unsafe_binding.parent;
+
+  if (!unsafe_binding) throw new Error("Can't find recipe in parent frames.");
+
+  return unsafe_binding.materialize([...binding.path, ...path]);
 }

@@ -133,6 +133,12 @@ export type Recipe = {
   initial?: JSON;
   result: JSON;
   nodes: Node[];
+  unsafe_original_recipe?: Recipe;
+  unsafe_parent_recipe?: Recipe;
+  unsafe_parent_materialize_factory?: (
+    path: PropertyKey[],
+    log: any,
+  ) => (path: PropertyKey[]) => any;
 };
 
 export function isRecipe(value: any): value is Recipe {
@@ -175,13 +181,17 @@ export function isShadowRef(value: any): value is ShadowRef {
   );
 }
 
+export type UnsafeBinding = {
+  recipe: Recipe;
+  materialize: (path: PropertyKey[]) => any;
+  parent?: UnsafeBinding;
+};
+
 export type Frame = {
   parent?: Frame;
   cause?: any;
-  unsafe_binding?: {
-    recipe: Recipe;
-    materialize?: (path: PropertyKey[]) => any;
-  };
+  opaqueRefs: Set<OpaqueRef<any>>;
+  unsafe_binding?: UnsafeBinding;
 };
 
 const isStaticMarker = Symbol("isStatic");

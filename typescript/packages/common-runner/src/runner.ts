@@ -13,6 +13,7 @@ import {
   popFrame,
   recipeFromFrame,
   pushFrameFromCause,
+  UnsafeBinding,
 } from "@commontools/common-builder";
 import {
   cell,
@@ -193,6 +194,7 @@ export function run<T, R = any>(
       node.outputs,
       processCell,
       addCancel,
+      recipe,
     );
   }
 
@@ -220,6 +222,7 @@ function instantiateNode(
   outputBindings: JSON,
   processCell: CellImpl<any>,
   addCancel: AddCancel,
+  recipe: Recipe,
 ) {
   if (isModule(module)) {
     switch (module.type) {
@@ -230,6 +233,7 @@ function instantiateNode(
           outputBindings,
           processCell,
           addCancel,
+          recipe,
         );
         break;
       case "javascript":
@@ -239,6 +243,7 @@ function instantiateNode(
           outputBindings,
           processCell,
           addCancel,
+          recipe,
         );
         break;
       case "raw":
@@ -293,6 +298,7 @@ function instantiateJavaScriptNode(
   outputBindings: JSON,
   processCell: CellImpl<any>,
   addCancel: AddCancel,
+  recipe: Recipe,
 ) {
   const inputs = mapBindingsToCell(
     inputBindings as { [key: string]: any },
@@ -361,7 +367,10 @@ function instantiateJavaScriptNode(
       const inputsCell = cell(eventInputs, cause);
       inputsCell.freeze(); // Freezes the bindings, not aliased cells.
 
-      const frame = pushFrameFromCause(cause);
+      const frame = pushFrameFromCause(cause, {
+        recipe,
+        materialize: (path) => inputsCell.getAsQueryResult(path),
+      });
       const result = fn(inputsCell.getAsQueryResult([]));
 
       // If handler returns a graph created by builder, run it
@@ -396,7 +405,10 @@ function instantiateJavaScriptNode(
     const action: Action = (log: ReactivityLog) => {
       const inputsProxy = inputsCell.getAsQueryResult([], log);
 
-      const frame = pushFrameFromCause({ inputs, outputs, fn: fn.toString() });
+      const frame = pushFrameFromCause({ inputs, outputs, fn: fn.toString() }, {
+        recipe,
+        materialize: (path) => processCell.getAsQueryResult(path, log),
+      } satisfies UnsafeBinding);
       const result = fn(inputsProxy);
       popFrame(frame);
 

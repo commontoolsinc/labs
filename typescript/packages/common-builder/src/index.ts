@@ -1,5 +1,12 @@
 export { opaqueRef as cell } from "./opaque-ref.js";
-export { createNodeFactory, derive, lift, byRef, handler, isolated } from "./module.js";
+export {
+  createNodeFactory,
+  derive,
+  lift,
+  byRef,
+  handler,
+  isolated,
+} from "./module.js";
 export {
   recipe,
   recipeFromFrame,
@@ -44,6 +51,7 @@ export {
   type JSON,
   type Frame,
   Static,
+  type UnsafeBinding,
 } from "./types.js";
 
 // This should be a separate package, but for now it's easier to keep it here.

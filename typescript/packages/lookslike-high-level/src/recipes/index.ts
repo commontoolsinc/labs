@@ -15,6 +15,11 @@ import { chat } from "./chatty.js";
 addRecipe(chat, chatSrc);
 export { chat };
 
+import closuresSrc from "./closures.tsx?raw";
+import { closures } from "./closures.js";
+addRecipe(closures, closuresSrc);
+export { closures };
+
 import collectionSrc from "./collection.tsx?raw";
 import collection from "./collection.js";
 addRecipe(collection, collectionSrc);
