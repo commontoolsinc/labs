@@ -1,5 +1,4 @@
-import { $, Instruction, refer, Reference, Rule } from "../../common-system/lib/adapter.js";
-import { h, Select, select, View } from '@commontools/common-system'
+import { h, $, Instruction, Select, select, refer, Rule, Reference } from '@commontools/common-system'
 
 export const collection = (membership: string): Rule => {
   return {
