@@ -113,7 +113,7 @@ app.get("/blob/:hash", async (c) => {
 
 app.get("/blob/:hash/png", async (c) => {
   const hash = c.req.param("hash");
-  const snapURL = `https://paas.saga-castor.ts.net/snap/screenshot/${hash}`;
+  const snapURL = `${Deno.env.get("SNAP_API_URL")}/screenshot/${hash}`;
 
   const snap = await fetch(snapURL);
   const snapBlob = await snap.blob();
