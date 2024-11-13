@@ -151,7 +151,7 @@ export async function syncRecipe(id: string) {
     src = await response.text();
   }
 
-  const { recipe, errors } = buildRecipe(src);
+  const { recipe, errors } = await buildRecipe(src);
   if (errors) throw new Error(errors);
 
   const recipeId = addRecipe(recipe!, src);
