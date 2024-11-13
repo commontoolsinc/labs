@@ -1,24 +1,24 @@
 // This file is setting up example data
 
-import { TYPE, NAME, UI, Recipe } from "@commontools/common-builder";
+import { NAME, Recipe, TYPE, UI } from "@commontools/common-builder";
 import {
-  run,
-  cell,
-  getEntityId,
-  type CellImpl,
-  type CellReference,
-  raw,
   addModuleByRef,
-  type ReactivityLog,
-  createRef,
   addRecipe,
   allRecipesByName,
-  idle,
+  cell,
+  type CellImpl,
+  type CellReference,
+  createRef,
   EntityId,
+  getEntityId,
   getRecipe,
   getRecipeSrc,
-  isCellReference,
+  idle,
   isCell,
+  isCellReference,
+  raw,
+  type ReactivityLog,
+  run,
 } from "@commontools/common-runner";
 import { createStorage } from "./storage.js";
 import * as allRecipes from "./recipes/index.js";
@@ -31,7 +31,7 @@ export type Charm = {
   [key: string]: any;
 };
 
-export { TYPE, NAME, UI };
+export { NAME, TYPE, UI };
 
 const storage = createStorage(
   (import.meta as any).env.VITE_STORAGE_TYPE ?? "memory",
@@ -52,13 +52,14 @@ export async function addCharms(newCharms: CellImpl<any>[]) {
     (cell) => !currentCharmsIds.includes(JSON.stringify(cell.entityId)),
   );
 
-  if (charmsToAdd.length > 0)
+  if (charmsToAdd.length > 0) {
     charms.send([
       ...charms.get(),
       ...charmsToAdd.map(
         (cell) => ({ cell, path: [] }) satisfies CellReference,
       ),
     ]);
+  }
 }
 
 export async function runPersistent(
@@ -82,8 +83,9 @@ export async function runPersistent(
     (recipe.argumentSchema as any).type === "object"
   ) {
     const properties = (recipe.argumentSchema as any).properties;
-    const inputProperties =
-      typeof inputs === "object" && inputs !== null ? Object.keys(inputs) : [];
+    const inputProperties = typeof inputs === "object" && inputs !== null
+      ? Object.keys(inputs)
+      : [];
     for (const key in properties) {
       if (
         !(key in inputProperties) &&
@@ -100,11 +102,12 @@ export async function runPersistent(
               (property) =>
                 charmProperties[property].description?.includes(`#${hashtag}`),
             );
-            if (matchingProperty)
+            if (matchingProperty) {
               inputs = {
                 ...inputs,
                 [key]: { $alias: { cell, path: [matchingProperty] } },
               };
+            }
           });
         }
       }
@@ -135,7 +138,9 @@ export async function syncRecipe(id: string) {
     return;
   }
 
-  const response = await fetch(`https://paas.saga-castor.ts.net/blobby/blob/${id}`);
+  const response = await fetch(
+    `https://paas.saga-castor.ts.net/blobby/blob/${id}`,
+  );
   let src: string;
   try {
     const resp = await response.json();
@@ -148,8 +153,9 @@ export async function syncRecipe(id: string) {
   if (errors) throw new Error(errors);
 
   const recipeId = addRecipe(recipe!, src);
-  if (id !== recipeId)
+  if (id !== recipeId) {
     throw new Error(`Recipe ID mismatch: ${id} !== ${recipeId}`);
+  }
   recipesKnownToStorage.add(recipeId);
 }
 
@@ -158,16 +164,19 @@ export async function saveRecipe(id: string, src: string) {
   recipesKnownToStorage.add(id);
 
   console.log("Saving recipe", id);
-  const response = await fetch(`https://paas.saga-castor.ts.net/blobby/blob/${id}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
+  const response = await fetch(
+    `https://paas.saga-castor.ts.net/blobby/blob/${id}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        src,
+        recipe: JSON.parse(JSON.stringify(getRecipe(id))),
+      }),
     },
-    body: JSON.stringify({
-      src,
-      recipe: JSON.parse(JSON.stringify(getRecipe(id))),
-    }),
-  });
+  );
   return response.ok;
 }
 
@@ -182,8 +191,8 @@ export type RecipeManifest = {
 
 export const recipes: RecipeManifest[] = Object.entries(allRecipes).map(
   ([name, recipe]) => ({
-    name:
-      (recipe.argumentSchema as { description: string })?.description ?? name,
+    name: (recipe.argumentSchema as { description: string })?.description ??
+      name,
     recipeId: addRecipe(recipe),
   }),
 );
@@ -217,7 +226,7 @@ function getFridayAndMondayDateStrings() {
 // Terrible hack to open a charm from a recipe
 let openCharmOpener: (
   charmId: string | EntityId | CellImpl<any>,
-) => void = () => { };
+) => void = () => {};
 export const openCharm = (charmId: string | EntityId | CellImpl<any>) =>
   openCharmOpener(charmId);
 openCharm.set = (
