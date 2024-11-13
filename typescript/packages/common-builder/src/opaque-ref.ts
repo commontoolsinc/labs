@@ -32,6 +32,7 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
     defaultValue: undefined,
     nodes: new Set<NodeRef>(),
     frame: getTopFrame()!,
+    ref: undefined,
   };
 
   function createNestedProxy(
@@ -55,6 +56,8 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
         path,
         ...store,
       }),
+      setCellReference: (ref: { cell?: any; path?: PropertyKey[] }) =>
+        setValueAtPath(store, ["ref"], ref),
       map: <S>(
         fn: (
           value: Opaque<Required<T extends Array<infer U> ? U : T>>,
@@ -91,6 +94,11 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
             };
           },
         };
+      },
+      [Symbol.toPrimitive]: () => {
+        if (!store.ref || !store.frame?.materialize)
+          throw new Error("Trying to reference opaque ref during creation.");
+        return store.frame.materialize(store.ref);
       },
       [isOpaqueRefMarker]: true,
     };

@@ -41,10 +41,12 @@ export type OpaqueRefMethods<T> = {
     external?: any;
     frame: Frame;
   };
+  setCellReference(ref: { cell?: any; path?: PropertyKey[] }): void;
   map<S>(
     fn: (value: T extends Array<infer U> ? Opaque<U> : Opaque<T>) => Opaque<S>,
   ): Opaque<S[]>;
   [Symbol.iterator](): Iterator<T>;
+  [Symbol.toPrimitive](): T;
   [isOpaqueRefMarker]: true;
 };
 
@@ -176,6 +178,7 @@ export function isShadowRef(value: any): value is ShadowRef {
 export type Frame = {
   parent?: Frame;
   cause?: any;
+  materialize?: (path: PropertyKey[]) => any;
 };
 
 const isStaticMarker = Symbol("isStatic");
