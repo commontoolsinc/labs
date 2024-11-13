@@ -148,7 +148,8 @@ app.get("/blob/:hash/*", async (c) => {
 
     // If result is null or not an object (string, number, boolean, undefined), return as text
     if (typeof result !== "object" || result === null) {
-      return c.text(String(result));
+      c.header("Content-Type", "application/javascript");
+      return c.body(String(result));
     }
 
     // If it's an object or array, return as JSON
