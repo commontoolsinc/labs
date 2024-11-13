@@ -37,9 +37,9 @@ describe("opaqueRef function", () => {
     expect(v.nodes.size).toBe(0);
   });
 
-  it("returns itself on get", () => {
+  it("throws on get", () => {
     const c = opaqueRef<number>();
-    expect(c.get() === c).toBe(true);
+    expect(() => c.get()).toThrow();
   });
 
   it("supports nested values", () => {

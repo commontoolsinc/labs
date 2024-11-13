@@ -41,7 +41,7 @@ export type OpaqueRefMethods<T> = {
     external?: any;
     frame: Frame;
   };
-  setCellReference(ref: { cell?: any; path?: PropertyKey[] }): void;
+  unsafe_bindToRecipeAndPath(recipe: Recipe, path: PropertyKey[]): void;
   map<S>(
     fn: (value: T extends Array<infer U> ? Opaque<U> : Opaque<T>) => Opaque<S>,
   ): Opaque<S[]>;
@@ -178,7 +178,10 @@ export function isShadowRef(value: any): value is ShadowRef {
 export type Frame = {
   parent?: Frame;
   cause?: any;
-  materialize?: (path: PropertyKey[]) => any;
+  unsafe_binding?: {
+    recipe: Recipe;
+    materialize?: (path: PropertyKey[]) => any;
+  };
 };
 
 const isStaticMarker = Symbol("isStatic");
