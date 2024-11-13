@@ -1,59 +1,68 @@
-import { h, behavior, $, Reference, select, View, refer, Instruction } from "@commontools/common-system";
-import { Selector } from 'datalogia'
-import { collection, make, view } from "../sugar.jsx";
+import { h, behavior, $, Reference, select, View, refer, Instruction, Select } from "@commontools/common-system";
+import { Selector, Variable } from 'datalogia'
 import { analyzeRuleDependencies } from "../viz.js";
+import { build, make } from "../sugar/build.js";
 
 export const source = { readingList: { v: 1 } };
 
-const event = (name: string, selectors?: Record<string, any>) => select({
-  self: $.self,
-  event: $.event,
-  ...selectors
-}).match($.self, `~/on/${name}`, $.event);
+const event = <T extends Record<string, any>>(name: string) => {
+  const baseSelect = select({
+    self: $.self,
+    event: $.event
+  }) as Select<{
+    self: Variable<any>,
+    event: Variable<any>
+  }>;
 
-const init = <T extends Selector>(
-  collectionName: string,
-  matchQuery: T,
-  additionalMatches: (builder: any) => any,
-  propsGen: (queryVars: any) => Instruction[]
-) => {
-  let builder = select({ ...matchQuery, self: $.self, item: $.item })
-    .match($.self, collectionName, $.item)
-    .not.match($.item, "instance/initialized", true);
+  const builder = {
+    select: (additionalSelectors: T) => {
+      return select({
+        self: $.self,
+        event: $.event,
+        ...additionalSelectors
+      }) as Select<{
+        self: Variable<any>,
+        event: Variable<any>
+      } & {
+        [K in keyof T]: Variable<any>
+      }>;
+    },
+    match: (...args: any[]) => baseSelect.match($.self, `~/on/${name}`, $.event),
+    upsert: baseSelect.upsert,
+    assert: baseSelect.assert,
+    retract: baseSelect.retract,
+    update: baseSelect.update,
+    commit: baseSelect.commit,
+  };
 
-  additionalMatches(builder);
-
-  return builder.update(vars => [
-    ...propsGen(vars),
-    { Assert: [vars.item, "instance/initialized", true] }
-  ]);
+  return builder;
 };
 
+const defaultTo = (field: string, defaultValue: any) => select({ self: $.self })
+  .not.match($.self, field, $._)
+  .assert(({ self }) => [self, field, defaultValue])
+  .commit();
+
 export const readingList = behavior({
-  // set the title of this list if it has none
-  defaultTitle: select({ self: $.self })
-    .not.match($.self, "title", $._)
-    .assert(({ self }) => [self, "title", "Ben's Reading List"])
-    .commit(),
+  defaultTitle: defaultTo("title", "Ben's Reading List"),
 
-  // declare collection of articles + init behaviour
-  articles: collection("collection/articles"),
-  initArticle: init('collection/articles',
-    { draftTitle: $.draftTitle },
-    (builder) => {
-      builder.match($.self, 'draft/title', $.draftTitle);
-    },
-    ({ self, item, draftTitle }) => [
-      { Assert: [item, 'title', draftTitle] },
-      { Upsert: [self, 'draft/title', ""] }
-    ]
-  ),
+  // enter name of item
+  titleInput: defaultTo('draft/title', ""),
 
-  // initial value for input field
-  titleInput: select({ self: $.self })
-    .not.match($.self, "draft/title", $._)
-    .assert(({ self }) => [self, 'draft/title', ""])
-    .commit(),
+  // declare collection of articles
+  articles: build("collection/articles"),
+
+  // add item on click
+  onAddItem: event('add-item')
+    .select({ draftTitle: $.draftTitle })
+    .match($.self, "draft/title", $.draftTitle)
+    .update(({ self, event, draftTitle }) => [
+      // Q: we should probably say the name of the collection here
+      // currently it just adds it to ANY collection that listens for `NEW`
+      make(self, { title: draftTitle }),
+      // reset input field
+      { Retract: [self, "draft/title", draftTitle] }
+    ]),
 
   // list articles view
   view: select({
@@ -88,15 +97,8 @@ export const readingList = behavior({
       <button onclick="~/on/add-item">Add</button>
     </div>),
 
-  // event handlers
-  onAddItem: event('add-item')
-    .update(({ self, event }) => [
-      make(self, 'collection/articles'),
-    ]),
-
   onChangeTitle: event('change-title')
     .upsert(({ self, event }) => {
-      // common-input gives us events with easy to read values
       return [self, 'draft/title', event.detail.value]
     })
     .commit(),
