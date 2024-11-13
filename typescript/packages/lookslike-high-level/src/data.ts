@@ -128,6 +128,10 @@ export async function syncCharm(
   return storage.syncCell(entityId, waitForStorage);
 }
 
+export const BLOBBY_SERVER_URL = typeof window !== "undefined"
+  ? window.location.protocol + "//" + window.location.host + "/api/blobby"
+  : "//api/blobby";
+
 const recipesKnownToStorage = new Set<string>();
 
 export async function syncRecipe(id: string) {
@@ -138,9 +142,7 @@ export async function syncRecipe(id: string) {
     return;
   }
 
-  const response = await fetch(
-    `https://paas.saga-castor.ts.net/blobby/blob/${id}`,
-  );
+  const response = await fetch(`${BLOBBY_SERVER_URL}/blob/${id}`);
   let src: string;
   try {
     const resp = await response.json();
@@ -164,19 +166,16 @@ export async function saveRecipe(id: string, src: string) {
   recipesKnownToStorage.add(id);
 
   console.log("Saving recipe", id);
-  const response = await fetch(
-    `https://paas.saga-castor.ts.net/blobby/blob/${id}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        src,
-        recipe: JSON.parse(JSON.stringify(getRecipe(id))),
-      }),
+  const response = await fetch(`${BLOBBY_SERVER_URL}/blob/${id}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
     },
-  );
+    body: JSON.stringify({
+      src,
+      recipe: JSON.parse(JSON.stringify(getRecipe(id))),
+    }),
+  });
   return response.ok;
 }
 

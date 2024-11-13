@@ -56,6 +56,13 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/data/, ""),
       },
+      "/api/blobby": {
+        target:
+          process.env.BLOBBY_API_URL ??
+          "https://paas.saga-castor.ts.net/blobby",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/blobby/, ""),
+      },
     },
     headers: {
       "*.wasm": {
