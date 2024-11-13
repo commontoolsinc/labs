@@ -253,6 +253,7 @@ export class CommonSidebar extends LitElement {
         this.compileErrors = errors || "";
 
         if (!recipe) return;
+        // NOTE(ja): adding a recipe triggers saving to blobby
         addRecipe(recipe, this.workingSrc);
 
         // TODO(ja): we should check if the recipe arguments have changed
