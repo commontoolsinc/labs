@@ -1,5 +1,39 @@
-import { $, Reference } from "../../common-system/lib/adapter.js";
+import { $, Instruction, refer, Reference, Rule } from "../../common-system/lib/adapter.js";
 import { h, Select, select, View } from '@commontools/common-system'
+
+export const collection = (membership: string): Rule => {
+  return {
+    select: {
+      self: $.self,
+      cause: $.cause,
+      new: $['instance/new']
+    },
+    where: [
+      { Case: [$.self, "instance/new", $['instance/new']] },
+      {
+        Or: [
+          { Case: [$.self, "instance/cause", $.cause] },
+          {
+            And: [
+              { Not: { Case: [$.self, "instance/cause", $._] } },
+              { Match: [null, "==", $.cause] }
+            ]
+          }
+        ]
+      }
+    ],
+    update: ({ cause, self, new: old }: { cause: Reference, self: Reference, new: Reference }) => {
+      const entity = refer({ last: cause, of: self })
+      return [
+        { Upsert: [self, "instance/cause", entity] },
+        { Assert: [self, membership, entity] },
+        { Retract: [self, "instance/new", old] }
+      ]
+    }
+  }
+}
+
+export const make = (self, member): Instruction => ({ Upsert: [self, "instance/new", member] })
 
 export function createQuery(keys: string[]) {
   // Build the select object with all properties

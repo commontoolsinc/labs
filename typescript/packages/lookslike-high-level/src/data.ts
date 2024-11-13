@@ -63,6 +63,7 @@ import { mealExample } from "./recipes/meal.jsx";
 
 import * as dungeon from "./recipes/dungeon.jsx";
 import * as charmExample from './recipes/charm.jsx'
+import * as readingList from './recipes/readingList.jsx'
 import Fetcher from "./recipes/fetcher.jsx";
 import Fetch from "./effects/fetch.js";
 
@@ -243,11 +244,14 @@ export async function saveRecipe(
 }
 
 addCharms([
-  charmExample.spawn({
-    v6: true,
-  }),
-  dungeon.spawn({
-    v: 2
+  // charmExample.spawn({
+  //   v6: true,
+  // }),
+  // dungeon.spawn({
+  //   v: 2
+  // }),
+  readingList.spawn({
+    v: 1
   }),
   Fetcher.spawn(),
   Fetch.spawn(),
