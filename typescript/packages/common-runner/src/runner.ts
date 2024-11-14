@@ -14,6 +14,8 @@ import {
   recipeFromFrame,
   pushFrameFromCause,
   UnsafeBinding,
+  unsafe_materializeFactory,
+  unsafe_originalRecipe,
 } from "@commontools/common-builder";
 import {
   cell,
@@ -33,6 +35,7 @@ import {
   sendValueToBinding,
   staticDataToNestedCells,
   deepCopy,
+  unsafe_noteParentOnRecipes,
 } from "./utils.js";
 import { getModuleByRef } from "./module.js";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.js";
@@ -179,7 +182,11 @@ export function run<T, R = any>(
   // Send "query" to results to the result cell
   resultCell.send(mapBindingsToCell<R>(recipe.result as R, processCell));
 
-  // Now start the recipe
+  // [unsafe closures:] For recipes from closures, add a materialize factory
+  if (recipe[unsafe_originalRecipe])
+    recipe[unsafe_materializeFactory] = (log: any) => (path: PropertyKey[]) =>
+      processCell.getAsQueryResult(path, log);
+
   for (const node of recipe.nodes) {
     // Generate causal IDs for all cells read and written to by this node, if
     // they don't have any yet.
@@ -253,6 +260,7 @@ function instantiateNode(
           outputBindings,
           processCell,
           addCancel,
+          recipe,
         );
         break;
       case "passthrough":
@@ -369,7 +377,8 @@ function instantiateJavaScriptNode(
 
       const frame = pushFrameFromCause(cause, {
         recipe,
-        materialize: (path) => inputsCell.getAsQueryResult(path),
+        materialize: (path: PropertyKey[]) =>
+          processCell.getAsQueryResult(path),
       });
       const result = fn(inputsCell.getAsQueryResult([]));
 
@@ -407,7 +416,8 @@ function instantiateJavaScriptNode(
 
       const frame = pushFrameFromCause({ inputs, outputs, fn: fn.toString() }, {
         recipe,
-        materialize: (path) => processCell.getAsQueryResult(path, log),
+        materialize: (path: PropertyKey[]) =>
+          processCell.getAsQueryResult(path, log),
       } satisfies UnsafeBinding);
       const result = fn(inputsProxy);
       popFrame(frame);
@@ -425,6 +435,7 @@ function instantiateRawNode(
   outputBindings: JSON,
   processCell: CellImpl<any>,
   addCancel: AddCancel,
+  recipe: Recipe,
 ) {
   if (typeof module.implementation !== "function")
     throw new Error(
@@ -436,6 +447,10 @@ function instantiateRawNode(
 
   const mappedInputBindings = mapBindingsToCell(inputBindings, processCell);
   const mappedOutputBindings = mapBindingsToCell(outputBindings, processCell);
+
+  // For `map` and future other node types that take closures, we need to
+  // note the parent recipe on the closure recipes.
+  unsafe_noteParentOnRecipes(recipe, mappedInputBindings);
 
   const inputCells = findAllAliasedCells(mappedInputBindings, processCell);
   const outputCells = findAllAliasedCells(mappedOutputBindings, processCell);

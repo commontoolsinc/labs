@@ -1,4 +1,13 @@
-import { isAlias, isStatic, markAsStatic } from "@commontools/common-builder";
+import {
+  isAlias,
+  isStatic,
+  markAsStatic,
+  unsafe_originalRecipe,
+  unsafe_parentRecipe,
+  Recipe,
+  UnsafeBinding,
+  unsafe_materializeFactory,
+} from "@commontools/common-builder";
 import {
   cell,
   isCell,
@@ -189,13 +198,38 @@ export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
       return binding; // Don't enter cells
     else if (Array.isArray(binding))
       return binding.map((value) => convert(value));
-    else if (typeof binding === "object" && binding !== null)
-      return Object.fromEntries(
+    else if (typeof binding === "object" && binding !== null) {
+      const result: any = Object.fromEntries(
         Object.entries(binding).map(([key, value]) => [key, convert(value)]),
       );
-    else return binding;
+      if (binding[unsafe_originalRecipe])
+        result[unsafe_originalRecipe] = binding[unsafe_originalRecipe];
+      return result;
+    } else return binding;
   }
   return convert(binding) as T;
+}
+
+export function unsafe_noteParentOnRecipes(recipe: Recipe, binding: any) {
+  if (typeof binding !== "object" || binding === null) return;
+
+  // For now we just do top-level bindings
+  for (const key in binding)
+    if (binding[key][unsafe_originalRecipe])
+      binding[key][unsafe_parentRecipe] = recipe;
+}
+
+export function unsafe_createParentBindings(
+  recipe: Recipe,
+  log: ReactivityLog,
+): UnsafeBinding | undefined {
+  if (!recipe || !recipe[unsafe_originalRecipe]) return undefined;
+  else
+    return {
+      recipe: recipe[unsafe_originalRecipe]!,
+      materialize: recipe[unsafe_materializeFactory]!(log),
+      parent: unsafe_createParentBindings(recipe[unsafe_parentRecipe]!, log),
+    };
 }
 
 // Traverses binding and returns all cells reacheable through aliases.

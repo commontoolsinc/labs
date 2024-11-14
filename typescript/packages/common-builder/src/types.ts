@@ -127,18 +127,20 @@ export type Node = {
   outputs: JSON;
 };
 
+// Used to get back to original recipe from a JSONified representation.
+export const unsafe_originalRecipe = Symbol("unsafe_originalRecipe");
+export const unsafe_parentRecipe = Symbol("unsafe_parentRecipe");
+export const unsafe_materializeFactory = Symbol("unsafe_materializeFactory");
+
 export type Recipe = {
   argumentSchema: JSON;
   resultSchema: JSON;
   initial?: JSON;
   result: JSON;
   nodes: Node[];
-  unsafe_original_recipe?: Recipe;
-  unsafe_parent_recipe?: Recipe;
-  unsafe_parent_materialize_factory?: (
-    path: PropertyKey[],
-    log: any,
-  ) => (path: PropertyKey[]) => any;
+  [unsafe_originalRecipe]?: Recipe;
+  [unsafe_parentRecipe]?: Recipe;
+  [unsafe_materializeFactory]?: (log: any) => (path: PropertyKey[]) => any;
 };
 
 export function isRecipe(value: any): value is Recipe {

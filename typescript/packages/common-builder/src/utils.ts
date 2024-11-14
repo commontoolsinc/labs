@@ -16,6 +16,7 @@ import {
   markAsStatic,
   isShadowRef,
   isRecipe,
+  unsafe_originalRecipe,
 } from "./types.js";
 import { getTopFrame } from "./recipe.js";
 
@@ -198,6 +199,8 @@ export function toJSONWithAliases(
         hasValue = true;
       }
     }
+
+    if (isRecipe(value)) result[unsafe_originalRecipe] = value;
 
     return hasValue || Object.keys(result).length === 0 ? result : undefined;
   }
