@@ -19,7 +19,7 @@ const event = <T extends Record<string, any>, D extends (name: string) => `~/on/
 };
 
 const defaultTo = (field: string, defaultValue: any) => select({ self: $.self })
-  .not.match($.self, field, $._)
+  .not(q => q.match($.self, field, $._))
   .assert(({ self }) => [self, field, defaultValue])
   .commit();
 
@@ -71,13 +71,15 @@ export const readingList = behavior({
       make(self, { title: draftTitle }),
       // reset input field
       { Retract: [self, "draft/title", draftTitle] }
-    ]),
+    ])
+    .commit(),
 
   test2: query(Model, 'title', 'draft/title')
     .update(({ self, title, 'draft/title': draftTitle }) => {
       console.log('wat', self, title, draftTitle)
       return []
-    }),
+    })
+    .commit(),
 
   //  list articles view
   view: select({
@@ -101,7 +103,8 @@ export const readingList = behavior({
       <hr />
       <common-input value={draftTitle} oncommon-input={dispatch('change-title')} />
       <button onclick={dispatch('add-item')}>Add</button>
-    </div>),
+    </div>)
+    .commit(),
 
   // empty state view
   noArticlesView: select({
@@ -111,13 +114,14 @@ export const readingList = behavior({
   })
     .match($.self, "draft/title", $.draftTitle)
     .match($.self, "title", $.title)
-    .not.match($.self, "collection/articles", $._)
+    .not(q => q.match($.self, "collection/articles", $._))
     .render(({ self, draftTitle, title }) => <div title={title} entity={self}>
       <span>Empty!</span>
       <hr />
       <common-input value={draftTitle} oncommon-input={dispatch('change-title')} />
       <button onclick={dispatch('add-item')}>Add</button>
-    </div>),
+    </div>)
+    .commit(),
 
   onChangeTitle: event('change-title')
     .upsert(({ self, event }) => {
@@ -125,5 +129,7 @@ export const readingList = behavior({
     })
     .commit(),
 })
+
+console.log(readingList)
 
 export const spawn = (input: {} = source) => readingList.spawn(input);
