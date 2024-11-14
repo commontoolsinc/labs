@@ -123,7 +123,7 @@ addCharms([
   //   v: 2
   // }),
   readingList.spawn({
-    v: 1
+    v: 2
   }),
   Fetcher.spawn(),
   Fetch.spawn(),
