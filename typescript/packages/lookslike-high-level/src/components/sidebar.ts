@@ -317,6 +317,13 @@ export class CommonSidebar extends LitElement {
         conversation: this.llmConversation,
         feedback,
         compileErrors,
+        workingSource: this.workingSrc,
+        workingSpec: this.workingSpec,
+        recipeId,
+        recipe: JSON.parse(JSON.stringify(recipe)),
+        spec,
+        src,
+        schema,
       };
 
       if (score === 1) {
@@ -379,6 +386,7 @@ RESPOND WITH THE FULL SOURCE CODE - DO NOT INCLUDE ANY OTHER TEXT.
       if (!this.llmConversation) {
         this.llmConversation = payload;
       } else {
+        // FIXME(jake): make sure we're adding the latest messages to the conversation-- this might be working, idk
         // otherwise, append the new message to the messages array
         this.llmConversation.messages.push(...payload.messages);
       }
