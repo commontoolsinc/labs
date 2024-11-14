@@ -360,6 +360,8 @@ Here is the current source code:
 \`\`\`tsx
 ${this.workingSrc}
 \`\`\`
+
+RESPOND WITH THE FULL SOURCE CODE - DO NOT INCLUDE ANY OTHER TEXT.
 `;
         messages.push(fixitPrompt);
       }
@@ -496,15 +498,31 @@ ${this.workingSrc}
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">
-                  <a
-                    href="/recipe/${recipeId}"
-                    target="_blank"
-                    @click=${copyRecipeLink}
-                    style="float: right"
-                    >🔗 Share</a
+                  <div
+                    style="display: flex; justify-content: space-between; border: 1px solid pink; padding: 10px;"
                   >
+                    <a
+                      href="/recipe/${recipeId}"
+                      target="_blank"
+                      @click=${copyRecipeLink}
+                      style="float: right"
+                      >🔗 Share</a
+                    >
+                    <a
+                      href="https://paas.saga-castor.ts.net/blobby/blob/${recipeId}"
+                      target="_blank"
+                    >
+                      🪄 Spellbook jr</a
+                    >
+                    <a
+                      href="https://paas.saga-castor.ts.net/blobby/blob/${recipeId}/png"
+                      target="_blank"
+                    >
+                      📸 Spellbook screenshot</a
+                    >
+                  </div>
                 </div>
-                <div style="margin-bottom: 4px">
+                <div style="margin: 10px;">
                   <button @click=${() => runRecipe(false)}>
                     🔄 Run w/Current Data
                   </button>
