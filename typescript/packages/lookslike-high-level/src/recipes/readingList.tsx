@@ -5,37 +5,17 @@ import { build, make } from "../sugar/build.js";
 
 export const source = { readingList: { v: 1 } };
 
-const event = <T extends Record<string, any>>(name: string) => {
-  const baseSelect = select({
+const event = <T extends Record<string, any>>(name: string, additionalTerms?: T) => {
+  return (select({
     self: $.self,
-    event: $.event
+    event: $.event,
+    ...additionalTerms || {}
   }) as Select<{
     self: Variable<any>,
     event: Variable<any>
-  }>;
-
-  const builder = {
-    select: (additionalSelectors: T) => {
-      return select({
-        self: $.self,
-        event: $.event,
-        ...additionalSelectors
-      }) as Select<{
-        self: Variable<any>,
-        event: Variable<any>
-      } & {
-        [K in keyof T]: Variable<any>
-      }>;
-    },
-    match: (...args: any[]) => baseSelect.match($.self, `~/on/${name}`, $.event),
-    upsert: baseSelect.upsert,
-    assert: baseSelect.assert,
-    retract: baseSelect.retract,
-    update: baseSelect.update,
-    commit: baseSelect.commit,
-  };
-
-  return builder;
+  } & {
+    [K in keyof T]: Variable<any>
+  }>).match($.self, `~/on/${name}`, $.event);
 };
 
 const defaultTo = (field: string, defaultValue: any) => select({ self: $.self })
@@ -53,8 +33,7 @@ export const readingList = behavior({
   articles: build("collection/articles"),
 
   // add item on click
-  onAddItem: event('add-item')
-    .select({ draftTitle: $.draftTitle })
+  onAddItem: event('add-item', { draftTitle: $.draftTitle })
     .match($.self, "draft/title", $.draftTitle)
     .update(({ self, event, draftTitle }) => [
       // Q: we should probably say the name of the collection here
@@ -64,7 +43,7 @@ export const readingList = behavior({
       { Retract: [self, "draft/title", draftTitle] }
     ]),
 
-  // list articles view
+  // // list articles view
   view: select({
     self: $.self,
     draftTitle: $.draftTitle,
