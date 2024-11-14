@@ -186,8 +186,9 @@ export class CommonSidebar extends LitElement {
     const prompt = this.getFieldOrDefault("prompt", "");
     const data = this.getFieldOrDefault("data", {});
     const recipeId = this.focusedCharm?.sourceCell?.get()?.[TYPE];
+    const recipe = getRecipe(recipeId);
     const src = getRecipeSrc(recipeId);
-    const schema = this.getFieldOrDefault("schema", {});
+    const schema = recipe?.argumentSchema || {};
     const query = this.getFieldOrDefault("query", {});
 
     const sidebarNav = html`<div class="nav-buttons" slot="toolbar-start">
@@ -363,9 +364,7 @@ export class CommonSidebar extends LitElement {
                   <os-code-editor
                     slot="content"
                     language="application/json"
-                    .source=${watchCell(schema, (q) =>
-          JSON.stringify(q, null, 2),
-        )}
+                    .source=${JSON.stringify(schema, null, 2)}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
