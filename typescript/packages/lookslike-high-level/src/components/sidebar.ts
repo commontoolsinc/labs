@@ -291,7 +291,7 @@ export class CommonSidebar extends LitElement {
     };
 
     // FIXME(jake): implement "fix this" button after this works
-    const askLLM = async () => {
+    const askLLM = async ({ fixit }: { fixit?: string } = {}) => {
       const originalSrc = src;
       const originalSpec =
         spec ||
@@ -302,18 +302,36 @@ export class CommonSidebar extends LitElement {
         typeof window !== "undefined"
           ? window.location.protocol + "//" + window.location.host + "/api/llm"
           : "//api/llm";
+
+      const messages = [
+        originalSpec,
+        `\`\`\`tsx\n${originalSrc}\n\`\`\``,
+        newSpec,
+        prefill,
+      ];
+
+      if (fixit) {
+        console.log("fixit", fixit);
+        const fixitPrompt = `The user asked you to fix the following:
+\`\`\`
+${fixit}
+\`\`\`
+
+Here is the current source code:
+\`\`\`tsx
+${this.workingSrc}
+\`\`\`
+`;
+        messages.push(fixitPrompt);
+      }
+
       const llm = new LLMClient(url);
       const response = await llm.sendRequest(
         {
+          model: "anthropic:claude-3-5-sonnet-latest",
           system:
             "You are a helpful assistant that can help me improve my recipe.",
-          messages: [
-            originalSpec,
-            `\`\`\`tsx\n${originalSrc}\n\`\`\``,
-            newSpec,
-            prefill,
-          ],
-          model: "anthropic:claude-3-5-sonnet-latest",
+          messages,
         },
         (text) => console.log(text),
       );
@@ -426,8 +444,6 @@ export class CommonSidebar extends LitElement {
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">
-                  Source
-
                   <a
                     href="/recipe/${recipeId}"
                     target="_blank"
@@ -447,6 +463,9 @@ export class CommonSidebar extends LitElement {
                     📄 Export Arguments
                   </button>
                   <button @click=${() => askLLM()}>🤖 LLM</button>
+                  <button @click=${() => askLLM({ fixit: this.compileErrors })}>
+                    🪓 fix it
+                  </button>
 
                   ${when(
                     this.compileErrors,
@@ -459,8 +478,11 @@ ${this.compileErrors}</pre
                     () => html``,
                   )}
 
-                  <div>SPEC</div>
                   <div>
+                    <span
+                      style="padding-left: 25px; color: #969696; font-size: 12px;"
+                      >SPEC</span
+                    >
                     <os-code-editor
                       slot="content"
                       language="text/markdown"
@@ -468,6 +490,13 @@ ${this.compileErrors}</pre
                       @doc-change=${onSpecChanged}
                     ></os-code-editor>
                   </div>
+                </div>
+
+                <div>
+                  <span
+                    style="padding-left: 25px; color: #969696; font-size: 12px;"
+                    >SOURCE</span
+                  >
 
                   <os-code-editor
                     slot="content"
