@@ -23,52 +23,7 @@ export type View<Match extends Selector> = (
   props: InferBindings<Match>,
 ) => Node<any>;
 
-export class Where {
-  #where: Array<Clause>;
-
-  constructor(...clauses: Array<Clause>) {
-    this.#where = [...clauses];
-  }
-
-  match(
-    entity: Term<Entity>,
-    attribute: Term<Attribute>,
-    value: Term<API.Constant> = $._,
-  ): Where {
-    return new Where(...this.#where, {
-      Case: [entity, attribute, value],
-    });
-  }
-
-  or(builder: (q: Where) => Where): Where {
-    const clauses = builder(new Where()).commit();
-    return new Where(...this.#where, {
-      Or: clauses,
-    });
-  }
-
-  and(builder: (q: Where) => Where): Where {
-    const clauses = builder(new Where()).commit();
-    return new Where(...this.#where, {
-      And: clauses,
-    });
-  }
-
-  not(builder: (q: Where) => Where): Where {
-    const clauses = builder(new Where()).commit();
-    return new Where(...this.#where, {
-      Not: {
-        And: clauses,
-      },
-    });
-  }
-
-  commit(): Clause[] {
-    return this.#where;
-  }
-}
-
-export const where = (...clauses: Array<Clause>) => new Where(...clauses);
+export type BuilderOrValue<T> = ((q: T) => T) | T;
 
 export class Select<Match extends Selector = Selector> {
   #select: Match;
@@ -85,7 +40,7 @@ export class Select<Match extends Selector = Selector> {
     this.#transaction = transaction;
   }
 
-  where(builder: (q: Where) => Where): Select<Match> {
+  where(builder: BuilderOrValue<Where>): Select<Match> {
     return new Select<Match>(this.#select, this.#where.and(builder));
   }
 
@@ -100,15 +55,15 @@ export class Select<Match extends Selector = Selector> {
     );
   }
 
-  or(builder: (q: Where) => Where): Select<Match> {
+  or(builder: BuilderOrValue<Where>): Select<Match> {
     return this.where((q) => q.or(builder));
   }
 
-  and(builder: (q: Where) => Where): Select<Match> {
+  and(builder: BuilderOrValue<Where>): Select<Match> {
     return this.where((q) => q.and(builder));
   }
 
-  not(builder: (q: Where) => Where): Select<Match> {
+  not(builder: BuilderOrValue<Where>): Select<Match> {
     return this.where((q) => q.not(builder));
   }
 
@@ -157,6 +112,56 @@ export class Select<Match extends Selector = Selector> {
  */
 export const select = <Match extends Selector = Selector>(select: Match) =>
   new Select(select);
+
+export class Where {
+  #where: Array<Clause>;
+
+  constructor(...clauses: Array<Clause>) {
+    this.#where = [...clauses];
+  }
+
+  match(
+    entity: Term<Entity>,
+    attribute: Term<Attribute>,
+    value: Term<API.Constant> = $._,
+  ): Where {
+    return new Where(...this.#where, {
+      Case: [entity, attribute, value],
+    });
+  }
+
+  or(builder: BuilderOrValue<Where>): Where {
+    const where: Where =
+      typeof builder === "function" ? builder(new Where()) : builder;
+    return new Where(...this.#where, {
+      Or: where.commit(),
+    });
+  }
+
+  and(builder: BuilderOrValue<Where>): Where {
+    const where: Where =
+      typeof builder === "function" ? builder(new Where()) : builder;
+    return new Where(...this.#where, {
+      And: where.commit(),
+    });
+  }
+
+  not(builder: BuilderOrValue<Where>): Where {
+    const where: Where =
+      typeof builder === "function" ? builder(new Where()) : builder;
+    return new Where(...this.#where, {
+      Not: {
+        And: where.commit(),
+      },
+    });
+  }
+
+  commit(): Clause[] {
+    return this.#where;
+  }
+}
+
+export const where = (...clauses: Array<Clause>) => new Where(...clauses);
 
 export class Transaction<Match extends Selector = Selector> {
   #updates: Array<Update<Match>> = [];
