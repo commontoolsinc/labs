@@ -1,5 +1,4 @@
 import {
-  Query,
   Selector,
   Clause,
   InferBindings,
@@ -7,12 +6,10 @@ import {
   Entity,
   Attribute,
   API,
-  Bindings,
-  Confirmation,
-  Formula,
 } from "datalogia";
 import { $, Instruction, Fact } from "synopsys";
 import { Node } from "./jsx.js";
+export { $ } from "synopsys";
 
 export type Update<Match extends Selector> = (
   props: InferBindings<Match>,
@@ -26,23 +23,70 @@ export type View<Match extends Selector> = (
   props: InferBindings<Match>,
 ) => Node<any>;
 
-export type EditStep<Match extends Selector> = {
-  operation: "Assert" | "Retract" | "Upsert";
-  edit: Edit<Match>;
-};
+export class Where {
+  #where: Array<Clause>;
+
+  constructor(...clauses: Array<Clause>) {
+    this.#where = [...clauses];
+  }
+
+  match(
+    entity: Term<Entity>,
+    attribute: Term<Attribute>,
+    value: Term<API.Constant> = $._,
+  ): Where {
+    return new Where(...this.#where, {
+      Case: [entity, attribute, value],
+    });
+  }
+
+  or(builder: (q: Where) => Where): Where {
+    const clauses = builder(new Where()).commit();
+    return new Where(...this.#where, {
+      Or: clauses,
+    });
+  }
+
+  and(builder: (q: Where) => Where): Where {
+    const clauses = builder(new Where()).commit();
+    return new Where(...this.#where, {
+      And: clauses,
+    });
+  }
+
+  not(builder: (q: Where) => Where): Where {
+    const clauses = builder(new Where()).commit();
+    return new Where(...this.#where, {
+      Not: {
+        And: clauses,
+      },
+    });
+  }
+
+  commit(): Clause[] {
+    return this.#where;
+  }
+}
+
+export const where = (...clauses: Array<Clause>) => new Where(...clauses);
 
 export class Select<Match extends Selector = Selector> {
   #select: Match;
-  #where: Array<Clause> = [];
-  #negation = false;
+  #where: Where;
+  #transaction: Transaction<Match>;
 
-  constructor(select: Match) {
+  constructor(
+    select: Match,
+    where: Where = new Where(),
+    transaction: Transaction<Match> = new Transaction(),
+  ) {
     this.#select = select;
+    this.#where = where;
+    this.#transaction = transaction;
   }
 
-  where(...clauses: Array<Clause>) {
-    this.#where = [...this.#where, ...clauses];
-    return this;
+  where(builder: (q: Where) => Where): Select<Match> {
+    return new Select<Match>(this.#select, this.#where.and(builder));
   }
 
   match(
@@ -50,33 +94,100 @@ export class Select<Match extends Selector = Selector> {
     attribute: Term<Attribute>,
     value: Term<API.Constant> = $._,
   ): Select<Match> {
-    if (this.#negation) {
-      this.#negation = false;
-      return this.where(not(match(entity, attribute, value)));
-    } else {
-      return this.where(match(entity, attribute, value));
-    }
+    return new Select<Match>(
+      this.#select,
+      this.#where.match(entity, attribute, value),
+    );
   }
 
-  get not() {
-    this.#negation = true;
-    return this;
+  or(builder: (q: Where) => Where): Select<Match> {
+    return this.where((q) => q.or(builder));
   }
 
-  get transaction() {
-    return new Transaction(this.#select, this.#where);
+  and(builder: (q: Where) => Where): Select<Match> {
+    return this.where((q) => q.and(builder));
+  }
+
+  not(builder: (q: Where) => Where): Select<Match> {
+    return this.where((q) => q.not(builder));
+  }
+
+  transaction(
+    builder: (q: Transaction<Match>) => Transaction<Match>,
+  ): Select<Match> {
+    return new Select<Match>(
+      this.#select,
+      this.#where,
+      builder(this.#transaction),
+    );
+  }
+
+  assert(edit: Edit<Match>): Select<Match> {
+    return this.transaction((tx) => tx.assert(edit));
+  }
+
+  retract(edit: Edit<Match>): Select<Match> {
+    return this.transaction((tx) => tx.retract(edit));
+  }
+
+  upsert(edit: Edit<Match>): Select<Match> {
+    return this.transaction((tx) => tx.upsert(edit));
+  }
+
+  update(update: Update<Match>): Select<Match> {
+    return this.transaction((tx) => tx.update(update));
+  }
+
+  render(view: View<Match>): Select<Match> {
+    return this.transaction((tx) => tx.render(view));
+  }
+
+  commit() {
+    return {
+      select: this.#select,
+      where: this.#where.commit(),
+      update: this.#transaction.commit(),
+    };
+  }
+}
+
+/**
+ * Create a datalog query builder
+ * @example
+ */
+export const select = <Match extends Selector = Selector>(select: Match) =>
+  new Select(select);
+
+export class Transaction<Match extends Selector = Selector> {
+  #updates: Array<Update<Match>> = [];
+
+  constructor(...updates: Array<Update<Match>>) {
+    this.#updates = updates;
   }
 
   assert(edit: Edit<Match>) {
-    return this.transaction.assert(edit);
+    const up = (props: InferBindings<Match>): Array<Instruction> => {
+      return [{ Assert: edit(props) }];
+    };
+    return new Transaction(...this.#updates, up);
   }
 
   retract(edit: Edit<Match>) {
-    return this.transaction.retract(edit);
+    const up = (props: InferBindings<Match>): Array<Instruction> => {
+      return [{ Retract: edit(props) }];
+    };
+    return new Transaction(...this.#updates, up);
   }
 
   upsert(edit: Edit<Match>) {
-    return this.transaction.upsert(edit);
+    const up = (props: InferBindings<Match>): Array<Instruction> => {
+      return [{ Upsert: edit(props) }];
+    };
+    return new Transaction(...this.#updates, up);
+  }
+
+  update(update: Update<Match>) {
+    return new Transaction(...this.#updates, update);
   }
 
   render(view: View<Match>) {
@@ -90,149 +201,17 @@ export class Select<Match extends Selector = Selector> {
     });
   }
 
-  view(attribute: string, view: View<Match>) {
-    return this.update((props) => {
-      const vnode = view(props);
-      return [
-        {
-          Assert: [(props as any).self, attribute, vnode as any] as const,
-        },
-      ];
-    });
-  }
-
-  update(update: Update<Match>) {
-    return {
-      select: this.#select,
-      where: this.#where,
-      update,
-    };
-  }
-
-  commit(): Query<Match> {
-    return {
-      select: this.#select,
-      where: this.#where,
-    };
-  }
-}
-
-/**
- * Create a datalog query builder
- * @example
- */
-export const select = <Match extends Selector = Selector>(select: Match) =>
-  new Select(select);
-
-export class Transaction<Match extends Selector = Selector> {
-  #select: Match;
-  #where: Array<Clause>;
-  #steps: Array<EditStep<Match>> = [];
-
-  constructor(select: Match, where: Array<Clause>) {
-    this.#select = select;
-    this.#where = where;
-  }
-
-  #edit(operation: "Assert" | "Retract" | "Upsert", edit: Edit<Match>) {
-    this.#steps.push({
-      operation,
-      edit,
-    });
-    return this;
-  }
-
-  assert(edit: Edit<Match>) {
-    return this.#edit("Assert", edit);
-  }
-
-  retract(edit: Edit<Match>) {
-    return this.#edit("Retract", edit);
-  }
-
-  upsert(edit: Edit<Match>) {
-    return this.#edit("Upsert", edit);
-  }
-
   commit() {
-    return new Commit(this.#select, this.#where, this.#steps);
+    return (selection: InferBindings<Match>): Array<Instruction> => {
+      const changes: Array<Instruction> = [];
+      for (const update of this.#updates) {
+        changes.push(...update(selection));
+      }
+      return changes;
+    };
   }
 }
 
-export class Commit<Match extends Selector = Selector> {
-  select: Match;
-  where: Array<Clause>;
-  #steps: Array<EditStep<Match>>;
-
-  constructor(
-    select: Match,
-    where: Array<Clause>,
-    steps: Array<EditStep<Match>>,
-  ) {
-    this.select = select;
-    this.where = where;
-    this.#steps = steps;
-  }
-
-  update(selection: InferBindings<Match>): Array<Instruction> {
-    const changes: Array<Instruction> = [];
-    for (const { edit, operation } of this.#steps) {
-      changes.push({
-        [operation]: edit(selection),
-      } as unknown as Instruction);
-    }
-    return changes;
-  }
-}
-
-export const and = (...clauses: Array<Clause>): Clause => ({
-  And: clauses,
-});
-
-export const or = (...clauses: Array<Clause>): Clause => ({
-  Or: clauses,
-});
-
-export const not = (clause: Clause): Clause => ({
-  Not: clause,
-});
-
-/** Case */
-export const match = (
-  entity: Term<Entity>,
-  attribute: Term<Attribute>,
-  value: Term<API.Constant>,
-): Clause => ({
-  Case: [entity, attribute, value],
-});
-
-export const form = <Variables extends Selector>(
-  selector: Variables,
-  confirm: (selector: Selector, bindings: Bindings) => Confirmation,
-): Clause => ({
-  Form: {
-    selector,
-    confirm,
-  },
-});
-
-export const rule = <Match extends Selector = Selector>(
-  input: Selector,
-  rule?: API.Rule<Match>,
-): Clause => ({
-  Rule: {
-    input,
-    rule,
-  },
-});
-
-export const is = (
-  binding: Term<API.Constant>,
-  value: Term<API.Constant>,
-): Clause => ({
-  Is: [binding, value],
-});
-
-export const formula = (formula: Formula): Clause => ({
-  Match: formula,
-});
+export const transaction = <Match extends Selector = Selector>(
+  ...updates: Array<Update<Match>>
+) => new Transaction(...updates);

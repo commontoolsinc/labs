@@ -7,7 +7,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm run build && mocha lib/test/**/*.test.js",
+    "test": "npm run build && mocha lib/**/*.test.js",
     "test-browser": "npm run build && web-test-runner \"lib/test-browser/**/*.test.js\" --node-resolve",
     "build": "wireit",
     "clean": "wireit",
@@ -26,13 +26,13 @@
     "./lib/index.js"
   ],
   "dependencies": {
-    "synopsys": "^2.3.0",
-    "@commontools/common-runner": "^0.0.1",
     "@commontools/common-builder": "^0.0.1",
-    "@gozala/co-dom": "^0.4.0"
+    "@commontools/common-runner": "^0.0.1",
+    "@gozala/co-dom": "^0.4.0",
+    "datalogia": "^0.9.2",
+    "synopsys": "^2.3.0"
   },
   "devDependencies": {
-    "vite": "^5.3.3",
     "@types/mocha": "^10.0.7",
     "@types/node": "^20.14.10",
     "@types/sax": "^1.2.7",
@@ -40,6 +40,7 @@
     "mocha": "^10.6.0",
     "tslib": "^2.6.2",
     "typescript": "^5.2.2",
+    "vite": "^5.3.3",
     "wireit": "^0.14.4"
   },
   "wireit": {
