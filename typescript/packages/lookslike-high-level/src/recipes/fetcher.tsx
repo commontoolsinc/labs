@@ -89,7 +89,6 @@ export default behavior({
     .match($.self, "~/on/reset", $.event)
     .match($.self, "my/request", $.request)
     .update(({ self, request }) => {
-      debugger
       return [{ Retract: [self, "my/request", request] }];
     }),
 
