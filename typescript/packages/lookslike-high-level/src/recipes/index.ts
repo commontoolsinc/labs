@@ -31,8 +31,9 @@ addRecipe(counter, counterSrc);
 export { counter };
 
 import countersSrc from "./counters.tsx?raw";
+import counterSpec from "./counters.md?raw";
 import counters from "./counters.js";
-addRecipe(counters, countersSrc);
+addRecipe(counters, countersSrc, counterSpec);
 export { counters };
 
 import dataDesignerSrc from "./dataDesigner.ts?raw";
