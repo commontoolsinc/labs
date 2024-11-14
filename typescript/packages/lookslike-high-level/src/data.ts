@@ -186,7 +186,11 @@ export async function saveRecipe(id: string, src: string, spec?: string) {
 }
 
 addCharms([
-  //await runPersistent(<recipe>, <default inputs>, <unique name for a stable id>)
+  await runPersistent(
+    allRecipes.counters,
+    { title: "jake demo" },
+    "hello world",
+  ),
 ]);
 
 export type RecipeManifest = {

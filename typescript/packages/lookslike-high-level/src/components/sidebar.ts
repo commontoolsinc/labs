@@ -14,7 +14,6 @@ import {
 } from "../data.js";
 import {
   addRecipe,
-  allRecipesByName,
   cell,
   CellImpl,
   getRecipe,
@@ -28,6 +27,7 @@ import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.js";
 import { render } from "@commontools/common-html";
+import { LLMClient } from "@commontools/llm-client";
 
 const toasty = (message: string) => {
   const toastEl = document.createElement("div");
@@ -91,6 +91,7 @@ export class CommonSidebar extends LitElement {
   workingSpec: string = "";
 
   private homeRef = createRef<HTMLElement>();
+  private editorRef = createRef<HTMLElement>();
   private homeCharm: Promise<CellImpl<Charm>> | null = null;
   private linkedCharms: CellImpl<Charm>[] = [];
 
@@ -289,6 +290,44 @@ export class CommonSidebar extends LitElement {
       });
     };
 
+    // FIXME(jake): implement "fix this" button after this works
+    const askLLM = async () => {
+      const originalSrc = src;
+      const originalSpec =
+        spec ||
+        "there is no spec, describe the app in a descriptive and delcarative way";
+      const newSpec = this.workingSpec;
+      const prefill = `\`\`\`tsx\n`; // fixme - put the imports from originalSrc?
+      const url =
+        typeof window !== "undefined"
+          ? window.location.protocol + "//" + window.location.host + "/api/llm"
+          : "//api/llm";
+      const llm = new LLMClient(url);
+      const response = await llm.sendRequest(
+        {
+          system:
+            "You are a helpful assistant that can help me improve my recipe.",
+          messages: [
+            originalSpec,
+            `\`\`\`tsx\n${originalSrc}\n\`\`\``,
+            newSpec,
+            prefill,
+          ],
+          model: "anthropic:claude-3-5-sonnet-latest",
+        },
+        (text) => console.log(text),
+      );
+      const newSrc = response.match(/```tsx\n([\s\S]+?)```/)?.[1];
+      if (!newSrc) {
+        console.error("No tsx found in text", response);
+        return;
+      }
+      // tell the editor this is the new source
+      if (this.editorRef.value) {
+        this.editorRef.value.source = newSrc;
+      }
+    };
+
     const exportData = () => {
       const data = this.focusedCharm?.sourceCell?.getAsQueryResult()?.argument;
       if (!data) return;
@@ -397,7 +436,7 @@ export class CommonSidebar extends LitElement {
                     >🔗 Share</a
                   >
                 </div>
-                <div>
+                <div style="margin-bottom: 4px">
                   <button @click=${() => runRecipe(false)}>
                     🔄 Run w/Current Data
                   </button>
@@ -407,6 +446,8 @@ export class CommonSidebar extends LitElement {
                   <button @click=${() => exportData()}>
                     📄 Export Arguments
                   </button>
+                  <button @click=${() => askLLM()}>🤖 LLM</button>
+
                   ${when(
                     this.compileErrors,
                     () =>
@@ -417,11 +458,23 @@ ${this.compileErrors}</pre
                       >`,
                     () => html``,
                   )}
+
+                  <div>SPEC</div>
+                  <div>
+                    <os-code-editor
+                      slot="content"
+                      language="text/markdown"
+                      .source=${spec}
+                      @doc-change=${onSpecChanged}
+                    ></os-code-editor>
+                  </div>
+
                   <os-code-editor
                     slot="content"
                     language="text/x.typescript"
                     .source=${src}
                     @doc-change=${onSrcChanged}
+                    ${ref(this.editorRef)}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
