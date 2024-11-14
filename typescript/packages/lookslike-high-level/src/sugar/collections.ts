@@ -26,8 +26,8 @@ export class Collection {
     }
   }
   static includes(collection: Term<Entity>, member: Term<Entity>): Clause {
-    const key = $[`${member["?"].id}.key`]
-    const value = $[`${member["?"].id}.value`]
+    const key = $[`${collection["?"].id}.key`]
+    const value = $[`${collection["?"].id}.value`]
     return {
       And: [
         { Case: [collection, key, value] },
