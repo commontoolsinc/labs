@@ -178,5 +178,10 @@ export const event = <T = any>(
   f: (event: T, self: any) => any,
 ): OpaqueRef<T> => handler(f)(input);
 
-export const render = <T = any, R = any>(f: (input: T) => R): OpaqueRef<R> =>
-  lift<any, any>(f)({ $alias: { path: ["argument"] } });
+// unsafe closures: like derive, but doesn't need any arguments
+export const compute: <T>(fn: () => T) => OpaqueRef<T> = (fn: () => any) =>
+  lift(fn)(undefined);
+
+// unsafe closures: alias compute, since render(() => <div>{var}</div>) might be
+// a common pattern.
+export const render = compute;
