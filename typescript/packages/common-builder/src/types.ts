@@ -41,10 +41,12 @@ export type OpaqueRefMethods<T> = {
     external?: any;
     frame: Frame;
   };
+  unsafe_bindToRecipeAndPath(recipe: Recipe, path: PropertyKey[]): void;
   map<S>(
     fn: (value: T extends Array<infer U> ? Opaque<U> : Opaque<T>) => Opaque<S>,
   ): Opaque<S[]>;
   [Symbol.iterator](): Iterator<T>;
+  [Symbol.toPrimitive](): T;
   [isOpaqueRefMarker]: true;
 };
 
@@ -125,12 +127,20 @@ export type Node = {
   outputs: JSON;
 };
 
+// Used to get back to original recipe from a JSONified representation.
+export const unsafe_originalRecipe = Symbol("unsafe_originalRecipe");
+export const unsafe_parentRecipe = Symbol("unsafe_parentRecipe");
+export const unsafe_materializeFactory = Symbol("unsafe_materializeFactory");
+
 export type Recipe = {
   argumentSchema: JSON;
   resultSchema: JSON;
   initial?: JSON;
   result: JSON;
   nodes: Node[];
+  [unsafe_originalRecipe]?: Recipe;
+  [unsafe_parentRecipe]?: Recipe;
+  [unsafe_materializeFactory]?: (log: any) => (path: PropertyKey[]) => any;
 };
 
 export function isRecipe(value: any): value is Recipe {
@@ -173,9 +183,17 @@ export function isShadowRef(value: any): value is ShadowRef {
   );
 }
 
+export type UnsafeBinding = {
+  recipe: Recipe;
+  materialize: (path: PropertyKey[]) => any;
+  parent?: UnsafeBinding;
+};
+
 export type Frame = {
   parent?: Frame;
   cause?: any;
+  opaqueRefs: Set<OpaqueRef<any>>;
+  unsafe_binding?: UnsafeBinding;
 };
 
 const isStaticMarker = Symbol("isStatic");

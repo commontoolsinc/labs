@@ -16,6 +16,7 @@ import {
   Frame,
   ShadowRef,
   isShadowRef,
+  UnsafeBinding,
 } from "./types.js";
 import { createShadowRef, opaqueRef } from "./opaque-ref.js";
 import {
@@ -158,6 +159,10 @@ function factoryFromRecipe<T, R>(
   inputs = collectCellsAndNodes(inputs);
   outputs = collectCellsAndNodes(outputs);
 
+  // [For unsafe bindings] Also collect otherwise disconnected cells and nodes,
+  // since they might only be mentioned via a code closure in a lifted function.
+  getTopFrame()?.opaqueRefs.forEach((ref) => collectCellsAndNodes(ref));
+
   // Then assign paths on the recipe cell for all cells. For now we just assign
   // incremental counters, since we don't have access to the original variable
   // names. Later we might do something more clever by analyzing the code (we'll
@@ -265,13 +270,14 @@ function factoryFromRecipe<T, R>(
     nodes: serializedNodes,
     toJSON: () => recipeToJSON(recipe),
   };
+
   const module: Module & toJSON = {
     type: "recipe",
     implementation: recipe,
     toJSON: () => moduleToJSON(module),
   };
 
-  return Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
+  const recipeFactory = Object.assign((inputs: Opaque<T>): OpaqueRef<R> => {
     const outputs = opaqueRef<R>();
     const node: NodeRef = {
       module,
@@ -285,18 +291,36 @@ function factoryFromRecipe<T, R>(
 
     return outputs;
   }, recipe) satisfies RecipeFactory<T, R>;
+
+  // Bind all cells to the recipe
+  // TODO: Does OpaqueRef cause issues here?
+  [...cells]
+    .filter((cell) => !cell.export().path.length) // Only bind root cells
+    .forEach((cell) =>
+      cell.unsafe_bindToRecipeAndPath(recipeFactory, paths.get(cell)!),
+    );
+
+  return recipeFactory;
 }
 
 const frames: Frame[] = [];
 
 export function pushFrame(frame?: Frame): Frame {
-  if (!frame) frame = { parent: getTopFrame() };
+  if (!frame) frame = { parent: getTopFrame(), opaqueRefs: new Set() };
   frames.push(frame);
   return frame;
 }
 
-export function pushFrameFromCause(cause: any): Frame {
-  const frame = { parent: getTopFrame(), cause };
+export function pushFrameFromCause(
+  cause: any,
+  unsafe_binding?: UnsafeBinding,
+): Frame {
+  const frame = {
+    parent: getTopFrame(),
+    cause,
+    opaqueRefs: new Set(),
+    ...(unsafe_binding ? { unsafe_binding } : {}),
+  };
   frames.push(frame);
   return frame;
 }

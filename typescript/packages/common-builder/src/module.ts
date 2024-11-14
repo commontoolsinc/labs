@@ -91,11 +91,6 @@ export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
   });
 }
 
-export const derive = <In, Out>(
-  input: Opaque<In>,
-  f: (input: In) => Out,
-): OpaqueRef<Out> => lift(f)(input);
-
 export function handler<E, T>(
   handler: (event: E, props: T) => any,
 ): ModuleFactory<T, E> {
@@ -170,3 +165,18 @@ export function isolated<T, R>(
     } satisfies JavaScriptModuleDefinition,
   });
 }
+
+// Lift a function and directly apply inputs
+export const derive = <In, Out>(
+  input: Opaque<In>,
+  f: (input: In) => Out,
+): OpaqueRef<Out> => lift(f)(input);
+
+// Like `derive`, but for event handlers
+export const event = <T = any>(
+  input: Opaque<T>,
+  f: (event: T, self: any) => any,
+): OpaqueRef<T> => handler(f)(input);
+
+export const render = <T = any, R = any>(f: (input: T) => R): OpaqueRef<R> =>
+  lift<any, any>(f)({ $alias: { path: ["argument"] } });

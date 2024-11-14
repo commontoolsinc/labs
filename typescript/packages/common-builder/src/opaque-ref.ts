@@ -6,6 +6,8 @@ import {
   NodeFactory,
   isOpaqueRefMarker,
   ShadowRef,
+  Recipe,
+  UnsafeBinding,
 } from "./types.js";
 import { setValueAtPath, hasValueAtPath } from "./utils.js";
 import { getTopFrame, recipe } from "./recipe.js";
@@ -34,14 +36,18 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
     frame: getTopFrame()!,
   };
 
+  let unsafe_binding: { recipe: Recipe; path: PropertyKey[] } | undefined;
+
   function createNestedProxy(
     path: PropertyKey[],
     target?: any,
   ): OpaqueRef<any> {
     const methods: OpaqueRefMethods<any> = {
-      get: () => proxy,
+      get: () => unsafe_materialize(unsafe_binding, path),
       set: (newValue: Opaque<any>) => {
-        setValueAtPath(store, ["value", ...path], newValue);
+        if (unsafe_binding)
+          unsafe_materialize(unsafe_binding, path); // TODO: Set value
+        else setValueAtPath(store, ["value", ...path], newValue);
       },
       key: (key: PropertyKey) => createNestedProxy([...path, key]),
       setDefault: (newValue: Opaque<any>) => {
@@ -55,6 +61,8 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
         path,
         ...store,
       }),
+      unsafe_bindToRecipeAndPath: (recipe: Recipe, path: PropertyKey[]) =>
+        (unsafe_binding = { recipe, path }),
       map: <S>(
         fn: (
           value: Opaque<Required<T extends Array<infer U> ? U : T>>,
@@ -92,6 +100,8 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
           },
         };
       },
+      // unsafe way to materialize opaque references at runtime
+      [Symbol.toPrimitive]: () => unsafe_materialize(unsafe_binding, path),
       [isOpaqueRefMarker]: true,
     };
 
@@ -116,9 +126,35 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
   }
 
   const top = createNestedProxy([]) as OpaqueRef<T>;
+
+  store.frame.opaqueRefs.add(top);
+
   return top;
 }
 
 export function createShadowRef(ref: OpaqueRef<any>): ShadowRef {
   return { shadowOf: ref };
+}
+
+function unsafe_materialize(
+  binding: { recipe: Recipe; path: PropertyKey[] } | undefined,
+  path: PropertyKey[],
+) {
+  if (!binding) throw new Error("Can't read value during recipe creation.");
+
+  // Find first frame with unsafe binding
+  let frame = getTopFrame();
+  let unsafe_binding: UnsafeBinding | undefined;
+  while (frame && !unsafe_binding) {
+    unsafe_binding = frame.unsafe_binding;
+    frame = frame.parent;
+  }
+
+  // Walk up the chain until we find the original recipe
+  while (unsafe_binding && unsafe_binding.parent?.recipe === binding.recipe)
+    unsafe_binding = unsafe_binding.parent;
+
+  if (!unsafe_binding) throw new Error("Can't find recipe in parent frames.");
+
+  return unsafe_binding.materialize([...binding.path, ...path]);
 }
