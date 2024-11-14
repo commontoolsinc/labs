@@ -70,6 +70,18 @@ ${typeof this.content === "string"
   }
 }
 
+interface LLMConversation {
+  model: string;
+  system: string;
+  messages: string[];
+}
+
+interface LLMEvalFeedback {
+  score: number;
+  feedback: string;
+  conversation: LLMConversation;
+}
+
 @customElement("common-sidebar")
 export class CommonSidebar extends LitElement {
   @property({ type: Object })
@@ -89,6 +101,9 @@ export class CommonSidebar extends LitElement {
 
   @property({ type: String })
   workingSpec: string = "";
+
+  @property({ type: Object })
+  llmConversation: LLMConversation | null = null;
 
   private homeRef = createRef<HTMLElement>();
   private editorRef = createRef<HTMLElement>();
@@ -290,6 +305,30 @@ export class CommonSidebar extends LitElement {
       });
     };
 
+    const handleEvalFeedback = (
+      score: number,
+      {
+        feedback,
+        compileErrors,
+      }: { feedback?: string; compileErrors?: string },
+    ) => {
+      const evalFeedback = {
+        score: score,
+        conversation: this.llmConversation,
+        feedback,
+        compileErrors,
+      };
+
+      if (score === 1) {
+        console.log("👍 - yay - sending llm feedback to some server");
+      } else {
+        console.log("👎 - boo - sending llm feedback to some server");
+      }
+
+      console.log("evalFeedback", evalFeedback);
+      // TODO(jake): send conversation and score to llm for evals
+    };
+
     // FIXME(jake): implement "fix this" button after this works
     const askLLM = async ({ fixit }: { fixit?: string } = {}) => {
       const originalSrc = src;
@@ -326,15 +365,28 @@ ${this.workingSrc}
       }
 
       const llm = new LLMClient(url);
+
+      const payload = {
+        model: "anthropic:claude-3-5-sonnet-latest",
+        system:
+          "You are a helpful assistant that can help me improve my recipe.",
+        messages,
+      };
+
+      // If this is the first round of the llm conversation, set the payload on the llmConversation property.
+      if (!this.llmConversation) {
+        this.llmConversation = payload;
+      } else {
+        // otherwise, append the new message to the messages array
+        this.llmConversation.messages.push(...payload.messages);
+      }
+
       const response = await llm.sendRequest(
-        {
-          model: "anthropic:claude-3-5-sonnet-latest",
-          system:
-            "You are a helpful assistant that can help me improve my recipe.",
-          messages,
-        },
-        (text) => console.log(text),
+        payload,
+        // (text) => (text) => console.log(text),
       );
+
+      console.log("full response", response);
       const newSrc = response.match(/```tsx\n([\s\S]+?)```/)?.[1];
       if (!newSrc) {
         console.error("No tsx found in text", response);
@@ -465,6 +517,22 @@ ${this.workingSrc}
                   <button @click=${() => askLLM()}>🤖 LLM</button>
                   <button @click=${() => askLLM({ fixit: this.compileErrors })}>
                     🪓 fix it
+                  </button>
+                  <button
+                    @click=${() =>
+                      handleEvalFeedback(1, {
+                        compileErrors: this.compileErrors,
+                      })}
+                  >
+                    👍 +1
+                  </button>
+                  <button
+                    @click=${() =>
+                      handleEvalFeedback(0, {
+                        compileErrors: this.compileErrors,
+                      })}
+                  >
+                    👎 -1
                   </button>
 
                   ${when(
