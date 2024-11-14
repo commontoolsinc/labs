@@ -282,12 +282,13 @@ export class CommonSidebar extends LitElement {
     };
 
     const exportData = () => {
-      const data = this.focusedCharm?.sourceCell?.get()?.argument;
+      const data = this.focusedCharm?.sourceCell?.getAsQueryResult()?.argument;
+      if (!data) return;
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "data.json";
+      a.download = "arguments.json";
       a.click();
     }
 
