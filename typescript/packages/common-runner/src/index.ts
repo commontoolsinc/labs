@@ -44,5 +44,6 @@ export {
   getRecipeId,
   getRecipeSrc,
   allRecipesByName,
+  getRecipeSpec,
 } from "./recipe-map.js";
 export { type Cancel, type AddCancel, useCancelGroup } from "./cancel.js";

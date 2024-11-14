@@ -19,6 +19,7 @@ import {
   raw,
   type ReactivityLog,
   run,
+  getRecipeSpec,
 } from "@commontools/common-runner";
 import { createStorage } from "./storage.js";
 import * as allRecipes from "./recipes/index.js";
@@ -83,9 +84,8 @@ export async function runPersistent(
     (recipe.argumentSchema as any).type === "object"
   ) {
     const properties = (recipe.argumentSchema as any).properties;
-    const inputProperties = typeof inputs === "object" && inputs !== null
-      ? Object.keys(inputs)
-      : [];
+    const inputProperties =
+      typeof inputs === "object" && inputs !== null ? Object.keys(inputs) : [];
     for (const key in properties) {
       if (
         !(key in inputProperties) &&
@@ -128,9 +128,10 @@ export async function syncCharm(
   return storage.syncCell(entityId, waitForStorage);
 }
 
-export const BLOBBY_SERVER_URL = typeof window !== "undefined"
-  ? window.location.protocol + "//" + window.location.host + "/api/blobby"
-  : "//api/blobby";
+export const BLOBBY_SERVER_URL =
+  typeof window !== "undefined"
+    ? window.location.protocol + "//" + window.location.host + "/api/blobby"
+    : "//api/blobby";
 
 const recipesKnownToStorage = new Set<string>();
 
@@ -138,30 +139,34 @@ export async function syncRecipe(id: string) {
   if (getRecipe(id)) {
     if (recipesKnownToStorage.has(id)) return;
     const src = getRecipeSrc(id);
-    if (src) saveRecipe(id, src);
+    const spec = getRecipeSpec(id);
+    if (src) saveRecipe(id, src, spec);
     return;
   }
 
   const response = await fetch(`${BLOBBY_SERVER_URL}/blob/${id}`);
   let src: string;
+  let spec: string;
   try {
     const resp = await response.json();
     src = resp.src;
+    spec = resp.spec;
   } catch (e) {
     src = await response.text();
+    spec = "";
   }
 
   const { recipe, errors } = await buildRecipe(src);
   if (errors) throw new Error(errors);
 
-  const recipeId = addRecipe(recipe!, src);
+  const recipeId = addRecipe(recipe!, src, spec);
   if (id !== recipeId) {
     throw new Error(`Recipe ID mismatch: ${id} !== ${recipeId}`);
   }
   recipesKnownToStorage.add(recipeId);
 }
 
-export async function saveRecipe(id: string, src: string) {
+export async function saveRecipe(id: string, src: string, spec?: string) {
   if (recipesKnownToStorage.has(id)) return;
   recipesKnownToStorage.add(id);
 
@@ -174,6 +179,7 @@ export async function saveRecipe(id: string, src: string) {
     body: JSON.stringify({
       src,
       recipe: JSON.parse(JSON.stringify(getRecipe(id))),
+      spec,
     }),
   });
   return response.ok;
@@ -190,8 +196,8 @@ export type RecipeManifest = {
 
 export const recipes: RecipeManifest[] = Object.entries(allRecipes).map(
   ([name, recipe]) => ({
-    name: (recipe.argumentSchema as { description: string })?.description ??
-      name,
+    name:
+      (recipe.argumentSchema as { description: string })?.description ?? name,
     recipeId: addRecipe(recipe),
   }),
 );

@@ -1,25 +1,27 @@
-import { LitElement, html, css, PropertyValues } from "lit";
+import { css, html, LitElement, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { when } from "lit/directives/when.js";
 import { style } from "@commontools/common-ui";
 import {
+  addCharms,
   Charm,
   charms,
+  NAME,
   recipes,
-  UI,
   runPersistent,
   TYPE,
-  addCharms,
-  NAME,
+  UI,
 } from "../data.js";
 import {
-  CellImpl,
   addRecipe,
+  allRecipesByName,
   cell,
+  CellImpl,
   getRecipe,
   getRecipeSrc,
   isCell,
   run,
+  getRecipeSpec,
 } from "@commontools/common-runner";
 import { buildRecipe } from "../localBuild.js";
 import { watchCell } from "../watchCell.js";
@@ -61,8 +63,8 @@ export class CommonDebug extends LitElement {
     return html`
       <pre slot="content">
 ${typeof this.content === "string"
-        ? this.content
-        : JSON.stringify(this.content, null, 2)}</pre
+          ? this.content
+          : JSON.stringify(this.content, null, 2)}</pre
       >
     `;
   }
@@ -84,6 +86,9 @@ export class CommonSidebar extends LitElement {
 
   @property({ type: String })
   workingSrc: string = "";
+
+  @property({ type: String })
+  workingSpec: string = "";
 
   private homeRef = createRef<HTMLElement>();
   private homeCharm: Promise<CellImpl<Charm>> | null = null;
@@ -164,9 +169,9 @@ export class CommonSidebar extends LitElement {
             if (value.get()?.resultRef) value = value.get().resultRef.cell;
 
             if (value !== this.focusedCharm) {
-              if (value.get()?.[NAME] && value.get()?.[UI])
+              if (value.get()?.[NAME] && value.get()?.[UI]) {
                 linkedCharms.add(value);
-              else {
+              } else {
                 console.log("not a charm", initialCell, value.get(), parents);
               }
             }
@@ -183,10 +188,10 @@ export class CommonSidebar extends LitElement {
   }
 
   override render() {
-    const prompt = this.getFieldOrDefault("prompt", "");
     const data = this.getFieldOrDefault("data", {});
     const recipeId = this.focusedCharm?.sourceCell?.get()?.[TYPE];
     const recipe = getRecipe(recipeId);
+    const spec = getRecipeSpec(recipeId);
     const src = getRecipeSrc(recipeId);
     const schema = recipe?.argumentSchema || {};
     const query = this.getFieldOrDefault("query", {});
@@ -228,7 +233,7 @@ export class CommonSidebar extends LitElement {
       <os-sidebar-close-button slot="toolbar-end"></os-sidebar-close-button> `;
 
     const onSpecChanged = (e: CustomEvent) => {
-      this.setField("prompt", e.detail.state.doc.toString());
+      this.workingSpec = e.detail.state.doc.toString();
     };
 
     const onQueryChanged = (e: CustomEvent) => {
@@ -243,19 +248,21 @@ export class CommonSidebar extends LitElement {
       this.workingSrc = e.detail.state.doc.toString();
     };
 
+    // FIXME(jake): this should only be called when src changes, not on every render.
     if (this.workingSrc) {
       buildRecipe(this.workingSrc).then(({ errors }) => {
         this.compileErrors = errors || "";
       });
     }
 
+    // NOTE(jake): maybe rename this to "compileAndSave" or something?
     const runRecipe = (newData: boolean = false) => {
       buildRecipe(this.workingSrc).then(({ recipe, errors }) => {
         this.compileErrors = errors || "";
 
         if (!recipe) return;
         // NOTE(ja): adding a recipe triggers saving to blobby
-        addRecipe(recipe, this.workingSrc);
+        addRecipe(recipe, this.workingSrc, this.workingSpec);
 
         // TODO(ja): we should check if the recipe arguments have changed
         // TODO(ja): if default values have changed and source still has to old
@@ -285,13 +292,15 @@ export class CommonSidebar extends LitElement {
     const exportData = () => {
       const data = this.focusedCharm?.sourceCell?.getAsQueryResult()?.argument;
       if (!data) return;
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json",
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = "arguments.json";
       a.click();
-    }
+    };
 
     const copyRecipeLink = (event: Event) => {
       const target = event.target as HTMLAnchorElement;
@@ -303,39 +312,39 @@ export class CommonSidebar extends LitElement {
     return html`
       <os-navstack>
         ${when(
-      this.sidebarTab === "home",
-      () =>
-        html`<os-navpanel safearea>
+          this.sidebarTab === "home",
+          () =>
+            html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group safearea>
                 <div slot="label">Pinned</div>
                 <div ${ref(this.homeRef)}></div>
               </os-sidebar-group>
             </os-navpanel>`,
-      () => html``,
-    )}
+          () => html``,
+        )}
         ${when(
-      this.sidebarTab === "links",
-      () =>
-        html`<os-navpanel safearea>
+          this.sidebarTab === "links",
+          () =>
+            html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">Linked Charms</div>
                 <div>
                   ${this.linkedCharms.map(
-          (charm) => html`
+                    (charm) => html`
                       <common-charm-link .charm=${charm}></common-charm-link>
                     `,
-        )}
+                  )}
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-      () => html``,
-    )}
+          () => html``,
+        )}
         ${when(
-      this.sidebarTab === "query",
-      () =>
-        html`<os-navpanel safearea>
+          this.sidebarTab === "query",
+          () =>
+            html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">Query</div>
@@ -344,19 +353,19 @@ export class CommonSidebar extends LitElement {
                     slot="content"
                     language="application/json"
                     .source=${watchCell(query, (q) =>
-          JSON.stringify(q, null, 2),
-        )}
+                      JSON.stringify(q, null, 2),
+                    )}
                     @doc-change=${onQueryChanged}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-      () => html``,
-    )}
+          () => html``,
+        )}
         ${when(
-      this.sidebarTab === "schema",
-      () =>
-        html`<os-navpanel safearea>
+          this.sidebarTab === "schema",
+          () =>
+            html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">Schema</div>
@@ -369,12 +378,12 @@ export class CommonSidebar extends LitElement {
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-      () => html``,
-    )}
+          () => html``,
+        )}
         ${when(
-      this.sidebarTab === "source",
-      () =>
-        html`<os-navpanel safearea>
+          this.sidebarTab === "source",
+          () =>
+            html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">
@@ -399,10 +408,15 @@ export class CommonSidebar extends LitElement {
                     📄 Export Arguments
                   </button>
                   ${when(
-          this.compileErrors,
-          () => html`<pre style='color: white; background: #800; padding: 4px'>${this.compileErrors}</pre>`,
-          () => html``,
-        )}
+                    this.compileErrors,
+                    () =>
+                      html`<pre
+                        style="color: white; background: #800; padding: 4px"
+                      >
+${this.compileErrors}</pre
+                      >`,
+                    () => html``,
+                  )}
                   <os-code-editor
                     slot="content"
                     language="text/x.typescript"
@@ -412,12 +426,12 @@ export class CommonSidebar extends LitElement {
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-      () => html``,
-    )}
+          () => html``,
+        )}
         ${when(
-      this.sidebarTab === "recipe-json",
-      () =>
-        html`<os-navpanel safearea>
+          this.sidebarTab === "recipe-json",
+          () =>
+            html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">Recipe JSON</div>
@@ -430,12 +444,12 @@ export class CommonSidebar extends LitElement {
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-      () => html``,
-    )}
+          () => html``,
+        )}
         ${when(
-      this.sidebarTab === "data",
-      () =>
-        html`<os-navpanel safearea>
+          this.sidebarTab === "data",
+          () =>
+            html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">Data</div>
@@ -444,19 +458,19 @@ export class CommonSidebar extends LitElement {
                     slot="content"
                     language="application/json"
                     .source=${watchCell(data, (q) =>
-          JSON.stringify(q, null, 2),
-        )}
+                      JSON.stringify(q, null, 2),
+                    )}
                     @doc-change=${onDataChanged}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-      () => html``,
-    )}
+          () => html``,
+        )}
         ${when(
-      this.sidebarTab === "prompt",
-      () =>
-        html`<os-navpanel safearea>
+          this.sidebarTab === "prompt",
+          () =>
+            html`<os-navpanel safearea>
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">
@@ -473,14 +487,14 @@ export class CommonSidebar extends LitElement {
                   <os-code-editor
                     slot="content"
                     language="text/markdown"
-                    .source=${watchCell(prompt)}
+                    .source=${spec}
                     @doc-change=${onSpecChanged}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,
-      () => html``,
-    )}
+          () => html``,
+        )}
       </os-navstack>
     `;
   }
