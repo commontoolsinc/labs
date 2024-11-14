@@ -31,6 +31,7 @@ export default behavior({
 
   blankState: select({ self: $.self, url: $.url, form: $.form })
     .match($.self, "url", $.url)
+    .match($.self, subview('form'), $.form)
     .not.match($.self, "my/request", $._)
     .render(({ self, url, form }) => (
       <div title="Effect Demo" entity={self}>
