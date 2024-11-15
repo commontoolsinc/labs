@@ -1,6 +1,7 @@
 // vite.config.js
 import { defineConfig } from "vite";
 import path from "path";
+import { VitePWA } from "vite-plugin-pwa";
 
 const commonPackages = [
   "@commontools/common-builder",
@@ -68,6 +69,7 @@ export default defineConfig({
       "*.wasm": {
         "Content-Type": "application/wasm",
       },
+      "Service-Worker-Allowed": "/data/",
     },
   },
   test: {

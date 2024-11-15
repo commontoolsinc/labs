@@ -31,11 +31,15 @@ import { buildRecipe } from "./localBuild.js";
 import "./recipes/todo-list-as-task.js";
 import "./recipes/playlist.js";
 
-import * as readingList from './recipes/readingList.jsx'
 import * as keywords from './recipes/keywords.jsx'
 import * as workbench from './recipes/workbench.jsx'
+import * as dungeon from "./recipes/dungeon.jsx";
+import * as charmExample from "./recipes/charm.jsx";
+import * as readingList from "./recipes/readingList.jsx";
+import Hello from "./recipes/hello.jsx";
 import Fetcher from "./recipes/fetcher.jsx";
 import Fetch from "./effects/fetch.js";
+import { UI as View } from "@commontools/common-system";
 
 export type Charm = {
   [NAME]?: string;
@@ -214,12 +218,8 @@ export async function saveRecipe(
 }
 
 addCharms([
-  // charmExample.spawn({
-  //   v6: true,
-  // }),
-  // dungeon.spawn({
-  //   v: 2
-  // }),
+  View.spawn(),
+  Hello.spawn({ hello: { v: 1 } }),
   readingList.spawn({
     v: 10
   }),

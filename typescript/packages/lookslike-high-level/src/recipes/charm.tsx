@@ -1,5 +1,11 @@
-import { h, behavior, $, Reference, select, View } from "@commontools/common-system";
-import { view } from "../sugar.jsx";
+import {
+  h,
+  behavior,
+  $,
+  Reference,
+  select,
+  View,
+} from "@commontools/common-system";
 import { analyzeRuleDependencies } from "../viz.js";
 
 export const source = { clicker: { v: 33 } };
@@ -10,7 +16,7 @@ const init = select({ self: $.self })
   .commit();
 
 // // can use q.clicks(0) to express the default
-const viewCount = view(q => {
+const viewCount = view((q) => {
   return (
     <div title={`Clicks ${q.clicks}`} entity={q.self}>
       <div>{q.clicks}</div>
@@ -41,10 +47,10 @@ export const rules = behavior({
   init,
   viewCount,
   onClick,
-  onReset
+  onReset,
 });
 
-const mermaid = analyzeRuleDependencies(rules.rules as any)
-console.log(mermaid)
+const mermaid = analyzeRuleDependencies(rules.rules as any);
+console.log(mermaid);
 
 export const spawn = (input: {} = source) => rules.spawn(input);
