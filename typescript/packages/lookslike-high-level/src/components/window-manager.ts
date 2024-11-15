@@ -323,135 +323,135 @@ export class CommonWindowManager extends LitElement {
     };
 
     return html`
-      <common-xxx-import @common-data=${onImportLocalData}>
-        <os-chrome
-          ?wide=${this.wideSidebar}
-          locationtitle=${this.focusedProxy?.[NAME] || "Untitled"}
-          @location=${this.onLocationClicked}
-        >
-          <os-avatar
-            slot="toolbar-start"
-            name="Ben"
-            .onclick=${this.onHome}
-          ></os-avatar>
+      <os-chrome
+        ?wide=${this.wideSidebar}
+        locationtitle=${this.focusedProxy?.[NAME] || "Untitled"}
+        @location=${this.onLocationClicked}
+      >
+        <os-avatar
+          slot="toolbar-start"
+          name="Ben"
+          .onclick=${this.onHome}
+        ></os-avatar>
 
-          <os-dialog .open=${this.searchOpen} @closedialog=${onCloseDialog}>
-            <os-ai-box
-              @submit=${onSearchSubmit}
-              placeholder="Search or imagine..."
-            ></os-ai-box>
+        <os-dialog .open=${this.searchOpen} @closedialog=${onCloseDialog}>
+          <os-ai-box
+            @submit=${onSearchSubmit}
+            placeholder="Search or imagine..."
+          ></os-ai-box>
 
-            <os-charm-chip-group>
-              ${repeat(
-                this.charms,
-                (charm) => charm.entityId!.toString(),
-                (charm) => {
-                  if (!charm.get()) return;
-
-                  const charmId = charm.entityId!;
-
-                  // Create a new ref for this charm
-                  let charmRef = this.charmRefs.get(JSON.stringify(charmId));
-                  if (!charmRef) {
-                    charmRef = createRef<HTMLElement>();
-                    this.charmRefs.set(JSON.stringify(charmId), charmRef);
-                    this.newCharmRefs.push([charm, charmRef]);
-                  }
-
-                  const onNavigate = () => {
-                    this.openCharm(JSON.stringify(charmId));
-                    this.searchOpen = false;
-                  };
-
-                  return html` <os-charm-chip
-                    icon=${charm.getAsQueryResult().icon || "search"}
-                    text=${charm.getAsQueryResult()[NAME] || "Untitled"}
-                    .highlight=${JSON.stringify(charm.entityId) ===
-                    JSON.stringify(this.focusedCharm?.entityId)}
-                    @click=${onNavigate}
-                  ></os-charm-chip>`;
-                },
-              )}
-            </os-charm-chip-group>
-          </os-dialog>
-
-          <os-fabgroup class="pin-br" slot="overlay" @submit=${onAiBoxSubmit}>
+          <os-charm-chip-group>
             ${repeat(
-              Array.isArray(this.suggestions) ? this.suggestions : [],
-              (suggestion) => suggestion.prompt,
-              (suggestion) => html`
-                <os-bubble
-                  icon=${suggestion.behavior === "fork" ? "call_split" : "add"}
-                  text=${suggestion.prompt}
-                  @click=${() => onSuggestionsSelected(suggestion)}
-                ></os-bubble>
-              `,
+              this.charms,
+              (charm) => charm.entityId!.toString(),
+              (charm) => {
+                if (!charm.get()) return;
+
+                const charmId = charm.entityId!;
+
+                // Create a new ref for this charm
+                let charmRef = this.charmRefs.get(JSON.stringify(charmId));
+                if (!charmRef) {
+                  charmRef = createRef<HTMLElement>();
+                  this.charmRefs.set(JSON.stringify(charmId), charmRef);
+                  this.newCharmRefs.push([charm, charmRef]);
+                }
+
+                const onNavigate = () => {
+                  this.openCharm(JSON.stringify(charmId));
+                  this.searchOpen = false;
+                };
+
+                return html` <os-charm-chip
+                  icon=${charm.getAsQueryResult().icon || "search"}
+                  text=${charm.getAsQueryResult()[NAME] || "Untitled"}
+                  .highlight=${JSON.stringify(charm.entityId) ===
+                  JSON.stringify(this.focusedCharm?.entityId)}
+                  @click=${onNavigate}
+                ></os-charm-chip>`;
+              },
             )}
-          </os-fabgroup>
-          ${this.charms.length === 0
-            ? html`
+          </os-charm-chip-group>
+        </os-dialog>
+
+        <os-fabgroup class="pin-br" slot="overlay" @submit=${onAiBoxSubmit}>
+          ${repeat(
+            Array.isArray(this.suggestions) ? this.suggestions : [],
+            (suggestion) => suggestion.prompt,
+            (suggestion) => html`
+              <os-bubble
+                icon=${suggestion.behavior === "fork" ? "call_split" : "add"}
+                text=${suggestion.prompt}
+                @click=${() => onSuggestionsSelected(suggestion)}
+              ></os-bubble>
+            `,
+          )}
+        </os-fabgroup>
+        ${this.charms.length === 0
+          ? html`
+              <common-import @common-data=${onImportLocalData}>
                 <div class="empty-state">
                   <div style="display: flex; align-items: center;">
                     <os-ai-icon></os-ai-icon>
                     <p style="margin-left: 10px;">Imagine or import to begin</p>
                   </div>
                 </div>
-              `
-            : html``}
-          ${repeat(
-            this.charms,
-            (charm) => charm.entityId!.toString(),
-            (charm) => {
-              if (!charm.get()) return;
+              </common-import>
+            `
+          : html``}
+        ${repeat(
+          this.charms,
+          (charm) => charm.entityId!.toString(),
+          (charm) => {
+            if (!charm.get()) return;
 
-              const charmId = charm.entityId!;
+            const charmId = charm.entityId!;
 
-              // Create a new ref for this charm
-              let charmRef = this.charmRefs.get(JSON.stringify(charmId));
-              if (!charmRef) {
-                charmRef = createRef<HTMLElement>();
-                this.charmRefs.set(JSON.stringify(charmId), charmRef);
-                this.newCharmRefs.push([charm, charmRef]);
-              }
+            // Create a new ref for this charm
+            let charmRef = this.charmRefs.get(JSON.stringify(charmId));
+            if (!charmRef) {
+              charmRef = createRef<HTMLElement>();
+              this.charmRefs.set(JSON.stringify(charmId), charmRef);
+              this.newCharmRefs.push([charm, charmRef]);
+            }
 
-              const onNavigate = () => {
-                this.openCharm(JSON.stringify(charmId));
-              };
+            const onNavigate = () => {
+              this.openCharm(JSON.stringify(charmId));
+            };
 
-              return html`
-                <div
-                  class="window ${JSON.stringify(charm.entityId) !==
-                  JSON.stringify(this.focusedCharm?.entityId)
-                    ? "minimized"
-                    : ""}"
-                  id="window-${charmId}"
-                  data-charm-id="${JSON.stringify(charmId)}"
-                >
-                  <div class="window-toolbar">
-                    <h1 class="window-title" @click=${onNavigate}>
-                      ${charm.getAsQueryResult()[NAME]}
-                    </h1>
-                    <button class="close-button" @click="${this.onClose}">
-                      ×
-                    </button>
-                  </div>
-                  <div class="charm" ${ref(charmRef)}></div>
+            return html`
+              <div
+                class="window ${JSON.stringify(charm.entityId) !==
+                JSON.stringify(this.focusedCharm?.entityId)
+                  ? "minimized"
+                  : ""}"
+                id="window-${charmId}"
+                data-charm-id="${JSON.stringify(charmId)}"
+              >
+                <div class="window-toolbar">
+                  <h1 class="window-title" @click=${onNavigate}>
+                    ${charm.getAsQueryResult()[NAME]}
+                  </h1>
+                  <button class="close-button" @click="${this.onClose}">
+                    ×
+                  </button>
                 </div>
-              `;
-            },
-          )}
+                <div class="charm" ${ref(charmRef)}></div>
+              </div>
+            `;
+          },
+        )}
 
-          <os-navstack slot="sidebar">
-            <common-sidebar
-              .focusedProxy=${this.focusedProxy}
-              .focusedCharm=${this.focusedCharm}
-              sidebarTab=${this.sidebarTab}
-              @tab-changed=${onSidebarTabChanged}
-            >
-            </common-sidebar>
-          </os-navstack>
-        </os-chrome>
-      </common-xxx-import>
+        <os-navstack slot="sidebar">
+          <common-sidebar
+            .focusedProxy=${this.focusedProxy}
+            .focusedCharm=${this.focusedCharm}
+            sidebarTab=${this.sidebarTab}
+            @tab-changed=${onSidebarTabChanged}
+          >
+          </common-sidebar>
+        </os-navstack>
+      </os-chrome>
     `;
   }
 
