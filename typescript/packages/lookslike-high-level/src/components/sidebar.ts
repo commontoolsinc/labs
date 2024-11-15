@@ -14,7 +14,6 @@ import {
 } from "../data.js";
 import {
   addRecipe,
-  allRecipesByName,
   cell,
   CellImpl,
   getRecipe,
@@ -28,6 +27,7 @@ import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.js";
 import { render } from "@commontools/common-html";
+import { LLMClient } from "@commontools/llm-client";
 
 const toasty = (message: string) => {
   const toastEl = document.createElement("div");
@@ -70,6 +70,18 @@ ${typeof this.content === "string"
   }
 }
 
+interface LLMConversation {
+  model: string;
+  system: string;
+  messages: string[];
+}
+
+interface LLMEvalFeedback {
+  score: number;
+  feedback: string;
+  conversation: LLMConversation;
+}
+
 @customElement("common-sidebar")
 export class CommonSidebar extends LitElement {
   @property({ type: Object })
@@ -90,7 +102,11 @@ export class CommonSidebar extends LitElement {
   @property({ type: String })
   workingSpec: string = "";
 
+  @property({ type: Object })
+  llmConversation: LLMConversation | null = null;
+
   private homeRef = createRef<HTMLElement>();
+  private editorRef = createRef<HTMLElement>();
   private homeCharm: Promise<CellImpl<Charm>> | null = null;
   private linkedCharms: CellImpl<Charm>[] = [];
 
@@ -289,6 +305,109 @@ export class CommonSidebar extends LitElement {
       });
     };
 
+    const handleEvalFeedback = (
+      score: number,
+      {
+        feedback,
+        compileErrors,
+      }: { feedback?: string; compileErrors?: string },
+    ) => {
+      const evalFeedback = {
+        score: score,
+        conversation: this.llmConversation,
+        feedback,
+        compileErrors,
+        workingSource: this.workingSrc,
+        workingSpec: this.workingSpec,
+        recipeId,
+        recipe: JSON.parse(JSON.stringify(recipe)),
+        spec,
+        src,
+        schema,
+      };
+
+      if (score === 1) {
+        console.log("👍 - yay - sending llm feedback to some server");
+      } else {
+        console.log("👎 - boo - sending llm feedback to some server");
+      }
+
+      console.log("evalFeedback", evalFeedback);
+      // TODO(jake): send conversation and score to llm for evals
+    };
+
+    // FIXME(jake): implement "fix this" button after this works
+    const askLLM = async ({ fixit }: { fixit?: string } = {}) => {
+      const originalSrc = src;
+      const originalSpec =
+        spec ||
+        "there is no spec, describe the app in a descriptive and delcarative way";
+      const newSpec = this.workingSpec;
+      const prefill = `\`\`\`tsx\n`; // fixme - put the imports from originalSrc?
+      const url =
+        typeof window !== "undefined"
+          ? window.location.protocol + "//" + window.location.host + "/api/llm"
+          : "//api/llm";
+
+      const messages = [
+        originalSpec,
+        `\`\`\`tsx\n${originalSrc}\n\`\`\``,
+        newSpec,
+        prefill,
+      ];
+
+      if (fixit) {
+        console.log("fixit", fixit);
+        const fixitPrompt = `The user asked you to fix the following:
+\`\`\`
+${fixit}
+\`\`\`
+
+Here is the current source code:
+\`\`\`tsx
+${this.workingSrc}
+\`\`\`
+
+RESPOND WITH THE FULL SOURCE CODE - DO NOT INCLUDE ANY OTHER TEXT.
+`;
+        messages.push(fixitPrompt);
+      }
+
+      const llm = new LLMClient(url);
+
+      const payload = {
+        model: "anthropic:claude-3-5-sonnet-latest",
+        system:
+          "You are a helpful assistant that can help me improve my recipe.",
+        messages,
+      };
+
+      // If this is the first round of the llm conversation, set the payload on the llmConversation property.
+      if (!this.llmConversation) {
+        this.llmConversation = payload;
+      } else {
+        // FIXME(jake): make sure we're adding the latest messages to the conversation-- this might be working, idk
+        // otherwise, append the new message to the messages array
+        this.llmConversation.messages.push(...payload.messages);
+      }
+
+      const response = await llm.sendRequest(
+        payload,
+        // (text) => (text) => console.log(text),
+      );
+
+      console.log("full response", response);
+      const newSrc = response.match(/```tsx\n([\s\S]+?)```/)?.[1];
+      if (!newSrc) {
+        console.error("No tsx found in text", response);
+        return;
+      }
+      // tell the editor this is the new source
+      if (this.editorRef.value) {
+        this.editorRef.value.source = newSrc;
+      }
+    };
+
     const exportData = () => {
       const data = this.focusedCharm?.sourceCell?.getAsQueryResult()?.argument;
       if (!data) return;
@@ -387,17 +506,31 @@ export class CommonSidebar extends LitElement {
               ${sidebarNav}
               <os-sidebar-group>
                 <div slot="label">
-                  Source
-
-                  <a
-                    href="/recipe/${recipeId}"
-                    target="_blank"
-                    @click=${copyRecipeLink}
-                    style="float: right"
-                    >🔗 Share</a
+                  <div
+                    style="display: flex; justify-content: space-between; border: 1px solid pink; padding: 10px;"
                   >
+                    <a
+                      href="/recipe/${recipeId}"
+                      target="_blank"
+                      @click=${copyRecipeLink}
+                      style="float: right"
+                      >🔗 Share</a
+                    >
+                    <a
+                      href="https://paas.saga-castor.ts.net/blobby/blob/${recipeId}"
+                      target="_blank"
+                    >
+                      🪄 Spellbook jr</a
+                    >
+                    <a
+                      href="https://paas.saga-castor.ts.net/blobby/blob/${recipeId}/png"
+                      target="_blank"
+                    >
+                      📸 Spellbook screenshot</a
+                    >
+                  </div>
                 </div>
-                <div>
+                <div style="margin: 10px;">
                   <button @click=${() => runRecipe(false)}>
                     🔄 Run w/Current Data
                   </button>
@@ -407,6 +540,27 @@ export class CommonSidebar extends LitElement {
                   <button @click=${() => exportData()}>
                     📄 Export Arguments
                   </button>
+                  <button @click=${() => askLLM()}>🤖 LLM</button>
+                  <button @click=${() => askLLM({ fixit: this.compileErrors })}>
+                    🪓 fix it
+                  </button>
+                  <button
+                    @click=${() =>
+                      handleEvalFeedback(1, {
+                        compileErrors: this.compileErrors,
+                      })}
+                  >
+                    👍 +1
+                  </button>
+                  <button
+                    @click=${() =>
+                      handleEvalFeedback(0, {
+                        compileErrors: this.compileErrors,
+                      })}
+                  >
+                    👎 -1
+                  </button>
+
                   ${when(
                     this.compileErrors,
                     () =>
@@ -417,11 +571,33 @@ ${this.compileErrors}</pre
                       >`,
                     () => html``,
                   )}
+
+                  <div>
+                    <span
+                      style="padding-left: 25px; color: #969696; font-size: 12px;"
+                      >SPEC</span
+                    >
+                    <os-code-editor
+                      slot="content"
+                      language="text/markdown"
+                      .source=${spec}
+                      @doc-change=${onSpecChanged}
+                    ></os-code-editor>
+                  </div>
+                </div>
+
+                <div>
+                  <span
+                    style="padding-left: 25px; color: #969696; font-size: 12px;"
+                    >SOURCE</span
+                  >
+
                   <os-code-editor
                     slot="content"
                     language="text/x.typescript"
                     .source=${src}
                     @doc-change=${onSrcChanged}
+                    ${ref(this.editorRef)}
                   ></os-code-editor>
                 </div>
               </os-sidebar-group>
