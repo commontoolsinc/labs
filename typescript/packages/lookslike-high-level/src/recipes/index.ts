@@ -36,17 +36,6 @@ import counters from "./counters.js";
 addRecipe(counters, countersSrc, counterSpec);
 export { counters };
 
-// llm based changes:
-//   * user updates the spec (maybe put the spec on the same tab as the source for now?)
-//   * we send LLM the conversation:
-//     system: generate a recipe based on user requests using .... (descibe charm framework) ... don't rewrite functions unless needed, do not change the schema, ....
-//     user: (original spec)
-//     ass: (original src)
-//     user: (new spec) --- OR fix: (errors)
-//     ass: ```tsx
-//     import { ... } ...
-//
-
 import d2Src from "./d2.tsx?raw";
 import d2 from "./d2.js";
 addRecipe(d2, d2Src);
