@@ -36,11 +36,6 @@ import counters from "./counters.js";
 addRecipe(counters, countersSrc, counterSpec);
 export { counters };
 
-import d2Src from "./d2.tsx?raw";
-import d2 from "./d2.js";
-addRecipe(d2, d2Src);
-export { d2 };
-
 import dataDesignerSrc from "./dataDesigner.ts?raw";
 import { dataDesigner } from "./dataDesigner.js";
 addRecipe(dataDesigner, dataDesignerSrc);
