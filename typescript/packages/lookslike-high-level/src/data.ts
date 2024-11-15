@@ -53,10 +53,12 @@ import { todoQuery } from "./recipes/todoQuery.jsx";
 import { mealExample } from "./recipes/meal.jsx";
 
 import * as dungeon from "./recipes/dungeon.jsx";
-import * as charmExample from './recipes/charm.jsx'
-import * as readingList from './recipes/readingList.jsx'
+import * as charmExample from "./recipes/charm.jsx";
+import * as readingList from "./recipes/readingList.jsx";
+import Hello from "./recipes/hello.jsx";
 import Fetcher from "./recipes/fetcher.jsx";
 import Fetch from "./effects/fetch.js";
+import { UI as View } from "@commontools/common-system";
 
 export type Charm = {
   [NAME]?: string;
@@ -116,17 +118,19 @@ export async function syncCharm(
 }
 
 addCharms([
+  View.spawn(),
+  Hello.spawn({ hello: { v: 1 } }),
   // charmExample.spawn({
   //   v6: true,
   // }),
   // dungeon.spawn({
   //   v: 2
   // }),
-  readingList.spawn({
-    v: 2
-  }),
-  Fetcher.spawn(),
-  Fetch.spawn(),
+  // readingList.spawn({
+  //   v: 2,
+  // }),
+  // Fetcher.spawn(),
+  // Fetch.spawn(),
   // await runPersistent(charmExample, {}, "Charm Example"),
   // await runPersistent(mealExample, {}, "Meal Example"),
   // await runPersistent(todoQuery, { titleInput: "" }, "Persisted Todos"),

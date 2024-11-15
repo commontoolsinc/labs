@@ -1,5 +1,6 @@
-import * as DB from "synopsys";
+import { Type, Task, refer, Reference, $ } from "synopsys";
 import { run, CellImpl } from "@commontools/common-runner";
+import * as DB from "./db.js";
 import {
   NAME,
   UI,
@@ -8,7 +9,6 @@ import {
 } from "@commontools/common-builder";
 import { html } from "@commontools/common-html";
 
-import { Task } from "synopsys";
 export { refer, Reference, $, _, Task, Instruction, Fact } from "synopsys";
 
 /**
@@ -20,18 +20,24 @@ export interface Behavior<
 > {
   readonly rules: Rules;
 
+  readonly id: Reference;
+
+  fork(self?: Reference): Task.Task<{}, Error>;
+
   spawn(source?: {}): CellImpl<{}>;
 }
 
 export interface Service<Effects extends Record<string, Effect>> {
   readonly rules: Effects;
-  spawn(source?: {}): CellImpl<{}>;
+  // spawn(source?: {}): CellImpl<{}>;
+
+  spawn(source?: {}): {};
 }
 
-export interface Effect<Select extends DB.API.Selector = DB.API.Selector> {
+export interface Effect<Select extends Type.Selector = Type.Selector> {
   select: Select;
-  where: DB.API.Query["where"];
-  perform: (input: DB.API.InferBindings<Select>) => Task.Task<DB.Instruction[]>;
+  where: Type.Where;
+  perform: (input: Type.Selection<Select>) => Task.Task<Type.Instruction[]>;
 }
 
 /**
@@ -40,13 +46,13 @@ export interface Effect<Select extends DB.API.Selector = DB.API.Selector> {
  * and provides an update logic that submits new facts to the database when
  * when result of the selector changes.
  */
-export interface Rule<Select extends DB.API.Selector = DB.API.Selector> {
+export interface Rule<Select extends Type.Selector = Type.Selector> {
   select: Select;
-  where: DB.API.Query["where"];
-  update: (input: DB.API.InferBindings<Select>) => DB.Transaction;
+  where: Type.Where;
+  update: (input: Type.Selection<Select>) => Type.Transaction;
 }
 
-export const toEffect = <Select extends DB.API.Selector = DB.API.Selector>(
+export const toEffect = <Select extends Type.Selector = Type.Selector>(
   rule: Rule<Select>,
 ): Effect<Select> => {
   const effect = rule as (Rule<Select> & { perform?: void }) | Effect<Select>;
@@ -70,10 +76,10 @@ export const service = <Source extends Record<string, any>>(effects: {
 
 class SystemBehavior<Rules extends Record<string, Rule>> {
   rules: Rules;
-  id: DB.Reference;
+  id: Reference;
   constructor(rules: Rules) {
     this.rules = rules;
-    this.id = DB.refer({
+    this.id = refer({
       rules: Object.fromEntries(
         Object.entries(this.rules).map(([name, rule]) => [
           name,
@@ -82,9 +88,46 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
       ),
     });
   }
+
+  *fork(self: Reference = this.id) {
+    const db = yield* DB.local;
+    const subscriptions = [];
+    const changes = [];
+    for (const rule of Object.values(this.rules)) {
+      const query = {
+        select: rule.select,
+        where: [
+          { Match: [self, "==", $.self] },
+          //
+          ...rule.where,
+        ],
+      };
+
+      const subscription = yield* DB.subscribe(
+        query as Type.Query,
+        toEffect(rule),
+      );
+      subscriptions.push(subscription);
+
+      changes.push(...(yield* subscription.poll(db)));
+    }
+
+    if (changes.length) {
+      yield* DB.transact(changes);
+    }
+
+    try {
+      yield* Task.suspend();
+      return {};
+    } finally {
+      for (const subscription of subscriptions) {
+        subscription.abort();
+      }
+    }
+  }
   spawn(source: {} = this.id) {
-    const entity = DB.refer(source);
-    const charm = DB.refer({ entity, rules: this.id });
+    const entity = refer(source);
+    const charm = refer({ entity, rules: this.id });
 
     return run(
       recipe(charm.toString(), () => {
@@ -106,10 +149,10 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
 
 class SystemService<Effects extends Record<string, Effect>> {
   rules: Effects;
-  id: DB.Reference;
+  id: Reference;
   constructor(rules: Effects) {
     this.rules = rules;
-    this.id = DB.refer({
+    this.id = refer({
       rules: Object.fromEntries(
         Object.entries(this.rules).map(([name, rule]) => [
           name,
@@ -118,29 +161,47 @@ class SystemService<Effects extends Record<string, Effect>> {
       ),
     });
   }
-  spawn(source: {} = this.id) {
-    const entity = DB.refer(source);
-    const charm = DB.refer({ entity, rules: this.id });
 
-    return run(
-      recipe(charm.toString(), () => {
-        const cell = createCell({ name: "" });
+  *fork(self: Reference = this.id) {
+    const db = yield* DB.local;
+    const subscriptions = [];
+    const changes = [];
+    for (const rule of Object.values(this.rules)) {
+      const query = {
+        select: rule.select,
+        where: [
+          { Match: [self, "==", $.self] },
+          //
+          ...rule.where,
+        ],
+      };
 
-        return {
-          [NAME]: cell.name,
-          [UI]: html`<common-charm
-            id=${charm.toString()}
-            spell=${() => this}
-            entity=${() => entity}
-            $cell=${cell}
-          />`,
-        };
-      }),
-    );
+      const subscription = yield* DB.subscribe(query as Type.Query, rule);
+      subscriptions.push(subscription);
+
+      changes.push(...(yield* subscription.poll(db)));
+    }
+
+    if (changes.length) {
+      yield* DB.transact(changes);
+    }
+
+    try {
+      yield* Task.suspend();
+    } finally {
+      for (const subscription of subscriptions) {
+        subscription.abort();
+      }
+    }
+  }
+
+  spawn(self: Reference = this.id) {
+    Task.perform(this.fork(self));
+    return {};
   }
 }
 
-class RuleEffect<Select extends DB.API.Selector = DB.API.Selector> {
+class RuleEffect<Select extends Type.Selector = Type.Selector> {
   rule: Rule<Select>;
   constructor(rule: Rule<Select>) {
     this.rule = rule;
@@ -152,13 +213,13 @@ class RuleEffect<Select extends DB.API.Selector = DB.API.Selector> {
   get where() {
     return this.rule.where;
   }
-  update(input: DB.API.InferBindings<Select>) {
+  update(input: Type.Selection<Select>) {
     return this.rule.update(input);
   }
 
   *perform(
-    input: DB.API.InferBindings<Select>,
-  ): Task.Task<DB.Instruction[], never> {
+    input: Type.Selection<Select>,
+  ): Task.Task<Type.Instruction[], never> {
     return [...this.rule.update(input)];
   }
 }
