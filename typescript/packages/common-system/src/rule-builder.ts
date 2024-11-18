@@ -7,8 +7,9 @@ import {
   Attribute,
   API,
   Formula,
+  Variable,
 } from "datalogia";
-import { $, Instruction, Fact } from "synopsys";
+import { $, Instruction, Fact, Constant } from "synopsys";
 import { Node } from "./jsx.js";
 export { $ } from "synopsys";
 
@@ -53,6 +54,20 @@ export class Select<Match extends Selector = Selector> {
     return new Select<Match>(
       this.#select,
       this.#where.match(entity, attribute, value),
+    );
+  }
+
+  select<S extends Selector>(selector: S) {
+    return new Select<S & Match>({...this.#select, ...selector}, this.#where);
+  }
+
+  event<T extends Constant>(name: string) {
+    return new Select<Match & { event: Variable<T> }>(
+      {
+        ...this.#select,
+        event: $.event,
+      },
+      this.#where.match($.self, `~/on/${name}`, $.event),
     );
   }
 

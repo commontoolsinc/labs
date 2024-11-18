@@ -1,23 +1,12 @@
-import { h, behavior, $, Reference, select, View, refer, Instruction, Select, Where } from "@commontools/common-system";
-import { Selector, Variable } from 'datalogia'
-import { analyzeRuleDependencies } from "../viz.js";
+import { h, behavior, $, Reference, select, Select } from "@commontools/common-system";
+import { Variable } from 'datalogia'
 import { build, make } from "../sugar/build.js";
-import { Constant } from "synopsys";
+import { query, queryDefault } from "../sugar/query.js";
+import { event } from "../sugar/event.js";
+import { fetch } from "../effects/fetch.js";
 
 export const source = { readingList: { v: 1 } };
 
-const event = <T extends Record<string, any>, D extends (name: string) => `~/on/${string}`>(name: Parameters<D>[0], additionalTerms?: T) => {
-  return (select({
-    self: $.self,
-    event: $.event,
-    ...additionalTerms || {}
-  }) as Select<{
-    self: Variable<any>,
-    event: Variable<any>
-  } & {
-    [K in keyof T]: Variable<any>
-  }>).match($.self, `~/on/${name}`, $.event);
-};
 const defaultTo = (field: string, defaultValue: any) => select({ self: $.self })
   .not(q => q.match($.self, field, $._))
   .assert(({ self }) => [self, field, defaultValue])
@@ -31,17 +20,6 @@ const defaults = <T extends Record<string, any>>(input: T) => {
     };
   }, {});
 }
-
-// {Or: [
-//   { Case: [$.self, CAUSE, $.cause] },
-//   {
-//     And: [
-//       { Not: { Case: [$.self, CAUSE, $._] } },
-//       { Match: [null, "==", $.cause] }
-//     ]
-//   }
-// ]}
-
 
 const createDispatch = <T extends string>(names: readonly T[]) => (name: T) => `~/on/${name}`;
 
@@ -57,129 +35,104 @@ const charms = (items: { id: Reference }[], behaviour: any) => items.sort((a, b)
 const dispatch = createDispatch([
   'add-item',
   'delete-item',
-  'change-title'
+  'change-title',
+  'reimagine-item'
 ]);
 
 const Model = {
-  'title': "Ben's Reading List 99",
+  'title': "Ben's Reading List 98",
   'draft/title': '',
-  'collection/articles': []
+  'collection/articles': [],
+  'font-family': 'Helvetica'
 };
 
 const ItemModel = {
   title: ''
 }
 
-
-function getOrDefault<T extends Constant, S extends Selector>(select: Select<S>, attribute: string, field: Variable, fallback: T) {
-  return select.or(w => {
-    return w
-      .match($.self, attribute, field)
-      .and(w => {
-        return w
-          .formula(fallback, '==', field);
-      });
-  })
+function ReadingListItem({ self, title }: { self: Reference, title: string }) {
+  return <li title={title} entity={self}>
+    {title}
+    <button onclick={dispatch('delete-item')} style="margin-left: 8px">Delete</button>
+    <button onclick={dispatch('reimagine-item')} style="margin-left: 8px">Re-Imagine</button>
+  </li>
 }
 
-const query = <M extends Record<string, string | number | boolean | any[]>, T extends keyof M>(model: M, ...fields: T[]) => {
-  const selection = { self: $.self, ...Object.fromEntries(fields.map(name => [name, $[name]])) };
-  type Bindings = {
-    self: Variable<any>;
-  } & {
-    [K in T]: Variable<any>;
-  };
-  const selectParams = select(selection) as Select<Bindings>;
-  return fields.reduce((acc, field) => {
-    return acc.match($.self, field as any, $[field]);
-  }, selectParams);
-};
-
-const queryDefault = <M extends Record<string, string | number | boolean | any[]>, T extends keyof M>(model: M, ...fields: T[]) => {
-  const selection = { self: $.self, ...Object.fromEntries(fields.map(name => [name, $[name]])) };
-  type Bindings = {
-    self: Variable<any>;
-  } & {
-    [K in T]: Variable<any>;
-  };
-  const selectParams = select(selection) as Select<Bindings>;
-  return fields.reduce((acc, field) => {
-    if (Array.isArray(model[field])) {
-      return acc.match($.self, field as any, $[field]);
-    }
-    return getOrDefault(acc, field as string, $[field], model[field]);
-  }, selectParams);
-};
+function Footer({ draftTitle }: { draftTitle: string }) {
+  return <div>
+    <hr />
+    <common-input value={draftTitle} oncommon-input={dispatch('change-title')} />
+    <button onclick={dispatch('add-item')}>Add</button>
+  </div>
+}
 
 const readingListItem = behavior({
   view: query(ItemModel, 'title')
-    .render(({ self, title }) =>
-      <li title={title} entity={self}>
-        {title}
-        <button onclick={dispatch('delete-item')} style="margin-left: 8px">Delete</button>
-      </li>
-    )
+    .render(ReadingListItem)
     .commit(),
 
   onDeleteItem: event('delete-item')
     .upsert(({ self }) => [self, 'deleted', true])
-    .commit()
+    .commit(),
+
+  onReimagineItem: select({ self: $.self })
+    .event('reimagine-item')
+    .update(({ self, event }) => {
+      return [
+        fetch(
+          self,
+          "my/request",
+          new Request('https://jsonplaceholder.typicode.com/todos/1', {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          }),
+        ).json(),
+      ];
+    }).commit(),
+
+  onFinished: select({ self: $.self, request: $.request, title: $.title })
+    .match($.self, "my/request", $.request)
+    .match($.request, "response/json", $.content)
+    .match($.content, 'title', $.title)
+    .update(({ self, title, request }) => {
+      return [{ Upsert: [self, 'title', title] }, { Retract: [self, "my/request", request] }];
+    })
+    .commit(),
 })
 
 export const readingList = behavior({
-  // bf: we would be better served baking this behaviour into the query, rather than spamming writes on spawn
-  // ...defaults(Model),
+  articles: build('collection/articles'),
 
   // empty state view
   emptyStateView: queryDefault(Model, 'title', 'draft/title')
-    // .not(q => q.match($.self, "collection/articles", $.article))
+    .not(q => q.match($.self, "collection/articles", $.article))
     .render(({ self, 'draft/title': draftTitle, title }) =>
       <div title={title} entity={self}>
         <span>Empty!</span>
-        <hr />
-        <common-input value={draftTitle} oncommon-input={dispatch('change-title')} />
-        <button onclick={dispatch('add-item')}>Add</button>
+        {Footer({ draftTitle })}
       </div>
     )
     .commit(),
 
-  // testDefault: getOrDefault(select({ self: $.self, value: $.field }), 'value', $.field, 'default').update(({ self, value }) => {
-  //   debugger
-  //   console.log('defaulted', value);
-  //   return [{
-  //     Upsert: [self, 'value', 'something']
-  //   }];
-  // }).commit(),
-
-  testQueryDefault: queryDefault(Model, 'title').update(({ self, title }) => {
-    debugger
-    console.log('query defaulted', title);
-    return [];
-  }).commit(),
-
-  listArticlesView: select({
-    self: $.self,
-    draftTitle: $.draftTitle,
-    title: $.title,
-    article: [{
-      id: $.article,
-      title: $.articleTitle,
-    }]
-  })
-    .match($.self, "title", $.title)
-    .match($.self, "draft/title", $.draftTitle)
+  listArticlesView: queryDefault(Model, 'title', 'draft/title', 'font-family')
+    .select({
+      article: [{
+        id: $.article,
+        title: $.articleTitle,
+      }]
+    })
     .match($.self, "collection/articles", $.article)
     .match($.article, "title", $.articleTitle)
     .not(q => q.match($.article, "deleted", true))
-    .render(({ article, self, draftTitle, title }) =>
-      <div title={title} entity={self}>
+    .render(({ article, self, 'draft/title': draftTitle, title, "font-family": font }) =>
+      <div title={title} entity={self} style={`font-family: "${font}"`}>
         <h1>Unordered Collection (Set)</h1>
         <ul>
           {...charms(article, readingListItem)}
         </ul>
-        <hr />
-        <common-input value={draftTitle} oncommon-input={dispatch('change-title')} />
-        <button onclick={dispatch('add-item')}>Add</button>
+        {Footer({ draftTitle })}
       </div>
     )
     .commit(),
@@ -190,15 +143,17 @@ export const readingList = behavior({
     })
     .commit(),
 
-  onAddItem: event('add-item', { draftTitle: $.draftTitle })
-    .match($.self, "draft/title", $.draftTitle)
-    .update(({ self, event, draftTitle }) => [
-      // bf: we should probably say the name of the collection here
-      // currently it just adds it to ANY collection that listens for `NEW`
-      make(self, { title: draftTitle }),
-      // reset input field
-      { Retract: [self, "draft/title", draftTitle] }
-    ])
+  onAddItem: queryDefault(Model, 'draft/title')
+    .event('add-item')
+    .update(({ self, event, 'draft/title': draftTitle }) => {
+      return [
+        // bf: we should probably say the name of the collection here
+        // currently it just adds it to ANY collection that listens for `NEW`
+        make(self, { title: draftTitle }),
+        // reset input field
+        { Retract: [self, "draft/title", draftTitle] }
+      ]
+    })
     .commit(),
 })
 
