@@ -90,8 +90,14 @@ app.post("/blob/:hash", async (c) => {
   //   return c.json({ error: "Hash mismatch" }, 400);
   // }
 
+  // Parse content as JSON
+  const jsonContent = JSON.parse(content);
+
+  jsonContent.blobCreatedAt = new Date().toISOString();
+  jsonContent.blobAuthor = c.get("user").split("@")[0];
+
   // Save blob
-  await storage.saveBlob(hash, content);
+  await storage.saveBlob(hash, JSON.stringify(jsonContent));
 
   // Associate blob with user
   const user = c.get("user");
@@ -159,7 +165,7 @@ app.get("/blob/:hash/*", async (c) => {
   }
 });
 
-app.get("/blobs", async (c) => {
+app.get("/blob", async (c) => {
   const showAll = c.req.query("all") === "true";
   const redis = c.get("redis");
   const user = c.get("user");
