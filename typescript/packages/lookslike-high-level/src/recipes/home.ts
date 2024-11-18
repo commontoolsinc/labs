@@ -1,12 +1,18 @@
 import { html } from "@commontools/common-html";
-import { recipe, lift, NAME, UI } from "@commontools/common-builder";
-import { Charm, RecipeManifest } from "../data.js";
+import { recipe, lift, NAME, UI, handler } from "@commontools/common-builder";
+import { getEntityId } from "@commontools/common-runner";
+import { Charm, removeCharm, RecipeManifest } from "../data.js";
 
 const getCharmsWithNameAndUI = lift<Charm[], { charm: Charm }[]>((charms) =>
   (charms ?? [])
     .filter((charm) => charm && charm[UI] && charm[NAME])
     .map((charm) => ({ charm })),
 );
+
+const deleteCharm = handler<{}, { charm: Charm }>((_, { charm }) => {
+  console.log("deleteCharm", charm);
+  removeCharm(getEntityId(charm)!);
+});
 
 export const home = recipe<{
   charms: Charm[];
@@ -24,6 +30,7 @@ export const home = recipe<{
               $opentarget=${charm}
             >
               <common-charm-link $charm=${charm}></common-charm-link>
+              <button onclick=${deleteCharm({ charm })}>×</button>
             </common-droppable>
           </div>`,
       )}

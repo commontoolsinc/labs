@@ -65,6 +65,11 @@ export async function addCharms(newCharms: CellImpl<any>[]) {
   }
 }
 
+export function removeCharm(id: EntityId) {
+  const newCharms = charms.get().filter(({ cell }) => cell.entityId !== id);
+  if (newCharms.length !== charms.get().length) charms.send(newCharms);
+}
+
 export async function runPersistent(
   recipe: Recipe,
   inputs?: any,
