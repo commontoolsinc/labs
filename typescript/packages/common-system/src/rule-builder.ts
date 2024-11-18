@@ -6,6 +6,7 @@ import {
   Entity,
   Attribute,
   API,
+  Formula,
 } from "datalogia";
 import { $, Instruction, Fact } from "synopsys";
 import { Node } from "./jsx.js";
@@ -128,6 +129,12 @@ export class Where {
     return new Where(...this.#where, {
       Case: [entity, attribute, value],
     });
+  }
+
+  formula<F extends Formula>(f1: F[0], f2: F[1], f3: F[2]) {
+    return new Where(...this.#where, {
+      Match: [f1, f2, f3] as Formula,
+    })
   }
 
   or(builder: BuilderOrValue<Where>): Where {
