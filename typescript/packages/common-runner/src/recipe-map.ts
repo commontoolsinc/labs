@@ -7,7 +7,12 @@ const idByRecipe = new Map<Recipe, string>();
 const srcById = new Map<string, string>();
 const specById = new Map<string, string>();
 const parentsById = new Map<string, string[]>();
-export function addRecipe(recipe: Recipe, src?: string, spec?: string, parents?: string[]): string {
+export function addRecipe(
+  recipe: Recipe,
+  src?: string,
+  spec?: string,
+  parents?: string[],
+): string {
   if (idByRecipe.has(recipe)) return idByRecipe.get(recipe)!;
 
   const id = src

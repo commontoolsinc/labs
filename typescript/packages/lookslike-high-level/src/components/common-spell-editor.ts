@@ -1,34 +1,16 @@
-import { css, html, LitElement, PropertyValues } from "lit";
+import { html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { when } from "lit/directives/when.js";
-import { style } from "@commontools/common-ui";
 import {
   addRecipe,
-  cell,
-  CellImpl,
-  getRecipe,
   getRecipeSpec,
   getRecipeSrc,
-  isCell,
   run,
 } from "@commontools/common-runner";
-import {
-  addCharms,
-  Charm,
-  charms,
-  NAME,
-  recipes,
-  runPersistent,
-  TYPE,
-  UI,
-} from "../data.js";
+import { addCharms } from "../data.js";
 import { buildRecipe } from "../localBuild.js";
-import { LLMClient } from "@commontools/llm-client";
+import { iterate } from "./spell-ai.js";
 import { createRef, ref } from "lit/directives/ref.js";
-
-const llmUrl = typeof window !== "undefined"
-  ? window.location.protocol + "//" + window.location.host + "/api/llm"
-  : "//api/llm";
 
 // NOTE(ja): copied from sidebar.ts ... we need a toasty?
 const toasty = (message: string) => {
@@ -115,7 +97,6 @@ export class CommonSpellEditor extends LitElement {
       e: CustomEvent,
     ) => (this.workingSrc = e.detail.state.doc.toString());
 
-
     const revert = () => {
       this.workingSrc = this.recipeSrc;
       this.workingSpec = this.recipeSpec;
@@ -136,67 +117,20 @@ export class CommonSpellEditor extends LitElement {
 
     const askLLM = async ({ fixit }: { fixit?: string } = {}) => {
       this.llmRunning = true;
-      const originalSrc = this.recipeSrc;
-      const originalSpec = this.recipeSpec ||
-        "there is no spec, describe the app in a descriptive and delcarative way";
-      const newSpec = this.workingSpec;
-
-      let prefill = `\`\`\`tsx\n`;
-      if (this.workingSrc.includes("//HACK")) {
-        console.log("HACK in src");
-        prefill += this.workingSrc.split("//HACK")[0];
-      }
-
-      const messages = [
-        originalSpec,
-        `\`\`\`tsx\n${originalSrc}\n\`\`\``,
-        newSpec,
-        prefill,
-      ];
-
-      if (fixit) {
-        console.log("fixit", fixit);
-        const fixitPrompt = `The user asked you to fix the following:
-\`\`\`
-${fixit}
-\`\`\`
-
-Here is the current source code:
-\`\`\`tsx
-${this.workingSrc}
-\`\`\`
-
-RESPOND WITH THE FULL SOURCE CODE - DO NOT INCLUDE ANY OTHER TEXT.
-`;
-        messages.push(fixitPrompt);
-      }
-
-      const llm = new LLMClient(llmUrl);
-
-      const payload = {
-        model: "anthropic:claude-3-5-sonnet-latest",
-        system: "You are code generator that implements @commontools recipes.",
-        messages,
-        stop: "\n```",
-      };
-
-      const updateEditor = (text: string) => {
-        if (this.editorRef.value) {
-          const newSrc = text.split("```tsx\n")[1].split("\n```")[0];
-          if (newSrc) {
-            this.workingSrc = newSrc;
-            this.requestUpdate();
-          }
-        }
-      };
 
       try {
-        const response = await llm.sendRequest(
-          payload,
-          // updateEditor,
-        );
-
-        updateEditor(response);
+        const newSrc = await iterate({
+          errors: fixit,
+          originalSpec: this.recipeSpec ||
+            "there is no spec, describe the app in a descriptive and delcarative way",
+          originalSrc: this.recipeSrc,
+          workingSpec: this.workingSpec,
+          workingSrc: this.workingSrc,
+        });
+        if (newSrc) {
+          this.workingSrc = newSrc;
+          this.requestUpdate();
+        }
       } finally {
         this.llmRunning = false;
       }
@@ -249,12 +183,16 @@ RESPOND WITH THE FULL SOURCE CODE - DO NOT INCLUDE ANY OTHER TEXT.
         <button @click=${() =>
       askLLM()} ?disabled=${this.llmRunning}>🤖 LLM</button>
         <button @click=${() =>
-      askLLM({ fixit: this.compileErrors })} ?disabled=${this.llmRunning || !this.compileErrors}>
+      askLLM({ fixit: this.compileErrors })} ?disabled=${
+      this.llmRunning || !this.compileErrors
+    }>
           🪓 fix it
         </button>
         <button
           @click=${revert}
-          ?disabled=${this.recipeSrc === this.workingSrc && this.recipeSpec === this.workingSpec}
+          ?disabled=${
+      this.recipeSrc === this.workingSrc && this.recipeSpec === this.workingSpec
+    }
         >
           ↩️ revert
         </button>
