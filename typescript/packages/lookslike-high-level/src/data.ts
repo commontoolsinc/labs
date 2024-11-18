@@ -12,6 +12,7 @@ import {
   EntityId,
   getEntityId,
   getRecipe,
+  getRecipeParents,
   getRecipeSrc,
   idle,
   isCell,
@@ -140,33 +141,37 @@ export async function syncRecipe(id: string) {
     if (recipesKnownToStorage.has(id)) return;
     const src = getRecipeSrc(id);
     const spec = getRecipeSpec(id);
-    if (src) saveRecipe(id, src, spec);
+    const parents = getRecipeParents(id);
+    if (src) saveRecipe(id, src, spec, parents);
     return;
   }
 
   const response = await fetch(`${BLOBBY_SERVER_URL}/blob/${id}`);
   let src: string;
   let spec: string;
+  let parents: string[];
   try {
     const resp = await response.json();
     src = resp.src;
     spec = resp.spec;
+    parents = resp.parents || [];
   } catch (e) {
     src = await response.text();
     spec = "";
+    parents = [];
   }
 
   const { recipe, errors } = await buildRecipe(src);
   if (errors) throw new Error(errors);
 
-  const recipeId = addRecipe(recipe!, src, spec);
+  const recipeId = addRecipe(recipe!, src, spec, parents);
   if (id !== recipeId) {
     throw new Error(`Recipe ID mismatch: ${id} !== ${recipeId}`);
   }
   recipesKnownToStorage.add(recipeId);
 }
 
-export async function saveRecipe(id: string, src: string, spec?: string) {
+export async function saveRecipe(id: string, src: string, spec?: string, parents?: string[]) {
   if (recipesKnownToStorage.has(id)) return;
   recipesKnownToStorage.add(id);
 
@@ -180,6 +185,7 @@ export async function saveRecipe(id: string, src: string, spec?: string) {
       src,
       recipe: JSON.parse(JSON.stringify(getRecipe(id))),
       spec,
+      parents,
     }),
   });
   return response.ok;

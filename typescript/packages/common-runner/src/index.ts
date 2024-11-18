@@ -42,6 +42,7 @@ export {
   addRecipe,
   getRecipe,
   getRecipeId,
+  getRecipeParents,
   getRecipeSrc,
   allRecipesByName,
   getRecipeSpec,

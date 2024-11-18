@@ -217,7 +217,8 @@ RESPOND WITH THE FULL SOURCE CODE - DO NOT INCLUDE ANY OTHER TEXT.
 
         if (!recipe) return;
         // NOTE(ja): adding a recipe triggers saving to blobby
-        addRecipe(recipe, this.workingSrc, this.workingSpec);
+        const parents = this.recipeId ? [this.recipeId] : undefined;
+        addRecipe(recipe, this.workingSrc, this.workingSpec, parents);
 
         // TODO(ja): we should check if the recipe arguments have changed
         // TODO(ja): if default values have changed and source still has to old
