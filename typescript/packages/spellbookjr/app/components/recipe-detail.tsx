@@ -14,7 +14,7 @@ export default function RecipeDetail({
 }: RecipeDetailProps) {
   return (
     <div>
-      <h1>{recipe.recipe.NAME || "Unnamed Recipe"}</h1>
+      <h1>{recipe.recipeName || "Unnamed Recipe"}</h1>
       <img
         src={screenshotUrl}
         alt="Recipe Screenshot"
@@ -22,7 +22,7 @@ export default function RecipeDetail({
         height={600}
       />
       <h2>Recipe JSON</h2>
-      <JsonView value={recipe.recipe} />
+      <JsonView value={recipe} />
     </div>
   );
 }
