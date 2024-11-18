@@ -4,6 +4,7 @@ import { build, make } from "../sugar/build.js";
 import { query, queryDefault } from "../sugar/query.js";
 import { event } from "../sugar/event.js";
 import { fetch } from "../effects/fetch.js";
+import { Constant, Instruction } from "synopsys";
 
 export const source = { readingList: { v: 1 } };
 
@@ -30,6 +31,14 @@ const charms = (items: { id: Reference }[], behaviour: any) => items.sort((a, b)
   spell={() => behaviour}
   entity={() => a.id}
 ></common-charm>);
+
+function upsert(self: Reference, fields: {}): Instruction[] {
+  return Object.entries(fields).map(([k, v]) => ({ Upsert: [self, k, v] } as Instruction));
+}
+
+function retract(self: Reference, fields: {}): Instruction[] {
+  return Object.entries(fields).map(([k, v]) => ({ Retract: [self, k, v] } as Instruction));
+}
 
 // bf: exploring typesafe event names
 const dispatch = createDispatch([
@@ -58,12 +67,20 @@ function ReadingListItem({ self, title }: { self: Reference, title: string }) {
   </li>
 }
 
-function Footer({ draftTitle }: { draftTitle: string }) {
-  return <div>
-    <hr />
-    <common-input value={draftTitle} oncommon-input={dispatch('change-title')} />
-    <button onclick={dispatch('add-item')}>Add</button>
-  </div>
+
+const getTodo = ({ self, event }: { self: Reference, event: Constant }) => {
+  return [
+    fetch(
+      self,
+      "my/request",
+      new Request('https://jsonplaceholder.typicode.com/todos/1', {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }),
+    ).json(),
+  ];
 }
 
 const readingListItem = behavior({
@@ -77,30 +94,47 @@ const readingListItem = behavior({
 
   onReimagineItem: select({ self: $.self })
     .event('reimagine-item')
-    .update(({ self, event }) => {
-      return [
-        fetch(
-          self,
-          "my/request",
-          new Request('https://jsonplaceholder.typicode.com/todos/1', {
-            method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-            },
-          }),
-        ).json(),
-      ];
-    }).commit(),
+    .update(getTodo)
+    .commit(),
 
   onFinished: select({ self: $.self, request: $.request, title: $.title })
     .match($.self, "my/request", $.request)
     .match($.request, "response/json", $.content)
     .match($.content, 'title', $.title)
     .update(({ self, title, request }) => {
-      return [{ Upsert: [self, 'title', title] }, { Retract: [self, "my/request", request] }];
+      return [
+        ...upsert(self, { title }),
+        ...retract(self, { "my/request": request })
+      ];
     })
     .commit(),
 })
+
+
+function Footer({ draftTitle }: { draftTitle: string }) {
+  return <div>
+    <hr />
+    <common-input value={draftTitle} oncommon-input={dispatch('change-title')} />
+    <button onclick={dispatch('add-item')}>Add</button>
+  </div>
+}
+
+function EmptyState({ self, 'draft/title': draftTitle, title }: { self: Reference, 'draft/title': string, title: string }) {
+  return <div title={title} entity={self}>
+    <span>Empty!</span>
+    {Footer({ draftTitle })}
+  </div>
+}
+
+function ArticleList({ article, self, 'draft/title': draftTitle, title, "font-family": font }: { article: { id: Reference }[], self: Reference, 'draft/title': string, title: string, "font-family": string }) {
+  return <div title={title} entity={self} style={`font-family: "${font}"`}>
+    <h1>Unordered Collection (Set)</h1>
+    <ul>
+      {...charms(article, readingListItem)}
+    </ul>
+    {Footer({ draftTitle })}
+  </div>
+}
 
 export const readingList = behavior({
   articles: build('collection/articles'),
@@ -108,12 +142,7 @@ export const readingList = behavior({
   // empty state view
   emptyStateView: queryDefault(Model, 'title', 'draft/title')
     .not(q => q.match($.self, "collection/articles", $.article))
-    .render(({ self, 'draft/title': draftTitle, title }) =>
-      <div title={title} entity={self}>
-        <span>Empty!</span>
-        {Footer({ draftTitle })}
-      </div>
-    )
+    .render(EmptyState)
     .commit(),
 
   listArticlesView: queryDefault(Model, 'title', 'draft/title', 'font-family')
@@ -126,20 +155,12 @@ export const readingList = behavior({
     .match($.self, "collection/articles", $.article)
     .match($.article, "title", $.articleTitle)
     .not(q => q.match($.article, "deleted", true))
-    .render(({ article, self, 'draft/title': draftTitle, title, "font-family": font }) =>
-      <div title={title} entity={self} style={`font-family: "${font}"`}>
-        <h1>Unordered Collection (Set)</h1>
-        <ul>
-          {...charms(article, readingListItem)}
-        </ul>
-        {Footer({ draftTitle })}
-      </div>
-    )
+    .render(ArticleList)
     .commit(),
 
   onChangeTitle: event('change-title')
-    .upsert(({ self, event }) => {
-      return [self, 'draft/title', event.detail.value]
+    .update(({ self, event }) => {
+      return upsert(self, { 'draft/title': event.detail.value })
     })
     .commit(),
 
@@ -150,8 +171,7 @@ export const readingList = behavior({
         // bf: we should probably say the name of the collection here
         // currently it just adds it to ANY collection that listens for `NEW`
         make(self, { title: draftTitle }),
-        // reset input field
-        { Retract: [self, "draft/title", draftTitle] }
+        ...retract(self, { 'draft/title': draftTitle })
       ]
     })
     .commit(),
