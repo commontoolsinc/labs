@@ -167,7 +167,8 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     log("sync in memory", key, this.lastValues.get(key));
     if (inMemoryStorage.has(key))
       this.lastValues.set(key, JSON.stringify(inMemoryStorage.get(key)!));
-    else if (expectedInStorage) return this.waitForSync(key);
+    else if (expectedInStorage)
+      return Promise.resolve(); // nothing to sync
     else this.lastValues.delete(key);
   }
 
