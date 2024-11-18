@@ -1,7 +1,7 @@
 import { getBlobByHash, getBlobScreenshotUrl } from "@/app/lib/blobby";
 import { notFound } from "next/navigation";
 import RecipeDetail from "@/app/components/recipe-detail";
-
+import JsonView from "@uiw/react-json-view";
 interface RecipeDetailProps {
   params: { hash: string };
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { JsonView } from "@uiw/react-json-view";
+import JsonView from "@uiw/react-json-view";
 
 interface RecipeDetailProps {
   recipe: any; // TODO: type this properly based on your recipe structure
