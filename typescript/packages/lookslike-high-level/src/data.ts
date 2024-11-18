@@ -64,6 +64,7 @@ import { mealExample } from "./recipes/meal.jsx";
 import * as dungeon from "./recipes/dungeon.jsx";
 import * as charmExample from './recipes/charm.jsx'
 import * as readingList from './recipes/readingList.jsx'
+import * as keywords from './recipes/keywords.jsx'
 import Fetcher from "./recipes/fetcher.jsx";
 import Fetch from "./effects/fetch.js";
 
@@ -251,6 +252,9 @@ addCharms([
   //   v: 2
   // }),
   readingList.spawn({
+    v: 10
+  }),
+  keywords.spawn({
     v: 2
   }),
   Fetcher.spawn(),

@@ -1,5 +1,6 @@
-import { $, Position, refer, Type, Reference } from "synopsys"
-import { Clause, Entity, Instruction, Selector, Term, Variable, Constant } from "datalogia";
+import { Position, refer, Type, } from "synopsys"
+import { Clause, Entity, Instruction, Selector, Term, Variable, Constant, InferBindings } from "datalogia";
+import { $, Reference } from "@commontools/common-system";
 
 export type CollectionSelection = {
   collection: any,
@@ -10,24 +11,24 @@ export type CollectionSelection = {
 }
 
 type At = {
-  before?: Reference,
-  after?: Reference,
+  before?: any,
+  after?: any,
 }
 
 export class Collection {
-  #model: CollectionSelection;
+  #model: InferBindings<CollectionSelection>;
 
   static select(variable: Variable): CollectionSelection {
-    const key = $[`${variable["?"].id}.key`]
-    const value = $[`${variable["?"].id}.value`]
+    const key = $[`${variable.toString()}.key`]
+    const value = $[`${variable.toString()}.value`]
     return {
       collection: variable,
       of: [{ key, value }]
     }
   }
   static includes(collection: Term<Entity>, member: Term<Entity>): Clause {
-    const key = $[`${collection["?"].id}.key`]
-    const value = $[`${collection["?"].id}.value`]
+    const key = $[`${collection.toString()}.key`]
+    const value = $[`${collection.toString()}.value`]
     return {
       And: [
         { Case: [collection, key, value] },
@@ -36,10 +37,14 @@ export class Collection {
     }
   }
 
-  static from(model: any) {
+  static new(context: Reference, membership: string): Instruction {
+    return { Assert: [context, membership, refer({ context, membership, items: [] })] }
+  }
+
+  static from(model: InferBindings<CollectionSelection>) {
     return new Collection(model)
   }
-  constructor(model) {
+  constructor(model: InferBindings<CollectionSelection>) {
     this.#model = model
   }
   [Symbol.iterator]() {
@@ -63,7 +68,6 @@ export class Collection {
   keys() {
     return this.entries().map(([key]) => key)
   }
-
   insert(member: Record<string, Term>, at: At): Instruction[] {
     const collection = this.#model
     const before = at.before ? collection.of.find($ => $.value === at.before) : undefined
