@@ -1,7 +1,7 @@
 import { html } from "@commontools/common-html";
 import { recipe, lift, NAME, UI, handler } from "@commontools/common-builder";
 import { getEntityId } from "@commontools/common-runner";
-import { Charm, removeCharm, RecipeManifest } from "../data.js";
+import { Charm, removeCharm, RecipeManifest, closeCharm } from "../data.js";
 
 const getCharmsWithNameAndUI = lift<Charm[], { charm: Charm }[]>((charms) =>
   (charms ?? [])
@@ -10,8 +10,10 @@ const getCharmsWithNameAndUI = lift<Charm[], { charm: Charm }[]>((charms) =>
 );
 
 const deleteCharm = handler<{}, { charm: Charm }>((_, { charm }) => {
-  console.log("deleteCharm", charm);
-  removeCharm(getEntityId(charm)!);
+  const charmId = getEntityId(charm)!;
+  console.log("deleteCharm", charmId);
+  removeCharm(charmId);
+  closeCharm(charmId);
 });
 
 export const home = recipe<{

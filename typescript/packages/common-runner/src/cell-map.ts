@@ -83,6 +83,10 @@ export const createRef = (
  * @returns The entity ID, or undefined if the value is not a cell.
  */
 export const getEntityId = (value: any): EntityId | undefined => {
+  if (typeof value === "string") return JSON.parse(value) as EntityId;
+  if (typeof value === "object" && value !== null && "/" in value)
+    return value as EntityId;
+
   let ref: CellReference | undefined = undefined;
 
   if (isQueryResultForDereferencing(value))

@@ -204,6 +204,7 @@ export async function saveRecipe(
 }
 
 addCharms([
+  //await runPersistent(allRecipes.counters, {}, "counters demo"),
   //await runPersistent(<recipe>, <default inputs>, <unique name for a stable id>)
 ]);
 
@@ -247,15 +248,24 @@ function getFridayAndMondayDateStrings() {
 */
 
 // Terrible hack to open a charm from a recipe
-let openCharmOpener: (
+export type CharmActionFn = (
   charmId: string | EntityId | CellImpl<any>,
-) => void = () => {};
+) => void;
+export type CharmAction = CharmActionFn & {
+  set: (opener: CharmActionFn) => void;
+};
+
+let charmOpener: CharmActionFn | CharmAction = () => {};
+let charmCloser: CharmActionFn | CharmAction = () => {};
 export const openCharm = (charmId: string | EntityId | CellImpl<any>) =>
-  openCharmOpener(charmId);
-openCharm.set = (
-  opener: (charmId: string | EntityId | CellImpl<any>) => void,
-) => {
-  openCharmOpener = opener;
+  charmOpener(charmId);
+export const closeCharm = (charmId: string | EntityId | CellImpl<any>) =>
+  charmCloser(charmId);
+openCharm.set = (opener: CharmActionFn) => {
+  charmOpener = opener;
+};
+closeCharm.set = (closer: CharmActionFn) => {
+  charmCloser = closer;
 };
 
 addModuleByRef(

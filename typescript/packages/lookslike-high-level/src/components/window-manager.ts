@@ -11,6 +11,7 @@ import {
   syncCharm,
   openCharm,
   syncRecipe,
+  closeCharm,
 } from "../data.js";
 import {
   run,
@@ -19,6 +20,7 @@ import {
   idle,
   EntityId,
   getRecipe,
+  getEntityId,
 } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
@@ -494,6 +496,16 @@ export class CommonWindowManager extends LitElement {
     });
   }
 
+  async closeCharm(charmId: string | EntityId | CellImpl<any>) {
+    charmId = getEntityId(charmId)!;
+    if (this.focusedCharm?.entityId === charmId) {
+      this.focusedCharm = null;
+      this.focusedProxy = null;
+      this.location = "Home";
+      navigate("/");
+    }
+  }
+
   private scrollToAndHighlight(charmId: string, animate: boolean) {
     const window = this.renderRoot.querySelector(
       `[data-charm-id="${CSS.escape(charmId)}"]`,
@@ -565,6 +577,7 @@ export class CommonWindowManager extends LitElement {
       new CustomEvent("routeChange", { detail: window.location.href }),
     );
     openCharm.set(this.openCharm.bind(this));
+    closeCharm.set(this.closeCharm.bind(this));
   }
 
   override disconnectedCallback() {
