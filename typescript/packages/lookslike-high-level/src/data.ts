@@ -186,6 +186,7 @@ export async function saveRecipe(id: string, src: string, spec?: string) {
 }
 
 addCharms([
+  await runPersistent(allRecipes.counters, {}, "counters demo"),
   //await runPersistent(<recipe>, <default inputs>, <unique name for a stable id>)
 ]);
 
