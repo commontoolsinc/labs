@@ -13,21 +13,15 @@ import {
   UI,
 } from "../data.js";
 import {
-  addRecipe,
   cell,
   CellImpl,
   getRecipe,
-  getRecipeSrc,
   isCell,
-  run,
-  getRecipeSpec,
 } from "@commontools/common-runner";
-import { buildRecipe } from "../localBuild.js";
 import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.js";
 import { render } from "@commontools/common-html";
-import { LLMClient } from "@commontools/llm-client";
 
 const toasty = (message: string) => {
   const toastEl = document.createElement("div");
@@ -206,9 +200,8 @@ export class CommonSidebar extends LitElement {
   override render() {
     const data = this.getFieldOrDefault("data", {});
     const recipeId = this.focusedCharm?.sourceCell?.get()?.[TYPE];
+    const argument = this.focusedCharm?.sourceCell?.getAsQueryResult()?.argument;
     const recipe = getRecipe(recipeId);
-    const spec = getRecipeSpec(recipeId);
-    const src = getRecipeSrc(recipeId);
     const schema = recipe?.argumentSchema || {};
     const query = this.getFieldOrDefault("query", {});
 
@@ -258,167 +251,6 @@ export class CommonSidebar extends LitElement {
 
     const onDataChanged = (e: CustomEvent) => {
       this.setField("data", JSON.parse(e.detail.state.doc.toString()));
-    };
-
-    const onSrcChanged = (e: CustomEvent) => {
-      this.workingSrc = e.detail.state.doc.toString();
-    };
-
-    // FIXME(jake): this should only be called when src changes, not on every render.
-    if (this.workingSrc) {
-      buildRecipe(this.workingSrc).then(({ errors }) => {
-        this.compileErrors = errors || "";
-      });
-    }
-
-    // NOTE(jake): maybe rename this to "compileAndSave" or something?
-    const runRecipe = (newData: boolean = false) => {
-      buildRecipe(this.workingSrc).then(({ recipe, errors }) => {
-        this.compileErrors = errors || "";
-
-        if (!recipe) return;
-        // NOTE(ja): adding a recipe triggers saving to blobby
-        addRecipe(recipe, this.workingSrc, this.workingSpec);
-
-        // TODO(ja): we should check if the recipe arguments have changed
-        // TODO(ja): if default values have changed and source still has to old
-        //           defaults, update to new defaults
-        const data = newData
-          ? {}
-          : this.focusedCharm?.sourceCell?.get()?.argument;
-        const charm = run(recipe, data);
-
-        addCharms([charm]);
-        const charmId = JSON.stringify(charm.entityId);
-        this.dispatchEvent(
-          new CustomEvent("open-charm", {
-            detail: { charmId },
-            bubbles: true,
-            composed: true,
-          }),
-        );
-        if (newData) {
-          toasty("Welcome to a new charm!");
-        } else {
-          toasty("Welcome to a new version of this charm!");
-        }
-      });
-    };
-
-    const handleEvalFeedback = (
-      score: number,
-      {
-        feedback,
-        compileErrors,
-      }: { feedback?: string; compileErrors?: string },
-    ) => {
-      const evalFeedback = {
-        score: score,
-        conversation: this.llmConversation,
-        feedback,
-        compileErrors,
-        workingSource: this.workingSrc,
-        workingSpec: this.workingSpec,
-        recipeId,
-        recipe: JSON.parse(JSON.stringify(recipe)),
-        spec,
-        src,
-        schema,
-      };
-
-      if (score === 1) {
-        console.log("👍 - yay - sending llm feedback to some server");
-      } else {
-        console.log("👎 - boo - sending llm feedback to some server");
-      }
-
-      console.log("evalFeedback", evalFeedback);
-      // TODO(jake): send conversation and score to llm for evals
-    };
-
-    // FIXME(jake): implement "fix this" button after this works
-    const askLLM = async ({ fixit }: { fixit?: string } = {}) => {
-      const originalSrc = src;
-      const originalSpec =
-        spec ||
-        "there is no spec, describe the app in a descriptive and delcarative way";
-      const newSpec = this.workingSpec;
-      const prefill = `\`\`\`tsx\n`; // fixme - put the imports from originalSrc?
-      const url =
-        typeof window !== "undefined"
-          ? window.location.protocol + "//" + window.location.host + "/api/llm"
-          : "//api/llm";
-
-      const messages = [
-        originalSpec,
-        `\`\`\`tsx\n${originalSrc}\n\`\`\``,
-        newSpec,
-        prefill,
-      ];
-
-      if (fixit) {
-        console.log("fixit", fixit);
-        const fixitPrompt = `The user asked you to fix the following:
-\`\`\`
-${fixit}
-\`\`\`
-
-Here is the current source code:
-\`\`\`tsx
-${this.workingSrc}
-\`\`\`
-
-RESPOND WITH THE FULL SOURCE CODE - DO NOT INCLUDE ANY OTHER TEXT.
-`;
-        messages.push(fixitPrompt);
-      }
-
-      const llm = new LLMClient(url);
-
-      const payload = {
-        model: "anthropic:claude-3-5-sonnet-latest",
-        system:
-          "You are a helpful assistant that can help me improve my recipe.",
-        messages,
-      };
-
-      // If this is the first round of the llm conversation, set the payload on the llmConversation property.
-      if (!this.llmConversation) {
-        this.llmConversation = payload;
-      } else {
-        // FIXME(jake): make sure we're adding the latest messages to the conversation-- this might be working, idk
-        // otherwise, append the new message to the messages array
-        this.llmConversation.messages.push(...payload.messages);
-      }
-
-      const response = await llm.sendRequest(
-        payload,
-        // (text) => (text) => console.log(text),
-      );
-
-      console.log("full response", response);
-      const newSrc = response.match(/```tsx\n([\s\S]+?)```/)?.[1];
-      if (!newSrc) {
-        console.error("No tsx found in text", response);
-        return;
-      }
-      // tell the editor this is the new source
-      if (this.editorRef.value) {
-        this.editorRef.value.source = newSrc;
-      }
-    };
-
-    const exportData = () => {
-      const data = this.focusedCharm?.sourceCell?.getAsQueryResult()?.argument;
-      if (!data) return;
-      const blob = new Blob([JSON.stringify(data, null, 2)], {
-        type: "application/json",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "arguments.json";
-      a.click();
     };
 
     const copyRecipeLink = (event: Event) => {
@@ -531,74 +363,14 @@ RESPOND WITH THE FULL SOURCE CODE - DO NOT INCLUDE ANY OTHER TEXT.
                   </div>
                 </div>
                 <div style="margin: 10px;">
-                  <button @click=${() => runRecipe(false)}>
-                    🔄 Run w/Current Data
-                  </button>
-                  <button @click=${() => runRecipe(true)}>
-                    🐣 Run w/New Data
-                  </button>
-                  <button @click=${() => exportData()}>
-                    📄 Export Arguments
-                  </button>
-                  <button @click=${() => askLLM()}>🤖 LLM</button>
-                  <button @click=${() => askLLM({ fixit: this.compileErrors })}>
-                    🪓 fix it
-                  </button>
-                  <button
-                    @click=${() =>
-                      handleEvalFeedback(1, {
-                        compileErrors: this.compileErrors,
-                      })}
-                  >
-                    👍 +1
-                  </button>
-                  <button
-                    @click=${() =>
-                      handleEvalFeedback(0, {
-                        compileErrors: this.compileErrors,
-                      })}
-                  >
-                    👎 -1
-                  </button>
 
-                  ${when(
-                    this.compileErrors,
-                    () =>
-                      html`<pre
-                        style="color: white; background: #800; padding: 4px"
-                      >
-${this.compileErrors}</pre
-                      >`,
-                    () => html``,
-                  )}
-
-                  <div>
-                    <span
-                      style="padding-left: 25px; color: #969696; font-size: 12px;"
-                      >SPEC</span
-                    >
-                    <os-code-editor
-                      slot="content"
-                      language="text/markdown"
-                      .source=${spec}
-                      @doc-change=${onSpecChanged}
-                    ></os-code-editor>
-                  </div>
                 </div>
 
                 <div>
-                  <span
-                    style="padding-left: 25px; color: #969696; font-size: 12px;"
-                    >SOURCE</span
-                  >
-
-                  <os-code-editor
-                    slot="content"
-                    language="text/x.typescript"
-                    .source=${src}
-                    @doc-change=${onSrcChanged}
-                    ${ref(this.editorRef)}
-                  ></os-code-editor>
+                  <common-spell-editor
+                    .recipeId=${recipeId}
+                    .data=${argument}
+                  ></common-spell-editor>
                 </div>
               </os-sidebar-group>
             </os-navpanel>`,

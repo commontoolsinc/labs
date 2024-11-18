@@ -11,3 +11,4 @@ export * as CommonMarkdown from "./markdown.js";
 export * as CommonShaderLayer from "./shader-layer.js";
 export * as CommonDroppable from "./common-droppable.js";
 export * as CommonDraggable from "./common-draggable.js";
+export * as CommonSpellEditor from "./common-spell-editor.js";

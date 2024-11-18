@@ -107,7 +107,8 @@ const tsToExports = async (src: string): Promise<{ exports?: any, errors?: strin
     })(${customRequire.toString()})`;
 
     try {
-        return { exports: eval(wrappedCode) };
+        const exports = eval(wrappedCode);
+        return { exports };
     } catch (e) {
         return { errors: (e as Error).message }
     }
