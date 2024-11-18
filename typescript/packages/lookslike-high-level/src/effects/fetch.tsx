@@ -222,6 +222,37 @@ export default service({
 export const fetch = (consumer: Reference, port: string, request: Request) =>
   new Fetch(consumer, port, request, "bytes");
 
+type LlmRequest = {
+  prompt?: string;
+  messages?: string[];
+  system?: string;
+  model?: string,
+  max_tokens?: number,
+  stop?: string,
+}
+
+export const LLM_SERVER_URL =
+  typeof window !== "undefined"
+    ? window.location.protocol + "//" + window.location.host + "/api/llm"
+    : "//api/llm";
+
+export const llm = (consumer: Reference, port: string, request: LlmRequest) =>
+  new Fetch(consumer, port, new Request(
+    LLM_SERVER_URL,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-3-5-sonnet-latest",
+        max_tokens: 4096,
+        ...request,
+        messages: request.messages || [{ role: "user", content: request.prompt }],
+      }),
+    }
+  ), "json");
+
 export type Expect = "text" | "json" | "bytes";
 
 export class Fetch {
