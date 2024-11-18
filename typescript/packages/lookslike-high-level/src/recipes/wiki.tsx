@@ -1,4 +1,4 @@
-import { html } from "@commontools/common-html";
+import { h } from "@commontools/common-html";
 import {
   recipe,
   lift,
@@ -15,6 +15,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 
 const ExploreResult = z.object({
   text: z.string().describe("text of the wiki page"),
+  prompt: z.string().describe("image prompt for current page"),
   related: z.array(
     z.object({
       title: z.string().describe("title"),
@@ -54,19 +55,19 @@ ${jsonSchema}
 
 const grabJSON = lift<{ result?: string }, ExploreResult>(({ result }) => {
   if (!result) {
-    return { text: "", related: [] };
+    return { text: "", related: [], prompt: "" };
   }
   const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
   if (!jsonMatch) {
     console.error("No JSON found in text:", result);
-    return { text: "", related: [] };
+    return { text: "", related: [], prompt: "" };
   }
 
   let rawData = JSON.parse(jsonMatch[1]);
   let parsedData = ExploreResult.safeParse(rawData);
   if (!parsedData.success) {
     console.error("Invalid JSON:", parsedData.error);
-    return { text: "", related: [] };
+    return { text: "", related: [], prompt: "" };
   }
   return parsedData.data;
 });
@@ -89,7 +90,11 @@ const launcher = handler<PointerEvent, { title: string; canon: string }>(
   (_, { title, canon }) => navigateTo(wiki({ title, canon })),
 );
 
-export const wiki = recipe<{ title: string; canon: string }>(
+const imgUrl = lift(
+  ({ prompt }) => prompt ? `/api/img/?prompt=${encodeURIComponent(prompt)}` : '/api/img?prompt=infinite+void',
+);
+
+const wiki = recipe<{ title: string; canon: string }>(
   "Wiki",
   ({ title, canon }) => {
     title.setDefault("Mystical Creatures");
@@ -98,7 +103,8 @@ export const wiki = recipe<{ title: string; canon: string }>(
     );
 
     const { result, pending } = llm(prep({ title, canon }));
-    const { text, related } = grabJSON({ result });
+    const { text, prompt, related } = grabJSON({ result });
+    const img = imgUrl({ prompt });
 
     text.setDefault("");
     related.setDefault([]);
@@ -113,55 +119,29 @@ export const wiki = recipe<{ title: string; canon: string }>(
 
     return {
       [NAME]: str`${title} ~ Wiki Page`,
-      [UI]: html`<div>
-        <h3>${title}</h3>
-        ${ifElse(
+      [UI]: <div>
+        <h3>{title}</h3>
+        {ifElse(
           pending,
-          html`<p><i>generating...</i></p>`,
-          html`<p>${text}</p>`,
+          <p><i>generating...</i></p>,
+          <p>{text}</p>,
+        )}
+        {ifElse(
+          prompt,
+          <img src={img} width={256} />,
+          <i></i>
         )}
         <ul>
-          ${relatedWithClosure.map(
+          {relatedWithClosure.map(
             ({ title, canon }: { title: string; canon: string }) =>
-              html`<li onclick=${launcher({ title, canon })}>${title}</li>`,
+              <li onclick={launcher({ title, canon })}>{title}</li>,
           )}
         </ul>
-        <h4>Debug (Canon)</h4>
-        <pre>${canon}</pre>
-      </div>`,
+      </div>,
       title,
-      text: str`${text}`, // FIXME(ja): if don't use str`, the [NAME] doesn't get set correctly/show up in the sidebar?
       canon,
     };
   },
 );
 
-// export const wikiToPrompt = recipe<{ wiki: { title: string; text: string } }>(
-//   "create prompt from wiki",
-//   ({ wiki }) => {
-//     const promptTitle = lift(({ title }) => title)(wiki);
-
-//     // FIXME(ja): this is what I wanted to do:
-//     // const newPrompt = run(prompt, { title: wiki.title });
-//     // addGems([newPrompt]);
-//     // openSaga(newPrompt.get()[ID]);
-//     // return { [UI]: html`<div></div>` };
-
-//     return { [UI]: html`<b>Sorry, you have to click <common-button
-//         onclick=${handler({ promptTitle }, (_, { promptTitle }) => {
-//           const newPage = run(prompt, {
-//             title: promptTitle,
-//           });
-//           addGems([newPage]);
-//           openSaga(newPage.get()[ID]);
-//         })}
-//         >button</common-button>`
-//       }
-//     });
-
-// addSuggestion({
-//   description: description`Generate a prompt for ${"wiki"}`,
-//   recipe: wikiToPrompt,
-//   bindings: { sagas: "sagas" },
-//   dataGems: { wiki: "wiki" },
-// });
+export default wiki;

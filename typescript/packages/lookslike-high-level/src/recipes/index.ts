@@ -116,7 +116,7 @@ import { tweets } from "./tweets.js";
 addRecipe(tweets, tweetsSrc);
 export { tweets };
 
-import wikiSrc from "./wiki.ts?raw";
-import { wiki } from "./wiki.js";
+import wikiSrc from "./wiki.tsx?raw";
+import wiki from "./wiki.js";
 addRecipe(wiki, wikiSrc);
 export { wiki };
