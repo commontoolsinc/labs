@@ -9,7 +9,7 @@ import {
 } from "@commontools/common-runner";
 import { addCharms } from "../data.js";
 import { buildRecipe } from "../localBuild.js";
-import { iterate } from "./spell-ai.js";
+import { iterate, llmTweakSpec } from "./spell-ai.js";
 import { createRef, ref } from "lit/directives/ref.js";
 
 // NOTE(ja): copied from sidebar.ts ... we need a toasty?
@@ -136,6 +136,25 @@ export class CommonSpellEditor extends LitElement {
       }
     };
 
+    const tweakSpec = async () => {
+      const change = window.prompt("how should we change the spec?");
+      if (change) {
+        this.llmRunning = true;
+        try {
+          const newSpec = await llmTweakSpec({
+            spec: this.workingSpec,
+            change,
+          });
+          if (newSpec) {
+            this.workingSpec = newSpec;
+            this.requestUpdate();
+          }
+        } finally {
+          this.llmRunning = false;
+        }
+      }
+    };
+
     const compileAndUpdate = () => {
       console.log("compileAndUpdate", this.data);
       compileAndRun(this.data);
@@ -196,6 +215,7 @@ export class CommonSpellEditor extends LitElement {
         >
           ↩️ revert
         </button>
+        <button @click=${tweakSpec} ?disabled=${this.llmRunning}>🔧 tweak spec</button>
       </div>
       ${
       when(

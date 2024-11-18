@@ -6,6 +6,31 @@ const llmUrl = typeof window !== "undefined"
 
 const llm = new LLMClient(llmUrl);
 
+export const llmTweakSpec = async (
+    { spec, change }: { spec: string; change: string }
+) => {
+    const payload = {
+        model: "anthropic:claude-3-5-sonnet-latest",
+        system: "You are a spec editor for @commontools recipes.  Please respond with the full spec.",
+        messages: [
+            'what is the current spec?',
+            `\`\`\`markdown\n${spec}\n\`\`\``,
+            `The user asked you to update the spec by the following:
+\`\`\`
+${change}
+\`\`\`
+
+RESPOND WITH THE FULL SPEC.  Try to keep the same structure, style and content as the original spec except for the changes requested.
+`,
+            `\`\`\`markdown\n`,
+        ],
+        stop: "\n```",
+    };
+
+    const text = await llm.sendRequest(payload);
+    return text.split("```markdown\n")[1].split("\n```")[0];
+};
+
 export const iterate = async (
     { errors, originalSpec, originalSrc, workingSpec, workingSrc }: {
         errors?: string;
