@@ -2,6 +2,7 @@ import { Recipe } from "@commontools/common-builder";
 import { createRef } from "./cell-map.js";
 
 const recipeById = new Map<string, Recipe>();
+const recipeNameById = new Map<string, string>();
 const recipeByName = new Map<string, Recipe>();
 const idByRecipe = new Map<Recipe, string>();
 const srcById = new Map<string, string>();
@@ -25,7 +26,10 @@ export function addRecipe(
   if (spec) specById.set(id, spec);
   if (parents) parentsById.set(id, parents);
   const name = (recipe.argumentSchema as { description: string })?.description;
-  if (name) recipeByName.set(name, recipe);
+  if (name) {
+    recipeByName.set(name, recipe);
+    recipeNameById.set(id, name);
+  }
 
   return id;
 }
@@ -36,6 +40,10 @@ export function getRecipe(id: string) {
 
 export function getRecipeId(recipe: Recipe) {
   return idByRecipe.get(recipe);
+}
+
+export function getRecipeName(id: string) {
+  return recipeNameById.get(id);
 }
 
 export function getRecipeSrc(id: string) {

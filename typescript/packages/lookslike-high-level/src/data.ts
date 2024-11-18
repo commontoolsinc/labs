@@ -21,6 +21,7 @@ import {
   type ReactivityLog,
   run,
   getRecipeSpec,
+  getRecipeName,
 } from "@commontools/common-runner";
 import { createStorage } from "./storage.js";
 import * as allRecipes from "./recipes/index.js";
@@ -171,7 +172,12 @@ export async function syncRecipe(id: string) {
   recipesKnownToStorage.add(recipeId);
 }
 
-export async function saveRecipe(id: string, src: string, spec?: string, parents?: string[]) {
+export async function saveRecipe(
+  id: string,
+  src: string,
+  spec?: string,
+  parents?: string[],
+) {
   if (recipesKnownToStorage.has(id)) return;
   recipesKnownToStorage.add(id);
 
@@ -186,6 +192,7 @@ export async function saveRecipe(id: string, src: string, spec?: string, parents
       recipe: JSON.parse(JSON.stringify(getRecipe(id))),
       spec,
       parents,
+      recipeName: getRecipeName(id),
     }),
   });
   return response.ok;
