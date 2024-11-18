@@ -37,7 +37,7 @@ export type Charm = {
 export { NAME, TYPE, UI };
 
 const storage = createStorage(
-  (import.meta as any).env.VITE_STORAGE_TYPE ?? "memory",
+  (import.meta as any).env.VITE_STORAGE_TYPE ?? "local",
 );
 
 export const charms = cell<CellReference[]>([], "charms");
@@ -204,7 +204,6 @@ export async function saveRecipe(
 }
 
 addCharms([
-  await runPersistent(allRecipes.counters, {}, "counters demo"),
   //await runPersistent(<recipe>, <default inputs>, <unique name for a stable id>)
 ]);
 
