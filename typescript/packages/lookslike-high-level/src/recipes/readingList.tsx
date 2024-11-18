@@ -3,7 +3,7 @@ import { Variable } from 'datalogia'
 import { build, make } from "../sugar/build.js";
 import { query, queryDefault } from "../sugar/query.js";
 import { event } from "../sugar/event.js";
-import { fetch } from "../effects/fetch.js";
+import { fetch, llm } from "../effects/fetch.js";
 import { Constant, Instruction } from "synopsys";
 
 export const source = { readingList: { v: 1 } };
@@ -68,18 +68,9 @@ function ReadingListItem({ self, title }: { self: Reference, title: string }) {
 }
 
 
-const getTodo = ({ self, event }: { self: Reference, event: Constant }) => {
+const getTodo = ({ self, event, title }: { self: Reference, event: Constant, title: string }) => {
   return [
-    fetch(
-      self,
-      "my/request",
-      new Request('https://jsonplaceholder.typicode.com/todos/1', {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }),
-    ).json(),
+    llm(self, 'my/request', { prompt: 're-imagine this: ' + title }).json(),
   ];
 }
 
@@ -92,7 +83,7 @@ const readingListItem = behavior({
     .upsert(({ self }) => [self, 'deleted', true])
     .commit(),
 
-  onReimagineItem: select({ self: $.self })
+  onReimagineItem: query(ItemModel, 'title')
     .event('reimagine-item')
     .update(getTodo)
     .commit(),
@@ -100,11 +91,11 @@ const readingListItem = behavior({
   onFinished: select({ self: $.self, request: $.request, title: $.title })
     .match($.self, "my/request", $.request)
     .match($.request, "response/json", $.content)
-    .match($.content, 'title', $.title)
+    .match($.content, 'content', $.title)
     .update(({ self, title, request }) => {
       return [
-        ...upsert(self, { title }),
-        ...retract(self, { "my/request": request })
+        ...retract(self, { "my/request": request }),
+        ...upsert(self, { title })
       ];
     })
     .commit(),
