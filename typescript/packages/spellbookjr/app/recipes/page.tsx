@@ -26,7 +26,7 @@ export default async function RecipesPage({
           // FIXME(jake): This is a hack to get the recipe name. For now this just
           // uses the schema description, but we will swap to recipe name once it
           // is added to the blob.
-          name: blob.recipe?.argumentSchema?.description || "Unnamed Recipe",
+          name: blob?.recipeName || "Unnamed Recipe",
         };
       } catch (error) {
         console.error(`Failed to fetch blob ${hash}:`, error);
