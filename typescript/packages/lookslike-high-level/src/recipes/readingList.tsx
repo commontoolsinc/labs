@@ -1,7 +1,8 @@
-import { h, behavior, $, Reference, select, View, refer, Instruction, Select } from "@commontools/common-system";
+import { h, behavior, $, Reference, select, View, refer, Instruction, Select, Where } from "@commontools/common-system";
 import { Selector, Variable } from 'datalogia'
 import { analyzeRuleDependencies } from "../viz.js";
 import { build, make } from "../sugar/build.js";
+import { Constant } from "synopsys";
 
 export const source = { readingList: { v: 1 } };
 
@@ -31,6 +32,17 @@ const defaults = <T extends Record<string, any>>(input: T) => {
   }, {});
 }
 
+// {Or: [
+//   { Case: [$.self, CAUSE, $.cause] },
+//   {
+//     And: [
+//       { Not: { Case: [$.self, CAUSE, $._] } },
+//       { Match: [null, "==", $.cause] }
+//     ]
+//   }
+// ]}
+
+
 const createDispatch = <T extends string>(names: readonly T[]) => (name: T) => `~/on/${name}`;
 
 // bf: probably not where we want to end up here but sort of works
@@ -49,13 +61,25 @@ const dispatch = createDispatch([
 ]);
 
 const Model = {
-  'title': "Ben's Reading List",
+  'title': "Ben's Reading List 99",
   'draft/title': '',
   'collection/articles': []
 };
 
 const ItemModel = {
   title: ''
+}
+
+
+function getOrDefault<T extends Constant, S extends Selector>(select: Select<S>, attribute: string, field: Variable, fallback: T) {
+  return select.or(w => {
+    return w
+      .match($.self, attribute, field)
+      .and(w => {
+        return w
+          .formula(fallback, '==', field);
+      });
+  })
 }
 
 const query = <M extends Record<string, string | number | boolean | any[]>, T extends keyof M>(model: M, ...fields: T[]) => {
@@ -68,6 +92,22 @@ const query = <M extends Record<string, string | number | boolean | any[]>, T ex
   const selectParams = select(selection) as Select<Bindings>;
   return fields.reduce((acc, field) => {
     return acc.match($.self, field as any, $[field]);
+  }, selectParams);
+};
+
+const queryDefault = <M extends Record<string, string | number | boolean | any[]>, T extends keyof M>(model: M, ...fields: T[]) => {
+  const selection = { self: $.self, ...Object.fromEntries(fields.map(name => [name, $[name]])) };
+  type Bindings = {
+    self: Variable<any>;
+  } & {
+    [K in T]: Variable<any>;
+  };
+  const selectParams = select(selection) as Select<Bindings>;
+  return fields.reduce((acc, field) => {
+    if (Array.isArray(model[field])) {
+      return acc.match($.self, field as any, $[field]);
+    }
+    return getOrDefault(acc, field as string, $[field], model[field]);
   }, selectParams);
 };
 
@@ -88,11 +128,11 @@ const readingListItem = behavior({
 
 export const readingList = behavior({
   // bf: we would be better served baking this behaviour into the query, rather than spamming writes on spawn
-  ...defaults(Model),
+  // ...defaults(Model),
 
   // empty state view
-  emptyStateView: query(Model, 'title', 'draft/title')
-    .not(q => q.match($.self, "collection/articles", $.article))
+  emptyStateView: queryDefault(Model, 'title', 'draft/title')
+    // .not(q => q.match($.self, "collection/articles", $.article))
     .render(({ self, 'draft/title': draftTitle, title }) =>
       <div title={title} entity={self}>
         <span>Empty!</span>
@@ -102,6 +142,20 @@ export const readingList = behavior({
       </div>
     )
     .commit(),
+
+  // testDefault: getOrDefault(select({ self: $.self, value: $.field }), 'value', $.field, 'default').update(({ self, value }) => {
+  //   debugger
+  //   console.log('defaulted', value);
+  //   return [{
+  //     Upsert: [self, 'value', 'something']
+  //   }];
+  // }).commit(),
+
+  testQueryDefault: queryDefault(Model, 'title').update(({ self, title }) => {
+    debugger
+    console.log('query defaulted', title);
+    return [];
+  }).commit(),
 
   listArticlesView: select({
     self: $.self,
