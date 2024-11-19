@@ -27,44 +27,13 @@ import { createStorage } from "./storage.js";
 import * as allRecipes from "./recipes/index.js";
 import { buildRecipe } from "./localBuild.js";
 
-import { todoList } from "./recipes/todo-list.js";
-import { localSearch } from "./recipes/local-search.js";
-import { luftBnBSearch } from "./recipes/luft-bnb-search.js";
-import { ticket } from "./recipes/ticket.js";
-import { routine } from "./recipes/routine.js";
-import { fetchExample } from "./recipes/fetchExample.js";
-import { counter } from "./recipes/counter.js";
-import { counters } from "./recipes/counters.js";
-import { tweets } from "./recipes/tweets.jsx";
-
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.js";
 import "./recipes/playlist.js";
 
-import { iframe } from "./recipes/iframe.js";
-import { search } from "./recipes/search.js";
-import { dataDesigner } from "./recipes/dataDesigner.js";
-import { prompt } from "./recipes/prompts.js";
-import { wiki } from "./recipes/wiki.js";
-import { queryCollections } from "./recipes/queryCollections.js";
-import { articleQuery } from "./recipes/articleQuery.jsx";
-import { debounceExample } from "./recipes/examples/debounce.jsx";
-import { calc } from "./recipes/examples/calculator.jsx";
-import { rectangleQuery } from "./recipes/examples/rectangleQuery.jsx";
-import { evalJs } from "./recipes/examples/eval.js";
-import { importCalendar } from "./recipes/archive/importCalendar.js";
-import { jsonImporter } from "./recipes/archive/jsonImport.js";
-import { helloIsolated } from "./recipes/examples/helloIsolated.js";
-import { shoelaceDemo } from "./recipes/examples/shoelace.jsx";
-import { z } from "zod";
-import { datalogQueryExample } from "./recipes/datalogQuery.jsx";
-import { todoQuery } from "./recipes/todoQuery.jsx";
-import { mealExample } from "./recipes/meal.jsx";
-
-import * as dungeon from "./recipes/dungeon.jsx";
-import * as charmExample from './recipes/charm.jsx'
 import * as readingList from './recipes/readingList.jsx'
 import * as keywords from './recipes/keywords.jsx'
+import * as workbench from './recipes/workbench.jsx'
 import Fetcher from "./recipes/fetcher.jsx";
 import Fetch from "./effects/fetch.js";
 
@@ -254,9 +223,10 @@ addCharms([
   readingList.spawn({
     v: 10
   }),
-  keywords.spawn({
-    v: 2
-  }),
+  workbench.spawn({ v: 1}),
+  // keywords.spawn({
+  //   v: 2
+  // }),
   Fetcher.spawn(),
   Fetch.spawn(),
 ]);
