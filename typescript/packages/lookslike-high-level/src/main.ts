@@ -17,10 +17,3 @@ if ("serviceWorker" in navigator) {
     },
   );
 }
-
-document.addEventListener("DOMContentLoaded", () => {
-  const windowManager = document.getElementById(
-    "window-manager",
-  )! as CommonWindowManager;
-  openCharm.set(windowManager.openCharm.bind(windowManager));
-});
