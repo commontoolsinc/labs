@@ -119,7 +119,7 @@ const wiki = recipe<{ title: string; canon: string }>(
 
     return {
       [NAME]: str`${title} ~ Wiki Page`,
-      [UI]: <div>
+      [UI]: <os-container>
         <h3>{title}</h3>
         {ifElse(
           pending,
@@ -137,7 +137,7 @@ const wiki = recipe<{ title: string; canon: string }>(
               <li onclick={launcher({ title, canon })}>{title}</li>,
           )}
         </ul>
-      </div>,
+      </os-container>,
       title,
       canon,
     };
