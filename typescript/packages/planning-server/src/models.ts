@@ -1,4 +1,5 @@
 import { anthropic } from "npm:@ai-sdk/anthropic";
+import { createOpenAI } from "@ai-sdk/openai";
 import { groq } from "npm:@ai-sdk/groq";
 import { openai } from "npm:@ai-sdk/openai";
 import { vertex } from "npm:@ai-sdk/google-vertex";
@@ -292,6 +293,82 @@ if (
       images: true,
       prefill: true,
       systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+}
+
+if (Deno.env.get("CEREBRAS_API_KEY")) {
+  const cerebras = createOpenAI({
+    name: "cerebras",
+    apiKey: Deno.env.get("CEREBRAS_API_KEY"),
+    baseURL: "https://api.cerebras.ai/v1",
+  });
+  console.log(cerebras);
+  addModel({
+    provider: cerebras,
+    name: "cerebras:llama3.1-70b",
+    aliases: ["cerebras"],
+    capabilities: {
+      contextWindow: 8192,
+      maxOutputTokens: 8192,
+      images: false,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+}
+
+if (Deno.env.get("PERPLEXITY_API_KEY")) {
+  const perplexity = createOpenAI({
+    name: "perplexity",
+    apiKey: Deno.env.get("PERPLEXITY_API_KEY"),
+    baseURL: "https://api.perplexity.ai/",
+  });
+
+  addModel({
+    provider: perplexity,
+    name: "perplexity:llama-3.1-sonar-large-128k-online",
+    aliases: ["perplexity-lg"],
+    capabilities: {
+      contextWindow: 127_072,
+      maxOutputTokens: 8192,
+      images: false,
+      prefill: false,
+      systemPrompt: false,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+
+  addModel({
+    provider: perplexity,
+    name: "perplexity:llama-3.1-sonar-small-128k-online",
+    aliases: ["perplexity-sm"],
+    capabilities: {
+      contextWindow: 127_072,
+      maxOutputTokens: 8192,
+      images: false,
+      prefill: false,
+      systemPrompt: false,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+
+  addModel({
+    provider: perplexity,
+    name: "perplexity:llama-3.1-sonar-huge-128k-online",
+    aliases: ["perplexity-huge"],
+    capabilities: {
+      contextWindow: 127_072,
+      maxOutputTokens: 8192,
+      images: false,
+      prefill: false,
+      systemPrompt: false,
       stopSequences: true,
       streaming: true,
     },
