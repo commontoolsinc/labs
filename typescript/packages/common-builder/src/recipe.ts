@@ -7,7 +7,6 @@ import {
   isOpaqueRef,
   Node,
   Module,
-  Alias,
   toJSON,
   JSON,
   UI,
@@ -254,9 +253,7 @@ function factoryFromRecipe<T, R>(
       : resultSchemaArg ?? ({} as JSON);
 
   const serializedNodes = Array.from(nodes).map((node) => {
-    const module = isOpaqueRef(node.module)
-      ? (toJSONWithAliases(node.module, paths) as Alias)
-      : (node.module as Module);
+    const module = toJSONWithAliases(node.module, paths) as Module;
     const inputs = toJSONWithAliases(node.inputs, paths)!;
     const outputs = toJSONWithAliases(node.outputs, paths)!;
     return { module, inputs, outputs } satisfies Node;
