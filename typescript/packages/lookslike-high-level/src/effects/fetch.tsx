@@ -245,7 +245,7 @@ export const llm = (consumer: Reference, port: string, request: LlmRequest) =>
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-3-5-sonnet-latest",
+        model: "claude-3-5-sonnet",
         max_tokens: 4096,
         ...request,
         messages: request.messages || [{ role: "user", content: request.prompt }],
