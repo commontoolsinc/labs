@@ -34,6 +34,7 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
     defaultValue: undefined,
     nodes: new Set<NodeRef>(),
     frame: getTopFrame()!,
+    name: undefined as string | undefined,
   };
 
   let unsafe_binding: { recipe: Recipe; path: PropertyKey[] } | undefined;
@@ -55,6 +56,10 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
           setValueAtPath(store, ["defaultValue", ...path], newValue);
       },
       setPreExisting: (ref: any) => setValueAtPath(store, ["external"], ref),
+      setName: (name: string) => {
+        if (path.length === 0) store.name = name;
+        else throw new Error("Can only set name for root opaque ref");
+      },
       connect: (node: NodeRef) => store.nodes.add(node),
       export: () => ({
         cell: top,

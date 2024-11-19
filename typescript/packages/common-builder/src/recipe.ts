@@ -158,6 +158,31 @@ function factoryFromRecipe<T, R>(
   inputs = collectCellsAndNodes(inputs);
   outputs = collectCellsAndNodes(outputs);
 
+  // Fill in reasonable names for all cells, where possible:
+
+  // First from results
+  if (typeof outputs === "object" && outputs !== null)
+    Object.entries(outputs).forEach(([key, value]) => {
+      if (
+        isOpaqueRef(value) &&
+        !value.export().path.length &&
+        !value.export().name
+      )
+        value.setName(key);
+    });
+
+  // Then from assignments in nodes
+  cells.forEach((cell) => {
+    if (cell.export().path.length) return;
+    cell.export().nodes.forEach((node: NodeRef) => {
+      if (typeof node.inputs === "object" && node.inputs !== null)
+        Object.entries(node.inputs).forEach(([key, input]) => {
+          if (isOpaqueRef(input) && input.cell === cell && !cell.export().name)
+            cell.setName(key);
+        });
+    });
+  });
+
   // [For unsafe bindings] Also collect otherwise disconnected cells and nodes,
   // since they might only be mentioned via a code closure in a lifted function.
   getTopFrame()?.opaqueRefs.forEach((ref) => collectCellsAndNodes(ref));
@@ -176,8 +201,8 @@ function factoryFromRecipe<T, R>(
   let count = 0;
   cells.forEach((cell: OpaqueRef<any>) => {
     if (paths.has(cell)) return;
-    const { cell: top, path } = cell.export();
-    if (!paths.has(top)) paths.set(top, ["internal", `__#${count++}`]);
+    const { cell: top, path, name } = cell.export();
+    if (!paths.has(top)) paths.set(top, ["internal", name ?? `__#${count++}`]);
     if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
   });
   shadows.forEach((shadow) => {

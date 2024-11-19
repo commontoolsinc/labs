@@ -31,6 +31,7 @@ export type OpaqueRefMethods<T> = {
   key<K extends keyof T>(key: K): OpaqueRef<T[K]>;
   setDefault(value: Opaque<T> | T): void;
   setPreExisting(ref: any): void;
+  setName(name: string): void;
   connect(node: NodeRef): void;
   export(): {
     cell: OpaqueRef<any>;
@@ -39,6 +40,7 @@ export type OpaqueRefMethods<T> = {
     defaultValue?: Opaque<T>;
     nodes: Set<NodeRef>;
     external?: any;
+    name?: string;
     frame: Frame;
   };
   unsafe_bindToRecipeAndPath(recipe: Recipe, path: PropertyKey[]): void;

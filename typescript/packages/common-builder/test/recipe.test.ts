@@ -3,6 +3,7 @@ import { Recipe, isRecipe, Module, isModule, Opaque } from "../src/types.js";
 import { lift } from "../src/module.js";
 import { recipe } from "../src/recipe.js";
 import { z } from "zod";
+import { opaqueRef } from "../src/opaque-ref.js";
 
 describe("recipe function", () => {
   it("creates a recipe", () => {
@@ -19,6 +20,19 @@ describe("recipe function", () => {
       return { double: double(x) };
     });
     expect(isRecipe(doubleRecipe)).toBe(true);
+  });
+
+  it("creates a recipe, with an inner opaque ref", () => {
+    const doubleRecipe = recipe<{ x: number }>("Double a number", () => {
+      const x = opaqueRef<number>(1);
+      x.setName("x");
+      const double = lift(({ x }) => x * 2);
+      return { double: double({ x }) };
+    });
+    expect(isRecipe(doubleRecipe)).toBe(true);
+    expect(doubleRecipe.nodes[0].inputs).toEqual({
+      x: { $alias: { path: ["internal", "x"] } },
+    });
   });
 });
 
@@ -40,7 +54,7 @@ describe("complex recipe function", () => {
       },
     });
     expect(result).toEqual({
-      double: { $alias: { path: ["internal", "__#1"] } },
+      double: { $alias: { path: ["internal", "double"] } },
     });
   });
 
@@ -55,7 +69,7 @@ describe("complex recipe function", () => {
     });
     expect(nodes[1].inputs).toEqual({ $alias: { path: ["internal", "__#0"] } });
     expect(nodes[1].outputs).toEqual({
-      $alias: { path: ["internal", "__#1"] },
+      $alias: { path: ["internal", "double"] },
     });
   });
 });
