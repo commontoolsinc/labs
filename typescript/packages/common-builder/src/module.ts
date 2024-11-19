@@ -84,11 +84,6 @@ export function lift<T, R>(
   });
 }
 
-export const derive = <In, Out>(
-  input: Opaque<In>,
-  f: (input: In) => Out,
-): OpaqueRef<Out> => lift(f)(input);
-
 export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
   return createNodeFactory({
     type: "ref",
