@@ -1,15 +1,17 @@
-import { h, behavior, $, Reference, select, Select, service } from "@commontools/common-system";
-import { Variable } from 'datalogia'
+import { h, behavior, $, Reference, select, service } from "@commontools/common-system";
 import { build, make } from "../sugar/build.js";
-import { query, queryDefault } from "../sugar/query.js";
 import { event } from "../sugar/event.js";
-import { fetch, llm } from "../effects/fetch.js";
-import { Constant, Instruction, refer, Task } from "synopsys";
+import { Task } from "synopsys";
 import { tsToExports } from "../localBuild.js";
 
 export const source = { workbench: { v: 1 } };
 const DEFAULT_SOURCE = `
 import { h, behavior, $, select } from "@commontools/common-system";
+import { build, make } from "../sugar/build.js";
+import { query, queryDefault } from "../sugar/query.js";
+import { event } from "../sugar/event.js";
+
+const dispatch = (name: T) => \`~/on/\${name}\`;
 
 export const spell = behavior({
   helloWorld: select({ self: $.self })
@@ -17,7 +19,15 @@ export const spell = behavior({
       return <div entity={self} title="Hello World">
         <h1>Hello World</h1>
         <p>This is a spell.</p>
+        <button type="button" onclick={dispatch('click')}>Click me</button>
       </div>
+    })
+    .commit(),
+
+  onClick: event('click')
+    .update(({ self }) => {
+      console.log('clicked', self)
+      alert('Hello from ' + self.toString());
     })
     .commit()
 });
@@ -33,16 +43,8 @@ const charms = (items: Reference[], behaviour: any) => items.map(a => <common-ch
   entity={() => a}
 ></common-charm>);
 
-function upsert(self: Reference, fields: {}): Instruction[] {
-  return Object.entries(fields).map(([k, v]) => ({ Upsert: [self, k, v] } as Instruction));
-}
-
-function retract(self: Reference, fields: {}): Instruction[] {
-  return Object.entries(fields).map(([k, v]) => ({ Retract: [self, k, v] } as Instruction));
-}
-
 // bf: exploring typesafe event names
-const dispatch = createDispatch(['new-spell', 'compile-spell']);
+const dispatch = createDispatch(['new-spell', 'compile-spell', 'save-spell', 'rename-spell', 'code-change']);
 
 const SpellModel = {
   name: '<unnamed spell>',
@@ -65,39 +67,44 @@ function SpellView({ self, name, sourceCode, compiled }: { self: Reference, name
 
 type State = any
 
-const compiledSpells = new Map<String, State>();
-
-const spellView = behavior({
-  view: queryDefault(SpellModel, 'name', 'sourceCode', 'compiled')
-    .render(SpellView)
-    .commit(),
-});
-
 const spellService = service({
-  // onCompileSpell: {
-  //   select: {
-  //     self: $.self,
-  //     sourceCode: $.sourceCode,
-  //     event: $.event,
-  //   },
-  //   where: [
-  //     { Case: [$.self, `sourceCode`, $.sourceCode] },
-  //     { Case: [$.self, `~/on/compile-spell`, $.event] },
-  //   ],
-  //   *perform({ self, sourceCode }: { self: Reference; sourceCode: string }) {
-  //     const compiled = yield* Task.wait(tsToExports(sourceCode));
-  //     const exports = JSON.stringify(compiled, null, 2);
-  //     const hash = refer({ sourceCode })
+  onNameChanged: {
+    select: {
+      self: $.self,
+      event: $.event,
+    },
+    where: [
+      { Case: [$.self, `~/on/rename-spell`, $.event] },
+    ],
+    *perform({ self, event }) {
+      console.log(event, event.detail.value)
 
-  //     console.log(compiled, exports)
-  //     compiledSpells.set(hash.toString(), compiled)
+      return [
+        { Upsert: [self, 'name', event.detail.value] }
+      ];
+    },
+  },
 
-  //     return [
-  //       { Upsert: [self, 'compiled', exports] }
-  //     ];
-  //   },
-  // },
+  onCodeChanged: {
+    select: {
+      self: $.self,
+      event: $.event,
+    },
+    where: [
+      { Case: [$.self, `~/on/code-change`, $.event] },
+    ],
+    *perform({ self, event }) {
+      console.log(event, event.detail.state.doc.toString())
 
+      return [
+        { Upsert: [self, 'sourceCode', event.detail.state.doc.toString()] }
+      ];
+    },
+  },
+
+  // bf: abusing a service to compile + render in the same rule
+  // this seems fine and does render, but everything disappears when I trigger and event
+  // and my handlers above aren't called
   render: {
     select: {
       self: $.self,
@@ -110,22 +117,19 @@ const spellService = service({
     ],
     *perform({ self, sourceCode, name }: { self: Reference; sourceCode: string; name: string; }) {
       const compiled = yield* Task.wait(tsToExports(sourceCode));
-      const exports = JSON.stringify(compiled, null, 2);
-      const hash = refer({ sourceCode })
-
-      console.log(compiled, exports)
-      compiledSpells.set(hash.toString(), compiled)
+      console.log(compiled)
 
       return [
         {
           Upsert: [self, '~/common/ui', <div entity={self}>
             <common-input type="text" value={name} />
             <textarea>{sourceCode}</textarea>
-            {/* <button onclick={dispatch('save-spell')}>Save</button> */}
+            <button onclick={dispatch('save-spell')}>Save</button>
             <os-code-editor
               slot="content"
               language="text/x.jsx"
               source={sourceCode}
+              ondoc-change={dispatch('code-change')}
             ></os-code-editor>
             <fieldset>
               <common-charm
@@ -139,25 +143,12 @@ const spellService = service({
       ];
     }
   }
-
-  // onCompileSpell:
-  //   query(SpellModel, 'sourceCode')
-  //     .event('compile-spell')
-  //     .update(({ self, event, sourceCode }) => {
-  //       const x = tsToExports(sourceCode);
-
-  //       return [
-  //         ...upsert(self, { compiled: true }),
-  //       ]
-  //     })
-  //     .commit(),
 })
 
 
 export const spellWorkbench = behavior({
   spells: build('spells'),
 
-  // empty state view
   emptyStateView: select({ self: $.self })
     .not(q => q.match($.self, "spells", $.article))
     .render(({ self }) => {
@@ -169,7 +160,7 @@ export const spellWorkbench = behavior({
     })
     .commit(),
 
-  listArticlesView: select({
+  listSpells: select({
     self: $.self,
     spells: [$.spell]
   })
@@ -177,11 +168,11 @@ export const spellWorkbench = behavior({
     .render(({ self, spells }) => {
       return <div entity={self} title="Workbench">
         <h1>Workbench</h1>
-        {/* {...charms(spells, spellView)} */}
         {...charms(spells, spellService)}
         <pre>
           {JSON.stringify(spells, null, 2)}
         </pre>
+        <button onclick={dispatch('new-spell')}>New Spell</button>
       </div>
     })
     .commit(),
