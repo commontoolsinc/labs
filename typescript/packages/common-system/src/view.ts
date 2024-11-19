@@ -87,11 +87,7 @@ export class Charm extends HTMLElement {
   }
 
   *dispatch([attribute, event]: [string, Event]) {
-    console.log(this.entity.toString(), "dispatch", attribute, event);
-
     yield* transact([{ Upsert: [this.entity, attribute, event as any] }]);
-
-    console.log("Now retract changes");
 
     // We retract the event right after so that rules will react to event
     // only once.
