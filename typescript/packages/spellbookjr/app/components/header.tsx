@@ -5,7 +5,11 @@ export default function Header() {
     <header className="bg-purple-50">
       <div className="container mx-auto flex items-center justify-center px-4 py-4 text-center">
         <Link href="/" className="flex items-center space-x-2 justify-center">
-          <img src="/images/logo.svg" alt="Spellbook Logo" className="w-40" />
+          <img
+            src="/spellbookjr/images/logo.svg"
+            alt="Spellbook Logo"
+            className="w-40"
+          />
         </Link>
       </div>
     </header>
