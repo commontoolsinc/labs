@@ -10,17 +10,16 @@ import RecipeCard from "@/app/components/recipe-card";
 interface BlobData {
   hash: string;
   name: string;
-  author?: string;
-  likes?: number;
+  author: string;
+  likes: number;
 }
 
 export default async function RecipesPage({
   searchParams,
 }: {
-  searchParams: { q?: string } | Promise<{ q?: string }>;
+  searchParams: { q?: string };
 }) {
-  const resolvedParams = await searchParams;
-  const searchTerm = resolvedParams.q?.toLowerCase() || "";
+  const searchTerm = searchParams.q?.toLowerCase() || "";
 
   const blobHashes = await getAllBlobs();
   const blobs = (
@@ -41,7 +40,7 @@ export default async function RecipesPage({
 
   const validBlobs = blobs.filter((blob): blob is BlobData => blob !== null);
   const filteredBlobs = validBlobs.filter((blob) =>
-    blob.name.toLowerCase().includes(searchTerm),
+    blob?.name.toLowerCase().includes(searchTerm),
   );
 
   return (
@@ -51,18 +50,18 @@ export default async function RecipesPage({
         <div className="container mx-auto px-4 py-8">
           <div className="mb-8 flex items-center justify-between">
             <h1 className="text-4xl font-bold text-purple-900">Recipes</h1>
-            <SearchBox defaultValue={searchTerm} className="w-64" />
+            <SearchBox defaultValue={searchTerm} />
           </div>
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {filteredBlobs.map((blob) => (
               <RecipeCard
-                key={blob.hash}
-                hash={blob.hash}
-                name={blob.name}
-                author={blob.author || "Anonymous"}
-                likes={blob.likes || 0}
-                imageUrl={getBlobScreenshotUrl(blob.hash)}
+                key={blob?.hash}
+                hash={blob?.hash || ""}
+                name={blob?.name}
+                author={blob?.author || "Anonymous"}
+                likes={blob?.likes || 0}
+                imageUrl={getBlobScreenshotUrl(blob?.hash || "")}
               />
             ))}
           </div>

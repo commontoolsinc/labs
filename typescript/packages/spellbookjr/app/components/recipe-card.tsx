@@ -25,7 +25,7 @@ export default function RecipeCard({
       className="group transform rounded-lg bg-white p-4 shadow-md transition-all hover:scale-105 hover:shadow-lg"
     >
       <div className="relative h-48 w-full overflow-hidden rounded-md">
-        <img src={imageUrl} alt={name} fill className="object-cover" />
+        <img src={imageUrl} alt={name} className="object-cover" />
       </div>
       <div className="mt-4">
         <h2 className="text-xl font-semibold text-purple-900 group-hover:text-purple-600">
