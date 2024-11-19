@@ -322,6 +322,59 @@ if (Deno.env.get("CEREBRAS_API_KEY")) {
   });
 }
 
+if (Deno.env.get("PERPLEXITY_API_KEY")) {
+  const perplexity = createOpenAI({
+    name: "perplexity",
+    apiKey: Deno.env.get("PERPLEXITY_API_KEY"),
+    baseURL: "https://api.perplexity.ai/",
+  });
+
+  addModel({
+    provider: perplexity,
+    name: "perplexity:llama-3.1-sonar-large-128k-online",
+    aliases: ["perplexity-lg"],
+    capabilities: {
+      contextWindow: 127_072,
+      maxOutputTokens: 8192,
+      images: false,
+      prefill: false,
+      systemPrompt: false,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+
+  addModel({
+    provider: perplexity,
+    name: "perplexity:llama-3.1-sonar-small-128k-online",
+    aliases: ["perplexity-sm"],
+    capabilities: {
+      contextWindow: 127_072,
+      maxOutputTokens: 8192,
+      images: false,
+      prefill: false,
+      systemPrompt: false,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+
+  addModel({
+    provider: perplexity,
+    name: "perplexity:llama-3.1-sonar-huge-128k-online",
+    aliases: ["perplexity-huge"],
+    capabilities: {
+      contextWindow: 127_072,
+      maxOutputTokens: 8192,
+      images: false,
+      prefill: false,
+      systemPrompt: false,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+}
+
 export const findModel = (name: string) => {
   return MODELS[name];
 };
