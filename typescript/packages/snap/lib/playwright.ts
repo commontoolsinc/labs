@@ -1,11 +1,14 @@
 import { chromium } from "playwright";
 
-export async function takeScreenshot(url: string, { outputPath, fullPage }: { outputPath: string, fullPage: boolean }) {
+export async function takeScreenshot(
+  url: string,
+  { outputPath, fullPage }: { outputPath: string; fullPage: boolean },
+) {
   const browser = await chromium.launch();
   const context = await browser.newContext({
     viewport: {
-      width: 1920,
-      height: 1080,
+      width: 1024,
+      height: 768,
     },
   });
 
@@ -13,8 +16,13 @@ export async function takeScreenshot(url: string, { outputPath, fullPage }: { ou
 
   // Wait for network to be idle to ensure all content is loaded
   await page.goto(url, {
-    waitUntil: 'networkidle'
+    waitUntil: "networkidle",
   });
+
+  // Close the sidebar
+  const selector = "os-navstack > os-navpanel > os-sidebar-close-button";
+  await page.waitForSelector(selector);
+  await page.click(selector);
 
   // Take screenshot
   const screenshot = await page.screenshot({
@@ -28,4 +36,4 @@ export async function takeScreenshot(url: string, { outputPath, fullPage }: { ou
   await browser.close();
 
   return screenshot;
-} 
+}

@@ -7,7 +7,6 @@ import { ensureDir, exists } from "@std/fs";
 import { sha256 } from "./lib/hash.ts";
 import { takeScreenshot } from "./lib/playwright.ts";
 
-
 // Ensure data directory exists
 const dataDir = join(Deno.cwd(), "data");
 ensureDir(dataDir);
@@ -46,10 +45,9 @@ app.use(async (c, next) => {
   await next();
 });
 
-
 app.get("/screenshot/*", async (c) => {
   const uri = c.req.path.substring("/screenshot/".length);
-  const fullPage = c.req.query('fullpage') === 'true';
+  const fullPage = c.req.query("fullpage") === "true";
 
   let requestURL: URL;
 
@@ -59,28 +57,34 @@ app.get("/screenshot/*", async (c) => {
     // If the uri is not a valid URL, we assume that it is a recipe ID
     requestURL = new URL(`http://localhost:5173/recipe/${uri}`);
   }
-  
+
   const urlHash = await sha256(requestURL.toString());
   const outputPath = join(dataDir, `${urlHash}.png`);
 
   if (await exists(outputPath)) {
-    console.log('Fetching cached screenshot for', requestURL.toString(), 'path: ', outputPath);
+    console.log(
+      "Fetching cached screenshot for",
+      requestURL.toString(),
+      "path: ",
+      outputPath,
+    );
     const screenshot = await Deno.readFile(outputPath);
-    c.header('Content-Type', 'image/png');
-    c.header('CT-Cached-Image', 'true');
+    c.header("Content-Type", "image/png");
+    c.header("CT-Cached-Image", "true");
     return c.body(screenshot);
   }
 
-  console.log('Fetching screenshot for', requestURL.toString());
+  console.log("Fetching screenshot for", requestURL.toString());
 
-  const screenshot = await takeScreenshot(requestURL.toString(), { outputPath, fullPage });
+  const screenshot = await takeScreenshot(requestURL.toString(), {
+    outputPath,
+    fullPage,
+  });
 
   // Set the content type to PNG and return the buffer directly
-  c.header('Content-Type', 'image/png');
+  c.header("Content-Type", "image/png");
   return c.body(screenshot);
 });
-
-
 
 const PORT = Deno.env.get("PORT") || 3000;
 
