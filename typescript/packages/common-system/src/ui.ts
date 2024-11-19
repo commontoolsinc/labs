@@ -10,7 +10,18 @@ export interface Mount {
 }
 
 export const UI = "~/common/ui";
+export const MOUNT = "~/ui/mount";
 
+/**
+ * UI is a service that observes entities that have `~/common/ui` and
+ * `~/ui/mount` attributes and renders VDOM assigned to the `~/common/ui`
+ * in a `.mount` of the `Charm` custom element assigned to the `~/ui/mount`
+ * attribute.
+ *
+ * `Charm` custom element sets `~/ui/mount` attribute on the entity bound to
+ * it when element is connected to the DOM and unsets it when element is
+ * disconnected from the DOM.
+ */
 export default service({
   render: {
     select: {
@@ -19,10 +30,9 @@ export default service({
     },
     where: [
       { Case: [$.entity, UI, $.ui] },
-      { Case: [$.entity, "~/ui/mount", $.mount] },
+      { Case: [$.entity, MOUNT, $.mount] },
     ],
     *perform({ mount, ui }: { mount: Reference; ui: Reference }) {
-      console.log("Render");
       const view = Session.resolve(mount) as Mount;
       const vdom = Session.resolve(ui) as DOM.Node<{}>;
       if (view.vdom === null) {

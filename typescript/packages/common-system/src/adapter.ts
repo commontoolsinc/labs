@@ -90,7 +90,7 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
   }
 
   *fork(self: Reference = this.id) {
-    const db = yield* DB.local;
+    const db = yield* Task.wait(DB.local);
     const subscriptions = [];
     const changes = [];
     for (const rule of Object.values(this.rules)) {
@@ -163,7 +163,7 @@ class SystemService<Effects extends Record<string, Effect>> {
   }
 
   *fork(self: Reference = this.id) {
-    const db = yield* DB.local;
+    const db = yield* Task.wait(DB.local);
     const subscriptions = [];
     const changes = [];
     for (const rule of Object.values(this.rules)) {

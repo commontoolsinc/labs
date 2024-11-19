@@ -1,24 +1,24 @@
 import { Type, Task, Hybrid, Fact, Selector, refer, Reference } from "synopsys";
 
-// import * as IDB from "synopsys/store/idb";
+import * as IDB from "synopsys/store/idb";
 import * as Memory from "synopsys/store/memory";
 import * as Session from "./session.js";
-import { Effect } from "./adapter.js";
+import type { Effect } from "./adapter.js";
 export * from "synopsys";
 
 export type DB =
   ReturnType<typeof Hybrid.open> extends Type.Task<infer T> ? T : never;
 
 export function* open(): Task.Task<DB, Error> {
-  // const durable = yield* IDB.open({
-  //   idb: {
-  //     name: "synopsys",
-  //     version: 1,
-  //     store: "facts",
-  //   },
-  // });
+  const durable = yield* IDB.open({
+    idb: {
+      name: "synopsys",
+      version: 1,
+      store: "facts",
+    },
+  });
 
-  const durable = yield* Memory.open();
+  // const durable = yield* Memory.open();
   const ephemeral = yield* Memory.open();
 
   const db = yield* Hybrid.open({
@@ -41,14 +41,12 @@ export const upstream = {
 export function* transact(
   changes: Type.Transaction,
 ): Task.Task<Type.Commit, Error> {
-  const db = yield* local;
+  const db = yield* Task.wait(local);
 
   const transaction = [...changes].map(resolve);
-  console.log("submit transaction", ...transaction);
   const commit = yield* db.transact(transaction);
 
   const updates = yield* publish(db);
-  console.log("transaction complete", commit);
   if (updates.length > 0) {
     yield* Task.fork(submit(updates));
   }
@@ -125,7 +123,7 @@ export const synchronize = debounce(function* (
 export function* query<Select extends Type.Selector>(
   select: Type.Query<Select>,
 ) {
-  const db = yield* local;
+  const db = yield* Task.wait(local);
   return yield* db.query(select);
 }
 
