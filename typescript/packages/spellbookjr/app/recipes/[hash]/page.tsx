@@ -22,5 +22,11 @@ export default async function RecipeDetailPage({ params }: RecipeDetailProps) {
 
   const screenshotUrl = getBlobScreenshotUrl(hash);
 
-  return <RecipeDetail recipe={blob} screenshotUrl={screenshotUrl} />;
+  return (
+    <RecipeDetail
+      recipe={blob}
+      recipeHash={hash}
+      screenshotUrl={screenshotUrl}
+    />
+  );
 }
