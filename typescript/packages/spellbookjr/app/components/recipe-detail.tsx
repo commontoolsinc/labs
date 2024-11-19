@@ -1,10 +1,10 @@
 "use client";
 
-import Image from "next/image";
 import JsonView from "@uiw/react-json-view";
-import { LuHeart, LuShare, LuBookOpen, LuSend } from "react-icons/lu";
+import { LuHeart, LuBookOpen, LuSend, LuCode2 } from "react-icons/lu";
 import Header from "@/app/components/header";
 import { useState } from "react";
+import ActionButton from "@/app/components/action-button";
 
 interface RecipeDetailProps {
   recipe: any;
@@ -17,13 +17,21 @@ export default function RecipeDetail({
   recipeHash,
   screenshotUrl,
 }: RecipeDetailProps) {
-  const [showCopyMessage, setShowCopyMessage] = useState(false);
+  const [isLiked, setIsLiked] = useState(false);
 
   const handleShare = () => {
-    const url = `http://localhost:5173/recipes/${recipeHash}`;
+    const url = `http://localhost:5173/recipe/${recipeHash}`;
     navigator.clipboard.writeText(url);
-    setShowCopyMessage(true);
-    setTimeout(() => setShowCopyMessage(false), 2000); // Hide after 2 seconds
+  };
+
+  const handleCopyBlobbyLink = () => {
+    const url = `https://paas.saga-castor.ts.net/blobby/blob/${recipeHash}`;
+    navigator.clipboard.writeText(url);
+  };
+
+  const handleLike = () => {
+    setIsLiked(!isLiked);
+    // TODO: Make API call to whatever service is handling likes
   };
 
   console.log(recipe);
@@ -32,20 +40,30 @@ export default function RecipeDetail({
       <Header />
       <main className="min-h-screen bg-purple-50 p-4 md:p-8">
         <div className="container mx-auto max-w-4xl flex flex-col gap-4">
-          <div className="actionBar bg-purple-100 rounded-2xl p-4 relative">
-            <button
+          <div className="actionBar bg-purple-100 rounded-2xl p-4 flex gap-2 justify-between">
+            <ActionButton
+              icon={<LuCode2 size={24} />}
+              label="Blobby"
+              onClick={handleCopyBlobbyLink}
+              popoverMessage="Blobby link copied to clipboard!"
+            />
+            <ActionButton
+              icon={
+                <LuHeart
+                  size={24}
+                  className={isLiked ? "fill-purple-600" : ""}
+                />
+              }
+              label="Like"
+              onClick={handleLike}
+              popoverMessage="Liked!"
+            />
+            <ActionButton
+              icon={<LuSend size={24} />}
+              label="Share"
               onClick={handleShare}
-              className="flex items-center gap-2 text-purple-600 hover:bg-purple-200 hover:text-purple-800 hover:-translate-y-0.5 hover:scale-105 active:translate-y-0 active:scale-95 p-4 rounded-2xl transition-all duration-150 ease-out"
-            >
-              <LuSend size={24} />
-              <span>Share</span>
-            </button>
-
-            {showCopyMessage && (
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-4 py-2 bg-purple-900 text-white text-sm rounded-lg whitespace-nowrap animate-fade-in-down">
-                Shareable recipe link copied to clipboard!
-              </div>
-            )}
+              popoverMessage="Shareable recipe link copied to clipboard!"
+            />
           </div>
 
           <div className="relative aspect-video w-full">
@@ -62,20 +80,11 @@ export default function RecipeDetail({
                 <h1 className="text-2xl md:text-3xl font-bold text-purple-900">
                   {recipe.recipeName || "Unnamed Recipe"}
                 </h1>
-                <div className="flex gap-4">
-                  <button className="flex items-center text-purple-600 hover:text-purple-800 transition-colors">
-                    <LuHeart className="w-5 h-5 mr-1" />
-                    <span>{recipe.likes || 0}</span>
-                  </button>
-                  <button className="text-purple-600 hover:text-purple-800 transition-colors">
-                    <LuShare className="w-5 h-5" />
-                  </button>
-                </div>
               </div>
 
               <div className="mb-8">
                 <p className="text-gray-600">
-                  by {recipe.blobAuthor || "Anonymous"}
+                  first created by {recipe.blobAuthor || "Anonymous"}
                 </p>
               </div>
 
