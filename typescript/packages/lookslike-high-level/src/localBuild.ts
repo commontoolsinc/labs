@@ -5,6 +5,9 @@ import * as commonSystem from "@commontools/common-system";
 import * as zod from "zod";
 import * as zodToJsonSchema from 'zod-to-json-schema';
 
+import * as collectionSugar from "./sugar/build.js";
+import * as querySugar from "./sugar/query.js";
+import * as eventSugar from "./sugar/event.js";
 
 // NOTE(ja): this isn't currently doing typechecking, but it could...
 
@@ -87,18 +90,24 @@ export const tsToExports = async (src: string): Promise<{ exports?: any, errors?
             return localImports[moduleName];
         }
         switch (moduleName) {
-            case "@commontools/common-html":
-                return commonHtml;
-            case "@commontools/common-builder":
-                return commonBuilder;
-            case "@commontools/common-system":
-                return commonSystem;
-            case "zod":
-                return zod;
-            case "zod-to-json-schema":
-                return zodToJsonSchema;
-            default:
-                throw new Error(`Module not found: ${moduleName}`);
+          case "../sugar/build.js":
+            return collectionSugar;
+          case "../sugar/query.js":
+            return querySugar;
+          case "../sugar/event.js":
+            return eventSugar;
+          case "@commontools/common-html":
+              return commonHtml;
+          case "@commontools/common-builder":
+              return commonBuilder;
+          case "@commontools/common-system":
+              return commonSystem;
+          case "zod":
+              return zod;
+          case "zod-to-json-schema":
+              return zodToJsonSchema;
+          default:
+              throw new Error(`Module not found: ${moduleName}`);
         }
     };
 
