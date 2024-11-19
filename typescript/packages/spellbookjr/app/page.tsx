@@ -23,21 +23,21 @@ export default async function RecipesPage({
   const searchTerm = resolvedParams.q?.toLowerCase() || "";
 
   const blobHashes = await getAllBlobs();
-  const blobs = await Promise.all(
-    blobHashes.map(async (hash) => {
-      try {
+  const blobs = (
+    await Promise.allSettled(
+      blobHashes.map(async (hash) => {
         const blob = await getBlobByHash(hash);
+
+        console.log(blob);
         return {
           hash,
           name: blob.recipeName || "Unnamed Recipe",
-          author: blob.author || "Anonymous",
+          author: blob.blobAuthor || "Anonymous",
           likes: blob.likes || 0,
         };
-      } catch {
-        return null;
-      }
-    }),
-  );
+      }),
+    )
+  ).map((result) => (result.status === "fulfilled" ? result.value : null));
 
   const validBlobs = blobs.filter((blob): blob is BlobData => blob !== null);
   const filteredBlobs = validBlobs.filter((blob) =>

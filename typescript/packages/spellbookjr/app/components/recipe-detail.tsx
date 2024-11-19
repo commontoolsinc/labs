@@ -18,17 +18,17 @@ export default function RecipeDetail({
     <>
       <Header />
       <main className="min-h-screen bg-purple-50 px-4 py-8">
-        <div className="container mx-auto max-w-4xl">
-          <div className="overflow-hidden rounded-xl bg-white shadow-lg">
-            <div className="relative h-[400px] w-full">
-              <img
-                src={screenshotUrl}
-                alt={recipe.recipeName || "Recipe Screenshot"}
-                fill
-                className="object-cover"
-              />
-            </div>
+        <div className="container mx-auto max-w-4xl flex flex-col gap-4">
+          <div className="relative w-full">
+            <img
+              src={screenshotUrl}
+              alt={recipe.recipeName || "Recipe Screenshot"}
+              fill
+              className="object-cover rounded-2xl shadow-lg"
+            />
+          </div>
 
+          <div className="overflow-hidden rounded-xl bg-white shadow-lg">
             <div className="p-8">
               <div className="mb-6 flex items-center justify-between">
                 <h1 className="text-3xl font-bold text-purple-900">
@@ -47,7 +47,7 @@ export default function RecipeDetail({
 
               <div className="mb-8">
                 <p className="text-gray-600">
-                  by {recipe.author || "Anonymous"}
+                  by {recipe.blobAuthor || "Anonymous"}
                 </p>
               </div>
 
