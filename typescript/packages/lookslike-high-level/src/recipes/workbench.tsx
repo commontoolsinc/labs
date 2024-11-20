@@ -122,7 +122,7 @@ const spellService = service({
       const compiled = yield* Task.wait(tsToExports(sourceCode));
       console.log(compiled)
 
-      const child = refer({ parent: self })
+      const child = refer({ parent: self, compiled: compiled.exports.spell.id })
 
       return [
         {

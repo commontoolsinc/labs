@@ -36,6 +36,8 @@ import * as workbench from './recipes/workbench.jsx'
 import * as dungeon from "./recipes/dungeon.jsx";
 import * as charmExample from "./recipes/charm.jsx";
 import * as readingList from "./recipes/readingList.jsx";
+import * as roundTrip from "./recipes/jsonRoundTrip.jsx";
+import * as tamagochi from "./recipes/tamagochi.jsx";
 import Hello from "./recipes/hello.jsx";
 import Fetcher from "./recipes/fetcher.jsx";
 import Fetch from "./effects/fetch.js";
@@ -220,6 +222,8 @@ export async function saveRecipe(
 addCharms([
   View.spawn(),
   Hello.spawn({ hello: { v: 1 } }),
+  roundTrip.spawn({ trip: 2 }),
+  tamagochi.spawn({tamagochi: 1}),
   readingList.spawn({
     v: 10
   }),
