@@ -51,7 +51,9 @@ export function lift<T, R>(
 export function lift<T extends z.ZodTypeAny, R extends z.ZodTypeAny>(
   argumentSchema: T,
   resultSchema: R,
-  implementation: (input: z.infer<T>) => z.infer<R>,
+  implementation: (
+    input: z.infer<typeof argumentSchema>,
+  ) => z.infer<typeof resultSchema>,
 ): ModuleFactory<T, R>;
 export function lift<T, R>(
   implementation: (input: T) => R,

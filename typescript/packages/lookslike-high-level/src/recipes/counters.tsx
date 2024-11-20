@@ -6,15 +6,19 @@ import {
   handler,
   lift,
   str,
+  ModuleFactory,
 } from "@commontools/common-builder";
 import { z } from "zod";
 
 const Counter = z.object({ title: z.string(), count: z.number() });
 type Counter = z.infer<typeof Counter>;
 
+const CounterArray = z.array(Counter);
+type CounterArray = z.infer<typeof CounterArray>;
+
 const Counters = z
   .object({
-    items: z.array(Counter).default([]),
+    items: CounterArray.default([]),
     title: z.string().default("Counters"),
   })
   .describe("Counters");
@@ -50,9 +54,9 @@ const removeItem = handler<{}, { items: Counter[]; item: Counter }>(
   },
 );
 
-const sum = lift(({ items }: { items: Counter[] }) =>
+const sum = lift(z.object({ items: CounterArray }), z.number(), ({ items }) =>
   items.reduce((acc: number, item: Counter) => acc + item.count, 0),
-);
+) as unknown as ModuleFactory<{ items: CounterArray }, number>;
 
 export default recipe(Counters, ({ items, title }) => {
   const total = sum({ items });
@@ -80,5 +84,6 @@ export default recipe(Counters, ({ items, title }) => {
         <button onclick={addItem({ items })}>Add new item</button>
       </os-container>
     ),
+    total,
   };
 });

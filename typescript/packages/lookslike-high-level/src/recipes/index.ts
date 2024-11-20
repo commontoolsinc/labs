@@ -31,6 +31,7 @@ addRecipe(counter, counterSrc);
 export { counter };
 
 import countersSrc from "./counters.tsx?raw";
+// @ts-ignore - it wants this to be a proper module
 import counterSpec from "./counters.md?raw";
 import counters from "./counters.js";
 addRecipe(counters, countersSrc, counterSpec);
