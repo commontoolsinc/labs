@@ -7,6 +7,7 @@ import {
   EncodedEvent,
   Attribute,
   on as handler,
+  keyedNode,
 } from "@gozala/co-dom";
 
 export type { Node } from "@gozala/co-dom";
@@ -56,7 +57,7 @@ const setting = <T>(key: string, value: unknown): Attribute<T> => {
   return property(key, value);
 };
 
-const toChild = <T>(child: unknown): Node<T> => {
+const toChild = <T>(child: Node<T>): Node<T> => {
   switch (typeof child) {
     case "string":
       return text(child);
@@ -74,8 +75,22 @@ export const h = <T>(
   settings: { [key: string]: any } | null,
   ...children: Node<T>[]
 ): Node<T> =>
-  node(
-    localName,
-    Object.entries(settings ?? {}).map(([key, value]) => setting(key, value)),
-    children.map(toChild),
-  ) as Node<T>;
+  {
+    const ourSettings = Object.entries(settings ?? {}).map(([key, value]) => setting(key, value))
+    // if all children have keys
+    console.log('children', children)
+    const allHaveKeys = children.every(c => (c.settings as any)?.['key'])
+    if (allHaveKeys) {
+      console.log('allHaveKeys', allHaveKeys)
+      return keyedNode(localName, ourSettings, children.map(c => {
+        return [(c.settings as any)['key'], toChild(c)] as const
+      })) as Node<T>
+    }
+
+    return node(
+      localName,
+      ourSettings,
+      children.map(toChild),
+    ) as Node<T>;
+
+  }

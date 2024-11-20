@@ -28,6 +28,7 @@ const createDispatch = <T extends string>(names: readonly T[]) => (name: T) => `
 // bf: there's something strange going on where new items look like clones of an existing item until you reload (I suspect local memory?)
 const charms = (items: { id: Reference }[], behaviour: any) => items.sort((a, b) => a.id.toString().localeCompare(b.id.toString())).map(a => <common-charm
   id={a.id.toString()}
+  key={a.id.toString()}
   spell={() => behaviour}
   entity={() => a.id}
 ></common-charm>);
