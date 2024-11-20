@@ -12,6 +12,12 @@
     "jsr:@std/path@*": "1.0.8",
     "jsr:@std/path@^1.0.7": "1.0.8",
     "jsr:@std/path@^1.0.8": "1.0.8",
+    "npm:@playwright/test@*": "1.49.0",
+    "npm:@playwright/test@1.49.0": "1.49.0",
+    "npm:@playwright/test@^1.49.0": "1.49.0",
+    "npm:@playwright/test@latest": "1.49.0",
+    "npm:playwright@*": "1.49.0",
+    "npm:playwright@1.49.0": "1.49.0",
     "npm:playwright@^1.49.0": "1.49.0"
   },
   "jsr": {
@@ -44,6 +50,12 @@
     }
   },
   "npm": {
+    "@playwright/test@1.49.0": {
+      "integrity": "sha512-DMulbwQURa8rNIQrf94+jPJQ4FmOVdpE5ZppRNvWVjvhC+6sOeo28r8MgIpQRYouXRtt/FCCXU7zn20jnHR4Qw==",
+      "dependencies": [
+        "playwright"
+      ]
+    },
     "fsevents@2.3.2": {
       "integrity": "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA=="
     },
@@ -66,6 +78,7 @@
       "jsr:@std/encoding@^1.0.5",
       "jsr:@std/fs@^1.0.5",
       "jsr:@std/path@^1.0.8",
+      "npm:@playwright/test@^1.49.0",
       "npm:playwright@^1.49.0"
     ]
   }
