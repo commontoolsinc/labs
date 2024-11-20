@@ -8,7 +8,6 @@ import {
   isModule,
   isRecipe,
   isAlias,
-  isOpaqueRef,
   isStreamAlias,
   popFrame,
   recipeFromFrame,
@@ -36,6 +35,7 @@ import {
   staticDataToNestedCells,
   deepCopy,
   unsafe_noteParentOnRecipes,
+  containsOpaqueRef,
 } from "./utils.js";
 import { getModuleByRef } from "./module.js";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.js";
@@ -80,6 +80,8 @@ export function run<T, R = any>(
   argument?: T,
   resultCell: CellImpl<R> = cell<R>(),
 ): CellImpl<R> {
+  console.log("run", JSON.stringify(recipe, null, 2), JSON.stringify(argument));
+
   if (cancels.has(resultCell)) {
     // If it's already running and no new recipe or argument are given,
     // we are just returning the result cell
@@ -383,18 +385,11 @@ function instantiateJavaScriptNode(
       const result = fn(inputsCell.getAsQueryResult([]));
 
       // If handler returns a graph created by builder, run it
-      // TODO: Handle case where the result is a structure with possibly
-      // multiple such nodes
-      if (isOpaqueRef(result)) {
-        const resultNode = result;
-
-        // Recipe that assigns the result of the returned node to "result"
+      if (containsOpaqueRef(result)) {
         const resultRecipe = recipeFromFrame(
           "event handler result",
           undefined,
-          () => ({
-            result: resultNode,
-          }),
+          () => result,
         );
 
         const resultCell = run(resultRecipe, {});

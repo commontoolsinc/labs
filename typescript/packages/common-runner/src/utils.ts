@@ -7,6 +7,7 @@ import {
   Recipe,
   UnsafeBinding,
   unsafe_materializeFactory,
+  isOpaqueRef,
 } from "@commontools/common-builder";
 import {
   cell,
@@ -558,6 +559,13 @@ export function isEqualCellReferences(
     a.cell === b.cell &&
     arrayEqual(a.path, b.path)
   );
+}
+
+export function containsOpaqueRef(value: any): boolean {
+  if (isOpaqueRef(value)) return true;
+  if (typeof value === "object" && value !== null)
+    return Object.values(value).some(containsOpaqueRef);
+  return false;
 }
 
 export function deepCopy(value: any): any {
