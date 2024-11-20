@@ -81,14 +81,8 @@ function EmptyState({ self, time, size, color, description, hunger }: { self: Re
 }
 
 export const tamagochi = behavior({
-  helloWorld: queryDefault(Creature, 'time')
-    .render(({ self }) => {
-      return <div entity={self} title="Hello World">
-        <h1>Hello World</h1>
-        <p>This is a spell.</p>
-        <button type="button" onclick={dispatch('click')}>Click me</button>
-      </div>
-    })
+  view: queryDefault(Creature, 'time', 'hunger', 'size', 'color', 'description')
+    .render(EmptyState)
     .commit(),
 
   tickHunger: queryDefault(Creature, 'hunger')
