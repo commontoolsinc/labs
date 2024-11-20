@@ -29,20 +29,20 @@ export type BuilderOrValue<T> = ((q: T) => T) | T;
 
 export class Select<Match extends Selector = Selector> {
   #select: Match;
-  #where: Where;
-  #transaction: Transaction<Match>;
+  #where: WhereBuilder;
+  #transaction: TransactionBuilder<Match>;
 
   constructor(
     select: Match,
-    where: Where = new Where(),
-    transaction: Transaction<Match> = new Transaction(),
+    where: WhereBuilder = new WhereBuilder(),
+    transaction: TransactionBuilder<Match> = new TransactionBuilder(),
   ) {
     this.#select = select;
     this.#where = where;
     this.#transaction = transaction;
   }
 
-  where(builder: BuilderOrValue<Where>): Select<Match> {
+  where(builder: BuilderOrValue<WhereBuilder>): Select<Match> {
     return new Select<Match>(this.#select, this.#where.and(builder));
   }
 
@@ -58,7 +58,7 @@ export class Select<Match extends Selector = Selector> {
   }
 
   select<S extends Selector>(selector: S) {
-    return new Select<S & Match>({...this.#select, ...selector}, this.#where);
+    return new Select<S & Match>({ ...this.#select, ...selector }, this.#where);
   }
 
   event<T extends Constant>(name: string) {
@@ -71,20 +71,20 @@ export class Select<Match extends Selector = Selector> {
     );
   }
 
-  or(builder: BuilderOrValue<Where>): Select<Match> {
-    return this.where((q) => q.or(builder));
+  or(builder: BuilderOrValue<WhereBuilder>): Select<Match> {
+    return this.where(q => q.or(builder));
   }
 
-  and(builder: BuilderOrValue<Where>): Select<Match> {
-    return this.where((q) => q.and(builder));
+  and(builder: BuilderOrValue<WhereBuilder>): Select<Match> {
+    return this.where(q => q.and(builder));
   }
 
-  not(builder: BuilderOrValue<Where>): Select<Match> {
-    return this.where((q) => q.not(builder));
+  not(builder: BuilderOrValue<WhereBuilder>): Select<Match> {
+    return this.where(q => q.not(builder));
   }
 
   transaction(
-    builder: (q: Transaction<Match>) => Transaction<Match>,
+    builder: (q: TransactionBuilder<Match>) => TransactionBuilder<Match>,
   ): Select<Match> {
     return new Select<Match>(
       this.#select,
@@ -94,23 +94,23 @@ export class Select<Match extends Selector = Selector> {
   }
 
   assert(edit: Edit<Match>): Select<Match> {
-    return this.transaction((tx) => tx.assert(edit));
+    return this.transaction(tx => tx.assert(edit));
   }
 
   retract(edit: Edit<Match>): Select<Match> {
-    return this.transaction((tx) => tx.retract(edit));
+    return this.transaction(tx => tx.retract(edit));
   }
 
   upsert(edit: Edit<Match>): Select<Match> {
-    return this.transaction((tx) => tx.upsert(edit));
+    return this.transaction(tx => tx.upsert(edit));
   }
 
   update(update: Update<Match>): Select<Match> {
-    return this.transaction((tx) => tx.update(update));
+    return this.transaction(tx => tx.update(update));
   }
 
   render(view: View<Match>): Select<Match> {
-    return this.transaction((tx) => tx.render(view));
+    return this.transaction(tx => tx.render(view));
   }
 
   commit() {
@@ -129,7 +129,7 @@ export class Select<Match extends Selector = Selector> {
 export const select = <Match extends Selector = Selector>(select: Match) =>
   new Select(select);
 
-export class Where {
+export class WhereBuilder {
   #where: Array<Clause>;
 
   constructor(...clauses: Array<Clause>) {
@@ -140,38 +140,38 @@ export class Where {
     entity: Term<Entity>,
     attribute: Term<Attribute>,
     value: Term<API.Constant> = $._,
-  ): Where {
-    return new Where(...this.#where, {
+  ): WhereBuilder {
+    return new WhereBuilder(...this.#where, {
       Case: [entity, attribute, value],
     });
   }
 
   formula<F extends Formula>(f1: F[0], f2: F[1], f3: F[2]) {
-    return new Where(...this.#where, {
+    return new WhereBuilder(...this.#where, {
       Match: [f1, f2, f3] as Formula,
-    })
+    });
   }
 
-  or(builder: BuilderOrValue<Where>): Where {
-    const where: Where =
-      typeof builder === "function" ? builder(new Where()) : builder;
-    return new Where(...this.#where, {
+  or(builder: BuilderOrValue<WhereBuilder>): WhereBuilder {
+    const where: WhereBuilder =
+      typeof builder === "function" ? builder(new WhereBuilder()) : builder;
+    return new WhereBuilder(...this.#where, {
       Or: where.commit(),
     });
   }
 
-  and(builder: BuilderOrValue<Where>): Where {
-    const where: Where =
-      typeof builder === "function" ? builder(new Where()) : builder;
-    return new Where(...this.#where, {
+  and(builder: BuilderOrValue<WhereBuilder>): WhereBuilder {
+    const where: WhereBuilder =
+      typeof builder === "function" ? builder(new WhereBuilder()) : builder;
+    return new WhereBuilder(...this.#where, {
       And: where.commit(),
     });
   }
 
-  not(builder: BuilderOrValue<Where>): Where {
-    const where: Where =
-      typeof builder === "function" ? builder(new Where()) : builder;
-    return new Where(...this.#where, {
+  not(builder: BuilderOrValue<WhereBuilder>): WhereBuilder {
+    const where: WhereBuilder =
+      typeof builder === "function" ? builder(new WhereBuilder()) : builder;
+    return new WhereBuilder(...this.#where, {
       Not: {
         And: where.commit(),
       },
@@ -183,9 +183,10 @@ export class Where {
   }
 }
 
-export const where = (...clauses: Array<Clause>) => new Where(...clauses);
+export const where = (...clauses: Array<Clause>) =>
+  new WhereBuilder(...clauses);
 
-export class Transaction<Match extends Selector = Selector> {
+export class TransactionBuilder<Match extends Selector = Selector> {
   #updates: Array<Update<Match>> = [];
 
   constructor(...updates: Array<Update<Match>>) {
@@ -196,29 +197,29 @@ export class Transaction<Match extends Selector = Selector> {
     const up = (props: InferBindings<Match>): Array<Instruction> => {
       return [{ Assert: edit(props) }];
     };
-    return new Transaction(...this.#updates, up);
+    return new TransactionBuilder(...this.#updates, up);
   }
 
   retract(edit: Edit<Match>) {
     const up = (props: InferBindings<Match>): Array<Instruction> => {
       return [{ Retract: edit(props) }];
     };
-    return new Transaction(...this.#updates, up);
+    return new TransactionBuilder(...this.#updates, up);
   }
 
   upsert(edit: Edit<Match>) {
     const up = (props: InferBindings<Match>): Array<Instruction> => {
       return [{ Upsert: edit(props) }];
     };
-    return new Transaction(...this.#updates, up);
+    return new TransactionBuilder(...this.#updates, up);
   }
 
   update(update: Update<Match>) {
-    return new Transaction(...this.#updates, update);
+    return new TransactionBuilder(...this.#updates, update);
   }
 
   render(view: View<Match>) {
-    return this.update((props) => {
+    return this.update(props => {
       const vnode = view(props);
       return [
         {
@@ -241,4 +242,4 @@ export class Transaction<Match extends Selector = Selector> {
 
 export const transaction = <Match extends Selector = Selector>(
   ...updates: Array<Update<Match>>
-) => new Transaction(...updates);
+) => new TransactionBuilder(...updates);

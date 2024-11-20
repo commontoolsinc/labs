@@ -1,9 +1,18 @@
-import { $, select, Select, Where } from "@commontools/common-system";
-import { Clause, Selector, Variable } from 'datalogia'
+import { $, select, Select, WhereBuilder } from "@commontools/common-system";
+import { Clause, Selector, Variable } from "datalogia";
 import { Constant } from "synopsys";
 
-export const query = <M extends Record<string, string | number | boolean | any[]>, T extends keyof M>(model: M, ...fields: T[]) => {
-  const selection = { self: $.self, ...Object.fromEntries(fields.map(name => [name, $[name]])) };
+export const query = <
+  M extends Record<string, string | number | boolean | any[]>,
+  T extends keyof M,
+>(
+  model: M,
+  ...fields: T[]
+) => {
+  const selection = {
+    self: $.self,
+    ...Object.fromEntries(fields.map((name) => [name, $[name]])),
+  };
   type Bindings = {
     self: Variable<any>;
   } & {
@@ -15,24 +24,31 @@ export const query = <M extends Record<string, string | number | boolean | any[]
   }, selectParams);
 };
 
-function getOrDefault2(attribute: string, field: Variable<any>, defaultValue: Constant): Clause {
+function getOrDefault2(
+  attribute: string,
+  field: Variable<any>,
+  defaultValue: Constant,
+): Clause {
   return {
     Or: [
       {
         And: [
           { Not: { Case: [$.self, attribute, $._] } },
-          { Match: [defaultValue, "==", field] }
-        ]
+          { Match: [defaultValue, "==", field] },
+        ],
       },
       { Case: [$.self, attribute, field] },
-    ]
-  }
+    ],
+  };
 }
 
-export const queryDefault2 = <M extends Record<string, any>, T extends keyof M>(model: M, ...fields: T[]) => {
+export const queryDefault2 = <M extends Record<string, any>, T extends keyof M>(
+  model: M,
+  ...fields: T[]
+) => {
   const selection = {
     self: $.self,
-    ...Object.fromEntries(fields.map(name => [name, $[name]]))
+    ...Object.fromEntries(fields.map((name) => [name, $[name]])),
   };
 
   type Bindings = {
@@ -47,30 +63,31 @@ export const queryDefault2 = <M extends Record<string, any>, T extends keyof M>(
     return [...acc, getOrDefault2(field as string, $[field], model[field])];
   }, []);
 
-  return new Select(selection as Bindings, new Where(...where))
+  return new Select(selection as Bindings, new WhereBuilder(...where));
 };
 
 export function getOrDefault<T extends Constant, S extends Selector>(
   select: Select<S>,
   attribute: string,
   field: Variable,
-  fallback: T
+  fallback: T,
 ) {
-  return select.or(w => {
-    return w
-      .match($.self, attribute, field)
-      .and(w => {
-        return w
-          .not(q => q.match($.self, attribute, $._))
-          .formula(fallback, '==', field);
-      });
-  })
+  return select.or((w) => {
+    return w.match($.self, attribute, field).and((w) => {
+      return w
+        .not((q) => q.match($.self, attribute, $._))
+        .formula(fallback, "==", field);
+    });
+  });
 }
 
-export const queryDefault = <M extends Record<string, any>, T extends keyof M>(model: M, ...fields: T[]) => {
+export const queryDefault = <M extends Record<string, any>, T extends keyof M>(
+  model: M,
+  ...fields: T[]
+) => {
   const selection = {
     self: $.self,
-    ...Object.fromEntries(fields.map(name => [name, $[name]]))
+    ...Object.fromEntries(fields.map((name) => [name, $[name]])),
   };
 
   type Bindings = {

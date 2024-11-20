@@ -31,17 +31,17 @@ import { buildRecipe } from "./localBuild.js";
 import "./recipes/todo-list-as-task.js";
 import "./recipes/playlist.js";
 
-import * as keywords from './recipes/keywords.jsx'
-import * as workbench from './recipes/workbench.jsx'
+import * as keywords from "./recipes/keywords.jsx";
+import * as workbench from "./recipes/workbench.jsx";
 import * as dungeon from "./recipes/dungeon.jsx";
 import * as charmExample from "./recipes/charm.jsx";
 import * as readingList from "./recipes/readingList.jsx";
 import * as roundTrip from "./recipes/jsonRoundTrip.jsx";
 import * as tamagochi from "./recipes/tamagochi.jsx";
 import Hello from "./recipes/hello.jsx";
-import Fetcher from "./recipes/fetcher.jsx";
-import Fetch from "./effects/fetch.js";
-import { UI as View } from "@commontools/common-system";
+import FetchExample from "./recipes/fetcher.jsx";
+import FetchService from "./effects/fetch.js";
+import { UI as ViewService } from "@commontools/common-system";
 
 export type Charm = {
   [NAME]?: string;
@@ -68,15 +68,13 @@ export async function addCharms(newCharms: CellImpl<any>[]) {
     .get()
     .map(({ cell }) => JSON.stringify(cell.entityId));
   const charmsToAdd = newCharms.filter(
-    (cell) => !currentCharmsIds.includes(JSON.stringify(cell.entityId)),
+    cell => !currentCharmsIds.includes(JSON.stringify(cell.entityId)),
   );
 
   if (charmsToAdd.length > 0) {
     charms.send([
       ...charms.get(),
-      ...charmsToAdd.map(
-        (cell) => ({ cell, path: [] }) satisfies CellReference,
-      ),
+      ...charmsToAdd.map(cell => ({ cell, path: [] }) satisfies CellReference),
     ]);
   }
 }
@@ -122,7 +120,7 @@ export async function runPersistent(
             const charmProperties = (recipe?.resultSchema as any)
               ?.properties as any;
             const matchingProperty = Object.keys(charmProperties ?? {}).find(
-              (property) =>
+              property =>
                 charmProperties[property].description?.includes(`#${hashtag}`),
             );
             if (matchingProperty) {
@@ -220,19 +218,19 @@ export async function saveRecipe(
 }
 
 addCharms([
-  View.spawn(),
   Hello.spawn({ hello: { v: 1 } }),
   roundTrip.spawn({ trip: 2 }),
-  tamagochi.spawn({tamagochi: 1}),
+  tamagochi.spawn({ tamagochi: 1 }),
   readingList.spawn({
-    v: 10
+    readingList: { v: 10 },
   }),
-  workbench.spawn({ v: 1}),
-  // keywords.spawn({
-  //   v: 2
-  // }),
-  Fetcher.spawn(),
-  Fetch.spawn(),
+  workbench.spawn({ v: 1 }),
+  keywords.spawn({
+    keywords: { v: 2 },
+  }),
+  FetchExample.spawn(),
+  FetchService.spawn(),
+  ViewService.spawn(),
 ]);
 
 export type RecipeManifest = {

@@ -12,7 +12,6 @@ export class Charm extends HTMLElement {
   #vdom: DOM.Node<{}> | null;
   #cell: null | { send(data: { name: string }): void };
   mount: HTMLElement;
-  // #changes: Type.Instruction[] = [];
 
   #invocation: Task.Invocation<{}, Error> | null = null;
 
@@ -45,30 +44,11 @@ export class Charm extends HTMLElement {
     this.#invocation = Task.perform(this.spell.fork(this.entity));
 
     // bf: this should not be any at some point later
-    Task.perform(DB.transact([{ Upsert: [this.entity, MOUNT, this as any] }]));
-    // Add rerendering effect
-    // Task.perform(
-    //   Effect.spawn({
-    //     effect: Render.rules.render,
-    //     entity: this.entity,
-    //   }),
-    // );
+    await Task.perform(
+      DB.transact([{ Upsert: [this.entity, MOUNT, this as any] }]),
+    );
 
-    // for (const [_name, rule] of Object.entries(this.spell.rules)) {
-    //   Task.perform(
-    //     Effect.spawn({
-    //       effect: toEffect(rule),
-    //       entity: this.entity,
-    //     }),
-    //   );
-    // }
-
-    // Task.perform(
-    //   Effect.spawn({
-    //     effect: render,
-    //     entity: this.entity,
-    //   }),
-    // );
+    this.propagate();
   }
   deactivate() {
     if (this.#invocation) {
@@ -93,7 +73,6 @@ export class Charm extends HTMLElement {
     yield* transact([{ Retract: [this.entity, attribute, event as any] }]);
 
     this.propagate();
-    // yield* render(this);
   }
 
   set entity(value: Reference) {
