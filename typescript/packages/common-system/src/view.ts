@@ -3,6 +3,7 @@ import { Reference, Task, transact } from "./db.js";
 
 import { Behavior } from "./adapter.js";
 import * as DB from "./db.js";
+import { MOUNT } from "./ui.js";
 
 export class Charm extends HTMLElement {
   #root: ShadowRoot;
@@ -40,14 +41,11 @@ export class Charm extends HTMLElement {
     this.#cell = value;
   }
 
-  // Here we pretend to be a reference so that database can treat it as such.
-  get ["/"]() {
-    return this.entity["/"];
-  }
-
   async activate() {
     this.#invocation = Task.perform(this.spell.fork(this.entity));
-    Task.perform(DB.transact([{ Upsert: [this.entity, "~/ui/mount", this] }]));
+
+    // bf: this should not be any at some point later
+    Task.perform(DB.transact([{ Upsert: [this.entity, MOUNT, this as any] }]));
     // Add rerendering effect
     // Task.perform(
     //   Effect.spawn({
@@ -76,7 +74,8 @@ export class Charm extends HTMLElement {
     if (this.#invocation) {
       this.#invocation.abort(undefined);
     }
-    Task.perform(DB.transact([{ Retract: [this.entity, "~/ui/mount", this] }]));
+    // bf: this should not be any at some point later
+    Task.perform(DB.transact([{ Retract: [this.entity, MOUNT, this as any] }]));
   }
 
   connectedCallback() {

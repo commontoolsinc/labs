@@ -4,6 +4,7 @@ import * as IDB from "synopsys/store/idb";
 import * as Memory from "synopsys/store/memory";
 import * as Session from "./session.js";
 import type { Effect } from "./adapter.js";
+import { Constant } from "datalogia";
 export * from "synopsys";
 
 export type DB =
@@ -81,8 +82,8 @@ function* submit(changes: Type.Transaction) {
   yield* transact(changes);
 }
 
-const isLocal = ([_entity, attribute]: Fact) =>
-  typeof attribute === "string" && attribute.startsWith("~/");
+const isLocal = ([_entity, attribute, value]: Fact) =>
+  typeof attribute === "string" && attribute.startsWith("~/") && !Constant.is(value);
 
 const resolve = (change: Type.Instruction): Type.Instruction => {
   if (change.Assert) {
