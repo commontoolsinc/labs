@@ -16,3 +16,4 @@ typescript/packages/collectathon/collections.db
 typescript/packages/linkheap/links.db
 typescript/packages/collectathon/.env
 typescript/packages/lookslike-high-level/.env
+typescript/test-results/*
