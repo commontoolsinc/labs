@@ -1,9 +1,11 @@
-import { h, $, Instruction, Select, select, refer, Rule, Reference } from '@commontools/common-system'
+import { h, $, Instruction, Select, select, refer, Rule, Reference, Session } from '@commontools/common-system'
+import { Variable } from 'datalogia'
 
 const CAUSE = "instance/cause"
 const NEW = "~/new"
 
-export const build = (membership: string): Rule => {
+// bf: add helper function to do this annotation (rule() ?)
+export const build = (membership: string): Rule<{ cause: Variable<Reference>, self: Variable<Reference>, data: Variable<Reference> }> => {
     return {
       select: {
         self: $.self,
@@ -22,7 +24,7 @@ export const build = (membership: string): Rule => {
             }
           ]}
       ],
-      update: ({ cause, self, data }: { cause: Reference, self: Reference, data: Reference }) => {
+      update: ({ cause, self, data }) => {
         const entity = refer({ data, after: cause, of: self })
         const changes: Instruction[] = [
           { Retract: [self, NEW, data]},
@@ -31,7 +33,7 @@ export const build = (membership: string): Rule => {
         ]
 
         // Assert all relations on the given member.
-        for (const [key, value] of Object.entries(fromReference(data))) {
+        for (const [key, value] of Object.entries(Session.resolve(data) as Record<string, any>)) {
           changes.push({ Assert: [entity, key, value] })
         }
 
@@ -40,16 +42,8 @@ export const build = (membership: string): Rule => {
     }
 }
 
-const refs = new WeakMap()
-
-export const toReference = (options: Record<string, any>) => {
-  const reference = refer(options)
-  refs.set(reference, options)
-  return reference
-}
-
 export const fromReference = (reference: Reference): Record<string, any> => {
-  const data = refs.get(reference)
+  const data = Session.resolve(reference)
   if (data == undefined) {
     throw new ReferenceError(`Reference not found`)
   }
@@ -69,6 +63,6 @@ export const make = (self: Reference, relations: Record<string, any>): Instructi
     // deserialize them, however since it's local facts we simply
     // store corresponding data in the weak map to avoid serialize
     // deserialize steps.
-    Upsert: [self, NEW, toReference(relations)]
+    Upsert: [self, NEW, relations as any]
   }
 }

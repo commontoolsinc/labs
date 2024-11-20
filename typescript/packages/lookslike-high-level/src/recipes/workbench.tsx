@@ -1,8 +1,9 @@
 import { h, behavior, $, Reference, select, service } from "@commontools/common-system";
 import { build, make } from "../sugar/build.js";
 import { event } from "../sugar/event.js";
-import { Task } from "synopsys";
+import { Task, refer } from "synopsys";
 import { tsToExports } from "../localBuild.js";
+import { Session } from "@commontools/common-system";
 
 export const source = { workbench: { v: 1 } };
 const DEFAULT_SOURCE = `
@@ -28,6 +29,7 @@ export const spell = behavior({
     .update(({ self }) => {
       console.log('clicked', self)
       alert('Hello from ' + self.toString());
+      return [];
     })
     .commit()
 });
@@ -94,10 +96,10 @@ const spellService = service({
       { Case: [$.self, `~/on/code-change`, $.event] },
     ],
     *perform({ self, event }) {
-      console.log(event, event.detail.state.doc.toString())
+      console.log(event, Session.resolve(event).detail.state.doc.toString())
 
       return [
-        { Upsert: [self, 'sourceCode', event.detail.state.doc.toString()] }
+        { Upsert: [self, 'sourceCode', Session.resolve(event).detail.state.doc.toString()] }
       ];
     },
   },
@@ -119,6 +121,8 @@ const spellService = service({
       const compiled = yield* Task.wait(tsToExports(sourceCode));
       console.log(compiled)
 
+      const child = refer({ parent: self })
+
       return [
         {
           Upsert: [self, '~/common/ui', <div entity={self}>
@@ -133,9 +137,9 @@ const spellService = service({
             ></os-code-editor>
             <fieldset>
               <common-charm
-                id={self.toString() + '/sandbox'}
+                id={child}
                 spell={() => compiled.exports.spell}
-                entity={() => self}
+                entity={() => child}
               ></common-charm>
             </fieldset>
           </div>]

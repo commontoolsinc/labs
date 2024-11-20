@@ -1,4 +1,4 @@
-import { h, behavior, $, Reference, select, Select } from "@commontools/common-system";
+import { h, behavior, $, Reference, select, Select, Session } from "@commontools/common-system";
 import { Variable } from 'datalogia'
 import { build, make } from "../sugar/build.js";
 import { query, queryDefault } from "../sugar/query.js";
@@ -151,7 +151,7 @@ export const readingList = behavior({
 
   onChangeTitle: event('change-title')
     .update(({ self, event }) => {
-      return upsert(self, { 'draft/title': event.detail.value })
+      return upsert(self, { 'draft/title': Session.resolve(event).detail.value })
     })
     .commit(),
 
