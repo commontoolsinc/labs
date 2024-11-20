@@ -1,7 +1,7 @@
 {
   "version": "4",
   "specifiers": {
-    "jsr:@hono/hono@^4.6.9": "4.6.9",
+    "jsr:@hono/hono@^4.6.11": "4.6.11",
     "jsr:@std/assert@1": "1.0.7",
     "jsr:@std/crypto@*": "1.0.3",
     "jsr:@std/crypto@^1.0.3": "1.0.3",
@@ -12,12 +12,11 @@
     "jsr:@std/path@*": "1.0.8",
     "jsr:@std/path@^1.0.7": "1.0.8",
     "jsr:@std/path@^1.0.8": "1.0.8",
-    "npm:playwright@*": "1.48.2",
-    "npm:playwright@^1.48.2": "1.48.2"
+    "npm:playwright@^1.49.0": "1.49.0"
   },
   "jsr": {
-    "@hono/hono@4.6.9": {
-      "integrity": "4d4975f5c023d4416d26e6dd4a498c56e59958561733f56f55a9be57f023603b"
+    "@hono/hono@4.6.11": {
+      "integrity": "07399d911f09e94b7dc1e0e0a0577d35fe66578af20163d513958364c4e9e702"
     },
     "@std/assert@1.0.7": {
       "integrity": "64ce9fac879e0b9f3042a89b3c3f8ccfc9c984391af19e2087513a79d73e28c3",
@@ -48,11 +47,11 @@
     "fsevents@2.3.2": {
       "integrity": "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA=="
     },
-    "playwright-core@1.48.2": {
-      "integrity": "sha512-sjjw+qrLFlriJo64du+EK0kJgZzoQPsabGF4lBvsid+3CNIZIYLgnMj9V6JY5VhM2Peh20DJWIVpVljLLnlawA=="
+    "playwright-core@1.49.0": {
+      "integrity": "sha512-R+3KKTQF3npy5GTiKH/T+kdhoJfJojjHESR1YEWhYuEKRVfVaxH3+4+GvXE5xyCngCxhxnykk0Vlah9v8fs3jA=="
     },
-    "playwright@1.48.2": {
-      "integrity": "sha512-NjYvYgp4BPmiwfe31j4gHLa3J7bD2WiBz8Lk2RoSsmX38SVIARZ18VYjxLjAcDsAhA+F4iSEXTSGgjua0rrlgQ==",
+    "playwright@1.49.0": {
+      "integrity": "sha512-eKpmys0UFDnfNb3vfsf8Vx2LEOtflgRebl0Im2eQQnYMA4Aqd+Zw8bEOB+7ZKvN76901mRnqdsiOGKxzVTbi7A==",
       "dependencies": [
         "fsevents",
         "playwright-core"
@@ -61,13 +60,13 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@hono/hono@^4.6.9",
+      "jsr:@hono/hono@^4.6.11",
       "jsr:@std/assert@1",
       "jsr:@std/crypto@^1.0.3",
       "jsr:@std/encoding@^1.0.5",
       "jsr:@std/fs@^1.0.5",
       "jsr:@std/path@^1.0.8",
-      "npm:playwright@^1.48.2"
+      "npm:playwright@^1.49.0"
     ]
   }
 }
