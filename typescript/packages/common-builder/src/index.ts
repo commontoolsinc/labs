@@ -1,4 +1,4 @@
-export { opaqueRef as cell } from "./opaque-ref.js";
+export { opaqueRef as cell, stream } from "./opaque-ref.js";
 export {
   createNodeFactory,
   derive,
