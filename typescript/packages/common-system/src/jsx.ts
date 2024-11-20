@@ -77,11 +77,10 @@ export const h = <T>(
 ): Node<T> =>
   {
     const ourSettings = Object.entries(settings ?? {}).map(([key, value]) => setting(key, value))
-    // if all children have keys
-    console.log('children', children)
+
+    // bf: fix any typing here
     const allHaveKeys = children.every(c => (c.settings as any)?.['key'])
     if (allHaveKeys) {
-      console.log('allHaveKeys', allHaveKeys)
       return keyedNode(localName, ourSettings, children.map(c => {
         return [(c.settings as any)['key'], toChild(c)] as const
       })) as Node<T>
