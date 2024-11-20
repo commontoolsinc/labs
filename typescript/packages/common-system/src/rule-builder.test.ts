@@ -1,6 +1,6 @@
 import assert from "assert";
 import { refer, Reference } from "synopsys";
-import { where, select, Transaction } from "./rule-builder.js";
+import { where, select, TransactionBuilder } from "./rule-builder.js";
 import { div } from "@gozala/co-dom";
 
 describe("Rule Builder", () => {
@@ -87,7 +87,7 @@ describe("Rule Builder", () => {
   describe("Transaction", () => {
     describe("assert", () => {
       it("should create an Assert instruction", () => {
-        const tx = new Transaction();
+        const tx = new TransactionBuilder();
         const id1 = refer(1);
 
         const update = tx
@@ -103,7 +103,7 @@ describe("Rule Builder", () => {
 
     describe("retract", () => {
       it("should create a Retract instruction", () => {
-        const tx = new Transaction();
+        const tx = new TransactionBuilder();
         const id1 = refer(1);
         const update = tx
           .retract(() => [id1, "attribute", "value"] as const)
@@ -118,7 +118,7 @@ describe("Rule Builder", () => {
 
     describe("upsert", () => {
       it("should create an Upsert instruction", () => {
-        const tx = new Transaction();
+        const tx = new TransactionBuilder();
         const id1 = refer(1);
         const update = tx
           .upsert(() => [id1, "attribute", "value"] as const)
@@ -133,7 +133,7 @@ describe("Rule Builder", () => {
 
     describe("update", () => {
       it("should add custom update instructions", () => {
-        const tx = new Transaction();
+        const tx = new TransactionBuilder();
         const id1 = refer(1);
         const id2 = refer(1);
 
@@ -156,7 +156,7 @@ describe("Rule Builder", () => {
     describe("render", () => {
       it("should create an Assert instruction with UI node", () => {
         const id1 = refer(1);
-        const tx = new Transaction<{ self: Reference<1> }>();
+        const tx = new TransactionBuilder<{ self: Reference<1> }>();
 
         const update = tx.render(() => div()).commit();
 
@@ -174,7 +174,7 @@ describe("Rule Builder", () => {
 
     describe("commit", () => {
       it("should combine multiple updates", () => {
-        const tx = new Transaction();
+        const tx = new TransactionBuilder();
 
         const id1 = refer(1);
         const edit1 = () => [id1, "attr1", "val1"] as const;
@@ -192,7 +192,7 @@ describe("Rule Builder", () => {
       });
 
       it("should handle empty transaction", () => {
-        const tx = new Transaction();
+        const tx = new TransactionBuilder();
         const update = tx.commit();
         const result = update({});
         assert.deepStrictEqual(result, []);

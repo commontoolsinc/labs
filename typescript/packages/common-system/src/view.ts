@@ -115,13 +115,28 @@ export class Charm extends HTMLElement {
     for (const change of changes) {
       console.log("change", change);
       if (change.Assert) {
-        console.log('assert', change.Assert[0].toString(), change.Assert[1].toString(), change.Assert[2]);
+        console.log(
+          "assert",
+          change.Assert[0].toString(),
+          change.Assert[1].toString(),
+          change.Assert[2],
+        );
       } else if (change.Import) {
-        console.log('import', change.Import);
+        console.log("import", change.Import);
       } else if (change.Retract) {
-        console.log('retract', change.Retract[0].toString(), change.Retract[1].toString(), change.Retract[2]);
+        console.log(
+          "retract",
+          change.Retract[0].toString(),
+          change.Retract[1].toString(),
+          change.Retract[2],
+        );
       } else if (change.Upsert) {
-        console.log('upsert', change.Upsert[0].toString(), change.Upsert[1].toString(), change.Upsert[2]);
+        console.log(
+          "upsert",
+          change.Upsert[0].toString(),
+          change.Upsert[1].toString(),
+          change.Upsert[2],
+        );
       }
     }
     console.groupEnd();
@@ -140,7 +155,7 @@ export class Charm extends HTMLElement {
   }
 }
 
-export interface Session {
+export interface UISession {
   entity: Reference;
   replica: DB.Type.Replica;
 
@@ -148,7 +163,7 @@ export interface Session {
 }
 
 export function* spawn<Selection extends DB.Selector>(
-  session: Session,
+  session: UISession,
   rule: Effect<Selection>,
 ) {
   const { replica } = session;
