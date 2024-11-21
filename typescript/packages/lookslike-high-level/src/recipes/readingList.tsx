@@ -25,13 +25,13 @@ const defaults = <T extends Record<string, any>>(input: T) => {
 const createDispatch = <T extends string>(names: readonly T[]) => (name: T) => `~/on/${name}`;
 
 // bf: probably not where we want to end up here but sort of works
-// bf: there's something strange going on where new items look like clones of an existing item until you reload (I suspect local memory?)
-const charms = (items: { id: Reference }[], behaviour: any) => items.sort((a, b) => a.id.toString().localeCompare(b.id.toString())).map(a => <common-charm
-  id={a.id.toString()}
-  key={a.id.toString()}
-  spell={() => behaviour}
-  entity={() => a.id}
-></common-charm>);
+const charms = (items: { id: Reference }[], behaviour: any) => items.map(a =>
+  <common-charm
+    id={a.id.toString()}
+    key={a.id.toString()}
+    spell={() => behaviour}
+    entity={() => a.id}
+  ></common-charm>);
 
 function upsert(self: Reference, fields: {}): Instruction[] {
   return Object.entries(fields).map(([k, v]) => ({ Upsert: [self, k, v] } as Instruction));
@@ -69,7 +69,7 @@ function ReadingListItem({ self, title }: { self: Reference, title: string }) {
 }
 
 
-const getTodo = ({ self, event, title }: { self: Reference, event: Constant, title: string }) => {
+const reimagineTodo = ({ self, event, title }: { self: Reference, event: Constant, title: string }) => {
   return [
     llm(self, 'my/request', { prompt: 're-imagine this: ' + title }).json(),
   ];
@@ -86,7 +86,7 @@ const readingListItem = behavior({
 
   onReimagineItem: query(ItemModel, 'title')
     .event('reimagine-item')
-    .update(getTodo)
+    .update(reimagineTodo)
     .commit(),
 
   onFinished: select({ self: $.self, request: $.request, title: $.title })
