@@ -12,12 +12,7 @@ import {
   TYPE,
   UI,
 } from "../data.js";
-import {
-  cell,
-  CellImpl,
-  getRecipe,
-  isCell,
-} from "@commontools/common-runner";
+import { cell, CellImpl, getRecipe, isCell } from "@commontools/common-runner";
 import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.js";
@@ -200,7 +195,8 @@ export class CommonSidebar extends LitElement {
   override render() {
     const data = this.getFieldOrDefault("data", {});
     const recipeId = this.focusedCharm?.sourceCell?.get()?.[TYPE];
-    const argument = this.focusedCharm?.sourceCell?.getAsQueryResult()?.argument;
+    const argument =
+      this.focusedCharm?.sourceCell?.getAsQueryResult()?.argument;
     const recipe = getRecipe(recipeId);
     const schema = recipe?.argumentSchema || {};
     const query = this.getFieldOrDefault("query", {});
@@ -362,9 +358,7 @@ export class CommonSidebar extends LitElement {
                     >
                   </div>
                 </div>
-                <div style="margin: 10px;">
-
-                </div>
+                <div style="margin: 10px;"></div>
 
                 <div>
                   <common-spell-editor

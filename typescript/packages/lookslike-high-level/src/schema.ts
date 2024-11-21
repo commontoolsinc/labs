@@ -358,14 +358,19 @@ export function generateZodCode(schema: any, indent: number = 0): string {
     default:
       // Handle arrays
       if (schema.type === "array") {
-        const itemsSchema = schema.items ? generateZodCode(schema.items, indent) : "z.any()";
+        const itemsSchema = schema.items
+          ? generateZodCode(schema.items, indent)
+          : "z.any()";
         zodSchema = `z.array(${itemsSchema})`;
       }
       // Handle objects
       else if (schema.type === "object") {
         const properties = schema.properties || {};
         const zodProperties = Object.entries(properties)
-          .map(([key, value]) => `${innerSpacing}${key}: ${generateZodCode(value, indent + 1)}`)
+          .map(
+            ([key, value]) =>
+              `${innerSpacing}${key}: ${generateZodCode(value, indent + 1)}`,
+          )
           .join(",\n");
         zodSchema = `z.object({\n${zodProperties}\n${spacing}})`;
       }
@@ -405,18 +410,18 @@ import {
 import { z } from "zod"; 
 import { zodToJsonSchema } from "zod-to-json-schema";
 
+const stringify = lift((state) => JSON.stringify(state, null, 2));
+const imageUrl = lift((prompt) => '/api/img?prompt=' + encodeURIComponent(prompt));
+
 const Schema = ${zodCode};
 //PREFILL
-const stringify = lift((state) => JSON.stringify(state, null, 2));
-
-const imageUrl = lift((prompt) => '/api/img?prompt=' + encodeURIComponent(prompt));
 
 export default recipe(Schema, (state) => {
   return {
     [NAME]: ${JSON.stringify(schema.description)},
     [UI]: <os-container>
       <h2>Data</h2>
-      <pre>{stringify( state )}</pre>
+      <pre>{stringify(state)}</pre>
     </os-container>
   }
 });
