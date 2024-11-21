@@ -167,12 +167,27 @@ app.get("/blob/:hash/*", async (c) => {
 
 app.get("/blob", async (c) => {
   const showAll = c.req.query("all") === "true";
+  const showAllWithData = c.req.query("allWithData") !== undefined;
   const redis = c.get("redis");
   const user = c.get("user");
 
-  const blobs = showAll
-    ? await getAllBlobs(redis)
-    : await getUserBlobs(redis, user);
+  // Get the list of blobs
+  const blobs =
+    showAll || showAllWithData
+      ? await getAllBlobs(redis)
+      : await getUserBlobs(redis, user);
+
+  // If showAllWithData is true, fetch the full blob data for each hash
+  if (showAllWithData) {
+    const blobData: Record<string, any> = {};
+    for (const hash of blobs) {
+      const content = await storage.getBlob(hash);
+      if (content) {
+        blobData[hash] = JSON.parse(content);
+      }
+    }
+    return c.json(blobData);
+  }
 
   return c.json({ blobs });
 });
