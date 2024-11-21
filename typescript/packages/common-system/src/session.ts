@@ -10,7 +10,7 @@ export const cast = (entity: Reference, object: any) => {
   return entity;
 };
 
-export const resolve = (reference: Reference): unknown => {
+export const resolve = <T extends unknown>(reference: Reference): T => {
   const object = objects.get(reference.toString());
   if (object !== undefined) {
     return object;
