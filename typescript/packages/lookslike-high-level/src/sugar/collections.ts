@@ -167,15 +167,14 @@ export class CollectionView<Select extends Selector> {
       this.last,
     );
   }
-
   insert(
     member: Selection<Select>,
     {
       before,
       after,
     }: {
-      before?: MemberSelection<Select>;
-      after?: MemberSelection<Select>;
+      before?: MemberSelection<Select> | null;
+      after?: MemberSelection<Select> | null;
     } = {},
   ) {
     const builder = this.edit();
@@ -184,10 +183,10 @@ export class CollectionView<Select extends Selector> {
   }
 
   push(member: Selection<Select>) {
-    this.insert(member, { after: this.last });
+    this.insert(member, { after: this.last, before: null });
   }
   unshift(member: Selection<Select>) {
-    this.insert(member, { before: this.first });
+    this.insert(member, { before: this.first, after: null });
   }
 }
 
@@ -245,8 +244,8 @@ export class TransactionBuilder<Select extends Selector>
       after = this.first,
       before = this.last,
     }: {
-      before?: MemberSelection<Select>;
-      after?: MemberSelection<Select>;
+      before?: MemberSelection<Select> | null;
+      after?: MemberSelection<Select> | null;
     } = {},
   ) {
     const site = {
