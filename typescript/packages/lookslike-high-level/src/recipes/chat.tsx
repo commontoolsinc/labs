@@ -13,6 +13,7 @@ import {
 import * as Collection from "../sugar/collections.js";
 import { event } from "../sugar/event.js";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
+import * as DB from 'datalogia'
 
 export const source = { chat: { v: 1 } };
 
@@ -77,11 +78,26 @@ function defaultTo(
   };
 }
 
+function isEmpty(self: Variable<Reference>, attribute: string): Clause {
+  return { Not: { Case: [self, attribute, $._] } };
+}
+
 const CommonChat = {
   draft: '~/draft',
   screenName: '~/screenName',
   messages: "messages"
 }
+
+// Adopt datalogia patterns?
+// const CommonChatModel = DB.entity({
+//   '~/draft': DB.string,
+//   '~/screenName': DB.string,
+// })
+
+// const chat = {
+//   draft: DB.string,
+//   screenName: DB.string,
+// }
 
 const Messages = Collection.of({
   message: $.message,
@@ -89,42 +105,69 @@ const Messages = Collection.of({
   sentAt: $.sentAt
 });
 
-const ChatEvents = {
-  onSendMessage: '~/on/onSendMessage',
-  onDraftMessage: '~/on/onDraftMessage',
-  onChangeScreenName: '~/on/onChangeScreenName',
+class EventDeclaration {
+  name: string;
+
+  constructor(name: string) {
+    this.name = name;
+  }
+
+  subscribe() {
+    return event(this.name);
+  }
+
+  dispatch() {
+    return this.name.startsWith('~/on/') ? this.name : `~/on/${this.name}`;
+  }
 }
 
-export const chat = behavior({
+function declareEvents<T extends Record<string, string>>(events: T): { [K in keyof T]: EventDeclaration } {
+  const declarations = {} as { [K in keyof T]: EventDeclaration };
+  for (const [name, path] of Object.entries(events)) {
+    declarations[name as keyof T] = new EventDeclaration(path);
+  }
+  return declarations;
+}
+
+const events = declareEvents({
+  onSendMessage: 'onSendMessage',
+  onDraftMessage: 'onDraftMessage',
+  onChangeScreenName: 'onChangeScreenName',
+})
+
+export const chatRules = behavior({
   init: {
     select: {
       self: $.self,
     },
-    where: [{ Not: { Case: [$.self, CommonChat.messages, $._] } }],
+    where: [isEmpty($.self, CommonChat.screenName)],
     update: ({ self }) => {
       return Messages.new({ messages: self }).push({ message: "hello world", author: "system", sentAt: Date.now() });
     },
   },
 
-  sendMessage: event(ChatEvents.onSendMessage)
-    .select({ draft: $.draft, screenName: $.screenName })
-    .match($.self, CommonChat.draft, $.draft)
-    .match($.self, CommonChat.screenName, $.screenName)
-    .update(({ self, event, screenName, draft }) => {
-      return [
-        ...transact(self, { [CommonChat.draft]: draft }, tx => {
-          delete tx[CommonChat.draft];
-        }),
-        ...Messages.new({ messages: self }).push({
-          message: draft,
-          author: screenName,
-          sentAt: Date.now()
-        })
-      ];
-    })
-    .commit(),
+  sendMessage:
+    events.onSendMessage
+      .subscribe()
+      .select({ draft: $.draft, screenName: $.screenName }) // .include(CommonChat.select({ draft, screenName }))
+      .match($.self, CommonChat.draft, $.draft)
+      .match($.self, CommonChat.screenName, $.screenName)
+      .update(({ self, event, screenName, draft }) => {
+        return [
+          ...transact(self, { [CommonChat.draft]: draft }, tx => {
+            delete tx[CommonChat.draft];
+          }),
+          ...Messages.new({ messages: self }).push({
+            message: draft,
+            author: screenName,
+            sentAt: Date.now()
+          })
+        ];
+      })
+      .commit(),
 
-  editMessage: event(ChatEvents.onDraftMessage)
+  editMessage: events.onDraftMessage
+    .subscribe()
     .update(({ self, event }) => {
       console.log(Session.resolve(event))
 
@@ -134,7 +177,10 @@ export const chat = behavior({
     })
     .commit(),
 
-  changeName: event(ChatEvents.onChangeScreenName)
+  // events.onChangeScreenName
+  //   .listen(({ self, event }) => {}))
+  changeName: events.onChangeScreenName
+    .subscribe()
     .update(({ self, event }) => {
       console.log(Session.resolve(event))
       return transact(self, { [CommonChat.screenName]: '' }, tx => {
@@ -143,6 +189,9 @@ export const chat = behavior({
     })
     .commit(),
 
+
+  // CommonChat.select({ draft, screenName, messages })
+  //  .default({ draft: '', screenName: '<empty>' })
   view: {
     select: {
       self: $.self,
@@ -151,9 +200,9 @@ export const chat = behavior({
       messages: Messages,
     },
     where: [
-      defaultTo($.self, CommonChat.screenName, $.screenName, '<empty>'),
-      defaultTo($.self, CommonChat.draft, $.draft, ''),
-      { Case: [$.self, CommonChat.messages, $.messages] },
+      defaultTo($.self, CommonChat.screenName, $.screenName, '<empty>'), // include($.self, CommonChat.screenName, '<empty>')
+      defaultTo($.self, CommonChat.draft, $.draft, ''), // include($.self, CommonChat.draft, '')
+      { Case: [$.self, CommonChat.messages, $.messages] }, // includeCollection($.self, $.messages, CommonChat.messages, Messages)
       Messages.match($.messages),
     ],
     update: ({ self, messages, screenName, draft }) => {
@@ -168,10 +217,10 @@ export const chat = behavior({
             </li>)}</ul>
             <fieldset>
               <label>Name</label>
-              <common-input type="text" value={screenName} oncommon-input={ChatEvents.onChangeScreenName} />
+              <common-input type="text" value={screenName} oncommon-input={events.onChangeScreenName.dispatch()} />
               <label>Message</label>
-              <common-input type="text" value={draft} placeholder="say something!" oncommon-input={ChatEvents.onDraftMessage} />
-              <button onclick={ChatEvents.onSendMessage}>Add</button>
+              <common-input type="text" value={draft} placeholder="say something!" oncommon-input={events.onDraftMessage.dispatch()} />
+              <button onclick={events.onSendMessage.dispatch()}>Send</button>
             </fieldset>
           </div>
         )),
@@ -180,4 +229,4 @@ export const chat = behavior({
   },
 });
 
-export const spawn = (input: {} = source) => chat.spawn(input);
+export const spawn = (input: {} = source) => chatRules.spawn(input);

@@ -81,6 +81,7 @@ function EmptyState({ self, time, size, color, description, hunger }: { self: Re
 }
 
 export const tamagochi = behavior({
+  // Creature.select('time', hunger', 'size', 'color', 'description') instead?
   view: queryDefault(Creature, 'time', 'hunger', 'size', 'color', 'description')
     .render(EmptyState)
     .commit(),
