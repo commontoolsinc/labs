@@ -5,7 +5,7 @@ import * as Session from "./session.js";
 
 export interface Mount {
   vdom: DOM.Node<{}> | null;
-  mount: HTMLElement;
+  renderMount: HTMLElement;
   dispatch: (fact: [attribute: string, event: Event]) => Task.Task<unknown>;
 }
 
@@ -36,11 +36,11 @@ export default service({
       const view = Session.resolve(mount) as Mount;
       const vdom = Session.resolve(ui) as DOM.Node<{}>;
       if (view.vdom === null) {
-        view.vdom = DOM.virtualize(view.mount);
+        view.vdom = DOM.virtualize(view.renderMount);
       }
       if (vdom !== view.vdom) {
         const delta = DOM.diff(view.vdom, vdom);
-        DOM.patch(view.mount, view.vdom, delta, {
+        DOM.patch(view.renderMount, view.vdom, delta, {
           send(fact: [attribute: string, event: Event]) {
             Task.perform(view.dispatch(fact));
           },

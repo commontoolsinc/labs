@@ -130,10 +130,11 @@ export function* query<Select extends Type.Selector>(
 
 const subscriptions = new Set<Subscription>();
 export function* subscribe<Select extends Type.Selector>(
+  name: string,
   query: Type.Query<Select>,
   effect: Effect<Select>,
 ) {
-  const subscription = new Subscription(query, effect);
+  const subscription = new Subscription(name, query, effect);
   subscriptions.add(subscription);
 
   return subscription;
@@ -151,7 +152,9 @@ class Subscription<Select extends Selector = Selector> {
   effect: Effect<Select>;
   query: Type.Query<Select>;
   revision: Reference;
-  constructor(query: Type.Query<Select>, effect: Effect<Select>) {
+  name: string;
+  constructor(name: string, query: Type.Query<Select>, effect: Effect<Select>) {
+    this.name = name;
     this.query = query;
     this.effect = effect;
     this.revision = refer([]);
@@ -162,9 +165,28 @@ class Subscription<Select extends Selector = Selector> {
     const changes = [];
     if (this.revision.toString() !== revision.toString()) {
       this.revision = revision;
-      for (const match of selection) {
-        changes.push(...(yield* this.effect.perform(match)));
+      if (selection.length > 0) {
+        console.group(`%c${this.name}`, 'color: #4CAF50; font-weight: bold;');
+        console.log('%crevision%c:', 'color: #2196F3; font-weight: bold;', 'color: inherit;', this.revision.toString());
+        console.log('%cquery%c:', 'color: #2196F3; font-weight: bold;', 'color: inherit;', this.query);
+        console.log('%cselection%c:', 'color: #2196F3; font-weight: bold;', 'color: inherit;', selection);
       }
+      for (const match of selection) {
+        const self = (match as any).self
+        const matchChanges = (yield* this.effect.perform(match));
+
+        if (self) {
+          console.group(`%c${self.toString()}`, 'color: #FF9800; font-weight: bold;');
+          for (const change of matchChanges) {
+            console.log('%cchange%c:', 'color: #E91E63; font-weight: bold;', 'color: inherit;', JSON.stringify(change), change);
+          }
+          console.groupEnd();
+        }
+        changes.push(...matchChanges);
+      }
+    }
+    if (selection.length > 0) {
+      console.groupEnd();
     }
     return changes;
   }

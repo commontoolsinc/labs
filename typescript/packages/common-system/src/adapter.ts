@@ -93,7 +93,7 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
     const db = yield* Task.wait(DB.local);
     const subscriptions = [];
     const changes = [];
-    for (const rule of Object.values(this.rules)) {
+    for (const [name, rule] of Object.entries(this.rules)) {
       const query = {
         select: rule.select,
         where: [
@@ -104,6 +104,7 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
       };
 
       const subscription = yield* DB.subscribe(
+        name,
         query as Type.Query,
         toEffect(rule),
       );
@@ -166,7 +167,7 @@ class SystemService<Effects extends Record<string, Effect>> {
     const db = yield* Task.wait(DB.local);
     const subscriptions = [];
     const changes = [];
-    for (const rule of Object.values(this.rules)) {
+    for (const [name, rule] of Object.entries(this.rules)) {
       const query = {
         select: rule.select,
         where: [
@@ -176,7 +177,7 @@ class SystemService<Effects extends Record<string, Effect>> {
         ],
       };
 
-      const subscription = yield* DB.subscribe(query as Type.Query, rule);
+      const subscription = yield* DB.subscribe(name, query as Type.Query, rule);
       subscriptions.push(subscription);
 
       changes.push(...(yield* subscription.poll(db)));

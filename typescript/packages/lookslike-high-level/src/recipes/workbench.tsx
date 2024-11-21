@@ -122,7 +122,7 @@ const spellService = service({
       const compiled = yield* Task.wait(tsToExports(sourceCode));
       console.log(compiled)
 
-      const child = refer({ parent: self, compiled: compiled.exports.spell.id })
+      const child = refer({ parent: self, compiled: compiled.exports.spell.id, time: Date.now() })
 
       return [
         {
@@ -138,7 +138,8 @@ const spellService = service({
             ></os-code-editor>
             <fieldset>
               <common-charm
-                id={child}
+                id={child.toString()}
+                key={child.toString()}
                 spell={() => compiled.exports.spell}
                 entity={() => child}
               ></common-charm>
