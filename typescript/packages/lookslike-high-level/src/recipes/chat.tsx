@@ -140,37 +140,56 @@ export const chatRules = behavior({
     select: {
       self: $.self,
     },
-    where: [isEmpty($.self, CommonChat.screenName)],
+    where: [isEmpty($.self, CommonChat.messages)],
     update: ({ self }) => {
       return Messages.new({ messages: self }).push({ message: "hello world", author: "system", sentAt: Date.now() });
     },
   },
 
-  sendMessage:
-    events.onSendMessage
-      .subscribe()
-      .select({ draft: $.draft, screenName: $.screenName }) // .include(CommonChat.select({ draft, screenName }))
-      .match($.self, CommonChat.draft, $.draft)
-      .match($.self, CommonChat.screenName, $.screenName)
-      .update(({ self, event, screenName, draft }) => {
-        return [
-          ...transact(self, { [CommonChat.draft]: draft }, tx => {
-            delete tx[CommonChat.draft];
-          }),
-          ...Messages.new({ messages: self }).push({
-            message: draft,
-            author: screenName,
-            sentAt: Date.now()
-          })
-        ];
-      })
-      .commit(),
+  // sendMessage:
+  //   events.onSendMessage
+  //     .subscribe()
+  //     .select({ draft: $.draft, screenName: $.screenName }) // .include(CommonChat.select({ draft, screenName }))
+  //     .match($.self, CommonChat.draft, $.draft)
+  //     .match($.self, CommonChat.screenName, $.screenName)
+  //     .update(({ self, event, screenName, draft }) => {
+  //       return [
+  //         ...transact(self, { [CommonChat.draft]: draft }, tx => {
+  //           delete tx[CommonChat.draft];
+  //         }),
+  //         ...Messages.new({ messages: self }).push({
+  //           message: draft,
+  //           author: screenName,
+  //           sentAt: Date.now()
+  //         })
+  //       ];
+  //     })
+  //     .commit(),
+
+  sendMessage: events.onSendMessage.subscribe()
+    .select({
+      draft: $.draft,
+      screenName: $.screenName,
+      messages: Messages
+    })
+    .match($.self, '~/draft', $.draft)
+    .match($.self, '~/screenName', $.screenName)
+    .match($.self, "messages", $.messages)
+    .clause(Messages.match($.messages))
+    .update(({ self, event, screenName, messages, draft }) => {
+      const collection = Messages.from(messages)
+      const allMessages = [...collection];
+
+      return [
+        ...retract(self, { '~/draft': draft }),
+        ...collection.push({ message: draft, author: screenName, sentAt: Date.now() })
+      ];
+    })
+    .commit(),
 
   editMessage: events.onDraftMessage
     .subscribe()
     .update(({ self, event }) => {
-      console.log(Session.resolve(event))
-
       return transact(self, { [CommonChat.draft]: '' }, tx => {
         tx[CommonChat.draft] = Session.resolve<CommonInputEvent>(event).detail.value;
       });
@@ -182,7 +201,6 @@ export const chatRules = behavior({
   changeName: events.onChangeScreenName
     .subscribe()
     .update(({ self, event }) => {
-      console.log(Session.resolve(event))
       return transact(self, { [CommonChat.screenName]: '' }, tx => {
         tx[CommonChat.screenName] = Session.resolve<CommonInputEvent>(event).detail.value;
       });
@@ -206,14 +224,13 @@ export const chatRules = behavior({
       Messages.match($.messages),
     ],
     update: ({ self, messages, screenName, draft }) => {
-      console.log(messages);
       const collection = Messages.from(messages);
 
       return [
         render({ self }, ({ self }) => (
           <div title="Common Chat">
             <ul>{...[...collection].map(item => <li key={item.author + item.message}>
-              {item.author}: {item.message} <sub style="opacity: 0.5;">{new Date(item.sentAt).toLocaleTimeString()}</sub>
+              <b>{item.author}</b>: {item.message} <sub style="opacity: 0.5;">{new Date(item.sentAt).toLocaleTimeString()}</sub>
             </li>)}</ul>
             <fieldset>
               <label>Name</label>

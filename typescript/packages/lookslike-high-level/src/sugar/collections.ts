@@ -183,10 +183,10 @@ export class CollectionView<Select extends Selector> {
   }
 
   push(member: Selection<Select>) {
-    this.insert(member, { after: this.last, before: null });
+    return this.insert(member, { after: this.last, before: null });
   }
   unshift(member: Selection<Select>) {
-    this.insert(member, { before: this.first, after: null });
+    return this.insert(member, { before: this.first, after: null });
   }
 }
 

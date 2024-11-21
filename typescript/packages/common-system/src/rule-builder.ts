@@ -57,6 +57,13 @@ export class Select<Match extends Selector = Selector> {
     );
   }
 
+  clause(clause: Clause) {
+    return new Select<Match>(
+      this.#select,
+      this.#where.clause(clause)
+    );
+  }
+
   select<S extends Selector>(selector: S) {
     return new Select<S & Match>({ ...this.#select, ...selector }, this.#where);
   }
@@ -176,6 +183,10 @@ export class WhereBuilder {
         And: where.commit(),
       },
     });
+  }
+
+  clause(clause: Clause) {
+    return new WhereBuilder(...this.#where, clause);
   }
 
   commit(): Clause[] {
