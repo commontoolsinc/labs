@@ -330,3 +330,96 @@ export function inferZodSchema(data: unknown): z.ZodTypeAny {
   // Fallback
   return z.unknown();
 }
+
+export function generateZodCode(schema: any, indent: number = 0): string {
+  // Handle null
+  if (schema.type === "null") {
+    return "z.null()";
+  }
+
+  let zodSchema = "";
+  const spacing = "  ".repeat(indent);
+  const innerSpacing = "  ".repeat(indent + 1);
+
+  // Handle basic types
+  switch (schema.type) {
+    case "string":
+      zodSchema = "z.string()";
+      break;
+    case "number":
+      zodSchema = "z.number()";
+      break;
+    case "integer":
+      zodSchema = "z.number().int()";
+      break;
+    case "boolean":
+      zodSchema = "z.boolean()";
+      break;
+    default:
+      // Handle arrays
+      if (schema.type === "array") {
+        const itemsSchema = schema.items ? generateZodCode(schema.items, indent) : "z.any()";
+        zodSchema = `z.array(${itemsSchema})`;
+      }
+      // Handle objects
+      else if (schema.type === "object") {
+        const properties = schema.properties || {};
+        const zodProperties = Object.entries(properties)
+          .map(([key, value]) => `${innerSpacing}${key}: ${generateZodCode(value, indent + 1)}`)
+          .join(",\n");
+        zodSchema = `z.object({\n${zodProperties}\n${spacing}})`;
+      }
+      // Fallback to any
+      else {
+        zodSchema = "z.any()";
+      }
+  }
+
+  // Add description if present
+  if (schema.description) {
+    zodSchema += `.describe(${JSON.stringify(schema.description)})`;
+  }
+
+  // Add default if present
+  if (schema.default !== undefined) {
+    zodSchema += `.default(${JSON.stringify(schema.default)})`;
+  }
+
+  return zodSchema;
+}
+
+export const generateZodSpell = (schema: any): string => {
+  const zodCode = generateZodCode(schema);
+
+  return `import { h } from "@commontools/common-html";
+import {
+  recipe,
+  lift,
+  llm,
+  handler,
+  navigateTo,
+  NAME,
+  UI,
+  ifElse
+} from "@commontools/common-builder";
+import { z } from "zod"; 
+import { zodToJsonSchema } from "zod-to-json-schema";
+
+const Schema = ${zodCode};
+//PREFILL
+const stringify = lift((state) => JSON.stringify(state, null, 2));
+
+export default recipe(Schema, (state) => {
+  return {
+    [NAME]: "new recipe, who dis?",
+    [UI]: <os-container>
+      <h2>Data</h2>
+      <pre>{stringify( state )}</pre>
+    </os-container>
+  }
+});
+`;
+};
+
+// const zodSchemaCode = generateZodCode(inferredSchema);
+// console.log(zodSchemaCode);

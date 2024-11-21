@@ -13,6 +13,7 @@ import {
   syncRecipe,
   closeCharm,
 } from "../data.js";
+
 import {
   run,
   CellImpl,
@@ -20,6 +21,7 @@ import {
   idle,
   EntityId,
   getRecipe,
+  addRecipe,
   getEntityId,
 } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
@@ -27,8 +29,8 @@ import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
 import { NAME, TYPE } from "@commontools/common-builder";
 import { matchRoute, navigate } from "../router.js";
-import { inferJsonSchema } from "../schema.js";
-import { schemaQueryExample } from "../recipes/schemaQuery.jsx";
+import * as Schema from "../schema.js";
+import { buildRecipe } from "../localBuild.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -317,10 +319,23 @@ export class CommonWindowManager extends LitElement {
         this.requestUpdate();
       } else {
         // Create a new charm and query for the imported data
-        const schema = inferJsonSchema(data[0]);
-        runPersistent(schemaQueryExample, { schema }).then((charm) =>
-          this.openCharm(charm),
-        );
+        const jsonSchema = Schema.inferJsonSchema(data[0]);
+        jsonSchema.description = "Calendar"; // FIXME(JA): what is a better description!
+        const src = Schema.generateZodSpell(jsonSchema);
+        buildRecipe(src).then(({ recipe }) => {
+
+
+          if (recipe) {
+            addRecipe(recipe, src, "render data", []);
+
+            runPersistent(recipe, data[0]).then((charm) =>
+              this.openCharm(charm),
+            );
+          }
+        });
+        // runPersistent(schemaQueryExample, { schema: zodCode }).then((charm) =>
+        //   this.openCharm(charm),
+        // );
       }
     };
 
