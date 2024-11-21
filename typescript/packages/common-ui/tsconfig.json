@@ -14,9 +14,7 @@
         "../../node_modules/@commontools/io/lib/index.d.ts"
       ]
     },
-    "types": ["node"]
+    "types": ["node", "mocha"]
   },
-  "include": [
-    "src/**/*",
-  ]
+  "include": ["src/**/*"]
 }
