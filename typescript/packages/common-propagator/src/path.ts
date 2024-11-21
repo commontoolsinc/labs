@@ -1,4 +1,5 @@
 import { isObject } from "./contract.js";
+import debug from "./debug.js";
 import * as logger from "./logger.js";
 
 /** A keypath is an array of property keys */
@@ -36,24 +37,28 @@ export const path = <T>(parent: T, keyPath: Array<PropertyKey>): unknown => {
   const key = keyPath.shift()!;
   if (isKeyable(parent)) {
     const child = parent.key(key);
+    if (debug()) {
+      logger.debug({
+        msg: "call .key()",
+        fn: "path()",
+        parent,
+        key,
+        child,
+      });
+    }
+    return path(child, keyPath);
+  }
+  // We checked the length, so we know this is not undefined.
+  const child = getProp(parent, key);
+  if (debug()) {
     logger.debug({
-      msg: "call .key()",
+      msg: "get prop",
       fn: "path()",
       parent,
       key,
       child,
     });
-    return path(child, keyPath);
   }
-  // We checked the length, so we know this is not undefined.
-  const child = getProp(parent, key);
-  logger.debug({
-    msg: "get prop",
-    fn: "path()",
-    parent,
-    key,
-    child,
-  });
   return path(child, keyPath);
 };
 
