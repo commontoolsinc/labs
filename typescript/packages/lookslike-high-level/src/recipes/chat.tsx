@@ -14,7 +14,31 @@ import * as Collection from "../sugar/collections.js";
 import { event } from "../sugar/event.js";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
 
-export const source = { keywords: { v: 1 } };
+export const source = { chat: { v: 1 } };
+
+function transact<T extends Record<string, any>>(ref: Reference, fields: T, closure: (tx: T) => void): Instruction[] {
+  const original = { ...fields };
+  const proxy = { ...fields };
+  closure(proxy);
+
+  const instructions: Instruction[] = [];
+
+  // Check for changed/new values
+  Object.entries(proxy).forEach(([key, value]) => {
+    if (!(key in original) || original[key] !== value) {
+      instructions.push({ Upsert: [ref, key, value] } as Instruction);
+    }
+  });
+
+  // Check for deleted values
+  Object.keys(original).forEach(key => {
+    if (!(key in proxy)) {
+      instructions.push({ Retract: [ref, key, original[key]] } as Instruction);
+    }
+  });
+
+  return instructions;
+}
 
 function upsert(self: Reference, fields: {}): Instruction[] {
   return Object.entries(fields).map(([k, v]) => ({ Upsert: [self, k, v] } as Instruction));
@@ -53,13 +77,19 @@ function defaultTo(
   };
 }
 
+const CommonChat = {
+  draft: '~/draft',
+  screenName: '~/screenName',
+  messages: "messages"
+}
+
 const Messages = Collection.of({
   message: $.message,
   author: $.author,
   sentAt: $.sentAt
 });
 
-const Events = {
+const ChatEvents = {
   onSendMessage: '~/on/onSendMessage',
   onDraftMessage: '~/on/onDraftMessage',
   onChangeScreenName: '~/on/onChangeScreenName',
@@ -70,35 +100,46 @@ export const chat = behavior({
     select: {
       self: $.self,
     },
-    where: [{ Not: { Case: [$.self, "messages", $._] } }],
+    where: [{ Not: { Case: [$.self, CommonChat.messages, $._] } }],
     update: ({ self }) => {
       return Messages.new({ messages: self }).push({ message: "hello world", author: "system", sentAt: Date.now() });
     },
   },
 
-  sendMessage: event('onSendMessage')
+  sendMessage: event(ChatEvents.onSendMessage)
     .select({ draft: $.draft, screenName: $.screenName })
-    .match($.self, '~/draft', $.draft)
-    .match($.self, '~/screenName', $.screenName)
+    .match($.self, CommonChat.draft, $.draft)
+    .match($.self, CommonChat.screenName, $.screenName)
     .update(({ self, event, screenName, draft }) => {
       return [
-        ...retract(self, { '~/draft': draft }),
-        ...Messages.new({ messages: self }).push({ message: draft, author: screenName, sentAt: Date.now() })
+        ...transact(self, { [CommonChat.draft]: draft }, tx => {
+          delete tx[CommonChat.draft];
+        }),
+        ...Messages.new({ messages: self }).push({
+          message: draft,
+          author: screenName,
+          sentAt: Date.now()
+        })
       ];
     })
     .commit(),
 
-  editMessage: event('onDraftMessage')
+  editMessage: event(ChatEvents.onDraftMessage)
     .update(({ self, event }) => {
       console.log(Session.resolve(event))
-      return upsert(self, { '~/draft': Session.resolve<CommonInputEvent>(event).detail.value });
+
+      return transact(self, { [CommonChat.draft]: '' }, tx => {
+        tx[CommonChat.draft] = Session.resolve<CommonInputEvent>(event).detail.value;
+      });
     })
     .commit(),
 
-  changeName: event('onChangeScreenName')
+  changeName: event(ChatEvents.onChangeScreenName)
     .update(({ self, event }) => {
       console.log(Session.resolve(event))
-      return upsert(self, { '~/screenName': Session.resolve<CommonInputEvent>(event).detail.value });
+      return transact(self, { [CommonChat.screenName]: '' }, tx => {
+        tx[CommonChat.screenName] = Session.resolve<CommonInputEvent>(event).detail.value;
+      });
     })
     .commit(),
 
@@ -110,9 +151,9 @@ export const chat = behavior({
       messages: Messages,
     },
     where: [
-      defaultTo($.self, '~/screenName', $.screenName, '<empty>'),
-      defaultTo($.self, '~/draft', $.draft, ''),
-      { Case: [$.self, "messages", $.messages] },
+      defaultTo($.self, CommonChat.screenName, $.screenName, '<empty>'),
+      defaultTo($.self, CommonChat.draft, $.draft, ''),
+      { Case: [$.self, CommonChat.messages, $.messages] },
       Messages.match($.messages),
     ],
     update: ({ self, messages, screenName, draft }) => {
@@ -127,10 +168,10 @@ export const chat = behavior({
             </li>)}</ul>
             <fieldset>
               <label>Name</label>
-              <common-input type="text" value={screenName} oncommon-input={Events.onChangeScreenName} />
+              <common-input type="text" value={screenName} oncommon-input={ChatEvents.onChangeScreenName} />
               <label>Message</label>
-              <common-input type="text" value={draft} placeholder="say something!" oncommon-input={Events.onDraftMessage} />
-              <button onclick={Events.onSendMessage}>Add</button>
+              <common-input type="text" value={draft} placeholder="say something!" oncommon-input={ChatEvents.onDraftMessage} />
+              <button onclick={ChatEvents.onSendMessage}>Add</button>
             </fieldset>
           </div>
         )),
