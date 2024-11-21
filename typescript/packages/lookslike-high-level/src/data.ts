@@ -31,7 +31,7 @@ import { buildRecipe } from "./localBuild.js";
 import "./recipes/todo-list-as-task.js";
 import "./recipes/playlist.js";
 
-import * as keywords from "./recipes/keywords.jsx";
+import * as chat from "./recipes/chat.jsx";
 import * as workbench from "./recipes/workbench.jsx";
 import * as dungeon from "./recipes/dungeon.jsx";
 import * as charmExample from "./recipes/charm.jsx";
@@ -225,8 +225,8 @@ addCharms([
     readingList: { v: 10 },
   }),
   workbench.spawn({ v: 1 }),
-  keywords.spawn({
-    keywords: { v: 2 },
+  chat.spawn({
+    chat: { v: 1 },
   }),
   FetchExample.spawn(),
   FetchService.spawn(),
