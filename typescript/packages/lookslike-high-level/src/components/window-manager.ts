@@ -320,7 +320,7 @@ export class CommonWindowManager extends LitElement {
       } else {
         // Create a new charm and query for the imported data
         const jsonSchema = Schema.inferJsonSchema(data[0]);
-        jsonSchema.description = "Calendar"; // FIXME(JA): what is a better description!
+        jsonSchema.description = Object.keys(data[0]).join(", ");
         const src = Schema.generateZodSpell(jsonSchema);
         buildRecipe(src).then(({ recipe }) => {
 
@@ -333,9 +333,6 @@ export class CommonWindowManager extends LitElement {
             );
           }
         });
-        // runPersistent(schemaQueryExample, { schema: zodCode }).then((charm) =>
-        //   this.openCharm(charm),
-        // );
       }
     };
 

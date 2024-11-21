@@ -198,6 +198,7 @@ RESPOND WITH THE FULL SOURCE CODE
         if (workingSrc?.includes("//PREFILL")) {
             console.log("PREFILL in src");
             prefill += workingSrc.split("//PREFILL")[0];
+            prefill += "\n//PREFILL\n";
         }
 
         if (workingSpec && workingSrc) {

@@ -409,9 +409,11 @@ const Schema = ${zodCode};
 //PREFILL
 const stringify = lift((state) => JSON.stringify(state, null, 2));
 
+const imageUrl = lift((prompt) => '/api/img?prompt=' + encodeURIComponent(prompt));
+
 export default recipe(Schema, (state) => {
   return {
-    [NAME]: "new recipe, who dis?",
+    [NAME]: ${JSON.stringify(schema.description)},
     [UI]: <os-container>
       <h2>Data</h2>
       <pre>{stringify( state )}</pre>
