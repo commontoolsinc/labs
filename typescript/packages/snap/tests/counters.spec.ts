@@ -3,7 +3,6 @@ import { test, expect } from '@playwright/test';
 test.describe('Counters Page', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5173/');
-    await page.getByRole('link', { name: '👨‍🍳 Counters' }).click();
   });
 
   test('should allow renaming the counter', async ({ page }) => {

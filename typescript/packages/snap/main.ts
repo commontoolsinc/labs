@@ -86,6 +86,76 @@ app.get("/screenshot/*", async (c) => {
   return c.body(screenshot);
 });
 
+app.post("/test/:recipeId", async (c) => {
+  const recipeId = c.req.param("recipeId");
+  const body = await c.req.json();
+  const testContent = body.test;
+
+  if (!testContent) {
+    return c.json({ error: "Missing test content" }, 400);
+  }
+
+  // Create temp directory if it doesn't exist
+  const tempDir = join(Deno.cwd(), "temp-tests");
+  await ensureDir(tempDir);
+
+  // Create a unique filename
+  const tempTestFilePath = join(tempDir, `test-${Date.now()}-${crypto.randomUUID()}.spec.ts`);
+
+  try {
+    // Replace the initial page.goto URL
+    const updatedTestContent = testContent.replace(
+      /await page\.goto\(['"][^'"]*['"]\)/,
+      `await page.goto('http://localhost:5173/recipe/${recipeId}')`
+    );
+
+    // Write to temporary file
+    await Deno.writeTextFile(tempTestFilePath, updatedTestContent);
+
+    // Execute the test
+    const args = ["playwright", "test", tempTestFilePath];
+    const shellCommand = `npx ${args.join(" ")}`;
+    console.log("Shell command:", shellCommand);
+
+    const process = new Deno.Command("npx", {
+      args,
+      stdout: "piped",
+      stderr: "piped",
+    });
+
+    console.log("deno command", process.toString());
+    const { code, stdout, stderr } = await process.output();
+
+    const output = new TextDecoder().decode(stdout);
+    const error = new TextDecoder().decode(stderr);
+
+    // Clean up
+    await Deno.remove(tempTestFilePath);
+
+    if (code === 0) {
+      return c.json({ success: true, output });
+    } else {
+      return c.json({ 
+        success: false, 
+        error,
+        output 
+      }, 400);
+    }
+  } catch (error) {
+    // Clean up on error
+    try {
+      await Deno.remove(tempTestFilePath);
+    } catch {
+      // Ignore cleanup errors
+    }
+
+    return c.json({ 
+      success: false, 
+      error: error.message 
+    }, 500);
+  }
+});
+
 const PORT = Deno.env.get("PORT") || 3000;
 
 Deno.serve({ port: Number(PORT) }, app.fetch);

@@ -1,4 +1,4 @@
 data/*
 screenshot.png
 node_modules/
-!tests/
+temp-tests/
