@@ -1,6 +1,8 @@
 import { h, behavior, Reference } from "@commontools/common-system";
 import { queryDefault } from "../sugar/query.js";
-import { Instruction } from "synopsys";
+import { $, Instruction } from "synopsys";
+import { event } from "../sugar/event.js";
+import { tags } from "../sugar/inbox.js";
 
 export const source = { readingList: { v: 1 } };
 
@@ -27,10 +29,11 @@ function retract(self: Reference, fields: {}): Instruction[] {
 const dispatch = createDispatch([
   'advance-time',
   'give-food',
-  'exercise'
+  'exercise',
+  'broadcast'
 ]);
 
-const Creature = {
+export const Creature = {
   color: 'blue',
   description: 'lizard bunny',
   hunger: 0,
@@ -44,6 +47,7 @@ function Footer({ }: {}) {
     <button onclick={dispatch('advance-time')}>Wait</button>
     <button onclick={dispatch('give-food')}>Feed</button>
     <button onclick={dispatch('exercise')}>Exercise</button>
+    <button onclick={dispatch('broadcast')}>Broadcast</button>
   </div>
 }
 
@@ -79,6 +83,8 @@ function EmptyState({ self, time, size, color, description, hunger }: { self: Re
     {Footer({})}
   </div>
 }
+
+// <Footer />
 
 export const tamagochi = behavior({
   // Creature.select('time', hunger', 'size', 'color', 'description') instead?
@@ -129,6 +135,14 @@ export const tamagochi = behavior({
         ...upsert(self, {
           time: time + 1
         })
+      ]
+    })
+    .commit(),
+
+  broadcast: event('broadcast')
+    .update(({ self, event }) => {
+      return [
+        { Assert: [tags, '#tamagochi', self] },
       ]
     })
     .commit(),

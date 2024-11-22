@@ -42,6 +42,7 @@ import Hello from "./recipes/hello.jsx";
 import FetchExample from "./recipes/fetcher.jsx";
 import FetchService from "./effects/fetch.js";
 import { UI as ViewService } from "@commontools/common-system";
+import * as sharedDataViewer from "./recipes/sharedDataViewer.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -218,15 +219,16 @@ export async function saveRecipe(
 }
 
 addCharms([
+  sharedDataViewer.spawn({ sharedDataInstance: 2 }),
   Hello.spawn({ hello: { v: 1 } }),
   roundTrip.spawn({ trip: 2 }),
   tamagochi.spawn({ tamagochi: 1 }),
   readingList.spawn({
     readingList: { v: 10 },
   }),
-  workbench.spawn({ v: 1 }),
+  workbench.spawn({ v: 2 }),
   chat.spawn({
-    chat: { v: 1 },
+    chat: { v: 2 },
   }),
   FetchExample.spawn(),
   FetchService.spawn(),

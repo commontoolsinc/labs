@@ -8,12 +8,14 @@ import {
   Reference,
   View,
   Instruction,
-  Session
+  Session,
+  refer
 } from "@commontools/common-system";
 import * as Collection from "../sugar/collections.js";
 import { event } from "../sugar/event.js";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
 import * as DB from 'datalogia'
+import { chatHistory, tags } from "../sugar/inbox.js";
 
 export const source = { chat: { v: 1 } };
 
@@ -82,7 +84,7 @@ function isEmpty(self: Variable<Reference>, attribute: string): Clause {
   return { Not: { Case: [self, attribute, $._] } };
 }
 
-const CommonChat = {
+export const CommonChat = {
   draft: '~/draft',
   screenName: '~/screenName',
   messages: "messages"
@@ -99,7 +101,7 @@ const CommonChat = {
 //   screenName: DB.string,
 // }
 
-const Messages = Collection.of({
+export const Messages = Collection.of({
   message: $.message,
   author: $.author,
   sentAt: $.sentAt
@@ -133,6 +135,7 @@ const events = declareEvents({
   onSendMessage: 'onSendMessage',
   onDraftMessage: 'onDraftMessage',
   onChangeScreenName: 'onChangeScreenName',
+  onBroadcastHistory: 'onBroadcastHistory',
 })
 
 export const chatRules = behavior({
@@ -207,6 +210,19 @@ export const chatRules = behavior({
     })
     .commit(),
 
+  broadcast: events.onBroadcastHistory
+    .subscribe()
+    .select({
+      messages: $.messages
+    })
+    .match($.self, "messages", $.messages)
+    .update(({ self, event, messages }) => {
+      return [
+        { Upsert: [chatHistory, 'shared', messages] },
+        { Assert: [tags, '#chat', messages] },
+      ]
+    })
+    .commit(),
 
   // CommonChat.select({ draft, screenName, messages })
   //  .default({ draft: '', screenName: '<empty>' })
@@ -239,6 +255,7 @@ export const chatRules = behavior({
               <common-input type="text" value={draft} placeholder="say something!" oncommon-input={events.onDraftMessage.dispatch()} />
               <button onclick={events.onSendMessage.dispatch()}>Send</button>
             </fieldset>
+            <button onclick={events.onBroadcastHistory.dispatch()}>Broadcast History</button>
           </div>
         )),
       ];
