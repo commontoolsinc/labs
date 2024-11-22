@@ -1,13 +1,8 @@
-import { h, behavior, Reference, select, Select } from "@commontools/common-system";
-import { $, Constant, Instruction, Selector } from "synopsys";
-import { event, events, Events } from "../sugar/event.js";
+import { h, behavior, Reference } from "@commontools/common-system";
+import { event, events } from "../sugar/event.js";
 import { set } from "../sugar/transact.js";
 import { addTag } from "../sugar/tags.js";
-import { defaultTo } from "../sugar/default.js";
-import { describe } from "vitest";
 import { field } from "../sugar/query.js";
-
-export const source = { readingList: { v: 1 } };
 
 const genImage =
   (prompt: string) => `/api/img/?prompt=${encodeURIComponent(prompt)}`
@@ -21,7 +16,7 @@ function generateDescription({ time, hunger, size, color, description }: { time:
     `They've been around for ${time} time units and have grown to size ${size}.`;
 }
 
-function EmptyState({ self, time, size, color, description, hunger }) {
+function TamagochiView({ self, time, size, color, description, hunger }: { self: Reference, time: number, size: number, color: string, description: string, hunger: number }) {
   return <div title={'Tamagochi'} entity={self}>
     <div style={`color:${color}`}>{description}</div>
     <table>
@@ -73,60 +68,46 @@ const TamagochiEvents = events({
 
 export const tamagochi = behavior({
   view: Creature
-    .render(EmptyState)
+    .render(TamagochiView)
+    .commit(),
+
+  // NOTE(ja): is there a way to only have this advance time - and
+  // all the other events should only deal with non-time related changes?
+  advanceTime: event(TamagochiEvents.onAdvanceTime)
+    .with(time)
+    .update(({ self, time }) => set(self, { time: time + 1 }))
     .commit(),
 
   tickHunger: event(TamagochiEvents.onAdvanceTime)
     .with(hunger)
-    .update(({ self, event, hunger }) => {
-      return set(self, {
-        hunger: hunger + 1
-      })
-    })
+    .update(({ self, hunger }) => set(self, { hunger: hunger + 1 }))
     .commit(),
 
   feed: event(TamagochiEvents.onGiveFood)
     .with(hunger)
     .with(time)
-    .update(({ self, event, hunger, time }) => {
-      return set(self, {
-        hunger: Math.max(0, hunger - 1),
-        time: time + 1
-      })
-    })
+    .update(({ self, hunger, time }) => set(self, {
+      hunger: Math.max(0, hunger - 1),
+      time: time + 1
+    }))
     .commit(),
 
   exercise: event(TamagochiEvents.onExercise)
     .with(hunger)
     .with(time)
     .with(size)
-    .update(({ self, event, hunger, time, size }) => {
-      return set(self, {
-        hunger: hunger + 1,
-        time: time + 1,
-        size: size + 1
-      })
-    })
-    .commit(),
-
-  onAddItem: event(TamagochiEvents.onAdvanceTime)
-    .with(time)
-    .update(({ self, event, time }) => {
-      return set(self, {
-        time: time + 1
-      })
-    })
+    .update(({ self, hunger, time, size }) => set(self, {
+      hunger: hunger + 1,
+      time: time + 1,
+      size: size + 1
+    }))
     .commit(),
 
   broadcast: event(TamagochiEvents.onBroadcast)
-    .update(({ self }) => {
-      return [
-        addTag(self, '#tamagochi')
-      ]
-    })
+    .update(({ self }) => addTag(self, '#tamagochi'))
     .commit(),
 })
 
 console.log(tamagochi)
 
-export const spawn = (input: {} = source) => tamagochi.spawn(input);
+export const spawn = (source: {} = { tamagochi: 3 }) => tamagochi.spawn(source);

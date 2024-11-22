@@ -8,8 +8,6 @@ import { each } from "../sugar/render.jsx";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
 import { defaultTo } from "../sugar/default.js";
 
-export const source = { readingList: { v: 1 } };
-
 const ReadingListEvent = events({
   onChangeTitle: '~/on/changeTitle',
   onAddItem: '~/on/addItem',
@@ -21,16 +19,14 @@ const ReadingListEvent = events({
 function ReadingListItem({ self, title }: { self: Reference, title: string }) {
   return <li title={title} entity={self}>
     {title}
-    <button onclick={ReadingListEvent.onDeleteItem} style="margin-left: 8px">Delete</button>
-    <button onclick={ReadingListEvent.onReimagineItem} style="margin-left: 8px">Re-Imagine</button>
+    <button onclick={ReadingListEvent.onDeleteItem}>Delete</button>
+    <button onclick={ReadingListEvent.onReimagineItem}>Re-Imagine</button>
   </li>
 }
 
-const reimagine = ({ self, event, title }: { self: Reference, event: Constant, title: string }) => {
-  return [
-    llm(self, 'my/request', { prompt: 're-imagine this: ' + title }).json(),
-  ];
-}
+const reimagine = ({ self, title }: { self: Reference, event: Constant, title: string }) => [
+  llm(self, 'my/request', { prompt: 're-imagine this: ' + title }).json(),
+];
 
 const Title = select({ self: $.self, title: $.title })
   .match($.self, 'title', $.title)
@@ -55,15 +51,12 @@ const readingListItem = behavior({
     .commit(),
 
   onFinished: LlmResponse
-    .update(({ self, title, request }) => {
-      return [
-        ...remove(self, { "my/request": request }),
-        ...set(self, { title })
-      ];
-    })
+    .update(({ self, title, request }) => [
+      ...remove(self, { "my/request": request }),
+      ...set(self, { title })
+    ])
     .commit(),
 })
-
 
 function Footer({ draftTitle }: { draftTitle: string }) {
   return <div>
@@ -73,58 +66,58 @@ function Footer({ draftTitle }: { draftTitle: string }) {
   </div>
 }
 
-function EmptyState({ self, draftTitle, title }: { self: Reference, draftTitle: string, title: string }) {
-  return <div title={title} entity={self}>
+function EmptyState({ self, draftTitle }: { self: Reference, draftTitle: string }) {
+  return <div title='Empty Reading List' entity={self}>
     <span>Empty!</span>
     {Footer({ draftTitle })}
   </div>
 }
 
-function ArticleList({ article, self, draftTitle, title }: { article: Reference[], self: Reference, draftTitle: string, title: string }) {
-  return <div title={title} entity={self} >
-    <h1>Unordered Collection (Set)</h1>
+function ArticleList({ articles, self, draftTitle }: { articles: Reference[], self: Reference, draftTitle: string }) {
+  return <div title={`Reading List ${articles.length} items`} entity={self} >
+    <h1>Unordered Collection (Set of {articles.length})</h1>
     <ul>
-      {...each(article, readingListItem)}
+      {...each(articles, readingListItem)}
     </ul>
     {Footer({ draftTitle })}
   </div>
 }
 
-const Articles = select({ article: [$.article] })
+const Articles = select({ articles: [$.article] })
   .match($.self, "collection/articles", $.article)
   .not(q => q.match($.article, "deleted", true))
 
-const TitleWithDefault = select({ self: $.self, title: $.title })
-  .clause(defaultTo($.self, 'title', $.title, '<empty list>'))
-
-const DraftTitle = select({ draftTitle: $.draftTitle })
+const DraftTitle = select({ self: $.self, draftTitle: $.draftTitle })
   .clause(defaultTo($.self, 'draft/title', $.draftTitle, ''))
 
 export const readingList = behavior({
   articles: build('collection/articles'),
 
-  emptyStateView: TitleWithDefault
-    .with(DraftTitle)
+  emptyStateView: DraftTitle
     // bf: how do we also check for the list existing but zero non-deleted elements?
     .not(q => q.match($.self, "collection/articles", $.article))
     .render(EmptyState)
     .commit(),
 
-  listArticlesView: TitleWithDefault
-    .with(DraftTitle)
+  listArticlesView: DraftTitle
     .with(Articles)
     .render(ArticleList)
     .commit(),
 
-  onChangeTitle: event(ReadingListEvent.onChangeTitle)
-    .update(({ self, event }) => {
-      return set(self, { 'draft/title': Session.resolve<CommonInputEvent>(event).detail.value })
-    })
+  // NOTE(ja): this is highlighting a "problem" with double-binding
+  // where keypress triggers this, which triggers ui event, which updates UI
+  // with the new value.. but the time to go through the whole pipeline and
+  // update the UI is too long - so the inputted but not processed text gets overwritten
+  // by the processed text.  this will be a common pattern we need to get right
+  onChangeArticleTitle: event(ReadingListEvent.onChangeTitle)
+    .update(({ self, event }) => set(self, {
+      'draft/title': Session.resolve<CommonInputEvent>(event).detail.value
+    }))
     .commit(),
 
   onAddItem: event(ReadingListEvent.onAddItem)
     .with(DraftTitle)
-    .update(({ self, event, draftTitle }) => {
+    .update(({ self, draftTitle }) => {
       return [
         // bf: we should probably say the name of the collection here
         // currently it just adds it to ANY collection that listens for `NEW`
@@ -138,4 +131,4 @@ export const readingList = behavior({
 console.log(readingList)
 console.log(readingListItem)
 
-export const spawn = (input: {} = source) => readingList.spawn(input);
+export const spawn = (source: {} = { readingList: 2 }) => readingList.spawn(source);

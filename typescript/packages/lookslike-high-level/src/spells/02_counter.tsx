@@ -1,14 +1,6 @@
-import {
-  h,
-  behavior,
-  $,
-  Reference,
-  select,
-} from "@commontools/common-system";
-import { event, events, Events } from "../sugar/event.js";
-import { set as set } from "../sugar/transact.js";
-
-export const source = { clicker: { v: 33 } };
+import { h, behavior, $, select } from "@commontools/common-system";
+import { event, events } from "../sugar/event.js";
+import { set } from "../sugar/transact.js";
 
 const Empty = select({ self: $.self })
   .not(q => q.match($.self, "clicks", $._))
@@ -30,6 +22,7 @@ const viewCount = Clicks.render(({ clicks, self }) => {
     <div title={`Clicks ${clicks}`} entity={self}>
       <div>{clicks}</div>
       <button onclick={CounterEvent.onClick}>Click me!</button>
+      <button onclick={CounterEvent.onReset}>Reset</button>
     </div>
   );
 })
@@ -51,4 +44,4 @@ export const rules = behavior({
   onReset,
 });
 
-export const spawn = (input: {} = source) => rules.spawn(input);
+export const spawn = (source: {} = { counter: 34 }) => rules.spawn(source);
