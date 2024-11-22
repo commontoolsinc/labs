@@ -1,9 +1,11 @@
-import { h, behavior, Reference, select } from "@commontools/common-system";
-import { $, Instruction } from "synopsys";
+import { h, behavior, Reference, select, Select } from "@commontools/common-system";
+import { $, Constant, Instruction, Selector } from "synopsys";
 import { event, events, Events } from "../sugar/event.js";
 import { set } from "../sugar/transact.js";
 import { addTag } from "../sugar/tags.js";
 import { defaultTo } from "../sugar/default.js";
+import { describe } from "vitest";
+import { field } from "../sugar/query.js";
 
 export const source = { readingList: { v: 1 } };
 
@@ -54,21 +56,13 @@ function Footer({ }: {}) {
 
 // queries can be declared in piecemeal fashion and composed together later
 
-const Hunger = select({ self: $.self, hunger: $.hunger })
-  .clause(defaultTo($.self, 'hunger', $.hunger, 0))
+const hunger = field('hunger', 0);
+const size = field('size', 1)
+const time = field('time', 0)
+const description = field('description', 'lizard bunny')
+const color = field('color', 'blue')
 
-const Size = select({ self: $.self, size: $.size })
-  .clause(defaultTo($.self, 'size', $.size, 1))
-
-const Time = select({ self: $.self, time: $.time })
-  .clause(defaultTo($.self, 'time', $.time, 0))
-
-const Creature = select({ self: $.self, color: $.color, description: $.description })
-  .clause(defaultTo($.self, 'description', $.description, 'lizard bunny'))
-  .clause(defaultTo($.self, 'color', $.color, 'blue'))
-  .with(Hunger)
-  .with(Size)
-  .with(Time)
+const Creature = description.with(hunger).with(size).with(time).with(color)
 
 const TamagochiEvents = events({
   onAdvanceTime: '~/on/advanceTime',
@@ -83,7 +77,7 @@ export const tamagochi = behavior({
     .commit(),
 
   tickHunger: event(TamagochiEvents.onAdvanceTime)
-    .with(Hunger)
+    .with(hunger)
     .update(({ self, event, hunger }) => {
       return set(self, {
         hunger: hunger + 1
@@ -92,8 +86,8 @@ export const tamagochi = behavior({
     .commit(),
 
   feed: event(TamagochiEvents.onGiveFood)
-    .with(Hunger)
-    .with(Time)
+    .with(hunger)
+    .with(time)
     .update(({ self, event, hunger, time }) => {
       return set(self, {
         hunger: Math.max(0, hunger - 1),
@@ -103,9 +97,9 @@ export const tamagochi = behavior({
     .commit(),
 
   exercise: event(TamagochiEvents.onExercise)
-    .with(Hunger)
-    .with(Time)
-    .with(Size)
+    .with(hunger)
+    .with(time)
+    .with(size)
     .update(({ self, event, hunger, time, size }) => {
       return set(self, {
         hunger: hunger + 1,
@@ -116,7 +110,7 @@ export const tamagochi = behavior({
     .commit(),
 
   onAddItem: event(TamagochiEvents.onAdvanceTime)
-    .with(Time)
+    .with(time)
     .update(({ self, event, time }) => {
       return set(self, {
         time: time + 1
