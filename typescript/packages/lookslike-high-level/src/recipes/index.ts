@@ -42,6 +42,11 @@ import { dataDesigner } from "./dataDesigner.js";
 addRecipe(dataDesigner, dataDesignerSrc);
 export { dataDesigner };
 
+import fetchExampleSrc from "./fetchExample.ts?raw";
+import { fetchExample } from "./fetchExample.js";
+addRecipe(fetchExample, fetchExampleSrc);
+export { fetchExample };
+
 import generatorSrc from "./generator.ts?raw";
 import { generator } from "./generator.js";
 addRecipe(generator, generatorSrc);
