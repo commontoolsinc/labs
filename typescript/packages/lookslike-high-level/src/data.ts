@@ -229,7 +229,7 @@ addCharms([
   // workbench.spawn({ workbench: 1 }),
   // FetchService.spawn(),
   // Fetcher.spawn({ fetch: 1 }),
-  // ViewService.spawn(),
+  ViewService.spawn(),
 ]);
 
 export type RecipeManifest = {
