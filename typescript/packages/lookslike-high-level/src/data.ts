@@ -27,6 +27,16 @@ import { createStorage } from "./storage.js";
 import * as allRecipes from "./recipes/index.js";
 import { buildRecipe } from "./localBuild.js";
 
+// Necessary, so that suggestions are indexed.
+import "./recipes/todo-list-as-task.js";
+import "./recipes/playlist.js";
+
+import * as readingList from "./recipes/readingList.jsx";
+import * as keywords from "./recipes/keywords.jsx";
+import * as workbench from "./recipes/workbench.jsx";
+import FetchExample from "./recipes/fetcher.jsx";
+import FetchFX from "./effects/fetch.js";
+
 export type Charm = {
   [NAME]?: string;
   [UI]?: any;
@@ -204,8 +214,21 @@ export async function saveRecipe(
 }
 
 addCharms([
-  //await runPersistent(allRecipes.counters, {}, "counters demo"),
-  //await runPersistent(<recipe>, <default inputs>, <unique name for a stable id>)
+  // charmExample.spawn({
+  //   v6: true,
+  // }),
+  // dungeon.spawn({
+  //   v: 2
+  // }),
+  // readingList.spawn({
+  //   v: 10
+  // }),
+  // workbench.spawn({ v: 1 }),
+  keywords.spawn({
+    keywords: { v: 2 },
+  }),
+  // FetchExample.spawn(),
+  FetchFX.spawn(),
 ]);
 
 export type RecipeManifest = {

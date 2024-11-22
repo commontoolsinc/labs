@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM"],
+    "outDir": "./lib",
+    "rootDir": "./src",
+    "strict": false,
+    "types": ["node", "mocha"],
+    "strictNullChecks": true
+  },
+  "include": ["src/**/*"]
+}

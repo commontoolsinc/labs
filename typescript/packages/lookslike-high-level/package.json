@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "npm run build && npx vite",
     "test": "npm run build && vitest",
+    "check": "tsc --build",
     "build": "wireit",
     "clean": "wireit"
   },
@@ -37,16 +38,21 @@
         "../common-html:build",
         "../common-ui:build",
         "../common-os-ui:build",
+        "../common-system:build",
         "../lookslike-sagas:build",
         "../llm-client:build"
       ],
       "command": "vite build"
     },
     "clean": {
+      "dependencies": [
+        "../common-system:clean"
+      ],
       "command": "rm -rf ./lib ./dist ./.wireit ./node_modules"
     }
   },
   "dependencies": {
+    "@commontools/common-system": "^0.0.1",
     "@commontools/common-builder": "^0.0.1",
     "@commontools/common-frp": "^0.0.1",
     "@commontools/common-frp-lit": "^0.0.1",
