@@ -121,6 +121,13 @@ class Collection<Select extends MemberSelector = MemberSelector> {
     return new CollectionView(selection);
   }
 
+  get select() {
+    return {
+      collection: this.collection,
+      of: this.of,
+    }
+  }
+
   match(term: API.Term): API.Clause {
     return {
       And: [

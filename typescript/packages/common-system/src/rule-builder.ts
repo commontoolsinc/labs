@@ -68,13 +68,17 @@ export class Select<Match extends Selector = Selector> {
     return new Select<S & Match>({ ...this.#select, ...selector }, this.#where);
   }
 
+  with<T extends Selector>(other: Select<T>): Select<T & Match> {
+    return new Select({ ...this.#select, ...other.#select }, this.#where.merge(other.#where));
+  }
+
   event<T extends Constant>(name: string) {
     return new Select<Match & { event: Variable<T> }>(
       {
         ...this.#select,
         event: $.event,
       },
-      this.#where.match($.self, `~/on/${name}`, $.event),
+      this.#where.match($.self, name.startsWith('~/on/') ? name : `~/on/${name}`, $.event),
     );
   }
 
@@ -141,6 +145,10 @@ export class WhereBuilder {
 
   constructor(...clauses: Array<Clause>) {
     this.#where = [...clauses];
+  }
+
+  merge(other: WhereBuilder): WhereBuilder {
+    return new WhereBuilder(...this.#where, ...other.#where);
   }
 
   match(

@@ -31,18 +31,19 @@ import { buildRecipe } from "./localBuild.js";
 import "./recipes/todo-list-as-task.js";
 import "./recipes/playlist.js";
 
-import * as chat from "./recipes/chat.jsx";
-import * as workbench from "./recipes/workbench.jsx";
-import * as dungeon from "./recipes/dungeon.jsx";
-import * as charmExample from "./recipes/charm.jsx";
-import * as readingList from "./recipes/readingList.jsx";
-import * as roundTrip from "./recipes/jsonRoundTrip.jsx";
-import * as tamagochi from "./recipes/tamagochi.jsx";
-import Hello from "./recipes/hello.jsx";
-import FetchExample from "./recipes/fetcher.jsx";
+// import FetchExample from "./recipes/fetcher.jsx";
 import FetchService from "./effects/fetch.js";
 import { UI as ViewService } from "@commontools/common-system";
-import * as sharedDataViewer from "./recipes/sharedDataViewer.jsx";
+
+import * as helloWorld from "./spells/01_helloWorld.jsx";
+import * as counter from "./spells/02_counter.jsx";
+import * as desugared from "./spells/03_desugared.jsx";
+import * as tamagochi from "./spells/04_tamagochi.jsx";
+import * as readingList from './spells/05_readingList.jsx'
+import * as chat from './spells/06_chat.jsx'
+import * as sharedTags from './spells/07_sharedTags.jsx'
+import * as workbench from './spells/08_workbench.jsx'
+import { default as Fetcher } from './spells/fetcher.jsx'
 
 export type Charm = {
   [NAME]?: string;
@@ -219,19 +220,15 @@ export async function saveRecipe(
 }
 
 addCharms([
-  sharedDataViewer.spawn({ sharedDataInstance: 2 }),
-  Hello.spawn({ hello: { v: 1 } }),
-  roundTrip.spawn({ trip: 2 }),
+  helloWorld.spawn({ helloWorld: 1 }),
+  counter.spawn({ counter: 1 }),
   tamagochi.spawn({ tamagochi: 1 }),
-  readingList.spawn({
-    readingList: { v: 10 },
-  }),
-  workbench.spawn({ v: 2 }),
-  chat.spawn({
-    chat: { v: 2 },
-  }),
-  FetchExample.spawn(),
+  readingList.spawn({ readingList: 1, }),
+  chat.spawn({ chat: 1, }),
+  sharedTags.spawn({ sharedDataInstance: 2 }),
+  workbench.spawn({ workbench: 1 }),
   FetchService.spawn(),
+  // Fetcher.spawn({ fetch: 1 }),
   ViewService.spawn(),
 ]);
 

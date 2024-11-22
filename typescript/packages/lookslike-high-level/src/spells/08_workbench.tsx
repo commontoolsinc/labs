@@ -4,6 +4,7 @@ import { event } from "../sugar/event.js";
 import { Task, refer } from "synopsys";
 import { tsToExports } from "../localBuild.js";
 import { Session } from "@commontools/common-system";
+import { each } from "../sugar/render.jsx";
 
 export const source = { workbench: { v: 1 } };
 const DEFAULT_SOURCE = `
@@ -37,38 +38,8 @@ export const spell = behavior({
 
 const createDispatch = <T extends string>(names: readonly T[]) => (name: T) => `~/on/${name}`;
 
-// bf: probably not where we want to end up here but sort of works
-// bf: there's something strange going on where new items look like clones of an existing item until you reload (I suspect local memory?)
-const charms = (items: Reference[], behaviour: any) => items.map(a => <common-charm
-  id={a.toString()}
-  key={a.toString()}
-  spell={() => behaviour}
-  entity={() => a}
-></common-charm>);
-
 // bf: exploring typesafe event names
 const dispatch = createDispatch(['new-spell', 'compile-spell', 'save-spell', 'rename-spell', 'code-change']);
-
-const SpellModel = {
-  name: '<unnamed spell>',
-  sourceCode: '',
-  'compiled': 'n/a',
-}
-
-function SpellView({ self, name, sourceCode, compiled }: { self: Reference, name: string, sourceCode: string, compiled: string }) {
-  return <li title={name} entity={self}>
-    <h2>{name}</h2>
-
-    <h3>Source Code</h3>
-    <pre>{sourceCode}</pre>
-
-    <h3>Compiled Rules</h3>
-    <pre>{compiled}</pre>
-    <button onclick={dispatch('compile-spell')}>Compile</button>
-  </li>
-}
-
-type State = any
 
 const spellService = service({
   onNameChanged: {
@@ -151,7 +122,6 @@ const spellService = service({
   }
 })
 
-
 export const spellWorkbench = behavior({
   spells: build('spells'),
 
@@ -174,7 +144,7 @@ export const spellWorkbench = behavior({
     .render(({ self, spells }) => {
       return <div entity={self} title="Workbench">
         <h1>Workbench</h1>
-        {...charms(spells, spellService)}
+        {...each(spells, spellService)}
         <pre>
           {JSON.stringify(spells, null, 2)}
         </pre>
@@ -191,7 +161,5 @@ export const spellWorkbench = behavior({
     })
     .commit(),
 })
-
-console.log(spellWorkbench)
 
 export const spawn = (input: {} = source) => spellWorkbench.spawn(input);
