@@ -1,15 +1,19 @@
 import ts from 'typescript';
 import * as commonHtml from "@commontools/common-html";
 import * as commonBuilder from "@commontools/common-builder";
+import * as commonSystem from "@commontools/common-system";
 import * as zod from "zod";
 import * as zodToJsonSchema from 'zod-to-json-schema';
 
+import * as collectionSugar from "./sugar/build.js";
+import * as querySugar from "./sugar/query.js";
+import * as eventSugar from "./sugar/event.js";
 
 // NOTE(ja): this isn't currently doing typechecking, but it could...
 
 // NOTE(ja): we should probably send JSON of graph, not the function... but...
 // 1. unsure how to run a JSON graph from a recipe
-// 2. converting to JSON loses closures (which is we will want, but we 
+// 2. converting to JSON loses closures (which is we will want, but we
 //    currently use closures to get around gaps in the current implementation)
 
 const importCache: Record<string, any> = {};
@@ -38,7 +42,7 @@ const ensureRequires = async (js: string): Promise<Record<string, any>> => {
     return localImports;
 }
 
-const tsToExports = async (src: string): Promise<{ exports?: any, errors?: string }> => {
+export const tsToExports = async (src: string): Promise<{ exports?: any, errors?: string }> => {
 
 
     // Add error handling for compilation
@@ -86,16 +90,24 @@ const tsToExports = async (src: string): Promise<{ exports?: any, errors?: strin
             return localImports[moduleName];
         }
         switch (moduleName) {
-            case "@commontools/common-html":
-                return commonHtml;
-            case "@commontools/common-builder":
-                return commonBuilder;
-            case "zod":
-                return zod;
-            case "zod-to-json-schema":
-                return zodToJsonSchema;
-            default:
-                throw new Error(`Module not found: ${moduleName}`);
+          case "../sugar/build.js":
+            return collectionSugar;
+          case "../sugar/query.js":
+            return querySugar;
+          case "../sugar/event.js":
+            return eventSugar;
+          case "@commontools/common-html":
+              return commonHtml;
+          case "@commontools/common-builder":
+              return commonBuilder;
+          case "@commontools/common-system":
+              return commonSystem;
+          case "zod":
+              return zod;
+          case "zod-to-json-schema":
+              return zodToJsonSchema;
+          default:
+              throw new Error(`Module not found: ${moduleName}`);
         }
     };
 

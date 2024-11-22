@@ -48,6 +48,8 @@
     }
   },
   "dependencies": {
+    "@gozala/co-dom": "0.4.0",
+    "@commontools/common-system": "^0.0.1",
     "@cfworker/json-schema": "^1.12.8",
     "@shoelace-style/shoelace": "^2.18.0",
     "@types/node": "^20.14.2",
@@ -64,7 +66,8 @@
   "wireit": {
     "build": {
       "dependencies": [
-        "../common-frp:build"
+        "../common-frp:build",
+        "../common-system:build"
       ],
       "files": [
         "./src/**/*"
@@ -75,6 +78,9 @@
       "command": "tsc --build -f"
     },
     "clean": {
+      "dependencies": [
+        "../common-system:clean"
+      ],
       "command": "rm -rf ./lib ./.wireit"
     }
   }

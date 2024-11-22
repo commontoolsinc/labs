@@ -27,6 +27,24 @@ import { createStorage } from "./storage.js";
 import * as allRecipes from "./recipes/index.js";
 import { buildRecipe } from "./localBuild.js";
 
+// Necessary, so that suggestions are indexed.
+import "./recipes/todo-list-as-task.js";
+import "./recipes/playlist.js";
+
+// import FetchExample from "./recipes/fetcher.jsx";
+import FetchService from "./effects/fetch.js";
+import { UI as ViewService } from "@commontools/common-system";
+
+import * as helloWorld from "./spells/01_helloWorld.jsx";
+import * as counter from "./spells/02_counter.jsx";
+import * as desugared from "./spells/03_desugared.jsx";
+import * as tamagochi from "./spells/04_tamagochi.jsx";
+import * as readingList from './spells/05_readingList.jsx'
+import * as chat from './spells/06_chat.jsx'
+import * as sharedTags from './spells/07_sharedTags.jsx'
+import * as workbench from './spells/08_workbench.jsx'
+import { default as Fetcher } from './spells/fetcher.jsx'
+
 export type Charm = {
   [NAME]?: string;
   [UI]?: any;
@@ -52,15 +70,13 @@ export async function addCharms(newCharms: CellImpl<any>[]) {
     .get()
     .map(({ cell }) => JSON.stringify(cell.entityId));
   const charmsToAdd = newCharms.filter(
-    (cell) => !currentCharmsIds.includes(JSON.stringify(cell.entityId)),
+    cell => !currentCharmsIds.includes(JSON.stringify(cell.entityId)),
   );
 
   if (charmsToAdd.length > 0) {
     charms.send([
       ...charms.get(),
-      ...charmsToAdd.map(
-        (cell) => ({ cell, path: [] }) satisfies CellReference,
-      ),
+      ...charmsToAdd.map(cell => ({ cell, path: [] }) satisfies CellReference),
     ]);
   }
 }
@@ -106,7 +122,7 @@ export async function runPersistent(
             const charmProperties = (recipe?.resultSchema as any)
               ?.properties as any;
             const matchingProperty = Object.keys(charmProperties ?? {}).find(
-              (property) =>
+              property =>
                 charmProperties[property].description?.includes(`#${hashtag}`),
             );
             if (matchingProperty) {
@@ -204,8 +220,16 @@ export async function saveRecipe(
 }
 
 addCharms([
-  //await runPersistent(allRecipes.counters, {}, "counters demo"),
-  //await runPersistent(<recipe>, <default inputs>, <unique name for a stable id>)
+  // helloWorld.spawn({ helloWorld: 1 }),
+  // counter.spawn({ counter: 1 }),
+  // tamagochi.spawn({ tamagochi: 1 }),
+  // readingList.spawn({ readingList: 1, }),
+  // chat.spawn({ chat: 1, }),
+  // sharedTags.spawn({ sharedDataInstance: 2 }),
+  // workbench.spawn({ workbench: 1 }),
+  // FetchService.spawn(),
+  // Fetcher.spawn({ fetch: 1 }),
+  // ViewService.spawn(),
 ]);
 
 export type RecipeManifest = {
