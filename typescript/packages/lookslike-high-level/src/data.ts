@@ -220,16 +220,16 @@ export async function saveRecipe(
 }
 
 addCharms([
-  helloWorld.spawn({ helloWorld: 1 }),
-  counter.spawn({ counter: 1 }),
-  tamagochi.spawn({ tamagochi: 1 }),
-  readingList.spawn({ readingList: 1, }),
-  chat.spawn({ chat: 1, }),
-  sharedTags.spawn({ sharedDataInstance: 2 }),
-  workbench.spawn({ workbench: 1 }),
-  FetchService.spawn(),
+  // helloWorld.spawn({ helloWorld: 1 }),
+  // counter.spawn({ counter: 1 }),
+  // tamagochi.spawn({ tamagochi: 1 }),
+  // readingList.spawn({ readingList: 1, }),
+  // chat.spawn({ chat: 1, }),
+  // sharedTags.spawn({ sharedDataInstance: 2 }),
+  // workbench.spawn({ workbench: 1 }),
+  // FetchService.spawn(),
   // Fetcher.spawn({ fetch: 1 }),
-  ViewService.spawn(),
+  // ViewService.spawn(),
 ]);
 
 export type RecipeManifest = {
