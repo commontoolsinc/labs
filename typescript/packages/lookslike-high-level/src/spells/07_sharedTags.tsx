@@ -4,7 +4,7 @@ import {
   $,
   Session,
 } from "@commontools/common-system";
-import { declareEvents } from "../sugar/event.js";
+import { event, events } from "../sugar/event.js";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
 import { tags } from "../sugar/inbox.js";
 import { render } from "../sugar/render.jsx";
@@ -12,8 +12,8 @@ import { Messages } from "./06_chat.jsx";
 
 export const source = { chat: { v: 1 } };
 
-const events = declareEvents({
-  onEditTag: 'onEditTag'
+const SharedDataEvents = events({
+  onEditTag: '~/on/editTag'
 })
 
 export const sharedDataViewer = behavior({
@@ -126,8 +126,7 @@ export const sharedDataViewer = behavior({
     },
   },
 
-
-  editTag: events.onEditTag.subscribe()
+  editTag: event(SharedDataEvents.onEditTag)
     .update(({ self, event }) => {
       const ev = Session.resolve<CommonInputEvent>(event)
       return [

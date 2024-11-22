@@ -1,102 +1,64 @@
-import { h, behavior, $, Reference, select, Select, Session } from "@commontools/common-system";
-import { Variable } from 'datalogia'
+import { h, behavior, $, Reference, select, Session } from "@commontools/common-system";
 import { build, make } from "../sugar/build.js";
-import { query, queryDefault } from "../sugar/query.js";
-import { event } from "../sugar/event.js";
-import { fetch, llm } from "../effects/fetch.js";
-import { Constant, Instruction } from "synopsys";
+import { event, events } from "../sugar/event.js";
+import { llm } from "../effects/fetch.js";
+import { Constant } from "synopsys";
+import { remove, set } from "../sugar/transact.js";
+import { each } from "../sugar/render.jsx";
+import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
+import { defaultTo } from "../sugar/default.js";
 
 export const source = { readingList: { v: 1 } };
 
-const defaultTo = (field: string, defaultValue: any) => select({ self: $.self })
-  .not(q => q.match($.self, field, $._))
-  .assert(({ self }) => [self, field, defaultValue])
-  .commit();
-const defaults = <T extends Record<string, any>>(input: T) => {
-  return Object.entries(input).reduce((rules, [field, value]) => {
-    const ruleName = `defaultFor${field.charAt(0).toUpperCase() + field.slice(1).replace(/\//g, '_')}`;
-    return {
-      ...rules,
-      [ruleName]: Array.isArray(value) ? build(field) : defaultTo(field, value)
-    };
-  }, {});
-}
-
-const createDispatch = <T extends string>(names: readonly T[]) => (name: T) => `~/on/${name}`;
-
-// bf: probably not where we want to end up here but sort of works
-const charms = (items: { id: Reference }[], behaviour: any) => items.map(a =>
-  <common-charm
-    id={a.id.toString()}
-    key={a.id.toString()}
-    spell={() => behaviour}
-    entity={() => a.id}
-  ></common-charm>);
-
-function upsert(self: Reference, fields: {}): Instruction[] {
-  return Object.entries(fields).map(([k, v]) => ({ Upsert: [self, k, v] } as Instruction));
-}
-
-function retract(self: Reference, fields: {}): Instruction[] {
-  return Object.entries(fields).map(([k, v]) => ({ Retract: [self, k, v] } as Instruction));
-}
-
-// bf: exploring typesafe event names
-const dispatch = createDispatch([
-  'add-item',
-  'delete-item',
-  'change-title',
-  'reimagine-item'
-]);
-
-const Model = {
-  'title': "Ben's Reading List 98",
-  'draft/title': '',
-  'collection/articles': [],
-  'font-family': 'Helvetica'
-};
-
-const ItemModel = {
-  title: ''
-}
+const ReadingListEvent = events({
+  onChangeTitle: '~/on/changeTitle',
+  onAddItem: '~/on/addItem',
+  onDeleteItem: '~/on/deleteItem',
+  onReimagineItem: '~/on/reimagineItem',
+  onFinished: '~/on/finished'
+})
 
 function ReadingListItem({ self, title }: { self: Reference, title: string }) {
   return <li title={title} entity={self}>
     {title}
-    <button onclick={dispatch('delete-item')} style="margin-left: 8px">Delete</button>
-    <button onclick={dispatch('reimagine-item')} style="margin-left: 8px">Re-Imagine</button>
+    <button onclick={ReadingListEvent.onDeleteItem} style="margin-left: 8px">Delete</button>
+    <button onclick={ReadingListEvent.onReimagineItem} style="margin-left: 8px">Re-Imagine</button>
   </li>
 }
 
-
-const reimagineTodo = ({ self, event, title }: { self: Reference, event: Constant, title: string }) => {
+const reimagine = ({ self, event, title }: { self: Reference, event: Constant, title: string }) => {
   return [
     llm(self, 'my/request', { prompt: 're-imagine this: ' + title }).json(),
   ];
 }
 
+const Title = select({ self: $.self, title: $.title })
+  .match($.self, 'title', $.title)
+
+const LlmResponse = select({ self: $.self, request: $.request, title: $.title })
+  .match($.self, "my/request", $.request)
+  .match($.request, "response/json", $.content)
+  .match($.content, 'content', $.title)
+
 const readingListItem = behavior({
-  view: query(ItemModel, 'title')
+  view: Title
     .render(ReadingListItem)
     .commit(),
 
-  onDeleteItem: event('delete-item')
-    .upsert(({ self }) => [self, 'deleted', true])
+  onDeleteItem: event(ReadingListEvent.onDeleteItem)
+    .update(({ self }) => set(self, { deleted: true }))
     .commit(),
 
-  onReimagineItem: query(ItemModel, 'title')
-    .event('reimagine-item')
-    .update(reimagineTodo)
+  onReimagineItem: event(ReadingListEvent.onReimagineItem)
+    .with(Title)
+    .update(reimagine)
     .commit(),
 
-  onFinished: select({ self: $.self, request: $.request, title: $.title })
-    .match($.self, "my/request", $.request)
-    .match($.request, "response/json", $.content)
-    .match($.content, 'content', $.title)
+  onFinished: LlmResponse
     .update(({ self, title, request }) => {
       return [
-        ...retract(self, { "my/request": request }),
-        ...upsert(self, { title })
+        ...remove(self, { "my/request": request }),
+        ...set(self, { title })
       ];
     })
     .commit(),
@@ -106,64 +68,68 @@ const readingListItem = behavior({
 function Footer({ draftTitle }: { draftTitle: string }) {
   return <div>
     <hr />
-    <common-input value={draftTitle} oncommon-input={dispatch('change-title')} />
-    <button onclick={dispatch('add-item')}>Add</button>
+    <common-input value={draftTitle} oncommon-input={ReadingListEvent.onChangeTitle} />
+    <button onclick={ReadingListEvent.onAddItem}>Add</button>
   </div>
 }
 
-function EmptyState({ self, 'draft/title': draftTitle, title }: { self: Reference, 'draft/title': string, title: string }) {
+function EmptyState({ self, draftTitle, title }: { self: Reference, draftTitle: string, title: string }) {
   return <div title={title} entity={self}>
     <span>Empty!</span>
     {Footer({ draftTitle })}
   </div>
 }
 
-function ArticleList({ article, self, 'draft/title': draftTitle, title, "font-family": font }: { article: { id: Reference }[], self: Reference, 'draft/title': string, title: string, "font-family": string }) {
-  return <div title={title} entity={self} style={`font-family: "${font}"`}>
+function ArticleList({ article, self, draftTitle, title }: { article: Reference[], self: Reference, draftTitle: string, title: string }) {
+  return <div title={title} entity={self} >
     <h1>Unordered Collection (Set)</h1>
     <ul>
-      {...charms(article, readingListItem)}
+      {...each(article, readingListItem)}
     </ul>
     {Footer({ draftTitle })}
   </div>
 }
 
+const Articles = select({ article: [$.article] })
+  .match($.self, "collection/articles", $.article)
+  .not(q => q.match($.article, "deleted", true))
+
+const TitleWithDefault = select({ self: $.self, title: $.title })
+  .clause(defaultTo($.self, 'title', $.title, '<empty list>'))
+
+const DraftTitle = select({ draftTitle: $.draftTitle })
+  .clause(defaultTo($.self, 'draft/title', $.draftTitle, ''))
+
 export const readingList = behavior({
   articles: build('collection/articles'),
 
-  // empty state view
-  emptyStateView: queryDefault(Model, 'title', 'draft/title')
+  emptyStateView: TitleWithDefault
+    .with(DraftTitle)
+    // bf: how do we also check for the list existing but zero non-deleted elements?
     .not(q => q.match($.self, "collection/articles", $.article))
     .render(EmptyState)
     .commit(),
 
-  listArticlesView: queryDefault(Model, 'title', 'draft/title', 'font-family')
-    .select({
-      article: [{
-        id: $.article,
-        title: $.articleTitle,
-      }]
-    })
-    .match($.self, "collection/articles", $.article)
-    .match($.article, "title", $.articleTitle)
-    .not(q => q.match($.article, "deleted", true))
+  listArticlesView: TitleWithDefault
+    .with(DraftTitle)
+    .with(Articles)
     .render(ArticleList)
     .commit(),
 
-  onChangeTitle: event('change-title')
+  onChangeTitle: event(ReadingListEvent.onChangeTitle)
     .update(({ self, event }) => {
-      return upsert(self, { 'draft/title': Session.resolve(event).detail.value })
+      return set(self, { 'draft/title': Session.resolve<CommonInputEvent>(event).detail.value })
     })
     .commit(),
 
-  onAddItem: queryDefault(Model, 'draft/title')
-    .event('add-item')
-    .update(({ self, event, 'draft/title': draftTitle }) => {
+  onAddItem: event(ReadingListEvent.onAddItem)
+    .with(DraftTitle)
+    .update(({ self, event, draftTitle }) => {
       return [
         // bf: we should probably say the name of the collection here
         // currently it just adds it to ANY collection that listens for `NEW`
         make(self, { title: draftTitle }),
-        ...retract(self, { 'draft/title': draftTitle })
+        ...remove(self, { 'draft/title': draftTitle })
       ]
     })
     .commit(),

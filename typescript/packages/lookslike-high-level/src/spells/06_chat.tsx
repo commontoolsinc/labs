@@ -6,7 +6,7 @@ import {
   select
 } from "@commontools/common-system";
 import * as Collection from "../sugar/collections.js";
-import { event, Events } from "../sugar/event.js";
+import { event, events } from "../sugar/event.js";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
 import { defaultTo, isEmpty } from "../sugar/default.js";
 import * as Transact from "../sugar/transact.js";
@@ -25,12 +25,12 @@ export const ChatModel = {
 
 // events
 
-const events: Events = {
+const ChatEvents = events({
   onSendMessage: '~/on/SendMessage',
   onDraftMessage: '~/on/DraftMessage',
   onChangeScreenName: '~/on/ChangeScreenName',
   onBroadcastHistory: '~/on/BroadcastHistory',
-}
+})
 
 // queries
 
@@ -73,7 +73,7 @@ export const chatRules = behavior({
     })
     .commit(),
 
-  sendMessage: event(events.onSendMessage)
+  sendMessage: event(ChatEvents.onSendMessage)
     .with(Chat)
     .update(({ self, event, screenName, messages, draft }) => {
       const collection = Messages.from(messages)
@@ -86,7 +86,7 @@ export const chatRules = behavior({
     })
     .commit(),
 
-  editMessage: event(events.onDraftMessage)
+  editMessage: event(ChatEvents.onDraftMessage)
     .update(({ self, event }) => {
       return Transact.set(self, {
         [ChatModel.draft]: Session.resolve<CommonInputEvent>(event).detail.value
@@ -94,7 +94,7 @@ export const chatRules = behavior({
     })
     .commit(),
 
-  changeName: event(events.onChangeScreenName)
+  changeName: event(ChatEvents.onChangeScreenName)
     .update(({ self, event }) => {
       return Transact.set(self, {
         [ChatModel.screenName]: Session.resolve<CommonInputEvent>(event).detail.value
@@ -102,7 +102,7 @@ export const chatRules = behavior({
     })
     .commit(),
 
-  broadcast: event(events.onBroadcastHistory)
+  broadcast: event(ChatEvents.onBroadcastHistory)
     .with(MessageHistoryLink)
     .update(({ messages }) => {
       return [
@@ -125,12 +125,12 @@ export const chatRules = behavior({
             </li>)}</ul>
             <fieldset style="border-radius: 8px;">
               <label>Name</label>
-              <common-input type="text" value={screenName} oncommon-input={events.onChangeScreenName} />
+              <common-input type="text" value={screenName} oncommon-input={ChatEvents.onChangeScreenName} />
               <label>Message</label>
-              <common-input type="text" value={draft} placeholder="say something!" oncommon-input={events.onDraftMessage} />
-              <button onclick={events.onSendMessage}>Send</button>
+              <common-input type="text" value={draft} placeholder="say something!" oncommon-input={ChatEvents.onDraftMessage} />
+              <button onclick={ChatEvents.onSendMessage}>Send</button>
             </fieldset>
-            <button onclick={events.onBroadcastHistory}>Broadcast History</button>
+            <button onclick={ChatEvents.onBroadcastHistory}>Broadcast History</button>
           </div>
         )),
       ];

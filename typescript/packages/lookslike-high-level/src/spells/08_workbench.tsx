@@ -1,6 +1,6 @@
 import { h, behavior, $, Reference, select, service } from "@commontools/common-system";
 import { build, make } from "../sugar/build.js";
-import { event } from "../sugar/event.js";
+import { event, events } from "../sugar/event.js";
 import { Task, refer } from "synopsys";
 import { tsToExports } from "../localBuild.js";
 import { Session } from "@commontools/common-system";
@@ -36,10 +36,13 @@ export const spell = behavior({
 });
 `
 
-const createDispatch = <T extends string>(names: readonly T[]) => (name: T) => `~/on/${name}`;
-
-// bf: exploring typesafe event names
-const dispatch = createDispatch(['new-spell', 'compile-spell', 'save-spell', 'rename-spell', 'code-change']);
+const WorkbenchEvents = events({
+  onNewSpell: '~/on/new-spell',
+  onCompileSpell: '~/on/compile-spell',
+  onSaveSpell: '~/on/save-spell',
+  onRenameSpell: '~/on/rename-spell',
+  onCodeChange: '~/on/code-change',
+})
 
 const spellService = service({
   onNameChanged: {
@@ -48,7 +51,7 @@ const spellService = service({
       event: $.event,
     },
     where: [
-      { Case: [$.self, `~/on/rename-spell`, $.event] },
+      { Case: [$.self, WorkbenchEvents.onRenameSpell, $.event] },
     ],
     *perform({ self, event }) {
       console.log(event, event.detail.value)
@@ -65,7 +68,7 @@ const spellService = service({
       event: $.event,
     },
     where: [
-      { Case: [$.self, `~/on/code-change`, $.event] },
+      { Case: [$.self, WorkbenchEvents.onCodeChange, $.event] },
     ],
     *perform({ self, event }) {
       console.log(event, Session.resolve(event).detail.state.doc.toString())
@@ -100,12 +103,12 @@ const spellService = service({
           Upsert: [self, '~/common/ui', <div entity={self}>
             <common-input type="text" value={name} />
             <textarea>{sourceCode}</textarea>
-            <button onclick={dispatch('save-spell')}>Save</button>
+            <button onclick={WorkbenchEvents.onSaveSpell}>Save</button>
             <os-code-editor
               slot="content"
               language="text/x.jsx"
               source={sourceCode}
-              ondoc-change={dispatch('code-change')}
+              ondoc-change={WorkbenchEvents.onCodeChange}
             ></os-code-editor>
             <fieldset>
               <common-charm
@@ -131,7 +134,7 @@ export const spellWorkbench = behavior({
       return <div entity={self} title="Workbench (empty)">
         <h1>Workbench</h1>
         <p>There are no articles in this collection.</p>
-        <button onclick={dispatch('new-spell')}>New Spell</button>
+        <button onclick={WorkbenchEvents.onNewSpell}>New Spell</button>
       </div>
     })
     .commit(),
@@ -148,12 +151,12 @@ export const spellWorkbench = behavior({
         <pre>
           {JSON.stringify(spells, null, 2)}
         </pre>
-        <button onclick={dispatch('new-spell')}>New Spell</button>
+        <button onclick={WorkbenchEvents.onNewSpell}>New Spell</button>
       </div>
     })
     .commit(),
 
-  onAddItem: event('new-spell')
+  onAddItem: event(WorkbenchEvents.onNewSpell)
     .update(({ self, event }) => {
       return [
         make(self, { name: 'New Spell ' + Math.round(Math.random() * 1000), sourceCode: DEFAULT_SOURCE }),

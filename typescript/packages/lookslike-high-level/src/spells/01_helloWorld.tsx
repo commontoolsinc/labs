@@ -1,11 +1,9 @@
 import { h, $, behavior, select } from "@commontools/common-system";
-import { event, Events } from "../sugar/event.js";
+import { event, events, Events } from "../sugar/event.js";
 
-const events: Events = {
+const HelloWorldEvent = events({
   onAlert: '~/on/alert',
-}
-
-const HelloWorld = select({ self: $.self })
+})
 
 const spell = behavior({
   view: select({ self: $.self })
@@ -13,12 +11,12 @@ const spell = behavior({
       return <div entity={self} title="Hello World">
         <h1>Hello World</h1>
         <p>This is a spell.</p>
-        <button type="button" onclick={events.onAlert}>Click me</button>
+        <button type="button" onclick={HelloWorldEvent.onAlert}>Click me</button>
       </div>
     })
     .commit(),
 
-  onClick: event(events.onAlert)
+  onClick: event(HelloWorldEvent.onAlert)
     .update(({ self }) => {
       alert('Hello from ' + self.toString());
       return [];

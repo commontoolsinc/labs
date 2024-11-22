@@ -1,23 +1,11 @@
 import { h, behavior, Reference, select } from "@commontools/common-system";
-import { queryDefault } from "../sugar/query.js";
 import { $, Instruction } from "synopsys";
-import { event, Events } from "../sugar/event.js";
-import { tags } from "../sugar/inbox.js";
+import { event, events, Events } from "../sugar/event.js";
 import { set } from "../sugar/transact.js";
 import { addTag } from "../sugar/tags.js";
 import { defaultTo } from "../sugar/default.js";
 
 export const source = { readingList: { v: 1 } };
-
-function Footer({ }: {}) {
-  return <div>
-    <hr />
-    <button onclick={events.onAdvanceTime}>Wait</button>
-    <button onclick={events.onGiveFood}>Feed</button>
-    <button onclick={events.onExercise}>Exercise</button>
-    <button onclick={events.onBroadcast}>Broadcast</button>
-  </div>
-}
 
 const genImage =
   (prompt: string) => `/api/img/?prompt=${encodeURIComponent(prompt)}`
@@ -54,7 +42,17 @@ function EmptyState({ self, time, size, color, description, hunger }) {
   </div>
 }
 
-// <Footer />
+function Footer({ }: {}) {
+  return <div>
+    <hr />
+    <button onclick={TamagochiEvents.onAdvanceTime}>Wait</button>
+    <button onclick={TamagochiEvents.onGiveFood}>Feed</button>
+    <button onclick={TamagochiEvents.onExercise}>Exercise</button>
+    <button onclick={TamagochiEvents.onBroadcast}>Broadcast</button>
+  </div>
+}
+
+// queries can be declared in piecemeal fashion and composed together later
 
 const Hunger = select({ self: $.self, hunger: $.hunger })
   .clause(defaultTo($.self, 'hunger', $.hunger, 0))
@@ -72,20 +70,19 @@ const Creature = select({ self: $.self, color: $.color, description: $.descripti
   .with(Size)
   .with(Time)
 
-
-const events: Events = {
+const TamagochiEvents = events({
   onAdvanceTime: '~/on/advanceTime',
   onGiveFood: '~/on/giveFood',
   onExercise: '~/on/exercise',
   onBroadcast: '~/on/broadcast',
-}
+})
 
 export const tamagochi = behavior({
   view: Creature
     .render(EmptyState)
     .commit(),
 
-  tickHunger: event(events.onAdvanceTime)
+  tickHunger: event(TamagochiEvents.onAdvanceTime)
     .with(Hunger)
     .update(({ self, event, hunger }) => {
       return set(self, {
@@ -94,7 +91,7 @@ export const tamagochi = behavior({
     })
     .commit(),
 
-  feed: event(events.onGiveFood)
+  feed: event(TamagochiEvents.onGiveFood)
     .with(Hunger)
     .with(Time)
     .update(({ self, event, hunger, time }) => {
@@ -105,7 +102,7 @@ export const tamagochi = behavior({
     })
     .commit(),
 
-  exercise: event(events.onExercise)
+  exercise: event(TamagochiEvents.onExercise)
     .with(Hunger)
     .with(Time)
     .with(Size)
@@ -118,7 +115,7 @@ export const tamagochi = behavior({
     })
     .commit(),
 
-  onAddItem: event(events.onAdvanceTime)
+  onAddItem: event(TamagochiEvents.onAdvanceTime)
     .with(Time)
     .update(({ self, event, time }) => {
       return set(self, {
@@ -127,7 +124,7 @@ export const tamagochi = behavior({
     })
     .commit(),
 
-  broadcast: event(events.onBroadcast)
+  broadcast: event(TamagochiEvents.onBroadcast)
     .update(({ self }) => {
       return [
         addTag(self, '#tamagochi')
