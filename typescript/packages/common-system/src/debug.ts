@@ -219,40 +219,73 @@ const naturalLanguage = (query: Query) => {
 };
 
 export const logQuery = (query: Query): void => {
-  console.group('Query');
+  try {
+    console.group('Query');
 
-  // Log SELECT
-  console.group('SELECT');
-  Object.entries(query.select).forEach(([key, value]) => {
-    const attrStyle = styleAttribute(key);
-    const varStyle = styleVar(value as Variable);
-    console.log(
-      `${attrStyle[0]}: ${varStyle[0]}`,
-      attrStyle[1],
-      varStyle[1]
-    );
-  });
-  console.groupEnd();
+    try {
+      // Log SELECT
+      console.group('SELECT');
+      const logSelectValue = (key: string, value: any): [string[], string[]] => {
+        if (value['?']) {
+          const attrStyle = styleAttribute(key);
+          const varStyle = styleVar(value as Variable);
+          return [[`${attrStyle[0]}: ${varStyle[0]}`], [attrStyle[1], varStyle[1]]];
+        } else if (typeof value === 'object') {
+          return Object.entries(value).reduce((acc, [subKey, subValue]) => {
+            const [texts, styles] = logSelectValue(`${key}.${subKey}`, subValue);
+            return [
+              [...acc[0], ...texts],
+              [...acc[1], ...styles]
+            ];
+          }, [[] as string[], [] as string[]]);
+        }
+        return [[], []];
+      };
 
-  // Log WHERE
-  console.group('WHERE');
-  [...query.where].forEach((clause: Clause) => {
-    const formatted = formatWhereClause(clause);
-    console.log(formatted.text, ...formatted.styles);
-  });
-  console.groupEnd();
+      Object.entries(query.select).forEach(([key, value]) => {
+        const [texts, styles] = logSelectValue(key, value);
+        texts.forEach((text, i) => {
+          console.log(text, ...styles.slice(i * 2, i * 2 + 2));
+        });
+      });
+    } catch (err) {
+      console.error('Error logging SELECT:', err);
+    } finally {
+      console.groupEnd();
+    }
 
-  // Log EXPLANATION
-  console.groupCollapsed('EXPLANATION');
-  const explanation = naturalLanguage(query);
-  console.log(explanation.selection);
-  console.log('where:');
-  explanation.conditions.forEach(condition => {
-    console.log('•', condition);
-  });
-  console.groupEnd();
+    try {
+      // Log WHERE
+      console.group('WHERE');
+      [...query.where].forEach((clause: Clause) => {
+        const formatted = formatWhereClause(clause);
+        console.log(formatted.text, ...formatted.styles);
+      });
+    } catch (err) {
+      console.error('Error logging WHERE:', err);
+    } finally {
+      console.groupEnd();
+    }
 
-  console.groupEnd();
+    try {
+      // Log EXPLANATION
+      console.groupCollapsed('EXPLANATION');
+      const explanation = naturalLanguage(query);
+      console.log(explanation.selection);
+      console.log('where:');
+      explanation.conditions.forEach(condition => {
+        console.log('•', condition);
+      });
+    } catch (err) {
+      console.error('Error logging EXPLANATION:', err);
+    } finally {
+      console.groupEnd();
+    }
+
+    console.groupEnd();
+  } catch (err) {
+    console.error('Error in logQuery:', err);
+  }
 };
 
 // Example usage:

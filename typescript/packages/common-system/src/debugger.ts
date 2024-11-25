@@ -12,6 +12,9 @@ export function getDebugCharms(): boolean {
 
 setDebugCharms(true);
 
+const genImage =
+  (prompt: string) => `/api/img/?prompt=${encodeURIComponent(prompt)}`
+
 export class CharmDebugger extends HTMLElement {
   #root: ShadowRoot;
   #ruleActivations: Map<string, {count: number, lastSelection: any, performanceMs: number }> = new Map();
@@ -21,6 +24,8 @@ export class CharmDebugger extends HTMLElement {
   #cardColors = ['#ff7675', '#74b9ff', '#55efc4', '#ffeaa7', '#b2bec3', '#fd79a8', '#81ecec'];
   #ruleElements: Map<string, {details: HTMLElement, summary: HTMLElement, pre?: HTMLElement}> = new Map();
   #mutationLog: any[] = [];
+  #isOpen: boolean = true;
+  #isMutationLogOpen: boolean = false;
 
   constructor() {
     super();
@@ -41,6 +46,14 @@ export class CharmDebugger extends HTMLElement {
         color: black;
       }
 
+      :host(.closed) .content > ul {
+        display: none;
+      }
+
+      :host(.mutation-log-closed) .content > .mutation-log {
+        display: none;
+      }
+
       ul {
         list-style: none;
         padding: 0;
@@ -48,7 +61,7 @@ export class CharmDebugger extends HTMLElement {
 
       details {
         margin-bottom: 8px;
-        border-radius: 4px;
+        border-radius: 8px;
         padding: 8px;
       }
 
@@ -56,6 +69,23 @@ export class CharmDebugger extends HTMLElement {
         font-size: 18px;
         font-weight: bold;
         cursor: pointer;
+      }
+
+      .entity-id {
+        padding: 6px 12px;
+        border-radius: 16px;
+        display: inline-block;
+        margin-bottom: 8px;
+        cursor: pointer;
+      }
+
+      .mutation-log-toggle {
+        padding: 6px 12px;
+        border-radius: 16px;
+        display: inline-block;
+        margin-bottom: 8px;
+        cursor: pointer;
+        margin-left: 8px;
       }
 
       .explanation {
@@ -77,7 +107,7 @@ export class CharmDebugger extends HTMLElement {
       }
 
       .rule-card {
-        border-radius: 4px;
+        border-radius: 8px;
         margin-bottom: 8px;
         padding: 12px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
@@ -85,10 +115,14 @@ export class CharmDebugger extends HTMLElement {
 
       .mutation-log {
         background: white;
-        border-radius: 4px;
+        border-radius: 8px;
         padding: 12px;
         margin-top: 16px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      }
+
+      .mutation-log summary {
+        font-size: 14px;
       }
 
       @keyframes pulse {
@@ -99,6 +133,15 @@ export class CharmDebugger extends HTMLElement {
 
       .pulse {
         animation: pulse 0.3s ease-in-out;
+      }
+
+      img {
+        width: 100%;
+        max-width: 128px;
+        max-height: 128px;
+        border-radius: 50%;
+        margin: 8px 0;
+        border: 2px solid white;
       }
     `;
 
@@ -148,6 +191,11 @@ export class CharmDebugger extends HTMLElement {
         this.renderMutationLog();
       }
     });
+
+    // Initialize classes based on initial state
+    if (!this.#isMutationLogOpen) {
+      this.classList.add('mutation-log-closed');
+    }
   }
 
   truncateId(id: string | Reference) {
@@ -224,7 +272,23 @@ export class CharmDebugger extends HTMLElement {
       const truncatedId = this.truncateId(this.#entity.toString());
       entityId.innerText = truncatedId;
       entityId.title = this.#entity.toString();
+      entityId.className = 'entity-id';
+      entityId.style.background = this.#cardColors[Math.floor(Math.random() * this.#cardColors.length)];
+      entityId.addEventListener('click', () => {
+        this.#isOpen = !this.#isOpen;
+        this.classList.toggle('closed');
+      });
       this.#content.appendChild(entityId);
+
+      const mutationLogToggle = document.createElement('div');
+      mutationLogToggle.innerText = 'Toggle Log';
+      mutationLogToggle.className = 'mutation-log-toggle';
+      mutationLogToggle.style.background = this.#cardColors[Math.floor(Math.random() * this.#cardColors.length)];
+      mutationLogToggle.addEventListener('click', () => {
+        this.#isMutationLogOpen = !this.#isMutationLogOpen;
+        this.classList.toggle('mutation-log-closed');
+      });
+      this.#content.appendChild(mutationLogToggle);
     }
 
     if (this.#behavior?.rules) {
@@ -240,9 +304,6 @@ export class CharmDebugger extends HTMLElement {
         ruleDetails.dataset.rule = rule;
         ruleDetails.style.background = this.#cardColors[Math.floor(Math.random() * this.#cardColors.length)];
 
-        const explanation = document.createElement('div')
-        explanation.className = 'explanation';
-
         const activation = this.#ruleActivations.get(rule);
         ruleSummary.innerText = `${rule} (${activation?.count || 0})`;
         ruleDetails.appendChild(ruleSummary)
@@ -254,8 +315,16 @@ export class CharmDebugger extends HTMLElement {
           ruleDetails.appendChild(pre);
         }
 
-        explanation.innerText = await explainQuery(this.#behavior.rules[rule])
+        const explanation = document.createElement('div')
+        explanation.className = 'explanation';
+        const explanationText = await explainQuery(this.#behavior.rules[rule])
+        explanation.innerText = explanationText;
         ruleDetails.appendChild(explanation)
+
+        // Create and append image
+        const img = document.createElement('img');
+        img.src = genImage(`${explanationText} -style cartoony, sticker-like illustration, flat design, bold lines, bright colors, fun emoji-like`);
+        ruleDetails.appendChild(img);
 
         const performance = document.createElement('div');
         performance.className = 'performance';
