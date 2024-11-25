@@ -13,6 +13,7 @@ export async function explainQuery(query: any) {
     use this query metadata and generated explanation to produce a single sentence description of what would TRIGGER the query at the application level, from the perspective of an application developer with limited understanding of datalog
 
     when referencing an identifier from the query surround it in backticks (standard markdown)
+    include a 1-3 emoji sequence to describe the change (at the domain level)
   `
   return await makeClient().sendRequest({ messages: [
     { role: 'user', content: JSON.stringify(query) },
@@ -22,6 +23,8 @@ export async function explainQuery(query: any) {
 export async function explainMutation(mutation: any) {
   const systemPrompt = `
     here is a datalog query in JSON form along with the data that matched the query and any changes produced in response to it. we are working in a graph database where all identifiers are merkle-references.
+
+    include a 1-3 emoji sequence to describe the change (at the domain level)
   `
   return await makeClient().sendRequest({ messages: [
     { role: 'user', content:`${JSON.stringify(mutation)}

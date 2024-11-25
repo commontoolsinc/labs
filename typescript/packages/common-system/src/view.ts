@@ -4,16 +4,7 @@ import { Reference, Task, transact } from "./db.js";
 import { Behavior } from "./adapter.js";
 import * as DB from "./db.js";
 import { MOUNT } from "./ui.js";
-
-function setDebugCharms(value: boolean) {
-  (globalThis as any).DEBUG_CHARMS = value;
-}
-
-function getDebugCharms(): boolean {
-  return (globalThis as any).DEBUG_CHARMS;
-}
-
-setDebugCharms(true);
+import { CharmDebugger, getDebugCharms } from "./debugger.js";
 
 export class Charm extends HTMLElement {
   #root: ShadowRoot;
@@ -23,13 +14,12 @@ export class Charm extends HTMLElement {
   #cell: null | { send(data: { name: string }): void };
   #mount: HTMLElement;
   renderMount: HTMLElement;
-  #debugMount: HTMLElement;
+  #debugger: CharmDebugger | null = null;
 
   #invocation: Task.Invocation<{}, Error> | null = null;
 
   constructor() {
     super();
-    // Set up shadow and styles
     this.#root = this.attachShadow({ mode: "closed" });
 
     const style = document.createElement('style');
@@ -59,41 +49,12 @@ export class Charm extends HTMLElement {
           box-shadow: 0 0 0 0 rgba(77, 77, 255, 0);
         }
       }
-
-      .charm-debugger {
-        position: absolute;
-        top: 4px;
-        right: 4px;
-        min-width: 128px;
-        width: 33%;
-        max-height: 512px;
-        overflow-y: auto;
-        background: blue;
-        padding: 8px;
-        font-size: 16px;
-        font-family: monospace;
-        color: white;
-
-        border: 1px solid #4d4dff;
-        border-radius: 4px;
-        animation: pulse 2s infinite;
-      }
-
-      .charm-debugger ul {
-        list-style: none;
-      }
-
-      .charm-debuggger summary {
-        font-size: 12px;
-      }
     `;
 
     this.#mount = document.createElement("div");
     this.renderMount = document.createElement("div");
-    this.#debugMount = document.createElement("div");
 
     this.#mount.classList.add('charm')
-    this.#debugMount.className = "charm-debugger"
 
     this.root.appendChild(style);
     this.root.appendChild(this.#mount);
@@ -101,41 +62,14 @@ export class Charm extends HTMLElement {
 
     if (getDebugCharms()) {
       this.#mount.classList.add('debug')
-      this.#mount.appendChild(this.#debugMount);
-      this.renderDebug();
+      this.#debugger = new CharmDebugger();
+      this.#mount.appendChild(this.#debugger);
     }
 
     this.#behavior = null;
     this.#entity = null;
     this.#vdom = null;
     this.#cell = null;
-  }
-
-  renderDebug() {
-    if (!this.#debugMount) return;
-
-    this.#debugMount.innerHTML = '';
-
-    const details = document.createElement('details');
-    const summary = document.createElement('summary');
-
-    if (this.entity) {
-      summary.innerText = this.entity.toString();
-      details.appendChild(summary);
-    }
-
-    if (this.#behavior?.rules) {
-      const rules = Object.keys(this.#behavior.rules)
-      const ul = document.createElement('ul')
-      rules.forEach(rule => {
-        const li = document.createElement('li')
-        li.innerText = rule
-        ul.appendChild(li)
-      })
-      details.appendChild(ul)
-    }
-
-    this.#debugMount.appendChild(details);
   }
 
   get vdom() {
@@ -159,6 +93,7 @@ export class Charm extends HTMLElement {
 
     this.propagate();
   }
+
   deactivate() {
     if (this.#invocation) {
       this.#invocation.abort(undefined);
@@ -186,10 +121,11 @@ export class Charm extends HTMLElement {
 
   set entity(value: Reference) {
     this.#entity = (value as any)();
-    if (getDebugCharms()) {
-      this.renderDebug();
+    if (this.#debugger) {
+      this.#debugger.entity = this.#entity;
     }
   }
+
   get entity() {
     return this.#entity as Reference;
   }
@@ -197,16 +133,18 @@ export class Charm extends HTMLElement {
   get spell() {
     return this.#behavior as Behavior;
   }
+
   set spell(value: Behavior) {
     this.#behavior = (value as any)();
-    if (getDebugCharms()) {
-      this.renderDebug();
+    if (this.#debugger) {
+      this.#debugger.behavior = this.#behavior;
     }
   }
 
   get root() {
     return this.#root;
   }
+
   get name() {
     return this.renderMount.title;
   }

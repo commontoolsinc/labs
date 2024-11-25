@@ -5,6 +5,7 @@ import * as Memory from "synopsys/store/memory";
 import * as Session from "./session.js";
 import type { Effect } from "./adapter.js";
 import { Constant } from "datalogia";
+import { explainMutation, explainQuery, logQuery } from "./debug.js";
 export * from "synopsys";
 
 export type DB =
@@ -130,11 +131,12 @@ export function* query<Select extends Type.Selector>(
 
 const subscriptions = new Set<Subscription>();
 export function* subscribe<Select extends Type.Selector>(
+  id: Reference,
   name: string,
   query: Type.Query<Select>,
   effect: Effect<Select>,
 ) {
-  const subscription = new Subscription(name, query, effect);
+  const subscription = new Subscription(id, name, query, effect);
   subscriptions.add(subscription);
 
   return subscription;
@@ -153,7 +155,10 @@ class Subscription<Select extends Selector = Selector> {
   query: Type.Query<Select>;
   revision: Reference;
   name: string;
-  constructor(name: string, query: Type.Query<Select>, effect: Effect<Select>) {
+  id: Reference;
+
+  constructor(id: Reference,  name: string, query: Type.Query<Select>, effect: Effect<Select>) {
+    this.id = id;
     this.name = name;
     this.query = query;
     this.effect = effect;
@@ -186,6 +191,10 @@ class Subscription<Select extends Selector = Selector> {
         console.timeEnd(fxId)
 
         if (self) {
+          window.dispatchEvent(new CustomEvent('query-triggered', {
+            detail: { rule: this.name, spell: this.id.toString(), entity: self.toString(), match }
+          }))
+          console.log('trigger(' + this.name + ')', { rule: this.name, spell: this.id.toString(), entity: self.toString(), match })
           console.group(`%c${self.toString()}`, 'color: #FF9800; font-weight: bold;');
           for (const change of matchChanges) {
             console.log('%cchange%c:', 'color: #E91E63; font-weight: bold;', 'color: inherit;', JSON.stringify(change), change);
