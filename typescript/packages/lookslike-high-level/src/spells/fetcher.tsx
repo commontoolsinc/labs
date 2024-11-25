@@ -74,6 +74,17 @@ export default behavior({
     ))
     .commit(),
 
+  blankState: select({ self: $.self, url: $.url, form: $.form })
+    .match($.self, "url", $.url)
+    .match($.self, subview('form'), $.form)
+    .not(q => q.match($.self, "my/request", $._))
+    .render(({ self, url, form }) => (
+      <div title="Effect Demo" entity={self}>
+        {form}
+        <h1>Ok</h1>
+      </div>
+    )).commit(),
+
   onReset: select({ self: $.self, event: $.event, request: $.request })
     .match($.self, "~/on/reset", $.event)
     .match($.self, "my/request", $.request)
