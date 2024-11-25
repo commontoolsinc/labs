@@ -160,20 +160,30 @@ class Subscription<Select extends Selector = Selector> {
     this.revision = refer([]);
   }
   *poll(db: DB) {
+    const id = this.name + ' query';
+    console.time(id);
     const selection = yield* db.query(this.query);
+    console.timeEnd(id);
+
     const revision = refer(selection);
     const changes = [];
     if (this.revision.toString() !== revision.toString()) {
       this.revision = revision;
       if (selection.length > 0) {
+        logQuery(this.query);
+        explainQuery(this.query).then(res => {
+          console.log(`%cquery(${this.name})%c:`, 'color: #00FFFF; font-weight: bold;', 'color: inherit; font-style: italic;', res);
+        })
         console.group(`%c${this.name}`, 'color: #4CAF50; font-weight: bold;');
         console.log('%crevision%c:', 'color: #2196F3; font-weight: bold;', 'color: inherit;', this.revision.toString());
-        console.log('%cquery%c:', 'color: #2196F3; font-weight: bold;', 'color: inherit;', this.query);
         console.log('%cselection%c:', 'color: #2196F3; font-weight: bold;', 'color: inherit;', selection);
       }
       for (const match of selection) {
         const self = (match as any).self
+        const fxId = this.name + ' effect';
+        console.time(fxId)
         const matchChanges = (yield* this.effect.perform(match));
+        console.timeEnd(fxId)
 
         if (self) {
           console.group(`%c${self.toString()}`, 'color: #FF9800; font-weight: bold;');
@@ -187,7 +197,18 @@ class Subscription<Select extends Selector = Selector> {
     }
     if (selection.length > 0) {
       console.groupEnd();
+
+      if (changes.length > 0) {
+        explainMutation({
+          query: this.query,
+          selection,
+          changes
+        }).then(res => {
+          console.log(`%cupdate(${this.name})%c:`, 'color: #FF69B4; font-weight: bold;', 'color: inherit; font-style: italic;', res);
+        })
+      }
     }
+
     return changes;
   }
   abort() {
