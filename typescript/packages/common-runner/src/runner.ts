@@ -556,6 +556,7 @@ function instantiateRecipeNode(
   addCancel: AddCancel,
 ) {
   if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
+  const recipe = mapBindingsToCell(module.implementation, processCell);
   const inputs = mapBindingsToCell(inputBindings, processCell);
   const resultCell = cell(undefined, {
     recipe: module.implementation,
@@ -563,7 +564,7 @@ function instantiateRecipeNode(
     inputBindings,
     outputBindings,
   });
-  run(module.implementation, inputs, resultCell);
+  run(recipe, inputs, resultCell);
   sendValueToBinding(processCell, outputBindings, {
     cell: resultCell,
     path: [],

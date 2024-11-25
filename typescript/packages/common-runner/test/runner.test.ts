@@ -54,14 +54,18 @@ describe("runRecipe", () => {
         },
       },
       resultSchema: {},
-      result: { $alias: { path: ["internal", "output"] } },
+      result: { $alias: { cell: 1, path: ["internal", "output"] } },
       nodes: [
         {
           module: {
             type: "passthrough",
           },
-          inputs: { value: { $alias: { path: ["argument", "input"] } } },
-          outputs: { value: { $alias: { path: ["internal", "output"] } } },
+          inputs: {
+            value: { $alias: { cell: 1, path: ["argument", "input"] } },
+          },
+          outputs: {
+            value: { $alias: { cell: 1, path: ["internal", "output"] } },
+          },
         },
       ],
     } as Recipe;
@@ -171,15 +175,15 @@ describe("runRecipe", () => {
     const nestedRecipe: Recipe = {
       argumentSchema: {},
       resultSchema: {},
-      result: { $alias: { path: ["internal", "result"] } },
+      result: { $alias: { cell: 1, path: ["internal", "result"] } },
       nodes: [
         {
           module: {
             type: "javascript",
             implementation: (value: number) => value * 2,
           },
-          inputs: { $alias: { path: ["argument", "input"] } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          inputs: { $alias: { cell: 1, path: ["argument", "input"] } },
+          outputs: { $alias: { cell: 1, path: ["internal", "result"] } },
         },
       ],
     };

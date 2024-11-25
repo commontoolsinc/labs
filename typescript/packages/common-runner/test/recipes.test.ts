@@ -26,6 +26,7 @@ describe("Recipe Runner", () => {
   it("should handle nested recipes", async () => {
     const innerRecipe = recipe<{ x: number }>("Inner Recipe", ({ x }) => {
       const squared = lift((n: number) => {
+        console.log("inner squared", n);
         return n * n;
       })(x);
       return { squared };
@@ -36,15 +37,22 @@ describe("Recipe Runner", () => {
       ({ value }) => {
         const { squared } = innerRecipe({ x: value });
         const result = lift((n: number) => {
+          console.log("n", n);
           return n + 1;
         })(squared);
         return { result };
       },
     );
 
+    console.log("outerRecipe", JSON.stringify(outerRecipe.toJSON(), null, 2));
     const result = run(outerRecipe, { value: 4 });
+    console.log(
+      "sourceCells",
+      JSON.stringify(result.sourceCell?.getAsQueryResult(), null, 2),
+    );
 
     await idle();
+    console.log("result", JSON.stringify(result.getAsQueryResult(), null, 2));
 
     expect(result.getAsQueryResult()).toEqual({ result: 17 });
   });
