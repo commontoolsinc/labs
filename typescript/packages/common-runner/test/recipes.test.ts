@@ -206,7 +206,9 @@ describe("Recipe Runner", () => {
     await idle();
     expect(values).toEqual([
       [1, 1, 0],
-      [3, 1, 0], // That's the first logger called again when counter changes
+      // Next is the first logger called again when counter changes, since this
+      // is now a long running charmlet:
+      [3, 1, 0],
       [3, 2, 0],
     ]);
   });

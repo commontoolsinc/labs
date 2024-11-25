@@ -834,7 +834,6 @@ function makeOpaqueRef(
   let ref = opaqueRefs.find((p) => arrayEqual(valuePath, p.path))?.opaqueRef;
   if (!ref) {
     ref = opaqueRef();
-    for (const key of valuePath) ref = ref.key(key);
     ref.setPreExisting({ $alias: { cell: valueCell, path: valuePath } });
     opaqueRefs.push({ path: valuePath, opaqueRef: ref });
   }
