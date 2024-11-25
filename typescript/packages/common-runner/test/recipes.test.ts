@@ -205,24 +205,69 @@ describe("Recipe Runner", () => {
   });
 
   it("should handle recipes returned by lifted functions", async () => {
-    const multiply = lift<{ x: number; y: number }>(({ x, y }) => x * y);
+    const x = cell(2);
+    const y = cell(3);
+
+    const runCounts = {
+      multiply: 0,
+      multiplyGenerator: 0,
+      multiplyGenerator2: 0,
+    };
+
+    const multiply = lift<{ x: number; y: number }>(({ x, y }) => {
+      runCounts.multiply++;
+      return x * y;
+    });
 
     const multiplyGenerator = lift<{ x: number; y: number }>((args) => {
+      runCounts.multiplyGenerator++;
       return multiply(args);
+    });
+
+    const multiplyGenerator2 = lift<{ x: number; y: number }>(({ x, y }) => {
+      runCounts.multiplyGenerator2++;
+      // Now passing literals, so will hardcode values in recipe and hence
+      // re-run when values change
+      return multiply({ x, y });
     });
 
     const multiplyRecipe = recipe<{ x: number; y: number }>(
       "multiply",
       (args) => {
-        return { result: multiplyGenerator(args) };
+        return {
+          result1: multiplyGenerator(args),
+          result2: multiplyGenerator2(args),
+        };
       },
     );
 
-    const result = run(multiplyRecipe, { x: 2, y: 3 });
+    const result = run(multiplyRecipe, { x, y });
 
     await idle();
 
-    expect(result.getAsQueryResult()).toEqual({ result: 6 });
+    expect(result.getAsQueryResult()).toMatchObject({
+      result1: 6,
+      result2: 6,
+    });
+
+    expect(runCounts).toMatchObject({
+      multiply: 2,
+      multiplyGenerator: 1,
+      multiplyGenerator2: 1,
+    });
+
+    x.send(3);
+    await idle();
+    expect(result.getAsQueryResult()).toMatchObject({
+      result1: 9,
+      result2: 9,
+    });
+
+    expect(runCounts).toMatchObject({
+      multiply: 4,
+      multiplyGenerator: 1, // Did not re-run, since we didn't read the values!
+      multiplyGenerator2: 2,
+    });
   });
 
   it("should support referenced modules", async () => {
