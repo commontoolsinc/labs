@@ -376,7 +376,7 @@ export function cell<T>(value?: T, cause?: any): CellImpl<T> {
     toJSON: () =>
       typeof entityId?.toJSON === "function"
         ? entityId.toJSON()
-        : (entityId as { "/": string }),
+        : (entityId as { "/": string }) ?? { "/": "" },
     get value(): T {
       return value as T;
     },
