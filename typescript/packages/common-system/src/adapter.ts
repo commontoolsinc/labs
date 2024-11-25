@@ -74,19 +74,23 @@ export const service = <Source extends Record<string, any>>(effects: {
 }): Service<{ [K in keyof Source]: Effect<Source[K]> }> =>
   new SystemService(effects);
 
+function spellId<Rules extends Record<string, any>>(rules: Rules) {
+  return refer({
+    rules: Object.fromEntries(
+      Object.entries(rules).map(([name, rule]) => [
+        name,
+        { select: rule.select, where: rule.where },
+      ]),
+    ),
+  });
+}
+
 class SystemBehavior<Rules extends Record<string, Rule>> {
   rules: Rules;
   id: Reference;
   constructor(rules: Rules) {
     this.rules = rules;
-    this.id = refer({
-      rules: Object.fromEntries(
-        Object.entries(this.rules).map(([name, rule]) => [
-          name,
-          { select: rule.select, where: rule.where },
-        ]),
-      ),
-    });
+    this.id = spellId(rules);
   }
 
   *fork(self: Reference = this.id) {
@@ -104,6 +108,7 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
       };
 
       const subscription = yield* DB.subscribe(
+        spellId(this.rules),
         name,
         query as Type.Query,
         toEffect(rule),
@@ -177,7 +182,7 @@ class SystemService<Effects extends Record<string, Effect>> {
         ],
       };
 
-      const subscription = yield* DB.subscribe(name, query as Type.Query, rule);
+      const subscription = yield* DB.subscribe(spellId(this.rules), name, query as Type.Query, rule);
       subscriptions.push(subscription);
 
       changes.push(...(yield* subscription.poll(db)));

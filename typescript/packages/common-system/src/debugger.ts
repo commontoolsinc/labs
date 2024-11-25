@@ -14,7 +14,7 @@ setDebugCharms(true);
 
 export class CharmDebugger extends HTMLElement {
   #root: ShadowRoot;
-  #queryResults: any[] = [];
+  #ruleActivations: Map<string, {count: number, lastSelection: any}> = new Map();
   #entity: Reference | null = null;
   #behavior: Behavior | null = null;
   #content: HTMLElement;
@@ -75,8 +75,14 @@ export class CharmDebugger extends HTMLElement {
     this.#root.appendChild(this.#content);
 
     window.addEventListener('query-triggered', (event: any) => {
+      console.log(event)
       if (event.detail.entity === this.#entity?.toString() && event.detail.spell == this.#behavior?.id.toString()) {
-        this.#queryResults.push(event.detail);
+        const ruleName = event.detail.rule;
+        const current = this.#ruleActivations.get(ruleName) || {count: 0, lastSelection: null};
+        this.#ruleActivations.set(ruleName, {
+          count: current.count + 1,
+          lastSelection: event.detail.match
+        });
         this.render();
       }
     });
@@ -110,27 +116,26 @@ export class CharmDebugger extends HTMLElement {
         const li = document.createElement('li')
         const ruleDetails = document.createElement('details')
         const ruleSummary = document.createElement('summary')
-        ruleSummary.innerText = rule
-        ruleDetails.appendChild(ruleSummary)
+
         const explanation = document.createElement('div')
+
+        const activation = this.#ruleActivations.get(rule);
+        ruleSummary.innerText = `${rule} (${activation?.count || 0})`;
+        ruleDetails.appendChild(ruleSummary)
+
+        if (activation?.lastSelection) {
+          const pre = document.createElement('pre');
+          pre.innerText = JSON.stringify(activation.lastSelection, null, 2);
+          ruleDetails.appendChild(pre);
+        }
+
         explanation.innerText = await explainQuery(this.#behavior?.rules[rule])
         ruleDetails.appendChild(explanation)
+
         li.appendChild(ruleDetails)
         ul.appendChild(li)
       })
       details.appendChild(ul)
-    }
-
-    if (this.#queryResults.length > 0) {
-      const queriesDetails = document.createElement('details');
-      const queriesSummary = document.createElement('summary');
-      queriesSummary.innerText = 'Query Results';
-      queriesDetails.appendChild(queriesSummary);
-
-      const pre = document.createElement('pre');
-      pre.innerText = JSON.stringify(this.#queryResults, null, 2);
-      queriesDetails.appendChild(pre);
-      details.appendChild(queriesDetails);
     }
 
     this.#content.appendChild(details);
