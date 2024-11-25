@@ -172,17 +172,42 @@ export function setNestedValue(
   return true;
 }
 
-// Turn local aliases into explicit aliases to named cell.
-export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
+/**
+ * Unwraps one level of aliases, and
+ * - binds top-level aliases to passed cell
+ * - reduces wrapping count of closure cells by one
+ *
+ * This is used for arguments to nodes (which can be recipes, e.g. for map) and
+ * for the recipe in recipe nodes.
+ *
+ * An alias will go through these stages:
+ * - { $alias: { cell: 1, path: ["a"] } }
+ *   = Nested two layers deep, an argment for a nested recipe
+ * - { $alias: { path: ["a"] } }
+ *   = One layer deep, e.g. a recipe that will be passed to `run`
+ * - { $alias: { cell: <cell>, path: ["a"] } }
+ *   = Unwrapped, executing the recipe
+ *
+ * @param binding - The binding to unwrap.
+ * @param cell - The cell to bind to.
+ * @returns The unwrapped binding.
+ */
+export function unwrapOneLevelAndBindtoCell<T>(
+  binding: T,
+  cell: CellImpl<any>,
+): T {
   function convert(binding: any, processStatic = false): any {
     if (isStatic(binding) && !processStatic)
       return markAsStatic(convert(binding, true));
     else if (isAlias(binding)) {
       if (typeof binding.$alias.cell === "number")
         if (binding.$alias.cell === 1)
+          // Moved to the next-to-top level. Don't assign a cell, so that on
+          // next unwrap, the right cell be assigned.
           return { $alias: { path: binding.$alias.path } };
         else
           return {
+            // Otherwise decrease count by one
             $alias: {
               cell: binding.$alias.cell - 1,
               path: binding.$alias.path,
@@ -190,6 +215,7 @@ export function mapBindingsToCell<T>(binding: T, cell: CellImpl<any>): T {
           };
       else
         return {
+          // Bind to passed cell, if there isn't already one
           $alias: {
             cell: binding.$alias.cell ?? cell,
             path: binding.$alias.path,

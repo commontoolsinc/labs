@@ -27,7 +27,7 @@ import {
 import { Action, schedule, addEventHandler } from "./scheduler.js";
 import {
   extractDefaultValues,
-  mapBindingsToCell,
+  unwrapOneLevelAndBindtoCell,
   findAllAliasedCells,
   followAliases,
   mergeObjects,
@@ -182,7 +182,9 @@ export function run<T, R = any>(
   });
 
   // Send "query" to results to the result cell
-  resultCell.send(mapBindingsToCell<R>(recipe.result as R, processCell));
+  resultCell.send(
+    unwrapOneLevelAndBindtoCell<R>(recipe.result as R, processCell),
+  );
 
   // [unsafe closures:] For recipes from closures, add a materialize factory
   if (recipe[unsafe_originalRecipe])
@@ -310,7 +312,7 @@ function instantiateJavaScriptNode(
   addCancel: AddCancel,
   recipe: Recipe,
 ) {
-  const inputs = mapBindingsToCell(
+  const inputs = unwrapOneLevelAndBindtoCell(
     inputBindings as { [key: string]: any },
     processCell,
   );
@@ -320,7 +322,7 @@ function instantiateJavaScriptNode(
   // written.
   const reads = findAllAliasedCells(inputs, processCell);
 
-  const outputs = mapBindingsToCell(outputBindings, processCell);
+  const outputs = unwrapOneLevelAndBindtoCell(outputBindings, processCell);
   const writes = findAllAliasedCells(outputs, processCell);
 
   let fn = (
@@ -440,8 +442,14 @@ function instantiateRawNode(
   // Built-ins can define their own scheduling logic, so they'll
   // implement parts of the above themselves.
 
-  const mappedInputBindings = mapBindingsToCell(inputBindings, processCell);
-  const mappedOutputBindings = mapBindingsToCell(outputBindings, processCell);
+  const mappedInputBindings = unwrapOneLevelAndBindtoCell(
+    inputBindings,
+    processCell,
+  );
+  const mappedOutputBindings = unwrapOneLevelAndBindtoCell(
+    outputBindings,
+    processCell,
+  );
 
   // For `map` and future other node types that take closures, we need to
   // note the parent recipe on the closure recipes.
@@ -469,11 +477,11 @@ function instantiatePassthroughNode(
   processCell: CellImpl<any>,
   addCancel: AddCancel,
 ) {
-  const inputs = mapBindingsToCell(inputBindings, processCell);
+  const inputs = unwrapOneLevelAndBindtoCell(inputBindings, processCell);
   const inputsCell = cell(inputs);
   const reads = findAllAliasedCells(inputs, processCell);
 
-  const outputs = mapBindingsToCell(outputBindings, processCell);
+  const outputs = unwrapOneLevelAndBindtoCell(outputBindings, processCell);
   const writes = findAllAliasedCells(outputs, processCell);
 
   const action: Action = (log: ReactivityLog) => {
@@ -491,12 +499,12 @@ function instantiateIsolatedNode(
   processCell: CellImpl<any>,
   addCancel: AddCancel,
 ) {
-  const inputs = mapBindingsToCell(inputBindings, processCell);
+  const inputs = unwrapOneLevelAndBindtoCell(inputBindings, processCell);
   const reads = findAllAliasedCells(inputs, processCell);
   const inputsCell = cell(inputs);
   inputsCell.freeze();
 
-  const outputs = mapBindingsToCell(outputBindings, processCell);
+  const outputs = unwrapOneLevelAndBindtoCell(outputBindings, processCell);
   const writes = findAllAliasedCells(outputs, processCell);
 
   if (!isJavaScriptModuleDefinition(module.implementation))
@@ -556,8 +564,11 @@ function instantiateRecipeNode(
   addCancel: AddCancel,
 ) {
   if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
-  const recipe = mapBindingsToCell(module.implementation, processCell);
-  const inputs = mapBindingsToCell(inputBindings, processCell);
+  const recipe = unwrapOneLevelAndBindtoCell(
+    module.implementation,
+    processCell,
+  );
+  const inputs = unwrapOneLevelAndBindtoCell(inputBindings, processCell);
   const resultCell = cell(undefined, {
     recipe: module.implementation,
     parent: processCell,
