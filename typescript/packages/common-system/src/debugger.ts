@@ -220,6 +220,11 @@ export class CharmDebugger extends HTMLElement {
     logContainer.className = 'mutation-log';
     logContainer.innerHTML = '';
 
+    const title = document.createElement('div');
+    title.innerText = 'Mutation Log';
+    title.style.fontWeight = 'bold';
+    logContainer.appendChild(title);
+
     for (const mutation of this.#mutationLog) {
       const details = document.createElement('details');
       const summary = document.createElement('summary');
@@ -259,7 +264,7 @@ export class CharmDebugger extends HTMLElement {
     }
 
     if (!this.#root.querySelector('.mutation-log')) {
-      this.#root.appendChild(logContainer);
+      this.#content.appendChild(logContainer);
     }
   }
 
