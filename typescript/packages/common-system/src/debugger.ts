@@ -20,6 +20,7 @@ export class CharmDebugger extends HTMLElement {
   #content: HTMLElement;
   #cardColors = ['#ff7675', '#74b9ff', '#55efc4', '#ffeaa7', '#b2bec3', '#fd79a8', '#81ecec'];
   #ruleElements: Map<string, {details: HTMLElement, summary: HTMLElement, pre?: HTMLElement}> = new Map();
+  #mutationLog: any[] = [];
 
   constructor() {
     super();
@@ -82,6 +83,14 @@ export class CharmDebugger extends HTMLElement {
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
       }
 
+      .mutation-log {
+        background: white;
+        border-radius: 4px;
+        padding: 12px;
+        margin-top: 16px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      }
+
       @keyframes pulse {
         0% { transform: scale(1); }
         50% { transform: scale(1.05); }
@@ -132,6 +141,20 @@ export class CharmDebugger extends HTMLElement {
         }
       }
     });
+
+    window.addEventListener('mutation', (event: any) => {
+      if (event.detail.entity === this.#entity?.toString() && event.detail.spell === this.#behavior?.id.toString()) {
+        this.#mutationLog.push(event.detail);
+        this.renderMutationLog();
+      }
+    });
+  }
+
+  truncateId(id: string | Reference) {
+    if (typeof id === 'object') id = id.toString();
+
+    if (id.length <= 8) return id;
+    return `${id.slice(0,4)}…${id.slice(-4)}`;
   }
 
   set entity(value: Reference | null) {
@@ -144,13 +167,63 @@ export class CharmDebugger extends HTMLElement {
     this.render();
   }
 
+  renderMutationLog() {
+    const logContainer = this.#root.querySelector('.mutation-log') || document.createElement('div');
+    logContainer.className = 'mutation-log';
+    logContainer.innerHTML = '';
+
+    for (const mutation of this.#mutationLog) {
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      const truncatedRevision = this.truncateId(mutation.revision);
+      summary.innerText = `${mutation.rule}@${truncatedRevision}`;
+      summary.title = `${mutation.rule}@${mutation.revision}`;
+      details.appendChild(summary);
+
+      const explanation = document.createElement('div');
+      explanation.className = 'explanation';
+      explanation.innerText = mutation.explanation;
+      details.appendChild(explanation);
+
+      const selectionDetails = document.createElement('details');
+      const selectionSummary = document.createElement('summary');
+      selectionSummary.style.fontWeight = 'bold';
+      selectionSummary.innerText = 'Selection';
+      selectionDetails.appendChild(selectionSummary);
+
+      const selectionPre = document.createElement('pre');
+      selectionPre.innerText = JSON.stringify(mutation.selection, null, 2);
+      selectionDetails.appendChild(selectionPre);
+      details.appendChild(selectionDetails);
+
+      const changesDetails = document.createElement('details');
+      const changesSummary = document.createElement('summary');
+      changesSummary.style.fontWeight = 'bold';
+      changesSummary.innerText = 'Changes';
+      changesDetails.appendChild(changesSummary);
+
+      const changesPre = document.createElement('pre');
+      changesPre.innerText = JSON.stringify(mutation.changes, null, 2);
+      changesDetails.appendChild(changesPre);
+      details.appendChild(changesDetails);
+
+      logContainer.appendChild(details);
+    }
+
+    if (!this.#root.querySelector('.mutation-log')) {
+      this.#root.appendChild(logContainer);
+    }
+  }
+
   async render() {
     this.#content.innerHTML = '';
     this.#ruleElements.clear();
 
     if (this.#entity) {
       const entityId = document.createElement('div');
-      entityId.innerText = this.#entity.toString();
+      const truncatedId = this.truncateId(this.#entity.toString());
+      entityId.innerText = truncatedId;
+      entityId.title = this.#entity.toString();
       this.#content.appendChild(entityId);
     }
 
@@ -200,6 +273,7 @@ export class CharmDebugger extends HTMLElement {
       }
       this.#content.appendChild(ul)
     }
+    this.renderMutationLog();
   }
 }
 
