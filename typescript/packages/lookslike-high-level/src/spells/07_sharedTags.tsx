@@ -42,7 +42,7 @@ export const sharedDataViewer = behavior({
       return [render({ self }, ({ self }) => (
         <div title="Shared">
           <fieldset>
-            <common-input value={searchTag} type="text" oncommon-input={events.onEditTag.dispatch()} />
+            <common-input value={searchTag} type="text" oncommon-input={SharedDataEvents.onEditTag} />
           </fieldset>
         </div>
       ))]
@@ -70,7 +70,7 @@ export const sharedDataViewer = behavior({
       return [render({ self }, ({ self }) => (
         <div title="Shared">
           <fieldset>
-            <common-input value={searchTag} type="text" oncommon-input={events.onEditTag.dispatch()} />
+            <common-input value={searchTag} type="text" oncommon-input={SharedDataEvents.onEditTag} />
           </fieldset>
           <pre>{JSON.stringify(shared, null, 2)}</pre>
         </div>
@@ -93,7 +93,7 @@ export const sharedDataViewer = behavior({
       return [render({ self }, ({ self }) => (
         <div title="Shared">
           <fieldset>
-            <common-input value={searchTag} type="text" oncommon-input={events.onEditTag.dispatch()} />
+            <common-input value={searchTag} type="text" oncommon-input={SharedDataEvents.onEditTag} />
           </fieldset>
           <div>
             {...shared.map((sharedItem, tableIndex) => {
