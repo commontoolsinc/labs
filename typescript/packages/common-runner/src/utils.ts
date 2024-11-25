@@ -495,7 +495,6 @@ export function normalizeToCells(
           value[i] = { cell: cell(value[i]), path: [] } satisfies CellReference;
           value[i].cell.entityId = itemId;
           value[i].cell.sourceCell = parentCell;
-          if (Array.isArray(parentCell.get())) debugger;
 
           preceedingItemId = itemId;
           log?.writes.push(value[i]);

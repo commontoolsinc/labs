@@ -772,7 +772,6 @@ export function createQueryResultProxy<T>(
         };
         ref.cell.send(value);
         ref.cell.sourceCell = valueCell;
-        if (Array.isArray(valueCell.get())) debugger;
 
         log?.writes.push(ref);
 
