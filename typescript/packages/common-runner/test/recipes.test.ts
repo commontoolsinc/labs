@@ -204,6 +204,27 @@ describe("Recipe Runner", () => {
     ]);
   });
 
+  it("should handle recipes returned by lifted functions", async () => {
+    const multiply = lift<{ x: number; y: number }>(({ x, y }) => x * y);
+
+    const multiplyGenerator = lift<{ x: number; y: number }>((args) => {
+      return multiply(args);
+    });
+
+    const multiplyRecipe = recipe<{ x: number; y: number }>(
+      "multiply",
+      (args) => {
+        return { result: multiplyGenerator(args) };
+      },
+    );
+
+    const result = run(multiplyRecipe, { x: 2, y: 3 });
+
+    await idle();
+
+    expect(result.getAsQueryResult()).toEqual({ result: 6 });
+  });
+
   it("should support referenced modules", async () => {
     addModuleByRef(
       "double",

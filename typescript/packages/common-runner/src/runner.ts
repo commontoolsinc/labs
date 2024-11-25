@@ -80,8 +80,6 @@ export function run<T, R = any>(
   argument?: T,
   resultCell: CellImpl<R> = cell<R>(),
 ): CellImpl<R> {
-  console.log("run", JSON.stringify(recipe, null, 2), JSON.stringify(argument));
-
   if (cancels.has(resultCell)) {
     // If it's already running and no new recipe or argument are given,
     // we are just returning the result cell
@@ -394,7 +392,7 @@ function instantiateJavaScriptNode(
           () => result,
         );
 
-        const resultCell = run(resultRecipe, {});
+        const resultCell = run(resultRecipe);
         addCancel(cancels.get(resultCell));
       }
 
@@ -408,6 +406,8 @@ function instantiateJavaScriptNode(
     const inputsCell = cell(inputs);
     inputsCell.freeze(); // Freezes the bindings, not aliased cells.
 
+    let resultCell: CellImpl<any> | undefined;
+
     const action: Action = (log: ReactivityLog) => {
       const inputsProxy = inputsCell.getAsQueryResult([], log);
 
@@ -417,9 +417,28 @@ function instantiateJavaScriptNode(
           processCell.getAsQueryResult(path, log),
       } satisfies UnsafeBinding);
       const result = fn(inputsProxy);
-      popFrame(frame);
 
-      sendValueToBinding(processCell, outputs, result, log);
+      if (containsOpaqueRef(result)) {
+        const resultRecipe = recipeFromFrame(
+          "action result",
+          undefined,
+          () => result,
+        );
+
+        resultCell = run(resultRecipe, undefined, resultCell);
+        addCancel(cancels.get(resultCell));
+
+        sendValueToBinding(
+          processCell,
+          outputs,
+          { cell: resultCell, path: [] },
+          log,
+        );
+      } else {
+        sendValueToBinding(processCell, outputs, result, log);
+      }
+
+      popFrame(frame);
     };
 
     addCancel(schedule(action, { reads, writes } satisfies ReactivityLog));
