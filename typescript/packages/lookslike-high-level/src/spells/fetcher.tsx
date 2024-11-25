@@ -4,7 +4,7 @@ import {
   $,
   Reference,
   select,
-  View,
+  Session,
 } from "@commontools/common-system";
 
 import { fetch } from "../effects/fetch.js";
@@ -23,22 +23,11 @@ export default behavior({
     .match($.self, "url", $.url)
     // name here is the subview id
     .render(({ self, url }) => (
-      <div>
+      <div title="Fetcher Form">
         <common-input value={url} oncommon-input="~/on/change-url" />
         <button onclick="~/on/send-request">Fetch</button>
       </div>
     ), subview('form')).commit(),
-
-  blankState: select({ self: $.self, url: $.url, form: $.form })
-    .match($.self, "url", $.url)
-    .match($.self, subview('form'), $.form)
-    .not(q => q.match($.self, "my/request", $._))
-    .render(({ self, url, form }) => (
-      <div title="Effect Demo" entity={self}>
-        {form}
-        <h1>Ok</h1>
-      </div>
-    )).commit(),
 
   onSendRequest: select({ self: $.self, event: $.event, url: $.url })
     .match($.self, "~/on/send-request", $.event)
@@ -66,8 +55,7 @@ export default behavior({
     .not(q => q.match($.request, "response/json", $._))
     .render(({ self, status, url }) => (
       <div title="Effect Demo" entity={self}>
-        <h1>Pending</h1>
-        {status}
+        <h1>{status}</h1>
         <button onclick="~/on/reset">Reset</button>
       </div>
     )).commit(),
@@ -98,7 +86,7 @@ export default behavior({
     .match($.self, "~/on/change-url", $.event)
     .upsert(({ self, event }) => {
       // common-input gives us events with easy to read values
-      return [self, 'url', event.detail.value]
+      return [self, 'url', Session.resolve<CommonInputEvent>(event).detail.value]
     })
     .commit(),
 });
