@@ -55,7 +55,7 @@ export type Charm = {
 export { NAME, TYPE, UI };
 
 const storage = createStorage(
-  (import.meta as any).env.VITE_STORAGE_TYPE ?? "local",
+  (import.meta as any).env.VITE_STORAGE_TYPE ?? "memory",
 );
 
 export const charms = cell<CellReference[]>([], "charms");
