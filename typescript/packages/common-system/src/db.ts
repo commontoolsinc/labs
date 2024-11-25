@@ -3,7 +3,7 @@ import { Type, Task, Hybrid, Fact, Selector, refer, Reference } from "synopsys";
 import * as IDB from "synopsys/store/idb";
 import * as Memory from "synopsys/store/memory";
 import * as Session from "./session.js";
-import type { Effect } from "./adapter.js";
+import type { Effect, Instruction } from "./adapter.js";
 import { Constant } from "datalogia";
 import { explainMutation, explainQuery, logQuery } from "./debug.js";
 export * from "synopsys";
@@ -166,12 +166,14 @@ class Subscription<Select extends Selector = Selector> {
   }
   *poll(db: DB) {
     const id = this.name + ' query';
-    console.time(id);
+    const start = performance.now();
     const selection = yield* db.query(this.query);
+    const queryTime = performance.now() - start;
+    console.time(id);
     console.timeEnd(id);
 
     const revision = refer(selection);
-    const changes = [];
+    const changes: Instruction[] = [];
     if (this.revision.toString() !== revision.toString()) {
       this.revision = revision;
       if (selection.length > 0) {
@@ -192,7 +194,7 @@ class Subscription<Select extends Selector = Selector> {
 
         if (self) {
           window.dispatchEvent(new CustomEvent('query-triggered', {
-            detail: { rule: this.name, spell: this.id.toString(), entity: self.toString(), match }
+            detail: { rule: this.name, spell: this.id.toString(), entity: self.toString(), match, performanceMs: queryTime }
           }))
           console.log('trigger(' + this.name + ')', { rule: this.name, spell: this.id.toString(), entity: self.toString(), match })
           console.group(`%c${self.toString()}`, 'color: #FF9800; font-weight: bold;');
@@ -212,8 +214,13 @@ class Subscription<Select extends Selector = Selector> {
           query: this.query,
           selection,
           changes
-        }).then(res => {
-          console.log(`%cupdate(${this.name})%c:`, 'color: #FF69B4; font-weight: bold;', 'color: inherit; font-style: italic;', res);
+        }).then(explanation => {
+          window.dispatchEvent(new CustomEvent('mutation', {detail:{
+            query: this.query,
+            selection,
+            changes,
+            explanation
+          }}))
         })
       }
     }

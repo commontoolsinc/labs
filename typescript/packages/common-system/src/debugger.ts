@@ -14,10 +14,12 @@ setDebugCharms(true);
 
 export class CharmDebugger extends HTMLElement {
   #root: ShadowRoot;
-  #ruleActivations: Map<string, {count: number, lastSelection: any}> = new Map();
+  #ruleActivations: Map<string, {count: number, lastSelection: any, performanceMs: number }> = new Map();
   #entity: Reference | null = null;
   #behavior: Behavior | null = null;
   #content: HTMLElement;
+  #cardColors = ['#ff7675', '#74b9ff', '#55efc4', '#ffeaa7', '#b2bec3', '#fd79a8', '#81ecec'];
+  #ruleElements: Map<string, {details: HTMLElement, summary: HTMLElement, pre?: HTMLElement}> = new Map();
 
   constructor() {
     super();
@@ -33,14 +35,9 @@ export class CharmDebugger extends HTMLElement {
         width: 33%;
         max-height: 512px;
         overflow-y: auto;
-        background: blue;
-        padding: 8px;
         font-size: 16px;
         font-family: monospace;
-        color: white;
-        border: 1px solid #4d4dff;
-        border-radius: 4px;
-        animation: pulse 2s infinite;
+        color: black;
       }
 
       ul {
@@ -48,23 +45,51 @@ export class CharmDebugger extends HTMLElement {
         padding: 0;
       }
 
+      details {
+        margin-bottom: 8px;
+        border-radius: 4px;
+        padding: 8px;
+      }
+
       summary {
-        font-size: 12px;
+        font-size: 18px;
+        font-weight: bold;
+        cursor: pointer;
+      }
+
+      .explanation {
+        font-style: italic;
+        font-size: 14px;
+      }
+
+      .performance {
+        font-size: 11px;
+      }
+
+      pre {
+        background: rgba(0,0,0,0.5);
+        color: white;
+        padding: 12px;
+        border-radius: 4px;
+        font-size: 14px;
+        overflow-x: auto;
+      }
+
+      .rule-card {
+        border-radius: 4px;
+        margin-bottom: 8px;
+        padding: 12px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
       }
 
       @keyframes pulse {
-        0% {
-          border-color: rgba(77, 77, 255, 0.4);
-          box-shadow: 0 0 0 0 rgba(77, 77, 255, 0.4);
-        }
-        70% {
-          border-color: rgba(77, 77, 255, 0.8);
-          box-shadow: 0 0 0 4px rgba(77, 77, 255, 0);
-        }
-        100% {
-          border-color: rgba(77, 77, 255, 0.4);
-          box-shadow: 0 0 0 0 rgba(77, 77, 255, 0);
-        }
+        0% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+        100% { transform: scale(1); }
+      }
+
+      .pulse {
+        animation: pulse 0.3s ease-in-out;
       }
     `;
 
@@ -81,9 +106,30 @@ export class CharmDebugger extends HTMLElement {
         const current = this.#ruleActivations.get(ruleName) || {count: 0, lastSelection: null};
         this.#ruleActivations.set(ruleName, {
           count: current.count + 1,
-          lastSelection: event.detail.match
+          lastSelection: event.detail.match,
+          performanceMs: event.detail.performanceMs,
         });
-        this.render();
+
+        const ruleElements = this.#ruleElements.get(ruleName);
+        if (ruleElements) {
+          // Update count
+          ruleElements.summary.innerText = `${ruleName} (${current.count + 1})`;
+
+          // Update selection
+          if (ruleElements.pre) {
+            ruleElements.pre.innerText = JSON.stringify(event.detail.match, null, 2);
+          } else {
+            const pre = document.createElement('pre');
+            pre.innerText = JSON.stringify(event.detail.match, null, 2);
+            ruleElements.details.appendChild(pre);
+            ruleElements.pre = pre;
+          }
+
+          // Animate
+          ruleElements.details.classList.remove('pulse');
+          ruleElements.details.offsetWidth; // Force reflow
+          ruleElements.details.classList.add('pulse');
+        }
       }
     });
   }
@@ -98,47 +144,62 @@ export class CharmDebugger extends HTMLElement {
     this.render();
   }
 
-  render() {
+  async render() {
     this.#content.innerHTML = '';
-
-    const details = document.createElement('details');
-    const summary = document.createElement('summary');
+    this.#ruleElements.clear();
 
     if (this.#entity) {
-      summary.innerText = this.#entity.toString();
-      details.appendChild(summary);
+      const entityId = document.createElement('div');
+      entityId.innerText = this.#entity.toString();
+      this.#content.appendChild(entityId);
     }
 
     if (this.#behavior?.rules) {
       const rules = Object.keys(this.#behavior.rules)
       const ul = document.createElement('ul')
-      rules.forEach(async rule => {
+
+      for (const rule of rules) {
         const li = document.createElement('li')
         const ruleDetails = document.createElement('details')
         const ruleSummary = document.createElement('summary')
 
+        ruleDetails.className = 'rule-card';
+        ruleDetails.dataset.rule = rule;
+        ruleDetails.style.background = this.#cardColors[Math.floor(Math.random() * this.#cardColors.length)];
+
         const explanation = document.createElement('div')
+        explanation.className = 'explanation';
 
         const activation = this.#ruleActivations.get(rule);
         ruleSummary.innerText = `${rule} (${activation?.count || 0})`;
         ruleDetails.appendChild(ruleSummary)
 
+        let pre;
         if (activation?.lastSelection) {
-          const pre = document.createElement('pre');
+          pre = document.createElement('pre');
           pre.innerText = JSON.stringify(activation.lastSelection, null, 2);
           ruleDetails.appendChild(pre);
         }
 
-        explanation.innerText = await explainQuery(this.#behavior?.rules[rule])
+        explanation.innerText = await explainQuery(this.#behavior.rules[rule])
         ruleDetails.appendChild(explanation)
+
+        const performance = document.createElement('div');
+        performance.className = 'performance';
+        performance.innerText = `${activation?.performanceMs || 0}ms`;
+        ruleDetails.appendChild(performance);
+
+        this.#ruleElements.set(rule, {
+          details: ruleDetails,
+          summary: ruleSummary,
+          pre
+        });
 
         li.appendChild(ruleDetails)
         ul.appendChild(li)
-      })
-      details.appendChild(ul)
+      }
+      this.#content.appendChild(ul)
     }
-
-    this.#content.appendChild(details);
   }
 }
 
