@@ -15,6 +15,13 @@ setDebugCharms(true);
 const genImage =
   (prompt: string) => `/api/img/?prompt=${encodeURIComponent(prompt)}`
 
+export function truncateId(id: string | Reference) {
+  if (typeof id === 'object') id = id.toString();
+
+  if (id.length <= 8) return id;
+  return `${id.slice(0,4)}…${id.slice(-4)}`;
+}
+
 export class CharmDebugger extends HTMLElement {
   #root: ShadowRoot;
   #ruleActivations: Map<string, {count: number, lastSelection: any, performanceMs: number }> = new Map();
@@ -198,13 +205,6 @@ export class CharmDebugger extends HTMLElement {
     }
   }
 
-  truncateId(id: string | Reference) {
-    if (typeof id === 'object') id = id.toString();
-
-    if (id.length <= 8) return id;
-    return `${id.slice(0,4)}…${id.slice(-4)}`;
-  }
-
   set entity(value: Reference | null) {
     this.#entity = value;
     this.render();
@@ -228,7 +228,7 @@ export class CharmDebugger extends HTMLElement {
     for (const mutation of this.#mutationLog) {
       const details = document.createElement('details');
       const summary = document.createElement('summary');
-      const truncatedRevision = this.truncateId(mutation.revision);
+      const truncatedRevision = truncateId(mutation.revision);
       summary.innerText = `${mutation.rule}@${truncatedRevision}`;
       summary.title = `${mutation.rule}@${mutation.revision}`;
       details.appendChild(summary);
@@ -274,7 +274,7 @@ export class CharmDebugger extends HTMLElement {
 
     if (this.#entity) {
       const entityId = document.createElement('div');
-      const truncatedId = this.truncateId(this.#entity.toString());
+      const truncatedId = truncateId(this.#entity.toString());
       entityId.innerText = truncatedId;
       entityId.title = this.#entity.toString();
       entityId.className = 'entity-id';

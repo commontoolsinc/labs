@@ -15,6 +15,17 @@ const provider = refer({
   effect: { fetch: { version: [0, 0, 1] } },
 });
 
+export const REQUEST = {
+  STATUS: 'request/status',
+  STATUS_CODE: 'request/status/code',
+  STATUS_TEXT: 'request/status/text',
+}
+export const RESPONSE = {
+  JSON: 'response/json',
+  TEXT: 'response/text',
+  BYTES: 'response/bytes',
+}
+
 type State =
   | { status: "Open"; source: Fetch }
   | { status: "Sending"; source: Fetch; response: Promise<Response> }
@@ -40,7 +51,7 @@ export default service({
           { Retract: [provider, "~/send", request] },
           { Upsert: [provider, "~/receive", state as any] },
           { Upsert: [effect.source.consumer, effect.source.port, effect.source.id] },
-          { Upsert: [effect.source.id, "request/status", "Sending"] },
+          { Upsert: [effect.source.id, REQUEST.STATUS, "Sending"] },
         ];
       }
       return [];
@@ -72,9 +83,9 @@ export default service({
         return [
           { Retract: [provider, "~/receive", request] },
           { Upsert: [provider, `~/complete`, state as any] },
-          { Upsert: [effect.source.id, "request/status", "Receiving"] },
-          { Upsert: [effect.source.id, "response/status/code", response.status] },
-          { Upsert: [effect.source.id, "response/status/text", response.statusText] },
+          { Upsert: [effect.source.id, REQUEST.STATUS, "Receiving"] },
+          { Upsert: [effect.source.id, REQUEST.STATUS_CODE, response.status] },
+          { Upsert: [effect.source.id, REQUEST.STATUS_TEXT, response.statusText] },
         ];
       }
 
@@ -91,27 +102,28 @@ export default service({
       const effect = Session.resolve<State>(request);
       if (effect?.status === "Receiving") {
         const content = yield* Task.wait(effect.content);
+        console.log({ request, content, effect });
         changes.push(
           { Retract: [provider, `~/complete`, request] },
           { Assert: [provider, "effect/log", request] },
-          { Upsert: [effect.source.id, "request/status", "Complete"] },
+          { Upsert: [effect.source.id, REQUEST.STATUS, "Complete"] },
         );
 
         if (effect.source.expect === "json") {
-          const id = refer(content); // NOTE(ja): 
+          const id = refer(content); // NOTE(ja):
           changes.push(
             { Import: content },
-            { Upsert: [request, `response/json`, id] },
+            { Upsert: [effect.source.id, RESPONSE.JSON, id] },
           );
         } else if (effect.source.expect === "text") {
           changes.push({
-            Upsert: [request, `response/text`, content as string],
+            Upsert: [effect.source.id, RESPONSE.TEXT, content as string],
           });
         } else {
           changes.push({
             Upsert: [
               request,
-              `response/bytes`,
+              RESPONSE.BYTES,
               new Uint8Array(content as ArrayBuffer),
             ],
           });
@@ -197,7 +209,7 @@ export default service({
   //         // { Case: [provider, "~/complete", $.request] },
   //       ],
   //     },
-  //     // { Case: [$.request, "request/status", $.status] },
+  //     // { Case: [$.request, REQUEST.STATUS, $.status] },
   //   ],
   //   *perform({
   //     self,

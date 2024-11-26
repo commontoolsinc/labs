@@ -7,11 +7,10 @@ import {
   Session,
 } from "@commontools/common-system";
 
-import { fetch } from "../effects/fetch.js";
+import { fetch, REQUEST, RESPONSE } from "../effects/fetch.js";
+import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
 
-function subview(id: string) {
-  return '~/common/ui/' + id
-}
+const TODO_REQUEST = 'todo/request'
 
 export default behavior({
   defaultUrl: select({ self: $.self })
@@ -21,22 +20,12 @@ export default behavior({
 
   form: select({ self: $.self, url: $.url })
     .match($.self, "url", $.url)
+    .not(q => q.match($.self, TODO_REQUEST, $._))
     // name here is the subview id
     .render(({ self, url }) => (
       <div title="Fetcher Form">
         <common-input value={url} oncommon-input="~/on/change-url" />
         <button onclick="~/on/send-request">Fetch</button>
-      </div>
-    ), subview('form')).commit(),
-
-  blankState: select({ self: $.self, url: $.url, form: $.form })
-    .match($.self, "url", $.url)
-    .match($.self, subview('form'), $.form)
-    .not(q => q.match($.self, "my/request", $._))
-    .render(({ self, url, form }) => (
-      <div title="Effect Demo" entity={self}>
-        {form}
-        <h1>Ok</h1>
       </div>
     )).commit(),
 
@@ -47,7 +36,7 @@ export default behavior({
       return [
         fetch(
           self,
-          "my/request",
+          TODO_REQUEST,
           new Request(url, {
             method: "GET",
             headers: {
@@ -58,28 +47,26 @@ export default behavior({
       ];
     }).commit(),
 
-  // annoying repetition between states
-  pending: select({ self: $.self, request: $.request, status: $.status, url: $.url })
-    .match($.self, "my/request", $.request)
-    .match($.request, "request/status", $.status)
+  inFlight: select({ self: $.self, request: $.request, status: $.status, url: $.url })
+    .match($.self, TODO_REQUEST, $.request)
+    .match($.request, REQUEST.STATUS, $.status)
     .match($.self, "url", $.url)
-    .not(q => q.match($.request, "response/json", $._))
+    .not(q => q.match($.request, RESPONSE.JSON, $._))
     .render(({ self, status, url }) => (
       <div title="Effect Demo" entity={self}>
-        <h1>{status}</h1>
+        <h1>{status} - <i>{url}</i></h1>
         <button onclick="~/on/reset">Reset</button>
       </div>
     )).commit(),
 
-  display: select({ self: $.self, request: $.request, title: $.title, url: $.url })
-    .match($.self, "my/request", $.request)
-    .match($.request, "response/json", $.content)
+  showResult: select({ self: $.self, request: $.request, content: $.content, title: $.title })
+    .match($.self, TODO_REQUEST, $.request)
+    .match($.request, RESPONSE.JSON, $.content)
     .match($.content, 'title', $.title)
-    .match($.self, "url", $.url)
-    .render(({ self, title, url }) => (
+    .render(({ self, title }) => (
       <div title="Effect Demo" entity={self}>
         <h1>Response</h1>
-        <pre>{title}</pre>
+        <pre>{JSON.stringify({ title })}</pre>
         <button onclick="~/on/reset">Reset</button>
       </div>
     ))
@@ -87,9 +74,9 @@ export default behavior({
 
   onReset: select({ self: $.self, event: $.event, request: $.request })
     .match($.self, "~/on/reset", $.event)
-    .match($.self, "my/request", $.request)
+    .match($.self, TODO_REQUEST, $.request)
     .update(({ self, request }) => {
-      return [{ Retract: [self, "my/request", request] }];
+      return [{ Retract: [self, TODO_REQUEST, request] }];
     })
     .commit(),
 

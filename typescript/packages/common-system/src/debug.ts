@@ -220,7 +220,7 @@ const naturalLanguage = (query: Query) => {
 
 export const logQuery = (query: Query): void => {
   try {
-    console.group('Query');
+    console.groupCollapsed('Query');
 
     try {
       // Log SELECT

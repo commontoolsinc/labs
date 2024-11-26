@@ -5,7 +5,7 @@ import * as Memory from "synopsys/store/memory";
 import * as Session from "./session.js";
 import type { Effect, Instruction } from "./adapter.js";
 import { Constant } from "datalogia";
-import { explainMutation, explainQuery, logQuery } from "./debug.js";
+import { explainMutation, logQuery } from "./debug.js";
 export * from "synopsys";
 
 export type DB =
@@ -165,43 +165,36 @@ class Subscription<Select extends Selector = Selector> {
     this.revision = refer([]);
   }
   *poll(db: DB) {
-    const id = this.name + ' query';
     const start = performance.now();
     const selection = yield* db.query(this.query);
     const queryTime = performance.now() - start;
-    console.time(id);
-    console.timeEnd(id);
+    console.log(`%c${this.name} ${queryTime.toFixed(2)}ms (spell/${this.id.toString()})`, 'color: #999; font-size: 0.8em; font-style: italic;');
 
     const revision = refer(selection);
     const changes: Instruction[] = [];
     if (this.revision.toString() !== revision.toString()) {
       this.revision = revision;
       if (selection.length > 0) {
-        logQuery(this.query);
-        explainQuery(this.query).then(res => {
-          console.log(`%cquery(${this.name})%c:`, 'color: #00FFFF; font-weight: bold;', 'color: inherit; font-style: italic;', res);
-        })
         console.group(`%c${this.name}`, 'color: #4CAF50; font-weight: bold;');
+        logQuery(this.query);
         console.log('%crevision%c:', 'color: #2196F3; font-weight: bold;', 'color: inherit;', this.revision.toString());
         console.log('%cselection%c:', 'color: #2196F3; font-weight: bold;', 'color: inherit;', selection);
       }
+      const processStartTime = performance.now();
       for (const match of selection) {
         const self = (match as any).self
-        const fxId = this.name + ' effect';
-        console.time(fxId)
+        const effectStartTime = performance.now();
         const matchChanges = (yield* this.effect.perform(match));
-        console.timeEnd(fxId)
+        const effectTime = performance.now() - effectStartTime;
+        console.log(`%c ↳ self/${self?.toString() || 'none'} ${effectTime.toFixed(2)}ms`, 'color: #999; font-size: 0.8em; font-style: italic;');
 
         if (self) {
           window.dispatchEvent(new CustomEvent('query-triggered', {
             detail: { rule: this.name, spell: this.id.toString(), entity: self.toString(), match, performanceMs: queryTime }
           }))
-          console.log('trigger(' + this.name + ')', { rule: this.name, spell: this.id.toString(), entity: self.toString(), match })
-          console.group(`%c${self.toString()}`, 'color: #FF9800; font-weight: bold;');
-          for (const change of matchChanges) {
-            console.log('%cchange%c:', 'color: #E91E63; font-weight: bold;', 'color: inherit;', JSON.stringify(change), change);
-          }
-          console.groupEnd();
+        }
+        for (const change of matchChanges) {
+          console.log('%cchange%c:', 'color: #E91E63; font-weight: bold;', 'color: inherit;', JSON.stringify(change), change);
         }
         changes.push(...matchChanges);
 
@@ -214,7 +207,7 @@ class Subscription<Select extends Selector = Selector> {
             window.dispatchEvent(new CustomEvent('mutation', {detail:{
               rule: this.name,
               spell: this.id.toString(),
-              entity: self.toString(),
+              entity: self?.toString(),
               query: this.query,
               selection,
               changes,
@@ -224,9 +217,11 @@ class Subscription<Select extends Selector = Selector> {
           })
         }
       }
-    }
-    if (selection.length > 0) {
-      console.groupEnd();
+      if (selection.length > 0) {
+        const totalTime = performance.now() - processStartTime;
+        console.log(`%cTotal reaction: ${totalTime.toFixed(2)}ms`, 'color: #999; font-size: 0.8em; font-style: italic;');
+        console.groupEnd();
+      }
     }
 
     return changes;
