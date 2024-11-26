@@ -146,7 +146,7 @@ export class Charm extends HTMLElement {
   }
 
   get name() {
-    return this.renderMount.title;
+    return this.renderMount.title || "untitled";
   }
 
   propagate() {
