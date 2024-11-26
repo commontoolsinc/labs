@@ -51,7 +51,7 @@ export const articlePreview = behavior({
     .commit(),
 })
 
-export default behavior({
+export const importer = behavior({
   defaultUrl: select({ self: $.self })
     .not(q => q.match($.self, "url", $._))
     .assert(({ self }) => [self, 'url', 'https://bf.wtf'])
@@ -144,3 +144,5 @@ export default behavior({
     })
     .commit(),
 });
+
+export const spawn = (source: {} = { importer: 1 }) => importer.spawn(source);

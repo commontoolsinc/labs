@@ -43,7 +43,7 @@ import * as readingList from './spells/05_readingList.jsx'
 import * as chat from './spells/06_chat.jsx'
 import * as sharedTags from './spells/07_sharedTags.jsx'
 import * as workbench from './spells/08_workbench.jsx'
-import { default as Fetcher } from './spells/fetcher.jsx'
+import * as importer from './spells/09_importer.jsx'
 
 export type Charm = {
   [NAME]?: string;
@@ -228,7 +228,7 @@ addCharms([
   // sharedTags.spawn({ sharedDataInstance: 2 }),
   // workbench.spawn({ workbench: 1 }),
   // FetchService.spawn(),
-  // Fetcher.spawn({ fetch: 1 }),
+  // importer.spawn({ fetch: 1 }),
   ViewService.spawn(),
 ]);
 
