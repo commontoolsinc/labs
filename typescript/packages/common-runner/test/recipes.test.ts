@@ -15,7 +15,6 @@ describe("Recipe Runner", () => {
       },
     );
 
-    console.log("simpleRecipe", JSON.stringify(simpleRecipe.toJSON(), null, 2));
     const result = run(simpleRecipe, { value: 5 });
 
     await idle();
@@ -198,9 +197,77 @@ describe("Recipe Runner", () => {
     await idle();
     expect(values).toEqual([
       [1, 1, 0],
-      [3, 1, 0], // That's the first logger called again when counter changes
+      // Next is the first logger called again when counter changes, since this
+      // is now a long running charmlet:
+      [3, 1, 0],
       [3, 2, 0],
     ]);
+  });
+
+  it("should handle recipes returned by lifted functions", async () => {
+    const x = cell(2);
+    const y = cell(3);
+
+    const runCounts = {
+      multiply: 0,
+      multiplyGenerator: 0,
+      multiplyGenerator2: 0,
+    };
+
+    const multiply = lift<{ x: number; y: number }>(({ x, y }) => {
+      runCounts.multiply++;
+      return x * y;
+    });
+
+    const multiplyGenerator = lift<{ x: number; y: number }>((args) => {
+      runCounts.multiplyGenerator++;
+      return multiply(args);
+    });
+
+    const multiplyGenerator2 = lift<{ x: number; y: number }>(({ x, y }) => {
+      runCounts.multiplyGenerator2++;
+      // Now passing literals, so will hardcode values in recipe and hence
+      // re-run when values change
+      return multiply({ x, y });
+    });
+
+    const multiplyRecipe = recipe<{ x: number; y: number }>(
+      "multiply",
+      (args) => {
+        return {
+          result1: multiplyGenerator(args),
+          result2: multiplyGenerator2(args),
+        };
+      },
+    );
+
+    const result = run(multiplyRecipe, { x, y });
+
+    await idle();
+
+    expect(result.getAsQueryResult()).toMatchObject({
+      result1: 6,
+      result2: 6,
+    });
+
+    expect(runCounts).toMatchObject({
+      multiply: 2,
+      multiplyGenerator: 1,
+      multiplyGenerator2: 1,
+    });
+
+    x.send(3);
+    await idle();
+    expect(result.getAsQueryResult()).toMatchObject({
+      result1: 9,
+      result2: 9,
+    });
+
+    expect(runCounts).toMatchObject({
+      multiply: 4,
+      multiplyGenerator: 1, // Did not re-run, since we didn't read the values!
+      multiplyGenerator2: 2,
+    });
   });
 
   it("should support referenced modules", async () => {

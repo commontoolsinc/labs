@@ -4,7 +4,7 @@ import {
   mergeObjects,
   sendValueToBinding,
   setNestedValue,
-  mapBindingsToCell,
+  unwrapOneLevelAndBindtoCell,
   followCellReferences,
   followAliases,
   compactifyPaths,
@@ -233,7 +233,7 @@ describe("mapBindingToCell", () => {
       z: 3,
     };
 
-    const result = mapBindingsToCell(binding, testCell);
+    const result = unwrapOneLevelAndBindtoCell(binding, testCell);
     expect(result).toEqual({
       x: { $alias: { cell: testCell, path: ["a"] } },
       y: { $alias: { cell: testCell, path: ["b", "c"] } },

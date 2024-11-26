@@ -137,6 +137,10 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
   return top;
 }
 
+export function stream<T>(): OpaqueRef<T> {
+  return opaqueRef<T>({ $stream: true } as T);
+}
+
 export function createShadowRef(ref: OpaqueRef<any>): ShadowRef {
   return { shadowOf: ref };
 }

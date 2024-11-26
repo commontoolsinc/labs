@@ -376,7 +376,7 @@ export function cell<T>(value?: T, cause?: any): CellImpl<T> {
     toJSON: () =>
       typeof entityId?.toJSON === "function"
         ? entityId.toJSON()
-        : (entityId as { "/": string }),
+        : (entityId as { "/": string }) ?? { "/": "" },
     get value(): T {
       return value as T;
     },
@@ -772,7 +772,6 @@ export function createQueryResultProxy<T>(
         };
         ref.cell.send(value);
         ref.cell.sourceCell = valueCell;
-        if (Array.isArray(valueCell.get())) debugger;
 
         log?.writes.push(ref);
 
@@ -835,7 +834,6 @@ function makeOpaqueRef(
   let ref = opaqueRefs.find((p) => arrayEqual(valuePath, p.path))?.opaqueRef;
   if (!ref) {
     ref = opaqueRef();
-    for (const key of valuePath) ref = ref.key(key);
     ref.setPreExisting({ $alias: { cell: valueCell, path: valuePath } });
     opaqueRefs.push({ path: valuePath, opaqueRef: ref });
   }
