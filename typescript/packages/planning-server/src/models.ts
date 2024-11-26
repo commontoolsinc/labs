@@ -5,6 +5,10 @@ import { openai } from "npm:@ai-sdk/openai";
 import { vertex } from "npm:@ai-sdk/google-vertex";
 import { ollama } from "ollama-ai-provider";
 
+// ensure env is ready to be read
+import { config } from "https://deno.land/x/dotenv/mod.ts";
+await config({ export: true });
+
 export type Capabilities = {
   contextWindow: number;
   maxOutputTokens: number;
