@@ -1,7 +1,7 @@
 import {
   TYPE,
   type Recipe,
-  type RecipeFactory,
+  type NodeFactory,
   type Module,
   type Alias,
   type JSON,
@@ -66,17 +66,17 @@ export const cancels = new WeakMap<CellImpl<any>, Cancel>();
  * @returns The result cell.
  */
 export function run<T, R>(
-  recipeFactory?: RecipeFactory<T, R>,
+  recipeFactory?: NodeFactory<T, R>,
   argument?: T,
   resultCell?: CellImpl<R>,
 ): CellImpl<R>;
 export function run<T, R = any>(
-  recipe?: Recipe,
+  recipe?: Recipe | Module,
   argument?: T,
   resultCell?: CellImpl<R>,
 ): CellImpl<R>;
 export function run<T, R = any>(
-  recipe?: Recipe,
+  recipe?: Recipe | Module,
   argument?: T,
   resultCell: CellImpl<R> = cell<R>(),
 ): CellImpl<R> {
@@ -89,6 +89,22 @@ export function run<T, R = any>(
     // make all this async.
     stop(resultCell);
   }
+
+  // If this is a module, not a recipe, wrap it in a recipe that just runs,
+  // passing arguments in unmodified and passing all results through as is
+  if (isModule(recipe))
+    recipe = {
+      argumentSchema: {},
+      resultSchema: {},
+      result: { $alias: { path: ["internal", "result"] } },
+      nodes: [
+        {
+          module: recipe as Module,
+          inputs: { $alias: { path: ["argument"] } },
+          outputs: { $alias: { path: ["internal", "result"] } },
+        },
+      ],
+    } satisfies Recipe;
 
   // Keep track of subscriptions to cancel them later
   const [cancel, addCancel] = useCancelGroup();
@@ -137,7 +153,7 @@ export function run<T, R = any>(
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
       // Create aliases for all the top level keys in the object
       argument = Object.fromEntries(
-        Object.keys(value).map((key) => [
+        Object.keys(value).map(key => [
           key,
           { $alias: { cell: ref.cell, path: [...ref.path, key] } },
         ]),
@@ -192,7 +208,7 @@ export function run<T, R = any>(
   for (const node of recipe.nodes) {
     // Generate causal IDs for all cells read and written to by this node, if
     // they don't have any yet.
-    [node.inputs, node.outputs].forEach((bindings) =>
+    [node.inputs, node.outputs].forEach(bindings =>
       findAllAliasedCells(bindings, processCell).forEach(({ cell, path }) => {
         if (!cell.entityId) cell.generateEntityId({ cell: processCell, path });
       }),
@@ -535,7 +551,7 @@ function instantiateIsolatedNode(
     () => new CommonRuntime(COMMON_RUNTIME_URL),
   );
 
-  const fnPromise = runtime.then((rt) =>
+  const fnPromise = runtime.then(rt =>
     rt.instantiate(
       module.implementation as unknown as JavaScriptModuleDefinition,
     ),
