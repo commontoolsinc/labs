@@ -4,6 +4,7 @@ import {
   refer,
   Reference,
   Instruction,
+  Session,
   Task,
   Fact,
   h,
@@ -20,8 +21,6 @@ type State =
   | { status: "Receiving"; source: Fetch; content: Promise<{}> }
   | { status: "Complete"; source: Fetch; content: {} };
 
-const effects = new WeakMap<Reference, State>();
-
 export default service({
   send: {
     select: {
@@ -29,19 +28,19 @@ export default service({
     },
     where: [{ Case: [provider, `~/send`, $.request] }],
     *perform({ request }: { request: Reference }): Task.Task<Instruction[]> {
-      const effect = effects.get(request);
+      const effect = Session.resolve<State>(request);
       if (effect?.status === "Open") {
-        effects.set(request, {
+        const state = {
           status: "Sending",
           source: effect.source,
           response: globalThis.fetch(effect.source.request),
-        });
+        }
 
         return [
           { Retract: [provider, "~/send", request] },
-          { Upsert: [provider, "~/receive", request] },
-          { Upsert: [request, "request/status", "Sending"] },
-          { Upsert: [effect.source.consumer, effect.source.port, request] },
+          { Upsert: [provider, "~/receive", state as any] },
+          { Upsert: [effect.source.consumer, effect.source.port, effect.source.id] },
+          { Upsert: [effect.source.id, "request/status", "Sending"] },
         ];
       }
       return [];
@@ -53,7 +52,7 @@ export default service({
     },
     where: [{ Case: [provider, `~/receive`, $.request] }],
     *perform({ request }: { request: Reference }) {
-      const effect = effects.get(request);
+      const effect = Session.resolve<State>(request);
       if (effect?.status === "Sending") {
         const response = yield* Task.wait(effect.response);
         const { expect } = effect.source;
@@ -64,18 +63,18 @@ export default service({
               ? response.json()
               : response.arrayBuffer();
 
-        effects.set(request, {
+        const state = {
           status: "Receiving",
           source: effect.source,
           content,
-        });
+        }
 
         return [
           { Retract: [provider, "~/receive", request] },
-          { Upsert: [provider, `~/complete`, request] },
-          { Upsert: [request, "request/status", "Receiving"] },
-          { Upsert: [request, "response/status/code", response.status] },
-          { Upsert: [request, "response/status/text", response.statusText] },
+          { Upsert: [provider, `~/complete`, state as any] },
+          { Upsert: [effect.source.id, "request/status", "Receiving"] },
+          { Upsert: [effect.source.id, "response/status/code", response.status] },
+          { Upsert: [effect.source.id, "response/status/text", response.statusText] },
         ];
       }
 
@@ -89,18 +88,17 @@ export default service({
     where: [{ Case: [provider, `~/complete`, $.request] }],
     *perform({ request }: { request: Reference }) {
       const changes: Instruction[] = [];
-      const effect = effects.get(request);
+      const effect = Session.resolve<State>(request);
       if (effect?.status === "Receiving") {
         const content = yield* Task.wait(effect.content);
-        effects.delete(request);
         changes.push(
           { Retract: [provider, `~/complete`, request] },
           { Assert: [provider, "effect/log", request] },
-          { Upsert: [request, "request/status", "Complete"] },
+          { Upsert: [effect.source.id, "request/status", "Complete"] },
         );
 
         if (effect.source.expect === "json") {
-          const id = refer(content);
+          const id = refer(content); // NOTE(ja): 
           changes.push(
             { Import: content },
             { Upsert: [request, `response/json`, id] },
@@ -260,6 +258,7 @@ export class Fetch {
   port: string;
   request: Request;
   expect: Expect;
+  id: Reference;
   constructor(
     consumer: Reference,
     port: string,
@@ -270,10 +269,7 @@ export class Fetch {
     this.port = port;
     this.request = request;
     this.expect = expect;
-  }
-
-  get Assert(): Fact {
-    const request = refer({
+    this.id = refer({
       provider,
       consumer: this.consumer,
       port: this.port,
@@ -287,10 +283,10 @@ export class Fetch {
         expect: this.expect,
       },
     });
+  }
 
-    effects.set(request, { status: "Open", source: this });
-
-    return [provider, `~/send`, request];
+  get Assert(): Fact {
+    return [provider, `~/send`, { status: "Open", source: this } as any];
   }
 
   text() {
