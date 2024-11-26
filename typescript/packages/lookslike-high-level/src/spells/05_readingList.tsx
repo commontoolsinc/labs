@@ -1,11 +1,13 @@
-import { h, behavior, $, Reference, select, Session } from "@commontools/common-system";
-import { build, make, event, events, remove, set, each, defaultTo } from "../sugar.js";
+import { h, $, Reference, select, Session } from "@commontools/common-system";
+import { build, make, event, events, remove, set, each, defaultTo, behavior } from "../sugar.js";
 import { llm } from "../effects/fetch.js";
 import { Constant } from "synopsys";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
+import { CommonAudioRecordingEvent } from "../../../common-ui/lib/components/common-audio-recorder.js";
 
 const ReadingListEvent = events({
   onChangeTitle: '~/on/changeTitle',
+  onTranscription: '~/on/transcription',
   onAddItem: '~/on/addItem',
   onDeleteItem: '~/on/deleteItem',
   onReimagineItem: '~/on/reimagineItem',
@@ -58,6 +60,10 @@ function Footer({ draftTitle }: { draftTitle: string }) {
   return <div>
     <hr />
     <common-input value={draftTitle} oncommon-input={ReadingListEvent.onChangeTitle} />
+    <common-audio-recorder transcribe={true} oncommon-audio-recording={ReadingListEvent.onTranscription}>
+      <button slot="start">🎤</button>
+      <button slot="stop">⏹️</button>
+    </common-audio-recorder>
     <button onclick={ReadingListEvent.onAddItem}>Add</button>
   </div>
 }
@@ -108,6 +114,12 @@ export const readingList = behavior({
   onChangeArticleTitle: event(ReadingListEvent.onChangeTitle)
     .update(({ self, event }) => set(self, {
       'draft/title': Session.resolve<CommonInputEvent>(event).detail.value
+    }))
+    .commit(),
+
+  onTranscription: event(ReadingListEvent.onTranscription)
+    .update(({ self, event }) => set(self, {
+      'draft/title': Session.resolve<CommonAudioRecordingEvent>(event).detail.transcription || ''
     }))
     .commit(),
 
