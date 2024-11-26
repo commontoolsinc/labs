@@ -574,7 +574,20 @@ export class CommonWindowManager extends LitElement {
       syncRecipe(recipeId).then(() => {
         const recipe = getRecipe(recipeId);
         if (recipe) {
-          const charm = run(recipe, {});
+          // Get data from URL query parameter if it exists
+          const searchParams = new URLSearchParams(url.search);
+          const encodedData = searchParams.get('data');
+          let initialData = {};
+
+          if (encodedData) {
+            try {
+              initialData = JSON.parse(atob(encodedData));
+            } catch (e) {
+              console.error('Failed to parse data parameter:', e);
+            }
+          }
+
+          const charm = run(recipe, initialData);
           this.openCharm(charm);
         }
       });
