@@ -1,17 +1,7 @@
-import {
-  h,
-  behavior,
-  $,
-  Reference,
-  select,
-  Session,
-  refer,
-} from "@commontools/common-system";
-
+import { h, behavior, $, Reference, select, Session, refer } from "@commontools/common-system";
 import { fetch, REQUEST, RESPONSE } from "../effects/fetch.js";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
-import { addTag } from "../sugar/tags.js";
-import { events } from "../sugar/event.js";
+import { addTag } from "../sugar.js";
 
 const IMPORT_REQUEST = 'import/request'
 

@@ -1,12 +1,8 @@
 import { h, behavior, $, Reference, select, Session } from "@commontools/common-system";
-import { build, make } from "../sugar/build.js";
-import { event, events } from "../sugar/event.js";
+import { build, make, event, events, remove, set, each, defaultTo } from "../sugar.js";
 import { llm } from "../effects/fetch.js";
 import { Constant } from "synopsys";
-import { remove, set } from "../sugar/transact.js";
-import { each } from "../sugar/render.jsx";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
-import { defaultTo } from "../sugar/default.js";
 
 const ReadingListEvent = events({
   onChangeTitle: '~/on/changeTitle',

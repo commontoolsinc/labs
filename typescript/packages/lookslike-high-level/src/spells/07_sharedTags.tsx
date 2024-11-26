@@ -4,14 +4,12 @@ import {
   $,
   Session,
 } from "@commontools/common-system";
-import { event, events } from "../sugar/event.js";
+import { event, events, tags, each, render } from "../sugar.js";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
-import { tags } from "../sugar/inbox.js";
-import { each, render } from "../sugar/render.jsx";
 import { Messages } from "./06_chat.jsx";
 import { articlePreview } from "./09_importer.jsx";
 
-export const source = { chat: { v: 1 } };
+export const source = { viewer: 1 };
 
 const SharedDataEvents = events({
   onEditTag: '~/on/editTag'

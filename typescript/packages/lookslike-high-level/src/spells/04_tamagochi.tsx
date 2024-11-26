@@ -1,8 +1,5 @@
 import { h, behavior, Reference } from "@commontools/common-system";
-import { event, events } from "../sugar/event.js";
-import { set } from "../sugar/transact.js";
-import { addTag } from "../sugar/tags.js";
-import { field } from "../sugar/query.js";
+import { event, events, set, addTag, field } from "../sugar.js";
 
 const genImage =
   (prompt: string) => `/api/img/?prompt=${encodeURIComponent(prompt)}`

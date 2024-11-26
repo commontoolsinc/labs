@@ -1,5 +1,5 @@
 import { h, $, behavior, select } from "@commontools/common-system";
-import { event, events } from "../sugar/event.js";
+import { event, events } from "../sugar.js";
 
 const HelloWorldEvent = events({
   onAlert: '~/on/alert',

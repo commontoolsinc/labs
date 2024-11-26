@@ -5,7 +5,6 @@ import {
   select,
   refer,
 } from "@commontools/common-system";
-import { default as Importer } from './09_importer.jsx'
 import { sharedDataViewer } from "./07_sharedTags.jsx";
 import { tamagochi } from "./04_tamagochi.jsx";
 
@@ -34,3 +33,5 @@ export const composed = behavior({
     ))
     .commit(),
 })
+
+export const spawn = (source: {} = {shared: 1}) => composed.spawn(source)
