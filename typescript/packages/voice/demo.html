@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Transcription</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+        button {
+            font-size: 1.2rem;
+            padding: 0.5rem 1rem;
+            margin: 0.5rem;
+        }
+        #transcription {
+            margin-top: 1rem;
+            padding: 1rem;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            min-height: 100px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Audio Transcription</h1>
+    <p>Enter the URL of the transcription API:</p>
+    <input type="text" id="url" value="/api/transcribe" style="width: 100%;" />
+    
+    <button id="startRecord">Start Recording</button>
+    <button id="stopRecord" disabled>Stop Recording</button>
+    
+    <div>
+        <h3>Transcription:</h3>
+        <div id="transcription"></div>
+    </div>
+
+    <script>
+        async function runTranscription(audioBlob) {
+            const url = document.getElementById('url').value;
+            const response = await fetch(url, {
+                method: 'POST',
+                body: audioBlob
+            });
+            const data = await response.json();
+            transcriptionDiv.textContent = data.transcription;
+        }
+
+        let mediaRecorder;
+        let audioChunks = [];
+
+        const startButton = document.getElementById('startRecord');
+        const stopButton = document.getElementById('stopRecord');
+        const transcriptionDiv = document.getElementById('transcription');
+
+        startButton.onclick = async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    
+                    runTranscription(audioBlob);
+                };
+
+                audioChunks = [];
+                mediaRecorder.start();
+                startButton.disabled = true;
+                stopButton.disabled = false;
+            } catch (error) {
+                console.error('Error accessing microphone:', error);
+            }
+        };
+
+        stopButton.onclick = () => {
+            mediaRecorder.stop();
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        };
+    </script>
+</body>
+</html>
