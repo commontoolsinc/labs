@@ -35,7 +35,7 @@ export const articlePreview = behavior({
     .match($.self, "likes", $.likes)
     .update(({ self, likes }) => {
       return [
-        { Assert: [self, 'likes', Number(likes) + 1] }
+        { Upsert: [self, 'likes', Number(likes) + 1] }
       ];
     })
     .commit(),
