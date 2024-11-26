@@ -7,8 +7,9 @@ import {
 import { event, events } from "../sugar/event.js";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
 import { tags } from "../sugar/inbox.js";
-import { render } from "../sugar/render.jsx";
+import { each, render } from "../sugar/render.jsx";
 import { Messages } from "./06_chat.jsx";
+import { articlePreview } from "./09_importer.jsx";
 
 export const source = { chat: { v: 1 } };
 
@@ -120,6 +121,32 @@ export const sharedDataViewer = behavior({
                 </table>
               );
             })}
+          </div>
+        </div>
+      ))]
+    },
+  },
+
+  articles: {
+    select: {
+      self: $.self,
+      shared: [{ self: $.shared, url: $.url, content: $.content }],
+      searchTag: $.searchTag,
+    },
+    where: [
+      { Case: [$.self, 'searchTag', $.searchTag] },
+      { Case: [tags, $.searchTag, $.shared] },
+      { Case: [$.shared, 'url', $.url] },
+      { Case: [$.shared, 'content', $.content] },
+    ],
+    update: ({ self, shared, searchTag }) => {
+      return [render({ self }, ({ self }) => (
+        <div title="Shared">
+          <fieldset>
+            <common-input value={searchTag} type="text" oncommon-input={SharedDataEvents.onEditTag} />
+          </fieldset>
+          <div>
+            {...each(shared.map(s => s.self), articlePreview)}
           </div>
         </div>
       ))]
