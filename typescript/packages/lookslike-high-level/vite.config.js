@@ -6,6 +6,7 @@ import { VitePWA } from "vite-plugin-pwa";
 const commonPackages = [
   "@commontools/common-builder",
   "@commontools/common-runner",
+  "@commontools/common-system",
   "@commontools/common-html",
   "@commontools/common-ui",
   "@commontools/common-runtime",
@@ -46,6 +47,10 @@ export default defineConfig({
         target: "https://ct-img.m4ke.workers.dev",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/img/, ""),
+      },
+      "/api/transcribe": {
+        target: "https://voice.commontools.workers.dev",
+        changeOrigin: true
       },
       "/api/reader": {
         target: "https://r.jina.ai/",

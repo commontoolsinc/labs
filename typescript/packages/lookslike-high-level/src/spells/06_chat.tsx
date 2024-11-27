@@ -5,13 +5,8 @@ import {
   Session,
   select
 } from "@commontools/common-system";
-import * as Collection from "../sugar/collections.js";
-import { event, events } from "../sugar/event.js";
+import { event, events, Collection, defaultTo, isEmpty, Transact, addTag, render } from "../sugar.js";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
-import { defaultTo, isEmpty } from "../sugar/default.js";
-import * as Transact from "../sugar/transact.js";
-import { addTag } from "../sugar/tags.js";
-import { render } from "../sugar/render.js";
 
 export const source = { chat: { v: 1 } };
 
@@ -140,4 +135,4 @@ export const chatRules = behavior({
 
 console.log(chatRules)
 
-export const spawn = (input: {} = source) => chatRules.spawn(input);
+export const spawn = (input: {} = source) => chatRules.spawn(input, "Chat");

@@ -137,4 +137,4 @@ export const rules = behavior({
 const mermaid = analyzeRuleDependencies(rules.rules as any)
 console.log(mermaid)
 
-export const spawn = (input: {} = source) => rules.spawn(input);
+export const spawn = (input: {} = source) => rules.spawn(input, "Dungeon");

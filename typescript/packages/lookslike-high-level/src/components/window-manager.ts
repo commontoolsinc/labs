@@ -1,34 +1,36 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { ref, createRef, Ref } from "lit/directives/ref.js";
+import { createRef, Ref, ref } from "lit/directives/ref.js";
 import { style } from "@commontools/common-ui";
 import { render } from "@commontools/common-html";
 import {
-  Charm,
-  UI,
   addCharms,
+  Charm,
+  closeCharm,
+  openCharm,
   runPersistent,
   syncCharm,
-  openCharm,
   syncRecipe,
-  closeCharm,
+  UI,
 } from "../data.js";
+
 import {
-  run,
+  addRecipe,
   CellImpl,
-  isCell,
-  idle,
   EntityId,
-  getRecipe,
   getEntityId,
+  getRecipe,
+  idle,
+  isCell,
+  run,
 } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
 import { NAME, TYPE } from "@commontools/common-builder";
 import { matchRoute, navigate } from "../router.js";
-import { inferJsonSchema } from "../schema.js";
-import { schemaQueryExample } from "../recipes/schemaQuery.jsx";
+import * as Schema from "../schema.js";
+import { buildRecipe } from "../localBuild.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -155,8 +157,10 @@ export class CommonWindowManager extends LitElement {
   private charmRefs: Map<string, Ref<HTMLElement>> = new Map();
   private newCharmRefs: [CellImpl<Charm>, Ref<HTMLElement>][] = [];
 
-  @state() private focusedCharm: CellImpl<Charm> | null = null;
-  @state() private focusedProxy: Charm | null = null;
+  @state()
+  private focusedCharm: CellImpl<Charm> | null = null;
+  @state()
+  private focusedProxy: Charm | null = null;
 
   handleUniboxSubmit(event: CustomEvent) {
     const charm = this.focusedProxy;
@@ -216,12 +220,17 @@ export class CommonWindowManager extends LitElement {
 
   input: string = "";
 
-  @state() searchOpen: boolean = false;
-  @state() location: string = "Home";
+  @state()
+  searchOpen: boolean = false;
+  @state()
+  location: string = "Home";
 
-  @state() sidebarTab: string = "home";
-  @state() wideSidebar: boolean = false;
-  @state() suggestions: any[] = [];
+  @state()
+  sidebarTab: string = "home";
+  @state()
+  wideSidebar: boolean = false;
+  @state()
+  suggestions: any[] = [];
 
   onLocationClicked(_event: CustomEvent) {
     console.log("Location clicked in app.");
@@ -283,8 +292,7 @@ export class CommonWindowManager extends LitElement {
 
     const onSidebarTabChanged = (event: CustomEvent) => {
       this.sidebarTab = event.detail.tab;
-      this.wideSidebar =
-        this.sidebarTab === "source" ||
+      this.wideSidebar = this.sidebarTab === "source" ||
         this.sidebarTab === "data" ||
         this.sidebarTab === "query";
     };
@@ -308,19 +316,27 @@ export class CommonWindowManager extends LitElement {
         this.focusedCharm.asRendererCell(["data"]).send(mergedData);
 
         // Update the title to indicate the merge
-        const newTitle = `${
-          this.focusedProxy?.[NAME] || "Untitled"
-        } (Merged ${new Date().toISOString()})`;
+        const newTitle = `${this.focusedProxy?.[NAME] || "Untitled"} (Merged ${
+          new Date().toISOString()
+        })`;
         this.focusedCharm.asRendererCell([NAME]).send(newTitle);
 
         // Refresh the UI
         this.requestUpdate();
       } else {
         // Create a new charm and query for the imported data
-        const schema = inferJsonSchema(data[0]);
-        runPersistent(schemaQueryExample, { schema }).then((charm) =>
-          this.openCharm(charm),
-        );
+        const jsonSchema = Schema.inferJsonSchema(data[0]);
+        jsonSchema.description = Object.keys(data[0]).join(", ");
+        const src = Schema.generateZodSpell(jsonSchema);
+        buildRecipe(src).then(({ recipe }) => {
+          if (recipe) {
+            addRecipe(recipe, src, "render data", []);
+
+            runPersistent(recipe, data[0]).then((charm) =>
+              this.openCharm(charm)
+            );
+          }
+        });
       }
     };
 
@@ -343,54 +359,62 @@ export class CommonWindowManager extends LitElement {
           ></os-ai-box>
 
           <os-charm-chip-group>
-            ${repeat(
-              this.charms,
-              (charm) => charm.entityId!.toString(),
-              (charm) => {
-                if (!charm.get()) return;
+            ${
+      repeat(
+        this.charms,
+        (charm) => charm.entityId!.toString(),
+        (charm) => {
+          if (!charm.get()) return;
 
-                const charmId = charm.entityId!;
+          const charmId = charm.entityId!;
 
-                // Create a new ref for this charm
-                let charmRef = this.charmRefs.get(JSON.stringify(charmId));
-                if (!charmRef) {
-                  charmRef = createRef<HTMLElement>();
-                  this.charmRefs.set(JSON.stringify(charmId), charmRef);
-                  this.newCharmRefs.push([charm, charmRef]);
-                }
+          // Create a new ref for this charm
+          let charmRef = this.charmRefs.get(JSON.stringify(charmId));
+          if (!charmRef) {
+            charmRef = createRef<HTMLElement>();
+            this.charmRefs.set(JSON.stringify(charmId), charmRef);
+            this.newCharmRefs.push([charm, charmRef]);
+          }
 
-                const onNavigate = () => {
-                  this.openCharm(JSON.stringify(charmId));
-                  this.searchOpen = false;
-                };
+          const onNavigate = () => {
+            this.openCharm(JSON.stringify(charmId));
+            this.searchOpen = false;
+          };
 
-                return html` <os-charm-chip
+          return html` <os-charm-chip
                   icon=${charm.getAsQueryResult().icon || "search"}
                   text=${charm.getAsQueryResult()[NAME] || "Untitled"}
-                  .highlight=${JSON.stringify(charm.entityId) ===
-                  JSON.stringify(this.focusedCharm?.entityId)}
+                  .highlight=${
+            JSON.stringify(charm.entityId) ===
+              JSON.stringify(this.focusedCharm?.entityId)
+          }
                   @click=${onNavigate}
                 ></os-charm-chip>`;
-              },
-            )}
+        },
+      )
+    }
           </os-charm-chip-group>
         </os-dialog>
 
         <os-fabgroup class="pin-br" slot="overlay" @submit=${onAiBoxSubmit}>
-          ${repeat(
-            Array.isArray(this.suggestions) ? this.suggestions : [],
-            (suggestion) => suggestion.prompt,
-            (suggestion) => html`
+          ${
+      repeat(
+        Array.isArray(this.suggestions) ? this.suggestions : [],
+        (suggestion) => suggestion.prompt,
+        (suggestion) =>
+          html`
               <os-bubble
                 icon=${suggestion.behavior === "fork" ? "call_split" : "add"}
                 text=${suggestion.prompt}
                 @click=${() => onSuggestionsSelected(suggestion)}
               ></os-bubble>
             `,
-          )}
+      )
+    }
         </os-fabgroup>
-        ${this.charms.length === 0
-          ? html`
+        ${
+      this.charms.length === 0
+        ? html`
               <common-import @common-data=${onImportLocalData}>
                 <div class="empty-state">
                   <div style="display: flex; align-items: center;">
@@ -400,33 +424,37 @@ export class CommonWindowManager extends LitElement {
                 </div>
               </common-import>
             `
-          : html``}
-        ${repeat(
-          this.charms,
-          (charm) => charm.entityId!.toString(),
-          (charm) => {
-            if (!charm.get()) return;
+        : html``
+    }
+        ${
+      repeat(
+        this.charms,
+        (charm) => charm.entityId!.toString(),
+        (charm) => {
+          if (!charm.get()) return;
 
-            const charmId = charm.entityId!;
+          const charmId = charm.entityId!;
 
-            // Create a new ref for this charm
-            let charmRef = this.charmRefs.get(JSON.stringify(charmId));
-            if (!charmRef) {
-              charmRef = createRef<HTMLElement>();
-              this.charmRefs.set(JSON.stringify(charmId), charmRef);
-              this.newCharmRefs.push([charm, charmRef]);
-            }
+          // Create a new ref for this charm
+          let charmRef = this.charmRefs.get(JSON.stringify(charmId));
+          if (!charmRef) {
+            charmRef = createRef<HTMLElement>();
+            this.charmRefs.set(JSON.stringify(charmId), charmRef);
+            this.newCharmRefs.push([charm, charmRef]);
+          }
 
-            const onNavigate = () => {
-              this.openCharm(JSON.stringify(charmId));
-            };
+          const onNavigate = () => {
+            this.openCharm(JSON.stringify(charmId));
+          };
 
-            return html`
+          return html`
               <div
-                class="window ${JSON.stringify(charm.entityId) !==
+                class="window ${
+            JSON.stringify(charm.entityId) !==
                 JSON.stringify(this.focusedCharm?.entityId)
-                  ? "minimized"
-                  : ""}"
+              ? "minimized"
+              : ""
+          }"
                 id="window-${charmId}"
                 data-charm-id="${JSON.stringify(charmId)}"
               >
@@ -441,8 +469,9 @@ export class CommonWindowManager extends LitElement {
                 <div class="charm" ${ref(charmRef)}></div>
               </div>
             `;
-          },
-        )}
+        },
+      )
+    }
 
         <os-navstack slot="sidebar">
           <common-sidebar
@@ -556,13 +585,57 @@ export class CommonWindowManager extends LitElement {
       }, 100);
     }
 
+    const newRecipeMatch = matchRoute("/newRecipe", url);
+    if (newRecipeMatch) {
+      const searchParams = new URLSearchParams(url.search);
+      const srcUrl = searchParams.get("src");
+      if (!srcUrl) return;
+
+      const encodedData = searchParams.get("data");
+      let initialData = {};
+
+      if (encodedData) {
+        try {
+          initialData = JSON.parse(encodedData);
+        } catch (e) {
+          console.error("Failed to parse data parameter:", e);
+        }
+      }
+
+      fetch(decodeURIComponent(srcUrl)).then(async (response) => {
+        const src = await response.text();
+        buildRecipe(src).then(({ recipe }) => {
+          if (recipe) {
+            addRecipe(recipe, src, "render data", []);
+
+            runPersistent(recipe, initialData).then((charm) =>
+              this.openCharm(charm)
+            );
+          }
+        });
+      });
+    }
+
     const recipeMatch = matchRoute("/recipe/:recipeId", url);
     if (recipeMatch) {
       const recipeId = recipeMatch.params.recipeId;
       syncRecipe(recipeId).then(() => {
         const recipe = getRecipe(recipeId);
         if (recipe) {
-          const charm = run(recipe, {});
+          // Get data from URL query parameter if it exists
+          const searchParams = new URLSearchParams(url.search);
+          const encodedData = searchParams.get("data");
+          let initialData = {};
+
+          if (encodedData) {
+            try {
+              initialData = JSON.parse(atob(encodedData));
+            } catch (e) {
+              console.error("Failed to parse data parameter:", e);
+            }
+          }
+
+          const charm = run(recipe, initialData);
           this.openCharm(charm);
         }
       });

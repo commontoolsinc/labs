@@ -1,10 +1,8 @@
 import { h, behavior, $, Reference, select, service } from "@commontools/common-system";
-import { build, make } from "../sugar/build.js";
-import { event, events } from "../sugar/event.js";
+import { build, make, event, events, each } from "../sugar.js";
 import { Task, refer } from "synopsys";
 import { tsToExports } from "../localBuild.js";
 import { Session } from "@commontools/common-system";
-import { each } from "../sugar/render.jsx";
 
 export const source = { workbench: { v: 1 } };
 const DEFAULT_SOURCE = `
@@ -165,4 +163,4 @@ export const spellWorkbench = behavior({
     .commit(),
 })
 
-export const spawn = (input: {} = source) => spellWorkbench.spawn(input);
+export const spawn = (input: {} = source) => spellWorkbench.spawn(input, "Workbench");

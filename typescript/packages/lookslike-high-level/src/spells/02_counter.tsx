@@ -1,6 +1,5 @@
 import { h, behavior, $, select } from "@commontools/common-system";
-import { event, events } from "../sugar/event.js";
-import { set } from "../sugar/transact.js";
+import { event, events, set } from "../sugar.js";
 
 const Empty = select({ self: $.self })
   .not(q => q.match($.self, "clicks", $._))
@@ -44,4 +43,4 @@ export const rules = behavior({
   onReset,
 });
 
-export const spawn = (source: {} = { counter: 34 }) => rules.spawn(source);
+export const spawn = (source: {} = { counter: 34 }) => rules.spawn(source, "Counter");

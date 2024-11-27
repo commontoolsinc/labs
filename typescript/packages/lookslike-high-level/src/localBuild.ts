@@ -8,6 +8,7 @@ import * as zodToJsonSchema from 'zod-to-json-schema';
 import * as collectionSugar from "./sugar/build.js";
 import * as querySugar from "./sugar/query.js";
 import * as eventSugar from "./sugar/event.js";
+import * as sugar from "./sugar.js";
 
 // NOTE(ja): this isn't currently doing typechecking, but it could...
 
@@ -96,6 +97,8 @@ export const tsToExports = async (src: string): Promise<{ exports?: any, errors?
             return querySugar;
           case "../sugar/event.js":
             return eventSugar;
+          case "../sugar.js":
+            return sugar;
           case "@commontools/common-html":
               return commonHtml;
           case "@commontools/common-builder":

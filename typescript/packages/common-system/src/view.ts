@@ -11,12 +11,13 @@ export class Charm extends HTMLElement {
   #behavior: Behavior | null;
   #entity: Reference | null;
   #vdom: DOM.Node<{}> | null;
-  #cell: null | { send(data: { name: string }): void };
+  #cell: null | { send(data: string): void };
   #mount: HTMLElement;
   renderMount: HTMLElement;
   #debugger: CharmDebugger | null = null;
 
   #invocation: Task.Invocation<{}, Error> | null = null;
+  #observer: MutationObserver;
 
   constructor() {
     super();
@@ -70,6 +71,16 @@ export class Charm extends HTMLElement {
     this.#entity = null;
     this.#vdom = null;
     this.#cell = null;
+
+    // Add mutation observer to watch renderMount title changes
+    this.#observer = new MutationObserver(() => {
+      this.propagate();
+    });
+
+    this.#observer.observe(this.renderMount, {
+      attributes: true,
+      attributeFilter: ["title"],
+    });
   }
 
   get vdom() {
@@ -107,12 +118,11 @@ export class Charm extends HTMLElement {
   }
   disconnectedCallback() {
     this.deactivate();
+    this.#observer.disconnect();
   }
 
   *dispatch([attribute, event]: [string, Event]) {
     yield* DB.dispatch([this.entity, attribute, event]);
-
-    this.propagate();
   }
 
   set entity(value: Reference) {
@@ -142,10 +152,10 @@ export class Charm extends HTMLElement {
   }
 
   get name() {
-    return this.renderMount.title;
+    return this.renderMount.title || "untitled";
   }
 
   propagate() {
-    this.#cell?.send({ name: this.name });
+    this.#cell?.send(this.name);
   }
 }

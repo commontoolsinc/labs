@@ -1,5 +1,5 @@
 import { h, $, behavior, select } from "@commontools/common-system";
-import { event, events } from "../sugar/event.js";
+import { event, events } from "../sugar.js";
 
 const HelloWorldEvent = events({
   onAlert: '~/on/alert',
@@ -24,4 +24,4 @@ const spell = behavior({
     .commit()
 });
 
-export const spawn = (source: {} = { hello: 1 }) => spell.spawn(source);
+export const spawn = (source: {} = { hello: 1 }) => spell.spawn(source, "Hello World");

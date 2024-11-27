@@ -339,15 +339,6 @@
       "notes": "Consider collaborating with a local art gallery or the Berkeley Art Museum.",
       "createdAt": "2023-06-12T16:00:00Z",
       "updatedAt": "2023-06-12T16:00:00Z"
-    },
-    {
-      "id": "b014",
-      "title": "Attend a 'cosmic sabbatical' on the next leap year",
-      "description": "Take a mysterious four-year 'cosmic sabbatical' to explore the nature of time, consciousness, and reality.",
-      "category": "Personal Growth",
-      "priority": 10,
-      "estimatedCost": 100000,
-      "currency": "USD",
-      "timeFrame": "Long-term",
-      "isCompleted": false,
-      "relatedGo
+    }
+  ]
+}

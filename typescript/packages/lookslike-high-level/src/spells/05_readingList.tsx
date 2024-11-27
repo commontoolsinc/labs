@@ -1,15 +1,13 @@
-import { h, behavior, $, Reference, select, Session } from "@commontools/common-system";
-import { build, make } from "../sugar/build.js";
-import { event, events } from "../sugar/event.js";
+import { h, $, Reference, select, Session, behavior } from "@commontools/common-system";
+import { build, make, event, events, remove, set, each, defaultTo } from "../sugar.js";
 import { llm } from "../effects/fetch.js";
 import { Constant } from "synopsys";
-import { remove, set } from "../sugar/transact.js";
-import { each } from "../sugar/render.jsx";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
-import { defaultTo } from "../sugar/default.js";
+import { CommonAudioRecordingEvent } from "../../../common-ui/lib/components/common-audio-recorder.js";
 
 const ReadingListEvent = events({
   onChangeTitle: '~/on/changeTitle',
+  onTranscription: '~/on/transcription',
   onAddItem: '~/on/addItem',
   onDeleteItem: '~/on/deleteItem',
   onReimagineItem: '~/on/reimagineItem',
@@ -62,6 +60,10 @@ function Footer({ draftTitle }: { draftTitle: string }) {
   return <div>
     <hr />
     <common-input value={draftTitle} oncommon-input={ReadingListEvent.onChangeTitle} />
+    <common-audio-recorder transcribe={true} oncommon-audio-recording={ReadingListEvent.onTranscription}>
+      <button slot="start">🎤</button>
+      <button slot="stop">⏹️</button>
+    </common-audio-recorder>
     <button onclick={ReadingListEvent.onAddItem}>Add</button>
   </div>
 }
@@ -115,6 +117,12 @@ export const readingList = behavior({
     }))
     .commit(),
 
+  onTranscription: event(ReadingListEvent.onTranscription)
+    .update(({ self, event }) => set(self, {
+      'draft/title': Session.resolve<CommonAudioRecordingEvent>(event).detail.transcription || ''
+    }))
+    .commit(),
+
   onAddItem: event(ReadingListEvent.onAddItem)
     .with(DraftTitle)
     .update(({ self, draftTitle }) => {
@@ -131,4 +139,4 @@ export const readingList = behavior({
 console.log(readingList)
 console.log(readingListItem)
 
-export const spawn = (source: {} = { readingList: 2 }) => readingList.spawn(source);
+export const spawn = (source: {} = { readingList: 2 }) => readingList.spawn(source, "Reading List");
