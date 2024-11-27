@@ -163,4 +163,4 @@ export const spellWorkbench = behavior({
     .commit(),
 })
 
-export const spawn = (input: {} = source) => spellWorkbench.spawn(input);
+export const spawn = (input: {} = source) => spellWorkbench.spawn(input, "Workbench");

@@ -43,4 +43,4 @@ export const rules = behavior({
   onReset,
 });
 
-export const spawn = (source: {} = { counter: 34 }) => rules.spawn(source);
+export const spawn = (source: {} = { counter: 34 }) => rules.spawn(source, "Counter");

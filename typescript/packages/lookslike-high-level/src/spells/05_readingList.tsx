@@ -1,5 +1,5 @@
-import { h, $, Reference, select, Session } from "@commontools/common-system";
-import { build, make, event, events, remove, set, each, defaultTo, behavior } from "../sugar.js";
+import { h, $, Reference, select, Session, behavior } from "@commontools/common-system";
+import { build, make, event, events, remove, set, each, defaultTo } from "../sugar.js";
 import { llm } from "../effects/fetch.js";
 import { Constant } from "synopsys";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
@@ -139,4 +139,4 @@ export const readingList = behavior({
 console.log(readingList)
 console.log(readingListItem)
 
-export const spawn = (source: {} = { readingList: 2 }) => readingList.spawn(source);
+export const spawn = (source: {} = { readingList: 2 }) => readingList.spawn(source, "Reading List");

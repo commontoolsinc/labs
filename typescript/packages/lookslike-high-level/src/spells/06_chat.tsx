@@ -135,4 +135,4 @@ export const chatRules = behavior({
 
 console.log(chatRules)
 
-export const spawn = (input: {} = source) => chatRules.spawn(input);
+export const spawn = (input: {} = source) => chatRules.spawn(input, "Chat");

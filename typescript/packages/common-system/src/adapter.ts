@@ -19,7 +19,7 @@ export interface Behavior<
 
   fork(self?: Reference): Task.Task<{}, Error>;
 
-  spawn(source?: {}): CellImpl<{}>;
+  spawn(source?: {}, defaultName?: string): CellImpl<{}>;
 }
 
 export interface Service<Effects extends Record<string, Effect>> {
@@ -126,13 +126,13 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
       }
     }
   }
-  spawn(source: {} = this.id) {
+  spawn(source: {} = this.id, defaultName: string = "pending") {
     const entity = refer(source);
     const charm = refer({ entity, rules: this.id });
 
     return run(
       recipe(charm.toString(), () => {
-        const name = createRunnerCell("untitled");
+        const name = createRunnerCell(defaultName);
 
         return {
           [NAME]: name,

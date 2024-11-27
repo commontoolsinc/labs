@@ -161,4 +161,4 @@ export const sharedDataViewer = behavior({
     .commit(),
 });
 
-export const spawn = (input: {} = source) => sharedDataViewer.spawn(input);
+export const spawn = (input: {} = source) => sharedDataViewer.spawn(input, "Shared Data");

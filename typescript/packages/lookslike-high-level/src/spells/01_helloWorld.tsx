@@ -24,4 +24,4 @@ const spell = behavior({
     .commit()
 });
 
-export const spawn = (source: {} = { hello: 1 }) => spell.spawn(source);
+export const spawn = (source: {} = { hello: 1 }) => spell.spawn(source, "Hello World");

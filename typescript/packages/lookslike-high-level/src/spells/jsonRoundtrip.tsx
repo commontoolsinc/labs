@@ -61,4 +61,4 @@ export const roundTrip = behavior({
 
 console.log(roundTrip)
 
-export const spawn = (input: {} = source) => roundTrip.spawn(input);
+export const spawn = (input: {} = source) => roundTrip.spawn(input, "Roundtrip Demo");

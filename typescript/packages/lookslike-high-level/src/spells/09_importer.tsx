@@ -136,3 +136,4 @@ export const importer = behavior({
 });
 
 export const spawn = (source: {} = { importer: 1 }) => importer.spawn(source);
+export const spawn = (source: {} = { importer: 1 }) => importer.spawn(source, "Importer");

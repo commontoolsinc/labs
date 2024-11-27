@@ -34,4 +34,4 @@ export const composed = behavior({
     .commit(),
 })
 
-export const spawn = (source: {} = {shared: 1}) => composed.spawn(source)
+export const spawn = (source: {} = {shared: 1}) => composed.spawn(source, "Composed")

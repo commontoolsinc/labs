@@ -107,4 +107,4 @@ export const tamagochi = behavior({
 
 console.log(tamagochi)
 
-export const spawn = (source: {} = { tamagochi: 3 }) => tamagochi.spawn(source);
+export const spawn = (source: {} = { tamagochi: 3 }) => tamagochi.spawn(source, "Tamagochi");
