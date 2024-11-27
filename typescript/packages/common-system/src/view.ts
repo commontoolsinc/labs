@@ -17,6 +17,7 @@ export class Charm extends HTMLElement {
   #debugger: CharmDebugger | null = null;
 
   #invocation: Task.Invocation<{}, Error> | null = null;
+  #observer: MutationObserver;
 
   constructor() {
     super();
@@ -70,6 +71,16 @@ export class Charm extends HTMLElement {
     this.#entity = null;
     this.#vdom = null;
     this.#cell = null;
+
+    // Add mutation observer to watch renderMount title changes
+    this.#observer = new MutationObserver(() => {
+      this.propagate();
+    });
+    
+    this.#observer.observe(this.renderMount, {
+      attributes: true,
+      attributeFilter: ['title']
+    });
   }
 
   get vdom() {
@@ -107,6 +118,7 @@ export class Charm extends HTMLElement {
   }
   disconnectedCallback() {
     this.deactivate();
+    this.#observer.disconnect();
   }
 
   *dispatch([attribute, event]: [string, Event]) {
@@ -115,8 +127,6 @@ export class Charm extends HTMLElement {
     // We retract the event right after so that rules will react to event
     // only once.
     yield* transact([{ Retract: [this.entity, attribute, event as any] }]);
-
-    this.propagate();
   }
 
   set entity(value: Reference) {
