@@ -1,5 +1,5 @@
 import * as DOM from "@gozala/co-dom";
-import { Reference, Task, transact } from "./db.js";
+import { Reference, Task } from "./db.js";
 
 import { Behavior } from "./adapter.js";
 import * as DB from "./db.js";
@@ -22,7 +22,7 @@ export class Charm extends HTMLElement {
     super();
     this.#root = this.attachShadow({ mode: "closed" });
 
-    const style = document.createElement('style');
+    const style = document.createElement("style");
     style.textContent = `
       .charm {
         position: relative;
@@ -54,14 +54,14 @@ export class Charm extends HTMLElement {
     this.#mount = document.createElement("div");
     this.renderMount = document.createElement("div");
 
-    this.#mount.classList.add('charm')
+    this.#mount.classList.add("charm");
 
     this.root.appendChild(style);
     this.root.appendChild(this.#mount);
     this.#mount.appendChild(this.renderMount);
 
     if (getDebugCharms()) {
-      this.#mount.classList.add('debug')
+      this.#mount.classList.add("debug");
       this.#debugger = new CharmDebugger();
       this.#mount.appendChild(this.#debugger);
     }
@@ -110,11 +110,7 @@ export class Charm extends HTMLElement {
   }
 
   *dispatch([attribute, event]: [string, Event]) {
-    yield* transact([{ Upsert: [this.entity, attribute, event as any] }]);
-
-    // We retract the event right after so that rules will react to event
-    // only once.
-    yield* transact([{ Retract: [this.entity, attribute, event as any] }]);
+    yield* DB.dispatch([this.entity, attribute, event]);
 
     this.propagate();
   }
