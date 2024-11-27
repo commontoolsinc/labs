@@ -92,19 +92,21 @@ export function run<T, R = any>(
 
   // If this is a module, not a recipe, wrap it in a recipe that just runs,
   // passing arguments in unmodified and passing all results through as is
-  if (isModule(recipe))
+  if (isModule(recipe)) {
+    const module = recipe as Module;
     recipe = {
-      argumentSchema: {},
-      resultSchema: {},
-      result: { $alias: { path: ["internal", "result"] } },
+      argumentSchema: module.argumentSchema ?? {},
+      resultSchema: module.resultSchema ?? {},
+      result: { $alias: { path: ["internal"] } },
       nodes: [
         {
-          module: recipe as Module,
+          module,
           inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal", "result"] } },
+          outputs: { $alias: { path: ["internal"] } },
         },
       ],
     } satisfies Recipe;
+  }
 
   // Keep track of subscriptions to cancel them later
   const [cancel, addCancel] = useCancelGroup();
@@ -440,6 +442,8 @@ function instantiateJavaScriptNode(
           undefined,
           () => result,
         );
+
+        console.log("lift: running result recipe", resultRecipe.toJSON());
 
         resultCell = run(resultRecipe, undefined, resultCell);
         addCancel(cancels.get(resultCell));
