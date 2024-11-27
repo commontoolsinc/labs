@@ -89,7 +89,6 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
   }
 
   *fork(self: Reference = this.id) {
-    const db = yield* Task.wait(DB.local);
     const subscriptions = [];
     const changes = [];
     for (const [name, rule] of Object.entries(this.rules)) {
@@ -110,7 +109,7 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
       );
       subscriptions.push(subscription);
 
-      changes.push(...(yield* subscription.poll(db)));
+      changes.push(...(yield* subscription.poll()));
     }
 
     if (changes.length) {
@@ -164,7 +163,6 @@ class SystemService<Effects extends Record<string, Effect>> {
   }
 
   *fork(self: Reference = this.id) {
-    const db = yield* Task.wait(DB.local);
     const subscriptions = [];
     const changes = [];
     for (const [name, rule] of Object.entries(this.rules)) {
@@ -177,10 +175,15 @@ class SystemService<Effects extends Record<string, Effect>> {
         ],
       };
 
-      const subscription = yield* DB.subscribe(spellId(this.rules), name, query as Type.Query, rule);
+      const subscription = yield* DB.subscribe(
+        spellId(this.rules),
+        name,
+        query as Type.Query,
+        rule,
+      );
       subscriptions.push(subscription);
 
-      changes.push(...(yield* subscription.poll(db)));
+      changes.push(...(yield* subscription.poll()));
     }
 
     if (changes.length) {

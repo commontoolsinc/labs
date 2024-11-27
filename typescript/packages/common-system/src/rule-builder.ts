@@ -9,7 +9,7 @@ import {
   Formula,
   Variable,
 } from "datalogia";
-import { $, Instruction, Fact, Constant } from "synopsys";
+import { $, Instruction, Fact, Scalar } from "synopsys";
 import { Node } from "./jsx.js";
 export { $ } from "synopsys";
 
@@ -58,10 +58,7 @@ export class Select<Match extends Selector = Selector> {
   }
 
   clause(clause: Clause) {
-    return new Select<Match>(
-      this.#select,
-      this.#where.clause(clause)
-    );
+    return new Select<Match>(this.#select, this.#where.clause(clause));
   }
 
   select<S extends Selector>(selector: S) {
@@ -69,16 +66,23 @@ export class Select<Match extends Selector = Selector> {
   }
 
   with<T extends Selector>(other: Select<T>): Select<T & Match> {
-    return new Select({ ...this.#select, ...other.#select }, this.#where.merge(other.#where));
+    return new Select(
+      { ...this.#select, ...other.#select },
+      this.#where.merge(other.#where),
+    );
   }
 
-  event<T extends Constant>(name: string) {
+  event<T extends Scalar>(name: string) {
     return new Select<Match & { event: Variable<T> }>(
       {
         ...this.#select,
         event: $.event,
       },
-      this.#where.match($.self, name.startsWith('~/on/') ? name : `~/on/${name}`, $.event),
+      this.#where.match(
+        $.self,
+        name.startsWith("~/on/") ? name : `~/on/${name}`,
+        $.event,
+      ),
     );
   }
 
