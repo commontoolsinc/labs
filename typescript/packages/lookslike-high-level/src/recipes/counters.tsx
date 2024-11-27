@@ -66,6 +66,7 @@ export default recipe(Counters, ({ items, title }) => {
     [UI]: (
       <os-container>
         <common-input
+          id="title"
           value={title}
           placeholder="Name of counter"
           oncommon-input={updateValue({ value: title })}
@@ -74,14 +75,22 @@ export default recipe(Counters, ({ items, title }) => {
           {items.map(item => (
             <li>
               {item.title} - {item.count}
-              <button onclick={inc({ item })}>inc</button>
-              <button onclick={removeItem({ item, items })}>remove</button>
+              <button class="increment" onclick={inc({ item })}>
+                inc
+              </button>
+              <button class="remove" onclick={removeItem({ item, items })}>
+                remove
+              </button>
             </li>
           ))}
         </ul>
         <p>Total: {total}</p>
-        <button onclick={updateRandomItem({ items })}>Inc random item</button>
-        <button onclick={addItem({ items })}>Add new item</button>
+        <button id="randomIncrement" onclick={updateRandomItem({ items })}>
+          Inc random item
+        </button>
+        <button id="add" onclick={addItem({ items })}>
+          Add new item
+        </button>
       </os-container>
     ),
     total,
