@@ -84,7 +84,7 @@ export default recipe(Counters, ({ items, title }) => {
             </li>
           ))}
         </ul>
-        <p>Total: {total}</p>
+        <p id="total">Total: {total}</p>
         <button id="randomIncrement" onclick={updateRandomItem({ items })}>
           Inc random item
         </button>
