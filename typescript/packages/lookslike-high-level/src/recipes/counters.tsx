@@ -49,7 +49,7 @@ const removeItem = handler<{}, { items: Counter[]; item: Counter }>(
   ({}, state) => {
     // fixme(ja): findIndex doesn't work here
     // fixme(ja): filter doesn't work here
-    const index = state.items.findIndex((i) => i.title === state.item.title);
+    const index = state.items.findIndex(i => i.title === state.item.title);
     state.items.splice(index, 1);
   },
 );
@@ -71,7 +71,7 @@ export default recipe(Counters, ({ items, title }) => {
           oncommon-input={updateValue({ value: title })}
         />
         <ul>
-          {items.map((item) => (
+          {items.map(item => (
             <li>
               {item.title} - {item.count}
               <button onclick={inc({ item })}>inc</button>
