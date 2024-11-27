@@ -3,6 +3,8 @@
     "dev": "deno run --watch main.ts"
   },
   "imports": {
+    "@cliffy/command": "jsr:@cliffy/command@^1.0.0-rc.7",
+    "@cliffy/prompt": "jsr:@cliffy/prompt@^1.0.0-rc.7",
     "@playwright/test": "npm:@playwright/test@^1.49.0",
     "@std/assert": "jsr:@std/assert@1",
     "playwright": "npm:playwright@^1.49.0"
