@@ -11,7 +11,7 @@ export class Charm extends HTMLElement {
   #behavior: Behavior | null;
   #entity: Reference | null;
   #vdom: DOM.Node<{}> | null;
-  #cell: null | { send(data: { name: string }): void };
+  #cell: null | { send(data: string): void };
   #mount: HTMLElement;
   renderMount: HTMLElement;
   #debugger: CharmDebugger | null = null;
@@ -150,6 +150,6 @@ export class Charm extends HTMLElement {
   }
 
   propagate() {
-    this.#cell?.send({ name: this.name });
+    this.#cell?.send( this.name );
   }
 }

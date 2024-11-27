@@ -1,12 +1,7 @@
 import { Type, Task, refer, Reference, $ } from "synopsys";
-import { run, CellImpl } from "@commontools/common-runner";
+import { run, CellImpl, cell as createRunnerCell } from "@commontools/common-runner";
 import * as DB from "./db.js";
-import {
-  NAME,
-  UI,
-  recipe,
-  cell as createCell,
-} from "@commontools/common-builder";
+import { NAME, UI, recipe } from "@commontools/common-builder";
 import { html } from "@commontools/common-html";
 
 export { refer, Reference, $, _, Task, Instruction, Fact } from "synopsys";
@@ -137,15 +132,15 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
 
     return run(
       recipe(charm.toString(), () => {
-        const cell = createCell({ name: "" });
+        const name = createRunnerCell("untitled");
 
         return {
-          [NAME]: cell.name,
+          [NAME]: name,
           [UI]: html`<common-charm
             id=${charm.toString()}
             entity=${() => entity}
             spell=${() => this}
-            $cell=${cell}
+            $cell=${name}
           />`,
         };
       }),
