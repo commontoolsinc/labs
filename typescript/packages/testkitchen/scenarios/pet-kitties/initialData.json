@@ -1,0 +1,17 @@
+{
+  "title": "Super Happy Counter Funtime",
+  "items": [
+    {
+      "title": "Cats",
+      "count": 3
+    },
+    {
+      "title": "Hats",
+      "count": 2
+    },
+    {
+      "title": "Bats",
+      "count": 1
+    }
+  ]
+}

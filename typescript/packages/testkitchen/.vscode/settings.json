@@ -1,0 +1,11 @@
+{
+  "[typescript]": {
+    "editor.defaultFormatter": "ms-vsliveshare.vsliveshare",
+    "editor.formatOnSave": true
+  },
+  "deno.enable": true,
+  "deno.lint": true,
+  "[deno]": {
+    "editor.formatOnSave": true
+  }
+}
