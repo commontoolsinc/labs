@@ -15,6 +15,7 @@ import {
 } from "../data.js";
 import {
   run,
+  effect,
   CellImpl,
   isCell,
   idle,
@@ -202,7 +203,7 @@ export class CommonWindowManager extends LitElement {
           data: fieldsToInclude,
           title: value,
           prompt: value,
-        }).then((charm) => this.openCharm(charm));
+        }).then(charm => this.openCharm(charm));
       }
     } else {
       // there is no existing data
@@ -210,7 +211,7 @@ export class CommonWindowManager extends LitElement {
         data: {},
         title: value,
         prompt: value,
-      }).then((charm) => this.openCharm(charm));
+      }).then(charm => this.openCharm(charm));
     }
   }
 
@@ -240,7 +241,7 @@ export class CommonWindowManager extends LitElement {
     this.focusedCharm
       ?.asRendererCell()
       .key("suggestions")
-      ?.sink((suggestions) => {
+      ?.sink(suggestions => {
         const s = suggestions?.items;
         if (!s) return;
 
@@ -254,7 +255,7 @@ export class CommonWindowManager extends LitElement {
       this.input = "";
       runPersistent(search, {
         search: event.detail.value,
-      }).then((charm) => this.openCharm(charm));
+      }).then(charm => this.openCharm(charm));
     };
 
     const onAiBoxSubmit = (event: CustomEvent) => {
@@ -318,7 +319,7 @@ export class CommonWindowManager extends LitElement {
       } else {
         // Create a new charm and query for the imported data
         const schema = inferJsonSchema(data[0]);
-        runPersistent(schemaQueryExample, { schema }).then((charm) =>
+        runPersistent(schemaQueryExample, { schema }).then(charm =>
           this.openCharm(charm),
         );
       }
@@ -345,8 +346,8 @@ export class CommonWindowManager extends LitElement {
           <os-charm-chip-group>
             ${repeat(
               this.charms,
-              (charm) => charm.entityId!.toString(),
-              (charm) => {
+              charm => charm.entityId!.toString(),
+              charm => {
                 if (!charm.get()) return;
 
                 const charmId = charm.entityId!;
@@ -379,8 +380,8 @@ export class CommonWindowManager extends LitElement {
         <os-fabgroup class="pin-br" slot="overlay" @submit=${onAiBoxSubmit}>
           ${repeat(
             Array.isArray(this.suggestions) ? this.suggestions : [],
-            (suggestion) => suggestion.prompt,
-            (suggestion) => html`
+            suggestion => suggestion.prompt,
+            suggestion => html`
               <os-bubble
                 icon=${suggestion.behavior === "fork" ? "call_split" : "add"}
                 text=${suggestion.prompt}
@@ -403,8 +404,8 @@ export class CommonWindowManager extends LitElement {
           : html``}
         ${repeat(
           this.charms,
-          (charm) => charm.entityId!.toString(),
-          (charm) => {
+          charm => charm.entityId!.toString(),
+          charm => {
             if (!charm.get()) return;
 
             const charmId = charm.entityId!;
@@ -486,10 +487,16 @@ export class CommonWindowManager extends LitElement {
     this.updateComplete.then(() => {
       while (this.newCharmRefs.length > 0) {
         const [charm, charmRef] = this.newCharmRefs.pop()!;
-        const view = charm.asRendererCell<Charm>().key(UI);
-        if (!view.getAsQueryResult()) throw new Error("Charm has no UI");
-        render(charmRef.value!, view);
-        this.requestUpdate();
+        effect(charm.asRendererCell<Charm>(), charm =>
+          effect(charm[UI], view => {
+            if (!view) {
+              console.log("no UI");
+              return;
+            }
+            render(charmRef.value!, view as any);
+            this.requestUpdate();
+          }),
+        );
       }
 
       this.scrollToAndHighlight(charmId, false);
@@ -529,7 +536,7 @@ export class CommonWindowManager extends LitElement {
       const charmId = windowElement.getAttribute("data-charm-id");
       if (charmId) {
         this.charms = this.charms.filter(
-          (charm) => JSON.stringify(charm.entityId) !== charmId,
+          charm => JSON.stringify(charm.entityId) !== charmId,
         );
         this.charmRefs.delete(charmId);
       }
@@ -549,7 +556,7 @@ export class CommonWindowManager extends LitElement {
       // TODO: Add a timeout here, show loading state and error state
       setTimeout(() => {
         syncCharm(charmMatch.params.charmId, true).then(
-          (charm) =>
+          charm =>
             (charm && charm.get() && this.openCharm(charm)) ||
             navigate(`/charm/${charmMatch.params.charmId}`),
         );

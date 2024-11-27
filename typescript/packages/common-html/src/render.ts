@@ -9,6 +9,7 @@ import {
   Child,
   isSection,
   getContext,
+  Binding,
 } from "./view.js";
 import {
   effect,
@@ -17,6 +18,7 @@ import {
   useCancelGroup,
   type Cancel,
   type RendererCell,
+  ReactiveCell,
 } from "@commontools/common-runner";
 import * as logger from "./logger.js";
 
@@ -86,7 +88,7 @@ const bindChildren = (
       }
     } else if (isBinding(child) || isReactive(child)) {
       // Bind dynamic content
-      const replacement = isReactive(child)
+      const replacement = isReactive(child as ReactiveCell<unknown>)
         ? child
         : getContext(context, child.path);
       // Anchor for reactive replacement
@@ -166,9 +168,9 @@ const bindProps = (
       isSendable(propValue)
     ) {
       const replacement =
-        isReactive(propValue) || isSendable(propValue)
+        isReactive(propValue as ReactiveCell<unknown>) || isSendable(propValue)
           ? propValue
-          : getContext(context, propValue.path);
+          : getContext(context, (propValue as Binding).path);
       // If prop is an event, we need to add an event listener
       if (isEventProp(propKey)) {
         if (!isSendable(replacement)) {
@@ -178,7 +180,7 @@ const bindProps = (
         }
         const key = cleanEventProp(propKey);
         if (key != null) {
-          const cancel = listen(element, key, (event) => {
+          const cancel = listen(element, key, event => {
             const sanitizedEvent = sanitizeEvent(event);
             replacement.send(sanitizedEvent);
           });
@@ -192,7 +194,7 @@ const bindProps = (
         const key = propKey.slice(1);
         setProp(element, key, replacement);
       } else {
-        const cancel = effect(replacement, (replacement) => {
+        const cancel = effect(replacement, replacement => {
           // Replacements are set as properties not attributes to avoid
           // string serialization of complex datatypes.
           setProp(element, propKey, replacement);
