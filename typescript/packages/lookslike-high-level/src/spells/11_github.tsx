@@ -1,45 +1,35 @@
-import { h, behavior, $, Reference, select, Session, refer } from "@commontools/common-system";
+import {
+  h,
+  behavior,
+  $,
+  Reference,
+  select,
+  Session,
+  refer,
+} from "@commontools/common-system";
+
 import { fetch, REQUEST, RESPONSE } from "../effects/fetch.js";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
-import { addTag } from "../sugar.js";
-import { Likeable, LikeButton, LikeEvents } from "./stickers/like.jsx";
-import { mixin } from "../sugar/mixin.js";
+import { addTag } from "../sugar/tags.js";
 
 const IMPORT_REQUEST = 'import/request'
 
-const getMarkdown =
-  (url: string) => `/api/reader/${url}`
+const getCommits =
+  (url: string) => `https://api.github.com/repos${new URL(url).pathname}/commits?per_page=50`
 
-export const articlePreview = behavior({
-  ...mixin(Likeable),
-
-  defaultView: select({ self: $.self, url: $.url, content: $.content, likes: $.likes })
-    .match($.self, 'url', $.url)
-    .match($.self, 'content', $.content)
-    .match($.self, 'likes', $.likes)
-    .render(({ url, content, likes, self }) => (
-      <div style="background: grey; border-radius: 16px; color: white; padding: 16px;">
-        <div><a href={url} style="color: darkgrey; font-style: italic; text-decoration: none;">{url}</a></div>
-        <div><common-markdown markdown={content.substring(0, 255)} /></div>
-        {LikeButton(likes)}
-      </div>
-    ))
-    .commit(),
-})
-
-export const importer = behavior({
+export default behavior({
   defaultUrl: select({ self: $.self })
     .not(q => q.match($.self, "url", $._))
-    .assert(({ self }) => [self, 'url', 'https://bf.wtf'])
+    .assert(({ self }) => [self, 'url', 'https://github.com/user/repo'])
     .commit(),
 
   form: select({ self: $.self, url: $.url })
     .match($.self, "url", $.url)
     .not(q => q.match($.self, IMPORT_REQUEST, $._))
     .render(({ self, url }) => (
-      <div title="Fetcher Form">
+      <div title="Github Commits Fetcher">
         <common-input value={url} oncommon-input="~/on/change-url" />
-        <button onclick="~/on/send-request">Fetch</button>
+        <button onclick="~/on/send-request">Fetch Commits</button>
       </div>
     )).commit(),
 
@@ -51,13 +41,14 @@ export const importer = behavior({
         fetch(
           self,
           IMPORT_REQUEST,
-          new Request(getMarkdown(url), {
+          new Request(getCommits(url), {
             method: "GET",
             headers: {
+              "Accept": "application/vnd.github.v3+json",
               "Content-Type": "application/json",
             },
           }),
-        ).text(),
+        ).json(),
       ];
     }).commit(),
 
@@ -65,41 +56,33 @@ export const importer = behavior({
     .match($.self, IMPORT_REQUEST, $.request)
     .match($.request, REQUEST.STATUS, $.status)
     .match($.self, "url", $.url)
-    .not(q => q.match($.request, RESPONSE.TEXT, $._))
+    .not(q => q.match($.request, RESPONSE.JSON, $._))
     .render(({ self, status, url }) => (
-      <div title="Effect Demo" entity={self}>
-        <h1>{status} - <i>{url}</i></h1>
+      <div title="Github Commits" entity={self}>
+        <h1>{status} - Fetching commits from <i>{url}</i></h1>
         <button onclick="~/on/reset">Reset</button>
       </div>
     )).commit(),
 
   showResult: select({ self: $.self, request: $.request, content: $.content })
     .match($.self, IMPORT_REQUEST, $.request)
-    .match($.request, RESPONSE.TEXT, $.content)
+    .match($.request, RESPONSE.JSON, $.content)
     .render(({ self, content }) => (
-      <div title="Effect Demo" entity={self}>
-        <h1>Response</h1>
-        <common-markdown markdown={content} />
-        <details>
-          <pre>{content}</pre>
-        </details>
+      <div title="Github Commits" entity={self}>
+        <h1>Commit History</h1>
+        <pre>{JSON.stringify(content)}</pre>
         <button onclick="~/on/reset">Reset</button>
       </div>
     ))
     .commit(),
 
-  onComplete: select({ self: $.self, request: $.request, content: $.content, url: $.url })
+  onComplete: select({ self: $.self, request: $.request, content: $.content })
     .match($.self, IMPORT_REQUEST, $.request)
-    .match($.self, "url", $.url)
     .match($.request, REQUEST.STATUS, 'Complete')
-    .match($.request, RESPONSE.TEXT, $.content)
-    .update(({ self, content, url }) => {
-      const data = { url, content }
-      const id = refer(data)
+    .match($.request, RESPONSE.JSON, $.content)
+    .update(({ self, content }) => {
       return [
-        { Import: data },
-        { Assert: [self, 'clippedItems', id] },
-        ...addTag(id, '#import')
+        ...addTag(content, '#github-commits')
       ]
     })
     .commit(),
@@ -120,5 +103,3 @@ export const importer = behavior({
     })
     .commit(),
 });
-
-export const spawn = (source: {} = { importer: 1 }) => importer.spawn(source, "Importer");
