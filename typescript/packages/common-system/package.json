@@ -27,12 +27,12 @@
   ],
   "dependencies": {
     "@commontools/common-builder": "^0.0.1",
-    "@commontools/common-runner": "^0.0.1",
     "@commontools/common-html": "^0.0.1",
+    "@commontools/common-runner": "^0.0.1",
     "@commontools/llm-client": "^0.0.1",
     "@gozala/co-dom": "^0.4.0",
     "datalogia": "^0.9.2",
-    "synopsys": "file:../../../../synopsys"
+    "synopsys": "^5.1.0"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.7",
