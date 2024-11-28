@@ -116,8 +116,15 @@ export default service({
             { Upsert: [effect.source.id, RESPONSE.JSON, id] },
           );
         } else if (effect.source.expect === "text") {
+          let text: string;
+          if (typeof content !== 'string') {
+            text = JSON.stringify(content)
+          } else {
+            text = content;
+          }
+
           changes.push({
-            Upsert: [effect.source.id, RESPONSE.TEXT, content as string],
+            Upsert: [effect.source.id, RESPONSE.TEXT, text],
           });
         } else {
           changes.push({
