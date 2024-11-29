@@ -15,6 +15,7 @@ export class Charm extends HTMLElement {
   #mount: HTMLElement;
   renderMount: HTMLElement;
   #debugger: CharmDebugger | null = null;
+  #errorDisplay: HTMLElement;
 
   #invocation: Task.Invocation<{}, Error> | null = null;
   #observer: MutationObserver;
@@ -27,6 +28,8 @@ export class Charm extends HTMLElement {
     style.textContent = `
       .charm {
         position: relative;
+        transform-origin: center;
+        padding: 4px;
       }
 
       .charm.debug {
@@ -34,6 +37,48 @@ export class Charm extends HTMLElement {
         border-radius: 4px;
         animation: pulse 2s infinite;
         padding: 4px;
+      }
+
+      .charm.vdom-update {
+        animation: grow 0.3s ease-out;
+      }
+
+      .placeholder {
+        min-width: 64px;
+        min-height: 64px;
+        border: 2px dashed #808080;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .placeholder::before {
+        content: "?";
+        font-size: 24px;
+        color: #808080;
+      }
+
+      .error-display {
+        border: 2px solid #ff0000;
+        border-radius: 4px;
+        padding: 12px;
+        margin: 8px 0;
+        background: #fff0f0;
+        display: none;
+      }
+
+      .error-display.visible {
+        display: block;
+      }
+
+      .error-display pre {
+        margin: 8px 0;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        background: #fff;
+        padding: 8px;
+        border: 1px solid #ffcccc;
       }
 
       @keyframes pulse {
@@ -50,19 +95,45 @@ export class Charm extends HTMLElement {
           box-shadow: 0 0 0 0 rgba(77, 77, 255, 0);
         }
       }
+
+      @keyframes grow {
+        0% {
+          transform: scale(1);
+          opacity: 1;
+          border: 0px solid rgba(0, 0, 0, 0);
+        }
+        33% {
+          transform: scale(1.005);
+          opacity: 0.98;
+          border: 1px solid rgba(0, 0, 0, 0.2);
+        }
+        66% {
+          transform: scale(0.999);
+          opacity: 1;
+          border: 0px solid rgba(0, 0, 0, 0);
+        }
+        100% {
+          transform: scale(1);
+          border: 0px solid rgba(0, 0, 0, 0);
+        }
+      }
     `;
 
     this.#mount = document.createElement("div");
     this.renderMount = document.createElement("div");
+    this.#errorDisplay = document.createElement("div");
+    this.#errorDisplay.className = "error-display";
 
     this.#mount.classList.add("charm");
+    this.renderMount.classList.add("placeholder");
 
     this.root.appendChild(style);
     this.root.appendChild(this.#mount);
     this.#mount.appendChild(this.renderMount);
+    this.#mount.appendChild(this.#errorDisplay);
 
     if (getDebugCharms()) {
-      this.#mount.classList.add("debug");
+      // this.#mount.classList.add("debug");
       this.#debugger = new CharmDebugger();
       this.#mount.appendChild(this.#debugger);
     }
@@ -83,11 +154,30 @@ export class Charm extends HTMLElement {
     });
   }
 
+  #handleError(action: string, error: Error) {
+    this.#errorDisplay.classList.add("visible");
+    this.#errorDisplay.innerHTML = `
+      <h3><code>Error ${action}</code></h3>
+      <details>
+        <summary><code>${error.message || String(error)}</code></summary>
+        <pre><code>${error.stack || ""}</code></pre>
+      </details>
+    `;
+  }
+
+  #clearError() {
+    this.#errorDisplay.classList.remove("visible");
+  }
+
   get vdom() {
     return this.#vdom;
   }
+
   set vdom(vdom) {
     this.#vdom = vdom;
+    this.#mount.classList.remove("vdom-update");
+    void this.#mount.offsetWidth; // Force reflow
+    this.#mount.classList.add("vdom-update");
   }
 
   set cell(value: any) {
@@ -95,22 +185,34 @@ export class Charm extends HTMLElement {
   }
 
   async activate() {
-    this.#invocation = Task.perform(this.spell.fork(this.entity));
+    try {
+      this.#invocation = Task.perform(this.spell.fork(this.entity));
 
-    // bf: this should not be any at some point later
-    await Task.perform(
-      DB.transact([{ Upsert: [this.entity, MOUNT, this as any] }]),
-    );
+      // throw new Error("This is a test error");
 
-    this.propagate();
+      await Task.perform(
+        DB.transact([{ Upsert: [this.entity, MOUNT, this as any] }]),
+      );
+
+      this.propagate();
+      this.#clearError();
+    } catch (error) {
+      this.#handleError("Activating Charm", error);
+    }
   }
 
   deactivate() {
-    if (this.#invocation) {
-      this.#invocation.abort(undefined);
+    try {
+      if (this.#invocation) {
+        this.#invocation.abort(undefined);
+      }
+      Task.perform(
+        DB.transact([{ Retract: [this.entity, MOUNT, this as any] }]),
+      );
+      this.#clearError();
+    } catch (error) {
+      this.#handleError("Deactivating Charm", error);
     }
-    // bf: this should not be any at some point later
-    Task.perform(DB.transact([{ Retract: [this.entity, MOUNT, this as any] }]));
   }
 
   connectedCallback() {
@@ -122,13 +224,23 @@ export class Charm extends HTMLElement {
   }
 
   *dispatch([attribute, event]: [string, Event]) {
-    yield* DB.dispatch([this.entity, attribute, event]);
+    try {
+      yield* DB.dispatch([this.entity, attribute, event]);
+      this.#clearError();
+    } catch (error) {
+      this.#handleError("Dispatching Event", error);
+    }
   }
 
   set entity(value: Reference) {
-    this.#entity = (value as any)();
-    if (this.#debugger) {
-      this.#debugger.entity = this.#entity;
+    try {
+      this.#entity = (value as any)();
+      if (this.#debugger) {
+        this.#debugger.entity = this.#entity;
+      }
+      this.#clearError();
+    } catch (error) {
+      this.#handleError("Setting Entity", error);
     }
   }
 
@@ -141,9 +253,14 @@ export class Charm extends HTMLElement {
   }
 
   set spell(value: Behavior) {
-    this.#behavior = (value as any)();
-    if (this.#debugger) {
-      this.#debugger.behavior = this.#behavior;
+    try {
+      this.#behavior = (value as any)();
+      if (this.#debugger) {
+        this.#debugger.behavior = this.#behavior;
+      }
+      this.#clearError();
+    } catch (error) {
+      this.#handleError("Setting Spell", error);
     }
   }
 
@@ -156,6 +273,11 @@ export class Charm extends HTMLElement {
   }
 
   propagate() {
-    this.#cell?.send(this.name);
+    try {
+      this.#cell?.send(this.name);
+      this.#clearError();
+    } catch (error) {
+      this.#handleError("Propagating Update", error);
+    }
   }
 }
