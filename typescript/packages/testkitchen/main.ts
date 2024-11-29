@@ -28,6 +28,9 @@ async function runRecipeActions(page: Page, actions: Action[]): Promise<ActionRe
       const startTime = performance.now();
       try {
         await page.getByRole(...action.args).click({ timeout: 500 });
+
+        const endTime = performance.now();
+        const duration = endTime - startTime;
         // Small delay to let any animations complete
         await page.waitForTimeout(100);
         
@@ -40,7 +43,7 @@ async function runRecipeActions(page: Page, actions: Action[]): Promise<ActionRe
         rv.push({ 
           success: true, 
           action,
-          duration: performance.now() - startTime,
+          duration,
           screenshots: {
             before: `media/action-${index}/before.png`,
             after: `media/action-${index}/after.png`
@@ -191,9 +194,9 @@ async function testOneScenario(scenario: string, actions: Action[]): Promise<any
 }
 
 // P2: click to see code diff
-// P2: save screenshots for each actions / initial state of recipe, ending state
+// x P2: save screenshots for each actions / initial state of recipe, ending state
 // P2: save console logs/errors for each actions
-// P2: timings!!!!  (we should store the timings)
+// x P2: timings!!!!  (we should store the timings)
 function generateReportHtml(results: any, reportName: string): string {
   const reports: string[] = [];
   
@@ -287,7 +290,7 @@ function generateReportHtml(results: any, reportName: string): string {
 // [x] add more other stuff here (more recipes)
 // [ ] generate a report with: what the prompts were
 // [x] have a baby dsl for tests???
-// [ ] recipes -> scenarios
+// [x] recipes -> scenarios
 // tests = [
 //   ["click", [("button", { name: "Add New Kitty" }], {timeout: 250}, "click the cat"]
 //   ["click", [("button", { name: "Add New Kitty" }], {timeout: 250}]
@@ -298,8 +301,8 @@ function generateReportHtml(results: any, reportName: string): string {
 
 // 1. iterating on the `prompts.ts` ... (prompting)
 //   x P0: want to run all the scenarios
-//   - P0: see a "all scenarios report: 3/5 scenarios pass, details"
-//   - P3: write report to disk each time something changes ... this way live-server (node) will just give us live reporting
+//   x P0: see a "all scenarios report: 3/5 scenarios pass, details"
+//   x P3: write report to disk each time something changes ... this way live-server (node) will just give us live reporting
 //   x P0 /reports/:date
 //   x P1 /reports/latest -> symlink to the last reports/:date
 
