@@ -11,14 +11,20 @@ async function runRecipeActions(page: Page, actions: Action[]) {
   let action;
   for (action of actions) {
     if (action.type === "click") {
+      const startTime = performance.now();
       try {
         await page.getByRole(...action.args).click({ timeout: 500 });
-        rv.push({ success: true, action });
+        rv.push({ 
+          success: true, 
+          action,
+          duration: performance.now() - startTime 
+        });
       } catch (e) {
         rv.push({
           error: e instanceof Error ? e.message : JSON.stringify(e),
           success: false,
           action,
+          duration: performance.now() - startTime
         });
       }
     }
@@ -69,8 +75,8 @@ async function testOneScenario(scenario: string, actions: Action[]): Promise {
     )
   }`;
 
-  const browser = await chromium.launch({ headless: false });
-  // const browser = await chromium.launch({ headless: true });
+  // const browser = await chromium.launch({ headless: false });
+  const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
 
   const loaded = new Promise<string | true>((resolve) => {
@@ -124,25 +130,34 @@ function generateReportHtml(results: any, reportName: string): string {
   let info;
 
   for (info of results) {
-    const report = `<div class="scenario">
+    const report = `<div class="scenario" style="border: 1px solid black; padding: 10px; margin: 10px;">
+
+    <h2>${info.name}</h2>
     ${
       info.compileError
         ? `<h2>Compile Error</h2><br/><pre>${info.compileError}</pre>`
         : ""
     }
-    <h2>Actions</h2>
 
     ${
       info.tests &&info.tests.length > 0
-        ? `<ul>
+        ? `
+            <h2>Actions</h2>
+<ul>
       ${
         info.tests
           .map(
             (test: any) => `
         <li class="${test.success ? "success" : "failure"}">
+        <span>
           <strong>${test.action.name}</strong>: ${
               test.success ? "Passed" : "Failed"
             }
+            <span style="font-family: monospace;">
+              ${test.duration ? `(${test.duration.toFixed(2)}ms)` : ""}
+            </span>
+        </span>
+
           ${test.error ? `<pre>${test.error}</pre>` : ""}
         </li>
       `,
@@ -225,7 +240,7 @@ const reportPath = join(reportDir, "report.html");
 await Deno.writeTextFile(reportPath, reportHtml);
 const reportJsonPath = join(reportDir, "report.json");
 await Deno.writeTextFile(reportJsonPath, JSON.stringify(results, null, 2));
-
+console.log('INFO', JSON.stringify(results, null, 2))
 const latestLinkPath = join("reports", "latest");
 
 if (await exists(latestLinkPath)) {

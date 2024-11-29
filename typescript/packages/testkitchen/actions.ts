@@ -14,4 +14,5 @@ export type ActionResult = {
   error?: string;
   success: boolean;
   action: Action;
+  duration?: number;
 };
