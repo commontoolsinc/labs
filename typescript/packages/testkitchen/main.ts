@@ -6,25 +6,62 @@ import { Action, ActionResult } from "./actions.ts";
 import { ensureDir } from "@std/fs";
 
 const scenarioDir = join(Deno.cwd(), "scenarios");
-async function runRecipeActions(page: Page, actions: Action[]) {
+const reportName = "run";
+const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+const reportDir = join("reports", `${reportName}-${timestamp}`);
+await ensureDir(reportDir);
+
+async function runRecipeActions(page: Page, actions: Action[]): Promise<ActionResult[]> {
   const rv = [] as ActionResult[];
   let action;
-  for (action of actions) {
+  for (const [index, action] of actions.entries()) {
     if (action.type === "click") {
+      const actionDir = join(reportDir, "media", `action-${index}`);
+      await ensureDir(actionDir);
+      
+      // Screenshot before action
+      await page.screenshot({ 
+        path: join(actionDir, "before.png"),
+        fullPage: true 
+      });
+
       const startTime = performance.now();
       try {
         await page.getByRole(...action.args).click({ timeout: 500 });
+        // Small delay to let any animations complete
+        await page.waitForTimeout(100);
+        
+        // Screenshot after action
+        await page.screenshot({ 
+          path: join(actionDir, "after.png"),
+          fullPage: true 
+        });
+
         rv.push({ 
           success: true, 
           action,
-          duration: performance.now() - startTime 
+          duration: performance.now() - startTime,
+          screenshots: {
+            before: `media/action-${index}/before.png`,
+            after: `media/action-${index}/after.png`
+          }
         });
       } catch (e) {
+        // Still capture the after screenshot on failure
+        await page.screenshot({ 
+          path: join(actionDir, "after.png"),
+          fullPage: true 
+        });
+
         rv.push({
           error: e instanceof Error ? e.message : JSON.stringify(e),
           success: false,
           action,
-          duration: performance.now() - startTime
+          duration: performance.now() - startTime,
+          screenshots: {
+            before: `media/action-${index}/before.png`,
+            after: `media/action-${index}/after.png`
+          }
         });
       }
     }
@@ -32,7 +69,7 @@ async function runRecipeActions(page: Page, actions: Action[]) {
   return rv;
 }
 
-async function testOneScenario(scenario: string, actions: Action[]): Promise {
+async function testOneScenario(scenario: string, actions: Action[]): Promise<any> {
   let info = {} as any;
 
   // TODO: remove any old generated source
@@ -77,7 +114,20 @@ async function testOneScenario(scenario: string, actions: Action[]): Promise {
 
   // const browser = await chromium.launch({ headless: false });
   const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
+  const mediaDir = join(reportDir, "media");
+  await ensureDir(mediaDir);
+  const videoPath = join(mediaDir, `${scenario}.webm`);
+
+  // Create a new context with video recording enabled
+  const context = await browser.newContext({
+    recordVideo: {
+      dir: mediaDir,
+      size: { width: 1280, height: 720 }
+    }
+  });
+  
+  // Create page from this context
+  const page = await context.newPage();
 
   const loaded = new Promise<string | true>((resolve) => {
     page.on("console", (msg) => {
@@ -108,16 +158,35 @@ async function testOneScenario(scenario: string, actions: Action[]): Promise {
     return info;
   }
 
-  // this should have details for all the tests ... perhaps including screenshots, any error logs, ...
+  // Run the tests
   info["tests"] = await runRecipeActions(page, info["actions"]);
 
-  // note(ja): this is silly, but until info['tests'] does the right thing, it is the best we can do
   if (info["tests"] === true) {
     info["success"] = new Date();
   }
 
-  await browser.close();
+  // Wait for the page to finish any pending actions
+  await page.waitForLoadState('networkidle');
+  
+  // Get video before closing anything
+  const video = page.video();
+  
+  // Close page first, but keep context alive
+  await page.close();
+  
+  // Now save the video
+  if (video) {
+    await video.saveAs(videoPath);
+    // Delete the original UUID-named file
+    await video.delete();
+  }
 
+  // Close the context after saving
+  await context.close();
+  
+  info["videoPath"] = `media/${scenario}.webm`;
+  
+  await browser.close();
   return info;
 }
 
@@ -140,40 +209,43 @@ function generateReportHtml(results: any, reportName: string): string {
   let info;
   for (info of results) {
     const report = `<div class="scenario" style="border: 1px solid black; padding: 10px; margin: 10px;">
-
     <h2>${info.name}</h2>
-    ${
-      info.compileError
-        ? `<h2>Compile Error</h2><br/><pre>${info.compileError}</pre>`
-        : ""
-    }
+    ${info.videoPath ? `
+      <video width="800" controls>
+        <source src="${info.videoPath}" type="video/webm">
+        Your browser does not support the video tag.
+      </video>
+    ` : ''}
+    
+    ${info.compileError
+      ? `<h2>Compile Error</h2><br/><pre>${info.compileError}</pre>`
+      : ""}
 
     ${
       info.tests &&info.tests.length > 0
         ? `
             <h2>Actions</h2>
-<ul>
-      ${
-        info.tests
-          .map(
-            (test: any) => `
-        <li class="${test.success ? "success" : "failure"}">
-        <span>
-          <strong>${test.action.name}</strong>: ${
-              test.success ? "Passed" : "Failed"
-            }
-            <span style="font-family: monospace;">
-              ${test.duration ? `(${test.duration.toFixed(2)}ms)` : ""}
-            </span>
-        </span>
-
-          ${test.error ? `<pre>${test.error}</pre>` : ""}
-        </li>
-      `,
-          )
-          .join("")
-      }
-      </ul>`
+            ${info.tests.map((test: any, index: number) => `
+              <div class="test-action">
+                <h3 class="${test.success ? "success" : "failure"}">
+                  Action ${index + 1}: ${test.action.name} 
+                  <span style="font-size: 0.8em; font-family: monospace;">(${test.duration.toFixed(2)}ms)</span>
+                </h3>
+                ${test.error ? `<p class="error">Error: ${test.error}</p>` : ''}
+                
+                <div class="screenshots" style="display: flex; gap: 10px; margin-top: 10px;">
+                  <div>
+                    <h4>Before</h4>
+                    <img src="${test.screenshots.before}" style="max-width: 300px; border: 1px solid #ccc;" />
+                  </div>
+                  <div>
+                    <h4>After</h4>
+                    <img src="${test.screenshots.after}" style="max-width: 300px; border: 1px solid #ccc;" />
+                  </div>
+                </div>
+              </div>
+            `).join('\n')}
+        `
         : ""
     }
     </div>`;
@@ -191,7 +263,10 @@ function generateReportHtml(results: any, reportName: string): string {
         h1, h2 { color: #333; }
         .success { color: green; }
         .failure { color: red; }
+        .error { color: red; margin: 10px 0; }
         pre { background-color: #f0f0f0; padding: 10px; }
+        .test-action { margin: 20px 0; padding: 10px; border: 1px solid #eee; }
+        .screenshots img { box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
       </style>
     </head>
     <body>
@@ -239,11 +314,6 @@ results.push(await testOneScenario("pet-kitties", kittyActions));
 import { actions as anotherActions } from "./scenarios/another-counters/actions.ts";
 results.push(await testOneScenario("another-counters", anotherActions));
 
-const reportName = "run"; // TODO: user should be allowed to provide
-const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-const reportDir = join("reports", `${reportName}-${timestamp}`);
-
-await ensureDir(reportDir);
 const reportHtml = generateReportHtml(results, reportName);
 
 const reportPath = join(reportDir, "report.html");

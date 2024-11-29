@@ -15,4 +15,8 @@ export type ActionResult = {
   success: boolean;
   action: Action;
   duration?: number;
+  screenshots?: {
+    before?: string;
+    after?: string;
+  };
 };
