@@ -7,14 +7,15 @@ import {
   lift,
   str,
   ModuleFactory,
+  ifElse,
 } from "@commontools/common-builder";
 import { z } from "zod";
 
 const Counter = z.object({ title: z.string(), count: z.number() });
-type Counter = z.infer<typeof Counter>;
+type Counter = z.infer;
 
 const CounterArray = z.array(Counter);
-type CounterArray = z.infer<typeof CounterArray>;
+type CounterArray = z.infer;
 
 const Counters = z
   .object({
@@ -22,7 +23,7 @@ const Counters = z
     title: z.string().default("Counters"),
   })
   .describe("Counters");
-type Counters = z.infer<typeof Counters>;
+type Counters = z.infer;
 
 const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => {
@@ -56,7 +57,7 @@ const removeItem = handler<{}, { items: Counter[]; item: Counter }>(
 
 const sum = lift(z.object({ items: CounterArray }), z.number(), ({ items }) =>
   items.reduce((acc: number, item: Counter) => acc + item.count, 0),
-) as unknown as ModuleFactory<{ items: CounterArray }, number>;
+) as unknown as ModuleFactory;
 
 export default recipe(Counters, ({ items, title }) => {
   const total = sum({ items });

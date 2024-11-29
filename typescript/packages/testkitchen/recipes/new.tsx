@@ -1,4 +1,3 @@
-
 import { h } from "@commontools/common-html";
 import {
   recipe,
@@ -8,18 +7,19 @@ import {
   lift,
   str,
   ModuleFactory,
+  ifElse,
 } from "@commontools/common-builder";
 import { z } from "zod";
 
-const Counter = z.object({ 
-  title: z.string(), 
+const Counter = z.object({
+  title: z.string(),
   count: z.number(),
-  kitty: z.string().default("🐱") 
+  kitty: z.string().default("🐱"),
 });
-type Counter = z.infer<typeof Counter>;
+type Counter = z.infer;
 
 const CounterArray = z.array(Counter);
-type CounterArray = z.infer<typeof CounterArray>;
+type CounterArray = z.infer;
 
 const Counters = z
   .object({
@@ -27,7 +27,7 @@ const Counters = z
     title: z.string().default("Kitty Counters"),
   })
   .describe("Kitty Counters");
-type Counters = z.infer<typeof Counters>;
+type Counters = z.infer;
 
 const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
   ({ detail }, state) => {
@@ -46,10 +46,10 @@ const updateRandomItem = handler<{}, { items: Counter[] }>(({}, state) => {
 });
 
 const addItem = handler<{}, { items: Counter[] }>(({}, state) => {
-  state.items.push({ 
-    title: `Kitty ${state.items.length + 1}`, 
+  state.items.push({
+    title: `Kitty ${state.items.length + 1}`,
     count: 0,
-    kitty: "🐱"
+    kitty: "🐱",
   });
 });
 
@@ -60,9 +60,12 @@ const removeItem = handler<{}, { items: Counter[]; item: Counter }>(
   },
 );
 
-const calculateTotal = lift(z.object({ items: CounterArray }), z.number(), ({ items }) =>
-  items.reduce((acc: number, item: Counter) => acc + item.count, 0),
-) as unknown as ModuleFactory<{ items: CounterArray }, number>;
+const calculateTotal = lift(
+  z.object({ items: CounterArray }),
+  z.number(),
+  ({ items }) =>
+    items.reduce((acc: number, item: Counter) => acc + item.count, 0),
+) as unknown as ModuleFactory;
 
 export default recipe(Counters, ({ items, title }) => {
   const total = calculateTotal({ items });
@@ -75,7 +78,7 @@ export default recipe(Counters, ({ items, title }) => {
           <common-input
             id="title"
             value={title}
-            placeholder="Collection Title" 
+            placeholder="Collection Title"
             oncommon-input={updateTitle({ title })}
           />
         </h1>
@@ -96,16 +99,20 @@ export default recipe(Counters, ({ items, title }) => {
               </li>
             ))}
           </ul>,
-          <p><em>No kitties yet! Add some with the button below.</em></p>
+          <p>
+            <em>No kitties yet! Add some with the button below.</em>
+          </p>,
         )}
 
         <div class="controls">
-          <p>Total Pats: <span id="total">{total}</span></p>
-          
+          <p>
+            Total Pats: <span id="total">{total}</span>
+          </p>
+
           <button id="randomIncrement" onclick={updateRandomItem({ items })}>
             Pat random kitty
           </button>
-          
+
           <button id="add" onclick={addItem({ items })}>
             Adopt new kitty
           </button>
