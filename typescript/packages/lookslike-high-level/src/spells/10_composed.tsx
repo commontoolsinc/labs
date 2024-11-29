@@ -1,6 +1,5 @@
 import { h, behavior, $, select, refer } from "@commontools/common-system";
-import { sharedDataViewer } from "./07_sharedTags.jsx";
-import { tamagochi } from "./04_tamagochi.jsx";
+import { tamagotchi } from "./04_tamagotchi.jsx";
 
 export const composed = behavior({
   defaultStates: select({ self: $.self })
@@ -22,7 +21,7 @@ export const composed = behavior({
             key={importer.toString()}
             id={importer.toString()}
             entity={() => importer}
-            spell={() => tamagochi}
+            spell={() => tamagotchi}
           />
         </div>
         <div style="flex: 1; width: 50%">
@@ -30,7 +29,7 @@ export const composed = behavior({
             key={viewer.toString()}
             id={viewer.toString()}
             entity={() => viewer}
-            spell={() => tamagochi}
+            spell={() => tamagotchi}
           />
         </div>
       </div>

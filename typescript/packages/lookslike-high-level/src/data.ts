@@ -38,12 +38,16 @@ import { UI as ViewService } from "@commontools/common-system";
 import * as helloWorld from "./spells/01_helloWorld.jsx";
 import * as counter from "./spells/02_counter.jsx";
 import * as desugared from "./spells/03_desugared.jsx";
-import * as tamagochi from "./spells/04_tamagochi.jsx";
+import * as tamagotchi from "./spells/04_tamagotchi.jsx";
 import * as readingList from "./spells/05_readingList.jsx";
 import * as chat from "./spells/06_chat.jsx";
 import * as sharedTags from "./spells/07_sharedTags.jsx";
 import * as workbench from "./spells/08_workbench.jsx";
 import * as importer from "./spells/09_importer.jsx";
+import { composed } from "./spells/10_composed.jsx";
+import github from "./spells/11_github.jsx";
+import form from "./spells/13_form.jsx";
+import * as helloWorldWithLikes from "./spells/12_helloWorldWithLikes.jsx";
 
 export type Charm = {
   [NAME]?: string;

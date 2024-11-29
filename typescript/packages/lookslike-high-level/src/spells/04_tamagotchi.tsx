@@ -50,7 +50,7 @@ export function generateDescription({
   );
 }
 
-function TamagochiView({
+function TamagotchiView({
   self,
   time,
   size,
@@ -66,7 +66,7 @@ function TamagochiView({
   hunger: number;
 }) {
   return (
-    <div title={"Tamagochi"} entity={self}>
+    <div title={"Tamagotchi"} entity={self}>
       <div style={`color:${color}`}>{description}</div>
       <table>
         <tr>
@@ -95,10 +95,10 @@ function Footer({}: {}) {
   return (
     <div>
       <hr />
-      <button onclick={TamagochiEvents.onAdvanceTime}>Wait</button>
-      <button onclick={TamagochiEvents.onGiveFood}>Feed</button>
-      <button onclick={TamagochiEvents.onExercise}>Exercise</button>
-      <button onclick={TamagochiEvents.onBroadcast}>Broadcast</button>
+      <button onclick={TamagotchiEvents.onAdvanceTime}>Wait</button>
+      <button onclick={TamagotchiEvents.onGiveFood}>Feed</button>
+      <button onclick={TamagotchiEvents.onExercise}>Exercise</button>
+      <button onclick={TamagotchiEvents.onBroadcast}>Broadcast</button>
     </div>
   );
 }
@@ -117,14 +117,14 @@ export const Creature = description
   .with(time)
   .with(color);
 
-const TamagochiEvents = events({
+const TamagotchiEvents = events({
   onAdvanceTime: "~/on/advanceTime",
   onGiveFood: "~/on/giveFood",
   onExercise: "~/on/exercise",
   onBroadcast: "~/on/broadcast",
 });
 
-export const tamagochi = behavior({
+export const tamagotchi = behavior({
   ...mixin(
     Description(
       ["hunger", "size", "time", "color", "description"],
@@ -133,21 +133,21 @@ export const tamagochi = behavior({
     ),
   ),
 
-  view: Creature.render(TamagochiView).commit(),
+  view: Creature.render(TamagotchiView).commit(),
 
   // NOTE(ja): is there a way to only have this advance time - and
   // all the other events should only deal with non-time related changes?
-  advanceTime: event(TamagochiEvents.onAdvanceTime)
+  advanceTime: event(TamagotchiEvents.onAdvanceTime)
     .with(time)
     .update(({ self, time }) => set(self, { time: time + 1 }))
     .commit(),
 
-  tickHunger: event(TamagochiEvents.onAdvanceTime)
+  tickHunger: event(TamagotchiEvents.onAdvanceTime)
     .with(hunger)
     .update(({ self, hunger }) => set(self, { hunger: hunger + 1 }))
     .commit(),
 
-  feed: event(TamagochiEvents.onGiveFood)
+  feed: event(TamagotchiEvents.onGiveFood)
     .with(hunger)
     .with(time)
     .update(({ self, hunger, time }) =>
@@ -158,7 +158,7 @@ export const tamagochi = behavior({
     )
     .commit(),
 
-  exercise: event(TamagochiEvents.onExercise)
+  exercise: event(TamagotchiEvents.onExercise)
     .with(hunger)
     .with(time)
     .with(size)
@@ -171,12 +171,12 @@ export const tamagochi = behavior({
     )
     .commit(),
 
-  broadcast: event(TamagochiEvents.onBroadcast)
-    .update(({ self }) => addTag(self, "#tamagochi"))
+  broadcast: event(TamagotchiEvents.onBroadcast)
+    .update(({ self }) => addTag(self, "#tamagotchi"))
     .commit(),
 });
 
-console.log(tamagochi);
+console.log(tamagotchi);
 
-export const spawn = (source: {} = { tamagochi: 1 }) =>
-  tamagochi.spawn(source, "Tamagochi");
+export const spawn = (source: {} = { tamagotchi: 1 }) =>
+  tamagotchi.spawn(source, "Tamagotchi");
