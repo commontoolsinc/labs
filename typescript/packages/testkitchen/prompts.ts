@@ -186,5 +186,6 @@ export const iterate = async ({
   };
 
   const text = await llm.sendRequest(payload);
-  return text.split("```tsx\n")[1].split("\n```")[0];
+  const src = text.split("```tsx\n")[1].split("\n```")[0];
+  return { ...payload, src };
 };
