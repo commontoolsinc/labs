@@ -159,12 +159,11 @@ export const iterate = async ({
   originalSpec,
   originalSrc,
   workingSpec,
-  workingSrc,
 }: {
   originalSpec: string;
   originalSrc: string;
   workingSpec: string;
-} = {}) => {
+}) => {
   const messages = [];
   const prefill = `\`\`\`tsx\n`;
 
@@ -180,7 +179,8 @@ export const iterate = async ({
 
   const payload = {
     model: "anthropic:claude-3-5-sonnet-latest",
-    system: `You are code generator that implements @commontools recipes.\n${recipeGuide}`,
+    system:
+      `You are code generator that implements @commontools recipes.\n${recipeGuide}`,
     messages,
     stop: "\n```",
   };
