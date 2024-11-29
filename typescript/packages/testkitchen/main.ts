@@ -105,10 +105,15 @@ async function testOneRecipe(recipe: string, actions: Action[]): Promise {
   return info;
 }
 
+// reports should show a high level of "3 of 5 tests passed"
+// It should help us understand whether we should be improving the prompts, fixing the code, or both
+
+
 // TODO:
 // [ ] add more other stuff here (more recipes)
 // [ ] generate a report with: what the prompts were
-// [ ] have a dsl for tests???
+// [x] have a baby dsl for tests???
+// [ ] recipes -> scenarios
 // tests = [
 //   ["click", [("button", { name: "Add New Kitty" }], {timeout: 250}, "click the cat"]
 //   ["click", [("button", { name: "Add New Kitty" }], {timeout: 250}]
