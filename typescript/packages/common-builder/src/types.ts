@@ -48,7 +48,7 @@ export type OpaqueRefMethods<T> = {
     fn: (value: T extends Array<infer U> ? Opaque<U> : Opaque<T>) => Opaque<S>,
   ): Opaque<S[]>;
   [Symbol.iterator](): Iterator<T>;
-  [Symbol.toPrimitive](): T;
+  [Symbol.toPrimitive](hint: string): T;
   [isOpaqueRefMarker]: true;
 };
 

@@ -45,7 +45,7 @@ import init, {
   JavaScriptModuleDefinition,
   JavaScriptValueMap,
 } from "@commontools/common-runtime";
-import { addRecipe, getRecipe } from "./recipe-map.js";
+import { addRecipe, getRecipe, getRecipeId } from "./recipe-map.js";
 
 export const cancels = new WeakMap<CellImpl<any>, Cancel>();
 
@@ -76,36 +76,19 @@ export function run<T, R = any>(
   resultCell?: CellImpl<R>,
 ): CellImpl<R>;
 export function run<T, R = any>(
-  recipe?: Recipe | Module,
+  recipeOrModule?: Recipe | Module,
   argument?: T,
   resultCell: CellImpl<R> = cell<R>(),
 ): CellImpl<R> {
   if (cancels.has(resultCell)) {
     // If it's already running and no new recipe or argument are given,
     // we are just returning the result cell
-    if (recipe === undefined && argument === undefined) return resultCell;
+    if (recipeOrModule === undefined && argument === undefined)
+      return resultCell;
 
     // Otherwise stop execution of the old recipe. TODO: Await, but this will
     // make all this async.
     stop(resultCell);
-  }
-
-  // If this is a module, not a recipe, wrap it in a recipe that just runs,
-  // passing arguments in unmodified and passing all results through as is
-  if (isModule(recipe)) {
-    const module = recipe as Module;
-    recipe = {
-      argumentSchema: module.argumentSchema ?? {},
-      resultSchema: module.resultSchema ?? {},
-      result: { $alias: { path: ["internal"] } },
-      nodes: [
-        {
-          module,
-          inputs: { $alias: { path: ["argument"] } },
-          outputs: { $alias: { path: ["internal"] } },
-        },
-      ],
-    } satisfies Recipe;
   }
 
   // Keep track of subscriptions to cancel them later
@@ -128,14 +111,41 @@ export function run<T, R = any>(
     resultCell.sourceCell = processCell;
   }
 
-  if (!recipe && processCell.get()?.[TYPE]) {
-    recipe = getRecipe(processCell.get()[TYPE]);
-    if (!recipe) throw new Error(`Unknown recipe: ${processCell.get()[TYPE]}`);
-  } else if (!recipe) {
+  let recipeId: string | undefined;
+
+  if (!recipeOrModule && processCell.get()?.[TYPE]) {
+    recipeId = processCell.get()[TYPE];
+    recipeOrModule = getRecipe(recipeId);
+    if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
+  } else if (!recipeOrModule) {
     console.warn(
       "No recipe provided and no recipe found in process cell. Not running.",
     );
     return resultCell;
+  }
+
+  let recipe: Recipe;
+
+  // If this is a module, not a recipe, wrap it in a recipe that just runs,
+  // passing arguments in unmodified and passing all results through as is
+  if (isModule(recipeOrModule)) {
+    const module = recipeOrModule as Module;
+    recipeId ??= getRecipeId(module);
+
+    recipe = {
+      argumentSchema: module.argumentSchema ?? {},
+      resultSchema: module.resultSchema ?? {},
+      result: { $alias: { path: ["internal"] } },
+      nodes: [
+        {
+          module,
+          inputs: { $alias: { path: ["argument"] } },
+          outputs: { $alias: { path: ["internal"] } },
+        },
+      ],
+    } satisfies Recipe;
+  } else {
+    recipe = recipeOrModule as Recipe;
   }
 
   // Walk the recipe's schema and extract all default values
@@ -177,7 +187,7 @@ export function run<T, R = any>(
 
   const internal =
     processCell.get()?.internal ??
-    (recipe.initial as { internal: any })?.internal;
+    ((recipe as Recipe).initial as { internal: any })?.internal;
 
   // Ensure static data is converted to cell references, e.g. for arrays
   argument = staticDataToNestedCells(
@@ -191,7 +201,7 @@ export function run<T, R = any>(
   if (defaults) argument = mergeObjects(argument, deepCopy(defaults));
 
   processCell.send({
-    [TYPE]: addRecipe(recipe),
+    [TYPE]: recipeId ?? addRecipe(recipe),
     argument,
     ...(internal ? { internal: deepCopy(internal) } : {}),
     resultRef: { cell: resultCell, path: [] },
@@ -442,8 +452,6 @@ function instantiateJavaScriptNode(
           undefined,
           () => result,
         );
-
-        console.log("lift: running result recipe", resultRecipe.toJSON());
 
         resultCell = run(resultRecipe, undefined, resultCell);
         addCancel(cancels.get(resultCell));

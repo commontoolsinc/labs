@@ -77,7 +77,7 @@ describe("Recipe Runner", () => {
       "Double numbers",
       ({ values }) => {
         const doubled = values.map(({ x }) => {
-          const double = lift<number>((x) => x * 2);
+          const double = lift<number>(x => x * 2);
           return { double: double(x) };
         });
         return { doubled };
@@ -90,7 +90,7 @@ describe("Recipe Runner", () => {
 
     // This is necessary to ensure the recipe has time to run
     // TODO: Get await idle() to work for this case as well
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     expect(result.getAsQueryResult()).toMatchObject({
       doubled: [{ double: 2 }, { double: 4 }, { double: 6 }],
@@ -105,7 +105,7 @@ describe("Recipe Runner", () => {
     const doubleArray = recipe<{ values: number[]; factor: number }>(
       "Double numbers",
       ({ values, factor }) => {
-        const doubled = values.map((x) => double({ x, factor }));
+        const doubled = values.map(x => double({ x, factor }));
         return { doubled };
       },
     );
@@ -119,7 +119,7 @@ describe("Recipe Runner", () => {
 
     // This is necessary to ensure the recipe has time to run
     // TODO: Get await idle() to work for this case as well
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise(resolve => setTimeout(resolve, 100));
 
     expect(result.getAsQueryResult()).toMatchObject({
       doubled: [3, 6, 9],
@@ -219,7 +219,7 @@ describe("Recipe Runner", () => {
       return x * y;
     });
 
-    const multiplyGenerator = lift<{ x: number; y: number }>((args) => {
+    const multiplyGenerator = lift<{ x: number; y: number }>(args => {
       runCounts.multiplyGenerator++;
       return multiply(args);
     });
@@ -233,7 +233,7 @@ describe("Recipe Runner", () => {
 
     const multiplyRecipe = recipe<{ x: number; y: number }>(
       "multiply",
-      (args) => {
+      args => {
         return {
           result1: multiplyGenerator(args),
           result2: multiplyGenerator2(args),
@@ -258,15 +258,16 @@ describe("Recipe Runner", () => {
 
     x.send(3);
     await idle();
-    expect(result.getAsQueryResult()).toMatchObject({
-      result1: 9,
-      result2: 9,
-    });
 
     expect(runCounts).toMatchObject({
       multiply: 4,
       multiplyGenerator: 1, // Did not re-run, since we didn't read the values!
       multiplyGenerator2: 2,
+    });
+
+    expect(result.getAsQueryResult()).toMatchObject({
+      result1: 9,
+      result2: 9,
     });
   });
 

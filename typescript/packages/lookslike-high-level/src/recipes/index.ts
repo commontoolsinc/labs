@@ -16,7 +16,7 @@ addRecipe(chat, chatSrc);
 export { chat };
 
 import closuresSrc from "./closures.tsx?raw";
-import { closures } from "./closures.js";
+import closures from "./closures.js";
 addRecipe(closures, closuresSrc);
 export { closures };
 

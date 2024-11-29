@@ -1,15 +1,16 @@
-import { Recipe } from "@commontools/common-builder";
+import { Module, Recipe } from "@commontools/common-builder";
 import { createRef } from "./cell-map.js";
 
-const recipeById = new Map<string, Recipe>();
+const recipeById = new Map<string, Recipe | Module>();
 const recipeNameById = new Map<string, string>();
-const recipeByName = new Map<string, Recipe>();
-const idByRecipe = new Map<Recipe, string>();
+const recipeByName = new Map<string, Recipe | Module>();
+const idByRecipe = new Map<Recipe | Module, string>();
 const srcById = new Map<string, string>();
 const specById = new Map<string, string>();
 const parentsById = new Map<string, string[]>();
+
 export function addRecipe(
-  recipe: Recipe,
+  recipe: Recipe | Module,
   src?: string,
   spec?: string,
   parents?: string[],
@@ -38,7 +39,7 @@ export function getRecipe(id: string) {
   return recipeById.get(id);
 }
 
-export function getRecipeId(recipe: Recipe) {
+export function getRecipeId(recipe: Recipe | Module) {
   return idByRecipe.get(recipe);
 }
 
