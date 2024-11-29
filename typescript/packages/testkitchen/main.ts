@@ -2,10 +2,10 @@ import { join } from "@std/path";
 import { exists } from "@std/fs";
 import { iterate } from "./prompts.ts";
 import { chromium, Page } from "playwright";
-import { Action, ActionResult } from "./recipes/actions.ts";
+import { Action, ActionResult } from "./actions.ts";
 import { ensureDir } from "@std/fs";
 
-const recipeDir = join(Deno.cwd(), "recipes");
+const scenarioDir = join(Deno.cwd(), "scenarios");
 async function runRecipeActions(page: Page, actions: Action[]) {
   const rv = [] as ActionResult[];
   let action;
@@ -26,19 +26,21 @@ async function runRecipeActions(page: Page, actions: Action[]) {
   return rv;
 }
 
-async function testOneRecipe(recipe: string, actions: Action[]): Promise {
+async function testOneScenario(scenario: string, actions: Action[]): Promise {
   let info = {} as any;
 
   // TODO: remove any old generated source
 
+  info["name"] = scenario;
+
   info["originalSrc"] = await Deno.readTextFile(
-    join(recipeDir, `${recipe}.tsx`),
+    join(scenarioDir, scenario, "original.tsx"),
   );
   info["originalSpec"] = await Deno.readTextFile(
-    join(recipeDir, `${recipe}.ogspec.md`),
+    join(scenarioDir, scenario, "ogspec.md"),
   );
   info["workingSpec"] = await Deno.readTextFile(
-    join(recipeDir, `${recipe}.newspec.md`),
+    join(scenarioDir, scenario, "newspec.md"),
   );
   info["actions"] = actions;
 
@@ -55,18 +57,24 @@ async function testOneRecipe(recipe: string, actions: Action[]): Promise {
     return info;
   }
 
-  const newSrcPath = join(recipeDir, `new-${recipe}.tsx`);
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const tmpSrcName = `${scenario}-${timestamp}`;
+  const newSrcPath = join("tmp", `${tmpSrcName}.tsx`);
   await Deno.writeTextFile(newSrcPath, info["generatedSrc"]);
-  const srcUrl = `http://localhost:8000/recipes/new-${recipe}.tsx`;
-  const loadUrl = `http://localhost:5173/newRecipe?src=${encodeURIComponent(
-    srcUrl,
-  )}`;
+  // FIXME(ja): we should stand up a server to serve interm reports as well as generated content
+  const srcUrl = `http://localhost:8000/tmp/${tmpSrcName}.tsx`;
+  const loadUrl = `http://localhost:5173/newRecipe?src=${
+    encodeURIComponent(
+      srcUrl,
+    )
+  }`;
 
-  const browser = await chromium.launch({ headless: false });
+  // const browser = await chromium.launch({ headless: false });
+  const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
 
-  const loaded = new Promise<string | true>(resolve => {
-    page.on("console", msg => {
+  const loaded = new Promise<string | true>((resolve) => {
+    page.on("console", (msg) => {
       if (msg.type() == "eror") {
         if (msg.text().includes("Errors in recipe:")) {
           // TODO(jake): make this expose the full error/stack trace??
@@ -104,12 +112,52 @@ async function testOneRecipe(recipe: string, actions: Action[]): Promise {
   return info;
 }
 
-function generateReportHtml(info: any): string {
+// P2: click to see code diff
+// P2: save screenshots for each actions / initial state of recipe, ending state
+// P2: save console logs/errors for each actions
+// P2: timings!!!!  (we should store the timings)
+function generateReportHtml(results: any, reportName: string): string {
+  const reports: string[] = [];
+  let info;
+
+  for (info of results) {
+    const report = `<div class="scenario">
+    ${
+      info.compileError
+        ? `<h2>Compile Error</h2><br/><pre>${info.compileError}</pre>`
+        : ""
+    }
+    <h2>Actions</h2>
+
+    ${
+      info.tests &&info.tests.length > 0
+        ? `<ul>
+      ${
+        info.tests
+          .map(
+            (test: any) => `
+        <li class="${test.success ? "success" : "failure"}">
+          <strong>${test.action.name}</strong>: ${
+              test.success ? "Passed" : "Failed"
+            }
+          ${test.error ? `<pre>${test.error}</pre>` : ""}
+        </li>
+      `,
+          )
+          .join("")
+      }
+      </ul>`
+        : ""
+    }
+    </div>`;
+    reports.push(report);
+  }
+
   return `
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Test Report for ${info.testName || "Unknown Test"}</title>
+      <title>Summary Report for ${reportName}</title>
       <style>
         /* Add your styles here */
         body { font-family: sans-serif; padding: 20px; }
@@ -120,33 +168,10 @@ function generateReportHtml(info: any): string {
       </style>
     </head>
     <body>
-      <h1>Test Report for ${info.testName || "Unknown Test"}</h1>
-      <p>Generated at: ${new Date().toLocaleString()}</p>
-      
-      ${
-        info.compileError
-          ? `
-        <h2>Compile Error</h2>
-        <pre>${info.compileError}</pre>
-      `
-          : ""
-      }
 
-      <h2>Actions</h2>
-      <ul>
-        ${info.tests
-          .map(
-            (test: any) => `
-          <li class="${test.success ? "success" : "failure"}">
-            <strong>${test.action.name}</strong>: ${
-              test.success ? "Passed" : "Failed"
-            }
-            ${test.error ? `<pre>${test.error}</pre>` : ""}
-          </li>
-        `,
-          )
-          .join("")}
-      </ul>
+    <h1>Test Report for ${reportName}</h1>
+    <p>Generated at: ${new Date().toLocaleString()}</p>
+      ${reports.join("\n")}
 
       <!-- Include any other relevant context you need -->
 
@@ -168,53 +193,75 @@ function generateReportHtml(info: any): string {
 //   ["click", [("button", { name: "Add New Kitty" }], {timeout: 250}]
 // ];
 
-import { actions as counterActions } from "./recipes/counters.newspec.actions.ts";
-const counterReport = await testOneRecipe("counters", counterActions);
+// TWO WAYS TO RUN:
 
-console.log(JSON.stringify(counterReport, null, 2));
+// 1. iterating on the `prompts.ts` ... (prompting)
+//   - P0: want to run all the scenarios
+//   - P0: see a "all scenarios report: 3/5 scenarios pass, details"
+//   - P3: write report to disk each time something changes ... this way live-server (node) will just give us live reporting
+//   - P0 /reports/:date
+//   - P1 /reports/latest -> symlink to the last reports/:date
 
-// FIXME(jake): make this dynamic
-const scenarioName = "scenario-abc123";
+// 2. Iterating on a scenario (fixate - pytest -f)
+//   - P2 only re-run the given sceneraio, only see the report on that sceneario
+
+const results = [];
+
+import { actions as kittyActions } from "./scenarios/pet-kitties/actions.ts";
+results.push(await testOneScenario("pet-kitties", kittyActions));
+
+import { actions as anotherActions } from "./scenarios/another-counters/actions.ts";
+results.push(await testOneScenario("another-counters", anotherActions));
+
+const reportName = "run"; // TODO: user should be allowed to provide
 const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-const reportDir = join("results", scenarioName, timestamp);
+const reportDir = join("reports", `${reportName}-${timestamp}`);
 
 await ensureDir(reportDir);
-const reportHtml = generateReportHtml(counterReport);
+const reportHtml = generateReportHtml(results, reportName);
+
 const reportPath = join(reportDir, "report.html");
 await Deno.writeTextFile(reportPath, reportHtml);
 const reportJsonPath = join(reportDir, "report.json");
-await Deno.writeTextFile(
-  reportJsonPath,
-  JSON.stringify(counterReport, null, 2),
-);
+await Deno.writeTextFile(reportJsonPath, JSON.stringify(results, null, 2));
 
-const recipe = "counters";
-// Copy original source
-await Deno.copyFile(
-  join(recipeDir, `${recipe}.tsx`),
-  join(reportDir, `${recipe}.tsx`),
-);
+const latestLinkPath = join("reports", "latest");
 
-// Copy original spec
-await Deno.copyFile(
-  join(recipeDir, `${recipe}.ogspec.md`),
-  join(reportDir, `${recipe}.ogspec.md`),
-);
-
-// Copy working spec
-await Deno.copyFile(
-  join(recipeDir, `${recipe}.newspec.md`),
-  join(reportDir, `${recipe}.newspec.md`),
-);
-
-// Copy actions
-await Deno.copyFile(
-  join(recipeDir, `${recipe}.newspec.actions.ts`),
-  join(reportDir, `${recipe}.newspec.actions.ts`),
-);
-
-// Copy generated source if it exists
-if (counterReport["generatedSrc"]) {
-  const generatedSrcPath = join(reportDir, `generated-${recipe}.tsx`);
-  await Deno.writeTextFile(generatedSrcPath, counterReport["generatedSrc"]);
+if (await exists(latestLinkPath)) {
+  await Deno.remove(latestLinkPath);
 }
+
+// Use the relative directory name only, not the full path
+const relativeReportDir = `run-${timestamp}`;
+await Deno.symlink(relativeReportDir, latestLinkPath, { type: "dir" });
+
+// const recipe = "counters";
+// // Copy original source
+// await Deno.copyFile(
+//   join(scenarioDir, `${recipe}.tsx`),
+//   join(reportDir, `${recipe}.tsx`),
+// );
+
+// // Copy original spec
+// await Deno.copyFile(
+//   join(scenarioDir, `${recipe}.ogspec.md`),
+//   join(reportDir, `${recipe}.ogspec.md`),
+// );
+
+// // Copy working spec
+// await Deno.copyFile(
+//   join(scenarioDir, `${recipe}.newspec.md`),
+//   join(reportDir, `${recipe}.newspec.md`),
+// );
+
+// // Copy actions
+// await Deno.copyFile(
+//   join(scenarioDir, `${recipe}.newspec.actions.ts`),
+//   join(reportDir, `${recipe}.newspec.actions.ts`),
+// );
+
+// // Copy generated source if it exists
+// if (counterReport["generatedSrc"]) {
+//   const generatedSrcPath = join(reportDir, `generated-${recipe}.tsx`);
+//   await Deno.writeTextFile(generatedSrcPath, counterReport["generatedSrc"]);
+// }

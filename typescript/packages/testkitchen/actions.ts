@@ -9,6 +9,7 @@ export type Action = {
   // }
 };
 
+// FIXME(jake): Add timings
 export type ActionResult = {
   error?: string;
   success: boolean;
