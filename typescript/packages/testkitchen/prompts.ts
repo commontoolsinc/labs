@@ -155,6 +155,17 @@ export default recipe(Schema, ({ items, title }) => {
 \`\`\`
 `;
 
+type LLMResponse = {
+  llm: {
+    model: string;
+    system: string;
+    messages: { role: string; content: string }[] | string[];
+    stop: string;
+  };
+  generatedSrc?: string;
+  generationError?: string;
+};
+
 export const iterate = async ({
   originalSpec,
   originalSrc,
@@ -163,7 +174,7 @@ export const iterate = async ({
   originalSpec: string;
   originalSrc: string;
   workingSpec: string;
-}) => {
+}): Promise => {
   const messages = [];
   const prefill = `\`\`\`tsx\n`;
 
@@ -179,13 +190,23 @@ export const iterate = async ({
 
   const payload = {
     model: "anthropic:claude-3-5-sonnet-latest",
-    system:
-      `You are code generator that implements @commontools recipes.\n${recipeGuide}`,
+    system: `You are code generator that implements @commontools recipes.\n${recipeGuide}`,
     messages,
     stop: "\n```",
   };
 
-  const text = await llm.sendRequest(payload);
-  const src = text.split("```tsx\n")[1].split("\n```")[0];
-  return { ...payload, src };
+  try {
+    const text = await llm.sendRequest(payload);
+    const generatedSrc = text.split("```tsx\n")[1].split("\n```")[0];
+    return {
+      //  llm: payload,
+      generatedSrc,
+    };
+  } catch (e) {
+    console.error("Error during LLM request:", e);
+    return {
+      // llm: payload,
+      generationError: e instanceof Error ? e.message : JSON.stringify(e),
+    };
+  }
 };

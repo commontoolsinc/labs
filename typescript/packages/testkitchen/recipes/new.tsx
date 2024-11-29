@@ -1,3 +1,4 @@
+
 import { h } from "@commontools/common-html";
 import {
   recipe,
@@ -6,68 +7,67 @@ import {
   handler,
   lift,
   str,
-  ModuleFactory,
-  ifElse,
 } from "@commontools/common-builder";
 import { z } from "zod";
 
-const Counter = z.object({
+// Define counter schema
+const Counter = z.object({ 
   title: z.string(),
   count: z.number(),
-  kitty: z.string().default("🐱"),
+  kitty: z.string().default("🐱") // Add kitty field
 });
-type Counter = z.infer;
+type Counter = z.infer<typeof Counter>;
 
-const CounterArray = z.array(Counter);
-type CounterArray = z.infer;
-
-const Counters = z
+const Schema = z
   .object({
-    items: CounterArray.default([]),
-    title: z.string().default("Kitty Counters"),
+    items: z.array(Counter).default([]),
+    title: z.string().default("Kitty Counters"), // Changed default title
   })
   .describe("Kitty Counters");
-type Counters = z.infer;
+type Schema = z.infer<typeof Schema>;
 
+// Handler to update title
 const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
   ({ detail }, state) => {
     detail?.value && (state.title = detail.value);
   },
 );
 
+// Handler to increment counter
 const inc = handler<{}, { item: Counter }>(({}, { item }) => {
   item.count += 1;
 });
 
+// Handler to randomly increment a counter
 const updateRandomItem = handler<{}, { items: Counter[] }>(({}, state) => {
   if (state.items.length > 0) {
     state.items[Math.floor(Math.random() * state.items.length)].count += 1;
   }
 });
 
+// Handler to add new counter
 const addItem = handler<{}, { items: Counter[] }>(({}, state) => {
-  state.items.push({
+  state.items.push({ 
     title: `Kitty ${state.items.length + 1}`,
     count: 0,
-    kitty: "🐱",
+    kitty: "🐱"
   });
 });
 
+// Handler to remove counter
 const removeItem = handler<{}, { items: Counter[]; item: Counter }>(
   ({}, state) => {
-    const index = state.items.findIndex(i => i.title === state.item.title);
+    const index = state.items.findIndex((i) => i.title === state.item.title);
     state.items.splice(index, 1);
   },
 );
 
-const calculateTotal = lift(
-  z.object({ items: CounterArray }),
-  z.number(),
-  ({ items }) =>
-    items.reduce((acc: number, item: Counter) => acc + item.count, 0),
-) as unknown as ModuleFactory;
+// Lift to calculate total
+const calculateTotal = lift(({ items }: { items: Counter[] }) =>
+  items.reduce((acc, item) => acc + item.count, 0)
+);
 
-export default recipe(Counters, ({ items, title }) => {
+export default recipe(Schema, ({ items, title }) => {
   const total = calculateTotal({ items });
 
   return {
@@ -75,50 +75,97 @@ export default recipe(Counters, ({ items, title }) => {
     [UI]: (
       <os-container>
         <h1>
-          <common-input
-            id="title"
-            value={title}
-            placeholder="Collection Title"
-            oncommon-input={updateTitle({ title })}
-          />
+          <span role="img" aria-label="cat">🐱</span> 
+          Kitty Counter Collection
+          <span role="img" aria-label="cat">🐱</span>
         </h1>
+        
+        <common-input
+          id="title"
+          value={title}
+          placeholder="Collection Title"
+          oncommon-input={updateTitle({ title })}
+        />
 
         {ifElse(
           items,
           <ul>
-            {items.map(item => (
+            {items.map((item) => (
               <li>
-                <span class="kitty">{item.kitty}</span>
-                {item.title} - <span class="count">{item.count}</span>
+                <span role="img" aria-label="cat">{item.kitty}</span>
+                {item.title} - <strong>{item.count}</strong>
                 <button class="increment" onclick={inc({ item })}>
-                  Pat the kitty
+                  Pat the kitty (+1)
                 </button>
                 <button id="remove" onclick={removeItem({ item, items })}>
-                  Goodbye kitty
+                  Remove kitty
                 </button>
               </li>
             ))}
           </ul>,
-          <p>
-            <em>No kitties yet! Add some with the button below.</em>
-          </p>,
+          <p><em>No kitties yet! Add some with the button below.</em></p>
         )}
 
+        <p>
+          Total Kitty Pats: <span id="total">{total}</span>
+        </p>
+
         <div class="controls">
-          <p>
-            Total Pats: <span id="total">{total}</span>
-          </p>
-
           <button id="randomIncrement" onclick={updateRandomItem({ items })}>
-            Pat random kitty
+            Pat Random Kitty
           </button>
-
           <button id="add" onclick={addItem({ items })}>
-            Adopt new kitty
+            Add New Kitty
           </button>
         </div>
+
+        <style>
+          {`
+            os-container {
+              padding: 20px;
+              font-family: sans-serif;
+            }
+            h1 {
+              text-align: center;
+              color: #333;
+            }
+            ul {
+              list-style: none;
+              padding: 0;
+            }
+            li {
+              margin: 10px 0;
+              padding: 10px;
+              border: 2px solid #eee;
+              border-radius: 8px;
+              display: flex;
+              align-items: center;
+              gap: 10px;
+            }
+            button {
+              padding: 5px 10px;
+              border-radius: 4px;
+              border: none;
+              cursor: pointer;
+            }
+            button.increment {
+              background: #e0f7fa;
+            }
+            button#remove {
+              background: #ffebee;
+            }
+            .controls {
+              margin-top: 20px;
+              display: flex;
+              gap: 10px;
+            }
+            #total {
+              font-weight: bold;
+              color: #2196f3;
+            }
+          `}
+        </style>
       </os-container>
     ),
-    total,
   };
 });

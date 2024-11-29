@@ -20,6 +20,7 @@
     "jsr:@std/text@~1.0.7": "1.0.8",
     "npm:@playwright/test@*": "1.49.0",
     "npm:@playwright/test@^1.49.0": "1.49.0",
+    "npm:@playwright/test@latest": "1.49.0",
     "npm:playwright@*": "1.49.0",
     "npm:playwright@^1.49.0": "1.49.0"
   },
@@ -132,7 +133,8 @@
       "jsr:@std/assert@1",
       "jsr:@std/fs@^1.0.6",
       "jsr:@std/path@^1.0.8",
-      "npm:@playwright/test@^1.49.0"
+      "npm:@playwright/test@^1.49.0",
+      "npm:playwright@^1.49.0"
     ]
   }
 }
