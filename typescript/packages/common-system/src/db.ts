@@ -19,7 +19,7 @@ import * as Memory from "synopsys/store/memory";
 import * as Session from "./session.js";
 import type { Effect, Instruction } from "./adapter.js";
 import { Constant } from "datalogia";
-import { explainMutation, logQuery } from "./debug.js";
+import { logQuery } from "./debug.js";
 import * as Store from "./idb.js";
 export * from "synopsys";
 
@@ -652,7 +652,13 @@ class Subscription<Select extends Selector = Selector> {
       "color: #999; font-size: 0.8em; font-style: italic;",
     );
 
-    const revision = refer(selection);
+    let revision;
+    try {
+      revision = refer(selection);
+    } catch (error) {
+      console.error("Error creating reference from selection:", error);
+      return [];
+    }
     const changes: Instruction[] = [];
     if (this.revision.toString() !== revision.toString()) {
       this.revision = revision;
