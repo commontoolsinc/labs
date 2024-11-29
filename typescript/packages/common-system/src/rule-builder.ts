@@ -57,6 +57,25 @@ export class Select<Match extends Selector = Selector> {
     );
   }
 
+  matches(
+    ...match: Array<
+      [
+        entity: Term<Entity>,
+        attribute: Term<Attribute>,
+        value: Term<API.Constant>,
+      ]
+    >
+  ): Select<Match> {
+    return new Select<Match>(
+      this.#select,
+      match.reduce(
+        (where, [entity, attribute, value]) =>
+          where.match(entity, attribute, value),
+        this.#where,
+      ),
+    );
+  }
+
   clause(clause: Clause) {
     return new Select<Match>(this.#select, this.#where.clause(clause));
   }
