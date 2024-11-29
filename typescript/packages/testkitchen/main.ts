@@ -12,6 +12,8 @@ async function testIterate(
 ): Promise {
   let info: Iteration = {};
 
+  // TODO: remove any old generated source
+
   info["originalSrc"] = await Deno.readTextFile(
     join(recipeDir, `${recipe}.tsx`),
   );
@@ -34,23 +36,20 @@ async function testIterate(
     return info;
   }
 
-  await Deno.writeTextFile(
-    join(recipeDir, `new-${recipe}.tsx`),
-    info["generatedSrc"],
-  );
-  const srcUrl = `http://localhost:8000/recipes/new.tsx`;
+  const newSrcPath = join(recipeDir, `new-${recipe}.tsx`);
+  await Deno.writeTextFile(newSrcPath, info["generatedSrc"]);
+  const srcUrl = `http://localhost:8000/recipes/new-${recipe}.tsx`;
 
-  const loadUrl = `http://localhost:5173/newRecipe?src=${
-    encodeURIComponent(
-      srcUrl,
-    )
-  }`;
+  const loadUrl = `http://localhost:5173/newRecipe?src=${encodeURIComponent(
+    srcUrl,
+  )}`;
 
+  console.log("loading", loadUrl);
   const browser = await chromium.launch({ headless: false });
   const page = await browser.newPage();
 
-  const loaded = new Promise<string | true>((resolve) => {
-    page.on("console", (msg) => {
+  const loaded = new Promise<string | true>(resolve => {
+    page.on("console", msg => {
       if (msg.type() === "error") {
         if (msg.text().includes("Errors in recipe:")) {
           // TODO(jake): make this expose the full error/stack trace??
@@ -71,7 +70,7 @@ async function testIterate(
   const status = await loaded;
   if (typeof status === "string") {
     info["compileError"] = status;
-    browser.close();
+    // browser.close();
     return info;
   }
 
