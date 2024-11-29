@@ -9,7 +9,6 @@ export const actions: Action[] = [
   {
     type: "click",
     name: "pet the first kitty",
-    // args: ["button", { name: "Pat Kitty" }],
-    args: ["button", { name: "Pet Kitty" }],
+    args: ["button", { name: "Pat Kitty" }],
   },
 ];

@@ -127,8 +127,17 @@ async function testOneScenario(scenario: string, actions: Action[]): Promise {
 // P2: timings!!!!  (we should store the timings)
 function generateReportHtml(results: any, reportName: string): string {
   const reports: string[] = [];
+  
+  // Calculate pass/fail stats
+  const total = results.length;
+  const passed = results.filter((info: any) => 
+    !info.compileError && 
+    info.tests?.every((test: any) => test.success)
+  ).length;
+  const allPassed = passed === total;
+  const resultsColor = allPassed ? "green" : "red";
+  
   let info;
-
   for (info of results) {
     const report = `<div class="scenario" style="border: 1px solid black; padding: 10px; margin: 10px;">
 
@@ -188,6 +197,7 @@ function generateReportHtml(results: any, reportName: string): string {
     <body>
 
     <h1>Test Report for ${reportName}</h1>
+    <h2 style="color: ${resultsColor}">Results: ${passed}/${total} scenarios passed</h2>
     <p>Generated at: ${new Date().toLocaleString()}</p>
       ${reports.join("\n")}
 
@@ -199,7 +209,7 @@ function generateReportHtml(results: any, reportName: string): string {
 // It should help us understand whether we should be improving the prompts, fixing the code, or both
 
 // TODO:
-// [ ] add more other stuff here (more recipes)
+// [x] add more other stuff here (more recipes)
 // [ ] generate a report with: what the prompts were
 // [x] have a baby dsl for tests???
 // [ ] recipes -> scenarios
@@ -212,11 +222,11 @@ function generateReportHtml(results: any, reportName: string): string {
 // TWO WAYS TO RUN:
 
 // 1. iterating on the `prompts.ts` ... (prompting)
-//   - P0: want to run all the scenarios
+//   x P0: want to run all the scenarios
 //   - P0: see a "all scenarios report: 3/5 scenarios pass, details"
 //   - P3: write report to disk each time something changes ... this way live-server (node) will just give us live reporting
-//   - P0 /reports/:date
-//   - P1 /reports/latest -> symlink to the last reports/:date
+//   x P0 /reports/:date
+//   x P1 /reports/latest -> symlink to the last reports/:date
 
 // 2. Iterating on a scenario (fixate - pytest -f)
 //   - P2 only re-run the given sceneraio, only see the report on that sceneario
