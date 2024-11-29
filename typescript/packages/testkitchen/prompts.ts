@@ -199,13 +199,13 @@ export const iterate = async ({
     const text = await llm.sendRequest(payload);
     const generatedSrc = text.split("```tsx\n")[1].split("\n```")[0];
     return {
-      //  llm: payload,
+      llm: payload,
       generatedSrc,
     };
   } catch (e) {
     console.error("Error during LLM request:", e);
     return {
-      // llm: payload,
+      llm: payload,
       generationError: e instanceof Error ? e.message : JSON.stringify(e),
     };
   }
