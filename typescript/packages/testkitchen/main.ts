@@ -12,7 +12,7 @@ async function runRecipeActions(page: Page, actions: Action[]) {
   for (action of actions) {
     if (action.type === "click") {
       try {
-        await page.getByRole(...action.args).click({ timeout: 250 });
+        await page.getByRole(...action.args).click({ timeout: 500 });
         rv.push({ success: true, action });
       } catch (e) {
         rv.push({
@@ -69,16 +69,18 @@ async function testOneScenario(scenario: string, actions: Action[]): Promise {
     )
   }`;
 
-  // const browser = await chromium.launch({ headless: false });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: false });
+  // const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
 
   const loaded = new Promise<string | true>((resolve) => {
     page.on("console", (msg) => {
-      if (msg.type() == "eror") {
+      if (msg.type() == "error") {
         if (msg.text().includes("Errors in recipe:")) {
           // TODO(jake): make this expose the full error/stack trace??
           const error = msg.text().split("Errors in recipe: ")[1];
+          console.log(`Recipe failed to load, with error: "${error}"`);
+
           resolve(error);
         }
       }
@@ -93,9 +95,10 @@ async function testOneScenario(scenario: string, actions: Action[]): Promise {
   await page.goto(loadUrl);
 
   const status = await loaded;
+
   if (typeof status === "string") {
     info["compileError"] = status;
-    // browser.close();
+    await browser.close();
     return info;
   }
 
@@ -172,8 +175,6 @@ function generateReportHtml(results: any, reportName: string): string {
     <h1>Test Report for ${reportName}</h1>
     <p>Generated at: ${new Date().toLocaleString()}</p>
       ${reports.join("\n")}
-
-      <!-- Include any other relevant context you need -->
 
     </body>
     </html>
