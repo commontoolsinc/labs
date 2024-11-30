@@ -17,7 +17,6 @@ import {
   run,
   effect,
   CellImpl,
-  isCell,
   idle,
   EntityId,
   getRecipe,
@@ -458,14 +457,31 @@ export class CommonWindowManager extends LitElement {
     `;
   }
 
+  private idAliases = new Map<string, string>();
   async openCharm(charmToOpen: string | EntityId | CellImpl<any>) {
-    const charm = await syncCharm(charmToOpen);
+    let charm = await syncCharm(charmToOpen);
+    let charmId = JSON.stringify(charm.entityId!);
+
+    if (typeof charmToOpen === "string" && this.idAliases.has(charmToOpen)) {
+      charmToOpen = this.idAliases.get(charmToOpen)!;
+      console.log("Using alias", charmToOpen);
+      charm = await syncCharm(charmToOpen);
+      charmId = JSON.stringify(charm.entityId!);
+    }
+
     const recipeId = charm?.sourceCell?.get()[TYPE];
     if (recipeId) await syncRecipe(recipeId);
-    const charmId = JSON.stringify(charm.entityId!);
     await idle();
     run(undefined, undefined, charm);
-    if (!isCell(charm)) throw new Error(`Charm ${charmId} doesn't exist`);
+    await idle();
+
+    // HACK: Workaround the bug that result cells that are just aliases to other
+    // cells tend to return these as charm cells in some circumstances.
+    const maybeAlias = JSON.stringify(getEntityId(charm.getAsQueryResult()));
+    if (maybeAlias && maybeAlias !== charmId) {
+      this.idAliases.set(maybeAlias, charmId);
+    }
+
     this.focusedCharm = charm;
     this.focusedProxy = charm?.getAsQueryResult();
 
@@ -553,6 +569,7 @@ export class CommonWindowManager extends LitElement {
       charmMatch &&
       JSON.stringify(this.focusedCharm?.entityId) !== charmMatch.params.charmId
     ) {
+      console.log("charmMatch", charmMatch.params.charmId);
       // TODO: Add a timeout here, show loading state and error state
       setTimeout(() => {
         syncCharm(charmMatch.params.charmId, true).then(
