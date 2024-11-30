@@ -187,7 +187,7 @@ export function run<T, R = any>(
 
   const internal =
     processCell.get()?.internal ??
-    ((recipe as Recipe).initial as { internal: any })?.internal;
+    (recipe.initial as { internal: any })?.internal;
 
   // Ensure static data is converted to cell references, e.g. for arrays
   argument = staticDataToNestedCells(
