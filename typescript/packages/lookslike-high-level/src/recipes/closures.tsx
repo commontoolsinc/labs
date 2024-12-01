@@ -10,20 +10,22 @@ import {
 import { z } from "zod";
 
 export const counter = lift<{ count: number }>(state => {
-  return render(() => (
-    <div>
-      [
-      <button
-        onclick={() => {
-          console.log("clicked", state.count);
-          state.count = state.count + 1;
-        }}
-      >
-        #{`${state.count}`} - {state.count}
-      </button>
-      ]
-    </div>
-  ));
+  return {
+    [UI]: render(() => (
+      <div>
+        [
+        <button
+          onclick={() => {
+            console.log("clicked", state.count);
+            state.count = state.count + 1;
+          }}
+        >
+          #{`${state.count}`} - {state.count}
+        </button>
+        ]
+      </div>
+    )),
+  };
 });
 
 export default lift(
@@ -53,7 +55,7 @@ export default lift(
       </li>
     ));
 
-    const counterUI = counter(cell({ count: 0 })); // cell() so that it's mutable
+    const counterUI = counter(cell({ count: 0 }))[UI]; // cell() so that it's mutable
 
     return {
       [NAME]: `closures with ${test}`,
