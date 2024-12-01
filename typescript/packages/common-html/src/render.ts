@@ -76,9 +76,13 @@ const bindChildren = (
   const [cancel, addCancel] = useCancelGroup();
 
   for (const child of children) {
-    if (typeof child === "string") {
+    if (
+      typeof child === "string" ||
+      typeof child === "number" ||
+      typeof child === "boolean"
+    ) {
       // Bind static content
-      element.append(child);
+      element.append(child.toString());
     } else if (isVNode(child)) {
       // Bind static VNode
       const [childElement, cancel] = renderNode(child, context);
