@@ -32,6 +32,7 @@
     "@commontools/llm-client": "^0.0.1",
     "@gozala/co-dom": "^0.4.0",
     "datalogia": "^0.9.2",
+    "lit-html": "^3.2.1",
     "synopsys": "^5.1.0"
   },
   "devDependencies": {
