@@ -20,10 +20,77 @@ export function truncateId(id: string | Reference) {
   return `${id.slice(0, 4)}…${id.slice(-4)}`;
 }
 
+@customElement('rule-details-popover')
+export class RuleDetailsPopover extends LitElement {
+  @property({ attribute: false }) accessor rule: string = '';
+  @property({ attribute: false }) accessor color: string = '#000';
+  @property({ attribute: false }) accessor activation: any = null;
+  @property({ attribute: false }) accessor ruleData: any = null;
+
+  static override styles = css`
+    :host {
+      position: absolute;
+      left: -320px;
+      top: 0;
+      width: 300px;
+      max-height: 320px;
+      background: white;
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      overflow-y: auto;
+      font-size: 14px;
+      pointer-events: all;
+    }
+
+    pre {
+      background: rgba(0,0,0,0.1);
+      padding: 8px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+
+    .close {
+      position: absolute;
+      right: 8px;
+      top: 8px;
+      cursor: pointer;
+      opacity: 0.6;
+    }
+
+    .close:hover {
+      opacity: 1;
+    }
+  `;
+
+  override render() {
+    return html`
+      <div style="color: ${this.color}">
+        <div class="close" @click=${() => this.remove()}>✕</div>
+        <h3>${this.rule}</h3>
+        <div>Activations: ${this.activation?.count || 0}</div>
+        ${this.activation?.performanceMs ? html`
+          <div>Last performance: ${this.activation.performanceMs}ms</div>
+        ` : ''}
+
+        <h4>Rule Definition</h4>
+        <pre>${JSON.stringify(this.ruleData, null, 2)}</pre>
+
+        ${this.activation?.lastSelection ? html`
+          <h4>Last Selection</h4>
+          <pre>${JSON.stringify(this.activation.lastSelection, null, 2)}</pre>
+        ` : ''}
+      </div>
+    `;
+  }
+}
+
 @customElement('charm-debugger')
 export class CharmDebugger extends LitElement {
   private _entity: Reference | null = null;
   private _behavior: Behavior | null = null;
+  private activePopover: RuleDetailsPopover | null = null;
 
   @property({ attribute: false })
   get entity() {
@@ -66,6 +133,19 @@ export class CharmDebugger extends LitElement {
   private getColorForEntity(entityId: string): string {
     const hash = Array.from(entityId).reduce((acc, char) => acc + char.charCodeAt(0), 0);
     return this.cardColors[hash % this.cardColors.length];
+  }
+
+  private showRuleDetails(rule: string, color: string, activation: any, ruleData: any) {
+    // Remove any existing popover
+    this.activePopover?.remove();
+
+    const popover = document.createElement('rule-details-popover') as RuleDetailsPopover;
+    popover.rule = rule;
+    popover.color = color;
+    popover.activation = activation;
+    popover.ruleData = ruleData;
+    this.activePopover = popover;
+    this.renderRoot.appendChild(popover);
   }
 
   static override styles = css`
@@ -332,13 +412,15 @@ export class CharmDebugger extends LitElement {
               const emojiList = ["🌟", "🎯", "🎨", "🎭", "🎪", "🎢", "🎡", "🎮", "🎲", "🎰", "🎳", "🎹", "🎼", "🎧", "🎤", "🎬", "🎨", "🎭", "🎪"];
               const activation = this.ruleActivations.get(rule);
               const emoji = emojiList[hash % emojiList.length];
+              const color = this.cardColors[hash % this.cardColors.length];
 
               return html`
                 <div class="rule-item" style="top: ${Math.floor(index / 2) * 96}px">
                   <div
                     class="emoji-tile ${this.pulsingRules.has(rule) ? 'pulse' : ''}"
-                    style="background: ${this.cardColors[hash % this.cardColors.length]}"
+                    style="background: ${color}"
                     title="${rule} (${activation?.count || 0} activations)"
+                    @click=${() => this.showRuleDetails(rule, color, activation, this.behavior?.rules[rule])}
                   >
                     ${emoji}
                   </div>
