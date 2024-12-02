@@ -14,6 +14,7 @@ export class Charm extends HTMLElement {
   #cell: null | { send(data: string): void };
   #mount: HTMLElement;
   renderMount: HTMLElement;
+  animationWrapper: HTMLElement;
   #debugger: CharmDebugger | null = null;
   #errorDisplay: HTMLElement;
 
@@ -39,7 +40,7 @@ export class Charm extends HTMLElement {
         padding: 4px;
       }
 
-      .charm.vdom-update {
+      .animation-wrapper.vdom-update {
         animation: grow 0.3s ease-out;
       }
 
@@ -121,16 +122,20 @@ export class Charm extends HTMLElement {
 
     this.#mount = document.createElement("div");
     this.renderMount = document.createElement("div");
+    this.animationWrapper = document.createElement("div");
     this.#errorDisplay = document.createElement("div");
     this.#errorDisplay.className = "error-display";
 
     this.#mount.classList.add("charm");
-    this.renderMount.classList.add("placeholder");
+    this.renderMount.classList.add("placeholder", "render-mount");
+    this.animationWrapper.classList.add("animation-wrapper");
+
+    this.animationWrapper.appendChild(this.renderMount);
+    this.#mount.appendChild(this.animationWrapper);
+    this.#mount.appendChild(this.#errorDisplay);
 
     this.root.appendChild(style);
     this.root.appendChild(this.#mount);
-    this.#mount.appendChild(this.renderMount);
-    this.#mount.appendChild(this.#errorDisplay);
 
     if (getDebugCharms()) {
       // this.#mount.classList.add("debug");
@@ -175,9 +180,9 @@ export class Charm extends HTMLElement {
 
   set vdom(vdom) {
     this.#vdom = vdom;
-    this.#mount.classList.remove("vdom-update");
-    void this.#mount.offsetWidth; // Force reflow
-    this.#mount.classList.add("vdom-update");
+    this.animationWrapper.classList.remove("vdom-update");
+    void this.animationWrapper.offsetWidth; // Force reflow
+    this.animationWrapper.classList.add("vdom-update");
   }
 
   set cell(value: any) {

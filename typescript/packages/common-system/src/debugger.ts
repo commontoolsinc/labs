@@ -61,6 +61,12 @@ export class CharmDebugger extends LitElement {
   private mutationLog: any[] = [];
   private isOpen: boolean = false;
   private isMutationLogOpen: boolean = false;
+  private pulsingRules: Set<string> = new Set();
+
+  private getColorForEntity(entityId: string): string {
+    const hash = Array.from(entityId).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return this.cardColors[hash % this.cardColors.length];
+  }
 
   static override styles = css`
     :host {
@@ -75,13 +81,18 @@ export class CharmDebugger extends LitElement {
       font-family: monospace;
       color: black;
       pointer-events: none;
+      overflow: visible;
+      display: flex;
+      align-items: flex-start;
+      flex-direction: column;
+      align-items: flex-end;
     }
 
     .content * {
       pointer-events: auto;
     }
 
-    :host(.closed) .content > ul {
+    :host(.closed) .content > .rules-grid {
       display: none;
     }
 
@@ -89,21 +100,62 @@ export class CharmDebugger extends LitElement {
       display: none;
     }
 
-    ul {
-      list-style: none;
-      padding: 0;
+    .rules-grid {
+      position: relative;
+      right: 16px;
+      top: 16px;
+      max-width: 128px;
+      pointer-events: all;
+      min-height: 256px;
+      box-sizing: border-box;
+      padding: 32px 16px;
+      overflow: visible;
+      transform: scale(0.75);
+      opacity: 0.75;
+      transform-origin: top right;
+      transition: transform 0.2s ease-in-out, opacity 0.2s ease-in-out;
     }
 
-    details {
-      margin-bottom: 8px;
-      border-radius: 8px;
-      padding: 8px;
+    .rules-grid:hover {
+      transform: scale(1);
+      opacity: 1;
     }
 
-    summary {
-      font-size: 18px;
-      font-weight: bold;
+    .rule-item {
+      position: absolute;
+      width: 48%;
+      transition: all 0.3s ease;
+    }
+
+    .rule-item:nth-child(odd) {
+      left: 0;
+    }
+
+    .rule-item:nth-child(even) {
+      right: 0;
+      margin-top: 48px;
+    }
+
+    .emoji-tile {
+      width: 48px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      border-radius: 128px;
+      /* margin-bottom: 16px; */
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
       cursor: pointer;
+      border: 2px solid white;
+      transition: transform 0.2s ease;
+      transform: scale(1.2);
+      opacity: 0.9;
+    }
+
+    .emoji-tile:hover {
+      transform: scale(1.3) rotate(5deg);
+      opacity: 1;
     }
 
     .entity-id {
@@ -143,15 +195,6 @@ export class CharmDebugger extends LitElement {
       overflow-x: auto;
     }
 
-    .rule-card {
-      border-radius: 16px;
-      margin-bottom: 8px;
-      padding: 4px;
-      padding-left: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      font-size: 12px;
-    }
-
     .mutation-log {
       background: white;
       border-radius: 8px;
@@ -165,9 +208,9 @@ export class CharmDebugger extends LitElement {
     }
 
     @keyframes pulse {
-      0% { transform: scale(1); }
-      50% { transform: scale(1.05); }
-      100% { transform: scale(1); }
+      0% { transform: scale(1.2); }
+      50% { transform: scale(1.3); opacity: 1; }
+      100% { transform: scale(1.2); }
     }
 
     .pulse {
@@ -221,6 +264,14 @@ export class CharmDebugger extends LitElement {
           performanceMs: event.detail.performanceMs,
         });
 
+        // Add rule to pulsing set
+        this.pulsingRules.add(ruleName);
+        // Remove the rule from pulsing set after animation completes
+        setTimeout(() => {
+          this.pulsingRules.delete(ruleName);
+          this.requestUpdate();
+        }, 300);
+
         this.requestUpdate();
       }
     });
@@ -260,7 +311,7 @@ export class CharmDebugger extends LitElement {
           <div>
             <div
               class="entity-id"
-              style="background: ${this.cardColors[Math.floor(Math.random() * this.cardColors.length)]};"
+              style="background: ${this.getColorForEntity(this.entity.toString())};"
               title=${this.entity.toString()}
               @click=${this.toggleOpen}
             >
@@ -275,27 +326,26 @@ export class CharmDebugger extends LitElement {
         ` : ''}
 
         ${this.behavior?.rules ? html`
-          <ul>
-            ${Object.keys(this.behavior.rules).map(rule => {
+          <div class="rules-grid">
+            ${Object.keys(this.behavior.rules).map((rule, index) => {
               const hash = Array.from(rule).reduce((acc, char) => acc + char.charCodeAt(0), 0);
               const emojiList = ["🌟", "🎯", "🎨", "🎭", "🎪", "🎢", "🎡", "🎮", "🎲", "🎰", "🎳", "🎹", "🎼", "🎧", "🎤", "🎬", "🎨", "🎭", "🎪"];
               const activation = this.ruleActivations.get(rule);
+              const emoji = emojiList[hash % emojiList.length];
 
               return html`
-                <li>
-                  <details class="rule-card" data-rule=${rule} style="background: ${this.cardColors[hash % this.cardColors.length]}">
-                    <summary>${rule} ${emojiList[hash % emojiList.length]} (${activation?.count || 0})</summary>
-                    ${activation?.lastSelection ? html`
-                      <pre>${JSON.stringify(activation.lastSelection, null, 2)}</pre>
-                    ` : ''}
-                    <div class="explanation">Rule:</div>
-                    <pre>${JSON.stringify(this.behavior!.rules[rule], null, 2)}</pre>
-                    <div class="performance">${activation?.performanceMs || 0}ms</div>
-                  </details>
-                </li>
+                <div class="rule-item" style="top: ${Math.floor(index / 2) * 96}px">
+                  <div
+                    class="emoji-tile ${this.pulsingRules.has(rule) ? 'pulse' : ''}"
+                    style="background: ${this.cardColors[hash % this.cardColors.length]}"
+                    title="${rule} (${activation?.count || 0} activations)"
+                  >
+                    ${emoji}
+                  </div>
+                </div>
               `;
             })}
-          </ul>
+          </div>
         ` : ''}
 
         <div class="mutation-log">
