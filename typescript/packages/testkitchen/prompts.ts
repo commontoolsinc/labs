@@ -174,7 +174,7 @@ export const iterate = async ({
   originalSpec: string;
   originalSrc: string;
   workingSpec: string;
-}): Promise => {
+}): Promise<LLMResponse> => {
   const messages = [];
   const prefill = `\`\`\`tsx\n`;
 
