@@ -145,18 +145,44 @@ export const chatRules = behavior({
       console.log('chat', items)
       items.sort((a, b) => a.sentAt - b.sentAt)
 
-      return <div title="Common Chat">
-        <ul>{items.map(item => <li key={item.author + item.message + item.sentAt}>
-          <b>{item.author}</b>: {item.message} <sub style="opacity: 0.5;">{new Date(item.sentAt).toLocaleTimeString()}</sub>
-        </li>)}</ul>
+      return <div title="Common Chat" style="max-width: 800px; margin: 20px auto; padding: 20px; background: #f5f5f5; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        <ul style="list-style: none; padding: 0; margin: 0 0 20px 0; max-height: 400px; overflow-y: auto;">
+          {items.map(item => <li key={item.author + item.message + item.sentAt} style={`
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 8px;
+            background: ${item.author === 'assistant' ? '#fff' : '#007bff'};
+            color: ${item.author === 'assistant' ? '#000' : '#fff'};
+            max-width: 80%;
+            ${item.author === 'assistant' ? 'margin-right: auto;' : 'margin-left: auto;'}
+          `}>
+            <b>{item.author}</b>: {item.message}
+            <sub style="opacity: 0.7; display: block; font-size: 0.8em; margin-top: 4px;">
+              {new Date(item.sentAt).toLocaleTimeString()}
+            </sub>
+          </li>)}
+        </ul>
         <common-form reset oncommon-submit="~/on/submit">
-          <fieldset style="border-radius: 8px;">
-            <label>Message</label>
-            <input name="message" type="text" placeholder="say something!" />
-            <button type="submit">Submit</button>
+          <fieldset style="border: none; padding: 0; margin: 0;">
+            <label style="display: none;">Message</label>
+            <div style="display: flex; gap: 8px;">
+              <input
+                name="message"
+                type="text"
+                placeholder="Type your message..."
+                style="flex: 1; padding: 12px; border-radius: 20px; border: 1px solid #ddd; font-size: 16px;"
+              />
+              <button type="submit" style="padding: 12px 24px; border-radius: 20px; border: none; background: #007bff; color: white; cursor: pointer;">Send</button>
+            </div>
           </fieldset>
         </common-form>
-        <button type="button" onclick={ChatEvents.onClearChat}>Clear Chat</button>
+        <button
+          type="button"
+          onclick={ChatEvents.onClearChat}
+          style="margin-top: 12px; padding: 8px 16px; border-radius: 8px; border: none; background: #dc3545; color: white; cursor: pointer;"
+        >
+          Clear Chat
+        </button>
       </div>
     })
     .commit(),
