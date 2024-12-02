@@ -19,6 +19,104 @@ export function truncateId(id: string | Reference) {
   if (id.length <= 8) return id;
   return `${id.slice(0, 4)}…${id.slice(-4)}`;
 }
+@customElement('mutation-log-entry')
+export class MutationLogEntry extends LitElement {
+  @property({ attribute: false }) accessor mutation: any;
+
+  static override styles = css`
+    :host {
+      display: block;
+      font-family: monospace;
+      font-size: 12px;
+      margin: 4px 0;
+    }
+
+    .log-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .assert { color: #27ae60; }
+    .upsert { color: #f1c40f; }
+    .retract { color: #e74c3c; }
+
+    .details-btn {
+      opacity: 0.5;
+      cursor: pointer;
+      font-size: 10px;
+      background: none;
+      border: none;
+      padding: 2px;
+    }
+
+    .details-btn:hover {
+      opacity: 1;
+    }
+
+    span {
+      color: #333333;
+    }
+  `;
+
+  private formatValue(value: any): string {
+    if (value === null || value === undefined) return 'null';
+    if (Array.isArray(value)) return '[...]';
+    if (typeof value === 'object') return '{...}';
+    if (typeof value === 'string') return `'${value}'`;
+    return String(value);
+  }
+
+  private showDetails() {
+    console.group('Mutation Details');
+    console.log('%cRule:', 'color: #3498db', this.mutation.rule);
+    console.log('%cRevision:', 'color: #3498db', this.mutation.revision);
+    console.log('%cSelection:', 'color: #3498db', this.mutation.selection);
+    console.log('%cChanges:', 'color: #3498db', this.mutation.changes);
+    console.groupEnd();
+  }
+
+  override render() {
+    const changes = this.mutation.changes;
+    let icon = '';
+    let colorClass = '';
+
+    // Handle array of changes
+    const change = changes[0];
+    const type = Object.keys(change)[0];
+    const [_, field, value] = change[type];
+
+    const formatValue = (val: any) => {
+      const formatted = this.formatValue(val);
+      if (typeof val === 'string' && val.length > 32) {
+        const start = formatted.slice(0, 16);
+        const end = formatted.slice(-16);
+        return `${start}…${end}`;
+      }
+      return formatted;
+    };
+
+    if (type === 'Assert') {
+      icon = '+';
+      colorClass = 'assert';
+    } else if (type === 'Upsert') {
+      icon = '~';
+      colorClass = 'upsert';
+    } else if (type === 'Retract') {
+      icon = '-';
+      colorClass = 'retract';
+    }
+
+    return html`
+      <div class="log-line">
+        <span class=${colorClass}><b>${icon}</b></span>
+        <span><b>${field}</b>= ${field === '~/common/ui' ? 're-render' : formatValue(value)}</span>
+        <button class="details-btn" @click=${this.showDetails} title="Show full details">🔍</button>
+      </div>
+    `;
+  }
+}
+
 
 @customElement('rule-details-popover')
 export class RuleDetailsPopover extends LitElement {
@@ -85,6 +183,7 @@ export class RuleDetailsPopover extends LitElement {
     `;
   }
 }
+
 
 @customElement('charm-debugger')
 export class CharmDebugger extends LitElement {
@@ -224,7 +323,6 @@ export class CharmDebugger extends LitElement {
       justify-content: center;
       font-size: 28px;
       border-radius: 128px;
-      /* margin-bottom: 16px; */
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
       cursor: pointer;
       border: 2px solid white;
@@ -257,34 +355,12 @@ export class CharmDebugger extends LitElement {
       font-size: 8px;
     }
 
-    .explanation {
-      font-style: italic;
-      font-size: 14px;
-    }
-
-    .performance {
-      font-size: 11px;
-    }
-
-    pre {
-      background: rgba(0,0,0,0.5);
-      color: white;
-      padding: 12px;
-      border-radius: 4px;
-      font-size: 14px;
-      overflow-x: auto;
-    }
-
     .mutation-log {
       background: white;
       border-radius: 8px;
       padding: 12px;
       margin-top: 16px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-
-    .mutation-log summary {
-      font-size: 14px;
     }
 
     @keyframes pulse {
@@ -295,32 +371,6 @@ export class CharmDebugger extends LitElement {
 
     .pulse {
       animation: pulse 0.3s ease-in-out;
-    }
-
-    img {
-      width: 100%;
-      max-width: 128px;
-      max-height: 128px;
-      border-radius: 50%;
-      margin: 8px 0;
-      border: 2px solid white;
-    }
-
-    .copy-button {
-      padding: 2px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 8px;
-      margin-left: 2px;
-      background: transparent;
-      border: none;
-      opacity: 0.6;
-      position: relative;
-      top: -2px;
-    }
-
-    .copy-button:hover {
-      opacity: 1;
     }
   `;
 
@@ -344,9 +394,7 @@ export class CharmDebugger extends LitElement {
           performanceMs: event.detail.performanceMs,
         });
 
-        // Add rule to pulsing set
         this.pulsingRules.add(ruleName);
-        // Remove the rule from pulsing set after animation completes
         setTimeout(() => {
           this.pulsingRules.delete(ruleName);
           this.requestUpdate();
@@ -433,23 +481,7 @@ export class CharmDebugger extends LitElement {
         <div class="mutation-log">
           <div style="font-weight: bold;">Mutation Log</div>
           ${this.mutationLog.map(mutation => html`
-            <details>
-              <summary title="${mutation.rule}@${mutation.revision}">
-                ${mutation.rule}@${truncateId(mutation.revision)}
-              </summary>
-
-              <div class="explanation">${mutation.explanation}</div>
-
-              <details>
-                <summary style="font-weight: bold;">Selection</summary>
-                <pre>${JSON.stringify(mutation.selection, null, 2)}</pre>
-              </details>
-
-              <details>
-                <summary style="font-weight: bold;">Changes</summary>
-                <pre>${JSON.stringify(mutation.changes, null, 2)}</pre>
-              </details>
-            </details>
+            <mutation-log-entry .mutation=${mutation}></mutation-log-entry>
           `)}
         </div>
       </div>

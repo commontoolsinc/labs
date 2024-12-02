@@ -713,28 +713,21 @@ class Subscription<Select extends Selector = Selector> {
         }
         changes.push(...matchChanges);
 
-        // if (matchChanges.length > 0) {
-        //   explainMutation({
-        //     query: this.query,
-        //     selection,
-        //     changes,
-        //   }).then(explanation => {
-        //     window.dispatchEvent(
-        //       new CustomEvent("mutation", {
-        //         detail: {
-        //           rule: this.name,
-        //           spell: this.id.toString(),
-        //           entity: self?.toString(),
-        //           query: this.query,
-        //           selection,
-        //           changes,
-        //           explanation,
-        //           revision,
-        //         },
-        //       }),
-        //     );
-        //   });
-        // }
+        if (matchChanges.length > 0) {
+          window.dispatchEvent(
+            new CustomEvent("mutation", {
+              detail: {
+                rule: this.name,
+                spell: this.id.toString(),
+                entity: self?.toString(),
+                query: this.query,
+                selection,
+                changes,
+                revision,
+              },
+            }),
+          );
+        }
       }
       if (selection.length > 0) {
         const totalTime = performance.now() - processStartTime;
