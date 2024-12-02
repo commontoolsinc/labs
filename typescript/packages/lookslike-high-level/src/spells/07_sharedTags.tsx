@@ -11,7 +11,7 @@ import {
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
 import { Messages } from "./06_chat.jsx";
 import { articlePreview } from "./09_importer.jsx";
-import { Creature, generateDescription, genImage } from "./04_tamagochi.jsx";
+import { Creature, generateDescription, genImage } from "./04_tamagotchi.jsx";
 
 export const source = { viewer: 1 };
 
@@ -93,7 +93,7 @@ export const sharedDataViewer = behavior({
               key={c.self.toString()}
               style={{ display: "flex", flexDirection: "row" }}
             >
-              <img width="100" height="100" src={c.description} />
+              <img width="100" height="100" src={genImage(c.description)} />
               {c.description}
             </div>
           ))}

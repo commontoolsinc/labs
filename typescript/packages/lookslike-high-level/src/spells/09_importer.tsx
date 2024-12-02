@@ -21,7 +21,7 @@ export const articlePreview = behavior({
       <div style="background: grey; border-radius: 16px; color: white; padding: 16px;">
         <div><a href={url} style="color: darkgrey; font-style: italic; text-decoration: none;">{url}</a></div>
         <div><common-markdown markdown={content.substring(0, 255)} /></div>
-        {LikeButton(likes)}
+        <LikeButton likes={likes} />
       </div>
     ))
     .commit(),

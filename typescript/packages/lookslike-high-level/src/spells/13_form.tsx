@@ -1,8 +1,6 @@
 import { h, behavior, $, select, Session } from "@commontools/common-system";
-import * as merkle from "merkle-reference";
+import { fromString } from "merkle-reference";
 
-debugger
-const fromString = merkle.fromString;
 
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
 import { defaultTo, event } from "../sugar.js";
