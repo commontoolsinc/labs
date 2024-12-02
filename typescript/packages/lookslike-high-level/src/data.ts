@@ -235,9 +235,10 @@ addCharms([
   importer.spawn({ fetch: 1 }),
   form.spawn({ geneticsLab: 1 }),
   llmChat.spawn({ llmChat: 7 }),
+  composed.spawn({ composed: 1 }),
   helloWorldWithLikes.spawn({ helloWorldWithLikes: 1 }),
-  FetchService.spawn(),
-  ViewService.spawn(),
+  FetchService.spawn() as any,
+  ViewService.spawn() as any,
 ]);
 
 export type RecipeManifest = {

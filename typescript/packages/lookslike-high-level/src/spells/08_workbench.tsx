@@ -10,6 +10,7 @@ import { build, make, event, events, each } from "../sugar.js";
 import { Task, refer } from "synopsys";
 import { tsToExports } from "../localBuild.js";
 import { Session } from "@commontools/common-system";
+import { DocChangeEvent } from "../../../common-os-ui/lib/components/code-editor/os-code-editor.js";
 
 export const source = { workbench: { v: 1 } };
 const DEFAULT_SOURCE = `
@@ -70,14 +71,14 @@ const spellService = service({
     },
     where: [{ Case: [$.self, WorkbenchEvents.onCodeChange, $.event] }],
     *perform({ self, event }) {
-      console.log(event, Session.resolve(event).detail.state.doc.toString());
+      const ev = Session.resolve<DocChangeEvent>(event)
 
       return [
         {
           Upsert: [
             self,
             "sourceCode",
-            Session.resolve(event).detail.state.doc.toString(),
+            ev.detail.state.doc.toString(),
           ],
         },
       ];
@@ -138,7 +139,7 @@ const spellService = service({
                   entity={() => child}
                 ></common-charm>
               </fieldset>
-            </div>,
+            </div> as any,
           ],
         },
       ];

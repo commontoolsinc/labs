@@ -11,7 +11,7 @@ import {
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
 import { Messages } from "./06_chat.jsx";
 import { articlePreview } from "./09_importer.jsx";
-import { Creature, generateDescription, genImage } from "./04_tamagotchi.jsx";
+import { genImage } from "./04_tamagotchi.jsx";
 
 export const source = { viewer: 1 };
 
@@ -50,7 +50,7 @@ export const sharedDataViewer = behavior({
                 oncommon-input={SharedDataEvents.onEditTag}
               />
             </fieldset>
-          </div>
+          </div> as any
         )),
       ];
     },
@@ -150,7 +150,7 @@ export const sharedDataViewer = behavior({
                 );
               })}
             </div>
-          </div>
+          </div> as any
         )),
       ];
     },
@@ -185,7 +185,7 @@ export const sharedDataViewer = behavior({
                 articlePreview,
               )}
             </div>
-          </div>
+          </div> as any
         )),
       ];
     },

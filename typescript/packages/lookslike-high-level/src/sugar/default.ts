@@ -1,10 +1,10 @@
-import { $, Clause, Constant, Reference, Variable } from "@commontools/common-system";
+import { $, Clause, Reference, Variable } from "@commontools/common-system";
 
 export function defaultTo(
   entity: Variable<any>,
   attribute: string,
   field: Variable<any>,
-  defaultValue: Constant,
+  defaultValue: any,
 ): Clause {
   return {
     Or: [

@@ -72,6 +72,8 @@ export const createEditor = ({
   });
 };
 
+export type DocChangeEvent = CustomEvent<{ state: EditorState }>;
+
 @customElement("os-code-editor")
 export class OsCodeEditor extends ReactiveElement {
   static override styles = [

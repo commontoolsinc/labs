@@ -54,7 +54,7 @@ export default behavior({
               <output>{clicks}</output>
               <button onclick="~/on/increment">Increment</button>
               <button onclick="~/on/decrement">Decrement</button>
-            </div>,
+            </div> as any,
           ],
         },
       ];
