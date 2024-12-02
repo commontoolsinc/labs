@@ -48,6 +48,7 @@ export class MutationLogEntry extends LitElement {
       background: none;
       border: none;
       padding: 2px;
+      margin-left: auto;
     }
 
     .details-btn:hover {
@@ -83,8 +84,6 @@ export class MutationLogEntry extends LitElement {
 
     // Handle array of changes
     const change = changes[0];
-    const type = Object.keys(change)[0];
-    const [_, field, value] = change[type];
 
     const formatValue = (val: any) => {
       const formatted = this.formatValue(val);
@@ -96,15 +95,28 @@ export class MutationLogEntry extends LitElement {
       return formatted;
     };
 
-    if (type === 'Assert') {
+    let field;
+    let value;
+
+    if (change.Assert) {
       icon = '+';
       colorClass = 'assert';
-    } else if (type === 'Upsert') {
+      [, field, value] = change.Assert;
+    } else if (change.Upsert) {
       icon = '~';
       colorClass = 'upsert';
-    } else if (type === 'Retract') {
+      [, field, value] = change.Upsert;
+    } else if (change.Retract) {
       icon = '-';
       colorClass = 'retract';
+      [, field, value] = change.Retract;
+    } else {
+      return html`
+        <div class="log-line">
+          <span><b>&lt;effect&gt;</b></span>
+          <button class="details-btn" @click=${this.showDetails} title="Show full details">🔍</button>
+        </div>
+      `;
     }
 
     return html`
@@ -117,13 +129,12 @@ export class MutationLogEntry extends LitElement {
   }
 }
 
-
 @customElement('rule-details-popover')
 export class RuleDetailsPopover extends LitElement {
   @property({ attribute: false }) accessor rule: string = '';
   @property({ attribute: false }) accessor color: string = '#000';
   @property({ attribute: false }) accessor activation: any = null;
-  @property({ attribute: false }) accessor ruleData: any = null;
+  @property({ attribute: false }) accessor behavior: Behavior;
 
   static override styles = css`
     :host {
@@ -160,20 +171,56 @@ export class RuleDetailsPopover extends LitElement {
     .close:hover {
       opacity: 1;
     }
+
+    .rule-controls {
+      display: flex;
+      gap: 8px;
+      margin: 8px 0;
+    }
+
+    button {
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
   `;
+
+  private enableRule() {
+    const event = new CustomEvent('spell-rule-enabled', {
+      detail: {
+        id: this.behavior.id,
+        name: this.rule
+      }
+    });
+    window.dispatchEvent(event);
+  }
+
+  private disableRule() {
+    const event = new CustomEvent('spell-rule-disabled', {
+      detail: {
+        id: this.behavior.id,
+        name: this.rule
+      }
+    });
+    window.dispatchEvent(event);
+  }
 
   override render() {
     return html`
       <div style="color: ${this.color}">
         <div class="close" @click=${() => this.remove()}>✕</div>
         <h3>${this.rule}</h3>
+        <div class="rule-controls">
+          <button @click=${this.enableRule}>Enable</button>
+          <button @click=${this.disableRule}>Disable</button>
+        </div>
         <div>Activations: ${this.activation?.count || 0}</div>
         ${this.activation?.performanceMs ? html`
           <div>Last performance: ${this.activation.performanceMs}ms</div>
         ` : ''}
 
         <h4>Rule Definition</h4>
-        <pre>${JSON.stringify(this.ruleData, null, 2)}</pre>
+        <pre>${JSON.stringify(this.behavior.rules, null, 2)}</pre>
 
         ${this.activation?.lastSelection ? html`
           <h4>Last Selection</h4>
@@ -183,7 +230,6 @@ export class RuleDetailsPopover extends LitElement {
     `;
   }
 }
-
 
 @customElement('charm-debugger')
 export class CharmDebugger extends LitElement {
@@ -224,6 +270,13 @@ export class CharmDebugger extends LitElement {
     "#81ecec",
   ];
 
+  private rulePrefixes = new Map([
+    ['likes/', {emoji: '👍', color: '#ffeaa7'}],
+    ['description/', {emoji: '📝', color: '#ffffff'}],
+    ['chat/', {emoji: '💬', color: '#74b9ff'}],
+    ['comments/', {emoji: '✍️', color: '#fd79a8'}]
+  ]);
+
   private mutationLog: any[] = [];
   private isOpen: boolean = false;
   private isMutationLogOpen: boolean = false;
@@ -234,7 +287,34 @@ export class CharmDebugger extends LitElement {
     return this.cardColors[hash % this.cardColors.length];
   }
 
-  private showRuleDetails(rule: string, color: string, activation: any, ruleData: any) {
+  private getRuleStyle(rule: string): {emoji: string, color: string} {
+    // Check for event rules starting with 'on'
+    if (/^on[A-Z]/.test(rule)) {
+      return {emoji: '⚡', color: '#ffeaa7'};
+    }
+
+    // Check for view/render rules
+    if (rule === 'view' || rule === 'render' || rule === 'show' ||
+        rule.startsWith('view') || rule.startsWith('render') || rule.startsWith('show')) {
+      return {emoji: '🎨', color: '#9b59b6'};
+    }
+
+    for (const [prefix, style] of this.rulePrefixes) {
+      if (rule.startsWith(prefix)) {
+        return style;
+      }
+    }
+
+    const hash = Array.from(rule).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const emojiList = ["🌟", "🎯", "🎨", "🎭", "🎪", "🎢", "🎡", "🎮", "🎲", "🎰", "🎳", "🎹", "🎼", "🎧", "🎤", "🎬", "🎨", "🎭", "🎪"];
+
+    return {
+      emoji: emojiList[hash % emojiList.length],
+      color: this.cardColors[hash % this.cardColors.length]
+    };
+  }
+
+  private showRuleDetails(rule: string, color: string, activation: any) {
     // Remove any existing popover
     this.activePopover?.remove();
 
@@ -242,7 +322,7 @@ export class CharmDebugger extends LitElement {
     popover.rule = rule;
     popover.color = color;
     popover.activation = activation;
-    popover.ruleData = ruleData;
+    popover.behavior = this.behavior!;
     this.activePopover = popover;
     this.renderRoot.appendChild(popover);
   }
@@ -322,6 +402,7 @@ export class CharmDebugger extends LitElement {
       align-items: center;
       justify-content: center;
       font-size: 28px;
+      font-family: system-ui;
       border-radius: 128px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
       cursor: pointer;
@@ -356,11 +437,22 @@ export class CharmDebugger extends LitElement {
     }
 
     .mutation-log {
-      background: white;
+      background: #eee;
       border-radius: 8px;
-      padding: 12px;
       margin-top: 16px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      padding: 4px 0px;
+      margin-left: -192px;
+      max-height: 256px;
+      overflow-y: auto;
+      border: 1px solid #aaa;
+    }
+
+    mutation-log-entry {
+      padding: 0px 8px;
+    }
+
+    .mutation-log mutation-log-entry:nth-child(even) {
+      background: rgba(255, 255, 255, 0.5);
     }
 
     @keyframes pulse {
@@ -456,21 +548,18 @@ export class CharmDebugger extends LitElement {
         ${this.behavior?.rules ? html`
           <div class="rules-grid">
             ${Object.keys(this.behavior.rules).map((rule, index) => {
-              const hash = Array.from(rule).reduce((acc, char) => acc + char.charCodeAt(0), 0);
-              const emojiList = ["🌟", "🎯", "🎨", "🎭", "🎪", "🎢", "🎡", "🎮", "🎲", "🎰", "🎳", "🎹", "🎼", "🎧", "🎤", "🎬", "🎨", "🎭", "🎪"];
               const activation = this.ruleActivations.get(rule);
-              const emoji = emojiList[hash % emojiList.length];
-              const color = this.cardColors[hash % this.cardColors.length];
+              const style = this.getRuleStyle(rule);
 
               return html`
                 <div class="rule-item" style="top: ${Math.floor(index / 2) * 96}px">
                   <div
                     class="emoji-tile ${this.pulsingRules.has(rule) ? 'pulse' : ''}"
-                    style="background: ${color}"
+                    style="background: ${style.color}"
                     title="${rule} (${activation?.count || 0} activations)"
-                    @click=${() => this.showRuleDetails(rule, color, activation, this.behavior?.rules[rule])}
+                    @click=${() => this.showRuleDetails(rule, style.color, activation)}
                   >
-                    ${emoji}
+                    ${style.emoji}
                   </div>
                 </div>
               `;
@@ -479,7 +568,6 @@ export class CharmDebugger extends LitElement {
         ` : ''}
 
         <div class="mutation-log">
-          <div style="font-weight: bold;">Mutation Log</div>
           ${this.mutationLog.map(mutation => html`
             <mutation-log-entry .mutation=${mutation}></mutation-log-entry>
           `)}

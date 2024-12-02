@@ -635,6 +635,7 @@ const resolve = (change: Type.Instruction): Type.Instruction => {
  */
 class Subscription<Select extends Selector = Selector> {
   revision: Reference = refer([]);
+  suspended: boolean = false;
 
   constructor(
     public id: Reference,
@@ -644,6 +645,10 @@ class Subscription<Select extends Selector = Selector> {
     public connection: Connection,
   ) {}
   *poll() {
+    if (this.suspended) {
+      return [];
+    }
+
     const start = performance.now();
     const selection = yield* this.connection.local.query(this.query);
     const queryTime = performance.now() - start;

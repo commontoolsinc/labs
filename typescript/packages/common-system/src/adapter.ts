@@ -20,6 +20,10 @@ export interface Behavior<
   fork(self?: Reference): Task.Task<{}, Error>;
 
   spawn(source?: {}, defaultName?: string): CellImpl<{}>;
+
+  disableRule(ruleName: keyof Rules): void;
+  enableRule(ruleName: keyof Rules): void;
+  isRuleEnabled(ruleName: keyof Rules): boolean;
 }
 
 export interface Service<Effects extends Record<string, Effect>> {
@@ -79,17 +83,37 @@ function spellId<Rules extends Record<string, any>>(rules: Rules) {
     ),
   });
 }
-
 class SystemBehavior<Rules extends Record<string, Rule>> {
   rules: Rules;
   id: Reference;
+  private subscriptionMap: Map<string, any>;
+
   constructor(rules: Rules) {
     this.rules = rules;
     this.id = spellId(rules);
+    this.subscriptionMap = new Map();
+  }
+
+  disableRule(ruleName: keyof Rules) {
+    const subscription = this.subscriptionMap.get(ruleName as string);
+    if (subscription) {
+      subscription.suspended = true;
+    }
+  }
+
+  enableRule(ruleName: keyof Rules) {
+    const subscription = this.subscriptionMap.get(ruleName as string);
+    if (subscription) {
+      subscription.suspended = false;
+    }
+  }
+
+  isRuleEnabled(ruleName: keyof Rules): boolean {
+    const subscription = this.subscriptionMap.get(ruleName as string);
+    return subscription ? !subscription.suspended : true;
   }
 
   *fork(self: Reference = this.id) {
-    const subscriptions = [];
     const changes = [];
     for (const [name, rule] of Object.entries(this.rules)) {
       const query = {
@@ -107,7 +131,7 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
         query as Type.Query,
         toEffect(rule),
       );
-      subscriptions.push(subscription);
+      this.subscriptionMap.set(name, subscription);
 
       changes.push(...(yield* subscription.poll()));
     }
@@ -120,11 +144,13 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
       yield* Task.suspend();
       return {};
     } finally {
-      for (const subscription of subscriptions) {
+      for (const subscription of this.subscriptionMap.values()) {
         subscription.abort();
       }
+      this.subscriptionMap.clear();
     }
   }
+
   spawn(source: {} = this.id, defaultName: string = "pending") {
     const entity = refer(source);
     const charm = refer({ entity, rules: this.id });

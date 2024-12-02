@@ -148,6 +148,20 @@ export class Charm extends HTMLElement {
     this.#vdom = null;
     this.#cell = null;
 
+    window.addEventListener('spell-rule-enabled', ((e: CustomEvent) => {
+      if (this.#behavior?.id == e.detail.id) {
+        this.#behavior?.enableRule(e.detail.name);
+        console.log(`Enabled rule ${e.detail.name} for behavior ${e.detail.id}`);
+      }
+    }) as EventListener);
+
+    window.addEventListener('spell-rule-disabled', ((e: CustomEvent) => {
+      if (this.#behavior?.id == e.detail.id) {
+        this.#behavior?.disableRule(e.detail.name);
+        console.log(`Disabled rule ${e.detail.name} for behavior ${e.detail.id}`);
+      }
+    }) as EventListener);
+
     // Add mutation observer to watch renderMount title changes
     this.#observer = new MutationObserver(() => {
       this.propagate();
