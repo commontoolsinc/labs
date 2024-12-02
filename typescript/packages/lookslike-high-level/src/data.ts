@@ -48,6 +48,7 @@ import { composed } from "./spells/10_composed.jsx";
 import github from "./spells/11_github.jsx";
 import form from "./spells/13_form.jsx";
 import * as helloWorldWithLikes from "./spells/12_helloWorldWithLikes.jsx";
+import * as llmChat from "./spells/14_llm_chat.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -228,11 +229,13 @@ addCharms([
   counter.spawn({ counter: 1 }),
   tamagotchi.spawn({ tamagochi: 1 }),
   readingList.spawn({ readingList: 1, }),
-  chat.spawn({ chat: 1, }),
+  chat.spawn({ chat: 2, }),
   sharedTags.spawn({ sharedDataInstance: 2 }),
   workbench.spawn({ workbench: 1 }),
   importer.spawn({ fetch: 1 }),
   form.spawn({ geneticsLab: 1 }),
+  llmChat.spawn({ llmChat: 7 }),
+  helloWorldWithLikes.spawn({ helloWorldWithLikes: 1 }),
   FetchService.spawn(),
   ViewService.spawn(),
 ]);

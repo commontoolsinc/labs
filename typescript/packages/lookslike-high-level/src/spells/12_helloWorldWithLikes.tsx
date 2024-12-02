@@ -8,6 +8,7 @@ import {
   Comments,
   CommentsView,
 } from "./stickers/comments.jsx";
+import { Chattable } from "./stickers/chat.jsx";
 
 const HelloWorldEvent = events({
   onAlert: "~/on/alert",
