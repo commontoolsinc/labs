@@ -3,29 +3,31 @@ import {
   behavior,
   $,
   Session,
-  select
+  select,
+  refer
 } from "@commontools/common-system";
 import { event, events, Collection, defaultTo, isEmpty, Transact, addTag, render } from "../sugar.js";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
 import { CommonFormSubmitEvent } from "../../../common-ui/lib/components/common-form.js";
+import { llm, RESPONSE } from "../effects/fetch.jsx";
 
 export const source = { chat: { v: 1 } };
 
 // attribute names
 
 export const ChatModel = {
-  draft: '~/draft',
-  screenName: '~/screenName',
   messages: "messages"
 }
+
+const CHAT_REQUEST = 'chat/request'
 
 // events
 
 const ChatEvents = events({
   onSendMessage: '~/on/SendMessage',
   onDraftMessage: '~/on/DraftMessage',
-  onChangeScreenName: '~/on/ChangeScreenName',
   onBroadcastHistory: '~/on/BroadcastHistory',
+  onClearChat: '~/on/ClearChat',
 })
 
 // queries
@@ -41,12 +43,8 @@ const MessageHistoryLink = select({ messages: $.messages })
 
 const Chat = select({
   self: $.self,
-  draft: $.draft,
-  screenName: $.screenName,
   messages: Messages.select
 })
-  .clause(defaultTo($.self, ChatModel.draft, $.draft, ''))
-  .clause(defaultTo($.self, ChatModel.screenName, $.screenName, '<empty>'))
   .match($.self, "messages", $.messages)
   .clause(Messages.match($.messages));
 
@@ -58,60 +56,66 @@ const Uninitialized = select({ self: $.self })
 export const chatRules = behavior({
   init: Uninitialized
     .update(({ self }) => {
-      const collection = Messages.new({ messages: self })
+      const collection = Messages.new({ messages: self, seed: refer({ v: Math.random() }) })
       return [
         ...collection.push({
-          message: "hello world",
-          author: "system",
+          message: "Hello! How can I help you today?",
+          author: "assistant",
           sentAt: Date.now()
         })
       ];
     })
     .commit(),
-
 
   on: event('~/on/submit')
     .with(Chat)
     .update(({ self, event, messages }) => {
       const payload = Session.resolve<CommonFormSubmitEvent>(event)
       const collection = Messages.from(messages)
+      const userMessage = payload.detail.formData.get('message')
+
+      const newMessage = {
+        message: userMessage,
+        author: "user",
+        sentAt: Date.now()
+      };
+      const msgs = [...collection, newMessage];
+      msgs.sort((a, b) => a.sentAt - b.sentAt);
+      const messageHistory = msgs.map(msg => ({
+        role: msg.author,
+        content: msg.message
+      }))
 
       return [
-        ...collection.push({
-          message: payload.detail.formData.get('message'),
-          author: payload.detail.formData.get('screenname'),
-          sentAt: Date.now()
-        })
+        llm(self, CHAT_REQUEST, {
+          messages: messageHistory,
+        }).json(),
+        ...collection.push(newMessage),
       ];
     })
     .commit(),
 
-  sendMessage: event(ChatEvents.onSendMessage)
+  "chat/complete": select({
+    self: $.self,
+    request: $.request,
+    payload: $.payload,
+    content: $.content,
+  })
+    .match($.self, CHAT_REQUEST, $.request)
+    .match($.request, RESPONSE.JSON, $.payload)
+    .match($.payload, "content", $.content)
     .with(Chat)
-    .update(({ self, event, screenName, messages, draft }) => {
+    .update(({ self, request, content, messages, payload }) => {
       const collection = Messages.from(messages)
-      const allMessages = [...collection];
-
       return [
-        ...Transact.remove(self, { '~/draft': draft }),
-        ...collection.push({ message: draft, author: screenName, sentAt: Date.now() })
+        { Retract: [self, CHAT_REQUEST, request] },
+        { Retract: [request, RESPONSE.JSON, payload] },
+        ...collection.push({
+          message: content,
+          author: "assistant",
+          sentAt: Date.now()
+        }),
       ];
-    })
-    .commit(),
-
-  editMessage: event(ChatEvents.onDraftMessage)
-    .update(({ self, event }) => {
-      return Transact.set(self, {
-        [ChatModel.draft]: Session.resolve<CommonInputEvent>(event).detail.value
-      })
-    })
-    .commit(),
-
-  changeName: event(ChatEvents.onChangeScreenName)
-    .update(({ self, event }) => {
-      return Transact.set(self, {
-        [ChatModel.screenName]: Session.resolve<CommonInputEvent>(event).detail.value
-      })
     })
     .commit(),
 
@@ -124,13 +128,21 @@ export const chatRules = behavior({
     })
     .commit(),
 
+  clear: event(ChatEvents.onClearChat)
+    .select({ messages: $.messages })
+    .match($.self, ChatModel.messages, $.messages)
+    .update(({ self, messages }) => {
+      return [
+        { Retract: [self, "messages", messages] }
+      ];
+    })
+    .commit(),
 
-  // CommonChat.select({ draft, screenName, messages })
-  //  .default({ draft: '', screenName: '<empty>' })
   view: Chat
     .render(({ self, messages }) => {
       const collection = Messages.from(messages);
       const items = [...collection]
+      console.log('chat', items)
       items.sort((a, b) => a.sentAt - b.sentAt)
 
       return <div title="Common Chat">
@@ -139,14 +151,12 @@ export const chatRules = behavior({
         </li>)}</ul>
         <common-form reset oncommon-submit="~/on/submit">
           <fieldset style="border-radius: 8px;">
-            <label>Name</label>
-            <input name="screenname" type="text" />
             <label>Message</label>
             <input name="message" type="text" placeholder="say something!" />
             <button type="submit">Submit</button>
           </fieldset>
         </common-form>
-        <button onclick={ChatEvents.onBroadcastHistory}>Broadcast History</button>
+        <button type="button" onclick={ChatEvents.onClearChat}>Clear Chat</button>
       </div>
     })
     .commit(),

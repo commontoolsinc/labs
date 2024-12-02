@@ -241,7 +241,9 @@ export const fetch = (consumer: Reference, port: string, request: Request) =>
 
 type LlmRequest = {
   prompt?: string;
-  messages?: string[];
+  messages?: {
+    role: string; content: string;
+  }[];
   system?: string;
   model?: string,
   max_tokens?: number,
