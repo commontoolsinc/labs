@@ -652,10 +652,10 @@ class Subscription<Select extends Selector = Selector> {
     const start = performance.now();
     const selection = yield* this.connection.local.query(this.query);
     const queryTime = performance.now() - start;
-    console.log(
-      `%c${this.name} ${queryTime.toFixed(2)}ms (spell/${this.id.toString()})`,
-      "color: #999; font-size: 0.8em; font-style: italic;",
-    );
+    // console.log(
+    //   `%c${this.name} ${queryTime.toFixed(2)}ms (spell/${this.id.toString()})`,
+    //   "color: #999; font-size: 0.8em; font-style: italic;",
+    // );
 
     let revision;
     try {
