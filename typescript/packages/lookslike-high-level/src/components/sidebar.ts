@@ -3,7 +3,6 @@ import { customElement, property } from "lit/decorators.js";
 import { when } from "lit/directives/when.js";
 import { style } from "@commontools/common-ui";
 import {
-  addCharms,
   Charm,
   charms,
   NAME,
@@ -59,18 +58,6 @@ ${typeof this.content === "string"
   }
 }
 
-interface LLMConversation {
-  model: string;
-  system: string;
-  messages: string[];
-}
-
-interface LLMEvalFeedback {
-  score: number;
-  feedback: string;
-  conversation: LLMConversation;
-}
-
 @customElement("common-sidebar")
 export class CommonSidebar extends LitElement {
   @property({ type: Object })
@@ -92,10 +79,8 @@ export class CommonSidebar extends LitElement {
   workingSpec: string = "";
 
   @property({ type: Object })
-  llmConversation: LLMConversation | null = null;
 
   private homeRef = createRef<HTMLElement>();
-  private editorRef = createRef<HTMLElement>();
   private homeCharm: Promise<CellImpl<Charm>> | null = null;
   private linkedCharms: CellImpl<Charm>[] = [];
 
