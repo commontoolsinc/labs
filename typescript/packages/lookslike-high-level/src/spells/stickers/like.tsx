@@ -8,10 +8,37 @@ export const LikeEvents = events({
 export const likes = `likes`;
 
 export function LikeButton({ likes }: { likes: number }) {
+  const buttonStyles = `
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px;
+    transition: transform 0.2s ease;
+    &:hover { transform: scale(1.2); }
+    &:active { transform: scale(0.9); }
+  `;
+
+  const containerStyles = `
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+  `;
+
+  const countStyles = `
+    font-size: 16px;
+    font-weight: bold;
+    color: #aaa;
+  `;
+
   return (
-    <div>
-      Likes: {likes}
-      <button onclick={LikeEvents.onLike}>👍</button>
+    <div style={containerStyles}>
+      <span style={countStyles}>{likes}</span>
+      <button
+        onclick={LikeEvents.onLike}
+        style={buttonStyles}
+      >❤️</button>
     </div>
   );
 }

@@ -10,6 +10,13 @@ const IMPORT_REQUEST = 'import/request'
 const getMarkdown =
   (url: string) => `/api/reader/${url}`
 
+const articlePreviewStyles = {
+  container: 'background: #f8f9fa; border-radius: 8px; border: 1px solid #dfe1e5; padding: 16px; margin: 8px 0; box-shadow: 0 1px 6px rgba(32,33,36,.28)',
+  url: 'color: #4285f4; font-style: italic; text-decoration: none; font-size: 14px',
+  content: 'color: #202124; font-size: 16px; margin: 12px 0',
+  actions: 'margin-top: 12px'
+};
+
 export const articlePreview = behavior({
   ...mixin(Likeable),
 
@@ -17,15 +24,26 @@ export const articlePreview = behavior({
     .match($.self, 'url', $.url)
     .match($.self, 'content', $.content)
     .match($.self, 'likes', $.likes)
-    .render(({ url, content, likes, self }) => (
-      <div style="background: grey; border-radius: 16px; color: white; padding: 16px;">
-        <div><a href={url} style="color: darkgrey; font-style: italic; text-decoration: none;">{url}</a></div>
-        <div><common-markdown markdown={content.substring(0, 255)} /></div>
-        <LikeButton likes={likes} />
+    .render(({ url, content, likes }) => (
+      <div style={articlePreviewStyles.container}>
+        <div><a href={url} style={articlePreviewStyles.url}>{url}</a></div>
+        <div style={articlePreviewStyles.content}>
+          <common-markdown markdown={content.substring(0, 320)} />
+        </div>
+        <div style={articlePreviewStyles.actions}>
+          <LikeButton likes={likes} />
+        </div>
       </div>
     ))
     .commit(),
 })
+
+const containerStyles = 'display: flex; flex-direction: column; align-items: center; padding: 24px; font-family: arial, sans-serif';
+const searchBoxStyles = 'width: 500px; border-radius: 24px; border: 1px solid #dfe1e5; padding: 12px 24px; margin: 16px 0; box-shadow: 0 1px 6px rgba(32,33,36,.28)';
+const statusTextStyles = 'color: #4285f4; font-size: 14px';
+const urlTextStyles = 'color: #202124; font-size: 14px';
+const buttonStyles = 'background: #f8f9fa; border: 1px solid #f8f9fa; border-radius: 4px; color: #3c4043; padding: 8px 16px; margin-top: 16px; cursor: pointer';
+const readerStyles = 'max-width: 680px; margin: 0 auto; line-height: 1.6; font-size: 18px';
 
 export const importer = behavior({
   defaultUrl: select({ self: $.self })
@@ -37,9 +55,9 @@ export const importer = behavior({
     .match($.self, "url", $.url)
     .not(q => q.match($.self, IMPORT_REQUEST, $._))
     .render(({ self, url }) => (
-      <div title="Fetcher Form">
-        <common-input value={url} oncommon-input="~/on/change-url" />
-        <button onclick="~/on/send-request">Fetch</button>
+      <div title="Fetcher Form" style={containerStyles}>
+        <common-input value={url} oncommon-input="~/on/change-url" style={searchBoxStyles} />
+        <button onclick="~/on/send-request" style={buttonStyles}>Fetch</button>
       </div>
     )).commit(),
 
@@ -67,9 +85,14 @@ export const importer = behavior({
     .match($.self, "url", $.url)
     .not(q => q.match($.request, RESPONSE.TEXT, $._))
     .render(({ self, status, url }) => (
-      <div title="Effect Demo" entity={self}>
-        <h1>{status} - <i>{url}</i></h1>
-        <button onclick="~/on/reset">Reset</button>
+      <div title="Effect Demo" entity={self} style={containerStyles}>
+        <div>
+          <span style={statusTextStyles}>{status}</span>
+          {' - '}
+          <i style={urlTextStyles}>{url}</i>
+        </div>
+        <input type="text" value={url} disabled style={searchBoxStyles} />
+        <button onclick="~/on/reset" style={buttonStyles}>Reset</button>
       </div>
     )).commit(),
 
@@ -77,13 +100,14 @@ export const importer = behavior({
     .match($.self, IMPORT_REQUEST, $.request)
     .match($.request, RESPONSE.TEXT, $.content)
     .render(({ self, content }) => (
-      <div title="Effect Demo" entity={self}>
-        <h1>Response</h1>
-        <common-markdown markdown={content} />
-        <details>
-          <pre>{content}</pre>
-        </details>
-        <button onclick="~/on/reset">Reset</button>
+      <div title="Effect Demo" entity={self} style={containerStyles}>
+        <button onclick="~/on/reset" style={buttonStyles}>Reset</button>
+        <div style={readerStyles}>
+          <common-markdown markdown={content} />
+          <details>
+            <pre>{content}</pre>
+          </details>
+        </div>
       </div>
     ))
     .commit(),

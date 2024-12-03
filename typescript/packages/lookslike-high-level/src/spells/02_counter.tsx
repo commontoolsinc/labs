@@ -26,15 +26,19 @@ const viewCount = Clicks
   .with(ChatUiResolver)
   .render(({ clicks, self, llmDescription, chatView }) => {
     const view = chatView == null ? <div>Placeholder!</div> : Session.resolve(chatView)
+    const containerStyle = 'display: flex; flex-direction: column; align-items: center; padding: 20px; background: linear-gradient(45deg, #1a1a1a, #2d2d2d); border-radius: 10px; color: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'
+    const clicksStyle = 'font-size: 48px; font-weight: bold; color: #0ff; text-shadow: 0 0 10px rgba(0,255,255,0.5); margin: 10px 0;'
+    const buttonStyle = 'background: #333; color: #fff; border: 2px solid #0ff; padding: 10px 20px; margin: 5px; border-radius: 5px; cursor: pointer; transition: all 0.3s; font-family: monospace;'
+    const descriptionStyle = 'font-family: monospace; color: #0ff; margin: 15px 0; text-align: center;'
 
     return (
-      <div title={`Clicks ${clicks}`} entity={self}>
-        <div>{clicks}</div>
-        <button onclick={CounterEvent.onClick}>Click me!</button>
-        <button onclick={CounterEvent.onReset}>Reset</button>
-        <p>{llmDescription}</p>
-
-        {view}
+      <div title={`Clicks ${clicks}`} entity={self} style={containerStyle}>
+        <div style={clicksStyle}>{clicks}</div>
+        <div>
+          <button style={buttonStyle} onclick={CounterEvent.onClick}>Click me!</button>
+          <button style={buttonStyle} onclick={CounterEvent.onReset}>Reset</button>
+        </div>
+        <p style={descriptionStyle}>{llmDescription}</p>
       </div>
     );
   })

@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { LitElement, html, css, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 import { view } from "../hyperscript/render.js";
@@ -57,7 +57,9 @@ export class CommonFormElement extends LitElement {
 
     return html`
       <form id="${this.id}" @submit="${onSubmit}">
-        ${this.childNodes}
+        ${this.hasChildNodes()
+          ? html`<span>${Array.from(this.children)}</span>`
+          : nothing}
       </form>
     `;
   }

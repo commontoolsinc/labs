@@ -21,6 +21,16 @@ const SharedDataEvents = events({
 
 const searchTag = field("searchTag", "#chat");
 
+const TagSearch = ({ tag }: { tag: string }) => (
+  <fieldset>
+    <common-input
+      value={tag}
+      type="text"
+      oncommon-blur={SharedDataEvents.onEditTag}
+    />
+  </fieldset>
+);
+
 export const sharedDataViewer = behavior({
   init: {
     select: { self: $.self },
@@ -43,13 +53,7 @@ export const sharedDataViewer = behavior({
       return [
         render({ self }, ({ self }) => (
           <div title="Shared">
-            <fieldset>
-              <common-input
-                value={searchTag}
-                type="text"
-                oncommon-input={SharedDataEvents.onEditTag}
-              />
-            </fieldset>
+            <TagSearch tag={searchTag} />
           </div> as any
         )),
       ];
@@ -78,25 +82,30 @@ export const sharedDataViewer = behavior({
     .clause(defaultTo($.creature, "llmDescription", $.description, ""))
     .clause(defaultTo($.creature, "color", $.color, ""))
     .render(({ searchTag, creature }) => {
+      const containerStyle = "display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px; padding: 20px;";
+      const cardStyle = "border: 2px solid #444; border-radius: 8px; padding: 10px; background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.2);";
+      const imageStyle = "width: 100%; height: 180px; object-fit: cover; border-radius: 4px;";
+      const statsStyle = "display: flex; gap: 10px; margin-top: 10px; font-size: 12px;";
+      const statPipStyle = "padding: 4px 8px; background: #eee; border-radius: 12px;";
+
       return (
         <div title="Shared">
-          <fieldset>
-            <common-input
-              value={searchTag}
-              type="text"
-              oncommon-input={SharedDataEvents.onEditTag}
-            />
-          </fieldset>
-
-          {creature.map(c => (
-            <div
-              key={c.self.toString()}
-              style={{ display: "flex", flexDirection: "row" }}
-            >
-              <img width="100" height="100" src={genImage(c.description)} />
-              {c.description}
-            </div>
-          ))}
+          <TagSearch tag={searchTag} />
+          <div style={containerStyle}>
+            {creature.map(c => (
+              <div key={c.self.toString()} style={cardStyle}>
+                <img
+                  style={imageStyle}
+                  src={genImage(c.description)}
+                  alt={c.description}
+                />
+                <div style={statsStyle}>
+                  <span style={statPipStyle}>Size: {c.size}</span>
+                  <span style={statPipStyle}>Hunger: {c.hunger}</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       );
     })
@@ -117,13 +126,7 @@ export const sharedDataViewer = behavior({
       return [
         render({ self }, ({ self }) => (
           <div title="Shared">
-            <fieldset>
-              <common-input
-                value={searchTag}
-                type="text"
-                oncommon-input={SharedDataEvents.onEditTag}
-              />
-            </fieldset>
+            <TagSearch tag={searchTag} />
             <div>
               {...shared.map((sharedItem, tableIndex) => {
                 const collection = Messages.from(sharedItem);
@@ -172,13 +175,7 @@ export const sharedDataViewer = behavior({
       return [
         render({ self }, ({ self }) => (
           <div title="Shared">
-            <fieldset>
-              <common-input
-                value={searchTag}
-                type="text"
-                oncommon-input={SharedDataEvents.onEditTag}
-              />
-            </fieldset>
+            <TagSearch tag={searchTag} />
             <div>
               {each(
                 shared.map(s => s.self),

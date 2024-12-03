@@ -6,40 +6,93 @@ import { CommonInputEvent } from "../../../common-ui/lib/components/common-input
 import { defaultTo, event } from "../sugar.js";
 import { Creature } from "./04_tamagotchi.jsx";
 import * as Tamagotchi from "./04_tamagotchi.jsx";
+const formContainerStyle = `
+  padding: 20px;
+  background: #f0f0f0;
+  border: 2px solid #ccc;
+  border-radius: 8px;
+  font-family: monospace;
+  max-width: 320px;
+  margin: 0 auto;
+`;
+
+const inputGroupStyle = `
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 20px;
+`;
+
+const inputLabelStyle = `
+  font-size: 12px;
+  color: #666;
+  font-weight: bold;
+  text-transform: uppercase;
+`;
+
+const displayPanelStyle = `
+  border: 3px solid #666;
+  border-radius: 15px;
+  padding: 20px;
+  background: #222;
+  box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+`;
+
+const imageStyle = `
+  width: 100%;
+  border-radius: 12px;
+  border: 2px solid #444;
+`;
 
 const tamagotchiLab = behavior({
   render: Creature.render(
     ({ self, description, color, hunger, size, time }) => (
-      <div>
-        <common-input
-          value={description}
-          oncommon-input="~/on/change-description"
-        />
-        <common-input value={color} oncommon-input="~/on/change-color" />
-        <common-input
-          type="number"
-          value={hunger}
-          oncommon-input="~/on/change-hunger"
-        />
-        <common-input
-          type="number"
-          value={size}
-          oncommon-input="~/on/change-size"
-        />
-        <common-input
-          type="number"
-          value={time}
-          oncommon-input="~/on/change-time"
-        />
-        <p>
-          {Tamagotchi.generateDescription({
-            description,
-            color,
-            hunger,
-            size,
-            time,
-          })}
-        </p>
+      <div style={formContainerStyle}>
+        <div style={inputGroupStyle}>
+          <div>
+            <div style={inputLabelStyle}>Description</div>
+            <common-input
+              value={description}
+              oncommon-blur="~/on/change-description"
+            />
+          </div>
+          <div>
+            <div style={inputLabelStyle}>Color</div>
+            <common-input value={color} oncommon-blur="~/on/change-color" />
+          </div>
+          <div>
+            <div style={inputLabelStyle}>Hunger</div>
+            <common-input
+              type="number"
+              value={hunger}
+              oncommon-blur="~/on/change-hunger"
+            />
+          </div>
+          <div>
+            <div style={inputLabelStyle}>Size</div>
+            <common-input
+              type="number"
+              value={size}
+              oncommon-blur="~/on/change-size"
+            />
+          </div>
+          <div>
+            <div style={inputLabelStyle}>Time</div>
+            <common-input
+              type="number"
+              value={time}
+              oncommon-blur="~/on/change-time"
+            />
+          </div>
+        </div>
+        <div style={displayPanelStyle}>
+          <img
+            style={imageStyle}
+            src={Tamagotchi.genImage(
+              `A creature in a science lab happily being experimented on. ${Tamagotchi.generateDescription({ time, size, color, description, hunger })}`
+            )}
+          />
+        </div>
       </div>
     ),
   ).commit(),
@@ -98,19 +151,23 @@ export default behavior({
       <div title="Tamagotchi Genetics Lab">
         <common-input value={targetId} oncommon-input="~/on/change-target" />
         <button onclick="~/on/reset">Reset</button>
-        <pre>{JSON.stringify(target, null, 2)}</pre>
         {target ? (
-          <fieldset>
+          <div>
             <common-charm
               key={target.toString()}
               id={target.toString()}
               entity={() => target}
               spell={() => tamagotchiLab}
             />
-          </fieldset>
+          </div>
         ) : (
           <div></div>
         )}
+
+        <details>
+          <summary>Debug</summary>
+          <pre>{JSON.stringify(target, null, 2)}</pre>
+        </details>
       </div>
     ))
     .commit(),

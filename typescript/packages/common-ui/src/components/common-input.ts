@@ -40,6 +40,20 @@ export class CommonKeydownEvent extends Event {
   }
 }
 
+export type CommonBlur = {
+  id: string;
+  value: string;
+}
+
+export class CommonBlurEvent extends Event {
+  detail: CommonBlur;
+
+  constructor(detail: CommonBlur) {
+    super("common-blur", { bubbles: true, composed: true });
+    this.detail = detail;
+  }
+}
+
 @customElement("common-input")
 export class CommonInputElement extends LitElement {
   static override styles = [
@@ -93,12 +107,17 @@ export class CommonInputElement extends LitElement {
       this.dispatchEvent(new CommonKeydownEvent({ id: this.id, key: event.key, value: this.value }));
     };
 
+    const onblur = () => {
+      this.dispatchEvent(new CommonBlurEvent({ id: this.id, value: this.value }));
+    };
+
     return html`
       <div class="input-wrapper">
         <input
           class="input"
           @input="${oninput}"
           @keydown="${onkeydown}"
+          @blur="${onblur}"
           .value="${this.value}"
           .placeholder="${this.placeholder}"
           type="text"

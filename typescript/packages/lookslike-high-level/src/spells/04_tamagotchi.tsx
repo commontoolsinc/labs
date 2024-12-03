@@ -1,5 +1,5 @@
-import { h, behavior, Reference } from "@commontools/common-system";
-import { event, events, set, addTag, field } from "../sugar.js";
+import { h, behavior, Reference, select, $ } from "@commontools/common-system";
+import { event, events, set, addTag, field, isEmpty } from "../sugar.js";
 import { Description } from "./stickers/describe.jsx";
 import { mixin } from "../sugar/mixin.js";
 
@@ -91,7 +91,7 @@ function TamagotchiView({
   );
 }
 
-function Footer({}: {}) {
+function Footer({ }: {}) {
   return (
     <div>
       <hr />
@@ -132,6 +132,21 @@ export const tamagotchi = behavior({
         `Come up with a cool description for this creature in one sentence: ${generateDescription(self)}`,
     ),
   ),
+
+  emptyRule: select({ self: $.self })
+    .clause(isEmpty($.self, 'hunger'))
+    .clause(isEmpty($.self, 'size'))
+    .clause(isEmpty($.self, 'time'))
+    .update(({ self }) =>
+      set(self, {
+        hunger: 0,
+        size: 1,
+        time: 0,
+        color: "blue",
+        description: "lizard bunny",
+      })
+    )
+    .commit(),
 
   view: Creature.render(TamagotchiView).commit(),
 

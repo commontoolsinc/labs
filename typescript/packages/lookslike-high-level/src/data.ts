@@ -228,6 +228,7 @@ addCharms([
   helloWorld.spawn({ helloWorld: 1 }),
   counter.spawn({ counter: 1 }),
   tamagotchi.spawn({ tamagochi: 1 }),
+  tamagotchi.spawn({ tamagochi: 3 }),
   readingList.spawn({ readingList: 1, }),
   chat.spawn({ chat: 2, }),
   sharedTags.spawn({ sharedDataInstance: 2 }),
