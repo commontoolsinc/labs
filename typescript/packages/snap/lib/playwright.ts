@@ -23,7 +23,8 @@ export async function takeScreenshot(
   const selector = "os-navstack > os-navpanel > os-sidebar-close-button";
   await page.waitForSelector(selector);
   await page.click(selector);
-  await page.waitForTimeout(500); // Wait half a second
+  await page.waitForTimeout(500);
+  await page.waitForLoadState("networkidle");
 
   // Take screenshot
   const screenshot = await page.screenshot({
