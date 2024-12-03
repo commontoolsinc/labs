@@ -28,6 +28,7 @@ export const ChatEvents = events({
   onDraftMessage: '~/on/DraftMessage',
   onBroadcastHistory: '~/on/BroadcastHistory',
   onClearChat: '~/on/ClearChat',
+  onSubmit: '~/on/chat/submit'
 })
 
 // queries
@@ -86,7 +87,7 @@ export const ChatMessageList = ({ collection }: { collection: CollectionView<{ a
 };
 
 export const ChatSubmitForm = () => (
-  <common-form reset oncommon-submit="~/on/submit">
+  <common-form reset oncommon-submit={ChatEvents.onSubmit}>
     <fieldset style="border: none; padding: 0; margin: 0;">
       <label style="display: none;">Message</label>
       <div style="display: flex; gap: 8px;">
@@ -195,7 +196,7 @@ export const Chattable = (config: {
       })
       .commit(),
 
-    onSubmit: event('~/on/chat/submit')
+    onSubmit: event(ChatEvents.onSubmit)
       .update(({ self, event }) => {
         const payload = Session.resolve<CommonFormSubmitEvent>(event)
         const userMessage = payload.detail.formData.get('message')

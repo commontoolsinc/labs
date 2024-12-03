@@ -72,17 +72,6 @@ export const rules = behavior({
   viewCount,
   onClick,
   onReset,
-
-  onSubmit: event('~/on/submit')
-    .update(({ self, event }) => {
-      const payload = Session.resolve<CommonFormSubmitEvent>(event)
-      const userMessage = payload.detail.formData.get('message')
-
-      return [
-        sendMessage(self, { message: userMessage as string })
-      ];
-    })
-    .commit(),
 });
 
 export const spawn = (source: {} = { counter: 34 }) =>
