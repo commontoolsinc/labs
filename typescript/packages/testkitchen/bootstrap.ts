@@ -3,7 +3,7 @@ import { exists } from "@std/fs";
 import { iterate } from "./prompts.ts";
 
 if (Deno.args.length !== 1) {
-  console.error("Usage: deno run --allow-read --allow-write --allow-net bootstrap.ts <scenario-name>");
+  console.error("Usage: deno run -A bootstrap.ts <scenario-name>");
   Deno.exit(1);
 }
 
@@ -17,37 +17,73 @@ async function bootstrap() {
     Deno.exit(1);
   }
 
-  // Read spec file
-  const specPath = join(scenarioDir, "ogspec.md");
-  if (!await exists(specPath)) {
-    console.error(`Spec file not found: ${specPath}`);
+  // Define paths
+  const ogSpecPath = join(scenarioDir, "ogspec.md");
+  const newSpecPath = join(scenarioDir, "newspec.md");
+  const originalPath = join(scenarioDir, "original.tsx");
+  const newPath = join(scenarioDir, "new.tsx");
+
+  // Check for required files
+  if (!await exists(ogSpecPath)) {
+    console.error(`Original spec file not found: ${ogSpecPath}`);
     Deno.exit(1);
   }
 
-  const spec = await Deno.readTextFile(specPath);
-  
-  // Generate the recipe code
-  const result = await iterate({
-    originalSpec: spec,
-    originalSrc: "", // No original source for bootstrap
-    workingSpec: spec, // Use same spec for working spec in bootstrap
-  });
+  const ogSpec = await Deno.readTextFile(ogSpecPath);
 
-  if (result.generationError) {
-    console.error("Error generating code:", result.generationError);
-    Deno.exit(1);
+  // Check if we're doing initial creation or iteration
+  const hasNewSpec = await exists(newSpecPath);
+  const hasOriginal = await exists(originalPath);
+
+  if (hasNewSpec && hasOriginal) {
+    // We're doing an iteration
+    console.log("Found newspec.md and original.tsx - generating iteration...");
+    
+    const newSpec = await Deno.readTextFile(newSpecPath);
+    const originalSrc = await Deno.readTextFile(originalPath);
+
+    const result = await iterate({
+      originalSpec: ogSpec,
+      originalSrc,
+      workingSpec: newSpec,
+    });
+
+    if (result.generationError) {
+      console.error("Error generating iteration:", result.generationError);
+      Deno.exit(1);
+    }
+
+    if (!result.generatedSrc) {
+      console.error("No code was generated for iteration");
+      Deno.exit(1);
+    }
+
+    await Deno.writeTextFile(newPath, result.generatedSrc);
+    console.log(`Successfully generated iterated code at: ${newPath}`);
+
+  } else {
+    // We're doing initial creation
+    console.log("Generating initial recipe...");
+    
+    const result = await iterate({
+      originalSpec: ogSpec,
+      originalSrc: "", // No original source for bootstrap
+      workingSpec: ogSpec, // Use same spec for working spec in bootstrap
+    });
+
+    if (result.generationError) {
+      console.error("Error generating code:", result.generationError);
+      Deno.exit(1);
+    }
+
+    if (!result.generatedSrc) {
+      console.error("No code was generated");
+      Deno.exit(1);
+    }
+
+    await Deno.writeTextFile(originalPath, result.generatedSrc);
+    console.log(`Successfully generated initial recipe at: ${originalPath}`);
   }
-
-  if (!result.generatedSrc) {
-    console.error("No code was generated");
-    Deno.exit(1);
-  }
-
-  // Write the generated code
-  const outputPath = join(scenarioDir, "original.tsx");
-  await Deno.writeTextFile(outputPath, result.generatedSrc);
-  
-  console.log(`Successfully generated recipe code at: ${outputPath}`);
 }
 
 bootstrap().catch((error) => {
