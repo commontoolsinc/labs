@@ -1,8 +1,9 @@
-import { h, behavior, Reference, select, $ } from "@commontools/common-system";
+import { h, behavior, Reference, select, $, Session } from "@commontools/common-system";
 import { event, events, set, addTag, field, isEmpty } from "../sugar.js";
 import { Description } from "./stickers/describe.jsx";
 import { mixin } from "../sugar/mixin.js";
 import { description as llmDescription } from "./stickers/describe.jsx";
+import { Chattable, ChatUiResolver } from "./stickers/chat.jsx";
 
 export const genImage = (prompt: string) =>
   `/api/img/?prompt=${encodeURIComponent(prompt)}`;
@@ -53,6 +54,11 @@ export function generateDescription({
     `${color} ${sizeDesc} ${description} is ${ageDesc} and feels ${hungerDesc}.${activityDesc} `
   );
 }
+
+function subview(viewRef: Reference) {
+  return viewRef == null ? <div></div> : Session.resolve(viewRef);
+}
+
 function TamagotchiView({
   self,
   time,
@@ -62,6 +68,7 @@ function TamagotchiView({
   hunger,
   llmDescription,
   lastActivity,
+  chatView
 }: {
   self: Reference;
   time: number;
@@ -71,6 +78,7 @@ function TamagotchiView({
   hunger: number;
   llmDescription: string;
   lastActivity: string;
+  chatView?: any;
 }) {
   const frameStyle = `
     background: #ff3232;
@@ -196,6 +204,7 @@ function TamagotchiView({
         <button style={buttonStyle} onclick={TamagotchiEvents.onExercise}>Move</button>
         <button style={buttonStyle} onclick={TamagotchiEvents.onBroadcast}>Send</button>
       </div>
+      {subview(chatView)}
     </div>
   );
 }
@@ -238,7 +247,13 @@ export const tamagotchi = behavior({
     ),
   ),
 
-  emptyRule: select({ self: $.self })
+  ...mixin(Chattable({
+    attributes: ["hunger", "size", "time", "color", "description", "lastActivity"],
+    greeting: 'bleep bloop',
+    systemPrompt: ({ hunger, size, time, color, description, lastActivity }) => `You are acting as a ${generateDescription({ hunger, size, time, color, description, lastActivity })}. Respond in character, keeping your responses brief and consistent with your current state.`,
+  })),
+
+  initialState: select({ self: $.self })
     .clause(isEmpty($.self, 'hunger'))
     .clause(isEmpty($.self, 'size'))
     .clause(isEmpty($.self, 'time'))
@@ -254,19 +269,22 @@ export const tamagotchi = behavior({
     )
     .commit(),
 
-  view: Creature.with(llmDescription).render(TamagotchiView).commit(),
+  view: Creature
+    .with(llmDescription)
+    .with(ChatUiResolver)
+    .render(TamagotchiView).commit(),
 
-  advanceTime: event(TamagotchiEvents.onAdvanceTime)
+  onAdvanceTime: event(TamagotchiEvents.onAdvanceTime)
     .with(time)
     .update(({ self, time }) => set(self, { time: time + 1, lastActivity: "waiting" }))
     .commit(),
 
-  tickHunger: event(TamagotchiEvents.onAdvanceTime)
+  onTickHunger: event(TamagotchiEvents.onAdvanceTime)
     .with(hunger)
     .update(({ self, hunger }) => set(self, { hunger: hunger + 1 }))
     .commit(),
 
-  feed: event(TamagotchiEvents.onGiveFood)
+  onFeed: event(TamagotchiEvents.onGiveFood)
     .with(hunger)
     .with(time)
     .update(({ self, hunger, time }) =>
@@ -278,7 +296,7 @@ export const tamagotchi = behavior({
     )
     .commit(),
 
-  exercise: event(TamagotchiEvents.onExercise)
+  onExercise: event(TamagotchiEvents.onExercise)
     .with(hunger)
     .with(time)
     .with(size)
@@ -292,13 +310,15 @@ export const tamagotchi = behavior({
     )
     .commit(),
 
-  broadcast: event(TamagotchiEvents.onBroadcast)
+  onBroadcast: event(TamagotchiEvents.onBroadcast)
     .update(({ self }) => {
       addTag(self, "#tamagotchi");
       set(self, { lastActivity: "broadcasting" });
     })
     .commit(),
 });
+
+tamagotchi.disableRule('chat/view' as any)
 
 console.log(tamagotchi);
 
