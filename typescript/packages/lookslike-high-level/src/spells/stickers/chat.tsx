@@ -206,20 +206,28 @@ export const Chattable = (config: {
       .commit(),
 
     'chat/view': chatResolver
-      .render(({ messages }) => {
+      .update(({ self, messages }) => {
         const collection = Messages.from(messages);
 
-        return <div style="max-width: 800px; margin: 20px auto; padding: 20px; background: #f5f5f5; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-          <ChatMessageList collection={collection} />
-          <ChatSubmitForm />
-          <button
-            type="button"
-            onclick={ChatEvents.onClearChat}
-            style="margin-top: 12px; padding: 8px 16px; border-radius: 8px; border: none; background: #dc3545; color: white; cursor: pointer;"
-          >
-            Clear Chat
-          </button>
-        </div>
+        return [
+          {
+            Upsert: [
+              self,
+              "~/common/ui/chat",
+              <div style="max-width: 800px; margin: 20px auto; padding: 20px; background: #f5f5f5; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <ChatMessageList collection={collection} />
+                <ChatSubmitForm />
+                <button
+                  type="button"
+                  onclick={ChatEvents.onClearChat}
+                  style="margin-top: 12px; padding: 8px 16px; border-radius: 8px; border: none; background: #dc3545; color: white; cursor: pointer;"
+                >
+                  Clear Chat
+                </button>
+              </div> as any,
+            ],
+          },
+        ]
       })
       .commit(),
   });
