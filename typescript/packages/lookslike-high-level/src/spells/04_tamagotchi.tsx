@@ -2,6 +2,7 @@ import { h, behavior, Reference, select, $ } from "@commontools/common-system";
 import { event, events, set, addTag, field, isEmpty } from "../sugar.js";
 import { Description } from "./stickers/describe.jsx";
 import { mixin } from "../sugar/mixin.js";
+import { description as llmDescription } from "./stickers/describe.jsx";
 
 export const genImage = (prompt: string) =>
   `/api/img/?prompt=${encodeURIComponent(prompt)}`;
@@ -12,12 +13,14 @@ export function generateDescription({
   size,
   color,
   description,
+  lastActivity,
 }: {
   time: number;
   hunger: number;
   size: number;
   color: string;
   description: string;
+  lastActivity?: string;
 }) {
   const ageDesc =
     time < 5
@@ -44,9 +47,10 @@ export function generateDescription({
           ? "large"
           : "huge";
 
+  const activityDesc = lastActivity ? ` They are currently ${lastActivity}.` : '';
+
   return (
-    `Your ${color} ${sizeDesc} ${description} is ${ageDesc} and feeling ${hungerDesc}. ` +
-    `They've been around for ${time} time units and have grown to size ${size}.`
+    `${color} ${sizeDesc} ${description} is ${ageDesc} and feels ${hungerDesc}.${activityDesc} `
   );
 }
 function TamagotchiView({
@@ -56,6 +60,8 @@ function TamagotchiView({
   color,
   description,
   hunger,
+  llmDescription,
+  lastActivity,
 }: {
   self: Reference;
   time: number;
@@ -63,6 +69,8 @@ function TamagotchiView({
   color: string;
   description: string;
   hunger: number;
+  llmDescription: string;
+  lastActivity: string;
 }) {
   const frameStyle = `
     background: #ff3232;
@@ -175,11 +183,11 @@ function TamagotchiView({
         <img
           style="width: 100%; aspect-ratio: 1; border-radius: 8px; box-shadow: inset 0 0 10px rgba(0,0,0,0.5);"
           src={genImage(
-            generateDescription({ time, size, color, description, hunger }),
+            generateDescription({ time, size, color, description, hunger, lastActivity }),
           )}
         />
         <div style={speechBubbleStyle}>
-          {generateDescription({ time, size, color, description, hunger })}
+          {llmDescription}
         </div>
       </div>
       <div style={buttonContainerStyle}>
@@ -203,12 +211,14 @@ export const size = field("size", 1);
 export const time = field("time", 0);
 export const description = field("description", "lizard bunny");
 export const color = field("color", "blue");
+export const lastActivity = field("lastActivity", "");
 
 export const Creature = description
   .with(hunger)
   .with(size)
   .with(time)
-  .with(color);
+  .with(color)
+  .with(lastActivity);
 
 const TamagotchiEvents = events({
   onAdvanceTime: "~/on/advanceTime",
@@ -222,7 +232,9 @@ export const tamagotchi = behavior({
     Description(
       ["hunger", "size", "time", "color", "description"],
       (self: any) =>
-        `Come up with a cool description for this creature in one sentence: ${generateDescription(self)}`,
+        `Roleplay as a creature, current status: ${generateDescription(self)}.
+
+        Respond with the just the text of a "status update" in the voice of the creature, a single sentence.`,
     ),
   ),
 
@@ -237,17 +249,16 @@ export const tamagotchi = behavior({
         time: 0,
         color: "blue",
         description: "lizard bunny",
+        lastActivity: "",
       })
     )
     .commit(),
 
-  view: Creature.render(TamagotchiView).commit(),
+  view: Creature.with(llmDescription).render(TamagotchiView).commit(),
 
-  // NOTE(ja): is there a way to only have this advance time - and
-  // all the other events should only deal with non-time related changes?
   advanceTime: event(TamagotchiEvents.onAdvanceTime)
     .with(time)
-    .update(({ self, time }) => set(self, { time: time + 1 }))
+    .update(({ self, time }) => set(self, { time: time + 1, lastActivity: "waiting" }))
     .commit(),
 
   tickHunger: event(TamagotchiEvents.onAdvanceTime)
@@ -262,6 +273,7 @@ export const tamagotchi = behavior({
       set(self, {
         hunger: Math.max(0, hunger - 1),
         time: time + 1,
+        lastActivity: "eating",
       }),
     )
     .commit(),
@@ -275,12 +287,16 @@ export const tamagotchi = behavior({
         hunger: hunger + 1,
         time: time + 1,
         size: size + 1,
+        lastActivity: "exercising",
       }),
     )
     .commit(),
 
   broadcast: event(TamagotchiEvents.onBroadcast)
-    .update(({ self }) => addTag(self, "#tamagotchi"))
+    .update(({ self }) => {
+      addTag(self, "#tamagotchi");
+      set(self, { lastActivity: "broadcasting" });
+    })
     .commit(),
 });
 

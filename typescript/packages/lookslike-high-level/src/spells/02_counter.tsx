@@ -39,6 +39,7 @@ const viewCount = Clicks
           <button style={buttonStyle} onclick={CounterEvent.onReset}>Reset</button>
         </div>
         <p style={descriptionStyle}>{llmDescription}</p>
+        {view}
       </div>
     );
   })
@@ -73,6 +74,8 @@ export const rules = behavior({
   onClick,
   onReset,
 });
+
+rules.disableRule('chat/view' as any)
 
 export const spawn = (source: {} = { counter: 34 }) =>
   rules.spawn(source, "Counter");

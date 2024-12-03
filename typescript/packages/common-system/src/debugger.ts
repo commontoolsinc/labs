@@ -2,6 +2,7 @@ import { Reference } from "./db.js";
 import { Behavior } from "./adapter.js";
 import { html, css, LitElement } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
+import { formatDatalogQuery } from "./format.js";
 
 function setDebugCharms(value: boolean) {
   (globalThis as any).DEBUG_CHARMS = value;
@@ -143,21 +144,24 @@ export class RuleDetailsPopover extends LitElement {
       top: 0;
       width: 300px;
       max-height: 320px;
-      background: white;
-      border-radius: 8px;
-      padding: 16px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      background: #f8f9fa;
+      border-radius: 4px;
+      padding: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
       overflow-y: auto;
-      font-size: 14px;
+      font-size: 12px;
       pointer-events: all;
+      font-family: monospace;
+      border: 1px solid #dee2e6;
     }
 
     pre {
-      background: rgba(0,0,0,0.1);
+      background: white;
       padding: 8px;
       border-radius: 4px;
       overflow-x: auto;
-      font-size: 12px;
+      border: 1px solid #dee2e6;
+      margin: 4px 0;
     }
 
     .close {
@@ -166,6 +170,7 @@ export class RuleDetailsPopover extends LitElement {
       top: 8px;
       cursor: pointer;
       opacity: 0.6;
+      font-family: system-ui;
     }
 
     .close:hover {
@@ -182,6 +187,35 @@ export class RuleDetailsPopover extends LitElement {
       padding: 4px 8px;
       border-radius: 4px;
       cursor: pointer;
+      border: 1px solid #dee2e6;
+      background: white;
+    }
+
+    button:hover {
+      background: #f8f9fa;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .rule-name {
+      font-weight: bold;
+      font-size: 14px;
+    }
+
+    h4 {
+      margin: 12px 0 4px 0;
+      font-size: 12px;
+      color: #666;
+    }
+
+    .stats {
+      font-size: 11px;
+      color: #666;
     }
   `;
 
@@ -206,21 +240,33 @@ export class RuleDetailsPopover extends LitElement {
   }
 
   override render() {
+    const style = getRuleStyle(this.rule) || { emoji: '🔧', color: this.color };
+
     return html`
-      <div style="color: ${this.color}">
+      <div>
         <div class="close" @click=${() => this.remove()}>✕</div>
-        <h3>${this.rule}</h3>
+        <div class="header">
+          <span style="color: ${style.color}">${style.emoji}</span>
+          <span class="rule-name" style="color: ${style.color}">${this.rule}</span>
+        </div>
+
         <div class="rule-controls">
           <button @click=${this.enableRule}>Enable</button>
           <button @click=${this.disableRule}>Disable</button>
         </div>
-        <div>Activations: ${this.activation?.count || 0}</div>
-        ${this.activation?.performanceMs ? html`
-          <div>Last performance: ${this.activation.performanceMs}ms</div>
-        ` : ''}
+
+        <div class="stats">
+          <div>Activations: ${this.activation?.count || 0}</div>
+          ${this.activation?.performanceMs ? html`
+            <div>Last performance: ${this.activation.performanceMs}ms</div>
+          ` : ''}
+        </div>
 
         <h4>Rule Definition</h4>
-        <pre>${JSON.stringify(this.behavior.rules, null, 2)}</pre>
+        <pre>${formatDatalogQuery({
+            select: this.behavior.rules[this.rule].select,
+            where: [...this.behavior.rules[this.rule].where]
+        })}</pre>
 
         ${this.activation?.lastSelection ? html`
           <h4>Last Selection</h4>
@@ -231,11 +277,61 @@ export class RuleDetailsPopover extends LitElement {
   }
 }
 
+const cardColors = [
+  "#ff7675",
+  "#74b9ff",
+  "#55efc4",
+  "#ffeaa7",
+  "#b2bec3",
+  "#fd79a8",
+  "#81ecec",
+];
+
+const rulePrefixes = new Map([
+  ['likes/', {emoji: '👍', color: '#ffeaa7'}],
+  ['description/', {emoji: '📝', color: '#ffffff'}],
+  ['chat/', {emoji: '💬', color: '#74b9ff'}],
+  ['comments/', {emoji: '✍️', color: '#fd79a8'}]
+]);
+
+function getColorForEntity(entityId: string): string {
+  const hash = Array.from(entityId).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return cardColors[hash % cardColors.length];
+}
+
+function getRuleStyle(rule: string): {emoji: string, color: string} {
+  // Check for event rules starting with 'on'
+  if (/^on[A-Z]/.test(rule)) {
+    return {emoji: '⚡', color: '#ffeaa7'};
+  }
+
+  // Check for view/render rules
+  if (rule === 'view' || rule === 'render' || rule === 'show' ||
+      rule.startsWith('view') || rule.startsWith('render') || rule.startsWith('show')) {
+    return {emoji: '🎨', color: '#9b59b6'};
+  }
+
+  for (const [prefix, style] of rulePrefixes) {
+    if (rule.startsWith(prefix)) {
+      return style;
+    }
+  }
+
+  const hash = Array.from(rule).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const emojiList = ["🌟", "🎯", "🎨", "🎭", "🎪", "🎢", "🎡", "🎮", "🎲", "🎰", "🎳", "🎹", "🎼", "🎧", "🎤", "🎬", "🎨", "🎭", "🎪"];
+
+  return {
+    emoji: emojiList[hash % emojiList.length],
+    color: cardColors[hash % cardColors.length]
+  };
+}
+
 @customElement('charm-debugger')
 export class CharmDebugger extends LitElement {
   private _entity: Reference | null = null;
   private _behavior: Behavior | null = null;
   private activePopover: RuleDetailsPopover | null = null;
+  private activeRuleId: string | null = null;
 
   @property({ attribute: false })
   get entity() {
@@ -260,62 +356,21 @@ export class CharmDebugger extends LitElement {
     { count: number; lastSelection: any; performanceMs: number }
   > = new Map();
 
-  private cardColors = [
-    "#ff7675",
-    "#74b9ff",
-    "#55efc4",
-    "#ffeaa7",
-    "#b2bec3",
-    "#fd79a8",
-    "#81ecec",
-  ];
-
-  private rulePrefixes = new Map([
-    ['likes/', {emoji: '👍', color: '#ffeaa7'}],
-    ['description/', {emoji: '📝', color: '#ffffff'}],
-    ['chat/', {emoji: '💬', color: '#74b9ff'}],
-    ['comments/', {emoji: '✍️', color: '#fd79a8'}]
-  ]);
-
   private mutationLog: any[] = [];
   private isOpen: boolean = false;
   private isMutationLogOpen: boolean = false;
   private pulsingRules: Set<string> = new Set();
 
-  private getColorForEntity(entityId: string): string {
-    const hash = Array.from(entityId).reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return this.cardColors[hash % this.cardColors.length];
-  }
 
-  private getRuleStyle(rule: string): {emoji: string, color: string} {
-    // Check for event rules starting with 'on'
-    if (/^on[A-Z]/.test(rule)) {
-      return {emoji: '⚡', color: '#ffeaa7'};
-    }
-
-    // Check for view/render rules
-    if (rule === 'view' || rule === 'render' || rule === 'show' ||
-        rule.startsWith('view') || rule.startsWith('render') || rule.startsWith('show')) {
-      return {emoji: '🎨', color: '#9b59b6'};
-    }
-
-    for (const [prefix, style] of this.rulePrefixes) {
-      if (rule.startsWith(prefix)) {
-        return style;
-      }
-    }
-
-    const hash = Array.from(rule).reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const emojiList = ["🌟", "🎯", "🎨", "🎭", "🎪", "🎢", "🎡", "🎮", "🎲", "🎰", "🎳", "🎹", "🎼", "🎧", "🎤", "🎬", "🎨", "🎭", "🎪"];
-
-    return {
-      emoji: emojiList[hash % emojiList.length],
-      color: this.cardColors[hash % this.cardColors.length]
-    };
-  }
 
   private showRuleDetails(rule: string, color: string, activation: any) {
-    // Remove any existing popover
+    if (this.activeRuleId === rule) {
+      this.activePopover?.remove();
+      this.activePopover = null;
+      this.activeRuleId = null;
+      return;
+    }
+
     this.activePopover?.remove();
 
     const popover = document.createElement('rule-details-popover') as RuleDetailsPopover;
@@ -324,6 +379,7 @@ export class CharmDebugger extends LitElement {
     popover.activation = activation;
     popover.behavior = this.behavior!;
     this.activePopover = popover;
+    this.activeRuleId = rule;
     this.renderRoot.appendChild(popover);
   }
 
@@ -376,7 +432,6 @@ export class CharmDebugger extends LitElement {
     }
 
     .rules-grid:hover {
-      transform: scale(1);
       opacity: 1;
     }
 
@@ -415,6 +470,17 @@ export class CharmDebugger extends LitElement {
     .emoji-tile:hover {
       transform: scale(1.3) rotate(5deg);
       opacity: 1;
+    }
+
+    .emoji-tile.disabled {
+      transform: scale(0.8);
+      opacity: 0.5;
+      filter: grayscale(1);
+    }
+
+    .emoji-tile.disabled:hover {
+      transform: scale(0.9);
+      opacity: 0.6;
     }
 
     .entity-id {
@@ -506,6 +572,22 @@ export class CharmDebugger extends LitElement {
       }
     });
 
+    window.addEventListener("spell-rule-enabled", (event: any) => {
+      if (
+        event.detail.id === this.behavior?.id
+      ) {
+        this.requestUpdate();
+      }
+    });
+
+    window.addEventListener("spell-rule-disabled", (event: any) => {
+      if (
+        event.detail.id === this.behavior?.id
+      ) {
+        this.requestUpdate();
+      }
+    });
+
     if (!this.isOpen) {
       this.classList.add("closed");
     }
@@ -531,7 +613,7 @@ export class CharmDebugger extends LitElement {
           <div>
             <div
               class="entity-id"
-              style="background: ${this.getColorForEntity(this.entity.toString())};"
+              style="background: ${getColorForEntity(this.entity.toString())};"
               title=${this.entity.toString()}
               @click=${this.toggleOpen}
             >
@@ -547,14 +629,21 @@ export class CharmDebugger extends LitElement {
 
         ${this.behavior?.rules ? html`
           <div class="rules-grid">
-            ${Object.keys(this.behavior.rules).map((rule, index) => {
+              ${Object.keys(this.behavior.rules).sort((a, b) => {
+                const hasSlashA = a.includes('/');
+                const hasSlashB = b.includes('/');
+                if (hasSlashA && !hasSlashB) return -1;
+                if (!hasSlashA && hasSlashB) return 1;
+                return a.localeCompare(b);
+              }).map((rule, index) => {
               const activation = this.ruleActivations.get(rule);
-              const style = this.getRuleStyle(rule);
+              const style = getRuleStyle(rule);
+              const isEnabled = this.behavior!.isRuleEnabled(rule);
 
               return html`
                 <div class="rule-item" style="top: ${Math.floor(index / 2) * 96}px">
                   <div
-                    class="emoji-tile ${this.pulsingRules.has(rule) ? 'pulse' : ''}"
+                    class="emoji-tile ${this.pulsingRules.has(rule) ? 'pulse' : ''} ${isEnabled ? '' : 'disabled'}"
                     style="background: ${style.color}"
                     title="${rule} (${activation?.count || 0} activations)"
                     @click=${() => this.showRuleDetails(rule, style.color, activation)}

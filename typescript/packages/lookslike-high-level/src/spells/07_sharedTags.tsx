@@ -11,7 +11,7 @@ import {
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
 import { Messages } from "./06_chat.jsx";
 import { articlePreview } from "./09_importer.jsx";
-import { genImage } from "./04_tamagotchi.jsx";
+import { generateDescription, genImage } from "./04_tamagotchi.jsx";
 
 export const source = { viewer: 1 };
 
@@ -79,7 +79,7 @@ export const sharedDataViewer = behavior({
     .match($.creature, "size", $.size)
     .match($.creature, "hunger", $.hunger)
     .match($.creature, "time", $.time)
-    .clause(defaultTo($.creature, "llmDescription", $.description, ""))
+    .clause(defaultTo($.creature, "description", $.description, ""))
     .clause(defaultTo($.creature, "color", $.color, ""))
     .render(({ searchTag, creature }) => {
       const containerStyle = "display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px; padding: 20px;";
@@ -96,7 +96,7 @@ export const sharedDataViewer = behavior({
               <div key={c.self.toString()} style={cardStyle}>
                 <img
                   style={imageStyle}
-                  src={genImage(c.description)}
+                  src={genImage(generateDescription(c))}
                   alt={c.description}
                 />
                 <div style={statsStyle}>

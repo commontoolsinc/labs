@@ -87,11 +87,13 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
   rules: Rules;
   id: Reference;
   private subscriptionMap: Map<string, any>;
+  private disabledRules: Set<string>;
 
   constructor(rules: Rules) {
     this.rules = rules;
     this.id = spellId(rules);
     this.subscriptionMap = new Map();
+    this.disabledRules = new Set();
   }
 
   disableRule(ruleName: keyof Rules) {
@@ -99,6 +101,7 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
     if (subscription) {
       subscription.suspended = true;
     }
+    this.disabledRules.add(ruleName as string);
   }
 
   enableRule(ruleName: keyof Rules) {
@@ -106,9 +109,13 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
     if (subscription) {
       subscription.suspended = false;
     }
+    this.disabledRules.delete(ruleName as string);
   }
 
   isRuleEnabled(ruleName: keyof Rules): boolean {
+    if (this.disabledRules.has(ruleName as string)) {
+      return false;
+    }
     const subscription = this.subscriptionMap.get(ruleName as string);
     return subscription ? !subscription.suspended : true;
   }
@@ -132,6 +139,10 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
         toEffect(rule),
       );
       this.subscriptionMap.set(name, subscription);
+
+      if (this.disabledRules.has(name)) {
+        subscription.suspended = true;
+      }
 
       changes.push(...(yield* subscription.poll()));
     }
