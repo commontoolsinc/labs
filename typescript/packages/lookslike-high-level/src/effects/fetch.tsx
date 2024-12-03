@@ -33,7 +33,7 @@ type State =
   | { status: "Complete"; source: Fetch; content: {} };
 
 export default service({
-  send: {
+  'fetch/send': {
     select: {
       request: $.request,
     },
@@ -57,7 +57,7 @@ export default service({
       return [];
     },
   },
-  receive: {
+  'fetch/receive': {
     select: {
       request: $.request,
     },
@@ -92,7 +92,7 @@ export default service({
       return [];
     },
   },
-  complete: {
+  'fetch/complete': {
     select: {
       request: $.request,
     },
@@ -141,7 +141,7 @@ export default service({
     },
   },
 
-  idle: {
+  'fetch/idle': {
     select: {
       self: $.self,
     },
@@ -161,7 +161,7 @@ export default service({
     },
   },
 
-  active: {
+  'fetch/active': {
     select: {
       self: $.self,
       requests: [{ request: $.request, state: $.state }],
