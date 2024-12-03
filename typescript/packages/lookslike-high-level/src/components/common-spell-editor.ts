@@ -90,12 +90,10 @@ export class CommonSpellEditor extends LitElement {
   private editorRef = createRef<HTMLElement>();
 
   override render() {
-    const onSpecChanged = (
-      e: CustomEvent,
-    ) => (this.workingSpec = e.detail.state.doc.toString());
-    const onSrcChanged = (
-      e: CustomEvent,
-    ) => (this.workingSrc = e.detail.state.doc.toString());
+    const onSpecChanged = (e: CustomEvent) =>
+      (this.workingSpec = e.detail.state.doc.toString());
+    const onSrcChanged = (e: CustomEvent) =>
+      (this.workingSrc = e.detail.state.doc.toString());
 
     const revert = () => {
       this.workingSrc = this.recipeSrc;
@@ -121,7 +119,8 @@ export class CommonSpellEditor extends LitElement {
       try {
         const newSrc = await iterate({
           errors: fixit,
-          originalSpec: this.recipeSpec ||
+          originalSpec:
+            this.recipeSpec ||
             "there is no spec, describe the app in a descriptive and delcarative way",
           originalSrc: this.recipeSrc,
           workingSpec: this.workingSpec,
@@ -196,52 +195,53 @@ export class CommonSpellEditor extends LitElement {
     };
 
     return html`
-      <div>
+      <div style="margin: 10px;">
         <button @click=${compileAndUpdate}>🔄 Run w/Current Data</button>
         <button @click=${compileAndRunNew}>🐣 Run w/New Data</button>
-        <button @click=${() =>
-      askLLM()} ?disabled=${this.llmRunning}>🤖 LLM</button>
-        <button @click=${() =>
-      askLLM({ fixit: this.compileErrors })} ?disabled=${
-      this.llmRunning || !this.compileErrors
-    }>
+        <button @click=${() => askLLM()} ?disabled=${this.llmRunning}>
+          🤖 LLM
+        </button>
+        <button
+          @click=${() => askLLM({ fixit: this.compileErrors })}
+          ?disabled=${this.llmRunning || !this.compileErrors}
+        >
           🪓 fix it
         </button>
         <button
           @click=${revert}
-          ?disabled=${
-      this.recipeSrc === this.workingSrc && this.recipeSpec === this.workingSpec
-    }
+          ?disabled=${this.recipeSrc === this.workingSrc &&
+          this.recipeSpec === this.workingSpec}
         >
           ↩️ revert
         </button>
-        <button @click=${tweakSpec} ?disabled=${this.llmRunning}>🔧 tweak spec</button>
+        <button @click=${tweakSpec} ?disabled=${this.llmRunning}>
+          🔧 tweak spec
+        </button>
       </div>
-      ${
-      when(
+      ${when(
         this.compileErrors,
         () =>
-          html`<pre
-                        style="color: white; background: #800; padding: 4px"
-                      >
+          html`<pre style="color: white; background: #800; padding: 4px">
 ${this.compileErrors}</pre
-                      >`,
+          >`,
         () => html``,
-      )
-    }
+      )}
+
+      <div style="margin: 10px;">
+        <os-code-editor
+          style="margin-bottom: 10px;"
+          language="text/markdown"
+          .source=${this.workingSpec}
+          @doc-change=${onSpecChanged}
+        ></os-code-editor>
 
         <os-code-editor
-          language="text/markdown"
-        .source=${this.workingSpec}
-        @doc-change=${onSpecChanged}
-      ></os-code-editor>
-
-      <os-code-editor
-        language="text/x.typescript"
-        .source=${this.workingSrc}
-        @doc-change=${onSrcChanged}
-        ${ref(this.editorRef)}
-      ></os-code-editor>
+          language="text/x.typescript"
+          .source=${this.workingSrc}
+          @doc-change=${onSrcChanged}
+          ${ref(this.editorRef)}
+        ></os-code-editor>
+      </div>
     `;
   }
 }

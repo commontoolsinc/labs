@@ -62,6 +62,8 @@ DO NOT PERFORM ANY JS OPERATIONS INSIDE THE UI JSX!
   GOOD: <p>Related Goals: {item.relatedGoals.map((goal) => <li>{goal}</li>)}</p>
   GOOD: <p>Related Goals: {lift(({ item }) => item.relatedGoals.join(", "))(item)}</p>
 
+If you are asked to add or generate an image, you can generate images using AI by using the following URL, and urlencoding the prompt in the url \`/api/img?prompt=' + encodeURIComponent(prompt)\`
+
 CSS must be defined inline as a string, we do not support css-in-js.
 
 Full Example of Counter Recipe:
