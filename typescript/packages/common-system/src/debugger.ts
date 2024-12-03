@@ -3,6 +3,7 @@ import { Behavior } from "./adapter.js";
 import { html, css, LitElement } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import { formatDatalogQuery } from "./format.js";
+import { explainQuery, explainMutation } from "./debug.js";
 
 function setDebugCharms(value: boolean) {
   (globalThis as any).DEBUG_CHARMS = value;
@@ -76,6 +77,15 @@ export class MutationLogEntry extends LitElement {
     console.log('%cSelection:', 'color: #3498db', this.mutation.selection);
     console.log('%cChanges:', 'color: #3498db', this.mutation.changes);
     console.groupEnd();
+
+    // Add async explanation without blocking
+    explainMutation(this.mutation).then(explanation => {
+      console.group('Mutation Explanation');
+      console.log(explanation);
+      console.groupEnd();
+    }).catch(err => {
+      console.error('Failed to explain mutation:', err);
+    });
   }
 
   override render() {
@@ -239,6 +249,24 @@ export class RuleDetailsPopover extends LitElement {
     window.dispatchEvent(event);
   }
 
+  private async explainRule() {
+    if (!this.behavior?.rules[this.rule]) return;
+
+    const query = {
+      select: this.behavior.rules[this.rule].select,
+      where: [...this.behavior.rules[this.rule].where]
+    };
+
+    try {
+      console.group(`Explanation for rule: ${this.rule}`);
+      const explanation = await explainQuery(query);
+      console.log(explanation);
+      console.groupEnd();
+    } catch (err) {
+      console.error('Failed to explain query:', err);
+    }
+  }
+
   override render() {
     const style = getRuleStyle(this.rule) || { emoji: '🔧', color: this.color };
 
@@ -253,6 +281,7 @@ export class RuleDetailsPopover extends LitElement {
         <div class="rule-controls">
           <button @click=${this.enableRule}>Enable</button>
           <button @click=${this.disableRule}>Disable</button>
+          <button @click=${this.explainRule}>Explain</button>
         </div>
 
         <div class="stats">
