@@ -117,7 +117,7 @@ export const Commentable = behavior({
 
   "comments/sendComment": event(CommentEvents.onSendComment)
     .with(Comment)
-    .update(({ self, event, screenName, comments, draft }) => {
+    .update(({ self, screenName, comments, draft }) => {
       const collection = Comments.from(comments);
       return [
         ...Transact.remove(self, { "~/comments/draft": draft }),

@@ -4,7 +4,7 @@ import {
   Session,
 } from "@commontools/common-system";
 import { mixin } from "../sugar/mixin.js";
-import { ChatResolver, Chattable, ChatUiResolver } from "./stickers/chat.jsx";
+import { chatResolver, Chattable, chatUiResolver } from "./stickers/chat.jsx";
 
 export const source = { chat: { v: 1 } };
 
@@ -14,8 +14,8 @@ export const chatRules = behavior({
     systemPrompt: () => 'speak only in riddles'
   })),
 
-  view: ChatResolver
-    .with(ChatUiResolver)
+  view: chatResolver
+    .with(chatUiResolver)
     .render(({ chatView }) => {
       const view = chatView == null ? <div>Loading...</div> : Session.resolve(chatView)
 

@@ -1,9 +1,9 @@
-import { h, behavior, Reference, select, $, Session } from "@commontools/common-system";
-import { event, events, set, addTag, field, isEmpty } from "../sugar.js";
+import { h, behavior, Reference, select, $ } from "@commontools/common-system";
+import { event, events, set, addTag, field, isEmpty, subview } from "../sugar.js";
 import { Description } from "./stickers/describe.jsx";
 import { mixin } from "../sugar/mixin.js";
 import { description as llmDescription } from "./stickers/describe.jsx";
-import { Chattable, ChatUiResolver } from "./stickers/chat.jsx";
+import { Chattable, chatUiResolver } from "./stickers/chat.jsx";
 
 export const genImage = (prompt: string) =>
   `/api/img/?prompt=${encodeURIComponent(prompt)}`;
@@ -53,10 +53,6 @@ export function generateDescription({
   return (
     `${color} ${sizeDesc} ${description} is ${ageDesc} and feels ${hungerDesc}.${activityDesc} `
   );
-}
-
-function subview(viewRef: Reference) {
-  return viewRef == null ? <div></div> : Session.resolve(viewRef);
 }
 
 function TamagotchiView({
@@ -124,16 +120,6 @@ function TamagotchiView({
     padding: 10px;
     border-radius: 15px;
     box-shadow: inset 0 0 5px rgba(0,255,0,0.5);
-  `;
-
-  const bubbleArrowStyle = `
-    content: '';
-    position: absolute;
-    bottom: -10px;
-    left: 50%;
-    border-width: 10px 10px 0;
-    border-style: solid;
-    border-color: #111 transparent;
   `;
 
   const buttonContainerStyle = `
@@ -209,10 +195,6 @@ function TamagotchiView({
   );
 }
 
-function Footer({ }: {}) {
-  return null;
-}
-
 // queries can be declared in piecemeal fashion and composed together later
 
 export const hunger = field("hunger", 0);
@@ -221,8 +203,12 @@ export const time = field("time", 0);
 export const description = field("description", "lizard bunny");
 export const color = field("color", "blue");
 export const lastActivity = field("lastActivity", "");
+const resolveUninitialized = select({ self: $.self })
+  .clause(isEmpty($.self, 'hunger'))
+  .clause(isEmpty($.self, 'size'))
+  .clause(isEmpty($.self, 'time'))
 
-export const Creature = description
+export const resolveCreature = description
   .with(hunger)
   .with(size)
   .with(time)
@@ -253,10 +239,7 @@ export const tamagotchi = behavior({
     systemPrompt: ({ hunger, size, time, color, description, lastActivity }) => `You are acting as a ${generateDescription({ hunger, size, time, color, description, lastActivity })}. Respond in character, keeping your responses brief and consistent with your current state.`,
   })),
 
-  initialState: select({ self: $.self })
-    .clause(isEmpty($.self, 'hunger'))
-    .clause(isEmpty($.self, 'size'))
-    .clause(isEmpty($.self, 'time'))
+  initialState: resolveUninitialized
     .update(({ self }) =>
       set(self, {
         hunger: 0,
@@ -269,9 +252,9 @@ export const tamagotchi = behavior({
     )
     .commit(),
 
-  view: Creature
+  view: resolveCreature
     .with(llmDescription)
-    .with(ChatUiResolver)
+    .with(chatUiResolver)
     .render(TamagotchiView).commit(),
 
   onAdvanceTime: event(TamagotchiEvents.onAdvanceTime)
@@ -312,8 +295,10 @@ export const tamagotchi = behavior({
 
   onBroadcast: event(TamagotchiEvents.onBroadcast)
     .update(({ self }) => {
-      addTag(self, "#tamagotchi");
-      set(self, { lastActivity: "broadcasting" });
+      return [
+        ...addTag(self, "#tamagotchi"),
+        ...set(self, { lastActivity: "broadcasting" })
+      ];
     })
     .commit(),
 });

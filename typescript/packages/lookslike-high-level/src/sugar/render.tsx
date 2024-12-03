@@ -1,4 +1,4 @@
-import { Behavior, h, Instruction, Reference, Service, View } from "@commontools/common-system";
+import { Behavior, h, Instruction, Reference, Service, Session, View } from "@commontools/common-system";
 
 export function render<T extends { self: Reference }>(
   props: T,
@@ -16,3 +16,9 @@ export const each = (items: Reference[], behaviour: Behavior | Service<any>) => 
   spell={() => behaviour}
   entity={() => a}
 ></common-charm>);
+
+const empty = <div></div>
+
+export function subview(viewRef: Reference, fallback: any = empty) {
+  return viewRef == null ? fallback : Session.resolve(viewRef);
+}

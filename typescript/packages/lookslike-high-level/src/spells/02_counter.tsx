@@ -1,14 +1,12 @@
 import { h, behavior, $, select, Session } from "@commontools/common-system";
-import { defaultTo, event, events, set } from "../sugar.js";
+import { event, events, set, subview } from "../sugar.js";
 import { description, Description } from "./stickers/describe.jsx";
 import { mixin } from "../sugar/mixin.js";
-import { Commentable } from "./stickers/comments.jsx";
-import { ChatMessageList, ChatResolver, ChatSubmitForm, Chattable, ChatUiResolver, Messages, sendMessage } from "./stickers/chat.jsx";
-import { CommonFormSubmitEvent } from "../../../common-ui/lib/components/common-form.js";
+import { Chattable, chatUiResolver } from "./stickers/chat.jsx";
 
-const Empty = select({ self: $.self }).not(q => q.match($.self, "clicks", $._));
+const resolveEmpty = select({ self: $.self }).not(q => q.match($.self, "clicks", $._));
 
-const Clicks = select({ self: $.self, clicks: $.clicks }).match(
+const resolveClicks = select({ self: $.self, clicks: $.clicks }).match(
   $.self,
   "clicks",
   $.clicks,
@@ -19,40 +17,12 @@ const CounterEvent = events({
   onClick: "~/on/click",
 });
 
-const init = Empty.update(({ self }) => set(self, { clicks: 0 })).commit();
-
-const viewCount = Clicks
-  .with(description)
-  .with(ChatUiResolver)
-  .render(({ clicks, self, llmDescription, chatView }) => {
-    const view = chatView == null ? <div>Placeholder!</div> : Session.resolve(chatView)
-    const containerStyle = 'display: flex; flex-direction: column; align-items: center; padding: 20px; background: linear-gradient(45deg, #1a1a1a, #2d2d2d); border-radius: 10px; color: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'
-    const clicksStyle = 'font-size: 48px; font-weight: bold; color: #0ff; text-shadow: 0 0 10px rgba(0,255,255,0.5); margin: 10px 0;'
-    const buttonStyle = 'background: #333; color: #fff; border: 2px solid #0ff; padding: 10px 20px; margin: 5px; border-radius: 5px; cursor: pointer; transition: all 0.3s; font-family: monospace;'
-    const descriptionStyle = 'font-family: monospace; color: #0ff; margin: 15px 0; text-align: center;'
-
-    return (
-      <div title={`Clicks ${clicks}`} entity={self} style={containerStyle}>
-        <div style={clicksStyle}>{clicks}</div>
-        <div>
-          <button style={buttonStyle} onclick={CounterEvent.onClick}>Click me!</button>
-          <button style={buttonStyle} onclick={CounterEvent.onReset}>Reset</button>
-        </div>
-        <p style={descriptionStyle}>{llmDescription}</p>
-        {view}
-      </div>
-    );
-  })
-  .commit();
-
-const onReset = event(CounterEvent.onReset)
-  .update(({ self }) => set(self, { clicks: 0 }))
-  .commit();
-
-const onClick = event(CounterEvent.onClick)
-  .with(Clicks)
-  .update(({ self, clicks }) => set(self, { clicks: clicks + 1 }))
-  .commit();
+const styles = {
+  container: 'display: flex; flex-direction: column; align-items: center; padding: 20px; background: linear-gradient(45deg, #1a1a1a, #2d2d2d); border-radius: 10px; color: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1);',
+  clicks: 'font-size: 48px; font-weight: bold; color: #0ff; text-shadow: 0 0 10px rgba(0,255,255,0.5); margin: 10px 0;',
+  button: 'background: #333; color: #fff; border: 2px solid #0ff; padding: 10px 20px; margin: 5px; border-radius: 5px; cursor: pointer; transition: all 0.3s; font-family: monospace;',
+  description: 'font-family: monospace; color: #0ff; margin: 15px 0; text-align: center;'
+}
 
 export const rules = behavior({
   ...mixin(
@@ -69,10 +39,34 @@ export const rules = behavior({
     systemPrompt: ({ clicks }) => `The current counter is at: ${clicks}?`,
   })),
 
-  init,
-  viewCount,
-  onClick,
-  onReset,
+  init: resolveEmpty.update(({ self }) => set(self, { clicks: 0 })).commit(),
+
+  viewCount: resolveClicks
+    .with(description)
+    .with(chatUiResolver)
+    .render(({ clicks, self, llmDescription, chatView }) => {
+      return (
+        <div title={`Clicks ${clicks}`} entity={self} style={styles.container}>
+          <div style={styles.clicks}>{clicks}</div>
+          <div>
+            <button style={styles.button} onclick={CounterEvent.onClick}>Click me!</button>
+            <button style={styles.button} onclick={CounterEvent.onReset}>Reset</button>
+          </div>
+          <p style={styles.description}>{llmDescription}</p>
+          {subview(chatView)}
+        </div>
+      );
+    })
+    .commit(),
+
+  onReset: event(CounterEvent.onReset)
+    .update(({ self }) => set(self, { clicks: 0 }))
+    .commit(),
+
+  onClick: event(CounterEvent.onClick)
+    .with(resolveClicks)
+    .update(({ self, clicks }) => set(self, { clicks: clicks + 1 }))
+    .commit(),
 });
 
 rules.disableRule('chat/view' as any)

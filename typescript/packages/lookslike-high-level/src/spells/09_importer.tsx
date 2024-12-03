@@ -1,8 +1,8 @@
 import { h, behavior, $, Reference, select, Session, refer } from "@commontools/common-system";
 import { fetch, REQUEST, RESPONSE } from "../effects/fetch.js";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
-import { addTag } from "../sugar.js";
-import { Likeable, LikeButton, LikeEvents } from "./stickers/like.jsx";
+import { addTag, event, Transact } from "../sugar.js";
+import { Likeable, LikeButton, resolveLikes } from "./stickers/like.jsx";
 import { mixin } from "../sugar/mixin.js";
 
 const IMPORT_REQUEST = 'import/request'
@@ -17,13 +17,15 @@ const articlePreviewStyles = {
   actions: 'margin-top: 12px'
 };
 
+const resolveArticle = select({ url: $.url, content: $.content })
+  .match($.self, 'url', $.url)
+  .match($.self, 'content', $.content)
+
 export const articlePreview = behavior({
   ...mixin(Likeable),
 
-  defaultView: select({ self: $.self, url: $.url, content: $.content, likes: $.likes })
-    .match($.self, 'url', $.url)
-    .match($.self, 'content', $.content)
-    .match($.self, 'likes', $.likes)
+  defaultView: resolveArticle
+    .with(resolveLikes)
     .render(({ url, content, likes }) => (
       <div style={articlePreviewStyles.container}>
         <div><a href={url} style={articlePreviewStyles.url}>{url}</a></div>
@@ -45,25 +47,40 @@ const urlTextStyles = 'color: #202124; font-size: 14px';
 const buttonStyles = 'background: #f8f9fa; border: 1px solid #f8f9fa; border-radius: 4px; color: #3c4043; padding: 8px 16px; margin-top: 16px; cursor: pointer';
 const readerStyles = 'max-width: 680px; margin: 0 auto; line-height: 1.6; font-size: 18px';
 
+const resolveUrl = select({ self: $.self, url: $.url }).match($.self, "url", $.url)
+const resolveRequest = select({ self: $.self, request: $.request, status: $.status })
+  .match($.self, IMPORT_REQUEST, $.request)
+  .match($.request, REQUEST.STATUS, $.status)
+const resolveRequestContent = select({ content: $.content })
+  .match($.request, RESPONSE.TEXT, $.content)
+
+function importRequest(url: string, content: string) {
+  const data = { url, content }
+  const id = refer(data)
+  return {
+    id, changes: [
+      { Import: data }
+    ]
+  }
+}
+
 export const importer = behavior({
   defaultUrl: select({ self: $.self })
     .not(q => q.match($.self, "url", $._))
-    .assert(({ self }) => [self, 'url', 'https://bf.wtf'])
+    .update(({ self }) => Transact.assert(self, { url: 'https://bf.wtf' }))
     .commit(),
 
-  form: select({ self: $.self, url: $.url })
-    .match($.self, "url", $.url)
+  viewForm: resolveUrl
     .not(q => q.match($.self, IMPORT_REQUEST, $._))
     .render(({ self, url }) => (
-      <div title="Fetcher Form" style={containerStyles}>
-        <common-input value={url} oncommon-input="~/on/change-url" style={searchBoxStyles} />
+      <div entity={self} title="Fetcher Form" style={containerStyles}>
+        <common-input value={url} oncommon-blur="~/on/change-url" style={searchBoxStyles} />
         <button onclick="~/on/send-request" style={buttonStyles}>Fetch</button>
       </div>
     )).commit(),
 
-  onSendRequest: select({ self: $.self, event: $.event, url: $.url })
-    .match($.self, "~/on/send-request", $.event)
-    .match($.self, "url", $.url)
+  onSendRequest: event('~/on/send-request')
+    .with(resolveUrl)
     .update(({ self, url }: { self: Reference, url: string }) => {
       return [
         fetch(
@@ -79,10 +96,7 @@ export const importer = behavior({
       ];
     }).commit(),
 
-  inFlight: select({ self: $.self, request: $.request, status: $.status, url: $.url })
-    .match($.self, IMPORT_REQUEST, $.request)
-    .match($.request, REQUEST.STATUS, $.status)
-    .match($.self, "url", $.url)
+  eiewInFlight: resolveRequest.with(resolveUrl)
     .not(q => q.match($.request, RESPONSE.TEXT, $._))
     .render(({ self, status, url }) => (
       <div title="Effect Demo" entity={self} style={containerStyles}>
@@ -96,9 +110,8 @@ export const importer = behavior({
       </div>
     )).commit(),
 
-  showResult: select({ self: $.self, request: $.request, content: $.content })
-    .match($.self, IMPORT_REQUEST, $.request)
-    .match($.request, RESPONSE.TEXT, $.content)
+  viewResult: resolveRequest
+    .with(resolveRequestContent)
     .render(({ self, content }) => (
       <div title="Effect Demo" entity={self} style={containerStyles}>
         <button onclick="~/on/reset" style={buttonStyles}>Reset</button>
@@ -112,35 +125,34 @@ export const importer = behavior({
     ))
     .commit(),
 
-  onComplete: select({ self: $.self, request: $.request, content: $.content, url: $.url })
-    .match($.self, IMPORT_REQUEST, $.request)
-    .match($.self, "url", $.url)
+  onComplete: resolveRequest
+    .with(resolveUrl)
+    .with(resolveRequestContent)
     .match($.request, REQUEST.STATUS, 'Complete')
-    .match($.request, RESPONSE.TEXT, $.content)
     .update(({ self, content, url }) => {
-      const data = { url, content }
-      const id = refer(data)
+      const { changes, id } = importRequest(url, content)
       return [
-        { Import: data },
-        { Assert: [self, 'clippedItems', id] },
+        ...changes,
+        ...Transact.assert(self, { clippedItems: id }),
         ...addTag(id, '#import')
       ]
     })
     .commit(),
 
-  onReset: select({ self: $.self, event: $.event, request: $.request })
-    .match($.self, "~/on/reset", $.event)
-    .match($.self, IMPORT_REQUEST, $.request)
+  onReset: event('~/on/reset')
+    .with(resolveRequest)
     .update(({ self, request }) => {
-      return [{ Retract: [self, IMPORT_REQUEST, request] }];
+      return Transact.remove(self, {
+        [IMPORT_REQUEST]: request
+      })
     })
     .commit(),
 
-  onChangeUrl: select({ self: $.self, event: $.event })
-    .match($.self, "~/on/change-url", $.event)
-    .upsert(({ self, event }) => {
-      // common-input gives us events with easy to read values
-      return [self, 'url', Session.resolve<CommonInputEvent>(event).detail.value]
+  onChangeUrl: event('~/on/change-url')
+    .update(({ self, event }) => {
+      return Transact.set(self, {
+        url: Session.resolve<CommonInputEvent>(event).detail.value
+      })
     })
     .commit(),
 });

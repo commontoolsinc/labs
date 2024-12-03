@@ -39,20 +39,18 @@ export const Messages = Collection.of({
   sentAt: $.sentAt
 });
 
-export const ChatResolver = select({
+export const chatResolver = select({
   self: $.self,
   messages: Messages.select
 })
   .match($.self, "messages", $.messages)
   .clause(Messages.match($.messages));
 
-export const ChatUiResolver = select({ chatView: $.chatView })
+export const chatUiResolver = select({ chatView: $.chatView })
   .clause(defaultTo($.self, '~/common/ui/chat', $.chatView, null))
 
-const Uninitialized = select({ self: $.self })
+const resolveUninitialized = select({ self: $.self })
   .clause(isEmpty($.self, ChatModel.messages));
-
-// behavior
 
 export type ChatMessageEvent = {
   message: string;
@@ -115,7 +113,7 @@ export const Chattable = (config: {
   } = config;
 
   return behavior({
-    'chat/init': Uninitialized
+    'chat/init': resolveUninitialized
       .update(({ self }) => {
         const collection = Messages.new({ messages: self, seed: refer({ v: Math.random() }) })
         return [
@@ -129,7 +127,7 @@ export const Chattable = (config: {
       .commit(),
 
     'chat/send': event(ChatEvents.onSendMessage)
-      .with(ChatResolver)
+      .with(chatResolver)
       .select({
         ...Object.fromEntries(attributes.map(a => [a, $[a]]))
       })
@@ -171,7 +169,7 @@ export const Chattable = (config: {
       .match($.self, CHAT_REQUEST, $.request)
       .match($.request, RESPONSE.JSON, $.payload)
       .match($.payload, "content", $.content)
-      .with(ChatResolver)
+      .with(chatResolver)
       .update(({ self, request, content, messages, payload }) => {
         const collection = Messages.from(messages)
         return [
@@ -207,29 +205,21 @@ export const Chattable = (config: {
       })
       .commit(),
 
-    'chat/view': ChatResolver
-      .update(({ self, messages }) => {
+    'chat/view': chatResolver
+      .render(({ messages }) => {
         const collection = Messages.from(messages);
 
-        return [
-          {
-            Upsert: [
-              self,
-              "~/common/ui/chat",
-              <div style="max-width: 800px; margin: 20px auto; padding: 20px; background: #f5f5f5; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                <ChatMessageList collection={collection} />
-                <ChatSubmitForm />
-                <button
-                  type="button"
-                  onclick={ChatEvents.onClearChat}
-                  style="margin-top: 12px; padding: 8px 16px; border-radius: 8px; border: none; background: #dc3545; color: white; cursor: pointer;"
-                >
-                  Clear Chat
-                </button>
-              </div> as any,
-            ],
-          },
-        ]
+        return <div style="max-width: 800px; margin: 20px auto; padding: 20px; background: #f5f5f5; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+          <ChatMessageList collection={collection} />
+          <ChatSubmitForm />
+          <button
+            type="button"
+            onclick={ChatEvents.onClearChat}
+            style="margin-top: 12px; padding: 8px 16px; border-radius: 8px; border: none; background: #dc3545; color: white; cursor: pointer;"
+          >
+            Clear Chat
+          </button>
+        </div>
       })
       .commit(),
   });

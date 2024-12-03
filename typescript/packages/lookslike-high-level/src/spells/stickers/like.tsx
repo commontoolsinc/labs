@@ -43,6 +43,8 @@ export function LikeButton({ likes }: { likes: number }) {
   );
 }
 
+export const resolveLikes = select({ self: $.self, likes: $.likes }).match($.self, likes, $.likes)
+
 export const Likeable = behavior({
   "likes/default": select({ self: $.self })
     .not(q => q.match($.self, "likes", $._))

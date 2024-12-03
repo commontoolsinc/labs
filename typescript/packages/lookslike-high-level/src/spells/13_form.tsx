@@ -1,67 +1,67 @@
 import { h, behavior, $, select, Session } from "@commontools/common-system";
 import { fromString } from "merkle-reference";
-
-
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
-import { defaultTo, event } from "../sugar.js";
-import { Creature } from "./04_tamagotchi.jsx";
+import { defaultTo, event, isEmpty, Transact } from "../sugar.js";
+import { resolveCreature } from "./04_tamagotchi.jsx";
 import * as Tamagotchi from "./04_tamagotchi.jsx";
-const formContainerStyle = `
-  padding: 20px;
-  background: #f0f0f0;
-  border: 2px solid #ccc;
-  border-radius: 8px;
-  font-family: monospace;
-  max-width: 320px;
-  margin: 0 auto;
-`;
+const styles = {
+  formContainer: `
+    padding: 20px;
+    background: #f0f0f0;
+    border: 2px solid #ccc;
+    border-radius: 8px;
+    font-family: monospace;
+    max-width: 320px;
+    margin: 0 auto;
+  `,
 
-const inputGroupStyle = `
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-  margin-bottom: 20px;
-`;
+  inputGroup: `
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+  `,
 
-const inputLabelStyle = `
-  font-size: 12px;
-  color: #666;
-  font-weight: bold;
-  text-transform: uppercase;
-`;
+  inputLabel: `
+    font-size: 12px;
+    color: #666;
+    font-weight: bold;
+    text-transform: uppercase;
+  `,
 
-const displayPanelStyle = `
-  border: 3px solid #666;
-  border-radius: 15px;
-  padding: 20px;
-  background: #222;
-  box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
-`;
+  displayPanel: `
+    border: 3px solid #666;
+    border-radius: 15px;
+    padding: 20px;
+    background: #222;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.5);
+  `,
 
-const imageStyle = `
-  width: 100%;
-  border-radius: 12px;
-  border: 2px solid #444;
-`;
+  image: `
+    width: 100%;
+    border-radius: 12px;
+    border: 2px solid #444;
+  `
+};
 
 const tamagotchiLab = behavior({
-  render: Creature.render(
+  render: resolveCreature.render(
     ({ self, description, color, hunger, size, time }) => (
-      <div style={formContainerStyle}>
-        <div style={inputGroupStyle}>
+      <div entity={self} style={styles.formContainer}>
+        <div style={styles.inputGroup}>
           <div>
-            <div style={inputLabelStyle}>Description</div>
+            <div style={styles.inputLabel}>Description</div>
             <common-input
               value={description}
               oncommon-blur="~/on/change-description"
             />
           </div>
           <div>
-            <div style={inputLabelStyle}>Color</div>
+            <div style={styles.inputLabel}>Color</div>
             <common-input value={color} oncommon-blur="~/on/change-color" />
           </div>
           <div>
-            <div style={inputLabelStyle}>Hunger</div>
+            <div style={styles.inputLabel}>Hunger</div>
             <common-input
               type="number"
               value={hunger}
@@ -69,7 +69,7 @@ const tamagotchiLab = behavior({
             />
           </div>
           <div>
-            <div style={inputLabelStyle}>Size</div>
+            <div style={styles.inputLabel}>Size</div>
             <common-input
               type="number"
               value={size}
@@ -77,7 +77,7 @@ const tamagotchiLab = behavior({
             />
           </div>
           <div>
-            <div style={inputLabelStyle}>Time</div>
+            <div style={styles.inputLabel}>Time</div>
             <common-input
               type="number"
               value={time}
@@ -85,9 +85,9 @@ const tamagotchiLab = behavior({
             />
           </div>
         </div>
-        <div style={displayPanelStyle}>
+        <div style={styles.displayPanel}>
           <img
-            style={imageStyle}
+            style={styles.image}
             src={Tamagotchi.genImage(
               `A creature in a science lab happily being experimented on. ${Tamagotchi.generateDescription({ time, size, color, description, hunger })}`
             )}
@@ -138,17 +138,23 @@ const tamagotchiLab = behavior({
     .commit(),
 });
 
+const resolveTarget = select({ self: $.self, target: $.target })
+  .clause(defaultTo($.self, "target", $.target, null))
+const resolveTargetIdInput = select({ self: $.self, targetId: $.targetId })
+  .match($.self, "~/target", $.targetId)
+
 export default behavior({
   defaultUrl: select({ self: $.self })
-    .not(q => q.match($.self, "~/target", $._))
-    .assert(({ self }) => [self, "~/target", "bafy..."])
+    .clause(isEmpty($.self, "~/target"))
+    .update(({ self }) =>
+      Transact.assert(self, { '~/target': 'bafy...' })
+    )
     .commit(),
 
-  render: select({ self: $.self, targetId: $.targetId, target: $.target })
-    .match($.self, "~/target", $.targetId)
-    .clause(defaultTo($.self, "target", $.target, null))
+  view: resolveTargetIdInput
+    .with(resolveTarget)
     .render(({ self, targetId, target }) => (
-      <div title="Tamagotchi Genetics Lab">
+      <div entity={self} title="Tamagotchi Genetics Lab">
         <common-input value={targetId} oncommon-input="~/on/change-target" />
         <button onclick="~/on/reset">Reset</button>
         {target ? (
@@ -172,23 +178,21 @@ export default behavior({
     ))
     .commit(),
 
-  onChangeTarget: select({ self: $.self, event: $.event })
-    .match($.self, "~/on/change-target", $.event)
-    .update(({ self, event }) => {
-      const val = Session.resolve<CommonInputEvent>(event).detail.value;
-      const entity = fromString(val);
+  onChangeTarget:
+    event("~/on/change-target")
+      .update(({ self, event }) => {
+        const val = Session.resolve<CommonInputEvent>(event).detail.value;
+        const entity = fromString(val);
 
-      // common-input gives us events with easy to read values
-      return [
-        { Upsert: [self, "~/target", val] },
-        { Upsert: [self, "target", entity] },
-      ];
-    })
-    .commit(),
+        return Transact.set(self, {
+          "~/target": val,
+          target: entity
+        });
+      })
+      .commit(),
 
-  onReset: select({ self: $.self, target: $.target })
-    .match($.self, "~/on/reset")
-    .clause(defaultTo($.self, "target", $.target, null))
+  onReset: event("~/on/reset")
+    .with(resolveTarget)
     .update(({ self, target }) => {
       return [{ Retract: [self, "target", target] }];
     })
