@@ -86,13 +86,13 @@ export const prompt = recipe(Title, ({ title }) => {
   return {
     [NAME]: title,
     [UI]: (
-      <common-vstack gap="sm">
+      <os-container>
         <common-input
           value={title}
           placeholder="List title"
           oncommon-input={updateTitle({ title })}
         />
-        <img src={src} width="50%" />
+        <img src={src} width="512" />
         <ul>
           {variations.map((v) => (
             <img
@@ -103,7 +103,7 @@ export const prompt = recipe(Title, ({ title }) => {
             />
           ))}
         </ul>
-      </common-vstack>
+      </os-container>
     ),
     title,
     variations,

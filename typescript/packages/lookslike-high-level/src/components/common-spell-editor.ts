@@ -8,9 +8,10 @@ import {
   run,
 } from "@commontools/common-runner";
 import { addCharms } from "../data.js";
-import { buildRecipe } from "../localBuild.js";
-import { iterate, llmTweakSpec } from "./spell-ai.js";
+import { tsToExports } from "../localBuild.js";
+import { iterate, llmTweakSpec, generateSuggestions } from "./spell-ai.js";
 import { createRef, ref } from "lit/directives/ref.js";
+import { spinner } from "../../../common-ui/lib/components/shoelace/index.js";
 
 // NOTE(ja): copied from sidebar.ts ... we need a toasty?
 const toasty = (message: string) => {
@@ -33,41 +34,14 @@ const toasty = (message: string) => {
 
 @customElement("common-spell-editor")
 export class CommonSpellEditor extends LitElement {
-  @property({ type: String })
-  get recipeId() {
-    return this.getAttribute("recipeId") ?? "";
-  }
-  set recipeId(value: string) {
-    this.setAttribute("recipeId", value);
+  @property({ type: String, attribute: 'recipe-id' })
+  recipeId = '';
 
-    if (value) {
-      this.workingSrc = getRecipeSrc(value) ?? "";
-      this.recipeSrc = this.workingSrc;
-      this.workingSpec = getRecipeSpec(value) ?? "";
-      this.recipeSpec = this.workingSpec;
-    } else {
-      this.workingSrc = "";
-      this.recipeSrc = "";
-      this.workingSpec = "";
-      this.recipeSpec = "";
-    }
-  }
+  @property({ type: String, attribute: 'working-src' })
+  workingSrc = '';
 
   @property({ type: String })
-  get workingSrc() {
-    return this.getAttribute("workingSrc") ?? "";
-  }
-  set workingSrc(value: string) {
-    if (value === this.workingSrc) return;
-    console.log("setting src", value.slice(0, 100));
-    this.setAttribute("workingSrc", value);
-    this.compileErrors = "";
-    buildRecipe(value).then(({ errors }) => {
-      this.compileErrors = errors || "";
-    });
-
-    this.requestUpdate();
-  }
+  spell = '';
 
   @property({ type: Boolean })
   llmRunning = false;
@@ -87,7 +61,62 @@ export class CommonSpellEditor extends LitElement {
   @property({ type: Object })
   data: any = null;
 
+  @property({ type: String })
+  entityId = '';
+
+  @property({ type: Array })
+  suggestions: string[] = [];
+
   private editorRef = createRef<HTMLElement>();
+
+  override updated(changedProperties: Map<string, any>) {
+    let makeSuggestions = false;
+    if (changedProperties.has('recipeId')) {
+      // Handle recipe ID changes
+      if (this.recipeId) {
+        this.workingSrc = getRecipeSrc(this.recipeId) ?? '';
+        this.recipeSrc = this.workingSrc;
+        this.workingSpec = getRecipeSpec(this.recipeId) ?? '';
+        this.recipeSpec = this.workingSpec;
+        makeSuggestions = true;
+      } else {
+        if (!this.spell) {
+          this.workingSrc = '';
+          this.recipeSrc = '';
+          this.workingSpec = '';
+          this.recipeSpec = '';
+        }
+      }
+    }
+
+    if (changedProperties.has('spell')) {
+      if (this.spell) {
+        this.workingSrc = this.spell;
+        this.recipeSrc = this.spell;
+        this.workingSpec = '';
+        this.recipeSpec = '';
+        makeSuggestions = true;
+      }
+    }
+
+    if (changedProperties.has('workingSrc') && this.workingSrc !== changedProperties.get('workingSrc')) {
+      console.log("setting src", this.workingSrc.slice(0, 100));
+      this.compileErrors = '';
+      tsToExports(this.workingSrc).then(({ errors }) => {
+        this.compileErrors = errors || '';
+      });
+    }
+
+    if (makeSuggestions && this.workingSpec && this.workingSrc) {
+      generateSuggestions({
+        originalSpec: this.workingSpec,
+        originalSrc: this.workingSrc,
+      }).then(({ suggestions }) => {
+        this.suggestions = suggestions;
+        this.requestUpdate();
+      });
+    }
+  }
 
   override render() {
     const onSpecChanged = (e: CustomEvent) =>
@@ -101,19 +130,11 @@ export class CommonSpellEditor extends LitElement {
       this.requestUpdate();
     };
 
-    const exportData = () => {
-      if (!this.data) return;
-      const blob = new Blob([JSON.stringify(this.data, null, 2)], {
-        type: "application/json",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "arguments.json";
-      a.click();
-    };
-
     const askLLM = async ({ fixit }: { fixit?: string } = {}) => {
+      if (this.llmRunning) {
+        return;
+      }
+
       this.llmRunning = true;
 
       try {
@@ -144,73 +165,104 @@ export class CommonSpellEditor extends LitElement {
             spec: this.workingSpec,
             change,
           });
+          this.llmRunning = false;
           if (newSpec) {
             this.workingSpec = newSpec;
+            askLLM();
             this.requestUpdate();
           }
-        } finally {
+        } catch (e) {
           this.llmRunning = false;
+          console.error(e);
         }
       }
     };
 
     const compileAndUpdate = () => {
-      console.log("compileAndUpdate", this.data);
-      compileAndRun(this.data);
+      compileAndRun(true);
     };
 
     const compileAndRunNew = () => {
-      compileAndRun();
+      compileAndRun(false);
     };
 
-    const compileAndRun = (data?: any) => {
-      buildRecipe(this.workingSrc).then(({ recipe, errors }) => {
+    const compileAndRun = (keepData?: boolean) => {
+      tsToExports(this.workingSrc).then(({ exports, errors }) => {
         this.compileErrors = errors || "";
 
-        if (!recipe) return;
-        // NOTE(ja): adding a recipe triggers saving to blobby
-        const parents = this.recipeId ? [this.recipeId] : undefined;
-        addRecipe(recipe, this.workingSrc, this.workingSpec, parents);
+        let { spell, default: recipe } = exports;
 
-        // TODO(ja): we should check if the recipe arguments have changed
-        // TODO(ja): if default values have changed and source still has to old
-        //           defaults, update to new defaults
-        const charm = run(recipe, data ?? {});
+        if (recipe) {
+          // NOTE(ja): adding a recipe triggers saving to blobby
+          const parents = this.recipeId ? [this.recipeId] : undefined;
+          addRecipe(recipe, this.workingSrc, this.workingSpec, parents);
 
-        addCharms([charm]);
-        const charmId = JSON.stringify(charm.entityId);
-        this.dispatchEvent(
-          new CustomEvent("open-charm", {
-            detail: { charmId },
-            bubbles: true,
-            composed: true,
-          }),
-        );
-        if (data) {
-          toasty("Welcome to a new version of this charm!");
-        } else {
-          toasty("Welcome to a new charm!");
+          // TODO(ja): we should check if the recipe arguments have changed
+          // TODO(ja): if default values have changed and source still has to old
+          //           defaults, update to new defaults
+          const charm = run(recipe, keepData ? this.data : {});
+
+          addCharms([charm]);
+          const charmId = JSON.stringify(charm.entityId);
+          this.dispatchEvent(
+            new CustomEvent("open-charm", {
+              detail: { charmId },
+              bubbles: true,
+              composed: true,
+            }),
+          );
+          if (data) {
+            toasty("Welcome to a new version of this charm!");
+          } else {
+            toasty("Welcome to a new charm!");
+          }
+        }
+
+        if (spell) {
+          const charm = spell.spawn({ root: Math.random().toString() }, "compiled", this.workingSrc, keepData ? this.entityId : undefined);
+          addCharms([charm]);
+          this.dispatchEvent(
+            new CustomEvent("open-charm", {
+              detail: { charmId: JSON.stringify(charm.entityId) },
+              bubbles: true,
+              composed: true,
+            }),
+          );
         }
       });
     };
 
+    const applySuggestion = async (s: { behaviour: string; prompt: string }) => {
+      if (s.behaviour === "append") {
+        this.workingSpec += `\n${s.prompt}`;
+      } else {
+        const newSpec = await llmTweakSpec({
+          spec: this.workingSpec,
+          change: s.prompt,
+        });
+        this.workingSpec = newSpec;
+      }
+      askLLM();
+      this.requestUpdate();
+    };
+
     return html`
       <div style="margin: 10px;">
-        <button @click=${compileAndUpdate}>🔄 Run w/Current Data</button>
-        <button @click=${compileAndRunNew}>🐣 Run w/New Data</button>
-        <button @click=${() => askLLM()} ?disabled=${this.llmRunning}>
-          🤖 LLM
+        <button @click=${compileAndUpdate} ?disabled=${this.compileErrors || this.workingSrc === this.recipeSrc}>🔄 Run w/Current Data</button>
+        <button @click=${compileAndRunNew} ?disabled=${this.compileErrors || this.workingSrc === this.recipeSrc}>🐣 Run w/New Data</button>
+        <button @click=${() => askLLM()} ?disabled=${this.llmRunning || this.workingSpec === this.recipeSpec}>
+          ${this.llmRunning ? html`<sl-spinner></sl-spinner>` : ""} ✨ code it
         </button>
         <button
           @click=${() => askLLM({ fixit: this.compileErrors })}
           ?disabled=${this.llmRunning || !this.compileErrors}
         >
-          🪓 fix it
+          ${this.llmRunning ? html`<sl-spinner></sl-spinner>` : ""} 🪓 fix it
         </button>
         <button
           @click=${revert}
           ?disabled=${this.recipeSrc === this.workingSrc &&
-          this.recipeSpec === this.workingSpec}
+      this.recipeSpec === this.workingSpec}
         >
           ↩️ revert
         </button>
@@ -234,6 +286,17 @@ ${this.compileErrors}</pre
           .source=${this.workingSpec}
           @doc-change=${onSpecChanged}
         ></os-code-editor>
+
+        ${when(
+          this.suggestions.length > 0,
+          () =>
+            html`<div style="margin-bottom: 10px;">
+              ${this.suggestions.map(
+                (s) =>
+                html`<button @click=${() => applySuggestion(s)}>[${s.behaviour}] ${s.prompt}</button>`,
+              )}
+            </div>`,
+        )}
 
         <os-code-editor
           language="text/x.typescript"

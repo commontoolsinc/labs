@@ -187,7 +187,7 @@ RESPOND WITH THE FULL SPEC.  Try to keep the same structure, style and content a
   };
 
   const text = await llm.sendRequest(payload);
-  return text.split("```markdown\n")[1].split("\n```")[0];
+  return text.split("```markdown\n")[1].split("\n```")[0].trim();
 };
 
 export const iterate = async ({
@@ -246,4 +246,61 @@ RESPOND WITH THE FULL SOURCE CODE
 
   const text = await llm.sendRequest(payload);
   return text.split("```tsx\n")[1].split("\n```")[0];
+};
+
+export const generateSuggestions = async ({
+  originalSpec,
+  originalSrc,
+}: {
+  originalSpec: string;
+  originalSrc: string;
+}) => {
+  const messages = [];
+
+  const instructions = `Given the current spec:
+
+<SPEC>
+${originalSpec}
+</SPEC>
+
+Suggest 3 prompts to enhance, refine or branch off into a new UI. Keep it simple these add or change a single feature.
+
+Do not ever exceed a single sentence. Prefer terse, suggestions that take one step.`;
+
+  const system = `Suggest extensions to the UI either as modifications or forks off into new interfaces. Avoid bloat, focus on the user experience and creative potential.
+
+The current source code is:
+
+<SRC>
+${originalSrc}
+</SRC>
+
+Respond in a json block.
+
+\`\`\`json
+{
+  "suggestions": [
+    {
+      "behaviour": "append" | "fork",
+      "prompt": "string"
+    }
+  ]
+}
+\`\`\``;
+
+  const stop = "\n```";
+
+  messages.push(instructions);
+  messages.push(`\`\`\`json\n{"suggestions": [{"behaviour": "append", "prompt":`);
+
+  const payload = {
+    model: "anthropic:claude-3-5-sonnet-latest",
+    system,
+    messages,
+    stop,
+  };
+
+  const text = await llm.sendRequest(payload);
+  let suggestions = text.split("```json\n")[1].split("\n```")[0];
+  return JSON.parse(suggestions);
 };
