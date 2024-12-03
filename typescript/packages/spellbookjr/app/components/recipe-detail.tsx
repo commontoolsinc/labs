@@ -1,7 +1,7 @@
 "use client";
 
 import JsonView from "@uiw/react-json-view";
-import { LuHeart, LuBookOpen, LuSend, LuCode2 } from "react-icons/lu";
+import { LuHeart, LuBookOpen, LuSend, LuCode } from "react-icons/lu";
 import Header from "@/app/components/header";
 import { useState } from "react";
 import ActionButton from "@/app/components/action-button";
@@ -42,7 +42,7 @@ export default function RecipeDetail({
         <div className="container mx-auto max-w-4xl flex flex-col gap-4">
           <div className="actionBar bg-purple-100 rounded-2xl p-4 flex gap-2 justify-between">
             <ActionButton
-              icon={<LuCode2 size={24} />}
+              icon={<LuCode size={24} />}
               label="Blobby"
               onClick={handleCopyBlobbyLink}
               popoverMessage="Blobby link copied to clipboard!"
