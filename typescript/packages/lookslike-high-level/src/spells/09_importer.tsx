@@ -24,7 +24,7 @@ const resolveArticle = select({ url: $.url, content: $.content })
 export const articlePreview = behavior({
   ...mixin(Likeable),
 
-  defaultView: resolveArticle
+  view: resolveArticle
     .with(resolveLikes)
     .render(({ url, content, likes }) => (
       <div style={articlePreviewStyles.container}>
@@ -96,7 +96,7 @@ export const importer = behavior({
       ];
     }).commit(),
 
-  eiewInFlight: resolveRequest.with(resolveUrl)
+  viewInFlight: resolveRequest.with(resolveUrl)
     .not(q => q.match($.request, RESPONSE.TEXT, $._))
     .render(({ self, status, url }) => (
       <div title="Effect Demo" entity={self} style={containerStyles}>
