@@ -378,10 +378,8 @@ export class RuleDetailsPopover extends LitElement {
       <div>
         <div class="close" @click=${() => this.remove()}>✕</div>
         <div class="header">
-          <span style="color: ${style.color}">${style.emoji}</span>
-          <span class="rule-name" style="color: ${style.color}"
-            >${this.rule}</span
-          >
+          <span style="color: ${style.color}; display: inline-block; width: 20px; height: 20px; border-radius: 50%; background-color: ${style.color}; text-align: center; line-height: 20px;">${style.emoji}</span>
+          <span class="rule-name">${this.rule}</span>
         </div>
 
         <div class="rule-controls">
@@ -624,7 +622,6 @@ export class CharmDebugger extends LitElement {
       padding: 32px 16px;
       overflow: visible;
       transform: scale(0.75);
-      opacity: 0.75;
       transform-origin: top right;
       transition:
         transform 0.2s ease-in-out,
@@ -665,11 +662,27 @@ export class CharmDebugger extends LitElement {
       transition: transform 0.2s ease;
       transform: scale(1.2);
       opacity: 0.9;
+      position: relative;
     }
 
     .emoji-tile:hover {
       transform: scale(1.3) rotate(5deg);
       opacity: 1;
+    }
+
+    .emoji-tile:hover::before {
+      content: attr(data-rule);
+      position: absolute;
+      right: 100%;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(0,0,0,0.8);
+      color: white;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      margin-right: 8px;
+      white-space: nowrap;
     }
 
     .emoji-tile.disabled {
@@ -724,20 +737,13 @@ export class CharmDebugger extends LitElement {
     }
 
     @keyframes pulse {
-      0% {
-        transform: scale(1.2);
-      }
-      50% {
-        transform: scale(1.3);
-        opacity: 1;
-      }
-      100% {
-        transform: scale(1.2);
-      }
+      0% { transform: scale(1.2); }
+      50% { transform: scale(1.5); opacity: 1; }
+      100% { transform: scale(1.2); }
     }
 
     .pulse {
-      animation: pulse 0.3s ease-in-out;
+      animation: pulse 0.6s ease-in-out;
     }
   `;
 
@@ -823,18 +829,47 @@ export class CharmDebugger extends LitElement {
   override render() {
     return html`
       <div class="content">
-        ${this.entity
-          ? html`
-              <div>
-                <div
-                  class="entity-id"
-                  style="background: ${getColorForEntity(
-                    this.entity.toString(),
-                  )};"
-                  title=${this.entity.toString()}
-                  @click=${this.toggleOpen}
-                >
-                  ${truncateId(this.entity)}
+        ${this.entity ? html`
+          <div>
+            <div
+              class="entity-id"
+              style="background: ${getColorForEntity(this.entity.toString())};"
+              title=${this.entity.toString()}
+              @click=${this.toggleOpen}
+            >
+              ${truncateId(this.entity)}
+            </div>
+            <button class="copy-button" title="Copy ID" @click=${(e: Event) => {
+              e.stopPropagation();
+              navigator.clipboard.writeText(this.entity!.toString());
+            }}>📋</button>
+            <button class="copy-button" title="Toggle Log" @click=${this.toggleMutationLog}>📜</button>
+          </div>
+        ` : ''}
+
+        ${this.behavior?.rules ? html`
+          <div class="rules-grid">
+              ${Object.keys(this.behavior.rules).sort((a, b) => {
+                const hasSlashA = a.includes('/');
+                const hasSlashB = b.includes('/');
+                if (hasSlashA && !hasSlashB) return -1;
+                if (!hasSlashA && hasSlashB) return 1;
+                return a.localeCompare(b);
+              }).map((rule, index) => {
+              const activation = this.ruleActivations.get(rule);
+              const style = getRuleStyle(rule);
+              const isEnabled = this.behavior!.isRuleEnabled(rule);
+
+              return html`
+                <div class="rule-item" style="top: ${Math.floor(index / 2) * 96}px">
+                  <div
+                    class="emoji-tile ${this.pulsingRules.has(rule) ? 'pulse' : ''} ${isEnabled ? '' : 'disabled'}"
+                    style="background: ${style.color}"
+                    data-rule="${rule}"
+                    @click=${() => this.showRuleDetails(rule, style.color, activation)}
+                  >
+                    ${style.emoji}
+                  </div>
                 </div>
                 <button
                   class="copy-button"
@@ -860,45 +895,6 @@ export class CharmDebugger extends LitElement {
                 >
                   📊
                 </button>
-              </div>
-            `
-          : ""}
-        ${this.behavior?.rules
-          ? html`
-              <div class="rules-grid">
-                ${Object.keys(this.behavior.rules)
-                  .sort((a, b) => {
-                    const hasSlashA = a.includes("/");
-                    const hasSlashB = b.includes("/");
-                    if (hasSlashA && !hasSlashB) return -1;
-                    if (!hasSlashA && hasSlashB) return 1;
-                    return a.localeCompare(b);
-                  })
-                  .map((rule, index) => {
-                    const activation = this.ruleActivations.get(rule);
-                    const style = getRuleStyle(rule);
-                    const isEnabled = this.behavior!.isRuleEnabled(rule);
-
-                    return html`
-                      <div
-                        class="rule-item"
-                        style="top: ${Math.floor(index / 2) * 96}px"
-                      >
-                        <div
-                          class="emoji-tile ${this.pulsingRules.has(rule)
-                            ? "pulse"
-                            : ""} ${isEnabled ? "" : "disabled"}"
-                          style="background: ${style.color}"
-                          title="${rule} (${activation?.count ||
-                          0} activations)"
-                          @click=${() =>
-                            this.showRuleDetails(rule, style.color, activation)}
-                        >
-                          ${style.emoji}
-                        </div>
-                      </div>
-                    `;
-                  })}
               </div>
             `
           : ""}
