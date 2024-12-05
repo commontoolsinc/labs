@@ -4,7 +4,7 @@ import { groq } from "npm:@ai-sdk/groq";
 import { openai } from "npm:@ai-sdk/openai";
 import { vertex } from "npm:@ai-sdk/google-vertex";
 import { ollama } from "ollama-ai-provider";
-
+import { bedrock } from "npm:@ai-sdk/amazon-bedrock";
 // ensure env is ready to be read
 import { config } from "https://deno.land/x/dotenv/mod.ts";
 await config({ export: true });
@@ -44,18 +44,32 @@ const addModel = ({
   aliases,
   capabilities,
 }: {
-  provider: typeof anthropic | typeof groq | typeof openai | typeof vertex;
+  provider:
+    | typeof anthropic
+    | typeof groq
+    | typeof openai
+    | typeof vertex
+    | typeof bedrock;
   name: string;
   aliases: string[];
   capabilities: Capabilities;
 }) => {
-  const model = provider(
-    name.includes(":") ? name.split(":").slice(1).join(":") : name,
-  );
+  let modelName = name.includes(":")
+    ? name.split(":").slice(1).join(":")
+    : name;
+
+  // AWS includes colons in their model names, so we need to special case it.
+  if (name.includes("us.amazon")) {
+    modelName = name;
+  }
+
+  const model = provider(modelName);
+
   const config: ModelConfig = {
     model,
     capabilities,
   };
+
   MODELS[name] = config;
   for (const alias of aliases) {
     MODELS[alias] = config;
@@ -373,6 +387,56 @@ if (Deno.env.get("PERPLEXITY_API_KEY")) {
       images: false,
       prefill: false,
       systemPrompt: false,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+}
+
+if (
+  Deno.env.get("AWS_ACCESS_KEY_ID") &&
+  Deno.env.get("AWS_SECRET_ACCESS_KEY")
+) {
+  addModel({
+    provider: bedrock,
+    name: "us.amazon.nova-micro-v1:0",
+    aliases: ["amazon:nova-micro", "nova-micro"],
+    capabilities: {
+      contextWindow: 128_000,
+      maxOutputTokens: 5000,
+      images: false,
+      prefill: false,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+
+  addModel({
+    provider: bedrock,
+    name: "us.amazon.nova-lite-v1:0",
+    aliases: ["amazon:nova-lite", "nova-lite"],
+    capabilities: {
+      contextWindow: 300_000,
+      maxOutputTokens: 5000,
+      images: true,
+      prefill: false,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+
+  addModel({
+    provider: bedrock,
+    name: "us.amazon.nova-pro-v1:0",
+    aliases: ["amazon:nova-pro", "nova-pro"],
+    capabilities: {
+      contextWindow: 300_000,
+      maxOutputTokens: 5000,
+      images: true,
+      prefill: false,
+      systemPrompt: true,
       stopSequences: true,
       streaming: true,
     },

@@ -28,6 +28,9 @@ const varietyModels = [
   // "openai:o1-mini-2024-09-12",
   "google:gemini-1.5-flash-002",
   // "google:gemini-1.5-pro-002",
+  "amazon:nova-micro",
+  // "amazon:nova-lite",
+  // "amazon:nova-pro",
 ];
 
 async function testModel(modelName: string) {
@@ -49,9 +52,13 @@ async function testModel(modelName: string) {
   };
 
   console.log(
-    `\n    ${colors.blue}PAYLOAD:${colors.reset} ${
-      JSON.stringify(payload, null, 2).split("\n").join("\n    ")
-    }\n`,
+    `\n    ${colors.blue}PAYLOAD:${colors.reset} ${JSON.stringify(
+      payload,
+      null,
+      2,
+    )
+      .split("\n")
+      .join("\n    ")}\n`,
   );
   try {
     const response = await fetch(API_URL, {
@@ -95,9 +102,10 @@ async function main() {
       await testModel(modelName);
     }
   } else if (PROVIDER_NAMES.has(arg)) {
-    const providerModels = Object.keys(MODELS).filter((model) => {
-      return model.toLowerCase().startsWith(arg) &&
-        !ALIAS_NAMES.includes(model);
+    const providerModels = Object.keys(MODELS).filter(model => {
+      return (
+        model.toLowerCase().startsWith(arg) && !ALIAS_NAMES.includes(model)
+      );
     });
     for (const modelName of providerModels) {
       await testModel(modelName);
