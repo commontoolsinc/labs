@@ -1,5 +1,8 @@
 import { LLMClient } from "@commontools/llm-client";
 
+const SELECTED_MODEL = "anthropic:claude-3-5-sonnet-latest";
+// const SELECTED_MODEL = "amazon:nova-pro";
+
 const llmUrl =
   typeof window !== "undefined"
     ? window.location.protocol + "//" + window.location.host + "/api/llm"
@@ -168,7 +171,7 @@ export const llmTweakSpec = async ({
   change: string;
 }) => {
   const payload = {
-    model: "anthropic:claude-3-5-sonnet-latest",
+    model: SELECTED_MODEL,
     system:
       "You are a spec editor for @commontools recipes.  Please respond with the full spec.",
     messages: [
@@ -238,7 +241,7 @@ RESPOND WITH THE FULL SOURCE CODE
   }
 
   const payload = {
-    model: "anthropic:claude-3-5-sonnet-latest",
+    model: SELECTED_MODEL,
     system: `You are code generator that implements @commontools recipes.\n${recipeGuide}`,
     messages,
     stop: "\n```",
@@ -291,10 +294,12 @@ Respond in a json block.
   const stop = "\n```";
 
   messages.push(instructions);
-  messages.push(`\`\`\`json\n{"suggestions": [{"behaviour": "append", "prompt":`);
+  messages.push(
+    `\`\`\`json\n{"suggestions": [{"behaviour": "append", "prompt":`,
+  );
 
   const payload = {
-    model: "anthropic:claude-3-5-sonnet-latest",
+    model: SELECTED_MODEL,
     system,
     messages,
     stop,
