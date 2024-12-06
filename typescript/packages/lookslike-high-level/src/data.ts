@@ -49,6 +49,8 @@ import github from "./spells/11_github.jsx";
 import form from "./spells/13_form.jsx";
 import * as helloWorldWithLikes from "./spells/12_helloWorldWithLikes.jsx";
 import * as llmChat from "./spells/14_llm_chat.jsx";
+import * as countdown from "./spells/countdown.jsx";
+import TimerService from "./effects/timer.js";
 
 export type Charm = {
   [NAME]?: string;
@@ -238,8 +240,10 @@ addCharms([
   llmChat.spawn({ llmChat: 7 }),
   // composed.spawn({ composed: 1 }),
   // helloWorldWithLikes.spawn({ helloWorldWithLikes: 1 }),
+  countdown.spawn({ countdown: 1 }),
   FetchService.spawn() as any,
   ViewService.spawn() as any,
+  TimerService.spawn() as any,
 ]);
 
 export type RecipeManifest = {
