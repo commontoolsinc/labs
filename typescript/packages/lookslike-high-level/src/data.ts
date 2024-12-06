@@ -52,6 +52,8 @@ import * as llmChat from "./spells/14_llm_chat.jsx";
 import * as countdown from "./spells/countdown.jsx";
 import TimerService from "./effects/timer.js";
 
+import * as myFoodPal from "./spells/myFoodPal.jsx";
+
 export type Charm = {
   [NAME]?: string;
   [UI]?: any;
@@ -227,23 +229,24 @@ export async function saveRecipe(
 }
 
 addCharms([
-  helloWorld.spawn({ helloWorld: 1 }),
-  counter.spawn({ counter: 1 }),
-  importer.spawn({ fetch: 1 }),
-  sharedTags.spawn({ sharedDataInstance: 2 }),
-  tamagotchi.spawn({ tamagochi: 1 }),
-  tamagotchi.spawn({ tamagochi: 3 }),
+  myFoodPal.spawn({ myFoodPal: 1 }),
+  // helloWorld.spawn({ helloWorld: 1 }),
+  // counter.spawn({ counter: 1 }),
+  // importer.spawn({ fetch: 1 }),
+  // sharedTags.spawn({ sharedDataInstance: 2 }),
+  // tamagotchi.spawn({ tamagochi: 1 }),
+  // tamagotchi.spawn({ tamagochi: 3 }),
   // readingList.spawn({ readingList: 1, }),
   // chat.spawn({ chat: 2, }),
   // workbench.spawn({ workbench: 1 }),
-  form.spawn({ geneticsLab: 1 }),
-  llmChat.spawn({ llmChat: 7 }),
+  // form.spawn({ geneticsLab: 1 }),
+  // llmChat.spawn({ llmChat: 7 }),
   // composed.spawn({ composed: 1 }),
   // helloWorldWithLikes.spawn({ helloWorldWithLikes: 1 }),
-  countdown.spawn({ countdown: 1 }),
-  FetchService.spawn() as any,
+  // countdown.spawn({ countdown: 1 }),
+  // FetchService.spawn() as any,
   ViewService.spawn() as any,
-  TimerService.spawn() as any,
+  // TimerService.spawn() as any,
 ]);
 
 export type RecipeManifest = {
