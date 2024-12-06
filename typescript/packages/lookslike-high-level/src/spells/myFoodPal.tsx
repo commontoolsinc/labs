@@ -1,4 +1,12 @@
-import { h, behavior, $, select, Session } from "@commontools/common-system";
+import {
+  Instruction,
+  h,
+  behavior,
+  $,
+  select,
+  Session,
+  Reference,
+} from "@commontools/common-system";
 import { fromString } from "merkle-reference";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
 import {
@@ -13,41 +21,128 @@ import {
   Transact,
 } from "../sugar.js";
 
-export const foo = field("foo", 0);
-// export const size = field("size", 1);
-// export const time = field("time", 0);
-// export const description = field("description", "lizard bunny");
-// export const color = field("color", "blue");
-// export const lastActivity = field("lastActivity", "");
-// const resolveUninitialized = select({ self: $.self })
-//   .clause(isEmpty($.self, "hunger"))
-//   .clause(isEmpty($.self, "size"))
-//   .clause(isEmpty($.self, "time"));
+import { refer } from "synopsys";
 
-// export const resolveCreature = description
-//   .with(hunger)
-//   .with(size)
-//   .with(time)
-//   .with(color)
-//   .with(lastActivity);
+const foodItems = [
+  {
+    name: "Chicken Breast",
+    servingSize: 100,
+    servingUnit: "g",
+    nutrients: {
+      calories: 165,
+      protein: 31,
+      carbohydrates: 0,
+      fat: 3.6,
+    },
+  },
+  {
+    name: "Apple",
+    servingSize: 1,
+    servingUnit: "medium apple",
+    nutrients: {
+      calories: 95,
+      protein: 0.5,
+      carbohydrates: 25,
+      fat: 0.3,
+    },
+  },
+  {
+    name: "Greek Yogurt",
+    servingSize: 170,
+    servingUnit: "g",
+    nutrients: {
+      calories: 100,
+      protein: 17,
+      carbohydrates: 6,
+      fat: 0.4,
+    },
+  },
+  {
+    name: "Slice of Whole Wheat Bread",
+    servingSize: 1,
+    servingUnit: "slice",
+    nutrients: {
+      calories: 110,
+      protein: 4,
+      carbohydrates: 20,
+      fat: 1.5,
+    },
+  },
+  {
+    name: "Banana",
+    servingSize: 1,
+    servingUnit: "medium banana",
+    nutrients: {
+      calories: 105,
+      protein: 1.3,
+      carbohydrates: 27,
+      fat: 0.4,
+    },
+  },
+];
+
+const entry = {
+  id: "meal_123",
+  timestamp: "2024-12-06T07:30:00Z",
+  mealType: "breakfast",
+  foods: [
+    {
+      foodId: "food_125",
+      qty: 1, // one serving of Greek Yogurt
+    },
+    {
+      foodId: "food_127",
+      qty: 1, // one banana
+    },
+  ],
+  notes: "Quick breakfast before work",
+};
+
+// export const foo = field("foo", 0);
 
 export const myFoodPal = behavior({
-  render: foo
-    .render(({ self, foo }) => (
-      <div entity={self}>
-        <span>{foo}</span>
-      </div>
-    ))
+  importFoods: select({ self: $.self })
+    .not(q => q.match($.self, "foods", $._))
+    .update(({ self }) =>
+      foodItems.flatMap(food => {
+        const id = refer(food);
+        return [
+          { Import: food },
+          { Assert: [self, "foods", id] } as Instruction,
+        ];
+      }),
+    )
     .commit(),
 
-  // onChangeDescription: event("~/on/change-description")
-  //   .with(Tamagotchi.description)
-  //   .update(({ self, event }) => {
-  //     const val = Session.resolve<CommonInputEvent>(event).detail.value;
-  //     return [{ Upsert: [self, "description", val] }];
-  //   })
-  //   .commit(),
+  render: select({
+    self: $.self,
+    foods: [
+      {
+        id: $.foodId,
+        name: $.name,
+      },
+    ],
+  })
+    .match($.self, "foods", $.foodId)
+    .match($.foodId, "name", $.name)
+    .render(EmptyState)
+    .commit(),
 });
 
-export const spawn = (source: {} = { myFoodPal: 1 }) =>
+function EmptyState({
+  self,
+  foods,
+}: {
+  self: Reference;
+  foods: { id: Reference; name: string }[];
+}) {
+  return (
+    <div title={"My Food Pal"} entity={self}>
+      <h1>foods!</h1>
+      <pre>{JSON.stringify(foods, null, 2)}</pre>
+    </div>
+  );
+}
+
+export const spawn = (source: {} = { myFoodPal: 2 }) =>
   myFoodPal.spawn(source, "MyFoodPal");

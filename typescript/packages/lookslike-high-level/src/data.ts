@@ -229,7 +229,7 @@ export async function saveRecipe(
 }
 
 addCharms([
-  myFoodPal.spawn({ myFoodPal: 1 }),
+  myFoodPal.spawn(),
   // helloWorld.spawn({ helloWorld: 1 }),
   // counter.spawn({ counter: 1 }),
   // importer.spawn({ fetch: 1 }),
