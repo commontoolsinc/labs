@@ -1,7 +1,7 @@
 import { Reference } from "./db.js";
 import { Behavior } from "./adapter.js";
-import { html, css, LitElement } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
+import { html, css, LitElement } from "lit";
+import { customElement, property } from "lit/decorators.js";
 import { formatDatalogQuery } from "./format.js";
 import { explainQuery, explainMutation } from "./debug.js";
 
@@ -21,7 +21,89 @@ export function truncateId(id: string | Reference) {
   if (id.length <= 8) return id;
   return `${id.slice(0, 4)}…${id.slice(-4)}`;
 }
-@customElement('mutation-log-entry')
+@customElement("entity-state-card")
+export class EntityStateCard extends LitElement {
+  @property({ attribute: false }) accessor entityId: string = "";
+  @property({ attribute: false }) accessor state: Record<string, any> = {};
+
+  static override styles = css`
+    :host {
+      display: block;
+      font-family: monospace;
+      font-size: 12px;
+      padding: 8px;
+      border-bottom: 1px solid #ddd;
+    }
+
+    .header {
+      font-weight: bold;
+      margin-bottom: 4px;
+      color: #666;
+    }
+
+    .attribute-row {
+      display: flex;
+      gap: 8px;
+      padding: 2px 0;
+      align-items: center;
+      white-space: nowrap;
+    }
+
+    .attribute-name {
+      color: #333;
+      min-width: 100px;
+    }
+
+    .attribute-value {
+      color: #666;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 200px;
+    }
+
+    .inspect {
+      opacity: 0.5;
+      cursor: pointer;
+      padding: 0 4px;
+    }
+
+    .inspect:hover {
+      opacity: 1;
+    }
+  `;
+
+  private inspectValue(key: string, value: any) {
+    console.group(`Value for ${key}:`);
+    console.log(value);
+    console.groupEnd();
+  }
+
+  override render() {
+    return html`
+      <div class="header">${truncateId(this.entityId)}</div>
+      ${Object.entries(this.state)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => {
+          if (key.startsWith("~/common/")) return null;
+          return html`
+            <div class="attribute-row">
+              <span class="attribute-name">${key}:</span>
+              <span class="attribute-value">${JSON.stringify(value)}</span>
+              <span
+                class="inspect"
+                @click=${() => this.inspectValue(key, value)}
+                title="Inspect full value"
+                >🔍</span
+              >
+            </div>
+          `;
+        })
+        .filter(Boolean)}
+    `;
+  }
+}
+
+@customElement("mutation-log-entry")
 export class MutationLogEntry extends LitElement {
   @property({ attribute: false }) accessor mutation: any;
 
@@ -39,9 +121,15 @@ export class MutationLogEntry extends LitElement {
       gap: 8px;
     }
 
-    .assert { color: #27ae60; }
-    .upsert { color: #f1c40f; }
-    .retract { color: #e74c3c; }
+    .assert {
+      color: #27ae60;
+    }
+    .upsert {
+      color: #f1c40f;
+    }
+    .retract {
+      color: #e74c3c;
+    }
 
     .details-btn {
       opacity: 0.5;
@@ -63,42 +151,43 @@ export class MutationLogEntry extends LitElement {
   `;
 
   private formatValue(value: any): string {
-    if (value === null || value === undefined) return 'null';
-    if (Array.isArray(value)) return '[...]';
-    if (typeof value === 'object') return '{...}';
-    if (typeof value === 'string') return `'${value}'`;
+    if (value === null || value === undefined) return "null";
+    if (Array.isArray(value)) return "[...]";
+    if (typeof value === "object") return "{...}";
+    if (typeof value === "string") return `'${value}'`;
     return String(value);
   }
 
   private showDetails() {
-    console.group('Mutation Details');
-    console.log('%cRule:', 'color: #3498db', this.mutation.rule);
-    console.log('%cRevision:', 'color: #3498db', this.mutation.revision);
-    console.log('%cSelection:', 'color: #3498db', this.mutation.selection);
-    console.log('%cChanges:', 'color: #3498db', this.mutation.changes);
+    console.group("Mutation Details");
+    console.log("%cRule:", "color: #3498db", this.mutation.rule);
+    console.log("%cRevision:", "color: #3498db", this.mutation.revision);
+    console.log("%cSelection:", "color: #3498db", this.mutation.selection);
+    console.log("%cChanges:", "color: #3498db", this.mutation.changes);
     console.groupEnd();
 
-    // Add async explanation without blocking
-    explainMutation(this.mutation).then(explanation => {
-      console.group('Mutation Explanation');
-      console.log(explanation);
-      console.groupEnd();
-    }).catch(err => {
-      console.error('Failed to explain mutation:', err);
-    });
+    explainMutation(this.mutation)
+      .then(explanation => {
+        console.group("Mutation Explanation");
+        console.log(explanation);
+        console.groupEnd();
+      })
+      .catch(err => {
+        console.error("Failed to explain mutation:", err);
+      });
   }
 
   override render() {
     const changes = this.mutation.changes;
-    let icon = '';
-    let colorClass = '';
+    let icon = "";
+    let colorClass = "";
 
     // Handle array of changes
     const change = changes[0];
 
     const formatValue = (val: any) => {
       const formatted = this.formatValue(val);
-      if (typeof val === 'string' && val.length > 32) {
+      if (typeof val === "string" && val.length > 32) {
         const start = formatted.slice(0, 16);
         const end = formatted.slice(-16);
         return `${start}…${end}`;
@@ -110,22 +199,28 @@ export class MutationLogEntry extends LitElement {
     let value;
 
     if (change.Assert) {
-      icon = '+';
-      colorClass = 'assert';
+      icon = "+";
+      colorClass = "assert";
       [, field, value] = change.Assert;
     } else if (change.Upsert) {
-      icon = '~';
-      colorClass = 'upsert';
+      icon = "~";
+      colorClass = "upsert";
       [, field, value] = change.Upsert;
     } else if (change.Retract) {
-      icon = '-';
-      colorClass = 'retract';
+      icon = "-";
+      colorClass = "retract";
       [, field, value] = change.Retract;
     } else {
       return html`
         <div class="log-line">
           <span><b>&lt;effect&gt;</b></span>
-          <button class="details-btn" @click=${this.showDetails} title="Show full details">🔍</button>
+          <button
+            class="details-btn"
+            @click=${this.showDetails}
+            title="Show full details"
+          >
+            🔍
+          </button>
         </div>
       `;
     }
@@ -133,17 +228,26 @@ export class MutationLogEntry extends LitElement {
     return html`
       <div class="log-line">
         <span class=${colorClass}><b>${icon}</b></span>
-        <span><b>${field}</b>= ${field === '~/common/ui' ? 're-render' : formatValue(value)}</span>
-        <button class="details-btn" @click=${this.showDetails} title="Show full details">🔍</button>
+        <span
+          ><b>${field}</b>=
+          ${field === "~/common/ui" ? "re-render" : formatValue(value)}</span
+        >
+        <button
+          class="details-btn"
+          @click=${this.showDetails}
+          title="Show full details"
+        >
+          🔍
+        </button>
       </div>
     `;
   }
 }
 
-@customElement('rule-details-popover')
+@customElement("rule-details-popover")
 export class RuleDetailsPopover extends LitElement {
-  @property({ attribute: false }) accessor rule: string = '';
-  @property({ attribute: false }) accessor color: string = '#000';
+  @property({ attribute: false }) accessor rule: string = "";
+  @property({ attribute: false }) accessor color: string = "#000";
   @property({ attribute: false }) accessor activation: any = null;
   @property({ attribute: false }) accessor behavior: Behavior;
 
@@ -157,7 +261,7 @@ export class RuleDetailsPopover extends LitElement {
       background: #f8f9fa;
       border-radius: 4px;
       padding: 12px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
       overflow-y: auto;
       font-size: 12px;
       pointer-events: all;
@@ -230,21 +334,21 @@ export class RuleDetailsPopover extends LitElement {
   `;
 
   private enableRule() {
-    const event = new CustomEvent('spell-rule-enabled', {
+    const event = new CustomEvent("spell-rule-enabled", {
       detail: {
         id: this.behavior.id,
-        name: this.rule
-      }
+        name: this.rule,
+      },
     });
     window.dispatchEvent(event);
   }
 
   private disableRule() {
-    const event = new CustomEvent('spell-rule-disabled', {
+    const event = new CustomEvent("spell-rule-disabled", {
       detail: {
         id: this.behavior.id,
-        name: this.rule
-      }
+        name: this.rule,
+      },
     });
     window.dispatchEvent(event);
   }
@@ -254,7 +358,7 @@ export class RuleDetailsPopover extends LitElement {
 
     const query = {
       select: this.behavior.rules[this.rule].select,
-      where: [...this.behavior.rules[this.rule].where]
+      where: [...this.behavior.rules[this.rule].where],
     };
 
     try {
@@ -263,19 +367,21 @@ export class RuleDetailsPopover extends LitElement {
       console.log(explanation);
       console.groupEnd();
     } catch (err) {
-      console.error('Failed to explain query:', err);
+      console.error("Failed to explain query:", err);
     }
   }
 
   override render() {
-    const style = getRuleStyle(this.rule) || { emoji: '🔧', color: this.color };
+    const style = getRuleStyle(this.rule) || { emoji: "🔧", color: this.color };
 
     return html`
       <div>
         <div class="close" @click=${() => this.remove()}>✕</div>
         <div class="header">
           <span style="color: ${style.color}">${style.emoji}</span>
-          <span class="rule-name" style="color: ${style.color}">${this.rule}</span>
+          <span class="rule-name" style="color: ${style.color}"
+            >${this.rule}</span
+          >
         </div>
 
         <div class="rule-controls">
@@ -286,21 +392,29 @@ export class RuleDetailsPopover extends LitElement {
 
         <div class="stats">
           <div>Activations: ${this.activation?.count || 0}</div>
-          ${this.activation?.performanceMs ? html`
-            <div>Last performance: ${this.activation.performanceMs}ms</div>
-          ` : ''}
+          ${this.activation?.performanceMs
+            ? html`
+                <div>Last performance: ${this.activation.performanceMs}ms</div>
+              `
+            : ""}
         </div>
 
         <h4>Rule Definition</h4>
-        <pre>${formatDatalogQuery({
+        <pre>
+${formatDatalogQuery({
             select: this.behavior.rules[this.rule].select,
-            where: [...this.behavior.rules[this.rule].where]
-        })}</pre>
+            where: [...this.behavior.rules[this.rule].where],
+          })}</pre
+        >
 
-        ${this.activation?.lastSelection ? html`
-          <h4>Last Selection</h4>
-          <pre>${JSON.stringify(this.activation.lastSelection, null, 2)}</pre>
-        ` : ''}
+        ${this.activation?.lastSelection
+          ? html`
+              <h4>Last Selection</h4>
+              <pre>
+${JSON.stringify(this.activation.lastSelection, null, 2)}</pre
+              >
+            `
+          : ""}
       </div>
     `;
   }
@@ -317,27 +431,36 @@ const cardColors = [
 ];
 
 const rulePrefixes = new Map([
-  ['likes/', {emoji: '👍', color: '#ffeaa7'}],
-  ['description/', {emoji: '📝', color: '#ffffff'}],
-  ['chat/', {emoji: '💬', color: '#74b9ff'}],
-  ['comments/', {emoji: '✍️', color: '#fd79a8'}]
+  ["likes/", { emoji: "👍", color: "#ffeaa7" }],
+  ["description/", { emoji: "📝", color: "#ffffff" }],
+  ["chat/", { emoji: "💬", color: "#74b9ff" }],
+  ["comments/", { emoji: "✍️", color: "#fd79a8" }],
 ]);
 
 function getColorForEntity(entityId: string): string {
-  const hash = Array.from(entityId).reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const hash = Array.from(entityId).reduce(
+    (acc, char) => acc + char.charCodeAt(0),
+    0,
+  );
   return cardColors[hash % cardColors.length];
 }
 
-function getRuleStyle(rule: string): {emoji: string, color: string} {
+function getRuleStyle(rule: string): { emoji: string; color: string } {
   // Check for event rules starting with 'on'
   if (/^on[A-Z]/.test(rule)) {
-    return {emoji: '⚡', color: '#ffeaa7'};
+    return { emoji: "⚡", color: "#ffeaa7" };
   }
 
   // Check for view/render rules
-  if (rule === 'view' || rule === 'render' || rule === 'show' ||
-      rule.startsWith('view') || rule.startsWith('render') || rule.startsWith('show')) {
-    return {emoji: '🎨', color: '#9b59b6'};
+  if (
+    rule === "view" ||
+    rule === "render" ||
+    rule === "show" ||
+    rule.startsWith("view") ||
+    rule.startsWith("render") ||
+    rule.startsWith("show")
+  ) {
+    return { emoji: "🎨", color: "#9b59b6" };
   }
 
   for (const [prefix, style] of rulePrefixes) {
@@ -346,21 +469,46 @@ function getRuleStyle(rule: string): {emoji: string, color: string} {
     }
   }
 
-  const hash = Array.from(rule).reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const emojiList = ["🌟", "🎯", "🎨", "🎭", "🎪", "🎢", "🎡", "🎮", "🎲", "🎰", "🎳", "🎹", "🎼", "🎧", "🎤", "🎬", "🎨", "🎭", "🎪"];
+  const hash = Array.from(rule).reduce(
+    (acc, char) => acc + char.charCodeAt(0),
+    0,
+  );
+  const emojiList = [
+    "🌟",
+    "🎯",
+    "🎨",
+    "🎭",
+    "🎪",
+    "🎢",
+    "🎡",
+    "🎮",
+    "🎲",
+    "🎰",
+    "🎳",
+    "🎹",
+    "🎼",
+    "🎧",
+    "🎤",
+    "🎬",
+    "🎨",
+    "🎭",
+    "🎪",
+  ];
 
   return {
     emoji: emojiList[hash % emojiList.length],
-    color: cardColors[hash % cardColors.length]
+    color: cardColors[hash % cardColors.length],
   };
 }
 
-@customElement('charm-debugger')
+@customElement("charm-debugger")
 export class CharmDebugger extends LitElement {
   private _entity: Reference | null = null;
   private _behavior: Behavior | null = null;
   private activePopover: RuleDetailsPopover | null = null;
   private activeRuleId: string | null = null;
+  private entityProjections: Map<string, Record<string, any>> = new Map();
+  private isProjectionsOpen: boolean = false;
 
   @property({ attribute: false })
   get entity() {
@@ -390,7 +538,22 @@ export class CharmDebugger extends LitElement {
   private isMutationLogOpen: boolean = false;
   private pulsingRules: Set<string> = new Set();
 
+  private projectMutation(mutation: any) {
+    const entityId = mutation.entity;
+    const changes = mutation.changes[0];
+    let currentState = this.entityProjections.get(entityId) || {};
 
+    if (changes.Assert || changes.Upsert) {
+      const [, field, value] = changes.Assert || changes.Upsert;
+      currentState = { ...currentState, [field]: value };
+    } else if (changes.Retract) {
+      const [, field] = changes.Retract;
+      const { [field]: _, ...rest } = currentState;
+      currentState = rest;
+    }
+
+    this.entityProjections.set(entityId, currentState);
+  }
 
   private showRuleDetails(rule: string, color: string, activation: any) {
     if (this.activeRuleId === rule) {
@@ -402,7 +565,9 @@ export class CharmDebugger extends LitElement {
 
     this.activePopover?.remove();
 
-    const popover = document.createElement('rule-details-popover') as RuleDetailsPopover;
+    const popover = document.createElement(
+      "rule-details-popover",
+    ) as RuleDetailsPopover;
     popover.rule = rule;
     popover.color = color;
     popover.activation = activation;
@@ -444,6 +609,10 @@ export class CharmDebugger extends LitElement {
       display: none;
     }
 
+    :host(.projections-closed) .content > .projections {
+      display: none;
+    }
+
     .rules-grid {
       position: relative;
       right: 16px;
@@ -457,7 +626,9 @@ export class CharmDebugger extends LitElement {
       transform: scale(0.75);
       opacity: 0.75;
       transform-origin: top right;
-      transition: transform 0.2s ease-in-out, opacity 0.2s ease-in-out;
+      transition:
+        transform 0.2s ease-in-out,
+        opacity 0.2s ease-in-out;
     }
 
     .rules-grid:hover {
@@ -488,7 +659,7 @@ export class CharmDebugger extends LitElement {
       font-size: 28px;
       font-family: system-ui;
       border-radius: 128px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
       cursor: pointer;
       border: 2px solid white;
       transition: transform 0.2s ease;
@@ -531,7 +702,8 @@ export class CharmDebugger extends LitElement {
       font-size: 8px;
     }
 
-    .mutation-log {
+    .mutation-log,
+    .projections {
       background: #eee;
       border-radius: 8px;
       margin-top: 16px;
@@ -540,6 +712,7 @@ export class CharmDebugger extends LitElement {
       max-height: 256px;
       overflow-y: auto;
       border: 1px solid #aaa;
+      width: 256px;
     }
 
     mutation-log-entry {
@@ -551,9 +724,16 @@ export class CharmDebugger extends LitElement {
     }
 
     @keyframes pulse {
-      0% { transform: scale(1.2); }
-      50% { transform: scale(1.3); opacity: 1; }
-      100% { transform: scale(1.2); }
+      0% {
+        transform: scale(1.2);
+      }
+      50% {
+        transform: scale(1.3);
+        opacity: 1;
+      }
+      100% {
+        transform: scale(1.2);
+      }
     }
 
     .pulse {
@@ -597,22 +777,19 @@ export class CharmDebugger extends LitElement {
         event.detail.spell === this.behavior?.id.toString()
       ) {
         this.mutationLog.push(event.detail);
+        this.projectMutation(event.detail);
         this.requestUpdate();
       }
     });
 
     window.addEventListener("spell-rule-enabled", (event: any) => {
-      if (
-        event.detail.id === this.behavior?.id
-      ) {
+      if (event.detail.id === this.behavior?.id) {
         this.requestUpdate();
       }
     });
 
     window.addEventListener("spell-rule-disabled", (event: any) => {
-      if (
-        event.detail.id === this.behavior?.id
-      ) {
+      if (event.detail.id === this.behavior?.id) {
         this.requestUpdate();
       }
     });
@@ -622,6 +799,9 @@ export class CharmDebugger extends LitElement {
     }
     if (!this.isMutationLogOpen) {
       this.classList.add("mutation-log-closed");
+    }
+    if (!this.isProjectionsOpen) {
+      this.classList.add("projections-closed");
     }
   }
 
@@ -635,60 +815,111 @@ export class CharmDebugger extends LitElement {
     this.classList.toggle("mutation-log-closed");
   }
 
+  toggleProjections() {
+    this.isProjectionsOpen = !this.isProjectionsOpen;
+    this.classList.toggle("projections-closed");
+  }
+
   override render() {
     return html`
       <div class="content">
-        ${this.entity ? html`
-          <div>
-            <div
-              class="entity-id"
-              style="background: ${getColorForEntity(this.entity.toString())};"
-              title=${this.entity.toString()}
-              @click=${this.toggleOpen}
-            >
-              ${truncateId(this.entity)}
-            </div>
-            <button class="copy-button" title="Copy ID" @click=${(e: Event) => {
-              e.stopPropagation();
-              navigator.clipboard.writeText(this.entity!.toString());
-            }}>📋</button>
-            <button class="copy-button" title="Toggle Log" @click=${this.toggleMutationLog}>📜</button>
-          </div>
-        ` : ''}
-
-        ${this.behavior?.rules ? html`
-          <div class="rules-grid">
-              ${Object.keys(this.behavior.rules).sort((a, b) => {
-                const hasSlashA = a.includes('/');
-                const hasSlashB = b.includes('/');
-                if (hasSlashA && !hasSlashB) return -1;
-                if (!hasSlashA && hasSlashB) return 1;
-                return a.localeCompare(b);
-              }).map((rule, index) => {
-              const activation = this.ruleActivations.get(rule);
-              const style = getRuleStyle(rule);
-              const isEnabled = this.behavior!.isRuleEnabled(rule);
-
-              return html`
-                <div class="rule-item" style="top: ${Math.floor(index / 2) * 96}px">
-                  <div
-                    class="emoji-tile ${this.pulsingRules.has(rule) ? 'pulse' : ''} ${isEnabled ? '' : 'disabled'}"
-                    style="background: ${style.color}"
-                    title="${rule} (${activation?.count || 0} activations)"
-                    @click=${() => this.showRuleDetails(rule, style.color, activation)}
-                  >
-                    ${style.emoji}
-                  </div>
+        ${this.entity
+          ? html`
+              <div>
+                <div
+                  class="entity-id"
+                  style="background: ${getColorForEntity(
+                    this.entity.toString(),
+                  )};"
+                  title=${this.entity.toString()}
+                  @click=${this.toggleOpen}
+                >
+                  ${truncateId(this.entity)}
                 </div>
-              `;
-            })}
-          </div>
-        ` : ''}
+                <button
+                  class="copy-button"
+                  title="Copy ID"
+                  @click=${(e: Event) => {
+                    e.stopPropagation();
+                    navigator.clipboard.writeText(this.entity!.toString());
+                  }}
+                >
+                  📋
+                </button>
+                <button
+                  class="copy-button"
+                  title="Toggle Log"
+                  @click=${this.toggleMutationLog}
+                >
+                  📜
+                </button>
+                <button
+                  class="copy-button"
+                  title="Toggle Projections"
+                  @click=${this.toggleProjections}
+                >
+                  📊
+                </button>
+              </div>
+            `
+          : ""}
+        ${this.behavior?.rules
+          ? html`
+              <div class="rules-grid">
+                ${Object.keys(this.behavior.rules)
+                  .sort((a, b) => {
+                    const hasSlashA = a.includes("/");
+                    const hasSlashB = b.includes("/");
+                    if (hasSlashA && !hasSlashB) return -1;
+                    if (!hasSlashA && hasSlashB) return 1;
+                    return a.localeCompare(b);
+                  })
+                  .map((rule, index) => {
+                    const activation = this.ruleActivations.get(rule);
+                    const style = getRuleStyle(rule);
+                    const isEnabled = this.behavior!.isRuleEnabled(rule);
+
+                    return html`
+                      <div
+                        class="rule-item"
+                        style="top: ${Math.floor(index / 2) * 96}px"
+                      >
+                        <div
+                          class="emoji-tile ${this.pulsingRules.has(rule)
+                            ? "pulse"
+                            : ""} ${isEnabled ? "" : "disabled"}"
+                          style="background: ${style.color}"
+                          title="${rule} (${activation?.count ||
+                          0} activations)"
+                          @click=${() =>
+                            this.showRuleDetails(rule, style.color, activation)}
+                        >
+                          ${style.emoji}
+                        </div>
+                      </div>
+                    `;
+                  })}
+              </div>
+            `
+          : ""}
 
         <div class="mutation-log">
-          ${this.mutationLog.map(mutation => html`
-            <mutation-log-entry .mutation=${mutation}></mutation-log-entry>
-          `)}
+          ${this.mutationLog.map(
+            mutation => html`
+              <mutation-log-entry .mutation=${mutation}></mutation-log-entry>
+            `,
+          )}
+        </div>
+
+        <div class="projections">
+          ${Array.from(this.entityProjections.entries()).map(
+            ([entityId, state]) => html`
+              <entity-state-card
+                .entityId=${entityId}
+                .state=${state}
+              ></entity-state-card>
+            `,
+          )}
         </div>
       </div>
     `;
