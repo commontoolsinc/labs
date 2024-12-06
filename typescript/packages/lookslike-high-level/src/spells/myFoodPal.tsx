@@ -76,7 +76,7 @@ const foodItems = [
       calories: 105,
       protein: 1.3,
       carbohydrates: 27,
-      fat: 0.4,
+      // fat: 0.4,
     },
   },
 ];
@@ -120,11 +120,27 @@ export const myFoodPal = behavior({
       {
         id: $.foodId,
         name: $.name,
+        servingSize: $.servingSize,
+        servingUnit: $.servingUnit,
+        nutrients: {
+          calories: $.calories,
+          protein: $.protein,
+          carbohydrates: $.carbohydrates,
+          fat: $.fat,
+        },
       },
     ],
   })
     .match($.self, "foods", $.foodId)
     .match($.foodId, "name", $.name)
+    .match($.foodId, "nutrients", $.nutrient)
+    .match($.nutrient, "calories", $.calories)
+    .match($.nutrient, "protein", $.protein)
+    .match($.nutrient, "carbohydrates", $.carbohydrates)
+    // .match($.nutrient, "fat", $.fat)
+    .clause(defaultTo($.nutrient, "fat", $.fat, 0))
+    .match($.foodId, "servingSize", $.servingSize)
+    .match($.foodId, "servingUnit", $.servingUnit)
     .render(EmptyState)
     .commit(),
 });
@@ -134,15 +150,64 @@ function EmptyState({
   foods,
 }: {
   self: Reference;
-  foods: { id: Reference; name: string }[];
+  foods: {
+    id: Reference;
+    name: string;
+    nutrients: any;
+    servingSize: number;
+    servingUnit: string;
+  }[];
 }) {
   return (
     <div title={"My Food Pal"} entity={self}>
       <h1>foods!</h1>
-      <pre>{JSON.stringify(foods, null, 2)}</pre>
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
+        {foods.map(({ id, name, nutrients, servingSize, servingUnit }) => (
+          <div
+            key={id}
+            style="border: 2px solid #ccc; border-radius: 8px; padding: 20px;"
+          >
+            <h2>{name}</h2>
+            <img
+              width={250}
+              height={250}
+              style="object-fit: cover; border-radius: 8px;"
+              src={`/api/img?prompt=${encodeURIComponent("cute hello kitty themed food illustration of a " + name)}`}
+            />
+            <h3>Nutrition</h3>
+            <span>
+              Serving Size: {servingSize} {servingUnit}
+            </span>
+            <table>
+              <tbody>
+                <tr>
+                  <td>Calories</td>
+                  <td>{nutrients.calories}</td>
+                </tr>
+                <tr>
+                  <td>Protein</td>
+                  <td>{nutrients.protein}</td>
+                </tr>
+                <tr>
+                  <td>Carbohydrates</td>
+                  <td>{nutrients.carbohydrates}</td>
+                </tr>
+                {nutrients.fat === 0 ? (
+                  ""
+                ) : (
+                  <tr>
+                    <td>Fat</td>
+                    <td>{nutrients.fat}</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-export const spawn = (source: {} = { myFoodPal: 2 }) =>
+export const spawn = (source: {} = { myFoodPal: 5 }) =>
   myFoodPal.spawn(source, "MyFoodPal");
