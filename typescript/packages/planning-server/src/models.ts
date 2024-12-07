@@ -143,6 +143,21 @@ if (Deno.env.get("GROQ_API_KEY")) {
 
   addModel({
     provider: groq,
+    name: "groq:llama-3.3-70b-versatile",
+    aliases: ["groq:llama-3.3-70b"],
+    capabilities: {
+      contextWindow: 128_000,
+      maxOutputTokens: 8000,
+      images: false,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: false,
+    },
+  });
+
+  addModel({
+    provider: groq,
     name: "groq:llama-3.1-8b-instant",
     aliases: ["llama-3.1-8b"],
     capabilities: {
