@@ -839,23 +839,37 @@ export class CharmDebugger extends LitElement {
             >
               ${truncateId(this.entity)}
             </div>
-            <button class="copy-button" title="Copy ID" @click=${(e: Event) => {
-              e.stopPropagation();
-              navigator.clipboard.writeText(this.entity!.toString());
-            }}>📋</button>
-            <button class="copy-button" title="Toggle Log" @click=${this.toggleMutationLog}>📜</button>
+            <button
+              class="copy-button"
+              title="Copy ID"
+              @click=${(e: Event) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(this.entity!.toString());
+              }}
+            >📋</button>
+            <button
+              class="copy-button"
+              title="Toggle Log"
+              @click=${this.toggleMutationLog}
+            >📜</button>
+            <button
+              class="copy-button"
+              title="Toggle Projections"
+              @click=${this.toggleProjections}
+            >📊</button>
           </div>
         ` : ''}
 
-        ${this.behavior?.rules ? html`
-          <div class="rules-grid">
-              ${Object.keys(this.behavior.rules).sort((a, b) => {
-                const hasSlashA = a.includes('/');
-                const hasSlashB = b.includes('/');
-                if (hasSlashA && !hasSlashB) return -1;
-                if (!hasSlashA && hasSlashB) return 1;
-                return a.localeCompare(b);
-              }).map((rule, index) => {
+        ${this.behavior?.rules ? html`<div class="rules-grid">
+          ${Object.keys(this.behavior.rules)
+            .sort((a, b) => {
+              const hasSlashA = a.includes('/');
+              const hasSlashB = b.includes('/');
+              if (hasSlashA && !hasSlashB) return -1;
+              if (!hasSlashA && hasSlashB) return 1;
+              return a.localeCompare(b);
+            })
+            .map((rule, index) => {
               const activation = this.ruleActivations.get(rule);
               const style = getRuleStyle(rule);
               const isEnabled = this.behavior!.isRuleEnabled(rule);
@@ -871,33 +885,9 @@ export class CharmDebugger extends LitElement {
                     ${style.emoji}
                   </div>
                 </div>
-                <button
-                  class="copy-button"
-                  title="Copy ID"
-                  @click=${(e: Event) => {
-                    e.stopPropagation();
-                    navigator.clipboard.writeText(this.entity!.toString());
-                  }}
-                >
-                  📋
-                </button>
-                <button
-                  class="copy-button"
-                  title="Toggle Log"
-                  @click=${this.toggleMutationLog}
-                >
-                  📜
-                </button>
-                <button
-                  class="copy-button"
-                  title="Toggle Projections"
-                  @click=${this.toggleProjections}
-                >
-                  📊
-                </button>
-              </div>
-            `
-          : ""}
+              `;
+            })}
+        </div>` : ''}
 
         <div class="mutation-log">
           ${this.mutationLog.map(
