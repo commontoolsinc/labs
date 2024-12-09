@@ -2,14 +2,13 @@ import {
   service,
   $,
   refer,
-  Reference,
   Instruction,
   Session,
   Task,
   Fact,
   h,
 } from "@commontools/common-system";
-export type { Reference };
+import { Reference } from "merkle-reference";
 
 const provider = refer({
   effect: { fetch: { version: [0, 0, 1] } },

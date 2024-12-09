@@ -33,6 +33,7 @@ import "./recipes/playlist.js";
 
 // import FetchExample from "./recipes/fetcher.jsx";
 import FetchService from "./effects/fetch.js";
+import GmailService from "./effects/gmail.js";
 import { UI as ViewService } from "@commontools/common-system";
 
 import * as helloWorld from "./spells/01_helloWorld.jsx";
@@ -244,6 +245,7 @@ addCharms([
   // helloWorldWithLikes.spawn({ helloWorldWithLikes: 1 }),
   countdown.spawn({ countdown: 1 }),
   FetchService.spawn() as any,
+  GmailService.spawn() as any,
   ViewService.spawn() as any,
   TimerService.spawn() as any,
 ]);

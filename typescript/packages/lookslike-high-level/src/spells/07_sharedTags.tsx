@@ -188,6 +188,51 @@ export const sharedDataViewer = behavior({
     },
   },
 
+  emails: {
+    select: {
+      self: $.self,
+      shared: [{ self: $.shared, from: $.from, subject: $.subject, snippet: $.snippet, threadId: $.threadId }],
+      searchTag: $.searchTag,
+    },
+    where: [
+      { Case: [$.self, "searchTag", $.searchTag] },
+      { Case: [tags, $.searchTag, $.shared] },
+      { Case: [$.shared, "from", $.from] },
+      { Case: [$.shared, "subject", $.subject] },
+      { Case: [$.shared, "snippet", $.snippet] },
+      { Case: [$.shared, "threadId", $.threadId] },
+    ],
+    update: ({ self, shared, searchTag }) => {
+      const tableStyle = "width: 100%; border-collapse: collapse;";
+      const cellStyle = "padding: 12px; border-bottom: 1px solid #eee;";
+      const headerStyle = "text-align: left; padding: 12px; border-bottom: 2px solid #ddd; background: #f9f9f9;";
+
+      return [
+        render({ self }, ({ self }) => (
+          <div title="Shared">
+            <TagSearch tag={searchTag} />
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={headerStyle}>From</th>
+                  <th style={headerStyle}>Subject</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shared.map(email => (
+                  <tr key={email.threadId}>
+                    <td style={cellStyle}>{email.from}</td>
+                    <td style={cellStyle}>{email.subject}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div> as any
+        )),
+      ];
+    },
+  },
+
   editTag: event(SharedDataEvents.onEditTag)
     .update(({ self, event }) => {
       const ev = Session.resolve<CommonInputEvent>(event);
