@@ -51,6 +51,7 @@ import form from "./spells/13_form.jsx";
 import * as helloWorldWithLikes from "./spells/12_helloWorldWithLikes.jsx";
 import * as llmChat from "./spells/14_llm_chat.jsx";
 import * as countdown from "./spells/countdown.jsx";
+import * as themeable from "./spells/themeable.jsx";
 import TimerService from "./effects/timer.js";
 import { settings } from "./spells/settings.jsx";
 
@@ -244,6 +245,7 @@ addCharms([
   // composed.spawn({ composed: 1 }),
   // helloWorldWithLikes.spawn({ helloWorldWithLikes: 1 }),
   countdown.spawn({ countdown: 1 }),
+  themeable.spawn({ themeable: 1 }),
   FetchService.spawn() as any,
   GmailService.spawn() as any,
   ViewService.spawn() as any,
