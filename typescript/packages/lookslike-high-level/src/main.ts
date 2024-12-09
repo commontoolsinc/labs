@@ -4,6 +4,7 @@ export { fab } from "@commontools/common-os-ui";
 export { components as myComponents } from "./components.js";
 import { setDebug } from "@commontools/common-html";
 import "./router.js";
+import './gmail.js'
 
 setDebug(!!(import.meta as any).env.VITE_DEBUG);
 

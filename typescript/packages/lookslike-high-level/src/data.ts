@@ -51,6 +51,7 @@ import * as helloWorldWithLikes from "./spells/12_helloWorldWithLikes.jsx";
 import * as llmChat from "./spells/14_llm_chat.jsx";
 import * as countdown from "./spells/countdown.jsx";
 import TimerService from "./effects/timer.js";
+import { settings } from "./spells/settings.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -238,6 +239,7 @@ addCharms([
   // workbench.spawn({ workbench: 1 }),
   form.spawn({ geneticsLab: 1 }),
   llmChat.spawn({ llmChat: 7 }),
+  settings.spawn({ settings: 1 }),
   // composed.spawn({ composed: 1 }),
   // helloWorldWithLikes.spawn({ helloWorldWithLikes: 1 }),
   countdown.spawn({ countdown: 1 }),
