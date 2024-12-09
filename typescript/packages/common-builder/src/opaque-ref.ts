@@ -106,7 +106,10 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
         };
       },
       // unsafe way to materialize opaque references at runtime
-      [Symbol.toPrimitive]: () => unsafe_materialize(unsafe_binding, path),
+      [Symbol.toPrimitive]: (hint: string) => {
+        const value = unsafe_materialize(unsafe_binding, path);
+        return value?.[Symbol.toPrimitive]?.(hint) ?? value;
+      },
       [isOpaqueRefMarker]: true,
     };
 

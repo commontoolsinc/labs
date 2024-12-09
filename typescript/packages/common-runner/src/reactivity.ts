@@ -19,7 +19,7 @@ export interface SendableCell<T> {
  * @returns {boolean}
  */
 export const isReactive = <T = unknown>(
-  value: unknown,
+  value: ReactiveCell<T> | T,
 ): value is ReactiveCell<T> => {
   return (
     typeof value === "object" &&
@@ -72,13 +72,13 @@ export const isSendable = <T = unknown>(
  * @param {function} callback - The callback to run when the value changes.
  * @returns {function} - A function to cancel the effect.
  */
-export const effect = (
-  value: unknown,
-  callback: (value: unknown) => Cancel | void,
+export const effect = <T>(
+  value: ReactiveCell<T> | T,
+  callback: (value: T) => Cancel | void,
 ): Cancel => {
   const listener = () => {
     let cleanup: Cancel = noOp;
-    return (value: unknown) => {
+    return (value: ReactiveCell<T> | T) => {
       cleanup();
       const next = isReactive(value) ? value.sink(listener()) : callback(value);
       cleanup = isCancel(next) ? next : noOp;

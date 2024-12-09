@@ -7,8 +7,13 @@ import type {
   toJSON,
   JSON,
 } from "./types.js";
+import { isModule } from "./types.js";
 import { opaqueRef } from "./opaque-ref.js";
-import { moduleToJSON, connectInputAndOutputs } from "./utils.js";
+import {
+  moduleToJSON,
+  connectInputAndOutputs,
+  traverseValue,
+} from "./utils.js";
 import { getTopFrame } from "./recipe.js";
 import type {
   JavaScriptModuleDefinition,
@@ -145,13 +150,13 @@ export function isolated<T, R>(
   export const run = () => {
     let inputs = {};
     ${Object.keys(inputs)
-      .map((key) => `inputs["${key}"] = read("${key}")?.deref()?.val;`)
+      .map(key => `inputs["${key}"] = read("${key}")?.deref()?.val;`)
       .join("\n")}
     let fn = ${implementation.toString()};
     let result = fn(inputs);
     ${Object.keys(outputs)
       .map(
-        (key) =>
+        key =>
           `write("${key}", { tag: typeof result["${key}"], val: result["${key}"] })`,
       )
       .join("\n")}
@@ -184,6 +189,12 @@ export const event = <T = any>(
 export const compute: <T>(fn: () => T) => OpaqueRef<T> = (fn: () => any) =>
   lift(fn)(undefined);
 
-// unsafe closures: alias compute, since render(() => <div>{var}</div>) might be
-// a common pattern.
-export const render = compute;
+// unsafe closures: like compute, but also convert all functions to handlers
+export const render = <T>(fn: () => T): OpaqueRef<T> =>
+  compute(() =>
+    traverseValue(fn(), v => {
+      // Modules are functions, so we need to exclude them
+      if (!isModule(v) && typeof v === "function") return handler(v)({});
+      else return v;
+    }),
+  );
