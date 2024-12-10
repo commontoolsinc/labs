@@ -5,7 +5,74 @@ import "./Popup.css";
 type ClipFormat = 'link' | 'article' | 'social-post' | 'media' | 'code-repo' | 'person';
 type CaptureStrategy = 'selection' | 'full-page' | 'readability';
 
-interface ClippedContent {
+// Base clip content interfaces
+interface BaseClipContent {
+  sourceUrl: string;
+  title?: string;
+  snippet?: string;
+  tags: string[];
+  clippedAt: string;
+}
+
+interface ArticleClip extends BaseClipContent {
+  type: 'article';
+  authors?: string[];
+  publishedDate?: string;
+  content: string;
+  readingTime?: number;
+}
+
+interface LinkClip extends BaseClipContent {
+  type: 'link';
+  url: string;
+  favicon?: string;
+}
+
+interface SocialPostClip extends BaseClipContent {
+  type: 'social-post';
+  platform: string;
+  author: string;
+  content: string;
+  engagement?: {
+    likes?: number;
+    shares?: number;
+    comments?: number;
+  };
+}
+
+interface MediaClip extends BaseClipContent {
+  type: 'media';
+  mediaType: 'image' | 'video' | 'audio';
+  url: string;
+  duration?: number;
+  dimensions?: {
+    width: number;
+    height: number;
+  };
+}
+
+interface CodeRepoClip extends BaseClipContent {
+  type: 'code-repo';
+  platform: string;
+  owner: string;
+  repo: string;
+  language?: string;
+  stars?: number;
+  forks?: number;
+}
+
+interface PersonClip extends BaseClipContent {
+  type: 'person';
+  name: string;
+  role?: string;
+  company?: string;
+  socialProfiles?: {
+    platform: string;
+    url: string;
+  }[];
+}
+
+type ClippedContent = {
   type: 'text' | 'link' | 'media' | 'webpage';
   mediaType?: string;
   text?: string;
@@ -17,7 +84,9 @@ interface ClippedContent {
     text?: string;
     html?: string;
   };
-}
+};
+
+type FormattedClip = ArticleClip | LinkClip | SocialPostClip | MediaClip | CodeRepoClip | PersonClip;
 
 export default function Popup() {
   const [clippedContent, setClippedContent] = useState<ClippedContent | null>(null);
@@ -133,20 +202,85 @@ export default function Popup() {
   const getPayload = () => {
     if (!clippedContent) return null;
 
-    const content = {
-      ...clippedContent,
-      html: captureStrategy === 'selection' && clippedContent.selectedContent
-        ? clippedContent.selectedContent.html
-        : clippedContent.html,
-      text: captureStrategy === 'selection' && clippedContent.selectedContent
-        ? clippedContent.selectedContent.text
-        : undefined
+    const baseContent = {
+      sourceUrl: clippedContent.pageUrl,
+      title: clippedContent.title,
+      tags: [...autoTags, ...userTags],
+      clippedAt: new Date().toISOString()
     };
+
+    const content = captureStrategy === 'selection' && clippedContent.selectedContent
+      ? clippedContent.selectedContent
+      : clippedContent;
+
+    let formattedContent: FormattedClip;
+
+    switch (selectedFormat) {
+      case 'article':
+        formattedContent = {
+          ...baseContent,
+          type: 'article',
+          content: content.html || content.text || '',
+          snippet: content.text?.substring(0, 200)
+        };
+        break;
+
+      case 'link':
+        formattedContent = {
+          ...baseContent,
+          type: 'link',
+          url: clippedContent.url || clippedContent.pageUrl
+        };
+        break;
+
+      case 'social-post':
+        formattedContent = {
+          ...baseContent,
+          type: 'social-post',
+          platform: new URL(clippedContent.pageUrl).hostname,
+          author: '', // Would need additional parsing
+          content: content.text || ''
+        };
+        break;
+
+      case 'media':
+        formattedContent = {
+          ...baseContent,
+          type: 'media',
+          mediaType: (clippedContent.mediaType as 'image' | 'video' | 'audio') || 'image',
+          url: clippedContent.url || ''
+        };
+        break;
+
+      case 'code-repo':
+        formattedContent = {
+          ...baseContent,
+          type: 'code-repo',
+          platform: 'github', // Would need to handle other platforms
+          owner: '',  // Would need parsing
+          repo: ''    // Would need parsing
+        };
+        break;
+
+      case 'person':
+        formattedContent = {
+          ...baseContent,
+          type: 'person',
+          name: clippedContent.title || ''
+        };
+        break;
+
+      default:
+        formattedContent = {
+          ...baseContent,
+          type: 'link',
+          url: clippedContent.pageUrl
+        };
+    }
 
     return {
       format: selectedFormat,
-      content,
-      tags: [...autoTags, ...userTags],
+      content: formattedContent,
       strategy: captureStrategy
     };
   };
