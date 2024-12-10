@@ -1,92 +1,10 @@
 import { useEffect, useState } from 'react';
 import browser from 'webextension-polyfill';
 import "./Popup.css";
-
-type ClipFormat = 'link' | 'article' | 'social-post' | 'media' | 'code-repo' | 'person';
-type CaptureStrategy = 'selection' | 'full-page' | 'readability';
-
-// Base clip content interfaces
-interface BaseClipContent {
-  sourceUrl: string;
-  title?: string;
-  snippet?: string;
-  tags: string[];
-  clippedAt: string;
-}
-
-interface ArticleClip extends BaseClipContent {
-  type: 'article';
-  authors?: string[];
-  publishedDate?: string;
-  content: string;
-  readingTime?: number;
-}
-
-interface LinkClip extends BaseClipContent {
-  type: 'link';
-  url: string;
-  favicon?: string;
-}
-
-interface SocialPostClip extends BaseClipContent {
-  type: 'social-post';
-  platform: string;
-  author: string;
-  content: string;
-  engagement?: {
-    likes?: number;
-    shares?: number;
-    comments?: number;
-  };
-}
-
-interface MediaClip extends BaseClipContent {
-  type: 'media';
-  mediaType: 'image' | 'video' | 'audio';
-  url: string;
-  duration?: number;
-  dimensions?: {
-    width: number;
-    height: number;
-  };
-}
-
-interface CodeRepoClip extends BaseClipContent {
-  type: 'code-repo';
-  platform: string;
-  owner: string;
-  repo: string;
-  language?: string;
-  stars?: number;
-  forks?: number;
-}
-
-interface PersonClip extends BaseClipContent {
-  type: 'person';
-  name: string;
-  role?: string;
-  company?: string;
-  socialProfiles?: {
-    platform: string;
-    url: string;
-  }[];
-}
-
-type ClippedContent = {
-  type: 'text' | 'link' | 'media' | 'webpage';
-  mediaType?: string;
-  text?: string;
-  url?: string;
-  pageUrl: string;
-  html?: string;
-  title?: string;
-  selectedContent?: {
-    text?: string;
-    html?: string;
-  };
-};
-
-type FormattedClip = ArticleClip | LinkClip | SocialPostClip | MediaClip | CodeRepoClip | PersonClip;
+import { CaptureStrategy, ClipFormat, ClippedContent, FormattedClip } from '../model';
+import { ClipperPreview } from '../components/ClipperPreview';
+import { TagManager } from '../components/TagManager';
+import { ActionBar } from '../components/ActionBar';
 
 export default function Popup() {
   const [clippedContent, setClippedContent] = useState<ClippedContent | null>(null);
@@ -105,6 +23,66 @@ export default function Popup() {
     };
   }, []);
 
+
+  // Connect to background script and handle cleanup
+  useEffect(() => {
+    const port = browser.runtime.connect({ name: "popup" });
+    return () => {
+      port.disconnect();
+    };
+  }, []);
+
+  const extractYouTubeData = async (tabId: number) => {
+    const [{ result }] = await browser.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const videoId = new URLSearchParams(window.location.search).get('v');
+        const channelName = document.querySelector('#channel-name')?.textContent || '';
+        const description = document.querySelector('#description-text')?.textContent || '';
+        const views = document.querySelector('.view-count')?.textContent;
+        const likes = document.querySelector('#top-level-buttons-computed ytd-toggle-button-renderer:first-child #text')?.textContent;
+        const uploadDate = document.querySelector('#info-strings yt-formatted-string')?.textContent;
+
+        return {
+          videoId,
+          channelName,
+          description,
+          views: views ? parseInt(views.replace(/[^0-9]/g, '')) : undefined,
+          likes: likes ? parseInt(likes.replace(/[^0-9]/g, '')) : undefined,
+          uploadDate
+        };
+      }
+    });
+    return result;
+  };
+
+  const extractGitHubData = async (tabId: number) => {
+    const [{ result }] = await browser.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const [owner, repo] = window.location.pathname.split('/').filter(Boolean);
+        const description = document.querySelector('div[data-pjax="#js-repo-pjax-container"] p')?.textContent || '';
+        const stars = document.querySelector('a[href$="/stargazers"] span')?.textContent;
+        const forks = document.querySelector('a[href$="/network/members"] span')?.textContent;
+        const language = document.querySelector('span[itemprop="programmingLanguage"]')?.textContent;
+        const topics = Array.from(document.querySelectorAll('a[data-octo-click="topic_click"]')).map(el => el.textContent || '');
+        const lastUpdated = document.querySelector('relative-time')?.getAttribute('datetime');
+
+        return {
+          owner,
+          repo,
+          description,
+          stars: stars ? parseInt(stars.replace(/[^0-9]/g, '')) : undefined,
+          forks: forks ? parseInt(forks.replace(/[^0-9]/g, '')) : undefined,
+          language,
+          topics,
+          lastUpdated
+        };
+      }
+    });
+    return result;
+  };
+
   useEffect(() => {
     async function initializeContent() {
       const [currentTab] = await browser.tabs.query({
@@ -118,6 +96,23 @@ export default function Popup() {
         pageUrl: currentTab.url!,
         title: currentTab.title,
       };
+
+      // Extract site-specific data
+      const url = new URL(currentTab.url!);
+      if (url.hostname.includes('youtube.com') && url.pathname === '/watch') {
+        pageContent.siteSpecificData = {
+          youtube: await extractYouTubeData(currentTab.id!)
+        };
+        setSelectedFormat('media');
+      } else if (url.hostname === 'github.com') {
+        const pathParts = url.pathname.split('/').filter(Boolean);
+        if (pathParts.length >= 2) { // It's a repo
+          pageContent.siteSpecificData = {
+            github: await extractGitHubData(currentTab.id!)
+          };
+          setSelectedFormat('code-repo');
+        }
+      }
 
       // Check for stored selection
       const stored = await browser.storage.local.get('clipContent');
@@ -136,7 +131,6 @@ export default function Popup() {
         setCaptureStrategy('selection');
 
         if (clipContent.type === 'text' && clipContent.selectedContent) {
-          // Handle text selection - note the selectedContent structure matches exactly
           pageContent.selectedContent = clipContent.selectedContent;
           pageContent.type = clipContent.type;
         } else if (clipContent.type === 'link') {
@@ -171,18 +165,29 @@ export default function Popup() {
     const tags: string[] = [];
     const url = content.pageUrl;
 
-    if (url.includes('youtube.com')) tags.push('youtube');
-    if (url.includes('github.com')) tags.push('github');
+    if (url.includes('youtube.com')) {
+      tags.push('youtube', 'video');
+      content.type = 'media';
+      content.mediaType = 'video';
+      if (content.siteSpecificData?.youtube?.channelName) {
+        tags.push(content.siteSpecificData.youtube.channelName.toLowerCase().replace(/\s+/g, '-'));
+      }
+    }
+
+    if (url.includes('github.com')) {
+      tags.push('github', 'code');
+      if (content.siteSpecificData?.github?.language) {
+        tags.push(content.siteSpecificData.github.language.toLowerCase());
+      }
+      content.siteSpecificData?.github?.topics?.forEach(topic =>
+        tags.push(topic.toLowerCase())
+      );
+    }
+
     if (content.type === 'media') tags.push('media');
-    if (content.type === 'media' && content.mediaType === 'image') {
-      tags.push('image');
-    }
-    if (content.type === 'media' && content.mediaType === 'video') {
-      tags.push('video');
-    }
-    if (content.type === 'media' && content.mediaType === 'audio') {
-      tags.push('audio');
-    }
+    if (content.type === 'media' && content.mediaType === 'image') tags.push('image');
+    if (content.type === 'media' && content.mediaType === 'video') tags.push('video');
+    if (content.type === 'media' && content.mediaType === 'audio') tags.push('audio');
     if (content.type === 'text') tags.push('text');
 
     setAutoTags(tags);
@@ -238,8 +243,12 @@ export default function Popup() {
           ...baseContent,
           type: 'social-post',
           platform: new URL(clippedContent.pageUrl).hostname,
-          author: '', // Would need additional parsing
-          content: content.text || ''
+          author: clippedContent.siteSpecificData?.youtube?.channelName || '',
+          content: content.text || '',
+          engagement: clippedContent.siteSpecificData?.youtube ? {
+            likes: clippedContent.siteSpecificData.youtube.likes,
+            views: clippedContent.siteSpecificData.youtube.views
+          } : undefined
         };
         break;
 
@@ -248,17 +257,24 @@ export default function Popup() {
           ...baseContent,
           type: 'media',
           mediaType: (clippedContent.mediaType as 'image' | 'video' | 'audio') || 'image',
-          url: clippedContent.url || ''
+          url: clippedContent.url || '',
+          ...(clippedContent.siteSpecificData?.youtube && {
+            duration: 0, // Would need to extract from YouTube
+          })
         };
         break;
 
       case 'code-repo':
+        const githubData = clippedContent.siteSpecificData?.github;
         formattedContent = {
           ...baseContent,
           type: 'code-repo',
-          platform: 'github', // Would need to handle other platforms
-          owner: '',  // Would need parsing
-          repo: ''    // Would need parsing
+          platform: 'github',
+          owner: githubData?.owner || '',
+          repo: githubData?.repo || '',
+          language: githubData?.language,
+          stars: githubData?.stars,
+          forks: githubData?.forks
         };
         break;
 
@@ -304,154 +320,33 @@ export default function Popup() {
     }
   };
 
-  function renderPreview() {
-    if (!clippedContent) return <div>Loading...</div>;
-
-    const payload = getPayload();
-    const content = captureStrategy === 'selection' ?
-      clippedContent.selectedContent :
-      clippedContent;
-
-    return (
-      <div className="preview-content">
-        <select
-          value={captureStrategy}
-          onChange={(e) => setCaptureStrategy(e.target.value as CaptureStrategy)}
-          className="strategy-picker"
-        >
-          {hasSelectedContent && <option value="selection">Selected Content</option>}
-          <option value="full-page">Full Page</option>
-          <option value="readability">Reader View</option>
-        </select>
-
-        <div className="preview-tabs">
-          <button
-            className={!showRaw ? 'active' : ''}
-            onClick={() => setShowRaw(false)}
-          >
-            Preview
-          </button>
-          <button
-            className={showRaw ? 'active' : ''}
-            onClick={() => setShowRaw(true)}
-          >
-            Raw Content
-          </button>
-        </div>
-
-        {!showRaw ? (
-          <div>
-            {clippedContent.type === 'text' && (
-              <div>
-                <h3>Selected Text</h3>
-                <p>{content?.text}</p>
-                <div className="meta">
-                  <span>From: {clippedContent.pageUrl}</span>
-                </div>
-              </div>
-            )}
-
-            {clippedContent.type === 'link' && (
-              <div>
-                <h3>Link</h3>
-                <a href={clippedContent.url} target="_blank" rel="noopener noreferrer">
-                  {clippedContent.url}
-                </a>
-                <div className="meta">
-                  <span>From: {clippedContent.pageUrl}</span>
-                </div>
-              </div>
-            )}
-
-            {clippedContent.type === 'media' && (
-              <div>
-                <h3>Media</h3>
-                {clippedContent.mediaType === 'image' && (
-                  <img
-                    src={clippedContent.url}
-                    alt="Clipped content"
-                    style={{ maxWidth: '100%', height: 'auto' }}
-                  />
-                )}
-                {clippedContent.mediaType === 'video' && (
-                  <video
-                    src={clippedContent.url}
-                    controls
-                    style={{ maxWidth: '100%', height: 'auto' }}
-                  />
-                )}
-                {clippedContent.mediaType === 'audio' && (
-                  <audio
-                    src={clippedContent.url}
-                    controls
-                    style={{ width: '100%' }}
-                  />
-                )}
-                <div className="meta">
-                  <span>From: {clippedContent.pageUrl}</span>
-                </div>
-              </div>
-            )}
-
-            {clippedContent.type === 'webpage' && (
-              <div>
-                <h3>{clippedContent.title || 'Web Page'}</h3>
-                <p>{clippedContent.pageUrl}</p>
-                <div className="meta">
-                  <span>{content?.html?.length || 0} characters of HTML content</span>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div>
-            <div className="raw-section">
-              <h4>Raw HTML/Content</h4>
-              <pre>
-                {content?.html || content?.text || JSON.stringify(content, null, 2)}
-              </pre>
-            </div>
-            <div className="raw-section">
-              <h4>Payload to Server</h4>
-              <pre>
-                {JSON.stringify(payload, null, 2)}
-              </pre>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
   return (
     <div className="clipper-popup">
       <div className="preview-section">
-        {renderPreview()}
+        {clippedContent && (
+          <ClipperPreview
+            content={clippedContent}
+            strategy={captureStrategy}
+            hasSelectedContent={hasSelectedContent}
+            showRaw={showRaw}
+            onStrategyChange={setCaptureStrategy}
+            onShowRawChange={setShowRaw}
+          />
+        )}
       </div>
 
       <div className="clipping-controls">
-        <select
-          value={selectedFormat}
-          onChange={(e) => handleFormatChange(e.target.value as ClipFormat)}
-        >
-          <option value="link">Link</option>
-          <option value="article">Article</option>
-          <option value="social-post">Social Post</option>
-          <option value="media">Media</option>
-          <option value="code-repo">Code Repository</option>
-          <option value="person">Person Profile</option>
-        </select>
+        <ActionBar
+          selectedFormat={selectedFormat}
+          onFormatChange={setSelectedFormat}
+          onClip={handleClip}
+        />
 
-        <div>
-          <div>Auto Tags: {autoTags.map(tag => <span key={tag}>#{tag} </span>)}</div>
-          <input
-            type="text"
-            placeholder="Add tags (comma-separated)"
-            onChange={(e) => handleTagInput(e.target.value)}
-          />
-        </div>
-
-        <button onClick={handleClip}>Clip Content</button>
+        <TagManager
+          autoTags={autoTags}
+          userTags={userTags}
+          onTagsChange={setUserTags}
+        />
       </div>
 
       <style>{`
