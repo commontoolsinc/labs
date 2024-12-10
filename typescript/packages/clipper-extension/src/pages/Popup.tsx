@@ -2,112 +2,291 @@ import { useEffect, useState } from 'react';
 import browser from 'webextension-polyfill';
 import "./Popup.css";
 
+type ClipFormat = 'link' | 'article' | 'social-post' | 'media' | 'code-repo' | 'person';
+type CaptureStrategy = 'selection' | 'full-page' | 'readability';
+
 interface ClippedContent {
-  type: 'text' | 'link' | 'image' | 'webpage';
+  type: 'text' | 'link' | 'media' | 'webpage';
+  mediaType?: string;
   text?: string;
   url?: string;
   pageUrl: string;
   html?: string;
   title?: string;
+  selectedContent?: {
+    text?: string;
+    html?: string;
+  };
 }
 
 export default function Popup() {
   const [clippedContent, setClippedContent] = useState<ClippedContent | null>(null);
+  const [selectedFormat, setSelectedFormat] = useState<ClipFormat>('link');
+  const [captureStrategy, setCaptureStrategy] = useState<CaptureStrategy>('full-page');
+  const [userTags, setUserTags] = useState<string[]>([]);
+  const [autoTags, setAutoTags] = useState<string[]>([]);
+  const [showRaw, setShowRaw] = useState(false);
+  const [hasSelectedContent, setHasSelectedContent] = useState(false);
+
+  // Connect to background script and handle cleanup
+  useEffect(() => {
+    const port = browser.runtime.connect({ name: "popup" });
+    return () => {
+      port.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     async function initializeContent() {
-      // Check storage first for existing selection
-      const { clipContent } = await browser.storage.local.get('clipContent');
-
-      if (clipContent) {
-        setClippedContent(clipContent);
-        return;
-      }
-
-      // Get current tab info if no stored content
       const [currentTab] = await browser.tabs.query({
         active: true,
         currentWindow: true
       });
 
+      // Initialize base page content
       const pageContent: ClippedContent = {
         type: 'webpage',
         pageUrl: currentTab.url!,
         title: currentTab.title,
       };
 
-      // Get page HTML
+      // Check for stored selection
+      const stored = await browser.storage.local.get('clipContent');
+      const clipContent = stored.clipContent as ClippedContent | undefined;
+
+      // Always fetch full page HTML
       const [{ result: html }] = await browser.scripting.executeScript({
         target: { tabId: currentTab.id! },
         func: () => document.documentElement.outerHTML,
       });
-
       pageContent.html = html;
+
+      // Handle stored selection if it exists
+      if (clipContent) {
+        setHasSelectedContent(true);
+        setCaptureStrategy('selection');
+
+        if (clipContent.type === 'text' && clipContent.selectedContent) {
+          // Handle text selection - note the selectedContent structure matches exactly
+          pageContent.selectedContent = clipContent.selectedContent;
+          pageContent.type = clipContent.type;
+        } else if (clipContent.type === 'link') {
+          pageContent.type = clipContent.type;
+          pageContent.url = clipContent.url;
+          pageContent.selectedContent = {
+            text: clipContent.url,
+            html: `<a href="${clipContent.url}">${clipContent.url}</a>`
+          };
+        } else if (clipContent.type === 'media') {
+          pageContent.type = clipContent.type;
+          pageContent.url = clipContent.url;
+          pageContent.mediaType = clipContent.mediaType;
+          pageContent.selectedContent = {
+            text: clipContent.url,
+            html: `<img src="${clipContent.url}" />`
+          };
+        }
+      } else {
+        setHasSelectedContent(false);
+        setCaptureStrategy('full-page');
+      }
+
       setClippedContent(pageContent);
+      generateAutoTags(pageContent);
     }
 
     initializeContent().catch(console.error);
   }, []);
 
-  async function clearClipContent() {
-    await browser.storage.local.remove('clipContent');
-    setClippedContent(null);
-  }
+  const generateAutoTags = (content: ClippedContent) => {
+    const tags: string[] = [];
+    const url = content.pageUrl;
+
+    if (url.includes('youtube.com')) tags.push('youtube');
+    if (url.includes('github.com')) tags.push('github');
+    if (content.type === 'media') tags.push('media');
+    if (content.type === 'media' && content.mediaType === 'image') {
+      tags.push('image');
+    }
+    if (content.type === 'media' && content.mediaType === 'video') {
+      tags.push('video');
+    }
+    if (content.type === 'media' && content.mediaType === 'audio') {
+      tags.push('audio');
+    }
+    if (content.type === 'text') tags.push('text');
+
+    setAutoTags(tags);
+  };
+
+  const handleFormatChange = (format: ClipFormat) => {
+    setSelectedFormat(format);
+  };
+
+  const handleTagInput = (input: string) => {
+    const newTags = input.split(',').map(tag =>
+      tag.trim().startsWith('#') ? tag.trim() : `#${tag.trim()}`
+    );
+    setUserTags(newTags);
+  };
+
+  const getPayload = () => {
+    if (!clippedContent) return null;
+
+    const content = {
+      ...clippedContent,
+      html: captureStrategy === 'selection' && clippedContent.selectedContent
+        ? clippedContent.selectedContent.html
+        : clippedContent.html,
+      text: captureStrategy === 'selection' && clippedContent.selectedContent
+        ? clippedContent.selectedContent.text
+        : undefined
+    };
+
+    return {
+      format: selectedFormat,
+      content,
+      tags: [...autoTags, ...userTags],
+      strategy: captureStrategy
+    };
+  };
+
+  const handleClip = async () => {
+    const payload = getPayload();
+    if (!payload) return;
+
+    try {
+      const response = await fetch(process.env.INGESTION_SERVER_URL!, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) throw new Error('Failed to clip content');
+
+      await browser.storage.local.remove('clipContent');
+    } catch (error) {
+      console.error('Clipping failed:', error);
+    }
+  };
 
   function renderPreview() {
     if (!clippedContent) return <div>Loading...</div>;
 
-    switch (clippedContent.type) {
-      case 'text':
-        return (
-          <div className="preview-content">
-            <h3>Selected Text</h3>
-            <p>{clippedContent.text}</p>
-            <div className="meta">
-              <span>From: {clippedContent.pageUrl}</span>
-            </div>
-          </div>
-        );
+    const payload = getPayload();
+    const content = captureStrategy === 'selection' ?
+      clippedContent.selectedContent :
+      clippedContent;
 
-      case 'link':
-        return (
-          <div className="preview-content">
-            <h3>Link</h3>
-            <a href={clippedContent.url} target="_blank" rel="noopener noreferrer">
-              {clippedContent.url}
-            </a>
-            <div className="meta">
-              <span>From: {clippedContent.pageUrl}</span>
-            </div>
-          </div>
-        );
+    return (
+      <div className="preview-content">
+        <select
+          value={captureStrategy}
+          onChange={(e) => setCaptureStrategy(e.target.value as CaptureStrategy)}
+          className="strategy-picker"
+        >
+          {hasSelectedContent && <option value="selection">Selected Content</option>}
+          <option value="full-page">Full Page</option>
+          <option value="readability">Reader View</option>
+        </select>
 
-      case 'image':
-        return (
-          <div className="preview-content">
-            <h3>Image</h3>
-            <img
-              src={clippedContent.url}
-              alt="Clipped content"
-              style={{ maxWidth: '100%', height: 'auto' }}
-            />
-            <div className="meta">
-              <span>From: {clippedContent.pageUrl}</span>
-            </div>
-          </div>
-        );
+        <div className="preview-tabs">
+          <button
+            className={!showRaw ? 'active' : ''}
+            onClick={() => setShowRaw(false)}
+          >
+            Preview
+          </button>
+          <button
+            className={showRaw ? 'active' : ''}
+            onClick={() => setShowRaw(true)}
+          >
+            Raw Content
+          </button>
+        </div>
 
-      case 'webpage':
-        return (
-          <div className="preview-content">
-            <h3>{clippedContent.title || 'Web Page'}</h3>
-            <p>{clippedContent.pageUrl}</p>
-            <div className="meta">
-              <span>{clippedContent.html?.length} characters of HTML content</span>
+        {!showRaw ? (
+          <div>
+            {clippedContent.type === 'text' && (
+              <div>
+                <h3>Selected Text</h3>
+                <p>{content?.text}</p>
+                <div className="meta">
+                  <span>From: {clippedContent.pageUrl}</span>
+                </div>
+              </div>
+            )}
+
+            {clippedContent.type === 'link' && (
+              <div>
+                <h3>Link</h3>
+                <a href={clippedContent.url} target="_blank" rel="noopener noreferrer">
+                  {clippedContent.url}
+                </a>
+                <div className="meta">
+                  <span>From: {clippedContent.pageUrl}</span>
+                </div>
+              </div>
+            )}
+
+            {clippedContent.type === 'media' && (
+              <div>
+                <h3>Media</h3>
+                {clippedContent.mediaType === 'image' && (
+                  <img
+                    src={clippedContent.url}
+                    alt="Clipped content"
+                    style={{ maxWidth: '100%', height: 'auto' }}
+                  />
+                )}
+                {clippedContent.mediaType === 'video' && (
+                  <video
+                    src={clippedContent.url}
+                    controls
+                    style={{ maxWidth: '100%', height: 'auto' }}
+                  />
+                )}
+                {clippedContent.mediaType === 'audio' && (
+                  <audio
+                    src={clippedContent.url}
+                    controls
+                    style={{ width: '100%' }}
+                  />
+                )}
+                <div className="meta">
+                  <span>From: {clippedContent.pageUrl}</span>
+                </div>
+              </div>
+            )}
+
+            {clippedContent.type === 'webpage' && (
+              <div>
+                <h3>{clippedContent.title || 'Web Page'}</h3>
+                <p>{clippedContent.pageUrl}</p>
+                <div className="meta">
+                  <span>{content?.html?.length || 0} characters of HTML content</span>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div>
+            <div className="raw-section">
+              <h4>Raw HTML/Content</h4>
+              <pre>
+                {content?.html || content?.text || JSON.stringify(content, null, 2)}
+              </pre>
+            </div>
+            <div className="raw-section">
+              <h4>Payload to Server</h4>
+              <pre>
+                {JSON.stringify(payload, null, 2)}
+              </pre>
             </div>
           </div>
-        );
-    }
+        )}
+      </div>
+    );
   }
 
   return (
@@ -117,7 +296,28 @@ export default function Popup() {
       </div>
 
       <div className="clipping-controls">
-        {/* Format & tag controls will go here */}
+        <select
+          value={selectedFormat}
+          onChange={(e) => handleFormatChange(e.target.value as ClipFormat)}
+        >
+          <option value="link">Link</option>
+          <option value="article">Article</option>
+          <option value="social-post">Social Post</option>
+          <option value="media">Media</option>
+          <option value="code-repo">Code Repository</option>
+          <option value="person">Person Profile</option>
+        </select>
+
+        <div>
+          <div>Auto Tags: {autoTags.map(tag => <span key={tag}>#{tag} </span>)}</div>
+          <input
+            type="text"
+            placeholder="Add tags (comma-separated)"
+            onChange={(e) => handleTagInput(e.target.value)}
+          />
+        </div>
+
+        <button onClick={handleClip}>Clip Content</button>
       </div>
 
       <style>{`
@@ -157,6 +357,50 @@ export default function Popup() {
           display: flex;
           flex-direction: column;
           gap: 12px;
+        }
+
+        .preview-tabs {
+          display: flex;
+          gap: 8px;
+          margin-bottom: 16px;
+        }
+
+        .preview-tabs button {
+          padding: 8px 16px;
+          border: 1px solid #ddd;
+          background: white;
+          border-radius: 4px;
+          cursor: pointer;
+        }
+
+        .preview-tabs button.active {
+          background: #e0e0e0;
+        }
+
+        .raw-section {
+          margin-bottom: 16px;
+        }
+
+        .raw-section h4 {
+          margin: 0 0 8px 0;
+        }
+
+        .raw-section pre {
+          max-width: 320px;
+          background: #f0f0f0;
+          padding: 12px;
+          border-radius: 4px;
+          max-height: 200px;
+          overflow: auto;
+          margin: 0;
+          font-size: 12px;
+        }
+
+        .strategy-picker {
+          position: absolute;
+          top: 16px;
+          left: 16px;
+          z-index: 1;
         }
       `}</style>
     </div>
