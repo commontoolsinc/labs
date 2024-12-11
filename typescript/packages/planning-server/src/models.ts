@@ -143,21 +143,6 @@ if (Deno.env.get("GROQ_API_KEY")) {
 
   addModel({
     provider: groq,
-    name: "groq:llama-3.3-70b-versatile",
-    aliases: ["groq:llama-3.3-70b"],
-    capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 8000,
-      images: false,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: false,
-    },
-  });
-
-  addModel({
-    provider: groq,
     name: "groq:llama-3.1-8b-instant",
     aliases: ["llama-3.1-8b"],
     capabilities: {
@@ -315,6 +300,20 @@ if (
       streaming: true,
     },
   });
+  addModel({
+    provider: vertex,
+    name: "gemini-2.0-flash-exp",
+    aliases: ["google:gemini-2.0-flash", "gemini-2.0-flash"],
+    capabilities: {
+      contextWindow: 1_048_576,
+      maxOutputTokens: 8192,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
 
   addModel({
     provider: vertex,
@@ -322,6 +321,20 @@ if (
     aliases: ["google:gemini-1.5-pro", "gemini-1.5-pro"],
     capabilities: {
       contextWindow: 1_000_000,
+      maxOutputTokens: 8192,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+  addModel({
+    provider: vertex,
+    name: "google:gemini-exp-1206",
+    aliases: ["google:gemini-exp-1206", "gemini-exp-1206"],
+    capabilities: {
+      contextWindow: 2_000_000,
       maxOutputTokens: 8192,
       images: true,
       prefill: true,
