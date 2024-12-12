@@ -1,9 +1,9 @@
 import { Reference } from "merkle-reference";
 import { changes, Doc, Spell } from "./spell.jsx";
-import { Collection, defaultTo, Transact } from "../sugar.js";
-import { h, $, select } from "@commontools/common-system";
+import { Transact } from "../sugar.js";
+import { h } from "@commontools/common-system";
 
-type CommentsState = {
+type DemoState = {
   title: string;
   description: string;
   meta: Reference | null;
@@ -14,7 +14,7 @@ type Meta = {
   submittedAt: string;
 }
 
-export class CommentBoxSpell extends Spell<CommentsState> {
+export class DemoSpell extends Spell<DemoState> {
   constructor() {
     super();
 
