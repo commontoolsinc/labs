@@ -1,7 +1,7 @@
 import { Reference } from "merkle-reference";
-import { changes, Doc, Spell } from "./spell.jsx";
+import { changes, Charm, Doc, Spell } from "./spell.jsx";
 import { Transact } from "../sugar.js";
-import { Behavior, h, Rule, Selector } from "@commontools/common-system";
+import { h } from "@commontools/common-system";
 
 type DemoState = {
   title: string;
@@ -12,10 +12,6 @@ type DemoState = {
 type Meta = {
   category: string;
   submittedAt: string;
-}
-
-function Charm<T extends Record<string, Rule<Selector>>>({ spell, self }: { spell: Behavior<T>, self: Reference }) {
-  return <common-charm id={self.toString()} key={self.toString()} spell={() => spell} entity={() => self} />
 }
 
 function Metadata({ entity }: { entity: Reference }) {
@@ -91,9 +87,4 @@ class MetadataSpell extends Spell<Meta> {
       </div>
     );
   }
-}
-
-export function execute<T extends Record<string, any>, S extends Spell<T>>(id: Reference, SpellClass: new () => S) {
-  const spell = new SpellClass().compile()
-  return spell.spawn(id);
 }
