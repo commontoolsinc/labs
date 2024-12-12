@@ -179,12 +179,6 @@ export class MutationLogEntry extends LitElement {
 
   override render() {
     const changes = this.mutation.changes;
-    let icon = "";
-    let colorClass = "";
-
-    // Handle array of changes
-    const change = changes[0];
-
     const formatValue = (val: any) => {
       const formatted = this.formatValue(val);
       if (typeof val === "string" && val.length > 32) {
@@ -195,22 +189,7 @@ export class MutationLogEntry extends LitElement {
       return formatted;
     };
 
-    let field;
-    let value;
-
-    if (change.Assert) {
-      icon = "+";
-      colorClass = "assert";
-      [, field, value] = change.Assert;
-    } else if (change.Upsert) {
-      icon = "~";
-      colorClass = "upsert";
-      [, field, value] = change.Upsert;
-    } else if (change.Retract) {
-      icon = "-";
-      colorClass = "retract";
-      [, field, value] = change.Retract;
-    } else {
+    if (changes.length === 0) {
       return html`
         <div class="log-line">
           <span><b>&lt;effect&gt;</b></span>
@@ -226,20 +205,43 @@ export class MutationLogEntry extends LitElement {
     }
 
     return html`
-      <div class="log-line">
-        <span class=${colorClass}><b>${icon}</b></span>
-        <span
-          ><b>${field}</b>=
-          ${field === "~/common/ui" ? "re-render" : formatValue(value)}</span
-        >
-        <button
-          class="details-btn"
-          @click=${this.showDetails}
-          title="Show full details"
-        >
-          🔍
-        </button>
-      </div>
+      ${changes.map((change: any) => {
+        let icon = "";
+        let colorClass = "";
+        let field;
+        let value;
+
+        if (change.Assert) {
+          icon = "+";
+          colorClass = "assert";
+          [, field, value] = change.Assert;
+        } else if (change.Upsert) {
+          icon = "~";
+          colorClass = "upsert";
+          [, field, value] = change.Upsert;
+        } else if (change.Retract) {
+          icon = "-";
+          colorClass = "retract";
+          [, field, value] = change.Retract;
+        }
+
+        return html`
+          <div class="log-line">
+            <span class=${colorClass}><b>${icon}</b></span>
+            <span>
+              <b>${field}</b>=
+              ${field === "~/common/ui" ? "re-render" : formatValue(value)}
+            </span>
+            <button
+              class="details-btn"
+              @click=${this.showDetails}
+              title="Show full details"
+            >
+              🔍
+            </button>
+          </div>
+        `;
+      })}
     `;
   }
 }
@@ -538,16 +540,18 @@ export class CharmDebugger extends LitElement {
 
   private projectMutation(mutation: any) {
     const entityId = mutation.entity;
-    const changes = mutation.changes[0];
+    const changes = mutation.changes;
     let currentState = this.entityProjections.get(entityId) || {};
 
-    if (changes.Assert || changes.Upsert) {
-      const [, field, value] = changes.Assert || changes.Upsert;
-      currentState = { ...currentState, [field]: value };
-    } else if (changes.Retract) {
-      const [, field] = changes.Retract;
-      const { [field]: _, ...rest } = currentState;
-      currentState = rest;
+    for (const change of changes) {
+      if (change.Assert || change.Upsert) {
+        const [, field, value] = change.Assert || change.Upsert;
+        currentState = { ...currentState, [field]: value };
+      } else if (change.Retract) {
+        const [, field] = change.Retract;
+        const { [field]: _, ...rest } = currentState;
+        currentState = rest;
+      }
     }
 
     this.entityProjections.set(entityId, currentState);
