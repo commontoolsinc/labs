@@ -54,7 +54,7 @@ import * as countdown from "./spells/countdown.jsx";
 import * as themeable from "./spells/themeable.jsx";
 import TimerService from "./effects/timer.js";
 import { settings } from "./spells/settings.jsx";
-import {CommentBoxSpell, execute} from './spells/comments.jsx'
+import {DemoSpell, execute} from './spells/demo.jsx'
 
 export type Charm = {
   [NAME]?: string;
@@ -247,7 +247,7 @@ addCharms([
   // helloWorldWithLikes.spawn({ helloWorldWithLikes: 1 }),
   countdown.spawn({ countdown: 1 }),
   themeable.spawn({ themeable: 1 }),
-  execute(refer({ classTest: 1 }), CommentBoxSpell),
+  execute(refer({ classTest: 1 }), DemoSpell),
   FetchService.spawn() as any,
   GmailService.spawn() as any,
   ViewService.spawn() as any,
