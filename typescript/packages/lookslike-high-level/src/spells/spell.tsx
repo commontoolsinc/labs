@@ -1,6 +1,6 @@
 import { Reference } from "merkle-reference";
 import { defaultTo, event, Transact } from "../sugar.js";
-import { $, Behavior, behavior, Instruction, refer, Rule, select, Selector, Session } from "@commontools/common-system";
+import { h, $, Behavior, behavior, Instruction, refer, Rule, Scope, Select, select, Selector, Session } from "@commontools/common-system";
 
 export function appendOnPrefix(path: string): string {
   if (!path.startsWith('~/on/')) {
@@ -13,6 +13,24 @@ export const changes = (...instructions: (Instruction | Instruction[])[]) => {
   return instructions.reduce<Instruction[]>((acc, curr) =>
     acc.concat(Array.isArray(curr) ? curr : [curr]), []);
 };
+
+export class Embed<T extends any> {
+  constructor(public value: T) { }
+
+  static decode<T>(txt: string): T {
+    return JSON.parse(txt) as T;
+  }
+
+  id() {
+    const txt = JSON.stringify(this.value);
+    return refer(txt);
+  }
+
+  save() {
+    const txt = JSON.stringify(this.value);
+    return txt;
+  }
+}
 
 export class Doc<T extends Record<string, string | number | boolean>> {
   constructor(public value: T) { }
@@ -34,6 +52,15 @@ export class Doc<T extends Record<string, string | number | boolean>> {
       { Assert: [self, appendOnPrefix(event), detail] }
     ]
   }
+}
+
+export function execute<T extends Record<string, any>, S extends Spell<T>>(id: Reference, SpellClass: new () => S) {
+  const spell = new SpellClass().compile()
+  return spell.spawn(id);
+}
+
+export function Charm<T extends Record<string, Rule<Selector>>>({ spell, self }: { spell: Behavior<T>, self: Reference }) {
+  return <common-charm id={self.toString()} key={self.toString()} spell={() => spell} entity={() => self} />
 }
 
 export abstract class Spell<T extends Record<string, any>> {
@@ -71,6 +98,13 @@ export abstract class Spell<T extends Record<string, any>> {
 
   abstract init(): T;
   abstract render(state: T): any;
+
+  get<S extends string>(field: S, defaultValue?: any) {
+    if (defaultValue) {
+      return select({ [field]: $[field] } as const).clause(defaultTo($.self, field, $[field], defaultValue));
+    }
+    return select({ [field]: $[field] } as const).match($.self, field, $[field])
+  }
 
   compile(): Behavior<Record<string, Rule<Selector>>> {
     const initialState = this.init();
