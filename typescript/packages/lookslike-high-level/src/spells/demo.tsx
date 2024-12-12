@@ -1,7 +1,7 @@
 import { Reference } from "merkle-reference";
 import { changes, Doc, Spell } from "./spell.jsx";
 import { Transact } from "../sugar.js";
-import { h } from "@commontools/common-system";
+import { Behavior, h, Rule, Selector } from "@commontools/common-system";
 
 type DemoState = {
   title: string;
@@ -12,6 +12,14 @@ type DemoState = {
 type Meta = {
   category: string;
   submittedAt: string;
+}
+
+function Charm<T extends Record<string, Rule<Selector>>>({ spell, self }: { spell: Behavior<T>, self: Reference }) {
+  return <common-charm id={self.toString()} key={self.toString()} spell={() => spell} entity={() => self} />
+}
+
+function Metadata({ entity }: { entity: Reference }) {
+  return <Charm spell={new MetadataSpell().compile()} self={entity} />
 }
 
 export class DemoSpell extends Spell<DemoState> {
@@ -46,7 +54,7 @@ export class DemoSpell extends Spell<DemoState> {
         <p>{description}</p>
         <pre>{JSON.stringify(meta, null, 2)}</pre>
         {meta && <div>
-          <common-charm id={meta?.toString()} key={meta?.toString()} spell={() => new MetadataSpell().compile()} entity={() => meta} />
+          <Metadata entity={meta} />
         </div>}
         <common-form onsubmit={'~/on/submit'}>
           <common-input type="text" name="message" />
