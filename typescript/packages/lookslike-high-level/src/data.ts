@@ -34,7 +34,7 @@ import "./recipes/playlist.js";
 // import FetchExample from "./recipes/fetcher.jsx";
 import FetchService from "./effects/fetch.js";
 import GmailService from "./effects/gmail.js";
-import { UI as ViewService } from "@commontools/common-system";
+import { refer, UI as ViewService } from "@commontools/common-system";
 
 import * as helloWorld from "./spells/01_helloWorld.jsx";
 import * as counter from "./spells/02_counter.jsx";
@@ -54,6 +54,7 @@ import * as countdown from "./spells/countdown.jsx";
 import * as themeable from "./spells/themeable.jsx";
 import TimerService from "./effects/timer.js";
 import { settings } from "./spells/settings.jsx";
+import {CommentBoxSpell, execute} from './spells/comments.jsx'
 
 export type Charm = {
   [NAME]?: string;
@@ -246,6 +247,7 @@ addCharms([
   // helloWorldWithLikes.spawn({ helloWorldWithLikes: 1 }),
   countdown.spawn({ countdown: 1 }),
   themeable.spawn({ themeable: 1 }),
+  execute(refer({ classTest: 1 }), CommentBoxSpell),
   FetchService.spawn() as any,
   GmailService.spawn() as any,
   ViewService.spawn() as any,
