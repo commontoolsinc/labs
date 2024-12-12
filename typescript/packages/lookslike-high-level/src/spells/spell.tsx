@@ -1,6 +1,6 @@
 import { Reference } from "merkle-reference";
 import { defaultTo, event, Transact } from "../sugar.js";
-import { $, behavior, Instruction, refer, select, Session } from "@commontools/common-system";
+import { $, Behavior, behavior, Instruction, refer, Rule, select, Selector, Session } from "@commontools/common-system";
 
 export function appendOnPrefix(path: string): string {
   if (!path.startsWith('~/on/')) {
@@ -72,7 +72,7 @@ export abstract class Spell<T extends Record<string, any>> {
   abstract init(): T;
   abstract render(state: T): any;
 
-  compile() {
+  compile(): Behavior<Record<string, Rule<Selector>>> {
     const initialState = this.init();
     const stateKeys = Object.keys(initialState) as Array<keyof T>;
 
@@ -135,6 +135,6 @@ export abstract class Spell<T extends Record<string, any>> {
       .render(this.render)
       .commit();
 
-    return behavior(behaviorDef);
+    return behavior(behaviorDef) as any;
   }
 }
