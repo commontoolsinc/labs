@@ -44,6 +44,7 @@ export type OpaqueRefMethods<T> = {
     frame: Frame;
   };
   unsafe_bindToRecipeAndPath(recipe: Recipe, path: PropertyKey[]): void;
+  unsafe_getExternal(): OpaqueRef<T>;
   map<S>(
     fn: (value: T extends Array<infer U> ? Opaque<U> : Opaque<T>) => Opaque<S>,
   ): Opaque<S[]>;
