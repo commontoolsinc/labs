@@ -77,6 +77,8 @@ export type ClippedContent = {
   pageUrl: string;
   html?: string;
   title?: string;
+  pageScreenshot?: string; // base64 encoded screenshot
+  previewImage?: string;  // URL or base64 of preview image
   selectedContent?: {
     text?: string;
     html?: string;

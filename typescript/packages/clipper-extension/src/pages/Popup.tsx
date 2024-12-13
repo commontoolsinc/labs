@@ -5,7 +5,8 @@ import { CaptureStrategy, ClipFormat, ClippedContent, FormattedClip } from '../m
 import { ClipperPreview } from '../components/ClipperPreview';
 import { TagManager } from '../components/TagManager';
 import { ActionBar } from '../components/ActionBar';
-import { extractSiteSpecificData, formatClipContent, generateAutoTags, mapStoredClipToPageContent } from '../clipping';
+import { captureScreenshot, extractPreviewImage, extractSiteSpecificData, formatClipContent, generateAutoTags, mapStoredClipToPageContent } from '../clipping';
+import { ImagePreviews } from '../components/ImagePreviews';
 
 export default function Popup() {
   const [clippedContent, setClippedContent] = useState<ClippedContent | null>(null);
@@ -37,6 +38,24 @@ export default function Popup() {
         pageUrl: currentTab.url!,
         title: currentTab.title,
       };
+
+      // Get preview image from page
+      const [{ result: previewImage }] = await browser.scripting.executeScript({
+        target: { tabId: currentTab.id! },
+        func: () => extractPreviewImage(document)
+      });
+
+      if (previewImage) {
+        pageContent.previewImage = previewImage;
+      }
+
+      // Capture screenshot
+      try {
+        const screenshot = await captureScreenshot(currentTab.id!);
+        pageContent.pageScreenshot = screenshot;
+      } catch (error) {
+        console.error('Failed to capture screenshot:', error);
+      }
 
       // Extract site-specific data
       const url = new URL(currentTab.url!);
@@ -114,14 +133,20 @@ export default function Popup() {
     <div className="clipper-popup">
       <div className="preview-section">
         {clippedContent && (
-          <ClipperPreview
-            content={clippedContent}
-            strategy={captureStrategy}
-            hasSelectedContent={hasSelectedContent}
-            showRaw={showRaw}
-            onStrategyChange={setCaptureStrategy}
-            onShowRawChange={setShowRaw}
-          />
+          <>
+            <ClipperPreview
+              content={clippedContent}
+              strategy={captureStrategy}
+              hasSelectedContent={hasSelectedContent}
+              showRaw={showRaw}
+              onStrategyChange={setCaptureStrategy}
+              onShowRawChange={setShowRaw}
+            />
+            <ImagePreviews
+              previewImage={clippedContent.previewImage}
+              pageScreenshot={clippedContent.pageScreenshot}
+            />
+          </>
         )}
       </div>
 

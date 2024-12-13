@@ -44,7 +44,9 @@ export const formatClipContent = (
     sourceUrl: clippedContent.pageUrl,
     title: clippedContent.title,
     tags: [...autoTags, ...userTags],
-    clippedAt: new Date().toISOString()
+    clippedAt: new Date().toISOString(),
+    previewImage: clippedContent.previewImage,
+    pageScreenshot: clippedContent.pageScreenshot
   };
 
   const content = captureStrategy === 'selection' && clippedContent.selectedContent
@@ -231,3 +233,79 @@ const extractGitHubData = async (tabId: number) => {
   });
   return result;
 };
+export async function extractPreviewImage(document: Document): Promise<string | null> {
+  // Check common meta tags in order of preference
+  const selectors = [
+    'meta[property="og:image"]',
+    'meta[name="twitter:image"]',
+    'meta[property="image"]',
+    'link[rel="image_src"]'
+  ];
+
+  for (const selector of selectors) {
+    const element = document.querySelector(selector);
+    if (element) {
+      const url = element.getAttribute('content') || element.getAttribute('href');
+      if (url) return url;
+    }
+  }
+
+  // Look for large images in the page body
+  const images = Array.from(document.getElementsByTagName('img'));
+  const largeImages = images
+    .filter(img => {
+      const width = parseInt(img.getAttribute('width') || '0');
+      const height = parseInt(img.getAttribute('height') || '0');
+      return width > 200 && height > 200;
+    })
+    .map(img => img.src)
+    .filter(src => src && !src.includes('avatar') && !src.includes('icon'));
+
+  if (largeImages.length > 0) {
+    return largeImages[0];
+  }
+
+  return null;
+}
+
+// Capture full page screenshot
+export async function captureScreenshot(tabId: number): Promise<string> {
+  const screenshot = await browser.tabs.captureVisibleTab(undefined, {
+    format: 'png',
+    quality: 80
+  });
+
+  // Create image element to get original dimensions
+  const img = new Image();
+  const loadPromise = new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error('Failed to load screenshot'));
+  });
+  img.src = screenshot;
+  await loadPromise;
+
+  // Calculate new dimensions preserving aspect ratio
+  let width = img.width;
+  let height = img.height;
+  const maxSize = 512;
+
+  if (width > maxSize || height > maxSize) {
+    if (width > height) {
+      height = Math.round((height / width) * maxSize);
+      width = maxSize;
+    } else {
+      width = Math.round((width / height) * maxSize);
+      height = maxSize;
+    }
+  }
+
+  // Create canvas and draw resized image
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Failed to get canvas context');
+
+  ctx.drawImage(img, 0, 0, width, height);
+  return canvas.toDataURL('image/png', 0.8);
+}

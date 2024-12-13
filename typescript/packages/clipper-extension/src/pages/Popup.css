@@ -172,3 +172,37 @@ h3 {
     overflow-x: auto;
     white-space: pre-wrap;
 }
+
+.image-previews {
+    margin: 10px 0;
+    border: 1px solid #eee;
+    border-radius: 4px;
+}
+
+.image-preview-tabs {
+    display: flex;
+    border-bottom: 1px solid #eee;
+}
+
+.image-preview-tabs button {
+    padding: 8px 16px;
+    border: none;
+    background: none;
+    cursor: pointer;
+}
+
+.image-preview-tabs button.active {
+    border-bottom: 2px solid #007bff;
+    color: #007bff;
+}
+
+.image-preview-content {
+    padding: 10px;
+    max-height: 200px;
+    overflow: auto;
+}
+
+.image-preview-content img {
+    max-width: 100%;
+    height: auto;
+}

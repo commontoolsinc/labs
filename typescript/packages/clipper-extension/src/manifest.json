@@ -26,12 +26,14 @@
   },
   "permissions": [],
   "{{chrome}}.permissions": [
+    "tabs",
     "storage",
     "activeTab",
     "contextMenus",
     "scripting"
   ],
   "{{firefox}}.permissions": [
+    "tabs",
     "storage",
     "activeTab",
     "contextMenus",
