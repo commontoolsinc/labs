@@ -54,9 +54,6 @@ import * as countdown from "./spells/countdown.jsx";
 import * as themeable from "./spells/themeable.jsx";
 import TimerService from "./effects/timer.js";
 import { settings } from "./spells/settings.jsx";
-import {DemoSpell} from './spells/demo.jsx'
-import { GameOfLifeSpell } from "./spells/gameOfLife.jsx";
-import { execute } from "./spells/spell.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -249,8 +246,6 @@ addCharms([
   // helloWorldWithLikes.spawn({ helloWorldWithLikes: 1 }),
   countdown.spawn({ countdown: 1 }),
   themeable.spawn({ themeable: 1 }),
-  execute(refer({ classTest: 1 }), DemoSpell),
-  execute(refer({ classTest: 2 }), GameOfLifeSpell),
   FetchService.spawn() as any,
   GmailService.spawn() as any,
   ViewService.spawn() as any,
