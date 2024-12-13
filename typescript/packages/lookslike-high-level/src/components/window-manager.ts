@@ -624,10 +624,9 @@ export class CommonWindowManager extends LitElement {
         buildRecipe(src).then(({ recipe }) => {
           if (recipe) {
             addRecipe(recipe, src, "render data", []);
-
-            runPersistent(recipe, initialData).then((charm) =>
-              this.openCharm(charm)
-            );
+            runPersistent(recipe, initialData)
+              .then(charm => this.openCharm(charm))
+              .then(() => console.log("Recipe successfully loaded"));
           }
         });
       });
