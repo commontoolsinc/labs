@@ -188,6 +188,31 @@ export const sharedDataViewer = behavior({
     },
   },
 
+  clips: {
+    select: {
+      self: $.self,
+      shared: [{ self: $.shared, sourceUrl: $.sourceUrl }],
+      searchTag: $.searchTag,
+    },
+    where: [
+      { Case: [$.self, "searchTag", $.searchTag] },
+      { Case: [tags, $.searchTag, $.shared] },
+      { Case: [$.shared, "sourceUrl", $.sourceUrl] },
+    ],
+    update: ({ self, shared, searchTag }) => {
+      return [
+        render({ self }, ({ self }) => (
+          <div title="Shared">
+            <TagSearch tag={searchTag} />
+            <div>
+              <pre>{JSON.stringify(shared, null, 2)}</pre>
+            </div>
+          </div> as any
+        )),
+      ];
+    },
+  },
+
   emails: {
     select: {
       self: $.self,

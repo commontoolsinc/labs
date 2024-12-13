@@ -1,10 +1,11 @@
 import * as DOM from "@gozala/co-dom";
-import { Reference, Task } from "./db.js";
+import { Task } from "./db.js";
 
 import { Behavior } from "./adapter.js";
 import * as DB from "./db.js";
 import { MOUNT } from "./ui.js";
 import { CharmDebugger, getDebugCharms } from "./debugger.js";
+import { Reference } from "merkle-reference";
 
 export class Charm extends HTMLElement {
   #root: ShadowRoot;

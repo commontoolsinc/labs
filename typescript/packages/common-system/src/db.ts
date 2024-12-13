@@ -6,7 +6,6 @@ import {
   Fact,
   Selector,
   refer,
-  Reference,
   Codec,
   Variant,
   Transaction,
@@ -21,6 +20,7 @@ import type { Effect, Instruction } from "./adapter.js";
 import { Constant } from "datalogia";
 import { logQuery } from "./debug.js";
 import * as Store from "./idb.js";
+import { Reference } from "merkle-reference";
 export * from "synopsys";
 
 export type DB =
