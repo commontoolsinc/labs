@@ -1,4 +1,4 @@
-import { ClipFormat, ClippedContent, FormattedClip } from './model';
+import { ClipFormat, ClippedContent, FormattedClip } from './model.js';
 import browser from 'webextension-polyfill';
 
 export const generateAutoTags = (content: ClippedContent): string[] => {
@@ -233,12 +233,15 @@ const extractGitHubData = async (tabId: number) => {
   });
   return result;
 };
+
 export async function extractPreviewImage(document: Document): Promise<string | null> {
   // Check common meta tags in order of preference
   const selectors = [
     'meta[property="og:image"]',
     'meta[name="twitter:image"]',
+    'meta[name="twitter:image:src"]',
     'meta[property="image"]',
+    'meta[property="og:image:secure_url"]',
     'link[rel="image_src"]'
   ];
 
@@ -250,22 +253,40 @@ export async function extractPreviewImage(document: Document): Promise<string | 
     }
   }
 
-  // Look for large images in the page body
+  // Look for large images in the page body using natural dimensions
   const images = Array.from(document.getElementsByTagName('img'));
   const largeImages = images
     .filter(img => {
-      const width = parseInt(img.getAttribute('width') || '0');
-      const height = parseInt(img.getAttribute('height') || '0');
+      // Check both attribute dimensions and naturalWidth/Height
+      const width = img.naturalWidth || parseInt(img.getAttribute('width') || '0');
+      const height = img.naturalHeight || parseInt(img.getAttribute('height') || '0');
       return width > 200 && height > 200;
     })
     .map(img => img.src)
-    .filter(src => src && !src.includes('avatar') && !src.includes('icon'));
+    .filter(src => {
+      return src &&
+        !src.includes('avatar') &&
+        !src.includes('icon') &&
+        !src.includes('logo') &&
+        !src.includes('thumb') &&
+        !src.match(/\b\d{2}x\d{2}\b/); // Skip small thumbnail images
+    });
 
   if (largeImages.length > 0) {
     return largeImages[0];
   }
 
-  return null;
+  // Fallback to first image that isn't tiny
+  const firstUsableImage = images.find(img => {
+    const src = img.src;
+    return src &&
+      img.naturalWidth > 100 &&
+      img.naturalHeight > 100 &&
+      !src.includes('avatar') &&
+      !src.includes('icon');
+  });
+
+  return firstUsableImage?.src || null;
 }
 
 // Capture full page screenshot

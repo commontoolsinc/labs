@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import browser from 'webextension-polyfill';
 import "./Popup.css";
-import { CaptureStrategy, ClipFormat, ClippedContent, FormattedClip } from '../model';
-import { ClipperPreview } from '../components/ClipperPreview';
-import { TagManager } from '../components/TagManager';
-import { ActionBar } from '../components/ActionBar';
-import { captureScreenshot, extractPreviewImage, extractSiteSpecificData, formatClipContent, generateAutoTags, mapStoredClipToPageContent } from '../clipping';
-import { ImagePreviews } from '../components/ImagePreviews';
+import { CaptureStrategy, ClipFormat, ClippedContent, FormattedClip } from '../model.js';
+import { ClipperPreview } from '../components/ClipperPreview.jsx';
+import { TagManager } from '../components/TagManager.jsx';
+import { ActionBar } from '../components/ActionBar.jsx';
+import { captureScreenshot, extractPreviewImage, extractSiteSpecificData, formatClipContent, generateAutoTags, mapStoredClipToPageContent } from '../clipping.js';
+import { ImagePreviews } from '../components/ImagePreviews.jsx';
+import { saveClip } from '../synopsys.js';
 
 export default function Popup() {
   const [clippedContent, setClippedContent] = useState<ClippedContent | null>(null);
@@ -112,20 +113,15 @@ export default function Popup() {
 
   const handleClip = async () => {
     const payload = getPayload();
-    if (!payload) return;
+    if (!payload?.content) return;
 
     try {
-      const response = await fetch(process.env.INGESTION_SERVER_URL!, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) throw new Error('Failed to clip content');
-
+      await saveClip(payload.content);
       await browser.storage.local.remove('clipContent');
+      // Could add success notification here
     } catch (error) {
       console.error('Clipping failed:', error);
+      // Could add error notification here
     }
   };
 

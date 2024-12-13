@@ -1,4 +1,4 @@
-import { ClipFormat } from "../model";
+import { ClipFormat } from "../model.js";
 
 // Action bar component
 interface ActionBarProps {

@@ -1,4 +1,4 @@
-import { CaptureStrategy, ClippedContent } from "../model";
+import { CaptureStrategy, ClippedContent } from "../model.js";
 
 interface ClipperPreviewProps {
   content: ClippedContent;
