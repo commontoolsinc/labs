@@ -8,6 +8,7 @@
     "jsr:@cliffy/keycode@1.0.0-rc.7": "1.0.0-rc.7",
     "jsr:@cliffy/prompt@^1.0.0-rc.7": "1.0.0-rc.7",
     "jsr:@cliffy/table@1.0.0-rc.7": "1.0.0-rc.7",
+    "jsr:@hono/hono@^4.6.13": "4.6.13",
     "jsr:@std/assert@1": "1.0.8",
     "jsr:@std/assert@~1.0.6": "1.0.8",
     "jsr:@std/encoding@~1.0.5": "1.0.5",
@@ -74,6 +75,9 @@
         "jsr:@std/fmt"
       ]
     },
+    "@hono/hono@4.6.13": {
+      "integrity": "198970fc6facf71a88ee57aa1ed32143b56bcb0f842fa965ca3ee7d6fdd21a8e"
+    },
     "@std/assert@1.0.8": {
       "integrity": "ebe0bd7eb488ee39686f77003992f389a06c3da1bbd8022184804852b2fa641b",
       "dependencies": [
@@ -130,6 +134,7 @@
     "dependencies": [
       "jsr:@cliffy/command@^1.0.0-rc.7",
       "jsr:@cliffy/prompt@^1.0.0-rc.7",
+      "jsr:@hono/hono@^4.6.13",
       "jsr:@std/assert@1",
       "jsr:@std/fs@^1.0.6",
       "jsr:@std/path@^1.0.8",

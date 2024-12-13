@@ -4,6 +4,7 @@ import { iterate } from "./prompts.ts";
 import { chromium, Page } from "playwright";
 import { Action, ActionResult } from "./actions.ts";
 import { ensureDir } from "@std/fs";
+import { startTempServer } from "./hono-http.ts";
 
 const scenarioDir = join(Deno.cwd(), "scenarios");
 const reportName = "run";
@@ -13,7 +14,13 @@ await ensureDir(reportDir);
 
 async function runRecipeActions(page: Page, actions: Action[]): Promise<ActionResult[]> {
   const rv = [] as ActionResult[];
+  
+  // Initial page load delay instead of networkidle
+  await page.waitForTimeout(2000);
+  console.log('Page loaded, starting actions...');
+
   let action;
+
   for (const [index, action] of actions.entries()) {
     if (action.type === "click") {
       const actionDir = join(reportDir, "media", `action-${index}`);
@@ -27,12 +34,12 @@ async function runRecipeActions(page: Page, actions: Action[]): Promise<ActionRe
 
       const startTime = performance.now();
       try {
-        await page.getByRole(...action.args).click({ timeout: 500 });
+        await page.getByRole(...action.args).click({ timeout: 2500 });
 
         const endTime = performance.now();
         const duration = endTime - startTime;
         // Small delay to let any animations complete
-        await page.waitForTimeout(100);
+        await page.waitForTimeout(1000);
         
         // Screenshot after action
         await page.screenshot({ 
@@ -107,16 +114,13 @@ async function testOneScenario(scenario: string, actions: Action[]): Promise<any
   const tmpSrcName = `${scenario}-${timestamp}`;
   const newSrcPath = join("tmp", `${tmpSrcName}.tsx`);
   await Deno.writeTextFile(newSrcPath, info["generatedSrc"]);
-  // FIXME(ja): we should stand up a server to serve interm reports as well as generated content
-  const srcUrl = `http://localhost:8000/tmp/${tmpSrcName}.tsx`;
-  const loadUrl = `http://localhost:5173/newRecipe?src=${
-    encodeURIComponent(
-      srcUrl,
-    )
-  }`;
+  
+  const port = await startTempServer();
+  const srcUrl = `http://localhost:${port}/tmp/${tmpSrcName}.tsx`;
+  const loadUrl = `http://localhost:5173/newRecipe?src=${encodeURIComponent(srcUrl)}`;
 
-  // const browser = await chromium.launch({ headless: false });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: false });
+  // const browser = await chromium.launch({ headless: true });
   const mediaDir = join(reportDir, "media");
   await ensureDir(mediaDir);
   const videoPath = join(mediaDir, `${scenario}.webm`);
@@ -144,6 +148,7 @@ async function testOneScenario(scenario: string, actions: Action[]): Promise<any
         }
       }
 
+      // NOTE: This relies on the existence of a console.log message from the window manager, in the code that handles /newRecipe
       if (msg.text().includes("Recipe successfully loaded")) {
         console.log(`Recipe successfully loaded: "${msg.text()}"`);
         resolve(true);
@@ -161,6 +166,7 @@ async function testOneScenario(scenario: string, actions: Action[]): Promise<any
     return info;
   }
 
+
   // Run the tests
   info["tests"] = await runRecipeActions(page, info["actions"]);
 
@@ -169,7 +175,7 @@ async function testOneScenario(scenario: string, actions: Action[]): Promise<any
   }
 
   // Wait for the page to finish any pending actions
-  await page.waitForLoadState('networkidle');
+  await page.waitForTimeout(1000);
   
   // Get video before closing anything
   const video = page.video();
@@ -323,7 +329,7 @@ const reportPath = join(reportDir, "report.html");
 await Deno.writeTextFile(reportPath, reportHtml);
 const reportJsonPath = join(reportDir, "report.json");
 await Deno.writeTextFile(reportJsonPath, JSON.stringify(results, null, 2));
-console.log('INFO', JSON.stringify(results, null, 2))
+// console.log('INFO', JSON.stringify(results, null, 2))
 const latestLinkPath = join("reports", "latest");
 
 if (await exists(latestLinkPath)) {
@@ -333,6 +339,35 @@ if (await exists(latestLinkPath)) {
 // Use the relative directory name only, not the full path
 const relativeReportDir = `run-${timestamp}`;
 await Deno.symlink(relativeReportDir, latestLinkPath, { type: "dir" });
+
+// Print summary and exit
+const total = results.length;
+const passed = results.filter(info => 
+  !info.compileError && 
+  info.tests?.every(test => test.success)
+).length;
+
+console.log("\nTest Summary:");
+console.log("=============");
+console.log(`Scenarios: ${passed}/${total} passed`);
+
+for (const result of results) {
+  const scenarioStatus = !result.compileError && 
+    result.tests?.every(test => test.success) ? "✅" : "❌";
+  
+  console.log(`${scenarioStatus} ${result.name}`);
+  if (result.compileError) {
+    console.log(`   Error: ${result.compileError}`);
+  } else {
+    console.log(`   Actions: ${result.tests?.filter(t => t.success).length}/${result.tests?.length} passed`);
+  }
+}
+
+console.log(`\nReport written to: ${reportPath}`);
+
+// Exit with success if all tests passed
+Deno.exit(passed === total ? 0 : 1);
+
 
 // const recipe = "counters";
 // // Copy original source
