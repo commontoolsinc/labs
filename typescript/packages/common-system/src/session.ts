@@ -1,4 +1,5 @@
-import { Instruction, Fact, Reference, refer } from "synopsys";
+import { Reference } from "merkle-reference";
+import { Instruction, Fact, refer } from "synopsys";
 
 export type Store = Map<string, { version: number; value: unknown }>;
 

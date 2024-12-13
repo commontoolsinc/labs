@@ -1,9 +1,9 @@
-import { Reference } from "./db.js";
 import { Behavior } from "./adapter.js";
 import { html, css, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { formatDatalogQuery } from "./format.js";
 import { explainQuery, explainMutation } from "./debug.js";
+import { Reference } from "merkle-reference";
 
 function setDebugCharms(value: boolean) {
   (globalThis as any).DEBUG_CHARMS = value;

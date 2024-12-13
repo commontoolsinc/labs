@@ -1,7 +1,8 @@
 import assert from "assert";
-import { refer, Reference } from "synopsys";
+import { refer} from "synopsys";
 import { where, select, TransactionBuilder } from "./rule-builder.js";
 import { div } from "@gozala/co-dom";
+import { Reference } from "merkle-reference";
 
 describe("Rule Builder", () => {
   describe("Where", () => {

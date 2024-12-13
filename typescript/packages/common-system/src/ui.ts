@@ -1,7 +1,8 @@
 import { service } from "./adapter.js";
-import { Reference, Task, $ } from "./db.js";
+import { Task, $ } from "./db.js";
 import * as DOM from "@gozala/co-dom";
 import * as Session from "./session.js";
+import { Reference } from "merkle-reference";
 
 export interface Mount {
   vdom: DOM.Node<{}> | null;
