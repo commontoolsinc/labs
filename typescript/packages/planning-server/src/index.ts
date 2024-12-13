@@ -12,6 +12,9 @@ import {
 } from "./models.ts";
 import * as cache from "./cache.ts";
 import { colors, timestamp, timeTrack } from "./cli.ts";
+import { register as registerPhoenixOtel } from "./instrumentation.ts";
+
+registerPhoenixOtel();
 
 await config({ export: true });
 
@@ -200,6 +203,9 @@ const handleLLMPost = async (request: Request): Promise<Response> => {
       system?: string;
       stopSequences?: string[];
       abortSignal?: AbortSignal;
+      experimental_telemetry?: {
+        isEnabled: boolean;
+      };
     };
 
     params = {
@@ -207,6 +213,9 @@ const handleLLMPost = async (request: Request): Promise<Response> => {
       system: payload.system,
       stopSequences: payload.stop ? [payload.stop] : undefined,
       abortSignal: request.signal,
+      experimental_telemetry: {
+        isEnabled: true,
+      },
     };
 
     // If the model doesn't support system prompts, we need to prepend the system

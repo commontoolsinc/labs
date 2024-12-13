@@ -40,6 +40,11 @@
     "@ai-sdk/groq": "^0.0.3",
     "@ai-sdk/mistral": "^0.0.46",
     "@ai-sdk/openai": "^0.0.71",
+    "@arizeai/openinference-semantic-conventions": "^1.0.0",
+    "@arizeai/openinference-vercel": "^2.0.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.56.0",
+    "@opentelemetry/resources": "^1.29.0",
+    "@vercel/otel": "^1.10.0",
     "ollama-ai-provider": "^0.16.0"
   },
   "devDependencies": {
