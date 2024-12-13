@@ -218,46 +218,53 @@ function generateReportHtml(results: any, reportName: string): string {
   let info;
   for (info of results) {
     const report = `<div class="scenario" style="border: 1px solid black; padding: 10px; margin: 10px;">
-    <h2>${info.name}</h2>
-    ${info.videoPath ? `
-      <video width="800" controls>
-        <source src="${info.videoPath}" type="video/webm">
-        Your browser does not support the video tag.
-      </video>
-    ` : ''}
-    
-    ${info.compileError
-      ? `<h2>Compile Error</h2><br/><pre>${info.compileError}</pre>`
-      : ""}
+      <h2>${info.name}</h2>
+      
+      <details>
+        <summary>Video Recording</summary>
+        ${info.videoPath ? `
+          <video width="800" controls>
+            <source src="${info.videoPath}" type="video/webm">
+            Your browser does not support the video tag.
+          </video>
+        ` : ''}
+      </details>
+      
+      ${info.compileError
+        ? `<h2>Compile Error</h2><br/><pre>${info.compileError}</pre>`
+        : ""}
 
-    ${
-      info.tests &&info.tests.length > 0
-        ? `
-            <h2>Actions</h2>
-            ${info.tests.map((test: any, index: number) => `
-              <div class="test-action">
-                <h3 class="${test.success ? "success" : "failure"}">
-                  Action ${index + 1}: ${test.action.name} 
-                  <span style="font-size: 0.8em; font-family: monospace;">(${test.duration.toFixed(2)}ms)</span>
-                </h3>
-                ${test.error ? `<p class="error">Error: ${test.error}</p>` : ''}
-                
-                <div class="screenshots" style="display: flex; gap: 10px; margin-top: 10px;">
-                  <div>
-                    <h4>Before</h4>
-                    <img src="${test.screenshots.before}" style="max-width: 300px; border: 1px solid #ccc;" />
-                  </div>
-                  <div>
-                    <h4>After</h4>
-                    <img src="${test.screenshots.after}" style="max-width: 300px; border: 1px solid #ccc;" />
-                  </div>
+      ${
+        info.tests && info.tests.length > 0
+          ? `
+              <h2>Actions</h2>
+              ${info.tests.map((test: any, index: number) => `
+                <div class="test-action">
+                  <h3 class="${test.success ? "success" : "failure"}">
+                    Action ${index + 1}: ${test.action.name} 
+                    <span style="font-size: 0.8em; font-family: monospace;">(${test.duration.toFixed(2)}ms)</span>
+                  </h3>
+                  ${test.error ? `<p class="error">Error: ${test.error}</p>` : ''}
+                  
+                  <details>
+                    <summary>Screenshots</summary>
+                    <div class="screenshots" style="display: flex; gap: 10px; margin-top: 10px;">
+                      <div>
+                        <h4>Before</h4>
+                        <img src="${test.screenshots.before}" style="max-width: 300px; border: 1px solid #ccc;" />
+                      </div>
+                      <div>
+                        <h4>After</h4>
+                        <img src="${test.screenshots.after}" style="max-width: 300px; border: 1px solid #ccc;" />
+                      </div>
+                    </div>
+                  </details>
                 </div>
-              </div>
-            `).join('\n')}
-        `
-        : ""
-    }
-    </div>`;
+              `).join('\n')}
+          `
+          : ""
+      }
+      </div>`;
     reports.push(report);
   }
 
@@ -276,6 +283,9 @@ function generateReportHtml(results: any, reportName: string): string {
         pre { background-color: #f0f0f0; padding: 10px; }
         .test-action { margin: 20px 0; padding: 10px; border: 1px solid #eee; }
         .screenshots img { box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        details { margin: 10px 0; }
+        summary { cursor: pointer; padding: 5px; background: #f5f5f5; }
+        summary:hover { background: #eee; }
       </style>
     </head>
     <body>
