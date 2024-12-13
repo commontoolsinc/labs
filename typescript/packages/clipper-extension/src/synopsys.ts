@@ -61,11 +61,11 @@ export async function saveClip(formattedClip: FormattedClip) {
     // Import the full clip data
     { Import: cleanedClip as any },
     // Link to tags inbox
-    { Upsert: [tags, '#import', clipId] },
-    { Upsert: [clipId, '#import', tags] },
+    { Assert: [tags, '#import', clipId] },
+    { Assert: [clipId, '#import', tags] },
     // Link to clips inbox
-    { Upsert: [clips, '#import', clipId] },
-    { Upsert: [clipId, '#import', clips] }
+    { Assert: [clips, '#import', clipId] },
+    { Assert: [clipId, '#import', clips] }
   ];
 
   // Encode and send transaction
