@@ -14,6 +14,26 @@ import {
   Selector,
   Session,
 } from "@commontools/common-system";
+import { z } from "zod";
+import { resolve } from "../sugar/sugar.jsx";
+import { Node } from "../../../common-system/lib/jsx.js";
+
+export type TypedBehaviorConfig<T extends z.ZodRawShape> = {
+  render: (props: z.infer<z.ZodObject<T>> & { self: any }) => Node<any>;
+  rules: (schema: z.ZodObject<T>) => Record<string, any>;
+};
+
+export function typedBehavior<T extends z.ZodRawShape>(
+  schema: z.ZodObject<T>,
+  config: TypedBehaviorConfig<T>,
+) {
+  return behavior({
+    render: resolve(schema)
+      .render(config.render as any)
+      .commit(),
+    ...config.rules(schema),
+  });
+}
 
 export const init = select({ self: $.self, init: $.init }).match(
   $.self,

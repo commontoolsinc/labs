@@ -8,9 +8,9 @@ import {
   Select,
 } from "@commontools/common-system";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
-import { event, field, Transact } from "../sugar.js";
+import { event, Transact } from "../sugar.js";
 import { makeEmail, sendMessage } from "../effects/gmail.jsx";
-import { init, initRules } from "./spell.jsx";
+import { init, initRules, typedBehavior } from "./spell.jsx";
 import { z } from "zod";
 import { resolve } from "../sugar/sugar.jsx";
 
@@ -66,81 +66,79 @@ const styles = {
   `,
 };
 
-export const emailComposer = behavior({
-  ...initRules,
-
-  render: resolve(EmailComposer)
-    .render(({ self, body, subject, to }) => (
-      <div entity={self} style={styles.formContainer}>
-        <div style={styles.inputGroup}>
-          <div>
-            <div style={styles.inputLabel}>To</div>
-            <common-input
-              value={to}
-              style={styles.input}
-              oncommon-blur="~/on/change-to"
-            />
-          </div>
-          <div>
-            <div style={styles.inputLabel}>Subject</div>
-            <common-input
-              value={subject}
-              style={styles.input}
-              oncommon-blur="~/on/change-subject"
-            />
-          </div>
-          <div>
-            <div style={styles.inputLabel}>Message</div>
-            <common-input
-              value={body}
-              style={styles.textArea}
-              multiline={true}
-              oncommon-blur="~/on/change-body"
-            />
-          </div>
-          <common-button onclick="~/on/send-email">Send</common-button>
+export const emailComposer = typedBehavior(EmailComposer, {
+  render: ({ self, body, subject, to }) => (
+    <div entity={self} style={styles.formContainer}>
+      <div style={styles.inputGroup}>
+        <div>
+          <div style={styles.inputLabel}>To</div>
+          <common-input
+            value={to}
+            style={styles.input}
+            oncommon-blur="~/on/change-to"
+          />
         </div>
+        <div>
+          <div style={styles.inputLabel}>Subject</div>
+          <common-input
+            value={subject}
+            style={styles.input}
+            oncommon-blur="~/on/change-subject"
+          />
+        </div>
+        <div>
+          <div style={styles.inputLabel}>Message</div>
+          <common-input
+            value={body}
+            style={styles.textArea}
+            multiline={true}
+            oncommon-blur="~/on/change-body"
+          />
+        </div>
+        <common-button onclick="~/on/send-email">Send</common-button>
       </div>
-    ))
-    .commit(),
+    </div>
+  ),
+  rules: schema => ({
+    init: initRules.init,
+    onChangeTo: event("~/on/change-to")
+      .with(resolve(schema.pick({ to: true })))
+      .update(({ self, event }) => {
+        const val = Session.resolve<CommonInputEvent>(event).detail.value; // TODO: make this automatic
+        return [{ Upsert: [self, "to", val] }];
+      })
+      .commit(),
 
-  onChangeTo: event("~/on/change-to")
-    .with(resolve(EmailComposer.pick({ to: true })))
-    .update(({ self, event }) => {
-      const val = Session.resolve<CommonInputEvent>(event).detail.value;
-      return [{ Upsert: [self, "to", val] }];
-    })
-    .commit(),
+    onChangeSubject: event("~/on/change-subject")
+      .with(resolve(schema.pick({ subject: true })))
+      .update(({ self, event }) => {
+        const val = Session.resolve<CommonInputEvent>(event).detail.value;
+        return [{ Upsert: [self, "subject", val] }];
+      })
+      .commit(),
 
-  onChangeSubject: event("~/on/change-subject")
-    .with(resolve(EmailComposer.pick({ subject: true })))
-    .update(({ self, event }) => {
-      const val = Session.resolve<CommonInputEvent>(event).detail.value;
-      return [{ Upsert: [self, "subject", val] }];
-    })
-    .commit(),
+    onChangeBody: event("~/on/change-body")
+      .with(resolve(schema.pick({ body: true })))
+      .update(({ self, event }) => {
+        const val = Session.resolve<CommonInputEvent>(event).detail.value;
+        return [{ Upsert: [self, "body", val] }];
+      })
+      .commit(),
 
-  onChangeBody: event("~/on/change-body")
-    .with(resolve(EmailComposer.pick({ body: true })))
-    .update(({ self, event }) => {
-      const val = Session.resolve<CommonInputEvent>(event).detail.value;
-      return [{ Upsert: [self, "body", val] }];
-    })
-    .commit(),
+    onSendEmail: event("~/on/send-email")
+      .with(resolve(schema))
+      .transact(({ self, body, subject, to }, cmd) => {
+        cmd.add(
+          sendMessage(self, GMAIL_REQUEST, "me", makeEmail(to, subject, body)),
+        );
 
-  onSendEmail: event("~/on/send-email")
-    .with(resolve(EmailComposer))
-    .transact(({ self, body, subject, to }, cmd) => {
-      cmd.add(
-        sendMessage(self, GMAIL_REQUEST, "me", makeEmail(to, subject, body)),
-      );
-
-      cmd.add(
-        ...Transact.set(self, {
-          subject: "",
-          body: "",
-          status: "sending...",
-        }),
-      );
-    }),
+        cmd.add(
+          ...Transact.set(self, {
+            subject: "",
+            body: "",
+            status: "sending...",
+          }),
+        );
+      }),
+  }),
 });
