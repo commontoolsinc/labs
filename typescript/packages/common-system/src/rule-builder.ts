@@ -27,6 +27,36 @@ export type View<Match extends Selector> = (
 
 export type BuilderOrValue<T> = ((q: T) => T) | T;
 
+export type CommandBuilder<Match extends Selector> = (
+  props: InferBindings<Match>,
+  cmd: Commands,
+) => void;
+
+function transact<T extends Selector>(
+  selection: InferBindings<T>,
+  action: CommandBuilder<T>,
+) {
+  const cmd = new Commands();
+  action(selection, cmd);
+  return cmd.commit();
+}
+
+class Commands {
+  commands: Instruction[];
+
+  constructor() {
+    this.commands = [];
+  }
+
+  add(...commands: Instruction[]) {
+    this.commands.push(...commands);
+  }
+
+  commit() {
+    return this.commands;
+  }
+}
+
 export class Select<Match extends Selector = Selector> {
   #select: Match;
   #where: WhereBuilder;
@@ -141,6 +171,12 @@ export class Select<Match extends Selector = Selector> {
 
   update(update: Update<Match>): Select<Match> {
     return this.transaction(tx => tx.update(update));
+  }
+
+  transact(commandBuilder: CommandBuilder<Match>) {
+    return this.transaction(tx =>
+      tx.update(selection => transact(selection, commandBuilder)),
+    ).commit();
   }
 
   render(view: View<Match>): Select<Match> {

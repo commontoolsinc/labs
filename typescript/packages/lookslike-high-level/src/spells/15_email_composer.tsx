@@ -1,22 +1,27 @@
-import { h, behavior, $, select, Session } from "@commontools/common-system";
+import {
+  h,
+  behavior,
+  $,
+  select,
+  Session,
+  Instruction,
+  Select,
+} from "@commontools/common-system";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
 import { event, field, Transact } from "../sugar.js";
 import { makeEmail, sendMessage } from "../effects/gmail.jsx";
+import { init, initRules } from "./spell.jsx";
+import { z } from "zod";
+import { resolve } from "../sugar/sugar.jsx";
 
 const GMAIL_REQUEST = "~/gmail";
-export const to = field("to", "");
-export const subject = field("subject", "");
-export const body = field("body", "");
-export const init = select({ self: $.self, init: $.init }).match(
-  $.self,
-  "_init",
-  $.init,
-);
-const resolveUninitialized = select({ self: $.self }).not(q =>
-  q.match($.self, "_init", $._),
-);
+const EmailComposer = z.object({
+  to: z.string().default(""),
+  subject: z.string().default(""),
+  body: z.string().default(""),
+});
 
-export const resolveDraft = to.with(subject).with(body).with(init);
+export const resolveDraft = resolve(EmailComposer).with(init);
 
 const styles = {
   formContainer: `
@@ -62,13 +67,9 @@ const styles = {
 };
 
 export const emailComposer = behavior({
-  init: resolveUninitialized
-    .update(({ self }) => {
-      return Transact.set(self, { _init: true });
-    })
-    .commit(),
+  ...initRules,
 
-  render: resolveDraft
+  render: resolve(EmailComposer)
     .render(({ self, body, subject, to }) => (
       <div entity={self} style={styles.formContainer}>
         <div style={styles.inputGroup}>
@@ -104,7 +105,7 @@ export const emailComposer = behavior({
     .commit(),
 
   onChangeTo: event("~/on/change-to")
-    .with(to)
+    .with(resolve(EmailComposer.pick({ to: true })))
     .update(({ self, event }) => {
       const val = Session.resolve<CommonInputEvent>(event).detail.value;
       return [{ Upsert: [self, "to", val] }];
@@ -112,7 +113,7 @@ export const emailComposer = behavior({
     .commit(),
 
   onChangeSubject: event("~/on/change-subject")
-    .with(subject)
+    .with(resolve(EmailComposer.pick({ subject: true })))
     .update(({ self, event }) => {
       const val = Session.resolve<CommonInputEvent>(event).detail.value;
       return [{ Upsert: [self, "subject", val] }];
@@ -120,7 +121,7 @@ export const emailComposer = behavior({
     .commit(),
 
   onChangeBody: event("~/on/change-body")
-    .with(body)
+    .with(resolve(EmailComposer.pick({ body: true })))
     .update(({ self, event }) => {
       const val = Session.resolve<CommonInputEvent>(event).detail.value;
       return [{ Upsert: [self, "body", val] }];
@@ -128,11 +129,18 @@ export const emailComposer = behavior({
     .commit(),
 
   onSendEmail: event("~/on/send-email")
-    .with(resolveDraft)
-    .update(({ self, body, subject, to }) => {
-      return [
+    .with(resolve(EmailComposer))
+    .transact(({ self, body, subject, to }, cmd) => {
+      cmd.add(
         sendMessage(self, GMAIL_REQUEST, "me", makeEmail(to, subject, body)),
-      ];
-    })
-    .commit(),
+      );
+
+      cmd.add(
+        ...Transact.set(self, {
+          subject: "",
+          body: "",
+          status: "sending...",
+        }),
+      );
+    }),
 });

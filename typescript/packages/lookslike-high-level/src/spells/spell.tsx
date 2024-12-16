@@ -1,21 +1,53 @@
 import { Reference } from "merkle-reference";
 import { defaultTo, event, Transact } from "../sugar.js";
-import { h, $, Behavior, behavior, Instruction, refer, Rule, Scope, Select, select, Selector, Session } from "@commontools/common-system";
+import {
+  h,
+  $,
+  Behavior,
+  behavior,
+  Instruction,
+  refer,
+  Rule,
+  Scope,
+  Select,
+  select,
+  Selector,
+  Session,
+} from "@commontools/common-system";
+
+export const init = select({ self: $.self, init: $.init }).match(
+  $.self,
+  "_init",
+  $.init,
+);
+export const resolveUninitialized = select({ self: $.self }).not(q =>
+  q.match($.self, "_init", $._),
+);
+
+export const initRules = {
+  init: resolveUninitialized
+    .update(({ self }) => {
+      return Transact.set(self, { _init: true });
+    })
+    .commit(),
+};
 
 export function appendOnPrefix(path: string): string {
-  if (!path.startsWith('~/on/')) {
+  if (!path.startsWith("~/on/")) {
     return `~/on/${path}`;
   }
   return path;
 }
 
 export const changes = (...instructions: (Instruction | Instruction[])[]) => {
-  return instructions.reduce<Instruction[]>((acc, curr) =>
-    acc.concat(Array.isArray(curr) ? curr : [curr]), []);
+  return instructions.reduce<Instruction[]>(
+    (acc, curr) => acc.concat(Array.isArray(curr) ? curr : [curr]),
+    [],
+  );
 };
 
 export class Embed<T extends any> {
-  constructor(public value: T) { }
+  constructor(public value: T) {}
 
   static decode<T>(txt: string): T {
     return JSON.parse(txt) as T;
@@ -33,7 +65,7 @@ export class Embed<T extends any> {
 }
 
 export class Doc<T extends Record<string, string | number | boolean>> {
-  constructor(public value: T) { }
+  constructor(public value: T) {}
 
   id() {
     return refer(this.value);
@@ -41,26 +73,43 @@ export class Doc<T extends Record<string, string | number | boolean>> {
 
   save() {
     const self = this.id();
-    return [
-      ...Transact.set(self, this.value)
-    ];
+    return [...Transact.set(self, this.value)];
+  }
+
+  update(values: Partial<T>) {
+    const self = this.id();
+    return [...Transact.set(self, values)];
   }
 
   dispatch(event: string, detail: any) {
     const self = this.id();
-    return [
-      { Assert: [self, appendOnPrefix(event), detail] }
-    ]
+    return [{ Assert: [self, appendOnPrefix(event), detail] }];
   }
 }
 
-export function execute<T extends Record<string, any>, S extends Spell<T>>(id: Reference, SpellClass: new () => S) {
-  const spell = new SpellClass().compile()
+export function execute<T extends Record<string, any>, S extends Spell<T>>(
+  id: Reference,
+  SpellClass: new () => S,
+) {
+  const spell = new SpellClass().compile();
   return spell.spawn(id);
 }
 
-export function Charm<T extends Record<string, Rule<Selector>>>({ spell, self }: { spell: Behavior<T>, self: Reference }) {
-  return <common-charm id={self.toString()} key={self.toString()} spell={() => spell} entity={() => self} />
+export function Charm<T extends Record<string, Rule<Selector>>>({
+  spell,
+  self,
+}: {
+  spell: Behavior<T>;
+  self: Reference;
+}) {
+  return (
+    <common-charm
+      id={self.toString()}
+      key={self.toString()}
+      spell={() => spell}
+      entity={() => self}
+    />
+  );
 }
 
 export abstract class Spell<T extends Record<string, any>> {
@@ -74,18 +123,14 @@ export abstract class Spell<T extends Record<string, any>> {
     handler: (ctx: any) => any;
   }> = [];
 
-  constructor() { }
+  constructor() {}
 
   set(self: Reference, values: Partial<T>) {
-    return [
-      ...Transact.set(self, values)
-    ];
+    return [...Transact.set(self, values)];
   }
 
   dispatch(self: Reference, event: string, detail: any) {
-    return [
-      { Upsert: [self, appendOnPrefix(event), detail] }
-    ]
+    return [{ Upsert: [self, appendOnPrefix(event), detail] }];
   }
 
   addEventListener(type: string, handler: (self: Reference, ev: any) => any) {
@@ -101,9 +146,15 @@ export abstract class Spell<T extends Record<string, any>> {
 
   get<S extends string>(field: S, defaultValue?: any) {
     if (defaultValue) {
-      return select({ [field]: $[field] } as const).clause(defaultTo($.self, field, $[field], defaultValue));
+      return select({ [field]: $[field] } as const).clause(
+        defaultTo($.self, field, $[field], defaultValue),
+      );
     }
-    return select({ [field]: $[field] } as const).match($.self, field, $[field])
+    return select({ [field]: $[field] } as const).match(
+      $.self,
+      field,
+      $[field],
+    );
   }
 
   compile(): Behavior<Record<string, Rule<Selector>>> {
@@ -125,47 +176,52 @@ export abstract class Spell<T extends Record<string, any>> {
 
     // Transform rules into behavior rules
     this.rules.forEach((rule, index) => {
-      behaviorDef[`rule${index}`] =
-        rule.condition
-          .update(rule.handler)
-          .commit();
+      behaviorDef[`rule${index}`] = rule.condition
+        .update(rule.handler)
+        .commit();
     });
-    behaviorDef.init = select({ self: $.self }).not(q => q.match($.self, '_init', $._)).update(({ self }) => {
-      let initValues: any = { '_init': true };
-      let changes: Instruction[] = [];
-      for (const [key, value] of Object.entries(initialState)) {
-        if (value !== null && typeof value !== 'object') {
-          initValues[key] = value;
-        } else if (value?.collection) {
-          changes.push(...initialState[key].new({ [key]: self }));
+    behaviorDef.init = select({ self: $.self })
+      .not(q => q.match($.self, "_init", $._))
+      .update(({ self }) => {
+        let initValues: any = { _init: true };
+        let changes: Instruction[] = [];
+        for (const [key, value] of Object.entries(initialState)) {
+          if (value !== null && typeof value !== "object") {
+            initValues[key] = value;
+          } else if (value?.collection) {
+            changes.push(...initialState[key].new({ [key]: self }));
+          }
         }
-      }
-      changes.push(...this.set(self, { _init: true }));
-      return changes;
-    }).commit();
+        changes.push(...this.set(self, { _init: true }));
+        return changes;
+      })
+      .commit();
 
     // Transform render method with its state dependencies
     behaviorDef.render = select({
       self: $.self,
-      ...Object.fromEntries(stateKeys.map(key => [key, $[key]]))
+      ...Object.fromEntries(stateKeys.map(key => [key, $[key]])),
     });
     // Add defaultTo clauses for each primitive state value
     stateKeys.forEach(key => {
-      if (initialState[key] !== null && (typeof initialState[key] !== 'object')) {
-        behaviorDef.render = behaviorDef.render
-          .clause(defaultTo($.self, key as string, $[key], initialState[key]));
+      if (initialState[key] !== null && typeof initialState[key] !== "object") {
+        behaviorDef.render = behaviorDef.render.clause(
+          defaultTo($.self, key as string, $[key], initialState[key]),
+        );
       } else if (initialState[key]?.collection) {
-        behaviorDef.render = behaviorDef.render
-          .clause(initialState[key].match($[key]));
-      } else if (typeof initialState[key] === 'object') {
-        behaviorDef.render = behaviorDef.render
-          .clause(defaultTo($.self, key as string, $[key], null));
+        behaviorDef.render = behaviorDef.render.clause(
+          initialState[key].match($[key]),
+        );
+      } else if (typeof initialState[key] === "object") {
+        behaviorDef.render = behaviorDef.render.clause(
+          defaultTo($.self, key as string, $[key], null),
+        );
       }
     });
 
     // Add the actual render implementation
     behaviorDef.render = behaviorDef.render
-      .match($.self, '_init', $._)
+      .match($.self, "_init", $._)
       .render(this.render)
       .commit();
 
