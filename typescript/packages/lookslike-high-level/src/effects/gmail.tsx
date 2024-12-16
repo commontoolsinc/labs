@@ -234,17 +234,25 @@ export default service({
         const content = yield* Task.wait(effect.content);
         const id = refer(content);
 
-        return [
+        const instructionList = [
           { Retract: [provider, `~/complete`, request] },
           { Assert: [provider, "effect/log", request] },
           { Upsert: [effect.source.id, REQUEST.STATUS, "Complete"] },
-          { Import: content },
-          ...content.flatMap(i => [
-            { Import: i },
-            ...addTag(refer(i), "#email"),
-          ]),
           { Upsert: [effect.source.id, RESPONSE.JSON, id] },
         ];
+
+        if (effect.source.action.type === "listMessages") {
+          return [
+            ...instructionList,
+            { Import: content },
+            ...content.flatMap(i => [
+              { Import: i },
+              ...addTag(refer(i), "#email"),
+            ]),
+          ];
+        }
+
+        return instructionList;
       }
       return [];
     },
