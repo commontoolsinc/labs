@@ -16,20 +16,20 @@ const provider = refer({
 });
 
 export const REQUEST = {
-  STATUS: 'request/status',
-  STATUS_CODE: 'request/status/code',
-  STATUS_TEXT: 'request/status/text',
-}
+  STATUS: "request/status",
+  STATUS_CODE: "request/status/code",
+  STATUS_TEXT: "request/status/text",
+};
 
 export const RESPONSE = {
-  JSON: 'response/json',
-}
+  JSON: "response/json",
+};
 
 type GmailAction =
-  | { type: 'listMessages'; userId: string; q?: string }
-  | { type: 'getMessage'; userId: string; id: string }
-  | { type: 'sendMessage'; userId: string; message: any }
-  | { type: 'createDraft'; userId: string; message: any }
+  | { type: "listMessages"; userId: string; q?: string }
+  | { type: "getMessage"; userId: string; id: string }
+  | { type: "sendMessage"; userId: string; message: any }
+  | { type: "createDraft"; userId: string; message: any };
 // Add more Gmail actions as needed
 
 type State =
@@ -50,7 +50,7 @@ async function listMessagesWithContent(userId: string, query?: string) {
   const response = await gapi.client.gmail.users.messages.list({
     userId,
     q: query,
-    maxResults: 10
+    maxResults: 10,
   });
 
   const messages = response.result.messages;
@@ -59,28 +59,88 @@ async function listMessagesWithContent(userId: string, query?: string) {
   }
 
   const fullMessages = await Promise.all(
-    messages.map(msg => getMessageDetails(userId, msg.id))
+    messages.map(msg => getMessageDetails(userId, msg.id)),
   );
 
   return fullMessages;
 }
 
-async function sendMessage(userId: string, message: any) {
+export type GmailMessage = {
+  id: string;
+  threadId: string;
+  labelIds: string[];
+  snippet: string;
+  historyId?: string;
+  internalDate: string;
+  payload: object;
+  sizeEstimate: number;
+  raw: string;
+};
+
+export type GmailMessagePart = {
+  partId: string;
+  mimeType: string;
+  filename: string;
+  headers: Array<{
+    name: string;
+    value: string;
+  }>;
+  body: {
+    size: number;
+    data: string;
+    attachmentId?: string;
+  };
+  parts?: GmailMessagePart[];
+};
+
+export function makeEmail(
+  to: string,
+  subject: string,
+  body: string,
+): GmailMessage {
+  const emailLines = ["To: " + to, "Subject: " + subject, "", body].join(
+    "\r\n",
+  );
+
+  const raw = btoa(emailLines)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  return {
+    id: "",
+    threadId: "",
+    labelIds: [],
+    snippet: body.substring(0, 100),
+    // historyId: "",
+    internalDate: new Date().getTime().toString(),
+    payload: {
+      headers: [
+        { name: "To", value: to },
+        { name: "Subject", value: subject },
+      ],
+    },
+    sizeEstimate: emailLines.length,
+    raw,
+  };
+}
+
+async function sendGmailMessage(userId: string, message: GmailMessage) {
   return await gapi.client.gmail.users.messages.send({
     userId,
-    resource: message
+    resource: message,
   });
 }
 
 async function createDraft(userId: string, message: any) {
   return await gapi.client.gmail.users.drafts.create({
     userId,
-    resource: { message }
+    resource: { message },
   });
 }
 
 export default service({
-  'gmail/send': {
+  "gmail/send": {
     select: {
       request: $.request,
     },
@@ -92,16 +152,22 @@ export default service({
         let response: Promise<any> = Promise.resolve();
 
         switch (gmailAction.type) {
-          case 'listMessages':
-            response = listMessagesWithContent(gmailAction.userId, gmailAction.q);
+          case "listMessages":
+            response = listMessagesWithContent(
+              gmailAction.userId,
+              gmailAction.q,
+            );
             break;
-          case 'getMessage':
+          case "getMessage":
             response = getMessageDetails(gmailAction.userId, gmailAction.id);
             break;
-          case 'sendMessage':
-            response = sendMessage(gmailAction.userId, gmailAction.message);
+          case "sendMessage":
+            response = sendGmailMessage(
+              gmailAction.userId,
+              gmailAction.message,
+            );
             break;
-          case 'createDraft':
+          case "createDraft":
             response = createDraft(gmailAction.userId, gmailAction.message);
             break;
         }
@@ -109,13 +175,19 @@ export default service({
         const state = {
           status: "Sending",
           source: effect.source,
-          response
-        }
+          response,
+        };
 
         return [
           { Retract: [provider, "~/send", request] },
           { Upsert: [provider, "~/receive", state as any] },
-          { Upsert: [effect.source.consumer, effect.source.port, effect.source.id] },
+          {
+            Upsert: [
+              effect.source.consumer,
+              effect.source.port,
+              effect.source.id,
+            ],
+          },
           { Upsert: [effect.source.id, REQUEST.STATUS, "Sending"] },
         ];
       }
@@ -123,7 +195,7 @@ export default service({
     },
   },
 
-  'gmail/receive': {
+  "gmail/receive": {
     select: {
       request: $.request,
     },
@@ -138,7 +210,7 @@ export default service({
           status: "Receiving",
           source: effect.source,
           content: Promise.resolve(content),
-        }
+        };
 
         return [
           { Retract: [provider, "~/receive", request] },
@@ -151,7 +223,7 @@ export default service({
     },
   },
 
-  'gmail/complete': {
+  "gmail/complete": {
     select: {
       request: $.request,
     },
@@ -161,7 +233,6 @@ export default service({
       if (effect?.status === "Receiving") {
         const content = yield* Task.wait(effect.content);
         const id = refer(content);
-        debugger
 
         return [
           { Retract: [provider, `~/complete`, request] },
@@ -170,7 +241,7 @@ export default service({
           { Import: content },
           ...content.flatMap(i => [
             { Import: i },
-            ...addTag(refer(i), '#email')
+            ...addTag(refer(i), "#email"),
           ]),
           { Upsert: [effect.source.id, RESPONSE.JSON, id] },
         ];
@@ -179,7 +250,7 @@ export default service({
     },
   },
 
-  'gmail/idle': {
+  "gmail/idle": {
     select: {
       self: $.self,
     },
@@ -190,16 +261,18 @@ export default service({
           Upsert: [
             self,
             "~/common/ui",
-            <div title="Gmail Effect UI" entity={self}>
-              📧 Idle
-            </div> as any,
+            (
+              <div title="Gmail Effect UI" entity={self}>
+                📧 Idle
+              </div>
+            ) as any,
           ],
         },
       ];
     },
   },
 
-  'gmail/active': {
+  "gmail/active": {
     select: {
       self: $.self,
       requests: [{ request: $.request, state: $.state }],
@@ -220,15 +293,17 @@ export default service({
           Upsert: [
             self,
             "~/common/ui",
-            <div title="Gmail Effect UI" entity={self}>
-              <ul>
-                {...requests.map(({ request, state }) => (
-                  <li>
-                    📧 {state} {String(request)}
-                  </li>
-                ))}
-              </ul>
-            </div> as any,
+            (
+              <div title="Gmail Effect UI" entity={self}>
+                <ul>
+                  {...requests.map(({ request, state }) => (
+                    <li>
+                      📧 {state} {String(request)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) as any,
           ],
         },
       ];
@@ -242,11 +317,7 @@ export class Gmail {
   action: GmailAction;
   id: Reference;
 
-  constructor(
-    consumer: Reference,
-    port: string,
-    action: GmailAction,
-  ) {
+  constructor(consumer: Reference, port: string, action: GmailAction) {
     this.consumer = consumer;
     this.port = port;
     this.action = action;
@@ -264,11 +335,26 @@ export class Gmail {
 }
 
 // Helper functions to create Gmail actions
-export const listMessages = (consumer: Reference, port: string, userId: string, query?: string) =>
-  new Gmail(consumer, port, { type: 'listMessages', userId, q: query });
+export const listMessages = (
+  consumer: Reference,
+  port: string,
+  userId: string,
+  query?: string,
+) => new Gmail(consumer, port, { type: "listMessages", userId, q: query });
 
-export const getMessage = (consumer: Reference, port: string, userId: string, messageId: string) =>
-  new Gmail(consumer, port, { type: 'getMessage', userId, id: messageId });
+export const getMessage = (
+  consumer: Reference,
+  port: string,
+  userId: string,
+  messageId: string,
+) => new Gmail(consumer, port, { type: "getMessage", userId, id: messageId });
+
+export const sendMessage = (
+  consumer: Reference,
+  port: string,
+  userId: string,
+  message: GmailMessage,
+) => new Gmail(consumer, port, { type: "sendMessage", userId, message });
 
 type EmailPreview = {
   id: string;
@@ -277,7 +363,7 @@ type EmailPreview = {
   date: Date;
   from: string;
   subject: string;
-}
+};
 
 type RichEmail = {
   id: string;
@@ -290,22 +376,26 @@ type RichEmail = {
   bcc: string;
   subject: string;
   body: string;
-}
+};
 
 function parseEmailPreview(message: any): RichEmail {
   const headers = message.payload.headers;
   const getHeader = (name: string) =>
-    headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+    headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase())
+      ?.value || "";
 
-  let body = '';
+  let body = "";
   if (message.payload.body.data) {
-    body = atob(message.payload.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+    body = atob(
+      message.payload.body.data.replace(/-/g, "+").replace(/_/g, "/"),
+    );
   } else if (message.payload.parts) {
-    const textPart = message.payload.parts.find((part: any) =>
-      part.mimeType === 'text/plain' || part.mimeType === 'text/html'
+    const textPart = message.payload.parts.find(
+      (part: any) =>
+        part.mimeType === "text/plain" || part.mimeType === "text/html",
     );
     if (textPart?.body?.data) {
-      body = atob(textPart.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+      body = atob(textPart.body.data.replace(/-/g, "+").replace(/_/g, "/"));
     }
   }
 
@@ -314,11 +404,11 @@ function parseEmailPreview(message: any): RichEmail {
     threadId: message.threadId,
     snippet: message.snippet,
     date: message.internalDate,
-    from: getHeader('from'),
-    to: getHeader('to'),
-    cc: getHeader('cc'),
-    bcc: getHeader('bcc'),
-    subject: getHeader('subject'),
-    body
+    from: getHeader("from"),
+    to: getHeader("to"),
+    cc: getHeader("cc"),
+    bcc: getHeader("bcc"),
+    subject: getHeader("subject"),
+    body,
   };
 }

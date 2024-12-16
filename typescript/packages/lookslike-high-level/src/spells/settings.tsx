@@ -1,11 +1,25 @@
 import { h, behavior, $, select, Session } from "@commontools/common-system";
 import { fromString } from "merkle-reference";
 import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
-import { addTag, Collection, defaultTo, event, isEmpty, Transact } from "../sugar.js";
+import {
+  addTag,
+  Collection,
+  defaultTo,
+  event,
+  isEmpty,
+  Transact,
+} from "../sugar.js";
 import { attemptAuth, getToken, isGmailAuthenticated } from "../gmail.js";
-import { Gmail, listMessages, REQUEST, RESPONSE } from "../effects/gmail.jsx";
+import {
+  Gmail,
+  listMessages,
+  makeEmail,
+  REQUEST,
+  RESPONSE,
+  sendMessage,
+} from "../effects/gmail.jsx";
 
-const GMAIL_REQUEST = '~/gmail'
+const GMAIL_REQUEST = "~/gmail";
 
 export const Emails = Collection.of({
   id: $.id,
@@ -16,14 +30,21 @@ export const Emails = Collection.of({
 export const Headers = Collection.of({
   name: $.name,
   value: $.value,
-})
+});
 
-const resolveRequest = select({ self: $.self, request: $.request, status: $.status })
+const resolveRequest = select({
+  self: $.self,
+  request: $.request,
+  status: $.status,
+})
   .match($.self, GMAIL_REQUEST, $.request)
-  .match($.request, REQUEST.STATUS, $.status)
-const resolveRequestContent = select({ content: $.content, emails: Emails.select })
+  .match($.request, REQUEST.STATUS, $.status);
+const resolveRequestContent = select({
+  content: $.content,
+  emails: Emails.select,
+})
   .match($.request, RESPONSE.JSON, $.content)
-  .clause(Emails.match($.content))
+  .clause(Emails.match($.content));
 
 export const settings = behavior({
   view: select({ self: $.self })
@@ -57,35 +78,36 @@ export const settings = behavior({
 
           <div>
             <h3>Gmail</h3>
-            {isGmailAuthenticated() ? `Connected` : <button onclick="~/on/gmail-auth">
-              Connect Gmail Account
-            </button>}
+            {isGmailAuthenticated() ? (
+              `Connected`
+            ) : (
+              <button onclick="~/on/gmail-auth">Connect Gmail Account</button>
+            )}
 
-            {isGmailAuthenticated() ? (<div>
-              <pre>{JSON.stringify(getToken(), null, 2)}</pre>
-              <button onclick="~/on/test-gmail">
-                Fetch Emails
-              </button>
-            </div>) : ''}
+            {isGmailAuthenticated() ? (
+              <div>
+                <pre>{JSON.stringify(getToken(), null, 2)}</pre>
+                <button onclick="~/on/test-fetch-gmail">Fetch Emails</button>
+                <button onclick="~/on/test-send-gmail">Try Send Email</button>
+              </div>
+            ) : (
+              ""
+            )}
           </div>
 
           <div>
             <h3>Spotify</h3>
-            <button onclick="~/on/spotify-auth">
-              Connect Spotify Account
-            </button>
+            <button onclick="~/on/spotify-auth">Connect Spotify Account</button>
           </div>
 
           <div>
             <h3>GitHub</h3>
-            <button onclick="~/on/github-auth">
-              Connect GitHub Account
-            </button>
+            <button onclick="~/on/github-auth">Connect GitHub Account</button>
           </div>
-
         </div>
       </div>
-    )).commit(),
+    ))
+    .commit(),
 
   onBlueskyAuth: event("~/on/bluesky-auth")
     .update(({ self, event }) => {
@@ -130,20 +152,35 @@ export const settings = behavior({
     })
     .commit(),
 
-  onTestGmail: event("~/on/test-gmail")
+  onTestFetchGmail: event("~/on/test-fetch-gmail")
     .update(({ self }) => {
-      return [listMessages(self, GMAIL_REQUEST, 'me', '')];
+      return [listMessages(self, GMAIL_REQUEST, "me", "")];
+    })
+    .commit(),
+
+  onTestSendGmail: event("~/on/test-send-gmail")
+    .update(({ self }) => {
+      return [
+        sendMessage(
+          self,
+          GMAIL_REQUEST,
+          "me",
+          makeEmail(
+            "bfollington@gmail.com",
+            "Test Email",
+            "This is a test email",
+          ),
+        ),
+      ];
     })
     .commit(),
 
   onComplete: resolveRequest
     .with(resolveRequestContent)
-    .match($.request, REQUEST.STATUS, 'Complete')
+    .match($.request, REQUEST.STATUS, "Complete")
     .update(({ self, content, emails }) => {
       console.log({ self, content, emails });
-      return [
-        ...addTag(content, '#gmail')
-      ]
+      return [...addTag(content, "#gmail")];
     })
     .commit(),
 });
