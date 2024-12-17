@@ -19,13 +19,15 @@ export function resolve<T extends z.ZodObject<any>>(
   }) as any;
 
   for (const [fieldName, fieldData] of Object.entries(schema.shape)) {
-    const defaultValue = (fieldData as any)._def.defaultValue();
-    const resolver = field(fieldName, defaultValue);
+    const defaultValue = (fieldData as any)._def.defaultValue?.();
+    if (defaultValue !== undefined) {
+      const resolver = field(fieldName, defaultValue);
 
-    if (!aggregator) {
-      aggregator = resolver as any;
-    } else {
-      aggregator = aggregator.with(resolver);
+      if (!aggregator) {
+        aggregator = resolver as any;
+      } else {
+        aggregator = aggregator.with(resolver);
+      }
     }
   }
 

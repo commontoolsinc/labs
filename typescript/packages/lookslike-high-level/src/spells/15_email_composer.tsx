@@ -16,9 +16,9 @@ import { resolve } from "../sugar/sugar.jsx";
 
 const GMAIL_REQUEST = "~/gmail";
 const EmailComposer = z.object({
-  to: z.string().default(""),
-  subject: z.string().default(""),
-  body: z.string().default(""),
+  to: z.string().email().describe("The email address to send to"),
+  subject: z.string().min(1).max(255).describe("The subject of the email"),
+  body: z.string().min(10).max(8096).describe("The body of the email"),
 });
 
 export const resolveDraft = resolve(EmailComposer).with(init);
@@ -69,6 +69,12 @@ const styles = {
 export const emailComposer = typedBehavior(EmailComposer, {
   render: ({ self, body, subject, to }) => (
     <div entity={self} style={styles.formContainer}>
+      <common-form
+        schema={EmailComposer}
+        value={{ to, subject, body }}
+        onsubmit="~/on/send-email"
+      />
+
       <div style={styles.inputGroup}>
         <div>
           <div style={styles.inputLabel}>To</div>
