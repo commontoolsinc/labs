@@ -11,17 +11,44 @@ import { z } from "zod";
 import { field } from "./query.js";
 import { Reference } from "merkle-reference";
 
+// zod schema -> query
 export function resolve<T extends z.ZodObject<any>>(
   schema: T,
+  root = true
 ): Select<z.infer<T> & { self: Reference }> {
-  let aggregator: Select<z.infer<T> & { self: Reference }> = select({
+  let aggregator: Select<z.infer<T> & { self: Reference }> = root ? select({
     self: $.self,
-  }) as any;
+  }) : select({}) as any;
 
   for (const [fieldName, fieldData] of Object.entries(schema.shape)) {
-    const defaultValue = (fieldData as any)._def.defaultValue?.();
-    if (defaultValue !== undefined) {
-      const resolver = field(fieldName, defaultValue);
+    if ((fieldData as any)._def.typeName === 'ZodArray') {
+      const innerType = (fieldData as any)._def.type;
+      const subselector = (resolve(innerType as z.ZodObject<any>, false).selector)
+      // @ts-ignore
+      delete subselector['self']
+
+      let arrayResolver = select({
+        [fieldName]: [{
+          this: $[fieldName],
+          ...subselector
+        }]
+      }).match($.self, fieldName, $[fieldName]);
+
+      // Match each key in subselector
+      for (const key of Object.keys(subselector)) {
+        arrayResolver = arrayResolver.match($[fieldName], key, $[key]);
+      }
+
+      if (!aggregator) {
+        aggregator = arrayResolver as any;
+      } else {
+        aggregator = aggregator.with(arrayResolver);
+      }
+    } else {
+      const defaultValue = (fieldData as any)._def.defaultValue?.();
+      const resolver = defaultValue !== undefined
+        ? field(fieldName, defaultValue)
+        : field(fieldName);
 
       if (!aggregator) {
         aggregator = resolver as any;

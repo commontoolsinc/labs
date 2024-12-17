@@ -190,6 +190,10 @@ export class Select<Match extends Selector = Selector> {
       update: this.#transaction.commit(),
     };
   }
+
+  get selector(): Match {
+    return { ...this.#select };
+  }
 }
 
 /**

@@ -55,51 +55,119 @@ export class CommonFormElement extends LitElement {
     baseStyles,
     css`
       :host {
+        --form-bg: #f0f0f0;
+        --form-border: #ccc;
+        --form-radius: 8px;
+        --form-padding: 20px;
+        --form-gap: 15px;
+        --form-font: monospace;
+        --form-width: 600px;
+        --label-color: #666;
+        --label-size: 12px;
+        --input-padding: 10px;
+        --error-color: #dc2626;
+        --primary-color: #2563eb;
+      }
+
+      :host {
         display: block;
-        padding: 1rem;
+        padding: var(--form-padding);
+        background: var(--form-bg);
+        border: 2px solid var(--form-border);
+        border-radius: var(--form-radius);
+        font-family: var(--form-font);
+        max-width: var(--form-width);
+        margin: 0 auto;
       }
+
       .field {
-        margin-bottom: 1rem;
+        margin-bottom: var(--form-gap);
       }
+
       .field-label {
         display: block;
-        font-weight: 500;
-        margin-bottom: 0.25rem;
+        font-size: var(--label-size);
+        color: var(--label-color);
+        font-weight: bold;
+        text-transform: uppercase;
+        margin-bottom: calc(var(--form-gap) * 0.25);
+        cursor: help;
       }
+
       .field-input {
         width: 100%;
-        padding: 0.5rem;
-        border: 1px solid #ccc;
-        border-radius: 4px;
+        padding: var(--input-padding);
+        border: 1px solid var(--form-border);
+        border-radius: var(--form-radius);
+        font-family: inherit;
       }
+
       textarea.field-input {
         min-height: 200px;
         resize: vertical;
       }
+
       .field-error {
-        color: #dc2626;
+        color: var(--error-color);
         font-size: 0.875rem;
-        margin-top: 0.25rem;
+        margin-top: calc(var(--form-gap) * 0.25);
       }
+
       .field-input.has-error {
-        border-color: #dc2626;
+        border-color: var(--error-color);
       }
+
       .actions {
         display: flex;
-        gap: 0.5rem;
-        margin-top: 1rem;
+        gap: var(--form-gap);
+        margin-top: var(--form-gap);
       }
+
       button {
-        padding: 0.5rem 1rem;
-        border-radius: 4px;
-        border: 1px solid #ccc;
+        padding: calc(var(--input-padding) * 0.8) var(--input-padding);
+        border-radius: var(--form-radius);
+        border: 1px solid var(--form-border);
         background: white;
         cursor: pointer;
+        font-family: inherit;
       }
+
       button[type="submit"] {
-        background: #2563eb;
+        background: var(--primary-color);
         color: white;
         border: none;
+      }
+
+      button.icon-button {
+        padding: calc(var(--input-padding) * 0.25);
+        font-size: calc(var(--label-size) * 0.75);
+      }
+
+      .radio-group {
+        display: flex;
+        gap: var(--form-gap);
+      }
+
+      .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: calc(var(--form-gap) * 0.5);
+      }
+
+      .list-controls {
+        display: flex;
+        flex-direction: column;
+        gap: var(--form-gap);
+      }
+
+      .list-item {
+        display: flex;
+        gap: var(--form-gap);
+        align-items: flex-start;
+      }
+
+      .list-item common-form {
+        flex: 1;
       }
     `,
   ];
@@ -131,6 +199,10 @@ export class CommonFormElement extends LitElement {
             acc[key] = this.getDefaultValue(fieldSchema);
             return acc;
           }, {});
+      case 'ZodEnum':
+        return schema._def.values[0];
+      case 'ZodArray':
+        return [];
       default:
         return null;
     }
@@ -138,9 +210,8 @@ export class CommonFormElement extends LitElement {
 
   generateSampleData() {
     const sample: any = {};
-    debugger
     for (const [key, fieldSchema] of Object.entries(this.schema.shape)) {
-      switch ((fieldSchema as any)._def.innerType._def.typeName) {
+      switch ((fieldSchema as any)._def.typeName) {
         case 'ZodString':
           sample[key] = `Sample ${key}`;
           break;
@@ -153,6 +224,13 @@ export class CommonFormElement extends LitElement {
         case 'ZodObject':
           sample[key] = {};
           break;
+        case 'ZodEnum':
+          const values = (fieldSchema as any)._def.values;
+          sample[key] = values[Math.floor(Math.random() * values.length)];
+          break;
+        case 'ZodArray':
+          sample[key] = [];
+          break;
       }
     }
     this._internalValue = sample;
@@ -162,20 +240,22 @@ export class CommonFormElement extends LitElement {
 
   handleInput(key: string, event: Event) {
     const fieldSchema = this.schema.shape[key];
-    const rawValue = (event.target as HTMLInputElement).value;
+    const target = event.target as HTMLInputElement;
+    let value: any = target.value;
 
-    let parsedValue: string | number = rawValue;
     if (fieldSchema._def.typeName === 'ZodNumber') {
-      parsedValue = rawValue === '' ? 0 : Number(rawValue);
+      value = value === '' ? 0 : Number(value);
+    } else if (fieldSchema._def.typeName === 'ZodBoolean') {
+      value = target.checked;
     }
 
     this._internalValue = {
       ...this._internalValue,
-      [key]: parsedValue
+      [key]: value
     };
 
     try {
-      fieldSchema.parse(parsedValue);
+      fieldSchema.parse(value);
       this.errors = {
         ...this.errors,
         [key]: null
@@ -188,6 +268,44 @@ export class CommonFormElement extends LitElement {
     }
 
     this.dispatch('value-changed', { value: this._internalValue });
+    this.requestUpdate();
+  }
+
+  handleArrayUpdate(key: string, index: number, e: CustomEvent) {
+    const value = [...(this._internalValue[key] || [])];
+    value[index] = e.detail.value;
+
+    this._internalValue = {
+      ...this._internalValue,
+      [key]: value
+    };
+
+    this.dispatch('value-changed', { value: this._internalValue });
+    this.requestUpdate();
+  }
+
+  addArrayItem(key: string) {
+    const fieldSchema = this.schema.shape[key];
+    const value = [...(this._internalValue[key] || [])];
+    value.push(this.getDefaultValue(fieldSchema._def.innerType));
+
+    this._internalValue = {
+      ...this._internalValue,
+      [key]: value
+    };
+
+    this.requestUpdate();
+  }
+
+  removeArrayItem(key: string, index: number) {
+    const value = [...(this._internalValue[key] || [])];
+    value.splice(index, 1);
+
+    this._internalValue = {
+      ...this._internalValue,
+      [key]: value
+    };
+
     this.requestUpdate();
   }
 
@@ -211,30 +329,118 @@ export class CommonFormElement extends LitElement {
   renderField(key: string, schema: any) {
     const value = this._internalValue[key] ?? this.getDefaultValue(schema);
     const error = this.errors[key];
+    const description = schema.description;
 
     const isLongString = schema._def.typeName === 'ZodString' &&
       schema._def.checks?.some((check: any) =>
         check.kind === 'max' && check.value > 1024
       );
 
-    const input = isLongString ? html`
-      <textarea
-        class="field-input ${error ? 'has-error' : ''}"
-        .value=${value}
-        @input=${(e: Event) => this.handleInput(key, e)}
-      ></textarea>
-    ` : html`
-      <input
-        class="field-input ${error ? 'has-error' : ''}"
-        .value=${value}
-        type=${schema._def.typeName === 'ZodNumber' ? 'number' : 'text'}
-        @input=${(e: Event) => this.handleInput(key, e)}
-      />
-    `;
+    let input;
+
+    if (schema._def.typeName === 'ZodArray') {
+      const items = value || [];
+      const innerType = schema._def.type;
+      const isPrimitive = ['ZodString', 'ZodNumber', 'ZodBoolean'].includes(innerType._def.typeName);
+
+      input = html`
+        <div class="list-controls">
+          ${items.map((item: any, index: number) => html`
+            <div class="list-item">
+              ${isPrimitive ? html`
+                <input
+                  class="field-input"
+                  .value=${item}
+                  type=${innerType._def.typeName === 'ZodNumber' ? 'number' : 'text'}
+                  @input=${(e: Event) => this.handleArrayUpdate(key, index, new CustomEvent('value-changed', { detail: { value: (e.target as HTMLInputElement).value } }))}
+                />
+              ` : html`
+                <common-form
+                  .schema=${innerType}
+                  .value=${item}
+                  field-path=${this.fieldPath ? `${this.fieldPath}.${key}.${index}` : `${key}.${index}`}
+                  @value-changed=${(e: CustomEvent) => this.handleArrayUpdate(key, index, e)}
+                ></common-form>
+              `}
+              <button type="button" class="icon-button" @click=${() => this.removeArrayItem(key, index)}>❌</button>
+            </div>
+          `)}
+          <button type="button" class="icon-button" @click=${() => this.addArrayItem(key)}>➕</button>
+        </div>
+      `;
+    } else if (schema._def.typeName === 'ZodObject') {
+      input = html`
+        <common-form
+          .schema=${schema}
+          .value=${value}
+          field-path=${this.fieldPath ? `${this.fieldPath}.${key}` : key}
+          @value-changed=${(e: CustomEvent) => this.handleInput(key, e)}
+        ></common-form>
+      `;
+    } else if (schema._def.typeName === 'ZodBoolean') {
+      input = html`
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            .checked=${value}
+            @change=${(e: Event) => this.handleInput(key, e)}
+          />
+          ${key.replace(/([A-Z])/g, ' $1').trim()}
+        </label>
+      `;
+    } else if (schema._def.typeName === 'ZodEnum') {
+      const values = schema._def.values;
+      if (values.length <= 3) {
+        input = html`
+          <div class="radio-group">
+            ${values.map((v: string) => html`
+              <label>
+                <input
+                  type="radio"
+                  name=${key}
+                  value=${v}
+                  .checked=${value === v}
+                  @change=${(e: Event) => this.handleInput(key, e)}
+                />
+                ${v}
+              </label>
+            `)}
+          </div>
+        `;
+      } else {
+        input = html`
+          <select
+            class="field-input ${error ? 'has-error' : ''}"
+            @change=${(e: Event) => this.handleInput(key, e)}
+          >
+            ${values.map((v: string) => html`
+              <option value=${v} ?selected=${value === v}>${v}</option>
+            `)}
+          </select>
+        `;
+      }
+    } else if (isLongString) {
+      input = html`
+        <textarea
+          class="field-input ${error ? 'has-error' : ''}"
+          .value=${value}
+          @input=${(e: Event) => this.handleInput(key, e)}
+        ></textarea>
+      `;
+    } else {
+      input = html`
+        <input
+          class="field-input ${error ? 'has-error' : ''}"
+          .value=${value}
+          type=${schema._def.typeName === 'ZodNumber' ? 'number' : 'text'}
+          @input=${(e: Event) => this.handleInput(key, e)}
+        />
+      `;
+    }
 
     return html`
       <div class="field">
-        <label class="field-label">
+        <label class="field-label" title=${description || ''}>
           ${key.replace(/([A-Z])/g, ' $1').trim()}
         </label>
         ${input}
@@ -255,16 +461,14 @@ export class CommonFormElement extends LitElement {
         ${Object.entries(this.schema.shape).map(([key, fieldSchema]) =>
           this.renderField(key, fieldSchema)
         )}
-
-        <div class="actions">
-          <button type="submit">Submit</button>
-          <button
-            type="button"
-            @click=${() => this.generateSampleData()}
-          >
-            Generate Sample Data
-          </button>
-        </div>
+        ${this.fieldPath === '' ? html`
+          <div class="actions">
+            <button type="submit">Submit</button>
+            <button type="button" class="icon-button" @click=${() => this.generateSampleData()}>
+              🎲
+            </button>
+          </div>
+        ` : null}
       </form>
     `;
   }
