@@ -49,3 +49,9 @@ export {
   getRecipeName,
 } from "./recipe-map.js";
 export { type Cancel, type AddCancel, useCancelGroup } from "./cancel.js";
+export {
+  getRuleName,
+  recipeToBehavior,
+  notifyQueryTriggered,
+  notifyMutation,
+} from "./debug.js";

@@ -40,6 +40,95 @@ import { cell } from "@commontools/common-runner";
  * - derive rules just return new values
  */
 
+// $ is a proxy that just collect paths, so that one can call [getPath] on it
+// and get an array. For example for `q = $.foo.bar[0]` `q[getPath]` yields
+// `["foo", "bar", 0]`. This is used to generate queries.
+
+type PathSegment = PropertyKey | { fn: string; args: any[] };
+const getPath = Symbol("getPath");
+
+// Create the path collector proxy
+function createPathCollector(path: PathSegment[] = []): any {
+  return new Proxy(
+    function () {}, // Base target is a function to support function calls
+    {
+      get(_target, prop) {
+        if (prop === getPath) return path;
+        // Continue collecting path for property access
+        return createPathCollector([...path, prop]);
+      },
+
+      // Catch any function calls
+      apply(_target, _thisArg, args) {
+        // Get the last segment which should be the function name
+        const lastSegment = path[path.length - 1];
+        if (typeof lastSegment !== "string") {
+          throw new Error("Invalid function call");
+        }
+
+        // Remove the function name from the path and add it as a function call
+        const newPath = path.slice(0, -1);
+        return createPathCollector([...newPath, { fn: lastSegment, args }]);
+      },
+    },
+  );
+}
+
+// Create the root $ proxy
+const $ = createPathCollector();
+
+// Resolve $ to a paths on `self`
+// TODO: Also for non-top-level ones
+function resolve$(self: OpaqueRef<any>, query: any) {
+  const entries = Object.entries(query);
+  const result: Record<string, any> = {};
+
+  for (const [key, value] of entries) {
+    if (value && typeof value === "object" && getPath in value) {
+      const path = value[getPath] as PathSegment[];
+
+      let current = self;
+      for (const segment of path) {
+        if (typeof segment === "object" && "fn" in segment) {
+          // Execute any function with its arguments
+          current = current[segment.fn].apply(current, segment.args);
+        } else {
+          current = current[segment as PropertyKey];
+        }
+      }
+
+      result[key] = current;
+    } else {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
+function select(query: any) {
+  const generateQuery = (self: OpaqueRef<any>) => resolve$(self, query);
+  Object.assign(generateQuery, {
+    with: (schema: any) =>
+      select({
+        ...resolve$(self, query),
+        ...Object.fromEntries(
+          Object.keys(schema.properties ?? {}).map(key => [
+            key,
+            self[key as any],
+          ]),
+        ),
+      }),
+  });
+  return generateQuery;
+}
+
+// addRule(event("update"), ({ $event }) => { ... })
+function event(name: string) {
+  // .compile() will replace $event with actual stream
+  return select({ $event: name });
+}
+
 export abstract class Spell<T extends Record<string, any>> {
   private eventListeners: Array<{
     type: string;
@@ -117,15 +206,31 @@ export abstract class Spell<T extends Record<string, any>> {
       });
 
       this.rules.forEach(rule => {
-        // condition: ($) => { foo: $.foo }
+        // condition:
+        //  ($) => { foo: $.foo }
+        //  select({ foo: $.foo })
+        //  select({ foo: $.foo, bar: $.bar.map(item => item.foo) })
+        //     .filter(fn), count(), take(n), skip(n),
+        //     .sortBy(fn, dir?), groupBy(key), distinct(key),
+        //     .join(ref, key?)
+        //  event("update")
+        //  ["foo", "bar"]
 
-        // Should we consider?
-        // this.addRule(["comments"], ({ comments }) => { ... });
-        // this.addRule(select({ total: $.comments.count()}), ({ total }) => { ... });
-        // this.addRule(select({ comments: $.comments.filter((comment) => comment.meta.category.length > 0)}), ({ comments }) => { ... });
-        // this.addRule(select({ comments: $.comments.filter([ $.meta.category, "!==", ""]) }), ({ comments }) => { ... });
+        let condition = rule.condition(self);
 
-        derive(rule.condition(self), rule.handlerFn);
+        if (Array.isArray(condition))
+          condition = Object.fromEntries(
+            condition.map(key => [key, self[key]]),
+          );
+        else if (
+          condition &&
+          typeof condition === "object" &&
+          condition !== null &&
+          "$event" in condition
+        )
+          condition["$event"] = this.streams[condition["$event"]];
+
+        derive(condition, rule.handlerFn);
       });
 
       return {
@@ -175,7 +280,7 @@ class MetadataSpell extends Spell<Meta> {
     };
   }
 
-  override render({ category, submittedAt }: Meta) {
+  override render({ category, submittedAt }: OpaqueRef<Meta>) {
     console.log("Metadata render", category, submittedAt);
     return (
       <div>
@@ -198,8 +303,6 @@ function Metadata({ meta }: { meta: Meta }, _children: any) {
   return metadata(meta ?? {})[UI];
 }
 
-(window as any).metadata = metadata;
-
 export class CommentBoxSpell extends Spell<CommentsState> {
   constructor() {
     super();
@@ -207,10 +310,10 @@ export class CommentBoxSpell extends Spell<CommentsState> {
     this.addEventListener("random", self => {
       console.log("random", self);
 
-      const metadata: Meta = {
+      const metadata: Meta = doc({
         category: "Demo category " + Math.random(),
         submittedAt: new Date().toISOString(),
-      };
+      });
 
       this.set(self, { meta: metadata });
     });
@@ -228,7 +331,7 @@ export class CommentBoxSpell extends Spell<CommentsState> {
     };
   }
 
-  override render({ description, title, meta }: CommentsState) {
+  override render({ description, title, meta }: OpaqueRef<CommentsState>) {
     return (
       <div>
         <h1>{title}</h1>
@@ -271,5 +374,8 @@ export class CommentBoxSpell extends Spell<CommentsState> {
 }
 
 const commentBox = new CommentBoxSpell().compile("Comment Box");
+
+(window as any).metadata = metadata;
+(window as any).commentBox = commentBox;
 
 export default commentBox;

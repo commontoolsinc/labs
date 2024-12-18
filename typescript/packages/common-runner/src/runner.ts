@@ -46,6 +46,8 @@ import init, {
   JavaScriptValueMap,
 } from "@commontools/common-runtime";
 import { addRecipe, getRecipe, getRecipeId } from "./recipe-map.js";
+import { notifyQueryTriggered } from "./debug.js";
+import { getRuleName } from "./debug.js";
 
 export const cancels = new WeakMap<CellImpl<any>, Cancel>();
 
@@ -385,6 +387,12 @@ function instantiateJavaScriptNode(
     const stream = { ...streamRef };
 
     const handler = (event: any) => {
+      notifyQueryTriggered(
+        processCell,
+        recipe,
+        getRuleName(inputBindings, outputBindings),
+      );
+
       if (event.preventDefault) event.preventDefault();
       const eventInputs = { ...inputs };
       const cause = { ...inputs };
@@ -437,6 +445,12 @@ function instantiateJavaScriptNode(
     let resultCell: CellImpl<any> | undefined;
 
     const action: Action = (log: ReactivityLog) => {
+      notifyQueryTriggered(
+        processCell,
+        recipe,
+        getRuleName(inputBindings, outputBindings),
+      );
+
       const inputsProxy = inputsCell.getAsQueryResult([], log);
 
       const frame = pushFrameFromCause({ inputs, outputs, fn: fn.toString() }, {
