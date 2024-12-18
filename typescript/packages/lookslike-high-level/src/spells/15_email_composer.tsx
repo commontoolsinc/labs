@@ -52,7 +52,7 @@ export const emailComposer = typedBehavior(Composer, {
         schema={ComposedMessage}
         onsubmit="~/on/send-email"
       />
-      <pre>{JSON.stringify(sent, null, 2)}</pre>
+      <common-table schema={ComposedMessage} data={sent} />
     </div>
   ),
   rules: schema => ({

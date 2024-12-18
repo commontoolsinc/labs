@@ -10,6 +10,7 @@ import {
 import { z } from "zod";
 import { field } from "./query.js";
 import { Reference } from "merkle-reference";
+import { defaultTo } from "./default.js";
 
 // zod schema -> query
 export function resolve<T extends z.ZodObject<any>>(
@@ -20,40 +21,53 @@ export function resolve<T extends z.ZodObject<any>>(
     self: $.self,
   }) : select({}) as any;
 
-  for (const [fieldName, fieldData] of Object.entries(schema.shape)) {
-    if ((fieldData as any)._def.typeName === 'ZodArray') {
-      const innerType = (fieldData as any)._def.type;
-      const subselector = (resolve(innerType as z.ZodObject<any>, false).selector)
-      // @ts-ignore
-      delete subselector['self']
+  if (!schema.shape) {
+    const defaultValue = (schema as any)._def.defaultValue?.();
+    const resolver = defaultValue !== undefined
+      ? field('value', defaultValue)
+      : field('value');
 
-      let arrayResolver = select({
-        [fieldName]: [{
-          this: $[fieldName],
-          ...subselector
-        }]
-      }).match($.self, fieldName, $[fieldName]);
-
-      // Match each key in subselector
-      for (const key of Object.keys(subselector)) {
-        arrayResolver = arrayResolver.match($[fieldName], key, $[key]);
-      }
-
-      if (!aggregator) {
-        aggregator = arrayResolver as any;
-      } else {
-        aggregator = aggregator.with(arrayResolver);
-      }
+    if (!aggregator) {
+      aggregator = resolver as any;
     } else {
-      const defaultValue = (fieldData as any)._def.defaultValue?.();
-      const resolver = defaultValue !== undefined
-        ? field(fieldName, defaultValue)
-        : field(fieldName);
+      aggregator = aggregator.with(resolver);
+    }
+  } else {
+    for (const [fieldName, fieldData] of Object.entries(schema.shape)) {
+      if ((fieldData as any)._def.typeName === 'ZodArray') {
+        const innerType = (fieldData as any)._def.type;
+        const subselector = (resolve(innerType as z.ZodObject<any>, false).selector)
+        // @ts-ignore
+        delete subselector['self']
 
-      if (!aggregator) {
-        aggregator = resolver as any;
+        let arrayResolver = select({
+          [fieldName]: [{
+            this: $[fieldName],
+            ...subselector
+          }]
+        }).clause(defaultTo($.self, fieldName, $[fieldName], []));
+
+        // Match each key in subselector
+        for (const key of Object.keys(subselector)) {
+          arrayResolver = arrayResolver.match($[fieldName], key, $[key]);
+        }
+
+        if (!aggregator) {
+          aggregator = arrayResolver as any;
+        } else {
+          aggregator = aggregator.with(arrayResolver);
+        }
       } else {
-        aggregator = aggregator.with(resolver);
+        const defaultValue = (fieldData as any)._def.defaultValue?.();
+        const resolver = defaultValue !== undefined
+          ? field(fieldName, defaultValue)
+          : field(fieldName);
+
+        if (!aggregator) {
+          aggregator = resolver as any;
+        } else {
+          aggregator = aggregator.with(resolver);
+        }
       }
     }
   }

@@ -55,6 +55,7 @@ import * as themeable from "./spells/themeable.jsx";
 import TimerService from "./effects/timer.js";
 import { settings } from "./spells/settings.jsx";
 import { emailComposer } from "./spells/15_email_composer.jsx";
+import { addressBook } from "./spells/16_contacts.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -248,6 +249,7 @@ addCharms([
   countdown.spawn({ countdown: 1 }),
   themeable.spawn({ themeable: 1 }),
   emailComposer.spawn({ email: 1 }),
+  addressBook.spawn({ contacts: 1 }),
   FetchService.spawn() as any,
   GmailService.spawn() as any,
   ViewService.spawn() as any,
