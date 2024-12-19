@@ -1,6 +1,6 @@
 import { join } from "@std/path";
 import { exists } from "@std/fs";
-import { iterate } from "./prompts.ts";
+import { codeGenIteration, codeGenFirstRun } from "./prompts.ts";
 
 if (Deno.args.length !== 2) {
   console.error("Usage: deno run -A bootstrap.ts <eval-name> <scenario-name>");
@@ -43,7 +43,7 @@ async function bootstrap() {
     const newSpec = await Deno.readTextFile(newSpecPath);
     const originalSrc = await Deno.readTextFile(originalPath);
 
-    const result = await iterate({
+    const result = await codeGenIteration({
       originalSpec,
       originalSrc,
       workingSpec: newSpec,
@@ -66,7 +66,7 @@ async function bootstrap() {
     // We're doing initial creation
     console.log("Generating initial recipe...");
     
-    const result = await iterate({
+    const result = await codeGenFirstRun({
       originalSpec,
       originalSrc: "", // No original source for bootstrap
       workingSpec: originalSpec, // Use same spec for working spec in bootstrap

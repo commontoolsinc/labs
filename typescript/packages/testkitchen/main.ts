@@ -1,6 +1,6 @@
 import { join } from "@std/path";
 import { exists } from "@std/fs";
-import { iterate } from "./prompts.ts";
+import { LLM_CAPABILITIES} from "./prompts.ts";
 import { chromium, Page } from "playwright";
 import { Action, ActionResult } from "./types.ts";
 import { ensureDir } from "@std/fs";
@@ -119,6 +119,8 @@ async function testOneScenario(evalName: string, scenario: string, actions: Acti
   info["name"] = scenario;
   info["eval"] = evalName;
 
+  const llmHandler = LLM_CAPABILITIES[evalName].handler;
+
   const scenarioPath = join(evalDir, evalName, scenario);
 
   info["originalSpec"] = await safeReadFile(join(scenarioPath, "original-spec.md"));
@@ -127,7 +129,7 @@ async function testOneScenario(evalName: string, scenario: string, actions: Acti
   info["actions"] = actions;
 
   // exit if these inputs arent set
-  const payload = await iterate({
+  const payload = await llmHandler({
     originalSrc: info["originalSrc"],
     originalSpec: info["originalSpec"],
     workingSpec: info["workingSpec"],

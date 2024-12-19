@@ -73,7 +73,6 @@
         "./packages/common-runner:clean",
         "./packages/common-builder:clean",
         "./packages/common-system:clean",
-        "./packages/planning-server:clean",
         "./packages/llm-client:clean",
         "./common/data:clean",
         "./common/io:clean",

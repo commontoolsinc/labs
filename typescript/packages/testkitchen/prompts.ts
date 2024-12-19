@@ -18,11 +18,30 @@ and use it like this:
 
   <li>{formatDate(event.start_date)}</li>
 
+It's very IMPORTANT you provide the current state to a handler when calling it.
+
+When you have a handler defined like this \`increment\` handler:
+
+  const increment = handler<{}, { count: number }>(({}, state) => {
+    state.count += 1;
+  });
+
+You must ensure the state is provided to the handler. For example:
+
+  GOOD: <button onclick={increment({count})}>Increment</button>
+
+  BAD: <button onclick={increment({})}>Increment</button>
+
 DO NOT filter objects directly within the recipe. Instead, use a lift to filter the objects.
 
 To do a condition in a the UI of a recipe, you use the ifElse directive.  Both sides of the ifElse must return a UI element (return an empty <span> if you want to render nothing).
 
   <p>This event is {ifElse(state.is_private, <em>private</em>, <em>public</em>)}</p>
+
+You can NOT perform logic operators inside of the \`ifElse\` directive. In order to do that, you must create a new lift function. For example:
+
+  BAD: {ifElse(count >= 3, <h2>WOW!</h2>, <span/>)}
+  GOOD: {ifElse(showWow({count}), <h2>WOW!</h2>, <span/>)}
 
 Do not evaluate conditionals in the UI JSX, unless it is within the ifElse directive.
 
@@ -43,6 +62,7 @@ Do not call .length on an array - it will fail because it is a proxy and does no
 If you want to generate a string, you need to return the entire string in a lift as string interpolation is not supported in the UI JSX.
 
   <p style={generateStyle(variable)}>
+
 
 If you absolutely must do string interpolation, you can prefix your \`foo \${bar}\` with a str, like str\`foo \${bar}\`.
 
@@ -155,7 +175,28 @@ export default recipe(Schema, ({ items, title }) => {
 \`\`\`
 `;
 
-type LLMResponse = {
+
+
+// const MODEL = "cerebras:llama-3.3-70b";
+const MODEL = "groq:llama-3.3-70b";
+// const MODEL = "anthropic:claude-3-5-sonnet-latest";
+
+
+// What's the best way to handle different prompts for different llm usecases?
+
+export type LLMHandlerPayload = {
+  originalSpec: string;
+  originalSrc?: string;
+  workingSpec?: string;
+  model?: string;
+  errors?: string;
+};
+
+export type LLMHandler = (payload: LLMHandlerPayload) => Promise<LLMResponse>;
+
+
+
+export type LLMResponse = {
   llm: {
     model: string;
     system: string;
@@ -166,40 +207,13 @@ type LLMResponse = {
   generationError?: string;
 };
 
-export const iterate = async ({
-  originalSpec,
-  originalSrc,
-  workingSpec,
-}: {
-  originalSpec: string;
-  originalSrc: string;
-  workingSpec: string;
-}): Promise<LLMResponse> => {
-  const messages = [];
-  const prefill = `\`\`\`tsx\n`;
+// FIXME(jake): Add types for the payload
+export const LLMCall = async (capability: keyof typeof LLM_CAPABILITIES, payload: any) => {
+  const { handler } = LLM_CAPABILITIES[capability];
 
-  if (originalSpec) {
-    messages.push(originalSpec);
-  }
-
-  if (originalSrc) {
-    messages.push(`\`\`\`tsx\n${originalSrc}\n\`\`\``);
-  }
-
-  if (workingSpec) {
-    messages.push(workingSpec);
-    messages.push(prefill);
-  }
-
-  const currentTimestamp = new Date().toISOString();
-  const payload = {
-    // model: "anthropic:claude-3-5-sonnet-latest",
-    model: "cerebras:llama-3.3-70b",
-    // model: "groq:llama-3.3-70b",
-    system: `${currentTimestamp}: You are code generator that implements @commontools recipes.\n${recipeGuide}`,
-    messages,
-    // stop: "\n```",
-  };
+  // NOTE(jake): To ensure we are always exercising real LLMs, we insert a timestamp
+  // before the prompt to break any planning server caching.
+  payload.messages.unshift(new Date().toISOString());
 
   try {
     const text = await llm.sendRequest(payload);
@@ -215,4 +229,83 @@ export const iterate = async ({
       generationError: e instanceof Error ? e.message : JSON.stringify(e),
     };
   }
+};
+
+
+const CODEGEN_FIRSTRUN_SYSTEM_PROMPT = recipeGuide;
+
+export const codeGenFirstRun = async ({
+  originalSpec,
+  model = MODEL,
+}: LLMHandlerPayload): Promise<LLMResponse> => {
+  const messages = [];
+  const prefill = `\`\`\`tsx\n`;
+
+  messages.push(`\n Here is the original spec:\n${originalSpec}`);
+  messages.push("Please look at the original spec and write code that implements it.");
+
+  messages.push(prefill);
+
+
+  const payload = {
+    model: model,
+    system: CODEGEN_FIRSTRUN_SYSTEM_PROMPT,
+    messages,
+  };
+
+  return await LLMCall('codegen-firstrun', payload);
+};
+
+
+export const CODEGEN_ITERATION_SYSTEM_PROMPT = `You are code generator that implements and iterates on existing CommonTools Recipes.\n\n ${recipeGuide}`;
+
+export const codeGenIteration = async ({
+  originalSpec,
+  originalSrc,
+  workingSpec,
+  model
+}: LLMHandlerPayload): Promise<LLMResponse> => {
+  const messages = [];
+  const prefill = `\`\`\`tsx\n`;
+  
+  messages.push(`Here is the original spec:\n${originalSpec}`);
+  messages.push(`Here is the original src:\n${originalSrc}`);
+  messages.push(`Here is updated spec for iteration:\n${workingSpec}`);
+  messages.push("Please look at the original spec, original source code, and updated spec, and write the new source code.");
+
+  messages.push(prefill);
+
+
+  const payload = {
+    model: model,
+    system: CODEGEN_ITERATION_SYSTEM_PROMPT,
+    messages,
+  };
+
+  return await LLMCall('codegen-iteration', payload);
+};
+
+// payload ={
+//     originalSrc: info["originalSrc"],
+//     originalSpec: info["originalSpec"],
+//     workingSpec: info["workingSpec"],
+//   }
+
+
+export const LLM_CAPABILITIES: Record<string, { handler: LLMHandler }> = {
+  'codegen-firstrun': {
+    handler: codeGenFirstRun,
+  },
+  // 'codegen-fixit': {
+  //   handler: codeGenFixit,
+  // },
+  'codegen-iteration': {
+    handler: codeGenIteration,
+  },
+  // 'textgen-spec-iteration': {
+  //   handler: textGenSpecIteration,
+  // },
+  // 'textgen-recipe-suggestion': {
+  //   handler: textGenRecipeSuggestion,
+  // },
 };
