@@ -36,7 +36,8 @@ export function resolve<T extends z.ZodObject<any>>(
     for (const [fieldName, fieldData] of Object.entries(schema.shape)) {
       if ((fieldData as any)._def.typeName === 'ZodArray') {
         const innerType = (fieldData as any)._def.type;
-        const subselector = (resolve(innerType as z.ZodObject<any>, false).selector)
+        const subresolver = resolve(innerType as z.ZodObject<any>, false)
+        const subselector = subresolver.selector
         // @ts-ignore
         delete subselector['self']
 
@@ -45,11 +46,16 @@ export function resolve<T extends z.ZodObject<any>>(
             this: $[fieldName],
             ...subselector
           }]
-        }).clause(defaultTo($.self, fieldName, $[fieldName], []));
+        });
 
         // Match each key in subselector
         for (const key of Object.keys(subselector)) {
-          arrayResolver = arrayResolver.match($[fieldName], key, $[key]);
+          const defaultValue = (innerType.shape[key] as any)?._def?.defaultValue?.();
+          if (defaultValue !== undefined) {
+            arrayResolver = arrayResolver.clause(defaultTo($[fieldName], key, $[key], defaultValue));
+          } else {
+            arrayResolver = arrayResolver.match($[fieldName], key, $[key]);
+          }
         }
 
         if (!aggregator) {

@@ -136,12 +136,18 @@ export class CommonTableElement extends LitElement {
         color: #666;
       }
 
-      .preview-button {
+      .preview-button, .edit-button, .delete-button, .download-button {
         padding: 4px 8px;
         background: #f3f4f6;
         border: 1px solid #e5e7eb;
         border-radius: 4px;
         cursor: pointer;
+        margin-right: 4px;
+      }
+
+      .delete-button {
+        background: #fee2e2;
+        border-color: #fecaca;
       }
 
       .modal-overlay {
@@ -209,6 +215,37 @@ export class CommonTableElement extends LitElement {
     this.selectedItem = null;
   }
 
+  handleEdit(item: any) {
+    this.dispatchEvent(new CustomEvent('edit', {
+      detail: { item: item.this },
+      bubbles: true,
+      composed: true
+    }));
+  }
+
+  handleDelete(item: any) {
+    if (confirm('Are you sure you want to delete this item?')) {
+      this.dispatchEvent(new CustomEvent('delete', {
+        detail: { item: item.this },
+        bubbles: true,
+        composed: true
+      }));
+    }
+  }
+
+  handleDownload(item: any) {
+    const data = JSON.stringify(item, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `data-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  }
+
   override render() {
     if (!this.schema) {
       return html`<div>No schema provided</div>`;
@@ -239,6 +276,9 @@ export class CommonTableElement extends LitElement {
                 `)}
                 <td>
                   <button class="preview-button" @click=${() => this.showPreview(row)}>Preview</button>
+                  <button class="edit-button" @click=${() => this.handleEdit(row)}>Edit</button>
+                  <button class="delete-button" @click=${() => this.handleDelete(row)}>Delete</button>
+                  <button class="download-button" @click=${() => this.handleDownload(row)}>Download</button>
                 </td>
               </tr>
             `)}

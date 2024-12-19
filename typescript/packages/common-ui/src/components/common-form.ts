@@ -28,6 +28,7 @@ export class CommonFormElement extends LitElement {
   @property({ type: Object }) schema: ZodObject<any> = null;
   @property({ type: String, attribute: 'field-path' }) fieldPath = '';
   @property({ type: Object }) errors: { [key: string]: any } = {};
+  @property({ type: Boolean }) reset = false;
 
   @property({ type: Object })
   get value() {
@@ -169,6 +170,10 @@ export class CommonFormElement extends LitElement {
       .list-item common-form {
         flex: 1;
       }
+
+      .hidden-input {
+        display: none;
+      }
     `,
   ];
 
@@ -236,6 +241,24 @@ export class CommonFormElement extends LitElement {
     this._internalValue = sample;
     this.requestUpdate();
     this.dispatch('value-changed', { value: sample });
+  }
+  async handleFileImport() {
+    const input = this.shadowRoot?.querySelector('#file-input') as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const json = JSON.parse(text);
+      this._internalValue = json;
+      this.requestUpdate();
+      this.dispatch('value-changed', { value: json });
+    } catch (error) {
+      console.error('Failed to import JSON file:', error);
+    }
+
+    // Reset file input value so same file can be selected again
+    input.value = '';
   }
 
   handleInput(key: string, event: Event) {
@@ -317,6 +340,10 @@ export class CommonFormElement extends LitElement {
       this.errors = {};
       this.dispatch('submit', { value: validated });
       console.log('Form submitted:', validated);
+      if (this.reset) {
+        this._internalValue = this.getDefaultValue(this.schema);
+        this.requestUpdate();
+      }
     } catch (error: any) {
       this.errors = error.errors.reduce((acc: any, err: any) => {
         acc[err.path[0]] = err.message;
@@ -466,6 +493,16 @@ export class CommonFormElement extends LitElement {
             <button type="submit">Submit</button>
             <button type="button" class="icon-button" @click=${() => this.generateSampleData()}>
               🎲
+            </button>
+            <input
+              type="file"
+              id="file-input"
+              accept=".json"
+              class="hidden-input"
+              @change=${this.handleFileImport}
+            />
+            <button type="button" class="icon-button" @click=${() => (this.shadowRoot?.querySelector('#file-input') as HTMLInputElement)?.click()}>
+              📄
             </button>
           </div>
         ` : null}
