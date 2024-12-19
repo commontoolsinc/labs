@@ -453,7 +453,6 @@ export class CommonWindowManager extends LitElement {
                     ×
                   </button>
                   <charm-debugger
-                    .entity=${JSON.stringify(sourceCellId)}
                     .behavior=${recipeToBehavior(
                       charm.sourceCell?.get()?.[TYPE],
                     )}
