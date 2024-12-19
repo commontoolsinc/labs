@@ -26,6 +26,7 @@ import {
   recipeToBehavior,
 } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
+import { when } from "lit/directives/when.js";
 import { iframe } from "../recipes/iframe.js";
 import { search } from "../recipes/search.js";
 import { NAME, TYPE } from "@commontools/common-builder";
@@ -422,7 +423,6 @@ export class CommonWindowManager extends LitElement {
             if (!charm.get()) return;
 
             const charmId = charm.entityId!;
-            const sourceCellId = charm.sourceCell?.entityId;
 
             // Create a new ref for this charm
             let charmRef = this.charmRefs.get(JSON.stringify(charmId));
@@ -435,6 +435,8 @@ export class CommonWindowManager extends LitElement {
             const onNavigate = () => {
               this.openCharm(JSON.stringify(charmId));
             };
+
+            console.log("UI", charm.getAsQueryResult()?.[UI]);
 
             return html`
               <div
@@ -452,11 +454,17 @@ export class CommonWindowManager extends LitElement {
                   <button class="close-button" @click="${this.onClose}">
                     ×
                   </button>
-                  <charm-debugger
-                    .behavior=${recipeToBehavior(
-                      charm.sourceCell?.get()?.[TYPE],
-                    )}
-                  ></charm-debugger>
+                  ${when(
+                    (globalThis as any).DEBUG_CHARMS &&
+                      charm.getAsQueryResult()?.[UI]?.template?.name !==
+                        "common-charm",
+                    () =>
+                      html`<charm-debugger
+                        .behavior=${recipeToBehavior(
+                          charm.sourceCell?.get()?.[TYPE],
+                        )}
+                      ></charm-debugger> `,
+                  )}
                 </div>
                 <div class="charm" ${ref(charmRef)}></div>
               </div>
