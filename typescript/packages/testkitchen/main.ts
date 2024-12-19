@@ -249,9 +249,14 @@ async function testOneScenario(evalName: string, scenario: string, actions: Acti
 // P2: save console logs/errors for each actions
 // x P2: timings!!!!  (we should store the timings)
 function generateReportHtml(results: any, reportName: string): string {
-  const reports: string[] = [];
+  // Group results by eval
+  const evalGroups = results.reduce((acc: {[key: string]: any[]}, result: any) => {
+    acc[result.eval] = acc[result.eval] || [];
+    acc[result.eval].push(result);
+    return acc;
+  }, {});
   
-  // Calculate pass/fail stats
+  // Calculate overall pass/fail stats
   const total = results.length;
   const passed = results.filter((info: any) => 
     !info.compileError && 
@@ -260,58 +265,75 @@ function generateReportHtml(results: any, reportName: string): string {
   const allPassed = passed === total;
   const resultsColor = allPassed ? "green" : "red";
   
-  let info;
-  for (info of results) {
-    const report = `<div class="scenario" style="border: 1px solid black; padding: 10px; margin: 10px;">
-      <h2>${info.name}</h2>
-      
-      <details>
-        <summary>Video Recording</summary>
-        ${info.videoPath ? `
-          <video width="800" controls>
-            <source src="${info.videoPath}" type="video/webm">
-            Your browser does not support the video tag.
-          </video>
-        ` : ''}
-      </details>
-      
-      ${info.compileError
-        ? `<h2>Compile Error</h2><br/><pre>${info.compileError}</pre>`
-        : ""}
+  const evalReports = Object.entries(evalGroups).map(([evalName, evalResults]) => {
+    const evalPassed = evalResults.filter((info: any) => 
+      !info.compileError && 
+      info.tests?.every((test: any) => test.success)
+    ).length;
+    
+    const scenarios = evalResults.map(info => `
+      <div class="scenario" style="border: 1px solid black; padding: 10px; margin: 10px;">
+        <h3>${info.name}</h3>
+        
+        <details>
+          <summary>Video Recording</summary>
+          ${info.videoPath ? `
+            <video width="800" controls>
+              <source src="${info.videoPath}" type="video/webm">
+              Your browser does not support the video tag.
+            </video>
+          ` : ''}
+        </details>
+        
+        ${info.compileError
+          ? `<h3>Compile Error</h3><br/><pre>${info.compileError}</pre>`
+          : ""}
 
-      ${
-        info.tests && info.tests.length > 0
-          ? `
-              <h2>Actions</h2>
-              ${info.tests.map((test: any, index: number) => `
-                <div class="test-action">
-                  <h3 class="${test.success ? "success" : "failure"}">
-                    Action ${index + 1}: ${test.action.name} 
-                    <span style="font-size: 0.8em; font-family: monospace;">(${test.duration.toFixed(2)}ms)</span>
-                  </h3>
-                  ${test.error ? `<p class="error">Error: ${test.error}</p>` : ''}
-                  
-                  <details>
-                    <summary>Screenshots</summary>
-                    <div class="screenshots" style="display: flex; gap: 10px; margin-top: 10px;">
-                      <div>
-                        <h4>Before</h4>
-                        <img src="${test.screenshots.before}" style="max-width: 300px; border: 1px solid #ccc;" />
+        ${
+          info.tests && info.tests.length > 0
+            ? `
+                <h3>Actions</h3>
+                ${info.tests.map((test: any, index: number) => `
+                  <div class="test-action">
+                    <h4 class="${test.success ? "success" : "failure"}">
+                      Action ${index + 1}: ${test.action.name} 
+                      <span style="font-size: 0.8em; font-family: monospace;">(${test.duration.toFixed(2)}ms)</span>
+                    </h4>
+                    ${test.error ? `<p class="error">Error: ${test.error}</p>` : ''}
+                    
+                    <details>
+                      <summary>Screenshots</summary>
+                      <div class="screenshots" style="display: flex; gap: 10px; margin-top: 10px;">
+                        <div>
+                          <h4>Before</h4>
+                          <img src="${test.screenshots.before}" style="max-width: 300px; border: 1px solid #ccc;" />
+                        </div>
+                        <div>
+                          <h4>After</h4>
+                          <img src="${test.screenshots.after}" style="max-width: 300px; border: 1px solid #ccc;" />
+                        </div>
                       </div>
-                      <div>
-                        <h4>After</h4>
-                        <img src="${test.screenshots.after}" style="max-width: 300px; border: 1px solid #ccc;" />
-                      </div>
-                    </div>
-                  </details>
-                </div>
-              `).join('\n')}
-          `
-          : ""
-      }
-      </div>`;
-    reports.push(report);
-  }
+                    </details>
+                  </div>
+                `).join('\n')}
+            `
+            : ""
+        }
+      </div>
+    `).join('\n');
+
+    return `
+      <div class="eval-group">
+        <h2>
+          ${evalName} 
+          <span style="font-size: 0.8em; color: ${evalPassed === evalResults.length ? 'green' : 'red'}">
+            (${evalPassed}/${evalResults.length} passed)
+          </span>
+        </h2>
+        ${scenarios}
+      </div>
+    `;
+  }).join('\n');
 
   return `
     <!DOCTYPE html>
@@ -319,9 +341,8 @@ function generateReportHtml(results: any, reportName: string): string {
     <head>
       <title>Summary Report for ${reportName}</title>
       <style>
-        /* Add your styles here */
         body { font-family: sans-serif; padding: 20px; }
-        h1, h2 { color: #333; }
+        h1, h2, h3, h4 { color: #333; }
         .success { color: green; }
         .failure { color: red; }
         .error { color: red; margin: 10px 0; }
@@ -331,15 +352,19 @@ function generateReportHtml(results: any, reportName: string): string {
         details { margin: 10px 0; }
         summary { cursor: pointer; padding: 5px; background: #f5f5f5; }
         summary:hover { background: #eee; }
+        .eval-group { 
+          margin: 30px 0;
+          padding: 20px;
+          background: #f8f8f8;
+          border-radius: 8px;
+        }
       </style>
     </head>
     <body>
-
-    <h1>Test Report for ${reportName}</h1>
-    <h2 style="color: ${resultsColor}">Results: ${passed}/${total} scenarios passed</h2>
-    <p>Generated at: ${new Date().toLocaleString()}</p>
-      ${reports.join("\n")}
-
+      <h1>Test Report for ${reportName}</h1>
+      <h2 style="color: ${resultsColor}">Overall Results: ${passed}/${total} scenarios passed</h2>
+      <p>Generated at: ${new Date().toLocaleString()}</p>
+      ${evalReports}
     </body>
     </html>
   `;
