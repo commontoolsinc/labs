@@ -356,8 +356,8 @@ export function cell<T>(value?: T, cause?: any): CellImpl<T> {
       }
       if (changed) {
         log?.writes.push({ cell: self, path });
+        notifyMutation(self, path, newValue);
         for (const callback of callbacks) callback(value as T, path);
-        notifyMutation(self, path, value);
       }
       return changed;
     },
