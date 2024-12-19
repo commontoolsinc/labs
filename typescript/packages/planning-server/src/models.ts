@@ -128,11 +128,11 @@ if (Deno.env.get("ANTHROPIC_API_KEY")) {
 if (Deno.env.get("GROQ_API_KEY")) {
   addModel({
     provider: groq,
-    name: "groq:llama-3.1-70b-versatile",
-    aliases: ["groq:llama-3.1-70b"],
+    name: "groq:llama-3.3-70b-versatile",
+    aliases: ["groq:llama-3.3-70b"],
     capabilities: {
       contextWindow: 128_000,
-      maxOutputTokens: 8000,
+      maxOutputTokens: 32768,
       images: false,
       prefill: true,
       systemPrompt: true,
@@ -143,27 +143,12 @@ if (Deno.env.get("GROQ_API_KEY")) {
 
   addModel({
     provider: groq,
-    name: "groq:llama-3.1-8b-instant",
-    aliases: ["llama-3.1-8b"],
+    name: "groq:llama-3.3-70b-specdec",
+    aliases: ["groq:llama-3.3-70b-specdec"],
     capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 8000,
+      contextWindow: 8192,
+      maxOutputTokens: 8192,
       images: false,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: false,
-    },
-  });
-
-  addModel({
-    provider: groq,
-    name: "groq:llama-3.2-11b-vision-preview",
-    aliases: ["groq:llama-3.2-11b-vision", "llama-3.2-11b-vision"],
-    capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 8000,
-      images: true,
       prefill: true,
       systemPrompt: true,
       stopSequences: true,
@@ -179,21 +164,6 @@ if (Deno.env.get("GROQ_API_KEY")) {
       contextWindow: 128_000,
       maxOutputTokens: 8000,
       images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: false,
-    },
-  });
-
-  addModel({
-    provider: groq,
-    name: "groq:llama-3.2-3b-preview",
-    aliases: ["groq:llama-3.2-3b", "llama-3.2-3b"],
-    capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 8000,
-      images: false,
       prefill: true,
       systemPrompt: true,
       stopSequences: true,
@@ -354,7 +324,7 @@ if (Deno.env.get("CEREBRAS_API_KEY")) {
   console.log(cerebras);
   addModel({
     provider: cerebras,
-    name: "cerebras:llama3.1-70b",
+    name: "cerebras:llama-3.3-70b",
     aliases: ["cerebras"],
     capabilities: {
       contextWindow: 8192,
