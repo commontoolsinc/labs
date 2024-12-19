@@ -10,22 +10,71 @@ import {
 import { z } from "zod";
 import { field } from "./query.js";
 import { Reference } from "merkle-reference";
+import { defaultTo } from "./default.js";
 
+// zod schema -> query
 export function resolve<T extends z.ZodObject<any>>(
   schema: T,
+  root = true
 ): Select<z.infer<T> & { self: Reference }> {
-  let aggregator: Select<z.infer<T> & { self: Reference }> = select({
+  let aggregator: Select<z.infer<T> & { self: Reference }> = root ? select({
     self: $.self,
-  }) as any;
+  }) : select({}) as any;
 
-  for (const [fieldName, fieldData] of Object.entries(schema.shape)) {
-    const defaultValue = (fieldData as any)._def.defaultValue();
-    const resolver = field(fieldName, defaultValue);
+  if (!schema.shape) {
+    const defaultValue = (schema as any)._def.defaultValue?.();
+    const resolver = defaultValue !== undefined
+      ? field('value', defaultValue)
+      : field('value');
 
     if (!aggregator) {
       aggregator = resolver as any;
     } else {
       aggregator = aggregator.with(resolver);
+    }
+  } else {
+    for (const [fieldName, fieldData] of Object.entries(schema.shape)) {
+      if ((fieldData as any)._def.typeName === 'ZodArray') {
+        const innerType = (fieldData as any)._def.type;
+        const subresolver = resolve(innerType as z.ZodObject<any>, false)
+        const subselector = subresolver.selector
+        // @ts-ignore
+        delete subselector['self']
+
+        let arrayResolver = select({
+          [fieldName]: [{
+            this: $[fieldName],
+            ...subselector
+          }]
+        });
+
+        // Match each key in subselector
+        for (const key of Object.keys(subselector)) {
+          const defaultValue = (innerType.shape[key] as any)?._def?.defaultValue?.();
+          if (defaultValue !== undefined) {
+            arrayResolver = arrayResolver.clause(defaultTo($[fieldName], key, $[key], defaultValue));
+          } else {
+            arrayResolver = arrayResolver.match($[fieldName], key, $[key]);
+          }
+        }
+
+        if (!aggregator) {
+          aggregator = arrayResolver as any;
+        } else {
+          aggregator = aggregator.with(arrayResolver);
+        }
+      } else {
+        const defaultValue = (fieldData as any)._def.defaultValue?.();
+        const resolver = defaultValue !== undefined
+          ? field(fieldName, defaultValue)
+          : field(fieldName);
+
+        if (!aggregator) {
+          aggregator = resolver as any;
+        } else {
+          aggregator = aggregator.with(resolver);
+        }
+      }
     }
   }
 
