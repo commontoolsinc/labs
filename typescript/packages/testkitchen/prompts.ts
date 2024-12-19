@@ -178,8 +178,11 @@ export const iterate = async ({
   const messages = [];
   const prefill = `\`\`\`tsx\n`;
 
-  if (originalSpec && originalSrc) {
+  if (originalSpec) {
     messages.push(originalSpec);
+  }
+
+  if (originalSrc) {
     messages.push(`\`\`\`tsx\n${originalSrc}\n\`\`\``);
   }
 
@@ -188,11 +191,14 @@ export const iterate = async ({
     messages.push(prefill);
   }
 
+  const currentTimestamp = new Date().toISOString();
   const payload = {
-    model: "anthropic:claude-3-5-sonnet-latest",
-    system: `You are code generator that implements @commontools recipes.\n${recipeGuide}`,
+    // model: "anthropic:claude-3-5-sonnet-latest",
+    model: "cerebras:llama-3.3-70b",
+    // model: "groq:llama-3.3-70b",
+    system: `${currentTimestamp}: You are code generator that implements @commontools recipes.\n${recipeGuide}`,
     messages,
-    stop: "\n```",
+    // stop: "\n```",
   };
 
   try {
