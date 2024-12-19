@@ -2,11 +2,11 @@ import { join } from "@std/path";
 import { exists } from "@std/fs";
 import { iterate } from "./prompts.ts";
 import { chromium, Page } from "playwright";
-import { Action, ActionResult } from "./actions.ts";
+import { Action, ActionResult } from "./types.ts";
 import { ensureDir } from "@std/fs";
 import { startTempServer } from "./hono-http.ts";
 
-const scenarioDir = join(Deno.cwd(), "scenarios");
+const evalDir = join(Deno.cwd(), "evals");
 const reportName = "run";
 const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 const reportDir = join("reports", `${reportName}-${timestamp}`);
@@ -19,82 +19,111 @@ async function runRecipeActions(page: Page, actions: Action[]): Promise<ActionRe
   await page.waitForTimeout(2000);
   console.log('Page loaded, starting actions...');
 
-  let action;
-
   for (const [index, action] of actions.entries()) {
-    if (action.type === "click") {
-      const actionDir = join(reportDir, "media", `action-${index}`);
-      await ensureDir(actionDir);
+    const actionDir = join(reportDir, "media", `action-${index}`);
+    await ensureDir(actionDir);
+    
+    // Screenshot before action
+    await page.screenshot({ 
+      path: join(actionDir, "before.png"),
+      fullPage: true 
+    });
+
+    const startTime = performance.now();
+    try {
+      switch (action.type) {
+        case "click": {
+          const clickAction = action as ClickAction;
+          await page.getByRole(...clickAction.args).click({ timeout: 2500 });
+          break;
+        }
+        case "assert": {
+          const assertAction = action as AssertAction;
+          const element = page.getByRole(...assertAction.args);
+          const isVisible = await element.isVisible();
+
+          if (!isVisible) {
+            throw new Error(`Assertion failed: Could not find element with role ${assertAction.args[0]} and properties ${JSON.stringify(assertAction.args[1])}`);
+          }
+
+          if (assertAction.args[1].expected) {
+            const text = await element.textContent();
+            if (text !== assertAction.args[1].expected) {
+              throw new Error(`Assertion failed: Expected text "${assertAction.args[1].expected}" but got "${text}"`);
+            }
+          }
+          break;
+        }
+        default: {
+          const _exhaustiveCheck: never = action;
+          throw new Error(`Unknown action type: ${(action as any).type}`);
+        }
+      }
+
+      const endTime = performance.now();
+      const duration = endTime - startTime;
+      // Small delay to let any animations complete
+      await page.waitForTimeout(1000);
       
-      // Screenshot before action
+      // Screenshot after action
       await page.screenshot({ 
-        path: join(actionDir, "before.png"),
+        path: join(actionDir, "after.png"),
         fullPage: true 
       });
 
-      const startTime = performance.now();
-      try {
-        await page.getByRole(...action.args).click({ timeout: 2500 });
+      rv.push({ 
+        success: true, 
+        action,
+        duration,
+        screenshots: {
+          before: `media/action-${index}/before.png`,
+          after: `media/action-${index}/after.png`
+        }
+      });
+    } catch (e) {
+      // Still capture the after screenshot on failure
+      await page.screenshot({ 
+        path: join(actionDir, "after.png"),
+        fullPage: true 
+      });
 
-        const endTime = performance.now();
-        const duration = endTime - startTime;
-        // Small delay to let any animations complete
-        await page.waitForTimeout(1000);
-        
-        // Screenshot after action
-        await page.screenshot({ 
-          path: join(actionDir, "after.png"),
-          fullPage: true 
-        });
-
-        rv.push({ 
-          success: true, 
-          action,
-          duration,
-          screenshots: {
-            before: `media/action-${index}/before.png`,
-            after: `media/action-${index}/after.png`
-          }
-        });
-      } catch (e) {
-        // Still capture the after screenshot on failure
-        await page.screenshot({ 
-          path: join(actionDir, "after.png"),
-          fullPage: true 
-        });
-
-        rv.push({
-          error: e instanceof Error ? e.message : JSON.stringify(e),
-          success: false,
-          action,
-          duration: performance.now() - startTime,
-          screenshots: {
-            before: `media/action-${index}/before.png`,
-            after: `media/action-${index}/after.png`
-          }
-        });
-      }
+      rv.push({
+        error: e instanceof Error ? e.message : JSON.stringify(e),
+        success: false,
+        action,
+        duration: performance.now() - startTime,
+        screenshots: {
+          before: `media/action-${index}/before.png`,
+          after: `media/action-${index}/after.png`
+        }
+      });
     }
   }
   return rv;
 }
 
-async function testOneScenario(scenario: string, actions: Action[]): Promise<any> {
+async function safeReadFile(path: string, defaultValue: string = ""): Promise<string> {
+  try {
+    return await Deno.readTextFile(path);
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) {
+      console.warn(`Warning: Error reading ${path}:`, error);
+    }
+    return defaultValue;
+  }
+}
+
+async function testOneScenario(evalName: string, scenario: string, actions: Action[]): Promise<any> {
   let info = {} as any;
 
-  // TODO: remove any old generated source
-
   info["name"] = scenario;
+  info["eval"] = evalName;
 
-  info["originalSrc"] = await Deno.readTextFile(
-    join(scenarioDir, scenario, "original.tsx"),
-  );
-  info["originalSpec"] = await Deno.readTextFile(
-    join(scenarioDir, scenario, "ogspec.md"),
-  );
-  info["workingSpec"] = await Deno.readTextFile(
-    join(scenarioDir, scenario, "newspec.md"),
-  );
+  const scenarioPath = join(evalDir, evalName, scenario);
+
+  info["originalSpec"] = await safeReadFile(join(scenarioPath, "original-spec.md"));
+  info["originalSrc"] = await safeReadFile(join(scenarioPath, "original.tsx"));
+  info["workingSpec"] = await safeReadFile(join(scenarioPath, "new-spec.md"));
   info["actions"] = actions;
 
   // exit if these inputs arent set
@@ -327,11 +356,10 @@ function generateReportHtml(results: any, reportName: string): string {
 
 const results = [];
 
-import { actions as kittyActions } from "./scenarios/pet-kitties/actions.ts";
-results.push(await testOneScenario("pet-kitties", kittyActions));
+import { actions as counterActions } from "./evals/codegen-firstrun/01-counter/actions.ts";
+results.push(await testOneScenario("codegen-firstrun", "01-counter", counterActions));
 
-import { actions as anotherActions } from "./scenarios/another-counters/actions.ts";
-results.push(await testOneScenario("another-counters", anotherActions));
+// Add more scenarios here as needed
 
 const reportHtml = generateReportHtml(results, reportName);
 
