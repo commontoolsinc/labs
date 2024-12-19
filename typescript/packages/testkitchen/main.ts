@@ -7,8 +7,9 @@ import { ensureDir } from "@std/fs";
 import { startTempServer } from "./hono-http.ts";
 
 const evalDir = join(Deno.cwd(), "evals");
-const reportName = "run";
 const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+const reportName = `run`;
+
 const reportDir = join("reports", `${reportName}-${timestamp}`);
 await ensureDir(reportDir);
 

@@ -263,7 +263,7 @@ export const codeGenIteration = async ({
   originalSpec,
   originalSrc,
   workingSpec,
-  model
+  model = MODEL
 }: LLMHandlerPayload): Promise<LLMResponse> => {
   const messages = [];
   const prefill = `\`\`\`tsx\n`;
