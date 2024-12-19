@@ -8,19 +8,19 @@ import { Charm, initRules, typedBehavior } from "./spell.jsx";
 import { z } from "zod";
 import { Reference } from "merkle-reference";
 import { resolve } from "../sugar/sugar.jsx";
-const Ref = z.object({}).nullable().default(null);
+import { Ref, UiFragment } from "../sugar/zod.js";
 
 const Contact = z.object({
   name: z.string().min(1).max(255).describe("The name of the contact"),
   email: z.string().email().describe("The email address of the contact"),
   phone: z.string().min(10).max(20).describe("The phone number of the contact"),
-  nickname: z.string().nullable().default(null).describe("The nickname of the contact"),
+  // nickname: z.string().nullable().default(null).describe("The nickname of the contact"),
 });
 
 const AddressBook = z.object({
   focused: Ref.describe("The contact that is currently being edited"),
   contacts: z.array(Contact).describe("The contacts that have been added"),
-  '~/common/ui/list': z.any().nullable().default(null).describe("The UI fragment for the contacts list, if present")
+  '~/common/ui/list': UiFragment.describe("The UI fragment for the contacts list, if present")
 })
 
 type EditEvent = {
@@ -32,15 +32,15 @@ type SubmitEvent = {
 };
 
 const contactEditor = typedBehavior(Contact, {
-  render: ({ self, email, name, phone, nickname }) => (
+  render: ({ self, email, name, phone }) => (
     <div entity={self}>
       <common-form
         schema={Contact}
-        value={{ email, name, phone, nickname }}
+        value={{ email, name, phone }}
         onsubmit="~/on/save"
       />
       <details>
-        <pre>{JSON.stringify({ email, name, phone, nickname }, null, 2)}</pre>
+        <pre>{JSON.stringify({ email, name, phone }, null, 2)}</pre>
       </details>
     </div>
   ),
@@ -100,6 +100,7 @@ export const addressBook = typedBehavior(
 
     onDeleteContact: event("~/on/delete-contact")
       .transact(({ self, event }, cmd) => {
+        debugger
         const ev = Session.resolve<EditEvent>(event);
         cmd.add(...Transact.remove(self, { contacts: ev.detail.item }))
       }),

@@ -1,19 +1,14 @@
 import {
   h,
-  behavior,
-  $,
-  select,
   Session,
-  Instruction,
-  Select,
   refer,
 } from "@commontools/common-system";
-import { CommonInputEvent } from "../../../common-ui/lib/components/common-input.js";
-import { event, Transact } from "../sugar.js";
+import { event, subview, Transact } from "../sugar.js";
 import { makeEmail, sendMessage } from "../effects/gmail.jsx";
-import { Charm, init, initRules, typedBehavior } from "./spell.jsx";
+import { initRules, typedBehavior } from "./spell.jsx";
 import { z } from "zod";
 import { resolve } from "../sugar/sugar.jsx";
+import { UiFragment } from "../sugar/zod.js";
 
 const GMAIL_REQUEST = "~/gmail";
 const ComposedMessage = z.object({
@@ -24,35 +19,26 @@ const ComposedMessage = z.object({
 
 const Composer = z.object({
   sent: z.array(ComposedMessage).describe("The emails that have been sent"),
-  status: z.string().default('init')
+  status: z.string().default('init'),
+  '~/common/ui/list': UiFragment.describe("The UI fragment for the sent emails list")
 })
-
-const FormTest = z.object({
-  to: z.string().email().describe("The email address to send to"),
-  subject: z.string().min(1).max(255).describe("The subject of the email"),
-  body: z.string().min(10).max(8096).describe("The body of the email"),
-  count: z.number().describe("A number!"),
-  done: z.boolean().describe("Done?"),
-  category: z.enum(["work", "personal", "family"]).describe("The category of the email"),
-  tags: z.array(z.string()).describe("The tags of the email"),
-  cc: z.array(z.object({
-    email: z.string().email().describe("The email address to cc to"),
-    name: z.string().describe("The name of the person to cc"),
-  })).describe("The cc of the email"),
-});
 
 type SubmitEvent = {
   detail: { value: z.infer<typeof ComposedMessage> }
 };
 
-export const emailComposer = typedBehavior(Composer, {
-  render: ({ self, sent }) => (
+export const emailComposer = typedBehavior(Composer.pick({
+  status: true,
+  '~/common/ui/list': true
+}), {
+  render: ({ self, status, '~/common/ui/list': sentList }) => (
     <div entity={self} >
       <common-form
         schema={ComposedMessage}
+        reset
         onsubmit="~/on/send-email"
       />
-      <common-table schema={ComposedMessage} data={sent} />
+      {subview(sentList)}
     </div>
   ),
   rules: schema => ({
@@ -70,9 +56,18 @@ export const emailComposer = typedBehavior(Composer, {
 
         cmd.add(...Transact.set(self, { status: "sending", }));
 
-        // bf: this is sugarable, but how should we leverage schema in the process?
         cmd.add({ Import: msg })
         cmd.add(...Transact.assert(self, { sent: refer(msg) }))
       }),
+
+    renderSentList: resolve(Composer.pick({ sent: true }))
+      .update(({ self, sent }) => {
+        return [{
+          Upsert: [self, '~/common/ui/list', <common-table
+            schema={ComposedMessage}
+            data={sent}
+          /> as any]
+        }]
+      }).commit(),
   }),
 });
