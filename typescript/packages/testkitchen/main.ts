@@ -372,8 +372,8 @@ function generateReportHtml(results: any, reportName: string): string {
 
 const results = [];
 
-// import { actions as counterActions } from "./evals/codegen-firstrun/01-counter/actions.ts";
-// results.push(await testOneScenario("codegen-firstrun", "01-counter", counterActions));
+import { actions as counterActions } from "./evals/codegen-firstrun/01-counter/actions.ts";
+results.push(await testOneScenario("codegen-firstrun", "01-counter", counterActions));
 
 
 import { actions as counterMissingIfElseActions } from "./evals/codegen-fixit/01-counter-missing-ifelse/actions.ts";
@@ -413,7 +413,7 @@ for (const result of results) {
   const scenarioStatus = !result.compileError && 
     result.tests?.every(test => test.success) ? "✅" : "❌";
   
-  console.log(`${scenarioStatus} ${result.name}`);
+  console.log(`${scenarioStatus} ${result.eval}/${result.name}`);
   if (result.compileError) {
     console.log(`   Error: ${result.compileError}`);
   } else {

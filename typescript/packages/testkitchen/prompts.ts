@@ -95,7 +95,7 @@ import {
 } from "@commontools/common-builder";
 import { z } from "zod";
 
-const Counter = z.object({ title: z.string(), count: z.number() });
+const Counter = z.object({ title: z.string(), count: z.number().default(0) });
 type Counter = z.infer<typeof Counter>;
 
 const Schema = z
