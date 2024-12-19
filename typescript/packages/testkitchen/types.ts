@@ -13,7 +13,7 @@ export type ClickAction = {
 export type AssertAction = {
   type: "assert";
   name: string;
-  args: [string, { expected?: string, name?: string, level?: number }];
+  args: [string, { expected?: string, name?: string, level?: number, notVisible?: boolean }];
 };
 
 export type Action = ClickAction | AssertAction;

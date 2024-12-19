@@ -43,6 +43,10 @@ async function runRecipeActions(page: Page, actions: Action[]): Promise<ActionRe
           const isVisible = await element.isVisible();
 
           if (!isVisible) {
+            if (assertAction.args[1].notVisible) {
+              // This is ok
+              continue;
+            }
             throw new Error(`Assertion failed: Could not find element with role ${assertAction.args[0]} and properties ${JSON.stringify(assertAction.args[1])}`);
           }
 
@@ -52,6 +56,14 @@ async function runRecipeActions(page: Page, actions: Action[]): Promise<ActionRe
               throw new Error(`Assertion failed: Expected text "${assertAction.args[1].expected}" but got "${text}"`);
             }
           }
+
+          if (assertAction.args[1].notVisible) {
+            const isVisible = await element.isVisible();
+            if (isVisible) {
+              throw new Error(`Assertion failed: Expected element with role ${assertAction.args[0]} and properties ${JSON.stringify(assertAction.args[1])} to be hidden but it is visible`);
+            }
+          }
+
           break;
         }
         default: {
@@ -126,6 +138,7 @@ async function testOneScenario(evalName: string, scenario: string, actions: Acti
   info["originalSpec"] = await safeReadFile(join(scenarioPath, "original-spec.md"));
   info["originalSrc"] = await safeReadFile(join(scenarioPath, "original.tsx"));
   info["workingSpec"] = await safeReadFile(join(scenarioPath, "new-spec.md"));
+  info["errors"] = await safeReadFile(join(scenarioPath, "errors.txt"));
   info["actions"] = actions;
 
   // exit if these inputs arent set
@@ -133,6 +146,7 @@ async function testOneScenario(evalName: string, scenario: string, actions: Acti
     originalSrc: info["originalSrc"],
     originalSpec: info["originalSpec"],
     workingSpec: info["workingSpec"],
+    errors: info["errors"],
   });
 
   info = { ...payload, ...info };
@@ -358,8 +372,12 @@ function generateReportHtml(results: any, reportName: string): string {
 
 const results = [];
 
-import { actions as counterActions } from "./evals/codegen-firstrun/01-counter/actions.ts";
-results.push(await testOneScenario("codegen-firstrun", "01-counter", counterActions));
+// import { actions as counterActions } from "./evals/codegen-firstrun/01-counter/actions.ts";
+// results.push(await testOneScenario("codegen-firstrun", "01-counter", counterActions));
+
+
+import { actions as counterMissingIfElseActions } from "./evals/codegen-fixit/01-counter-missing-ifelse/actions.ts";
+results.push(await testOneScenario("codegen-fixit", "01-counter-missing-ifelse", counterMissingIfElseActions));
 
 // Add more scenarios here as needed
 

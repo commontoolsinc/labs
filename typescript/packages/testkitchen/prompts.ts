@@ -285,6 +285,38 @@ export const codeGenIteration = async ({
   return await LLMCall('codegen-iteration', payload);
 };
 
+
+export const CODEGEN_FIXIT_SYSTEM_PROMPT = `You are code generator that fixes existing CommonTools Recipes, specialized for fixing errors.\n\n ${recipeGuide}`;
+
+export const codeGenFixit = async ({
+  originalSpec,
+  originalSrc,
+  workingSpec,
+  errors,
+  model = MODEL
+}: LLMHandlerPayload): Promise<LLMResponse> => {
+  const messages = [];
+  const prefill = `\`\`\`tsx\n`;
+  
+  messages.push(`Here is the original spec:\n${originalSpec}`);
+  messages.push(`Here is the original src:\n${originalSrc}`);
+  if (workingSpec) {
+    messages.push(`Here is the updated spec:\n${workingSpec}`);
+  }
+  messages.push(`Please consider the following error message, and fix the code: \n ${errors}`);
+
+  messages.push(prefill);
+
+
+  const payload = {
+    model: model,
+    system: CODEGEN_FIXIT_SYSTEM_PROMPT,
+    messages,
+  };
+
+  return await LLMCall('codegen-fixit', payload);
+};
+
 // payload ={
 //     originalSrc: info["originalSrc"],
 //     originalSpec: info["originalSpec"],
@@ -296,9 +328,9 @@ export const LLM_CAPABILITIES: Record<string, { handler: LLMHandler }> = {
   'codegen-firstrun': {
     handler: codeGenFirstRun,
   },
-  // 'codegen-fixit': {
-  //   handler: codeGenFixit,
-  // },
+  'codegen-fixit': {
+    handler: codeGenFixit,
+  },
   'codegen-iteration': {
     handler: codeGenIteration,
   },
