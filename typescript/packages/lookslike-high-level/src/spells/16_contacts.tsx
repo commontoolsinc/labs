@@ -14,6 +14,7 @@ const Contact = z.object({
   name: z.string().min(1).max(255).describe("The name of the contact"),
   email: z.string().email().describe("The email address of the contact"),
   phone: z.string().min(10).max(20).describe("The phone number of the contact"),
+  nickname: z.string().nullable().default(null).describe("The nickname of the contact"),
 });
 
 const AddressBook = z.object({
@@ -31,15 +32,15 @@ type SubmitEvent = {
 };
 
 const contactEditor = typedBehavior(Contact, {
-  render: ({ self, email, name, phone }) => (
+  render: ({ self, email, name, phone, nickname }) => (
     <div entity={self}>
       <common-form
         schema={Contact}
-        value={{ email, name, phone }}
+        value={{ email, name, phone, nickname }}
         onsubmit="~/on/save"
       />
       <details>
-        <pre>{JSON.stringify({ email, name, phone }, null, 2)}</pre>
+        <pre>{JSON.stringify({ email, name, phone, nickname }, null, 2)}</pre>
       </details>
     </div>
   ),
