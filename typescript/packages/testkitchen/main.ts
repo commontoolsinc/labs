@@ -370,16 +370,50 @@ function generateReportHtml(results: any, reportName: string): string {
 // 2. Iterating on a scenario (fixate - pytest -f)
 //   - P2 only re-run the given sceneraio, only see the report on that sceneario
 
+async function findScenarios(evalDir: string, evalFilter?: string, scenarioFilter?: string): Promise<Array<{eval: string, scenario: string, actionsPath: string}>> {
+  const scenarios = [];
+  
+  for await (const evalEntry of Deno.readDir(evalDir)) {
+    if (!evalEntry.isDirectory || (evalFilter && evalEntry.name !== evalFilter)) continue;
+    
+    const evalPath = join(evalDir, evalEntry.name);
+    for await (const scenarioEntry of Deno.readDir(evalPath)) {
+      if (!scenarioEntry.isDirectory || (scenarioFilter && scenarioEntry.name !== scenarioFilter)) continue;
+      
+      const actionsPath = join(evalPath, scenarioEntry.name, "actions.ts");
+      if (await exists(actionsPath)) {
+        scenarios.push({
+          eval: evalEntry.name,
+          scenario: scenarioEntry.name,
+          actionsPath
+        });
+      }
+    }
+  }
+  
+  return scenarios;
+}
+
+// Get command line args
+const evalFilter = Deno.args[0];
+const scenarioFilter = Deno.args[1];
+
+const scenarios = await findScenarios(evalDir, evalFilter, scenarioFilter);
+
+if (scenarios.length === 0) {
+  console.log("No scenarios found matching filters!");
+  Deno.exit(1);
+}
+
 const results = [];
 
-import { actions as counterActions } from "./evals/codegen-firstrun/01-counter/actions.ts";
-results.push(await testOneScenario("codegen-firstrun", "01-counter", counterActions));
-
-
-import { actions as counterMissingIfElseActions } from "./evals/codegen-fixit/01-counter-missing-ifelse/actions.ts";
-results.push(await testOneScenario("codegen-fixit", "01-counter-missing-ifelse", counterMissingIfElseActions));
-
-// Add more scenarios here as needed
+for (const scenario of scenarios) {
+  console.log(`Running ${scenario.eval}/${scenario.scenario}...`);
+  
+  // Dynamic import of actions
+  const { actions } = await import(scenario.actionsPath);
+  results.push(await testOneScenario(scenario.eval, scenario.scenario, actions));
+}
 
 const reportHtml = generateReportHtml(results, reportName);
 
