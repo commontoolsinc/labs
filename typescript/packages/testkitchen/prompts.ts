@@ -190,6 +190,7 @@ export type LLMHandlerPayload = {
   workingSpec?: string;
   model?: string;
   errors?: string;
+  userPrompt?: string; // used for textgen usecases
 };
 
 export type LLMHandler = (payload: LLMHandlerPayload) => Promise<LLMResponse>;
@@ -208,7 +209,7 @@ export type LLMResponse = {
 };
 
 // FIXME(jake): Add types for the payload
-export const LLMCall = async (capability: keyof typeof LLM_CAPABILITIES, payload: any) => {
+export const LLMCodeGenCall = async (capability: keyof typeof LLM_CAPABILITIES, payload: any) => {
   const { handler } = LLM_CAPABILITIES[capability];
 
   // NOTE(jake): To ensure we are always exercising real LLMs, we insert a timestamp
@@ -221,6 +222,28 @@ export const LLMCall = async (capability: keyof typeof LLM_CAPABILITIES, payload
     return {
       llm: payload,
       generatedSrc,
+    };
+  } catch (e) {
+    console.error("Error during LLM request:", e);
+    return {
+      llm: payload,
+      generationError: e instanceof Error ? e.message : JSON.stringify(e),
+    };
+  }
+};
+
+export const LLMTextGenCall = async (capability: keyof typeof LLM_CAPABILITIES, payload: any) => {
+  const { handler } = LLM_CAPABILITIES[capability];
+
+  // NOTE(jake): To ensure we are always exercising real LLMs, we insert a timestamp
+  // before the prompt to break any planning server caching.
+  payload.messages.unshift(new Date().toISOString());
+
+  try {
+    const generatedText = await llm.sendRequest(payload);
+    return {
+      llm: payload,
+      generatedText,
     };
   } catch (e) {
     console.error("Error during LLM request:", e);
@@ -253,7 +276,7 @@ export const codeGenFirstRun = async ({
     messages,
   };
 
-  return await LLMCall('codegen-firstrun', payload);
+  return await LLMCodeGenCall('codegen-firstrun', payload);
 };
 
 
@@ -282,7 +305,7 @@ export const codeGenIteration = async ({
     messages,
   };
 
-  return await LLMCall('codegen-iteration', payload);
+  return await LLMCodeGenCall('codegen-iteration', payload);
 };
 
 
@@ -314,15 +337,35 @@ export const codeGenFixit = async ({
     messages,
   };
 
-  return await LLMCall('codegen-fixit', payload);
+  return await LLMCodeGenCall('codegen-fixit', payload);
 };
 
-// payload ={
-//     originalSrc: info["originalSrc"],
-//     originalSpec: info["originalSpec"],
-//     workingSpec: info["workingSpec"],
-//   }
 
+export const TEXTGEN_SPEC_ITERATION_SYSTEM_PROMPT = `You are prompt generator that takes an existing text prompt, and updates it based on a user prompt describing what to change. Only respond with the full spec text, Do not describe your changes.`
+
+export const textGenSpecIteration = async ({
+  originalSpec,
+  originalSrc,
+  userPrompt,
+  model = MODEL
+}: LLMHandlerPayload): Promise<LLMResponse> => {
+  const messages = [];  
+  messages.push(`Here is the original spec:\n${originalSpec}`);
+  if (originalSrc) {
+    messages.push(`Here is the original src:\n${originalSrc}`);
+  }
+  messages.push(`Here is the user's request:\n${userPrompt}`);
+  messages.push("Please look at the original spec, and make adjustments adhering to the user's request. You should return a new text spec.");
+  messages.push("")
+
+  const payload = {
+    model: model,
+    system: TEXTGEN_SPEC_ITERATION_SYSTEM_PROMPT,
+    messages,
+  };
+
+  return await LLMTextGenCall('textgen-spec-iteration', payload);
+};
 
 export const LLM_CAPABILITIES: Record<string, { handler: LLMHandler }> = {
   'codegen-firstrun': {
@@ -334,9 +377,9 @@ export const LLM_CAPABILITIES: Record<string, { handler: LLMHandler }> = {
   'codegen-iteration': {
     handler: codeGenIteration,
   },
-  // 'textgen-spec-iteration': {
-  //   handler: textGenSpecIteration,
-  // },
+  'textgen-spec-iteration': {
+    handler: textGenSpecIteration,
+  },
   // 'textgen-recipe-suggestion': {
   //   handler: textGenRecipeSuggestion,
   // },

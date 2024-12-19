@@ -5,6 +5,7 @@ import { chromium, Page } from "playwright";
 import { Action, ActionResult } from "./types.ts";
 import { ensureDir } from "@std/fs";
 import { startTempServer } from "./hono-http.ts";
+import { diff } from "@libs/diff";
 
 const evalDir = join(Deno.cwd(), "evals");
 const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -133,21 +134,55 @@ async function testOneScenario(evalName: string, scenario: string, actions: Acti
   info["eval"] = evalName;
 
   const llmHandler = LLM_CAPABILITIES[evalName].handler;
-
   const scenarioPath = join(evalDir, evalName, scenario);
 
   info["originalSpec"] = await safeReadFile(join(scenarioPath, "original-spec.md"));
   info["originalSrc"] = await safeReadFile(join(scenarioPath, "original.tsx"));
   info["workingSpec"] = await safeReadFile(join(scenarioPath, "new-spec.md"));
   info["errors"] = await safeReadFile(join(scenarioPath, "errors.txt"));
+  info["userPrompt"] = await safeReadFile(join(scenarioPath, "user-prompt.txt"));
   info["actions"] = actions;
 
-  // exit if these inputs arent set
+  // For text generation evals, check if we have an expected output file
+  const expectedOutputPath = join(scenarioPath, "expected-output.md");
+  const hasExpectedOutput = await exists(expectedOutputPath);
+  
+  if (hasExpectedOutput) {
+    // This is a text generation test
+    const expectedOutput = await safeReadFile(expectedOutputPath);
+    
+    const payload = await llmHandler({
+      originalSrc: info["originalSrc"],
+      originalSpec: info["originalSpec"],
+      workingSpec: info["workingSpec"],
+      userPrompt: info["userPrompt"],
+    });
+
+    info = { ...payload, ...info };
+
+
+    // Compare generated text with expected output
+    if (info["generatedText"]) {
+      info["tests"] = [{
+        success: info["generatedText"].trim() === expectedOutput.trim(),
+        action: {
+          type: "assert",
+          name: "Assert generated text is equal to expected text.",
+          args: ["text", { expected: expectedOutput, actual: info["generatedText"], diff: diff(expectedOutput.trim(), info["generatedText"].trim()) }],
+        }
+      }];
+    }
+    
+    return info;
+  }
+
+  // Rest of the existing code for codegen tests...
   const payload = await llmHandler({
     originalSrc: info["originalSrc"],
     originalSpec: info["originalSpec"],
     workingSpec: info["workingSpec"],
     errors: info["errors"],
+    userPrompt: info["userPrompt"],
   });
 
   info = { ...payload, ...info };
@@ -298,23 +333,34 @@ function generateReportHtml(results: any, reportName: string): string {
                   <div class="test-action">
                     <h4 class="${test.success ? "success" : "failure"}">
                       Action ${index + 1}: ${test.action.name} 
-                      <span style="font-size: 0.8em; font-family: monospace;">(${test.duration.toFixed(2)}ms)</span>
+                      ${test.duration ? `
+                        <span style="font-size: 0.8em; font-family: monospace;">(${test.duration.toFixed(2)}ms)</span>
+                      ` : ''}
                     </h4>
                     ${test.error ? `<p class="error">Error: ${test.error}</p>` : ''}
                     
-                    <details>
-                      <summary>Screenshots</summary>
-                      <div class="screenshots" style="display: flex; gap: 10px; margin-top: 10px;">
-                        <div>
-                          <h4>Before</h4>
-                          <img src="${test.screenshots.before}" style="max-width: 300px; border: 1px solid #ccc;" />
+                    ${test.screenshots ? `
+                      <details>
+                        <summary>Screenshots</summary>
+                        <div class="screenshots" style="display: flex; gap: 10px; margin-top: 10px;">
+                          <div>
+                            <h4>Before</h4>
+                            <img src="${test.screenshots.before}" style="max-width: 300px; border: 1px solid #ccc;" />
+                          </div>
+                          <div>
+                            <h4>After</h4>
+                            <img src="${test.screenshots.after}" style="max-width: 300px; border: 1px solid #ccc;" />
+                          </div>
                         </div>
-                        <div>
-                          <h4>After</h4>
-                          <img src="${test.screenshots.after}" style="max-width: 300px; border: 1px solid #ccc;" />
-                        </div>
-                      </div>
-                    </details>
+                      </details>
+                    ` : ''}
+                    
+                    ${test.action.args?.[1]?.diff ? `
+                      <details>
+                        <summary>Text Diff</summary>
+                        <pre class="diff">${test.action.args[1].diff}</pre>
+                      </details>
+                    ` : ''}
                   </div>
                 `).join('\n')}
             `
