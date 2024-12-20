@@ -5,6 +5,7 @@ import { Behavior } from "./adapter.js";
 import * as DB from "./db.js";
 import { MOUNT } from "./ui.js";
 import { CharmDebugger, getDebugCharms } from "./debugger.js";
+import { CharmCommand } from "./command.js";
 import { Reference } from "merkle-reference";
 
 export class Charm extends HTMLElement {
@@ -17,6 +18,7 @@ export class Charm extends HTMLElement {
   renderMount: HTMLElement;
   animationWrapper: HTMLElement;
   #debugger: CharmDebugger | null = null;
+  #command: CharmCommand | null = null;
   #errorDisplay: HTMLElement;
 
   #invocation: Task.Invocation<{}, Error> | null = null;
@@ -141,7 +143,9 @@ export class Charm extends HTMLElement {
     if (getDebugCharms()) {
       // this.#mount.classList.add("debug");
       this.#debugger = new CharmDebugger();
+      this.#command = new CharmCommand();
       this.#mount.appendChild(this.#debugger);
+      this.#mount.appendChild(this.#command);
     }
 
     this.#behavior = null;
@@ -149,17 +153,21 @@ export class Charm extends HTMLElement {
     this.#vdom = null;
     this.#cell = null;
 
-    window.addEventListener('spell-rule-enabled', ((e: CustomEvent) => {
+    window.addEventListener("spell-rule-enabled", ((e: CustomEvent) => {
       if (this.#behavior?.id == e.detail.id) {
         this.#behavior?.enableRule(e.detail.name);
-        console.log(`Enabled rule ${e.detail.name} for behavior ${e.detail.id}`);
+        console.log(
+          `Enabled rule ${e.detail.name} for behavior ${e.detail.id}`,
+        );
       }
     }) as EventListener);
 
-    window.addEventListener('spell-rule-disabled', ((e: CustomEvent) => {
+    window.addEventListener("spell-rule-disabled", ((e: CustomEvent) => {
       if (this.#behavior?.id == e.detail.id) {
         this.#behavior?.disableRule(e.detail.name);
-        console.log(`Disabled rule ${e.detail.name} for behavior ${e.detail.id}`);
+        console.log(
+          `Disabled rule ${e.detail.name} for behavior ${e.detail.id}`,
+        );
       }
     }) as EventListener);
 
@@ -258,6 +266,9 @@ export class Charm extends HTMLElement {
       if (this.#debugger) {
         this.#debugger.entity = this.#entity;
       }
+      if (this.#command) {
+        this.#command.entity = this.#entity;
+      }
       this.#clearError();
     } catch (error) {
       this.#handleError("Setting Entity", error);
@@ -277,6 +288,9 @@ export class Charm extends HTMLElement {
       this.#behavior = (value as any)();
       if (this.#debugger) {
         this.#debugger.behavior = this.#behavior;
+      }
+      if (this.#command) {
+        this.#command.behavior = this.#behavior!;
       }
       this.#clearError();
     } catch (error) {
