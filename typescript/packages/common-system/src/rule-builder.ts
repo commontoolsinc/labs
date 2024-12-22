@@ -194,6 +194,10 @@ export class Select<Match extends Selector = Selector> {
   get selector(): Match {
     return { ...this.#select };
   }
+
+  get clauses(): Clause[] {
+    return this.#where.commit();
+  }
 }
 
 /**

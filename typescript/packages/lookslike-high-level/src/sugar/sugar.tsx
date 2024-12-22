@@ -6,6 +6,7 @@ import {
   select,
   refer,
   Rule,
+  Variable,
 } from "@commontools/common-system";
 import { z } from "zod";
 import { field } from "./query.js";
@@ -15,11 +16,14 @@ import { defaultTo } from "./default.js";
 // zod schema -> query
 export function resolve<T extends z.ZodObject<any>>(
   schema: T,
-  root = true
+  root = true,
+  self: Variable<Reference> = $.self
 ): Select<z.infer<T> & { self: Reference }> {
   let aggregator: Select<z.infer<T> & { self: Reference }> = root ? select({
-    self: $.self,
+    self,
   }) : select({}) as any;
+
+  console.log('schema', root, schema.shape)
 
   if (!schema.shape) {
     const defaultValue = (schema as any)._def.defaultValue?.();
@@ -36,26 +40,24 @@ export function resolve<T extends z.ZodObject<any>>(
     for (const [fieldName, fieldData] of Object.entries(schema.shape)) {
       if ((fieldData as any)._def.typeName === 'ZodArray') {
         const innerType = (fieldData as any)._def.type;
-        const subresolver = resolve(innerType as z.ZodObject<any>, false)
+        const subresolver = resolve(innerType as z.ZodObject<any>, false, $[fieldName])
         const subselector = subresolver.selector
-        // @ts-ignore
-        delete subselector['self']
 
         let arrayResolver = select({
           [fieldName]: [{
-            this: $[fieldName],
-            ...subselector
+            ...subresolver.selector,
+            self: $[fieldName],
           }]
-        });
+        })
 
-        // Match each key in subselector
-        for (const key of Object.keys(subselector)) {
-          const defaultValue = (innerType.shape[key] as any)?._def?.defaultValue?.();
-          if (defaultValue !== undefined) {
-            arrayResolver = arrayResolver.clause(defaultTo($[fieldName], key, $[key], defaultValue));
-          } else {
-            arrayResolver = arrayResolver.match($[fieldName], key, $[key]);
-          }
+        // Match each key in subselector and include subresolver clauses
+        console.log(fieldName, 'subselector', subselector)
+
+        // First add the subresolver clauses
+        if (subresolver.clauses) {
+          arrayResolver = subresolver.clauses.reduce((resolver, clause) => {
+            return resolver.clause(clause);
+          }, arrayResolver);
         }
 
         if (!aggregator) {
@@ -63,11 +65,33 @@ export function resolve<T extends z.ZodObject<any>>(
         } else {
           aggregator = aggregator.with(arrayResolver);
         }
+      } else if ((fieldData as any)._def.typeName === 'ZodObject') {
+        const subresolver = resolve(fieldData as z.ZodObject<any>, false, $[fieldName])
+        const subselector = subresolver.selector
+
+        let objectResolver = select({
+          [fieldName]: {
+            ...subresolver.selector,
+            self: $[fieldName],
+          }
+        })
+
+        if (subresolver.clauses) {
+          objectResolver = subresolver.clauses.reduce((resolver, clause) => {
+            return resolver.clause(clause);
+          }, objectResolver);
+        }
+
+        if (!aggregator) {
+          aggregator = objectResolver as any;
+        } else {
+          aggregator = aggregator.with(objectResolver);
+        }
       } else {
         const defaultValue = (fieldData as any)._def.defaultValue?.();
         const resolver = defaultValue !== undefined
-          ? field(fieldName, defaultValue)
-          : field(fieldName);
+          ? select({ [fieldName]: $[fieldName] }).clause(defaultTo(self, fieldName, $[fieldName], defaultValue))
+          : select({ [fieldName]: $[fieldName] }).clause({ Case: [self, fieldName, $[fieldName]] })
 
         if (!aggregator) {
           aggregator = resolver as any;
@@ -76,6 +100,10 @@ export function resolve<T extends z.ZodObject<any>>(
         }
       }
     }
+  }
+
+  if (root) {
+    console.log('aggregator', aggregator)
   }
 
   return aggregator;

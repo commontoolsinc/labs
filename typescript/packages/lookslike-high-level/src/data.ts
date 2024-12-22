@@ -57,6 +57,7 @@ import { settings } from "./spells/settings.jsx";
 import { emailComposer } from "./spells/15_email_composer.jsx";
 import { addressBook } from "./spells/16_contacts.jsx";
 import { formTest } from "./spells/17_complex_form.jsx";
+import { musicLibrary } from "./spells/18_music.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -252,6 +253,7 @@ addCharms([
   emailComposer.spawn({ email: 1 }),
   addressBook.spawn({ contacts: 1 }),
   formTest.spawn({ formTest: 1 }),
+  musicLibrary.spawn({ musicLibrary: 1 }),
   FetchService.spawn() as any,
   GmailService.spawn() as any,
   ViewService.spawn() as any,

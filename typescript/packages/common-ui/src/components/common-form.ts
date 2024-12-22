@@ -4,6 +4,76 @@ import { baseStyles } from "./style.js";
 import { view } from "../hyperscript/render.js";
 import { eventProps } from "../hyperscript/schema-helpers.js";
 import { ZodObject } from "zod";
+import { fromString } from 'merkle-reference';
+
+// Reference Field Component
+@customElement("reference-field")
+export class ReferenceFieldElement extends LitElement {
+  @property({ type: String }) key = '';
+  @property({ type: String }) value = '';
+  @property({ type: String }) error = '';
+
+  static override styles = css`
+    :host {
+      display: block;
+    }
+    .field-input {
+      width: 100%;
+      padding: var(--input-padding);
+      border: 1px solid var(--form-border);
+      border-radius: var(--form-radius);
+      font-family: inherit;
+    }
+    .field-input.has-error {
+      border-color: var(--error-color);
+    }
+    .field-error {
+      color: var(--error-color);
+      font-size: 0.875rem;
+      margin-top: calc(var(--form-gap) * 0.25);
+    }
+  `;
+
+  dispatch(value: string, error: string | null = null) {
+    this.dispatchEvent(new CustomEvent('reference-changed', {
+      detail: { value, error },
+      bubbles: true,
+      composed: true
+    }));
+  }
+
+  async validateReference(input: string) {
+    try {
+      const ref = await fromString(input);
+      if (!ref) {
+        return 'Invalid reference format';
+      }
+      return null;
+    } catch {
+      return 'Invalid reference format';
+    }
+  }
+
+  override render() {
+    return html`
+      <input
+        class="field-input ${this.error ? 'has-error' : ''}"
+        .value=${this.value}
+        @input=${async (e: Event) => {
+          const value = (e.target as HTMLInputElement).value;
+          this.dispatch(value);
+        }}
+        @blur=${async (e: Event) => {
+          const error = await this.validateReference((e.target as HTMLInputElement).value);
+          this.dispatch(this.value, error);
+        }}
+      />
+      ${this.error ? html`
+        <div class="field-error">${this.error}</div>
+      ` : null}
+    `;
+  }
+}
 
 export const commonForm = view("common-form", {
   ...eventProps(),
@@ -29,6 +99,7 @@ export class CommonFormElement extends LitElement {
   @property({ type: String, attribute: 'field-path' }) fieldPath = '';
   @property({ type: Object }) errors: { [key: string]: any } = {};
   @property({ type: Boolean }) reset = false;
+  @property({ type: Object }) referenceFields: Set<string> = new Set();
 
   @property({ type: Object })
   get value() {
@@ -242,6 +313,7 @@ export class CommonFormElement extends LitElement {
     this.requestUpdate();
     this.dispatch('value-changed', { value: sample });
   }
+
   async handleFileImport() {
     const input = this.shadowRoot?.querySelector('#file-input') as HTMLInputElement;
     const file = input.files?.[0];
@@ -257,7 +329,6 @@ export class CommonFormElement extends LitElement {
       console.error('Failed to import JSON file:', error);
     }
 
-    // Reset file input value so same file can be selected again
     input.value = '';
   }
 
@@ -303,6 +374,58 @@ export class CommonFormElement extends LitElement {
       [key]: value
     };
 
+    if (e.detail.error) {
+      this.errors = {
+        ...this.errors,
+        [`${key}.${index}`]: e.detail.error
+      };
+    } else {
+      const {[`${key}.${index}`]: _, ...newErrors} = this.errors;
+      this.errors = newErrors;
+    }
+
+    this.dispatch('value-changed', { value: this._internalValue });
+    this.requestUpdate();
+  }
+
+  handleReferenceChange(key: string, index: number | null, e: CustomEvent) {
+    const value = e.detail.value;
+    const error = e.detail.error;
+
+    if (index !== null) {
+      // Handle array item
+      const arrayValue = [...(this._internalValue[key] || [])];
+      arrayValue[index] = value;
+      this._internalValue = {
+        ...this._internalValue,
+        [key]: arrayValue
+      };
+      if (error) {
+        this.errors = {
+          ...this.errors,
+          [`${key}.${index}`]: error
+        };
+      } else {
+        const {[`${key}.${index}`]: _, ...newErrors} = this.errors;
+        this.errors = newErrors;
+      }
+    } else {
+      // Handle single reference
+      this._internalValue = {
+        ...this._internalValue,
+        [key]: value
+      };
+      if (error) {
+        this.errors = {
+          ...this.errors,
+          [key]: error
+        };
+      } else {
+        const {[key]: _, ...newErrors} = this.errors;
+        this.errors = newErrors;
+      }
+    }
+
     this.dispatch('value-changed', { value: this._internalValue });
     this.requestUpdate();
   }
@@ -335,16 +458,22 @@ export class CommonFormElement extends LitElement {
   async handleSubmit(e: Event) {
     e.preventDefault();
 
+    if (this.referenceFields.size > 0) {
+      this.dispatch('submit', { value: this._internalValue });
+      return;
+    }
+
     try {
       const validated = await this.schema.parseAsync(this._internalValue);
       this.errors = {};
       this.dispatch('submit', { value: validated });
-      console.log('Form submitted:', validated);
+
       if (this.reset) {
         this._internalValue = this.getDefaultValue(this.schema);
         this.requestUpdate();
       }
     } catch (error: any) {
+      console.error('Validation failed:', error);
       this.errors = error.errors.reduce((acc: any, err: any) => {
         acc[err.path[0]] = err.message;
         return acc;
@@ -354,6 +483,58 @@ export class CommonFormElement extends LitElement {
   }
 
   renderField(key: string, schema: any) {
+    if (this.referenceFields.has(key)) {
+      if (schema._def.typeName === 'ZodArray') {
+        const refs = this._internalValue[key] || [];
+
+        return html`
+          <div class="field">
+            <label class="field-label" title="References to ${key}">
+              ${key} (refs)
+            </label>
+            <div class="list-controls">
+              ${refs.map((ref: string, index: number) => html`
+                <div class="list-item">
+                  <reference-field
+                    .key=${key}
+                    .value=${ref}
+                    .error=${this.errors[`${key}.${index}`]}
+                    @reference-changed=${(e: CustomEvent) => this.handleReferenceChange(key, index, e)}
+                  ></reference-field>
+                  <button
+                    type="button"
+                    class="icon-button"
+                    @click=${() => this.removeArrayItem(key, index)}
+                  >❌</button>
+                </div>
+              `)}
+              <button
+                type="button"
+                class="icon-button"
+                @click=${() => this.addArrayItem(key)}
+              >➕</button>
+            </div>
+          </div>
+        `;
+      } else {
+        const ref = this._internalValue[key] || '';
+
+        return html`
+          <div class="field">
+            <label class="field-label" title="Reference to ${key}">
+              ${key} (ref)
+            </label>
+            <reference-field
+              .key=${key}
+              .value=${ref}
+              .error=${this.errors[key]}
+              @reference-changed=${(e: CustomEvent) => this.handleReferenceChange(key, null, e)}
+            ></reference-field>
+          </div>
+        `;
+      }
+    }
+
     const value = this._internalValue[key] ?? this.getDefaultValue(schema);
     const error = this.errors[key];
     const description = schema.description;

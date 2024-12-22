@@ -136,7 +136,7 @@ export class CommonTableElement extends LitElement {
         color: #666;
       }
 
-      .preview-button, .edit-button, .delete-button, .download-button {
+      .preview-button, .edit-button, .delete-button, .download-button, .copy-button {
         padding: 4px 8px;
         background: #f3f4f6;
         border: 1px solid #e5e7eb;
@@ -246,6 +246,14 @@ export class CommonTableElement extends LitElement {
     document.body.removeChild(a);
   }
 
+  async handleCopySelf(item: any) {
+    try {
+      await navigator.clipboard.writeText(item.self.toString());
+    } catch (err) {
+      console.error('Failed to copy self property:', err);
+    }
+  }
+
   override render() {
     if (!this.schema) {
       return html`<div>No schema provided</div>`;
@@ -279,6 +287,7 @@ export class CommonTableElement extends LitElement {
                   <button class="edit-button" @click=${() => this.handleEdit(row)}>Edit</button>
                   <button class="delete-button" @click=${() => this.handleDelete(row)}>Delete</button>
                   <button class="download-button" @click=${() => this.handleDownload(row)}>Download</button>
+                  <button class="copy-button" @click=${() => this.handleCopySelf(row)}>Copy Self</button>
                 </td>
               </tr>
             `)}
