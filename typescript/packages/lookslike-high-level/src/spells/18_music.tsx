@@ -2,6 +2,7 @@ import {
   h,
   Session,
   refer,
+  Instruction,
 } from "@commontools/common-system";
 import { event, subview, Transact } from "../sugar.js";
 import { Charm, initRules, typedBehavior } from "./spell.jsx";
@@ -9,6 +10,58 @@ import { z } from "zod";
 import { fromString, Reference } from "merkle-reference";
 import { resolve } from "../sugar/sugar.jsx";
 import { Ref, UiFragment } from "../sugar/zod.js";
+
+function importEntity<T extends z.ZodObject<any>>(
+  value: any,
+  schema: T,
+  createRelationships = true
+) {
+
+  // Get reference fields from schema
+  const refFields = Object.entries(schema.shape)
+    .filter(([_, field]) =>
+      field instanceof z.ZodArray || field instanceof z.ZodObject
+    )
+    .map(([key]) => key);
+
+  // Split data and references
+  const { refs, data } = Object.entries(value).reduce((acc, [key, val]) => {
+    if (refFields.includes(key)) {
+      acc.refs[key] = val;
+    } else {
+      acc.data[key] = val;
+    }
+    return acc;
+  }, { refs: {}, data: {} } as { refs: Record<string, any>, data: Record<string, any> });
+
+  const instructions: Instruction[] = [{ Import: data }];
+
+  const self = refer(data)
+
+  if (createRelationships) {
+    Object.entries(refs).forEach(([field, refValue]) => {
+      instructions.push(...associate(self, field, refValue));
+    });
+  }
+
+  return { self, instructions };
+}
+
+/**
+ * Creates a relationship between two entities
+ */
+function associate(
+  source: Reference,
+  relationshipField: string,
+  targetRefs: string | string[]
+): Instruction[] {
+  const refs = Array.isArray(targetRefs) ? targetRefs : [targetRefs];
+  return refs.map(ref =>
+    Transact.assert(source, {
+      [relationshipField]: fromString(ref)
+    })
+  ).flat();
+}
 
 const Artist = z.object({
   name: z.string().min(1).max(255).describe("The name of the artist"),
@@ -22,7 +75,7 @@ const Song = z.object({
 });
 
 const Album = z.object({
-  title: z.string().min(1).max(255).describe("The album title"),
+  "album/title": z.string().min(1).max(255).describe("The album title"),
   artist: Artist.describe("The primary artist"),
   songs: z.array(Song).min(1).describe("The songs on the album"),
   year: z.number().min(1900).max(2100).describe("The release year")
@@ -217,37 +270,30 @@ export const musicLibrary = typedBehavior(
       .transact(({ self, event }, cmd) => {
         const ev = Session.resolve<SubmitEvent>(event);
         const artist = ev.detail.value;
-        cmd.add({ Import: artist })
-        cmd.add(...Transact.assert(self, { artists: refer(artist) }))
+
+        const { self: id, instructions } = importEntity(artist, Artist)
+        cmd.add(...instructions);
+        cmd.add(...Transact.assert(self, { artists: id }));
       }),
 
     onAddSong: event("~/on/add-song")
       .transact(({ self, event }, cmd) => {
         const ev = Session.resolve<SubmitEvent>(event);
-        const { artists: artistRefs, ...songData } = ev.detail.value;
-        const song = {
-          ...songData,
-        };
-        cmd.add({ Import: song });
-        cmd.add(...Transact.assert(self, { songs: refer(song) }));
-        for (const artistRef of artistRefs) {
-          cmd.add(...Transact.assert(refer(song), { artists: fromString(artistRef) }));
-        }
+        const song = ev.detail.value;
+
+        const { self: id, instructions } = importEntity(song, Song)
+        cmd.add(...instructions);
+        cmd.add(...Transact.assert(self, { songs: id }));
       }),
 
     onAddAlbum: event("~/on/add-album")
       .transact(({ self, event }, cmd) => {
         const ev = Session.resolve<SubmitEvent>(event);
-        const { artist: artistRef, songs: songRefs, ...albumData } = ev.detail.value;
-        const album = {
-          ...albumData,
-        };
-        cmd.add({ Import: album });
-        cmd.add(...Transact.assert(self, { albums: refer(album) }));
-        cmd.add(...Transact.assert(refer(album), { artist: fromString(artistRef) }));
-        for (const songRef of songRefs) {
-          cmd.add(...Transact.assert(refer(album), { songs: fromString(songRef) }));
-        }
+        const album = ev.detail.value;
+
+        const { self: id, instructions } = importEntity(album, Album)
+        cmd.add(...instructions);
+        cmd.add(...Transact.assert(self, { albums: id }));
       }),
 
     onAddPlaylist: event("~/on/add-playlist")

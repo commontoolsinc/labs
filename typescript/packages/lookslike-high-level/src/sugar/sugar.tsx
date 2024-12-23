@@ -17,7 +17,8 @@ import { defaultTo } from "./default.js";
 export function resolve<T extends z.ZodObject<any>>(
   schema: T,
   root = true,
-  self: Variable<Reference> = $.self
+  self: Variable<Reference> = $.self,
+  namespace = ''
 ): Select<z.infer<T> & { self: Reference }> {
   let aggregator: Select<z.infer<T> & { self: Reference }> = root ? select({
     self,
@@ -40,15 +41,15 @@ export function resolve<T extends z.ZodObject<any>>(
     for (const [fieldName, fieldData] of Object.entries(schema.shape)) {
       if ((fieldData as any)._def.typeName === 'ZodArray') {
         const innerType = (fieldData as any)._def.type;
-        const subresolver = resolve(innerType as z.ZodObject<any>, false, $[fieldName])
+        const subresolver = resolve(innerType as z.ZodObject<any>, false, $[namespace + fieldName], fieldName)
         const subselector = subresolver.selector
 
         let arrayResolver = select({
           [fieldName]: [{
             ...subresolver.selector,
-            self: $[fieldName],
+            self: $[namespace + fieldName],
           }]
-        })
+        }).match(self, fieldName, $[namespace + fieldName]);
 
         // Match each key in subselector and include subresolver clauses
         console.log(fieldName, 'subselector', subselector)
@@ -66,13 +67,12 @@ export function resolve<T extends z.ZodObject<any>>(
           aggregator = aggregator.with(arrayResolver);
         }
       } else if ((fieldData as any)._def.typeName === 'ZodObject') {
-        const subresolver = resolve(fieldData as z.ZodObject<any>, false, $[fieldName])
-        const subselector = subresolver.selector
+        const subresolver = resolve(fieldData as z.ZodObject<any>, false, $[namespace + fieldName], fieldName)
 
         let objectResolver = select({
           [fieldName]: {
             ...subresolver.selector,
-            self: $[fieldName],
+            self: $[namespace + fieldName],
           }
         })
 
@@ -90,8 +90,8 @@ export function resolve<T extends z.ZodObject<any>>(
       } else {
         const defaultValue = (fieldData as any)._def.defaultValue?.();
         const resolver = defaultValue !== undefined
-          ? select({ [fieldName]: $[fieldName] }).clause(defaultTo(self, fieldName, $[fieldName], defaultValue))
-          : select({ [fieldName]: $[fieldName] }).clause({ Case: [self, fieldName, $[fieldName]] })
+          ? select({ [fieldName]: $[namespace + fieldName] }).clause(defaultTo(self, fieldName, $[namespace + fieldName], defaultValue))
+          : select({ [fieldName]: $[namespace + fieldName] }).clause({ Case: [self, fieldName, $[namespace + fieldName]] })
 
         if (!aggregator) {
           aggregator = resolver as any;
