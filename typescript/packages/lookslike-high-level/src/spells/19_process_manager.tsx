@@ -85,7 +85,6 @@ export const charmViewer = typedService(CharmWithSpell, {
         self: Reference;
         spell: { name: string; sourceCode: string };
       }) {
-        debugger
         const compiled = yield* Task.wait(tsToExports(sourceCode));
         console.log(compiled);
 
