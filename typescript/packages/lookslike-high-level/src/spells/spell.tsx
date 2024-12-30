@@ -13,6 +13,7 @@ import {
   select,
   Selector,
   Session,
+  service,
 } from "@commontools/common-system";
 import { z } from "zod";
 import { resolve } from "../sugar/sugar.jsx";
@@ -32,6 +33,19 @@ export function typedBehavior<T extends z.ZodRawShape>(
       .render(config.render as any)
       .commit(),
     ...config.rules(schema),
+  });
+}
+
+export type TypedServiceConfig<T extends z.ZodRawShape> = {
+  rules: (schema: z.ZodObject<T>) => Record<string, any>;
+};
+
+export function typedService<T extends z.ZodRawShape>(
+  schema: z.ZodObject<T>,
+  config: TypedServiceConfig<T>
+) {
+  return service({
+    ...config.rules(schema)
   });
 }
 
@@ -67,7 +81,7 @@ export const changes = (...instructions: (Instruction | Instruction[])[]) => {
 };
 
 export class Embed<T extends any> {
-  constructor(public value: T) {}
+  constructor(public value: T) { }
 
   static decode<T>(txt: string): T {
     return JSON.parse(txt) as T;
@@ -85,7 +99,7 @@ export class Embed<T extends any> {
 }
 
 export class Doc<T extends Record<string, string | number | boolean>> {
-  constructor(public value: T) {}
+  constructor(public value: T) { }
 
   id() {
     return refer(this.value);
@@ -143,7 +157,7 @@ export abstract class Spell<T extends Record<string, any>> {
     handler: (ctx: any) => any;
   }> = [];
 
-  constructor() {}
+  constructor() { }
 
   set(self: Reference, values: Partial<T>) {
     return [...Transact.set(self, values)];

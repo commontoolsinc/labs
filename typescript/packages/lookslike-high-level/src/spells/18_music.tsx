@@ -2,66 +2,13 @@ import {
   h,
   Session,
   refer,
-  Instruction,
 } from "@commontools/common-system";
 import { event, subview, Transact } from "../sugar.js";
 import { Charm, initRules, typedBehavior } from "./spell.jsx";
 import { z } from "zod";
-import { fromString, Reference } from "merkle-reference";
-import { resolve } from "../sugar/sugar.jsx";
+import { Reference } from "merkle-reference";
+import { importEntity, resolve } from "../sugar/sugar.jsx";
 import { Ref, UiFragment } from "../sugar/zod.js";
-
-function importEntity<T extends z.ZodObject<any>>(
-  value: any,
-  schema: T,
-  createRelationships = true
-) {
-
-  // Get reference fields from schema
-  const refFields = Object.entries(schema.shape)
-    .filter(([_, field]) =>
-      field instanceof z.ZodArray || field instanceof z.ZodObject
-    )
-    .map(([key]) => key);
-
-  // Split data and references
-  const { refs, data } = Object.entries(value).reduce((acc, [key, val]) => {
-    if (refFields.includes(key)) {
-      acc.refs[key] = val;
-    } else {
-      acc.data[key] = val;
-    }
-    return acc;
-  }, { refs: {}, data: {} } as { refs: Record<string, any>, data: Record<string, any> });
-
-  const instructions: Instruction[] = [{ Import: data }];
-
-  const self = refer(data)
-
-  if (createRelationships) {
-    Object.entries(refs).forEach(([field, refValue]) => {
-      instructions.push(...associate(self, field, refValue));
-    });
-  }
-
-  return { self, instructions };
-}
-
-/**
- * Creates a relationship between two entities
- */
-function associate(
-  source: Reference,
-  relationshipField: string,
-  targetRefs: string | string[]
-): Instruction[] {
-  const refs = Array.isArray(targetRefs) ? targetRefs : [targetRefs];
-  return refs.map(ref =>
-    Transact.assert(source, {
-      [relationshipField]: fromString(ref)
-    })
-  ).flat();
-}
 
 const Artist = z.object({
   name: z.string().min(1).max(255).describe("The name of the artist"),

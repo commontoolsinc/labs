@@ -876,7 +876,7 @@ export class CharmDebugger extends LitElement {
             .map((rule, index) => {
               const activation = this.ruleActivations.get(rule);
               const style = getRuleStyle(rule);
-              const isEnabled = this.behavior!.isRuleEnabled(rule);
+              const isEnabled = this.behavior?.isRuleEnabled ? this.behavior.isRuleEnabled(rule) : true;
 
               return html`
                 <div class="rule-item" style="top: ${Math.floor(index / 2) * 96}px">

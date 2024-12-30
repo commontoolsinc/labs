@@ -458,13 +458,44 @@ export class CommonFormElement extends LitElement {
   async handleSubmit(e: Event) {
     e.preventDefault();
 
+    // Create a copy of the current value to modify
+    let submitValue = { ...this._internalValue };
+
+    // If there are reference fields, convert them before submission
     if (this.referenceFields.size > 0) {
-      this.dispatch('submit', { value: this._internalValue });
-      return;
+      try {
+        // Process all reference fields
+        for (const key of this.referenceFields) {
+          if (Array.isArray(submitValue[key])) {
+            // Handle array of references
+            submitValue[key] = await Promise.all(
+              submitValue[key].map(async (str: string) => {
+                const ref = await fromString(str);
+                return ref;
+              })
+            );
+          } else {
+            // Handle single reference
+            submitValue[key] = await fromString(submitValue[key]);
+          }
+        }
+
+        this.dispatch('submit', { value: submitValue });
+
+        if (this.reset) {
+          this._internalValue = this.getDefaultValue(this.schema);
+          this.requestUpdate();
+        }
+        return;
+      } catch (error) {
+        console.error('Reference conversion failed:', error);
+        return;
+      }
     }
 
+    // Handle non-reference fields validation as before
     try {
-      const validated = await this.schema.parseAsync(this._internalValue);
+      const validated = await this.schema.parseAsync(submitValue);
       this.errors = {};
       this.dispatch('submit', { value: validated });
 

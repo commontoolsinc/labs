@@ -10,8 +10,9 @@ import {
 } from "@commontools/common-system";
 import { z } from "zod";
 import { field } from "./query.js";
-import { Reference } from "merkle-reference";
+import { fromString, Reference } from "merkle-reference";
 import { defaultTo } from "./default.js";
+import { Transact } from "../sugar.js";
 
 // zod schema -> query
 export function resolve<T extends z.ZodObject<any>>(
@@ -108,6 +109,60 @@ export function resolve<T extends z.ZodObject<any>>(
 
   return aggregator;
 }
+
+
+export function importEntity<T extends z.ZodObject<any>>(
+  value: any,
+  schema: T,
+  createRelationships = true
+) {
+
+  // Get reference fields from schema
+  const refFields = Object.entries(schema.shape)
+    .filter(([_, field]) =>
+      field instanceof z.ZodArray || field instanceof z.ZodObject
+    )
+    .map(([key]) => key);
+
+  // Split data and references
+  const { refs, data } = Object.entries(value).reduce((acc, [key, val]) => {
+    if (refFields.includes(key)) {
+      acc.refs[key] = val;
+    } else {
+      acc.data[key] = val;
+    }
+    return acc;
+  }, { refs: {}, data: {} } as { refs: Record<string, any>, data: Record<string, any> });
+
+  const instructions: Instruction[] = [{ Import: data }];
+
+  const self = refer(data)
+
+  if (createRelationships) {
+    Object.entries(refs).forEach(([field, refValue]) => {
+      instructions.push(...associate(self, field, refValue));
+    });
+  }
+
+  return { self, instructions };
+}
+
+/**
+ * Creates a relationship between two entities
+ */
+export function associate(
+  source: Reference,
+  relationshipField: string,
+  targetRefs: string | string[]
+): Instruction[] {
+  const refs = Array.isArray(targetRefs) ? targetRefs : [targetRefs];
+  return refs.map(ref =>
+    Transact.assert(source, {
+      [relationshipField]: fromString(ref)
+    })
+  ).flat();
+}
+
 
 export const collection = (membership: string): Rule => {
   return {
