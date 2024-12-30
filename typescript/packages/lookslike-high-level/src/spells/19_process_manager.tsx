@@ -16,35 +16,6 @@ import { tsToExports } from "../localBuild.js";
 const adjectives = ['indigo', 'azure', 'crimson', 'emerald', 'golden', 'silver', 'obsidian', 'sapphire'];
 const nouns = ['crossfire', 'thunder', 'storm', 'blade', 'phoenix', 'dragon', 'whisper', 'shadow'];
 
-const DEFAULT_SOURCE = `
-import { h, behavior, $, select } from "@commontools/common-system";
-import { build, make } from "../sugar/build.js";
-import { query, queryDefault } from "../sugar/query.js";
-import { event } from "../sugar/event.js";
-
-const dispatch = (name: T) => \`~/on/\${name}\`;
-
-export const spell = behavior({
-  helloWorld: select({ self: $.self })
-    .render(({ self }) => {
-      return <div entity={self} title="Hello World">
-        <h1>Hello World</h1>
-        <p>This is a spell.</p>
-        <button type="button" onclick={dispatch('click')}>Click me</button>
-      </div>
-    })
-    .commit(),
-
-  onClick: event('click')
-    .update(({ self }) => {
-      console.log('clicked', self)
-      alert('Hello from ' + self.toString());
-      return [];
-    })
-    .commit()
-});
-`;
-
 const generateIdentifier = () => {
   const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
   const noun = nouns[Math.floor(Math.random() * nouns.length)];
@@ -67,7 +38,8 @@ const Charm = z.object({
 const CharmInstance = z.object({ charm: Ref })
 
 const SpellManager = z.object({
-  focused: Ref.describe("The charm that is currently being viewed"),
+  editingSpell: Ref.describe("The spell currently being edited"),
+  focusedCharm: Ref.describe("The charm that is currently being viewed"),
   spells: z.array(Spell.omit({ instances: true })).describe("All spells in the system"),
   charms: z.array(Charm).describe("All charm instances"),
   '~/common/ui/spell-list': UiFragment.describe("The UI fragment for the spells list"),
@@ -92,9 +64,6 @@ const CharmWithSpell = z.object({
 
 export const charmViewer = typedService(CharmWithSpell, {
   rules: _ => ({
-    // bf: abusing a service to compile + render in the same rule
-    // this seems fine and does render, but everything disappears when I trigger and event
-    // and my handlers above aren't called
     renderCharm: {
       select: {
         self: $.self,
@@ -147,7 +116,6 @@ export const charmViewer = typedService(CharmWithSpell, {
   })
 });
 
-// Spell editor component
 const spellEditor = typedBehavior(Spell, {
   render: ({ self, name, sourceCode, notes }) => (
     <div entity={self}>
@@ -171,14 +139,14 @@ const spellEditor = typedBehavior(Spell, {
   })
 });
 
-// Main spell manager component
 export const spellManager = typedBehavior(
   SpellManager.pick({
-    focused: true,
+    editingSpell: true,
+    focusedCharm: true,
     '~/common/ui/spell-list': true,
     '~/common/ui/charm-list': true
   }), {
-  render: ({ self, focused, '~/common/ui/spell-list': spellList, '~/common/ui/charm-list': charmList }) => (
+  render: ({ self, editingSpell, focusedCharm, '~/common/ui/spell-list': spellList, '~/common/ui/charm-list': charmList }) => (
     <div entity={self}>
       <div>
         <details>
@@ -207,11 +175,19 @@ export const spellManager = typedBehavior(
         </details>
       </div>
 
-      {focused && (
+      {editingSpell && (
+        <div>
+          <h3>Edit Spell</h3>
+          <button onclick="~/on/close-spell-editor">Close</button>
+          <CharmComponent self={editingSpell} spell={spellEditor as any} />
+        </div>
+      )}
+
+      {focusedCharm && (
         <div>
           <h3>Focused Charm</h3>
-          <button onclick="~/on/unfocus">Close</button>
-          <CharmComponent self={focused} spell={charmViewer as any} />
+          <button onclick="~/on/unfocus-charm">Close</button>
+          <CharmComponent self={focusedCharm} spell={charmViewer as any} />
         </div>
       )}
 
@@ -246,7 +222,6 @@ export const spellManager = typedBehavior(
         cmd.add(...instructions);
         cmd.add(...Transact.assert(self, { charms: charmId }));
 
-        // Now TypeScript knows spell exists
         if (charm.spell) {
           cmd.add(...Transact.assert(charm.spell, { instances: charmId }));
         }
@@ -257,14 +232,26 @@ export const spellManager = typedBehavior(
         const ev = Session.resolve<SubmitEvent<z.infer<typeof CharmInstance>>>(event);
         if (ev.detail.value.charm) {
           const charm = (ev.detail.value.charm)
-          cmd.add(...Transact.set(self, { focused: charm }));
+          cmd.add(...Transact.set(self, { focusedCharm: charm }));
         }
       }),
 
-    onUnfocus: event("~/on/unfocus")
-      .with(resolve(SpellManager.pick({ focused: true })))
-      .transact(({ self, focused }, cmd) => {
-        cmd.add(...Transact.remove(self, { focused }))
+    onEditSpell: event("~/on/edit-spell")
+      .transact(({ self, event }, cmd) => {
+        const ev = Session.resolve<EditEvent>(event);
+        cmd.add(...Transact.set(self, { editingSpell: ev.detail.item }))
+      }),
+
+    onCloseSpellEditor: event("~/on/close-spell-editor")
+      .with(resolve(SpellManager.pick({ editingSpell: true })))
+      .transact(({ self, editingSpell }, cmd) => {
+        cmd.add(...Transact.remove(self, { editingSpell }))
+      }),
+
+    onUnfocusCharm: event("~/on/unfocus-charm")
+      .with(resolve(SpellManager.pick({ focusedCharm: true })))
+      .transact(({ self, focusedCharm }, cmd) => {
+        cmd.add(...Transact.remove(self, { focusedCharm }))
       }),
 
     renderSpellList: resolve(SpellManager.pick({ spells: true }))
@@ -273,6 +260,7 @@ export const spellManager = typedBehavior(
           Upsert: [self, '~/common/ui/spell-list', <common-table
             schema={Spell}
             data={spells}
+            onedit="~/on/edit-spell"
             ondelete="~/on/delete-spell"
           /> as any]
         }]
@@ -299,7 +287,6 @@ export const spellManager = typedBehavior(
       .transact(({ self, event }, cmd) => {
         const ev = Session.resolve<EditEvent>(event);
         cmd.add(...Transact.remove(self, { charms: ev.detail.item }))
-        // Should also remove from spell's instances array
       }),
   }),
 });

@@ -217,7 +217,7 @@ export class CommonTableElement extends LitElement {
 
   handleEdit(item: any) {
     this.dispatchEvent(new CustomEvent('edit', {
-      detail: { item: item.this },
+      detail: { item: item.self },
       bubbles: true,
       composed: true
     }));
@@ -226,7 +226,7 @@ export class CommonTableElement extends LitElement {
   handleDelete(item: any) {
     if (confirm('Are you sure you want to delete this item?')) {
       this.dispatchEvent(new CustomEvent('delete', {
-        detail: { item: item.this },
+        detail: { item: item.self },
         bubbles: true,
         composed: true
       }));
