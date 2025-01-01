@@ -7,7 +7,7 @@ export class ShaderLayer extends LitElement {
   @property({ type: String }) shader = '';
   @property({ type: Number }) width = 640;
   @property({ type: Number }) height = 480;
-  @property({ type: String }) blendMode = 'hard-light';
+  @property({ type: String }) blendMode = 'default';
 
   private canvasRef = createRef<HTMLCanvasElement>();
   private gl?: WebGLRenderingContext;
@@ -16,6 +16,7 @@ export class ShaderLayer extends LitElement {
   private resolutionLocation?: WebGLUniformLocation;
   private animationFrame?: number;
   private startTime = performance.now();
+  private vertexShader?: WebGLShader;
 
   static override styles = css`
     :host {
@@ -34,7 +35,7 @@ export class ShaderLayer extends LitElement {
       position: absolute;
       top: 0;
       left: 0;
-      mix-blend-mode: var(--blend-mode, hard-light);
+      mix-blend-mode: var(--blend-mode, default);
     }
   `;
 
@@ -56,10 +57,10 @@ export class ShaderLayer extends LitElement {
     this.gl.enable(this.gl.BLEND);
     this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
 
-    const vertexShader = this.gl.createShader(this.gl.VERTEX_SHADER);
-    if (!vertexShader) return;
+    this.vertexShader = this.gl.createShader(this.gl.VERTEX_SHADER);
+    if (!this.vertexShader) return;
 
-    this.gl.shaderSource(vertexShader, `
+    this.gl.shaderSource(this.vertexShader, `
       attribute vec2 position;
       varying vec2 v_texCoord;
       void main() {
@@ -67,7 +68,7 @@ export class ShaderLayer extends LitElement {
         gl_Position = vec4(position, 0.0, 1.0);
       }
     `);
-    this.gl.compileShader(vertexShader);
+    this.gl.compileShader(this.vertexShader);
 
     const positions = new Float32Array([
       -1, -1,
@@ -81,7 +82,16 @@ export class ShaderLayer extends LitElement {
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, positionBuffer);
     this.gl.bufferData(this.gl.ARRAY_BUFFER, positions, this.gl.STATIC_DRAW);
 
-    if (!this.shader) return;
+    this.initShaderProgram();
+  }
+
+  private initShaderProgram() {
+    if (!this.gl || !this.vertexShader || !this.shader) return;
+
+    // Clean up existing program
+    if (this.program) {
+      this.gl.deleteProgram(this.program);
+    }
 
     this.program = this.gl.createProgram();
     if (!this.program) return;
@@ -97,7 +107,7 @@ export class ShaderLayer extends LitElement {
       return;
     }
 
-    this.gl.attachShader(this.program, vertexShader);
+    this.gl.attachShader(this.program, this.vertexShader);
     this.gl.attachShader(this.program, fragmentShader);
     this.gl.linkProgram(this.program);
 
@@ -112,6 +122,9 @@ export class ShaderLayer extends LitElement {
 
     this.timeLocation = this.gl.getUniformLocation(this.program, "iTime");
     this.resolutionLocation = this.gl.getUniformLocation(this.program, "iResolution");
+
+    // Clean up fragment shader
+    this.gl.deleteShader(fragmentShader);
   }
 
   private renderGl() {
@@ -135,6 +148,12 @@ export class ShaderLayer extends LitElement {
     this.animationFrame = requestAnimationFrame(() => this.renderGl());
   }
 
+  override updated(changedProperties: Map<string, any>) {
+    if (changedProperties.has('shader')) {
+      this.initShaderProgram();
+    }
+  }
+
   override firstUpdated() {
     this.setupWebGL();
     this.renderGl();
@@ -144,6 +163,12 @@ export class ShaderLayer extends LitElement {
     super.disconnectedCallback();
     if (this.animationFrame) {
       cancelAnimationFrame(this.animationFrame);
+    }
+    if (this.gl && this.program) {
+      this.gl.deleteProgram(this.program);
+    }
+    if (this.gl && this.vertexShader) {
+      this.gl.deleteShader(this.vertexShader);
     }
   }
 
