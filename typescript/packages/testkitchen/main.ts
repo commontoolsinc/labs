@@ -200,8 +200,8 @@ async function testOneScenario(evalName: string, scenario: string, actions: Acti
   const srcUrl = `http://localhost:${port}/tmp/${tmpSrcName}.tsx`;
   const loadUrl = `http://localhost:5173/newRecipe?src=${encodeURIComponent(srcUrl)}`;
 
-  const browser = await chromium.launch({ headless: false });
-  // const browser = await chromium.launch({ headless: true });
+  // const browser = await chromium.launch({ headless: false });
+  const browser = await chromium.launch({ headless: true });
   const mediaDir = join(reportDir, "media");
   await ensureDir(mediaDir);
   const videoPath = join(mediaDir, `${scenario}.webm`);
