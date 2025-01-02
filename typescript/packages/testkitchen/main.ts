@@ -408,6 +408,10 @@ function generateReportHtml(results: any, reportName: string): string {
       </style>
     </head>
     <body>
+      <center>
+        <img src="testkitchen.png" style="width: 350px; height: 350px" />
+      </center>
+
       <h1>Test Report for ${reportName}</h1>
       <h2 style="color: ${resultsColor}">Overall Results: ${passed}/${total} scenarios passed</h2>
       <p>Generated at: ${new Date().toLocaleString()}</p>
@@ -495,6 +499,14 @@ const reportJsonPath = join(reportDir, "report.json");
 await Deno.writeTextFile(reportJsonPath, JSON.stringify(results, null, 2));
 // console.log('INFO', JSON.stringify(results, null, 2))
 const latestLinkPath = join("reports", "latest");
+
+const logoPath = join(Deno.cwd(), "testkitchen.png");
+if (await exists(logoPath)) {
+  await Deno.copyFile(logoPath, join(reportDir, "testkitchen.png"));
+} else {
+  console.warn("Warning: testkitchen.png not found in project root");
+}
+
 
 if (await exists(latestLinkPath)) {
   await Deno.remove(latestLinkPath);

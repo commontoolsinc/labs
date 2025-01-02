@@ -176,13 +176,9 @@ export default recipe(Schema, ({ items, title }) => {
 `;
 
 
-
-// const MODEL = "cerebras:llama-3.3-70b";
-const MODEL = "groq:llama-3.3-70b";
+const MODEL = "cerebras:llama-3.3-70b";
+// const MODEL = "groq:llama-3.3-70b";
 // const MODEL = "anthropic:claude-3-5-sonnet-latest";
-
-
-// What's the best way to handle different prompts for different llm usecases?
 
 export type LLMHandlerPayload = {
   originalSpec: string;
@@ -219,6 +215,7 @@ export const LLMCodeGenCall = async (capability: keyof typeof LLM_CAPABILITIES, 
   try {
     const text = await llm.sendRequest(payload);
     const generatedSrc = text.split("```tsx\n")[1].split("\n```")[0];
+
     return {
       llm: payload,
       generatedSrc,
@@ -266,7 +263,7 @@ export const codeGenFirstRun = async ({
 
   messages.push(`\n Here is the original spec:\n${originalSpec}`);
   messages.push("Please look at the original spec and write code that implements it.");
-
+  // NOTE: this may not work, before break this had been removed, but not comitted.
   messages.push(prefill);
 
 
@@ -350,13 +347,15 @@ export const textGenSpecIteration = async ({
   model = MODEL
 }: LLMHandlerPayload): Promise<LLMResponse> => {
   const messages = [];  
+  const prefill = `\`\`\`tsx\n`;
   messages.push(`Here is the original spec:\n${originalSpec}`);
   if (originalSrc) {
     messages.push(`Here is the original src:\n${originalSrc}`);
   }
   messages.push(`Here is the user's request:\n${userPrompt}`);
   messages.push("Please look at the original spec, and make adjustments adhering to the user's request. You should return a new text spec.");
-  messages.push("")
+  // NOTE: this may not work, before break this had been added, but not comitted.
+  messages.push(prefill)
 
   const payload = {
     model: model,
