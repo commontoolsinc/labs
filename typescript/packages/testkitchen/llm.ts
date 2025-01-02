@@ -16,7 +16,7 @@ type TypedContent =
     };
 
 type LLMRequest = {
-  messages: SimpleMessage[] | SimpleContent[];
+  messages: SimpleMessage[];
   system?: string;
   model: string;
   max_tokens?: number;
@@ -38,12 +38,13 @@ export class LLMClient {
 
     // NOTE(jake): To ensure we are always exercising real LLMs, we insert a timestamp
     // before the prompt to break any planning server caching.
-    // userRequest.messages.unshift(new Date().toISOString());
+    const cacheBustMessage = {role: "user" as const, content: new Date().toISOString()};
+    userRequest.messages.unshift(cacheBustMessage);
 
     const fullRequest: LLMRequest = {
       ...userRequest,
       stream: partialCB ? true : false,
-      messages: userRequest.messages.map(processMessage),
+      messages: userRequest.messages,
     };
 
 
@@ -123,17 +124,4 @@ export class LLMClient {
 
     return text;
   }
-}
-
-function processMessage(
-  m: SimpleMessage | SimpleContent,
-  idx: number,
-): SimpleMessage {
-  if (typeof m === "string" || Array.isArray(m)) {
-    return {
-      role: idx % 2 === 0 ? "user" : "assistant",
-      content: m,
-    };
-  }
-  return m;
 }
