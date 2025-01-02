@@ -321,7 +321,6 @@ if (Deno.env.get("CEREBRAS_API_KEY")) {
     apiKey: Deno.env.get("CEREBRAS_API_KEY"),
     baseURL: "https://api.cerebras.ai/v1",
   });
-  console.log(cerebras);
   addModel({
     provider: cerebras,
     name: "cerebras:llama-3.3-70b",
@@ -330,7 +329,7 @@ if (Deno.env.get("CEREBRAS_API_KEY")) {
       contextWindow: 8192,
       maxOutputTokens: 8192,
       images: false,
-      prefill: true,
+      prefill: false,
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
