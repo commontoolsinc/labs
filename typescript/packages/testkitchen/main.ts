@@ -160,6 +160,7 @@ async function testOneScenario(evalName: string, scenario: string, actions: Acti
 
     info = { ...payload, ...info };
 
+    console.log("INFO", { expected: expectedOutput, actual: info["generatedText"] });
 
     // Compare generated text with expected output
     if (info["generatedText"]) {

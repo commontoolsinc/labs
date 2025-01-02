@@ -35,11 +35,17 @@ export class LLMClient {
     userRequest: LLMRequest,
     partialCB?: (text: string) => void,
   ): Promise<string> {
+
+    // NOTE(jake): To ensure we are always exercising real LLMs, we insert a timestamp
+    // before the prompt to break any planning server caching.
+    // userRequest.messages.unshift(new Date().toISOString());
+
     const fullRequest: LLMRequest = {
       ...userRequest,
       stream: partialCB ? true : false,
       messages: userRequest.messages.map(processMessage),
     };
+
 
     const response = await fetch(this.serverUrl, {
       method: "POST",

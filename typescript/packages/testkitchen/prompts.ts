@@ -176,8 +176,8 @@ export default recipe(Schema, ({ items, title }) => {
 `;
 
 
-const MODEL = "cerebras:llama-3.3-70b";
-// const MODEL = "groq:llama-3.3-70b";
+// const MODEL = "cerebras:llama-3.3-70b";
+const MODEL = "groq:llama-3.3-70b-specdec";
 // const MODEL = "anthropic:claude-3-5-sonnet-latest";
 
 export type LLMHandlerPayload = {
@@ -208,10 +208,6 @@ export type LLMResponse = {
 export const LLMCodeGenCall = async (capability: keyof typeof LLM_CAPABILITIES, payload: any) => {
   const { handler } = LLM_CAPABILITIES[capability];
 
-  // NOTE(jake): To ensure we are always exercising real LLMs, we insert a timestamp
-  // before the prompt to break any planning server caching.
-  payload.messages.unshift(new Date().toISOString());
-
   try {
     const text = await llm.sendRequest(payload);
     const generatedSrc = text.split("```tsx\n")[1].split("\n```")[0];
@@ -231,10 +227,6 @@ export const LLMCodeGenCall = async (capability: keyof typeof LLM_CAPABILITIES, 
 
 export const LLMTextGenCall = async (capability: keyof typeof LLM_CAPABILITIES, payload: any) => {
   const { handler } = LLM_CAPABILITIES[capability];
-
-  // NOTE(jake): To ensure we are always exercising real LLMs, we insert a timestamp
-  // before the prompt to break any planning server caching.
-  payload.messages.unshift(new Date().toISOString());
 
   try {
     const generatedText = await llm.sendRequest(payload);
@@ -259,13 +251,10 @@ export const codeGenFirstRun = async ({
   model = MODEL,
 }: LLMHandlerPayload): Promise<LLMResponse> => {
   const messages = [];
-  const prefill = `\`\`\`tsx\n`;
 
-  messages.push(`\n Here is the original spec:\n${originalSpec}`);
-  messages.push("Please look at the original spec and write code that implements it.");
-  // NOTE: this may not work, before break this had been removed, but not comitted.
-  messages.push(prefill);
 
+  messages.push({role: "user", content: `Here is the original spec:\n\n${originalSpec}`});
+  messages.push({role: "user", content: "Please look at the original spec and write code that implements it."});
 
   const payload = {
     model: model,
@@ -286,15 +275,11 @@ export const codeGenIteration = async ({
   model = MODEL
 }: LLMHandlerPayload): Promise<LLMResponse> => {
   const messages = [];
-  const prefill = `\`\`\`tsx\n`;
-  
-  messages.push(`Here is the original spec:\n${originalSpec}`);
-  messages.push(`Here is the original src:\n${originalSrc}`);
-  messages.push(`Here is updated spec for iteration:\n${workingSpec}`);
-  messages.push("Please look at the original spec, original source code, and updated spec, and write the new source code.");
 
-  messages.push(prefill);
-
+  messages.push({role: "user", content: `Here is the original spec:\n\n${originalSpec}`});
+  messages.push({role: "user", content: `Here is the original src:\n\n${originalSrc}`});
+  messages.push({role: "user", content: `Here is updated spec for iteration:\n\n${workingSpec}`});
+  messages.push({role: "user", content: "Please look at the original spec, original src, and updated spec, and write the new source code."});
 
   const payload = {
     model: model,
@@ -316,17 +301,13 @@ export const codeGenFixit = async ({
   model = MODEL
 }: LLMHandlerPayload): Promise<LLMResponse> => {
   const messages = [];
-  const prefill = `\`\`\`tsx\n`;
   
-  messages.push(`Here is the original spec:\n${originalSpec}`);
-  messages.push(`Here is the original src:\n${originalSrc}`);
+  messages.push({role: "user", content: `Here is the original spec:\n\n${originalSpec}`});
+  messages.push({role: "user", content: `Here is the original src:\n\n${originalSrc}`});
   if (workingSpec) {
-    messages.push(`Here is the updated spec:\n${workingSpec}`);
+    messages.push({role: "user", content: `Here is the updated spec:\n\n${workingSpec}`});
   }
-  messages.push(`Please consider the following error message, and fix the code: \n ${errors}`);
-
-  messages.push(prefill);
-
+  messages.push({role: "user", content: `Please consider the following error message, and fix the code: \n ${errors}`});
 
   const payload = {
     model: model,
@@ -347,15 +328,13 @@ export const textGenSpecIteration = async ({
   model = MODEL
 }: LLMHandlerPayload): Promise<LLMResponse> => {
   const messages = [];  
-  const prefill = `\`\`\`tsx\n`;
-  messages.push(`Here is the original spec:\n${originalSpec}`);
+  messages.push({role: "user", content: `Here is the original spec:\n\n${originalSpec}`});
   if (originalSrc) {
-    messages.push(`Here is the original src:\n${originalSrc}`);
+    messages.push({role: "user", content: `Here is the original src:\n\n${originalSrc}`});
   }
-  messages.push(`Here is the user's request:\n${userPrompt}`);
-  messages.push("Please look at the original spec, and make adjustments adhering to the user's request. You should return a new text spec.");
-  // NOTE: this may not work, before break this had been added, but not comitted.
-  messages.push(prefill)
+  messages.push({role: "user", content: `Here is the user's request:\n\n${userPrompt}`});
+  messages.push({role: "user", content: "Please look at the original spec, and make adjustments adhering to the user's request. You should return a new text spec. Return only the spec text, do not include any other text."});
+
 
   const payload = {
     model: model,
