@@ -18,11 +18,30 @@ and use it like this:
 
   <li>{formatDate(event.start_date)}</li>
 
+It's very IMPORTANT you provide the current state to a handler when calling it.
+
+When you have a handler defined like this \`increment\` handler:
+
+  const increment = handler<{}, { count: number }>(({}, state) => {
+    state.count += 1;
+  });
+
+You must ensure the state is provided to the handler. For example:
+
+  GOOD: <button onclick={increment({count})}>Increment</button>
+
+  BAD: <button onclick={increment({})}>Increment</button>
+
 DO NOT filter objects directly within the recipe. Instead, use a lift to filter the objects.
 
 To do a condition in a the UI of a recipe, you use the ifElse directive.  Both sides of the ifElse must return a UI element (return an empty <span> if you want to render nothing).
 
   <p>This event is {ifElse(state.is_private, <em>private</em>, <em>public</em>)}</p>
+
+You can NOT perform logic operators inside of the \`ifElse\` directive. In order to do that, you must create a new lift function. For example:
+
+  BAD: {ifElse(count >= 3, <h2>WOW!</h2>, <span/>)}
+  GOOD: {ifElse(showWow({count}), <h2>WOW!</h2>, <span/>)}
 
 Do not evaluate conditionals in the UI JSX, unless it is within the ifElse directive.
 
@@ -43,6 +62,7 @@ Do not call .length on an array - it will fail because it is a proxy and does no
 If you want to generate a string, you need to return the entire string in a lift as string interpolation is not supported in the UI JSX.
 
   <p style={generateStyle(variable)}>
+
 
 If you absolutely must do string interpolation, you can prefix your \`foo \${bar}\` with a str, like str\`foo \${bar}\`.
 
@@ -75,7 +95,7 @@ import {
 } from "@commontools/common-builder";
 import { z } from "zod";
 
-const Counter = z.object({ title: z.string(), count: z.number() });
+const Counter = z.object({ title: z.string(), count: z.number().default(0) });
 type Counter = z.infer<typeof Counter>;
 
 const Schema = z
@@ -155,7 +175,25 @@ export default recipe(Schema, ({ items, title }) => {
 \`\`\`
 `;
 
-type LLMResponse = {
+
+// const MODEL = "cerebras:llama-3.3-70b";
+const MODEL = "groq:llama-3.3-70b-specdec";
+// const MODEL = "anthropic:claude-3-5-sonnet-latest";
+
+export type LLMHandlerPayload = {
+  originalSpec: string;
+  originalSrc?: string;
+  workingSpec?: string;
+  model?: string;
+  errors?: string;
+  userPrompt?: string; // used for textgen usecases
+};
+
+export type LLMHandler = (payload: LLMHandlerPayload) => Promise<LLMResponse>;
+
+
+
+export type LLMResponse = {
   llm: {
     model: string;
     system: string;
@@ -166,38 +204,14 @@ type LLMResponse = {
   generationError?: string;
 };
 
-export const iterate = async ({
-  originalSpec,
-  originalSrc,
-  workingSpec,
-}: {
-  originalSpec: string;
-  originalSrc: string;
-  workingSpec: string;
-}): Promise<LLMResponse> => {
-  const messages = [];
-  const prefill = `\`\`\`tsx\n`;
-
-  if (originalSpec && originalSrc) {
-    messages.push(originalSpec);
-    messages.push(`\`\`\`tsx\n${originalSrc}\n\`\`\``);
-  }
-
-  if (workingSpec) {
-    messages.push(workingSpec);
-    messages.push(prefill);
-  }
-
-  const payload = {
-    model: "anthropic:claude-3-5-sonnet-latest",
-    system: `You are code generator that implements @commontools recipes.\n${recipeGuide}`,
-    messages,
-    stop: "\n```",
-  };
+// FIXME(jake): Add types for the payload
+export const LLMCodeGenCall = async (capability: keyof typeof LLM_CAPABILITIES, payload: any) => {
+  const { handler } = LLM_CAPABILITIES[capability];
 
   try {
     const text = await llm.sendRequest(payload);
     const generatedSrc = text.split("```tsx\n")[1].split("\n```")[0];
+
     return {
       llm: payload,
       generatedSrc,
@@ -209,4 +223,142 @@ export const iterate = async ({
       generationError: e instanceof Error ? e.message : JSON.stringify(e),
     };
   }
+};
+
+export const LLMTextGenCall = async (capability: keyof typeof LLM_CAPABILITIES, payload: any) => {
+  const { handler } = LLM_CAPABILITIES[capability];
+
+  try {
+    const generatedText = await llm.sendRequest(payload);
+    return {
+      llm: payload,
+      generatedText,
+    };
+  } catch (e) {
+    console.error("Error during LLM request:", e);
+    return {
+      llm: payload,
+      generationError: e instanceof Error ? e.message : JSON.stringify(e),
+    };
+  }
+};
+
+
+const CODEGEN_FIRSTRUN_SYSTEM_PROMPT = recipeGuide;
+
+export const codeGenFirstRun = async ({
+  originalSpec,
+  model = MODEL,
+}: LLMHandlerPayload): Promise<LLMResponse> => {
+  const messages = [];
+
+
+  messages.push({role: "user", content: `Here is the original spec:\n\n${originalSpec}`});
+  messages.push({role: "user", content: "Please look at the original spec and write code that implements it."});
+
+  const payload = {
+    model: model,
+    system: CODEGEN_FIRSTRUN_SYSTEM_PROMPT,
+    messages,
+  };
+
+  return await LLMCodeGenCall('codegen-firstrun', payload);
+};
+
+
+export const CODEGEN_ITERATION_SYSTEM_PROMPT = `You are code generator that implements and iterates on existing CommonTools Recipes.\n\n ${recipeGuide}`;
+
+export const codeGenIteration = async ({
+  originalSpec,
+  originalSrc,
+  workingSpec,
+  model = MODEL
+}: LLMHandlerPayload): Promise<LLMResponse> => {
+  const messages = [];
+
+  messages.push({role: "user", content: `Here is the original spec:\n\n${originalSpec}`});
+  messages.push({role: "user", content: `Here is the original src:\n\n${originalSrc}`});
+  messages.push({role: "user", content: `Here is updated spec for iteration:\n\n${workingSpec}`});
+  messages.push({role: "user", content: "Please look at the original spec, original src, and updated spec, and write the new source code."});
+
+  const payload = {
+    model: model,
+    system: CODEGEN_ITERATION_SYSTEM_PROMPT,
+    messages,
+  };
+
+  return await LLMCodeGenCall('codegen-iteration', payload);
+};
+
+
+export const CODEGEN_FIXIT_SYSTEM_PROMPT = `You are code generator that fixes existing CommonTools Recipes, specialized for fixing errors.\n\n ${recipeGuide}`;
+
+export const codeGenFixit = async ({
+  originalSpec,
+  originalSrc,
+  workingSpec,
+  errors,
+  model = MODEL
+}: LLMHandlerPayload): Promise<LLMResponse> => {
+  const messages = [];
+  
+  messages.push({role: "user", content: `Here is the original spec:\n\n${originalSpec}`});
+  messages.push({role: "user", content: `Here is the original src:\n\n${originalSrc}`});
+  if (workingSpec) {
+    messages.push({role: "user", content: `Here is the updated spec:\n\n${workingSpec}`});
+  }
+  messages.push({role: "user", content: `Please consider the following error message, and fix the code: \n ${errors}`});
+
+  const payload = {
+    model: model,
+    system: CODEGEN_FIXIT_SYSTEM_PROMPT,
+    messages,
+  };
+
+  return await LLMCodeGenCall('codegen-fixit', payload);
+};
+
+
+export const TEXTGEN_SPEC_ITERATION_SYSTEM_PROMPT = `You are prompt generator that takes an existing text prompt, and updates it based on a user prompt describing what to change. Only respond with the full spec text, Do not describe your changes.`
+
+export const textGenSpecIteration = async ({
+  originalSpec,
+  originalSrc,
+  userPrompt,
+  model = MODEL
+}: LLMHandlerPayload): Promise<LLMResponse> => {
+  const messages = [];  
+  messages.push({role: "user", content: `Here is the original spec:\n\n${originalSpec}`});
+  if (originalSrc) {
+    messages.push({role: "user", content: `Here is the original src:\n\n${originalSrc}`});
+  }
+  messages.push({role: "user", content: `Here is the user's request:\n\n${userPrompt}`});
+  messages.push({role: "user", content: "Please look at the original spec, and make adjustments adhering to the user's request. You should return a new text spec. Return only the spec text, do not include any other text."});
+
+
+  const payload = {
+    model: model,
+    system: TEXTGEN_SPEC_ITERATION_SYSTEM_PROMPT,
+    messages,
+  };
+
+  return await LLMTextGenCall('textgen-spec-iteration', payload);
+};
+
+export const LLM_CAPABILITIES: Record<string, { handler: LLMHandler }> = {
+  'codegen-firstrun': {
+    handler: codeGenFirstRun,
+  },
+  'codegen-fixit': {
+    handler: codeGenFixit,
+  },
+  'codegen-iteration': {
+    handler: codeGenIteration,
+  },
+  'textgen-spec-iteration': {
+    handler: textGenSpecIteration,
+  },
+  // 'textgen-recipe-suggestion': {
+  //   handler: textGenRecipeSuggestion,
+  // },
 };

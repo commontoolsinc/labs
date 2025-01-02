@@ -1,14 +1,15 @@
 import { join } from "@std/path";
 import { exists } from "@std/fs";
-import { iterate } from "./prompts.ts";
+import { codeGenIteration, codeGenFirstRun } from "./prompts.ts";
 
-if (Deno.args.length !== 1) {
-  console.error("Usage: deno run -A bootstrap.ts <scenario-name>");
+if (Deno.args.length !== 2) {
+  console.error("Usage: deno run -A bootstrap.ts <eval-name> <scenario-name>");
   Deno.exit(1);
 }
 
-const scenarioName = Deno.args[0];
-const scenarioDir = join(Deno.cwd(), "scenarios", scenarioName);
+const evalName = Deno.args[0];
+const scenarioName = Deno.args[1];
+const scenarioDir = join(Deno.cwd(), "evals", evalName, scenarioName);
 
 async function bootstrap() {
   // Check if scenario directory exists
@@ -17,19 +18,19 @@ async function bootstrap() {
     Deno.exit(1);
   }
 
-  // Define paths
-  const ogSpecPath = join(scenarioDir, "ogspec.md");
-  const newSpecPath = join(scenarioDir, "newspec.md");
+  // Define paths based on new structure
+  const originalSpecPath = join(scenarioDir, "original-spec.md");
+  const newSpecPath = join(scenarioDir, "new-spec.md");
   const originalPath = join(scenarioDir, "original.tsx");
   const newPath = join(scenarioDir, "new.tsx");
 
   // Check for required files
-  if (!await exists(ogSpecPath)) {
-    console.error(`Original spec file not found: ${ogSpecPath}`);
+  if (!await exists(originalSpecPath)) {
+    console.error(`Original spec file not found: ${originalSpecPath}`);
     Deno.exit(1);
   }
 
-  const ogSpec = await Deno.readTextFile(ogSpecPath);
+  const originalSpec = await Deno.readTextFile(originalSpecPath);
 
   // Check if we're doing initial creation or iteration
   const hasNewSpec = await exists(newSpecPath);
@@ -37,13 +38,13 @@ async function bootstrap() {
 
   if (hasNewSpec && hasOriginal) {
     // We're doing an iteration
-    console.log("Found newspec.md and original.tsx - generating iteration...");
+    console.log("Found new-spec.md and original.tsx - generating iteration...");
     
     const newSpec = await Deno.readTextFile(newSpecPath);
     const originalSrc = await Deno.readTextFile(originalPath);
 
-    const result = await iterate({
-      originalSpec: ogSpec,
+    const result = await codeGenIteration({
+      originalSpec,
       originalSrc,
       workingSpec: newSpec,
     });
@@ -65,10 +66,10 @@ async function bootstrap() {
     // We're doing initial creation
     console.log("Generating initial recipe...");
     
-    const result = await iterate({
-      originalSpec: ogSpec,
+    const result = await codeGenFirstRun({
+      originalSpec,
       originalSrc: "", // No original source for bootstrap
-      workingSpec: ogSpec, // Use same spec for working spec in bootstrap
+      workingSpec: originalSpec, // Use same spec for working spec in bootstrap
     });
 
     if (result.generationError) {

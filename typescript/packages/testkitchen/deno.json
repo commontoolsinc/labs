@@ -6,6 +6,7 @@
     "@cliffy/command": "jsr:@cliffy/command@^1.0.0-rc.7",
     "@cliffy/prompt": "jsr:@cliffy/prompt@^1.0.0-rc.7",
     "@hono/hono": "jsr:@hono/hono@^4.6.13",
+    "@libs/diff": "jsr:@libs/diff@^3.0.0",
     "@playwright/test": "npm:@playwright/test@^1.49.0",
     "@std/assert": "jsr:@std/assert@1",
     "@std/fs": "jsr:@std/fs@^1.0.6",
