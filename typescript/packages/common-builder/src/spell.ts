@@ -19,8 +19,10 @@ function createPathCollector(path: PathSegment[] = []): any {
   return new Proxy(
     function () {}, // Base target is a function to support function calls
     {
-      get(_target, prop) {
+      get(target, prop) {
         if (prop === getPath) return path;
+        if (typeof prop === "symbol") return (target as any)[prop];
+
         // Continue collecting path for property access
         return createPathCollector([...path, prop]);
       },
