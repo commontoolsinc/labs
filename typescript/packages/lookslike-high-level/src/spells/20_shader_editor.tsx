@@ -39,7 +39,7 @@ const generateIdentifier = () => {
 const SHADER_TEMPLATE = `    precision mediump float;
     uniform float iTime;
     uniform vec2 iResolution;
-    #define UV (gl_FragCoord.xy / iResolution);
+    #define UV (gl_FragCoord.xy / iResolution)
 
     varying vec2 v_texCoord;
 `;
