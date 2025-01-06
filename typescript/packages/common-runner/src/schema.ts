@@ -6,6 +6,7 @@ export interface JsonSchema {
   items?: JsonSchema;
   $ref?: string;
   reference?: boolean;
+  additionalProperties?: JsonSchema;
 }
 
 export function resolveSchema(schema: JsonSchema, rootSchema: JsonSchema = schema): JsonSchema {
@@ -29,18 +30,39 @@ export function validateAndTransform(
     return cell.asRendererCell(path, undefined, resolvedSchema);
   }
 
-  if (resolvedSchema.type === "object" && resolvedSchema.properties) {
+  if (resolvedSchema.type === "object") {
     const result: Record<string, any> = {};
-    for (const [key, propSchema] of Object.entries(resolvedSchema.properties)) {
-      const propValue = value?.[key];
-      result[key] = validateAndTransform(
-        cell,
-        propValue,
-        propSchema,
-        rootSchema,
-        [...path, key]
-      );
+    
+    // Handle explicitly defined properties
+    if (resolvedSchema.properties) {
+      for (const [key, propSchema] of Object.entries(resolvedSchema.properties)) {
+        const propValue = value?.[key];
+        result[key] = validateAndTransform(
+          cell,
+          propValue,
+          propSchema,
+          rootSchema,
+          [...path, key]
+        );
+      }
     }
+    
+    // Handle additional properties if defined
+    if (resolvedSchema.additionalProperties && value) {
+      for (const key of Object.keys(value)) {
+        if (!resolvedSchema.properties?.[key]) {
+          const propValue = value[key];
+          result[key] = validateAndTransform(
+            cell,
+            propValue,
+            resolvedSchema.additionalProperties,
+            rootSchema,
+            [...path, key]
+          );
+        }
+      }
+    }
+    
     return result;
   }
 

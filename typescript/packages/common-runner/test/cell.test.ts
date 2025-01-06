@@ -545,6 +545,83 @@ describe("asRendererCell with schema", () => {
     expect(metadataValue.createdAt).toBe("2025-01-06");
     expect(metadataValue.type).toBe("user");
   });
+
+  it("should handle objects with additional properties as references", () => {
+    const c = cell({
+      id: 1,
+      context: {
+        user: { name: "John" },
+        settings: { theme: "dark" },
+        data: { value: 42 }
+      }
+    });
+
+    const schema = {
+      type: "object",
+      properties: {
+        id: { type: "number" },
+        context: { 
+          type: "object",
+          additionalProperties: {
+            type: "object",
+            reference: true
+          }
+        }
+      }
+    } satisfies JsonSchema;
+
+    const rendererCell = c.asRendererCell([], undefined, schema);
+    const value = rendererCell.get();
+
+    // Regular property works normally
+    expect(value.id).toBe(1);
+
+    // Each property in context should be a RendererCell
+    expect(isRendererCell(value.context.user)).toBe(true);
+    expect(isRendererCell(value.context.settings)).toBe(true);
+    expect(isRendererCell(value.context.data)).toBe(true);
+
+    // But we can still get their values
+    expect(value.context.user.get().name).toBe("John");
+    expect(value.context.settings.get().theme).toBe("dark");
+    expect(value.context.data.get().value).toBe(42);
+  });
+
+  it("should handle additional properties with just reference: true", () => {
+    const c = cell({
+      context: {
+        number: 42,
+        string: "hello",
+        object: { value: 123 },
+        array: [1, 2, 3]
+      }
+    });
+
+    const schema = {
+      type: "object",
+      properties: {
+        context: { 
+          type: "object",
+          additionalProperties: { reference: true }
+        }
+      }
+    } satisfies JsonSchema;
+
+    const rendererCell = c.asRendererCell([], undefined, schema);
+    const value = rendererCell.get();
+
+    // All properties in context should be RendererCells regardless of their type
+    expect(isRendererCell(value.context.number)).toBe(true);
+    expect(isRendererCell(value.context.string)).toBe(true);
+    expect(isRendererCell(value.context.object)).toBe(true);
+    expect(isRendererCell(value.context.array)).toBe(true);
+
+    // Values should be preserved
+    expect(value.context.number.get()).toBe(42);
+    expect(value.context.string.get()).toBe("hello");
+    expect(value.context.object.get()).toEqual({ value: 123 });
+    expect(value.context.array.get()).toEqual([1, 2, 3]);
+  });
 });
 
 describe("JSON.stringify bug", () => {
