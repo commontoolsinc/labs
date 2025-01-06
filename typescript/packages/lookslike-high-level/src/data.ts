@@ -60,6 +60,7 @@ import { formTest } from "./spells/17_complex_form.jsx";
 import { musicLibrary } from "./spells/18_music.jsx";
 import { spellManager } from './spells/19_process_manager.jsx'
 import { shaderManager } from './spells/20_shader_editor.jsx'
+import { schemaGenerator } from './spells/21_model_builder.jsx'
 
 export type Charm = {
   [NAME]?: string;
@@ -258,6 +259,7 @@ addCharms([
   musicLibrary.spawn({ musicLibrary: 1 }),
   spellManager.spawn({ spellManager: 1 }),
   shaderManager.spawn({ shaderManager: 1 }),
+  schemaGenerator.spawn({ schemaGenerator: 1 }),
   FetchService.spawn() as any,
   GmailService.spawn() as any,
   ViewService.spawn() as any,
