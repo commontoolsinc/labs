@@ -111,7 +111,7 @@ type SubmitEvent<T> = {
 
 export const schemaGenerator = typedBehavior(SchemaGenerator, {
   render: ({ self, description, generatedCode, mermaidDiagram }) => (
-    <div entity={self}>
+    <div entity={self} title="Domain Model Generator">
       <h3>Domain Model Generator</h3>
       <common-form
         schema={DomainModel}

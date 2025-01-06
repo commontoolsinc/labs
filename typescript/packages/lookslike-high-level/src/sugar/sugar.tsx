@@ -5,14 +5,40 @@ import {
   Select,
   select,
   refer,
+  Term,
   Rule,
   Variable,
+  WhereBuilder,
+  Clause,
 } from "@commontools/common-system";
 import { z } from "zod";
 import { field } from "./query.js";
 import { fromString, Reference } from "merkle-reference";
 import { defaultTo } from "./default.js";
 import { Transact } from "../sugar.js";
+
+export function list<T extends z.ZodObject<any>>(
+  schema: T
+) {
+  const base = resolve(schema);
+  const item = base.selector.self;
+  const newVar = $.listItem;
+  (base.selector as any).self = newVar;
+  const constraints: Clause[] = base.clauses.map(constraint => {
+    if (constraint.Case) {
+      return { Case: [newVar, constraint.Case[1], constraint.Case[2]] } as Clause;
+    }
+
+    return constraint;
+  });
+
+  constraints.push(conforms(newVar, schema));
+
+  const selector = new Select({ self: $.self, items: [base.selector] }, new WhereBuilder(...constraints)) as any;
+  console.log('selector', selector)
+
+  return selector as Select<{ self: Reference, items: T }>;
+}
 
 // zod schema -> query
 export function resolve<T extends z.ZodObject<any>>(
@@ -110,12 +136,22 @@ export function resolve<T extends z.ZodObject<any>>(
   return aggregator;
 }
 
+export function conforms<T extends z.ZodObject<any>>(entity: Term, schema: T): Clause {
+  return {
+    Case: [entity, 'common/schema', refer(JSON.stringify(schema.shape))]
+  }
+}
+
+export function tagWithSchema<T extends z.ZodObject<any>>(entity: Term, schema: T): Instruction {
+  return { Assert: [entity, 'common/schema', refer(JSON.stringify(schema.shape))] }
+}
 
 export function importEntity<T extends z.ZodObject<any>>(
   value: any,
   schema: T,
   createRelationships = true
 ) {
+
 
   // Get reference fields from schema
   const refFields = Object.entries(schema.shape)
@@ -143,6 +179,11 @@ export function importEntity<T extends z.ZodObject<any>>(
       instructions.push(...associate(self, field, refValue));
     });
   }
+  instructions.push({
+    Assert: [
+      self, 'common/schema', refer(JSON.stringify(schema.shape))
+    ]
+  });
 
   return { self, instructions };
 }
@@ -153,12 +194,12 @@ export function importEntity<T extends z.ZodObject<any>>(
 export function associate(
   source: Reference,
   relationshipField: string,
-  targetRefs: string | string[]
+  targetRefs: string | string[] | Reference | Reference[]
 ): Instruction[] {
   const refs = Array.isArray(targetRefs) ? targetRefs : [targetRefs];
   return refs.map(ref =>
     Transact.assert(source, {
-      [relationshipField]: fromString(ref)
+      [relationshipField]: typeof ref === 'string' ? fromString(ref) : ref
     })
   ).flat();
 }

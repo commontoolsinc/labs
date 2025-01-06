@@ -10,18 +10,18 @@ import { Reference } from "merkle-reference";
 import { importEntity, resolve } from "../sugar/sugar.jsx";
 import { Ref, UiFragment } from "../sugar/zod.js";
 
-const Artist = z.object({
+export const Artist = z.object({
   name: z.string().min(1).max(255).describe("The name of the artist"),
 });
 
-const Song = z.object({
+export const Song = z.object({
   title: z.string().min(1).max(255).describe("The title of the song"),
   artists: z.array(Artist).min(1).describe("The artists who performed the song"),
   duration: z.number().min(1).describe("The duration in seconds"),
   year: z.number().min(1900).max(2100).describe("The release year")
 });
 
-const Album = z.object({
+export const Album = z.object({
   "album/title": z.string().min(1).max(255).describe("The album title"),
   artist: Artist.describe("The primary artist"),
   songs: z.array(Song).min(1).describe("The songs on the album"),
@@ -151,51 +151,51 @@ const playlistEditor = typedBehavior(Playlist, {
 
 export const musicLibrary = typedBehavior(
   MusicLibrary.pick({
-    focused: true,
+    // focused: true,
     '~/common/ui/artist-list': true,
     '~/common/ui/song-list': true,
     '~/common/ui/album-list': true,
     '~/common/ui/playlist-list': true
   }), {
-  render: ({ self, focused, '~/common/ui/artist-list': artistList, '~/common/ui/song-list': songList, '~/common/ui/album-list': albumList, '~/common/ui/playlist-list': playlistList }) => (
-    <div entity={self}>
+  render: ({
+    self,
+    '~/common/ui/artist-list': artistList,
+    '~/common/ui/song-list': songList,
+    '~/common/ui/album-list': albumList,
+    '~/common/ui/playlist-list': playlistList
+  }) => (
+    <div entity={self} title="Music">
       <div>
-        {focused ? (
-          <div>
-            <button onclick="~/on/close-editor">Close</button>
-            <Charm self={focused} spell={songEditor as any} />
-          </div>
-        ) : (
-          <div>
-            <h3>Add Artist</h3>
-            <common-form
-              schema={Artist}
-              reset
-              onsubmit="~/on/add-artist"
-            />
-            <h3>Add Song</h3>
-            <common-form
-              schema={Song}
-              referenceFields={new Set(['artists'])}
-              reset
-              onsubmit="~/on/add-song"
-            />
-            <h3>Add Album</h3>
-            <common-form
-              schema={Album}
-              referenceFields={new Set(['artist', 'songs'])}
-              reset
-              onsubmit="~/on/add-album"
-            />
-            <h3>Add Playlist</h3>
-            <common-form
-              schema={Playlist}
-              referenceFields={new Set(['songs'])}
-              reset
-              onsubmit="~/on/add-playlist"
-            />
-          </div>
-        )}
+        <div>
+          <h3>Add Artist</h3>
+          <common-form
+            schema={Artist}
+            reset
+            onsubmit="~/on/add-artist"
+          />
+          <h3>Add Song</h3>
+          <common-form
+            schema={Song}
+            referenceFields={new Set(['artists'])}
+            reset
+            onsubmit="~/on/add-song"
+          />
+          <h3>Add Album</h3>
+          <common-form
+            schema={Album}
+            referenceFields={new Set(['artist', 'songs'])}
+            reset
+            onsubmit="~/on/add-album"
+          />
+          <h3>Add Playlist</h3>
+          <common-form
+            schema={Playlist}
+            referenceFields={new Set(['songs'])}
+            reset
+            onsubmit="~/on/add-playlist"
+          />
+        </div>
+
       </div>
 
       <div>

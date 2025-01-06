@@ -10,7 +10,7 @@ import { event, subview, Transact } from "../sugar.js";
 import { Charm as CharmComponent, initRules, typedBehavior, typedService } from "./spell.jsx";
 import { z } from "zod";
 import { fromString, Reference } from "merkle-reference";
-import { importEntity, resolve } from "../sugar/sugar.jsx";
+import { importEntity, resolve, tagWithSchema } from "../sugar/sugar.jsx";
 import { Ref, UiFragment } from "../sugar/zod.js";
 import { tsToExports } from "../localBuild.js";
 import { sendMessage } from "./stickers/chat.jsx";
@@ -40,7 +40,7 @@ const generateIdentifier = () => {
 };
 
 // Define the core schemas
-const Spell = z.object({
+export const Spell = z.object({
   name: z.string().min(1).max(255).describe("The name of the spell"),
   sourceCode: z.string().min(1).max(8192).describe("The spell's source code"),
   notes: z.string().describe("Notes about the spell"),
@@ -163,6 +163,7 @@ const spellEditor = typedBehavior(Spell, {
         const ev = Session.resolve<SubmitEvent<z.infer<typeof Spell>>>(event);
         const spell = ev.detail.value;
         cmd.add(...Transact.set(self, spell))
+        cmd.add(tagWithSchema(self, Spell))
       }),
 
     onModifyWithAI: event("~/on/modify-with-ai")
@@ -674,7 +675,7 @@ export const spellManager = typedBehavior(
     '~/common/ui/charm-list': true
   }), {
   render: ({ self, editingSpell, focusedCharm, '~/common/ui/spell-list': spellList, '~/common/ui/charm-list': charmList }) => (
-    <div entity={self}>
+    <div entity={self} title="Spell Manager">
       <div>
         <details>
           <h3>Create New Spell</h3>

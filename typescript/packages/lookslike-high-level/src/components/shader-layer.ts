@@ -8,6 +8,7 @@ export class ShaderLayer extends LitElement {
   @property({ type: Number }) width = 640;
   @property({ type: Number }) height = 480;
   @property({ type: String }) blendMode = 'default';
+  @property({ type: String, reflect: true }) errorMessage: string | null = null;
 
   private canvasRef = createRef<HTMLCanvasElement>();
   private gl?: WebGLRenderingContext;
@@ -17,7 +18,6 @@ export class ShaderLayer extends LitElement {
   private animationFrame?: number;
   private startTime = performance.now();
   private vertexShader?: WebGLShader;
-  private errorMessage: string | null = null;
 
   static override styles = css`
     :host {
@@ -87,6 +87,7 @@ export class ShaderLayer extends LitElement {
     });
     if (!gl) {
       this.errorMessage = "WebGL not supported";
+      this.requestUpdate();
       return;
     }
     this.gl = gl;
@@ -97,6 +98,7 @@ export class ShaderLayer extends LitElement {
     const vertexShader = gl.createShader(gl.VERTEX_SHADER);
     if (!vertexShader) {
       this.errorMessage = "Failed to create vertex shader";
+      this.requestUpdate();
       return;
     }
     this.vertexShader = vertexShader;
@@ -113,6 +115,7 @@ export class ShaderLayer extends LitElement {
 
     if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
       this.errorMessage = `Vertex shader error: ${gl.getShaderInfoLog(vertexShader)}`;
+      this.requestUpdate();
       return;
     }
 
@@ -138,12 +141,14 @@ export class ShaderLayer extends LitElement {
     const program = gl.createProgram();
     if (!program) {
       this.errorMessage = "Failed to create program";
+      this.requestUpdate();
       return;
     }
 
     const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
     if (!fragmentShader) {
       this.errorMessage = "Failed to create fragment shader";
+      this.requestUpdate();
       return;
     }
 
@@ -153,6 +158,7 @@ export class ShaderLayer extends LitElement {
     if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
       this.errorMessage = `Fragment shader error: ${gl.getShaderInfoLog(fragmentShader)}`;
       gl.deleteShader(fragmentShader);
+      this.requestUpdate();
       return;
     }
 
@@ -164,6 +170,7 @@ export class ShaderLayer extends LitElement {
       this.errorMessage = `Program linking error: ${gl.getProgramInfoLog(program)}`;
       gl.deleteShader(fragmentShader);
       gl.deleteProgram(program);
+      this.requestUpdate();
       return;
     }
 

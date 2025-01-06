@@ -1,5 +1,6 @@
-import { $, select, Select, Reference } from "@commontools/common-system";
+import { $, select, Select} from "@commontools/common-system";
 import { Variable } from 'datalogia'
+import { Reference } from "merkle-reference";
 
 export type Events = Record<string, `~/on${string}`>;
 
