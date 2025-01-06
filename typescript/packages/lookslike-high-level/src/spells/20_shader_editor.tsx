@@ -54,7 +54,8 @@ const Shader = z.object({
 const ShaderEditor = z.object({
   editingShader: Ref.describe("The shader currently being edited"),
   shaders: z.array(Shader).describe("All shaders in the system"),
-  '~/common/ui/shader-list': UiFragment.describe("The UI fragment for the shaders list")
+  '~/common/ui/shader-list': UiFragment.describe("The UI fragment for the shaders list"),
+  '~/common/ui/navigation': UiFragment.describe("The UI fragment for navigation")
 });
 
 const SourceModificationPrompt = z.object({
@@ -73,18 +74,21 @@ type EditEvent = {
 const shaderEditor = typedBehavior(Shader, {
   render: ({ self, name, sourceCode, notes }) => (
     <div entity={self}>
-      <common-form
-        schema={Shader}
-        value={{ name, sourceCode: sourceCode || SHADER_TEMPLATE, notes }}
-        onsubmit="~/on/save"
-      />
-      <h4>Modify with AI</h4>
-      <common-form
-        schema={SourceModificationPrompt}
-        value={{ sourceId: self }}
-        reset
-        onsubmit="~/on/modify-with-ai"
-      />
+      <details>
+        <summary>Edit</summary>
+        <common-form
+          schema={Shader}
+          value={{ name, sourceCode: sourceCode || SHADER_TEMPLATE, notes }}
+          onsubmit="~/on/save"
+        />
+        <h4>Modify with AI</h4>
+        <common-form
+          schema={SourceModificationPrompt}
+          value={{ sourceId: self }}
+          reset
+          onsubmit="~/on/modify-with-ai"
+        />
+      </details>
       <div style="position: relative; width: 500px; height: 500px;">
         <shader-layer
           width={500}
@@ -147,9 +151,11 @@ const shaderEditor = typedBehavior(Shader, {
 export const shaderManager = typedBehavior(
   ShaderEditor.pick({
     editingShader: true,
-    '~/common/ui/shader-list': true
+    shaders: true,
+    '~/common/ui/shader-list': true,
+    '~/common/ui/navigation': true
   }), {
-  render: ({ self, editingShader, '~/common/ui/shader-list': shaderList }) => (
+  render: ({ self, editingShader, '~/common/ui/shader-list': shaderList, '~/common/ui/navigation': navigation }) => (
     <div entity={self}>
       <div>
         <details>
@@ -168,6 +174,7 @@ export const shaderManager = typedBehavior(
           <h3>Edit Shader</h3>
           <button onclick="~/on/close-shader-editor">Close</button>
           <Charm self={editingShader} spell={shaderEditor as any} />
+          {subview(navigation)}
         </div>
       )}
 
@@ -213,6 +220,49 @@ export const shaderManager = typedBehavior(
           /> as any]
         }]
       }).commit(),
+
+    renderNavigation: resolve(ShaderEditor.pick({ shaders: true, editingShader: true }))
+      .update(({ self, shaders, editingShader }) => {
+        const currentIndex = shaders.findIndex(s => (s as any).self.toString() === editingShader?.toString());
+        const shader = shaders[currentIndex];
+        if (!shader) return [];
+
+        return [{
+          Upsert: [self, '~/common/ui/navigation',
+            <div style="display: flex; align-items: center; gap: 1rem; margin: 1rem 0;">
+              <button
+                onclick={`~/on/prev-shader`}
+                disabled={currentIndex === 0}
+              >Previous</button>
+              <span>{shader.name}</span>
+              <button
+                onclick={`~/on/next-shader`}
+                disabled={currentIndex === shaders.length - 1}
+              >Next</button>
+            </div> as any
+          ]
+        }]
+      }).commit(),
+
+    onPrevShader:
+      resolve(ShaderEditor.pick({ editingShader: true, shaders: true }))
+        .with(event("~/on/prev-shader"))
+        .transact(({ self, shaders, editingShader }, cmd) => {
+          const currentIndex = shaders.findIndex(s => (s as any).self.toString() === editingShader?.toString());
+          if (currentIndex > 0) {
+            cmd.add(...Transact.set(self, { editingShader: (shaders[currentIndex - 1] as any).self }));
+          }
+        }),
+
+    onNextShader:
+      resolve(ShaderEditor.pick({ editingShader: true, shaders: true }))
+        .with(event("~/on/next-shader"))
+        .transact(({ self, shaders, editingShader }, cmd) => {
+          const currentIndex = shaders.findIndex(s => (s as any).self.toString() === editingShader?.toString());
+          if (currentIndex < shaders.length - 1) {
+            cmd.add(...Transact.set(self, { editingShader: (shaders[currentIndex + 1] as any).self }));
+          }
+        }),
 
     onDeleteShader: event("~/on/delete-shader")
       .transact(({ self, event }, cmd) => {

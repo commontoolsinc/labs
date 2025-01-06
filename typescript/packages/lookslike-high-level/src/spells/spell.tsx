@@ -137,12 +137,15 @@ export function Charm<T extends Record<string, Rule<Selector>>>({
   self: Reference;
 }) {
   return (
-    <common-charm
-      id={self.toString()}
-      key={self.toString()}
-      spell={() => spell}
-      entity={() => self}
-    />
+    <div>
+      {/* stupid workaround because keyed nodes only work all nodes are keyed within a parent... we should fix our JSX bindings */}
+      <common-charm
+        id={self.toString()}
+        key={self.toString()}
+        spell={() => spell}
+        entity={() => self}
+      />
+    </div>
   );
 }
 

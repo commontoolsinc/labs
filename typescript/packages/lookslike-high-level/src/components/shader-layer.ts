@@ -17,6 +17,7 @@ export class ShaderLayer extends LitElement {
   private animationFrame?: number;
   private startTime = performance.now();
   private vertexShader?: WebGLShader;
+  private errorMessage: string | null = null;
 
   static override styles = css`
     :host {
@@ -37,9 +38,42 @@ export class ShaderLayer extends LitElement {
       left: 0;
       mix-blend-mode: var(--blend-mode, default);
     }
+    .error {
+      color: red;
+      padding: 20px;
+      position: absolute;
+      top: 0;
+      left: 0;
+      background: rgba(0,0,0,0.8);
+    }
   `;
 
+  private cleanup() {
+    if (this.animationFrame) {
+      cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = undefined;
+    }
+
+    if (this.gl) {
+      if (this.program) {
+        this.gl.deleteProgram(this.program);
+        this.program = undefined;
+      }
+      if (this.vertexShader) {
+        this.gl.deleteShader(this.vertexShader);
+        this.vertexShader = undefined;
+      }
+      this.gl = undefined;
+    }
+
+    this.timeLocation = undefined;
+    this.resolutionLocation = undefined;
+    this.errorMessage = null;
+  }
+
   private setupWebGL() {
+    this.cleanup();
+
     const canvas = this.canvasRef.value;
     if (!canvas) return;
 
@@ -47,20 +81,27 @@ export class ShaderLayer extends LitElement {
     canvas.height = this.height;
     canvas.style.setProperty('--blend-mode', this.blendMode);
 
-    this.gl = canvas.getContext('webgl', {
+    const gl = canvas.getContext('webgl', {
       alpha: true,
       premultipliedAlpha: false
-    })!;
-    if (!this.gl) return;
+    });
+    if (!gl) {
+      this.errorMessage = "WebGL not supported";
+      return;
+    }
+    this.gl = gl;
 
-    // Enable blending for transparency
-    this.gl.enable(this.gl.BLEND);
-    this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-    this.vertexShader = this.gl.createShader(this.gl.VERTEX_SHADER);
-    if (!this.vertexShader) return;
+    const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+    if (!vertexShader) {
+      this.errorMessage = "Failed to create vertex shader";
+      return;
+    }
+    this.vertexShader = vertexShader;
 
-    this.gl.shaderSource(this.vertexShader, `
+    gl.shaderSource(vertexShader, `
       attribute vec2 position;
       varying vec2 v_texCoord;
       void main() {
@@ -68,7 +109,12 @@ export class ShaderLayer extends LitElement {
         gl_Position = vec4(position, 0.0, 1.0);
       }
     `);
-    this.gl.compileShader(this.vertexShader);
+    gl.compileShader(vertexShader);
+
+    if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
+      this.errorMessage = `Vertex shader error: ${gl.getShaderInfoLog(vertexShader)}`;
+      return;
+    }
 
     const positions = new Float32Array([
       -1, -1,
@@ -78,53 +124,62 @@ export class ShaderLayer extends LitElement {
       1, -1,
       1, 1
     ]);
-    const positionBuffer = this.gl.createBuffer();
-    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, positionBuffer);
-    this.gl.bufferData(this.gl.ARRAY_BUFFER, positions, this.gl.STATIC_DRAW);
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
 
     this.initShaderProgram();
   }
 
   private initShaderProgram() {
     if (!this.gl || !this.vertexShader || !this.shader) return;
+    const gl = this.gl;
 
-    // Clean up existing program
-    if (this.program) {
-      this.gl.deleteProgram(this.program);
-    }
-
-    this.program = this.gl.createProgram();
-    if (!this.program) return;
-
-    const fragmentShader = this.gl.createShader(this.gl.FRAGMENT_SHADER);
-    if (!fragmentShader) return;
-
-    this.gl.shaderSource(fragmentShader, this.shader);
-    this.gl.compileShader(fragmentShader);
-
-    if (!this.gl.getShaderParameter(fragmentShader, this.gl.COMPILE_STATUS)) {
-      console.error('Fragment shader compilation error:', this.gl.getShaderInfoLog(fragmentShader));
+    const program = gl.createProgram();
+    if (!program) {
+      this.errorMessage = "Failed to create program";
       return;
     }
 
-    this.gl.attachShader(this.program, this.vertexShader);
-    this.gl.attachShader(this.program, fragmentShader);
-    this.gl.linkProgram(this.program);
-
-    if (!this.gl.getProgramParameter(this.program, this.gl.LINK_STATUS)) {
-      console.error('Program linking error:', this.gl.getProgramInfoLog(this.program));
+    const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+    if (!fragmentShader) {
+      this.errorMessage = "Failed to create fragment shader";
       return;
     }
 
-    const positionLocation = this.gl.getAttribLocation(this.program, "position");
-    this.gl.enableVertexAttribArray(positionLocation);
-    this.gl.vertexAttribPointer(positionLocation, 2, this.gl.FLOAT, false, 0, 0);
+    gl.shaderSource(fragmentShader, this.shader);
+    gl.compileShader(fragmentShader);
 
-    this.timeLocation = this.gl.getUniformLocation(this.program, "iTime");
-    this.resolutionLocation = this.gl.getUniformLocation(this.program, "iResolution");
+    if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
+      this.errorMessage = `Fragment shader error: ${gl.getShaderInfoLog(fragmentShader)}`;
+      gl.deleteShader(fragmentShader);
+      return;
+    }
 
-    // Clean up fragment shader
-    this.gl.deleteShader(fragmentShader);
+    gl.attachShader(program, this.vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      this.errorMessage = `Program linking error: ${gl.getProgramInfoLog(program)}`;
+      gl.deleteShader(fragmentShader);
+      gl.deleteProgram(program);
+      return;
+    }
+
+    this.program = program;
+
+    const positionLocation = gl.getAttribLocation(program, "position");
+    gl.enableVertexAttribArray(positionLocation);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+    this.timeLocation = gl.getUniformLocation(program, "iTime");
+    this.resolutionLocation = gl.getUniformLocation(program, "iResolution");
+
+    gl.deleteShader(fragmentShader);
+
+    this.startTime = performance.now();
+    this.renderGl();
   }
 
   private renderGl() {
@@ -149,32 +204,27 @@ export class ShaderLayer extends LitElement {
   }
 
   override updated(changedProperties: Map<string, any>) {
-    if (changedProperties.has('shader')) {
-      this.initShaderProgram();
+    if (changedProperties.has('shader') ||
+        changedProperties.has('width') ||
+        changedProperties.has('height') ||
+        changedProperties.has('blendMode')) {
+      this.setupWebGL();
     }
   }
 
   override firstUpdated() {
     this.setupWebGL();
-    this.renderGl();
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
-    if (this.animationFrame) {
-      cancelAnimationFrame(this.animationFrame);
-    }
-    if (this.gl && this.program) {
-      this.gl.deleteProgram(this.program);
-    }
-    if (this.gl && this.vertexShader) {
-      this.gl.deleteShader(this.vertexShader);
-    }
+    this.cleanup();
   }
 
   override render() {
     return html`
       <canvas ${ref(this.canvasRef)}></canvas>
+      ${this.errorMessage ? html`<div class="error">${this.errorMessage}</div>` : null}
     `;
   }
 }
