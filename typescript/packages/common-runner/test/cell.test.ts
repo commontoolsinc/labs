@@ -9,6 +9,7 @@ import {
 } from "../src/cell.js";
 import { JsonSchema } from "../src/schema.js";
 import { addEventHandler, idle } from "../src/scheduler.js";
+import { compactifyPaths } from "../src/utils.js";
 
 describe("Cell", () => {
   it("should create a cell with initial value", () => {
@@ -552,22 +553,22 @@ describe("asRendererCell with schema", () => {
       context: {
         user: { name: "John" },
         settings: { theme: "dark" },
-        data: { value: 42 }
-      }
+        data: { value: 42 },
+      },
     });
 
     const schema = {
       type: "object",
       properties: {
         id: { type: "number" },
-        context: { 
+        context: {
           type: "object",
           additionalProperties: {
             type: "object",
-            reference: true
-          }
-        }
-      }
+            reference: true,
+          },
+        },
+      },
     } satisfies JsonSchema;
 
     const rendererCell = c.asRendererCell([], undefined, schema);
@@ -593,18 +594,18 @@ describe("asRendererCell with schema", () => {
         number: 42,
         string: "hello",
         object: { value: 123 },
-        array: [1, 2, 3]
-      }
+        array: [1, 2, 3],
+      },
     });
 
     const schema = {
       type: "object",
       properties: {
-        context: { 
+        context: {
           type: "object",
-          additionalProperties: { reference: true }
-        }
-      }
+          additionalProperties: { reference: true },
+        },
+      },
     } satisfies JsonSchema;
 
     const rendererCell = c.asRendererCell([], undefined, schema);
@@ -621,6 +622,134 @@ describe("asRendererCell with schema", () => {
     expect(value.context.string.get()).toBe("hello");
     expect(value.context.object.get()).toEqual({ value: 123 });
     expect(value.context.array.get()).toEqual([1, 2, 3]);
+  });
+
+  it("should handle references in underlying cell", () => {
+    // Create a cell with a reference
+    const innerCell = cell({ value: 42 });
+    const innerRef = innerCell.asRendererCell();
+
+    // Create a cell that uses that reference
+    const c = cell({
+      context: {
+        inner: innerRef,
+      },
+    });
+
+    const schema = {
+      type: "object",
+      properties: {
+        context: {
+          type: "object",
+          additionalProperties: { reference: true },
+        },
+      },
+    } satisfies JsonSchema;
+
+    const rendererCell = c.asRendererCell([], undefined, schema);
+    const value = rendererCell.get();
+
+    // The inner reference should be preserved but wrapped in a new RendererCell
+    expect(isRendererCell(value.context.inner)).toBe(true);
+    expect(value.context.inner.get().value).toBe(42);
+
+    // Changes to the original cell should propagate
+    innerCell.send({ value: 100 });
+    expect(value.context.inner.get().value).toBe(100);
+  });
+
+  it("should handle all types of references in underlying cell", () => {
+    // Create cells with different types of references
+    const innerCell = cell({ value: 42 });
+    const rendererRef = innerCell.asRendererCell();
+    const cellRef = { cell: innerCell, path: [] };
+    const aliasRef = { $alias: { cell: innerCell, path: [] } };
+
+    // Create a cell that uses all reference types
+    const c = cell({
+      context: {
+        renderer: rendererRef,
+        cell: innerCell,
+        reference: cellRef,
+        alias: aliasRef,
+      },
+    });
+
+    const schema = {
+      type: "object",
+      properties: {
+        context: {
+          type: "object",
+          additionalProperties: { reference: true },
+        },
+      },
+    } satisfies JsonSchema;
+
+    const rendererCell = c.asRendererCell([], undefined, schema);
+    const value = rendererCell.get();
+
+    // All references should be preserved but wrapped in RendererCells
+    expect(isRendererCell(value.context.renderer)).toBe(true);
+    expect(isRendererCell(value.context.cell)).toBe(true);
+    expect(isRendererCell(value.context.reference)).toBe(true);
+    expect(isRendererCell(value.context.alias)).toBe(true);
+
+    // All should point to the same value
+    expect(value.context.renderer.get().value).toBe(42);
+    expect(value.context.cell.get().value).toBe(42);
+    expect(value.context.reference.get().value).toBe(42);
+    expect(value.context.alias.get().value).toBe(42);
+
+    // Changes to the original cell should propagate to all references
+    innerCell.send({ value: 100 });
+    expect(value.context.renderer.get().value).toBe(100);
+    expect(value.context.cell.get().value).toBe(100);
+    expect(value.context.reference.get().value).toBe(100);
+    expect(value.context.alias.get().value).toBe(100);
+  });
+
+  it("should handle nested references", () => {
+    // Create a chain of references
+    const innerCell = cell({ value: 42 });
+    const ref1 = { cell: innerCell, path: [] };
+    const ref2 = { cell: cell({ ref: ref1 }), path: ["ref"] };
+    const ref3 = { cell: cell({ ref: ref2 }), path: ["ref"] };
+
+    // Create a cell that uses the nested reference
+    const c = cell({
+      context: {
+        nested: ref3,
+      },
+    });
+
+    const schema = {
+      type: "object",
+      properties: {
+        context: {
+          type: "object",
+          additionalProperties: { reference: true },
+        },
+      },
+    } satisfies JsonSchema;
+
+    const log = { reads: [], writes: [] } as ReactivityLog;
+    const rendererCell = c.asRendererCell([], log, schema);
+    const value = rendererCell.get();
+
+    // The nested reference should be followed all the way to the inner value
+    expect(isRendererCell(value.context.nested)).toBe(true);
+    expect(value.context.nested.get().value).toBe(42);
+
+    // All references in the chain should be read
+    expect(log.reads.length).toBe(4);
+    expect(log.reads[0].cell).toBe(c);
+    expect(log.reads[1].cell).toBe(ref3.cell);
+    expect(log.reads[2].cell).toBe(ref2.cell);
+    expect(log.reads[3].cell).toBe(ref1.cell);
+
+    // Changes to the original cell should propagate through the chain
+    innerCell.send({ value: 100 });
+    expect(value.context.nested.get().value).toBe(100);
   });
 });
 
