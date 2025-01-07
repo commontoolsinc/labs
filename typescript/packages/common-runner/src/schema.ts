@@ -6,7 +6,7 @@ import {
   type ReactivityLog,
 } from "./cell.js";
 import { isAlias } from "@commontools/common-builder";
-import { followAliases, followCellReferences } from "./utils.js";
+import { followAliases, followCellReferences, arrayEqual } from "./utils.js";
 
 export interface JsonSchema {
   type?: "string" | "number" | "boolean" | "object" | "array";
@@ -70,13 +70,14 @@ export function validateAndTransform(
   // If there is no schema, return as raw data via query result proxy
   if (!resolvedSchema) return cell.getAsQueryResult(path, log);
 
-  log?.reads.push({ cell, path });
-  const value = cell.getAtPath(path);
-
   // Handle various types of references
   const seen: CellReference[] = [];
 
+  let value;
   while (true) {
+    log?.reads.push({ cell, path });
+    value = cell.getAtPath(path);
+
     // Follow references and aliases until we hit a value
     if (isCellReference(value))
       ({ cell, path } = followCellReferences(value, log));
@@ -84,8 +85,8 @@ export function validateAndTransform(
     else if (isCell(value)) [cell, path] = [value, []];
     else break;
 
-    if (seen.findIndex(ref => ref.cell === cell && ref.path === path) !== -1)
-      throw new Error("Reference cycle detected");
+    if (seen.some(ref => ref.cell === cell && arrayEqual(ref.path, path)))
+      throw new Error(`Reference cycle detected ${path.join(".")}`);
     seen.push({ cell, path });
   }
 
