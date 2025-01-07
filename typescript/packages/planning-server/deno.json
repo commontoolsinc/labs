@@ -1,4 +1,32 @@
 {
+  "version": "0.0.1",
+  "tasks": {
+    "start": "deno run --allow-all --watch src/index.ts",
+    "test": "deno test --no-check",
+    "clean": "rm -rf ./lib",
+    "livetest": "deno run --allow-env --allow-read --allow-net ./src/livetest.ts all",
+    "livetest:all": "deno run --allow-env --allow-read --allow-net ./src/livetest.ts all",
+    "livetest:variety": "deno run --allow-env --allow-read --allow-net ./src/livetest.ts variety",
+    "livetest:anthropic": "deno run --allow-env --allow-read --allow-net ./src/livetest.ts anthropic",
+    "livetest:openai": "deno run --allow-env --allow-read --allow-net ./src/livetest.ts openai",
+    "livetest:google": "deno run --allow-env --allow-read --allow-net ./src/livetest.ts google",
+    "livetest:groq": "deno run --allow-env --allow-read --allow-net ./src/livetest.ts groq"
+  },
+  "imports": {
+    "@ai-sdk/amazon-bedrock": "npm:@ai-sdk/amazon-bedrock@1.0.4",
+    "@ai-sdk/anthropic": "npm:@ai-sdk/anthropic@0.0.55",
+    "@ai-sdk/google-vertex": "npm:@ai-sdk/google-vertex@0.0.43",
+    "@ai-sdk/groq": "npm:@ai-sdk/groq@0.0.3",
+    "@ai-sdk/mistral": "npm:@ai-sdk/mistral@0.0.46",
+    "@ai-sdk/openai": "npm:@ai-sdk/openai@0.0.71",
+    "@arizeai/openinference-semantic-conventions": "npm:@arizeai/openinference-semantic-conventions@1.0.0",
+    "@arizeai/openinference-vercel": "npm:@arizeai/openinference-vercel@2.0.0",
+    "@opentelemetry/api": "npm:@opentelemetry/api@1.9.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "npm:@opentelemetry/exporter-trace-otlp-proto@0.56.0",
+    "@opentelemetry/resources": "npm:@opentelemetry/resources@1.29.0",
+    "@vercel/otel": "npm:@vercel/otel@1.10.0",
+    "ollama-ai-provider": "npm:ollama-ai-provider@0.16.0"
+  },
   "fmt": {
     "indentWidth": 2,
     "lineWidth": 80,
@@ -7,7 +35,6 @@
     "proseWrap": "always",
     "include": ["src/"]
   },
-
   "lint": {
     "include": ["src/"],
     "exclude": ["src/testdata/", "src/fixtures/**/*.ts"],
