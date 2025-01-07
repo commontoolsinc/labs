@@ -751,6 +751,101 @@ describe("asRendererCell with schema", () => {
     innerCell.send({ value: 100 });
     expect(value.context.nested.get().value).toBe(100);
   });
+
+  it("should handle array schemas in key() navigation", () => {
+    const c = cell({
+      items: [
+        { name: "item1", value: 1 },
+        { name: "item2", value: 2 },
+      ],
+    });
+
+    const schema = {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              value: { type: "number" },
+            },
+          },
+        },
+      },
+    } satisfies JsonSchema;
+
+    const rendererCell = c.asRendererCell([], undefined, schema);
+    const itemsCell = rendererCell.key("items");
+    const firstItemCell = itemsCell.key(0);
+    const secondItemCell = itemsCell.key(1);
+
+    expect(firstItemCell.get()).toEqual({ name: "item1", value: 1 });
+    expect(secondItemCell.get()).toEqual({ name: "item2", value: 2 });
+  });
+
+  it("should handle additionalProperties in key() navigation", () => {
+    const c = cell({
+      defined: "known property",
+      extra1: { value: 1 },
+      extra2: { value: 2 },
+    });
+
+    const schema = {
+      type: "object",
+      properties: {
+        defined: { type: "string" },
+      },
+      additionalProperties: {
+        type: "object",
+        properties: {
+          value: { type: "number" },
+        },
+      },
+    } satisfies JsonSchema;
+
+    const rendererCell = c.asRendererCell([], undefined, schema);
+
+    // Test defined property
+    const definedCell = rendererCell.key("defined");
+    expect(definedCell.get()).toBe("known property");
+
+    // Test additional properties
+    const extra1Cell = rendererCell.key("extra1");
+    const extra2Cell = rendererCell.key("extra2");
+    expect(extra1Cell.get()).toEqual({ value: 1 });
+    expect(extra2Cell.get()).toEqual({ value: 2 });
+  });
+
+  it("should handle additionalProperties: true in key() navigation", () => {
+    const c = cell({
+      defined: "known property",
+      extra: { anything: "goes" },
+    });
+
+    const schema = {
+      type: "object",
+      properties: {
+        defined: { type: "string" },
+      },
+      additionalProperties: {
+        type: "object",
+        properties: { anything: { reference: true } },
+      },
+    } satisfies JsonSchema;
+
+    const rendererCell = c.asRendererCell([], undefined, schema);
+
+    // Test defined property
+    const definedCell = rendererCell.key("defined");
+    expect(definedCell.get()).toBe("known property");
+
+    // Test additional property with a schema that generates a reference
+    const extraCell = rendererCell.key("extra");
+    const extraValue = extraCell.get();
+    expect(isRendererCell(extraValue.anything)).toBe(true);
+  });
 });
 
 describe("JSON.stringify bug", () => {

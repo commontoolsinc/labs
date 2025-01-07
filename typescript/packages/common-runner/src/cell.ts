@@ -509,8 +509,13 @@ function rendererCell<T>(
         key: <K extends keyof T>(key: K) => {
           const currentSchema =
             schema?.type === "object"
-              ? schema.properties?.[key as string]
-              : undefined;
+              ? schema.properties?.[key as string] ??
+                (typeof schema.additionalProperties === "object"
+                  ? schema.additionalProperties
+                  : undefined)
+              : schema?.type === "array"
+                ? schema.items
+                : undefined;
           return cell.asRendererCell(
             [...path, key],
             log,

@@ -14,7 +14,7 @@ export interface JsonSchema {
   items?: JsonSchema;
   $ref?: string;
   reference?: boolean;
-  additionalProperties?: JsonSchema;
+  additionalProperties?: JsonSchema | boolean;
 }
 
 export function resolveSchema(
