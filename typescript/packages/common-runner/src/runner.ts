@@ -412,7 +412,7 @@ function instantiateJavaScriptNode(
       });
 
       const argument = module.argumentSchema
-        ? inputsCell.asRendererCell([], undefined, module.argumentSchema)
+        ? inputsCell.asRendererCell([], undefined, module.argumentSchema).get()
         : inputsCell.getAsQueryResult([], undefined);
       const result = fn(argument);
 
@@ -442,7 +442,7 @@ function instantiateJavaScriptNode(
 
     const action: Action = (log: ReactivityLog) => {
       const argument = module.argumentSchema
-        ? inputsCell.asRendererCell([], log, module.argumentSchema)
+        ? inputsCell.asRendererCell([], log, module.argumentSchema).get()
         : inputsCell.getAsQueryResult([], log);
 
       const frame = pushFrameFromCause({ inputs, outputs, fn: fn.toString() }, {
