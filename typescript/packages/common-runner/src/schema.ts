@@ -17,9 +17,7 @@ export function resolveSchema(
     schema !== null &&
     Object.keys(schema).length > 0
   ) {
-    if (schema.$ref === "#") return rootSchema;
-
-    let resolvedSchema = schema;
+    let resolvedSchema = schema.$ref === "#" ? rootSchema ?? schema : schema;
     if (schema.asCell)
       // Remove reference flag from schema, so it's describing the destination
       // schema. That means we can't describe a schema that points to top-level

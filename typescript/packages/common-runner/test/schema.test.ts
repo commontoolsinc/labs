@@ -115,6 +115,30 @@ describe("Schema Support", () => {
       expect(metadataValue.createdAt).toBe("2025-01-06");
       expect(metadataValue.type).toBe("user");
     });
+
+    it("Should support a reference at the root", () => {
+      const c = cell({
+        id: 1,
+        nested: { id: 2 },
+      });
+
+      const schema = {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+          nested: { $ref: "#", asCell: true },
+        },
+        asCell: true,
+      } as JSONSchema;
+
+      const rendererCell = c.asRendererCell([], undefined, schema);
+      const value = rendererCell.get();
+
+      expect(isRendererCell(value)).toBe(true);
+      expect(value.get().id).toBe(1);
+      expect(isRendererCell(value.get().nested)).toBe(true);
+      expect(value.get().nested.get().id).toBe(2);
+    });
   });
 
   describe("Schema References", () => {
