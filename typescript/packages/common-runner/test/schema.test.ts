@@ -200,7 +200,9 @@ describe("Schema Support", () => {
         tags: ["a", "b"],
       });
 
-      const c2 = cell({
+      // This is what the system (or someone manually) would create to remap
+      // data to match the desired schema
+      const mappingCell = cell({
         // as-is
         id: { cell: c, path: ["id"] },
         // turn single value to set
@@ -211,6 +213,7 @@ describe("Schema Support", () => {
         tag: { cell: c, path: ["tags", 0] },
       });
 
+      // This schema is how the recipient specifies what they want
       const schema = {
         type: "object",
         properties: {
@@ -221,7 +224,7 @@ describe("Schema Support", () => {
         },
       } as JsonSchema;
 
-      expect(c2.asRendererCell([], undefined, schema).get()).toEqual({
+      expect(mappingCell.asRendererCell([], undefined, schema).get()).toEqual({
         id: 1,
         changes: ["2025-01-06"],
         kind: "user",
