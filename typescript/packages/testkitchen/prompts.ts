@@ -3,7 +3,13 @@ import { LLMClient } from "./llm.ts";
 const llmUrl = "https://paas.saga-castor.ts.net/planning-service";
 
 const llm = new LLMClient(llmUrl);
-const recipeGuide = `Here is how recipes work:
+const recipeGuide = `
+
+You are a code generator agent that generates CommonTools Recipes. Please refer to the following guide for how to write recipes.
+
+DO NOT use React or any other UI library in your recipes. DO NOT add add any third party libraries to your recipes, unless they are specified in the following recipe guide.
+
+Here is how recipes work:
 
 Recipes are a declaritive way to generate a graph of execution.  This means
 recipes are run once to generate the graph, then the graph is used!
@@ -210,7 +216,12 @@ export const LLMCodeGenCall = async (capability: keyof typeof LLM_CAPABILITIES, 
 
   try {
     const text = await llm.sendRequest(payload);
-    const generatedSrc = text.split("```tsx\n")[1].split("\n```")[0];
+    const codeBlockMatch = text.match(/```(?:tsx|typescript)\n([\s\S]*?)\n```/);
+    const generatedSrc = codeBlockMatch?.[1];
+    
+    if (!generatedSrc) {
+      throw new Error("No code block found in LLM response");
+    }
 
     return {
       llm: payload,
