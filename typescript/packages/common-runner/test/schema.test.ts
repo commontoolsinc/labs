@@ -188,4 +188,45 @@ describe("Schema Support", () => {
       expect(isRendererCell(value.metadata)).toBe(true);
     });
   });
+
+  describe("Examples", () => {
+    it("allows mapping of fields via interim cells", () => {
+      const c = cell({
+        id: 1,
+        metadata: {
+          createdAt: "2025-01-06",
+          type: "user",
+        },
+        tags: ["a", "b"],
+      });
+
+      const c2 = cell({
+        // as-is
+        id: { cell: c, path: ["id"] },
+        // turn single value to set
+        changes: [{ cell: c, path: ["metadata", "createdAt"] }],
+        // rename field and uplift from nested element
+        kind: { cell: c, path: ["metadata", "type"] },
+        // turn set into a single value
+        tag: { cell: c, path: ["tags", 0] },
+      });
+
+      const schema = {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+          changes: { type: "array", items: { type: "string" } },
+          kind: { type: "string" },
+          tag: { type: "string" },
+        },
+      } as JsonSchema;
+
+      expect(c2.asRendererCell([], undefined, schema).get()).toEqual({
+        id: 1,
+        changes: ["2025-01-06"],
+        kind: "user",
+        tag: "a",
+      });
+    });
+  });
 });
