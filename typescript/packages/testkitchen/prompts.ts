@@ -81,11 +81,176 @@ DO NOT USE STRING INTERPOLATION IN THE UI JSX!
 DO NOT PERFORM ANY JS OPERATIONS INSIDE THE UI JSX!
 
   BAD: <p>Related Goals: {item.relatedGoals.join(", ")}</p>
+  BAD: <ul>{cats.map((cat) => <li>{cat}</li>)}</ul>
 
   GOOD: <p>Related Goals: {item.relatedGoals.map((goal) => <li>{goal}</li>)}</p>
   GOOD: <p>Related Goals: {lift(({ item }) => item.relatedGoals.join(", "))(item)}</p>
+  GOOD: <ul>{lift(({ cats }) => cats.map((cat) => <li>{cat}</li>))(cats)}</ul>
 
 CSS must be defined inline as a string, we do not support css-in-js.
+
+When possible, use our collection of custom web components. These are prefixed by \`<common-\`. Below is a list of all available components, and their event schemas which must be adhered to when writing custom handlers.
+
+Layout Components:
+    * <common-vstack>
+        props: {
+          gap: string
+          pad: string
+        }
+    * <common-hstack>
+    * <common-spacer>
+    * <common-hscroll>
+    * <common-hgroup>
+    * <common-grid>
+
+
+Form Components
+    * <common-button>
+        props> {
+          id: string,
+        }
+    * <common-input>
+        props: {
+            value: "string",
+            placeholder: "string",
+            appearance: "string",
+        }
+        events: {
+          CommonInputEvent: {
+            detail: {
+              id: string;
+              value: string;
+            }
+          }
+          CommonKeydownEvent: {
+            detail: {
+              id: string;
+              key: string;
+            }
+          }
+          CommonBlurEvent: {
+            detail: {
+              id: string;
+              value: string;
+            }
+          }
+        }
+    * <common-input-file>
+        props: {
+            files: File[],
+            filesContent: Array<{
+                file: File,
+                content: string | ArrayBuffer | object | null
+            }>,
+            multiple: boolean,
+            accept: string,
+            appearance: string,
+            loadMode: 'base64' | 'json' | 'text'
+        }
+        events: {
+          CommonFileInputEvent: {
+            detail: {
+              id: string;
+              files: File[];
+              filesContent: Array<{
+                file: File;
+                content: string | ArrayBuffer | object | null;
+              }>;
+            }
+          }
+        }
+    * <common-pill>
+    * <common-audio-recorder>
+        props: {
+            transcribe: boolean,
+            url: string
+        }
+        events: {
+          CommonAudioRecordingEvent: {
+            detail: {
+              id: string;
+              blob: Blob;
+              transcription?: string;
+            }
+          }
+        }
+    * <common-form>
+        props: {
+            schema: ZodObject,
+            fieldPath: string,
+            errors: object,
+            reset: boolean,
+            referenceFields: Set<string>,
+            value: object
+        }
+        events: {
+          ZodFormSubmitEvent: {
+            detail: {
+              path: string;
+              value: object;
+            }
+          }
+        }
+Other Components:
+    * <common-datatable>
+        props: {
+            cols: array,
+            rows: array
+        }
+    * <common-dict>
+        props: {
+            records: object
+        }
+    * <common-img>
+        props: {
+            src: string,
+            alt: string
+        }
+    * <common-media>
+        props: {
+            src: string,
+            thumbsize: string
+        }
+    * <common-table>
+        props: {
+            schema: ZodObject,
+            data: array
+        }
+        events: {
+          edit: {
+            detail: {
+              item: any
+            }
+          }
+          delete: {
+            detail: {
+              item: any
+            }
+          }
+        }
+    * <common-todo>
+        props: {
+            id: string,
+            checked: boolean,
+            placeholder: string,
+            value: string
+        }
+        events: {
+          CommonTodoCheckedEvent: {
+            detail: {
+              id: string;
+              checked: boolean;
+              value: string;
+            }
+          }
+          CommonTodoInputEvent: {
+            detail: {
+              id: string;
+              checked: boolean;
+              value: string;
+            }
+          }
+        }
 
 Full Example of Counter Recipe:
 
@@ -181,9 +346,9 @@ export default recipe(Schema, ({ items, title }) => {
 \`\`\`
 `;
 
-
 // const MODEL = "cerebras:llama-3.3-70b";
-const MODEL = "groq:llama-3.3-70b-specdec";
+// const MODEL = "groq:llama-3.3-70b-specdec";
+const MODEL = "groq:llama-3.3-70b-versatile";
 // const MODEL = "anthropic:claude-3-5-sonnet-latest";
 
 export type LLMHandlerPayload = {
@@ -197,8 +362,6 @@ export type LLMHandlerPayload = {
 
 export type LLMHandler = (payload: LLMHandlerPayload) => Promise<LLMResponse>;
 
-
-
 export type LLMResponse = {
   llm: {
     model: string;
@@ -211,14 +374,17 @@ export type LLMResponse = {
 };
 
 // FIXME(jake): Add types for the payload
-export const LLMCodeGenCall = async (capability: keyof typeof LLM_CAPABILITIES, payload: any) => {
+export const LLMCodeGenCall = async (
+  capability: keyof typeof LLM_CAPABILITIES,
+  payload: any,
+) => {
   const { handler } = LLM_CAPABILITIES[capability];
 
   try {
     const text = await llm.sendRequest(payload);
     const codeBlockMatch = text.match(/```(?:tsx|typescript)\n([\s\S]*?)\n```/);
     const generatedSrc = codeBlockMatch?.[1];
-    
+
     if (!generatedSrc) {
       throw new Error("No code block found in LLM response");
     }
@@ -236,7 +402,10 @@ export const LLMCodeGenCall = async (capability: keyof typeof LLM_CAPABILITIES, 
   }
 };
 
-export const LLMTextGenCall = async (capability: keyof typeof LLM_CAPABILITIES, payload: any) => {
+export const LLMTextGenCall = async (
+  capability: keyof typeof LLM_CAPABILITIES,
+  payload: any,
+) => {
   const { handler } = LLM_CAPABILITIES[capability];
 
   try {
@@ -254,7 +423,6 @@ export const LLMTextGenCall = async (capability: keyof typeof LLM_CAPABILITIES, 
   }
 };
 
-
 const CODEGEN_FIRSTRUN_SYSTEM_PROMPT = recipeGuide;
 
 export const codeGenFirstRun = async ({
@@ -263,9 +431,15 @@ export const codeGenFirstRun = async ({
 }: LLMHandlerPayload): Promise<LLMResponse> => {
   const messages = [];
 
-
-  messages.push({role: "user", content: `Here is the original spec:\n\n${originalSpec}`});
-  messages.push({role: "user", content: "Please look at the original spec and write code that implements it."});
+  messages.push({
+    role: "user",
+    content: `Here is the original spec:\n\n${originalSpec}`,
+  });
+  messages.push({
+    role: "user",
+    content:
+      "Please look at the original spec and write code that implements it.",
+  });
 
   const payload = {
     model: model,
@@ -273,9 +447,8 @@ export const codeGenFirstRun = async ({
     messages,
   };
 
-  return await LLMCodeGenCall('codegen-firstrun', payload);
+  return await LLMCodeGenCall("codegen-firstrun", payload);
 };
-
 
 export const CODEGEN_ITERATION_SYSTEM_PROMPT = `You are code generator that implements and iterates on existing CommonTools Recipes.\n\n ${recipeGuide}`;
 
@@ -283,14 +456,27 @@ export const codeGenIteration = async ({
   originalSpec,
   originalSrc,
   workingSpec,
-  model = MODEL
+  model = MODEL,
 }: LLMHandlerPayload): Promise<LLMResponse> => {
   const messages = [];
 
-  messages.push({role: "user", content: `Here is the original spec:\n\n${originalSpec}`});
-  messages.push({role: "user", content: `Here is the original src:\n\n${originalSrc}`});
-  messages.push({role: "user", content: `Here is updated spec for iteration:\n\n${workingSpec}`});
-  messages.push({role: "user", content: "Please look at the original spec, original src, and updated spec, and write the new source code."});
+  messages.push({
+    role: "user",
+    content: `Here is the original spec:\n\n${originalSpec}`,
+  });
+  messages.push({
+    role: "user",
+    content: `Here is the original src:\n\n${originalSrc}`,
+  });
+  messages.push({
+    role: "user",
+    content: `Here is updated spec for iteration:\n\n${workingSpec}`,
+  });
+  messages.push({
+    role: "user",
+    content:
+      "Please look at the original spec, original src, and updated spec, and write the new source code.",
+  });
 
   const payload = {
     model: model,
@@ -298,9 +484,8 @@ export const codeGenIteration = async ({
     messages,
   };
 
-  return await LLMCodeGenCall('codegen-iteration', payload);
+  return await LLMCodeGenCall("codegen-iteration", payload);
 };
-
 
 export const CODEGEN_FIXIT_SYSTEM_PROMPT = `You are code generator that fixes existing CommonTools Recipes, specialized for fixing errors.\n\n ${recipeGuide}`;
 
@@ -309,16 +494,28 @@ export const codeGenFixit = async ({
   originalSrc,
   workingSpec,
   errors,
-  model = MODEL
+  model = MODEL,
 }: LLMHandlerPayload): Promise<LLMResponse> => {
   const messages = [];
-  
-  messages.push({role: "user", content: `Here is the original spec:\n\n${originalSpec}`});
-  messages.push({role: "user", content: `Here is the original src:\n\n${originalSrc}`});
+
+  messages.push({
+    role: "user",
+    content: `Here is the original spec:\n\n${originalSpec}`,
+  });
+  messages.push({
+    role: "user",
+    content: `Here is the original src:\n\n${originalSrc}`,
+  });
   if (workingSpec) {
-    messages.push({role: "user", content: `Here is the updated spec:\n\n${workingSpec}`});
+    messages.push({
+      role: "user",
+      content: `Here is the updated spec:\n\n${workingSpec}`,
+    });
   }
-  messages.push({role: "user", content: `Please consider the following error message, and fix the code: \n ${errors}`});
+  messages.push({
+    role: "user",
+    content: `Please consider the following error message, and fix the code: \n ${errors}`,
+  });
 
   const payload = {
     model: model,
@@ -326,26 +523,37 @@ export const codeGenFixit = async ({
     messages,
   };
 
-  return await LLMCodeGenCall('codegen-fixit', payload);
+  return await LLMCodeGenCall("codegen-fixit", payload);
 };
 
-
-export const TEXTGEN_SPEC_ITERATION_SYSTEM_PROMPT = `You are prompt generator that takes an existing text prompt, and updates it based on a user prompt describing what to change. Only respond with the full spec text, Do not describe your changes.`
+export const TEXTGEN_SPEC_ITERATION_SYSTEM_PROMPT = `You are prompt generator that takes an existing text prompt, and updates it based on a user prompt describing what to change. Only respond with the full spec text, Do not describe your changes.`;
 
 export const textGenSpecIteration = async ({
   originalSpec,
   originalSrc,
   userPrompt,
-  model = MODEL
+  model = MODEL,
 }: LLMHandlerPayload): Promise<LLMResponse> => {
-  const messages = [];  
-  messages.push({role: "user", content: `Here is the original spec:\n\n${originalSpec}`});
+  const messages = [];
+  messages.push({
+    role: "user",
+    content: `Here is the original spec:\n\n${originalSpec}`,
+  });
   if (originalSrc) {
-    messages.push({role: "user", content: `Here is the original src:\n\n${originalSrc}`});
+    messages.push({
+      role: "user",
+      content: `Here is the original src:\n\n${originalSrc}`,
+    });
   }
-  messages.push({role: "user", content: `Here is the user's request:\n\n${userPrompt}`});
-  messages.push({role: "user", content: "Please look at the original spec, and make adjustments adhering to the user's request. You should return a new text spec. Return only the spec text, do not include any other text."});
-
+  messages.push({
+    role: "user",
+    content: `Here is the user's request:\n\n${userPrompt}`,
+  });
+  messages.push({
+    role: "user",
+    content:
+      "Please look at the original spec, and make adjustments adhering to the user's request. You should return a new text spec. Return only the spec text, do not include any other text.",
+  });
 
   const payload = {
     model: model,
@@ -353,20 +561,20 @@ export const textGenSpecIteration = async ({
     messages,
   };
 
-  return await LLMTextGenCall('textgen-spec-iteration', payload);
+  return await LLMTextGenCall("textgen-spec-iteration", payload);
 };
 
 export const LLM_CAPABILITIES: Record<string, { handler: LLMHandler }> = {
-  'codegen-firstrun': {
+  "codegen-firstrun": {
     handler: codeGenFirstRun,
   },
-  'codegen-fixit': {
+  "codegen-fixit": {
     handler: codeGenFixit,
   },
-  'codegen-iteration': {
+  "codegen-iteration": {
     handler: codeGenIteration,
   },
-  'textgen-spec-iteration': {
+  "textgen-spec-iteration": {
     handler: textGenSpecIteration,
   },
   // 'textgen-recipe-suggestion': {
