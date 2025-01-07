@@ -7,7 +7,7 @@ import {
   NodeRef,
   isOpaqueRef,
   JSONValue,
-  JSON,
+  JSONSchema,
   Alias,
   isAlias,
   canBeOpaqueRef,
@@ -39,7 +39,7 @@ export function traverseValue(
 
   // Traverse value
   if (Array.isArray(value))
-    return staticWrap(value.map((v) => traverseValue(v, fn)));
+    return staticWrap(value.map(v => traverseValue(v, fn)));
   else if (
     (!isOpaqueRef(value) &&
       !canBeOpaqueRef(value) &&
@@ -211,8 +211,8 @@ export function toJSONWithAliases(
 export function createJsonSchema(
   defaultValues: any,
   referenceValues: any,
-): JSON {
-  function analyzeType(value: any, defaultValue: any): JSON {
+): JSONSchema {
+  function analyzeType(value: any, defaultValue: any): JSONSchema {
     if (isAlias(value)) {
       const path = value.$alias.path;
       return analyzeType(
@@ -222,7 +222,7 @@ export function createJsonSchema(
     }
 
     const type = typeof (value ?? defaultValue);
-    const schema: JSON = {};
+    const schema: JSONSchema = {};
 
     switch (type) {
       case "object":
@@ -233,7 +233,7 @@ export function createJsonSchema(
             for (let i = 0; i < (value ?? defaultValue).length; i++) {
               const item = value?.[i] ?? defaultValue?.[i];
               if (typeof item === "object" && item !== null) {
-                Object.keys(item).forEach((key) => {
+                Object.keys(item).forEach(key => {
                   if (!(key in properties)) {
                     properties[key] = analyzeType(
                       value?.[i]?.[key],
@@ -272,7 +272,7 @@ export function createJsonSchema(
       case "undefined":
         break;
       default:
-        schema.type = type;
+        schema.type = type as JSONSchema["type"];
         break;
     }
 

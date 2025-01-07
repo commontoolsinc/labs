@@ -49,4 +49,3 @@ export {
   getRecipeName,
 } from "./recipe-map.js";
 export { type Cancel, type AddCancel, useCancelGroup } from "./cancel.js";
-export { JsonSchema } from "./schema.js";

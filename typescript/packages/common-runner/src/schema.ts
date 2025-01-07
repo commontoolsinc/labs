@@ -5,22 +5,13 @@ import {
   isCellReference,
   type ReactivityLog,
 } from "./cell.js";
-import { isAlias } from "@commontools/common-builder";
+import { isAlias, JSONSchema } from "@commontools/common-builder";
 import { followAliases, followCellReferences, arrayEqual } from "./utils.js";
 
-export interface JsonSchema {
-  type?: "string" | "number" | "boolean" | "object" | "array";
-  properties?: Record<string, JsonSchema>;
-  items?: JsonSchema;
-  $ref?: string;
-  reference?: boolean;
-  additionalProperties?: JsonSchema | boolean;
-}
-
 export function resolveSchema(
-  schema: JsonSchema | undefined,
-  rootSchema: JsonSchema | undefined = schema,
-): JsonSchema | undefined {
+  schema: JSONSchema | undefined,
+  rootSchema: JSONSchema | undefined = schema,
+): JSONSchema | undefined {
   if (
     typeof schema === "object" &&
     schema !== null &&
@@ -55,9 +46,9 @@ export function resolveSchema(
 export function validateAndTransform(
   cell: CellImpl<any>,
   path: PropertyKey[] = [],
-  schema?: JsonSchema,
+  schema?: JSONSchema,
   log?: ReactivityLog,
-  rootSchema: JsonSchema | undefined = schema,
+  rootSchema: JSONSchema | undefined = schema,
 ): any {
   const resolvedSchema = resolveSchema(schema, rootSchema);
 

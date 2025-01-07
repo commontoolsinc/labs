@@ -7,7 +7,7 @@ import {
   isRendererCell,
   ReactivityLog,
 } from "../src/cell.js";
-import { JsonSchema } from "../src/schema.js";
+import { JSONSchema } from "@commontools/common-builder";
 import { addEventHandler, idle } from "../src/scheduler.js";
 import { compactifyPaths } from "../src/utils.js";
 
@@ -333,7 +333,7 @@ describe("asRendererCell with schema", () => {
           },
         },
       },
-    } satisfies JsonSchema;
+    } satisfies JSONSchema;
 
     const rendererCell = c.asRendererCell([], undefined, schema);
     const value = rendererCell.get();
@@ -362,7 +362,7 @@ describe("asRendererCell with schema", () => {
           reference: true,
         },
       },
-    } satisfies JsonSchema;
+    } satisfies JSONSchema;
 
     const rendererCell = c.asRendererCell([], undefined, schema);
     const value = rendererCell.get();
@@ -405,7 +405,7 @@ describe("asRendererCell with schema", () => {
           items: { $ref: "#" },
         },
       },
-    } satisfies JsonSchema;
+    } satisfies JSONSchema;
 
     const rendererCell = c.asRendererCell([], undefined, schema);
     const value = rendererCell.get();
@@ -456,7 +456,7 @@ describe("asRendererCell with schema", () => {
           },
         },
       },
-    } satisfies JsonSchema;
+    } satisfies JSONSchema;
 
     const rendererCell = c.asRendererCell([], undefined, schema);
     const userCell = rendererCell.key("user");
@@ -511,7 +511,7 @@ describe("asRendererCell with schema", () => {
           },
         },
       },
-    } satisfies JsonSchema;
+    } satisfies JSONSchema;
 
     // Create a schema that marks metadata as a reference
     const referenceSchema = {
@@ -523,7 +523,7 @@ describe("asRendererCell with schema", () => {
           reference: true,
         },
       },
-    } satisfies JsonSchema;
+    } satisfies JSONSchema;
 
     const rendererCell = c.asRendererCell([], undefined, initialSchema);
     const value = rendererCell.get();
@@ -569,7 +569,7 @@ describe("asRendererCell with schema", () => {
           },
         },
       },
-    } satisfies JsonSchema;
+    } satisfies JSONSchema;
 
     const rendererCell = c.asRendererCell([], undefined, schema);
     const value = rendererCell.get();
@@ -606,7 +606,7 @@ describe("asRendererCell with schema", () => {
           additionalProperties: { reference: true },
         },
       },
-    } satisfies JsonSchema;
+    } satisfies JSONSchema;
 
     const rendererCell = c.asRendererCell([], undefined, schema);
     const value = rendererCell.get();
@@ -643,7 +643,7 @@ describe("asRendererCell with schema", () => {
           additionalProperties: { reference: true },
         },
       },
-    } satisfies JsonSchema;
+    } satisfies JSONSchema;
 
     const rendererCell = c.asRendererCell([], undefined, schema);
     const value = rendererCell.get();
@@ -680,7 +680,7 @@ describe("asRendererCell with schema", () => {
           additionalProperties: { reference: true },
         },
       },
-    } satisfies JsonSchema;
+    } satisfies JSONSchema;
 
     const rendererCell = c.asRendererCell([], undefined, schema);
     const value = rendererCell.get();
@@ -724,7 +724,7 @@ describe("asRendererCell with schema", () => {
           additionalProperties: { reference: true },
         },
       },
-    } satisfies JsonSchema;
+    } satisfies JSONSchema;
 
     const log = { reads: [], writes: [] } as ReactivityLog;
     const rendererCell = c.asRendererCell([], log, schema);
@@ -770,7 +770,7 @@ describe("asRendererCell with schema", () => {
           },
         },
       },
-    } satisfies JsonSchema;
+    } satisfies JSONSchema;
 
     const rendererCell = c.asRendererCell([], undefined, schema);
     const itemsCell = rendererCell.key("items");
@@ -799,7 +799,7 @@ describe("asRendererCell with schema", () => {
           value: { type: "number" },
         },
       },
-    } satisfies JsonSchema;
+    } satisfies JSONSchema;
 
     const rendererCell = c.asRendererCell([], undefined, schema);
 
@@ -829,7 +829,7 @@ describe("asRendererCell with schema", () => {
         type: "object",
         properties: { anything: { reference: true } },
       },
-    } satisfies JsonSchema;
+    } satisfies JSONSchema;
 
     const rendererCell = c.asRendererCell([], undefined, schema);
 

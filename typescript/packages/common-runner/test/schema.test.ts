@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { cell, isRendererCell } from "../src/cell.js";
-import { JsonSchema } from "../src/schema.js";
+import { JSONSchema } from "@commontools/common-builder";
 
 describe("Schema Support", () => {
   describe("Basic Types", () => {
@@ -11,7 +11,7 @@ describe("Schema Support", () => {
         bool: true,
       });
 
-      const schema: JsonSchema = {
+      const schema: JSONSchema = {
         type: "object",
         properties: {
           str: { type: "string" },
@@ -38,7 +38,7 @@ describe("Schema Support", () => {
         },
       });
 
-      const schema: JsonSchema = {
+      const schema: JSONSchema = {
         type: "object",
         properties: {
           user: {
@@ -66,7 +66,7 @@ describe("Schema Support", () => {
         items: [1, 2, 3],
       });
 
-      const schema: JsonSchema = {
+      const schema: JSONSchema = {
         type: "object",
         properties: {
           items: {
@@ -102,7 +102,7 @@ describe("Schema Support", () => {
             reference: true,
           },
         },
-      } as JsonSchema;
+      } as JSONSchema;
 
       const rendererCell = c.asRendererCell([], undefined, schema);
       const value = rendererCell.get();
@@ -127,7 +127,7 @@ describe("Schema Support", () => {
         ],
       });
 
-      const schema: JsonSchema = {
+      const schema: JSONSchema = {
         type: "object",
         properties: {
           name: { type: "string" },
@@ -158,7 +158,7 @@ describe("Schema Support", () => {
         },
       });
 
-      const schema: JsonSchema = {
+      const schema: JSONSchema = {
         type: "object",
         properties: {
           user: {
@@ -222,7 +222,7 @@ describe("Schema Support", () => {
           kind: { type: "string" },
           tag: { type: "string" },
         },
-      } as JsonSchema;
+      } as JSONSchema;
 
       expect(mappingCell.asRendererCell([], undefined, schema).get()).toEqual({
         id: 1,

@@ -4,7 +4,7 @@ import {
   type NodeFactory,
   type Module,
   type Alias,
-  type JSON,
+  type JSONValue,
   isModule,
   isRecipe,
   isAlias,
@@ -255,8 +255,8 @@ export function stop(resultCell: CellImpl<any>) {
 
 function instantiateNode(
   module: Module | Alias,
-  inputBindings: JSON,
-  outputBindings: JSON,
+  inputBindings: JSONValue,
+  outputBindings: JSONValue,
   processCell: CellImpl<any>,
   addCancel: AddCancel,
   recipe: Recipe,
@@ -332,8 +332,8 @@ function instantiateNode(
 
 function instantiateJavaScriptNode(
   module: Module,
-  inputBindings: JSON,
-  outputBindings: JSON,
+  inputBindings: JSONValue,
+  outputBindings: JSONValue,
   processCell: CellImpl<any>,
   addCancel: AddCancel,
   recipe: Recipe,
@@ -410,7 +410,11 @@ function instantiateJavaScriptNode(
         materialize: (path: PropertyKey[]) =>
           processCell.getAsQueryResult(path),
       });
-      const result = fn(inputsCell.getAsQueryResult([]));
+
+      const argument = module.argumentSchema
+        ? inputsCell.asRendererCell([], undefined, module.argumentSchema)
+        : inputsCell.getAsQueryResult([], undefined);
+      const result = fn(argument);
 
       // If handler returns a graph created by builder, run it
       if (containsOpaqueRef(result)) {
@@ -437,14 +441,16 @@ function instantiateJavaScriptNode(
     let resultCell: CellImpl<any> | undefined;
 
     const action: Action = (log: ReactivityLog) => {
-      const inputsProxy = inputsCell.getAsQueryResult([], log);
+      const argument = module.argumentSchema
+        ? inputsCell.asRendererCell([], log, module.argumentSchema)
+        : inputsCell.getAsQueryResult([], log);
 
       const frame = pushFrameFromCause({ inputs, outputs, fn: fn.toString() }, {
         recipe,
         materialize: (path: PropertyKey[]) =>
           processCell.getAsQueryResult(path, log),
       } satisfies UnsafeBinding);
-      const result = fn(inputsProxy);
+      const result = fn(argument);
 
       if (containsOpaqueRef(result)) {
         const resultRecipe = recipeFromFrame(
@@ -475,8 +481,8 @@ function instantiateJavaScriptNode(
 
 function instantiateRawNode(
   module: Module,
-  inputBindings: JSON,
-  outputBindings: JSON,
+  inputBindings: JSONValue,
+  outputBindings: JSONValue,
   processCell: CellImpl<any>,
   addCancel: AddCancel,
   recipe: Recipe,
@@ -519,8 +525,8 @@ function instantiateRawNode(
 
 function instantiatePassthroughNode(
   _: Module,
-  inputBindings: JSON,
-  outputBindings: JSON,
+  inputBindings: JSONValue,
+  outputBindings: JSONValue,
   processCell: CellImpl<any>,
   addCancel: AddCancel,
 ) {
@@ -541,8 +547,8 @@ function instantiatePassthroughNode(
 
 function instantiateIsolatedNode(
   module: Module,
-  inputBindings: JSON,
-  outputBindings: JSON,
+  inputBindings: JSONValue,
+  outputBindings: JSONValue,
   processCell: CellImpl<any>,
   addCancel: AddCancel,
 ) {
@@ -605,8 +611,8 @@ function isJavaScriptModuleDefinition(
 
 function instantiateRecipeNode(
   module: Module,
-  inputBindings: JSON,
-  outputBindings: JSON,
+  inputBindings: JSONValue,
+  outputBindings: JSONValue,
   processCell: CellImpl<any>,
   addCancel: AddCancel,
 ) {

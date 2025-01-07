@@ -8,7 +8,7 @@ import {
   Node,
   Module,
   toJSON,
-  JSON,
+  JSONSchema,
   UI,
   canBeOpaqueRef,
   makeOpaqueRef,
@@ -59,22 +59,22 @@ export function recipe<T extends z.ZodTypeAny, R extends z.ZodTypeAny>(
   fn: (input: OpaqueRef<Required<z.infer<T>>>) => Opaque<z.infer<R>>,
 ): RecipeFactory<z.infer<T>, z.infer<R>>;
 export function recipe<T>(
-  argumentSchema: string | JSON,
+  argumentSchema: string | JSONSchema,
   fn: (input: OpaqueRef<Required<T>>) => any,
 ): RecipeFactory<T, ReturnType<typeof fn>>;
 export function recipe<T, R>(
-  argumentSchema: string | JSON,
+  argumentSchema: string | JSONSchema,
   fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R>;
 export function recipe<T, R>(
-  argumentSchema: string | JSON,
-  resultSchema: JSON,
+  argumentSchema: string | JSONSchema,
+  resultSchema: JSONSchema,
   fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R>;
 export function recipe<T, R>(
-  argumentSchema: string | JSON | z.ZodTypeAny,
+  argumentSchema: string | JSONSchema | z.ZodTypeAny,
   resultSchema:
-    | JSON
+    | JSONSchema
     | z.ZodTypeAny
     | undefined
     | ((input: OpaqueRef<Required<T>>) => Opaque<R>),
@@ -104,8 +104,8 @@ export function recipe<T, R>(
 
 // Same as above, but assumes the caller manages the frame
 export function recipeFromFrame<T, R>(
-  argumentSchema: string | JSON | z.ZodTypeAny,
-  resultSchema: JSON | z.ZodTypeAny | undefined,
+  argumentSchema: string | JSONSchema | z.ZodTypeAny,
+  resultSchema: JSONSchema | z.ZodTypeAny | undefined,
   fn: (input: OpaqueRef<Required<T>>) => Opaque<R>,
 ): RecipeFactory<T, R> {
   const inputs = opaqueRef<Required<T>>();
@@ -114,8 +114,8 @@ export function recipeFromFrame<T, R>(
 }
 
 function factoryFromRecipe<T, R>(
-  argumentSchemaArg: string | JSON | z.ZodTypeAny,
-  resultSchemaArg: JSON | z.ZodTypeAny | undefined,
+  argumentSchemaArg: string | JSONSchema | z.ZodTypeAny,
+  resultSchemaArg: JSONSchema | z.ZodTypeAny | undefined,
   inputs: OpaqueRef<T>,
   outputs: Opaque<R>,
 ): RecipeFactory<T, R> {
@@ -125,7 +125,7 @@ function factoryFromRecipe<T, R>(
   const nodes = new Set<NodeRef>();
 
   const collectCellsAndNodes = (value: Opaque<any>) =>
-    traverseValue(value, (value) => {
+    traverseValue(value, value => {
       if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
       if (
         (isOpaqueRef(value) || isShadowRef(value)) &&
@@ -172,7 +172,7 @@ function factoryFromRecipe<T, R>(
     });
 
   // Then from assignments in nodes
-  cells.forEach((cell) => {
+  cells.forEach(cell => {
     if (cell.export().path.length) return;
     cell.export().nodes.forEach((node: NodeRef) => {
       if (typeof node.inputs === "object" && node.inputs !== null)
@@ -185,7 +185,7 @@ function factoryFromRecipe<T, R>(
 
   // [For unsafe bindings] Also collect otherwise disconnected cells and nodes,
   // since they might only be mentioned via a code closure in a lifted function.
-  getTopFrame()?.opaqueRefs.forEach((ref) => collectCellsAndNodes(ref));
+  getTopFrame()?.opaqueRefs.forEach(ref => collectCellsAndNodes(ref));
 
   // Then assign paths on the recipe cell for all cells. For now we just assign
   // incremental counters, since we don't have access to the original variable
@@ -205,7 +205,7 @@ function factoryFromRecipe<T, R>(
     if (!paths.has(top)) paths.set(top, ["internal", name ?? `__#${count++}`]);
     if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
   });
-  shadows.forEach((shadow) => {
+  shadows.forEach(shadow => {
     if (paths.has(shadow)) return;
     paths.set(shadow, []);
   });
@@ -222,7 +222,7 @@ function factoryFromRecipe<T, R>(
 
   // Set initial values for all cells, add non-inputs defaults
   const initial: any = {};
-  cells.forEach((cell) => {
+  cells.forEach(cell => {
     // Only process roots of extra cells:
     if (cell === inputs) return;
     const { path, value, defaultValue } = cell.export();
@@ -234,26 +234,20 @@ function factoryFromRecipe<T, R>(
   });
 
   // External cells all have to be added to the initial state
-  cells.forEach((cell) => {
+  cells.forEach(cell => {
     const { external } = cell.export();
     if (external) setValueAtPath(initial, paths.get(cell)!, external);
   });
 
-  let argumentSchema: {
-    properties: { [key: string]: any };
-    description: string;
-  };
+  let argumentSchema: JSONSchema;
 
   if (typeof argumentSchemaArg === "string") {
     // TODO: initial is likely not needed anymore
     // TODO: But we need a new one for the result
-    argumentSchema = createJsonSchema(defaults, {}) as {
-      properties: { [key: string]: any };
-      description: string;
-    };
+    argumentSchema = createJsonSchema(defaults, {});
     argumentSchema.description = argumentSchemaArg;
 
-    delete argumentSchema.properties[UI]; // TODO: This should be a schema for views
+    delete argumentSchema.properties?.[UI]; // TODO: This should be a schema for views
     if (argumentSchema.properties?.internal?.properties)
       for (const key of Object.keys(
         argumentSchema.properties.internal.properties as any,
@@ -261,23 +255,17 @@ function factoryFromRecipe<T, R>(
         if (key.startsWith("__#"))
           delete (argumentSchema as any).properties.internal.properties[key];
   } else if (argumentSchemaArg instanceof z.ZodType) {
-    argumentSchema = zodToJsonSchema(argumentSchemaArg) as {
-      properties: { [key: string]: any };
-      description: string;
-    };
+    argumentSchema = zodToJsonSchema(argumentSchemaArg) as JSONSchema;
   } else {
-    argumentSchema = argumentSchemaArg as unknown as {
-      properties: { [key: string]: any };
-      description: string;
-    };
+    argumentSchema = argumentSchemaArg as unknown as JSONSchema;
   }
 
-  const resultSchema: JSON =
+  const resultSchema: JSONSchema =
     resultSchemaArg instanceof z.ZodType
-      ? (zodToJsonSchema(resultSchemaArg) as JSON)
-      : resultSchemaArg ?? ({} as JSON);
+      ? (zodToJsonSchema(resultSchemaArg) as JSONSchema)
+      : resultSchemaArg ?? ({} as JSONSchema);
 
-  const serializedNodes = Array.from(nodes).map((node) => {
+  const serializedNodes = Array.from(nodes).map(node => {
     const module = toJSONWithAliases(node.module, paths) as Module;
     const inputs = toJSONWithAliases(node.inputs, paths)!;
     const outputs = toJSONWithAliases(node.outputs, paths)!;
@@ -317,8 +305,8 @@ function factoryFromRecipe<T, R>(
   // Bind all cells to the recipe
   // TODO: Does OpaqueRef cause issues here?
   [...cells]
-    .filter((cell) => !cell.export().path.length) // Only bind root cells
-    .forEach((cell) =>
+    .filter(cell => !cell.export().path.length) // Only bind root cells
+    .forEach(cell =>
       cell.unsafe_bindToRecipeAndPath(recipeFactory, paths.get(cell)!),
     );
 
