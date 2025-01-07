@@ -12,6 +12,7 @@ import { Reference } from "merkle-reference";
 import { importEntity, resolve, tagWithSchema } from "../sugar/sugar.jsx";
 import { Ref, UiFragment } from "../sugar/zod.js";
 import { llm, RESPONSE } from "../effects/fetch.jsx";
+import { log } from "../sugar/activity.js";
 
 const adjectives = ['indigo', 'azure', 'crimson', 'emerald', 'golden', 'silver', 'obsidian', 'sapphire'];
 const nouns = ['crossfire', 'thunder', 'storm', 'blade', 'phoenix', 'dragon', 'whisper', 'shadow'];
@@ -108,6 +109,7 @@ const shaderEditor = typedBehavior(Shader, {
         const shader = ev.detail.value;
         cmd.add(...Transact.set(self, shader))
         cmd.add(...tagWithSchema(self, Shader))
+        cmd.add(...log(self, 'Edited shader'))
       }),
 
     onModifyWithAI: event("~/on/modify-with-ai")
@@ -252,6 +254,7 @@ export const shaderManager = typedBehavior(
           const currentIndex = shaders.findIndex(s => (s as any).self.toString() === editingShader?.toString());
           if (currentIndex > 0) {
             cmd.add(...Transact.set(self, { editingShader: (shaders[currentIndex - 1] as any).self }));
+            cmd.add(...log(self, 'Show prev shader'));
           }
         }),
 
@@ -262,6 +265,7 @@ export const shaderManager = typedBehavior(
           const currentIndex = shaders.findIndex(s => (s as any).self.toString() === editingShader?.toString());
           if (currentIndex < shaders.length - 1) {
             cmd.add(...Transact.set(self, { editingShader: (shaders[currentIndex + 1] as any).self }));
+            cmd.add(...log(self, 'Show next shader'))
           }
         }),
 

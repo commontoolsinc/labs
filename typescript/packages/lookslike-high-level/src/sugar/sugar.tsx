@@ -16,6 +16,7 @@ import { field } from "./query.js";
 import { fromString, Reference } from "merkle-reference";
 import { defaultTo } from "./default.js";
 import { Transact } from "../sugar.js";
+import { log } from "./activity.js";
 
 export function list<T extends z.ZodObject<any>>(
   schema: T

@@ -9,6 +9,7 @@ import { z } from "zod";
 import { Reference } from "merkle-reference";
 import { importEntity, resolve, tagWithSchema } from "../sugar/sugar.jsx";
 import { Ref, UiFragment } from "../sugar/zod.js";
+import { log } from "../sugar/activity.js";
 
 const Contact = z.object({
   name: z.string().min(1).max(255).describe("The name of the contact"),
@@ -86,6 +87,7 @@ export const addressBook = typedBehavior(
         const { self: id, instructions } = importEntity(contact, Contact)
         cmd.add(...instructions);
         cmd.add(...Transact.assert(self, { contacts: id }));
+        cmd.add(...log(self, 'Added new contact'))
       }),
 
     onEditContact: event("~/on/edit-contact")

@@ -63,6 +63,9 @@ import { shaderManager } from './spells/20_shader_editor.jsx'
 import { schemaGenerator } from './spells/21_model_builder.jsx'
 import { search } from './spells/22_search.jsx'
 import { notebook } from './spells/23_notes.jsx'
+import { quotedb } from './spells/24_quotes.jsx'
+import { activity } from './spells/25_activity.jsx'
+import { activityRef } from "./sugar/activity.js";
 
 export type Charm = {
   [NAME]?: string;
@@ -264,6 +267,8 @@ addCharms([
   schemaGenerator.spawn({ schemaGenerator: 1 }),
   search.spawn({ search: 1 }),
   notebook.spawn({ notes: 1 }),
+  quotedb.spawn({ quotes: 1 }),
+  activity.spawn(activityRef),
   FetchService.spawn() as any,
   GmailService.spawn() as any,
   ViewService.spawn() as any,

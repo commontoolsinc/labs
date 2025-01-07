@@ -3,6 +3,7 @@ import { event, events, set, subview } from "../sugar.js";
 import { description, Description } from "./stickers/describe.jsx";
 import { mixin } from "../sugar/mixin.js";
 import { Chattable, chatUiResolver } from "./stickers/chat.jsx";
+import { log } from "../sugar/activity.js";
 
 const resolveEmpty = select({ self: $.self }).not(q => q.match($.self, "clicks", $._));
 
@@ -65,7 +66,7 @@ export const rules = behavior({
 
   onClick: event(CounterEvent.onClick)
     .with(resolveClicks)
-    .update(({ self, clicks }) => set(self, { clicks: clicks + 1 }))
+    .update(({ self, clicks }) => ([...set(self, { clicks: clicks + 1 }), ...log(self, 'Incremented counter')]))
     .commit(),
 });
 

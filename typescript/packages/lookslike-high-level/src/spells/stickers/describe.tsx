@@ -1,6 +1,7 @@
 import { behavior, $, select } from "@commontools/common-system";
 import { llm, RESPONSE } from "../../effects/fetch.jsx";
 import { field } from "../../sugar.js";
+import { log } from "../../sugar/activity.js";
 
 export const description = field("llmDescription", "");
 
@@ -18,6 +19,7 @@ export const Description = (
         llm(values.self, "my/describe", {
           prompt: promptFn(Object.fromEntries(fields.map(f => [f, values[f]]))),
         }).json(),
+        ...log(values.self, 'Generating description of: ' + promptFn(Object.fromEntries(fields.map(f => [f, values[f]]))))
       ])
       .commit(),
 
