@@ -424,5 +424,43 @@ describe("Recipe Runner", () => {
     await idle();
 
     expect(result.getAsQueryResult()).toEqual({ result: 12 });
-  }, 10000);
+  });
+
+  it("should execute handlers with schemas", async () => {
+    const incHandler = handler<{ amount: number }, { counter: number }>(
+      { type: "object", properties: { amount: { type: "number" } } },
+      {
+        type: "object",
+        properties: {
+          counter: {
+            type: "number",
+            asCell: true,
+          },
+        },
+      },
+      ({ amount }, { counter }) => {
+        const counterCell = counter as unknown as RendererCell<number>;
+        counterCell.send(counterCell.get() + amount);
+      },
+    );
+
+    const incRecipe = recipe<{ counter: number }>(
+      "Increment counter",
+      ({ counter }) => {
+        return { counter, stream: incHandler({ counter }) };
+      },
+    );
+
+    const result = run(incRecipe, { counter: 0 });
+
+    await idle();
+
+    result.asRendererCell(["stream"]).send({ amount: 1 });
+    await idle();
+    expect(result.getAsQueryResult()).toMatchObject({ counter: 1 });
+
+    result.asRendererCell(["stream"]).send({ amount: 2 });
+    await idle();
+    expect(result.getAsQueryResult()).toMatchObject({ counter: 3 });
+  });
 });
