@@ -359,7 +359,7 @@ describe("asRendererCell with schema", () => {
         id: { type: "number" },
         metadata: {
           type: "object",
-          reference: true,
+          asCell: true,
         },
       },
     } satisfies JSONSchema;
@@ -445,13 +445,13 @@ describe("asRendererCell with schema", () => {
                 name: { type: "string" },
                 settings: {
                   type: "object",
-                  reference: true,
+                  asCell: true,
                 },
               },
             },
             metadata: {
               type: "object",
-              reference: true,
+              asCell: true,
             },
           },
         },
@@ -520,7 +520,7 @@ describe("asRendererCell with schema", () => {
         id: { type: "number" },
         metadata: {
           type: "object",
-          reference: true,
+          asCell: true,
         },
       },
     } satisfies JSONSchema;
@@ -565,7 +565,7 @@ describe("asRendererCell with schema", () => {
           type: "object",
           additionalProperties: {
             type: "object",
-            reference: true,
+            asCell: true,
           },
         },
       },
@@ -603,7 +603,7 @@ describe("asRendererCell with schema", () => {
       properties: {
         context: {
           type: "object",
-          additionalProperties: { reference: true },
+          additionalProperties: { asCell: true },
         },
       },
     } satisfies JSONSchema;
@@ -640,7 +640,7 @@ describe("asRendererCell with schema", () => {
       properties: {
         context: {
           type: "object",
-          additionalProperties: { reference: true },
+          additionalProperties: { asCell: true },
         },
       },
     } satisfies JSONSchema;
@@ -677,7 +677,7 @@ describe("asRendererCell with schema", () => {
       properties: {
         context: {
           type: "object",
-          additionalProperties: { reference: true },
+          additionalProperties: { asCell: true },
         },
       },
     } satisfies JSONSchema;
@@ -721,7 +721,7 @@ describe("asRendererCell with schema", () => {
       properties: {
         context: {
           type: "object",
-          additionalProperties: { reference: true },
+          additionalProperties: { asCell: true },
         },
       },
     } satisfies JSONSchema;
@@ -827,7 +827,7 @@ describe("asRendererCell with schema", () => {
       },
       additionalProperties: {
         type: "object",
-        properties: { anything: { reference: true } },
+        properties: { anything: { asCell: true } },
       },
     } satisfies JSONSchema;
 

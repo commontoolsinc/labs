@@ -20,11 +20,11 @@ import {
   type RendererCell,
   ReactiveCell,
   isRendererCell,
-  JsonSchema,
 } from "@commontools/common-runner";
+import { JSONSchema } from "@commontools/common-builder";
 import * as logger from "./logger.js";
 
-const schema: JsonSchema = {
+const schema: JSONSchema = {
   type: "object",
   properties: {
     type: { type: "string" },
@@ -32,20 +32,20 @@ const schema: JsonSchema = {
     name: { type: "string" },
     props: {
       type: "object",
-      additionalProperties: { reference: true },
+      additionalProperties: { asCell: true },
     },
     children: {
       type: "array",
       items: {
         $ref: "#",
-        reference: true,
+        asCell: true,
       },
     },
     // For View
     template: { $ref: "#" },
     context: {
       type: "object",
-      additionalProperties: { reference: true },
+      additionalProperties: { asCell: true },
     },
   },
 };

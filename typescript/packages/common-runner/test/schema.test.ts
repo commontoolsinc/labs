@@ -47,7 +47,7 @@ describe("Schema Support", () => {
               name: { type: "string" },
               settings: {
                 type: "object",
-                reference: true,
+                asCell: true,
               },
             },
           },
@@ -99,7 +99,7 @@ describe("Schema Support", () => {
           id: { type: "number" },
           metadata: {
             type: "object",
-            reference: true,
+            asCell: true,
           },
         },
       } as JSONSchema;
@@ -170,7 +170,7 @@ describe("Schema Support", () => {
                   name: { type: "string" },
                   metadata: {
                     type: "object",
-                    reference: true,
+                    asCell: true,
                   },
                 },
               },

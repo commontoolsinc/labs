@@ -106,7 +106,7 @@ export type JSONSchema = {
   enum?: string[];
   items?: JSONSchema;
   $ref?: string;
-  reference?: boolean;
+  asCell?: boolean;
   additionalProperties?: JSONSchema | boolean;
 };
 

@@ -20,12 +20,12 @@ export function resolveSchema(
     if (schema.$ref === "#") return rootSchema;
 
     let resolvedSchema = schema;
-    if (schema.reference)
+    if (schema.asCell)
       // Remove reference flag from schema, so it's describing the destination
       // schema. That means we can't describe a schema that points to top-level
       // references, but that's on purpose.
       ({
-        reference: {},
+        asCell: {},
         ...resolvedSchema
       } = schema);
 
@@ -55,7 +55,7 @@ export function validateAndTransform(
   // If this should be a reference, return as a RendererCell of resolvedSchema
   // NOTE: Need to check on the passed schema whether it's a reference, not the
   // resolved schema. The returned reference is of type resolvedSchema though.
-  if (typeof schema === "object" && schema !== null && schema!.reference)
+  if (typeof schema === "object" && schema !== null && schema!.asCell)
     return cell.asRendererCell(path, log, resolvedSchema);
 
   // If there is no schema, return as raw data via query result proxy
