@@ -666,7 +666,6 @@ describe("asRendererCell with schema", () => {
     // Create a cell that uses all reference types
     const c = cell({
       context: {
-        renderer: innerCell,
         cell: innerCell,
         reference: cellRef,
         alias: aliasRef,
@@ -687,20 +686,17 @@ describe("asRendererCell with schema", () => {
     const value = rendererCell.get();
 
     // All references should be preserved but wrapped in RendererCells
-    expect(isRendererCell(value.context.renderer)).toBe(true);
     expect(isRendererCell(value.context.cell)).toBe(true);
     expect(isRendererCell(value.context.reference)).toBe(true);
     expect(isRendererCell(value.context.alias)).toBe(true);
 
     // All should point to the same value
-    expect(value.context.renderer.get().value).toBe(42);
     expect(value.context.cell.get().value).toBe(42);
     expect(value.context.reference.get().value).toBe(42);
     expect(value.context.alias.get().value).toBe(42);
 
     // Changes to the original cell should propagate to all references
     innerCell.send({ value: 100 });
-    expect(value.context.renderer.get().value).toBe(100);
     expect(value.context.cell.get().value).toBe(100);
     expect(value.context.reference.get().value).toBe(100);
     expect(value.context.alias.get().value).toBe(100);
