@@ -20,7 +20,6 @@ export const activity = typedBehavior(
     log: true
   }), {
   render: ({ self, log }) => {
-    debugger
     return (
       <table entity={self} title="Activity Log" style="width: 100%; border-spacing: 0">
         <tbody>
