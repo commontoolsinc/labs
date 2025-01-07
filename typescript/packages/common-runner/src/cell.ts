@@ -490,19 +490,7 @@ function rendererCell<T>(
         },
       } as RendererCell<T>)
     : {
-        get: () => {
-          if (schema) {
-            const value = cell.getAtPath(path);
-            log?.reads.push({ cell, path });
-            if (schema.reference) {
-              // For reference properties, return the raw value
-              return createQueryResultProxy(cell, path, log);
-            }
-            return validateAndTransform(cell, value, schema, log);
-          } else {
-            return createQueryResultProxy(cell, path, log);
-          }
-        },
+        get: () => validateAndTransform(cell, path, schema, log),
         set: (newValue: T) => cell.setAtPath(path, newValue, log),
         send: (newValue: T) => self.set(newValue),
         sink: (callback: (value: T) => void) => {

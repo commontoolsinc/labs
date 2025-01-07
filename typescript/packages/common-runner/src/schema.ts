@@ -1,8 +1,8 @@
 import {
   type CellImpl,
   isCell,
+  type CellReference,
   isCellReference,
-  isRendererCell,
   type ReactivityLog,
 } from "./cell.js";
 import { isAlias } from "@commontools/common-builder";
@@ -18,47 +18,75 @@ export interface JsonSchema {
 }
 
 export function resolveSchema(
-  schema: JsonSchema,
-  rootSchema: JsonSchema = schema,
-): JsonSchema {
-  if (schema.$ref === "#") {
-    return rootSchema;
-  }
-  return schema;
+  schema: JsonSchema | undefined,
+  rootSchema: JsonSchema | undefined = schema,
+): JsonSchema | undefined {
+  if (
+    typeof schema === "object" &&
+    schema !== null &&
+    Object.keys(schema).length > 0
+  ) {
+    if (schema.$ref === "#") return rootSchema;
+
+    let resolvedSchema = schema;
+    if (schema.reference)
+      // Remove reference flag from schema, so it's describing the destination
+      // schema. That means we can't describe a schema that points to top-level
+      // references, but that's on purpose.
+      ({
+        reference: {},
+        ...resolvedSchema
+      } = schema);
+
+    // Return no schema if all it said is that this was a reference or an
+    // object without properties.
+    if (Object.keys(resolvedSchema).length === 0) return undefined;
+    if (
+      resolvedSchema.type === "object" &&
+      !resolvedSchema.additionalProperties &&
+      !resolvedSchema.properties
+    )
+      return undefined;
+
+    return resolvedSchema;
+  } else return undefined;
 }
 
 export function validateAndTransform(
   cell: CellImpl<any>,
-  value: any,
-  schema: JsonSchema,
-  log?: ReactivityLog,
-  rootSchema: JsonSchema = schema,
   path: PropertyKey[] = [],
+  schema?: JsonSchema,
+  log?: ReactivityLog,
+  rootSchema: JsonSchema | undefined = schema,
 ): any {
   const resolvedSchema = resolveSchema(schema, rootSchema);
 
+  // If this should be a reference, return as a RendererCell of resolvedSchema
+  // NOTE: Need to check on the passed schema whether it's a reference, not the
+  // resolved schema. The returned reference is of type resolvedSchema though.
+  if (typeof schema === "object" && schema !== null && schema!.reference)
+    return cell.asRendererCell(path, log, resolvedSchema);
+
+  // If there is no schema, return as raw data via query result proxy
+  if (!resolvedSchema) return cell.getAsQueryResult(path, log);
+
+  log?.reads.push({ cell, path });
+  const value = cell.getAtPath(path);
+
   // Handle various types of references
-  if (isCellReference(value)) {
-    const ref = followCellReferences(value, log);
-    return ref.cell.asRendererCell(ref.path, undefined, resolvedSchema);
-  }
+  const seen: CellReference[] = [];
 
-  if (isRendererCell(value)) {
-    return value.asSchema(resolvedSchema);
-  }
+  while (true) {
+    // Follow references and aliases until we hit a value
+    if (isCellReference(value))
+      ({ cell, path } = followCellReferences(value, log));
+    else if (isAlias(value)) ({ cell, path } = followAliases(value, cell, log));
+    else if (isCell(value)) [cell, path] = [value, []];
+    else break;
 
-  if (isCell(value)) {
-    return value.asRendererCell([], undefined, resolvedSchema);
-  }
-
-  if (isAlias(value)) {
-    const ref = followAliases(value, cell, log);
-    return ref.cell.asRendererCell(ref.path, undefined, resolvedSchema);
-  }
-
-  // For reference properties, return a RendererCell that preserves the schema
-  if (resolvedSchema.reference) {
-    return cell.asRendererCell(path, undefined, resolvedSchema);
+    if (seen.findIndex(ref => ref.cell === cell && ref.path === path) !== -1)
+      throw new Error("Reference cycle detected");
+    seen.push({ cell, path });
   }
 
   if (resolvedSchema.type === "object") {
@@ -69,30 +97,33 @@ export function validateAndTransform(
       for (const [key, propSchema] of Object.entries(
         resolvedSchema.properties,
       )) {
-        const propValue = value?.[key];
         result[key] = validateAndTransform(
           cell,
-          propValue,
+          [...path, key],
           propSchema,
           log,
           rootSchema,
-          [...path, key],
         );
       }
     }
 
     // Handle additional properties if defined
-    if (resolvedSchema.additionalProperties && value) {
-      for (const key of Object.keys(value)) {
-        if (!resolvedSchema.properties?.[key]) {
-          const propValue = value[key];
+    if (resolvedSchema.additionalProperties) {
+      // For `additionalProperties: true` we assume no schema
+      const additionalPropertiesSchema =
+        typeof resolvedSchema.additionalProperties === "object"
+          ? resolvedSchema.additionalProperties
+          : undefined;
+      const keys =
+        typeof value === "object" && value !== null ? Object.keys(value) : [];
+      for (const key of keys) {
+        if (!resolvedSchema.properties || !(key in resolvedSchema.properties)) {
           result[key] = validateAndTransform(
             cell,
-            propValue,
-            resolvedSchema.additionalProperties,
+            [...path, key],
+            additionalPropertiesSchema,
             log,
             rootSchema,
-            [...path, key],
           );
         }
       }
@@ -105,14 +136,18 @@ export function validateAndTransform(
     if (!Array.isArray(value)) {
       return [];
     }
-    return value.map((item, i) =>
-      validateAndTransform(cell, item, resolvedSchema.items!, log, rootSchema, [
-        ...path,
-        i,
-      ]),
+    return value.map((_, i) =>
+      validateAndTransform(
+        cell,
+        [...path, i],
+        resolvedSchema.items!,
+        log,
+        rootSchema,
+      ),
     );
   }
 
   // For primitive types, just return the value
+  // TODO: Should we validate/coerce types here?
   return value;
 }

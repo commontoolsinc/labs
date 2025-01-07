@@ -627,12 +627,11 @@ describe("asRendererCell with schema", () => {
   it("should handle references in underlying cell", () => {
     // Create a cell with a reference
     const innerCell = cell({ value: 42 });
-    const innerRef = innerCell.asRendererCell();
 
     // Create a cell that uses that reference
     const c = cell({
       context: {
-        inner: innerRef,
+        inner: innerCell,
       },
     });
 
@@ -661,14 +660,13 @@ describe("asRendererCell with schema", () => {
   it("should handle all types of references in underlying cell", () => {
     // Create cells with different types of references
     const innerCell = cell({ value: 42 });
-    const rendererRef = innerCell.asRendererCell();
     const cellRef = { cell: innerCell, path: [] };
     const aliasRef = { $alias: { cell: innerCell, path: [] } };
 
     // Create a cell that uses all reference types
     const c = cell({
       context: {
-        renderer: rendererRef,
+        renderer: innerCell,
         cell: innerCell,
         reference: cellRef,
         alias: aliasRef,
@@ -741,11 +739,13 @@ describe("asRendererCell with schema", () => {
     expect(value.context.nested.get().value).toBe(42);
 
     // All references in the chain should be read
-    expect(log.reads.length).toBe(4);
-    expect(log.reads[0].cell).toBe(c);
-    expect(log.reads[1].cell).toBe(ref3.cell);
-    expect(log.reads[2].cell).toBe(ref2.cell);
-    expect(log.reads[3].cell).toBe(ref1.cell);
+    const reads = compactifyPaths(log.reads);
+
+    expect(reads.length).toBe(4);
+    expect(reads[0].cell).toBe(c);
+    expect(reads[1].cell).toBe(ref3.cell);
+    expect(reads[2].cell).toBe(ref2.cell);
+    expect(reads[3].cell).toBe(ref1.cell);
 
     // Changes to the original cell should propagate through the chain
     innerCell.send({ value: 100 });
