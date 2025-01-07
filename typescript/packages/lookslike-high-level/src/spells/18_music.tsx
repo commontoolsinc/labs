@@ -12,27 +12,27 @@ import { Ref, UiFragment } from "../sugar/zod.js";
 
 export const Artist = z.object({
   name: z.string().min(1).max(255).describe("The name of the artist"),
-});
+}).describe('Artist');
 
 export const Song = z.object({
   title: z.string().min(1).max(255).describe("The title of the song"),
   artists: z.array(Artist).min(1).describe("The artists who performed the song"),
   duration: z.number().min(1).describe("The duration in seconds"),
   year: z.number().min(1900).max(2100).describe("The release year")
-});
+}).describe('Song');
 
 export const Album = z.object({
   "album/title": z.string().min(1).max(255).describe("The album title"),
   artist: Artist.describe("The primary artist"),
   songs: z.array(Song).min(1).describe("The songs on the album"),
   year: z.number().min(1900).max(2100).describe("The release year")
-});
+}).describe('Album');
 
 const Playlist = z.object({
   name: z.string().min(1).max(255).describe("The playlist name"),
   description: z.string().max(1000).describe("The playlist description"),
   songs: z.array(Song).describe("The songs in the playlist")
-});
+}).describe('Playlist');
 
 const MusicLibrary = z.object({
   focused: Ref.describe("The item that is currently being edited"),

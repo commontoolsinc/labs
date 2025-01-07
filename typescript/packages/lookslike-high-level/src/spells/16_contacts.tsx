@@ -7,7 +7,7 @@ import { event, subview, Transact } from "../sugar.js";
 import { Charm, initRules, typedBehavior } from "./spell.jsx";
 import { z } from "zod";
 import { Reference } from "merkle-reference";
-import { resolve } from "../sugar/sugar.jsx";
+import { importEntity, resolve, tagWithSchema } from "../sugar/sugar.jsx";
 import { Ref, UiFragment } from "../sugar/zod.js";
 
 const Contact = z.object({
@@ -15,7 +15,7 @@ const Contact = z.object({
   email: z.string().email().describe("The email address of the contact"),
   phone: z.string().min(10).max(20).describe("The phone number of the contact"),
   // nickname: z.string().nullable().default(null).describe("The nickname of the contact"),
-});
+}).describe('Contact');
 
 const AddressBook = z.object({
   focused: Ref.describe("The contact that is currently being edited"),
@@ -57,22 +57,17 @@ const contactEditor = typedBehavior(Contact, {
 
 export const addressBook = typedBehavior(
   AddressBook.pick({
-    focused: true,
+    // focused: true,
     '~/common/ui/list': true
   }), {
-  render: ({ self, focused, '~/common/ui/list': contactList }) => (
-    <div entity={self} >
+  render: ({ self, '~/common/ui/list': contactList }) => (
+    <div entity={self} name="Contacts">
       <div>
-        {focused ? (
-          <div>
-            <button onclick="~/on/close-editor">Close</button>
-            <Charm self={focused} spell={contactEditor as any} />
-          </div>
-        ) : <common-form
+        <common-form
           schema={Contact}
           reset
           onsubmit="~/on/add-contact"
-        />}
+        />
       </div>
 
       <br />
@@ -88,14 +83,16 @@ export const addressBook = typedBehavior(
         const ev = Session.resolve<SubmitEvent>(event);
         const contact = ev.detail.value;
 
-        cmd.add({ Import: contact })
-        cmd.add(...Transact.assert(self, { contacts: refer(contact) }))
+        const { self: id, instructions } = importEntity(contact, Contact)
+        cmd.add(...instructions);
+        cmd.add(...Transact.assert(self, { contacts: id }));
       }),
 
     onEditContact: event("~/on/edit-contact")
       .transact(({ self, event }, cmd) => {
         const ev = Session.resolve<EditEvent>(event);
         cmd.add(...Transact.set(self, { focused: ev.detail.item }))
+        cmd.add(...tagWithSchema(self, Contact))
       }),
 
     onDeleteContact: event("~/on/delete-contact")

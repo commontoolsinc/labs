@@ -45,7 +45,7 @@ export const Spell = z.object({
   sourceCode: z.string().min(1).max(8192).describe("The spell's source code"),
   notes: z.string().describe("Notes about the spell"),
   instances: z.array(Ref).describe("References to charm instances of this spell")
-});
+}).describe('Spell');
 
 const Charm = z.object({
   spell: Ref.describe("Reference to the spell this charm instantiates"),
@@ -163,7 +163,7 @@ const spellEditor = typedBehavior(Spell, {
         const ev = Session.resolve<SubmitEvent<z.infer<typeof Spell>>>(event);
         const spell = ev.detail.value;
         cmd.add(...Transact.set(self, spell))
-        cmd.add(tagWithSchema(self, Spell))
+        cmd.add(...tagWithSchema(self, Spell))
       }),
 
     onModifyWithAI: event("~/on/modify-with-ai")

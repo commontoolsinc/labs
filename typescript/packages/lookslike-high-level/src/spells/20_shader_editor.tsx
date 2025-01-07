@@ -47,9 +47,9 @@ const SHADER_TEMPLATE = `    precision mediump float;
 // Define the core schemas
 export const Shader = z.object({
   name: z.string().min(1).max(255).describe("The name of the shader"),
-  sourceCode: z.string().min(1).max(8192).describe("The shader's GLSL source code"),
+  sourceCode: z.string().min(1).max(2 * 8192).describe("The shader's GLSL source code"),
   notes: z.string().describe("Notes about the shader")
-});
+}).describe('Shader');
 
 const ShaderEditor = z.object({
   editingShader: Ref.describe("The shader currently being edited"),
@@ -107,7 +107,7 @@ const shaderEditor = typedBehavior(Shader, {
         const ev = Session.resolve<SubmitEvent<z.infer<typeof Shader>>>(event);
         const shader = ev.detail.value;
         cmd.add(...Transact.set(self, shader))
-        cmd.add(tagWithSchema(self, Shader))
+        cmd.add(...tagWithSchema(self, Shader))
       }),
 
     onModifyWithAI: event("~/on/modify-with-ai")

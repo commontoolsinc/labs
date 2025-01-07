@@ -62,6 +62,7 @@ import { spellManager } from './spells/19_process_manager.jsx'
 import { shaderManager } from './spells/20_shader_editor.jsx'
 import { schemaGenerator } from './spells/21_model_builder.jsx'
 import { search } from './spells/22_search.jsx'
+import { notebook } from './spells/23_notes.jsx'
 
 export type Charm = {
   [NAME]?: string;
@@ -262,6 +263,7 @@ addCharms([
   shaderManager.spawn({ shaderManager: 1 }),
   schemaGenerator.spawn({ schemaGenerator: 1 }),
   search.spawn({ search: 1 }),
+  notebook.spawn({ notes: 1 }),
   FetchService.spawn() as any,
   GmailService.spawn() as any,
   ViewService.spawn() as any,

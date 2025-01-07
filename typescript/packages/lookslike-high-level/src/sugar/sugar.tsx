@@ -20,10 +20,12 @@ import { Transact } from "../sugar.js";
 export function list<T extends z.ZodObject<any>>(
   schema: T
 ) {
-  const base = resolve(schema);
+  let base = resolve(schema);
   const item = base.selector.self;
   const newVar = $.listItem;
-  (base.selector as any).self = newVar;
+  let selector = base.selector;
+  (selector as any).self = newVar;
+
   const constraints: Clause[] = base.clauses.map(constraint => {
     if (constraint.Case) {
       return { Case: [newVar, constraint.Case[1], constraint.Case[2]] } as Clause;
@@ -34,7 +36,33 @@ export function list<T extends z.ZodObject<any>>(
 
   constraints.push(conforms(newVar, schema));
 
-  const selector = new Select({ self: $.self, items: [base.selector] }, new WhereBuilder(...constraints)) as any;
+  selector = new Select({ self: $.self, items: [selector] }, new WhereBuilder(...constraints)) as any;
+  console.log('selector', selector)
+
+  return selector as Select<{ self: Reference, items: T }>;
+}
+
+export function listByRef<T extends z.ZodObject<any>>(
+  schemaRef: Term,
+  resultShape: z.ZodObject<any>
+) {
+  const base = resolve(resultShape);
+  const item = base.selector.self;
+  const newVar = $.listItem;
+  let selector = base.selector;
+  (selector as any).self = newVar;
+
+  const constraints: Clause[] = base.clauses.map(constraint => {
+    if (constraint.Case) {
+      return { Case: [newVar, constraint.Case[1], constraint.Case[2]] } as Clause;
+    }
+
+    return constraint;
+  });
+
+  constraints.push(conformsByRef(newVar, schemaRef));
+
+  selector = new Select({ self: $.self, items: [selector] }, new WhereBuilder(...constraints)) as any;
   console.log('selector', selector)
 
   return selector as Select<{ self: Reference, items: T }>;
@@ -136,20 +164,37 @@ export function resolve<T extends z.ZodObject<any>>(
   return aggregator;
 }
 
+export const StoredSchema = z.object({
+  name: z.string().describe("The name of the schema"),
+  schema: z.string().describe("The sourcecode of the schema"),
+  selection: z.string().describe("Serialized JSON of the selection shape that will retrieve this schema"),
+})
+
 export function conforms<T extends z.ZodObject<any>>(entity: Term, schema: T): Clause {
+  return conformsByRef(entity, refer(JSON.stringify(schema.shape)))
+}
+
+export function conformsByRef(entity: Term, schemaRef: Term): Clause {
   return {
-    Case: [entity, 'common/schema', refer(JSON.stringify(schema.shape))]
+    Case: [entity, 'common/schema', schemaRef]
   }
 }
 
-export function tagWithSchema<T extends z.ZodObject<any>>(entity: Term, schema: T): Instruction {
-  return { Assert: [entity, 'common/schema', refer(JSON.stringify(schema.shape))] }
+export function tagWithSchema<T extends z.ZodObject<any>>(entity: Term, schema: T): Instruction[] {
+  const id = refer(JSON.stringify(schema.shape))
+  const metaSchema = refer(JSON.stringify(StoredSchema.shape));
+
+  return [
+    { Assert: [entity, 'common/schema', id] },
+    ...Transact.set(id, { name: schema.description || '<unknown>', schema: JSON.stringify(schema.shape), 'common/schema': metaSchema, selection: JSON.stringify(resolve(schema).commit()) }),
+    ...Transact.set(metaSchema, { name: "Schema", schema: JSON.stringify(StoredSchema.shape) })
+  ]
 }
 
 export function importEntity<T extends z.ZodObject<any>>(
   value: any,
   schema: T,
-  createRelationships = true
+  createRelationships = true,
 ) {
 
 
@@ -170,7 +215,7 @@ export function importEntity<T extends z.ZodObject<any>>(
     return acc;
   }, { refs: {}, data: {} } as { refs: Record<string, any>, data: Record<string, any> });
 
-  const instructions: Instruction[] = [{ Import: data }];
+  let instructions: Instruction[] = [{ Import: data }];
 
   const self = refer(data)
 
@@ -179,11 +224,8 @@ export function importEntity<T extends z.ZodObject<any>>(
       instructions.push(...associate(self, field, refValue));
     });
   }
-  instructions.push({
-    Assert: [
-      self, 'common/schema', refer(JSON.stringify(schema.shape))
-    ]
-  });
+
+  instructions = instructions.concat(tagWithSchema(self, schema))
 
   return { self, instructions };
 }

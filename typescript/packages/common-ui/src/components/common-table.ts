@@ -37,43 +37,111 @@ export class CommonCardElement extends LitElement {
       }
       .value {
         color: #666;
+        max-height: 128px;
+        overflow-y: auto;
+      }
+      pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin: 0;
+      }
+      .string-value {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .self-pill {
+        display: inline-block;
+        background: #f3f4f6;
+        border-radius: 12px;
+        padding: 2px 8px;
+        font-family: monospace;
+        font-size: 10px;
       }
     `
   ];
 
   override render() {
-    if (!this.schema || !this.item) {
-      return html`<div>Missing schema or data</div>`;
+    if (!this.item) {
+      return html`<div>Missing data</div>`;
     }
 
+    if (this.schema) {
+      const entries = Object.entries(this.schema.shape);
+      const nonSelfEntries = entries.filter(([key]) => key !== 'self');
+      const selfEntry = entries.find(([key]) => key === 'self');
+
+      return html`
+        ${nonSelfEntries.map(([key, schema]) => html`
+          <div class="field">
+            <div class="label">${key.replace(/([A-Z])/g, ' $1').trim()}</div>
+            <div class="value">${this.formatValue(this.item[key], schema, key)}</div>
+          </div>
+        `)}
+        ${selfEntry ? html`
+          <div class="field">
+            <div class="label">${selfEntry[0].replace(/([A-Z])/g, ' $1').trim()}</div>
+            <div class="value">${this.formatValue(this.item[selfEntry[0]], selfEntry[1], selfEntry[0])}</div>
+          </div>
+        ` : ''}
+      `;
+    }
+
+    const entries = Object.entries(this.item);
+    const nonSelfEntries = entries.filter(([key]) => key !== 'self');
+    const selfEntry = entries.find(([key]) => key === 'self');
+
     return html`
-      ${Object.entries(this.schema.shape).map(([key, schema]) => html`
+      ${nonSelfEntries.map(([key, value]) => html`
         <div class="field">
           <div class="label">${key.replace(/([A-Z])/g, ' $1').trim()}</div>
-          <div class="value">${this.formatValue(this.item[key], schema)}</div>
+          <div class="value">${this.formatValue(value, undefined, key)}</div>
         </div>
       `)}
+      ${selfEntry ? html`
+        <div class="field">
+          <div class="label">${selfEntry[0].replace(/([A-Z])/g, ' $1').trim()}</div>
+          <div class="value">${this.formatValue(selfEntry[1], undefined, selfEntry[0])}</div>
+        </div>
+      ` : ''}
     `;
   }
 
-  formatValue(value: any, schema: any) {
+  formatValue(value: any, schema?: any, key?: string) {
     if (value === null || value === undefined) {
       return '';
     }
 
-    switch (schema._def.typeName) {
-      case 'ZodArray':
-      case 'ZodObject':
-        return html`<pre>${JSON.stringify(value, null, 2)}</pre>`;
-      case 'ZodBoolean':
-        return value ? '✓' : '✗';
-      case 'ZodDate':
-        return new Date(value).toLocaleString();
-      default:
-        return String(value);
+    if (key === 'self') {
+      return html`<span class="self-pill">${value.toString()}</span>`;
     }
+
+    if (schema) {
+      switch (schema._def.typeName) {
+        case 'ZodArray':
+        case 'ZodObject':
+          return html`<pre>${JSON.stringify(value, null, 2)}</pre>`;
+        case 'ZodBoolean':
+          return value ? '✓' : '✗';
+        case 'ZodDate':
+          return new Date(value).toLocaleString();
+        case 'ZodString':
+          return html`<div class="string-value">${value}</div>`;
+        default:
+          return String(value);
+      }
+    }
+
+    if (typeof value === 'object') {
+      return html`<pre>${JSON.stringify(value, null, 2)}</pre>`;
+    } else if (typeof value === 'boolean') {
+      return value ? '✓' : '✗';
+    } else if (value instanceof Date) {
+      return value.toLocaleString();
+    }
+    return html`<div class="string-value">${value}</div>`;
   }
 }
+
 @customElement("common-table")
 export class CommonTableElement extends LitElement {
   @property({ type: Object }) schema: ZodObject<any> = null;
