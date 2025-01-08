@@ -10,37 +10,6 @@ import {
 } from "@commontools/common-builder";
 import { h } from "@commontools/common-html";
 
-/**
- * Plan to rewrite this on top of recipe stack
- *
- * For now assume it won't be sandboxed, so `this` will at runtime refer to the
- * instance of the Spell. Note though that this is all on opaqueref space, but
- * the recipe-opaqueref is a transparent wrapper around life cells, so it should
- * work.
- *
- * .compile() will call `recipe` with a callback that constructs all the opaque
- * refs and so on.
- *
- * E.g. this.update({ ... }) should be possible to do, we look up the cells
- * in our cell table and update them.
- *
- * A few changes:
- * - formulating queries is select(($) => ({ foo: $.foo }))
- *   - would be nicer if we'd instead have this.<state> instead of $.foo?
- *     that's a bunch more work though.
- *   - we could also allow a shortcut like { foo, bar: ["bar", "baz"] }
- * - addEventHandler just gets the whole state
- * - addRule needs the builder syntax:
- *   - `event(name)` adds a stream of that name to parameters
- *   - `select(($) => ({ foo: $.foo }))` adds a query to the rule
- *   - `with(schema)` gets all keys from the schema
- *   - `match(condition)` adds a condition to the rule
- *   - First step: Just assume `select`.
- * - handlers just get values
- * - event handlers use this.update() without self to update the state
- * - derive rules just return new values
- */
-
 type Meta = {
   category: string;
   submittedAt: string;
