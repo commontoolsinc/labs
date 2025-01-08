@@ -90,10 +90,6 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    // This is necessary to ensure the recipe has time to run
-    // TODO: Get await idle() to work for this case as well
-    await new Promise(resolve => setTimeout(resolve, 100));
-
     expect(result.getAsQueryResult()).toMatchObject({
       multiplied: [{ multiplied: 1 }, { multiplied: 4 }, { multiplied: 9 }],
     });
@@ -118,10 +114,6 @@ describe("Recipe Runner", () => {
     });
 
     await idle();
-
-    // This is necessary to ensure the recipe has time to run
-    // TODO: Get await idle() to work for this case as well
-    await new Promise(resolve => setTimeout(resolve, 100));
 
     expect(result.getAsQueryResult()).toMatchObject({
       doubled: [3, 6, 9],
