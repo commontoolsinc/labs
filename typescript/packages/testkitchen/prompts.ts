@@ -24,6 +24,8 @@ and use it like this:
 
   <li>{formatDate(event.start_date)}</li>
 
+You can NOT return html from a lift function
+
 It's very IMPORTANT you provide the current state to a handler when calling it.
 
 When you have a handler defined like this \`increment\` handler:
@@ -40,7 +42,7 @@ You must ensure the state is provided to the handler. For example:
 
 DO NOT filter objects directly within the recipe. Instead, use a lift to filter the objects.
 
-To do a condition in a the UI of a recipe, you use the ifElse directive.  Both sides of the ifElse must return a UI element (return an empty <span> if you want to render nothing).
+To do a condition in a the UI of a recipe, you use the ifElse directive.  Both sides of the ifElse must return a UI element (return an empty <span> if you want to render nothing). If you use ifElse, you must first import it from \`@commontools/common-builder\`.
 
   <p>This event is {ifElse(state.is_private, <em>private</em>, <em>public</em>)}</p>
 
@@ -58,6 +60,8 @@ Do not evaluate conditionals in the UI JSX, unless it is within the ifElse direc
 To show a list of objects, you can use the map directive:
 
   <ul>{state.events.map((event) => <li>{event.title}</li>)}</ul>
+
+However it's important to understand that map is a custom implementation that does not support the index parameter.
 
 IMPORTANT: Conditionals in the UI JSX need to be evaluated in a lift or be a boolean-ish value.
 Since an empty list is falsy, you can use that to conditionally display a message.
@@ -82,12 +86,16 @@ DO NOT PERFORM ANY JS OPERATIONS INSIDE THE UI JSX!
 
   BAD: <p>Related Goals: {item.relatedGoals.join(", ")}</p>
   BAD: <ul>{cats.map((cat) => <li>{cat}</li>)}</ul>
+  BAD: <p>{hello + " world"}</p>
+  BAD: <p>{123 + 1}</p>
+  BAD: <p>{index + 1}</p>
 
   GOOD: <p>Related Goals: {item.relatedGoals.map((goal) => <li>{goal}</li>)}</p>
   GOOD: <p>Related Goals: {lift(({ item }) => item.relatedGoals.join(", "))(item)}</p>
   GOOD: <ul>{lift(({ cats }) => cats.map((cat) => <li>{cat}</li>))(cats)}</ul>
 
 CSS must be defined inline as a string, we do not support css-in-js.
+
 
 When possible, use our collection of custom web components. These are prefixed by \`<common-\`. Below is a list of all available components, and their event schemas which must be adhered to when writing custom handlers.
 
@@ -114,6 +122,33 @@ Form Components
             value: "string",
             placeholder: "string",
             appearance: "string",
+        }
+        events: {
+          CommonInputEvent: {
+            detail: {
+              id: string;
+              value: string;
+            }
+          }
+          CommonKeydownEvent: {
+            detail: {
+              id: string;
+              key: string;
+            }
+          }
+          CommonBlurEvent: {
+            detail: {
+              id: string;
+              value: string;
+            }
+          }
+        }
+    * <common-textarea>
+        props: {
+            value: "string",
+            placeholder: "string",
+            appearance: "string",
+            rows: number,
         }
         events: {
           CommonInputEvent: {
@@ -252,6 +287,16 @@ Other Components:
           }
         }
 
+Web components are built with LitElement, so the way you call them looks like:
+
+    <common-input
+      class="todo-input"
+      @input="\$\{oninput\}"
+      .placeholder="\$\{placeholder\}"
+      .value="\$\{value\}"
+    />
+
+
 Full Example of Counter Recipe:
 
 \`\`\`tsx
@@ -348,8 +393,8 @@ export default recipe(Schema, ({ items, title }) => {
 
 // const MODEL = "cerebras:llama-3.3-70b";
 // const MODEL = "groq:llama-3.3-70b-specdec";
-const MODEL = "groq:llama-3.3-70b-versatile";
-// const MODEL = "anthropic:claude-3-5-sonnet-latest";
+// const MODEL = "groq:llama-3.3-70b-versatile";
+const MODEL = "anthropic:claude-3-5-sonnet-latest";
 
 export type LLMHandlerPayload = {
   originalSpec: string;
