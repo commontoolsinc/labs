@@ -1,6 +1,6 @@
 import { h, Session, refer } from "@commontools/common-system";
 import { event, subview, Transact } from "../sugar.js";
-import { Charm, initRules, typedBehavior } from "./spell.jsx";
+import { Charm, initRules, initState, typedBehavior } from "./spell.jsx";
 import { z } from "zod";
 import { Reference } from "merkle-reference";
 import { importEntity, resolve, tagWithSchema } from "../sugar/sugar.jsx";
@@ -61,7 +61,7 @@ const contactEditor = typedBehavior(Contact, {
 
 export const addressBook = typedBehavior(
   AddressBook.pick({
-    // focused: true,
+    focused: true,
     "~/common/ui/list": true,
   }),
   {
@@ -77,7 +77,7 @@ export const addressBook = typedBehavior(
       </div>
     ),
     rules: schema => ({
-      init: initRules.init,
+      init: initState({ focused: false }),
 
       onAddContact: event("~/on/add-contact").transact(
         ({ self, event }, cmd) => {
@@ -110,7 +110,7 @@ export const addressBook = typedBehavior(
       onCloseEditor: event("~/on/close-editor")
         .with(resolve(AddressBook.pick({ focused: true })))
         .transact(({ self, focused }, cmd) => {
-          cmd.add(...Transact.remove(self, { focused }));
+          cmd.add(...Transact.set(self, { focused: false }));
         }),
 
       // bf: could sugar this

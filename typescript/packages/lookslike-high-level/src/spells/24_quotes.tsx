@@ -70,7 +70,7 @@ export const quotedb = typedBehavior(
   }),
   {
     render: ({ self, "~/common/ui/list": quoteList, focused }) => (
-      <div entity={self} name="Quotes">
+      <div entity={self} title="Quotes">
         {focused ? (
           <div>
             <h3>Edit Quote</h3>

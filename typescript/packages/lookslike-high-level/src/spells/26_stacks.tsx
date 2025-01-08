@@ -34,7 +34,7 @@ export const stackLayout = typedBehavior(
       "~/common/ui/list": stackList,
       "~/common/ui/picker": stackPicker,
     }) => (
-      <div entity={self} name="Quotes">
+      <div entity={self} title="Stack Layout">
         <h1>Stack Layout</h1>
         {subview(stackPicker)}
         <br />
