@@ -846,6 +846,10 @@ export const spellManager = typedBehavior(
                   <common-table
                     schema={Spell}
                     data={spells}
+                    edit
+                    delete
+                    download
+                    copy
                     onedit="~/on/edit-spell"
                     ondelete="~/on/delete-spell"
                   />
@@ -867,6 +871,7 @@ export const spellManager = typedBehavior(
                   <common-table
                     schema={Charm}
                     data={charms}
+                    delete
                     ondelete="~/on/delete-charm"
                   />
                 ) as any,

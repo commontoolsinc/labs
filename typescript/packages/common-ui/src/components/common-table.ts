@@ -168,6 +168,11 @@ export class CommonCardElement extends LitElement {
 export class CommonTableElement extends LitElement {
   @property({ type: Object }) schema: ZodObject<any> = null;
   @property({ type: Array }) data: any[] = [];
+  @property({ type: Boolean }) edit = false;
+  @property({ type: Boolean }) delete = false;
+  @property({ type: Boolean }) preview = false;
+  @property({ type: Boolean }) download = false;
+  @property({ type: Boolean }) copy = false;
   @state() selectedItem: any = null;
 
   static override styles = [
@@ -452,36 +457,56 @@ export class CommonTableElement extends LitElement {
                     `,
                   )}
                   <td>
-                    <button
-                      class="preview-button"
-                      @click=${() => this.showPreview(row)}
-                    >
-                      Preview
-                    </button>
-                    <button
-                      class="edit-button"
-                      @click=${() => this.handleEdit(row)}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      class="delete-button"
-                      @click=${() => this.handleDelete(row)}
-                    >
-                      Delete
-                    </button>
-                    <button
-                      class="download-button"
-                      @click=${() => this.handleDownload(row)}
-                    >
-                      Download
-                    </button>
-                    <button
-                      class="copy-button"
-                      @click=${() => this.handleCopySelf(row)}
-                    >
-                      Copy Self
-                    </button>
+                    ${this.preview
+                      ? html`
+                          <button
+                            class="preview-button"
+                            @click=${() => this.showPreview(row)}
+                          >
+                            Preview
+                          </button>
+                        `
+                      : ""}
+                    ${this.edit
+                      ? html`
+                          <button
+                            class="edit-button"
+                            @click=${() => this.handleEdit(row)}
+                          >
+                            Edit
+                          </button>
+                        `
+                      : ""}
+                    ${this.delete
+                      ? html`
+                          <button
+                            class="delete-button"
+                            @click=${() => this.handleDelete(row)}
+                          >
+                            Delete
+                          </button>
+                        `
+                      : ""}
+                    ${this.download
+                      ? html`
+                          <button
+                            class="download-button"
+                            @click=${() => this.handleDownload(row)}
+                          >
+                            Download
+                          </button>
+                        `
+                      : ""}
+                    ${this.copy
+                      ? html`
+                          <button
+                            class="copy-button"
+                            @click=${() => this.handleCopySelf(row)}
+                          >
+                            Copy Ref
+                          </button>
+                        `
+                      : ""}
                   </td>
                 </tr>
               `,

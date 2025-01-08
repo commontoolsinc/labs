@@ -1,6 +1,6 @@
 import { h, Session, refer } from "@commontools/common-system";
 import { event, subview, Transact } from "../sugar.js";
-import { Charm, initRules, typedBehavior } from "./spell.jsx";
+import { Charm, initRules, initState, typedBehavior } from "./spell.jsx";
 import { z } from "zod";
 import { Reference } from "merkle-reference";
 import { importEntity, resolve, tagWithSchema } from "../sugar/sugar.jsx";
@@ -65,22 +65,57 @@ const quoteEditor = typedBehavior(Quote, {
 
 export const quotedb = typedBehavior(
   QuoteDB.pick({
+    focused: true,
     "~/common/ui/list": true,
   }),
   {
-    render: ({ self, "~/common/ui/list": quoteList }) => (
+    render: ({ self, "~/common/ui/list": quoteList, focused }) => (
       <div entity={self} name="Quotes">
-        <div>
-          <common-form schema={Quote} reset onsubmit="~/on/add-quote" />
-        </div>
-
+        {focused ? (
+          <div>
+            <h3>Edit Quote</h3>
+            <button onclick="~/on/close-quote">Close</button>
+            <Charm self={focused} spell={quoteEditor as any} />
+          </div>
+        ) : (
+          <div>
+            <common-form schema={Quote} reset onsubmit="~/on/add-quote" />
+          </div>
+        )}
         <br />
         <br />
         {subview(quoteList)}
       </div>
     ),
     rules: schema => ({
-      init: initRules.init,
+      init: initState({ focused: false }),
+
+      renderQuoteList: resolve(QuoteDB.pick({ quotes: true }))
+        .update(({ self, quotes }) => {
+          return [
+            {
+              Upsert: [
+                self,
+                "~/common/ui/list",
+                (
+                  <common-table
+                    schema={Quote}
+                    data={quotes}
+                    preview
+                    edit
+                    download
+                    delete
+                    copy
+                    onedit="~/on/focus-quote"
+                    ondelete="~/on/delete-quote"
+                    onimport="~/on/import-quotes"
+                  />
+                ) as any,
+              ],
+            },
+          ];
+        })
+        .commit(),
 
       onAddQuote: event("~/on/add-quote").transact(({ self, event }, cmd) => {
         const ev = Session.resolve<SubmitEvent>(event);
@@ -97,9 +132,21 @@ export const quotedb = typedBehavior(
 
       onEditQuote: event("~/on/edit-quote").transact(({ self, event }, cmd) => {
         const ev = Session.resolve<EditEvent>(event);
-        cmd.add(...Transact.set(self, { focused: ev.detail.item }));
         cmd.add(...tagWithSchema(self, Quote));
       }),
+
+      onFocusQuote: event("~/on/focus-quote").transact(
+        ({ self, event }, cmd) => {
+          const ev = Session.resolve<EditEvent>(event);
+          cmd.add(...Transact.set(self, { focused: ev.detail.item }));
+        },
+      ),
+
+      onCloseQuote: event("~/on/close-quote")
+        .with(resolve(QuoteDB.pick({ focused: true })))
+        .transact(({ self, focused }, cmd) => {
+          cmd.add(...Transact.set(self, { focused: false }));
+        }),
 
       onDeleteQuote: event("~/on/delete-quote").transact(
         ({ self, event }, cmd) => {
@@ -128,28 +175,6 @@ export const quotedb = typedBehavior(
           cmd.add(...log(self, `Imported ${quotes.length} quotes`));
         },
       ),
-
-      renderQuoteList: resolve(QuoteDB.pick({ quotes: true }))
-        .update(({ self, quotes }) => {
-          return [
-            {
-              Upsert: [
-                self,
-                "~/common/ui/list",
-                (
-                  <common-table
-                    schema={Quote}
-                    data={quotes}
-                    onedit="~/on/edit-quote"
-                    ondelete="~/on/delete-quote"
-                    onimport="~/on/import-quotes"
-                  />
-                ) as any,
-              ],
-            },
-          ];
-        })
-        .commit(),
     }),
   },
 );

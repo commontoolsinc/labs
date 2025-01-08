@@ -1,8 +1,4 @@
-import {
-  h,
-  Session,
-  refer,
-} from "@commontools/common-system";
+import { h, Session, refer } from "@commontools/common-system";
 import { event, subview, Transact } from "../sugar.js";
 import { makeEmail, sendMessage } from "../effects/gmail.jsx";
 import { initRules, typedBehavior } from "./spell.jsx";
@@ -19,55 +15,70 @@ const ComposedMessage = z.object({
 
 const Composer = z.object({
   sent: z.array(ComposedMessage).describe("The emails that have been sent"),
-  status: z.string().default('init'),
-  '~/common/ui/list': UiFragment.describe("The UI fragment for the sent emails list")
-})
+  status: z.string().default("init"),
+  "~/common/ui/list": UiFragment.describe(
+    "The UI fragment for the sent emails list",
+  ),
+});
 
 type SubmitEvent = {
-  detail: { value: z.infer<typeof ComposedMessage> }
+  detail: { value: z.infer<typeof ComposedMessage> };
 };
 
-export const emailComposer = typedBehavior(Composer.pick({
-  status: true,
-  '~/common/ui/list': true
-}), {
-  render: ({ self, status, '~/common/ui/list': sentList }) => (
-    <div entity={self} >
-      <common-form
-        schema={ComposedMessage}
-        reset
-        onsubmit="~/on/send-email"
-      />
-      {subview(sentList)}
-    </div>
-  ),
-  rules: schema => ({
-    init: initRules.init,
+export const emailComposer = typedBehavior(
+  Composer.pick({
+    status: true,
+    "~/common/ui/list": true,
+  }),
+  {
+    render: ({ self, status, "~/common/ui/list": sentList }) => (
+      <div entity={self}>
+        <common-form
+          schema={ComposedMessage}
+          reset
+          onsubmit="~/on/send-email"
+        />
+        {subview(sentList)}
+      </div>
+    ),
+    rules: schema => ({
+      init: initRules.init,
 
-    onSendEmail: event("~/on/send-email")
-      .transact(({ self, event }, cmd) => {
+      onSendEmail: event("~/on/send-email").transact(({ self, event }, cmd) => {
         const ev = Session.resolve<SubmitEvent>(event);
         const msg = ev.detail.value;
 
-        debugger
+        debugger;
         cmd.add(
-          sendMessage(self, GMAIL_REQUEST, "me", makeEmail(msg.to, msg.subject, msg.body)),
+          sendMessage(
+            self,
+            GMAIL_REQUEST,
+            "me",
+            makeEmail(msg.to, msg.subject, msg.body),
+          ),
         );
 
-        cmd.add(...Transact.set(self, { status: "sending", }));
+        cmd.add(...Transact.set(self, { status: "sending" }));
 
-        cmd.add({ Import: msg })
-        cmd.add(...Transact.assert(self, { sent: refer(msg) }))
+        cmd.add({ Import: msg });
+        cmd.add(...Transact.assert(self, { sent: refer(msg) }));
       }),
 
-    renderSentList: resolve(Composer.pick({ sent: true }))
-      .update(({ self, sent }) => {
-        return [{
-          Upsert: [self, '~/common/ui/list', <common-table
-            schema={ComposedMessage}
-            data={sent}
-          /> as any]
-        }]
-      }).commit(),
-  }),
-});
+      renderSentList: resolve(Composer.pick({ sent: true }))
+        .update(({ self, sent }) => {
+          return [
+            {
+              Upsert: [
+                self,
+                "~/common/ui/list",
+                (
+                  <common-table schema={ComposedMessage} preview data={sent} />
+                ) as any,
+              ],
+            },
+          ];
+        })
+        .commit(),
+    }),
+  },
+);
