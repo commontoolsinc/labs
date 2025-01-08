@@ -51,6 +51,7 @@ export function map(
     cause,
   });
   result.sourceCell = parentCell;
+
   let sourceRefToResult: { ref: CellReference; resultCell: CellImpl<any> }[] =
     [];
 
@@ -103,9 +104,11 @@ export function map(
       value = followCellReferences(value, log);
 
       // If the value is new, instantiate the recipe and store the result cell
-      let itemResult = sourceRefToResult.find(({ ref }) =>
-        isEqualCellReferences(ref, value),
-      );
+      let itemResult =
+        index < sourceRefToResult.length &&
+        isEqualCellReferences(sourceRefToResult[index].ref, value)
+          ? sourceRefToResult[index]
+          : undefined;
 
       if (!itemResult) {
         if (value.cell.getAtPath(value.path) === undefined) {
@@ -117,14 +120,14 @@ export function map(
         if (!value.cell.entityId) value.cell.generateEntityId();
         const resultCell = cell();
         resultCell.generateEntityId({ map: value.cell.entityId });
-        run(op, value, resultCell);
+        run(op, { item: value, index }, resultCell);
         resultCell.sourceCell!.sourceCell = parentCell;
         if (Array.isArray(parentCell.get())) debugger;
 
         // TODO: Have `run` return cancel, once we make resultCell required
         addCancel(cancels.get(resultCell));
         itemResult = { ref: value, resultCell };
-        sourceRefToResult.push(itemResult);
+        sourceRefToResult[index] = itemResult;
       }
 
       // Send the result value to the result cell
