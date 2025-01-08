@@ -125,8 +125,9 @@ function factoryFromRecipe<T, R>(
   const nodes = new Set<NodeRef>();
 
   const collectCellsAndNodes = (value: Opaque<any>) =>
-    traverseValue(value, (value) => {
+    traverseValue(value, value => {
       if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
+      if (isOpaqueRef(value)) value = value.unsafe_getExternal();
       if (
         (isOpaqueRef(value) || isShadowRef(value)) &&
         !cells.has(value) &&
@@ -172,7 +173,7 @@ function factoryFromRecipe<T, R>(
     });
 
   // Then from assignments in nodes
-  cells.forEach((cell) => {
+  cells.forEach(cell => {
     if (cell.export().path.length) return;
     cell.export().nodes.forEach((node: NodeRef) => {
       if (typeof node.inputs === "object" && node.inputs !== null)
@@ -185,7 +186,7 @@ function factoryFromRecipe<T, R>(
 
   // [For unsafe bindings] Also collect otherwise disconnected cells and nodes,
   // since they might only be mentioned via a code closure in a lifted function.
-  getTopFrame()?.opaqueRefs.forEach((ref) => collectCellsAndNodes(ref));
+  getTopFrame()?.opaqueRefs.forEach(ref => collectCellsAndNodes(ref));
 
   // Then assign paths on the recipe cell for all cells. For now we just assign
   // incremental counters, since we don't have access to the original variable
@@ -205,7 +206,7 @@ function factoryFromRecipe<T, R>(
     if (!paths.has(top)) paths.set(top, ["internal", name ?? `__#${count++}`]);
     if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
   });
-  shadows.forEach((shadow) => {
+  shadows.forEach(shadow => {
     if (paths.has(shadow)) return;
     paths.set(shadow, []);
   });
@@ -222,7 +223,7 @@ function factoryFromRecipe<T, R>(
 
   // Set initial values for all cells, add non-inputs defaults
   const initial: any = {};
-  cells.forEach((cell) => {
+  cells.forEach(cell => {
     // Only process roots of extra cells:
     if (cell === inputs) return;
     const { path, value, defaultValue } = cell.export();
@@ -234,7 +235,7 @@ function factoryFromRecipe<T, R>(
   });
 
   // External cells all have to be added to the initial state
-  cells.forEach((cell) => {
+  cells.forEach(cell => {
     const { external } = cell.export();
     if (external) setValueAtPath(initial, paths.get(cell)!, external);
   });
@@ -277,7 +278,7 @@ function factoryFromRecipe<T, R>(
       ? (zodToJsonSchema(resultSchemaArg) as JSON)
       : resultSchemaArg ?? ({} as JSON);
 
-  const serializedNodes = Array.from(nodes).map((node) => {
+  const serializedNodes = Array.from(nodes).map(node => {
     const module = toJSONWithAliases(node.module, paths) as Module;
     const inputs = toJSONWithAliases(node.inputs, paths)!;
     const outputs = toJSONWithAliases(node.outputs, paths)!;
@@ -317,8 +318,8 @@ function factoryFromRecipe<T, R>(
   // Bind all cells to the recipe
   // TODO: Does OpaqueRef cause issues here?
   [...cells]
-    .filter((cell) => !cell.export().path.length) // Only bind root cells
-    .forEach((cell) =>
+    .filter(cell => !cell.export().path.length) // Only bind root cells
+    .forEach(cell =>
       cell.unsafe_bindToRecipeAndPath(recipeFactory, paths.get(cell)!),
     );
 

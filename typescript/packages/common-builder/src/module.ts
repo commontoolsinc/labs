@@ -180,10 +180,10 @@ export const derive = <In, Out>(
 ): OpaqueRef<Out> => lift(f)(input);
 
 // Like `derive`, but for event handlers
-export const event = <T = any>(
-  input: Opaque<T>,
-  f: (event: T, self: any) => any,
-): OpaqueRef<T> => handler(f)(input);
+// export const event = <T = any>(
+//   input: Opaque<T>,
+//   f: (event: T, self: any) => any,
+// ): OpaqueRef<T> => handler(f)(input);
 
 // unsafe closures: like derive, but doesn't need any arguments
 export const compute: <T>(fn: () => T) => OpaqueRef<T> = (fn: () => any) =>

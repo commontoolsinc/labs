@@ -1,25 +1,31 @@
 import { VNode, Child } from "./view.js";
 
 declare global {
-    namespace JSX {
-        interface IntrinsicElements {
-            [elemName: string]: any;
-        }
+  namespace JSX {
+    interface IntrinsicElements {
+      [elemName: string]: any;
     }
+  }
 }
 
-const Fragment = 'Fragment';
+const Fragment = "Fragment";
 
 function h(
-    name: string,
-    props: { [key: string]: any } | null,
-    ...children: Child[]
+  name: string | ((...args: any[]) => any),
+  props: { [key: string]: any } | null,
+  ...children: Child[]
 ): VNode {
+  if (typeof name === "function")
+    return name({
+      ...(props ?? {}),
+      children: children.flat(),
+    });
+  else
     return {
-        type: 'vnode',
-        name,
-        props: props || {},
-        children: children.flat(),
+      type: "vnode",
+      name,
+      props: props ?? {},
+      children: children.flat(),
     };
 }
 
