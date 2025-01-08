@@ -105,7 +105,7 @@ export function map(
 
       // If the value is new, instantiate the recipe and store the result cell
       let itemResult =
-        sourceRefToResult.length > index &&
+        index < sourceRefToResult.length &&
         isEqualCellReferences(sourceRefToResult[index].ref, value)
           ? sourceRefToResult[index]
           : undefined;

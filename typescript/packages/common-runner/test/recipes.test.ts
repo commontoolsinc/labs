@@ -73,18 +73,20 @@ describe("Recipe Runner", () => {
   });
 
   it("should handle recipes with map nodes", async () => {
-    const doubleArray = recipe<{ values: { x: number }[] }>(
-      "Double numbers",
+    const multipliedArray = recipe<{ values: { x: number }[] }>(
+      "Multiply numbers",
       ({ values }) => {
-        const doubled = values.map(({ x }) => {
-          const double = lift<number>(x => x * 2);
-          return { double: double(x) };
+        const multiplied = values.map(({ x }, index) => {
+          const multiply = lift<number>(x => x * (index + 1));
+          return { multiplied: multiply(x) };
         });
-        return { doubled };
+        return { multiplied };
       },
     );
 
-    const result = run(doubleArray, { values: [{ x: 1 }, { x: 2 }, { x: 3 }] });
+    const result = run(multipliedArray, {
+      values: [{ x: 1 }, { x: 2 }, { x: 3 }],
+    });
 
     await idle();
 
@@ -93,7 +95,7 @@ describe("Recipe Runner", () => {
     await new Promise(resolve => setTimeout(resolve, 100));
 
     expect(result.getAsQueryResult()).toMatchObject({
-      doubled: [{ double: 2 }, { double: 4 }, { double: 6 }],
+      multiplied: [{ multiplied: 1 }, { multiplied: 4 }, { multiplied: 9 }],
     });
   });
 

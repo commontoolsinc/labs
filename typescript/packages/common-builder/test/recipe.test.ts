@@ -232,21 +232,21 @@ describe("recipe with map node that references a parent cell", () => {
 
 describe("recipe with map node that references a parent cell in another recipe", () => {
   it("correctly creates references to the parent cells", () => {
-    const multiplyArray = recipe<{ values: { x: number }[]; factor: number }>(
+    const multiplyArray = recipe<{ values: { x: number }[] }>(
       "Double numbers",
-      ({ values, factor }) => {
+      ({ values }) => {
         const wrapper = recipe("Wrapper", () => {
-          const doubled = values.map(({ x }) => {
-            const double = lift<{ x: number; factor: number }>(
+          const multiplied = values.map(({ x }, index) => {
+            const multiply = lift<{ x: number; factor: number }>(
               ({ x, factor }) => ({
                 x: x * factor,
               }),
             );
-            return { doubled: double({ x, factor }) };
+            return { multiplied: multiply({ x, factor: index }) };
           });
-          return { doubled };
+          return { multiplied };
         });
-        return wrapper({ values, factor });
+        return wrapper({ values });
       },
     );
 
@@ -257,7 +257,7 @@ describe("recipe with map node that references a parent cell in another recipe",
     expect(isRecipe(subSubRecipe)).toBeTruthy();
     expect(subSubRecipe.nodes[0].inputs).toEqual({
       x: { $alias: { cell: 2, path: ["argument", "item", "x"] } },
-      factor: { $alias: { path: ["argument", "factor"] } },
+      factor: { $alias: { cell: 2, path: ["argument", "index"] } },
     });
   });
 });
