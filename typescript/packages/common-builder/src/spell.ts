@@ -13,11 +13,13 @@ import { cell } from "@commontools/common-runner";
 
 type PathSegment = PropertyKey | { fn: string; args: any[] };
 const getPath = Symbol("getPath");
+type PathCollector = Function & { [getPath]: PathSegment[]; 
+              [key: string]: PathCollector };
 
 // Create the path collector proxy
-function createPathCollector(path: PathSegment[] = []): any {
+function createPathCollector(path: PathSegment[] = []): PathCollector {
   return new Proxy(
-    function () {}, // Base target is a function to support function calls
+    function () {} as unknown as PathCollector, // Base target is a function to support function calls
     {
       get(target, prop) {
         if (prop === getPath) return path;
@@ -48,12 +50,12 @@ export const $ = createPathCollector();
 
 // Resolve $ to a paths on `self`
 // TODO: Also for non-top-level ones
-function resolve$(self: OpaqueRef<any>, query: any) {
+function resolve$(self: OpaqueRef<any>, query: PathCollector) {
   const entries = Object.entries(query);
   const result: Record<string, any> = {};
 
   for (const [key, value] of entries) {
-    if (value && typeof value === "object" && getPath in value) {
+    if (value && typeof value === "function" && value[getPath]) {
       const path = value[getPath] as PathSegment[];
 
       let current = self;
@@ -219,6 +221,8 @@ export abstract class Spell<T extends Record<string, any>> {
         ) {
           condition["$event"] = this.streams[condition["$event"]];
         }
+
+        condition.self = self;
 
         derive(condition, rule.handlerFn);
       });

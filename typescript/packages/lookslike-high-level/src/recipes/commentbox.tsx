@@ -118,8 +118,9 @@ export class CommentBoxSpell extends Spell<CommentsState> {
     });
 
     this.addRule(
-      select({ meta: $.meta }),
-      ({ meta }) => ({ metaLength: meta?.length ?? 0 }),
+      select({ category: $.meta.category, title: $.title }),
+      ({ self, category, title }) =>
+        this.update(self, { metaLength: title.length + (category ?? "").length })
     );
   }
 
@@ -132,11 +133,12 @@ export class CommentBoxSpell extends Spell<CommentsState> {
     };
   }
 
-  override render({ description, title, meta }: OpaqueRef<CommentsState>) {
+  override render({ description, title, meta, metaLength }: OpaqueRef<CommentsState>) {
     return (
       <div>
         <h1>{title}</h1>
         <p>{description}</p>
+        <p>metaLength: {metaLength}</p>
         <pre>{derive(meta, meta => JSON.stringify(meta, null, 2))}</pre>
         {ifElse(
           meta,
@@ -155,8 +157,5 @@ export class CommentBoxSpell extends Spell<CommentsState> {
 }
 
 const commentBox = new CommentBoxSpell().compile("Comment Box");
-
-(window as any).metadata = metadata;
-(window as any).commentBox = commentBox;
 
 export default commentBox;
