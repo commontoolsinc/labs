@@ -1,13 +1,11 @@
-import {
-  h,
-  Session,
-  refer,
-  $,
-  Task,
-  select,
-} from "@commontools/common-system";
+import { h, Session, refer, $, Task, select } from "@commontools/common-system";
 import { event, subview, Transact } from "../sugar.js";
-import { Charm as CharmComponent, initRules, typedBehavior, typedService } from "./spell.jsx";
+import {
+  Charm as CharmComponent,
+  initRules,
+  typedBehavior,
+  typedService,
+} from "./spell.jsx";
 import { z } from "zod";
 import { fromString, Reference } from "merkle-reference";
 import { importEntity, resolve, tagWithSchema } from "../sugar/sugar.jsx";
@@ -15,11 +13,30 @@ import { Ref, UiFragment } from "../sugar/zod.js";
 import { tsToExports } from "../localBuild.js";
 import { sendMessage } from "./stickers/chat.jsx";
 import { llm, RESPONSE } from "../effects/fetch.jsx";
+import { log } from "../sugar/activity.js";
 
-const adjectives = ['indigo', 'azure', 'crimson', 'emerald', 'golden', 'silver', 'obsidian', 'sapphire'];
-const nouns = ['crossfire', 'thunder', 'storm', 'blade', 'phoenix', 'dragon', 'whisper', 'shadow'];
+const adjectives = [
+  "indigo",
+  "azure",
+  "crimson",
+  "emerald",
+  "golden",
+  "silver",
+  "obsidian",
+  "sapphire",
+];
+const nouns = [
+  "crossfire",
+  "thunder",
+  "storm",
+  "blade",
+  "phoenix",
+  "dragon",
+  "whisper",
+  "shadow",
+];
 
-const CODE_REQUEST = '~/spell/modification-request';
+const CODE_REQUEST = "~/spell/modification-request";
 
 function grabJs(result: string) {
   if (!result) {
@@ -40,48 +57,66 @@ const generateIdentifier = () => {
 };
 
 // Define the core schemas
-export const Spell = z.object({
-  name: z.string().min(1).max(255).describe("The name of the spell"),
-  sourceCode: z.string().min(1).max(8192).describe("The spell's source code"),
-  notes: z.string().describe("Notes about the spell"),
-  instances: z.array(Ref).describe("References to charm instances of this spell")
-}).describe('Spell');
+export const Spell = z
+  .object({
+    name: z.string().min(1).max(255).describe("The name of the spell"),
+    sourceCode: z.string().min(1).max(8192).describe("The spell's source code"),
+    notes: z.string().describe("Notes about the spell"),
+    instances: z
+      .array(Ref)
+      .describe("References to charm instances of this spell"),
+  })
+  .describe("Spell");
 
-const Charm = z.object({
-  spell: Ref.describe("Reference to the spell this charm instantiates"),
-  name: z.string().min(1).max(255).describe("The name of the charm"),
-});
+export const Charm = z
+  .object({
+    spell: Ref.describe("Reference to the spell this charm instantiates"),
+    name: z.string().min(1).max(255).describe("The name of the charm"),
+  })
+  .describe("Charm");
 
-const CharmInstance = z.object({ charm: Ref })
+const CharmInstance = z.object({ charm: Ref });
 
 const SpellManager = z.object({
   editingSpell: Ref.describe("The spell currently being edited"),
   focusedCharm: Ref.describe("The charm that is currently being viewed"),
-  spells: z.array(Spell.omit({ instances: true })).describe("All spells in the system"),
+  spells: z
+    .array(Spell.omit({ instances: true }))
+    .describe("All spells in the system"),
   charms: z.array(Charm).describe("All charm instances"),
-  '~/common/ui/spell-list': UiFragment.describe("The UI fragment for the spells list"),
-  '~/common/ui/charm-list': UiFragment.describe("The UI fragment for the charms list")
+  "~/common/ui/spell-list": UiFragment.describe(
+    "The UI fragment for the spells list",
+  ),
+  "~/common/ui/charm-list": UiFragment.describe(
+    "The UI fragment for the charms list",
+  ),
 });
 
 const SourceModificationPrompt = z.object({
-  prompt: z.string().min(1).max(1000).describe("Prompt for modifying source code"),
-  sourceId: Ref.describe("Reference to the spell to modify")
+  prompt: z
+    .string()
+    .min(1)
+    .max(1000)
+    .describe("Prompt for modifying source code"),
+  sourceId: Ref.describe("Reference to the spell to modify"),
 });
 
 type SubmitEvent<T> = {
-  detail: { value: T }
+  detail: { value: T };
 };
 
 type FocusEvent = {
-  detail: { charmId: Reference }
+  detail: { charmId: Reference };
 };
 
 type EditEvent = {
-  detail: { item: Reference }
+  detail: { item: Reference };
 };
 
 const CharmWithSpell = z.object({
-  spell: Spell.omit({ instances: true }).describe("Reference to the spell this charm instantiates")
+  spell: Spell.omit({ instances: true }).describe(
+    "Reference to the spell this charm instantiates",
+  ),
 });
 
 export const charmViewer = typedService(CharmWithSpell, {
@@ -92,17 +127,17 @@ export const charmViewer = typedService(CharmWithSpell, {
         spell: {
           self: $.spell,
           name: $.name,
-          sourceCode: $.sourceCode
-        }
+          sourceCode: $.sourceCode,
+        },
       },
       where: [
-        { Case: [$.self, 'spell', $.spell] },
+        { Case: [$.self, "spell", $.spell] },
         { Case: [$.spell, `sourceCode`, $.sourceCode] },
         { Case: [$.spell, `name`, $.name] },
       ],
       *perform({
         self,
-        spell: { name, sourceCode }
+        spell: { name, sourceCode },
       }: {
         self: Reference;
         spell: { name: string; sourceCode: string };
@@ -121,20 +156,22 @@ export const charmViewer = typedService(CharmWithSpell, {
             Upsert: [
               self,
               "~/common/ui",
-              <div entity={self}>
-                <common-charm
-                  id={child.toString()}
-                  key={child.toString()}
-                  spell={() => compiled.exports.spell}
-                  entity={() => child}
-                ></common-charm>
-              </div> as any,
+              (
+                <div entity={self}>
+                  <common-charm
+                    id={child.toString()}
+                    key={child.toString()}
+                    spell={() => compiled.exports.spell}
+                    entity={() => child}
+                  ></common-charm>
+                </div>
+              ) as any,
             ],
           },
         ];
       },
-    }
-  })
+    },
+  }),
 });
 
 const spellEditor = typedBehavior(Spell, {
@@ -158,27 +195,33 @@ const spellEditor = typedBehavior(Spell, {
     </div>
   ),
   rules: _ => ({
-    onSave: event("~/on/save")
-      .transact(({ self, event }, cmd) => {
-        const ev = Session.resolve<SubmitEvent<z.infer<typeof Spell>>>(event);
-        const spell = ev.detail.value;
-        cmd.add(...Transact.set(self, spell))
-        cmd.add(...tagWithSchema(self, Spell))
-      }),
+    onSave: event("~/on/save").transact(({ self, event }, cmd) => {
+      const ev = Session.resolve<SubmitEvent<z.infer<typeof Spell>>>(event);
+      const spell = ev.detail.value;
+      cmd.add(...Transact.set(self, spell));
+      cmd.add(...tagWithSchema(self, Spell));
+    }),
 
     onModifyWithAI: event("~/on/modify-with-ai")
       .with(resolve(Spell.pick({ sourceCode: true, notes: true })))
       .transact(({ self, event, sourceCode, notes }, cmd) => {
-        const ev = Session.resolve<SubmitEvent<z.infer<typeof SourceModificationPrompt>>>(event);
+        const ev =
+          Session.resolve<
+            SubmitEvent<z.infer<typeof SourceModificationPrompt>>
+          >(event);
         const message = `Modify the attached source code based on the following prompt:
           <context>${notes}</context>
           <modification>${ev.detail.value.prompt}</modification>
 
           \`\`\`js\n${sourceCode}\n\`\`\``;
 
-        cmd.add(llm(self, CODE_REQUEST, {
-          messages: [{ role: 'user', content: message }, { role: 'assistant', content: '```js\n' }],
-          system: `
+        cmd.add(
+          llm(self, CODE_REQUEST, {
+            messages: [
+              { role: "user", content: message },
+              { role: "assistant", content: "```js\n" },
+            ],
+            system: `
 
           Here is a library of Spells that you should refer to while modifying the code:
 
@@ -643,7 +686,8 @@ const spellEditor = typedBehavior(Spell, {
           </music-library>
 
           Return the code in full.`,
-        }).json());
+          }).json(),
+        );
       }),
 
     onModificationComplete: select({
@@ -656,167 +700,197 @@ const spellEditor = typedBehavior(Spell, {
       .match($.request, RESPONSE.JSON, $.payload)
       .match($.payload, "content", $.content)
       .transact(({ self, request, content, payload }, cmd) => {
-        const code = grabJs(content)
+        const code = grabJs(content);
 
-        cmd.add({ Retract: [self, CODE_REQUEST, request] })
-        cmd.add({ Retract: [request, RESPONSE.JSON, payload] })
+        cmd.add({ Retract: [self, CODE_REQUEST, request] });
+        cmd.add({ Retract: [request, RESPONSE.JSON, payload] });
         if (code) {
-          cmd.add(...Transact.set(self, { sourceCode: code }))
+          cmd.add(...Transact.set(self, { sourceCode: code }));
         }
-      })
-  })
+      }),
+  }),
 });
 
 export const spellManager = typedBehavior(
   SpellManager.pick({
     editingSpell: true,
     focusedCharm: true,
-    '~/common/ui/spell-list': true,
-    '~/common/ui/charm-list': true
-  }), {
-  render: ({ self, editingSpell, focusedCharm, '~/common/ui/spell-list': spellList, '~/common/ui/charm-list': charmList }) => (
-    <div entity={self} title="Spell Manager">
-      <div>
-        <details>
-          <h3>Create New Spell</h3>
-          <common-form
-            schema={Spell.omit({ instances: true })}
-            reset
-            onsubmit="~/on/add-spell"
-          />
-
-          <h3>Instantiate Charm</h3>
-          <common-form
-            schema={Charm.omit({ name: true })}
-            referenceFields={new Set(['spell'])}
-            reset
-            onsubmit="~/on/create-charm"
-          />
-
-          <h3>Focus Charm</h3>
-          <common-form
-            schema={CharmInstance}
-            referenceFields={new Set(['charm'])}
-            reset
-            onsubmit="~/on/focus-charm"
-          />
-        </details>
-      </div>
-
-      {editingSpell && (
+    "~/common/ui/spell-list": true,
+    "~/common/ui/charm-list": true,
+  }),
+  {
+    render: ({
+      self,
+      editingSpell,
+      focusedCharm,
+      "~/common/ui/spell-list": spellList,
+      "~/common/ui/charm-list": charmList,
+    }) => (
+      <div entity={self} title="Spell Manager">
         <div>
-          <h3>Edit Spell</h3>
-          <button onclick="~/on/close-spell-editor">Close</button>
-          <CharmComponent self={editingSpell} spell={spellEditor as any} />
-        </div>
-      )}
+          <details>
+            <h3>Create New Spell</h3>
+            <common-form
+              schema={Spell.omit({ instances: true })}
+              reset
+              onsubmit="~/on/add-spell"
+            />
 
-      {focusedCharm && (
+            <h3>Instantiate Charm</h3>
+            <common-form
+              schema={Charm.omit({ name: true })}
+              referenceFields={new Set(["spell"])}
+              reset
+              onsubmit="~/on/create-charm"
+            />
+
+            <h3>Focus Charm</h3>
+            <common-form
+              schema={CharmInstance}
+              referenceFields={new Set(["charm"])}
+              reset
+              onsubmit="~/on/focus-charm"
+            />
+          </details>
+        </div>
+
+        {editingSpell && (
+          <div>
+            <h3>Edit Spell</h3>
+            <button onclick="~/on/close-spell-editor">Close</button>
+            <CharmComponent self={editingSpell} spell={spellEditor as any} />
+          </div>
+        )}
+
+        {focusedCharm && (
+          <div>
+            <h3>Focused Charm</h3>
+            <button onclick="~/on/unfocus-charm">Close</button>
+            <CharmComponent self={focusedCharm} spell={charmViewer as any} />
+          </div>
+        )}
+
         <div>
-          <h3>Focused Charm</h3>
-          <button onclick="~/on/unfocus-charm">Close</button>
-          <CharmComponent self={focusedCharm} spell={charmViewer as any} />
+          <h3>Spells</h3>
+          {subview(spellList)}
+          <h3>Charms</h3>
+          {subview(charmList)}
         </div>
-      )}
-
-      <div>
-        <h3>Spells</h3>
-        {subview(spellList)}
-        <h3>Charms</h3>
-        {subview(charmList)}
       </div>
-    </div>
-  ),
-  rules: _ => ({
-    init: initRules.init,
+    ),
+    rules: _ => ({
+      init: initRules.init,
 
-    onAddSpell: event("~/on/add-spell")
-      .transact(({ self, event }, cmd) => {
+      onAddSpell: event("~/on/add-spell").transact(({ self, event }, cmd) => {
         const ev = Session.resolve<SubmitEvent<z.infer<typeof Spell>>>(event);
         const spell = { ...ev.detail.value };
 
-        const { self: id, instructions } = importEntity(spell, Spell)
+        const { self: id, instructions } = importEntity(spell, Spell);
         cmd.add(...instructions);
         cmd.add(...Transact.assert(self, { spells: id }));
       }),
 
-    onCreateCharm: event("~/on/create-charm")
-      .transact(({ self, event }, cmd) => {
-        const ev = Session.resolve<SubmitEvent<z.infer<typeof Charm>>>(event);
-        const charm = ev.detail.value as { spell: Reference };
-        (charm as any).name = generateIdentifier();
+      onCreateCharm: event("~/on/create-charm").transact(
+        ({ self, event }, cmd) => {
+          const ev = Session.resolve<SubmitEvent<z.infer<typeof Charm>>>(event);
+          const charm = ev.detail.value as { spell: Reference };
+          (charm as any).name = generateIdentifier();
 
-        const { self: charmId, instructions } = importEntity(charm, Charm);
-        cmd.add(...instructions);
-        cmd.add(...Transact.assert(self, { charms: charmId }));
+          const { self: charmId, instructions } = importEntity(charm, Charm);
+          cmd.add(...instructions);
+          cmd.add(...Transact.assert(self, { charms: charmId }));
+          cmd.add(...log(self, "Created charm " + (charm as any).name));
 
-        if (charm.spell) {
-          cmd.add(...Transact.assert(charm.spell, { instances: charmId }));
-        }
-      }),
+          if (charm.spell) {
+            cmd.add(...Transact.assert(charm.spell, { instances: charmId }));
+          }
+        },
+      ),
 
-    onFocusCharm: event("~/on/focus-charm")
-      .transact(({ self, event }, cmd) => {
-        const ev = Session.resolve<SubmitEvent<z.infer<typeof CharmInstance>>>(event);
-        if (ev.detail.value.charm) {
-          const charm = (ev.detail.value.charm)
-          cmd.add(...Transact.set(self, { focusedCharm: charm }));
-        }
-      }),
+      onFocusCharm: event("~/on/focus-charm").transact(
+        ({ self, event }, cmd) => {
+          const ev =
+            Session.resolve<SubmitEvent<z.infer<typeof CharmInstance>>>(event);
+          if (ev.detail.value.charm) {
+            const charm = ev.detail.value.charm;
+            cmd.add(...Transact.set(self, { focusedCharm: charm }));
+          }
+        },
+      ),
 
-    onEditSpell: event("~/on/edit-spell")
-      .transact(({ self, event }, cmd) => {
+      onEditSpell: event("~/on/edit-spell").transact(({ self, event }, cmd) => {
         const ev = Session.resolve<EditEvent>(event);
-        cmd.add(...Transact.set(self, { editingSpell: ev.detail.item }))
+        cmd.add(...Transact.set(self, { editingSpell: ev.detail.item }));
       }),
 
-    onCloseSpellEditor: event("~/on/close-spell-editor")
-      .with(resolve(SpellManager.pick({ editingSpell: true })))
-      .transact(({ self, editingSpell }, cmd) => {
-        cmd.add(...Transact.remove(self, { editingSpell }))
-      }),
+      onCloseSpellEditor: event("~/on/close-spell-editor")
+        .with(resolve(SpellManager.pick({ editingSpell: true })))
+        .transact(({ self, editingSpell }, cmd) => {
+          cmd.add(...Transact.remove(self, { editingSpell }));
+        }),
 
-    onUnfocusCharm: event("~/on/unfocus-charm")
-      .with(resolve(SpellManager.pick({ focusedCharm: true })))
-      .transact(({ self, focusedCharm }, cmd) => {
-        cmd.add(...Transact.remove(self, { focusedCharm }))
-      }),
+      onUnfocusCharm: event("~/on/unfocus-charm")
+        .with(resolve(SpellManager.pick({ focusedCharm: true })))
+        .transact(({ self, focusedCharm }, cmd) => {
+          cmd.add(...Transact.remove(self, { focusedCharm }));
+        }),
 
-    renderSpellList: resolve(SpellManager.pick({ spells: true }))
-      .update(({ self, spells }) => {
-        return [{
-          Upsert: [self, '~/common/ui/spell-list', <common-table
-            schema={Spell}
-            data={spells}
-            onedit="~/on/edit-spell"
-            ondelete="~/on/delete-spell"
-          /> as any]
-        }]
-      }).commit(),
+      renderSpellList: resolve(SpellManager.pick({ spells: true }))
+        .update(({ self, spells }) => {
+          return [
+            {
+              Upsert: [
+                self,
+                "~/common/ui/spell-list",
+                (
+                  <common-table
+                    schema={Spell}
+                    data={spells}
+                    onedit="~/on/edit-spell"
+                    ondelete="~/on/delete-spell"
+                  />
+                ) as any,
+              ],
+            },
+          ];
+        })
+        .commit(),
 
-    renderCharmList: resolve(SpellManager.pick({ charms: true }))
-      .update(({ self, charms }) => {
-        return [{
-          Upsert: [self, '~/common/ui/charm-list', <common-table
-            schema={Charm}
-            data={charms}
-            ondelete="~/on/delete-charm"
-          /> as any]
-        }]
-      }).commit(),
+      renderCharmList: resolve(SpellManager.pick({ charms: true }))
+        .update(({ self, charms }) => {
+          return [
+            {
+              Upsert: [
+                self,
+                "~/common/ui/charm-list",
+                (
+                  <common-table
+                    schema={Charm}
+                    data={charms}
+                    ondelete="~/on/delete-charm"
+                  />
+                ) as any,
+              ],
+            },
+          ];
+        })
+        .commit(),
 
-    onDeleteSpell: event("~/on/delete-spell")
-      .transact(({ self, event }, cmd) => {
-        const ev = Session.resolve<EditEvent>(event);
-        cmd.add(...Transact.remove(self, { spells: ev.detail.item }))
-      }),
+      onDeleteSpell: event("~/on/delete-spell").transact(
+        ({ self, event }, cmd) => {
+          const ev = Session.resolve<EditEvent>(event);
+          cmd.add(...Transact.remove(self, { spells: ev.detail.item }));
+        },
+      ),
 
-    onDeleteCharm: event("~/on/delete-charm")
-      .transact(({ self, event }, cmd) => {
-        const ev = Session.resolve<EditEvent>(event);
-        cmd.add(...Transact.remove(self, { charms: ev.detail.item }))
-      }),
-  }),
-});
+      onDeleteCharm: event("~/on/delete-charm").transact(
+        ({ self, event }, cmd) => {
+          const ev = Session.resolve<EditEvent>(event);
+          cmd.add(...Transact.remove(self, { charms: ev.detail.item }));
+        },
+      ),
+    }),
+  },
+);
 
 console.log(spellManager);

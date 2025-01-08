@@ -13,3 +13,4 @@ export * as CommonDroppable from "./common-droppable.js";
 export * as CommonDraggable from "./common-draggable.js";
 export * as CommonSpellEditor from "./common-spell-editor.js";
 export * as CommonMermaid from "./mermaid.js";
+export * as CommonPicker from "./picker.js";
