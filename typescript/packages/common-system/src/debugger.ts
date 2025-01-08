@@ -378,10 +378,7 @@ export class RuleDetailsPopover extends LitElement {
       <div>
         <div class="close" @click=${() => this.remove()}>✕</div>
         <div class="header">
-          <span
-            style="color: ${style.color}; display: inline-block; width: 20px; height: 20px; border-radius: 50%; background-color: ${style.color}; text-align: center; line-height: 20px;"
-            >${style.emoji}</span
-          >
+          <span style="color: ${style.color}; display: inline-block; width: 20px; height: 20px; border-radius: 50%; background-color: ${style.color}; text-align: center; line-height: 20px;">${style.emoji}</span>
           <span class="rule-name">${this.rule}</span>
         </div>
 
@@ -679,7 +676,7 @@ export class CharmDebugger extends LitElement {
       right: 100%;
       top: 50%;
       transform: translateY(-50%);
-      background: rgba(0, 0, 0, 0.8);
+      background: rgba(0,0,0,0.8);
       color: white;
       padding: 4px 8px;
       border-radius: 4px;
@@ -740,16 +737,9 @@ export class CharmDebugger extends LitElement {
     }
 
     @keyframes pulse {
-      0% {
-        transform: scale(1.2);
-      }
-      50% {
-        transform: scale(1.5);
-        opacity: 1;
-      }
-      100% {
-        transform: scale(1.2);
-      }
+      0% { transform: scale(1.2); }
+      50% { transform: scale(1.5); opacity: 1; }
+      100% { transform: scale(1.2); }
     }
 
     .pulse {
@@ -762,8 +752,8 @@ export class CharmDebugger extends LitElement {
 
     window.addEventListener("query-triggered", (event: any) => {
       if (
-        (!this.entity || event.detail.entity === this.entity?.toString()) &&
-        (!this.behavior || event.detail.spell == this.behavior?.id.toString())
+        event.detail.entity === this.entity?.toString() &&
+        event.detail.spell == this.behavior?.id.toString()
       ) {
         const ruleName = event.detail.rule;
         const current = this.ruleActivations.get(ruleName) || {
@@ -789,8 +779,8 @@ export class CharmDebugger extends LitElement {
 
     window.addEventListener("mutation", (event: any) => {
       if (
-        (!this.entity || event.detail.entity === this.entity?.toString()) &&
-        (!this.behavior || event.detail.spell == this.behavior?.id.toString())
+        event.detail.entity === this.entity?.toString() &&
+        event.detail.spell === this.behavior?.id.toString()
       ) {
         this.mutationLog.push(event.detail);
         this.projectMutation(event.detail);
@@ -839,78 +829,65 @@ export class CharmDebugger extends LitElement {
   override render() {
     return html`
       <div class="content">
-        <div>
-          <div
-            class="entity-id"
-            style="background: ${getColorForEntity(
-              this.entity?.toString() ?? "*",
-            )};"
-            title=${this.entity?.toString() ?? "*"}
-            @click=${this.toggleOpen}
-          >
-            ${truncateId(this.entity ?? "🛠️")}
+        ${this.entity ? html`
+          <div>
+            <div
+              class="entity-id"
+              style="background: ${getColorForEntity(this.entity.toString())};"
+              title=${this.entity.toString()}
+              @click=${this.toggleOpen}
+            >
+              ${truncateId(this.entity)}
+            </div>
+            <button
+              class="copy-button"
+              title="Copy ID"
+              @click=${(e: Event) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(this.entity!.toString());
+              }}
+            >📋</button>
+            <button
+              class="copy-button"
+              title="Toggle Log"
+              @click=${this.toggleMutationLog}
+            >📜</button>
+            <button
+              class="copy-button"
+              title="Toggle Projections"
+              @click=${this.toggleProjections}
+            >📊</button>
           </div>
-          <button
-            class="copy-button"
-            title="Copy ID"
-            @click=${(e: Event) => {
-              e.stopPropagation();
-              navigator.clipboard.writeText(this.entity!.toString());
-            }}
-          >
-            📋
-          </button>
-          <button
-            class="copy-button"
-            title="Toggle Log"
-            @click=${this.toggleMutationLog}
-          >
-            📜
-          </button>
-          <button
-            class="copy-button"
-            title="Toggle Projections"
-            @click=${this.toggleProjections}
-          >
-            📊
-          </button>
-        </div>
-        ${this.behavior?.rules
-          ? html`<div class="rules-grid">
-              ${Object.keys(this.behavior.rules)
-                .sort((a, b) => {
-                  const hasSlashA = a.includes("/");
-                  const hasSlashB = b.includes("/");
-                  if (hasSlashA && !hasSlashB) return -1;
-                  if (!hasSlashA && hasSlashB) return 1;
-                  return a.localeCompare(b);
-                })
-                .map((rule, index) => {
-                  const activation = this.ruleActivations.get(rule);
-                  const style = getRuleStyle(rule);
-                  const isEnabled = this.behavior!.isRuleEnabled(rule);
+        ` : ''}
 
-                  return html`
-                    <div
-                      class="rule-item"
-                      style="top: ${Math.floor(index / 2) * 96}px"
-                    >
-                      <div
-                        class="emoji-tile ${this.pulsingRules.has(rule)
-                          ? "pulse"
-                          : ""} ${isEnabled ? "" : "disabled"}"
-                        style="background: ${style.color}"
-                        data-rule="${rule}"
-                        @click=${() =>
-                          this.showRuleDetails(rule, style.color, activation)}
-                      >
-                        ${style.emoji}
-                      </div>
-                    </div>
-                  `;
-                })}
-            </div>`
-          : ""}
+        ${this.behavior?.rules ? html`<div class="rules-grid">
+          ${Object.keys(this.behavior.rules)
+            .sort((a, b) => {
+              const hasSlashA = a.includes('/');
+              const hasSlashB = b.includes('/');
+              if (hasSlashA && !hasSlashB) return -1;
+              if (!hasSlashA && hasSlashB) return 1;
+              return a.localeCompare(b);
+            })
+            .map((rule, index) => {
+              const activation = this.ruleActivations.get(rule);
+              const style = getRuleStyle(rule);
+              const isEnabled = this.behavior!.isRuleEnabled(rule);
+
+              return html`
+                <div class="rule-item" style="top: ${Math.floor(index / 2) * 96}px">
+                  <div
+                    class="emoji-tile ${this.pulsingRules.has(rule) ? 'pulse' : ''} ${isEnabled ? '' : 'disabled'}"
+                    style="background: ${style.color}"
+                    data-rule="${rule}"
+                    @click=${() => this.showRuleDetails(rule, style.color, activation)}
+                  >
+                    ${style.emoji}
+                  </div>
+                </div>
+              `;
+            })}
+        </div>` : ''}
 
         <div class="mutation-log">
           ${this.mutationLog.map(
