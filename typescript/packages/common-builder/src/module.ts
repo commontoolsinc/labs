@@ -100,7 +100,7 @@ export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
   });
 }
 
-export function handler<E, T>(handler: {
+export function handler<E = any, T = any>(handler: {
   (this: T, event: E, props: T): any;
 }): HandlerFactory<T, E> {
   const module: Handler &
