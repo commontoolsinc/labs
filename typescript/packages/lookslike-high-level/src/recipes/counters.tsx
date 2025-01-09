@@ -23,7 +23,8 @@ const renameHandler = handler<{ detail: { value: string } }, { counter: Counter 
 
 const removeHandler = handler<{}, { counter: Counter, counters: Counter[] }>(function ({ }, { counter, counters }) {
   console.log("removeHandler", counter, counters);
-  const index = counters.findIndex(counter);
+  // FIXME(ja): not having equality check on objects is a problem
+  const index = counters.findIndex((i) => i.title === counter.title && i.count === counter.count);
   if (index !== -1) {
     counters.splice(index, 1);
   }
