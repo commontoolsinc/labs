@@ -71,8 +71,11 @@ export interface RendererCell<T> {
   get(): T;
   set(value: T): void;
   send(value: T): void;
+  update(value: Partial<T>): void;
+  push(value: T extends Array<infer U> ? U : any): void;
   sink(callback: (value: T) => void): () => void;
   key<K extends keyof T>(valueKey: K): RendererCell<T[K]>;
+  asSchema(schema: JSONSchema): RendererCell<T>;
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
     log?: ReactivityLog,
@@ -84,7 +87,6 @@ export interface RendererCell<T> {
   [isRendererCellMarker]: true;
   copyTrap: boolean;
   schema?: JSONSchema;
-  asSchema(schema: JSONSchema): RendererCell<T>;
 }
 
 /**
@@ -435,7 +437,7 @@ function generateEntityId(value: any, cause?: any): EntityId {
 }
 
 function rendererCell<T>(
-  cell: CellImpl<any>,
+  doc: CellImpl<any>,
   path: PropertyKey[] = [],
   log?: ReactivityLog,
   schema?: JSONSchema,
@@ -445,7 +447,7 @@ function rendererCell<T>(
   // this is just for setup. Arguably key() should possibly fail if it crosses a
   // cell, but right now it'll silently cross cells.
   let keys = [...path];
-  let target = cell.get();
+  let target = doc.get();
   while (keys.length) {
     const key = keys.shift()!;
     target = target instanceof Object ? target[key] : undefined;
@@ -467,14 +469,14 @@ function rendererCell<T>(
         ref = { cell: target, path: [] } satisfies CellReference;
       else if (isAlias(target))
         ref = {
-          cell: target.$alias.cell ?? cell,
+          cell: target.$alias.cell ?? doc,
           path: target.$alias.path,
         } satisfies CellReference;
 
       if (ref) {
         log?.reads.push({ cell: ref.cell, path: ref.path });
         target = ref.cell.getAtPath(ref.path);
-        cell = ref.cell;
+        doc = ref.cell;
         path = [...ref.path, ...keys];
       }
       // Follow all aliases and cell references for path resolution, but only go
@@ -482,28 +484,58 @@ function rendererCell<T>(
     } while (ref && keys.length);
   }
 
-  const self: RendererCell<T> = isStreamAlias(cell.getAtPath(path))
+  const self: RendererCell<T> = isStreamAlias(doc.getAtPath(path))
     ? ({
         // Implementing just Sendable<T>
         send: (event: T) => {
-          log?.writes.push({ cell: cell, path });
-          queueEvent({ cell: cell, path }, event);
+          log?.writes.push({ cell: doc, path });
+          queueEvent({ cell: doc, path }, event);
         },
       } as RendererCell<T>)
     : {
-        get: () => validateAndTransform(cell, path, schema, log),
-        set: (newValue: T) => cell.setAtPath(path, newValue, log),
+        get: () => validateAndTransform(doc, path, schema, log),
+        set: (newValue: T) => doc.setAtPath(path, newValue, log),
         send: (newValue: T) => self.set(newValue),
+        update: (value: Partial<T>) => {
+          const previousValue = doc.getAtPath(path);
+          if (typeof previousValue !== "object" || previousValue === null)
+            throw new Error("Can't update non-object value");
+          const newValue = {
+            ...previousValue,
+            ...value,
+          };
+          doc.setAtPath(path, newValue, log);
+        },
+        push: (value: any) => {
+          const array = doc.getAtPath(path) ?? [];
+          if (!Array.isArray(array))
+            throw new Error("Can't push into non-array value");
+
+          // Every element pushed to the array should be it's own doc or link to
+          // one. So if it isn't already, make it one.
+          value = getCellReferenceOrValue(value);
+          if (!isCell(value) && !isCellReference(value)) {
+            const cause = {
+              parent: doc.entityId,
+              path: path,
+              length: array.length,
+              // Context is the event id in event handlers, making this unique.
+              // TODO: In this case it shouldn't depend on the length, maybe
+              // instead just call order in the current context.
+              context: getTopFrame()?.cause ?? "unknown",
+            };
+
+            value = cell<any>(value, cause);
+          }
+
+          doc.setAtPath(path, [...array, value], log);
+        },
         sink: (callback: (value: T) => void) => {
-          return cell.sink(
+          return doc.sink(
             (value, changedPath) =>
               pathAffected(changedPath, path) &&
               callback(
-                transformToRendererCells(
-                  cell,
-                  getValueAtPath(value, path),
-                  log,
-                ),
+                transformToRendererCells(doc, getValueAtPath(value, path), log),
               ),
           );
         },
@@ -517,18 +549,21 @@ function rendererCell<T>(
               : schema?.type === "array"
                 ? schema.items
                 : undefined;
-          return cell.asRendererCell(
+          return doc.asRendererCell(
             [...path, key],
             log,
             currentSchema,
           ) as RendererCell<T[K]>;
         },
+        asSchema: (newSchema: JSONSchema) => {
+          return rendererCell(doc, path, log, newSchema);
+        },
         getAsQueryResult: (
           subPath: PropertyKey[] = [],
           newLog?: ReactivityLog,
-        ) => createQueryResultProxy(cell, [...path, ...subPath], newLog ?? log),
-        getAsCellReference: () => ({ cell, path }) satisfies CellReference,
-        toJSON: () => cell.toJSON(),
+        ) => createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
+        getAsCellReference: () => ({ cell: doc, path }) satisfies CellReference,
+        toJSON: () => doc.toJSON(),
         get value(): T {
           return self.get();
         },
@@ -542,9 +577,6 @@ function rendererCell<T>(
           );
         },
         schema,
-        asSchema: (newSchema: JSONSchema) => {
-          return rendererCell(cell, path, log, newSchema);
-        },
       };
   return self;
 }
