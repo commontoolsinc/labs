@@ -75,7 +75,7 @@ export type toJSON = {
 };
 
 export type NodeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
-  (Module | Recipe) &
+  (Module | Handler | Recipe) &
   toJSON;
 
 export type RecipeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
@@ -84,6 +84,10 @@ export type RecipeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
 
 export type ModuleFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
   Module &
+  toJSON;
+
+export type HandlerFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
+  Handler<T, R> &
   toJSON;
 
 export type JSONValue =
@@ -118,6 +122,10 @@ export type Module = {
   wrapper?: "handler";
   argumentSchema?: JSON;
   resultSchema?: JSON;
+};
+
+export type Handler<T = any, R = any> = Module & {
+  with: (inputs: Opaque<T>) => OpaqueRef<R>;
 };
 
 export function isModule(value: any): value is Module {

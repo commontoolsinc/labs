@@ -1,6 +1,8 @@
 import type {
   Module,
+  Handler,
   ModuleFactory,
+  HandlerFactory,
   Opaque,
   OpaqueRef,
   NodeRef,
@@ -100,15 +102,16 @@ export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
 
 export function handler<E, T>(
   handler: (event: E, props: T) => any,
-): ModuleFactory<T, E> {
-  const module: Module & toJSON = {
+): HandlerFactory<T, E> {
+  const module: Handler & toJSON = {
     type: "javascript",
     implementation: handler,
     wrapper: "handler",
+    with: (inputs: Opaque<T>) => factory(inputs),
     toJSON: () => moduleToJSON(module),
   };
 
-  return Object.assign((props: Opaque<T>): OpaqueRef<E> => {
+  const factory = Object.assign((props: Opaque<T>): OpaqueRef<E> => {
     const stream = opaqueRef();
     stream.set({ $stream: true });
     const node: NodeRef = {
@@ -123,6 +126,8 @@ export function handler<E, T>(
 
     return stream as unknown as OpaqueRef<E>;
   }, module);
+
+  return factory;
 }
 
 export function isolated<T, R>(
