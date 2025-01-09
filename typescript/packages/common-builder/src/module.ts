@@ -100,8 +100,12 @@ export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
   });
 }
 
-export function handler<E = any, T = any>(handler: {
-  (this: T, event: E, props: T): any;
+export function handler<E, T>(handler: {
+  (
+    this: T extends unknown ? any : T,
+    event: E extends unknown ? any : E,
+    props: T extends unknown ? any : T,
+  ): any;
 }): HandlerFactory<T, E> {
   const module: Handler &
     toJSON & { bind: (inputs: Opaque<T>) => OpaqueRef<E> } = {
