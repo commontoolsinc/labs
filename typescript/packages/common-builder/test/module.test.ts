@@ -5,6 +5,7 @@ import {
   OpaqueRef,
   Module,
   Frame,
+  JSONSchema,
 } from "../src/types.js";
 import { lift, handler, isolated } from "../src/module.js";
 import { opaqueRef } from "../src/opaque-ref.js";
@@ -45,12 +46,12 @@ describe("module", () => {
           age: { type: "number" },
         },
         required: ["name"],
-      };
+      } as JSONSchema;
 
       const greet = lift(
         schema,
         { type: "string" },
-        ({ name, age }) => `Hello ${name}${age ? `, age ${age}` : ""}!`
+        ({ name, age }) => `Hello ${name}${age ? `, age ${age}` : ""}!`,
       );
 
       expect(isModule(greet)).toBe(true);
@@ -68,7 +69,7 @@ describe("module", () => {
       const greet = lift(
         inputSchema,
         outputSchema,
-        ({ name, age }) => `Hello ${name}${age ? `, age ${age}` : ""}!`
+        ({ name, age }) => `Hello ${name}${age ? `, age ${age}` : ""}!`,
       );
 
       expect(isModule(greet)).toBe(true);
@@ -84,7 +85,7 @@ describe("module", () => {
         (event, props) => {
           props.x = event.clientX;
           props.y = event.clientY;
-        }
+        },
       );
       expect(typeof clickHandler).toBe("function");
       expect(isModule(clickHandler)).toBe(true);
@@ -95,7 +96,7 @@ describe("module", () => {
         (event, props) => {
           props.x = event.clientX;
           props.y = event.clientY;
-        }
+        },
       );
       const stream = clickHandler({ x: opaqueRef(10), y: opaqueRef(20) });
       expect(isOpaqueRef(stream)).toBe(true);
@@ -117,7 +118,7 @@ describe("module", () => {
           y: { type: "number" },
         },
         required: ["type", "x", "y"],
-      };
+      } as JSONSchema;
 
       const stateSchema = {
         type: "object",
@@ -125,15 +126,15 @@ describe("module", () => {
           lastX: { type: "number" },
           lastY: { type: "number" },
         },
-      };
+      } as JSONSchema;
 
       const mouseHandler = handler(
         eventSchema,
         stateSchema,
-        (event, state) => {
+        (event: any, state: any) => {
           state.lastX = event.x;
           state.lastY = event.y;
-        }
+        },
       );
 
       expect(isModule(mouseHandler)).toBe(true);
@@ -154,14 +155,10 @@ describe("module", () => {
         lastY: z.number(),
       });
 
-      const mouseHandler = handler(
-        eventSchema,
-        stateSchema,
-        (event, state) => {
-          state.lastX = event.x;
-          state.lastY = event.y;
-        }
-      );
+      const mouseHandler = handler(eventSchema, stateSchema, (event, state) => {
+        state.lastX = event.x;
+        state.lastY = event.y;
+      });
 
       expect(isModule(mouseHandler)).toBe(true);
       const module = mouseHandler as unknown as Module;
@@ -184,17 +181,17 @@ describe("module", () => {
         stateSchema,
         (event, state) => {
           state.elements[event.target] = !state.elements[event.target];
-        }
+        },
       );
 
       const elements = opaqueRef({ button1: true, button2: false });
-      const result = toggleHandler({ elements });
+      const result = toggleHandler({ elements } as any);
 
       expect(isOpaqueRef(result)).toBe(true);
       const { nodes } = result.export();
       expect(nodes.size).toBe(1);
       const handlerNode = [...nodes][0];
-      expect(handlerNode.module.wrapper).toBe("handler");
+      expect((handlerNode.module as Module).wrapper).toBe("handler");
       expect(handlerNode.inputs.elements).toBe(elements);
     });
   });
@@ -204,7 +201,7 @@ describe("module", () => {
       const add = isolated<{ a: number; b: number }, number>(
         { a: { tag: "number", val: 0 }, b: { tag: "number", val: 0 } },
         { result: "number" },
-        ({ a, b }) => a + b
+        ({ a, b }) => a + b,
       );
       expect(typeof add).toBe("function");
       const result = add({ a: 1, b: 2 });
@@ -214,8 +211,12 @@ describe("module", () => {
       expect(module.type).toBe("isolated");
       const definition = module.implementation as JavaScriptModuleDefinition;
       expect(definition.body).toContain("export const run = () => {");
-      expect(definition.body).toContain('inputs["a"] = read("a")?.deref()?.val;');
-      expect(definition.body).toContain('inputs["b"] = read("b")?.deref()?.val;');
+      expect(definition.body).toContain(
+        'inputs["a"] = read("a")?.deref()?.val;',
+      );
+      expect(definition.body).toContain(
+        'inputs["b"] = read("b")?.deref()?.val;',
+      );
       expect(definition.body).toContain('write("result", {');
       expect(definition.inputs).toMatchObject({
         a: { tag: "number", val: 0 },
