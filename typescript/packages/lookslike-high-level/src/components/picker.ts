@@ -42,6 +42,7 @@ export default class PickerElement extends LitElement {
       border-top: none;
       border-radius: 0 0 4px 4px;
       display: none;
+      z-index: 1000;
     }
 
     .dropdown.show {

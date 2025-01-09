@@ -67,6 +67,7 @@ import { quotedb } from "./spells/24_quotes.jsx";
 import { activity } from "./spells/25_activity.jsx";
 import { activityRef } from "./sugar/activity.js";
 import { stackLayout } from "./spells/26_stacks.jsx";
+import { canvasLayout } from "./spells/27_canvas.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -271,6 +272,7 @@ addCharms([
   quotedb.spawn({ quotes: 1 }),
   activity.spawn(activityRef),
   stackLayout.spawn({ stack: 1 }),
+  canvasLayout.spawn({ canvas: 1 }),
   FetchService.spawn() as any,
   GmailService.spawn() as any,
   ViewService.spawn() as any,

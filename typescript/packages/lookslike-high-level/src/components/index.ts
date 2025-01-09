@@ -14,3 +14,4 @@ export * as CommonDraggable from "./common-draggable.js";
 export * as CommonSpellEditor from "./common-spell-editor.js";
 export * as CommonMermaid from "./mermaid.js";
 export * as CommonPicker from "./picker.js";
+export * as CommonCanvasLayout from "./canvas-layout.js";
