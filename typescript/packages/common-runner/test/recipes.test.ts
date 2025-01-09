@@ -150,10 +150,10 @@ describe("Recipe Runner", () => {
 
   it("should execute handlers that use bind and this", async () => {
     // Switch to `function` so that we can set the type of `this`.
-    const incHandler = handler(function (
-      this: { counter: { value: number } },
-      { amount }: { amount: number },
-    ) {
+    const incHandler = handler<
+      { amount: number },
+      { counter: { value: number } }
+    >(function ({ amount }) {
       this.counter.value += amount;
     });
 
