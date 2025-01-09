@@ -1,38 +1,43 @@
 import { h } from "@commontools/common-html";
-import { recipe, NAME, UI, handler } from "@commontools/common-builder";
-import { z } from "zod";
+import { Spell, type OpaqueRef } from "@commontools/common-builder";
 
-const inc = handler<{}, { count: number }>(({}, state) => {
-  state.count += 1;
-});
+type CounterState = {
+  title: string;
+  count: number;
+};
 
-const updateValue = handler<{ detail: { value: string } }, { value: string }>(
-  ({ detail }, state) => {
-    detail?.value && (state.value = detail.value);
-  },
-);
+export class CounterSpell extends Spell<CounterState> {
+  constructor() {
+    super();
 
-const Counter = z
-  .object({
-    title: z.string().default("untitled counter"),
-    count: z.number().default(0),
-  })
-  .describe("A counter");
+    this.addEventListener("increment", self => {
+      const { count } = self;
+      this.update(self, { count: count + 1 });
+    });
 
-export default recipe(Counter, ({ title, count }) => {
-  return {
-    [NAME]: title,
-    [UI]: (
-      <os-container>
-        <common-input
-          value={title}
-          placeholder="Name of counter"
-          oncommon-input={updateValue({ value: title })}
-        />
-        <p>{count}</p>
-        <button onclick={inc({ count })}>Inc</button>
-      </os-container>
-    ),
-    count,
-  };
-});
+    this.addEventListener("title", (self, { detail: { value } }) => {
+      this.update(self, { title: value });
+    });
+  }
+
+  override init() {
+    return {
+      title: "untitled counter",
+      count: 0,
+    };
+  }
+
+  override render({ title, count }: OpaqueRef<CounterState>) {
+    return (
+      <div>
+        <common-input value={title} oncommon-input={this.dispatch("title")} />
+        <p>count: {count}</p>
+        <common-button onclick={this.dispatch("increment")}>Increment</common-button>
+      </div>
+    );
+  }
+}
+
+const counter = new CounterSpell().compile("Counter");
+
+export default counter;
