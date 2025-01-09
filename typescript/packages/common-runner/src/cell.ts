@@ -525,7 +525,7 @@ function rendererCell<T>(
               context: getTopFrame()?.cause ?? "unknown",
             };
 
-            value = cell<any>(value, cause);
+            value = { cell: cell<any>(value, cause), path: [] };
           }
 
           doc.setAtPath(path, [...array, value], log);

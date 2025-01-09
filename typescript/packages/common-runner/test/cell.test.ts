@@ -842,6 +842,46 @@ describe("asRendererCell with schema", () => {
     const extraValue = extraCell.get();
     expect(isRendererCell(extraValue.anything)).toBe(true);
   });
+
+  it("should partially update object values using update method", () => {
+    const c = cell({ name: "test", age: 42, tags: ["a", "b"] });
+    const rendererCell = c.asRendererCell();
+
+    rendererCell.update({ age: 43, tags: ["a", "b", "c"] });
+    expect(rendererCell.get()).toEqual({
+      name: "test",
+      age: 43,
+      tags: ["a", "b", "c"],
+    });
+
+    // Should preserve unmodified fields
+    rendererCell.update({ name: "updated" });
+    expect(rendererCell.get()).toEqual({
+      name: "updated",
+      age: 43,
+      tags: ["a", "b", "c"],
+    });
+  });
+
+  it("should push values to array using push method", () => {
+    const c = cell({ items: [1, 2, 3] });
+    const arrayCell = c.asRendererCell(["items"]);
+
+    arrayCell.push(4);
+    expect(arrayCell.get()).toEqual([1, 2, 3, 4]);
+
+    arrayCell.push(5);
+    expect(arrayCell.get()).toEqual([1, 2, 3, 4, 5]);
+
+    expect(isCellReference(c.get().items[4])).toBeTruthy();
+  });
+
+  it("should handle push method on non-array values", () => {
+    const c = cell({ value: "not an array" });
+    const rendererCell = c.asRendererCell(["value"]);
+
+    expect(() => rendererCell.push(42)).toThrow();
+  });
 });
 
 describe("JSON.stringify bug", () => {
