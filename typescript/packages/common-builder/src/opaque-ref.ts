@@ -78,8 +78,9 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
       },
       map: <S>(
         fn: (
-          value: Opaque<Required<T extends Array<infer U> ? U : T>>,
+          element: Opaque<Required<T extends Array<infer U> ? U : T>>,
           index: Opaque<number>,
+          array: T,
         ) => Opaque<S>,
       ) => {
         // Create the factory if it doesn't exist. Doing it here to avoid
@@ -90,8 +91,10 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
         });
         return mapFactory({
           list: proxy,
-          op: recipe("mapping function", ({ item, index }: Opaque<any>) =>
-            fn(item, index),
+          op: recipe(
+            "mapping function",
+            ({ element, index, array }: Opaque<any>) =>
+              fn(element, index, array),
           ),
         });
       },

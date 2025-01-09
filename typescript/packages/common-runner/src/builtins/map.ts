@@ -120,7 +120,7 @@ export function map(
         if (!value.cell.entityId) value.cell.generateEntityId();
         const resultCell = cell();
         resultCell.generateEntityId({ map: value.cell.entityId });
-        run(op, { item: value, index }, resultCell);
+        run(op, { element: value, index, array: list }, resultCell);
         resultCell.sourceCell!.sourceCell = parentCell;
         if (Array.isArray(parentCell.get())) debugger;
 

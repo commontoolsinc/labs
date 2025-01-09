@@ -46,7 +46,11 @@ export type OpaqueRefMethods<T> = {
   unsafe_bindToRecipeAndPath(recipe: Recipe, path: PropertyKey[]): void;
   unsafe_getExternal(): OpaqueRef<T>;
   map<S>(
-    fn: (value: T extends Array<infer U> ? Opaque<U> : Opaque<T>) => Opaque<S>,
+    fn: (
+      element: T extends Array<infer U> ? Opaque<U> : Opaque<T>,
+      index: Opaque<number>,
+      array: T,
+    ) => Opaque<S>,
   ): Opaque<S[]>;
   [Symbol.iterator](): Iterator<T>;
   [Symbol.toPrimitive](hint: string): T;

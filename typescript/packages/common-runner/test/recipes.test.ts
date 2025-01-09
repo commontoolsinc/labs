@@ -76,8 +76,8 @@ describe("Recipe Runner", () => {
     const multipliedArray = recipe<{ values: { x: number }[] }>(
       "Multiply numbers",
       ({ values }) => {
-        const multiplied = values.map(({ x }, index) => {
-          const multiply = lift<number>(x => x * (index + 1));
+        const multiplied = values.map(({ x }, index, array) => {
+          const multiply = lift<number>(x => x * (index + 1) * array.length);
           return { multiplied: multiply(x) };
         });
         return { multiplied };
@@ -91,7 +91,7 @@ describe("Recipe Runner", () => {
     await idle();
 
     expect(result.getAsQueryResult()).toMatchObject({
-      multiplied: [{ multiplied: 1 }, { multiplied: 4 }, { multiplied: 9 }],
+      multiplied: [{ multiplied: 3 }, { multiplied: 12 }, { multiplied: 27 }],
     });
   });
 
