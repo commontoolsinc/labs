@@ -43,7 +43,7 @@ describe("module", () => {
         (event, props) => {
           props.x = event.clientX;
           props.y = event.clientY;
-        }
+        },
       );
       expect(typeof clickHandler).toBe("function");
       expect(isModule(clickHandler)).toBe(true);
@@ -54,9 +54,27 @@ describe("module", () => {
         (event, props) => {
           props.x = event.clientX;
           props.y = event.clientY;
-        }
+        },
       );
       const stream = clickHandler({ x: opaqueRef(10), y: opaqueRef(20) });
+      expect(isOpaqueRef(stream)).toBe(true);
+      const { value, nodes } = (
+        stream as unknown as OpaqueRef<{ $stream: true }>
+      ).export();
+      expect(value).toEqual({ $stream: true });
+      expect(nodes.size).toBe(1);
+      expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
+      expect([...nodes][0].inputs.$event).toBe(stream);
+    });
+
+    it("creates a opaque ref with stream when with is called", () => {
+      const clickHandler = handler<MouseEvent, { x: number; y: number }>(
+        (event, props) => {
+          props.x = event.clientX;
+          props.y = event.clientY;
+        },
+      );
+      const stream = clickHandler.with({ x: opaqueRef(10), y: opaqueRef(20) });
       expect(isOpaqueRef(stream)).toBe(true);
       const { value, nodes } = (
         stream as unknown as OpaqueRef<{ $stream: true }>
@@ -73,7 +91,7 @@ describe("module", () => {
       const add = isolated<{ a: number; b: number }, number>(
         { a: { tag: "number", val: 0 }, b: { tag: "number", val: 0 } },
         { result: "number" },
-        ({ a, b }) => a + b
+        ({ a, b }) => a + b,
       );
       expect(typeof add).toBe("function");
       const result = add({ a: 1, b: 2 });
@@ -84,10 +102,10 @@ describe("module", () => {
       const definition = module.implementation as JavaScriptModuleDefinition;
       expect(definition.body).toContain("export const run = () => {");
       expect(definition.body).toContain(
-        'inputs["a"] = read("a")?.deref()?.val;'
+        'inputs["a"] = read("a")?.deref()?.val;',
       );
       expect(definition.body).toContain(
-        'inputs["b"] = read("b")?.deref()?.val;'
+        'inputs["b"] = read("b")?.deref()?.val;',
       );
       expect(definition.body).toContain('write("result", {');
       expect(definition.inputs).toMatchObject({

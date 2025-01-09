@@ -1,6 +1,8 @@
 import type {
   Module,
+  Handler,
   ModuleFactory,
+  HandlerFactory,
   Opaque,
   OpaqueRef,
   NodeRef,
@@ -98,17 +100,26 @@ export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
   });
 }
 
-export function handler<E, T>(
-  handler: (event: E, props: T) => any,
-): ModuleFactory<T, E> {
-  const module: Module & toJSON = {
+export function handler<E, T>(handler: {
+  (
+    this: T extends unknown ? any : T,
+    event: E extends unknown ? any : E,
+    props: T extends unknown ? any : T,
+  ): any;
+}): HandlerFactory<T, E> {
+  const module: Handler &
+    toJSON & { bind: (inputs: Opaque<T>) => OpaqueRef<E> } = {
     type: "javascript",
     implementation: handler,
     wrapper: "handler",
+    with: (inputs: Opaque<T>) => factory(inputs),
+    // Overriding the default `bind` method on functions. The wrapper will bind
+    // the actual inputs, so they'll be available as `this`
+    bind: (inputs: Opaque<T>) => factory(inputs),
     toJSON: () => moduleToJSON(module),
   };
 
-  return Object.assign((props: Opaque<T>): OpaqueRef<E> => {
+  const factory = Object.assign((props: Opaque<T>): OpaqueRef<E> => {
     const stream = opaqueRef();
     stream.set({ $stream: true });
     const node: NodeRef = {
@@ -123,6 +134,8 @@ export function handler<E, T>(
 
     return stream as unknown as OpaqueRef<E>;
   }, module);
+
+  return factory;
 }
 
 export function isolated<T, R>(
