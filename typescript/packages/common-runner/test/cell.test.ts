@@ -876,6 +876,25 @@ describe("asRendererCell with schema", () => {
     expect(isCellReference(c.get().items[4])).toBeTruthy();
   });
 
+  it("should push values that are already cells reusing the reference", () => {
+    const c = cell<{ items: { value: number }[] }>({ items: [] });
+    const arrayCell = c.asRendererCell().key("items");
+
+    const d = cell<{ value: number }>({ value: 1 });
+
+    arrayCell.push(d);
+    arrayCell.push(d.asRendererCell());
+    arrayCell.push(d.getAsQueryResult());
+    arrayCell.push({ cell: d, path: [] });
+
+    expect(c.get().items).toEqual([
+      { cell: d, path: [] },
+      { cell: d, path: [] },
+      { cell: d, path: [] },
+      { cell: d, path: [] },
+    ]);
+  });
+
   it("should handle push method on non-array values", () => {
     const c = cell({ value: "not an array" });
     const rendererCell = c.asRendererCell(["value"]);

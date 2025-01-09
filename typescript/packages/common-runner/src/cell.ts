@@ -72,7 +72,12 @@ export interface RendererCell<T> {
   set(value: T): void;
   send(value: T): void;
   update(value: Partial<T>): void;
-  push(value: T extends Array<infer U> ? U : any): void;
+  push(
+    value:
+      | (T extends Array<infer U> ? U : any)
+      | CellImpl<T extends Array<infer U> ? U : any>
+      | CellReference,
+  ): void;
   sink(callback: (value: T) => void): () => void;
   key<K extends keyof T>(valueKey: K): RendererCell<T[K]>;
   asSchema(schema: JSONSchema): RendererCell<T>;
@@ -513,19 +518,25 @@ function rendererCell<T>(
 
           // Every element pushed to the array should be it's own doc or link to
           // one. So if it isn't already, make it one.
-          value = getCellReferenceOrValue(value);
-          if (!isCell(value) && !isCellReference(value)) {
-            const cause = {
-              parent: doc.entityId,
-              path: path,
-              length: array.length,
-              // Context is the event id in event handlers, making this unique.
-              // TODO: In this case it shouldn't depend on the length, maybe
-              // instead just call order in the current context.
-              context: getTopFrame()?.cause ?? "unknown",
-            };
+          if (isRendererCell(value)) {
+            value = value.getAsCellReference();
+          } else if (isCell(value)) {
+            value = { cell: value, path: [] };
+          } else {
+            value = getCellReferenceOrValue(value);
+            if (!isCellReference(value)) {
+              const cause = {
+                parent: doc.entityId,
+                path: path,
+                length: array.length,
+                // Context is the event id in event handlers, making this unique.
+                // TODO: In this case it shouldn't depend on the length, maybe
+                // instead just call order in the current context.
+                context: getTopFrame()?.cause ?? "unknown",
+              };
 
-            value = { cell: cell<any>(value, cause), path: [] };
+              value = { cell: cell<any>(value, cause), path: [] };
+            }
           }
 
           doc.setAtPath(path, [...array, value], log);
