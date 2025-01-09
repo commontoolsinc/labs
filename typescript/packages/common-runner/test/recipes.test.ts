@@ -148,6 +148,35 @@ describe("Recipe Runner", () => {
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
   });
 
+  it("should execute handlers that use bind and this", async () => {
+    // Switch to `function` so that we can set the type of `this`.
+    const incHandler = handler(function (
+      this: { counter: { value: number } },
+      { amount }: { amount: number },
+    ) {
+      this.counter.value += amount;
+    });
+
+    const incRecipe = recipe<{ counter: { value: number } }>(
+      "Increment counter",
+      ({ counter }) => {
+        return { counter, stream: incHandler.bind({ counter }) };
+      },
+    );
+
+    const result = run(incRecipe, { counter: { value: 0 } });
+
+    await idle();
+
+    result.asRendererCell(["stream"]).send({ amount: 1 });
+    await idle();
+    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
+
+    result.asRendererCell(["stream"]).send({ amount: 2 });
+    await idle();
+    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
+  });
+
   it("should execute recipes returned by handlers", async () => {
     const counter = cell({ value: 0 });
     const nested = cell({ a: { b: { c: 0 } } });
