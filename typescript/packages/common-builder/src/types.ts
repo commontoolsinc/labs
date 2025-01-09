@@ -98,7 +98,26 @@ export type JSONValue =
   | JSONValue[]
   | { [key: string]: JSONValue };
 
-export type JSON = JSONValue | { [key: string]: JSONValue };
+export type JSONSchema = {
+  type?:
+    | "object"
+    | "array"
+    | "string"
+    | "integer"
+    | "number"
+    | "boolean"
+    | "null";
+  properties?: { [key: string]: JSONSchema };
+  description?: string;
+  default?: JSONValue;
+  title?: string;
+  required?: string[];
+  enum?: string[];
+  items?: JSONSchema;
+  $ref?: string;
+  asCell?: boolean;
+  additionalProperties?: JSONSchema | boolean;
+};
 
 export type Alias = {
   $alias: { cell?: any; path: PropertyKey[] };
@@ -120,8 +139,8 @@ export type Module = {
   type: "ref" | "javascript" | "recipe" | "raw" | "isolated" | "passthrough";
   implementation?: Function | Recipe | JavaScriptModuleDefinition | string;
   wrapper?: "handler";
-  argumentSchema?: JSON;
-  resultSchema?: JSON;
+  argumentSchema?: JSONSchema;
+  resultSchema?: JSONSchema;
 };
 
 export type Handler<T = any, R = any> = Module & {
@@ -138,8 +157,8 @@ export function isModule(value: any): value is Module {
 export type Node = {
   description?: string;
   module: Module | Alias;
-  inputs: JSON;
-  outputs: JSON;
+  inputs: JSONValue;
+  outputs: JSONValue;
 };
 
 // Used to get back to original recipe from a JSONified representation.
@@ -148,10 +167,10 @@ export const unsafe_parentRecipe = Symbol("unsafe_parentRecipe");
 export const unsafe_materializeFactory = Symbol("unsafe_materializeFactory");
 
 export type Recipe = {
-  argumentSchema: JSON;
-  resultSchema: JSON;
-  initial?: JSON;
-  result: JSON;
+  argumentSchema: JSONSchema;
+  resultSchema: JSONSchema;
+  initial?: JSONValue;
+  result: JSONValue;
   nodes: Node[];
   [unsafe_originalRecipe]?: Recipe;
   [unsafe_parentRecipe]?: Recipe;

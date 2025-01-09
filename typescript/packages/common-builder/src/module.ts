@@ -1,13 +1,13 @@
 import type {
   Module,
   Handler,
-  ModuleFactory,
   HandlerFactory,
+  ModuleFactory,
   Opaque,
   OpaqueRef,
   NodeRef,
   toJSON,
-  JSON,
+  JSONSchema,
 } from "./types.js";
 import { isModule } from "./types.js";
 import { opaqueRef } from "./opaque-ref.js";
@@ -51,8 +51,8 @@ export function createNodeFactory<T = any, R = any>(
  * @returns A module node factory that also serializes as module.
  */
 export function lift<T, R>(
-  argumentSchema: JSON,
-  resultSchema: JSON,
+  argumentSchema: JSONSchema,
+  resultSchema: JSONSchema,
   implementation: (input: T) => R,
 ): ModuleFactory<T, R>;
 export function lift<T extends z.ZodTypeAny, R extends z.ZodTypeAny>(
@@ -72,8 +72,8 @@ export function lift<T extends (...args: any[]) => any>(
   implementation: T,
 ): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
 export function lift<T, R>(
-  argumentSchema?: z.ZodTypeAny | JSON | ((input: any) => any),
-  resultSchema?: z.ZodTypeAny | JSON,
+  argumentSchema?: z.ZodTypeAny | JSONSchema | ((input: any) => any),
+  resultSchema?: z.ZodTypeAny | JSONSchema,
   implementation?: (input: T) => R,
 ): ModuleFactory<T, R> {
   if (typeof argumentSchema === "function") {
@@ -81,9 +81,9 @@ export function lift<T, R>(
     argumentSchema = resultSchema = undefined;
   }
   if (argumentSchema instanceof z.ZodType)
-    argumentSchema = zodToJsonSchema(argumentSchema) as JSON;
+    argumentSchema = zodToJsonSchema(argumentSchema) as JSONSchema;
   if (resultSchema instanceof z.ZodType)
-    resultSchema = zodToJsonSchema(resultSchema) as JSON;
+    resultSchema = zodToJsonSchema(resultSchema) as JSONSchema;
 
   return createNodeFactory({
     type: "javascript",
@@ -100,13 +100,56 @@ export function byRef<T, R>(ref: string): ModuleFactory<T, R> {
   });
 }
 
+export function handler<E, T>(
+  eventSchema: JSONSchema,
+  stateSchema: JSONSchema,
+  handler: (event: E, props: T) => any,
+): ModuleFactory<T, E>;
+export function handler<E extends z.ZodTypeAny, T extends z.ZodTypeAny>(
+  eventSchema: E,
+  stateSchema: T,
+  handler: (
+    event: z.infer<typeof eventSchema>,
+    props: z.infer<typeof stateSchema>,
+  ) => any,
+): ModuleFactory<T, E>;
 export function handler<E, T>(handler: {
   (
     this: T extends unknown ? any : T,
     event: E extends unknown ? any : E,
     props: T extends unknown ? any : T,
   ): any;
-}): HandlerFactory<T, E> {
+}): HandlerFactory<T, E>;
+export function handler<E, T>(
+  eventSchema:
+    | JSONSchema
+    | z.ZodTypeAny
+    | ((event: E, props: T) => any)
+    | undefined,
+  stateSchema?: JSONSchema | z.ZodTypeAny,
+  handler?: (event: E, props: T) => any,
+): ModuleFactory<T, E> {
+  if (typeof eventSchema === "function") {
+    handler = eventSchema;
+    eventSchema = stateSchema = undefined;
+  }
+
+  if (eventSchema instanceof z.ZodType)
+    eventSchema = zodToJsonSchema(eventSchema) as JSONSchema;
+  if (stateSchema instanceof z.ZodType)
+    stateSchema = zodToJsonSchema(stateSchema) as JSONSchema;
+
+  const schema: JSONSchema | undefined =
+    eventSchema || stateSchema
+      ? {
+          type: "object",
+          properties: {
+            $event: eventSchema ?? {},
+            ...(stateSchema?.properties ?? {}),
+          },
+        }
+      : undefined;
+
   const module: Handler &
     toJSON & { bind: (inputs: Opaque<T>) => OpaqueRef<E> } = {
     type: "javascript",
@@ -117,6 +160,7 @@ export function handler<E, T>(handler: {
     // the actual inputs, so they'll be available as `this`
     bind: (inputs: Opaque<T>) => factory(inputs),
     toJSON: () => moduleToJSON(module),
+    ...(schema ? { argumentSchema: schema } : {}),
   };
 
   const factory = Object.assign((props: Opaque<T>): OpaqueRef<E> => {
