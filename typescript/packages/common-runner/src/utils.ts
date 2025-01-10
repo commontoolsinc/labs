@@ -369,7 +369,7 @@ export function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
   );
 }
 
-export function transformToRendererCells(
+export function transformToCells(
   cell: DocImpl<any>,
   value: any,
   log?: ReactivityLog,
@@ -377,28 +377,28 @@ export function transformToRendererCells(
   if (isQueryResultForDereferencing(value)) {
     const ref = followCellReferences(getDocLinkOrThrow(value));
     if (cell === ref.cell)
-      return transformToRendererCells(cell, cell.getAtPath(ref.path), log);
-    else return ref.cell.asRendererCell(ref.path, log);
+      return transformToCells(cell, cell.getAtPath(ref.path), log);
+    else return ref.cell.asCell(ref.path, log);
   } else if (isAlias(value)) {
     const ref = followCellReferences(followAliases(value, cell, log), log);
-    return ref.cell.asRendererCell(ref.path, log);
+    return ref.cell.asCell(ref.path, log);
   } else if (isDoc(value)) {
     return value.asCell([], log);
   } else if (isDocLink(value)) {
     const ref = followCellReferences(value, log);
-    return ref.cell.asRendererCell(ref.path, log);
+    return ref.cell.asCell(ref.path, log);
   } else if (isCell(value)) {
     return value;
   }
 
   if (typeof value === "object" && value !== null)
     if (Array.isArray(value))
-      return value.map(value => transformToRendererCells(cell, value, log));
+      return value.map(value => transformToCells(cell, value, log));
     else
       return Object.fromEntries(
         Object.entries(value).map(([key, value]) => [
           key,
-          transformToRendererCells(cell, value, log),
+          transformToCells(cell, value, log),
         ]),
       );
   else return value;

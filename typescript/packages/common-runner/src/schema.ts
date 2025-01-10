@@ -50,7 +50,7 @@ export function validateAndTransform(
 ): any {
   const resolvedSchema = resolveSchema(schema, rootSchema);
 
-  // If this should be a reference, return as a RendererCell of resolvedSchema
+  // If this should be a reference, return as a Cell of resolvedSchema
   // NOTE: Need to check on the passed schema whether it's a reference, not the
   // resolved schema. The returned reference is of type resolvedSchema though.
   if (typeof schema === "object" && schema !== null && schema!.asCell)

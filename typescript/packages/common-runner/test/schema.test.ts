@@ -20,8 +20,8 @@ describe("Schema Support", () => {
         },
       };
 
-      const rendererCell = c.asCell([], undefined, schema);
-      const value = rendererCell.get();
+      const cell = c.asCell([], undefined, schema);
+      const value = cell.get();
 
       expect(value.str).toBe("hello");
       expect(value.num).toBe(42);
@@ -54,8 +54,8 @@ describe("Schema Support", () => {
         },
       };
 
-      const rendererCell = c.asCell([], undefined, schema);
-      const value = rendererCell.get();
+      const cell = c.asCell([], undefined, schema);
+      const value = cell.get();
 
       expect(value.user.name).toBe("John");
       expect(isCell(value.user.settings)).toBe(true);
@@ -76,15 +76,15 @@ describe("Schema Support", () => {
         },
       };
 
-      const rendererCell = c.asCell([], undefined, schema);
-      const value = rendererCell.get();
+      const cell = c.asCell([], undefined, schema);
+      const value = cell.get();
 
       expect(value.items).toEqual([1, 2, 3]);
     });
   });
 
   describe("References", () => {
-    it("should return RendererCell for reference properties", () => {
+    it("should return a Cell for reference properties", () => {
       const c = getDoc({
         id: 1,
         metadata: {
@@ -104,8 +104,8 @@ describe("Schema Support", () => {
         },
       } as JSONSchema;
 
-      const rendererCell = c.asCell([], undefined, schema);
-      const value = rendererCell.get();
+      const cell = c.asCell([], undefined, schema);
+      const value = cell.get();
 
       expect(value.id).toBe(1);
       expect(isCell(value.metadata)).toBe(true);
@@ -131,8 +131,8 @@ describe("Schema Support", () => {
         asCell: true,
       } as JSONSchema;
 
-      const rendererCell = c.asCell([], undefined, schema);
-      const value = rendererCell.get();
+      const cell = c.asCell([], undefined, schema);
+      const value = cell.get();
 
       expect(isCell(value)).toBe(true);
       expect(value.get().id).toBe(1);
@@ -162,8 +162,8 @@ describe("Schema Support", () => {
         },
       };
 
-      const rendererCell = c.asCell([], undefined, schema);
-      const value = rendererCell.get();
+      const cell = c.asCell([], undefined, schema);
+      const value = cell.get();
 
       expect(value.name).toBe("root");
       expect(value.children[0].name).toBe("child1");
@@ -203,8 +203,8 @@ describe("Schema Support", () => {
         },
       };
 
-      const rendererCell = c.asCell([], undefined, schema);
-      const userCell = rendererCell.key("user");
+      const cell = c.asCell([], undefined, schema);
+      const userCell = cell.key("user");
       const profileCell = userCell.key("profile");
       const value = profileCell.get();
 

@@ -230,7 +230,7 @@ describe("createProxy", () => {
   });
 });
 
-describe("asRendererCell", () => {
+describe("asCell", () => {
   it("should create a simple cell interface", () => {
     const c = getDoc({ x: 1, y: 2 });
     const simpleCell = c.asCell();
@@ -306,7 +306,7 @@ describe("asRendererCell", () => {
   });
 });
 
-describe("asRendererCell with schema", () => {
+describe("asCell with schema", () => {
   it("should validate and transform according to schema", () => {
     const c = getDoc({
       name: "test",
@@ -335,8 +335,8 @@ describe("asRendererCell with schema", () => {
       },
     } satisfies JSONSchema;
 
-    const rendererCell = c.asCell([], undefined, schema);
-    const value = rendererCell.get();
+    const cell = c.asCell([], undefined, schema);
+    const value = cell.get();
 
     expect(value.name).toBe("test");
     expect(value.age).toBe(42);
@@ -344,7 +344,7 @@ describe("asRendererCell with schema", () => {
     expect(value.nested.value).toBe(123);
   });
 
-  it("should return RendererCell for reference properties", () => {
+  it("should return a Cell for reference properties", () => {
     const c = getDoc({
       id: 1,
       metadata: {
@@ -364,8 +364,7 @@ describe("asRendererCell with schema", () => {
       },
     } satisfies JSONSchema;
 
-    const rendererCell = c.asCell([], undefined, schema);
-    const value = rendererCell.get();
+    const value = c.asCell([], undefined, schema).get();
 
     expect(value.id).toBe(1);
     expect(isCell(value.metadata)).toBe(true);
@@ -407,8 +406,7 @@ describe("asRendererCell with schema", () => {
       },
     } satisfies JSONSchema;
 
-    const rendererCell = c.asCell([], undefined, schema);
-    const value = rendererCell.get();
+    const value = c.asCell([], undefined, schema).get();
 
     expect(value.name).toBe("root");
     expect(value.children[0].name).toBe("child1");
@@ -458,8 +456,8 @@ describe("asRendererCell with schema", () => {
       },
     } satisfies JSONSchema;
 
-    const rendererCell = c.asCell([], undefined, schema);
-    const userCell = rendererCell.key("user");
+    const cell = c.asCell([], undefined, schema);
+    const userCell = cell.key("user");
     const profileCell = userCell.key("profile");
 
     const value = profileCell.get();
@@ -481,8 +479,7 @@ describe("asRendererCell with schema", () => {
       },
     });
 
-    const rendererCell = c.asCell();
-    const value = rendererCell.get();
+    const value = c.asCell().get();
 
     // Should behave like a query result proxy
     expect(value.data.value).toBe(42);
@@ -525,19 +522,19 @@ describe("asRendererCell with schema", () => {
       },
     } satisfies JSONSchema;
 
-    const rendererCell = c.asCell([], undefined, initialSchema);
-    const value = rendererCell.get();
+    const cell = c.asCell([], undefined, initialSchema);
+    const value = cell.get();
 
-    // With initial schema, metadata is not a RendererCell
+    // With initial schema, metadata is not a Cell
     expect(value.id).toBe(1);
     expect(isCell(value.metadata)).toBe(false);
     expect(value.metadata.createdAt).toBe("2025-01-06");
 
     // Switch to reference schema
-    const referenceCell = rendererCell.asSchema(referenceSchema);
+    const referenceCell = cell.asSchema(referenceSchema);
     const refValue = referenceCell.get();
 
-    // Now metadata should be a RendererCell
+    // Now metadata should be a Cell
     expect(refValue.id).toBe(1);
     expect(isCell(refValue.metadata)).toBe(true);
 
@@ -571,13 +568,13 @@ describe("asRendererCell with schema", () => {
       },
     } satisfies JSONSchema;
 
-    const rendererCell = c.asCell([], undefined, schema);
-    const value = rendererCell.get();
+    const cell = c.asCell([], undefined, schema);
+    const value = cell.get();
 
     // Regular property works normally
     expect(value.id).toBe(1);
 
-    // Each property in context should be a RendererCell
+    // Each property in context should be a Cell
     expect(isCell(value.context.user)).toBe(true);
     expect(isCell(value.context.settings)).toBe(true);
     expect(isCell(value.context.data)).toBe(true);
@@ -608,10 +605,10 @@ describe("asRendererCell with schema", () => {
       },
     } satisfies JSONSchema;
 
-    const rendererCell = c.asCell([], undefined, schema);
-    const value = rendererCell.get();
+    const cell = c.asCell([], undefined, schema);
+    const value = cell.get();
 
-    // All properties in context should be RendererCells regardless of their type
+    // All properties in context should be Cells regardless of their type
     expect(isCell(value.context.number)).toBe(true);
     expect(isCell(value.context.string)).toBe(true);
     expect(isCell(value.context.object)).toBe(true);
@@ -645,10 +642,10 @@ describe("asRendererCell with schema", () => {
       },
     } satisfies JSONSchema;
 
-    const rendererCell = c.asCell([], undefined, schema);
-    const value = rendererCell.get();
+    const cell = c.asCell([], undefined, schema);
+    const value = cell.get();
 
-    // The inner reference should be preserved but wrapped in a new RendererCell
+    // The inner reference should be preserved but wrapped in a new Cell
     expect(isCell(value.context.inner)).toBe(true);
     expect(value.context.inner.get().value).toBe(42);
 
@@ -682,10 +679,10 @@ describe("asRendererCell with schema", () => {
       },
     } satisfies JSONSchema;
 
-    const rendererCell = c.asCell([], undefined, schema);
-    const value = rendererCell.get();
+    const cell = c.asCell([], undefined, schema);
+    const value = cell.get();
 
-    // All references should be preserved but wrapped in RendererCells
+    // All references should be preserved but wrapped in Cells
     expect(isCell(value.context.cell)).toBe(true);
     expect(isCell(value.context.reference)).toBe(true);
     expect(isCell(value.context.alias)).toBe(true);
@@ -727,8 +724,8 @@ describe("asRendererCell with schema", () => {
     } satisfies JSONSchema;
 
     const log = { reads: [], writes: [] } as ReactivityLog;
-    const rendererCell = c.asCell([], log, schema);
-    const value = rendererCell.get();
+    const cell = c.asCell([], log, schema);
+    const value = cell.get();
 
     // The nested reference should be followed all the way to the inner value
     expect(isCell(value.context.nested)).toBe(true);
@@ -772,8 +769,8 @@ describe("asRendererCell with schema", () => {
       },
     } satisfies JSONSchema;
 
-    const rendererCell = c.asCell([], undefined, schema);
-    const itemsCell = rendererCell.key("items");
+    const cell = c.asCell([], undefined, schema);
+    const itemsCell = cell.key("items");
     const firstItemCell = itemsCell.key(0);
     const secondItemCell = itemsCell.key(1);
 
@@ -801,15 +798,15 @@ describe("asRendererCell with schema", () => {
       },
     } satisfies JSONSchema;
 
-    const rendererCell = c.asCell([], undefined, schema);
+    const cell = c.asCell([], undefined, schema);
 
     // Test defined property
-    const definedCell = rendererCell.key("defined");
+    const definedCell = cell.key("defined");
     expect(definedCell.get()).toBe("known property");
 
     // Test additional properties
-    const extra1Cell = rendererCell.key("extra1");
-    const extra2Cell = rendererCell.key("extra2");
+    const extra1Cell = cell.key("extra1");
+    const extra2Cell = cell.key("extra2");
     expect(extra1Cell.get()).toEqual({ value: 1 });
     expect(extra2Cell.get()).toEqual({ value: 2 });
   });
@@ -831,32 +828,32 @@ describe("asRendererCell with schema", () => {
       },
     } satisfies JSONSchema;
 
-    const rendererCell = c.asCell([], undefined, schema);
+    const cell = c.asCell([], undefined, schema);
 
     // Test defined property
-    const definedCell = rendererCell.key("defined");
+    const definedCell = cell.key("defined");
     expect(definedCell.get()).toBe("known property");
 
     // Test additional property with a schema that generates a reference
-    const extraCell = rendererCell.key("extra");
+    const extraCell = cell.key("extra");
     const extraValue = extraCell.get();
     expect(isCell(extraValue.anything)).toBe(true);
   });
 
   it("should partially update object values using update method", () => {
     const c = getDoc({ name: "test", age: 42, tags: ["a", "b"] });
-    const rendererCell = c.asCell();
+    const cell = c.asCell();
 
-    rendererCell.update({ age: 43, tags: ["a", "b", "c"] });
-    expect(rendererCell.get()).toEqual({
+    cell.update({ age: 43, tags: ["a", "b", "c"] });
+    expect(cell.get()).toEqual({
       name: "test",
       age: 43,
       tags: ["a", "b", "c"],
     });
 
     // Should preserve unmodified fields
-    rendererCell.update({ name: "updated" });
-    expect(rendererCell.get()).toEqual({
+    cell.update({ name: "updated" });
+    expect(cell.get()).toEqual({
       name: "updated",
       age: 43,
       tags: ["a", "b", "c"],
@@ -897,9 +894,9 @@ describe("asRendererCell with schema", () => {
 
   it("should handle push method on non-array values", () => {
     const c = getDoc({ value: "not an array" });
-    const rendererCell = c.asCell(["value"]);
+    const cell = c.asCell(["value"]);
 
-    expect(() => rendererCell.push(42)).toThrow();
+    expect(() => cell.push(42)).toThrow();
   });
 });
 
