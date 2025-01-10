@@ -19,13 +19,44 @@ import {
   type Cancel,
   type RendererCell,
   ReactiveCell,
+  isRendererCell,
 } from "@commontools/common-runner";
+import { JSONSchema } from "@commontools/common-builder";
 import * as logger from "./logger.js";
 
+const schema: JSONSchema = {
+  type: "object",
+  properties: {
+    type: { type: "string" },
+    // For VNode
+    name: { type: "string" },
+    props: {
+      type: "object",
+      additionalProperties: { asCell: true },
+    },
+    children: {
+      type: "array",
+      items: {
+        $ref: "#",
+        asCell: true,
+      },
+    },
+    // For View
+    template: { $ref: "#" },
+    context: {
+      type: "object",
+      additionalProperties: { asCell: true },
+    },
+  },
+};
+
+/** Render a view into a parent element */
 export const render = (
   parent: HTMLElement,
   view: View | VNode | RendererCell<View | VNode>,
 ): Cancel => {
+  // If this is a reactive cell, ensure the schema is View | VNode
+  if (isRendererCell(view)) view = view.asSchema(schema);
   return effect(view, (view: View | VNode) => renderImpl(parent, view));
 };
 

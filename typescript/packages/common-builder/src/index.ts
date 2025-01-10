@@ -52,7 +52,7 @@ export {
   markAsStatic,
   type toJSON,
   type JSONValue,
-  type JSON,
+  type JSONSchema,
   type Frame,
   Static,
   type UnsafeBinding,

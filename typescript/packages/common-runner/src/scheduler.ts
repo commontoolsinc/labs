@@ -30,7 +30,7 @@ export function schedule(action: Action, log: ReactivityLog): Cancel {
 }
 
 export function unschedule(fn: Action): void {
-  cancels.get(fn)?.forEach((cancel) => cancel());
+  cancels.get(fn)?.forEach(cancel => cancel());
   cancels.delete(fn);
   dependencies.delete(fn);
   pending.delete(fn);
@@ -42,35 +42,40 @@ export async function run(action: Action): Promise<any> {
 
   if (running) await running;
 
-  running = new Promise(async (resolve) => {
-    const result = await action(log);
+  running = new Promise(async resolve => {
+    try {
+      const result = await action(log);
 
-    // Note: By adding the listeners after the call we avoid triggering a re-run
-    // of the action if it changed a r/w cell. Note that this also means that
-    // those actions can't loop on themselves.
-    setDependencies(action, log);
-    cancels.set(
-      action,
-      Array.from(log.reads).map(({ cell, path }) =>
-        cell.updates((_newValue, changedPath) => {
-          if (pathAffected(changedPath, path)) {
-            dirty.add(cell);
-            queueExecution();
-            pending.add(action);
-          }
-        }),
-      ),
-    );
+      // Note: By adding the listeners after the call we avoid triggering a re-run
+      // of the action if it changed a r/w cell. Note that this also means that
+      // those actions can't loop on themselves.
+      setDependencies(action, log);
+      cancels.set(
+        action,
+        Array.from(log.reads).map(({ cell, path }) =>
+          cell.updates((_newValue, changedPath) => {
+            if (pathAffected(changedPath, path)) {
+              dirty.add(cell);
+              queueExecution();
+              pending.add(action);
+            }
+          }),
+        ),
+      );
 
-    running = undefined;
-    resolve(result);
+      running = undefined;
+      resolve(result);
+    } catch (e) {
+      console.error("caught error", e, action);
+      resolve(undefined);
+    }
   });
 
   return running;
 }
 
 export async function idle() {
-  return new Promise<void>(async (resolve) => {
+  return new Promise<void>(async resolve => {
     if (running) await running;
     if (pending.size === 0 && eventQueue.length === 0) resolve();
     idlePromises.push(resolve);
@@ -138,7 +143,7 @@ async function execute() {
   // scheduled actions.
   pending.clear();
   dirty.clear();
-  for (const fn of order) cancels.get(fn)?.forEach((cancel) => cancel());
+  for (const fn of order) cancels.get(fn)?.forEach(cancel => cancel());
 
   // Now run all functions. This will create new listeners to mark cells dirty
   // and schedule the next run.
@@ -193,7 +198,7 @@ function topologicalSort(
         const { writes } = dependencies.get(action)!;
         for (const write of writes) {
           if (
-            Array.from(relevantActions).some((relevantAction) =>
+            Array.from(relevantActions).some(relevantAction =>
               dependencies
                 .get(relevantAction)!
                 .reads.some(
@@ -253,7 +258,7 @@ function topologicalSort(
     if (queue.length === 0) {
       // Handle cycle: choose an unvisited node with the lowest in-degree
       const unvisitedAction = Array.from(relevantActions)
-        .filter((action) => !visited.has(action))
+        .filter(action => !visited.has(action))
         .reduce((a, b) => (inDegree.get(a)! < inDegree.get(b)! ? a : b));
       queue.push(unvisitedAction);
     }

@@ -1,8 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { recipe, lift, handler, byRef } from "@commontools/common-builder";
+import {
+  recipe,
+  lift,
+  handler,
+  byRef,
+  JSONSchema,
+} from "@commontools/common-builder";
 import { run } from "../src/runner.js";
 import { addModuleByRef } from "../src/module.js";
-import { cell } from "../src/cell.js";
+import { cell, RendererCell } from "../src/cell.js";
 import { idle } from "../src/scheduler.js";
 
 describe("Recipe Runner", () => {
@@ -341,5 +347,169 @@ describe("Recipe Runner", () => {
     await idle();
 
     expect(result.getAsQueryResult()).toMatchObject({ result: 10 });
+  });
+
+  it("should handle schema with cell references", async () => {
+    const schema = {
+      type: "object",
+      properties: {
+        settings: {
+          type: "object",
+          properties: {
+            value: { type: "number" },
+          },
+        },
+        multiplier: { type: "number" },
+      },
+    } as JSONSchema;
+
+    const multiplyRecipe = recipe<{
+      settings: { value: number };
+      multiplier: number;
+    }>("Multiply with Settings", ({ settings, multiplier }) => {
+      const result = lift(
+        schema,
+        { type: "number" },
+        ({ settings, multiplier }) => settings.value * multiplier,
+      )({ settings, multiplier });
+      return { result };
+    });
+
+    const settingsCell = cell({ value: 5 });
+    const result = run(multiplyRecipe, {
+      settings: settingsCell,
+      multiplier: 3,
+    });
+
+    await idle();
+
+    expect(result.getAsQueryResult()).toEqual({ result: 15 });
+
+    // Update the cell and verify the recipe recomputes
+    settingsCell.send({ value: 10 });
+
+    await idle();
+
+    expect(result.getAsQueryResult()).toEqual({ result: 30 });
+  });
+
+  it("should handle nested cell references in schema", async () => {
+    const schema = {
+      type: "object",
+      properties: {
+        data: {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  value: { type: "number" },
+                },
+                asCell: true,
+              },
+            },
+          },
+        },
+      },
+    } as JSONSchema;
+
+    const sumRecipe = recipe<{ data: { items: Array<{ value: number }> } }>(
+      "Sum Items",
+      ({ data }) => {
+        const result = lift(schema, { type: "number" }, ({ data }) =>
+          data.items.reduce((sum, item) => sum + item.get().value, 0),
+        )({ data });
+        return { result };
+      },
+    );
+
+    const item1 = cell({ value: 1 });
+    const item2 = cell({ value: 2 });
+    const result = run(sumRecipe, { data: { items: [item1, item2] } });
+
+    await idle();
+
+    expect(result.getAsQueryResult()).toEqual({ result: 3 });
+  });
+
+  it("should handle dynamic cell references with schema", async () => {
+    const schema = {
+      type: "object",
+      properties: {
+        context: {
+          type: "object",
+          additionalProperties: {
+            type: "number",
+            asCell: true,
+          },
+        },
+      },
+    } as JSONSchema;
+
+    const dynamicRecipe = recipe<{ context: Record<string, number> }>(
+      "Dynamic Context",
+      ({ context }) => {
+        const result = lift(schema, { type: "number" }, ({ context }) =>
+          Object.values(context ?? {}).reduce(
+            (sum: number, val) => sum + (val as RendererCell<number>).get(),
+            0,
+          ),
+        )({ context });
+        return { result };
+      },
+    );
+
+    const value1 = cell(5);
+    const value2 = cell(7);
+    const result = run(dynamicRecipe, {
+      context: {
+        first: value1,
+        second: value2,
+      },
+    });
+
+    await idle();
+
+    expect(result.getAsQueryResult()).toEqual({ result: 12 });
+  });
+
+  it("should execute handlers with schemas", async () => {
+    const incHandler = handler<{ amount: number }, { counter: number }>(
+      { type: "object", properties: { amount: { type: "number" } } },
+      {
+        type: "object",
+        properties: {
+          counter: {
+            type: "number",
+            asCell: true,
+          },
+        },
+      },
+      ({ amount }, { counter }) => {
+        const counterCell = counter as unknown as RendererCell<number>;
+        counterCell.send(counterCell.get() + amount);
+      },
+    );
+
+    const incRecipe = recipe<{ counter: number }>(
+      "Increment counter",
+      ({ counter }) => {
+        return { counter, stream: incHandler({ counter }) };
+      },
+    );
+
+    const result = run(incRecipe, { counter: 0 });
+
+    await idle();
+
+    result.asRendererCell(["stream"]).send({ amount: 1 });
+    await idle();
+    expect(result.getAsQueryResult()).toMatchObject({ counter: 1 });
+
+    result.asRendererCell(["stream"]).send({ amount: 2 });
+    await idle();
+    expect(result.getAsQueryResult()).toMatchObject({ counter: 3 });
   });
 });

@@ -224,7 +224,7 @@ describe("recipe with map node that references a parent cell", () => {
     expect(
       (multiplyArray.nodes[0].inputs as { op: Recipe }).op.nodes[0].inputs,
     ).toEqual({
-      x: { $alias: { cell: 1, path: ["argument", "item", "x"] } },
+      x: { $alias: { cell: 1, path: ["argument", "element", "x"] } },
       factor: { $alias: { path: ["argument", "factor"] } },
     });
   });
@@ -256,7 +256,7 @@ describe("recipe with map node that references a parent cell in another recipe",
     const subSubRecipe = (subRecipe.nodes[0].inputs as { op: Recipe }).op;
     expect(isRecipe(subSubRecipe)).toBeTruthy();
     expect(subSubRecipe.nodes[0].inputs).toEqual({
-      x: { $alias: { cell: 2, path: ["argument", "item", "x"] } },
+      x: { $alias: { cell: 2, path: ["argument", "element", "x"] } },
       factor: { $alias: { cell: 2, path: ["argument", "index"] } },
     });
   });
