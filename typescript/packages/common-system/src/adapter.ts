@@ -1,5 +1,9 @@
 import { Type, Task, refer, $ } from "synopsys";
-import { run, CellImpl, cell as createRunnerCell } from "@commontools/common-runner";
+import {
+  run,
+  DocImpl,
+  getDoc as createRunnerCell,
+} from "@commontools/common-runner";
 import * as DB from "./db.js";
 import { NAME, UI, recipe } from "@commontools/common-builder";
 import { html } from "@commontools/common-html";
@@ -20,7 +24,7 @@ export interface Behavior<
 
   fork(self?: Reference): Task.Task<{}, Error>;
 
-  spawn(source?: {}, defaultName?: string): CellImpl<{}>;
+  spawn(source?: {}, defaultName?: string): DocImpl<{}>;
 
   disableRule(ruleName: keyof Rules): void;
   enableRule(ruleName: keyof Rules): void;

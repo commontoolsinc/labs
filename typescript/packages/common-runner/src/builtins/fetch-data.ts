@@ -1,4 +1,4 @@
-import { cell, CellImpl, ReactivityLog } from "../cell.js";
+import { getDoc, DocImpl, ReactivityLog } from "../cell.js";
 import { normalizeToCells } from "../utils.js";
 import { idle, type Action } from "../scheduler.js";
 import { refer } from "merkle-reference";
@@ -14,7 +14,7 @@ import { refer } from "merkle-reference";
  * @returns { pending: boolean, result: any, error: any } - As individual cells, representing `pending` state, final `result`, and any `error`.
  */
 export function fetchData(
-  inputsCell: CellImpl<{
+  inputsCell: DocImpl<{
     url: string;
     mode?: "text" | "json";
     options?: { body?: any; method?: string; headers?: Record<string, string> };
@@ -22,17 +22,17 @@ export function fetchData(
   }>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
-  cause: CellImpl<any>[],
-  parentCell: CellImpl<any>,
+  cause: DocImpl<any>[],
+  parentCell: DocImpl<any>,
 ): Action {
-  const pending = cell(false, { fetchData: { pending: cause } });
-  const result = cell<any | undefined>(undefined, {
+  const pending = getDoc(false, { fetchData: { pending: cause } });
+  const result = getDoc<any | undefined>(undefined, {
     fetchData: { result: cause },
   });
-  const error = cell<any | undefined>(undefined, {
+  const error = getDoc<any | undefined>(undefined, {
     fetchData: { error: cause },
   });
-  const requestHash = cell<string | undefined>(undefined, {
+  const requestHash = getDoc<string | undefined>(undefined, {
     fetchData: { requestHash: cause },
   });
 
@@ -84,7 +84,7 @@ export function fetchData(
 
     fetch(url, options)
       .then(processResponse)
-      .then(async (data) => {
+      .then(async data => {
         if (thisRun !== currentRun) return;
 
         normalizeToCells(parentCell, data, undefined, log, {
@@ -98,7 +98,7 @@ export function fetchData(
         result.setAtPath([], data, log);
         requestHash.setAtPath([], hash, log);
       })
-      .catch(async (err) => {
+      .catch(async err => {
         if (thisRun !== currentRun) return;
 
         await idle();

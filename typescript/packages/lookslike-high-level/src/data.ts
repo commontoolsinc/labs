@@ -1,13 +1,13 @@
 // This file is setting up example data
 
-import { NAME, Recipe, TYPE, UI } from "@commontools/common-builder";
+import { NAME, Recipe, Module, TYPE, UI } from "@commontools/common-builder";
 import {
   addModuleByRef,
   addRecipe,
   allRecipesByName,
-  cell,
-  type CellImpl,
-  type CellReference,
+  getDoc,
+  type DocImpl,
+  type DocLink,
   createRef,
   EntityId,
   getEntityId,
@@ -15,8 +15,8 @@ import {
   getRecipeParents,
   getRecipeSrc,
   idle,
-  isCell,
-  isCellReference,
+  isDoc,
+  isDocLink,
   raw,
   type ReactivityLog,
   run,
@@ -82,10 +82,10 @@ const storage = createStorage(
   (import.meta as any).env.VITE_STORAGE_TYPE ?? "memory",
 );
 
-export const charms = cell<CellReference[]>([], "charms");
+export const charms = getDoc<DocLink[]>([], "charms");
 (window as any).charms = charms;
 
-export async function addCharms(newCharms: CellImpl<any>[]) {
+export async function addCharms(newCharms: DocImpl<any>[]) {
   await storage.syncCell(charms);
 
   await idle();
@@ -100,7 +100,7 @@ export async function addCharms(newCharms: CellImpl<any>[]) {
   if (charmsToAdd.length > 0) {
     charms.send([
       ...charms.get(),
-      ...charmsToAdd.map(cell => ({ cell, path: [] }) satisfies CellReference),
+      ...charmsToAdd.map(cell => ({ cell, path: [] }) satisfies DocLink),
     ]);
   }
 }
@@ -111,10 +111,10 @@ export function removeCharm(id: EntityId) {
 }
 
 export async function runPersistent(
-  recipe: Recipe,
+  recipe: Recipe | Module,
   inputs?: any,
   cause?: any,
-): Promise<CellImpl<any>> {
+): Promise<DocImpl<any>> {
   await idle();
 
   // Fill in missing parameters from other charms. It's a simple match on
@@ -125,8 +125,8 @@ export async function runPersistent(
 
   // TODO: This should really be extracted into a full-fledged query builder.
   if (
-    !isCell(inputs) && // Adding to a cell input is not supported yet
-    !isCellReference(inputs) && // Neither for cell reference
+    !isDoc(inputs) && // Adding to a cell input is not supported yet
+    !isDocLink(inputs) && // Neither for cell reference
     recipe.argumentSchema &&
     (recipe.argumentSchema as any).type === "object"
   ) {
@@ -169,9 +169,9 @@ export async function runPersistent(
 }
 
 export async function syncCharm(
-  entityId: string | EntityId | CellImpl<any>,
+  entityId: string | EntityId | DocImpl<any>,
   waitForStorage: boolean = false,
-): Promise<CellImpl<Charm>> {
+): Promise<DocImpl<Charm>> {
   return storage.syncCell(entityId, waitForStorage);
 }
 
@@ -322,18 +322,16 @@ function getFridayAndMondayDateStrings() {
 */
 
 // Terrible hack to open a charm from a recipe
-export type CharmActionFn = (
-  charmId: string | EntityId | CellImpl<any>,
-) => void;
+export type CharmActionFn = (charmId: string | EntityId | DocImpl<any>) => void;
 export type CharmAction = CharmActionFn & {
   set: (opener: CharmActionFn) => void;
 };
 
 let charmOpener: CharmActionFn | CharmAction = () => {};
 let charmCloser: CharmActionFn | CharmAction = () => {};
-export const openCharm = (charmId: string | EntityId | CellImpl<any>) =>
+export const openCharm = (charmId: string | EntityId | DocImpl<any>) =>
   charmOpener(charmId);
-export const closeCharm = (charmId: string | EntityId | CellImpl<any>) =>
+export const closeCharm = (charmId: string | EntityId | DocImpl<any>) =>
   charmCloser(charmId);
 openCharm.set = (opener: CharmActionFn) => {
   charmOpener = opener;
@@ -344,14 +342,14 @@ closeCharm.set = (closer: CharmActionFn) => {
 
 addModuleByRef(
   "navigateTo",
-  raw((inputsCell: CellImpl<any>) => (log: ReactivityLog) => {
+  raw((inputsCell: DocImpl<any>) => (log: ReactivityLog) => {
     // HACK to follow the cell references to the entityId
     const entityId = getEntityId(inputsCell.getAsQueryResult([], log));
     if (entityId) openCharm(entityId);
   }),
 );
 
-export let annotationsEnabled = cell<boolean>(false);
+export let annotationsEnabled = getDoc<boolean>(false);
 export const toggleAnnotations = () => {
   annotationsEnabled.send(!annotationsEnabled.get());
 };

@@ -40,7 +40,7 @@ describe("recipes with HTML", () => {
         [UI]: html`<div>
           <h1>${title}</h1>
           <ul>
-            ${items.map((item) => html`<li>${item.title}</li>`)}
+            ${items.map(item => html`<li>${item.title}</li>`)}
           </ul>
         </div>`,
       };
@@ -57,7 +57,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asRendererCell<{ [UI]: View }>().key(UI);
+    const cell = result.asCell<{ [UI]: View }>().key(UI);
     render(parent, cell.get());
 
     assert.equal(
@@ -91,7 +91,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asRendererCell<{ [UI]: View }>().key(UI);
+    const cell = result.asCell<{ [UI]: View }>().key(UI);
     render(parent, cell.get());
 
     assert.equal(parent.innerHTML, "<div><div>test</div></div>");
@@ -107,7 +107,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asRendererCell<{ [UI]: View }>().key(UI);
+    const cell = result.asCell<{ [UI]: View }>().key(UI);
     render(parent, cell.get());
 
     assert.equal(parent.innerHTML, "<div>Hello, world!</div>");
@@ -122,10 +122,10 @@ describe("recipes with HTML", () => {
       { test: 456, ok: true },
     ];
 
-    const nestedMapRecipe = recipe<any[]>("nested map recipe", (data) => ({
+    const nestedMapRecipe = recipe<any[]>("nested map recipe", data => ({
       [UI]: html`<div>
         ${data.map(
-          (row) =>
+          row =>
             html`<ul>
               ${entries(row).map(([k, v]) => html`<li>${k}: ${v}</li>`)}
             </ul>`,
@@ -138,7 +138,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asRendererCell([UI]);
+    const cell = result.asCell([UI]);
     render(parent, cell.get());
 
     assert.equal(

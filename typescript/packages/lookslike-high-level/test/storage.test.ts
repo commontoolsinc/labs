@@ -5,7 +5,7 @@ import {
   LocalStorageProvider,
   StorageProvider,
 } from "../src/storage-providers.js";
-import { cell, CellImpl, createRef } from "@commontools/common-runner";
+import { getDoc, DocImpl, createRef } from "@commontools/common-runner";
 
 // Create a mock window object
 const createMockWindow = () => {
@@ -63,7 +63,7 @@ const createMockWindow = () => {
     ),
     dispatchEvent: vi.fn((event: any) => {
       if (event.type === "storage") {
-        listeners.forEach((callback) => callback(event));
+        listeners.forEach(callback => callback(event));
       }
     }),
     location: {
@@ -105,11 +105,11 @@ if (typeof StorageEvent === "undefined") {
 describe("Storage", () => {
   const storageTypes = ["memory", "local"] as const;
 
-  storageTypes.forEach((storageType) => {
+  storageTypes.forEach(storageType => {
     describe(storageType, () => {
       let storage: Storage;
       let storage2: StorageProvider;
-      let testCell: CellImpl<any>;
+      let testCell: DocImpl<any>;
 
       beforeEach(() => {
         storage = createStorage(storageType);
@@ -121,7 +121,7 @@ describe("Storage", () => {
         } else {
           throw new Error("Invalid storage type: " + storageType);
         }
-        testCell = cell<string>();
+        testCell = getDoc<string>();
         testCell.generateEntityId();
       });
 
@@ -143,7 +143,7 @@ describe("Storage", () => {
         });
 
         it("should persist a cells and referenced cell references within it", async () => {
-          const refCell = cell("hello");
+          const refCell = getDoc("hello");
           refCell.generateEntityId();
 
           const testValue = {
@@ -162,7 +162,7 @@ describe("Storage", () => {
         });
 
         it("should persist a cells and referenced cells within it", async () => {
-          const refCell = cell("hello");
+          const refCell = getDoc("hello");
           refCell.generateEntityId();
 
           const testValue = {
@@ -181,7 +181,7 @@ describe("Storage", () => {
         it("should generate causal IDs for cells that don't have them yet", async () => {
           const testValue = {
             data: "test",
-            ref: { cell: cell("hello"), path: [] },
+            ref: { cell: getDoc("hello"), path: [] },
           };
           testCell.send(testValue);
 
@@ -222,7 +222,7 @@ describe("Storage", () => {
 
           // Even when passing in a new cell with the same entityId, it should be
           // the same cell.
-          const cell2 = cell();
+          const cell2 = getDoc();
           cell2.entityId = testCell.entityId;
           const cell3 = await storage.syncCell(cell2);
           expect(cell3).toBe(cell1);
@@ -250,7 +250,7 @@ describe("Storage", () => {
 
       describe("ephemeral cells", () => {
         it("should not be loaded from storage", async () => {
-          const ephemeralCell = cell("transient", "ephemeral");
+          const ephemeralCell = getDoc("transient", "ephemeral");
           ephemeralCell.ephemeral = true;
           await storage.syncCell(ephemeralCell);
 

@@ -11,7 +11,7 @@ import {
   TYPE,
   UI,
 } from "../data.js";
-import { cell, CellImpl, getRecipe, isCell } from "@commontools/common-runner";
+import { getDoc, DocImpl, getRecipe, isDoc } from "@commontools/common-runner";
 import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.js";
@@ -61,7 +61,7 @@ ${typeof this.content === "string"
 @customElement("common-sidebar")
 export class CommonSidebar extends LitElement {
   @property({ type: Object })
-  focusedCharm: CellImpl<Charm> | null = null;
+  focusedCharm: DocImpl<Charm> | null = null;
 
   @property({ type: Object })
   focusedProxy: Charm | null = null;
@@ -79,10 +79,9 @@ export class CommonSidebar extends LitElement {
   workingSpec: string = "";
 
   @property({ type: Object })
-
   private homeRef = createRef<HTMLElement>();
-  private homeCharm: Promise<CellImpl<Charm>> | null = null;
-  private linkedCharms: CellImpl<Charm>[] = [];
+  private homeCharm: Promise<DocImpl<Charm>> | null = null;
+  private linkedCharms: DocImpl<Charm>[] = [];
 
   static override styles = [
     style.baseStyles,
@@ -111,11 +110,10 @@ export class CommonSidebar extends LitElement {
   ];
 
   private getFieldOrDefault = <T>(field: string, defaultValue: T) =>
-    this.focusedCharm?.asRendererCell([field]) ||
-    cell(defaultValue).asRendererCell();
+    this.focusedCharm?.asCell([field]) || getDoc(defaultValue).asCell();
 
   private setField = <T>(field: string, value: T) => {
-    this.focusedCharm?.asRendererCell([field]).send(value);
+    this.focusedCharm?.asCell([field]).send(value);
   };
 
   private handleSidebarTabChange(tabName: string) {
@@ -139,7 +137,7 @@ export class CommonSidebar extends LitElement {
     if (!this.homeCharm && this.homeRef.value) {
       this.homeCharm = runPersistent(home, { charms, recipes }, "home").then(
         home => {
-          const view = home.asRendererCell<Charm>().key(UI);
+          const view = home.asCell<Charm>().key(UI);
           if (!view.getAsQueryResult()) throw new Error("Charm has no UI");
           render(this.homeRef.value!, view);
           return home;
@@ -150,9 +148,9 @@ export class CommonSidebar extends LitElement {
     if (_changedProperties.has("focusedCharm")) {
       const processCell = this.focusedCharm?.sourceCell?.get();
       if (processCell) {
-        const linkedCharms = new Set<CellImpl<Charm>>();
+        const linkedCharms = new Set<DocImpl<Charm>>();
         const traverse = (value: any, parents: any[] = []) => {
-          if (isCell(value)) {
+          if (isDoc(value)) {
             const initialCell = value;
 
             while (value.sourceCell) value = value.sourceCell;
@@ -413,7 +411,7 @@ export class CommonSidebar extends LitElement {
                   <os-code-editor
                     slot="content"
                     language="text/markdown"
-                    .source=${spec}
+                    .source=${this.workingSpec}
                     @doc-change=${onSpecChanged}
                   ></os-code-editor>
                 </div>

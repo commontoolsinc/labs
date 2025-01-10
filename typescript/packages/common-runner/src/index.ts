@@ -7,20 +7,20 @@ export {
   idle,
 } from "./scheduler.js";
 export type {
-  RendererCell,
-  CellImpl,
+  Cell,
+  DocImpl,
   QueryResult,
-  CellReference,
+  DocLink,
   ReactivityLog,
 } from "./cell.js";
 export {
-  cell,
+  getDoc,
+  isDoc,
   isCell,
-  isRendererCell,
-  isCellReference,
+  isDocLink,
   isQueryResult,
-  getCellReferenceOrValue,
-  getCellReferenceOrThrow,
+  getDocLinkOrValue,
+  getDocLinkOrThrow,
   isQueryResultForDereferencing,
 } from "./cell.js";
 export {
@@ -34,7 +34,7 @@ export {
 } from "./reactivity.js";
 export {
   getEntityId,
-  getCellByEntityId,
+  getDocByEntityId,
   createRef,
   type EntityId,
 } from "./cell-map.js";

@@ -1,10 +1,5 @@
 import { type Recipe } from "@commontools/common-builder";
-import {
-  cell,
-  CellImpl,
-  ReactivityLog,
-  getCellReferenceOrThrow,
-} from "../cell.js";
+import { getDoc, DocImpl, ReactivityLog, getDocLinkOrThrow } from "../cell.js";
 import { run, cancels } from "../runner.js";
 import { type Action } from "../scheduler.js";
 import { type AddCancel } from "../cancel.js";
@@ -31,16 +26,16 @@ import { type AddCancel } from "../cancel.js";
  * @returns A cell containing the mapped values.
  */
 export function map(
-  inputsCell: CellImpl<{
+  inputsCell: DocImpl<{
     list: any[];
     op: Recipe;
   }>,
   sendResult: (result: any) => void,
   addCancel: AddCancel,
   cause: any,
-  parentCell: CellImpl<any>,
+  parentCell: DocImpl<any>,
 ): Action {
-  const result = cell<any[]>([]);
+  const result = getDoc<any[]>([]);
   result.generateEntityId({
     map: parentCell.entityId,
     op: inputsCell.getAsQueryResult([])?.op,
@@ -65,21 +60,28 @@ export function map(
       throw new Error("map currently only supports arrays");
 
     // // Hack to get to underlying array that lists cell references, etc.
-    const listRef = getCellReferenceOrThrow(list);
+    const listRef = getDocLinkOrThrow(list);
 
     // Same for op, but here it's so that the proxy doesn't follow the aliases
     // in the recipe instead of returning the recipe.
     // TODO: Instead we should reify the recipe as a NodeFactory and teach the
     // query result proxy to not enter those.
-    const opRef = getCellReferenceOrThrow(op);
+    const opRef = getDocLinkOrThrow(op);
     op = opRef.cell.getAtPath(opRef.path);
 
     // Update values that are new or have changed
     for (let index = result.get().length; index < list.length; index++) {
-
-      const resultCell = cell();
+      const resultCell = getDoc();
       resultCell.generateEntityId({ result, index });
-      run(op, { element: { cell: listRef.cell, path: [...listRef.path, index] }, index, array: list }, resultCell);
+      run(
+        op,
+        {
+          element: { cell: listRef.cell, path: [...listRef.path, index] },
+          index,
+          array: list,
+        },
+        resultCell,
+      );
       resultCell.sourceCell!.sourceCell = parentCell;
 
       // TODO: Have `run` return cancel, once we make resultCell required

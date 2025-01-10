@@ -5,9 +5,9 @@ import { render, View } from "@commontools/common-html";
 import { charms, UI, annotationsEnabled } from "../data.js";
 import {
   run,
-  cell,
-  CellImpl,
-  getCellReferenceOrValue,
+  getDoc,
+  DocImpl,
+  getDocLinkOrValue,
 } from "@commontools/common-runner";
 import { annotation } from "../recipes/annotation.js";
 
@@ -40,12 +40,12 @@ export class CommonAnnotation extends LitElement {
   @property({ type: Object })
   data: { [key: string]: any } | undefined = undefined;
 
-  private annotation?: CellImpl<{ [UI]: any }>;
+  private annotation?: DocImpl<{ [UI]: any }>;
   private annotationRef = createRef<HTMLAnchorElement>();
 
-  private queryCell: CellImpl<string | undefined> = cell();
-  private targetCell: CellImpl<number | undefined> = cell();
-  private dataCell: CellImpl<{ [key: string]: any } | undefined> = cell();
+  private queryCell: DocImpl<string | undefined> = getDoc();
+  private targetCell: DocImpl<number | undefined> = getDoc();
+  private dataCell: DocImpl<{ [key: string]: any } | undefined> = getDoc();
 
   override render() {
     if (!annotationsEnabled.get()) {
@@ -60,7 +60,7 @@ export class CommonAnnotation extends LitElement {
     if (changedProperties.has("query")) this.queryCell.send(this.query);
     if (changedProperties.has("target")) this.targetCell.send(this.target);
     if (changedProperties.has("data"))
-      this.dataCell.send(getCellReferenceOrValue(this.data));
+      this.dataCell.send(getDocLinkOrValue(this.data));
 
     if (!this.annotation && this.annotationRef.value) {
       this.annotation = run(annotation, {
@@ -72,7 +72,7 @@ export class CommonAnnotation extends LitElement {
 
       render(
         this.annotationRef.value,
-        this.annotation.asRendererCell<{ [UI]: View }>().key(UI),
+        this.annotation.asCell<{ [UI]: View }>().key(UI),
       );
     }
   }

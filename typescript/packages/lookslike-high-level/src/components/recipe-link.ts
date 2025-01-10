@@ -2,7 +2,7 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { render } from "@commontools/common-ui";
 import { addCharms, runPersistent, type Charm } from "../data.js";
-import { type CellImpl, getRecipe } from "@commontools/common-runner";
+import { type DocImpl, getRecipe } from "@commontools/common-runner";
 
 export const recipeLink = render.view("common-recipe-link", {
   recipe: { type: "object" },
@@ -30,7 +30,7 @@ export class CommonRecipeLink extends LitElement {
     const recipe = getRecipe(this.recipe);
     if (!recipe) return;
 
-    const charm: CellImpl<Charm> = await runPersistent(recipe);
+    const charm: DocImpl<Charm> = await runPersistent(recipe);
     addCharms([charm]);
 
     this.dispatchEvent(

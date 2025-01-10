@@ -21,11 +21,11 @@ import {
 } from "./utils.js";
 import { queueEvent } from "./scheduler.js";
 import {
-  setCellByEntityId,
+  setDocByEntityId,
   getEntityId,
   createRef,
   type EntityId,
-  getCellByEntityId,
+  getDocByEntityId,
 } from "./cell-map.js";
 import { type Cancel } from "./cancel.js";
 import { validateAndTransform } from "./schema.js";
@@ -56,7 +56,7 @@ import { validateAndTransform } from "./schema.js";
  * @returns {QueryResult<DeepKeyLookup<T, Path>>}
  *
  * @method getAsCellReference Returns a cell reference for the cell.
- * @returns {CellReference}
+ * @returns {DocLink}
  *
  * @method toJSON Returns a JSON pointer to the cell (not the contents!).
  * @returns {{"/": string}}
@@ -67,7 +67,7 @@ import { validateAndTransform } from "./schema.js";
  * @method entityId Returns the current entity ID of the cell.
  * @returns {EntityId | undefined}
  */
-export interface RendererCell<T> {
+export interface Cell<T> {
   get(): T;
   set(value: T): void;
   send(value: T): void;
@@ -75,21 +75,21 @@ export interface RendererCell<T> {
   push(
     value:
       | (T extends Array<infer U> ? U : any)
-      | CellImpl<T extends Array<infer U> ? U : any>
-      | CellReference,
+      | DocImpl<T extends Array<infer U> ? U : any>
+      | DocLink,
   ): void;
   sink(callback: (value: T) => void): () => void;
-  key<K extends keyof T>(valueKey: K): RendererCell<T[K]>;
-  asSchema(schema: JSONSchema): RendererCell<T>;
+  key<K extends keyof T>(valueKey: K): Cell<T[K]>;
+  asSchema(schema: JSONSchema): Cell<T>;
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
     log?: ReactivityLog,
   ): QueryResult<DeepKeyLookup<T, Path>>;
-  getAsCellReference(): CellReference;
+  getAsDocLink(): DocLink;
   toJSON(): { "/": string } | undefined;
   value: T;
   entityId: EntityId | undefined;
-  [isRendererCellMarker]: true;
+  [isCellMarker]: true;
   copyTrap: boolean;
   schema?: JSONSchema;
 }
@@ -103,7 +103,7 @@ export interface RendererCell<T> {
  * Most of the time just used to get to the other representations or to pass
  * around to other parts of the system.
  */
-export type CellImpl<T> = {
+export type DocImpl<T> = {
   /**
    * Get raw value.
    *
@@ -147,11 +147,11 @@ export type CellImpl<T> = {
    * @param log - Reactivity log.
    * @returns Simple cell.
    */
-  asRendererCell<Q = T, Path extends PropertyKey[] = []>(
+  asCell<Q = T, Path extends PropertyKey[] = []>(
     path?: Path,
     log?: ReactivityLog,
     schema?: JSONSchema,
-  ): RendererCell<DeepKeyLookup<Q, Path>>;
+  ): Cell<DeepKeyLookup<Q, Path>>;
 
   /**
    * Send a value, log writes.
@@ -247,7 +247,7 @@ export type CellImpl<T> = {
    *
    * @returns Source cell.
    */
-  sourceCell: CellImpl<any> | undefined;
+  sourceCell: DocImpl<any> | undefined;
 
   /**
    * Whether the cell is ephemeral.
@@ -268,7 +268,7 @@ export type CellImpl<T> = {
   /**
    * Internal only: Marker for cells. Used by e.g. `isCell`, etc.
    */
-  [isCellMarker]: true;
+  [isDocMarker]: true;
 
   /**
    * Internal only: Trap for copy operations.
@@ -286,13 +286,13 @@ export type CellImpl<T> = {
  *
  * Renderer cells (CellImpl.asRendererCell) expose these as other renderer cells.
  */
-export type CellReference = {
-  cell: CellImpl<any>;
+export type DocLink = {
+  cell: DocImpl<any>;
   path: PropertyKey[];
 };
 
 export type QueryResultInternals = {
-  [getCellReference]: CellReference;
+  [getDocLink]: DocLink;
 };
 
 export type QueryResult<T> = T & QueryResultInternals;
@@ -304,8 +304,8 @@ export type QueryResult<T> = T & QueryResultInternals;
  * dependencies and to topologically sort pending actions before executing them.
  */
 export type ReactivityLog = {
-  reads: CellReference[];
-  writes: CellReference[];
+  reads: DocLink[];
+  writes: DocLink[];
 };
 
 export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends []
@@ -318,21 +318,21 @@ export type DeepKeyLookup<T, Path extends PropertyKey[]> = Path extends []
       : any
     : any;
 
-export function cell<T>(value?: T, cause?: any): CellImpl<T> {
+export function getDoc<T>(value?: T, cause?: any): DocImpl<T> {
   const callbacks = new Set<(value: T, path: PropertyKey[]) => void>();
   let readOnly = false;
   let entityId: EntityId | undefined;
-  let sourceCell: CellImpl<any> | undefined;
+  let sourceCell: DocImpl<any> | undefined;
   let ephemeral = false;
 
   // If cause is provided, generate ID and return pre-existing cell if any.
   if (cause) {
     entityId = generateEntityId(value, cause);
-    const existing = getCellByEntityId(entityId, false);
+    const existing = getDocByEntityId(entityId, false);
     if (existing) return existing;
   }
 
-  const self: CellImpl<T> = {
+  const self: DocImpl<T> = {
     get: () => value as T,
     getAsQueryResult: <Path extends PropertyKey[]>(
       path?: Path,
@@ -341,11 +341,11 @@ export function cell<T>(value?: T, cause?: any): CellImpl<T> {
       createQueryResultProxy(self, path ?? [], log) as QueryResult<
         DeepKeyLookup<T, Path>
       >,
-    asRendererCell: <Q = T, Path extends PropertyKey[] = []>(
+    asCell: <Q = T, Path extends PropertyKey[] = []>(
       path?: Path,
       log?: ReactivityLog,
       schema?: JSONSchema,
-    ) => rendererCell<Q>(self, path || [], log, schema),
+    ) => createCell<Q>(self, path || [], log, schema),
     send: (newValue: T, log?: ReactivityLog) =>
       self.setAtPath([], newValue, log),
     updates: (callback: (value: T, path: PropertyKey[]) => void) => {
@@ -383,7 +383,7 @@ export function cell<T>(value?: T, cause?: any): CellImpl<T> {
     isFrozen: () => readOnly,
     generateEntityId: (cause?: any): void => {
       entityId = generateEntityId(value, cause);
-      setCellByEntityId(entityId, self);
+      setDocByEntityId(entityId, self);
     },
     // This is the id and not the contents, because we .toJSON is called when
     // writing a structure to this that might contain a reference to this cell,
@@ -401,12 +401,12 @@ export function cell<T>(value?: T, cause?: any): CellImpl<T> {
     set entityId(id: EntityId) {
       if (entityId) throw new Error("Entity ID already set");
       entityId = id;
-      setCellByEntityId(id, self);
+      setDocByEntityId(id, self);
     },
-    get sourceCell(): CellImpl<any> | undefined {
+    get sourceCell(): DocImpl<any> | undefined {
       return sourceCell;
     },
-    set sourceCell(cell: CellImpl<any> | undefined) {
+    set sourceCell(cell: DocImpl<any> | undefined) {
       if (sourceCell && sourceCell !== cell)
         throw new Error(
           `Source cell already set: ${JSON.stringify(sourceCell)} -> ${JSON.stringify(cell)}`,
@@ -420,13 +420,13 @@ export function cell<T>(value?: T, cause?: any): CellImpl<T> {
       ephemeral = value;
     },
     [toOpaqueRef]: () => makeOpaqueRef(self, []),
-    [isCellMarker]: true,
+    [isDocMarker]: true,
     get copyTrap(): boolean {
       throw new Error("Copy trap: Don't copy cells, create references instead");
     },
   };
 
-  if (entityId) setCellByEntityId(entityId, self);
+  if (entityId) setDocByEntityId(entityId, self);
   return self;
 }
 
@@ -441,12 +441,12 @@ function generateEntityId(value: any, cause?: any): EntityId {
   );
 }
 
-function rendererCell<T>(
-  doc: CellImpl<any>,
+function createCell<T>(
+  doc: DocImpl<any>,
   path: PropertyKey[] = [],
   log?: ReactivityLog,
   schema?: JSONSchema,
-): RendererCell<T> {
+): Cell<T> {
   // Follow aliases, cell references, etc. in path. Note that
   // transformToRendererCells will follow aliases, but not cell references, so
   // this is just for setup. Arguably key() should possibly fail if it crosses a
@@ -457,7 +457,7 @@ function rendererCell<T>(
     const key = keys.shift()!;
     target = target instanceof Object ? target[key] : undefined;
     const seen = new Set();
-    let ref: CellReference | undefined;
+    let ref: DocLink | undefined;
     do {
       if (typeof target === "object" && target !== null) {
         if (seen.has(target)) {
@@ -468,15 +468,15 @@ function rendererCell<T>(
       }
 
       ref = undefined;
-      if (isQueryResultForDereferencing(target)) ref = target[getCellReference];
-      else if (isCellReference(target)) ref = target;
-      else if (isCell(target))
-        ref = { cell: target, path: [] } satisfies CellReference;
+      if (isQueryResultForDereferencing(target)) ref = target[getDocLink];
+      else if (isDocLink(target)) ref = target;
+      else if (isDoc(target))
+        ref = { cell: target, path: [] } satisfies DocLink;
       else if (isAlias(target))
         ref = {
           cell: target.$alias.cell ?? doc,
           path: target.$alias.path,
-        } satisfies CellReference;
+        } satisfies DocLink;
 
       if (ref) {
         log?.reads.push({ cell: ref.cell, path: ref.path });
@@ -489,14 +489,14 @@ function rendererCell<T>(
     } while (ref && keys.length);
   }
 
-  const self: RendererCell<T> = isStreamAlias(doc.getAtPath(path))
+  const self: Cell<T> = isStreamAlias(doc.getAtPath(path))
     ? ({
         // Implementing just Sendable<T>
         send: (event: T) => {
           log?.writes.push({ cell: doc, path });
           queueEvent({ cell: doc, path }, event);
         },
-      } as RendererCell<T>)
+      } as Cell<T>)
     : {
         get: () => validateAndTransform(doc, path, schema, log),
         set: (newValue: T) => doc.setAtPath(path, newValue, log),
@@ -518,13 +518,13 @@ function rendererCell<T>(
 
           // Every element pushed to the array should be it's own doc or link to
           // one. So if it isn't already, make it one.
-          if (isRendererCell(value)) {
-            value = value.getAsCellReference();
-          } else if (isCell(value)) {
+          if (isCell(value)) {
+            value = value.getAsDocLink();
+          } else if (isDoc(value)) {
             value = { cell: value, path: [] };
           } else {
-            value = getCellReferenceOrValue(value);
-            if (!isCellReference(value)) {
+            value = getDocLinkOrValue(value);
+            if (!isDocLink(value)) {
               const cause = {
                 parent: doc.entityId,
                 path: path,
@@ -535,7 +535,7 @@ function rendererCell<T>(
                 context: getTopFrame()?.cause ?? "unknown",
               };
 
-              value = { cell: cell<any>(value, cause), path: [] };
+              value = { cell: getDoc<any>(value, cause), path: [] };
             }
           }
 
@@ -560,28 +560,24 @@ function rendererCell<T>(
               : schema?.type === "array"
                 ? schema.items
                 : undefined;
-          return doc.asRendererCell(
-            [...path, key],
-            log,
-            currentSchema,
-          ) as RendererCell<T[K]>;
+          return doc.asCell([...path, key], log, currentSchema) as Cell<T[K]>;
         },
         asSchema: (newSchema: JSONSchema) => {
-          return rendererCell(doc, path, log, newSchema);
+          return createCell(doc, path, log, newSchema);
         },
         getAsQueryResult: (
           subPath: PropertyKey[] = [],
           newLog?: ReactivityLog,
         ) => createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
-        getAsCellReference: () => ({ cell: doc, path }) satisfies CellReference,
+        getAsDocLink: () => ({ cell: doc, path }) satisfies DocLink,
         toJSON: () => doc.toJSON(),
         get value(): T {
           return self.get();
         },
         get entityId(): EntityId | undefined {
-          return getEntityId(self.getAsCellReference());
+          return getEntityId(self.getAsDocLink());
         },
-        [isRendererCellMarker]: true,
+        [isCellMarker]: true,
         get copyTrap(): boolean {
           throw new Error(
             "Copy trap: Don't copy renderer cells. Create references instead.",
@@ -634,7 +630,7 @@ const arrayMethods: { [key: string]: ArrayMethodType } = {
 };
 
 export function createQueryResultProxy<T>(
-  valueCell: CellImpl<T>,
+  valueCell: DocImpl<T>,
   valuePath: PropertyKey[],
   log?: ReactivityLog,
 ): T {
@@ -647,7 +643,7 @@ export function createQueryResultProxy<T>(
   while (keys.length) {
     const key = keys.shift()!;
     if (isQueryResultForDereferencing(target)) {
-      const ref = target[getCellReference];
+      const ref = target[getDocLink];
       valueCell = ref.cell;
       valuePath = [...ref.path];
       log?.reads.push({ cell: valueCell, path: valuePath });
@@ -658,12 +654,12 @@ export function createQueryResultProxy<T>(
       valuePath = [...ref.path];
       log?.reads.push({ cell: valueCell, path: valuePath });
       target = ref.cell.getAtPath(ref.path);
-    } else if (isCell(target)) {
+    } else if (isDoc(target)) {
       valueCell = target;
       valuePath = [];
       log?.reads.push({ cell: valueCell, path: valuePath });
       target = target.get();
-    } else if (isCellReference(target)) {
+    } else if (isDocLink(target)) {
       const ref = followCellReferences(target, log);
       valueCell = ref.cell;
       valuePath = [...ref.path];
@@ -684,14 +680,14 @@ export function createQueryResultProxy<T>(
   // Now target is the end of the path. It might still be a cell, alias or cell
   // reference, so we follow these as well.
   if (isQueryResult(target)) {
-    const ref = target[getCellReference];
+    const ref = target[getDocLink];
     return createQueryResultProxy(ref.cell, ref.path, log);
-  } else if (isCell(target)) {
+  } else if (isDoc(target)) {
     return createQueryResultProxy(target, [], log);
   } else if (isAlias(target)) {
     const ref = followAliases(target, valueCell, log);
     return createQueryResultProxy(ref.cell, ref.path, log);
-  } else if (isCellReference(target)) {
+  } else if (isDocLink(target)) {
     const ref = followCellReferences(target, log);
     return createQueryResultProxy(ref.cell, ref.path, log);
   } else if (typeof target !== "object" || target === null) return target;
@@ -699,8 +695,8 @@ export function createQueryResultProxy<T>(
   return new Proxy(target as object, {
     get: (target, prop, receiver) => {
       if (typeof prop === "symbol") {
-        if (prop === getCellReference)
-          return { cell: valueCell, path: valuePath } satisfies CellReference;
+        if (prop === getDocLink)
+          return { cell: valueCell, path: valuePath } satisfies DocLink;
         else if (prop === toOpaqueRef)
           return () => makeOpaqueRef(valueCell, valuePath);
 
@@ -781,7 +777,7 @@ export function createQueryResultProxy<T>(
                 };
                 normalizeToCells(valueCell, result, undefined, log, cause);
 
-                const resultCell = cell<any[]>(undefined, cause);
+                const resultCell = getDoc<any[]>(undefined, cause);
                 resultCell.send(result);
 
                 result = resultCell.getAsQueryResult([], log);
@@ -794,7 +790,7 @@ export function createQueryResultProxy<T>(
       return createQueryResultProxy(valueCell, [...valuePath, prop], log);
     },
     set: (target, prop, value) => {
-      if (isQueryResult(value)) value = value[getCellReference];
+      if (isQueryResult(value)) value = value[getDocLink];
 
       if (Array.isArray(target) && prop === "length") {
         const oldLength = target.length;
@@ -824,13 +820,12 @@ export function createQueryResultProxy<T>(
         path: [...valuePath, prop],
       });
 
-      if (isCell(value))
-        value = { cell: value, path: [] } satisfies CellReference;
+      if (isDoc(value)) value = { cell: value, path: [] } satisfies DocLink;
 
       // When setting a value in an array, make sure it's a cell reference.
-      if (Array.isArray(target) && !isCellReference(value)) {
+      if (Array.isArray(target) && !isDocLink(value)) {
         const ref = {
-          cell: cell(undefined, {
+          cell: getDoc(undefined, {
             list: { cell: valueCell.entityId, path: valuePath },
             previous:
               Number(prop) > 0
@@ -863,7 +858,7 @@ const originalIndex = Symbol("original index");
 
 const createProxyForArrayValue = (
   source: number,
-  valueCell: CellImpl<any>,
+  valueCell: DocImpl<any>,
   valuePath: PropertyKey[],
   log?: ReactivityLog,
 ): { [originalIndex]: number } => {
@@ -880,31 +875,29 @@ const createProxyForArrayValue = (
   return target;
 };
 
-const cellToOpaqueRef = new WeakMap<
+const docLinkToOpaqueRef = new WeakMap<
   Frame,
-  WeakMap<CellImpl<any>, { path: PropertyKey[]; opaqueRef: OpaqueRef<any> }[]>
+  WeakMap<DocImpl<any>, { path: PropertyKey[]; opaqueRef: OpaqueRef<any> }[]>
 >();
 
 // Creates aliases to value, used in recipes to refer to this specific cell. We
 // have to memoize these, as conversion happens at multiple places when
 // creaeting the recipe.
-function makeOpaqueRef(
-  valueCell: CellImpl<any>,
-  valuePath: PropertyKey[],
-): OpaqueRef<any> {
+function makeOpaqueRef(doc: DocImpl<any>, path: PropertyKey[]): OpaqueRef<any> {
   const frame = getTopFrame();
   if (!frame) throw new Error("No frame");
-  if (!cellToOpaqueRef.has(frame)) cellToOpaqueRef.set(frame, new WeakMap());
-  let opaqueRefs = cellToOpaqueRef.get(frame)!.get(valueCell);
+  if (!docLinkToOpaqueRef.has(frame))
+    docLinkToOpaqueRef.set(frame, new WeakMap());
+  let opaqueRefs = docLinkToOpaqueRef.get(frame)!.get(doc);
   if (!opaqueRefs) {
     opaqueRefs = [];
-    cellToOpaqueRef.get(frame)!.set(valueCell, opaqueRefs);
+    docLinkToOpaqueRef.get(frame)!.set(doc, opaqueRefs);
   }
-  let ref = opaqueRefs.find(p => arrayEqual(valuePath, p.path))?.opaqueRef;
+  let ref = opaqueRefs.find(p => arrayEqual(path, p.path))?.opaqueRef;
   if (!ref) {
     ref = opaqueRef();
-    ref.setPreExisting({ $alias: { cell: valueCell, path: valuePath } });
-    opaqueRefs.push({ path: valuePath, opaqueRef: ref });
+    ref.setPreExisting({ $alias: { cell: doc, path } });
+    opaqueRefs.push({ path: path, opaqueRef: ref });
   }
   return ref;
 }
@@ -917,10 +910,10 @@ function isProxyForArrayValue(value: any): value is ProxyForArrayValue {
  * Get cell reference or return values as is if not a cell value proxy.
  *
  * @param {any} value - The value to get the cell reference or value from.
- * @returns {CellReference | any}
+ * @returns {DocLink | any}
  */
-export function getCellReferenceOrValue(value: any): CellReference {
-  if (isQueryResult(value)) return value[getCellReference];
+export function getDocLinkOrValue(value: any): DocLink {
+  if (isQueryResult(value)) return value[getDocLink];
   else return value;
 }
 
@@ -928,11 +921,11 @@ export function getCellReferenceOrValue(value: any): CellReference {
  * Get cell reference or throw if not a cell value proxy.
  *
  * @param {any} value - The value to get the cell reference from.
- * @returns {CellReference}
+ * @returns {DocLink}
  * @throws {Error} If the value is not a cell value proxy.
  */
-export function getCellReferenceOrThrow(value: any): CellReference {
-  if (isQueryResult(value)) return value[getCellReference];
+export function getDocLinkOrThrow(value: any): DocLink {
+  if (isQueryResult(value)) return value[getDocLink];
   else throw new Error("Value is not a cell proxy");
 }
 
@@ -942,7 +935,21 @@ export function getCellReferenceOrThrow(value: any): CellReference {
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export function isCell(value: any): value is CellImpl<any> {
+export function isDoc(value: any): value is DocImpl<any> {
+  return (
+    typeof value === "object" && value !== null && value[isDocMarker] === true
+  );
+}
+
+const isDocMarker = Symbol("isDoc");
+
+/**
+ * Check if value is a simple cell.
+ *
+ * @param {any} value - The value to check.
+ * @returns {boolean}
+ */
+export function isCell(value: any): value is Cell<any> {
   return (
     typeof value === "object" && value !== null && value[isCellMarker] === true
   );
@@ -951,40 +958,16 @@ export function isCell(value: any): value is CellImpl<any> {
 const isCellMarker = Symbol("isCell");
 
 /**
- * Check if value is a simple cell.
- *
- * @param {any} value - The value to check.
- * @returns {boolean}
- */
-export function isRendererCell(value: any): value is RendererCell<any> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    value[isRendererCellMarker] === true
-  );
-}
-
-const isRendererCellMarker = Symbol("isRendererCell");
-
-/**
  * Check if value is a cell reference.
  *
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export function isCellReference(value: any): value is CellReference {
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    isCell(value.cell) &&
-    Array.isArray(value.path) &&
-    value.path.length > 30
-  )
-    console.warn("Cell reference with long path", JSON.stringify(value));
+export function isDocLink(value: any): value is DocLink {
   return (
     typeof value === "object" &&
     value !== null &&
-    isCell(value.cell) &&
+    isDoc(value.cell) &&
     Array.isArray(value.path)
   );
 }
@@ -999,11 +982,11 @@ export function isQueryResult(value: any): value is QueryResult<any> {
   return (
     typeof value === "object" &&
     value !== null &&
-    value[getCellReference] !== undefined
+    value[getDocLink] !== undefined
   );
 }
 
-const getCellReference = Symbol("isQueryResultProxy");
+const getDocLink = Symbol("isQueryResultProxy");
 
 /**
  * Check if value is a cell proxy. Return as type that allows dereferencing, but

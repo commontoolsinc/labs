@@ -1,4 +1,4 @@
-import { CellImpl, CellReference, ReactivityLog } from "./cell.js";
+import { DocImpl, DocLink, ReactivityLog } from "./cell.js";
 import { compactifyPaths, pathAffected } from "./utils.js";
 import { type Cancel } from "./cancel.js";
 
@@ -7,8 +7,8 @@ export type EventHandler = (event: any) => any;
 
 const pending = new Set<Action>();
 const eventQueue: (() => void)[] = [];
-const eventHandlers: [CellReference, EventHandler][] = [];
-const dirty = new Set<CellImpl<any>>();
+const eventHandlers: [DocLink, EventHandler][] = [];
+const dirty = new Set<DocImpl<any>>();
 const dependencies = new WeakMap<Action, ReactivityLog>();
 const cancels = new WeakMap<Action, Cancel[]>();
 const idlePromises: (() => void)[] = [];
@@ -86,7 +86,7 @@ export function onError(fn: (error: Error) => void) {
   errorHandlers.add(fn);
 }
 
-export function queueEvent(eventRef: CellReference, event: any) {
+export function queueEvent(eventRef: DocLink, event: any) {
   for (const [ref, handler] of eventHandlers) {
     if (
       ref.cell === eventRef.cell &&
@@ -99,10 +99,7 @@ export function queueEvent(eventRef: CellReference, event: any) {
   }
 }
 
-export function addEventHandler(
-  handler: EventHandler,
-  ref: CellReference,
-): Cancel {
+export function addEventHandler(handler: EventHandler, ref: DocLink): Cancel {
   eventHandlers.push([ref, handler]);
   return () => {
     const index = eventHandlers.findIndex(
@@ -170,7 +167,7 @@ async function execute() {
 function topologicalSort(
   actions: Set<Action>,
   dependencies: WeakMap<Action, ReactivityLog>,
-  dirty: Set<CellImpl<any>>,
+  dirty: Set<DocImpl<any>>,
 ): Action[] {
   const relevantActions = new Set<Action>();
   const graph = new Map<Action, Set<Action>>();

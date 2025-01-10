@@ -10,15 +10,15 @@ import {
   isOpaqueRef,
 } from "@commontools/common-builder";
 import {
-  cell,
+  getDoc,
+  isDoc,
   isCell,
-  isRendererCell,
-  CellImpl,
+  DocImpl,
   ReactivityLog,
-  CellReference,
-  isCellReference,
+  DocLink,
+  isDocLink,
   isQueryResultForDereferencing,
-  getCellReferenceOrThrow,
+  getDocLinkOrThrow,
 } from "./cell.js";
 import { createRef } from "./cell-map.js";
 
@@ -46,7 +46,7 @@ export function extractDefaultValues(schema: any): any {
 // Recursively calls itself for nested objects, passing on any objects that
 // matching properties.
 export function mergeObjects(...objects: any[]): any {
-  objects = objects.filter((obj) => obj !== undefined);
+  objects = objects.filter(obj => obj !== undefined);
   if (objects.length === 0) return undefined;
   if (objects.length === 1) return objects[0];
 
@@ -62,7 +62,7 @@ export function mergeObjects(...objects: any[]): any {
       obj === null ||
       Array.isArray(obj) ||
       isAlias(obj) ||
-      isCellReference(obj) ||
+      isDocLink(obj) ||
       isStatic(obj)
     )
       return obj;
@@ -71,7 +71,7 @@ export function mergeObjects(...objects: any[]): any {
     for (const key of Object.keys(obj)) {
       if (seen.has(key)) continue;
       seen.add(key);
-      const merged = mergeObjects(...objects.map((obj) => obj[key]));
+      const merged = mergeObjects(...objects.map(obj => obj[key]));
       if (merged !== undefined) result[key] = merged;
     }
   }
@@ -85,14 +85,14 @@ export function mergeObjects(...objects: any[]): any {
 // cell. If the binding is a literal, we verify that it matches the value and
 // throw an error otherwise.
 export function sendValueToBinding(
-  cell: CellImpl<any>,
+  cell: DocImpl<any>,
   binding: any,
   value: any,
   log?: ReactivityLog,
 ) {
   if (isAlias(binding)) {
     const ref = followAliases(binding, cell, log);
-    if (!isCellReference(value) && !isCell(value) && !isAlias(value))
+    if (!isDocLink(value) && !isDoc(value) && !isAlias(value))
       normalizeToCells(cell, value, ref.cell.getAtPath(ref.path), log, binding);
     setNestedValue(ref.cell, ref.path, value, log);
   } else if (Array.isArray(binding)) {
@@ -112,7 +112,7 @@ export function sendValueToBinding(
 // success, meaning no frozen cells were in the way. That is, also returns true
 // if there was no change.
 export function setNestedValue(
-  currentCell: CellImpl<any>,
+  currentCell: DocImpl<any>,
   path: PropertyKey[],
   value: any,
   log?: ReactivityLog,
@@ -131,9 +131,9 @@ export function setNestedValue(
     typeof value === "object" &&
     value !== null &&
     Array.isArray(value) === Array.isArray(destValue) &&
-    !isCell(value) &&
-    !isCellReference(value) &&
-    !isRendererCell(value)
+    !isDoc(value) &&
+    !isDocLink(value) &&
+    !isCell(value)
   ) {
     let success = true;
     for (const key in value)
@@ -155,7 +155,7 @@ export function setNestedValue(
       }
 
     return success;
-  } else if (isCellReference(value) && isCellReference(destValue)) {
+  } else if (isDocLink(value) && isDocLink(destValue)) {
     if (
       value.cell !== destValue.cell ||
       !arrayEqual(value.path, destValue.path)
@@ -194,7 +194,7 @@ export function setNestedValue(
  */
 export function unwrapOneLevelAndBindtoCell<T>(
   binding: T,
-  cell: CellImpl<any>,
+  cell: DocImpl<any>,
 ): T {
   function convert(binding: any, processStatic = false): any {
     if (isStatic(binding) && !processStatic)
@@ -221,10 +221,10 @@ export function unwrapOneLevelAndBindtoCell<T>(
             path: binding.$alias.path,
           },
         };
-    } else if (isCell(binding))
+    } else if (isDoc(binding))
       return binding; // Don't enter cells
     else if (Array.isArray(binding))
-      return binding.map((value) => convert(value));
+      return binding.map(value => convert(value));
     else if (typeof binding === "object" && binding !== null) {
       const result: any = Object.fromEntries(
         Object.entries(binding).map(([key, value]) => [key, convert(value)]),
@@ -262,16 +262,16 @@ export function unsafe_createParentBindings(
 // Traverses binding and returns all cells reacheable through aliases.
 export function findAllAliasedCells(
   binding: any,
-  cell: CellImpl<any>,
-): CellReference[] {
-  const cells: CellReference[] = [];
-  function find(binding: any, origCell: CellImpl<any>) {
+  cell: DocImpl<any>,
+): DocLink[] {
+  const cells: DocLink[] = [];
+  function find(binding: any, origCell: DocImpl<any>) {
     if (isAlias(binding)) {
       // Numbered cells are yet to be unwrapped nested recipes. Ignore them.
       if (typeof binding.$alias.cell === "number") return;
       const cell = binding.$alias.cell ?? origCell;
       const path = binding.$alias.path;
-      if (cells.find((c) => c.cell === cell && c.path === path)) return;
+      if (cells.find(c => c.cell === cell && c.path === path)) return;
       cells.push({ cell, path });
       find(cell.getAtPath(path), cell);
     } else if (Array.isArray(binding)) {
@@ -279,9 +279,9 @@ export function findAllAliasedCells(
     } else if (
       typeof binding === "object" &&
       binding !== null &&
-      !isCellReference(binding) &&
-      !isCell(binding) &&
-      !isRendererCell(binding)
+      !isDocLink(binding) &&
+      !isDoc(binding) &&
+      !isCell(binding)
     ) {
       for (const value of Object.values(binding)) find(value, origCell);
     }
@@ -292,13 +292,13 @@ export function findAllAliasedCells(
 
 // Follows cell references and returns the last one
 export function followCellReferences(
-  reference: CellReference,
+  reference: DocLink,
   log?: ReactivityLog,
 ): any {
-  const seen = new Set<CellReference>();
+  const seen = new Set<DocLink>();
   let result = reference;
 
-  while (isCellReference(reference)) {
+  while (isDocLink(reference)) {
     log?.reads.push(reference);
     result = reference;
     if (seen.has(reference)) throw new Error("Reference cycle detected");
@@ -312,11 +312,11 @@ export function followCellReferences(
 // Follows aliases and returns cell reference describing the last alias.
 export function followAliases(
   alias: any,
-  cell: CellImpl<any>,
+  cell: DocImpl<any>,
   log?: ReactivityLog,
-): CellReference {
+): DocLink {
   const seen = new Set<any>();
-  let result: CellReference;
+  let result: DocLink;
 
   if (!isAlias(alias)) throw new Error("Not an alias");
   while (isAlias(alias)) {
@@ -333,9 +333,9 @@ export function followAliases(
 }
 
 // Remove longer paths already covered by shorter paths
-export function compactifyPaths(entries: CellReference[]): CellReference[] {
+export function compactifyPaths(entries: DocLink[]): DocLink[] {
   // First group by cell via a Map
-  const cellToPaths = new Map<CellImpl<any>, PropertyKey[][]>();
+  const cellToPaths = new Map<DocImpl<any>, PropertyKey[][]>();
   for (const { cell, path } of entries) {
     const paths = cellToPaths.get(cell) || [];
     paths.push(path);
@@ -344,13 +344,13 @@ export function compactifyPaths(entries: CellReference[]): CellReference[] {
 
   // For each cell, sort the paths by length, then only return those that don't
   // have a prefix earlier in the list
-  const result: CellReference[] = [];
+  const result: DocLink[] = [];
   for (const [cell, paths] of cellToPaths.entries()) {
     paths.sort((a, b) => a.length - b.length);
     for (let i = 0; i < paths.length; i++) {
       const earlier = paths.slice(0, i);
       if (
-        earlier.some((path) =>
+        earlier.some(path =>
           path.every((key, index) => key === paths[i][index]),
         )
       )
@@ -370,30 +370,30 @@ export function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
 }
 
 export function transformToRendererCells(
-  cell: CellImpl<any>,
+  cell: DocImpl<any>,
   value: any,
   log?: ReactivityLog,
 ): any {
   if (isQueryResultForDereferencing(value)) {
-    const ref = followCellReferences(getCellReferenceOrThrow(value));
+    const ref = followCellReferences(getDocLinkOrThrow(value));
     if (cell === ref.cell)
       return transformToRendererCells(cell, cell.getAtPath(ref.path), log);
     else return ref.cell.asRendererCell(ref.path, log);
   } else if (isAlias(value)) {
     const ref = followCellReferences(followAliases(value, cell, log), log);
     return ref.cell.asRendererCell(ref.path, log);
-  } else if (isCell(value)) {
-    return value.asRendererCell([], log);
-  } else if (isCellReference(value)) {
+  } else if (isDoc(value)) {
+    return value.asCell([], log);
+  } else if (isDocLink(value)) {
     const ref = followCellReferences(value, log);
     return ref.cell.asRendererCell(ref.path, log);
-  } else if (isRendererCell(value)) {
+  } else if (isCell(value)) {
     return value;
   }
 
   if (typeof value === "object" && value !== null)
     if (Array.isArray(value))
-      return value.map((value) => transformToRendererCells(cell, value, log));
+      return value.map(value => transformToRendererCells(cell, value, log));
     else
       return Object.fromEntries(
         Object.entries(value).map(([key, value]) => [
@@ -415,7 +415,7 @@ export function transformToRendererCells(
  * @returns The (potentially unwrapped) input value
  */
 export function staticDataToNestedCells(
-  parentCell: CellImpl<any>,
+  parentCell: DocImpl<any>,
   value: any,
   log?: ReactivityLog,
   cause?: any,
@@ -440,7 +440,7 @@ export function staticDataToNestedCells(
  * @returns Whether the value was changed.
  */
 export function normalizeToCells(
-  parentCell: CellImpl<any>,
+  parentCell: DocImpl<any>,
   value: any,
   previous?: any,
   log?: ReactivityLog,
@@ -452,10 +452,10 @@ export function normalizeToCells(
   let changed = false;
   if (isStatic(value)) {
     // no-op, don't normalize deep static values and assume they don't change
-  } else if (isCell(value) || isRendererCell(value)) {
+  } else if (isDoc(value) || isCell(value)) {
     changed = value !== previous;
-  } else if (isCellReference(value)) {
-    changed = isCellReference(previous)
+  } else if (isDocLink(value)) {
+    changed = isDocLink(previous)
       ? value.cell !== previous.cell || !arrayEqual(value.path, previous.path)
       : true;
   } else if (isAlias(value)) {
@@ -476,14 +476,7 @@ export function normalizeToCells(
       const item = maybeUnwrapProxy(value[i]);
       if (item !== value[i]) value[i] = item; // Capture unwrapped value
       const previousItem = previous ? maybeUnwrapProxy(previous[i]) : undefined;
-      if (
-        !(
-          isCell(item) ||
-          isCellReference(item) ||
-          isAlias(item) ||
-          isRendererCell(item)
-        )
-      ) {
+      if (!(isDoc(item) || isDocLink(item) || isAlias(item) || isCell(item))) {
         // TODO: Should this depend on the value if there is no id provided?
         // This is probably generating extra churn on ids.
         itemId =
@@ -497,20 +490,15 @@ export function normalizeToCells(
         const different = normalizeToCells(
           parentCell,
           value[i],
-          isCellReference(previousItem)
+          isDocLink(previousItem)
             ? previousItem.cell.getAtPath(previousItem.path)
             : previousItem,
           log,
-          isCellReference(previousItem)
+          isDocLink(previousItem)
             ? previousItem.cell.entityId ?? itemId
             : itemId,
         );
-        if (
-          !different &&
-          previous &&
-          previous[i] &&
-          isCellReference(previous[i])
-        ) {
+        if (!different && previous && previous[i] && isDocLink(previous[i])) {
           value[i] = previous[i];
           preceedingItemId = previousItem.cell.entityId;
           // NOTE: We don't treat making it a cell reference as a change, since
@@ -518,7 +506,7 @@ export function normalizeToCells(
           // transition from a previous run, but only if the value didn't
           // change as well.
         } else {
-          value[i] = { cell: cell(value[i]), path: [] } satisfies CellReference;
+          value[i] = { cell: getDoc(value[i]), path: [] } satisfies DocLink;
           value[i].cell.entityId = itemId;
           value[i].cell.sourceCell = parentCell;
 
@@ -553,7 +541,7 @@ export function normalizeToCells(
         }
       }
     }
-  } else if (isCellReference(previous)) {
+  } else if (isDocLink(previous)) {
     // value is a literal value here and the last clause
     changed = value !== previous.cell.getAtPath(previous.path);
   } else {
@@ -564,7 +552,7 @@ export function normalizeToCells(
 
 function maybeUnwrapProxy(value: any): any {
   return isQueryResultForDereferencing(value)
-    ? getCellReferenceOrThrow(value)
+    ? getDocLinkOrThrow(value)
     : value;
 }
 
@@ -574,13 +562,10 @@ export function arrayEqual(a: PropertyKey[], b: PropertyKey[]): boolean {
   return true;
 }
 
-export function isEqualCellReferences(
-  a: CellReference,
-  b: CellReference,
-): boolean {
+export function isEqualCellReferences(a: DocLink, b: DocLink): boolean {
   return (
-    isCellReference(a) &&
-    isCellReference(b) &&
+    isDocLink(a) &&
+    isDocLink(b) &&
     a.cell === b.cell &&
     arrayEqual(a.path, b.path)
   );
@@ -594,7 +579,7 @@ export function containsOpaqueRef(value: any): boolean {
 }
 
 export function deepCopy(value: any): any {
-  if (isCell(value) || isRendererCell(value)) return value;
+  if (isDoc(value) || isCell(value)) return value;
   if (typeof value === "object" && value !== null)
     return Array.isArray(value)
       ? value.map(deepCopy)
