@@ -5,6 +5,7 @@ import {
   stream,
   UI,
 } from "@commontools/common-builder";
+import { getDoc } from "@commontools/common-runner";
 
 // $ is a proxy that just collect paths, so that one can call [getPath] on it
 // and get an array. For example for `q = $.foo.bar[0]` `q[getPath]` yields
@@ -12,8 +13,10 @@ import {
 
 type PathSegment = PropertyKey | { fn: string; args: any[] };
 const getPath = Symbol("getPath");
-type PathCollector = Function & { [getPath]: PathSegment[]; 
-              [key: string]: PathCollector };
+type PathCollector = Function & {
+  [getPath]: PathSegment[];
+  [key: string]: PathCollector;
+};
 
 // Create the path collector proxy
 function createPathCollector(path: PathSegment[] = []): PathCollector {
@@ -235,6 +238,6 @@ export abstract class Spell<T extends Record<string, any>> {
   }
 }
 
-export function doc(value: any) {
-  return value.getAsQueryResult();
+export function doc<T = any>(value: any) {
+  return getDoc<T>(value).getAsQueryResult();
 }
