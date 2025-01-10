@@ -52,6 +52,7 @@ export type OpaqueRefMethods<T> = {
       array: T,
     ) => Opaque<S>,
   ): Opaque<S[]>;
+  toJSON(): any;
   [Symbol.iterator](): Iterator<T>;
   [Symbol.toPrimitive](hint: string): T;
   [isOpaqueRefMarker]: true;

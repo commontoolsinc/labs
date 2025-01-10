@@ -98,6 +98,7 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
           ),
         });
       },
+      toJSON: () => null, // TODO: Merge with Cell and cover doc-less case
       /**
        * We assume the cell is an array and will provide an infinite iterator.
        * The primary use-case is destructuring a tuple (`[a, b] = ...`). We
