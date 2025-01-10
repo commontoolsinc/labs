@@ -13,7 +13,7 @@ import { Ref, UiFragment } from "../sugar/zod.js";
 import { tsToExports } from "../localBuild.js";
 import { sendMessage } from "./stickers/chat.jsx";
 import { llm, RESPONSE } from "../effects/fetch.jsx";
-import { log } from "../sugar/activity.js";
+import { log, logEntries } from "../sugar/activity.js";
 
 const adjectives = [
   "indigo",
@@ -176,6 +176,14 @@ export const charmViewer = typedService(CharmWithSpell, {
   }),
 });
 
+const logEntries = select({
+  self: $.self,
+  log: [{ self: $.log, message: $.message, modified: $.modified }],
+})
+  .match($.self, "common/activity", $.log)
+  .match($.log, "message", $.message)
+  .match($.log, "modified", $.modified);
+
 const spellEditor = typedBehavior(Spell, {
   render: ({ self, name, sourceCode, notes }) => (
     <div entity={self}>
@@ -204,15 +212,31 @@ const spellEditor = typedBehavior(Spell, {
       cmd.add(...tagWithSchema(self, Spell));
     }),
 
+    // listLogEntries: select({
+    //   self: $.self,
+    //   log: [{ self: $.log, message: $.message, modified: $.modified }],
+    // })
+    //   .match($.self, "common/activity", $.log)
+    //   .match($.log, "message", $.message)
+    //   .match($.log, "modified", $.modified)
+    //   .transact(({ self, log }, cmd) => {
+    //     debugger;
+    //   }),
+
     onModifyWithAI: event("~/on/modify-with-ai")
       .with(resolve(Spell.pick({ sourceCode: true, notes: true })))
-      .transact(({ self, event, sourceCode, notes }, cmd) => {
+      .with(logEntries)
+      .transact(({ self, event, sourceCode, notes, log: logEntries }, cmd) => {
         const ev =
           Session.resolve<
             SubmitEvent<z.infer<typeof SourceModificationPrompt>>
           >(event);
+
+        cmd.add(...log(self, "AI modification: " + ev.detail.value.prompt));
+
         const message = `Modify the attached source code based on the following prompt:
           <context>${notes}</context>
+          <change-history>${JSON.stringify(logEntries)}</change-history>
           <modification>${ev.detail.value.prompt}</modification>
 
           \`\`\`js\n${sourceCode}\n\`\`\``;
@@ -968,30 +992,27 @@ export const spellManager = typedBehavior(
                   self={focusedCharm}
                   spell={charmViewer as any}
                 />
-                {editingSpell && (
-                  <details style={detailsStyle} open>
-                    <summary style={summaryStyle}>
-                      Edit Spell
-                      <button
-                        style={buttonStyle}
-                        onclick="~/on/close-spell-editor"
-                      >
-                        Close
-                      </button>
-                    </summary>
-                    <div style={formContainerStyle}>
-                      <CharmComponent
-                        self={editingSpell}
-                        spell={spellEditor as any}
-                      />
-                    </div>
-                  </details>
-                )}
               </div>
             ) : (
-              <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #666;">
+              <div style="display: flex; align-items: center; justify-content: center; height: 33%; color: #666;">
                 <h2>Select a charm to focus</h2>
               </div>
+            )}
+            {editingSpell && (
+              <details style={detailsStyle} open>
+                <summary style={summaryStyle}>
+                  Edit Spell
+                  <button style={buttonStyle} onclick="~/on/close-spell-editor">
+                    Close
+                  </button>
+                </summary>
+                <div style={formContainerStyle}>
+                  <CharmComponent
+                    self={editingSpell}
+                    spell={spellEditor as any}
+                  />
+                </div>
+              </details>
             )}
           </div>
         </div>
