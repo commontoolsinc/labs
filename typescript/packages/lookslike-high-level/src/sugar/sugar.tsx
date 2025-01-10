@@ -348,10 +348,6 @@ export const collection = (membership: string): Rule => {
   };
 };
 
-export const make = (self, member): Instruction => ({
-  Upsert: [self, "instance/new", member],
-});
-
 export function createQuery(keys: string[]) {
   // Build the select object with all properties
   const selectObj = keys.reduce(

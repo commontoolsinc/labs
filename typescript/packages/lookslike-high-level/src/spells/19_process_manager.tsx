@@ -8,7 +8,7 @@ import {
 } from "./spell.jsx";
 import { z } from "zod";
 import { fromString, Reference } from "merkle-reference";
-import { importEntity, resolve, tagWithSchema } from "../sugar/sugar.jsx";
+import { importEntity, list, resolve, tagWithSchema } from "../sugar/sugar.jsx";
 import { Ref, UiFragment } from "../sugar/zod.js";
 import { tsToExports } from "../localBuild.js";
 import { sendMessage } from "./stickers/chat.jsx";
@@ -90,6 +90,8 @@ const SpellManager = z.object({
   "~/common/ui/charm-list": UiFragment.describe(
     "The UI fragment for the charms list",
   ),
+  "~/common/ui/charm-picker": UiFragment.describe("find Charms to display"),
+  "~/common/ui/spell-picker": UiFragment.describe("find Spells to display"),
 });
 
 const SourceModificationPrompt = z.object({
@@ -240,7 +242,7 @@ const spellEditor = typedBehavior(Spell, {
             button: "background: #ff69b4; color: white; border: none; padding: 10px 20px; border-radius: 15px; font-size: 16px; cursor: pointer; transition: all 0.3s;"
           };
 
-          const spell = behavior({
+          export const spell = behavior({
             view: select({ self: $.self })
               .render(({ self }) => {
                 return <div entity={self} title="Hello World" style={styles.container}>
@@ -258,324 +260,124 @@ const spellEditor = typedBehavior(Spell, {
               })
               .commit()
           });
-
-          export const spawn = (source: {} = { hello: 1 }) => spell.spawn(source, "Hello World");
           </hello-world>
 
-          <tamagotchi>
-          import { h, behavior, Reference, select, $ } from "@commontools/common-system";
-          import { event, events, set, addTag, field, isEmpty, subview } from "../sugar.js";
-          import { Description } from "./stickers/describe.jsx";
-          import { mixin } from "../sugar/mixin.js";
-          import { description as llmDescription } from "./stickers/describe.jsx";
-          import { Chattable, chatUiResolver } from "./stickers/chat.jsx";
+          <notes>
+          import { h, Session, refer } from "@commontools/common-system";
+          import { event, subview, Transact } from "../sugar.js";
+          import { Charm, initRules, typedBehavior } from "./spell.jsx";
+          import { z } from "zod";
+          import { Reference } from "merkle-reference";
+          import { importEntity, resolve, tagWithSchema } from "../sugar/sugar.jsx";
+          import { Ref, UiFragment } from "../sugar/zod.js";
 
-          export const genImage = (prompt: string) =>
-            \`/api/img/?prompt=\${encodeURIComponent(prompt)}\`;
+          const Memo = z
+            .object({
+              name: z.string().max(255).describe("The title of the note"),
+              content: z
+                .string()
+                .min(1)
+                .max(1024 * 16)
+                .describe("The content of the note"),
+            })
+            .describe("Memo");
 
-          export function generateDescription({
-            time,
-            hunger,
-            size,
-            color,
-            description,
-            lastActivity,
-          }: {
-            time: number;
-            hunger: number;
-            size: number;
-            color: string;
-            description: string;
-            lastActivity?: string;
-          }) {
-            const ageDesc =
-              time < 5
-                ? "very young"
-                : time < 10
-                  ? "young"
-                  : time < 20
-                    ? "mature"
-                    : "old";
-            const hungerDesc =
-              hunger < 2
-                ? "satisfied"
-                : hunger < 4
-                  ? "peckish"
-                  : hunger < 6
-                    ? "hungry"
-                    : "starving";
-            const sizeDesc =
-              size < 3
-                ? "tiny"
-                : size < 6
-                  ? "medium-sized"
-                  : size < 10
-                    ? "large"
-                    : "huge";
-
-            const activityDesc = lastActivity ? \` They are currently \${lastActivity}.\` : '';
-
-            return (
-              \`\${color} \${sizeDesc} \${description} is \${ageDesc} and feels \${hungerDesc}.\${activityDesc} \`
-            );
-          }
-
-          function TamagotchiView({
-            self,
-            time,
-            size,
-            color,
-            description,
-            hunger,
-            llmDescription,
-            lastActivity,
-            chatView
-          }: {
-            self: Reference;
-            time: number;
-            size: number;
-            color: string;
-            description: string;
-            hunger: number;
-            llmDescription: string;
-            lastActivity: string;
-            chatView?: any;
-          }) {
-            const frameStyle = \`
-              background: #ff3232;
-              border-radius: 35px;
-              padding: 40px 30px 80px 30px;
-              max-width: 400px;
-              box-shadow:
-                inset -2px -2px 10px rgba(0,0,0,0.3),
-                inset 2px 2px 10px rgba(255,255,255,0.2),
-                5px 5px 20px rgba(0,0,0,0.3);
-              position: relative;
-            \`;
-
-            const screenStyle = \`
-              background: #707070;
-              border-radius: 8px;
-              padding: 20px;
-              border: 8px solid #404040;
-              margin-bottom: 20px;
-              position: relative;
-              box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
-            \`;
-
-            const statsStyle = \`
-              font-family: "LCD", monospace;
-              font-size: 16px;
-              color: #111;
-              margin-bottom: 10px;
-              text-align: center;
-              font-weight: bold;
-              background: #aaa;
-              padding: 8px;
-              border-radius: 4px;
-            \`;
-
-            const bubbleStyle = \`
-              position: absolute;
-              top: -40px;
-              left: 50%;
-              transform: translateX(-50%);
-              background: #111;
-              color: #0f0;
-              padding: 10px;
-              border-radius: 15px;
-              box-shadow: inset 0 0 5px rgba(0,255,0,0.5);
-            \`;
-
-            const buttonContainerStyle = \`
-              position: absolute;
-              bottom: 20px;
-              left: 0;
-              right: 0;
-              display: flex;
-              justify-content: space-around;
-              padding: 0 30px;
-            \`;
-
-            const buttonStyle = \`
-              width: 40px;
-              height: 40px;
-              border-radius: 50%;
-              background: #cc0000;
-              border: none;
-              color: white;
-              font-size: 10px;
-              cursor: pointer;
-              box-shadow:
-                inset 2px 2px 5px rgba(255,255,255,0.3),
-                inset -2px -2px 5px rgba(0,0,0,0.3),
-                2px 2px 5px rgba(0,0,0,0.2);
-              &:active {
-                box-shadow:
-                  inset -2px -2px 5px rgba(255,255,255,0.3),
-                  inset 2px 2px 5px rgba(0,0,0,0.3);
-              }
-            \`;
-
-            const speechBubbleStyle = \`
-              position: relative;
-              background: #111;
-              color: #0f0;
-              padding: 10px;
-              border-radius: 15px;
-              box-shadow: inset 0 0 5px rgba(0,255,0,0.5);
-              margin-top: -32px;
-              margin-left: 16px;
-              margin-right: 16px;
-              font-size: 12px;
-            \`;
-
-            return (
-              <div title={"Tamagotchi"} entity={self} style={frameStyle}>
-                <div style={screenStyle}>
-                  <div style={bubbleStyle}>
-                    {description}
-                  </div>
-                  <div style={statsStyle}>
-                    TIME: {time} | HUNGER: {hunger} | SIZE: {size}
-                  </div>
-                  <img
-                    style="width: 100%; aspect-ratio: 1; border-radius: 8px; box-shadow: inset 0 0 10px rgba(0,0,0,0.5);"
-                    src={genImage(
-                      generateDescription({ time, size, color, description, hunger, lastActivity }),
-                    )}
-                  />
-                  <div style={speechBubbleStyle}>
-                    {llmDescription}
-                  </div>
-                </div>
-                <div style={buttonContainerStyle}>
-                  <button style={buttonStyle} onclick={TamagotchiEvents.onAdvanceTime}>Wait</button>
-                  <button style={buttonStyle} onclick={TamagotchiEvents.onGiveFood}>Feed</button>
-                  <button style={buttonStyle} onclick={TamagotchiEvents.onExercise}>Move</button>
-                  <button style={buttonStyle} onclick={TamagotchiEvents.onBroadcast}>Send</button>
-                </div>
-                {subview(chatView)}
-              </div>
-            );
-          }
-
-          // queries can be declared in piecemeal fashion and composed together later
-
-          export const hunger = field("hunger", 0);
-          export const size = field("size", 1);
-          export const time = field("time", 0);
-          export const description = field("description", "lizard bunny");
-          export const color = field("color", "blue");
-          export const lastActivity = field("lastActivity", "");
-          const resolveUninitialized = select({ self: $.self })
-            .clause(isEmpty($.self, 'hunger'))
-            .clause(isEmpty($.self, 'size'))
-            .clause(isEmpty($.self, 'time'))
-
-          export const resolveCreature = description
-            .with(hunger)
-            .with(size)
-            .with(time)
-            .with(color)
-            .with(lastActivity);
-
-          const TamagotchiEvents = events({
-            onAdvanceTime: "~/on/advanceTime",
-            onGiveFood: "~/on/giveFood",
-            onExercise: "~/on/exercise",
-            onBroadcast: "~/on/broadcast",
-          });
-
-          export const tamagotchi = behavior({
-            ...mixin(
-              Description(
-                ["hunger", "size", "time", "color", "description"],
-                (self: any) =>
-                  \`Roleplay as a creature, current status: \${generateDescription(self)}.
-
-                  Respond with the just the text of a "status update" in the voice of the creature, a single sentence.\`,
-              ),
+          const Notebook = z.object({
+            focused: Ref.describe("The note that is currently being edited"),
+            notes: z.array(Memo).describe("The notes that have been added"),
+            "~/common/ui/list": UiFragment.describe(
+              "The UI fragment for the notes list, if present",
             ),
-
-            ...mixin(Chattable({
-              attributes: ["hunger", "size", "time", "color", "description", "lastActivity"],
-              greeting: 'bleep bloop',
-              systemPrompt: ({ hunger, size, time, color, description, lastActivity }) => \`You are acting as a \${generateDescription({ hunger, size, time, color, description, lastActivity })}. Respond in character, keeping your responses brief and consistent with your current state.\`,
-            })),
-
-            initialState: resolveUninitialized
-              .update(({ self }) =>
-                set(self, {
-                  hunger: 0,
-                  size: 1,
-                  time: 0,
-                  color: "blue",
-                  description: "lizard bunny",
-                  lastActivity: "",
-                })
-              )
-              .commit(),
-
-            view: resolveCreature
-              .with(llmDescription)
-              .with(chatUiResolver)
-              .render(TamagotchiView).commit(),
-
-            onAdvanceTime: event(TamagotchiEvents.onAdvanceTime)
-              .with(time)
-              .update(({ self, time }) => set(self, { time: time + 1, lastActivity: "waiting" }))
-              .commit(),
-
-            onTickHunger: event(TamagotchiEvents.onAdvanceTime)
-              .with(hunger)
-              .update(({ self, hunger }) => set(self, { hunger: hunger + 1 }))
-              .commit(),
-
-            onFeed: event(TamagotchiEvents.onGiveFood)
-              .with(hunger)
-              .with(time)
-              .update(({ self, hunger, time }) =>
-                set(self, {
-                  hunger: Math.max(0, hunger - 1),
-                  time: time + 1,
-                  lastActivity: "eating",
-                }),
-              )
-              .commit(),
-
-            onExercise: event(TamagotchiEvents.onExercise)
-              .with(hunger)
-              .with(time)
-              .with(size)
-              .update(({ self, hunger, time, size }) =>
-                set(self, {
-                  hunger: hunger + 1,
-                  time: time + 1,
-                  size: size + 1,
-                  lastActivity: "exercising",
-                }),
-              )
-              .commit(),
-
-            onBroadcast: event(TamagotchiEvents.onBroadcast)
-              .update(({ self }) => {
-                return [
-                  ...addTag(self, "#tamagotchi"),
-                  ...set(self, { lastActivity: "broadcasting" })
-                ];
-              })
-              .commit(),
           });
 
-          tamagotchi.disableRule('chat/view' as any)
+          type EditEvent = {
+            detail: { item: Reference };
+          };
 
-          console.log(tamagotchi);
+          type SubmitEvent = {
+            detail: { value: z.infer<typeof Memo> };
+          };
 
-          export const spawn = (source: {} = { tamagotchi: 1 }) =>
-            tamagotchi.spawn(source, "Tamagotchi");
+          export const spell = typedBehavior(
+            Notebook.pick({
+              "~/common/ui/list": true,
+            }),
+            {
+              render: ({ self, "~/common/ui/list": noteList }) => (
+                <div entity={self} name="Notes">
+                  <div>
+                    <common-form schema={Memo} reset onsubmit="~/on/add-note" />
+                  </div>
 
-          </tamagotchi>
+                  <br />
+                  <br />
+                  {subview(noteList)}
+                </div>
+              ),
+              rules: schema => ({
+                init: initRules.init,
+
+                onAddNote: event("~/on/add-note").transact(({ self, event }, cmd) => {
+                  const ev = Session.resolve<SubmitEvent>(event);
+                  let note = ev.detail.value;
+                  if (!note.name) {
+                    note.name = "Untitled";
+                  }
+
+                  const { self: id, instructions } = importEntity(note, Memo);
+                  cmd.add(...instructions);
+                  cmd.add(...Transact.assert(self, { notes: id }));
+                }),
+
+                onEditNote: event("~/on/edit-note").transact(({ self, event }, cmd) => {
+                  const ev = Session.resolve<EditEvent>(event);
+                  cmd.add(...Transact.set(self, { focused: ev.detail.item }));
+                  cmd.add(...tagWithSchema(self, Memo));
+                }),
+
+                onDeleteNote: event("~/on/delete-note").transact(
+                  ({ self, event }, cmd) => {
+                    debugger;
+                    const ev = Session.resolve<EditEvent>(event);
+                    cmd.add(...Transact.remove(self, { notes: ev.detail.item }));
+                  },
+                ),
+
+                onCloseEditor: event("~/on/close-editor")
+                  .with(resolve(Notebook.pick({ focused: true })))
+                  .transact(({ self, focused }, cmd) => {
+                    cmd.add(...Transact.remove(self, { focused }));
+                  }),
+
+                renderNoteList: resolve(Notebook.pick({ notes: true }))
+                  .update(({ self, notes }) => {
+                    return [
+                      {
+                        Upsert: [
+                          self,
+                          "~/common/ui/list",
+                          (
+                            <common-table
+                              schema={Memo}
+                              data={notes}
+                              edit
+                              delete
+                              download
+                              preview
+                              onedit="~/on/edit-note"
+                              ondelete="~/on/delete-note"
+                            />
+                          ) as any,
+                        ],
+                      },
+                    ];
+                  })
+                  .commit(),
+              }),
+            },
+          );
+
+          </notes>
 
           <counter>
           import { h, behavior, $, select, Session } from "@commontools/common-system";
@@ -604,7 +406,7 @@ const spellEditor = typedBehavior(Spell, {
             description: 'font-family: monospace; color: #0ff; margin: 15px 0; text-align: center;'
           }
 
-          export const rules = behavior({
+          export const spell = behavior({
             ...mixin(
               Description(
                 ["clicks"],
@@ -649,11 +451,6 @@ const spellEditor = typedBehavior(Spell, {
               .commit(),
           });
 
-          rules.disableRule('chat/view' as any)
-
-          export const spawn = (source: {} = { counter: 34 }) =>
-            rules.spawn(source, "Counter");
-
           </counter>
 
           <music-library>
@@ -669,31 +466,31 @@ const spellEditor = typedBehavior(Spell, {
           import { importEntity, resolve } from "../sugar/sugar.jsx";
           import { Ref, UiFragment } from "../sugar/zod.js";
 
-          const Artist = z.object({
+          export const Artist = z.object({
             name: z.string().min(1).max(255).describe("The name of the artist"),
           });
 
-          const Song = z.object({
+          export const Song = z.object({
             title: z.string().min(1).max(255).describe("The title of the song"),
             artists: z.array(Artist).min(1).describe("The artists who performed the song"),
             duration: z.number().min(1).describe("The duration in seconds"),
             year: z.number().min(1900).max(2100).describe("The release year")
           });
 
-          const Album = z.object({
+          export const Album = z.object({
             "album/title": z.string().min(1).max(255).describe("The album title"),
             artist: Artist.describe("The primary artist"),
             songs: z.array(Song).min(1).describe("The songs on the album"),
             year: z.number().min(1900).max(2100).describe("The release year")
           });
 
-          const Playlist = z.object({
+          export const Playlist = z.object({
             name: z.string().min(1).max(255).describe("The playlist name"),
             description: z.string().max(1000).describe("The playlist description"),
             songs: z.array(Song).describe("The songs in the playlist")
           });
 
-          const MusicLibrary = z.object({
+          export const MusicLibrary = z.object({
             focused: Ref.describe("The item that is currently being edited"),
             artists: z.array(Artist).describe("All artists in the library"),
             songs: z.array(Song).describe("All songs in the library"),
@@ -713,7 +510,7 @@ const spellEditor = typedBehavior(Spell, {
             detail: { value: z.infer<typeof Artist> | z.infer<typeof Song> | z.infer<typeof Album> | z.infer<typeof Playlist> }
           };
 
-          const artistEditor = typedBehavior(Artist, {
+          export const artistEditor = typedBehavior(Artist, {
             render: ({ self, name }) => (
               <div entity={self}>
                 <common-form
@@ -736,7 +533,7 @@ const spellEditor = typedBehavior(Spell, {
             })
           });
 
-          const songEditor = typedBehavior(Song, {
+          export const songEditor = typedBehavior(Song, {
             render: ({ self, title, artists, duration, year }) => (
               <div entity={self}>
                 <common-form
@@ -760,7 +557,7 @@ const spellEditor = typedBehavior(Spell, {
             })
           });
 
-          const albumEditor = typedBehavior(Album, {
+          export const albumEditor = typedBehavior(Album, {
             render: ({ self, title, artist, songs, year }) => (
               <div entity={self}>
                 <common-form
@@ -784,7 +581,7 @@ const spellEditor = typedBehavior(Spell, {
             })
           });
 
-          const playlistEditor = typedBehavior(Playlist, {
+          export const playlistEditor = typedBehavior(Playlist, {
             render: ({ self, name, description, songs }) => (
               <div entity={self}>
                 <common-form
@@ -808,7 +605,7 @@ const spellEditor = typedBehavior(Spell, {
             })
           });
 
-          export const musicLibrary = typedBehavior(
+          export const spell = typedBehavior(
             MusicLibrary.pick({
               focused: true,
               '~/common/ui/artist-list': true,
@@ -1026,12 +823,18 @@ const spellEditor = typedBehavior(Spell, {
   }),
 });
 
+type PickEvent = {
+  detail: { value: Reference; label: string };
+};
+
 export const spellManager = typedBehavior(
   SpellManager.pick({
     editingSpell: true,
     focusedCharm: true,
     "~/common/ui/spell-list": true,
     "~/common/ui/charm-list": true,
+    "~/common/ui/charm-picker": true,
+    "~/common/ui/spell-picker": true,
   }),
   {
     render: ({
@@ -1040,59 +843,160 @@ export const spellManager = typedBehavior(
       focusedCharm,
       "~/common/ui/spell-list": spellList,
       "~/common/ui/charm-list": charmList,
-    }) => (
-      <div entity={self} title="Spell Manager">
-        <div>
-          <details>
-            <h3>Create New Spell</h3>
-            <common-form
-              schema={Spell.omit({ instances: true })}
-              reset
-              onsubmit="~/on/add-spell"
-            />
+      "~/common/ui/charm-picker": charmPicker,
+      "~/common/ui/spell-picker": spellPicker,
+    }) => {
+      const containerStyle = `
+        display: flex;
+        height: 100vh;
+        background: #ffffff;
+        color: #1d1d1f;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+      `;
 
-            <h3>Instantiate Charm</h3>
-            <common-form
-              schema={Charm.omit({ name: true })}
-              referenceFields={new Set(["spell"])}
-              reset
-              onsubmit="~/on/create-charm"
-            />
+      const sidebarStyle = `
+        width: 33%;
+        min-width: 320px;
+        background: #f5f5f7;
+        border-right: 1px solid #e5e5e5;
+        padding: 20px;
+        overflow-y: auto;
+      `;
 
-            <h3>Focus Charm</h3>
-            <common-form
-              schema={CharmInstance}
-              referenceFields={new Set(["charm"])}
-              reset
-              onsubmit="~/on/focus-charm"
-            />
-          </details>
-        </div>
+      const mainStyle = `
+        flex: 1;
+        padding: 20px;
+        overflow-y: auto;
+        background: #ffffff;
+      `;
 
-        {editingSpell && (
-          <div>
-            <h3>Edit Spell</h3>
-            <button onclick="~/on/close-spell-editor">Close</button>
-            <CharmComponent self={editingSpell} spell={spellEditor as any} />
+      const detailsStyle = `
+        background: #ffffff;
+        border-radius: 12px;
+        margin-bottom: 16px;
+        border: 1px solid #e5e5e5;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+      `;
+
+      const summaryStyle = `
+        padding: 12px 16px;
+        font-weight: 500;
+        cursor: pointer;
+        background: #ffffff;
+        border-bottom: 1px solid #e5e5e5;
+        user-select: none;
+        color: #1d1d1f;
+        &:hover {
+          background: #f5f5f7;
+        }
+      `;
+
+      const formContainerStyle = `
+        padding: 16px;
+      `;
+
+      const headingStyle = `
+        font-size: 24px;
+        font-weight: 600;
+        margin: 0 0 20px 0;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #e5e5e5;
+        color: #1d1d1f;
+      `;
+
+      const buttonStyle = `
+        background: #0071e3;
+        border: none;
+        color: #ffffff;
+        padding: 8px 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 500;
+        transition: background-color 0.2s ease;
+        &:hover {
+          background: #0077ED;
+        }
+      `;
+
+      return (
+        <div entity={self} title="Spell Manager" style={containerStyle}>
+          <div style={sidebarStyle}>
+            <h2 style={headingStyle}>Spell Manager</h2>
+
+            <details style={detailsStyle}>
+              <summary style={summaryStyle}>Create New Spell</summary>
+              <div style={formContainerStyle}>
+                <common-form
+                  schema={Spell.omit({ instances: true })}
+                  reset
+                  onsubmit="~/on/add-spell"
+                />
+              </div>
+            </details>
+
+            <details style={detailsStyle}>
+              <summary style={summaryStyle}>Instantiate Charm</summary>
+              <div style={formContainerStyle}>{subview(spellPicker)}</div>
+            </details>
+
+            <details style={detailsStyle}>
+              <summary style={summaryStyle}>Focus Charm</summary>
+              <div style={formContainerStyle}>{subview(charmPicker)}</div>
+            </details>
+
+            <details style={detailsStyle} open>
+              <summary style={summaryStyle}>Spells</summary>
+              <div style={formContainerStyle}>{subview(spellList)}</div>
+            </details>
+
+            <details style={detailsStyle} open>
+              <summary style={summaryStyle}>Charms</summary>
+              <div style={formContainerStyle}>{subview(charmList)}</div>
+            </details>
           </div>
-        )}
 
-        {focusedCharm && (
-          <div>
-            <h3>Focused Charm</h3>
-            <button onclick="~/on/unfocus-charm">Close</button>
-            <CharmComponent self={focusedCharm} spell={charmViewer as any} />
+          <div style={mainStyle}>
+            {focusedCharm ? (
+              <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                  <h2 style={headingStyle}>Focused Charm</h2>
+                  <button style={buttonStyle} onclick="~/on/unfocus-charm">
+                    Close
+                  </button>
+                </div>
+                <CharmComponent
+                  self={focusedCharm}
+                  spell={charmViewer as any}
+                />
+                {editingSpell && (
+                  <details style={detailsStyle} open>
+                    <summary style={summaryStyle}>
+                      Edit Spell
+                      <button
+                        style={buttonStyle}
+                        onclick="~/on/close-spell-editor"
+                      >
+                        Close
+                      </button>
+                    </summary>
+                    <div style={formContainerStyle}>
+                      <CharmComponent
+                        self={editingSpell}
+                        spell={spellEditor as any}
+                      />
+                    </div>
+                  </details>
+                )}
+              </div>
+            ) : (
+              <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #666;">
+                <h2>Select a charm to focus</h2>
+              </div>
+            )}
           </div>
-        )}
-
-        <div>
-          <h3>Spells</h3>
-          {subview(spellList)}
-          <h3>Charms</h3>
-          {subview(charmList)}
         </div>
-      </div>
-    ),
+      );
+    },
     rules: _ => ({
       init: initRules.init,
 
@@ -1121,6 +1025,78 @@ export const spellManager = typedBehavior(
           }
         },
       ),
+
+      renderCharmPicker: list(Charm, Charm.pick({ name: true }))
+        .update(({ items, self }) => {
+          return [
+            {
+              Upsert: [
+                self,
+                "~/common/ui/charm-picker",
+                (
+                  <div>
+                    <common-picker
+                      items={items.map(item => ({
+                        value: item.self,
+                        label: item.name + " (" + item.self.toString() + ")",
+                      }))}
+                      onpick="~/on/pick-charm"
+                    />
+                  </div>
+                ) as any,
+              ],
+            },
+          ];
+        })
+        .commit(),
+
+      renderSpellPicker: list(Spell, Spell.pick({ name: true }))
+        .update(({ items, self }) => {
+          return [
+            {
+              Upsert: [
+                self,
+                "~/common/ui/spell-picker",
+                (
+                  <div>
+                    <common-picker
+                      items={items.map(item => ({
+                        value: item.self,
+                        label: item.name + " (" + item.self.toString() + ")",
+                      }))}
+                      onpick="~/on/pick-spell"
+                    />
+                  </div>
+                ) as any,
+              ],
+            },
+          ];
+        })
+        .commit(),
+
+      onPickSpell: event("~/on/pick-spell").transact(({ self, event }, cmd) => {
+        const ev = Session.resolve<PickEvent>(event);
+        const charm = { spell: ev.detail.value };
+        (charm as any).name = generateIdentifier();
+
+        const { self: charmId, instructions } = importEntity(charm, Charm);
+        cmd.add(...instructions);
+        cmd.add(...Transact.assert(self, { charms: charmId }));
+        cmd.add(...log(self, "Created charm " + (charm as any).name));
+
+        if (charm.spell) {
+          cmd.add(...Transact.assert(charm.spell, { instances: charmId }));
+        }
+      }),
+
+      onPickCharm: event("~/on/pick-charm").transact(({ self, event }, cmd) => {
+        const ev = Session.resolve<PickEvent>(event);
+        const charm = ev.detail.value;
+
+        if (charm) {
+          cmd.add(...Transact.set(self, { focusedCharm: charm }));
+        }
+      }),
 
       onFocusCharm: event("~/on/focus-charm").transact(
         ({ self, event }, cmd) => {
