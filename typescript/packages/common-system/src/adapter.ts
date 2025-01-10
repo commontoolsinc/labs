@@ -33,7 +33,7 @@ export interface Behavior<
 
 export interface Service<Effects extends Record<string, Effect>> {
   readonly rules: Effects;
-  // spawn(source?: {}): CellImpl<{}>;
+  // spawn(source?: {}): DocImpl<{}>;
 
   spawn(source?: {}): {};
 }
