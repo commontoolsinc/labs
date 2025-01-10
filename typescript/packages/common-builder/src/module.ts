@@ -104,7 +104,7 @@ export function handler<E, T>(
   eventSchema: JSONSchema,
   stateSchema: JSONSchema,
   handler: (event: E, props: T) => any,
-): ModuleFactory<T, E>;
+): HandlerFactory<T, E>;
 export function handler<E extends z.ZodTypeAny, T extends z.ZodTypeAny>(
   eventSchema: E,
   stateSchema: T,
@@ -112,10 +112,10 @@ export function handler<E extends z.ZodTypeAny, T extends z.ZodTypeAny>(
     event: z.infer<typeof eventSchema>,
     props: z.infer<typeof stateSchema>,
   ) => any,
-): ModuleFactory<T, E>;
+): HandlerFactory<T, E>;
 export function handler<E, T>(
   handler: (event: E, props: T) => any,
-): ModuleFactory<T, E>;
+): HandlerFactory<T, E>;
 export function handler<E, T>(
   eventSchema:
     | JSONSchema
@@ -124,7 +124,7 @@ export function handler<E, T>(
     | undefined,
   stateSchema?: JSONSchema | z.ZodTypeAny,
   handler?: (event: E, props: T) => any,
-): ModuleFactory<T, E> {
+): HandlerFactory<T, E> {
   if (typeof eventSchema === "function") {
     handler = eventSchema;
     eventSchema = stateSchema = undefined;
@@ -146,6 +146,7 @@ export function handler<E, T>(
         }
       : undefined;
 
+  const module: Handler &
     toJSON & { bind: (inputs: Opaque<T>) => OpaqueRef<E> } = {
     type: "javascript",
     implementation: handler,
