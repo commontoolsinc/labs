@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { Recipe, TYPE } from "@commontools/common-builder";
 import { run, stop } from "../src/runner.js";
 import { idle } from "../src/scheduler.js";
-import { cell } from "../src/cell.js";
+import { getDoc } from "../src/cell.js";
 
 describe("runRecipe", () => {
   it("should work with passthrough", async () => {
@@ -223,7 +223,7 @@ describe("runRecipe", () => {
       ],
     };
 
-    const inputCell = cell({ input: 10, output: 0 });
+    const inputCell = getDoc({ input: 10, output: 0 });
     inputCell.generateEntityId();
     const result = run(recipe, inputCell);
 
@@ -257,7 +257,7 @@ describe("runRecipe", () => {
       ],
     };
 
-    const inputCell = cell({ input: 10, output: 0 });
+    const inputCell = getDoc({ input: 10, output: 0 });
     const result = run(recipe, inputCell);
 
     await idle();
