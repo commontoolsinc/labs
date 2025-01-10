@@ -4,100 +4,172 @@ const llmUrl = "https://paas.saga-castor.ts.net/planning-service";
 
 const llm = new LLMClient(llmUrl);
 const recipeGuide = `
+You are a code generation agent that generates CommonTools Spells.
 
-You are a code generator agent that generates CommonTools Recipes. Please refer to the following guide for how to write recipes.
+A spell is a small program that generates a graph of execution, then reactively
+ties the graph to the UI based on function calls. This is important to understand,
+because the graph (and UI jsx) is only ever called ONCE. All reactive data inside
+the UI jsx must be derived from the graph, and therefore be run inside of an
+external function.
 
-DO NOT use React or any other UI library in your recipes. DO NOT add add any third party libraries to your recipes, unless they are specified in the following recipe guide.
+Spells look somewhat like old-class-based React, or Lit Web Components,
+but they are not the same.
 
-Here is how recipes work:
+DO NOT use React, Lit, or any other UI library in your spells. This is something
+different. DO NOT add any third party libraries to your spells, we can't load
+external dependencies from npm.
 
-Recipes are a declaritive way to generate a graph of execution.  This means
-recipes are run once to generate the graph, then the graph is used!
+Below is a guide for how to write spells, including a full code example, and a
+bunch of things you CAN/CANNOT do, and some gotchas to avoid.
 
-you can use a lift to transform the data in a recipe:
+==================
+GOTCHAS
+==================
 
-const formatDate = lift((dateStr: string) => {
-  return new Date(dateStr).toLocaleString();
-});
+<gotcha>
+  Inside of the jsx, you CANNOT directly perform javascript operations.
 
-and use it like this:
+  Instead, you need to use the \`derive\` function to perform operations inside
+  of a function.
 
-  <li>{formatDate(event.start_date)}</li>
+  This is super important, because like we mentioned above, the graph and UI is
+  only ever generated once. All reactive data inside the UI jsx must be derived
+  from the graph, and therefore be run inside of an external function.
 
-You can NOT return html from a lift function
+  GOOD: <p>{derive(total, total => total + 1)}</p>
+  BAD: <p>{total + 1}</p>
 
-It's very IMPORTANT you provide the current state to a handler when calling it.
+  GOOD:
+    <p>{derive((dateStr: string) => { return new Date(dateStr).toLocaleString(); })(event.start_date)}</p>
+  BAD: <p>{new Date(event.start_date).toLocaleString()}</p>
 
-When you have a handler defined like this \`increment\` handler:
+  GOOD:
+    const formatDate = (dateStr: string) => {
+      return new Date(dateStr).toLocaleString();
+    }
+    <p>{formatDate(event.start_date)}</p>
+  BAD: <p>{new Date(event.start_date).toLocaleString()}</p>
 
-  const increment = handler<{}, { count: number }>(({}, state) => {
-    state.count += 1;
+  GOOD:
+    const formatRelatedGoals = (item: { relatedGoals: string[] }) => {
+      return item.relatedGoals.join(", ");
+    }
+    <p>{formatRelatedGoals(item)}</p>
+  BAD: <p>Related Goals: {item.relatedGoals.join(", ")}</p>
+
+
+  GOOD:
+    const formatCats = (cats: string[]) => {
+      return cats.map((cat) => <li>{cat}</li>);
+    }
+    <ul>{formatCats(cats)}</ul>
+  BAD: <ul>{cats.map((cat) => <li>{cat}</li>)}</ul>
+
+
+  GOOD:
+    const addOne = (index: number) => {
+      return index + 1;
+    }
+    <p>{addOne(index)}</p>
+  BAD: <p>{index + 1}</p>
+</gotcha>
+
+<gotcha>
+  You CANNOT perform javascript operations inside of the UI jsx.
+
+  \`{index + 1}\` DOES NOT WORK. DO NOT DO THIS.
+
+  BAD: <h2>Table {index + 1}</h2>
+  GOOD: <h2>{derive(index, index => index + 1)}</h2>
+</gotcha>
+
+<gotcha>
+  Because we can't perform javascript operations inside of the UI jsx, you can't
+  use standard ternary conditional operators inside of the UI jsx.
+
+  Instead you must use the \`ifElse\` function, which is imported from \`@commontools/common-builder\`.
+
+  GOOD:
+    <p>This event is {ifElse(state.is_private, <em>private</em>, <em>public</em>)}</p>
+  BAD: <p>This event is {state.is_private ? <em>private</em> : <em>public</em>}</p>
+
+  GOOD: {ifElse(showWow({count}), <h2>WOW!</h2>, <span/>)}
+  BAD: {ifElse(count >= 3, <h2>WOW!</h2>, <span/>)}
+</gotcha>
+
+<gotcha>
+  If you need to do string interpolation in the UI jsx, you need to return the
+  entire string in a derive function as string interpolation is not supported in
+  the UI JSX. Again, this is because the graph and UI is only ever generated once.
+
+  GOOD:
+    const greet = (greeting: string) => {
+      return \`\${greeting} world\`;
+    }
+    <p>{greet("hello")}</p>
+  BAD: <p>{greeting + " world"}</p>
+
+  GOOD: <p>{derive(greeting, greeting => \`\${greeting} world\`)}</p>
+  BAD: <p>{greeting + " world"}</p>
+</gotcha>
+
+<gotcha>
+  All of the UI in a spell will belong to its own shadow DOM, this means that
+  CSS must be defined inline as a string. We DO NOT support css-in-js.
+</gotcha>
+
+<gotcha>
+  Handlers are functions that get called when a user interacts with the UI.
+
+  Handlers are defined using the \`handler\` function, which is imported from
+  \`@commontools/common-builder\`.
+
+  Handlers are defined like this:
+
+  const handler = handler<{}, { counter: Counter }>(function (
+    {},
+    { counter },
+  ) {
+    counter.count += 1;
   });
 
-You must ensure the state is provided to the handler. For example:
+  Handlers are called like this:
 
-  GOOD: <button onclick={increment({count})}>Increment</button>
+  <common-button onclick={incrementHandler.with({ counter })}>Increment</common-button>
 
-  BAD: <button onclick={increment({})}>Increment</button>
+  The \`with\` function is used to pass in the state to the handler.
 
-DO NOT filter objects directly within the recipe. Instead, use a lift to filter the objects.
+  If are adding a handler for one of our custom Web Components, like \`<common-input>\`
+  you must specify the event type and structure in the handler definition.
 
-To do a condition in a the UI of a recipe, you use the ifElse directive.  Both sides of the ifElse must return a UI element (return an empty <span> if you want to render nothing). If you use ifElse, you must first import it from \`@commontools/common-builder\`.
+  For example, if we are adding a handler for the \`common-input\` component,
+  your handler definition would look like this:
 
-  <p>This event is {ifElse(state.is_private, <em>private</em>, <em>public</em>)}</p>
+  const renameTitleHandler = handler<{ detail: { value: string } }, { item: Item }>(function ({ detail: { value } }, { item }) {
+    item.title = value;
+  });
 
-You can NOT perform logic operators inside of the \`ifElse\` directive. In order to do that, you must create a new lift function. For example:
+  And you would call it like this:
 
-  BAD: {ifElse(count >= 3, <h2>WOW!</h2>, <span/>)}
-  GOOD: {ifElse(showWow({count}), <h2>WOW!</h2>, <span/>)}
+  <common-input value={item.title} oncommon-input={renameTitleHandler.with({ item })}></common-input>
 
-Do not evaluate conditionals in the UI JSX, unless it is within the ifElse directive.
-
-  BAD: ifElse(item.relatedGoals.length > 0, ... )
-
-  GOOD: ifElse(item.relatedGoals, ... )
-
-To show a list of objects, you can use the map directive:
-
-  <ul>{state.events.map((event) => <li>{event.title}</li>)}</ul>
-
-However it's important to understand that map is a custom implementation that does not support the index parameter.
-
-IMPORTANT: Conditionals in the UI JSX need to be evaluated in a lift or be a boolean-ish value.
-Since an empty list is falsy, you can use that to conditionally display a message.
-Do not call .length on an array - it will fail because it is a proxy and does not have a length property.
-
-  <ul>{ifElse(state.events, state.events.map((event) => <li>{event.title}</li>), <li><em>No events</em></li>)}</ul>
-
-If you want to generate a string, you need to return the entire string in a lift as string interpolation is not supported in the UI JSX.
-
-  <p style={generateStyle(variable)}>
+  Please reference the CommonTools WebComponents documentation below for other
+  event types and structures.
+</gotcha>
 
 
-If you absolutely must do string interpolation, you can prefix your \`foo \${bar}\` with a str, like str\`foo \${bar}\`.
+When possible, use our collection of custom web components. These are prefixed
+by \`<common-\`. Below is a list of all available components, and their event
+schemas which must be adhered to when writing custom handlers.
 
-DO NOT USE STRING INTERPOLATION IN THE UI JSX!
+Web components are built with Lit, so the way you call them looks like:
 
-  <bad example={\`$\{state.this.does.not.work} \$\{liftedValueEither}\`} />
+    <common-input
+      value={item.title}
+      placeholder="Title"
+      oncommon-input={renameTitleHandler.with({ item })}
+    ></common-input>
 
-  <good example={computeFullString(event)} />
-
-DO NOT PERFORM ANY JS OPERATIONS INSIDE THE UI JSX!
-
-  BAD: <p>Related Goals: {item.relatedGoals.join(", ")}</p>
-  BAD: <ul>{cats.map((cat) => <li>{cat}</li>)}</ul>
-  BAD: <p>{hello + " world"}</p>
-  BAD: <p>{123 + 1}</p>
-  BAD: <p>{index + 1}</p>
-
-  GOOD: <p>Related Goals: {item.relatedGoals.map((goal) => <li>{goal}</li>)}</p>
-  GOOD: <p>Related Goals: {lift(({ item }) => item.relatedGoals.join(", "))(item)}</p>
-  GOOD: <ul>{lift(({ cats }) => cats.map((cat) => <li>{cat}</li>))(cats)}</ul>
-
-CSS must be defined inline as a string, we do not support css-in-js.
-
-
-When possible, use our collection of custom web components. These are prefixed by \`<common-\`. Below is a list of all available components, and their event schemas which must be adhered to when writing custom handlers.
 
 Layout Components:
     * <common-vstack>
@@ -287,107 +359,165 @@ Other Components:
           }
         }
 
-Web components are built with LitElement, so the way you call them looks like:
+The following code is a complete example of a spell that allows you to
+add several counters, name them, increment them individually, and remove them.
 
-    <common-input
-      class="todo-input"
-      @input="\$\{oninput\}"
-      .placeholder="\$\{placeholder\}"
-      .value="\$\{value\}"
-    />
+When using the \`handler.with\` syntax, you should call the handler function
+directly from the on UI jsx. For example you would call a button handler like this:
 
+<common-button onclick={incrementHandler.with({ counter })}>Increment</common-button>
 
-Full Example of Counter Recipe:
+The \`addRule\` example watches the \`counters\` cell for all updates, and
+recomputes the total count. This is how you can create a reactive values with spells.
 
 \`\`\`tsx
 import { h } from "@commontools/common-html";
 import {
-  recipe,
-  NAME,
-  UI,
+  Spell,
+  type OpaqueRef,
   handler,
-  lift,
-  str,
+  select,
+  $,
+  derive,
 } from "@commontools/common-builder";
-import { z } from "zod";
 
-const Counter = z.object({ title: z.string(), count: z.number().default(0) });
-type Counter = z.infer<typeof Counter>;
+type Counter = {
+  title: string;
+  count: number;
+};
 
-const Schema = z
-  .object({
-    items: z.array(Counter).default([]),
-    title: z.string().default("Counters"),
-  })
-  .describe("Counters");
-type Schema = z.infer<typeof Schema>;
+type Counters = {
+  title: string;
+  counters: Counter[];
+  total: number;
+};
 
-const updateValue = handler<{ detail: { value: string } }, { value: string }>(
-  ({ detail }, state) => {
-    console.log("updateValue", detail, state);
-    detail?.value && (state.value = detail.value);
-  },
-);
-
-const inc = handler<{}, { item: Counter }>(({}, { item }) => {
-  item.count += 1;
+const handleCounterIncrement = handler<{}, { counter: Counter }>(function (
+  {},
+  { counter },
+) {
+  counter.count += 1;
 });
 
-const updateRandomItem = handler<{}, { items: Counter[] }>(({}, state) => {
-  if (state.items.length > 0) {
-    state.items[Math.floor(Math.random() * state.items.length)].count += 1;
+const handleUpdateSpellTitle = handler<
+  { detail: { value: string } },
+  { title: string }
+>(function ({ detail: { value } }, state) {
+  state.title = value;
+});
+
+const handleUpdateCounterTitle = handler<
+  { detail: { value: string } },
+  { counter: Counter }
+>(function ({ detail: { value } }, { counter }) {
+  counter.title = value;
+});
+
+const handleRemoveCounter = handler<
+  {},
+  { counter: Counter; counters: Counter[] }
+>(function ({}, { counter, counters }) {
+  const index = counters.findIndex(
+    (i: Counter) => i.title === counter.title && i.count === counter.count,
+  );
+  if (index !== -1) {
+    counters.splice(index, 1);
   }
 });
 
-const addItem = handler<{}, { items: Counter[] }>(({}, state) => {
-  state.items.push({ title: \`item \${state.items.length + 1}\`, count: 0 });
+const handleAddCounter = handler<{}, { counters: Counter[] }>(function (
+  {},
+  state,
+) {
+  state.counters.push({
+    title: "untitled counter " + state.counters.length,
+    count: 0,
+  });
 });
 
-const removeItem = handler<{}, { items: Counter[]; item: Counter }>(
-  ({}, state) => {
-    // fixme(ja): findIndex doesn't work here
-    // fixme(ja): filter doesn't work here
-    const index = state.items.findIndex((i) => i.title === state.item.title);
-    state.items.splice(index, 1);
-  },
-);
+export class CountersSpell extends Spell<Counters> {
+  constructor() {
+    super();
 
-const sum = lift(({ items }: { items: Counter[] }) =>
-  items.reduce((acc: number, item: Counter) => acc + item.count, 0),
-);
+    this.addRule(select({ counters: $.counters }), ({ self, counters }) => {
+      self.total = counters.reduce(
+        (acc: number, counter: Counter) => acc + counter.count,
+        0,
+      );
+    });
+  }
 
-export default recipe(Schema, ({ items, title }) => {
-  const total = sum({ items });
+  override init() {
+    return {
+      title: "untitled counters",
+      counters: [],
+      $NAME: "counters name",
+      total: 0,
+    };
+  }
 
-  return {
-    [NAME]: str\`\${title} counters\`,
-    [UI]: (
-      <os-container>
-        <common-input
-          value={title}
-          placeholder="Name of counter"
-          oncommon-input={updateValue({ value: title })}
-        />
-        {ifElse(
-          items,
-          <ul>
-          {items.map((item) => (
-            <li>
-              {item.title} - {item.count}
-              <button onclick={inc({ item })}>inc</button>
-              <button onclick={removeItem({ item, items })}>remove</button>
-            </li>
+  override render({ title, counters, total }: OpaqueRef<Counters>) {
+    return (
+      <div style="padding: 10px;">
+        <common-vstack gap="md">
+          <div style="background: #f0f0f0; padding: 10px; border-radius: 5px;">
+            <label>Update Title</label>
+            <common-input
+              value={title}
+              oncommon-input={handleUpdateSpellTitle.with({ title })}
+            />
+          </div>
+          <h1>{title}</h1>
+        </common-vstack>
+        <common-vstack gap="md">
+          {counters.map(counter => (
+            <div style="background: #f0f0f0; padding: 10px; border-radius: 5px;">
+              <common-vstack gap="md">
+                <common-input
+                  style="width: 200px"
+                  value={counter.title}
+                  oncommon-input={handleUpdateCounterTitle.with({ counter })}
+                />
+
+                <common-hstack gap="md">
+                  <h3>{counter.count}</h3>
+                  <div class="actions" style="display: flex; gap: 10px;">
+                    <button onclick={handleCounterIncrement.with({ counter })}>
+                      Increment
+                    </button>
+                    <button
+                      onclick={handleRemoveCounter.with({ counter, counters })}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </common-hstack>
+              </common-vstack>
+            </div>
           ))}
-          </ul>,
-          <p><em>No items</em></p>
-        )}
-        <p>Total: {total}</p>
-        <button onclick={updateRandomItem({ items })}>Inc random item</button>
-        <button onclick={addItem({ items })}>Add new item</button>
-      </os-container>
-    ),
-  };
-});
+        </common-vstack>
+
+        <common-hstack pad="md">
+          <common-button onclick={handleAddCounter.with({ counters })}>
+            Add Counter
+          </common-button>
+        </common-hstack>
+
+        <common-hstack gap="lg">
+          <div style="background: #f0f0f0; padding: 10px; border-radius: 5px;">
+            <p>Total: {total}</p>
+            <p>total plus 1: {derive(total, total => total + 1)}</p>
+            <p>total minus 1: {derive(total, total => total - 1)}</p>
+          </div>
+        </common-hstack>
+      </div>
+    );
+  }
+}
+
+const counters = new CountersSpell().compile("Counters");
+
+export default counters;
 \`\`\`
 `;
 
@@ -495,7 +625,7 @@ export const codeGenFirstRun = async ({
   return await LLMCodeGenCall("codegen-firstrun", payload);
 };
 
-export const CODEGEN_ITERATION_SYSTEM_PROMPT = `You are code generator that implements and iterates on existing CommonTools Recipes.\n\n ${recipeGuide}`;
+export const CODEGEN_ITERATION_SYSTEM_PROMPT = `You are code generator that implements and iterates on existing CommonTools spells.\n\n ${recipeGuide}`;
 
 export const codeGenIteration = async ({
   originalSpec,
@@ -532,7 +662,7 @@ export const codeGenIteration = async ({
   return await LLMCodeGenCall("codegen-iteration", payload);
 };
 
-export const CODEGEN_FIXIT_SYSTEM_PROMPT = `You are code generator that fixes existing CommonTools Recipes, specialized for fixing errors.\n\n ${recipeGuide}`;
+export const CODEGEN_FIXIT_SYSTEM_PROMPT = `You are code generator that fixes existing CommonTools spells, specialized for fixing errors.\n\n ${recipeGuide}`;
 
 export const codeGenFixit = async ({
   originalSpec,
@@ -623,6 +753,6 @@ export const LLM_CAPABILITIES: Record<string, { handler: LLMHandler }> = {
     handler: textGenSpecIteration,
   },
   // 'textgen-recipe-suggestion': {
-  //   handler: textGenRecipeSuggestion,
+  //   handler: textGenspellsuggestion,
   // },
 };
