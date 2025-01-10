@@ -6,17 +6,11 @@ type CounterState = {
   count: number;
 };
 
-const thisHandler = handler<
-  {},
-  { count: number }
->(function () {
+const thisHandler = handler<{}, { count: number }>(function () {
   this.count += 1;
 });
 
-const withHandler = handler<
-  {},
-  { count: number }
->(function ({}, state) {
+const withHandler = handler<{}, { count: number }>(function ({}, state) {
   state.count += 1;
 });
 
@@ -25,6 +19,7 @@ export class CounterSpell extends Spell<CounterState> {
     super();
 
     this.addEventListener("increment", self => {
+      console.log("self", self);
       const { count } = self;
       this.update(self, { count: count + 1 });
     });
@@ -46,9 +41,15 @@ export class CounterSpell extends Spell<CounterState> {
       <div>
         <common-input value={title} oncommon-input={this.dispatch("title")} />
         <p>count: {count}</p>
-        <common-button onclick={this.dispatch("increment")}>dispatch</common-button>
-        <common-button onclick={thisHandler.bind({count})}>this</common-button>
-        <common-button onclick={withHandler.with({count})}>with</common-button>
+        <common-button onclick={this.dispatch("increment")}>
+          dispatch
+        </common-button>
+        <common-button onclick={thisHandler.bind({ count })}>
+          this
+        </common-button>
+        <common-button onclick={withHandler.with({ count })}>
+          with
+        </common-button>
       </div>
     );
   }
