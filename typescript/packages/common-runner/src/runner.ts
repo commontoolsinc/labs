@@ -640,5 +640,5 @@ function instantiateRecipeNode(
 
 const moduleWrappers = {
   handler: (fn: (event: any, ...props: any[]) => any) => (props: any) =>
-    fn(props.$event, props),
+    fn.bind(props)(props.$event, props),
 };

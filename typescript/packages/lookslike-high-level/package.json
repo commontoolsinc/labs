@@ -67,7 +67,6 @@
     "merkle-reference": "^1.1.0",
     "mermaid": "^11.4.1",
     "panzoom": "^9.4.3",
-    "zod": "^3.24.1",
     "zod-to-json-schema": "^3.23.3"
   },
   "overrides": {

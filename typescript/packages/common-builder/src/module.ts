@@ -1,6 +1,8 @@
 import type {
   Module,
+  Handler,
   ModuleFactory,
+  HandlerFactory,
   Opaque,
   OpaqueRef,
   NodeRef,
@@ -144,15 +146,19 @@ export function handler<E, T>(
         }
       : undefined;
 
-  const module: Module & toJSON = {
+    toJSON & { bind: (inputs: Opaque<T>) => OpaqueRef<E> } = {
     type: "javascript",
     implementation: handler,
     wrapper: "handler",
+    with: (inputs: Opaque<T>) => factory(inputs),
+    // Overriding the default `bind` method on functions. The wrapper will bind
+    // the actual inputs, so they'll be available as `this`
+    bind: (inputs: Opaque<T>) => factory(inputs),
     toJSON: () => moduleToJSON(module),
     ...(schema ? { argumentSchema: schema } : {}),
   };
 
-  return Object.assign((props: Opaque<T>): OpaqueRef<E> => {
+  const factory = Object.assign((props: Opaque<T>): OpaqueRef<E> => {
     const stream = opaqueRef();
     stream.set({ $stream: true });
     const node: NodeRef = {
@@ -167,6 +173,8 @@ export function handler<E, T>(
 
     return stream as unknown as OpaqueRef<E>;
   }, module);
+
+  return factory;
 }
 
 export function isolated<T, R>(
@@ -224,10 +232,10 @@ export const derive = <In, Out>(
 ): OpaqueRef<Out> => lift(f)(input);
 
 // Like `derive`, but for event handlers
-export const event = <T = any>(
-  input: Opaque<T>,
-  f: (event: T, self: any) => any,
-): OpaqueRef<T> => handler(f)(input);
+// export const event = <T = any>(
+//   input: Opaque<T>,
+//   f: (event: T, self: any) => any,
+// ): OpaqueRef<T> => handler(f)(input);
 
 // unsafe closures: like derive, but doesn't need any arguments
 export const compute: <T>(fn: () => T) => OpaqueRef<T> = (fn: () => any) =>

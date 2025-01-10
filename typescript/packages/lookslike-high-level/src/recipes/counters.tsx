@@ -1,89 +1,84 @@
 import { h } from "@commontools/common-html";
-import {
-  recipe,
-  NAME,
-  UI,
-  handler,
-  lift,
-  str,
-  ModuleFactory,
-} from "@commontools/common-builder";
-import { z } from "zod";
+import { Spell, type OpaqueRef, handler, select, $ } from "@commontools/common-builder";
 
-const Counter = z.object({ title: z.string(), count: z.number() });
-type Counter = z.infer<typeof Counter>;
+type Counter = {
+  title: string;
+  count: number;
+};
 
-const CounterArray = z.array(Counter);
-type CounterArray = z.infer<typeof CounterArray>;
+type Counters = {
+  title: string;
+  counters: Counter[];
+  total: number;
+};
 
-const Counters = z
-  .object({
-    items: CounterArray.default([]),
-    title: z.string().default("Counters"),
-  })
-  .describe("Counters");
-type Counters = z.infer<typeof Counters>;
-
-const updateValue = handler<{ detail: { value: string } }, { value: string }>(
-  ({ detail }, state) => {
-    console.log("updateValue", detail, state);
-    detail?.value && (state.value = detail.value);
-  },
-);
-
-const inc = handler<{}, { item: Counter }>(({}, { item }) => {
-  item.count += 1;
+const incrementHandler = handler<{}, { counter: Counter }>(function ({ }, { counter }) {
+  console.log("incrementHandler", counter);
+  counter.count += 1;
 });
 
-const updateRandomItem = handler<{}, { items: Counter[] }>(({}, state) => {
-  if (state.items.length > 0) {
-    state.items[Math.floor(Math.random() * state.items.length)].count += 1;
+const renameHandler = handler<{ detail: { value: string } }, { counter: Counter }>(function ({ detail: { value } }, { counter }) {
+  counter.title = value;
+});
+
+const removeHandler = handler<{}, { counter: Counter, counters: Counter[] }>(function ({ }, { counter, counters }) {
+  console.log("removeHandler", counter, counters);
+  // FIXME(ja): not having equality check on objects is a problem
+  const index = counters.findIndex((i) => i.title === counter.title && i.count === counter.count);
+  if (index !== -1) {
+    counters.splice(index, 1);
   }
 });
 
-const addItem = handler<{}, { items: Counter[] }>(({}, state) => {
-  state.items.push({ title: `item ${state.items.length + 1}`, count: 0 });
-});
+export class CountersSpell extends Spell<Counters> {
+  constructor() {
+    super();
 
-const removeItem = handler<{}, { items: Counter[]; item: Counter }>(
-  ({}, state) => {
-    // fixme(ja): findIndex doesn't work here
-    // fixme(ja): filter doesn't work here
-    const index = state.items.findIndex((i) => i.title === state.item.title);
-    state.items.splice(index, 1);
-  },
-);
+    this.addEventListener("title", (self, { detail: { value } }) => {
+      self.title = value;
+    });
 
-const sum = lift(z.object({ items: CounterArray }), z.number(), ({ items }) =>
-  items.reduce((acc: number, item: Counter) => acc + item.count, 0),
-) as unknown as ModuleFactory<{ items: CounterArray }, number>;
+    this.addEventListener("add", self => {
+      self.counters.push({ title: "untitled counter " + self.counters.length, count: 0 });
+    });
 
-export default recipe(Counters, ({ items, title }) => {
-  const total = sum({ items });
+    this.addRule(
+      select({ counters: $.counters }),
+      ({ self, counters }) => {
+        self.total = counters.reduce((acc: number, counter: Counter) => acc + counter.count, 0);
+      }
+    );
 
-  return {
-    [NAME]: str`${title} counters`,
-    [UI]: (
-      <os-container>
-        <common-input
-          value={title}
-          placeholder="Name of counter"
-          oncommon-input={updateValue({ value: title })}
-        />
-        <ul>
-          {items.map((item) => (
-            <li>
-              {item.title} - {item.count}
-              <button onclick={inc({ item })}>inc</button>
-              <button onclick={removeItem({ item, items })}>remove</button>
-            </li>
-          ))}
-        </ul>
+  }
+
+  override init() {
+    return {
+      title: "untitled counters",
+      counters: [], // FIXME(ja): sending in default values like { title: "untitled counter", count: 0 } doesn't convert them to a cell
+      $NAME: "counters name",
+      total: 0
+    };
+  }
+
+  override render({ title, counters, total }: OpaqueRef<Counters>) {
+    return (
+      <div>
+        <common-input value={title} oncommon-input={this.dispatch("title")} />
+        {counters.map((counter) => (
+          <div>
+            <common-input value={counter.title} oncommon-input={renameHandler.with({ counter })} />
+            {counter.count}
+            <button onclick={incrementHandler.with({ counter })}>Increment</button>
+            <button onclick={removeHandler.with({ counter, counters })}>Remove</button>
+          </div>
+        ))}
         <p>Total: {total}</p>
-        <button onclick={updateRandomItem({ items })}>Inc random item</button>
-        <button onclick={addItem({ items })}>Add new item</button>
-      </os-container>
-    ),
-    total,
-  };
-});
+        <common-button onclick={this.dispatch("add")}>Add</common-button>
+      </div>
+    );
+  }
+}
+
+const counters = new CountersSpell().compile("Counters");
+
+export default counters;

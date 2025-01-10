@@ -58,10 +58,16 @@ import { emailComposer } from "./spells/15_email_composer.jsx";
 import { addressBook } from "./spells/16_contacts.jsx";
 import { formTest } from "./spells/17_complex_form.jsx";
 import { musicLibrary } from "./spells/18_music.jsx";
-import { spellManager } from './spells/19_process_manager.jsx'
-import { shaderManager } from './spells/20_shader_editor.jsx'
-import { schemaGenerator } from './spells/21_model_builder.jsx'
-import { search } from './spells/22_search.jsx'
+import { spellManager } from "./spells/19_process_manager.jsx";
+import { shaderManager } from "./spells/20_shader_editor.jsx";
+import { schemaGenerator } from "./spells/21_model_builder.jsx";
+import { search } from "./spells/22_search.jsx";
+import { notebook } from "./spells/23_notes.jsx";
+import { quotedb } from "./spells/24_quotes.jsx";
+import { activity } from "./spells/25_activity.jsx";
+import { activityRef } from "./sugar/activity.js";
+import { stackLayout } from "./spells/26_stacks.jsx";
+import { canvasLayout } from "./spells/27_canvas.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -262,6 +268,11 @@ addCharms([
   shaderManager.spawn({ shaderManager: 1 }),
   schemaGenerator.spawn({ schemaGenerator: 1 }),
   search.spawn({ search: 1 }),
+  notebook.spawn({ notes: 1 }),
+  quotedb.spawn({ quotes: 1 }),
+  activity.spawn(activityRef),
+  stackLayout.spawn({ stack: 1 }),
+  canvasLayout.spawn({ canvas: 1 }),
   FetchService.spawn() as any,
   GmailService.spawn() as any,
   ViewService.spawn() as any,

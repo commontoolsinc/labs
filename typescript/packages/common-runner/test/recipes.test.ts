@@ -79,27 +79,25 @@ describe("Recipe Runner", () => {
   });
 
   it("should handle recipes with map nodes", async () => {
-    const doubleArray = recipe<{ values: { x: number }[] }>(
-      "Double numbers",
+    const multipliedArray = recipe<{ values: { x: number }[] }>(
+      "Multiply numbers",
       ({ values }) => {
-        const doubled = values.map(({ x }) => {
-          const double = lift<number>(x => x * 2);
-          return { double: double(x) };
+        const multiplied = values.map(({ x }, index, array) => {
+          const multiply = lift<number>(x => x * (index + 1) * array.length);
+          return { multiplied: multiply(x) };
         });
-        return { doubled };
+        return { multiplied };
       },
     );
 
-    const result = run(doubleArray, { values: [{ x: 1 }, { x: 2 }, { x: 3 }] });
+    const result = run(multipliedArray, {
+      values: [{ x: 1 }, { x: 2 }, { x: 3 }],
+    });
 
     await idle();
 
-    // This is necessary to ensure the recipe has time to run
-    // TODO: Get await idle() to work for this case as well
-    await new Promise(resolve => setTimeout(resolve, 100));
-
     expect(result.getAsQueryResult()).toMatchObject({
-      doubled: [{ double: 2 }, { double: 4 }, { double: 6 }],
+      multiplied: [{ multiplied: 3 }, { multiplied: 12 }, { multiplied: 27 }],
     });
   });
 
@@ -123,10 +121,6 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    // This is necessary to ensure the recipe has time to run
-    // TODO: Get await idle() to work for this case as well
-    await new Promise(resolve => setTimeout(resolve, 100));
-
     expect(result.getAsQueryResult()).toMatchObject({
       doubled: [3, 6, 9],
     });
@@ -144,6 +138,61 @@ describe("Recipe Runner", () => {
       "Increment counter",
       ({ counter }) => {
         return { counter, stream: incHandler({ counter }) };
+      },
+    );
+
+    const result = run(incRecipe, { counter: { value: 0 } });
+
+    await idle();
+
+    result.asRendererCell(["stream"]).send({ amount: 1 });
+    await idle();
+    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
+
+    result.asRendererCell(["stream"]).send({ amount: 2 });
+    await idle();
+    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
+  });
+
+  it("should execute handlers that use bind and this", async () => {
+    // Switch to `function` so that we can set the type of `this`.
+    const incHandler = handler<
+      { amount: number },
+      { counter: { value: number } }
+    >(function ({ amount }) {
+      this.counter.value += amount;
+    });
+
+    const incRecipe = recipe<{ counter: { value: number } }>(
+      "Increment counter",
+      ({ counter }) => {
+        return { counter, stream: incHandler.bind({ counter }) };
+      },
+    );
+
+    const result = run(incRecipe, { counter: { value: 0 } });
+
+    await idle();
+
+    result.asRendererCell(["stream"]).send({ amount: 1 });
+    await idle();
+    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
+
+    result.asRendererCell(["stream"]).send({ amount: 2 });
+    await idle();
+    expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
+  });
+
+  it("should execute handlers that use bind and this (no types)", async () => {
+    // Switch to `function` so that we can set the type of `this`.
+    const incHandler = handler(function ({ amount }) {
+      this.counter.value += amount;
+    });
+
+    const incRecipe = recipe<{ counter: { value: number } }>(
+      "Increment counter",
+      ({ counter }) => {
+        return { counter, stream: incHandler.bind({ counter }) };
       },
     );
 

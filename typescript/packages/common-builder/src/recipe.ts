@@ -127,6 +127,7 @@ function factoryFromRecipe<T, R>(
   const collectCellsAndNodes = (value: Opaque<any>) =>
     traverseValue(value, value => {
       if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
+      if (isOpaqueRef(value)) value = value.unsafe_getExternal();
       if (
         (isOpaqueRef(value) || isShadowRef(value)) &&
         !cells.has(value) &&

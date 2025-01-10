@@ -1,3 +1,4 @@
+import { isOpaqueRef } from "@commontools/common-builder";
 import {
   type CellImpl,
   isQueryResultForDereferencing,
@@ -29,7 +30,12 @@ export const createRef = (
     // Unwrap query result proxies, replace cells with their ids and remove
     // functions and undefined values, since `merkle-reference` doesn't support
     // them.
+    const seen = new Set<any>();
     function traverse(obj: any): any {
+      // Avoid cycles
+      if (seen.has(obj)) return null;
+      seen.add(obj);
+
       // Don't traverse into ids.
       if (typeof obj === "object" && obj !== null && "/" in obj) return obj;
 
@@ -41,6 +47,8 @@ export const createRef = (
       ) {
         obj = obj.toJSON() ?? obj;
       }
+
+      if (isOpaqueRef(obj)) return obj.export().value ?? crypto.randomUUID();
 
       if (isQueryResultForDereferencing(obj))
         // It'll traverse this and call .toJSON on the cell in the reference.

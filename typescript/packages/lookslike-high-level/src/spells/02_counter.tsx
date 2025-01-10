@@ -3,6 +3,7 @@ import { event, events, set, subview } from "../sugar.js";
 import { description, Description } from "./stickers/describe.jsx";
 import { mixin } from "../sugar/mixin.js";
 import { Chattable, chatUiResolver } from "./stickers/chat.jsx";
+import { log } from "../sugar/activity.js";
 
 const resolveEmpty = select({ self: $.self }).not(q => q.match($.self, "clicks", $._));
 
@@ -25,13 +26,13 @@ const styles = {
 }
 
 export const rules = behavior({
-  ...mixin(
-    Description(
-      ["clicks"],
-      (self: any) =>
-        `Come up with a pun based on this counter value: ${self.clicks}. Respond with just the pun directly.`,
-    ),
-  ),
+  // ...mixin(
+  //   Description(
+  //     ["clicks"],
+  //     (self: any) =>
+  //       `Come up with a pun based on this counter value: ${self.clicks}. Respond with just the pun directly.`,
+  //   ),
+  // ),
 
   ...mixin(Chattable({
     attributes: ["clicks"],
@@ -42,9 +43,9 @@ export const rules = behavior({
   init: resolveEmpty.update(({ self }) => set(self, { clicks: 0 })).commit(),
 
   viewCount: resolveClicks
-    .with(description)
+    // .with(description)
     .with(chatUiResolver)
-    .render(({ clicks, self, llmDescription, chatView }) => {
+    .render(({ clicks, self, chatView }) => {
       return (
         <div title={`Clicks ${clicks}`} entity={self} style={styles.container}>
           <div style={styles.clicks}>{clicks}</div>
@@ -52,7 +53,6 @@ export const rules = behavior({
             <button style={styles.button} onclick={CounterEvent.onClick}>Click me!</button>
             <button style={styles.button} onclick={CounterEvent.onReset}>Reset</button>
           </div>
-          <p style={styles.description}>{llmDescription}</p>
           {subview(chatView)}
         </div>
       );
@@ -65,7 +65,7 @@ export const rules = behavior({
 
   onClick: event(CounterEvent.onClick)
     .with(resolveClicks)
-    .update(({ self, clicks }) => set(self, { clicks: clicks + 1 }))
+    .update(({ self, clicks }) => ([...set(self, { clicks: clicks + 1 }), ...log(self, 'Incremented counter')]))
     .commit(),
 });
 

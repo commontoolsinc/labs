@@ -16,7 +16,7 @@ describe("recipe function", () => {
 
   it("creates a recipe, with simple function", () => {
     const doubleRecipe = recipe<{ x: number }>("Double a number", ({ x }) => {
-      const double = lift<number>((x) => x * 2);
+      const double = lift<number>(x => x * 2);
       return { double: double(x) };
     });
     expect(isRecipe(doubleRecipe)).toBe(true);
@@ -39,7 +39,7 @@ describe("recipe function", () => {
 describe("complex recipe function", () => {
   const doubleRecipe = recipe<{ x: number }>("Double a number", ({ x }) => {
     x.setDefault(1);
-    const double = lift<number>((x) => x * 2);
+    const double = lift<number>(x => x * 2);
     return { double: double(double(x)) };
   });
   const { argumentSchema, result, nodes } = doubleRecipe;
@@ -95,7 +95,7 @@ describe("schemas", () => {
     const double = lift(
       z.number().describe("A number"),
       z.number().describe("Doubled"),
-      (x) => x * 2,
+      x => x * 2,
     );
     // @ts-ignore-error ZodNumber and number clash to be investigated
     const testRecipe = recipe(
@@ -172,7 +172,7 @@ describe("recipe with map node", () => {
     "Double numbers",
     ({ values }) => {
       const doubled = values.map(({ x }) => {
-        const double = lift<number>((x) => x * 2);
+        const double = lift<number>(x => x * 2);
         return { doubled: double(x) };
       });
       return { doubled };
@@ -224,7 +224,7 @@ describe("recipe with map node that references a parent cell", () => {
     expect(
       (multiplyArray.nodes[0].inputs as { op: Recipe }).op.nodes[0].inputs,
     ).toEqual({
-      x: { $alias: { cell: 1, path: ["argument", "x"] } },
+      x: { $alias: { cell: 1, path: ["argument", "item", "x"] } },
       factor: { $alias: { path: ["argument", "factor"] } },
     });
   });
@@ -232,21 +232,21 @@ describe("recipe with map node that references a parent cell", () => {
 
 describe("recipe with map node that references a parent cell in another recipe", () => {
   it("correctly creates references to the parent cells", () => {
-    const multiplyArray = recipe<{ values: { x: number }[]; factor: number }>(
+    const multiplyArray = recipe<{ values: { x: number }[] }>(
       "Double numbers",
-      ({ values, factor }) => {
+      ({ values }) => {
         const wrapper = recipe("Wrapper", () => {
-          const doubled = values.map(({ x }) => {
-            const double = lift<{ x: number; factor: number }>(
+          const multiplied = values.map(({ x }, index) => {
+            const multiply = lift<{ x: number; factor: number }>(
               ({ x, factor }) => ({
                 x: x * factor,
               }),
             );
-            return { doubled: double({ x, factor }) };
+            return { multiplied: multiply({ x, factor: index }) };
           });
-          return { doubled };
+          return { multiplied };
         });
-        return wrapper({ values, factor });
+        return wrapper({ values });
       },
     );
 
@@ -256,8 +256,8 @@ describe("recipe with map node that references a parent cell in another recipe",
     const subSubRecipe = (subRecipe.nodes[0].inputs as { op: Recipe }).op;
     expect(isRecipe(subSubRecipe)).toBeTruthy();
     expect(subSubRecipe.nodes[0].inputs).toEqual({
-      x: { $alias: { cell: 2, path: ["argument", "x"] } },
-      factor: { $alias: { path: ["argument", "factor"] } },
+      x: { $alias: { cell: 2, path: ["argument", "item", "x"] } },
+      factor: { $alias: { cell: 2, path: ["argument", "index"] } },
     });
   });
 });

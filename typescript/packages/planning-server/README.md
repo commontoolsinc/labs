@@ -45,7 +45,7 @@ gcloud auth application-default login
 ## Run the server
 
 ```bash
-npm run start
+deno run -A start
 ```
 
 ## Testing language models
@@ -54,26 +54,26 @@ To run a quick battery of tests on all configured live LLMs, use the `livetest.t
 
 ```bash
 # Run tests against ALL configured models
-npm run livetest
+deno run -A livetest
 
 or
 
-npm run livetest:all
+deno run -A livetest:all
 ```
 
 Run tests against all models from a specific provider, run one of the following
 
 ```bash
-npm run livetest:anthropic
-npm run livetest:openai
-npm run livetest:google
-npm run livetest:groq
+deno run -A livetest:anthropic
+deno run -A livetest:openai
+deno run -A livetest:google
+deno run -A livetest:groq
 ```
 
 To get a list of all available models, run
 
 ```bash
-deno run --allow-env --allow-read --allow-net  ./src/livetest.ts
+deno run -A  ./src/livetest.ts
 ```
 
 Finally, you can test a remote `planning-server` endpoint by overriding the URL with the `PLANNING_SERVER_BASE_URL` environment variable.
@@ -81,7 +81,7 @@ Finally, you can test a remote `planning-server` endpoint by overriding the URL 
 For example
 
 ```bash
-PLANNING_API_URL="https://paas.saga-castor.ts.net/planning-service" npm run livetest:anthropic
+PLANNING_API_URL="https://paas.saga-castor.ts.net/planning-service" deno run -A livetest:anthropic
 ```
 
 ## Searching available models

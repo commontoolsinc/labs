@@ -8,6 +8,7 @@ import {
   ShadowRef,
   Recipe,
   UnsafeBinding,
+  toOpaqueRef,
 } from "./types.js";
 import { setValueAtPath, hasValueAtPath } from "./utils.js";
 import { getTopFrame, recipe } from "./recipe.js";
@@ -68,9 +69,18 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
       }),
       unsafe_bindToRecipeAndPath: (recipe: Recipe, path: PropertyKey[]) =>
         (unsafe_binding = { recipe, path }),
+      unsafe_getExternal: () => {
+        if (!unsafe_binding) return proxy;
+        const value = unsafe_materialize(unsafe_binding, path);
+        if (typeof value === "object" && value !== null && value[toOpaqueRef])
+          return value[toOpaqueRef]();
+        else return proxy;
+      },
       map: <S>(
         fn: (
-          value: Opaque<Required<T extends Array<infer U> ? U : T>>,
+          element: Opaque<Required<T extends Array<infer U> ? U : T>>,
+          index: Opaque<number>,
+          array: T,
         ) => Opaque<S>,
       ) => {
         // Create the factory if it doesn't exist. Doing it here to avoid
@@ -81,7 +91,11 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
         });
         return mapFactory({
           list: proxy,
-          op: recipe("mapping function", fn),
+          op: recipe(
+            "mapping function",
+            ({ element, index, array }: Opaque<any>) =>
+              fn(element, index, array),
+          ),
         });
       },
       /**
@@ -122,7 +136,7 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
             [...path, prop],
             methods[prop as keyof OpaqueRefMethods<any>],
           );
-        } else return createNestedProxy([...path, prop]);
+        } else return createNestedProxy([...path, prop], store);
       },
       set(_, prop, value) {
         methods.set({ [prop]: value });
@@ -133,7 +147,7 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
     return proxy;
   }
 
-  const top = createNestedProxy([]) as OpaqueRef<T>;
+  const top = createNestedProxy([], store) as OpaqueRef<T>;
 
   store.frame.opaqueRefs.add(top);
 

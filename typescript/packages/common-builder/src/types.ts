@@ -44,8 +44,13 @@ export type OpaqueRefMethods<T> = {
     frame: Frame;
   };
   unsafe_bindToRecipeAndPath(recipe: Recipe, path: PropertyKey[]): void;
+  unsafe_getExternal(): OpaqueRef<T>;
   map<S>(
-    fn: (value: T extends Array<infer U> ? Opaque<U> : Opaque<T>) => Opaque<S>,
+    fn: (
+      element: T extends Array<infer U> ? Opaque<U> : Opaque<T>,
+      index: Opaque<number>,
+      array: T,
+    ) => Opaque<S>,
   ): Opaque<S[]>;
   [Symbol.iterator](): Iterator<T>;
   [Symbol.toPrimitive](hint: string): T;
@@ -70,7 +75,7 @@ export type toJSON = {
 };
 
 export type NodeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
-  (Module | Recipe) &
+  (Module | Handler | Recipe) &
   toJSON;
 
 export type RecipeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
@@ -79,6 +84,10 @@ export type RecipeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
 
 export type ModuleFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
   Module &
+  toJSON;
+
+export type HandlerFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
+  Handler<T, R> &
   toJSON;
 
 export type JSONValue =
@@ -132,6 +141,10 @@ export type Module = {
   wrapper?: "handler";
   argumentSchema?: JSONSchema;
   resultSchema?: JSONSchema;
+};
+
+export type Handler<T = any, R = any> = Module & {
+  with: (inputs: Opaque<T>) => OpaqueRef<R>;
 };
 
 export function isModule(value: any): value is Module {

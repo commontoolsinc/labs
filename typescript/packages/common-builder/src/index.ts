@@ -1,4 +1,5 @@
 export { opaqueRef as cell, stream } from "./opaque-ref.js";
+export { Spell, doc, select, $, event } from "./spell.js";
 export {
   createNodeFactory,
   derive,
@@ -8,7 +9,7 @@ export {
   isolated,
   compute,
   render,
-  event,
+  // event,
 } from "./module.js";
 export {
   recipe,

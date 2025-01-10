@@ -42,10 +42,10 @@ export type TypedServiceConfig<T extends z.ZodRawShape> = {
 
 export function typedService<T extends z.ZodRawShape>(
   schema: z.ZodObject<T>,
-  config: TypedServiceConfig<T>
+  config: TypedServiceConfig<T>,
 ) {
   return service({
-    ...config.rules(schema)
+    ...config.rules(schema),
   });
 }
 
@@ -66,6 +66,13 @@ export const initRules = {
     .commit(),
 };
 
+export const initState = (values: { [id: string]: any }) =>
+  resolveUninitialized
+    .update(({ self }) => {
+      return Transact.set(self, { _init: true, ...values });
+    })
+    .commit();
+
 export function appendOnPrefix(path: string): string {
   if (!path.startsWith("~/on/")) {
     return `~/on/${path}`;
@@ -81,7 +88,7 @@ export const changes = (...instructions: (Instruction | Instruction[])[]) => {
 };
 
 export class Embed<T extends any> {
-  constructor(public value: T) { }
+  constructor(public value: T) {}
 
   static decode<T>(txt: string): T {
     return JSON.parse(txt) as T;
@@ -99,7 +106,7 @@ export class Embed<T extends any> {
 }
 
 export class Doc<T extends Record<string, string | number | boolean>> {
-  constructor(public value: T) { }
+  constructor(public value: T) {}
 
   id() {
     return refer(this.value);
@@ -160,7 +167,7 @@ export abstract class Spell<T extends Record<string, any>> {
     handler: (ctx: any) => any;
   }> = [];
 
-  constructor() { }
+  constructor() {}
 
   set(self: Reference, values: Partial<T>) {
     return [...Transact.set(self, values)];

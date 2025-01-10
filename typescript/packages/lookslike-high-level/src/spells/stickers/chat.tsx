@@ -5,149 +5,171 @@ import {
   Session,
   select,
   refer,
-  Reference
 } from "@commontools/common-system";
-import { event, events, Collection, isEmpty, CollectionView, defaultTo, } from "../../sugar.js";
-import { CommonFormSubmitEvent } from "../../../../common-ui/lib/components/common-form.js";
+import {
+  event,
+  events,
+  Collection,
+  isEmpty,
+  CollectionView,
+  defaultTo,
+} from "../../sugar.js";
 import { llm, RESPONSE } from "../../effects/fetch.jsx";
+import { z } from "zod";
+import { Reference } from "merkle-reference";
 
 export const source = { chat: { v: 1 } };
 
 // attribute names
 
 export const ChatModel = {
-  messages: "messages"
-}
+  messages: "messages",
+};
 
-const CHAT_REQUEST = 'chat/request'
+const CHAT_REQUEST = "chat/request";
 
 // events
 
 export const ChatEvents = events({
-  onSendMessage: '~/on/SendMessage',
-  onDraftMessage: '~/on/DraftMessage',
-  onBroadcastHistory: '~/on/BroadcastHistory',
-  onClearChat: '~/on/ClearChat',
-  onSubmit: '~/on/chat/submit'
-})
+  onSendMessage: "~/on/SendMessage",
+  onDraftMessage: "~/on/DraftMessage",
+  onBroadcastHistory: "~/on/BroadcastHistory",
+  onClearChat: "~/on/ClearChat",
+  onSubmit: "~/on/chat/submit",
+});
 
 // queries
 
 export const Messages = Collection.of({
   message: $.message,
   author: $.author,
-  sentAt: $.sentAt
+  sentAt: $.sentAt,
 });
 
 export const chatResolver = select({
   self: $.self,
-  messages: Messages.select
+  messages: Messages.select,
 })
   .match($.self, "messages", $.messages)
   .clause(Messages.match($.messages));
 
-export const chatUiResolver = select({ chatView: $.chatView })
-  .clause(defaultTo($.self, '~/common/ui/chat', $.chatView, null))
+export const chatUiResolver = select({ chatView: $.chatView }).clause(
+  defaultTo($.self, "~/common/ui/chat", $.chatView, null),
+);
 
-const resolveUninitialized = select({ self: $.self })
-  .clause(isEmpty($.self, ChatModel.messages));
+const resolveUninitialized = select({ self: $.self }).clause(
+  isEmpty($.self, ChatModel.messages),
+);
 
 export type ChatMessageEvent = {
   message: string;
-}
+};
 
 export function sendMessage(self: Reference, message: ChatMessageEvent) {
-  return Session.upsert([self, ChatEvents.onSendMessage, message as any])
+  return Session.upsert([self, ChatEvents.onSendMessage, message as any]);
 }
 
-export const ChatMessageList = ({ collection }: { collection: CollectionView<{ author: string, message: string, sentAt: number }> }) => {
-  const items = [...collection]
-  items.sort((a, b) => a.sentAt - b.sentAt)
+export const ChatMessageList = ({
+  collection,
+}: {
+  collection: CollectionView<{
+    author: string;
+    message: string;
+    sentAt: number;
+  }>;
+}) => {
+  const items = [...collection];
+  items.sort((a, b) => a.sentAt - b.sentAt);
 
   return (
     <ul style="list-style: none; padding: 0; margin: 0 0 20px 0; max-height: 400px; overflow-y: auto;">
-      {items.map(item => <li key={item.author + item.message + item.sentAt} style={`
+      {items.map(item => (
+        <li
+          key={item.author + item.message + item.sentAt}
+          style={`
       padding: 12px;
       margin: 8px 0;
       border-radius: 8px;
-      background: ${item.author === 'assistant' ? '#fff' : '#007bff'};
-      color: ${item.author === 'assistant' ? '#000' : '#fff'};
+      background: ${item.author === "assistant" ? "#fff" : "#007bff"};
+      color: ${item.author === "assistant" ? "#000" : "#fff"};
       max-width: 80%;
-      ${item.author === 'assistant' ? 'margin-right: auto;' : 'margin-left: auto;'}
-    `}>
-        <b>{item.author}</b>: {item.message}
-        <sub style="opacity: 0.7; display: block; font-size: 0.8em; margin-top: 4px;">
-          {new Date(item.sentAt).toLocaleTimeString()}
-        </sub>
-      </li>)}
+      ${item.author === "assistant" ? "margin-right: auto;" : "margin-left: auto;"}
+    `}
+        >
+          <b>{item.author}</b>: {item.message}
+          <sub style="opacity: 0.7; display: block; font-size: 0.8em; margin-top: 4px;">
+            {new Date(item.sentAt).toLocaleTimeString()}
+          </sub>
+        </li>
+      ))}
     </ul>
-  )
+  );
 };
 
+const Message = z.object({
+  message: z.string().min(1, "Message is required"),
+});
+
 export const ChatSubmitForm = () => (
-  <common-form reset oncommon-submit={ChatEvents.onSubmit}>
-    <fieldset style="border: none; padding: 0; margin: 0;">
-      <label style="display: none;">Message</label>
-      <div style="display: flex; gap: 8px;">
-        <input
-          name="message"
-          type="text"
-          placeholder="Type your message..."
-          style="flex: 1; padding: 12px; border-radius: 20px; border: 1px solid #ddd; font-size: 16px;"
-        />
-        <button type="submit" style="padding: 12px 24px; border-radius: 20px; border: none; background: #007bff; color: white; cursor: pointer;">Send</button>
-      </div>
-    </fieldset>
-  </common-form>
+  <common-form schema={Message} reset onsubmit={ChatEvents.onSendMessage} />
 );
 
-export const Chattable = (config: {
-  greeting?: string,
-  attributes?: string[],
-  systemPrompt?: (values: Record<string, any>) => string
-} = {}) => {
+type ChatSubmitEvent = {
+  detail: { value: z.infer<typeof Message> };
+};
+
+export const Chattable = (
+  config: {
+    greeting?: string;
+    attributes?: string[];
+    systemPrompt?: (values: Record<string, any>) => string;
+  } = {},
+) => {
   const {
     greeting = "Hello! How can I help you today?",
     attributes = [],
-    systemPrompt = () => ''
+    systemPrompt = () => "",
   } = config;
 
   return behavior({
-    'chat/init': resolveUninitialized
+    "chat/init": resolveUninitialized
       .update(({ self }) => {
-        const collection = Messages.new({ messages: self, seed: refer({ v: Math.random() }) })
+        const collection = Messages.new({
+          messages: self,
+          seed: refer({ v: Math.random() }),
+        });
         return [
           ...collection.push({
             message: greeting,
             author: "assistant",
-            sentAt: Date.now()
-          })
+            sentAt: Date.now(),
+          }),
         ];
       })
       .commit(),
 
-    'chat/send': event(ChatEvents.onSendMessage)
+    "chat/send": event(ChatEvents.onSendMessage)
       .with(chatResolver)
       .select({
-        ...Object.fromEntries(attributes.map(a => [a, $[a]]))
+        ...Object.fromEntries(attributes.map(a => [a, $[a]])),
       })
       .matches(...attributes.map(a => [$.self, a, $[a]] as any))
       .update(({ self, event, messages, ...values }) => {
-        const payload = Session.resolve<ChatMessageEvent>(event)
-        const collection = Messages.from(messages)
-        const userMessage = payload.message
+        const payload = Session.resolve<ChatSubmitEvent>(event);
+        const collection = Messages.from(messages);
+        const userMessage = payload.detail.value.message;
 
         const newMessage = {
           message: userMessage,
           author: "user",
-          sentAt: Date.now()
+          sentAt: Date.now(),
         };
         const msgs = [...collection, newMessage];
         msgs.sort((a, b) => a.sentAt - b.sentAt);
         const messageHistory = msgs.map(msg => ({
           role: msg.author,
-          content: msg.message
-        }))
+          content: msg.message,
+        }));
 
         return [
           Session.retract([self, ChatEvents.onSendMessage, event]),
@@ -171,41 +193,37 @@ export const Chattable = (config: {
       .match($.payload, "content", $.content)
       .with(chatResolver)
       .update(({ self, request, content, messages, payload }) => {
-        const collection = Messages.from(messages)
+        const collection = Messages.from(messages);
         return [
           { Retract: [self, CHAT_REQUEST, request] },
           { Retract: [request, RESPONSE.JSON, payload] },
           ...collection.push({
             message: content,
             author: "assistant",
-            sentAt: Date.now()
+            sentAt: Date.now(),
           }),
         ];
       })
       .commit(),
 
-    'chat/clear': event(ChatEvents.onClearChat)
+    "chat/clear": event(ChatEvents.onClearChat)
       .select({ messages: $.messages })
       .match($.self, ChatModel.messages, $.messages)
       .update(({ self, messages }) => {
-        return [
-          { Retract: [self, "messages", messages] }
-        ];
+        return [{ Retract: [self, "messages", messages] }];
       })
       .commit(),
 
     onSubmit: event(ChatEvents.onSubmit)
       .update(({ self, event }) => {
-        const payload = Session.resolve<CommonFormSubmitEvent>(event)
-        const userMessage = payload.detail.formData.get('message')
+        const payload = Session.resolve<CommonFormSubmitEvent>(event);
+        const userMessage = payload.detail.formData.get("message");
 
-        return [
-          sendMessage(self, { message: userMessage as string })
-        ];
+        return [sendMessage(self, { message: userMessage as string })];
       })
       .commit(),
 
-    'chat/view': chatResolver
+    "chat/view": chatResolver
       .update(({ self, messages }) => {
         const collection = Messages.from(messages);
 
@@ -214,20 +232,22 @@ export const Chattable = (config: {
             Upsert: [
               self,
               "~/common/ui/chat",
-              <div style="max-width: 800px; margin: 20px auto; padding: 20px; background: #f5f5f5; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                <ChatMessageList collection={collection} />
-                <ChatSubmitForm />
-                <button
-                  type="button"
-                  onclick={ChatEvents.onClearChat}
-                  style="margin-top: 12px; padding: 8px 16px; border-radius: 8px; border: none; background: #dc3545; color: white; cursor: pointer;"
-                >
-                  Clear Chat
-                </button>
-              </div> as any,
+              (
+                <div style="max-width: 800px; margin: 20px auto; padding: 20px; background: #f5f5f5; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                  <ChatMessageList collection={collection} />
+                  <ChatSubmitForm />
+                  <button
+                    type="button"
+                    onclick={ChatEvents.onClearChat}
+                    style="margin-top: 12px; padding: 8px 16px; border-radius: 8px; border: none; background: #dc3545; color: white; cursor: pointer;"
+                  >
+                    Clear Chat
+                  </button>
+                </div>
+              ) as any,
             ],
           },
-        ]
+        ];
       })
       .commit(),
   });

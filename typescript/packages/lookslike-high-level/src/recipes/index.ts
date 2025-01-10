@@ -20,6 +20,11 @@ import closures from "./closures.js";
 addRecipe(closures, closuresSrc);
 export { closures };
 
+import commentboxSrc from "./commentbox.tsx?raw";
+import commentbox from "./commentbox.js";
+addRecipe(commentbox, commentboxSrc);
+export { commentbox };
+
 import collectionSrc from "./collection.tsx?raw";
 import collection from "./collection.js";
 addRecipe(collection, collectionSrc);
