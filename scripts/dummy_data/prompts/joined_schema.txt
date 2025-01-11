@@ -1,4 +1,0 @@
-${preamble}
-
-Here is a schema:
-//${schema|join:both}
