@@ -1,9 +1,38 @@
 {
   "tasks": {
-    "dev": "deno run --watch main.ts"
+    "dev": "deno run --watch main.ts",
+    "test": "deno test -A --env-file=.env.test"
+  },
+  "fmt": {
+    "indentWidth": 2,
+    "lineWidth": 80,
+    "semiColons": true,
+    "singleQuote": false,
+    "proseWrap": "always",
+    "include": ["./"]
+  },
+  "lint": {
+    "include": ["./"],
+    "rules": {
+      "tags": ["recommended"],
+      "include": ["ban-untagged-todo"],
+      "exclude": ["no-unused-vars"]
+    }
   },
   "imports": {
-    "@hono/hono": "jsr:@hono/hono@^4.6.16",
-    "@std/assert": "jsr:@std/assert@1"
+    "@/": "./",
+    "@hono/zod-openapi": "npm:@hono/zod-openapi@^0.18.3",
+    "@hono/zod-validator": "npm:@hono/zod-validator@^0.4.2",
+    "@scalar/hono-api-reference": "npm:@scalar/hono-api-reference@^0.5.165",
+    "@std/assert": "jsr:@std/assert@^1.0.10",
+    "@std/dotenv": "jsr:@std/dotenv@^0.225.3",
+    "@std/expect": "jsr:@std/expect@^1.0.11",
+    "@std/path": "jsr:@std/path@^1.0.8",
+    "hono": "npm:hono@^4.6.16",
+    "hono-pino": "npm:hono-pino@^0.7.0",
+    "pino": "npm:pino@^9.6.0",
+    "pino-pretty": "npm:pino-pretty@^13.0.0",
+    "stoker": "npm:stoker@^1.4.2",
+    "zod": "npm:zod@^3.24.1"
   }
 }

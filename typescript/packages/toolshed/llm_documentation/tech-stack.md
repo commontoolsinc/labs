@@ -2,7 +2,7 @@
 
 Toolshed is a deno hono app.
 
-main.ts is the entrypoint for the app, but it's also a cli.
+For intra-service communication, we use hono stacks RPC style calls. https://hono.dev/docs/concepts/stacks
 
 Whenever possible, make sure to use packages from JSR instead of npm.
 
@@ -11,4 +11,4 @@ We are using Deno2, so imports are a little different than deno 1. The deno.json
 - Deno 2 (typescript)
 - Hono (http api)
 - Deno Queue (used as a task queue for background tasks)
-- cliffy for cli
+- Zod (schema validation)
