@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "dev": "deno run --watch main.ts",
+    "dev": "deno run -A --watch index.ts",
     "test": "deno test -A --env-file=.env.test"
   },
   "fmt": {
