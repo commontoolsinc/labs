@@ -3,6 +3,7 @@ import {
   Spell,
   type OpaqueRef,
   handler,
+  select,
   $,
   derive,
   ifElse,
@@ -11,119 +12,82 @@ import {
 type Guest = {
   id: string;
   name: string;
-  plusOne: boolean;
-  affiliation: "Bride" | "Groom";
-  description: string;
-  tableId: string | null;
+  tableNumber: number; // 0 for head table, 1-10 for regular tables
 };
 
-type Table = {
-  id: string;
-  name: string;
-  capacity: number;
+type SeatingChart = {
   guests: Guest[];
+  newGuestName: string;
 };
 
-type WeddingSeating = {
-  guests: Guest[];
-  tables: Table[];
-  csvContent: string;
-};
-
-const parseCSV = (csv: string): Guest[] => {
-  const lines = csv.trim().split("\n");
-  // Skip header row
-  return lines
-    .slice(1)
-    .filter(line => line.trim())
-    .map((line, index) => {
-      const [name, plusOne, affiliation, description] = line
-        .split(",")
-        .map(field => field.trim());
-      return {
-        id: `guest-${index}`,
-        name,
-        plusOne: plusOne.toUpperCase() === "TRUE",
-        affiliation: affiliation as "Bride" | "Groom",
-        description,
-        tableId: null,
-      };
-    });
-};
-
-const handleCSVInput = handler<
-  { detail: { value: string } },
-  { guests: Guest[] }
->(function ({ detail: { value } }, state) {
-  try {
-    state.guests = parseCSV(value);
-  } catch (e) {
-    console.error("Failed to parse CSV:", e);
-  }
+const createGuest = (name: string): Guest => ({
+  id: crypto.randomUUID(),
+  name,
+  tableNumber: -1, // -1 means unassigned
 });
 
-const handleAssignGuest = handler<
-  {},
-  { guest: Guest; table: Table; guests: Guest[]; tables: Table[] }
->(function ({}, { guest, table, guests, tables }) {
-  // Remove guest from current table if assigned
-  if (guest.tableId) {
-    const currentTable = tables.find(t => t.id === guest.tableId);
-    if (currentTable) {
-      currentTable.guests = currentTable.guests.filter(g => g.id !== guest.id);
-    }
-  }
-
-  // Check if table has capacity
-  if (table.guests.length < table.capacity) {
-    guest.tableId = table.id;
-    table.guests.push(guest);
-  }
-});
-
-const handleRemoveGuest = handler<{}, { guest: Guest; tables: Table[] }>(
-  function ({}, { guest, tables }) {
-    if (guest.tableId) {
-      const table = tables.find(t => t.id === guest.tableId);
-      if (table) {
-        table.guests = table.guests.filter(g => g.id !== guest.id);
-        guest.tableId = null;
-      }
+const handleAddGuest = handler<{}, { guests: Guest[]; newGuestName: string }>(
+  function ({}, state) {
+    if (state.newGuestName.trim()) {
+      state.guests.push(createGuest(state.newGuestName.trim()));
+      state.newGuestName = ""; // Clear input after adding
     }
   },
 );
 
-export class WeddingSeatingSpell extends Spell<WeddingSeating> {
-  override init() {
-    const tables: Table[] = [
-      {
-        id: "head",
-        name: "Head Table",
-        capacity: 10,
-        guests: [],
-      },
-      ...Array.from({ length: 10 }, (_, i) => ({
-        id: `table-${i + 1}`,
-        name: `Table ${i + 1}`,
-        capacity: 8,
-        guests: [],
-      })),
-    ];
+const handleUpdateNewGuestName = handler<
+  { detail: { value: string } },
+  { newGuestName: string }
+>(function ({ detail: { value } }, state) {
+  state.newGuestName = value;
+});
 
+const handleAssignTable = handler<
+  { detail: { value: string } },
+  { guest: Guest }
+>(function ({ detail: { value } }, { guest }) {
+  guest.tableNumber = parseInt(value, 10);
+});
+
+const handleRemoveGuest = handler<{}, { guest: Guest; guests: Guest[] }>(
+  function ({}, { guest, guests }) {
+    const index = guests.findIndex(g => g.id === guest.id);
+    if (index !== -1) {
+      guests.splice(index, 1);
+    }
+  },
+);
+
+const getTableGuests = (guests: Guest[], tableNumber: number) => {
+  console.log("guests", guests);
+  console.log("typeof guests", typeof guests);
+  return guests.filter(guest => guest.tableNumber === tableNumber);
+};
+
+const getTableCapacity = (tableNumber: number) => {
+  return tableNumber === 0 ? 10 : 8; // Head table has 10 seats, others have 8
+};
+
+const getTableName = (tableNumber: number) => {
+  return tableNumber === 0 ? "Head Table" : `Table ${tableNumber}`;
+};
+
+export class WeddingSeatingChartSpell extends Spell<SeatingChart> {
+  override init() {
     return {
       guests: [],
-      tables,
-      csvContent: "",
+      newGuestName: "",
     };
   }
 
-  override render({ guests, tables, csvContent }: OpaqueRef<WeddingSeating>) {
-    const getUnassignedGuests = (guests: Guest[]) => {
-      return guests.filter(guest => guest.tableId === null);
-    };
+  override render({ guests, newGuestName }: OpaqueRef<SeatingChart>) {
+    const tableNumbers = Array.from({ length: 11 }, (_, i) => i); // 0-10
 
-    const getTableCapacityString = (table: Table) => {
-      return `${table.guests.length}/${table.capacity}`;
+    const formatTableOption = (tableNum: number) => {
+      const capacity = getTableCapacity(tableNum);
+      const currentGuests = getTableGuests(guests, tableNum).length;
+      const remaining = capacity - currentGuests;
+      return `${getTableName(tableNum)} (${currentGuests}/${capacity})`;
     };
 
     return (
@@ -131,102 +95,163 @@ export class WeddingSeatingSpell extends Spell<WeddingSeating> {
         <style>
           {`
             .table-card {
-              border: 1px solid #ccc;
-              padding: 15px;
+              background: #f5f5f5;
               border-radius: 8px;
-              background: #f9f9f9;
+              padding: 16px;
+              margin-bottom: 16px;
             }
             .guest-list {
-              max-height: 200px;
-              overflow-y: auto;
+              display: grid;
+              grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+              gap: 16px;
             }
-            .guest-item {
-              padding: 8px;
-              margin: 4px 0;
+            .guest-card {
               background: white;
-              border: 1px solid #eee;
+              border: 1px solid #ddd;
               border-radius: 4px;
+              padding: 8px;
             }
-            .unassigned-section {
-              border: 1px solid #ffcdd2;
-              background: #ffebee;
-              padding: 15px;
-              border-radius: 8px;
-              margin-bottom: 20px;
+            .unassigned {
+              background: #fff3cd;
             }
           `}
         </style>
 
-        <common-vstack gap="xl">
-          <div>
-            <h2>Import Guest List</h2>
-            <common-textarea
-              value={csvContent}
-              placeholder="Paste CSV data here..."
-              rows={10}
-              oncommon-input={handleCSVInput.with({ guests })}
-            />
+        <common-vstack gap="lg">
+          <h1>Wedding Seating Chart</h1>
+
+          {/* Add Guest Form */}
+          <div class="table-card">
+            <common-vstack gap="md">
+              <h2>Add New Guest</h2>
+              <common-hstack gap="md">
+                <common-input
+                  value={newGuestName}
+                  placeholder="Enter guest name"
+                  oncommon-input={handleUpdateNewGuestName.with({
+                    newGuestName,
+                  })}
+                />
+                <common-button
+                  onclick={handleAddGuest.with({ guests, newGuestName })}
+                >
+                  Add Guest
+                </common-button>
+              </common-hstack>
+            </common-vstack>
           </div>
 
-          <div class="unassigned-section">
-            <h3>Unassigned Guests</h3>
+          {/* Table View */}
+          {tableNumbers.map(tableNum => (
+            <div class="table-card">
+              <h2>{getTableName(tableNum)}</h2>
+              <p>
+                Capacity:{" "}
+                {derive(guests, guests => {
+                  const currentGuests = getTableGuests(guests, tableNum).length;
+                  const capacity = getTableCapacity(tableNum);
+                  return `${currentGuests}/${capacity} seats filled`;
+                })}
+              </p>
+              <div class="guest-list">
+                {derive(guests, guests =>
+                  getTableGuests(guests, tableNum).map(guest => (
+                    <div class="guest-card">
+                      <common-vstack gap="sm">
+                        <common-hstack gap="md">
+                          <span>{guest.name}</span>
+                          <common-spacer />
+                          <common-button
+                            onclick={handleRemoveGuest.with({ guest, guests })}
+                          >
+                            Remove
+                          </common-button>
+                        </common-hstack>
+                        <select
+                          value={guest.tableNumber}
+                          onchange={handleAssignTable.with({ guest })}
+                        >
+                          <option value={-1}>Unassigned</option>
+                          {tableNumbers.map(num => (
+                            <option
+                              value={num}
+                              disabled={derive(guests, guests => {
+                                const currentGuests = getTableGuests(
+                                  guests,
+                                  num,
+                                ).length;
+                                return (
+                                  currentGuests >= getTableCapacity(num) &&
+                                  guest.tableNumber !== num
+                                );
+                              })}
+                            >
+                              {formatTableOption(num)}
+                            </option>
+                          ))}
+                        </select>
+                      </common-vstack>
+                    </div>
+                  )),
+                )}
+              </div>
+            </div>
+          ))}
+
+          {/* Unassigned Guests */}
+          <div class="table-card unassigned">
+            <h2>Unassigned Guests</h2>
             <div class="guest-list">
               {derive(guests, guests =>
-                getUnassignedGuests(guests).map(guest => (
-                  <div class="guest-item">
+                getTableGuests(guests, -1).map(guest => (
+                  <div class="guest-card">
                     <common-vstack gap="sm">
-                      <strong>{guest.name}</strong>
-                      <p>
-                        {guest.affiliation} |{" "}
-                        {ifElse(guest.plusOne, "Plus One", "No Plus One")}
-                      </p>
-                      <p>{guest.description}</p>
-                      <common-hstack gap="md"></common-hstack>
+                      <common-hstack gap="md">
+                        <span>{guest.name}</span>
+                        <common-spacer />
+                        <common-button
+                          onclick={handleRemoveGuest.with({ guest, guests })}
+                        >
+                          Remove
+                        </common-button>
+                      </common-hstack>
+                      <select
+                        value={guest.tableNumber}
+                        onchange={handleAssignTable.with({ guest })}
+                      >
+                        <option value={-1}>Unassigned</option>
+                        {tableNumbers.map(num => (
+                          <option
+                            value={num}
+                            disabled={derive(guests, guests => {
+                              const currentGuests = getTableGuests(
+                                guests,
+                                num,
+                              ).length;
+                              return (
+                                currentGuests >= getTableCapacity(num) &&
+                                guest.tableNumber !== num
+                              );
+                            })}
+                          >
+                            {formatTableOption(num)}
+                          </option>
+                        ))}
+                      </select>
                     </common-vstack>
                   </div>
                 )),
               )}
             </div>
           </div>
-
-          <common-grid style="grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;">
-            {tables.map(table => (
-              <div class="table-card">
-                <common-vstack gap="md">
-                  <common-hstack gap="md">
-                    <h3>{table.name}</h3>
-                    <span>
-                      {derive(table, table => getTableCapacityString(table))}
-                    </span>
-                  </common-hstack>
-                  <div class="guest-list">
-                    {table.guests.map(guest => (
-                      <div class="guest-item">
-                        <common-vstack gap="sm">
-                          <strong>{guest.name}</strong>
-                          <p>
-                            {guest.affiliation} |{" "}
-                            {ifElse(guest.plusOne, "Plus One", "No Plus One")}
-                          </p>
-                          <common-button
-                            onclick={handleRemoveGuest.with({ guest, tables })}
-                          >
-                            Remove
-                          </common-button>
-                        </common-vstack>
-                      </div>
-                    ))}
-                  </div>
-                </common-vstack>
-              </div>
-            ))}
-          </common-grid>
         </common-vstack>
       </div>
     );
   }
 }
 
-const weddingSeating = new WeddingSeatingSpell().compile("WeddingSeating");
+const weddingSeatingChart = new WeddingSeatingChartSpell().compile(
+  "WeddingSeatingChart",
+);
 
-export default weddingSeating;
+export default weddingSeatingChart;
