@@ -23,6 +23,11 @@ import {
 } from "@commontools/common-runner";
 import { JSONSchema } from "@commontools/common-builder";
 import * as logger from "./logger.js";
+import { isAllowedEventType, sanitizeEvent, sanitizeNode } from "./sanitize/index.js";
+
+// Set strict sanitization if `?strictdom` appears in
+// the URL's search params.
+const STRICT_SANITIZATION = new URLSearchParams(new URL(window.location.href).search).has("strictdom");
 
 const schema: JSONSchema = {
   type: "object",
@@ -82,7 +87,7 @@ const renderNode = (
 ): [HTMLElement | null, Cancel] => {
   const [cancel, addCancel] = useCancelGroup();
 
-  const sanitizedNode = sanitizeNode(node);
+  const sanitizedNode = sanitizeNode(node, STRICT_SANITIZATION);
 
   if (!sanitizedNode) {
     return [null, cancel];
@@ -215,11 +220,15 @@ const bindProps = (
         }
         const key = cleanEventProp(propKey);
         if (key != null) {
-          const cancel = listen(element, key, event => {
-            const sanitizedEvent = sanitizeEvent(event);
-            replacement.send(sanitizedEvent);
-          });
-          addCancel(cancel);
+          if (isAllowedEventType(key)) {
+            const cancel = listen(element, key, event => {
+              const sanitizedEvent = sanitizeEvent(event, STRICT_SANITIZATION);
+              replacement.send(sanitizedEvent);
+            });
+            addCancel(cancel);
+          } else {
+            logger.warn("Unallowed event type", propKey);
+          }
         } else {
           logger.warn("Could not bind event", propKey, propValue);
         }
@@ -270,27 +279,4 @@ const setProp = <T>(target: T, key: string, value: unknown) => {
     // @ts-ignore - we've validated these via runtime checks
     target[key] = value;
   }
-};
-
-const sanitizeScripts = (node: VNode): VNode | null => {
-  if (node.name === "script") {
-    return null;
-  }
-  return node;
-};
-
-let sanitizeNode = sanitizeScripts;
-
-export const setNodeSanitizer = (fn: (node: VNode) => VNode | null) => {
-  sanitizeNode = fn;
-};
-
-export type EventSanitizer<T> = (event: Event) => T;
-
-const passthroughEvent: EventSanitizer<Event> = (event: Event): Event => event;
-
-let sanitizeEvent: EventSanitizer<unknown> = passthroughEvent;
-
-export const setEventSanitizer = (sanitize: EventSanitizer<unknown>) => {
-  sanitizeEvent = sanitize;
 };

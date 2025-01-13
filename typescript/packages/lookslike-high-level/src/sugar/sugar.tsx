@@ -44,7 +44,7 @@ export function list<T extends z.ZodObject<any>, U extends z.ZodObject<any>>(
     { self: $.self, items: [selector] },
     new WhereBuilder(...constraints),
   ) as any;
-  console.log("selector", selector);
+  //console.log("selector", selector);
 
   return selector as Select<{ self: Reference; items: T }>;
 }
@@ -75,7 +75,7 @@ export function listByRef<T extends z.ZodObject<any>>(
     { self: $.self, items: [selector] },
     new WhereBuilder(...constraints),
   ) as any;
-  console.log("selector", selector);
+  //console.log("selector", selector);
 
   return selector as Select<{ self: Reference; items: T }>;
 }
@@ -93,7 +93,7 @@ export function resolve<T extends z.ZodObject<any>>(
       })
     : (select({}) as any);
 
-  console.log("schema", root, schema.shape);
+  //console.log("schema", root, schema.shape);
 
   if (!schema.shape) {
     const defaultValue = (schema as any)._def.defaultValue?.();
@@ -129,7 +129,7 @@ export function resolve<T extends z.ZodObject<any>>(
         }).match(self, fieldName, $[namespace + fieldName]);
 
         // Match each key in subselector and include subresolver clauses
-        console.log(fieldName, "subselector", subselector);
+        //console.log(fieldName, "subselector", subselector);
 
         // First add the subresolver clauses
         if (subresolver.clauses) {
@@ -195,7 +195,7 @@ export function resolve<T extends z.ZodObject<any>>(
   }
 
   if (root) {
-    console.log("aggregator", aggregator);
+    //console.log("aggregator", aggregator);
   }
 
   return aggregator;
