@@ -1,11 +1,11 @@
-import { anthropic } from "npm:@ai-sdk/anthropic";
+import { anthropic, createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
-import { groq } from "npm:@ai-sdk/groq";
-import { openai } from "npm:@ai-sdk/openai";
-import { vertex } from "npm:@ai-sdk/google-vertex";
-import { bedrock } from "npm:@ai-sdk/amazon-bedrock";
+import { createGroq, groq } from "@ai-sdk/groq";
+import { openai } from "@ai-sdk/openai";
+import { createVertex, vertex } from "@ai-sdk/google-vertex";
+import { cerebras, createCerebras } from "@ai-sdk/cerebras";
 
-import { env } from "@/env.ts";
+import env from "@/env.ts";
 
 export type Capabilities = {
   contextWindow: number;
@@ -19,13 +19,28 @@ export type Capabilities = {
 };
 
 type ModelConfig = {
-  model: any;
+  model: string;
   capabilities: Capabilities;
+  aliases: string[];
 };
 
-export const MODELS: Record<string, ModelConfig> = {};
+export type ModelList = Record<
+  string,
+  ModelConfig
+>;
+
+export const MODELS: ModelList = {};
 export const ALIAS_NAMES: string[] = [];
 export const PROVIDER_NAMES: Set<string> = new Set();
+
+export const TASK_MODELS = {
+  coding: "anthropic:claude-3-5-sonnet-20241022", // Best for code
+  json: "anthropic:claude-3-5-sonnet-20241022", // Fast & good at structured output
+  creative: "openai:gpt-4o-2024-08-06", // Best for creative tasks
+  vision: "google:gemini-1.5-pro-002", // Best for vision tasks
+} as const;
+
+export type TaskType = keyof typeof TASK_MODELS;
 
 const addModel = ({
   provider,
@@ -38,9 +53,7 @@ const addModel = ({
     | typeof groq
     | typeof openai
     | typeof vertex
-    | typeof bedrock
-    | typeof cerebras
-    | typeof perplexity;
+    | typeof cerebras;
   name: string;
   aliases: string[];
   capabilities: Capabilities;
@@ -59,6 +72,7 @@ const addModel = ({
   const config: ModelConfig = {
     model,
     capabilities,
+    aliases,
   };
 
   MODELS[name] = config;
@@ -69,9 +83,12 @@ const addModel = ({
   PROVIDER_NAMES.add(name.split(":")[0]);
 };
 
-if (Deno.env.get("ANTHROPIC_API_KEY")) {
+if (env.CTTS_AI_LLM_ANTHROPIC_API_KEY) {
+  const anthropicProvider = createAnthropic({
+    apiKey: env.CTTS_AI_LLM_ANTHROPIC_API_KEY,
+  });
   addModel({
-    provider: anthropic,
+    provider: anthropicProvider,
     name: "anthropic:claude-3-5-haiku-20241022",
     aliases: ["anthropic:claude-3-5-haiku-latest", "claude-3-5-haiku"],
     capabilities: {
@@ -86,7 +103,7 @@ if (Deno.env.get("ANTHROPIC_API_KEY")) {
   });
 
   addModel({
-    provider: anthropic,
+    provider: anthropicProvider,
     name: "anthropic:claude-3-5-sonnet-20241022",
     aliases: ["anthropic:claude-3-5-sonnet-latest", "claude-3-5-sonnet"],
     capabilities: {
@@ -101,7 +118,7 @@ if (Deno.env.get("ANTHROPIC_API_KEY")) {
   });
 
   addModel({
-    provider: anthropic,
+    provider: anthropicProvider,
     name: "anthropic:claude-3-opus-20240229",
     aliases: ["anthropic:claude-3-opus-latest", "claude-3-opus"],
     capabilities: {
@@ -116,9 +133,12 @@ if (Deno.env.get("ANTHROPIC_API_KEY")) {
   });
 }
 
-if (Deno.env.get("GROQ_API_KEY")) {
+if (env.CTTS_AI_LLM_GROQ_API_KEY) {
+  const groqProvider = createGroq({
+    apiKey: env.CTTS_AI_LLM_GROQ_API_KEY,
+  });
   addModel({
-    provider: groq,
+    provider: groqProvider,
     name: "groq:llama-3.3-70b-versatile",
     aliases: ["groq:llama-3.3-70b"],
     capabilities: {
@@ -133,7 +153,7 @@ if (Deno.env.get("GROQ_API_KEY")) {
   });
 
   addModel({
-    provider: groq,
+    provider: groqProvider,
     name: "groq:llama-3.3-70b-specdec",
     aliases: ["groq:llama-3.3-70b-specdec"],
     capabilities: {
@@ -148,7 +168,7 @@ if (Deno.env.get("GROQ_API_KEY")) {
   });
 
   addModel({
-    provider: groq,
+    provider: groqProvider,
     name: "groq:llama-3.2-90b-vision-preview",
     aliases: ["groq:llama-3.2-90b-vision", "llama-3.2-90b-vision"],
     capabilities: {
@@ -163,9 +183,12 @@ if (Deno.env.get("GROQ_API_KEY")) {
   });
 }
 
-if (Deno.env.get("OPENAI_API_KEY")) {
+if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
+  const openAIProvider = createOpenAI({
+    apiKey: env.CTTS_AI_LLM_OPENAI_API_KEY,
+  });
   addModel({
-    provider: openai,
+    provider: openAIProvider,
     name: "openai:gpt-4o-2024-08-06",
     aliases: ["openai:gpt-4o", "openai:gpt-4o-latest", "gpt-4o"],
     capabilities: {
@@ -180,7 +203,7 @@ if (Deno.env.get("OPENAI_API_KEY")) {
   });
 
   addModel({
-    provider: openai,
+    provider: openAIProvider,
     name: "openai:gpt-4o-mini-2024-07-18",
     aliases: ["openai:gpt-4o-mini-latest", "openai:gpt-4o-mini", "gpt-4o-mini"],
     capabilities: {
@@ -195,7 +218,7 @@ if (Deno.env.get("OPENAI_API_KEY")) {
   });
 
   addModel({
-    provider: openai,
+    provider: openAIProvider,
     name: "openai:o1-preview-2024-09-12",
     aliases: ["openai:o1-preview-latest", "openai:o1-preview", "o1-preview"],
     capabilities: {
@@ -210,7 +233,7 @@ if (Deno.env.get("OPENAI_API_KEY")) {
   });
 
   addModel({
-    provider: openai,
+    provider: openAIProvider,
     name: "openai:o1-mini-2024-09-12",
     aliases: ["openai:o1-mini-latest", "openai:o1-mini", "o1-mini"],
     capabilities: {
@@ -225,9 +248,16 @@ if (Deno.env.get("OPENAI_API_KEY")) {
   });
 }
 
-if (env.CTTS_AI_LLM_VERTEX_API_KEY) {
+if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
+  const vertexProvider = createVertex({
+    googleAuthOptions: {
+      credentials: env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS,
+    },
+    project: env.CTTS_AI_LLM_GOOGLE_VERTEX_PROJECT,
+    location: env.CTTS_AI_LLM_GOOGLE_VERTEX_LOCATION,
+  });
   addModel({
-    provider: vertex,
+    provider: vertexProvider,
     name: "google:gemini-1.5-flash-002",
     aliases: ["google:gemini-1.5-flash", "gemini-1.5-flash"],
     capabilities: {
@@ -241,7 +271,7 @@ if (env.CTTS_AI_LLM_VERTEX_API_KEY) {
     },
   });
   addModel({
-    provider: vertex,
+    provider: vertexProvider,
     name: "gemini-2.0-flash-exp",
     aliases: ["google:gemini-2.0-flash", "gemini-2.0-flash"],
     capabilities: {
@@ -256,7 +286,7 @@ if (env.CTTS_AI_LLM_VERTEX_API_KEY) {
   });
 
   addModel({
-    provider: vertex,
+    provider: vertexProvider,
     name: "google:gemini-1.5-pro-002",
     aliases: ["google:gemini-1.5-pro", "gemini-1.5-pro"],
     capabilities: {
@@ -270,7 +300,7 @@ if (env.CTTS_AI_LLM_VERTEX_API_KEY) {
     },
   });
   addModel({
-    provider: vertex,
+    provider: vertexProvider,
     name: "google:gemini-exp-1206",
     aliases: ["google:gemini-exp-1206", "gemini-exp-1206"],
     capabilities: {
@@ -286,13 +316,11 @@ if (env.CTTS_AI_LLM_VERTEX_API_KEY) {
 }
 
 if (env.CTTS_AI_LLM_CEREBRAS_API_KEY) {
-  const cerebras = createOpenAI({
-    name: "cerebras",
+  const cerebrasProvider = createCerebras({
     apiKey: env.CTTS_AI_LLM_CEREBRAS_API_KEY,
-    baseURL: "https://api.cerebras.ai/v1",
   });
   addModel({
-    provider: cerebras,
+    provider: cerebrasProvider,
     name: "cerebras:llama-3.3-70b",
     aliases: ["cerebras"],
     capabilities: {
@@ -308,14 +336,14 @@ if (env.CTTS_AI_LLM_CEREBRAS_API_KEY) {
 }
 
 if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
-  const perplexity = createOpenAI({
+  const perplexityProvider = createOpenAI({
     name: "perplexity",
-    apiKey: Deno.env.get("PERPLEXITY_API_KEY"),
+    apiKey: env.CTTS_AI_LLM_PERPLEXITY_API_KEY,
     baseURL: "https://api.perplexity.ai/",
   });
 
   addModel({
-    provider: perplexity,
+    provider: perplexityProvider,
     name: "perplexity:llama-3.1-sonar-large-128k-online",
     aliases: ["perplexity-lg"],
     capabilities: {
@@ -330,7 +358,7 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
   });
 
   addModel({
-    provider: perplexity,
+    provider: perplexityProvider,
     name: "perplexity:llama-3.1-sonar-small-128k-online",
     aliases: ["perplexity-sm"],
     capabilities: {
@@ -345,7 +373,7 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
   });
 
   addModel({
-    provider: perplexity,
+    provider: perplexityProvider,
     name: "perplexity:llama-3.1-sonar-huge-128k-online",
     aliases: ["perplexity-huge"],
     capabilities: {
@@ -360,55 +388,56 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
   });
 }
 
-if (
-  Deno.env.get("AWS_ACCESS_KEY_ID") &&
-  Deno.env.get("AWS_SECRET_ACCESS_KEY")
-) {
-  addModel({
-    provider: bedrock,
-    name: "us.amazon.nova-micro-v1:0",
-    aliases: ["amazon:nova-micro", "nova-micro"],
-    capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 5000,
-      images: false,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-    },
-  });
+// FIXME(jake): There's some package import error with the bedrock provider. Commenting out for now.
+// if (
+//   env.CTTS_AI_LLM_AWS_ACCESS_KEY_ID &&
+//   env.CTTS_AI_LLM_AWS_SECRET_ACCESS_KEY
+// ) {
+//   addModel({
+//     provider: bedrock,
+//     name: "us.amazon.nova-micro-v1:0",
+//     aliases: ["amazon:nova-micro", "nova-micro"],
+//     capabilities: {
+//       contextWindow: 128_000,
+//       maxOutputTokens: 5000,
+//       images: false,
+//       prefill: true,
+//       systemPrompt: true,
+//       stopSequences: true,
+//       streaming: true,
+//     },
+//   });
 
-  addModel({
-    provider: bedrock,
-    name: "us.amazon.nova-lite-v1:0",
-    aliases: ["amazon:nova-lite", "nova-lite"],
-    capabilities: {
-      contextWindow: 300_000,
-      maxOutputTokens: 5000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-    },
-  });
+//   addModel({
+//     provider: bedrock,
+//     name: "us.amazon.nova-lite-v1:0",
+//     aliases: ["amazon:nova-lite", "nova-lite"],
+//     capabilities: {
+//       contextWindow: 300_000,
+//       maxOutputTokens: 5000,
+//       images: true,
+//       prefill: true,
+//       systemPrompt: true,
+//       stopSequences: true,
+//       streaming: true,
+//     },
+//   });
 
-  addModel({
-    provider: bedrock,
-    name: "us.amazon.nova-pro-v1:0",
-    aliases: ["amazon:nova-pro", "nova-pro"],
-    capabilities: {
-      contextWindow: 300_000,
-      maxOutputTokens: 5000,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-    },
-  });
-}
+//   addModel({
+//     provider: bedrock,
+//     name: "us.amazon.nova-pro-v1:0",
+//     aliases: ["amazon:nova-pro", "nova-pro"],
+//     capabilities: {
+//       contextWindow: 300_000,
+//       maxOutputTokens: 5000,
+//       images: true,
+//       prefill: true,
+//       systemPrompt: true,
+//       stopSequences: true,
+//       streaming: true,
+//     },
+//   });
+// }
 
 export const findModel = (name: string) => {
   return MODELS[name];

@@ -14,15 +14,21 @@ const EnvSchema = z.object({
     "silent",
   ]).default("info"),
 
-  // LLM API Keys
+  // API Keys for LLM Providers
   CTTS_AI_LLM_ANTHROPIC_API_KEY: z.string().default(""),
   CTTS_AI_LLM_GROQ_API_KEY: z.string().default(""),
   CTTS_AI_LLM_OPENAI_API_KEY: z.string().default(""),
-  CTTS_AI_LLM_VERTEX_API_KEY: z.string().default(""),
   CTTS_AI_LLM_CEREBRAS_API_KEY: z.string().default(""),
   CTTS_AI_LLM_PERPLEXITY_API_KEY: z.string().default(""),
   CTTS_AI_LLM_AWS_ACCESS_KEY_ID: z.string().default(""),
   CTTS_AI_LLM_AWS_SECRET_ACCESS_KEY: z.string().default(""),
+  CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS: z.string().default(""),
+  CTTS_AI_LLM_GOOGLE_VERTEX_PROJECT: z.string().default(""),
+  CTTS_AI_LLM_GOOGLE_VERTEX_LOCATION: z.string().default(""),
+
+  // LLM Observability Tool
+  CTTS_AI_LLM_PHOENIX_PROJECT: z.string().default(""),
+  CTTS_AI_LLM_PHOENIX_URL: z.string().default(""),
 });
 
 export type env = z.infer<typeof EnvSchema>;
