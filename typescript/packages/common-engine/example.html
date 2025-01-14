@@ -1,0 +1,100 @@
+<script type="module">
+  // Nix build is currently only building with the `storage` feature flag,
+  // disabling the `runtime` features (`CTEngine`).
+  //import init, { CTEngine, CTStore } from './ct_engine.js';
+  import init, { CTStore } from './ct_engine.js';
+
+  // Only needed once, call the default export function
+  // to fetch and setup the web assembly artifact. 
+  await init();
+
+  // `runtime` is disabled in builds currently. 
+  if (false) {
+    // Building without 
+    // Host callback invoked by the VM via `globalThis.hostCallback()`
+    const hostCallback = (input) => {
+      switch (input.command) {
+        case "sum":
+          return Array.prototype.reduce.call(input.value, (acc, v) => {
+            acc += v;
+            return acc;
+          }, 0);
+      }
+      return {};
+    };
+
+    // Instantiate an engine
+    const engine = new CTEngine(hostCallback);
+
+    // Define a module definition
+    const definition = `
+  export const run = (input) => {
+    input.foo = input.foo + 1;
+    input.bar = globalThis.hostCallback({
+      command: "sum",
+      value: [1, 2, 3],
+    });
+    return input;
+  };
+  `;
+
+    // Instantiate the module.
+    let id = engine.define(definition);
+    // Call the module function.
+    let output = engine.run(id, { foo: 9 });
+
+    console.log("Output:", output);
+    console.assert(output.foo === 10);
+    console.assert(output.bar === 6);
+  }
+
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const HELLO_WORLD = encoder.encode("Hello World!");
+
+  const key1 = new Uint8Array(96).fill(1);
+  const key2 = new Uint8Array(96).fill(2);
+  const key3 = new Uint8Array(96).fill(3);
+
+  // Set value in store
+  let store = await new CTStore("db-name", "store-name");
+  await store.set(key1, HELLO_WORLD);
+  console.assert(arrayEq(await store.get(key1), HELLO_WORLD));
+
+  let hash = store.hash();
+  console.log(`Root of tree: ${hash}`);
+
+  // Rehydrate tree from hash
+  store = await new CTStore("db-name", "store-name", hash);
+  console.assert(arrayEq(await store.get(key1), HELLO_WORLD));
+
+  await store.set(key2, key2);
+  await store.set(key3, key3);
+
+  let i = 0;
+  // Query a range of keys
+  // Range of key1 (inclusive) to key3 (exclusive) should return
+  // entries of key1 and key2. 
+  await store.getRange(key1, key3, true, false, (key, value) => {
+    if (i === 0) {
+      arrayEq(key, key1)
+      arrayEq(value, HELLO_WORLD)
+    } else if (i === 1) {
+      arrayEq(key, key2)
+      arrayEq(value, key2)
+    } else {
+      throw new Error("Expected only two entries");
+    }
+    i++;
+  });
+  console.assert(i === 2);
+
+  function arrayEq(a, b) {
+    if (a === b) return true;
+    if (a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  }
+</script>

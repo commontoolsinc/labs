@@ -1,0 +1,16 @@
+{
+  "name": "ct-engine",
+  "type": "module",
+  "description": "Common engine",
+  "version": "0.1.0",
+  "files": [
+    "ct_engine_bg.wasm",
+    "ct_engine.js",
+    "ct_engine.d.ts"
+  ],
+  "main": "ct_engine.js",
+  "types": "ct_engine.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

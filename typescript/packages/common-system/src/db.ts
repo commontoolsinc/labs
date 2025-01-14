@@ -21,6 +21,8 @@ import { Constant } from "datalogia";
 import { logQuery } from "./debug.js";
 import * as Store from "./idb.js";
 import { Reference } from "merkle-reference";
+import { open as openCTSynopsisStore } from "./ctstore.js";
+
 export * from "synopsys";
 
 export type DB =
@@ -42,6 +44,7 @@ export interface Options {
   local?: IDB.Open;
 }
 
+
 /**
  * Represents a connection to a local and a remote databases. It takes care
  * of synchronizing two by publishing local changes to remote and integrating
@@ -49,7 +52,9 @@ export interface Options {
  */
 class Connection {
   static *open(options: Options = {}) {
-    const durable = yield* IDB.open(options.local);
+    const USE_CT_STORE = true;
+    const durable = yield* (USE_CT_STORE ? openCTSynopsisStore("dbname", "tablename") : IDB.open(options.local));
+    //const durable = yield* IDB.open(options.local);
 
     // const durable = yield* Memory.open();
     const ephemeral = yield* Memory.open();
@@ -71,7 +76,7 @@ class Connection {
   constructor(
     public local: DB,
     public remote: Remote,
-  ) {}
+  ) { }
 
   *dispatch([entity, attribute, event]: [Reference, string, Event]) {
     yield* this.local.transact([
@@ -304,7 +309,7 @@ class PullSource implements UnderlyingDefaultSource<Type.Transaction> {
     public url: URL,
     public store: Store.Store,
     public db: DB,
-  ) {}
+  ) { }
 
   async start(controller: ReadableStreamDefaultController<Type.Transaction>) {
     while (!this.cancelled) {
@@ -419,7 +424,7 @@ class PushTarget implements UnderlyingSink<Type.Transaction>, API.Transactor {
   constructor(
     public url: URL,
     public store: Store.Store<Uint8Array, ["push", number]>,
-  ) {}
+  ) { }
   start() {
     return Task.perform(this.flush());
   }
@@ -643,7 +648,7 @@ class Subscription<Select extends Selector = Selector> {
     public query: Type.Query<Select>,
     public effect: Effect<Select>,
     public connection: Connection,
-  ) {}
+  ) { }
   *poll() {
     if (this.suspended) {
       return [];

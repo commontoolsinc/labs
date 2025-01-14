@@ -243,6 +243,7 @@ export async function saveRecipe(
   return response.ok;
 }
 
+/*
 addCharms([
   helloWorld.spawn({ helloWorld: 1 }),
   counter.spawn({ counter: 1 }),
@@ -273,6 +274,14 @@ addCharms([
   activity.spawn(activityRef),
   stackLayout.spawn({ stack: 1 }),
   canvasLayout.spawn({ canvas: 1 }),
+  FetchService.spawn() as any,
+  GmailService.spawn() as any,
+  ViewService.spawn() as any,
+  TimerService.spawn() as any,
+]);
+*/
+addCharms([
+  counter.spawn({ counter: 1 }),
   FetchService.spawn() as any,
   GmailService.spawn() as any,
   ViewService.spawn() as any,
@@ -326,8 +335,8 @@ export type CharmAction = CharmActionFn & {
   set: (opener: CharmActionFn) => void;
 };
 
-let charmOpener: CharmActionFn | CharmAction = () => {};
-let charmCloser: CharmActionFn | CharmAction = () => {};
+let charmOpener: CharmActionFn | CharmAction = () => { };
+let charmCloser: CharmActionFn | CharmAction = () => { };
 export const openCharm = (charmId: string | EntityId | CellImpl<any>) =>
   charmOpener(charmId);
 export const closeCharm = (charmId: string | EntityId | CellImpl<any>) =>
