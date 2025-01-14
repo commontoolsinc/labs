@@ -29,6 +29,7 @@
     "npm:@types/node@*": "22.5.4",
     "npm:@vercel/otel@^1.10.0": "1.10.0_@opentelemetry+api@1.9.0_@opentelemetry+api-logs@0.57.1_@opentelemetry+instrumentation@0.57.1__@opentelemetry+api@1.9.0_@opentelemetry+resources@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-logs@0.57.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-metrics@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-trace-base@1.30.1__@opentelemetry+api@1.9.0",
     "npm:ai@*": "4.0.29_zod@3.24.1",
+    "npm:ai@^4.0.36": "4.0.36_zod@3.24.1",
     "npm:hono-pino@0.7": "0.7.0_hono@4.6.16_pino@9.6.0",
     "npm:hono@^4.4.6": "4.6.16",
     "npm:hono@^4.6.16": "4.6.16",
@@ -162,14 +163,33 @@
         "json-schema"
       ]
     },
+    "@ai-sdk/react@1.0.11_zod@3.24.1": {
+      "integrity": "sha512-ndBPA7dx2DqUr7s4zO1cRAPkFGS+wWvSri6OWfCuhfyTAADQ4vdd56vFP9zdTZl4cyL27Vh0hKLfFJMGx83MUQ==",
+      "dependencies": [
+        "@ai-sdk/provider-utils@2.0.7_zod@3.24.1",
+        "@ai-sdk/ui-utils@1.0.10_zod@3.24.1",
+        "swr",
+        "throttleit",
+        "zod"
+      ]
+    },
     "@ai-sdk/react@1.0.8_zod@3.24.1": {
       "integrity": "sha512-vzlvw+YAAm1oc/8AWz+bq8Ff7ibInzQOuiJenMr1oHnCDPHkMKaOdJWX3/zVQR+1IjZ8Z38TtCR275YEA9quww==",
       "dependencies": [
         "@ai-sdk/provider-utils@2.0.6_zod@3.24.1",
-        "@ai-sdk/ui-utils",
+        "@ai-sdk/ui-utils@1.0.7_zod@3.24.1",
         "swr",
         "throttleit",
         "zod"
+      ]
+    },
+    "@ai-sdk/ui-utils@1.0.10_zod@3.24.1": {
+      "integrity": "sha512-wZfZNH2IloTx5b1O8CU7/R/icm8EsmURElPckYwNYj2YZrKk9X5XeYSDBF/1/J83obzsn0i7VKkIf40qhRzVVA==",
+      "dependencies": [
+        "@ai-sdk/provider",
+        "@ai-sdk/provider-utils@2.0.7_zod@3.24.1",
+        "zod",
+        "zod-to-json-schema"
       ]
     },
     "@ai-sdk/ui-utils@1.0.7_zod@3.24.1": {
@@ -3909,12 +3929,24 @@
       "dependencies": [
         "@ai-sdk/provider",
         "@ai-sdk/provider-utils@2.0.6_zod@3.24.1",
-        "@ai-sdk/react",
-        "@ai-sdk/ui-utils",
+        "@ai-sdk/react@1.0.8_zod@3.24.1",
+        "@ai-sdk/ui-utils@1.0.7_zod@3.24.1",
         "@opentelemetry/api",
         "jsondiffpatch",
         "zod",
         "zod-to-json-schema"
+      ]
+    },
+    "ai@4.0.36_zod@3.24.1": {
+      "integrity": "sha512-KeXQe+eKQK57WYzN+K6VUBZqj/n70V+cCwrXAhXa7enbZCAsErvQKqrnxkF1qm9UfPuNKNEFV5BRoMKJ5gRfAw==",
+      "dependencies": [
+        "@ai-sdk/provider",
+        "@ai-sdk/provider-utils@2.0.7_zod@3.24.1",
+        "@ai-sdk/react@1.0.11_zod@3.24.1",
+        "@ai-sdk/ui-utils@1.0.10_zod@3.24.1",
+        "@opentelemetry/api",
+        "jsondiffpatch",
+        "zod"
       ]
     },
     "atomic-sleep@1.0.0": {
@@ -4443,6 +4475,7 @@
       "npm:@opentelemetry/resources@^1.30.1",
       "npm:@scalar/hono-api-reference@~0.5.165",
       "npm:@vercel/otel@^1.10.0",
+      "npm:ai@^4.0.36",
       "npm:hono-pino@0.7",
       "npm:hono@^4.6.16",
       "npm:pino-pretty@13",

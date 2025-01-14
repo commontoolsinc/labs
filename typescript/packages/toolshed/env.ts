@@ -14,7 +14,9 @@ const EnvSchema = z.object({
     "silent",
   ]).default("info"),
 
-  // API Keys for LLM Providers
+  // ===========================================================================
+  // (/routes/ai/llm) Environment variables for LLM Providers
+  // ===========================================================================
   CTTS_AI_LLM_ANTHROPIC_API_KEY: z.string().default(""),
   CTTS_AI_LLM_GROQ_API_KEY: z.string().default(""),
   CTTS_AI_LLM_OPENAI_API_KEY: z.string().default(""),
@@ -29,6 +31,7 @@ const EnvSchema = z.object({
   // LLM Observability Tool
   CTTS_AI_LLM_PHOENIX_PROJECT: z.string().default(""),
   CTTS_AI_LLM_PHOENIX_URL: z.string().default(""),
+  // ===========================================================================
 });
 
 export type env = z.infer<typeof EnvSchema>;
