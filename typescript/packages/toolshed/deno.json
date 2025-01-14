@@ -21,6 +21,11 @@
   },
   "imports": {
     "@/": "./",
+    "@ai-sdk/amazon-bedrock": "npm:@ai-sdk/amazon-bedrock@^1.0.8",
+    "@ai-sdk/anthropic": "npm:@ai-sdk/anthropic@^1.0.8",
+    "@ai-sdk/google-vertex": "npm:@ai-sdk/google-vertex@^2.0.17",
+    "@ai-sdk/groq": "npm:@ai-sdk/groq@^1.0.11",
+    "@ai-sdk/openai": "npm:@ai-sdk/openai@^1.0.18",
     "@hono/zod-openapi": "npm:@hono/zod-openapi@^0.18.3",
     "@hono/zod-validator": "npm:@hono/zod-validator@^0.4.2",
     "@scalar/hono-api-reference": "npm:@scalar/hono-api-reference@^0.5.165",
