@@ -9,7 +9,8 @@
     "semiColons": true,
     "singleQuote": false,
     "proseWrap": "always",
-    "include": ["./"]
+    "include": ["./"],
+    "exclude": ["./llm_documentation/*"]
   },
   "lint": {
     "include": ["./"],
@@ -19,6 +20,7 @@
       "exclude": ["no-unused-vars"]
     }
   },
+  "nodeModulesDir": "auto",
   "imports": {
     "@/": "./",
     "@ai-sdk/amazon-bedrock": "npm:@ai-sdk/amazon-bedrock@^1.0.8",
