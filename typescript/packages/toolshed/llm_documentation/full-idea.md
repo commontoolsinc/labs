@@ -75,44 +75,36 @@ This allows us to aggressively pursue new breaking ideas, while also supporting 
 
 ```
 toolshed/
-├── src/
-│   ├── middleware/
-│   │   ├── auth.ts         # Authentication middleware
-│   │   ├── logging.ts      # Logging middleware
-│   │   └── validation.ts   # Request validation
-│   ├── routes/
-│   │   ├── ai/            # v1 AI API
-│   │   │   ├── index.ts   # Route definitions
-│   │   │   ├── handlers.ts # Request handlers
-│   │   │   ├── schemas.ts  # Request/response schemas
-│   │   │   ├── types.ts
-│   │   │   └── handlers.test.ts
-│   │   ├── ai_v2/         # v2 AI API
-│   │   │   ├── index.ts
-│   │   │   ├── handlers.ts
-│   │   │   ├── schemas.ts
-│   │   │   ├── types.ts
-│   │   │   └── handlers.test.ts
-│   │   ├── data/          # Synopsys proxy
-│   │   │   ├── index.ts
-│   │   │   ├── handlers.ts
-│   │   │   ├── schemas.ts
-│   │   │   ├── types.ts
-│   │   │   └── handlers.test.ts
-│   │   └── profile/
-│   │       ├── index.ts
-│   │       ├── handlers.ts
-│   │       ├── schemas.ts
-│   │       ├── types.ts
-│   │       └── handlers.test.ts
-│   ├── utils/
-│   │   ├── auth.ts        # Auth helper functions
-│   │   ├── config.ts      # Configuration utilities
-│   │   ├── errors.ts      # Error handling utilities
-│   │   ├── http.ts        # HTTP client helpers
-│   │   ├── logger.ts      # Logging utilities
-│   │   └── validation.ts  # Schema validation helpers
-│   └── main.ts            # Main app entry point
+├── lib/
+│   ├── configure-open-api.ts  # OpenAPI configuration
+│   ├── constants.ts           # Global constants
+│   ├── create-app.ts          # App factory
+│   └── types.ts               # Common types
+├── middlewares/
+│   └── pino-logger.ts         # Logging middleware
+├── routes/
+│   ├── ai/                    # AI-related endpoints
+│   │   └── img/              # Image generation
+│   │       ├── img.handlers.ts    # Request handlers
+│   │       ├── img.index.ts       # Route definitions
+│   │       ├── img.routes.ts      # Route schemas
+│   │       └── img.test.ts        # Test cases
+│   │   └── llm/              # Language model endpoints
+│   │       ├── cache.ts      # llm-specific caching
+│   │       ├── instrumentation.ts # Telemetry
+│   │       ├── llm.handlers.ts    # Request handlers
+│   │       ├── llm.index.ts       # Route definitions
+│   │       ├── llm.routes.ts      # Route schemas
+│   │       ├── llm.test.ts        # Test cases
+│   │       └── models.ts          # Model definitions
+│   └── health/               # Health check endpoint
+│       ├── health.handlers.ts
+│       ├── health.index.ts
+│       ├── health.routes.ts
+│       └── health.test.ts
+├── app.ts                    # Main app setup
+├── env.ts                    # Environment config
+└── index.ts                  # Entry point
 ```
 
 # Deployment

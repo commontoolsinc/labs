@@ -32,6 +32,12 @@ const EnvSchema = z.object({
   CTTS_AI_LLM_PHOENIX_PROJECT: z.string().default(""),
   CTTS_AI_LLM_PHOENIX_URL: z.string().default(""),
   // ===========================================================================
+
+  // ===========================================================================
+  // (/routes/ai/img) Environment variables for Image generation
+  // ===========================================================================
+  CTTS_AI_IMG_FAL_API_KEY: z.string().default(""),
+  // ===========================================================================
 });
 
 export type env = z.infer<typeof EnvSchema>;
