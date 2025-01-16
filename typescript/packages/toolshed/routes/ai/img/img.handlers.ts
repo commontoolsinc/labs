@@ -9,7 +9,7 @@ import { sha256 } from "@/lib/sha2.ts";
 import { ensureDir } from "@std/fs";
 
 // Configure FAL client
-fal.config({ credentials: env.CTTS_AI_IMG_FAL_API_KEY });
+fal.config({ credentials: env.FAL_API_KEY });
 
 const CACHE_DIR = "./cache/ai-img";
 
