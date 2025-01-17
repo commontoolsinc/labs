@@ -4,6 +4,7 @@ import aiLLM from "@/routes/ai/llm/llm.index.ts";
 import configureOpenAPI from "@/lib/configure-open-api.ts";
 import aiImg from "@/routes/ai/img/img.index.ts";
 import aiVoice from "@/routes/ai/voice/voice.index.ts";
+import aiWebReader from "@/routes/ai/webreader/webreader.index.ts";
 
 const app = createApp();
 
@@ -14,6 +15,7 @@ const routes = [
   aiLLM,
   aiImg,
   aiVoice,
+  aiWebReader,
 ] as const;
 
 routes.forEach((route) => {
