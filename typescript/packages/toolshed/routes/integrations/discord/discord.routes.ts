@@ -5,7 +5,7 @@ import { z } from "zod";
 const tags = ["Discord Integration"];
 
 export const sendMessage = createRoute({
-  path: "/api/discord/messages",
+  path: "/api/integrations/discord/messages",
   method: "post",
   tags,
   request: {

@@ -1,6 +1,6 @@
 import env from "@/env.ts";
 import { Context } from "hono";
-import type { SendMessageRoute } from "@/routes/integration/discord/discord.routes.ts";
+import type { SendMessageRoute } from "@/routes/integrations/discord/discord.routes.ts";
 import type { AppRouteHandler } from "@/lib/types.ts";
 
 type WebhookMessage = {
