@@ -4,15 +4,9 @@ import { z } from "zod";
 const EnvSchema = z.object({
   ENV: z.string().default("development"),
   PORT: z.coerce.number().default(8000),
-  LOG_LEVEL: z.enum([
-    "fatal",
-    "error",
-    "warn",
-    "info",
-    "debug",
-    "trace",
-    "silent",
-  ]).default("info"),
+  LOG_LEVEL: z
+    .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
+    .default("info"),
 
   // ===========================================================================
   // (/routes/ai/llm) Environment variables for LLM Providers
@@ -46,6 +40,13 @@ const EnvSchema = z.object({
   //   * /routes/ai/webreader
   // ===========================================================================
   JINA_API_KEY: z.string().default(""),
+  // ===========================================================================
+  //
+  // ===========================================================================
+  // Discord Webhook URL
+  //   * /routes/integration/discord
+  // ===========================================================================
+  DISCORD_WEBHOOK_URL: z.string().default(""),
   // ===========================================================================
 });
 

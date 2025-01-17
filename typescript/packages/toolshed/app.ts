@@ -5,23 +5,18 @@ import configureOpenAPI from "@/lib/configure-open-api.ts";
 import aiImg from "@/routes/ai/img/img.index.ts";
 import aiVoice from "@/routes/ai/voice/voice.index.ts";
 import aiWebReader from "@/routes/ai/webreader/webreader.index.ts";
+import discord from "@/routes/integration/discord/discord.index.ts";
 
 const app = createApp();
 
 configureOpenAPI(app);
 
-const routes = [
-  health,
-  aiLLM,
-  aiImg,
-  aiVoice,
-  aiWebReader,
-] as const;
+const routes = [health, aiLLM, aiImg, aiVoice, aiWebReader, discord] as const;
 
-routes.forEach((route) => {
+routes.forEach(route => {
   app.route("/", route);
 });
 
-export type AppType = typeof routes[number];
+export type AppType = (typeof routes)[number];
 
 export default app;

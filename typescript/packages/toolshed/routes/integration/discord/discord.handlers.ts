@@ -1,0 +1,58 @@
+import env from "@/env.ts";
+import { Context } from "hono";
+
+type WebhookMessage = {
+  content: string;
+  username?: string;
+  avatar_url?: string;
+  embeds?: Array<{
+    title?: string;
+    description?: string;
+    color?: number;
+    fields?: Array<{
+      name: string;
+      value: string;
+      inline?: boolean;
+    }>;
+  }>;
+};
+
+export const sendMessage = async (ctx: Context) => {
+  const body = await ctx.req.json();
+
+  const webhookUrl = env.DISCORD_WEBHOOK_URL;
+  if (!webhookUrl) {
+    throw new Error("DISCORD_WEBHOOK_URL not configured");
+  }
+  return sendWebhookMessage(webhookUrl, {
+    content: body.message,
+    username: body.username,
+  });
+};
+
+export const sendWebhookMessage = async (
+  webhookUrl: string,
+  message: WebhookMessage,
+) => {
+  console.log("msg", message);
+  const response = await fetch(webhookUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(message),
+  });
+
+  if (!response.ok) {
+    const responseText = await response.text();
+    console.error("Webhook request failed:", {
+      status: response.status,
+      statusText: response.statusText,
+      body: message,
+      response: responseText,
+    });
+    throw new Error(`Failed to send webhook message: ${response.statusText}`);
+  }
+
+  return response;
+};
