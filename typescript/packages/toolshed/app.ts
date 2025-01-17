@@ -6,12 +6,21 @@ import aiImg from "@/routes/ai/img/img.index.ts";
 import aiVoice from "@/routes/ai/voice/voice.index.ts";
 import aiWebReader from "@/routes/ai/webreader/webreader.index.ts";
 import discord from "@/routes/integrations/discord/discord.index.ts";
+import blobby from "@/routes/storage/blobby/blobby.index.ts";
 
 const app = createApp();
 
 configureOpenAPI(app);
 
-const routes = [health, aiLLM, aiImg, aiVoice, aiWebReader, discord] as const;
+const routes = [
+  health,
+  aiLLM,
+  aiImg,
+  aiVoice,
+  aiWebReader,
+  discord,
+  blobby,
+] as const;
 
 routes.forEach((route) => {
   app.route("/", route);

@@ -1,3 +1,6 @@
 llm-api-cache
 cache
 .env
+
+!lib/
+!lib/**
