@@ -1,5 +1,7 @@
 import env from "@/env.ts";
 import { Context } from "hono";
+import type { SendMessageRoute } from "@/routes/integration/discord/discord.routes.ts";
+import type { AppRouteHandler } from "@/lib/types.ts";
 
 type WebhookMessage = {
   content: string;
@@ -17,7 +19,9 @@ type WebhookMessage = {
   }>;
 };
 
-export const sendMessage = async (ctx: Context) => {
+export const sendMessage: AppRouteHandler<SendMessageRoute> = async (
+  ctx: Context,
+) => {
   const body = await ctx.req.json();
 
   const webhookUrl = env.DISCORD_WEBHOOK_URL;
