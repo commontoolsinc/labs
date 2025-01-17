@@ -5,7 +5,7 @@ import configureOpenAPI from "@/lib/configure-open-api.ts";
 import aiImg from "@/routes/ai/img/img.index.ts";
 import aiVoice from "@/routes/ai/voice/voice.index.ts";
 import aiWebReader from "@/routes/ai/webreader/webreader.index.ts";
-import discord from "@/routes/integration/discord/discord.index.ts";
+import discord from "@/routes/integrations/discord/discord.index.ts";
 
 const app = createApp();
 
