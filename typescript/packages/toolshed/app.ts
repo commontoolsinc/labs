@@ -13,7 +13,7 @@ configureOpenAPI(app);
 
 const routes = [health, aiLLM, aiImg, aiVoice, aiWebReader, discord] as const;
 
-routes.forEach(route => {
+routes.forEach((route) => {
   app.route("/", route);
 });
 
