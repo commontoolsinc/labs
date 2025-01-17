@@ -29,12 +29,11 @@ export const sendMessage: AppRouteHandler<SendMessageRoute> = async (
       content: body.message,
       username: body.username,
     });
+    return ctx.json(response, 200);
   } catch (error) {
     console.error(error);
     return ctx.json({ error: "Failed to send message" }, 500);
   }
-
-  return ctx.json(response, 200);
 };
 
 export const sendWebhookMessage = async (message: WebhookMessage) => {
