@@ -52,7 +52,7 @@ export const sendMessage = createRoute({
       },
       description: "Message sent successfully",
     },
-    [HttpStatusCodes.BAD_REQUEST]: {
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: {
       content: {
         "application/json": {
           schema: z.object({
@@ -60,9 +60,8 @@ export const sendMessage = createRoute({
           }),
         },
       },
-      description: "Invalid request parameters",
+      description: "Server error",
     },
   },
 });
-
 export type SendMessageRoute = typeof sendMessage;

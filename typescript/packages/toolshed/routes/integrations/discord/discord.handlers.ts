@@ -24,20 +24,25 @@ export const sendMessage: AppRouteHandler<SendMessageRoute> = async (
 ) => {
   const body = await ctx.req.json();
 
+  try {
+    const response = await sendWebhookMessage({
+      content: body.message,
+      username: body.username,
+    });
+  } catch (error) {
+    console.error(error);
+    return ctx.json({ error: "Failed to send message" }, 500);
+  }
+
+  return ctx.json(response, 200);
+};
+
+export const sendWebhookMessage = async (message: WebhookMessage) => {
   const webhookUrl = env.DISCORD_WEBHOOK_URL;
   if (!webhookUrl) {
     throw new Error("DISCORD_WEBHOOK_URL not configured");
   }
-  return sendWebhookMessage(webhookUrl, {
-    content: body.message,
-    username: body.username,
-  });
-};
 
-export const sendWebhookMessage = async (
-  webhookUrl: string,
-  message: WebhookMessage,
-) => {
   console.log("msg", message);
   const response = await fetch(webhookUrl, {
     method: "POST",
