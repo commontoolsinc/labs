@@ -19,52 +19,61 @@ async function fixAssetPaths() {
   );
 
   await Deno.writeTextFile(indexPath, content);
+  console.log("✅ Fixed asset paths in index.html");
 }
 
 async function buildLookslike() {
   try {
     console.log("🏗️ Building lookslike-high-level...");
 
-    const installProcess = new Deno.Command("npm", {
-      args: ["install"],
-      cwd: LOOKSLIKE_DIR,
-      stdout: "inherit",
-      stderr: "inherit",
-    });
+    // Check if we're in Docker (presence of /.dockerenv)
+    const isDocker = await Deno.stat("/.dockerenv").catch(() => false);
 
-    const installResult = await installProcess.output();
-    if (!installResult.success) {
-      throw new Error("npm install failed");
-    }
+    if (!isDocker) {
+      // Local development build
+      const installProcess = new Deno.Command("npm", {
+        args: ["install"],
+        cwd: LOOKSLIKE_DIR,
+        stdout: "inherit",
+        stderr: "inherit",
+      });
 
-    const buildProcess = new Deno.Command("npm", {
-      args: ["run", "build"],
-      cwd: LOOKSLIKE_DIR,
-      stdout: "inherit",
-      stderr: "inherit",
-    });
+      const installResult = await installProcess.output();
+      if (!installResult.success) {
+        throw new Error("npm install failed");
+      }
 
-    const buildResult = await buildProcess.output();
-    if (!buildResult.success) {
-      throw new Error("npm build failed");
-    }
+      const buildProcess = new Deno.Command("npm", {
+        args: ["run", "build"],
+        cwd: LOOKSLIKE_DIR,
+        stdout: "inherit",
+        stderr: "inherit",
+      });
 
-    await ensureDir(DIST_DIR);
+      const buildResult = await buildProcess.output();
+      if (!buildResult.success) {
+        throw new Error("npm build failed");
+      }
 
-    const sourceDir = join(LOOKSLIKE_DIR, "dist");
-    const copyProcess = new Deno.Command("cp", {
-      args: ["-r", `${sourceDir}/.`, DIST_DIR],
-      stdout: "inherit",
-      stderr: "inherit",
-    });
+      await ensureDir(DIST_DIR);
+      const sourceDir = join(LOOKSLIKE_DIR, "dist");
+      const copyProcess = new Deno.Command("cp", {
+        args: ["-r", `${sourceDir}/.`, DIST_DIR],
+        stdout: "inherit",
+        stderr: "inherit",
+      });
 
-    const copyResult = await copyProcess.output();
-    if (!copyResult.success) {
-      throw new Error("Failed to copy dist files");
+      const copyResult = await copyProcess.output();
+      if (!copyResult.success) {
+        throw new Error("Failed to copy dist files");
+      }
+    } else {
+      // In Docker, we expect the dist files to be pre-built and copied
+      console.log("🐳 Running in Docker - skipping npm build");
+      await ensureDir(DIST_DIR);
     }
 
     await fixAssetPaths();
-
     console.log("✅ Build completed successfully!");
   } catch (error) {
     console.error("❌ Build failed:", error);
