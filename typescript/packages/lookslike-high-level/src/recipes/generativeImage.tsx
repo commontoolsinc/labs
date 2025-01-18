@@ -41,7 +41,7 @@ export const generativeImage = recipe(schema, ({ prompt }) => {
   timeoutId.setDefault(0);
 
   const genImageUrl = lift(
-    ({ prompt }) => `/api/img/?prompt=${encodeURIComponent(prompt)}`,
+    ({ prompt }) => `/api/ai/img/?prompt=${encodeURIComponent(prompt)}`,
   );
 
   return (

@@ -6,7 +6,7 @@ const router = createRouter();
 router.get(
   "/app/latest/*",
   serveStatic({
-    root: "./looks-like-highlevel-dist",
+    root: "./lookslike-highlevel-dist",
     rewriteRequestPath: (path) => {
       // Handle root path by serving index.html
       if (path === "/app/latest" || path === "/app/latest/") {

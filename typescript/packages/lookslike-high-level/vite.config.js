@@ -20,7 +20,7 @@ export default defineConfig({
   resolve: {
     preserveSymlinks: true,
     alias: Object.fromEntries(
-      commonPackages.map((pkg) => [
+      commonPackages.map(pkg => [
         pkg,
         path.resolve(__dirname, "..", pkg.replace("@commontools/", "")),
       ]),
@@ -38,36 +38,30 @@ export default defineConfig({
       ],
     },
     proxy: {
-      "/api/llm": {
-        target: process.env.PLANNING_API_URL ?? "http://localhost:8000",
+      "/api/ai/llm": {
+        target: "http://localhost:8000/api/ai/llm",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/llm/, ""),
       },
-      "/api/img": {
-        target: "https://ct-img.m4ke.workers.dev",
+      "/api/ai/img": {
+        target: "http://localhost:8000/api/ai/img",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/img/, ""),
       },
-      "/api/transcribe": {
-        target: "https://voice.commontools.workers.dev",
-        changeOrigin: true
-      },
-      "/api/reader": {
-        target: "https://r.jina.ai/",
+      "/api/ai/voice": {
+        target: "http://localhost:8000/api/ai/voice",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/reader/, ""),
+      },
+      "/api/ai/webreader": {
+        target: "http://localhost:8000/api/ai/webreader",
+        changeOrigin: true,
       },
       "/api/data": {
         target: process.env.SYNOPSYS_API_URL ?? "http://localhost:8080",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/data/, ""),
+        rewrite: path => path.replace(/^\/api\/data/, ""),
       },
-      "/api/blobby": {
-        target:
-          process.env.BLOBBY_API_URL ??
-          "https://paas.saga-castor.ts.net/blobby",
+      "/api/storage/blobby": {
+        target: "http://localhost:8000/api/storage/blobby",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/blobby/, ""),
       },
     },
     headers: {

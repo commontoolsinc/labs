@@ -1,12 +1,20 @@
 import { h, behavior, Reference, select, $ } from "@commontools/common-system";
-import { event, events, set, addTag, field, isEmpty, subview } from "../sugar.js";
+import {
+  event,
+  events,
+  set,
+  addTag,
+  field,
+  isEmpty,
+  subview,
+} from "../sugar.js";
 import { Description } from "./stickers/describe.jsx";
 import { mixin } from "../sugar/mixin.js";
 import { description as llmDescription } from "./stickers/describe.jsx";
 import { Chattable, chatUiResolver } from "./stickers/chat.jsx";
 
 export const genImage = (prompt: string) =>
-  `/api/img/?prompt=${encodeURIComponent(prompt)}`;
+  `/api/ai/img/?prompt=${encodeURIComponent(prompt)}`;
 
 export function generateDescription({
   time,
@@ -48,11 +56,11 @@ export function generateDescription({
           ? "large"
           : "huge";
 
-  const activityDesc = lastActivity ? ` They are currently ${lastActivity}.` : '';
+  const activityDesc = lastActivity
+    ? ` They are currently ${lastActivity}.`
+    : "";
 
-  return (
-    `${color} ${sizeDesc} ${description} is ${ageDesc} and feels ${hungerDesc}.${activityDesc} `
-  );
+  return `${color} ${sizeDesc} ${description} is ${ageDesc} and feels ${hungerDesc}.${activityDesc} `;
 }
 
 function TamagotchiView({
@@ -64,7 +72,7 @@ function TamagotchiView({
   hunger,
   llmDescription,
   lastActivity,
-  chatView
+  chatView,
 }: {
   self: Reference;
   time: number;
@@ -168,27 +176,38 @@ function TamagotchiView({
   return (
     <div title={"Tamagotchi"} entity={self} style={frameStyle}>
       <div style={screenStyle}>
-        <div style={bubbleStyle}>
-          {description}
-        </div>
+        <div style={bubbleStyle}>{description}</div>
         <div style={statsStyle}>
           TIME: {time} | HUNGER: {hunger} | SIZE: {size}
         </div>
         <img
           style="width: 100%; aspect-ratio: 1; border-radius: 8px; box-shadow: inset 0 0 10px rgba(0,0,0,0.5);"
           src={genImage(
-            generateDescription({ time, size, color, description, hunger, lastActivity }),
+            generateDescription({
+              time,
+              size,
+              color,
+              description,
+              hunger,
+              lastActivity,
+            }),
           )}
         />
-        <div style={speechBubbleStyle}>
-          {llmDescription}
-        </div>
+        <div style={speechBubbleStyle}>{llmDescription}</div>
       </div>
       <div style={buttonContainerStyle}>
-        <button style={buttonStyle} onclick={TamagotchiEvents.onAdvanceTime}>Wait</button>
-        <button style={buttonStyle} onclick={TamagotchiEvents.onGiveFood}>Feed</button>
-        <button style={buttonStyle} onclick={TamagotchiEvents.onExercise}>Move</button>
-        <button style={buttonStyle} onclick={TamagotchiEvents.onBroadcast}>Send</button>
+        <button style={buttonStyle} onclick={TamagotchiEvents.onAdvanceTime}>
+          Wait
+        </button>
+        <button style={buttonStyle} onclick={TamagotchiEvents.onGiveFood}>
+          Feed
+        </button>
+        <button style={buttonStyle} onclick={TamagotchiEvents.onExercise}>
+          Move
+        </button>
+        <button style={buttonStyle} onclick={TamagotchiEvents.onBroadcast}>
+          Send
+        </button>
       </div>
       {subview(chatView)}
     </div>
@@ -204,9 +223,9 @@ export const description = field("description", "lizard bunny");
 export const color = field("color", "blue");
 export const lastActivity = field("lastActivity", "");
 const resolveUninitialized = select({ self: $.self })
-  .clause(isEmpty($.self, 'hunger'))
-  .clause(isEmpty($.self, 'size'))
-  .clause(isEmpty($.self, 'time'))
+  .clause(isEmpty($.self, "hunger"))
+  .clause(isEmpty($.self, "size"))
+  .clause(isEmpty($.self, "time"));
 
 export const resolveCreature = description
   .with(hunger)
@@ -233,11 +252,28 @@ export const tamagotchi = behavior({
     ),
   ),
 
-  ...mixin(Chattable({
-    attributes: ["hunger", "size", "time", "color", "description", "lastActivity"],
-    greeting: 'bleep bloop',
-    systemPrompt: ({ hunger, size, time, color, description, lastActivity }) => `You are acting as a ${generateDescription({ hunger, size, time, color, description, lastActivity })}. Respond in character, keeping your responses brief and consistent with your current state.`,
-  })),
+  ...mixin(
+    Chattable({
+      attributes: [
+        "hunger",
+        "size",
+        "time",
+        "color",
+        "description",
+        "lastActivity",
+      ],
+      greeting: "bleep bloop",
+      systemPrompt: ({
+        hunger,
+        size,
+        time,
+        color,
+        description,
+        lastActivity,
+      }) =>
+        `You are acting as a ${generateDescription({ hunger, size, time, color, description, lastActivity })}. Respond in character, keeping your responses brief and consistent with your current state.`,
+    }),
+  ),
 
   initialState: resolveUninitialized
     .update(({ self }) =>
@@ -248,18 +284,21 @@ export const tamagotchi = behavior({
         color: "blue",
         description: "lizard bunny",
         lastActivity: "",
-      })
+      }),
     )
     .commit(),
 
   view: resolveCreature
     .with(llmDescription)
     .with(chatUiResolver)
-    .render(TamagotchiView).commit(),
+    .render(TamagotchiView)
+    .commit(),
 
   onAdvanceTime: event(TamagotchiEvents.onAdvanceTime)
     .with(time)
-    .update(({ self, time }) => set(self, { time: time + 1, lastActivity: "waiting" }))
+    .update(({ self, time }) =>
+      set(self, { time: time + 1, lastActivity: "waiting" }),
+    )
     .commit(),
 
   onTickHunger: event(TamagotchiEvents.onAdvanceTime)
@@ -297,13 +336,13 @@ export const tamagotchi = behavior({
     .update(({ self }) => {
       return [
         ...addTag(self, "#tamagotchi"),
-        ...set(self, { lastActivity: "broadcasting" })
+        ...set(self, { lastActivity: "broadcasting" }),
       ];
     })
     .commit(),
 });
 
-tamagotchi.disableRule('chat/view' as any)
+tamagotchi.disableRule("chat/view" as any);
 
 console.log(tamagotchi);
 

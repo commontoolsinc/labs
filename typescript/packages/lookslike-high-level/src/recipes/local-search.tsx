@@ -25,7 +25,7 @@ const Place = z.object({
 });
 
 const imageUrl = lift(
-  ({ prompt }) => `/api/img/?prompt=${encodeURIComponent(prompt)}`
+  ({ prompt }) => `/api/ai/img/?prompt=${encodeURIComponent(prompt)}`,
 );
 
 type Place = z.infer<typeof Place>;
@@ -76,7 +76,7 @@ const searchPlaces = handler<
 });
 
 const updateValue = handler<{ detail: { value: string } }, { value: string }>(
-  ({ detail }, state) => detail?.value && (state.value = detail.value)
+  ({ detail }, state) => detail?.value && (state.value = detail.value),
 );
 
 // TODO: This should be the user's default location, not hardcoded
@@ -125,7 +125,7 @@ export const localSearch = recipe<typeof Search>(Search, ({ what, where }) => {
           Search
         </common-button>
         <common-vstack gap="md">
-          {places.map((place) => (
+          {places.map(place => (
             <common-hstack>
               <img
                 src={imageUrl(
@@ -134,7 +134,7 @@ export const localSearch = recipe<typeof Search>(Search, ({ what, where }) => {
                     description: place.description,
                     what,
                     where,
-                  })
+                  }),
                 )}
                 width="300px"
               />

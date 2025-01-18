@@ -5,8 +5,8 @@ const SELECTED_MODEL = "anthropic:claude-3-5-sonnet-latest";
 
 const llmUrl =
   typeof window !== "undefined"
-    ? window.location.protocol + "//" + window.location.host + "/api/llm"
-    : "//api/llm";
+    ? window.location.protocol + "//" + window.location.host + "/api/ai/llm"
+    : "//api/ai/llm";
 
 const llm = new LLMClient(llmUrl);
 const recipeGuide = `Here is how recipes work:
@@ -65,7 +65,7 @@ DO NOT PERFORM ANY JS OPERATIONS INSIDE THE UI JSX!
   GOOD: <p>Related Goals: {item.relatedGoals.map((goal) => <li>{goal}</li>)}</p>
   GOOD: <p>Related Goals: {lift(({ item }) => item.relatedGoals.join(", "))(item)}</p>
 
-If you are asked to add or generate an image, you can generate images using AI by using the following URL, and urlencoding the prompt in the url \`/api/img?prompt=' + encodeURIComponent(prompt)\`
+If you are asked to add or generate an image, you can generate images using AI by using the following URL, and urlencoding the prompt in the url \`/api/ai/img?prompt=' + encodeURIComponent(prompt)\`
 
 CSS must be defined inline as a string, we do not support css-in-js.
 

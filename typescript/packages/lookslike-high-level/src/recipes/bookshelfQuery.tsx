@@ -36,7 +36,7 @@ const onAddItem = handler<{}, { titleInput: string; authorInput: string }>(
   },
 );
 
-const tap = lift((x) => {
+const tap = lift(x => {
   console.log(x, JSON.stringify(x, null, 2));
   return x;
 });
@@ -127,7 +127,7 @@ const deleteItem = handler<{}, { item: Book; items: Book[] }>((_, state) => {
 });
 
 const imageUrl = lift(
-  ({ title }) => `/api/img/?prompt=${encodeURIComponent(title)}`,
+  ({ title }) => `/api/ai/img/?prompt=${encodeURIComponent(title)}`,
 );
 
 /*
@@ -195,7 +195,7 @@ export const bookshelfQuery = recipe(
             </button>
           </div>
           <ul>
-            {items.map((item) => (
+            {items.map(item => (
               <li>
                 <common-hstack>
                   <common-input
