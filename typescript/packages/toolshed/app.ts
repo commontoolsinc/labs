@@ -7,6 +7,7 @@ import aiVoice from "@/routes/ai/voice/voice.index.ts";
 import aiWebReader from "@/routes/ai/webreader/webreader.index.ts";
 import discord from "@/routes/integrations/discord/discord.index.ts";
 import blobby from "@/routes/storage/blobby/blobby.index.ts";
+import lookslikeHighlevelApp from "@/routes/lookslike-highlevel-app/lookslike-highlevel-app.index.ts";
 
 const app = createApp();
 
@@ -20,6 +21,7 @@ const routes = [
   aiWebReader,
   discord,
   blobby,
+  lookslikeHighlevelApp,
 ] as const;
 
 routes.forEach((route) => {
