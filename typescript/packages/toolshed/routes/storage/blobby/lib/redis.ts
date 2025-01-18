@@ -20,18 +20,16 @@ export async function getBlobUsers(
   redis: RedisClient,
   hash: string,
 ): Promise<string[]> {
-  return redis.sMembers(`${REDIS_PREFIX}:blob:${hash}:users`);
+  return await redis.sMembers(`${REDIS_PREFIX}:blob:${hash}:users`);
 }
 
 export async function getUserBlobs(
   redis: RedisClient,
   user: string,
 ): Promise<string[]> {
-  return redis.sMembers(`${REDIS_PREFIX}:user:${user}:blobs`);
+  return await redis.sMembers(`${REDIS_PREFIX}:user:${user}:blobs`);
 }
 
-export async function getAllBlobs(
-  redis: RedisClient,
-): Promise<string[]> {
-  return redis.sMembers(`${REDIS_PREFIX}:blobs`);
+export async function getAllBlobs(redis: RedisClient): Promise<string[]> {
+  return await redis.sMembers(`${REDIS_PREFIX}:blobs`);
 }
