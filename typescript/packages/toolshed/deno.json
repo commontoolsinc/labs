@@ -48,6 +48,7 @@
     "@std/path": "jsr:@std/path@^1.0.8",
     "@vercel/otel": "npm:@vercel/otel@^1.10.0",
     "ai": "npm:ai@^4.0.36",
+    "jsonschema": "npm:jsonschema@^1.5.0",
     "hono": "npm:hono@^4.6.16",
     "hono-pino": "npm:hono-pino@^0.7.0",
     "pino": "npm:pino@^9.6.0",

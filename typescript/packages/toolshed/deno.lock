@@ -36,6 +36,7 @@
     "npm:hono-pino@0.7": "0.7.0_hono@4.6.16_pino@9.6.0",
     "npm:hono@^4.4.6": "4.6.16",
     "npm:hono@^4.6.16": "4.6.16",
+    "npm:jsonschema@^1.5.0": "1.5.0",
     "npm:pino-pretty@13": "13.0.0",
     "npm:pino@^9.4.0": "9.6.0",
     "npm:pino@^9.6.0": "9.6.0",
@@ -4201,6 +4202,9 @@
         "diff-match-patch"
       ]
     },
+    "jsonschema@1.5.0": {
+      "integrity": "sha512-K+A9hhqbn0f3pJX17Q/7H6yQfD/5OXgdrR5UE12gMXCiN9D5Xq2o5mddV2QEcX/bjla99ASsAAQUyMCCRWAEhw=="
+    },
     "jwa@2.0.0": {
       "integrity": "sha512-jrZ2Qx916EA+fq9cEAeCROWPTfCwi1IVHqT2tapuqLEVVDKFDENFw1oL+MwrTvH6msKxsd1YTDVw6uKEcsrLEA==",
       "dependencies": [
@@ -4569,6 +4573,7 @@
       "npm:ai@^4.0.36",
       "npm:hono-pino@0.7",
       "npm:hono@^4.6.16",
+      "npm:jsonschema@^1.5.0",
       "npm:pino-pretty@13",
       "npm:pino@^9.6.0",
       "npm:redis@^4.7.0",
