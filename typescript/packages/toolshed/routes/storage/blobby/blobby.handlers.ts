@@ -19,9 +19,9 @@ const DATA_DIR = "./cache/blobby";
 export const storage = new DiskStorage(DATA_DIR);
 await storage.init();
 
-export const uploadBlobHandler: AppRouteHandler<typeof uploadBlob> = async (
-  c,
-) => {
+export const uploadBlobHandler: AppRouteHandler<
+  typeof uploadBlob
+> = async (c) => {
   const redis = c.get("blobbyRedis");
   if (!redis) throw new Error("Redis client not found in context");
   const logger = c.get("logger");
@@ -50,9 +50,9 @@ export const getBlobHandler: AppRouteHandler<typeof getBlob> = async (c) => {
   return c.json(JSON.parse(content), 200);
 };
 
-export const getBlobPathHandler: AppRouteHandler<typeof getBlobPath> = async (
-  c,
-) => {
+export const getBlobPathHandler: AppRouteHandler<
+  typeof getBlobPath
+> = async (c) => {
   const key = c.req.param("key");
   const path = c.req.param("path");
 

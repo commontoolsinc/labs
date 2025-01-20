@@ -44,7 +44,7 @@ export const ProcessSchemaResponseSchema = z.object({
 export type ProcessSchemaRequest = z.infer<typeof ProcessSchemaRequestSchema>;
 export type ProcessSchemaResponse = z.infer<typeof ProcessSchemaResponseSchema>;
 
-export const imagine: AppRouteHandler<ProcessSchemaRoute> = async c => {
+export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
   const redis = c.get("blobbyRedis");
   if (!redis) throw new Error("Redis client not found in context");
   const logger = c.get("logger");
@@ -89,10 +89,9 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async c => {
       }
     }
 
-    const examplesList =
-      matchingExamples.length > 0
-        ? matchingExamples
-        : allExamples.sort(() => Math.random() - 0.5).slice(0, 5);
+    const examplesList = matchingExamples.length > 0
+      ? matchingExamples
+      : allExamples.sort(() => Math.random() - 0.5).slice(0, 5);
 
     const prompt = constructSchemaPrompt(
       body.schema,
@@ -168,7 +167,7 @@ function checkSchemaMatch(data: Record<string, unknown>, schema: any): boolean {
     }
 
     if (Array.isArray(obj)) {
-      return obj.some(item => checkSubtrees(item));
+      return obj.some((item) => checkSubtrees(item));
     }
 
     const result = validator.validate(obj, jsonSchema);
@@ -176,7 +175,7 @@ function checkSchemaMatch(data: Record<string, unknown>, schema: any): boolean {
       return true;
     }
 
-    return Object.values(obj).some(value => checkSubtrees(value));
+    return Object.values(obj).some((value) => checkSubtrees(value));
   }
 
   return checkSubtrees(data);

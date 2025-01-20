@@ -2,8 +2,8 @@ import { createRoute } from "@hono/zod-openapi";
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { jsonContent } from "stoker/openapi/helpers";
 import {
-  ProcessSchemaResponseSchema,
   ProcessSchemaRequestSchema,
+  ProcessSchemaResponseSchema,
 } from "./spell.handlers.ts";
 
 const tags = ["Spellcaster"];

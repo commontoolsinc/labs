@@ -19,7 +19,7 @@ import type { Context } from "hono";
  * Handler for GET /models endpoint
  * Returns filtered list of available LLM models based on search criteria
  */
-export const getModels: AppRouteHandler<GetModelsRoute> = c => {
+export const getModels: AppRouteHandler<GetModelsRoute> = (c) => {
   const { search, capability, task } = c.req.query();
   const capabilities = capability?.split(",");
 
@@ -28,18 +28,17 @@ export const getModels: AppRouteHandler<GetModelsRoute> = c => {
       // Skip alias names, we only want primary model names
       if (!ALIAS_NAMES.includes(name)) {
         // Apply filters: name search, capabilities, and task matching
-        const nameMatches =
-          !search || name.toLowerCase().includes(search.toLowerCase());
-        const capabilitiesMatch =
-          !capabilities ||
+        const nameMatches = !search ||
+          name.toLowerCase().includes(search.toLowerCase());
+        const capabilitiesMatch = !capabilities ||
           capabilities.every(
-            cap =>
+            (cap) =>
               modelConfig.capabilities[
                 cap as keyof typeof modelConfig.capabilities
               ],
           );
-        const taskMatches =
-          !task || TASK_MODELS[task as keyof typeof TASK_MODELS] === name;
+        const taskMatches = !task ||
+          TASK_MODELS[task as keyof typeof TASK_MODELS] === name;
 
         // Include model if it passes all filters
         if (nameMatches && capabilitiesMatch && taskMatches) {
@@ -207,7 +206,7 @@ export async function generateTextCore(
  * Handler for POST / endpoint
  * Generates text using specified LLM model or task
  */
-export const generateText: AppRouteHandler<GenerateTextRoute> = async c => {
+export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   const payload = await c.req.json();
 
   try {

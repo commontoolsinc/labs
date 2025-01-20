@@ -26,7 +26,7 @@ const routes = [
   lookslikeHighlevelApp,
 ] as const;
 
-routes.forEach(route => {
+routes.forEach((route) => {
   app.route("/", route);
 });
 
