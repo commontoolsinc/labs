@@ -83,8 +83,6 @@ export async function generateTextCore(
     throw new Error("You must specify a `model` or `task`.");
   }
 
-  console.log("params", params);
-
   let modelName = params.model;
 
   // If task specified, lookup corresponding model
@@ -95,8 +93,6 @@ export async function generateTextCore(
     }
     modelName = taskModel;
   }
-
-  console.log("Model:", modelName);
 
   // Validate and configure model
   const modelConfig = findModel(modelName);

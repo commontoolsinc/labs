@@ -1,6 +1,6 @@
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { z } from "zod";
-import { Validator } from "jsonschema";
+import { Schema, SchemaDefinition, Validator } from "jsonschema";
 
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type { ProcessSchemaRoute } from "./spell.routes.ts";
@@ -143,15 +143,21 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
   }
 };
 
-function checkSchemaMatch(data: Record<string, unknown>, schema: any): boolean {
+function checkSchemaMatch(
+  data: Record<string, unknown>,
+  schema: Schema,
+): boolean {
   const validator = new Validator();
 
-  const jsonSchema = {
+  const jsonSchema: SchemaDefinition = {
     type: "object",
-    properties: Object.keys(schema).reduce((acc: Record<string, any>, key) => {
-      acc[key] = { type: schema[key].type || typeof schema[key] };
-      return acc;
-    }, {}),
+    properties: Object.keys(schema).reduce(
+      (acc: Record<string, SchemaDefinition>, key) => {
+        acc[key] = { type: schema[key].type || typeof schema[key] };
+        return acc;
+      },
+      {},
+    ),
     required: Object.keys(schema),
     additionalProperties: true,
   };
@@ -161,7 +167,7 @@ function checkSchemaMatch(data: Record<string, unknown>, schema: any): boolean {
     return true;
   }
 
-  function checkSubtrees(obj: any): boolean {
+  function checkSubtrees(obj: unknown): boolean {
     if (typeof obj !== "object" || obj === null) {
       return false;
     }
