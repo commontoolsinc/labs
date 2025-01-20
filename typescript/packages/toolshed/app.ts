@@ -5,6 +5,7 @@ import configureOpenAPI from "@/lib/configure-open-api.ts";
 import aiImg from "@/routes/ai/img/img.index.ts";
 import aiVoice from "@/routes/ai/voice/voice.index.ts";
 import aiWebReader from "@/routes/ai/webreader/webreader.index.ts";
+import aiSpell from "@/routes/ai/spell/spell.index.ts";
 import discord from "@/routes/integrations/discord/discord.index.ts";
 import blobby from "@/routes/storage/blobby/blobby.index.ts";
 import lookslikeHighlevelApp from "@/routes/lookslike-highlevel-app/lookslike-highlevel-app.index.ts";
@@ -19,12 +20,13 @@ const routes = [
   aiImg,
   aiVoice,
   aiWebReader,
+  aiSpell,
   discord,
   blobby,
   lookslikeHighlevelApp,
 ] as const;
 
-routes.forEach((route) => {
+routes.forEach(route => {
   app.route("/", route);
 });
 
