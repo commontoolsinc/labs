@@ -16,7 +16,7 @@ import { DiskStorage } from "@/routes/storage/blobby/lib/storage.ts";
 
 const DATA_DIR = "./cache/blobby";
 
-const storage = new DiskStorage(DATA_DIR);
+export const storage = new DiskStorage(DATA_DIR);
 await storage.init();
 
 export const uploadBlobHandler: AppRouteHandler<typeof uploadBlob> = async (
