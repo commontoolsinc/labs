@@ -6,7 +6,7 @@ import { SearchResult } from "../search.ts";
 export async function scanForText(
   redis: any,
   phrase: string,
-  logger: any,
+  logger: Logger,
 ): Promise<SearchResult> {
   const prefixedLogger = new PrefixedLogger(logger, "scanForText");
   prefixedLogger.info(`Starting text scan for phrase: ${phrase}`);

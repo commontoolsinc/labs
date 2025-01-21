@@ -1,24 +1,16 @@
 import { State } from "mistreevous";
+import { Logger, PrefixedLogger } from "../prefixed-logger.ts";
 
 export abstract class BaseAgent {
-  protected logger: any;
+  protected logger: PrefixedLogger;
   protected agentName: string;
   protected stepDurations: Record<string, number> = {};
   protected logs: string[] = [];
   protected startTime: number = 0;
 
-  constructor(logger: any, agentName: string) {
+  constructor(logger: Logger, agentName: string) {
     this.agentName = agentName;
-    this.logger = {
-      info: (msg: string) => {
-        this.logs.push(msg);
-        logger.info(msg);
-      },
-      error: (msg: string, error?: any) => {
-        this.logs.push(`ERROR: ${msg}`);
-        logger.error(msg, error);
-      },
-    };
+    this.logger = new PrefixedLogger(logger, agentName);
     this.startTime = Date.now();
   }
 

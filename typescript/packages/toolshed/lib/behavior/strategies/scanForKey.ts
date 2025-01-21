@@ -6,7 +6,7 @@ import { storage } from "@/storage.ts";
 export async function scanForKey(
   redis: any,
   phrase: string,
-  logger: any,
+  logger: Logger,
 ): Promise<SearchResult> {
   const log = new PrefixedLogger(logger, "scanForKey");
 

@@ -1,11 +1,11 @@
 import { storage } from "@/storage.ts";
 import { SearchResult } from "../search.ts";
-import { PrefixedLogger } from "../../prefixed-logger.ts";
+import { Logger, PrefixedLogger } from "../../prefixed-logger.ts";
 import { generateText } from "../../llm/generateText.ts";
 
 async function generateKeywords(
   query: string,
-  logger: PrefixedLogger,
+  logger: Logger,
 ): Promise<string[]> {
   logger.info(`Generating keywords for query: ${query}`);
 
@@ -40,7 +40,7 @@ async function generateKeywords(
 export async function scanByCollections(
   redis: any,
   query: string,
-  logger: any,
+  logger: Logger,
 ): Promise<SearchResult> {
   const prefixedLogger = new PrefixedLogger(logger, "scanByCollections");
   prefixedLogger.info("Starting collection scan");

@@ -1,9 +1,16 @@
-export class PrefixedLogger {
-  private logger: any;
+export interface Logger {
+  info(...args: any[]): void;
+  error(...args: any[]): void;
+  warn(...args: any[]): void;
+  debug(...args: any[]): void;
+}
+
+export class PrefixedLogger implements Logger {
+  private logger: Logger;
   private prefix: string;
   private logMessages: string[] = [];
 
-  constructor(logger: any = console, prefix: string) {
+  constructor(logger: Logger = console, prefix: string) {
     this.logger = logger;
     this.prefix = prefix;
     this.info = this.info.bind(this);
@@ -12,30 +19,28 @@ export class PrefixedLogger {
     this.debug = this.debug.bind(this);
   }
 
-  info(message: string) {
-    const prefixedMessage = `[${this.prefix}] ${message}`;
-    this.logMessages.push(prefixedMessage);
-    this.logger.info(prefixedMessage);
+  info(...args: any[]) {
+    const message = [`[${this.prefix}]`, ...args].join(" ");
+    this.logMessages.push(message);
+    this.logger.info(message);
   }
 
-  error(message: string, error?: any) {
-    const prefixedMessage = `[${this.prefix}] ${message}`;
-    this.logMessages.push(
-      error ? `${prefixedMessage} ${error}` : prefixedMessage,
-    );
-    this.logger.error(prefixedMessage, error);
+  error(...args: any[]) {
+    const message = [`[${this.prefix}]`, ...args].join(" ");
+    this.logMessages.push(message);
+    this.logger.error(message);
   }
 
-  warn(message: string) {
-    const prefixedMessage = `[${this.prefix}] ${message}`;
-    this.logMessages.push(prefixedMessage);
-    this.logger.warn(prefixedMessage);
+  warn(...args: any[]) {
+    const message = [`[${this.prefix}]`, ...args].join(" ");
+    this.logMessages.push(message);
+    this.logger.warn(message);
   }
 
-  debug(message: string) {
-    const prefixedMessage = `[${this.prefix}] ${message}`;
-    this.logMessages.push(prefixedMessage);
-    this.logger.debug(prefixedMessage);
+  debug(...args: any[]) {
+    const message = [`[${this.prefix}]`, ...args].join(" ");
+    this.logMessages.push(message);
+    this.logger.debug(message);
   }
 
   getLogs(): string[] {
