@@ -18,7 +18,7 @@ const stringify = lift(({ obj }) => {
   return JSON.stringify(obj, null, 2);
 });
 
-const tap = lift((x) => {
+const tap = lift(x => {
   console.log(x, JSON.stringify(x, null, 2));
   return x;
 });
@@ -176,7 +176,7 @@ window.generateImage = function(prompt) {
  */
 window.sendLLMRequest = async function(system, messages) {
   console.log('iframe: Asking LLM', system, messages);
-  const response = await fetch('http://localhost:5173/api/llm', {
+  const response = await fetch('http://localhost:8000/api/ai/llm', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -15,7 +15,7 @@ const Prompt = z.object({
 type Prompt = z.infer<typeof Prompt>;
 
 const imageUrl = lift(
-  ({ title }) => `/api/img/?prompt=${encodeURIComponent(title)}`,
+  ({ title }) => `/api/ai/img/?prompt=${encodeURIComponent(title)}`,
 );
 
 // FIXME(ja): allowing both detail.value and newTitle is a bit of a hack
@@ -94,7 +94,7 @@ export const prompt = recipe(Title, ({ title }) => {
         />
         <img src={src} width="512" />
         <ul>
-          {variations.map((v) => (
+          {variations.map(v => (
             <img
               title={v.prompt}
               src={imageUrl({ title: v.prompt })}

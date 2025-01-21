@@ -48,10 +48,10 @@ const add = handler<{ detail: { value: string; key: string } }, { s: string }>(
 );
 
 const genImage = lift(
-  ({ prompt }) => `/api/img/?prompt=${encodeURIComponent(prompt)}`,
+  ({ prompt }) => `/api/ai/img/?prompt=${encodeURIComponent(prompt)}`,
 );
 
-const tap = lift((x) => {
+const tap = lift(x => {
   console.log(JSON.stringify(x, null, 2));
 });
 
@@ -88,7 +88,7 @@ const prepSuggestions = lift(({ prompts }) => {
         Suggest new guests to invite to the discussion based on the current guests provided by the user.  Reply with a list of names in JSON, then after the json describe why!`,
     model: "groq:llama-3.1-8b-instant",
     messages: [
-      `Current guests: \n- ${prompts.map((p) => p.prompt).join("\n - ")}`,
+      `Current guests: \n- ${prompts.map(p => p.prompt).join("\n - ")}`,
       '```json\n{"suggestions": ["',
     ],
     stop: "\n```",
@@ -149,9 +149,9 @@ export const latentExplorer = recipe(LatentExplorer, ({ prompts }) => {
           placeholder="new guest"
           oncommon-keydown={add({ prompts })}
         />
-        {result.map((item) => picture({ prompt: item.prompt, item })[UI])}
+        {result.map(item => picture({ prompt: item.prompt, item })[UI])}
         <ul>
-          {suggestions.map((s) => (
+          {suggestions.map(s => (
             <li onclick={add({ prompts, s })}>{s}</li>
           ))}
         </ul>

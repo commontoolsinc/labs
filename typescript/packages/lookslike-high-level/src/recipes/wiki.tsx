@@ -90,8 +90,10 @@ const launcher = handler<PointerEvent, { title: string; canon: string }>(
   (_, { title, canon }) => navigateTo(wiki({ title, canon })),
 );
 
-const imgUrl = lift(
-  ({ prompt }) => prompt ? `/api/img/?prompt=${encodeURIComponent(prompt)}` : '/api/img?prompt=infinite+void',
+const imgUrl = lift(({ prompt }) =>
+  prompt
+    ? `/api/ai/img/?prompt=${encodeURIComponent(prompt)}`
+    : "/api/ai/img?prompt=infinite+void",
 );
 
 const wiki = recipe<{ title: string; canon: string }>(
@@ -119,25 +121,26 @@ const wiki = recipe<{ title: string; canon: string }>(
 
     return {
       [NAME]: str`${title} ~ Wiki Page`,
-      [UI]: <os-container>
-        <h3>{title}</h3>
-        {ifElse(
-          pending,
-          <p><i>generating...</i></p>,
-          <p>{text}</p>,
-        )}
-        {ifElse(
-          prompt,
-          <img src={img} width={256} />,
-          <i></i>
-        )}
-        <ul>
-          {relatedWithClosure.map(
-            ({ title, canon }: { title: string; canon: string }) =>
-              <li onclick={launcher({ title, canon })}>{title}</li>,
+      [UI]: (
+        <os-container>
+          <h3>{title}</h3>
+          {ifElse(
+            pending,
+            <p>
+              <i>generating...</i>
+            </p>,
+            <p>{text}</p>,
           )}
-        </ul>
-      </os-container>,
+          {ifElse(prompt, <img src={img} width={256} />, <i></i>)}
+          <ul>
+            {relatedWithClosure.map(
+              ({ title, canon }: { title: string; canon: string }) => (
+                <li onclick={launcher({ title, canon })}>{title}</li>
+              ),
+            )}
+          </ul>
+        </os-container>
+      ),
       title,
       canon,
     };

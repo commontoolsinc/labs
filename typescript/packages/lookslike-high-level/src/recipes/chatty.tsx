@@ -10,7 +10,7 @@ import {
 import { z } from "zod";
 
 const genImage = lift(
-  ({ prompt }) => `/api/img/?prompt=${encodeURIComponent(prompt)}`,
+  ({ prompt }) => `/api/ai/img/?prompt=${encodeURIComponent(prompt)}`,
 );
 
 const Chat = z

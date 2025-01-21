@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.140.0/http/server.ts";
-import { generateText, streamText } from "npm:ai";
+import { generateText, streamText } from "ai";
 import { crypto } from "https://deno.land/std/crypto/mod.ts";
 import { config } from "https://deno.land/x/dotenv/mod.ts";
 import {

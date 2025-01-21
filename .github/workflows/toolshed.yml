@@ -1,0 +1,96 @@
+name: Toolshed CI/CD
+
+on:
+  push:
+    branches:
+      - toolshed
+      - main
+  pull_request:
+    branches:
+      - toolshed
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: ./typescript/packages/toolshed
+
+    services:
+      redis:
+        image: redis
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.1.5"
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.deno
+            ~/.cache/deno
+          key: ${{ runner.os }}-deno-${{ hashFiles('**/deno.json') }}
+
+      - name: Verify formatting
+        working-directory: typescript/packages/toolshed
+        run: deno fmt --check
+
+      - name: Run linter
+        working-directory: typescript/packages/toolshed
+        run: deno lint
+
+      - name: Run tests
+        working-directory: typescript/packages/toolshed
+        run: deno test -A --env-file=.env.test
+        env:
+          ENV: test
+          PORT: 8000
+          LOG_LEVEL: silent
+          REDIS_URL: redis://localhost:6379
+
+  deploy:
+    needs: test
+    timeout-minutes: 10
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/toolshed')
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: ./typescript/packages/toolshed
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build high-level app
+        working-directory: typescript/packages/lookslike-high-level
+        run: |
+          npm install
+          npm run build
+          mkdir -p ../toolshed/lookslike-highlevel-dist
+          cp -r dist/* ../toolshed/lookslike-highlevel-dist/
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy to Fly.io
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

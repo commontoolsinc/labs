@@ -78,7 +78,7 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
 
 const count = lift(({ items }: { items: [] }) => items?.length || 0);
 
-export default recipe(DungeonGameSchema, (state) => {
+export default recipe(DungeonGameSchema, state => {
   const walls = count({ items: state.walls });
 
   return {
@@ -87,7 +87,7 @@ export default recipe(DungeonGameSchema, (state) => {
       <div>
         <img
           width="256px"
-          src={str`/api/img?prompt=Dungeon+Game+player+${state.player.name}`}
+          src={str`/api/ai/img?prompt=Dungeon+Game+player+${state.player.name}`}
         />
         <div style="border: 1px dashed red;">
           <common-input

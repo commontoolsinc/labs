@@ -43,7 +43,7 @@ export class CommonAudioRecorderElement extends LitElement {
     transcribe = false;
 
     @property({ type: String })
-    url = "/api/transcribe";
+    url = "/api/ai/voice/transcribe";
 
     private mediaRecorder?: MediaRecorder;
     private audioChunks: Blob[] = [];

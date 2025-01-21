@@ -64,7 +64,7 @@ export function extractKeysFromJsonSchema(schema: any): string[] {
         keys.push(key);
         // Recursively get nested keys and prefix them with current key
         const nestedKeys = extractKeysFromJsonSchema(value).map(
-          (k) => `${key}.${k}`,
+          k => `${key}.${k}`,
         );
         keys.push(...nestedKeys);
       }
@@ -167,7 +167,7 @@ export function extractKeysFromZodSchema(schema: z.ZodTypeAny): string[] {
       keys.push(key);
       // Recursively get nested keys and prefix them with current key
       const nestedKeys = extractKeysFromZodSchema(value as any).map(
-        (k) => `${key}.${k}`,
+        k => `${key}.${k}`,
       );
       keys.push(...nestedKeys);
     }
@@ -411,7 +411,7 @@ import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
 const stringify = lift((state) => JSON.stringify(state, null, 2));
-const imageUrl = lift((prompt) => '/api/img?prompt=' + encodeURIComponent(prompt));
+const imageUrl = lift((prompt) => '/api/ai/img?prompt=' + encodeURIComponent(prompt));
 
 const Schema = ${zodCode};
 //PREFILL

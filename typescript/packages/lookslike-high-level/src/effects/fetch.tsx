@@ -15,15 +15,15 @@ const provider = refer({
 });
 
 export const REQUEST = {
-  STATUS: 'request/status',
-  STATUS_CODE: 'request/status/code',
-  STATUS_TEXT: 'request/status/text',
-}
+  STATUS: "request/status",
+  STATUS_CODE: "request/status/code",
+  STATUS_TEXT: "request/status/text",
+};
 export const RESPONSE = {
-  JSON: 'response/json',
-  TEXT: 'response/text',
-  BYTES: 'response/bytes',
-}
+  JSON: "response/json",
+  TEXT: "response/text",
+  BYTES: "response/bytes",
+};
 
 type State =
   | { status: "Open"; source: Fetch }
@@ -32,7 +32,7 @@ type State =
   | { status: "Complete"; source: Fetch; content: {} };
 
 export default service({
-  'fetch/send': {
+  "fetch/send": {
     select: {
       request: $.request,
     },
@@ -44,19 +44,25 @@ export default service({
           status: "Sending",
           source: effect.source,
           response: globalThis.fetch(effect.source.request),
-        }
+        };
 
         return [
           { Retract: [provider, "~/send", request] },
           { Upsert: [provider, "~/receive", state as any] },
-          { Upsert: [effect.source.consumer, effect.source.port, effect.source.id] },
+          {
+            Upsert: [
+              effect.source.consumer,
+              effect.source.port,
+              effect.source.id,
+            ],
+          },
           { Upsert: [effect.source.id, REQUEST.STATUS, "Sending"] },
         ];
       }
       return [];
     },
   },
-  'fetch/receive': {
+  "fetch/receive": {
     select: {
       request: $.request,
     },
@@ -77,21 +83,27 @@ export default service({
           status: "Receiving",
           source: effect.source,
           content,
-        }
+        };
 
         return [
           { Retract: [provider, "~/receive", request] },
           { Upsert: [provider, `~/complete`, state as any] },
           { Upsert: [effect.source.id, REQUEST.STATUS, "Receiving"] },
           { Upsert: [effect.source.id, REQUEST.STATUS_CODE, response.status] },
-          { Upsert: [effect.source.id, REQUEST.STATUS_TEXT, response.statusText] },
+          {
+            Upsert: [
+              effect.source.id,
+              REQUEST.STATUS_TEXT,
+              response.statusText,
+            ],
+          },
         ];
       }
 
       return [];
     },
   },
-  'fetch/complete': {
+  "fetch/complete": {
     select: {
       request: $.request,
     },
@@ -116,8 +128,8 @@ export default service({
           );
         } else if (effect.source.expect === "text") {
           let text: string;
-          if (typeof content !== 'string') {
-            text = JSON.stringify(content)
+          if (typeof content !== "string") {
+            text = JSON.stringify(content);
           } else {
             text = content;
           }
@@ -140,7 +152,7 @@ export default service({
     },
   },
 
-  'fetch/idle': {
+  "fetch/idle": {
     select: {
       self: $.self,
     },
@@ -160,7 +172,7 @@ export default service({
     },
   },
 
-  'fetch/active': {
+  "fetch/active": {
     select: {
       self: $.self,
       requests: [{ request: $.request, state: $.state }],
@@ -241,23 +253,25 @@ export const fetch = (consumer: Reference, port: string, request: Request) =>
 type LlmRequest = {
   prompt?: string;
   messages?: {
-    role: string; content: string;
+    role: string;
+    content: string;
   }[];
   system?: string;
-  model?: string,
-  max_tokens?: number,
-  stop?: string,
-}
+  model?: string;
+  max_tokens?: number;
+  stop?: string;
+};
 
 export const LLM_SERVER_URL =
   typeof window !== "undefined"
-    ? window.location.protocol + "//" + window.location.host + "/api/llm"
-    : "//api/llm";
+    ? window.location.protocol + "//" + window.location.host + "/api/ai/llm"
+    : "//api/ai/llm";
 
 export const llm = (consumer: Reference, port: string, request: LlmRequest) =>
-  new Fetch(consumer, port, new Request(
-    LLM_SERVER_URL,
-    {
+  new Fetch(
+    consumer,
+    port,
+    new Request(LLM_SERVER_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -266,10 +280,13 @@ export const llm = (consumer: Reference, port: string, request: LlmRequest) =>
         model: "claude-3-5-sonnet",
         max_tokens: 4096,
         ...request,
-        messages: request.messages || [{ role: "user", content: request.prompt }],
+        messages: request.messages || [
+          { role: "user", content: request.prompt },
+        ],
       }),
-    }
-  ), "json");
+    }),
+    "json",
+  );
 
 export type Expect = "text" | "json" | "bytes";
 
