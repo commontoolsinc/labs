@@ -4,6 +4,8 @@ import { jsonContent } from "stoker/openapi/helpers";
 import {
   ProcessSchemaRequestSchema,
   ProcessSchemaResponseSchema,
+  SearchSchemaRequestSchema,
+  SearchSchemaResponseSchema,
 } from "./spell.handlers.ts";
 
 const tags = ["Spellcaster"];
@@ -30,3 +32,26 @@ export const imagine = createRoute({
 });
 
 export type ProcessSchemaRoute = typeof imagine;
+
+export const search = createRoute({
+  path: "/ai/spell/search",
+  method: "post",
+  tags,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: SearchSchemaRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      SearchSchemaResponseSchema,
+      "The search results",
+    ),
+  },
+});
+
+export type SearchSchemaRoute = typeof search;
