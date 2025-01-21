@@ -4,7 +4,7 @@ import { scanForKey } from "./strategies/scanForKey.ts";
 import { scanForText } from "./strategies/scanForText.ts";
 import { generateSchema, scanBySchema } from "./strategies/scanBySchema.ts";
 import { scanByCollections } from "./strategies/scanByCollections.ts";
-import { PrefixedLogger } from "../prefixed-logger.ts";
+import { Logger, PrefixedLogger } from "../prefixed-logger.ts";
 
 export interface SearchResult {
   source: string;
@@ -31,11 +31,10 @@ class SearchAgent extends BaseAgent {
   private searchPromises: Map<string, Promise<SearchResult>> = new Map();
   private redis: any;
 
-  constructor(logger: any, query: string, redis: any) {
+  constructor(logger: Logger, query: string, redis: any) {
     super(logger, "SearchAgent");
     this.query = query;
     this.redis = redis;
-    this.logger = new PrefixedLogger(logger, "SearchAgent");
     this.resetSearch();
   }
 
@@ -167,24 +166,23 @@ const searchTreeDefinition = `root {
 
 export async function performSearch(
   query: string,
-  logger: any,
+  logger: Logger,
   redis: any,
 ): Promise<CombinedResults> {
   return new Promise((resolve, reject) => {
-    const prefixedLogger = new PrefixedLogger(logger, "SearchAgent");
     const agent = new SearchAgent(logger, query, redis);
     const tree = new BehaviourTree(searchTreeDefinition, agent);
 
-    prefixedLogger.info("Starting behavior tree execution");
+    logger.info("Starting behavior tree execution");
 
     const stepUntilComplete = () => {
       tree.step();
       const state = tree.getState();
       if (state === State.SUCCEEDED) {
-        prefixedLogger.info("Behavior tree completed successfully");
+        logger.info("Behavior tree completed successfully");
         resolve(agent.getCombinedResults());
       } else if (state === State.FAILED) {
-        prefixedLogger.error("Behavior tree failed");
+        logger.error("Behavior tree failed");
         reject(new Error("Search failed"));
       } else {
         setTimeout(stepUntilComplete, 100);

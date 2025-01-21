@@ -5,7 +5,10 @@ import { SearchResult } from "../search.ts";
 import { PrefixedLogger } from "../../prefixed-logger.ts";
 import { generateText } from "../../llm/generateText.ts";
 
-export async function generateSchema(query: string, logger: any): Promise<any> {
+export async function generateSchema(
+  query: string,
+  logger: Logger,
+): Promise<any> {
   const prefixedLogger = new PrefixedLogger(logger, "scanBySchema");
   prefixedLogger.info(`Generating schema for query: ${query}`);
   const schemaPrompt = {
@@ -33,7 +36,7 @@ export async function generateSchema(query: string, logger: any): Promise<any> {
 export async function scanBySchema(
   redis: any,
   schema: any,
-  logger: any,
+  logger: Logger,
 ): Promise<SearchResult> {
   const prefixedLogger = new PrefixedLogger(logger, "scanBySchema");
   prefixedLogger.info("Starting schema scan");
