@@ -7,4 +7,14 @@ console.log(`Server is running on port http://localhost:${port}`);
 
 export type AppType = typeof app;
 
-Deno.serve(app.fetch);
+console.log("WUATTTT", env.ENV);
+if (env.ENV === "development") {
+  const options = {
+    port: 8443,
+    cert: await Deno.readTextFile("./cert.pem"),
+    key: await Deno.readTextFile("./key.pem"),
+  };
+  Deno.serve(options, app.fetch);
+} else {
+  Deno.serve(app.fetch);
+}
