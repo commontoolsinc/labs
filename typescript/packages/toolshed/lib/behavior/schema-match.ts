@@ -30,7 +30,7 @@ export function checkSchemaMatch(
     }
 
     if (Array.isArray(obj)) {
-      return obj.some(item => checkSubtrees(item));
+      return obj.some((item) => checkSubtrees(item));
     }
 
     const result = validator.validate(obj, jsonSchema as Schema);
@@ -38,7 +38,7 @@ export function checkSchemaMatch(
       return true;
     }
 
-    return Object.values(obj).some(value => checkSubtrees(value));
+    return Object.values(obj).some((value) => checkSubtrees(value));
   }
 
   return checkSubtrees(data);
