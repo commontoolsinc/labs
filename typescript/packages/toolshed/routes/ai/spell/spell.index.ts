@@ -19,7 +19,7 @@ router.use("*", async (c, next) => {
       url: env.BLOBBY_REDIS_URL,
     });
 
-    redis.on("error", (err) => {
+    redis.on("error", err => {
       logger.error({ err }, "Redis client error");
     });
 
@@ -40,5 +40,6 @@ router.use("*", async (c, next) => {
 });
 
 router.openapi(routes.imagine, handlers.imagine);
+router.openapi(routes.search, handlers.search);
 
 export default router;

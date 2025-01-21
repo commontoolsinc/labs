@@ -45,7 +45,34 @@ export const ProcessSchemaResponseSchema = z.object({
 export type ProcessSchemaRequest = z.infer<typeof ProcessSchemaRequestSchema>;
 export type ProcessSchemaResponse = z.infer<typeof ProcessSchemaResponseSchema>;
 
-export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
+export const SearchSchemaRequestSchema = z.object({
+  query: z.string(),
+  options: z
+    .object({
+      limit: z.number().optional().default(10),
+      offset: z.number().optional().default(0),
+    })
+    .optional(),
+});
+
+export const SearchSchemaResponseSchema = z.object({
+  results: z.array(
+    z.object({
+      key: z.string(),
+      data: z.record(z.any()),
+      score: z.number(),
+    }),
+  ),
+  metadata: z.object({
+    total: z.number(),
+    processingTime: z.number(),
+  }),
+});
+
+export type SearchSchemaRequest = z.infer<typeof SearchSchemaRequestSchema>;
+export type SearchSchemaResponse = z.infer<typeof SearchSchemaResponseSchema>;
+
+export const imagine: AppRouteHandler<ProcessSchemaRoute> = async c => {
   const redis = c.get("blobbyRedis");
   if (!redis) throw new Error("Redis client not found in context");
   const logger = c.get("logger");
@@ -95,9 +122,10 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
 
     const maxExamples = body.options?.maxExamples || 5;
 
-    const examplesList = matchingExamples.length > 0
-      ? matchingExamples.slice(0, maxExamples)
-      : allExamples.sort(() => Math.random() - 0.5).slice(0, maxExamples);
+    const examplesList =
+      matchingExamples.length > 0
+        ? matchingExamples.slice(0, maxExamples)
+        : allExamples.sort(() => Math.random() - 0.5).slice(0, maxExamples);
 
     const prompt = constructSchemaPrompt(
       body.schema,
@@ -185,7 +213,7 @@ function checkSchemaMatch(
     }
 
     if (Array.isArray(obj)) {
-      return obj.some((item) => checkSubtrees(item));
+      return obj.some(item => checkSubtrees(item));
     }
 
     const result = validator.validate(obj, jsonSchema);
@@ -193,7 +221,7 @@ function checkSchemaMatch(
       return true;
     }
 
-    return Object.values(obj).some((value) => checkSubtrees(value));
+    return Object.values(obj).some(value => checkSubtrees(value));
   }
 
   return checkSubtrees(data);
@@ -218,8 +246,8 @@ function constructSchemaPrompt(
       if (typeof value === "string") {
         // Truncate long strings
         if (value.length > MAX_VALUE_LENGTH) {
-          sanitized[key] = value.substring(0, MAX_VALUE_LENGTH) +
-            "... [truncated]";
+          sanitized[key] =
+            value.substring(0, MAX_VALUE_LENGTH) + "... [truncated]";
           continue;
         }
       } else if (typeof value === "object" && value !== null) {
@@ -238,9 +266,11 @@ function constructSchemaPrompt(
   const examplesStr = examples
     .map(({ key, data }) => {
       const sanitizedData = sanitizeObject(data);
-      return `--- Example from "${key}" ---\n${
-        JSON.stringify(sanitizedData, null, 2)
-      }`;
+      return `--- Example from "${key}" ---\n${JSON.stringify(
+        sanitizedData,
+        null,
+        2,
+      )}`;
     })
     .join("\n\n");
 
@@ -275,3 +305,33 @@ Respond with ${
     many ? "an array of valid JSON objects" : "a single valid JSON object"
   }.`;
 }
+
+export const search: AppRouteHandler<SearchSchemaRoute> = async c => {
+  const redis = c.get("blobbyRedis");
+  if (!redis) throw new Error("Redis client not found in context");
+  const logger = c.get("logger");
+
+  const startTime = performance.now();
+  const body = (await c.req.json()) as SearchSchemaRequest;
+
+  try {
+    logger.info({ query: body.query }, "Processing search request");
+
+    // Stub implementation - just returns empty results for now
+    const response: SearchSchemaResponse = {
+      results: [],
+      metadata: {
+        total: 0,
+        processingTime: Math.round(performance.now() - startTime),
+      },
+    };
+
+    return c.json(response, HttpStatusCodes.OK);
+  } catch (error) {
+    logger.error({ error }, "Error processing search");
+    return c.json(
+      { error: "Failed to process search" },
+      HttpStatusCodes.INTERNAL_SERVER_ERROR,
+    );
+  }
+};
