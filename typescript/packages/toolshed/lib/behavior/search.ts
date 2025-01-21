@@ -130,15 +130,15 @@ class SearchAgent extends BaseAgent {
 
         const seenKeys = new Set<string>();
         const dedupedResults = allResults
-          .map(resultSet => ({
+          .map((resultSet) => ({
             source: resultSet.source,
-            results: resultSet.results.filter(result => {
+            results: resultSet.results.filter((result) => {
               if (seenKeys.has(result.key)) return false;
               seenKeys.add(result.key);
               return true;
             }),
           }))
-          .filter(result => result.results.length > 0);
+          .filter((result) => result.results.length > 0);
 
         this.results = dedupedResults;
         this.logger.info(
