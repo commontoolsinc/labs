@@ -77,7 +77,7 @@ export const SearchSchemaResponseSchema = z.object({
 export type SearchSchemaRequest = z.infer<typeof SearchSchemaRequestSchema>;
 export type SearchSchemaResponse = z.infer<typeof SearchSchemaResponseSchema>;
 
-export const imagine: AppRouteHandler<ProcessSchemaRoute> = async c => {
+export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
   const redis = c.get("blobbyRedis");
   if (!redis) throw new Error("Redis client not found in context");
   const logger = c.get("logger");
@@ -127,10 +127,9 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async c => {
 
     const maxExamples = body.options?.maxExamples || 5;
 
-    const examplesList =
-      matchingExamples.length > 0
-        ? matchingExamples.slice(0, maxExamples)
-        : allExamples.sort(() => Math.random() - 0.5).slice(0, maxExamples);
+    const examplesList = matchingExamples.length > 0
+      ? matchingExamples.slice(0, maxExamples)
+      : allExamples.sort(() => Math.random() - 0.5).slice(0, maxExamples);
 
     const prompt = constructSchemaPrompt(
       body.schema,
@@ -218,7 +217,7 @@ function checkSchemaMatch(
     }
 
     if (Array.isArray(obj)) {
-      return obj.some(item => checkSubtrees(item));
+      return obj.some((item) => checkSubtrees(item));
     }
 
     const result = validator.validate(obj, jsonSchema);
@@ -226,7 +225,7 @@ function checkSchemaMatch(
       return true;
     }
 
-    return Object.values(obj).some(value => checkSubtrees(value));
+    return Object.values(obj).some((value) => checkSubtrees(value));
   }
 
   return checkSubtrees(data);
@@ -251,8 +250,8 @@ function constructSchemaPrompt(
       if (typeof value === "string") {
         // Truncate long strings
         if (value.length > MAX_VALUE_LENGTH) {
-          sanitized[key] =
-            value.substring(0, MAX_VALUE_LENGTH) + "... [truncated]";
+          sanitized[key] = value.substring(0, MAX_VALUE_LENGTH) +
+            "... [truncated]";
           continue;
         }
       } else if (typeof value === "object" && value !== null) {
@@ -271,11 +270,13 @@ function constructSchemaPrompt(
   const examplesStr = examples
     .map(({ key, data }) => {
       const sanitizedData = sanitizeObject(data);
-      return `--- Example from "${key}" ---\n${JSON.stringify(
-        sanitizedData,
-        null,
-        2,
-      )}`;
+      return `--- Example from "${key}" ---\n${
+        JSON.stringify(
+          sanitizedData,
+          null,
+          2,
+        )
+      }`;
     })
     .join("\n\n");
 
@@ -311,7 +312,7 @@ Respond with ${
   }.`;
 }
 
-export const search: AppRouteHandler<SearchSchemaRoute> = async c => {
+export const search: AppRouteHandler<SearchSchemaRoute> = async (c) => {
   const redis = c.get("blobbyRedis");
   if (!redis) throw new Error("Redis client not found in context");
   const logger = c.get("logger");

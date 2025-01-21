@@ -46,7 +46,7 @@ export async function scanByCollections(
   prefixedLogger.info("Starting collection scan");
 
   const keywords = await generateKeywords(query, prefixedLogger);
-  const collectionKeys = keywords.map(keyword => `#${keyword}`);
+  const collectionKeys = keywords.map((keyword) => `#${keyword}`);
 
   prefixedLogger.info(`Looking up collections: ${collectionKeys.join(", ")}`);
 
