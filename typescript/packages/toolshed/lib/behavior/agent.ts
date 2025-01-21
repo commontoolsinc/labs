@@ -1,3 +1,5 @@
+import { State } from "mistreevous";
+
 export abstract class BaseAgent {
   protected logger: any;
   protected agentName: string;
