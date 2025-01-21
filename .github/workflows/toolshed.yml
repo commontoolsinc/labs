@@ -80,13 +80,13 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Build high-level app
-        working-directory: typescript/packages/lookslike-high-level
-        run: |
-          npm install
-          npm run build
-          mkdir -p ../toolshed/lookslike-highlevel-dist
-          cp -r dist/* ../toolshed/lookslike-highlevel-dist/
+      # - name: Build high-level app
+      #   working-directory: typescript/packages/lookslike-high-level
+      #   run: |
+      #     npm install
+      #     npm run build
+      #     mkdir -p ../toolshed/lookslike-highlevel-dist
+      #     cp -r dist/* ../toolshed/lookslike-highlevel-dist/
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
