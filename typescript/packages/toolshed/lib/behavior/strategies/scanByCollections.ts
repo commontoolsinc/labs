@@ -2,6 +2,7 @@ import { storage } from "@/storage.ts";
 import { SearchResult } from "../search.ts";
 import { Logger, PrefixedLogger } from "../../prefixed-logger.ts";
 import { generateText } from "../../llm/generateText.ts";
+import type { RedisClientType } from "redis";
 
 async function generateKeywords(
   query: string,
@@ -38,8 +39,8 @@ async function generateKeywords(
 }
 
 export async function scanByCollections(
-  redis: any,
   query: string,
+  redis: RedisClientType,
   logger: Logger,
 ): Promise<SearchResult> {
   const prefixedLogger = new PrefixedLogger(logger, "scanByCollections");

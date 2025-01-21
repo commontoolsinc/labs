@@ -4,7 +4,8 @@ import { scanForKey } from "./strategies/scanForKey.ts";
 import { scanForText } from "./strategies/scanForText.ts";
 import { generateSchema, scanBySchema } from "./strategies/scanBySchema.ts";
 import { scanByCollections } from "./strategies/scanByCollections.ts";
-import { Logger, PrefixedLogger } from "../prefixed-logger.ts";
+import { Logger } from "../prefixed-logger.ts";
+import type { RedisClientType } from "redis";
 
 export interface SearchResult {
   source: string;
@@ -42,9 +43,9 @@ class SearchAgent extends BaseAgent {
   private query: string = "";
   private results: SearchResult[] = [];
   private searchPromises: Map<string, Promise<SearchResult>> = new Map();
-  private redis: any;
+  private redis: RedisClientType;
 
-  constructor(logger: Logger, query: string, redis: any) {
+  constructor(query: string, redis: RedisClientType, logger: Logger) {
     super(logger, "SearchAgent");
     this.query = query;
     this.redis = redis;
@@ -72,7 +73,7 @@ class SearchAgent extends BaseAgent {
         this.logger.info("Starting key match search");
         this.searchPromises.set(
           "key-search",
-          scanForKey(this.redis, this.query, this.logger),
+          scanForKey(this.query, this.redis, this.logger),
         );
       }
       return State.SUCCEEDED;
@@ -85,7 +86,7 @@ class SearchAgent extends BaseAgent {
         this.logger.info("Starting text match search");
         this.searchPromises.set(
           "text-search",
-          scanForText(this.redis, this.query, this.logger),
+          scanForText(this.query, this.redis, this.logger),
         );
       }
       return State.SUCCEEDED;
@@ -114,7 +115,7 @@ class SearchAgent extends BaseAgent {
         this.logger.info("Starting collection match search");
         this.searchPromises.set(
           "collection-match",
-          scanByCollections(this.redis, this.query, this.logger),
+          scanByCollections(this.query, this.redis, this.logger),
         );
       }
       return State.SUCCEEDED;
@@ -166,11 +167,11 @@ class SearchAgent extends BaseAgent {
 
 export async function performSearch(
   query: string,
+  redis: RedisClientType,
   logger: Logger,
-  redis: any,
 ): Promise<CombinedResults> {
   return new Promise((resolve, reject) => {
-    const agent = new SearchAgent(logger, query, redis);
+    const agent = new SearchAgent(query, redis, logger);
     const tree = new BehaviourTree(searchTreeDefinition, agent);
 
     logger.info("Starting behavior tree execution");
