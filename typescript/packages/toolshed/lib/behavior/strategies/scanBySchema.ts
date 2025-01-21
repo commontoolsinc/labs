@@ -1,5 +1,5 @@
-import { storage } from "../../../routes/storage/blobby/blobby.handlers.ts";
-import { getAllBlobs } from "../../../routes/storage/blobby/lib/redis.ts";
+import { getAllBlobs } from "@/lib/redis/redis.ts";
+import { storage } from "@/storage.ts";
 import { checkSchemaMatch } from "../schema-match.ts";
 import { SearchResult } from "../search.ts";
 import { PrefixedLogger } from "../../prefixed-logger.ts";

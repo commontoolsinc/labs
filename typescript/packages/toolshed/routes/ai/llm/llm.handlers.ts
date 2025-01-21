@@ -1,13 +1,8 @@
-import { streamText } from "npm:ai";
-import { crypto } from "@std/crypto/crypto";
 import * as HttpStatusCodes from "stoker/http-status-codes";
-import { z } from "zod";
-
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type { GenerateTextRoute, GetModelsRoute } from "./llm.routes.ts";
 import {
   ALIAS_NAMES,
-  findModel,
   ModelList,
   MODELS,
   TASK_MODELS,

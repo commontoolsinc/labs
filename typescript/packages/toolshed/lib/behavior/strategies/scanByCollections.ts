@@ -1,4 +1,4 @@
-import { storage } from "../../../routes/storage/blobby/blobby.handlers.ts";
+import { storage } from "@/storage.ts";
 import { SearchResult } from "../search.ts";
 import { PrefixedLogger } from "../../prefixed-logger.ts";
 import { generateText } from "../../llm/generateText.ts";

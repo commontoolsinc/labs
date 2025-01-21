@@ -1,5 +1,3 @@
-import { ensureDir } from "@std/fs";
-import { join } from "@std/path";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
   getBlob,
@@ -7,21 +5,12 @@ import type {
   listBlobs,
   uploadBlob,
 } from "./blobby.routes.ts";
-import {
-  addBlobToUser,
-  getAllBlobs,
-  getUserBlobs,
-} from "@/routes/storage/blobby/lib/redis.ts";
-import { DiskStorage } from "@/routes/storage/blobby/lib/storage.ts";
-
-const DATA_DIR = "./cache/blobby";
-
-export const storage = new DiskStorage(DATA_DIR);
-await storage.init();
+import { addBlobToUser, getAllBlobs, getUserBlobs } from "@/lib/redis/redis.ts";
+import { storage } from "@/storage.ts";
 
 export const uploadBlobHandler: AppRouteHandler<
   typeof uploadBlob
-> = async (c) => {
+> = async c => {
   const redis = c.get("blobbyRedis");
   if (!redis) throw new Error("Redis client not found in context");
   const logger = c.get("logger");
@@ -39,7 +28,7 @@ export const uploadBlobHandler: AppRouteHandler<
   return c.json({ key }, 200);
 };
 
-export const getBlobHandler: AppRouteHandler<typeof getBlob> = async (c) => {
+export const getBlobHandler: AppRouteHandler<typeof getBlob> = async c => {
   const key = c.req.param("key");
   const content = await storage.getBlob(key);
 
@@ -52,7 +41,7 @@ export const getBlobHandler: AppRouteHandler<typeof getBlob> = async (c) => {
 
 export const getBlobPathHandler: AppRouteHandler<
   typeof getBlobPath
-> = async (c) => {
+> = async c => {
   const key = c.req.param("key");
   const path = c.req.param("path");
 
@@ -85,9 +74,7 @@ export const getBlobPathHandler: AppRouteHandler<
   }
 };
 
-export const listBlobsHandler: AppRouteHandler<typeof listBlobs> = async (
-  c,
-) => {
+export const listBlobsHandler: AppRouteHandler<typeof listBlobs> = async c => {
   const redis = c.get("blobbyRedis");
   if (!redis) throw new Error("Redis client not found in context");
   const logger = c.get("logger");
@@ -97,9 +84,10 @@ export const listBlobsHandler: AppRouteHandler<typeof listBlobs> = async (
   const user = "system";
   try {
     // Get the list of blobs based on user/all flag
-    const blobs = showAll || showAllWithData
-      ? await getAllBlobs(redis)
-      : await getUserBlobs(redis, user);
+    const blobs =
+      showAll || showAllWithData
+        ? await getAllBlobs(redis)
+        : await getUserBlobs(redis, user);
 
     // If showAllWithData is true, fetch the full blob data for each hash
     if (showAllWithData) {

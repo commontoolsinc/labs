@@ -1,7 +1,7 @@
-import { storage } from "../../../routes/storage/blobby/blobby.handlers.ts";
-import { getAllBlobs } from "../../../routes/storage/blobby/lib/redis.ts";
 import { SearchResult } from "../search.ts";
 import { PrefixedLogger } from "../../prefixed-logger.ts";
+import { getAllBlobs } from "@/lib/redis/redis.ts";
+import { storage } from "@/storage.ts";
 
 export async function scanForKey(
   redis: any,
