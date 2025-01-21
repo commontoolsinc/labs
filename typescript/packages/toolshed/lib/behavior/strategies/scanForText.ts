@@ -1,11 +1,12 @@
 import { getAllBlobs } from "@/lib/redis/redis.ts";
 import { storage } from "@/storage.ts";
-import { PrefixedLogger } from "../../prefixed-logger.ts";
+import { Logger, PrefixedLogger } from "../../prefixed-logger.ts";
 import { SearchResult } from "../search.ts";
+import type { RedisClientType } from "redis";
 
 export async function scanForText(
-  redis: any,
   phrase: string,
+  redis: RedisClientType,
   logger: Logger,
 ): Promise<SearchResult> {
   const prefixedLogger = new PrefixedLogger(logger, "scanForText");

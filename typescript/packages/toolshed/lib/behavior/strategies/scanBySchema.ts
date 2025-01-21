@@ -2,8 +2,9 @@ import { getAllBlobs } from "@/lib/redis/redis.ts";
 import { storage } from "@/storage.ts";
 import { checkSchemaMatch } from "../schema-match.ts";
 import { SearchResult } from "../search.ts";
-import { PrefixedLogger } from "../../prefixed-logger.ts";
+import { Logger, PrefixedLogger } from "../../prefixed-logger.ts";
 import { generateText } from "../../llm/generateText.ts";
+import type { RedisClientType } from "redis";
 
 export async function generateSchema(
   query: string,
@@ -34,8 +35,8 @@ export async function generateSchema(
 }
 
 export async function scanBySchema(
-  redis: any,
   schema: any,
+  redis: RedisClientType,
   logger: Logger,
 ): Promise<SearchResult> {
   const prefixedLogger = new PrefixedLogger(logger, "scanBySchema");

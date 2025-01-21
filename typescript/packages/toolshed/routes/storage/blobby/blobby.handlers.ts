@@ -7,6 +7,7 @@ import type {
 } from "./blobby.routes.ts";
 import { addBlobToUser, getAllBlobs, getUserBlobs } from "@/lib/redis/redis.ts";
 import { storage } from "@/storage.ts";
+import type { RedisClientType } from "redis";
 
 export const uploadBlobHandler: AppRouteHandler<
   typeof uploadBlob
@@ -77,7 +78,7 @@ export const getBlobPathHandler: AppRouteHandler<
 export const listBlobsHandler: AppRouteHandler<typeof listBlobs> = async (
   c,
 ) => {
-  const redis = c.get("blobbyRedis");
+  const redis: RedisClientType = c.get("blobbyRedis");
   if (!redis) throw new Error("Redis client not found in context");
   const logger = c.get("logger");
   const showAll = c.req.query("all") === "true";
