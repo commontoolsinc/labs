@@ -1,5 +1,5 @@
 import { ensureDir } from "https://deno.land/std/fs/mod.ts";
-import { colors, timestamp } from "./cli.ts";
+import { colors, timestamp } from "../../routes/ai/llm/cli.ts";
 
 export const CACHE_DIR = "./cache/llm-api-cache";
 
@@ -15,7 +15,7 @@ export async function hashKey(key: string): Promise<string> {
   const data = encoder.encode(key);
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
 export async function loadItem(key: string): Promise<CacheItem | null> {
@@ -24,9 +24,9 @@ export async function loadItem(key: string): Promise<CacheItem | null> {
   try {
     const cacheData = await Deno.readTextFile(filePath);
     console.log(
-      `${timestamp()} ${colors.green}📦 Cache loaded:${colors.reset} ${
-        filePath.slice(-12)
-      }`,
+      `${timestamp()} ${colors.green}📦 Cache loaded:${colors.reset} ${filePath.slice(
+        -12,
+      )}`,
     );
     return JSON.parse(cacheData);
   } catch {

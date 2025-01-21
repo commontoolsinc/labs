@@ -1,9 +1,9 @@
-import { generateTextCore } from "../../../routes/ai/llm/llm.handlers.ts";
 import { storage } from "../../../routes/storage/blobby/blobby.handlers.ts";
 import { getAllBlobs } from "../../../routes/storage/blobby/lib/redis.ts";
 import { checkSchemaMatch } from "../schema-match.ts";
 import { SearchResult } from "../search.ts";
 import { PrefixedLogger } from "../../prefixed-logger.ts";
+import { generateText } from "../../llm/generateText.ts";
 
 export async function generateSchema(query: string, logger: any): Promise<any> {
   const prefixedLogger = new PrefixedLogger(logger, "scanBySchema");
@@ -24,7 +24,7 @@ export async function generateSchema(query: string, logger: any): Promise<any> {
     stream: false,
   };
 
-  const schemaText = await generateTextCore(schemaPrompt);
+  const schemaText = await generateText(schemaPrompt);
   const schema = JSON.parse(schemaText.message.content);
   prefixedLogger.info(`Generated schema:\n${JSON.stringify(schema, null, 2)}`);
   return schema;
