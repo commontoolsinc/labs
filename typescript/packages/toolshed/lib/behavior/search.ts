@@ -38,8 +38,12 @@ const searchTreeDefinition = `root {
   }
 }`;
 
+function resolve<T>(value: T) {
+  return new Promise<T>((resolve) => resolve(value));
+}
+
 class SearchAgent extends BaseAgent {
-  [key: string]: any;
+  [key: string]: unknown;
   private query: string = "";
   private results: SearchResult[] = [];
   private searchPromises: Map<string, Promise<SearchResult>> = new Map();
@@ -59,15 +63,15 @@ class SearchAgent extends BaseAgent {
     this.logger.info("Reset search state");
   }
 
-  async InitiateSearch(): Promise<State> {
+  InitiateSearch(): Promise<State> {
     return this.measureStep("InitiateSearch", async () => {
       this.resetSearch();
       this.logger.info(`Initiated search with query: ${this.query}`);
-      return State.SUCCEEDED;
+      return await resolve(State.SUCCEEDED);
     });
   }
 
-  async SearchKeyMatch(): Promise<State> {
+  SearchKeyMatch(): Promise<State> {
     return this.measureStep("SearchKeyMatch", async () => {
       if (!this.searchPromises.has("key-search")) {
         this.logger.info("Starting key match search");
@@ -76,11 +80,11 @@ class SearchAgent extends BaseAgent {
           scanForKey(this.query, this.redis, this.logger),
         );
       }
-      return State.SUCCEEDED;
+      return await resolve(State.SUCCEEDED);
     });
   }
 
-  async SearchTextMatch(): Promise<State> {
+  SearchTextMatch(): Promise<State> {
     return this.measureStep("SearchTextMatch", async () => {
       if (!this.searchPromises.has("text-search")) {
         this.logger.info("Starting text match search");
@@ -89,11 +93,11 @@ class SearchAgent extends BaseAgent {
           scanForText(this.query, this.redis, this.logger),
         );
       }
-      return State.SUCCEEDED;
+      return await resolve(State.SUCCEEDED);
     });
   }
 
-  async SearchSchemaMatch(): Promise<State> {
+  SearchSchemaMatch(): Promise<State> {
     return this.measureStep("SearchSchemaMatch", async () => {
       if (!this.searchPromises.has("schema-match")) {
         this.logger.info("Starting schema match search");
@@ -102,14 +106,14 @@ class SearchAgent extends BaseAgent {
 
         this.searchPromises.set(
           "schema-match",
-          scanBySchema(this.redis, schema, this.logger),
+          scanBySchema(schema, this.redis, this.logger),
         );
       }
-      return State.SUCCEEDED;
+      return await resolve(State.SUCCEEDED);
     });
   }
 
-  async SearchCollectionMatch(): Promise<State> {
+  SearchCollectionMatch(): Promise<State> {
     return this.measureStep("SearchCollectionMatch", async () => {
       if (!this.searchPromises.has("collection-match")) {
         this.logger.info("Starting collection match search");
@@ -118,11 +122,11 @@ class SearchAgent extends BaseAgent {
           scanByCollections(this.query, this.redis, this.logger),
         );
       }
-      return State.SUCCEEDED;
+      return await resolve(State.SUCCEEDED);
     });
   }
 
-  async CollectResults(): Promise<State> {
+  CollectResults(): Promise<State> {
     return this.measureStep("CollectResults", async () => {
       try {
         this.logger.info("Collecting results from all sources");
@@ -144,10 +148,10 @@ class SearchAgent extends BaseAgent {
         this.logger.info(
           `Collected ${this.results.length} result sets after deduplication`,
         );
-        return State.SUCCEEDED;
+        return await resolve(State.SUCCEEDED);
       } catch (error) {
         this.logger.error("Error collecting results:", error);
-        return State.FAILED;
+        return await resolve(State.FAILED);
       }
     });
   }
@@ -165,7 +169,7 @@ class SearchAgent extends BaseAgent {
   }
 }
 
-export async function performSearch(
+export function performSearch(
   query: string,
   redis: RedisClientType,
   logger: Logger,

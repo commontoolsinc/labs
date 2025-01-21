@@ -1,7 +1,11 @@
 export interface Logger {
+  // deno-lint-ignore no-explicit-any
   info(...args: any[]): void;
+  // deno-lint-ignore no-explicit-any
   error(...args: any[]): void;
+  // deno-lint-ignore no-explicit-any
   warn(...args: any[]): void;
+  // deno-lint-ignore no-explicit-any
   debug(...args: any[]): void;
 }
 
@@ -19,24 +23,28 @@ export class PrefixedLogger implements Logger {
     this.debug = this.debug.bind(this);
   }
 
+  // deno-lint-ignore no-explicit-any
   info(...args: any[]) {
     const message = [`[${this.prefix}]`, ...args].join(" ");
     this.logMessages.push(message);
     this.logger.info(message);
   }
 
+  // deno-lint-ignore no-explicit-any
   error(...args: any[]) {
     const message = [`[${this.prefix}]`, ...args].join(" ");
     this.logMessages.push(message);
     this.logger.error(message);
   }
 
+  // deno-lint-ignore no-explicit-any
   warn(...args: any[]) {
     const message = [`[${this.prefix}]`, ...args].join(" ");
     this.logMessages.push(message);
     this.logger.warn(message);
   }
 
+  // deno-lint-ignore no-explicit-any
   debug(...args: any[]) {
     const message = [`[${this.prefix}]`, ...args].join(" ");
     this.logMessages.push(message);

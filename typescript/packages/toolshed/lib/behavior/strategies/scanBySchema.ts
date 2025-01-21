@@ -9,7 +9,7 @@ import type { RedisClientType } from "redis";
 export async function generateSchema(
   query: string,
   logger: Logger,
-): Promise<any> {
+): Promise<unknown> {
   const prefixedLogger = new PrefixedLogger(logger, "scanBySchema");
   prefixedLogger.info(`Generating schema for query: ${query}`);
   const schemaPrompt = {
@@ -35,7 +35,7 @@ export async function generateSchema(
 }
 
 export async function scanBySchema(
-  schema: any,
+  schema: unknown,
   redis: RedisClientType,
   logger: Logger,
 ): Promise<SearchResult> {
