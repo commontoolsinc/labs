@@ -1,7 +1,7 @@
-import { generateTextCore } from "../../../routes/ai/llm/llm.handlers.ts";
 import { storage } from "../../../routes/storage/blobby/blobby.handlers.ts";
 import { SearchResult } from "../search.ts";
 import { PrefixedLogger } from "../../prefixed-logger.ts";
+import { generateText } from "../../llm/generateText.ts";
 
 async function generateKeywords(
   query: string,
@@ -25,7 +25,7 @@ async function generateKeywords(
     stream: false,
   };
 
-  const keywordText = await generateTextCore(keywordPrompt);
+  const keywordText = await generateText(keywordPrompt);
   const keywords = JSON.parse(keywordText.message.content);
 
   // Add original query if it's a single word

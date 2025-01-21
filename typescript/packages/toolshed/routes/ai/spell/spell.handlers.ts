@@ -4,10 +4,10 @@ import { Schema, SchemaDefinition, Validator } from "jsonschema";
 
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type { ProcessSchemaRoute, SearchSchemaRoute } from "./spell.routes.ts";
-import { generateTextCore } from "../llm/llm.handlers.ts";
 import { getAllBlobs } from "../../storage/blobby/lib/redis.ts";
 import { storage } from "../../storage/blobby/blobby.handlers.ts";
-import { performSearch } from "../../../lib/behavior/search.ts";
+import { performSearch } from "@/lib/behavior/search.ts";
+import { generateText } from "@/lib/llm/generateText.ts";
 
 // Process Schema schemas
 export const ProcessSchemaRequestSchema = z.object({
@@ -139,7 +139,7 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async c => {
       body.many,
     );
 
-    const llmResponse = await generateTextCore({
+    const llmResponse = await generateText({
       model: "claude-3-5-sonnet",
       system: body.many
         ? "Generate valid JSON array containing multiple objects, no commentary. Each object in the array must fulfill the schema exactly, if there is no reference data then return nothing."
