@@ -17,18 +17,19 @@ export const ProcessSchemaRequestSchema = z.object({
         z.number().or(z.boolean().or(z.array(z.any()).or(z.record(z.any())))),
       ),
   ),
-  prompt: z.string().optional(), // Add optional prompt field
+  many: z.boolean().optional(),
+  prompt: z.string().optional(),
   options: z
     .object({
       format: z.enum(["json", "yaml"]).optional(),
       validate: z.boolean().optional(),
-      maxExamples: z.number().optional(), // Add optional maxExamples field
+      maxExamples: z.number().default(5).optional(),
     })
     .optional(),
 });
 
 export const ProcessSchemaResponseSchema = z.object({
-  result: z.record(z.any()),
+  result: z.union([z.record(z.any()), z.array(z.record(z.any()))]),
   metadata: z.object({
     processingTime: z.number(),
     schemaFormat: z.string(),
@@ -44,7 +45,7 @@ export const ProcessSchemaResponseSchema = z.object({
 export type ProcessSchemaRequest = z.infer<typeof ProcessSchemaRequestSchema>;
 export type ProcessSchemaResponse = z.infer<typeof ProcessSchemaResponseSchema>;
 
-export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
+export const imagine: AppRouteHandler<ProcessSchemaRoute> = async c => {
   const redis = c.get("blobbyRedis");
   if (!redis) throw new Error("Redis client not found in context");
   const logger = c.get("logger");
@@ -53,7 +54,10 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
   const startTime = performance.now();
 
   try {
-    logger.info({ schema: body.schema }, "Processing schema request");
+    logger.info(
+      { schema: body.schema, many: body.many },
+      "Processing schema request",
+    );
 
     const allBlobs = await getAllBlobs(redis);
     const matchingExamples: Array<{
@@ -89,20 +93,25 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
       }
     }
 
-    const examplesList = matchingExamples.length > 0
-      ? matchingExamples
-      : allExamples.sort(() => Math.random() - 0.5).slice(0, 5);
+    const maxExamples = body.options?.maxExamples || 5;
+
+    const examplesList =
+      matchingExamples.length > 0
+        ? matchingExamples.slice(0, maxExamples)
+        : allExamples.sort(() => Math.random() - 0.5).slice(0, maxExamples);
 
     const prompt = constructSchemaPrompt(
       body.schema,
       examplesList,
       body.prompt,
+      body.many,
     );
 
     const llmResponse = await generateTextCore({
       model: "claude-3-5-sonnet",
-      system:
-        "Generate valid JSON only, no commentary. The schema provided must be fulfilled exactly, if there is no reference data to draw from then make it up (with a meta property explaining it is hallucinated).",
+      system: body.many
+        ? "Generate valid JSON array containing multiple objects, no commentary. Each object in the array must fulfill the schema exactly, if there is no reference data then return nothing."
+        : "Generate valid JSON only, no commentary. The schema provided must be fulfilled exactly, if there is no reference data return nothing.",
       stream: false,
       messages: [
         {
@@ -112,9 +121,13 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
       ],
     });
 
-    let result: Record<string, unknown>;
+    let result: Record<string, unknown> | Array<Record<string, unknown>>;
     try {
       result = JSON.parse(llmResponse.message.content);
+      // Validate that we got an array when many=true
+      if (body.many && !Array.isArray(result)) {
+        result = [result]; // Wrap single object in array if needed
+      }
     } catch (error) {
       logger.error({ error }, "Failed to parse LLM response");
       throw new Error("Failed to parse LLM response as JSON");
@@ -173,7 +186,7 @@ function checkSchemaMatch(
     }
 
     if (Array.isArray(obj)) {
-      return obj.some((item) => checkSubtrees(item));
+      return obj.some(item => checkSubtrees(item));
     }
 
     const result = validator.validate(obj, jsonSchema);
@@ -181,7 +194,7 @@ function checkSchemaMatch(
       return true;
     }
 
-    return Object.values(obj).some((value) => checkSubtrees(value));
+    return Object.values(obj).some(value => checkSubtrees(value));
   }
 
   return checkSubtrees(data);
@@ -191,38 +204,69 @@ function constructSchemaPrompt(
   schema: Record<string, unknown>,
   examples: Array<{ key: string; data: Record<string, unknown> }>,
   userPrompt?: string,
+  many?: boolean,
 ): string {
   const schemaStr = JSON.stringify(schema, null, 2);
-  const maxExamples = 5;
+  const MAX_VALUE_LENGTH = 500; // Maximum length for individual values
+
+  // Helper function to truncate large values
+  function sanitizeObject(
+    obj: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const sanitized: Record<string, unknown> = {};
+
+    for (const [key, value] of Object.entries(obj)) {
+      if (typeof value === "string") {
+        // Truncate long strings
+        if (value.length > MAX_VALUE_LENGTH) {
+          sanitized[key] =
+            value.substring(0, MAX_VALUE_LENGTH) + "... [truncated]";
+          continue;
+        }
+      } else if (typeof value === "object" && value !== null) {
+        // Handle arrays and objects
+        const stringified = JSON.stringify(value);
+        if (stringified.length > MAX_VALUE_LENGTH) {
+          sanitized[key] = "[large content omitted]";
+          continue;
+        }
+      }
+      sanitized[key] = value;
+    }
+    return sanitized;
+  }
 
   const examplesStr = examples
-    .slice(0, maxExamples)
     .map(({ key, data }) => {
-      return `--- Example from "${key}" ---\n${JSON.stringify(data, null, 2)}`;
+      const sanitizedData = sanitizeObject(data);
+      return `--- Example from "${key}" ---\n${JSON.stringify(sanitizedData, null, 2)}`;
     })
     .join("\n\n");
 
-  const shuffledExamples = [...examples].sort(() => Math.random() - 0.5);
-  examples = shuffledExamples.slice(0, maxExamples);
-
   return `# TASK
-Generate a new object that precisely matches the provided schema.
+  ${
+    many
+      ? `Generate multiple objects that fit the requested schema based on the references provided.`
+      : `Fit data into the requested schema based on the references provided.`
+  }
 
 # SCHEMA
 ${schemaStr}
 
-# REFERENCE EXAMPLES
+# REFERENCES FROM DATABASE
 ${examples.length > 0 ? examplesStr : "No existing examples found in database."}
 
 # INSTRUCTIONS
-1. Generate an object that strictly follows the schema structure
-2. Use context from examples where relevant
-3. If no relevant context exists, create appropriate fictional data
-4. Include a "_meta" property if data is fabricated
-5. Return ONLY valid JSON matching the schema
+1. ${
+    many
+      ? `Generate an array of objects that strictly follow the schema structure`
+      : `Generate an object that strictly follows the schema structure`
+  }
+2. Combine and synthesize examples to create valid ${many ? "objects" : "an object"}
+3. Return ONLY valid JSON ${many ? "array" : "object"} matching the schema
 
 ${userPrompt ? `# ADDITIONAL REQUIREMENTS\n${userPrompt}\n\n` : ""}
 
 # RESPONSE FORMAT
-Respond with a single valid JSON object.`;
+Respond with ${many ? "an array of valid JSON objects" : "a single valid JSON object"}.`;
 }
