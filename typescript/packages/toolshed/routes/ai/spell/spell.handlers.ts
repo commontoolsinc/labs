@@ -4,10 +4,10 @@ import { Schema, SchemaDefinition, Validator } from "jsonschema";
 
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type { ProcessSchemaRoute, SearchSchemaRoute } from "./spell.routes.ts";
-import { getAllBlobs } from "../../storage/blobby/lib/redis.ts";
-import { storage } from "../../storage/blobby/blobby.handlers.ts";
 import { performSearch } from "@/lib/behavior/search.ts";
 import { generateText } from "@/lib/llm/generateText.ts";
+import { getAllBlobs } from "@/lib/redis/redis.ts";
+import { storage } from "@/storage.ts";
 
 // Process Schema schemas
 export const ProcessSchemaRequestSchema = z.object({
