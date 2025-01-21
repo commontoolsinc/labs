@@ -24,6 +24,19 @@ export interface CombinedResults {
   };
 }
 
+const searchTreeDefinition = `root {
+  sequence {
+    action [InitiateSearch]
+    parallel {
+      action [SearchKeyMatch]
+      action [SearchTextMatch]
+      action [SearchSchemaMatch]
+      action [SearchCollectionMatch]
+    }
+    action [CollectResults]
+  }
+}`;
+
 class SearchAgent extends BaseAgent {
   [key: string]: any;
   private query: string = "";
@@ -116,15 +129,15 @@ class SearchAgent extends BaseAgent {
 
         const seenKeys = new Set<string>();
         const dedupedResults = allResults
-          .map((resultSet) => ({
+          .map(resultSet => ({
             source: resultSet.source,
-            results: resultSet.results.filter((result) => {
+            results: resultSet.results.filter(result => {
               if (seenKeys.has(result.key)) return false;
               seenKeys.add(result.key);
               return true;
             }),
           }))
-          .filter((result) => result.results.length > 0);
+          .filter(result => result.results.length > 0);
 
         this.results = dedupedResults;
         this.logger.info(
@@ -150,19 +163,6 @@ class SearchAgent extends BaseAgent {
     };
   }
 }
-
-const searchTreeDefinition = `root {
-  sequence {
-    action [InitiateSearch]
-    parallel {
-      action [SearchKeyMatch]
-      action [SearchTextMatch]
-      action [SearchSchemaMatch]
-      action [SearchCollectionMatch]
-    }
-    action [CollectResults]
-  }
-}`;
 
 export async function performSearch(
   query: string,
