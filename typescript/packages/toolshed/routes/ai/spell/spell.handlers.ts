@@ -3,10 +3,11 @@ import { z } from "zod";
 import { Schema, SchemaDefinition, Validator } from "jsonschema";
 
 import type { AppRouteHandler } from "@/lib/types.ts";
-import type { ProcessSchemaRoute } from "./spell.routes.ts";
+import type { ProcessSchemaRoute, SearchSchemaRoute } from "./spell.routes.ts";
 import { generateTextCore } from "../llm/llm.handlers.ts";
 import { getAllBlobs } from "../../storage/blobby/lib/redis.ts";
 import { storage } from "../../storage/blobby/blobby.handlers.ts";
+import { performSearch } from "../../../lib/behavior/search.ts";
 
 // Process Schema schemas
 export const ProcessSchemaRequestSchema = z.object({
@@ -58,9 +59,13 @@ export const SearchSchemaRequestSchema = z.object({
 export const SearchSchemaResponseSchema = z.object({
   results: z.array(
     z.object({
-      key: z.string(),
-      data: z.record(z.any()),
-      score: z.number(),
+      source: z.string(),
+      results: z.array(
+        z.object({
+          key: z.string(),
+          data: z.record(z.any()),
+        }),
+      ),
     }),
   ),
   metadata: z.object({
@@ -317,14 +322,9 @@ export const search: AppRouteHandler<SearchSchemaRoute> = async c => {
   try {
     logger.info({ query: body.query }, "Processing search request");
 
-    // Stub implementation - just returns empty results for now
-    const response: SearchSchemaResponse = {
-      results: [],
-      metadata: {
-        total: 0,
-        processingTime: Math.round(performance.now() - startTime),
-      },
-    };
+    const result = await performSearch(body.query, logger, redis);
+
+    const response = result;
 
     return c.json(response, HttpStatusCodes.OK);
   } catch (error) {
