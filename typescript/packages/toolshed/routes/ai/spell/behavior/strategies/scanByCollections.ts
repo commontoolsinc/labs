@@ -1,6 +1,7 @@
 import { SearchResult } from "../search.ts";
 import { Logger, PrefixedLogger } from "@/lib/prefixed-logger.ts";
-import { generateText, getBlob } from "../effects.ts";
+import { getBlob } from "../effects.ts";
+import { generateText } from "@/lib/llm.ts";
 
 async function generateKeywords(
   query: string,
@@ -11,7 +12,7 @@ async function generateKeywords(
     model: "claude-3-5-sonnet",
     messages: [
       {
-        role: "user" as const,
+        role: "user",
         content: query,
       },
     ],

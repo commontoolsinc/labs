@@ -2,7 +2,8 @@ import { checkSchemaMatch } from "@/lib/schema-match.ts";
 import { SearchResult } from "../search.ts";
 import { Logger, PrefixedLogger } from "@/lib/prefixed-logger.ts";
 import type { RedisClientType } from "redis";
-import { generateText, getAllBlobs, getBlob } from "../effects.ts";
+import { generateText } from "@/lib/llm.ts";
+import { getAllBlobs, getBlob } from "../effects.ts";
 import { Schema } from "jsonschema";
 
 export async function generateSchema(
