@@ -1,1 +1,0 @@
-export * as components from '@commontools/common-ui/components.js';
