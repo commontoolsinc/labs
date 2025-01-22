@@ -1,15 +1,12 @@
 import { streamText } from "npm:ai";
 
-import {
-  findModel,
-  TASK_MODELS,
-} from "./models.ts";
+import { findModel, TASK_MODELS } from "./models.ts";
 
 // Core generation logic separated from HTTP handling
 export interface GenerateTextParams {
   model?: string;
   task?: string;
-  messages: { role: 'user' | 'assistant'; content: string }[];
+  messages: { role: "user" | "assistant"; content: string }[];
   system?: string;
   stream?: boolean;
   stop_token?: string;
@@ -17,7 +14,7 @@ export interface GenerateTextParams {
 }
 
 export interface GenerateTextResult {
-  message: { role: 'user' | 'assistant'; content: string };
+  message: { role: "user" | "assistant"; content: string };
   stream?: ReadableStream;
 }
 

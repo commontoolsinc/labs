@@ -1,6 +1,6 @@
 import { SearchResult } from "../search.ts";
 import { Logger, PrefixedLogger } from "@/lib/prefixed-logger.ts";
-import { generateText, getBlob} from "../effects.ts";
+import { generateText, getBlob } from "../effects.ts";
 
 async function generateKeywords(
   query: string,
@@ -15,7 +15,8 @@ async function generateKeywords(
         content: query,
       },
     ],
-    system: "Generate exactly 3 single-word collection names that would be relevant for organizing content related to this query. Return only a JSON array of 3 strings.",
+    system:
+      "Generate exactly 3 single-word collection names that would be relevant for organizing content related to this query. Return only a JSON array of 3 strings.",
     stream: false,
   };
   const keywordText = await generateText(keywordPrompt);

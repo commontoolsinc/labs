@@ -1,6 +1,6 @@
 import { SearchResult } from "../search.ts";
 import { Logger, PrefixedLogger } from "@/lib/prefixed-logger.ts";
-import { getBlob, getAllBlobs } from "../effects.ts";
+import { getAllBlobs, getBlob } from "../effects.ts";
 
 export async function scanForKey(
   phrase: string,

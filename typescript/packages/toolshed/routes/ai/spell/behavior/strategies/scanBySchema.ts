@@ -2,8 +2,8 @@ import { checkSchemaMatch } from "@/lib/schema-match.ts";
 import { SearchResult } from "../search.ts";
 import { Logger, PrefixedLogger } from "@/lib/prefixed-logger.ts";
 import type { RedisClientType } from "redis";
-import { generateText, getBlob, getAllBlobs } from "../effects.ts";
-import { Schema } from 'jsonschema'
+import { generateText, getAllBlobs, getBlob } from "../effects.ts";
+import { Schema } from "jsonschema";
 
 export async function generateSchema(
   query: string,
@@ -19,7 +19,8 @@ export async function generateSchema(
         content: query,
       },
     ],
-    system: "Generate a minimal JSON schema to match data that relates to this search query, aim for the absolute minimal number of fields that cature the essence of the data. (e.g. articles are really just title and url) Return only valid JSON schema.",
+    system:
+      "Generate a minimal JSON schema to match data that relates to this search query, aim for the absolute minimal number of fields that cature the essence of the data. (e.g. articles are really just title and url) Return only valid JSON schema.",
     stream: false,
   };
 
