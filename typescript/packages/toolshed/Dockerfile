@@ -12,7 +12,7 @@ RUN mkdir -p /app/node_modules/.deno && \
 USER deno
 
 # Copy the pre-built assets first
-COPY --chown=deno:deno lookslike-highlevel-dist /app/lookslike-highlevel-dist
+# COPY --chown=deno:deno lookslike-highlevel-dist /app/lookslike-highlevel-dist
 
 # Then copy the rest of the app
 COPY --chown=deno:deno . .
