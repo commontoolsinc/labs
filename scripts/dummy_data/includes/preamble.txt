@@ -1,5 +1,0 @@
-I'm building a system to create a new kind of personal, composable software that is totally private to a user and uses Information Flow Control to create an alternate laws of physics of the privacy model at the core. The system is defined so user's data is never able to be copied by 3P of any type or used in ways that don't directly work in their interest and how they think their data will be used.
-
-This means that it's possible to have significantly more private data in the system to remix and create experiences out of, because you don't have to worry about data flowing out of it.
-
-As part of prototyping it, we want to create a lot of dummy data for a fictional person that we could use to prototype and play around with. This dummy data should be kind of cheeky and clever, because it will be open source examples that in the future the ecosystem will likely rely on when building their experiences.
