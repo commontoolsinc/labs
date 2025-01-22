@@ -1,8 +1,13 @@
 import { createClient } from "redis";
+import { DiskStorage } from "./storage.ts";
 
 const REDIS_PREFIX = "ct:toolshed:blobby";
+const DATA_DIR = "./cache/blobby";
 
 export type RedisClient = ReturnType<typeof createClient>;
+export const storage = new DiskStorage(DATA_DIR);
+
+await storage.init();
 
 export async function addBlobToUser(
   redis: RedisClient,

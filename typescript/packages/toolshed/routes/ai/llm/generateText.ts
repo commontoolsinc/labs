@@ -16,7 +16,7 @@ import type { Context } from "hono";
 export interface GenerateTextParams {
   model?: string;
   task?: string;
-  messages: { role: string; content: string }[];
+  messages: { role: 'user' | 'assistant'; content: string }[];
   system?: string;
   stream?: boolean;
   stop_token?: string;
@@ -24,7 +24,7 @@ export interface GenerateTextParams {
 }
 
 export interface GenerateTextResult {
-  message: { role: string; content: string };
+  message: { role: 'user' | 'assistant'; content: string };
   stream?: ReadableStream;
 }
 
@@ -48,7 +48,7 @@ export async function generateText(
   }
 
   // Validate and configure model
-  const modelConfig = findModel(modelName);
+  const modelConfig = findModel(modelName!);
   if (!modelConfig) {
     console.error("Unsupported model:", modelName);
     throw new Error(`Unsupported model: ${modelName}`);
@@ -56,7 +56,7 @@ export async function generateText(
 
   const messages = params.messages;
   const streamParams = {
-    model: modelConfig.model || modelName,
+    model: modelConfig.model || modelName!,
     messages,
     stream: params.stream,
     system: params.system,

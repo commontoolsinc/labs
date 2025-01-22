@@ -5,8 +5,7 @@ import type {
   listBlobs,
   uploadBlob,
 } from "./blobby.routes.ts";
-import { addBlobToUser, getAllBlobs, getUserBlobs } from "@/lib/redis/redis.ts";
-import { storage } from "@/storage.ts";
+import { storage, addBlobToUser, getAllBlobs, getUserBlobs } from "./lib/redis.ts";
 import type { RedisClientType } from "redis";
 
 export const uploadBlobHandler: AppRouteHandler<

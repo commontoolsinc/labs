@@ -1,18 +1,15 @@
 import { SearchResult } from "../search.ts";
-import { Logger, PrefixedLogger } from "../../prefixed-logger.ts";
-import { getAllBlobs } from "@/lib/redis/redis.ts";
-import { storage } from "@/storage.ts";
-import type { RedisClientType } from "redis";
+import { Logger, PrefixedLogger } from "@/lib/prefixed-logger.ts";
+import { getBlob, getAllBlobs } from "../effects.ts";
 
 export async function scanForKey(
   phrase: string,
-  redis: RedisClientType,
   logger: Logger,
 ): Promise<SearchResult> {
   const log = new PrefixedLogger(logger, "scanForKey");
 
   log.info(`Starting key scan for phrase: ${phrase}`);
-  const allBlobs = await getAllBlobs(redis);
+  const allBlobs = await getAllBlobs();
   log.info(`Retrieved ${allBlobs.length} blobs to scan`);
 
   const matchingExamples: Array<{
@@ -23,7 +20,7 @@ export async function scanForKey(
   for (const blobKey of allBlobs) {
     if (blobKey.toLowerCase().includes(phrase.toLowerCase())) {
       try {
-        const content = await storage.getBlob(blobKey);
+        const content = await getBlob(blobKey);
         if (!content) {
           log.info(`No content found for key: ${blobKey}`);
           continue;
