@@ -44,10 +44,10 @@ export const generateImage: AppRouteHandler<GenerateImageRoute> = async (c) => {
   }
 
   try {
-    const result = await fal.subscribe("fal-ai/flux/dev", {
+    const result = await fal.subscribe("fal-ai/flux/schnell", {
       input: {
         prompt,
-        image_size: "square_hd",
+        image_size: "square",
         num_images: 1,
       },
       logs: true,
@@ -136,7 +136,7 @@ export const generateImageAdvanced: AppRouteHandler<
   }
 
   try {
-    const result = await fal.subscribe("fal-ai/flux/dev", {
+    const result = await fal.subscribe("fal-ai/flux/schnell", {
       input: {
         prompt,
         ...options,
