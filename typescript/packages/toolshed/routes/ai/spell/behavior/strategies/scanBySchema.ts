@@ -1,10 +1,9 @@
-import { getAllBlobs } from "@/lib/redis/redis.ts";
-import { storage } from "@/storage.ts";
-import { checkSchemaMatch } from "../schema-match.ts";
+import { checkSchemaMatch } from "@/lib/schema-match.ts";
 import { SearchResult } from "../search.ts";
-import { Logger, PrefixedLogger } from "../../prefixed-logger.ts";
-import { generateText } from "../../llm/generateText.ts";
+import { Logger, PrefixedLogger } from "@/lib/prefixed-logger.ts";
 import type { RedisClientType } from "redis";
+import { generateText, getBlob, getAllBlobs } from "../effects.ts";
+import { Schema } from 'jsonschema'
 
 export async function generateSchema(
   query: string,
@@ -16,33 +15,28 @@ export async function generateSchema(
     model: "claude-3-5-sonnet",
     messages: [
       {
-        role: "system",
-        content:
-          "Generate a minimal JSON schema to match data that relates to this search query, aim for the absolute minimal number of fields that cature the essence of the data. (e.g. articles are really just title and url) Return only valid JSON schema.",
-      },
-      {
-        role: "user",
+        role: "user" as const,
         content: query,
       },
     ],
+    system: "Generate a minimal JSON schema to match data that relates to this search query, aim for the absolute minimal number of fields that cature the essence of the data. (e.g. articles are really just title and url) Return only valid JSON schema.",
     stream: false,
   };
 
   const schemaText = await generateText(schemaPrompt);
-  const schema = JSON.parse(schemaText.message.content);
+  const schema = JSON.parse(schemaText);
   prefixedLogger.info(`Generated schema:\n${JSON.stringify(schema, null, 2)}`);
   return schema;
 }
 
 export async function scanBySchema(
   schema: unknown,
-  redis: RedisClientType,
   logger: Logger,
 ): Promise<SearchResult> {
   const prefixedLogger = new PrefixedLogger(logger, "scanBySchema");
   prefixedLogger.info("Starting schema scan");
   prefixedLogger.info(`Using schema:\n${JSON.stringify(schema, null, 2)}`);
-  const allBlobs = await getAllBlobs(redis);
+  const allBlobs = await getAllBlobs();
   prefixedLogger.info(`Retrieved ${allBlobs.length} blobs to scan`);
 
   const matchingExamples: Array<{
@@ -52,14 +46,14 @@ export async function scanBySchema(
 
   for (const blobKey of allBlobs) {
     try {
-      const content = await storage.getBlob(blobKey);
+      const content = await getBlob(blobKey);
       if (!content) {
         prefixedLogger.info(`No content found for key: ${blobKey}`);
         continue;
       }
 
       const blobData = JSON.parse(content);
-      const matches = checkSchemaMatch(blobData, schema);
+      const matches = checkSchemaMatch(blobData, schema as Schema);
 
       if (matches) {
         matchingExamples.push({

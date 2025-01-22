@@ -1,11 +1,10 @@
 import { BehaviourTree, State } from "mistreevous";
-import { BaseAgent } from "./agent.ts";
+import { BaseAgent } from "@/lib/agent.ts";
 import { scanForKey } from "./strategies/scanForKey.ts";
 import { scanForText } from "./strategies/scanForText.ts";
 import { generateSchema, scanBySchema } from "./strategies/scanBySchema.ts";
 import { scanByCollections } from "./strategies/scanByCollections.ts";
-import { Logger } from "../prefixed-logger.ts";
-import type { RedisClientType } from "redis";
+import { Logger } from "@/lib/prefixed-logger.ts";
 
 export interface SearchResult {
   source: string;
@@ -47,12 +46,10 @@ class SearchAgent extends BaseAgent {
   private query: string = "";
   private results: SearchResult[] = [];
   private searchPromises: Map<string, Promise<SearchResult>> = new Map();
-  private redis: RedisClientType;
 
-  constructor(query: string, redis: RedisClientType, logger: Logger) {
+  constructor(query: string, logger: Logger) {
     super(logger, "SearchAgent");
     this.query = query;
-    this.redis = redis;
     this.resetSearch();
   }
 
@@ -77,7 +74,7 @@ class SearchAgent extends BaseAgent {
         this.logger.info("Starting key match search");
         this.searchPromises.set(
           "key-search",
-          scanForKey(this.query, this.redis, this.logger),
+          scanForKey(this.query, this.logger),
         );
       }
       return await resolve(State.SUCCEEDED);
@@ -90,7 +87,7 @@ class SearchAgent extends BaseAgent {
         this.logger.info("Starting text match search");
         this.searchPromises.set(
           "text-search",
-          scanForText(this.query, this.redis, this.logger),
+          scanForText(this.query, this.logger),
         );
       }
       return await resolve(State.SUCCEEDED);
@@ -106,7 +103,7 @@ class SearchAgent extends BaseAgent {
 
         this.searchPromises.set(
           "schema-match",
-          scanBySchema(schema, this.redis, this.logger),
+          scanBySchema(schema, this.logger),
         );
       }
       return await resolve(State.SUCCEEDED);
@@ -119,7 +116,7 @@ class SearchAgent extends BaseAgent {
         this.logger.info("Starting collection match search");
         this.searchPromises.set(
           "collection-match",
-          scanByCollections(this.query, this.redis, this.logger),
+          scanByCollections(this.query, this.logger),
         );
       }
       return await resolve(State.SUCCEEDED);
@@ -171,11 +168,10 @@ class SearchAgent extends BaseAgent {
 
 export function performSearch(
   query: string,
-  redis: RedisClientType,
   logger: Logger,
 ): Promise<CombinedResults> {
   return new Promise((resolve, reject) => {
-    const agent = new SearchAgent(query, redis, logger);
+    const agent = new SearchAgent(query, logger);
     const tree = new BehaviourTree(searchTreeDefinition, agent);
 
     logger.info("Starting behavior tree execution");

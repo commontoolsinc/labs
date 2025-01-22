@@ -1,6 +1,10 @@
 import { join } from "@std/path";
 import { ensureDir } from "@std/fs";
 
+export const storage = new DiskStorage(DATA_DIR);
+
+await storage.init();
+
 export class DiskStorage {
   constructor(private baseDir: string) {}
 

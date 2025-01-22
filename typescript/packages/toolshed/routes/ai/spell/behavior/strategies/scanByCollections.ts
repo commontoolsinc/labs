@@ -1,33 +1,25 @@
-import { storage } from "@/storage.ts";
 import { SearchResult } from "../search.ts";
-import { Logger, PrefixedLogger } from "../../prefixed-logger.ts";
-import { generateText } from "../../llm/generateText.ts";
-import type { RedisClientType } from "redis";
+import { Logger, PrefixedLogger } from "@/lib/prefixed-logger.ts";
+import { generateText, getBlob} from "../effects.ts";
 
 async function generateKeywords(
   query: string,
   logger: Logger,
 ): Promise<string[]> {
   logger.info(`Generating keywords for query: ${query}`);
-
   const keywordPrompt = {
     model: "claude-3-5-sonnet",
     messages: [
       {
-        role: "system",
-        content:
-          "Generate exactly 3 single-word collection names that would be relevant for organizing content related to this query. Return only a JSON array of 3 strings.",
-      },
-      {
-        role: "user",
+        role: "user" as const,
         content: query,
       },
     ],
+    system: "Generate exactly 3 single-word collection names that would be relevant for organizing content related to this query. Return only a JSON array of 3 strings.",
     stream: false,
   };
-
   const keywordText = await generateText(keywordPrompt);
-  const keywords = JSON.parse(keywordText.message.content);
+  const keywords = JSON.parse(keywordText);
 
   // Add original query if it's a single word
   if (query.trim().split(/\s+/).length === 1) {
@@ -40,7 +32,6 @@ async function generateKeywords(
 
 export async function scanByCollections(
   query: string,
-  redis: RedisClientType,
   logger: Logger,
 ): Promise<SearchResult> {
   const prefixedLogger = new PrefixedLogger(logger, "scanByCollections");
@@ -58,7 +49,7 @@ export async function scanByCollections(
 
   for (const collectionKey of collectionKeys) {
     try {
-      const content = await storage.getBlob(collectionKey);
+      const content = await getBlob(collectionKey);
       if (!content) {
         prefixedLogger.info(
           `No content found for collection: ${collectionKey}`,
@@ -69,7 +60,7 @@ export async function scanByCollections(
       const keys = JSON.parse(content);
       for (const key of keys) {
         try {
-          const blobContent = await storage.getBlob(key);
+          const blobContent = await getBlob(key);
           if (blobContent) {
             matchingExamples.push({
               key,

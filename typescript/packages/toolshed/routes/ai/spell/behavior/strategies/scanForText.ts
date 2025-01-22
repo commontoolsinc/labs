@@ -1,17 +1,14 @@
-import { getAllBlobs } from "@/lib/redis/redis.ts";
-import { storage } from "@/storage.ts";
-import { Logger, PrefixedLogger } from "../../prefixed-logger.ts";
+import { Logger, PrefixedLogger } from "@/lib/prefixed-logger.ts";
 import { SearchResult } from "../search.ts";
-import type { RedisClientType } from "redis";
+import { getBlob, getAllBlobs } from "../effects.ts";
 
 export async function scanForText(
   phrase: string,
-  redis: RedisClientType,
   logger: Logger,
 ): Promise<SearchResult> {
   const prefixedLogger = new PrefixedLogger(logger, "scanForText");
   prefixedLogger.info(`Starting text scan for phrase: ${phrase}`);
-  const allBlobs = await getAllBlobs(redis);
+  const allBlobs = await getAllBlobs();
   prefixedLogger.info(`Retrieved ${allBlobs.length} blobs to scan`);
 
   const matchingExamples: Array<{
@@ -21,7 +18,7 @@ export async function scanForText(
 
   for (const blobKey of allBlobs) {
     try {
-      const content = await storage.getBlob(blobKey);
+      const content = await getBlob(blobKey);
       if (!content) {
         prefixedLogger.info(`No content found for key: ${blobKey}`);
         continue;

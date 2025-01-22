@@ -1,13 +1,11 @@
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { z } from "zod";
-import { Schema, SchemaDefinition, Validator } from "jsonschema";
+import { generateText, getBlob, getAllBlobs } from "./behavior/effects.ts";
 
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type { ProcessSchemaRoute, SearchSchemaRoute } from "./spell.routes.ts";
-import { performSearch } from "@/lib/behavior/search.ts";
-import { generateText } from "@/lib/llm/generateText.ts";
-import { getAllBlobs } from "@/lib/redis/redis.ts";
-import { storage } from "@/storage.ts";
+import { performSearch } from "./behavior/search.ts";
+import { checkSchemaMatch } from "@/lib/schema-match.ts";
 
 // Process Schema schemas
 export const ProcessSchemaRequestSchema = z.object({
@@ -91,7 +89,7 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
       "Processing schema request",
     );
 
-    const allBlobs = await getAllBlobs(redis);
+    const allBlobs = await getAllBlobs();
     const matchingExamples: Array<{
       key: string;
       data: Record<string, unknown>;
@@ -103,7 +101,7 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
 
     for (const blobKey of allBlobs) {
       try {
-        const content = await storage.getBlob(blobKey);
+        const content = await getBlob(blobKey);
         if (!content) continue;
 
         const blobData = JSON.parse(content);
@@ -154,7 +152,7 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
 
     let result: Record<string, unknown> | Array<Record<string, unknown>>;
     try {
-      result = JSON.parse(llmResponse.message.content);
+      result = JSON.parse(llmResponse);
       // Validate that we got an array when many=true
       if (body.many && !Array.isArray(result)) {
         result = [result]; // Wrap single object in array if needed
@@ -186,50 +184,6 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
     );
   }
 };
-
-function checkSchemaMatch(
-  data: Record<string, unknown>,
-  schema: Schema,
-): boolean {
-  const validator = new Validator();
-
-  const jsonSchema: SchemaDefinition = {
-    type: "object",
-    properties: Object.keys(schema).reduce(
-      (acc: Record<string, SchemaDefinition>, key) => {
-        acc[key] = { type: schema[key].type || typeof schema[key] };
-        return acc;
-      },
-      {},
-    ),
-    required: Object.keys(schema),
-    additionalProperties: true,
-  };
-
-  const rootResult = validator.validate(data, jsonSchema);
-  if (rootResult.valid) {
-    return true;
-  }
-
-  function checkSubtrees(obj: unknown): boolean {
-    if (typeof obj !== "object" || obj === null) {
-      return false;
-    }
-
-    if (Array.isArray(obj)) {
-      return obj.some((item) => checkSubtrees(item));
-    }
-
-    const result = validator.validate(obj, jsonSchema);
-    if (result.valid) {
-      return true;
-    }
-
-    return Object.values(obj).some((value) => checkSubtrees(value));
-  }
-
-  return checkSubtrees(data);
-}
 
 function constructSchemaPrompt(
   schema: Record<string, unknown>,
@@ -323,7 +277,7 @@ export const search: AppRouteHandler<SearchSchemaRoute> = async (c) => {
   try {
     logger.info({ query: body.query }, "Processing search request");
 
-    const result = await performSearch(body.query, logger, redis);
+    const result = await performSearch(body.query, logger);
 
     const response = result;
 
