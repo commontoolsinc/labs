@@ -7,9 +7,8 @@ import {
   Frame,
   JSONSchema,
 } from "../src/types.js";
-import { lift, handler, isolated } from "../src/module.js";
+import { lift, handler } from "../src/module.js";
 import { opaqueRef } from "../src/opaque-ref.js";
-import { JavaScriptModuleDefinition } from "@commontools/common-runtime";
 import { pushFrame } from "../src/recipe.js";
 import { popFrame } from "../src/recipe.js";
 import { z } from "zod";

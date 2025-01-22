@@ -999,3 +999,10 @@ export function isQueryResultForDereferencing(
 ): value is QueryResultInternals {
   return isQueryResult(value);
 }
+
+/**
+ * this is a helper created for the spell-style recipe prototype...
+ */
+export function doc<T = any>(value: any) {
+  return getDoc<T>(value).getAsQueryResult();
+}

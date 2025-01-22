@@ -2,7 +2,7 @@
   "name": "@commontools/common-runner",
   "author": "The Common Authors",
   "version": "0.0.1",
-  "description": "Typescript implementation of Common Runtime.",
+  "description": "Typescript implementation of Common Runner.",
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
@@ -25,7 +25,6 @@
   ],
   "dependencies": {
     "@commontools/common-builder": "^0.0.1",
-    "@commontools/common-runtime": "file:../common-runtime",
     "@commontools/llm-client": "^0.0.1",
     "merkle-reference": "^0.0.2"
   },

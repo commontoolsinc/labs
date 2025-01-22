@@ -5,10 +5,10 @@ import {
   ifElse,
   select,
   Spell,
-  doc,
   $
 } from "@commontools/common-builder";
 import { h } from "@commontools/common-html";
+import { doc } from "@commontools/common-runner";
 
 type Meta = {
   category: string;

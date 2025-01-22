@@ -14,6 +14,7 @@ export type {
   ReactivityLog,
 } from "./cell.js";
 export {
+  doc,
   getDoc,
   isDoc,
   isCell,
