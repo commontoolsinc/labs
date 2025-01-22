@@ -1,12 +1,7 @@
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type { GenerateTextRoute, GetModelsRoute } from "./llm.routes.ts";
-import {
-  ALIAS_NAMES,
-  ModelList,
-  MODELS,
-  TASK_MODELS,
-} from "./models.ts";
+import { ALIAS_NAMES, ModelList, MODELS, TASK_MODELS } from "./models.ts";
 import * as cache from "./cache.ts";
 import type { Context } from "hono";
 import { generateText as generateTextCore } from "./generateText.ts";
