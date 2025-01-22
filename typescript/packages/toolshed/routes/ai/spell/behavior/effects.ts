@@ -9,6 +9,7 @@ export async function generateText(
 ) {
   const res = await client.api.ai.llm.$post({ json: query });
   // cheating
+  // deno-lint-ignore no-explicit-any
   const data = (await res.json() as any) as {
     role: "assistant";
     content: string;
@@ -28,7 +29,7 @@ export async function getAllBlobs(): Promise<string[]> {
 
 export async function getBlob(key: string): Promise<unknown> {
   const res = await client.api.storage.blobby[":key"].$get({ param: { key } });
-  const data = await res.json() as any;
+  const data = await res.json() as unknown;
 
   if ("error" in data) {
     throw new Error(data.error);
