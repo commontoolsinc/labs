@@ -42,7 +42,6 @@ export const sendWebhookMessage = async (message: WebhookMessage) => {
     throw new Error("DISCORD_WEBHOOK_URL not configured");
   }
 
-  console.log("msg", message);
   const response = await fetch(webhookUrl, {
     method: "POST",
     headers: {

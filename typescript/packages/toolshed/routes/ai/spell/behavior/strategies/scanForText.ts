@@ -24,7 +24,7 @@ export async function scanForText(
         continue;
       }
 
-      const blobData = JSON.parse(content);
+      const blobData = content as Record<string, unknown>;
       const stringified = JSON.stringify(blobData).toLowerCase();
 
       if (stringified.includes(phrase.toLowerCase())) {

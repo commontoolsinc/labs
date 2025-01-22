@@ -57,14 +57,14 @@ export async function scanByCollections(
         continue;
       }
 
-      const keys = JSON.parse(content);
+      const keys = content as Array<string>;
       for (const key of keys) {
         try {
           const blobContent = await getBlob(key);
           if (blobContent) {
             matchingExamples.push({
               key,
-              data: JSON.parse(blobContent),
+              data: blobContent as Record<string, unknown>,
             });
             prefixedLogger.info(
               `Found item from collection ${collectionKey}: ${key}`,

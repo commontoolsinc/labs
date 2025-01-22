@@ -6,10 +6,10 @@ import {
   ModelList,
   MODELS,
   TASK_MODELS,
-} from "@/lib/llm/models.ts";
-import * as cache from "@/lib/llm/cache.ts";
+} from "./models.ts";
+import * as cache from "./cache.ts";
 import type { Context } from "hono";
-import { generateText as generateTextCore } from "@/lib/llm/generateText.ts";
+import { generateText as generateTextCore } from "./generateText.ts";
 
 /**
  * Handler for GET /models endpoint

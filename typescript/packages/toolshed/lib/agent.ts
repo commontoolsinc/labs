@@ -1,5 +1,5 @@
 import { State } from "mistreevous";
-import { Logger, PrefixedLogger } from "../prefixed-logger.ts";
+import { Logger, PrefixedLogger } from "./prefixed-logger.ts";
 
 // Handles logging and instrumentation
 export abstract class BaseAgent {
