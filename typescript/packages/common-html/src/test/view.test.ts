@@ -1,14 +1,15 @@
+import { markAsStatic } from "@commontools/common-builder";
 import { view, section, parse, binding, vnode, parsePath } from "../view.js";
 import * as assert from "node:assert/strict";
 
 describe("view()", () => {
   it("parses a context and string template into a view", () => {
     const hello = view("<div>Hello world!</div>", {});
-    assert.deepStrictEqual(hello, {
+    assert.deepStrictEqual(hello, markAsStatic({
       type: "view",
       template: vnode("div", {}, ["Hello world!"]),
       context: {},
-    });
+    }));
   });
 
   it("parses a context and string template into a view (2)", () => {
@@ -16,14 +17,14 @@ describe("view()", () => {
       hidden: false,
       text: "Hello world!",
     });
-    assert.deepStrictEqual(hello, {
+    assert.deepStrictEqual(hello, markAsStatic({
       type: "view",
       template: vnode("div", { hidden: binding("hidden") }, [binding("text")]),
       context: {
         hidden: false,
         text: "Hello world!",
       },
-    });
+    }));
   });
 });
 
