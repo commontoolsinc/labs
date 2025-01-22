@@ -1,5 +1,3 @@
-import { JavaScriptModuleDefinition } from "@commontools/common-runtime";
-
 // Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over recipes.
 export const TYPE = "$TYPE";
@@ -138,7 +136,7 @@ export function isStreamAlias(value: any): value is StreamAlias {
 
 export type Module = {
   type: "ref" | "javascript" | "recipe" | "raw" | "isolated" | "passthrough";
-  implementation?: Function | Recipe | JavaScriptModuleDefinition | string;
+  implementation?: Function | Recipe | string;
   wrapper?: "handler";
   argumentSchema?: JSONSchema;
   resultSchema?: JSONSchema;

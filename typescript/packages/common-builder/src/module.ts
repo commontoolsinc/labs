@@ -17,11 +17,6 @@ import {
   traverseValue,
 } from "./utils.js";
 import { getTopFrame } from "./recipe.js";
-import type {
-  JavaScriptModuleDefinition,
-  JavaScriptValueMap,
-  JavaScriptShapeMap,
-} from "@commontools/common-runtime";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
@@ -138,12 +133,12 @@ export function handler<E, T>(
   const schema: JSONSchema | undefined =
     eventSchema || stateSchema
       ? {
-          type: "object",
-          properties: {
-            $event: eventSchema ?? {},
-            ...(stateSchema?.properties ?? {}),
-          },
-        }
+        type: "object",
+        properties: {
+          $event: eventSchema ?? {},
+          ...(stateSchema?.properties ?? {}),
+        },
+      }
       : undefined;
 
   const module: Handler &
@@ -178,65 +173,10 @@ export function handler<E, T>(
   return factory;
 }
 
-export function isolated<T, R>(
-  inputs: JavaScriptValueMap,
-  outputs: JavaScriptShapeMap,
-  implementation: (input: T) => R,
-): ModuleFactory<T, R>;
-export function isolated<T>(
-  inputs: JavaScriptValueMap,
-  outputs: JavaScriptShapeMap,
-  implementation: (input: T) => any,
-): ModuleFactory<T, ReturnType<typeof implementation>>;
-export function isolated<T extends (...args: any[]) => any>(
-  inputs: JavaScriptValueMap,
-  outputs: JavaScriptShapeMap,
-  implementation: T,
-): ModuleFactory<Parameters<T>[0], ReturnType<T>>;
-export function isolated<T, R>(
-  inputs: JavaScriptValueMap,
-  outputs: JavaScriptShapeMap,
-  implementation: (input: T) => R,
-): ModuleFactory<T, R> {
-  const body = `import { read, write } from "common:io/state@0.0.1";
-
-  export const run = () => {
-    let inputs = {};
-    ${Object.keys(inputs)
-      .map(key => `inputs["${key}"] = read("${key}")?.deref()?.val;`)
-      .join("\n")}
-    let fn = ${implementation.toString()};
-    let result = fn(inputs);
-    ${Object.keys(outputs)
-      .map(
-        key =>
-          `write("${key}", { tag: typeof result["${key}"], val: result["${key}"] })`,
-      )
-      .join("\n")}
-  };
-  `;
-
-  return createNodeFactory({
-    type: "isolated",
-    implementation: {
-      inputs,
-      outputs,
-      body,
-    } satisfies JavaScriptModuleDefinition,
-  });
-}
-
-// Lift a function and directly apply inputs
 export const derive = <In, Out>(
   input: Opaque<In>,
   f: (input: In) => Out,
 ): OpaqueRef<Out> => lift(f)(input);
-
-// Like `derive`, but for event handlers
-// export const event = <T = any>(
-//   input: Opaque<T>,
-//   f: (event: T, self: any) => any,
-// ): OpaqueRef<T> => handler(f)(input);
 
 // unsafe closures: like derive, but doesn't need any arguments
 export const compute: <T>(fn: () => T) => OpaqueRef<T> = (fn: () => any) =>

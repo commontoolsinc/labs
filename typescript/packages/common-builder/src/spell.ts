@@ -5,7 +5,6 @@ import {
   stream,
   UI,
 } from "@commontools/common-builder";
-import { cell } from "@commontools/common-runner";
 
 // $ is a proxy that just collect paths, so that one can call [getPath] on it
 // and get an array. For example for `q = $.foo.bar[0]` `q[getPath]` yields
@@ -236,6 +235,6 @@ export abstract class Spell<T extends Record<string, any>> {
   }
 }
 
-export function doc<T = any>(value: any) {
-  return cell<T>(value).getAsQueryResult();
+export function doc(value: any) {
+  return value.getAsQueryResult();
 }
