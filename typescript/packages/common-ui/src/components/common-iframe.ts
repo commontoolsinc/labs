@@ -1,7 +1,7 @@
 import { LitElement, html, css } from "lit-element";
 import { customElement, property, state } from "lit/decorators.js";
 import {
-  RendererCell,
+  Cell,
   addAction,
   removeAction,
   type Action,
@@ -23,7 +23,7 @@ export class CommonIframeElement extends LitElement {
   // HACK: The UI framework already translates the top level cell into updated
   // properties, but we want to only have to deal with one type of listening, so
   // we'll add a an extra level of indirection with the "context" property.
-  @property({ type: Object }) context?: RendererCell<any> | any;
+  @property({ type: Object }) context?: Cell<any> | any;
 
   @state() private errorDetails: {
     message: string;
@@ -111,7 +111,7 @@ export class CommonIframeElement extends LitElement {
             : JSON.parse(JSON.stringify(value));
         this.iframeRef.value?.contentWindow?.postMessage(
           { type: "readResponse", key, value: copy },
-          "*"
+          "*",
         );
       } else if (type === "write" && this.context) {
         const updated =
@@ -126,7 +126,7 @@ export class CommonIframeElement extends LitElement {
         const action: Action = (log: ReactivityLog) =>
           this.notifySubscribers(
             key,
-            this.context.getAsQueryResult([key], log)
+            this.context.getAsQueryResult([key], log),
           );
 
         addAction(action);
@@ -148,7 +148,7 @@ export class CommonIframeElement extends LitElement {
       value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
     this.iframeRef.value?.contentWindow?.postMessage(
       { type: "update", key, value: copy },
-      "*"
+      "*",
     );
   }
   private boundHandleMessage = this.handleMessage.bind(this);
@@ -175,7 +175,7 @@ export class CommonIframeElement extends LitElement {
 
   private fixError() {
     this.dispatchEvent(
-      new CustomEvent("fix", { detail: this.errorDetails, bubbles: true })
+      new CustomEvent("fix", { detail: this.errorDetails, bubbles: true }),
     );
     this.errorDetails = null;
   }

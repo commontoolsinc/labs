@@ -1,8 +1,8 @@
 import {
-  type CellImpl,
-  isCell,
-  type CellReference,
-  isCellReference,
+  type DocImpl,
+  isDoc,
+  type DocLink,
+  isDocLink,
   type ReactivityLog,
 } from "./cell.js";
 import { isAlias, JSONSchema } from "@commontools/common-builder";
@@ -42,7 +42,7 @@ export function resolveSchema(
 }
 
 export function validateAndTransform(
-  cell: CellImpl<any>,
+  cell: DocImpl<any>,
   path: PropertyKey[] = [],
   schema?: JSONSchema,
   log?: ReactivityLog,
@@ -50,17 +50,17 @@ export function validateAndTransform(
 ): any {
   const resolvedSchema = resolveSchema(schema, rootSchema);
 
-  // If this should be a reference, return as a RendererCell of resolvedSchema
+  // If this should be a reference, return as a Cell of resolvedSchema
   // NOTE: Need to check on the passed schema whether it's a reference, not the
   // resolved schema. The returned reference is of type resolvedSchema though.
   if (typeof schema === "object" && schema !== null && schema!.asCell)
-    return cell.asRendererCell(path, log, resolvedSchema);
+    return cell.asCell(path, log, resolvedSchema);
 
   // If there is no schema, return as raw data via query result proxy
   if (!resolvedSchema) return cell.getAsQueryResult(path, log);
 
   // Handle various types of references
-  const seen: CellReference[] = [];
+  const seen: DocLink[] = [];
 
   let value;
   while (true) {
@@ -68,10 +68,9 @@ export function validateAndTransform(
     value = cell.getAtPath(path);
 
     // Follow references and aliases until we hit a value
-    if (isCellReference(value))
-      ({ cell, path } = followCellReferences(value, log));
+    if (isDocLink(value)) ({ cell, path } = followCellReferences(value, log));
     else if (isAlias(value)) ({ cell, path } = followAliases(value, cell, log));
-    else if (isCell(value)) [cell, path] = [value, []];
+    else if (isDoc(value)) [cell, path] = [value, []];
     else break;
 
     if (seen.some(ref => ref.cell === cell && arrayEqual(ref.path, path)))

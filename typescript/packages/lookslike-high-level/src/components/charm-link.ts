@@ -2,7 +2,7 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { render } from "@commontools/common-ui";
 import { NAME } from "../data.js";
-import { RendererCell, effect } from "@commontools/common-runner";
+import { Cell, effect } from "@commontools/common-runner";
 
 export const charmLink = render.view("common-charm-link", {
   charm: { type: "object" },
@@ -22,7 +22,7 @@ export class CommonCharmLink extends LitElement {
   `;
 
   @property({ type: Object })
-  charm: RendererCell<any> | undefined = undefined;
+  charm: Cell<any> | undefined = undefined;
 
   @property({ type: String })
   name: string | undefined = undefined;
@@ -56,7 +56,7 @@ export class CommonCharmLink extends LitElement {
 
     let { [NAME]: name } = this.charm.get() ?? {};
 
-    effect(name, (name) => {
+    effect(name, name => {
       this.nameFromCharm = name as string;
       if (!skipUpdate) this.requestUpdate();
       skipUpdate = false;

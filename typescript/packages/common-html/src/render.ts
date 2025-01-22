@@ -17,9 +17,9 @@ import {
   isReactive,
   useCancelGroup,
   type Cancel,
-  type RendererCell,
+  type Cell,
   ReactiveCell,
-  isRendererCell,
+  isCell,
 } from "@commontools/common-runner";
 import { JSONSchema } from "@commontools/common-builder";
 import * as logger from "./logger.js";
@@ -53,10 +53,10 @@ const schema: JSONSchema = {
 /** Render a view into a parent element */
 export const render = (
   parent: HTMLElement,
-  view: View | VNode | RendererCell<View | VNode>,
+  view: View | VNode | Cell<View | VNode>,
 ): Cancel => {
   // If this is a reactive cell, ensure the schema is View | VNode
-  if (isRendererCell(view)) view = view.asSchema(schema);
+  if (isCell(view)) view = view.asSchema(schema);
   return effect(view, (view: View | VNode) => renderImpl(parent, view));
 };
 

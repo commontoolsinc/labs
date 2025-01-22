@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { cell, ReactivityLog } from "../src/cell.js";
+import { getDoc, ReactivityLog } from "../src/cell.js";
 import {
   Action,
   run,
@@ -16,13 +16,13 @@ import { lift } from "@commontools/common-builder";
 describe("scheduler", () => {
   it("should run actions when cells change", async () => {
     let runCount = 0;
-    const a = cell(1);
-    const b = cell(2);
-    const c = cell(0);
-    const adder: Action = (log) => {
+    const a = getDoc(1);
+    const b = getDoc(2);
+    const c = getDoc(0);
+    const adder: Action = log => {
       runCount++;
-      c.asRendererCell([], log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log)
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
       );
     };
     await run(adder);
@@ -36,13 +36,13 @@ describe("scheduler", () => {
 
   it("schedule shouldn't run immediately", async () => {
     let runCount = 0;
-    const a = cell(1);
-    const b = cell(2);
-    const c = cell(0);
-    const adder: Action = (log) => {
+    const a = getDoc(1);
+    const b = getDoc(2);
+    const c = getDoc(0);
+    const adder: Action = log => {
       runCount++;
-      c.asRendererCell([], log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log)
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
       );
     };
     schedule(adder, {
@@ -62,13 +62,13 @@ describe("scheduler", () => {
 
   it("should remove actions", async () => {
     let runCount = 0;
-    const a = cell(1);
-    const b = cell(2);
-    const c = cell(0);
-    const adder: Action = (log) => {
+    const a = getDoc(1);
+    const b = getDoc(2);
+    const c = getDoc(0);
+    const adder: Action = log => {
       runCount++;
-      c.asRendererCell([], log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log)
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
       );
     };
     await run(adder);
@@ -89,13 +89,13 @@ describe("scheduler", () => {
 
   it("scheduler should return a cancel function", async () => {
     let runCount = 0;
-    const a = cell(1);
-    const b = cell(2);
-    const c = cell(0);
-    const adder: Action = (log) => {
+    const a = getDoc(1);
+    const b = getDoc(2);
+    const c = getDoc(0);
+    const adder: Action = log => {
       runCount++;
-      c.asRendererCell([], log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log)
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
       );
     };
     const cancel = schedule(adder, {
@@ -120,21 +120,21 @@ describe("scheduler", () => {
 
   it("should run actions in topological order", async () => {
     let runs: string[] = [];
-    const a = cell(1);
-    const b = cell(2);
-    const c = cell(0);
-    const d = cell(1);
-    const e = cell(0);
-    const adder1: Action = (log) => {
+    const a = getDoc(1);
+    const b = getDoc(2);
+    const c = getDoc(0);
+    const d = getDoc(1);
+    const e = getDoc(0);
+    const adder1: Action = log => {
       runs.push("adder1");
-      c.asRendererCell([], log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log)
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
       );
     };
-    const adder2: Action = (log) => {
+    const adder2: Action = log => {
       runs.push("adder2");
-      e.asRendererCell([], log).send(
-        c.getAsQueryResult([], log) + d.getAsQueryResult([], log)
+      e.asCell([], log).send(
+        c.getAsQueryResult([], log) + d.getAsQueryResult([], log),
       );
     };
     await run(adder1);
@@ -158,25 +158,25 @@ describe("scheduler", () => {
 
   it("should stop eventually when encountering infinite loops", async () => {
     let maxRuns = 200; // More than the limit in scheduler
-    const a = cell(1);
-    const b = cell(2);
-    const c = cell(0);
-    const d = cell(1);
-    const e = cell(0);
-    const adder1: Action = (log) => {
-      c.asRendererCell([], log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log)
+    const a = getDoc(1);
+    const b = getDoc(2);
+    const c = getDoc(0);
+    const d = getDoc(1);
+    const e = getDoc(0);
+    const adder1: Action = log => {
+      c.asCell([], log).send(
+        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
       );
     };
-    const adder2: Action = (log) => {
-      e.asRendererCell([], log).send(
-        c.getAsQueryResult([], log) + d.getAsQueryResult([], log)
+    const adder2: Action = log => {
+      e.asCell([], log).send(
+        c.getAsQueryResult([], log) + d.getAsQueryResult([], log),
       );
     };
-    const adder3: Action = (log) => {
+    const adder3: Action = log => {
       if (--maxRuns <= 0) return;
-      c.asRendererCell([], log).send(
-        e.getAsQueryResult([], log) + b.getAsQueryResult([], log)
+      c.asCell([], log).send(
+        e.getAsQueryResult([], log) + b.getAsQueryResult([], log),
       );
     };
 
@@ -194,11 +194,11 @@ describe("scheduler", () => {
   });
 
   it("should not loop on r/w changes on its own output", async () => {
-    const counter = cell(0);
-    const by = cell(1);
-    const inc: Action = (log) =>
+    const counter = getDoc(0);
+    const by = getDoc(1);
+    const inc: Action = log =>
       counter
-        .asRendererCell([], log)
+        .asCell([], log)
         .send(counter.getAsQueryResult([], log) + by.getAsQueryResult([], log));
 
     const stopped = vi.fn();
@@ -227,11 +227,11 @@ describe("scheduler", () => {
 
 describe("event handling", () => {
   it("should queue and process events", async () => {
-    const eventCell = cell(0);
-    const eventResultCell = cell(0);
+    const eventCell = getDoc(0);
+    const eventResultCell = getDoc(0);
     let eventCount = 0;
 
-    const eventHandler: EventHandler = (event) => {
+    const eventHandler: EventHandler = event => {
       eventCount++;
       eventResultCell.send(event);
     };
@@ -249,10 +249,10 @@ describe("event handling", () => {
   });
 
   it("should remove event handlers", async () => {
-    const eventCell = cell(0);
+    const eventCell = getDoc(0);
     let eventCount = 0;
 
-    const eventHandler: EventHandler = (event) => {
+    const eventHandler: EventHandler = event => {
       eventCount++;
       eventCell.send(event);
     };
@@ -278,7 +278,7 @@ describe("event handling", () => {
   });
 
   it("should handle events with nested paths", async () => {
-    const parentCell = cell({ child: { value: 0 } });
+    const parentCell = getDoc({ child: { value: 0 } });
     let eventCount = 0;
 
     const eventHandler: EventHandler = () => {
@@ -297,10 +297,10 @@ describe("event handling", () => {
   });
 
   it("should process events in order", async () => {
-    const eventCell = cell(0);
+    const eventCell = getDoc(0);
     const events: number[] = [];
 
-    const eventHandler: EventHandler = (event) => {
+    const eventHandler: EventHandler = event => {
       events.push(event);
     };
 
@@ -316,13 +316,13 @@ describe("event handling", () => {
   });
 
   it("should trigger recomputation of dependent cells", async () => {
-    const eventCell = cell(0);
-    const eventResultCell = cell(0);
+    const eventCell = getDoc(0);
+    const eventResultCell = getDoc(0);
     let eventCount = 0;
     let actionCount = 0;
     let lastEventSeen = 0;
 
-    const eventHandler: EventHandler = (event) => {
+    const eventHandler: EventHandler = event => {
       eventCount++;
       eventResultCell.send(event);
     };

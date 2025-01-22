@@ -1,4 +1,4 @@
-import { cell, CellImpl, ReactivityLog } from "../cell.js";
+import { getDoc, DocImpl, ReactivityLog } from "../cell.js";
 import { makeClient, SimpleMessage, SimpleContent } from "../llm-client.js";
 import { idle, type Action } from "../scheduler.js";
 import { refer } from "merkle-reference";
@@ -27,7 +27,7 @@ import { refer } from "merkle-reference";
  *   updating `partial` result.
  */
 export function llm(
-  inputsCell: CellImpl<{
+  inputsCell: DocImpl<{
     messages?: SimpleContent[] | SimpleMessage[];
     prompt?: SimpleContent;
     stop?: string;
@@ -39,14 +39,14 @@ export function llm(
   _addCancel: (cancel: () => void) => void,
   cause?: any,
 ): Action {
-  const pending = cell(false, { llm: { pending: cause } });
-  const result = cell<string | undefined>(undefined, {
+  const pending = getDoc(false, { llm: { pending: cause } });
+  const result = getDoc<string | undefined>(undefined, {
     llm: { result: cause },
   });
-  const partial = cell<string | undefined>(undefined, {
+  const partial = getDoc<string | undefined>(undefined, {
     llm: { partial: cause },
   });
-  const requestHash = cell<string | undefined>(undefined, {
+  const requestHash = getDoc<string | undefined>(undefined, {
     llm: { requestHash: cause },
   });
 
@@ -127,7 +127,7 @@ export function llm(
     let resultPromise = makeClient().sendRequest(llmParams, updatePartial);
 
     resultPromise
-      .then(async (text) => {
+      .then(async text => {
         if (thisRun !== currentRun) return;
 
         //normalizeToCells(text, undefined, log);
@@ -138,7 +138,7 @@ export function llm(
         partial.setAtPath([], text, log);
         requestHash.setAtPath([], hash, log);
       })
-      .catch(async (error) => {
+      .catch(async error => {
         if (thisRun !== currentRun) return;
 
         console.error("Error generating data", error);

@@ -1,7 +1,7 @@
 import { LitElement, html, css } from "lit-element";
 import { customElement, property, state } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
-import { RendererCell } from "@commontools/common-runner";
+import { Cell } from "@commontools/common-runner";
 
 @customElement("common-draggable")
 export default class DraggableElement extends LitElement {
@@ -27,7 +27,7 @@ export default class DraggableElement extends LitElement {
   `;
 
   @state() _altKey = false;
-  @property({ type: Object }) entity: RendererCell<any> | undefined = undefined;
+  @property({ type: Object }) entity: Cell<any> | undefined = undefined;
   @property({ type: Object }) spell: string | undefined = undefined;
 
   override connectedCallback() {
@@ -76,7 +76,7 @@ export default class DraggableElement extends LitElement {
     if (entityId) {
       // TODO: Replace with something more unique
       const data = JSON.stringify({
-        ...this.entity?.getAsCellReference(),
+        ...this.entity?.getAsDocLink(),
         ...(this.spell ? { spell: this.spell } : {}),
       });
       console.log("draggable data", data, e.dataTransfer);

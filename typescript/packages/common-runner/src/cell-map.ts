@@ -1,13 +1,13 @@
 import { isOpaqueRef } from "@commontools/common-builder";
 import {
-  type CellImpl,
+  type DocImpl,
   isQueryResultForDereferencing,
-  isCellReference,
-  isRendererCell,
+  isDocLink,
   isCell,
-  getCellReferenceOrThrow,
-  type CellReference,
-  cell,
+  isDoc,
+  getDocLinkOrThrow,
+  type DocLink,
+  getDoc,
 } from "./cell.js";
 import { refer } from "merkle-reference";
 
@@ -52,11 +52,10 @@ export const createRef = (
 
       if (isQueryResultForDereferencing(obj))
         // It'll traverse this and call .toJSON on the cell in the reference.
-        obj = getCellReferenceOrThrow(obj);
+        obj = getDocLinkOrThrow(obj);
 
       // If referencing other cells, return their ids (or random as fallback).
-      if (isCell(obj) || isRendererCell(obj))
-        return obj.entityId ?? crypto.randomUUID();
+      if (isDoc(obj) || isCell(obj)) return obj.entityId ?? crypto.randomUUID();
       else if (Array.isArray(obj)) return obj.map(traverse);
       else if (typeof obj === "object" && obj !== null)
         return Object.fromEntries(
@@ -95,13 +94,12 @@ export const getEntityId = (value: any): EntityId | undefined => {
   if (typeof value === "object" && value !== null && "/" in value)
     return value as EntityId;
 
-  let ref: CellReference | undefined = undefined;
+  let ref: DocLink | undefined = undefined;
 
-  if (isQueryResultForDereferencing(value))
-    ref = getCellReferenceOrThrow(value);
-  else if (isCellReference(value)) ref = value;
-  else if (isRendererCell(value)) ref = value.getAsCellReference();
-  else if (isCell(value)) ref = { cell: value, path: [] };
+  if (isQueryResultForDereferencing(value)) ref = getDocLinkOrThrow(value);
+  else if (isDocLink(value)) ref = value;
+  else if (isCell(value)) ref = value.getAsDocLink();
+  else if (isDoc(value)) ref = { cell: value, path: [] };
 
   if (!ref?.cell.entityId) return undefined;
 
@@ -110,24 +108,24 @@ export const getEntityId = (value: any): EntityId | undefined => {
   else return ref.cell.entityId;
 };
 
-export function getCellByEntityId<T = any>(
+export function getDocByEntityId<T = any>(
   entityId: EntityId | string,
   createIfNotFound = true,
-): CellImpl<T> | undefined {
+): DocImpl<T> | undefined {
   const id = typeof entityId === "string" ? entityId : JSON.stringify(entityId);
-  let entityCell = entityIdToCellMap.get(id);
-  if (entityCell) return entityCell;
+  let doc = entityIdToDocMap.get(id);
+  if (doc) return doc;
   if (!createIfNotFound) return undefined;
 
-  entityCell = cell<T>();
+  doc = getDoc<T>();
   if (typeof entityId === "string") entityId = JSON.parse(entityId) as EntityId;
-  entityCell.entityId = entityId;
-  setCellByEntityId(entityId, entityCell);
-  return entityCell;
+  doc.entityId = entityId;
+  setDocByEntityId(entityId, doc);
+  return doc;
 }
 
-export const setCellByEntityId = (entityId: EntityId, cell: CellImpl<any>) => {
-  entityIdToCellMap.set(JSON.stringify(entityId), cell);
+export const setDocByEntityId = (entityId: EntityId, cell: DocImpl<any>) => {
+  entityIdToDocMap.set(JSON.stringify(entityId), cell);
 };
 
 /**
@@ -174,4 +172,4 @@ class CleanableMap<T extends object> {
   }
 }
 
-const entityIdToCellMap = new CleanableMap<CellImpl<any>>();
+const entityIdToDocMap = new CleanableMap<DocImpl<any>>();

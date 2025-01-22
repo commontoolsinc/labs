@@ -1,4 +1,4 @@
-import { cell, CellImpl, ReactivityLog } from "../cell.js";
+import { getDoc, DocImpl, ReactivityLog } from "../cell.js";
 import { normalizeToCells } from "../utils.js";
 import { idle, type Action } from "../scheduler.js";
 
@@ -14,21 +14,21 @@ import { idle, type Action } from "../scheduler.js";
  * @returns { pending: boolean, result: any, error: any } - As individual cells, representing `pending` state, streamed `result`, and any `error`.
  */
 export function streamData(
-  inputsCell: CellImpl<{
+  inputsCell: DocImpl<{
     url: string;
     options?: { body?: any; method?: string; headers?: Record<string, string> };
     result?: any;
   }>,
   sendResult: (result: any) => void,
   _addCancel: (cancel: () => void) => void,
-  cause: CellImpl<any>[],
-  parentCell: CellImpl<any>,
+  cause: DocImpl<any>[],
+  parentCell: DocImpl<any>,
 ): Action {
-  const pending = cell(false, { streamData: { pending: cause } });
-  const result = cell<any | undefined>(undefined, {
+  const pending = getDoc(false, { streamData: { pending: cause } });
+  const result = getDoc<any | undefined>(undefined, {
     streamData: { result: cause },
   });
-  const error = cell<any | undefined>(undefined, {
+  const error = getDoc<any | undefined>(undefined, {
     streamData: { error: cause },
   });
 
@@ -81,7 +81,7 @@ export function streamData(
     const thisRun = ++status.run;
 
     fetch(url, { ...options, signal })
-      .then(async (response) => {
+      .then(async response => {
         const reader = response.body?.getReader();
         const utf8 = new TextDecoder();
 
@@ -141,7 +141,7 @@ export function streamData(
           }
         }
       })
-      .catch(async (e) => {
+      .catch(async e => {
         if (e instanceof DOMException && e.name === "AbortError") {
           return;
         }

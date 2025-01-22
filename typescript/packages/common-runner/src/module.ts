@@ -4,7 +4,7 @@ import {
   createNodeFactory,
 } from "@commontools/common-builder";
 import { type Action } from "./scheduler.js";
-import { type CellImpl } from "./cell.js";
+import { type DocImpl } from "./cell.js";
 import { type AddCancel } from "./cancel.js";
 const moduleMap = new Map<string, Module>();
 
@@ -24,11 +24,11 @@ export function getModuleByRef(ref: string): Module {
 // runner, and won't work with any other runners.
 export function raw<T, R>(
   implementation: (
-    inputsCell: CellImpl<T>,
+    inputsCell: DocImpl<T>,
     sendResult: (result: R) => void,
     addCancel: AddCancel,
     cause: any,
-    parentCell: CellImpl<any>,
+    parentCell: DocImpl<any>,
   ) => Action,
 ): ModuleFactory<T, R> {
   return createNodeFactory({

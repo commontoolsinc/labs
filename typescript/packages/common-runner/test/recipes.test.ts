@@ -8,7 +8,7 @@ import {
 } from "@commontools/common-builder";
 import { run } from "../src/runner.js";
 import { addModuleByRef } from "../src/module.js";
-import { cell, RendererCell } from "../src/cell.js";
+import { getDoc, Cell } from "../src/cell.js";
 import { idle } from "../src/scheduler.js";
 
 describe("Recipe Runner", () => {
@@ -145,11 +145,11 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    result.asRendererCell(["stream"]).send({ amount: 1 });
+    result.asCell(["stream"]).send({ amount: 1 });
     await idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
 
-    result.asRendererCell(["stream"]).send({ amount: 2 });
+    result.asCell(["stream"]).send({ amount: 2 });
     await idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
   });
@@ -174,11 +174,11 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    result.asRendererCell(["stream"]).send({ amount: 1 });
+    result.asCell(["stream"]).send({ amount: 1 });
     await idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
 
-    result.asRendererCell(["stream"]).send({ amount: 2 });
+    result.asCell(["stream"]).send({ amount: 2 });
     await idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
   });
@@ -200,18 +200,18 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    result.asRendererCell(["stream"]).send({ amount: 1 });
+    result.asCell(["stream"]).send({ amount: 1 });
     await idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 1 } });
 
-    result.asRendererCell(["stream"]).send({ amount: 2 });
+    result.asCell(["stream"]).send({ amount: 2 });
     await idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: { value: 3 } });
   });
 
   it("should execute recipes returned by handlers", async () => {
-    const counter = cell({ value: 0 });
-    const nested = cell({ a: { b: { c: 0 } } });
+    const counter = getDoc({ value: 0 });
+    const nested = getDoc({ a: { b: { c: 0 } } });
 
     const values: [number, number, number][] = [];
 
@@ -244,11 +244,11 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    result.asRendererCell(["stream"]).send({ amount: 1 });
+    result.asCell(["stream"]).send({ amount: 1 });
     await idle();
     expect(values).toEqual([[1, 1, 0]]);
 
-    result.asRendererCell(["stream"]).send({ amount: 2 });
+    result.asCell(["stream"]).send({ amount: 2 });
     await idle();
     expect(values).toEqual([
       [1, 1, 0],
@@ -260,8 +260,8 @@ describe("Recipe Runner", () => {
   });
 
   it("should handle recipes returned by lifted functions", async () => {
-    const x = cell(2);
-    const y = cell(3);
+    const x = getDoc(2);
+    const y = getDoc(3);
 
     const runCounts = {
       multiply: 0,
@@ -375,7 +375,7 @@ describe("Recipe Runner", () => {
       return { result };
     });
 
-    const settingsCell = cell({ value: 5 });
+    const settingsCell = getDoc({ value: 5 });
     const result = run(multiplyRecipe, {
       settings: settingsCell,
       multiplier: 3,
@@ -425,8 +425,8 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const item1 = cell({ value: 1 });
-    const item2 = cell({ value: 2 });
+    const item1 = getDoc({ value: 1 });
+    const item2 = getDoc({ value: 2 });
     const result = run(sumRecipe, { data: { items: [item1, item2] } });
 
     await idle();
@@ -453,7 +453,7 @@ describe("Recipe Runner", () => {
       ({ context }) => {
         const result = lift(schema, { type: "number" }, ({ context }) =>
           Object.values(context ?? {}).reduce(
-            (sum: number, val) => sum + (val as RendererCell<number>).get(),
+            (sum: number, val) => sum + (val as Cell<number>).get(),
             0,
           ),
         )({ context });
@@ -461,8 +461,8 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const value1 = cell(5);
-    const value2 = cell(7);
+    const value1 = getDoc(5);
+    const value2 = getDoc(7);
     const result = run(dynamicRecipe, {
       context: {
         first: value1,
@@ -488,7 +488,7 @@ describe("Recipe Runner", () => {
         },
       },
       ({ amount }, { counter }) => {
-        const counterCell = counter as unknown as RendererCell<number>;
+        const counterCell = counter as unknown as Cell<number>;
         counterCell.send(counterCell.get() + amount);
       },
     );
@@ -504,11 +504,11 @@ describe("Recipe Runner", () => {
 
     await idle();
 
-    result.asRendererCell(["stream"]).send({ amount: 1 });
+    result.asCell(["stream"]).send({ amount: 1 });
     await idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: 1 });
 
-    result.asRendererCell(["stream"]).send({ amount: 2 });
+    result.asCell(["stream"]).send({ amount: 2 });
     await idle();
     expect(result.getAsQueryResult()).toMatchObject({ counter: 3 });
   });

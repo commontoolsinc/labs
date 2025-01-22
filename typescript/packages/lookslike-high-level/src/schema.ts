@@ -1,5 +1,5 @@
 import { isQueryResultForDereferencing } from "@commontools/common-runner";
-import { getCellReferenceOrThrow } from "@commontools/common-runner";
+import { getDocLinkOrThrow } from "@commontools/common-runner";
 import { z } from "zod";
 
 export function jsonSchemaToPlaceholder(schema: any): any {
@@ -78,7 +78,7 @@ export function extractKeysFromJsonSchema(schema: any): string[] {
 
 export function zodSchemaToPlaceholder(schema: any): any {
   if (isQueryResultForDereferencing(schema)) {
-    const ref = getCellReferenceOrThrow(schema);
+    const ref = getDocLinkOrThrow(schema);
     schema = ref.cell.getAtPath(ref.path);
   }
 

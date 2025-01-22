@@ -1,17 +1,17 @@
 import { LitElement, html } from "lit-element";
 import { customElement, property } from "lit/decorators.js";
 import {
-  getCellByEntityId,
+  getDocByEntityId,
   isGettable,
   isSendable,
-  RendererCell,
+  Cell,
 } from "@commontools/common-runner";
 import { openCharm } from "../data.js";
 @customElement("common-droppable")
 export default class DroppableElement extends LitElement {
-  @property({ type: Object }) droppable: RendererCell<any[]> | undefined;
-  @property({ type: Object }) schema: RendererCell<any> | undefined;
-  @property({ type: Object }) opentarget: RendererCell<any> | undefined;
+  @property({ type: Object }) droppable: Cell<any[]> | undefined;
+  @property({ type: Object }) schema: Cell<any> | undefined;
+  @property({ type: Object }) opentarget: Cell<any> | undefined;
 
   private _hoverTimeout: number | undefined;
   private _openedTarget: boolean = false;
@@ -53,7 +53,7 @@ export default class DroppableElement extends LitElement {
       parsedData !== null &&
       parsedData.cell
     ) {
-      const cell = getCellByEntityId(parsedData.cell, false);
+      const cell = getDocByEntityId(parsedData.cell, false);
       if (cell) parsedData.cell = cell;
     }
 
@@ -80,7 +80,7 @@ export default class DroppableElement extends LitElement {
           if (parsedData !== undefined) items.push(parsedData);
         });
       } else if (item.type.startsWith("text/plain")) {
-        item.getAsString((data) => {
+        item.getAsString(data => {
           if (data !== undefined) items.push(data);
         });
       }
@@ -100,7 +100,7 @@ export default class DroppableElement extends LitElement {
     if (items.length > 0) this.droppable.send(items);
 
     if (this.opentarget && !this._openedTarget)
-      openCharm(this.opentarget!.getAsCellReference().cell);
+      openCharm(this.opentarget!.getAsDocLink().cell);
   }
 
   #handleDragLeave(e: DragEvent) {
@@ -123,7 +123,7 @@ export default class DroppableElement extends LitElement {
       console.log("hover timeout", this._openedTarget, this.opentarget);
       if (this._openedTarget || !this.opentarget) return;
       this._openedTarget = true;
-      openCharm(this.opentarget.getAsCellReference().cell);
+      openCharm(this.opentarget.getAsDocLink().cell);
     }, 1000) as unknown as number;
   }
 }
