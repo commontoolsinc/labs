@@ -8,9 +8,17 @@ import {
   type ReactivityLog,
 } from "@commontools/common-runner";
 import { Ref, createRef, ref } from "lit/directives/ref.js";
+import { view } from "../hyperscript/render.js";
+import { eventProps } from "../hyperscript/schema-helpers.js";
+
+export const iframe = view("common-iframe", {
+  ...eventProps(),
+  src: { type: "string" },
+  context: { type: "object" },
+});
 
 @customElement("common-iframe")
-export class CommonIframe extends LitElement {
+export class CommonIframeElement extends LitElement {
   @property({ type: String }) src = "";
   // HACK: The UI framework already translates the top level cell into updated
   // properties, but we want to only have to deal with one type of listening, so

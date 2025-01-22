@@ -1,7 +1,7 @@
 import "./index.js";
 import { subject } from "@commontools/common-frp/stream";
 import { state } from "@commontools/common-frp/signal";
-import { datatable, dict, vstack, div, shoelace } from "./hyperscript/tags.js";
+import { datatable, dict, vstack, div, shoelace, iframe } from "./hyperscript/tags.js";
 import { binding, repeat } from "./hyperscript/view.js";
 import render from "./hyperscript/render.js";
 
@@ -75,7 +75,12 @@ const listNode = vstack(
   repeat("items", div({ id: binding("id") }, binding("value"))),
 );
 
+const iframeNode = iframe({
+  src: "<b>Hello</b>",
+});
+
 const tree = vstack({}, [
+  iframeNode,
   shoelace.alert(
     {
       open: true,
@@ -109,6 +114,7 @@ clicks.sink({
     console.log("clicks", clicks);
   },
 });
+
 
 const element = render(tree, {
   clicks,

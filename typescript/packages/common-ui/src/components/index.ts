@@ -2,6 +2,7 @@ export * as CommonButton from "./common-button.js";
 export * as CommonDatatable from "./common-datatable.js";
 export * as CommonDict from "./common-dict.js";
 export * as CommonHstack from "./common-hstack.js";
+export * as CommonIframe from "./common-iframe.js";
 export * as CommonImg from "./common-img.js";
 export * as CommonInput from "./common-input.js";
 export * as CommonTextarea from "./common-textarea.js";

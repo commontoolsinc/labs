@@ -5,6 +5,7 @@ export { navpanel } from "../components/common-navpanel.js";
 export { record } from "../components/common-record.js";
 export { dict } from "../components/common-dict.js";
 export { datatable } from "../components/common-datatable.js";
+export { iframe } from "../components/common-iframe.js";
 export { commonInput } from "../components/common-input.js";
 export { suggestions } from "../components/common-suggestions.js";
 export { unibox } from "../components/common-unibox.js";

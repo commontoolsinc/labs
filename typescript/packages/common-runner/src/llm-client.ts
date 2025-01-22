@@ -8,8 +8,8 @@ export const jsonDataRequest = `Generate dummy data as JSON as per the provided 
 
 export const LLM_SERVER_URL =
   typeof window !== "undefined"
-    ? window.location.protocol + "//" + window.location.host + "/api/llm"
-    : "//api/llm";
+    ? window.location.protocol + "//" + window.location.host + "/api/ai/llm"
+    : "//api/ai/llm";
 export const makeClient = (url?: string) =>
   new LLMClient(url || LLM_SERVER_URL);
 

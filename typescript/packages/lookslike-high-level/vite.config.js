@@ -39,19 +39,19 @@ export default defineConfig({
     },
     proxy: {
       "/api/ai/llm": {
-        target: "http://localhost:8000/api/ai/llm",
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/api/ai/llm",
         changeOrigin: true,
       },
       "/api/ai/img": {
-        target: "http://localhost:8000/api/ai/img",
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/api/ai/img",
         changeOrigin: true,
       },
       "/api/ai/voice": {
-        target: "http://localhost:8000/api/ai/voice",
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/api/ai/voice",
         changeOrigin: true,
       },
       "/api/ai/webreader": {
-        target: "http://localhost:8000/api/ai/webreader",
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/api/ai/webreader",
         changeOrigin: true,
       },
       "/api/data": {
@@ -60,7 +60,7 @@ export default defineConfig({
         rewrite: path => path.replace(/^\/api\/data/, ""),
       },
       "/api/storage/blobby": {
-        target: "http://localhost:8000/api/storage/blobby",
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/api/storage/blobby",
         changeOrigin: true,
       },
     },

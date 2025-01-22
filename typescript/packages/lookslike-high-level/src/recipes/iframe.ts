@@ -115,8 +115,8 @@ const getSuggestion = lift(
 const responsePrefill = `<html>
 <head>
 <script src="https://cdn.tailwindcss.com"></script>
-<script crossorigin src="https://unpkg.com/react/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom/umd/react-dom.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script>
 window.onerror = function(message, source, lineno, colno, error) {
@@ -164,7 +164,7 @@ window.writeData = function(key, value) {
 }
 
 window.generateImage = function(prompt) {
-  return 'https://ct-img.m4ke.workers.dev/?prompt=' + encodeURIComponent(prompt);
+  return '/api/ai/img?prompt=' + encodeURIComponent(prompt);
 }
 
 
@@ -176,7 +176,7 @@ window.generateImage = function(prompt) {
  */
 window.sendLLMRequest = async function(system, messages) {
   console.log('iframe: Asking LLM', system, messages);
-  const response = await fetch('http://localhost:8000/api/ai/llm', {
+  const response = await fetch('/api/ai/llm', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
