@@ -1,5 +1,0 @@
-${preamble}
-
-Please generate a JSON schema for what would be included in the file with name ${files|split}.
-
-The output should be only the JSON schema and no other formatting or text.

@@ -1,7 +1,0 @@
-Here is the backstory for a character:
-
-${backstory}
-
-Generate dummy JSON data for a file about this character called family.json.
-
-Output only JSON.
