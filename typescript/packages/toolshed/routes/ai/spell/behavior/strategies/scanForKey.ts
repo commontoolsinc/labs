@@ -26,7 +26,7 @@ export async function scanForKey(
           continue;
         }
 
-        const blobData = JSON.parse(content);
+        const blobData = content as Record<string, unknown>;
         matchingExamples.push({
           key: blobKey,
           data: blobData,

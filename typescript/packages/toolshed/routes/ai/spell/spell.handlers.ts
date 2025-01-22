@@ -6,6 +6,7 @@ import type { AppRouteHandler } from "@/lib/types.ts";
 import type { ProcessSchemaRoute, SearchSchemaRoute } from "./spell.routes.ts";
 import { performSearch } from "./behavior/search.ts";
 import { checkSchemaMatch } from "@/lib/schema-match.ts";
+import { Logger } from "@/lib/prefixed-logger.ts";
 
 // Process Schema schemas
 export const ProcessSchemaRequestSchema = z.object({
@@ -76,9 +77,7 @@ export type SearchSchemaRequest = z.infer<typeof SearchSchemaRequestSchema>;
 export type SearchSchemaResponse = z.infer<typeof SearchSchemaResponseSchema>;
 
 export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
-  const redis = c.get("blobbyRedis");
-  if (!redis) throw new Error("Redis client not found in context");
-  const logger = c.get("logger");
+  const logger: Logger = c.get("logger");
 
   const body = (await c.req.json()) as ProcessSchemaRequest;
   const startTime = performance.now();
@@ -90,6 +89,9 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
     );
 
     const allBlobs = await getAllBlobs();
+
+    logger.info("Found blobs: " + allBlobs.length);
+
     const matchingExamples: Array<{
       key: string;
       data: Record<string, unknown>;
@@ -104,7 +106,7 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
         const content = await getBlob(blobKey);
         if (!content) continue;
 
-        const blobData = JSON.parse(content);
+        const blobData = content as Record<string, unknown>;
 
         allExamples.push({
           key: blobKey,
@@ -119,6 +121,7 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
           });
         }
       } catch (error) {
+        logger.error(`Error processing key ${blobKey}: ${error}`);
         continue;
       }
     }
@@ -267,10 +270,7 @@ Respond with ${
 }
 
 export const search: AppRouteHandler<SearchSchemaRoute> = async (c) => {
-  const redis = c.get("blobbyRedis");
-  if (!redis) throw new Error("Redis client not found in context");
-  const logger = c.get("logger");
-
+  const logger: Logger = c.get("logger");
   const startTime = performance.now();
   const body = (await c.req.json()) as SearchSchemaRequest;
 
