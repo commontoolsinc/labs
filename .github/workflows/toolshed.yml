@@ -3,11 +3,9 @@ name: Toolshed CI/CD
 on:
   push:
     branches:
-      - toolshed
       - main
   pull_request:
     branches:
-      - toolshed
       - main
 
 jobs:
