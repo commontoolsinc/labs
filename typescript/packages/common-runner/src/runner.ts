@@ -40,11 +40,6 @@ import {
 import { getModuleByRef } from "./module.js";
 import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.js";
 import "./builtins/index.js";
-import init, {
-  CommonRuntime,
-  JavaScriptModuleDefinition,
-  JavaScriptValueMap,
-} from "@commontools/common-runtime";
 import { addRecipe, getRecipe, getRecipeId } from "./recipe-map.js";
 
 export const cancels = new WeakMap<CellImpl<any>, Cancel>();
@@ -302,15 +297,6 @@ function instantiateNode(
           addCancel,
         );
         break;
-      case "isolated":
-        instantiateIsolatedNode(
-          module,
-          inputBindings,
-          outputBindings,
-          processCell,
-          addCancel,
-        );
-        break;
       case "recipe":
         instantiateRecipeNode(
           module,
@@ -543,70 +529,6 @@ function instantiatePassthroughNode(
   };
 
   addCancel(schedule(action, { reads, writes } satisfies ReactivityLog));
-}
-
-function instantiateIsolatedNode(
-  module: Module,
-  inputBindings: JSONValue,
-  outputBindings: JSONValue,
-  processCell: CellImpl<any>,
-  addCancel: AddCancel,
-) {
-  const inputs = unwrapOneLevelAndBindtoCell(inputBindings, processCell);
-  const reads = findAllAliasedCells(inputs, processCell);
-  const inputsCell = cell(inputs);
-  inputsCell.freeze();
-
-  const outputs = unwrapOneLevelAndBindtoCell(outputBindings, processCell);
-  const writes = findAllAliasedCells(outputs, processCell);
-
-  if (!isJavaScriptModuleDefinition(module.implementation))
-    throw new Error(`Invalid module definition`);
-
-  // Initialize web runtime wasm artifact.
-  // Needed only once.
-  runtime ||= (init as unknown as () => Promise<any>)().then(
-    () => new CommonRuntime(COMMON_RUNTIME_URL),
-  );
-
-  const fnPromise = runtime.then(rt =>
-    rt.instantiate(
-      module.implementation as unknown as JavaScriptModuleDefinition,
-    ),
-  );
-
-  const action: Action = async (log: ReactivityLog) => {
-    const inputsProxy = inputsCell.getAsQueryResult([], log);
-    if (typeof inputsProxy !== "object")
-      throw new Error(`Invalid inputs: Must be an object`);
-
-    const fn = await fnPromise;
-    const fnOutput = await fn.run(inputsProxy as unknown as JavaScriptValueMap);
-
-    const result: any = Object.fromEntries(
-      Object.entries(fnOutput).map(([key, value]) => [key, value.val]),
-    );
-
-    sendValueToBinding(processCell, outputBindings, result, log);
-  };
-
-  addCancel(schedule(action, { reads, writes } satisfies ReactivityLog));
-}
-
-let runtime: Promise<CommonRuntime> | undefined;
-const COMMON_RUNTIME_URL = "http://localhost:8081";
-
-// This should be in common-runtime
-function isJavaScriptModuleDefinition(
-  module: any,
-): module is JavaScriptModuleDefinition {
-  return (
-    typeof module === "object" &&
-    module !== null &&
-    typeof module.body === "string" &&
-    typeof module.inputs === "object" &&
-    typeof module.outputs === "object"
-  );
 }
 
 function instantiateRecipeNode(

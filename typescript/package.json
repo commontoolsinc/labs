@@ -28,15 +28,8 @@
   "wireit": {
     "build": {
       "dependencies": [
-        "./packages/usuba-rt:build",
-        "./packages/usuba-api:build",
-        "./packages/usuba-sw:build",
-        "./packages/usuba-ui:build",
-        "./packages/usuba-ses:build",
         "./packages/runtime-demo:build",
         "./packages/example-module:build",
-        "./packages/lookslike-prototype:build",
-        "./packages/lookslike-sagas:build",
         "./packages/common-html:build",
         "./packages/common-frp:build",
         "./packages/common-frp-lit:build",
@@ -53,15 +46,8 @@
     },
     "clean": {
       "dependencies": [
-        "./packages/usuba-rt:clean",
-        "./packages/usuba-api:clean",
-        "./packages/usuba-sw:clean",
-        "./packages/usuba-ui:clean",
-        "./packages/usuba-ses:clean",
         "./packages/runtime-demo:clean",
         "./packages/example-module:clean",
-        "./packages/lookslike-prototype:clean",
-        "./packages/lookslike-sagas:clean",
         "./packages/lookslike-high-level:clean",
         "./packages/collectathon:clean",
         "./packages/common-html:clean",

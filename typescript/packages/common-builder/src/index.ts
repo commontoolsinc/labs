@@ -6,10 +6,8 @@ export {
   lift,
   byRef,
   handler,
-  isolated,
   compute,
   render,
-  // event,
 } from "./module.js";
 export {
   recipe,
