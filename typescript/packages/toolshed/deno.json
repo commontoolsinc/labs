@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "dev": "deno task build-lookslike && deno run -A --watch index.ts",
+    "dev": "deno run -A --watch index.ts",
     "test": "deno test -A --env-file=.env.test",
     "build-lookslike": "deno run -A scripts/build-lookslike.ts"
   },
