@@ -1,16 +1,9 @@
 import { streamText } from "npm:ai";
-import { z } from "zod";
 
-import type { AppRouteHandler } from "@/lib/types.ts";
 import {
-  ALIAS_NAMES,
   findModel,
-  ModelList,
-  MODELS,
   TASK_MODELS,
 } from "./models.ts";
-import * as cache from "./cache.ts";
-import type { Context } from "hono";
 
 // Core generation logic separated from HTTP handling
 export interface GenerateTextParams {

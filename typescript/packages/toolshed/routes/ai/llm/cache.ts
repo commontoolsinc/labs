@@ -1,5 +1,5 @@
 import { ensureDir } from "https://deno.land/std/fs/mod.ts";
-import { colors, timestamp } from "../../routes/ai/llm/cli.ts";
+import { colors, timestamp } from "./cli.ts";
 
 export const CACHE_DIR = "./cache/llm-api-cache";
 
