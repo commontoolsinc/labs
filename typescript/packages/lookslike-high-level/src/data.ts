@@ -243,7 +243,10 @@ export async function saveRecipe(
   return response.ok;
 }
 
+import smolIframe from "./recipes/smolIframe.js";
+
 addCharms([
+  run(smolIframe, { data: { count: 1 } }),
   // helloWorld.spawn({ helloWorld: 1 }),
   // counter.spawn({ counter: 1 }),
   // importer.spawn({ fetch: 1 }),
