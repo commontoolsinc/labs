@@ -41,10 +41,10 @@ router.use("*", async (c, next) => {
 
 router.use(cors());
 
-router
+const Router = router
   .openapi(routes.uploadBlob, handlers.uploadBlobHandler)
   .openapi(routes.getBlob, handlers.getBlobHandler)
   .openapi(routes.getBlobPath, handlers.getBlobPathHandler)
   .openapi(routes.listBlobs, handlers.listBlobsHandler);
 
-export default router;
+export default Router;

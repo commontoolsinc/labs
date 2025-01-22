@@ -3,7 +3,7 @@ import { serveStatic } from "hono/deno";
 
 const router = createRouter();
 
-router.get(
+const Router = router.get(
   "/app/latest/*",
   serveStatic({
     root: "./lookslike-highlevel-dist",
@@ -18,4 +18,4 @@ router.get(
   }),
 );
 
-export default router;
+export default Router;
