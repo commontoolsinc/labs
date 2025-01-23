@@ -14,7 +14,7 @@ import {
 import { getDoc, DocImpl, getRecipe, isDoc } from "@commontools/common-runner";
 import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
-import { home } from "../recipes/home.js";
+import { home } from "../recipes/home.jsx";
 import { render } from "@commontools/common-html";
 
 const toasty = (message: string) => {

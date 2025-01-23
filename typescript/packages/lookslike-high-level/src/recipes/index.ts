@@ -42,7 +42,7 @@ import counters from "./counters.js";
 addRecipe(counters, countersSrc, counterSpec);
 export { counters };
 
-import dataDesignerSrc from "./dataDesigner.ts?raw";
+import dataDesignerSrc from "./dataDesigner.tsx?raw";
 import { dataDesigner } from "./dataDesigner.js";
 addRecipe(dataDesigner, dataDesignerSrc);
 export { dataDesigner };
@@ -72,7 +72,7 @@ import { jsonImporter } from "./archive/jsonImport.js";
 addRecipe(jsonImporter, jsonImporterSrc);
 export { jsonImporter };
 
-import luftBnBSearchSrc from "./luft-bnb-search.ts?raw";
+import luftBnBSearchSrc from "./luft-bnb-search.tsx?raw";
 import { luftBnBSearch } from "./luft-bnb-search.js";
 addRecipe(luftBnBSearch, luftBnBSearchSrc);
 export { luftBnBSearch };
@@ -82,7 +82,7 @@ import { prompt } from "./prompts.js";
 addRecipe(prompt, promptSrc);
 export { prompt };
 
-import playlistForTripSrc from "./playlist.ts?raw";
+import playlistForTripSrc from "./playlist.tsx?raw";
 import { playlistForTrip } from "./playlist.js";
 addRecipe(playlistForTrip, playlistForTripSrc);
 export { playlistForTrip };
@@ -97,7 +97,7 @@ import { routine } from "./routine.js";
 addRecipe(routine, routineSrc);
 export { routine };
 
-import searchSrc from "./search.ts?raw";
+import searchSrc from "./search.tsx?raw";
 import { search } from "./search.js";
 addRecipe(search, searchSrc);
 export { search };

@@ -25,8 +25,8 @@ import {
   run,
 } from "@commontools/common-runner";
 import { repeat } from "lit/directives/repeat.js";
-import { iframe } from "../recipes/iframe.js";
-import { search } from "../recipes/search.js";
+import { iframe } from "../recipes/iframe.jsx";
+import { search } from "../recipes/search.jsx";
 import { NAME, TYPE } from "@commontools/common-builder";
 import { matchRoute, navigate } from "../router.js";
 import * as Schema from "../schema.js";
