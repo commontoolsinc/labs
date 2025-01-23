@@ -1,17 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
-import { view } from "../hyperscript/render.js";
-import { eventProps } from "../hyperscript/schema-helpers.js";
-
-export const commonFileInput = view("common-file-input", {
-    ...eventProps(),
-    files: { type: "array" },
-    filesContent: { type: "array" },
-    multiple: { type: "boolean" },
-    accept: { type: "string" },
-    appearance: { type: "string" },
-});
 
 interface FileContent {
     file: File;

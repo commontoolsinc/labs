@@ -59,10 +59,10 @@ export class CommonAudioRecorderElement extends LitElement {
             });
             const data = await response.json();
 
-            this.dispatchEvent(new CommonAudioRecordingEvent({ 
+            this.dispatchEvent(new CommonAudioRecordingEvent({
                 id: this.id,
                 blob: audioBlob,
-                transcription: data.transcription 
+                transcription: data.transcription
             }));
         } catch (error) {
             console.error("Transcription error:", error);
@@ -89,9 +89,9 @@ export class CommonAudioRecorderElement extends LitElement {
                 const audioBlob = new Blob(this.audioChunks, {
                     type: "audio/wav",
                 });
-                this.dispatchEvent(new CommonAudioRecordingEvent({ 
+                this.dispatchEvent(new CommonAudioRecordingEvent({
                     id: this.id,
-                    blob: audioBlob 
+                    blob: audioBlob
                 }));
                 await this.runTranscription(audioBlob);
             };
@@ -119,16 +119,14 @@ export class CommonAudioRecorderElement extends LitElement {
 
     override render() {
         return html`
-      <div @click=${this.startRecording} class=${
-            this.isRecording ? "hidden" : ""
-        }>
+      <div @click=${this.startRecording} class=${this.isRecording ? "hidden" : ""
+            }>
         <slot name="start">
           <button>Start Recording</button>
         </slot>
       </div>
-      <div @click=${this.stopRecording} class=${
-            !this.isRecording ? "hidden" : ""
-        }>
+      <div @click=${this.stopRecording} class=${!this.isRecording ? "hidden" : ""
+            }>
         <slot name="stop">
           <button>Finish Recording</button>
         </slot>

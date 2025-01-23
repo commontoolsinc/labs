@@ -1,14 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
-import { view } from "../hyperscript/render.js";
-import { eventProps } from "../hyperscript/schema-helpers.js";
-
-export const vstack = view("common-vstack", {
-  ...eventProps(),
-  gap: { type: "string" },
-  pad: { type: "string" },
-});
 
 @customElement("common-vstack")
 export class CommonVstackElement extends LitElement {

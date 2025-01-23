@@ -8,14 +8,6 @@ import {
   type ReactivityLog,
 } from "@commontools/common-runner";
 import { Ref, createRef, ref } from "lit/directives/ref.js";
-import { view } from "../hyperscript/render.js";
-import { eventProps } from "../hyperscript/schema-helpers.js";
-
-export const iframe = view("common-iframe", {
-  ...eventProps(),
-  src: { type: "string" },
-  context: { type: "object" },
-});
 
 @customElement("common-iframe")
 export class CommonIframeElement extends LitElement {

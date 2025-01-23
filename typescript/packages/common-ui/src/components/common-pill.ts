@@ -1,12 +1,6 @@
 import { LitElement, html, css } from 'lit-element';
 import { customElement } from 'lit-element/decorators.js';
-import { view } from '../hyperscript/render.js';
 import { baseStyles } from './style.js';
-import { eventProps } from '../hyperscript/schema-helpers.js';
-
-export const pill = view('common-pill', {
-  ...eventProps(),
-});
 
 @customElement("common-pill")
 export class CommonButtonElement extends LitElement {
