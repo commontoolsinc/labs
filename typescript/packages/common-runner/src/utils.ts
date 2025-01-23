@@ -11,7 +11,6 @@ import {
   UnsafeBinding,
   unsafe_materializeFactory,
   isOpaqueRef,
-  doc,
 } from "@commontools/common-builder";
 import {
   type DocImpl,
@@ -314,7 +313,7 @@ export function followLinks(ref: DocLink, seen: DocLink[] = [], log?: Reactivity
     else if (isDoc(target)) ref = { cell: target, path: [] } satisfies DocLink;
     else if (isAlias(target))
       ref = {
-        cell: target.$alias.cell ?? doc,
+        cell: target.$alias.cell ?? ref.cell,
         path: target.$alias.path,
       } satisfies DocLink;
     else return ref;
