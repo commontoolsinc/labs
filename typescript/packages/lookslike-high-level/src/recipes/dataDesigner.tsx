@@ -1,4 +1,4 @@
-import { html } from "@commontools/common-html";
+import { h } from "@commontools/common-html";
 import {
   recipe,
   UI,
@@ -13,14 +13,14 @@ import {
   navigateTo,
 } from "@commontools/common-builder";
 import { truncateAsciiArt } from "../loader.js";
-import { prompt } from "./prompts.js";
+import { prompt } from "./prompts.jsx";
 
 const formatData = lift(({ obj }) => {
   console.log("stringify", obj);
   return JSON.stringify(obj || {}, null, 2);
 });
 
-const tap = lift((x) => {
+const tap = lift(x => {
   console.log(x, JSON.stringify(x, null, 2));
   return x;
 });
@@ -154,15 +154,18 @@ export const dataDesigner = recipe<{
 
   return {
     [NAME]: str`${title}`,
-    [UI]: html`<div>
-      ${ifElse(
-        pending,
-        html` <pre style="padding: 32px; color: #ccc; text-align: center;">
-${dots({ partial, pending })}</pre
-        >`,
-        html`<pre>${formatData({ obj: generatedData })}</pre>`,
-      )}
-    </div>`,
+    [UI]: (
+      <div>
+        $
+        {ifElse(
+          pending,
+          <pre style="padding: 32px; color: #ccc; text-align: center;">
+            {dots({ partial, pending })}
+          </pre>,
+          <pre>{formatData({ obj: generatedData })}</pre>,
+        )}
+      </div>
+    ),
     prompt,
     title,
     data: generatedData,

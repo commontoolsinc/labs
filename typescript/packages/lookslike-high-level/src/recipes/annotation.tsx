@@ -1,4 +1,4 @@
-import { html, type View } from "@commontools/common-html";
+import { h, type VNode } from "@commontools/common-html";
 import {
   recipe,
   lift,
@@ -160,7 +160,7 @@ const buildSuggestionsList = lift(({ suggestion }) => {
 const acceptSuggestion = handler<
   {},
   {
-    acceptedSuggestion: View | undefined;
+    acceptedSuggestion: VNode | undefined;
     suggestion: any;
     data: { [key: string]: any };
     target: number;
@@ -187,9 +187,9 @@ const acceptSuggestion = handler<
   // HACK: -1 is home screen and so let's open a new tab
   if (target == -1) {
     openCharm(JSON.stringify(accepted.entityId));
-    state.acceptedSuggestion = html`<div></div>`;
+    state.acceptedSuggestion = (<div></div>) as unknown as VNode;
   } else {
-    state.acceptedSuggestion = accepted.asCell<{ [UI]: View }>().key(UI).get();
+    state.acceptedSuggestion = accepted.asCell<{ [UI]: VNode }>().key(UI).get();
   }
 });
 
@@ -205,23 +205,26 @@ export const annotation = recipe<{
   const suggestion = findSuggestion({ matchingCharms, data });
 
   // Will be populated by acceptSuggestion
-  const acceptedSuggestion = cell<View | undefined>(undefined);
+  const acceptedSuggestion = cell<VNode | undefined>(undefined);
 
   return {
-    [UI]: html`<div>
-      ${ifElse(
-        acceptedSuggestion,
-        html`<div>${acceptedSuggestion}</div>`,
-        html`<common-suggestions
-          suggestions=${buildSuggestionsList({ suggestion })}
-          onselect-suggestion=${acceptSuggestion({
-            acceptedSuggestion,
-            suggestion,
-            data,
-            target,
-          })}
-        />`,
-      )}
-    </div>`,
+    [UI]: (
+      <div>
+        $
+        {ifElse(
+          acceptedSuggestion,
+          <div>${acceptedSuggestion}</div>,
+          <common-suggestions
+            suggestions={buildSuggestionsList({ suggestion })}
+            onselect-suggestion={acceptSuggestion({
+              acceptedSuggestion,
+              suggestion,
+              data,
+              target,
+            })}
+          />,
+        )}
+      </div>
+    ),
   };
 });
