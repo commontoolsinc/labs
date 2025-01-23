@@ -3,12 +3,18 @@ import { assertEquals } from "@std/assert";
 import env from "@/env.ts";
 import createApp from "@/lib/create-app.ts";
 import router from "@/routes/ai/spell/spell.index.ts";
+import llmRouter from "@/routes/ai/llm/llm.index.ts";
+import blobbyRouter from "@/routes/storage/blobby/blobby.index.ts";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
 }
 
-const app = createApp().route("/", router);
+const app = createApp()
+  .route("/", router)
+  .route("/", llmRouter)
+  .route("/", blobbyRouter);
+Deno.serve(app.fetch);
 
 Deno.test("spell routes", async (t) => {
   await t.step(
