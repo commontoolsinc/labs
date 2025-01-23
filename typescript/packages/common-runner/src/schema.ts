@@ -1,6 +1,6 @@
-import { type DocImpl, type DocLink, isDoc, isDocLink, type ReactivityLog } from "./cell.js";
-import { isAlias, JSONSchema } from "@commontools/builder";
-import { arrayEqual, followAliases, followCellReferences } from "./utils.js";
+import { type DocImpl, type DocLink, type ReactivityLog } from "./cell.js";
+import { JSONSchema } from "@commontools/common-builder";
+import { followLinks } from "./utils.js";
 
 export function resolveSchema(
   schema: JSONSchema | undefined,
@@ -34,51 +34,47 @@ export function resolveSchema(
 }
 
 export function validateAndTransform(
-  cell: DocImpl<any>,
+  doc: DocImpl<any>,
   path: PropertyKey[] = [],
   schema?: JSONSchema,
   log?: ReactivityLog,
   rootSchema: JSONSchema | undefined = schema,
+  seen: DocLink[] = [],
 ): any {
+  if (seen.length > 100) debugger;
+
   const resolvedSchema = resolveSchema(schema, rootSchema);
 
   // If this should be a reference, return as a Cell of resolvedSchema
   // NOTE: Need to check on the passed schema whether it's a reference, not the
   // resolved schema. The returned reference is of type resolvedSchema though.
-  if (typeof schema === "object" && schema !== null && schema!.asCell) {
-    return cell.asCell(path, log, resolvedSchema);
-  }
+  if (typeof schema === "object" && schema !== null && schema!.asCell)
+    return doc.asCell(path, log, resolvedSchema);
 
   // If there is no schema, return as raw data via query result proxy
-  if (!resolvedSchema) return cell.getAsQueryResult(path, log);
+  if (!resolvedSchema) return doc.getAsQueryResult(path, log);
 
   // Handle various types of references
-  const seen: DocLink[] = [];
-
-  let value;
-  while (true) {
-    log?.reads.push({ cell, path });
-    value = cell.getAtPath(path);
-
-    // Follow references and aliases until we hit a value
-    if (isDocLink(value)) ({ cell, path } = followCellReferences(value, log));
-    else if (isAlias(value)) ({ cell, path } = followAliases(value, cell, log));
-    else if (isDoc(value)) [cell, path] = [value, []];
-    else break;
-
-    if (seen.some((ref) => ref.cell === cell && arrayEqual(ref.path, path))) {
-      throw new Error(`Reference cycle detected ${path.join(".")}`);
-    }
-    seen.push({ cell, path });
-  }
+  ({ cell: doc, path } = followLinks({ cell: doc, path }, seen, log));
+  const value = doc.getAtPath(path);
 
   if (resolvedSchema.type === "object") {
+    if (typeof value !== "object" || value === null) return {};
+
     const result: Record<string, any> = {};
 
     // Handle explicitly defined properties
     if (resolvedSchema.properties) {
       for (const [key, propSchema] of Object.entries(resolvedSchema.properties)) {
-        result[key] = validateAndTransform(cell, [...path, key], propSchema, log, rootSchema);
+        if (propSchema.asCell || key in value)
+          result[key] = validateAndTransform(
+            doc,
+            [...path, key],
+            propSchema,
+            log,
+            rootSchema,
+            seen,
+          );
       }
     }
 
@@ -89,15 +85,16 @@ export function validateAndTransform(
         typeof resolvedSchema.additionalProperties === "object"
           ? resolvedSchema.additionalProperties
           : undefined;
-      const keys = typeof value === "object" && value !== null ? Object.keys(value) : [];
+      const keys = Object.keys(value);
       for (const key of keys) {
         if (!resolvedSchema.properties || !(key in resolvedSchema.properties)) {
           result[key] = validateAndTransform(
-            cell,
+            doc,
             [...path, key],
             additionalPropertiesSchema,
             log,
             rootSchema,
+            seen,
           );
         }
       }
@@ -111,7 +108,7 @@ export function validateAndTransform(
       return [];
     }
     return value.map((_, i) =>
-      validateAndTransform(cell, [...path, i], resolvedSchema.items!, log, rootSchema),
+      validateAndTransform(doc, [...path, i], resolvedSchema.items!, log, rootSchema),
     );
   }
 

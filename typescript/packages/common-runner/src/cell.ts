@@ -17,7 +17,7 @@ import {
   normalizeToCells,
   pathAffected,
   setNestedValue,
-  transformToCells,
+  followLinks,
 } from "./utils.js";
 import { queueEvent } from "./scheduler.js";
 import {
@@ -52,6 +52,10 @@ import { validateAndTransform } from "./schema.js";
  * @param {function} callback - The callback to be called when the cell changes.
  * @returns {function} - A function to cancel the callback.
  *
+ * @method updates Adds a callback that is called on cell changes.
+ * @param {function} callback - The callback to be called when the cell changes.
+ * @returns {function} - A function to cancel the callback.
+ *
  * @method getAsProxy Returns a value proxy for the cell.
  * @param {Path} path - The path to follow.
  * @returns {QueryResult<DeepKeyLookup<T, Path>>}
@@ -80,6 +84,7 @@ export interface Cell<T> {
       | DocLink,
   ): void;
   sink(callback: (value: T) => void): () => void;
+  updates(callback: (value: T) => void): () => void;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
   asSchema(schema: JSONSchema): Cell<T>;
   getAsQueryResult<Path extends PropertyKey[]>(
@@ -443,141 +448,162 @@ function createCell<T>(
   log?: ReactivityLog,
   schema?: JSONSchema,
 ): Cell<T> {
-  // Follow aliases, cell references, etc. in path. Note that
-  // transformToCells will follow aliases, but not cell references, so
-  // this is just for setup. Arguably key() should possibly fail if it crosses a
-  // cell, but right now it'll silently cross cells.
+  // Follow aliases, doc links, etc. in path, so that we end up on the right
+  // doc, meaning the one that contains the value we want to access without any
+  // redirects in between.
+  //
+  // If the path points to a redirect itself, we don't want to follow it: Other
+  // functions will do that. We just want to skip the interim ones.
+  //
+  // Let's look at a few examples:
+  //
+  // Doc: { link }, path: [] --> no change
+  // Doc: { link }, path: ["foo"] --> follow link, path: ["foo"]
+  // Doc: { foo: { link } }, path: ["foo"] --> no change
+  // Doc: { foo: { link } }, path: ["foo", "bar"] --> follow link, path: ["bar"]
+
+  let ref: DocLink = { cell: doc, path: [] };
+  const seen: DocLink[] = [];
+
   let keys = [...path];
-  let target = doc.get();
   while (keys.length) {
+    // First follow all the aliases and links, _before_ accessing the key.
+    ref = followLinks(ref, seen, log);
+    doc = ref.cell;
+    path = [...ref.path, ...keys];
+
+    // Now access the key.
     const key = keys.shift()!;
-    target = target instanceof Object ? target[key] : undefined;
-    const seen = new Set();
-    let ref: DocLink | undefined;
-    do {
-      if (typeof target === "object" && target !== null) {
-        if (seen.has(target)) {
-          throw new Error("Cyclic cell reference");
-        } else {
-          seen.add(target);
+    ref = { cell: doc, path: [...ref.path, key] };
+  }
+
+  // Follow aliases on the last key, but no other kinds of links.
+  if (isAlias(ref.cell.getAtPath(ref.path))) {
+    ref = followAliases(ref.cell.getAtPath(ref.path), ref.cell, log);
+    doc = ref.cell;
+    path = ref.path;
+  }
+
+  // Then follow the other links and see whether this is a stream alias.
+  ref = followLinks(ref, seen, log);
+  const isStream = isStreamAlias(ref.cell.getAtPath(ref.path));
+
+  if (isStream) return createStreamCell(ref.cell, ref.path);
+  else return createRegularCell(doc, path, log, schema);
+}
+
+function createStreamCell<T>(doc: DocImpl<any>, path: PropertyKey[]): Cell<T> {
+  const listeners = new Set<(event: T) => void>();
+
+  const self: Cell<T> = {
+    // Implementing just the subset of Cell<T> that is needed for streams.
+    send: (event: T) => {
+      queueEvent({ cell: doc, path }, event);
+      listeners.forEach((callback) => callback(event));
+    },
+    sink: (callback: (value: T) => void): Cancel => {
+      listeners.add(callback);
+      return () => listeners.delete(callback);
+    },
+    updates: (callback: (value: T) => void): Cancel => self.sink(callback),
+  } as Cell<T>;
+
+  return self;
+}
+
+function createRegularCell<T>(
+  doc: DocImpl<any>,
+  path: PropertyKey[],
+  log?: ReactivityLog,
+  schema?: JSONSchema,
+): Cell<T> {
+  const self: Cell<T> = {
+    get: () => validateAndTransform(doc, path, schema, log),
+    set: (newValue: T) => doc.setAtPath(path, newValue, log),
+    send: (newValue: T) => self.set(newValue),
+    update: (value: Partial<T>) => {
+      const previousValue = doc.getAtPath(path);
+      if (typeof previousValue !== "object" || previousValue === null)
+        throw new Error("Can't update non-object value");
+      const newValue = {
+        ...previousValue,
+        ...value,
+      };
+      doc.setAtPath(path, newValue, log);
+    },
+    push: (value: any) => {
+      const array = doc.getAtPath(path) ?? [];
+      if (!Array.isArray(array)) throw new Error("Can't push into non-array value");
+
+      // Every element pushed to the array should be it's own doc or link to
+      // one. So if it isn't already, make it one.
+      if (isCell(value)) {
+        value = value.getAsDocLink();
+      } else if (isDoc(value)) {
+        value = { cell: value, path: [] };
+      } else {
+        value = getDocLinkOrValue(value);
+        if (!isDocLink(value)) {
+          const cause = {
+            parent: doc.entityId,
+            path: path,
+            length: array.length,
+            // Context is the event id in event handlers, making this unique.
+            // TODO: In this case it shouldn't depend on the length, maybe
+            // instead just call order in the current context.
+            context: getTopFrame()?.cause ?? "unknown",
+          };
+
+          value = { cell: getDoc<any>(value, cause), path: [] };
         }
       }
 
-      ref = undefined;
-      if (isQueryResultForDereferencing(target)) ref = target[getDocLink];
-      else if (isDocLink(target)) ref = target;
-      else if (isDoc(target)) {
-        ref = { cell: target, path: [] } satisfies DocLink;
-      } else if (isAlias(target)) {
-        ref = {
-          cell: target.$alias.cell ?? doc,
-          path: target.$alias.path,
-        } satisfies DocLink;
-      }
+      doc.setAtPath(path, [...array, value], log);
+    },
+    sink: (callback: (value: T) => void) => {
+      return doc.sink(
+        (_value, changedPath) =>
+          pathAffected(changedPath, path) && callback(validateAndTransform(doc, path, schema, log)),
+      );
+    },
+    updates: (callback: (value: T) => void) => {
+      return doc.updates(
+        (_value, changedPath) =>
+          pathAffected(changedPath, path) && callback(validateAndTransform(doc, path, schema, log)),
+      );
+    },
+    key: <K extends keyof T>(key: K) => {
+      const currentSchema =
+        schema?.type === "object"
+          ? (schema.properties?.[key as string] ??
+            (typeof schema.additionalProperties === "object"
+              ? schema.additionalProperties
+              : undefined))
+          : schema?.type === "array"
+            ? schema.items
+            : undefined;
+      return doc.asCell([...path, key], log, currentSchema) as Cell<T[K]>;
+    },
+    asSchema: (newSchema: JSONSchema) => {
+      return createCell(doc, path, log, newSchema);
+    },
+    getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
+      createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
+    getAsDocLink: () => ({ cell: doc, path }) satisfies DocLink,
+    toJSON: () => doc.toJSON(),
+    get value(): T {
+      return self.get();
+    },
+    get entityId(): EntityId | undefined {
+      return getEntityId(self.getAsDocLink());
+    },
+    [isCellMarker]: true,
+    get copyTrap(): boolean {
+      throw new Error("Copy trap: Don't copy renderer cells. Create references instead.");
+    },
+    schema,
+  };
 
-      if (ref) {
-        log?.reads.push({ cell: ref.cell, path: ref.path });
-        target = ref.cell.getAtPath(ref.path);
-        doc = ref.cell;
-        path = [...ref.path, ...keys];
-      }
-      // Follow all aliases and cell references for path resolution, but only go
-      // one level deep on the last key.
-    } while (ref && keys.length);
-  }
-
-  const self: Cell<T> = isStreamAlias(doc.getAtPath(path))
-    ? ({
-        // Implementing just Sendable<T>
-        send: (event: T) => {
-          log?.writes.push({ cell: doc, path });
-          queueEvent({ cell: doc, path }, event);
-        },
-      } as Cell<T>)
-    : {
-        get: () => validateAndTransform(doc, path, schema, log),
-        set: (newValue: T) => doc.setAtPath(path, newValue, log),
-        send: (newValue: T) => self.set(newValue),
-        update: (value: Partial<T>) => {
-          const previousValue = doc.getAtPath(path);
-          if (typeof previousValue !== "object" || previousValue === null) {
-            throw new Error("Can't update non-object value");
-          }
-          const newValue = {
-            ...previousValue,
-            ...value,
-          };
-          doc.setAtPath(path, newValue, log);
-        },
-        push: (value: any) => {
-          const array = doc.getAtPath(path) ?? [];
-          if (!Array.isArray(array)) {
-            throw new Error("Can't push into non-array value");
-          }
-
-          // Every element pushed to the array should be it's own doc or link to
-          // one. So if it isn't already, make it one.
-          if (isCell(value)) {
-            value = value.getAsDocLink();
-          } else if (isDoc(value)) {
-            value = { cell: value, path: [] };
-          } else {
-            value = getDocLinkOrValue(value);
-            if (!isDocLink(value)) {
-              const cause = {
-                parent: doc.entityId,
-                path: path,
-                length: array.length,
-                // Context is the event id in event handlers, making this unique.
-                // TODO: In this case it shouldn't depend on the length, maybe
-                // instead just call order in the current context.
-                context: getTopFrame()?.cause ?? "unknown",
-              };
-
-              value = { cell: getDoc<any>(value, cause), path: [] };
-            }
-          }
-
-          doc.setAtPath(path, [...array, value], log);
-        },
-        sink: (callback: (value: T) => void) => {
-          return doc.sink(
-            (value, changedPath) =>
-              pathAffected(changedPath, path) &&
-              callback(transformToCells(doc, getValueAtPath(value, path), log)),
-          );
-        },
-        key: <K extends keyof T>(key: K) => {
-          const currentSchema =
-            schema?.type === "object"
-              ? (schema.properties?.[key as string] ??
-                (typeof schema.additionalProperties === "object"
-                  ? schema.additionalProperties
-                  : undefined))
-              : schema?.type === "array"
-                ? schema.items
-                : undefined;
-          return doc.asCell([...path, key], log, currentSchema) as Cell<T[K]>;
-        },
-        asSchema: (newSchema: JSONSchema) => {
-          return createCell(doc, path, log, newSchema);
-        },
-        getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
-          createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
-        getAsDocLink: () => ({ cell: doc, path }) satisfies DocLink,
-        toJSON: () => doc.toJSON(),
-        get value(): T {
-          return self.get();
-        },
-        get entityId(): EntityId | undefined {
-          return getEntityId(self.getAsDocLink());
-        },
-        [isCellMarker]: true,
-        get copyTrap(): boolean {
-          throw new Error("Copy trap: Don't copy renderer cells. Create references instead.");
-        },
-        schema,
-      };
   return self;
 }
 
