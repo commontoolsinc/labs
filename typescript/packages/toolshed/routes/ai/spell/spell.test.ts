@@ -16,6 +16,8 @@ const app = createApp()
   .route("/", blobbyRouter);
 Deno.serve(app.fetch);
 
+// bf: these are commented out because the LLM is not configured in CI and they will fail
+// they work locally if you have claude set up
 Deno.test("spell routes", async (t) => {
   // await t.step(
   //   "POST /ai/spell/search returns valid, empty response",
