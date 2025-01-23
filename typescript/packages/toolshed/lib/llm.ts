@@ -36,5 +36,11 @@ export async function generateText(
     return data.body.content;
   }
 
-  throw new Error("Unexpected response format");
+  if ('content' in data) {
+    // bf: this is actually the case that runs, even if the types disagree
+    // no idea why
+    return (data as any).content;
+  }
+
+  throw new Error("Unexpected response from LLM server");
 }
