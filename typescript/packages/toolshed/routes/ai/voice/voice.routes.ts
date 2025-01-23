@@ -14,7 +14,7 @@ const TranscriptionChunkSchema = z.object({
   text: z.string(),
 }) satisfies z.ZodType<TranscriptionChunk>;
 
-const SuccessResponseSchema = z.discriminatedUnion("response_type", [
+export const SuccessResponseSchema = z.discriminatedUnion("response_type", [
   z.object({
     response_type: z.literal("full"),
     transcription: z.string(),
@@ -30,7 +30,7 @@ const SuccessResponseSchema = z.discriminatedUnion("response_type", [
   }),
 ]);
 
-const ErrorResponseSchema = z.object({
+export const ErrorResponseSchema = z.object({
   error: z.string(),
 });
 

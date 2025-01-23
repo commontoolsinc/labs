@@ -29,7 +29,8 @@ export const sendMessage: AppRouteHandler<SendMessageRoute> = async (
       content: body.message,
       username: body.username,
     });
-    return ctx.json(response, 200);
+    const responseBody = await response.json();
+    return ctx.json(responseBody, 200);
   } catch (error) {
     console.error(error);
     return ctx.json({ error: "Failed to send message" }, 500);
@@ -42,7 +43,6 @@ export const sendWebhookMessage = async (message: WebhookMessage) => {
     throw new Error("DISCORD_WEBHOOK_URL not configured");
   }
 
-  console.log("msg", message);
   const response = await fetch(webhookUrl, {
     method: "POST",
     headers: {

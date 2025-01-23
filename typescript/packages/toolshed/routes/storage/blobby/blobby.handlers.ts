@@ -1,5 +1,3 @@
-import { ensureDir } from "@std/fs";
-import { join } from "@std/path";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
   getBlob,
@@ -7,11 +5,8 @@ import type {
   listBlobs,
   uploadBlob,
 } from "./blobby.routes.ts";
-import {
-  addBlobToUser,
-  getAllBlobs,
-  getUserBlobs,
-} from "@/routes/storage/blobby/lib/redis.ts";
+import { addBlobToUser, getAllBlobs, getUserBlobs } from "./lib/redis.ts";
+import type { RedisClientType } from "redis";
 import { DiskStorage } from "@/routes/storage/blobby/lib/storage.ts";
 
 const DATA_DIR = "./cache/blobby";
@@ -88,7 +83,7 @@ export const getBlobPathHandler: AppRouteHandler<
 export const listBlobsHandler: AppRouteHandler<typeof listBlobs> = async (
   c,
 ) => {
-  const redis = c.get("blobbyRedis");
+  const redis: RedisClientType = c.get("blobbyRedis");
   if (!redis) throw new Error("Redis client not found in context");
   const logger = c.get("logger");
   const showAll = c.req.query("all") === "true";

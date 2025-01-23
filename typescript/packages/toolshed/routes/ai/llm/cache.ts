@@ -25,7 +25,9 @@ export async function loadItem(key: string): Promise<CacheItem | null> {
     const cacheData = await Deno.readTextFile(filePath);
     console.log(
       `${timestamp()} ${colors.green}📦 Cache loaded:${colors.reset} ${
-        filePath.slice(-12)
+        filePath.slice(
+          -12,
+        )
       }`,
     );
     return JSON.parse(cacheData);

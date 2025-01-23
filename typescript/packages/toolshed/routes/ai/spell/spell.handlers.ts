@@ -1,12 +1,13 @@
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { z } from "zod";
-import { Schema, SchemaDefinition, Validator } from "jsonschema";
+import { getAllBlobs, getBlob } from "./behavior/effects.ts";
+import { generateText } from "@/lib/llm.ts";
 
 import type { AppRouteHandler } from "@/lib/types.ts";
-import type { ProcessSchemaRoute } from "./spell.routes.ts";
-import { generateTextCore } from "../llm/llm.handlers.ts";
-import { getAllBlobs } from "../../storage/blobby/lib/redis.ts";
-import { storage } from "../../storage/blobby/blobby.handlers.ts";
+import type { ProcessSchemaRoute, SearchSchemaRoute } from "./spell.routes.ts";
+import { performSearch } from "./behavior/search.ts";
+import { checkSchemaMatch } from "@/lib/schema-match.ts";
+import { Logger } from "@/lib/prefixed-logger.ts";
 
 // Process Schema schemas
 export const ProcessSchemaRequestSchema = z.object({
@@ -45,10 +46,40 @@ export const ProcessSchemaResponseSchema = z.object({
 export type ProcessSchemaRequest = z.infer<typeof ProcessSchemaRequestSchema>;
 export type ProcessSchemaResponse = z.infer<typeof ProcessSchemaResponseSchema>;
 
+export const SearchSchemaRequestSchema = z.object({
+  query: z.string(),
+  options: z
+    .object({
+      limit: z.number().optional().default(10),
+      offset: z.number().optional().default(0),
+    })
+    .optional(),
+});
+
+export const SearchSchemaResponseSchema = z.object({
+  results: z.array(
+    z.object({
+      source: z.string(),
+      results: z.array(
+        z.object({
+          key: z.string(),
+          data: z.record(z.any()),
+        }),
+      ),
+    }),
+  ),
+  metadata: z.object({
+    totalDuration: z.number(),
+    stepDurations: z.record(z.number()),
+    logs: z.array(z.any()),
+  }),
+});
+
+export type SearchSchemaRequest = z.infer<typeof SearchSchemaRequestSchema>;
+export type SearchSchemaResponse = z.infer<typeof SearchSchemaResponseSchema>;
+
 export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
-  const redis = c.get("blobbyRedis");
-  if (!redis) throw new Error("Redis client not found in context");
-  const logger = c.get("logger");
+  const logger: Logger = c.get("logger");
 
   const body = (await c.req.json()) as ProcessSchemaRequest;
   const startTime = performance.now();
@@ -59,7 +90,10 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
       "Processing schema request",
     );
 
-    const allBlobs = await getAllBlobs(redis);
+    const allBlobs = await getAllBlobs();
+
+    logger.info("Found blobs: " + allBlobs.length);
+
     const matchingExamples: Array<{
       key: string;
       data: Record<string, unknown>;
@@ -71,10 +105,10 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
 
     for (const blobKey of allBlobs) {
       try {
-        const content = await storage.getBlob(blobKey);
+        const content = await getBlob(blobKey);
         if (!content) continue;
 
-        const blobData = JSON.parse(content);
+        const blobData = content as Record<string, unknown>;
 
         allExamples.push({
           key: blobKey,
@@ -89,6 +123,7 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
           });
         }
       } catch (error) {
+        logger.error(`Error processing key ${blobKey}: ${error}`);
         continue;
       }
     }
@@ -106,7 +141,7 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
       body.many,
     );
 
-    const llmResponse = await generateTextCore({
+    const llmResponse = await generateText({
       model: "claude-3-5-sonnet",
       system: body.many
         ? "Generate valid JSON array containing multiple objects, no commentary. Each object in the array must fulfill the schema exactly, if there is no reference data then return nothing."
@@ -122,7 +157,7 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
 
     let result: Record<string, unknown> | Array<Record<string, unknown>>;
     try {
-      result = JSON.parse(llmResponse.message.content);
+      result = JSON.parse(llmResponse);
       // Validate that we got an array when many=true
       if (body.many && !Array.isArray(result)) {
         result = [result]; // Wrap single object in array if needed
@@ -154,50 +189,6 @@ export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
     );
   }
 };
-
-function checkSchemaMatch(
-  data: Record<string, unknown>,
-  schema: Schema,
-): boolean {
-  const validator = new Validator();
-
-  const jsonSchema: SchemaDefinition = {
-    type: "object",
-    properties: Object.keys(schema).reduce(
-      (acc: Record<string, SchemaDefinition>, key) => {
-        acc[key] = { type: schema[key].type || typeof schema[key] };
-        return acc;
-      },
-      {},
-    ),
-    required: Object.keys(schema),
-    additionalProperties: true,
-  };
-
-  const rootResult = validator.validate(data, jsonSchema);
-  if (rootResult.valid) {
-    return true;
-  }
-
-  function checkSubtrees(obj: unknown): boolean {
-    if (typeof obj !== "object" || obj === null) {
-      return false;
-    }
-
-    if (Array.isArray(obj)) {
-      return obj.some((item) => checkSubtrees(item));
-    }
-
-    const result = validator.validate(obj, jsonSchema);
-    if (result.valid) {
-      return true;
-    }
-
-    return Object.values(obj).some((value) => checkSubtrees(value));
-  }
-
-  return checkSubtrees(data);
-}
 
 function constructSchemaPrompt(
   schema: Record<string, unknown>,
@@ -239,7 +230,11 @@ function constructSchemaPrompt(
     .map(({ key, data }) => {
       const sanitizedData = sanitizeObject(data);
       return `--- Example from "${key}" ---\n${
-        JSON.stringify(sanitizedData, null, 2)
+        JSON.stringify(
+          sanitizedData,
+          null,
+          2,
+        )
       }`;
     })
     .join("\n\n");
@@ -275,3 +270,25 @@ Respond with ${
     many ? "an array of valid JSON objects" : "a single valid JSON object"
   }.`;
 }
+
+export const search: AppRouteHandler<SearchSchemaRoute> = async (c) => {
+  const logger: Logger = c.get("logger");
+  const startTime = performance.now();
+  const body = (await c.req.json()) as SearchSchemaRequest;
+
+  try {
+    logger.info({ query: body.query }, "Processing search request");
+
+    const result = await performSearch(body.query, logger);
+
+    const response = result;
+
+    return c.json(response, HttpStatusCodes.OK);
+  } catch (error) {
+    logger.error({ error }, "Error processing search");
+    return c.json(
+      { error: "Failed to process search" },
+      HttpStatusCodes.INTERNAL_SERVER_ERROR,
+    );
+  }
+};
