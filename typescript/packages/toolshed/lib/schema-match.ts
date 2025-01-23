@@ -10,7 +10,8 @@ export function checkSchemaMatch(
     type: "object",
     properties: Object.keys(schema).reduce(
       (acc: Record<string, unknown>, key) => {
-        acc[key] = { type: schema[key].type || typeof schema[key] };
+        const schemaValue = schema[key as keyof Schema];
+        acc[key] = { type: (schemaValue as any)?.type || typeof schemaValue };
         return acc;
       },
       {},

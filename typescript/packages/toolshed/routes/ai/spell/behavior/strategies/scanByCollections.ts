@@ -59,6 +59,12 @@ export async function scanByCollections(
         continue;
       }
 
+      if (!Array.isArray(content)) {
+        prefixedLogger.error(
+          `Expected array content for collection ${collectionKey}, got ${typeof content}`,
+        );
+        continue;
+      }
       const keys = content as Array<string>;
       for (const key of keys) {
         try {

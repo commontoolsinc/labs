@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "dev": "deno run -A --watch index.ts",
+    "dev": "deno run -A --watch --env-file=.env index.ts",
     "test": "deno test -A --env-file=.env.test",
     "build-lookslike": "deno run -A scripts/build-lookslike.ts"
   },
@@ -18,7 +18,7 @@
     "rules": {
       "tags": ["recommended"],
       "include": ["ban-untagged-todo"],
-      "exclude": ["no-unused-vars"]
+      "exclude": ["no-unused-vars", "no-explicit-any"]
     }
   },
   "nodeModulesDir": "auto",

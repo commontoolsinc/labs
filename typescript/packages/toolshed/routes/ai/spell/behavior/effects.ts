@@ -1,6 +1,5 @@
 import { AppType } from "@/app.ts";
 import { hc } from "hono/client";
-import { handleResponse } from "@/lib/response.ts";
 
 const client = hc<AppType>("http://localhost:8000/");
 
@@ -15,7 +14,7 @@ export async function getAllBlobs(): Promise<string[]> {
 
 export async function getBlob(key: string): Promise<unknown> {
   const res = await client.api.storage.blobby[":key"].$get({ param: { key } });
-  const data = await res.json() as unknown;
+  const data = await res.json() as any;
 
   if ("error" in data) {
     throw new Error(data.error);

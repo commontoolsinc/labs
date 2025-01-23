@@ -70,7 +70,7 @@ const addModel = ({
   const model = provider(modelName);
 
   const config: ModelConfig = {
-    model,
+    model: (model as unknown) as string,
     capabilities,
     aliases,
   };
@@ -251,7 +251,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
 if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
   const vertexProvider = createVertex({
     googleAuthOptions: {
-      credentials: env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS,
+      credentials: env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS as any, // bf: taming type errors
     },
     project: env.CTTS_AI_LLM_GOOGLE_VERTEX_PROJECT,
     location: env.CTTS_AI_LLM_GOOGLE_VERTEX_LOCATION,

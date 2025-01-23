@@ -69,8 +69,9 @@ export const SearchSchemaResponseSchema = z.object({
     }),
   ),
   metadata: z.object({
-    total: z.number(),
-    processingTime: z.number(),
+    totalDuration: z.number(),
+    stepDurations: z.record(z.number()),
+    logs: z.array(z.any()),
   }),
 });
 

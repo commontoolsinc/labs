@@ -36,7 +36,7 @@ export async function generateText(
     return data.body.content;
   }
 
-  if ('content' in data) {
+  if ("content" in data) {
     // bf: this is actually the case that runs, even if the types disagree
     // no idea why
     return (data as any).content;

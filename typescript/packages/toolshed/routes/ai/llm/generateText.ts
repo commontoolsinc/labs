@@ -70,7 +70,7 @@ export async function generateText(
     streamParams.model = modelConfig.model;
   }
 
-  const llmStream = await streamText(streamParams);
+  const llmStream = await streamText(streamParams as any);
 
   // If not streaming, handle regular response
   if (!params.stream) {

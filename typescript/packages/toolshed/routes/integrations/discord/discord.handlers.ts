@@ -29,7 +29,8 @@ export const sendMessage: AppRouteHandler<SendMessageRoute> = async (
       content: body.message,
       username: body.username,
     });
-    return ctx.json(response, 200);
+    const responseBody = await response.json();
+    return ctx.json(responseBody, 200);
   } catch (error) {
     console.error(error);
     return ctx.json({ error: "Failed to send message" }, 500);

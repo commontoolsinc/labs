@@ -7,8 +7,13 @@ import {
   SearchSchemaRequestSchema,
   SearchSchemaResponseSchema,
 } from "./spell.handlers.ts";
+import { z } from "zod";
 
 const tags = ["Spellcaster"];
+
+const ErrorResponseSchema = z.object({
+  error: z.string(),
+});
 
 export const imagine = createRoute({
   path: "/ai/spell/imagine",
@@ -27,6 +32,10 @@ export const imagine = createRoute({
     [HttpStatusCodes.OK]: jsonContent(
       ProcessSchemaResponseSchema,
       "The processed schema result",
+    ),
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
+      ErrorResponseSchema,
+      "An error occurred",
     ),
   },
 });
@@ -50,6 +59,10 @@ export const search = createRoute({
     [HttpStatusCodes.OK]: jsonContent(
       SearchSchemaResponseSchema,
       "The search results",
+    ),
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
+      ErrorResponseSchema,
+      "An error occurred",
     ),
   },
 });
