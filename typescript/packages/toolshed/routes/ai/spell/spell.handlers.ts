@@ -1,6 +1,7 @@
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { z } from "zod";
-import { generateText, getAllBlobs, getBlob } from "./behavior/effects.ts";
+import { getAllBlobs, getBlob } from "./behavior/effects.ts";
+import { generateText } from "@/lib/llm.ts";
 
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type { ProcessSchemaRoute, SearchSchemaRoute } from "./spell.routes.ts";

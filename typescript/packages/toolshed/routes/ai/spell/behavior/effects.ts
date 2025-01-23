@@ -4,20 +4,6 @@ import { handleResponse } from "@/lib/response.ts";
 
 const client = hc<AppType>("http://localhost:8000/");
 
-export async function generateText(
-  query: Parameters<typeof client.api.ai.llm.$post>[0]["json"],
-) {
-  const res = await client.api.ai.llm.$post({ json: query });
-  // cheating
-  // deno-lint-ignore no-explicit-any
-  const data = (await res.json() as any) as {
-    role: "assistant";
-    content: string;
-  };
-
-  return data.content;
-}
-
 export async function getAllBlobs(): Promise<string[]> {
   const res = await client.api.storage.blobby.$get({ query: { all: "true" } });
   const data = await res.json();
