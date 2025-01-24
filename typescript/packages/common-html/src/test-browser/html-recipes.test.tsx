@@ -1,4 +1,4 @@
-import { html, render, View } from "@commontools/common-html";
+import { h, render, VNode } from "@commontools/common-html";
 import { recipe, lift, str, UI } from "@commontools/common-builder";
 import { run, idle } from "@commontools/common-runner";
 import * as assert from "./assert.js";
@@ -9,7 +9,7 @@ describe("recipes with HTML", () => {
       "Simple UI Recipe",
       ({ value }) => {
         const doubled = lift((x: number) => x * 2)(value);
-        return { [UI]: html`<div>${doubled}</div>` };
+        return { [UI]: <div>{doubled}</div> };
       },
     );
 
@@ -37,12 +37,16 @@ describe("recipes with HTML", () => {
     }>("todo list", ({ title, items }) => {
       title.setDefault("untitled");
       return {
-        [UI]: html`<div>
-          <h1>${title}</h1>
-          <ul>
-            ${items.map(item => html`<li>${item.title}</li>`)}
-          </ul>
-        </div>`,
+        [UI]: (
+          <div>
+            <h1>{title}</h1>
+            <ul>
+              {items.map(item => (
+                <li>{item.title}</li>
+              ))}
+            </ul>
+          </div>
+        ),
       };
     });
 
@@ -57,7 +61,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asCell<{ [UI]: View }>().key(UI);
+    const cell = result.asCell<{ [UI]: VNode }>().key(UI);
     render(parent, cell.get());
 
     assert.equal(
@@ -73,11 +77,11 @@ describe("recipes with HTML", () => {
     }>("todo list", ({ title }) => {
       const { [UI]: summaryUI } = recipe<
         { title: { name: string } },
-        { [UI]: View }
+        { [UI]: VNode }
       >("summary", ({ title }) => {
-        return { [UI]: html`<div>${title.name}</div>` };
+        return { [UI]: <div>{title.name}</div> };
       })({ title });
-      return { [UI]: html`<div>${summaryUI}</div>` };
+      return { [UI]: <div>{summaryUI}</div> };
     });
 
     const result = run(todoList, {
@@ -91,7 +95,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asCell<{ [UI]: View }>().key(UI);
+    const cell = result.asCell<{ [UI]: VNode }>().key(UI);
     render(parent, cell.get());
 
     assert.equal(parent.innerHTML, "<div><div>test</div></div>");
@@ -99,7 +103,7 @@ describe("recipes with HTML", () => {
 
   it("works with str", async () => {
     const strRecipe = recipe<{ name: string }>("str recipe", ({ name }) => {
-      return { [UI]: html`<div>${str`Hello, ${name}!`}</div>` };
+      return { [UI]: <div>{str`Hello, ${name}!`}</div> };
     });
 
     const result = run(strRecipe, { name: "world" });
@@ -107,7 +111,7 @@ describe("recipes with HTML", () => {
     await idle();
 
     const parent = document.createElement("div");
-    const cell = result.asCell<{ [UI]: View }>().key(UI);
+    const cell = result.asCell<{ [UI]: VNode }>().key(UI);
     render(parent, cell.get());
 
     assert.equal(parent.innerHTML, "<div>Hello, world!</div>");
@@ -123,14 +127,19 @@ describe("recipes with HTML", () => {
     ];
 
     const nestedMapRecipe = recipe<any[]>("nested map recipe", data => ({
-      [UI]: html`<div>
-        ${data.map(
-          row =>
-            html`<ul>
-              ${entries(row).map(([k, v]) => html`<li>${k}: ${v}</li>`)}
-            </ul>`,
-        )}
-      </div>`,
+      [UI]: (
+        <div>
+          {data.map(row => (
+            <ul>
+              {entries(row).map(([k, v]) => (
+                <li>
+                  {k}: {v}
+                </li>
+              ))}
+            </ul>
+          ))}
+        </div>
+      ),
     }));
 
     const result = run(nestedMapRecipe, data);
