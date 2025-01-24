@@ -8,17 +8,18 @@ import type {
   Opaque,
   OpaqueRef,
   toJSON,
-} from "./types";
-import { isModule } from "./types";
-import { opaqueRef } from "./opaque-ref";
+} from "./types.js";
+import { isModule } from "./types.js";
+import { opaqueRef } from "./opaque-ref.js";
 import {
   connectInputAndOutputs,
   moduleToJSON,
   traverseValue,
-} from "./utils";
-import { getTopFrame } from "./recipe";
+} from "./utils.js";
+import { getTopFrame } from "./recipe.js";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+
 
 export function createNodeFactory<T = any, R = any>(
   moduleSpec: Module,

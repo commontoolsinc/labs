@@ -6,11 +6,11 @@ import {
   type JSONSchema,
   type Module,
   type OpaqueRef,
-} from "../src/types";
-import { handler, lift } from "../src/module";
-import { opaqueRef } from "../src/opaque-ref";
-import { pushFrame } from "../src/recipe";
-import { popFrame } from "../src/recipe";
+} from "../src/types.js";
+import { handler, lift } from "../src/module.js";
+import { opaqueRef } from "../src/opaque-ref.js";
+import { pushFrame } from "../src/recipe.js";
+import { popFrame } from "../src/recipe.js";
 import { z } from "zod";
 
 type MouseEvent = {

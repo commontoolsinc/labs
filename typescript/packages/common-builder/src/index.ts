@@ -1,5 +1,5 @@
-export { opaqueRef as cell, stream } from "./opaque-ref";
-export { $, event, select, Spell } from "./spell";
+export { opaqueRef as cell, stream } from "./opaque-ref.js";
+export { $, event, select, Spell } from "./spell.js";
 export {
   byRef,
   compute,
@@ -8,7 +8,7 @@ export {
   handler,
   lift,
   render,
-} from "./module";
+} from "./module.js";
 export {
   getTopFrame,
   popFrame,
@@ -16,7 +16,7 @@ export {
   pushFrameFromCause,
   recipe,
   recipeFromFrame,
-} from "./recipe";
+} from "./recipe.js";
 export {
   fetchData,
   ifElse,
@@ -24,7 +24,7 @@ export {
   navigateTo,
   str,
   streamData,
-} from "./built-in";
+} from "./built-in.js";
 export {
   type Alias,
   type Frame,
@@ -57,7 +57,7 @@ export {
   unsafe_originalRecipe,
   unsafe_parentRecipe,
   type UnsafeBinding,
-} from "./types";
+} from "./types.js";
 
 // This should be a separate package, but for now it's easier to keep it here.
 export {
@@ -65,4 +65,4 @@ export {
   deepEqual,
   getValueAtPath,
   setValueAtPath,
-} from "./utils";
+} from "./utils.js";

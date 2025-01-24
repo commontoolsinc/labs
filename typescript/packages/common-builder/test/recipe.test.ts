@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isModule, isRecipe, type Module, type Recipe } from "../src/types";
-import { lift } from "../src/module";
-import { recipe } from "../src/recipe";
+import { isModule, isRecipe, type Module, type Recipe } from "../src/types.js";
+import { lift } from "../src/module.js";
+import { recipe } from "../src/recipe.js";
 import { z } from "zod";
-import { opaqueRef } from "../src/opaque-ref";
+import { opaqueRef } from "../src/opaque-ref.js";
 
 describe("recipe function", () => {
   it("creates a recipe", () => {
