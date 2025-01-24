@@ -9,7 +9,7 @@ import {
   DocImpl,
   getDocLinkOrValue,
 } from "@commontools/common-runner";
-import { annotation } from "../recipes/annotation.js";
+import { annotation } from "../recipes/annotation.jsx";
 
 @customElement("common-annotation-toggle")
 export class CommonAnnotationToggle extends LitElement {

@@ -28,8 +28,8 @@ import * as allRecipes from "./recipes/index.js";
 import { buildRecipe } from "./localBuild.js";
 
 // Necessary, so that suggestions are indexed.
-import "./recipes/todo-list-as-task.js";
-import "./recipes/playlist.js";
+import "./recipes/todo-list-as-task.jsx";
+import "./recipes/playlist.jsx";
 
 // import FetchExample from "./recipes/fetcher.jsx";
 import FetchService from "./effects/fetch.js";

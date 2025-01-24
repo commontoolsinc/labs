@@ -25,10 +25,7 @@
   "files": [
     "./lib/index.js"
   ],
-  "dependencies": {
-    "htmlparser2": "^9.1.0",
-    "@commontools/common-propagator": "^0.0.1"
-  },
+  "dependencies": {},
   "devDependencies": {
     "vite": "^5.3.3",
     "@types/mocha": "^10.0.7",
@@ -44,8 +41,7 @@
     "build": {
       "dependencies": [
         "../common-runner:build",
-        "../common-builder:build",
-        "../common-propagator:build"
+        "../common-builder:build"
       ],
       "files": [
         "./src/**/*"

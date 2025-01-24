@@ -1,4 +1,4 @@
-import { html } from "@commontools/common-html";
+import { h } from "@commontools/common-html";
 import {
   recipe,
   str,
@@ -62,22 +62,24 @@ export const playlistForTrip = recipe<{
   );
 
   return {
-    [UI]: html`
-      <common-vstack gap="sm"
-        >${ifElse(
+    [UI]: (
+      <common-vstack gap="sm">
+        {ifElse(
           playlist,
-          html`<div>
-            <div>${playlist.title}</div>
+          <div>
+            <div>{playlist.title}</div>
             <common-vstack gap="xs">
-              ${playlist.songs.map(
-                (song) => html` <div>${song.name} by ${song.artist}</div> `,
-              )}
+              {playlist.songs.map(song => (
+                <div>
+                  {song.name} by {song.artist}
+                </div>
+              ))}
             </common-vstack>
-          </div>`,
+          </div>,
           "Creating playlist...",
         )}
       </common-vstack>
-    `,
+    ),
     playlist,
     [NAME]: lift(({ playlist, ticket }) =>
       playlist?.title ? playlist.title : `Creating playlist for ${ticket.show}`,

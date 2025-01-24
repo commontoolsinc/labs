@@ -1,4 +1,4 @@
-import { service } from "./adapter.js";
+import { service } from "./adapter.jsx";
 import { Task, $ } from "./db.js";
 import * as DOM from "@gozala/co-dom";
 import * as Session from "./session.js";

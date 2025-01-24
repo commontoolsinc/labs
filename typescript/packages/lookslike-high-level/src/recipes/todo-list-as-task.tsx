@@ -1,12 +1,10 @@
-import { html } from "@commontools/common-html";
+import { h } from "@commontools/common-html";
 import { recipe, lift, UI } from "@commontools/common-builder";
 import { addSuggestion, description } from "../suggestions.js";
-import { type TodoItem } from "./todo-list.js";
+import { type TodoItem } from "./todo-list.jsx";
 
 const getListSummary = lift((items: TodoItem[]) => {
-  const notDoneTitles = items.flatMap((item) =>
-    item.done ? [] : [item.title],
-  );
+  const notDoneTitles = items.flatMap(item => (item.done ? [] : [item.title]));
 
   return (
     items.length +
@@ -17,7 +15,7 @@ const getListSummary = lift((items: TodoItem[]) => {
   );
 });
 
-const allDone = lift((items: TodoItem[]) => items.every((item) => item.done));
+const allDone = lift((items: TodoItem[]) => items.every(item => item.done));
 
 export const todoListAsTask = recipe<{
   list: { [UI]: any; items: TodoItem[] };
@@ -26,15 +24,17 @@ export const todoListAsTask = recipe<{
   task.done = allDone(list.items);
 
   return {
-    [UI]: html` <details>
-      <summary>
-        <common-vstack gap="sm">
-          <span>${getListSummary(list.items)}</span>
-          <common-charm-link $charm=${list} />
-        </common-vstack>
-      </summary>
-      ${list[UI]}
-    </details>`,
+    [UI]: (
+      <details>
+        <summary>
+          <common-vstack gap="sm">
+            <span>{getListSummary(list.items)}</span>
+            <common-charm-link $charm={list} />
+          </common-vstack>
+        </summary>
+        {list[UI]}
+      </details>
+    ),
   };
 });
 

@@ -1,4 +1,4 @@
-import { html } from "@commontools/common-html";
+import { h } from "@commontools/common-html";
 import {
   recipe,
   UI,
@@ -440,19 +440,21 @@ export const iframe = recipe<{
 
   return {
     [NAME]: str`${title} UI`,
-    [UI]: html`<div style="height: 100%">
-      ${ifElse(
-        grabHTML({ result }),
-        html`<common-iframe
-          src=${grabHTML({ result })}
-          onfix=${consoleLogHandler({ error, lastSrc, src })}
-          $context=${data}
-        ></common-iframe>`,
-        html`<common-ascii-loader
-          progress=${progress({ partial: partialHTML, pending: pendingHTML })}
-        ></common-ascii-loader>`,
-      )}
-    </div>`,
+    [UI]: (
+      <div style="height: 100%">
+        {ifElse(
+          grabHTML({ result }),
+          <common-iframe
+            src={grabHTML({ result })}
+            onfix={consoleLogHandler({ error, lastSrc, src })}
+            $context={data}
+          ></common-iframe>,
+          <common-ascii-loader
+            progress={progress({ partial: partialHTML, pending: pendingHTML })}
+          ></common-ascii-loader>,
+        )}
+      </div>
+    ),
     icon: "preview",
     prompt,
     title,

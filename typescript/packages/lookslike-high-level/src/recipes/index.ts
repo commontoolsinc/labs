@@ -42,48 +42,48 @@ import counters from "./counters.js";
 addRecipe(counters, countersSrc, counterSpec);
 export { counters };
 
-import dataDesignerSrc from "./dataDesigner.ts?raw";
+import dataDesignerSrc from "./dataDesigner.tsx?raw";
 import { dataDesigner } from "./dataDesigner.js";
 addRecipe(dataDesigner, dataDesignerSrc);
 export { dataDesigner };
 
-import fetchExampleSrc from "./fetchExample.ts?raw";
-import { fetchExample } from "./fetchExample.js";
+import fetchExampleSrc from "./fetchExample.tsx?raw";
+import { fetchExample } from "./fetchExample.jsx";
 addRecipe(fetchExample, fetchExampleSrc);
 export { fetchExample };
 
-import generatorSrc from "./generator.ts?raw";
-import { generator } from "./generator.js";
+import generatorSrc from "./generator.tsx?raw";
+import { generator } from "./generator.jsx";
 addRecipe(generator, generatorSrc);
 export { generator };
 
 import generativeImageSrc from "./generativeImage.tsx?raw";
-import { generativeImage } from "./generativeImage.js";
+import { generativeImage } from "./generativeImage.jsx";
 addRecipe(generativeImage, generativeImageSrc);
 export { generativeImage };
 
-import importCalendarSrc from "./archive/importCalendar.ts?raw";
-import { importCalendar } from "./archive/importCalendar.js";
+import importCalendarSrc from "./archive/importCalendar.tsx?raw";
+import { importCalendar } from "./archive/importCalendar.jsx";
 addRecipe(importCalendar, importCalendarSrc);
 export { importCalendar };
 
-import jsonImporterSrc from "./archive/jsonImport.ts?raw";
-import { jsonImporter } from "./archive/jsonImport.js";
+import jsonImporterSrc from "./archive/jsonImport.tsx?raw";
+import { jsonImporter } from "./archive/jsonImport.jsx";
 addRecipe(jsonImporter, jsonImporterSrc);
 export { jsonImporter };
 
-import luftBnBSearchSrc from "./luft-bnb-search.ts?raw";
-import { luftBnBSearch } from "./luft-bnb-search.js";
+import luftBnBSearchSrc from "./luft-bnb-search.tsx?raw";
+import { luftBnBSearch } from "./luft-bnb-search.jsx";
 addRecipe(luftBnBSearch, luftBnBSearchSrc);
 export { luftBnBSearch };
 
 import promptSrc from "./prompts.tsx?raw";
-import { prompt } from "./prompts.js";
+import { prompt } from "./prompts.jsx";
 addRecipe(prompt, promptSrc);
 export { prompt };
 
-import playlistForTripSrc from "./playlist.ts?raw";
-import { playlistForTrip } from "./playlist.js";
+import playlistForTripSrc from "./playlist.tsx?raw";
+import { playlistForTrip } from "./playlist.jsx";
 addRecipe(playlistForTrip, playlistForTripSrc);
 export { playlistForTrip };
 
@@ -97,8 +97,8 @@ import { routine } from "./routine.js";
 addRecipe(routine, routineSrc);
 export { routine };
 
-import searchSrc from "./search.ts?raw";
-import { search } from "./search.js";
+import searchSrc from "./search.tsx?raw";
+import { search } from "./search.jsx";
 addRecipe(search, searchSrc);
 export { search };
 

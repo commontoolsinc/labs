@@ -6,7 +6,7 @@ import {
 } from "@commontools/common-runner";
 import * as DB from "./db.js";
 import { NAME, UI, recipe } from "@commontools/common-builder";
-import { html } from "@commontools/common-html";
+import { h } from "@commontools/common-html";
 import { Reference } from "merkle-reference";
 
 export { refer, Reference, $, _, Task, Instruction, Fact } from "synopsys";
@@ -177,12 +177,14 @@ class SystemBehavior<Rules extends Record<string, Rule>> {
 
         return {
           [NAME]: name,
-          [UI]: html`<common-charm
-            id=${charm.toString()}
-            entity=${() => entity}
-            spell=${() => this}
-            $cell=${name}
-          />`,
+          [UI]: (
+            <common-charm
+              id={charm.toString()}
+              entity={() => entity}
+              spell={() => this}
+              $cell={name}
+            />
+          ),
         };
       }),
     );

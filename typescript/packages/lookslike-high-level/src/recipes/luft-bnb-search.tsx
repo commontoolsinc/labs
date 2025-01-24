@@ -1,4 +1,4 @@
-import { html } from "@commontools/common-html";
+import { h } from "@commontools/common-html";
 import {
   recipe,
   lift,
@@ -129,29 +129,29 @@ export const luftBnBSearch = recipe<{
   const places = grabPlaces({ result });
 
   return {
-    [UI]: html`
+    [UI]: (
       <common-vstack gap="sm">
         <common-hstack gap="sm">
           <common-input
             type="date"
-            value=${startDateUI}
+            value={startDateUI}
             placeholder="Start Date"
-            oncommon-input=${updateValue({ value: startDateUI })}
+            oncommon-input={updateValue({ value: startDateUI })}
           ></common-input>
           <common-input
             type="date"
-            value=${endDateUI}
+            value={endDateUI}
             placeholder="End Date"
-            oncommon-input=${updateValue({ value: endDateUI })}
+            oncommon-input={updateValue({ value: endDateUI })}
           ></common-input>
         </common-hstack>
         <common-input
-          value=${locationUI}
+          value={locationUI}
           placeholder="Location"
-          oncommon-input=${updateValue({ value: locationUI })}
+          oncommon-input={updateValue({ value: locationUI })}
         ></common-input>
         <common-button
-          onclick=${handleSearchClick({
+          onclick={handleSearchClick({
             startDate,
             endDate,
             location,
@@ -159,33 +159,32 @@ export const luftBnBSearch = recipe<{
             endDateUI,
             locationUI,
           })}
-          >Search</common-button
         >
-        ${ifElse(
+          Search
+        </common-button>
+        {ifElse(
           pending,
-          html`<div>Searching...</div>`,
-          places.map(
-            (place) => html`
-              <common-vstack gap="xs">
-                <div>${place.title}</div>
-                <div>
-                  ${place.propertyType}, ${place.numberOfGuests} max guests
-                </div>
-                <div>${place.location}</div>
-                <div>
-                  ${asStars(place.rating)}
-                  (${place.rating})
-                </div>
-                <common-button onclick=${makeBooking({ place })}">
-                  Book for $${place.pricePerNight} per night
-                </common-button>
-                ${place.annotationUI}
-              </common-vstack>`,
-          ),
+          <div>Searching...</div>,
+          places.map(place => (
+            <common-vstack gap="xs">
+              <div>{place.title}</div>
+              <div>
+                ${place.propertyType}, ${place.numberOfGuests} max guests
+              </div>
+              <div>${place.location}</div>
+              <div>
+                ${asStars(place.rating)}
+                (${place.rating})
+              </div>
+              <common-button onclick={makeBooking({ place })}>
+                Book for $${place.pricePerNight} per night
+              </common-button>
+              {place.annotationUI}
+            </common-vstack>
+          )),
         )}
-        </common-vstack>
       </common-vstack>
-    `,
+    ),
     location,
     places,
     [NAME]: str`LuftBnB ${justMonthAndDay(startDate)} - ${justMonthAndDay(
@@ -200,10 +199,12 @@ export const luftBnBBooking = recipe<{
   endDate: string;
 }>("booking", ({ place, startDate, endDate }) => {
   return {
-    [UI]: html`<div>
-      Booked ${place.title} LuftBnB from ${startDate} to ${endDate} for
-      $${place.pricePerNight} per night
-    </div>`,
+    [UI]: (
+      <div>
+        Booked {place.title} LuftBnB from {startDate} to {endDate} for $
+        {place.pricePerNight} per night
+      </div>
+    ),
     [NAME]: str`Booking for LuftBnB in ${place.location}`,
     place,
     startDate,
@@ -245,13 +246,13 @@ const makeLuftBnBSearch = recipe<{
   });
 
   return {
-    [UI]: html`
-      <vstack gap="sm">
-        ${describeFirstResult({ places: luftBnB.places, startDate, endDate })}
+    [UI]: (
+      <common-vstack gap="sm">
+        {describeFirstResult({ places: luftBnB.places, startDate, endDate })}
         Or search for other places:
-        <common-charm-link $charm=${luftBnB} />
-      </vstack>
-    `,
+        <common-charm-link $charm={luftBnB} />
+      </common-vstack>
+    ),
     reservation,
     luftBnBSearch: luftBnB,
   };
@@ -321,9 +322,11 @@ const annotatePlacesWithNearbyPlaces = lift(({ nearbyPlaces, places }) => {
   (nearbyPlaces ?? []).forEach(
     (place: { name: string; walkingDistance: number }, i: number) => {
       if (place)
-        places[i].annotationUI = html`<div>
-          ${place.name} is ${place.walkingDistance} min away
-        </div>`;
+        places[i].annotationUI = (
+          <div>
+            {place.name} is {place.walkingDistance} min away
+          </div>
+        );
     },
   );
 });
@@ -338,7 +341,7 @@ const nearbyPlacesForRoutine = recipe<{
 
   annotatePlacesWithNearbyPlaces({ nearbyPlaces, places });
 
-  return { [UI]: html`<div></div>` };
+  return { [UI]: <div></div> };
 });
 
 addSuggestion({

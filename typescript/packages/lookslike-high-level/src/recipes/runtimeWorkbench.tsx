@@ -1,4 +1,4 @@
-import { html } from "@commontools/common-html";
+import { h } from "@commontools/common-html";
 import {
   recipe,
   NAME,
@@ -44,11 +44,13 @@ export const runtimeWorkbench = recipe<{ a?: string; b?: string; data: any }>(
 
     return {
       [NAME]: str`${a} ${b}`,
-      [UI]: html`<div>
-        <div>${urls}</div>
+      [UI]: (
+        <div>
+          <div>{urls}</div>
 
-        <pre>${stringify({ obj: data })}</pre>
-      </div> `,
+          <pre>{stringify({ obj: data })}</pre>
+        </div>
+      ),
       urls: urls,
     };
   },
