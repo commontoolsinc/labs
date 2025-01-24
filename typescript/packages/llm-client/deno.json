@@ -1,9 +1,0 @@
-{
-  "name": "@commontools/llm-client",
-  "version": "0.1.0",
-  "exports": "./src/index.ts",
-  "imports": {
-    "@cfworker/json-schema": "npm:@cfworker/json-schema@^4.1.0",
-    "ai": "npm:ai@^4.1.4",
-  }
-}
