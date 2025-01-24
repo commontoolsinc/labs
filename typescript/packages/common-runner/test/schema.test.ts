@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { getDoc, isCell } from "../src/cell.js";
-import { JSONSchema } from "@commontools/common-builder";
+import { describe, it } from "jsr:@std/testing/bdd";
+import { expect } from "jsr:@std/expect";
+import { getDoc, isCell } from "../src/cell.ts";
+import { JSONSchema } from "@commontools/builder";
 
 describe("Schema Support", () => {
   describe("Basic Types", () => {

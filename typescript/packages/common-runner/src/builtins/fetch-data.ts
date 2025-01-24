@@ -1,6 +1,6 @@
-import { getDoc, DocImpl, ReactivityLog } from "../cell.js";
-import { normalizeToCells } from "../utils.js";
-import { idle, type Action } from "../scheduler.js";
+import { DocImpl, getDoc, ReactivityLog } from "../cell.ts";
+import { normalizeToCells } from "../utils.ts";
+import { type Action, idle } from "../scheduler.ts";
 import { refer } from "merkle-reference";
 
 /**
@@ -63,10 +63,9 @@ export function fetchData(
     if (hash === previousCallHash || hash === requestHash.get()) return;
     previousCallHash = hash;
 
-    const processResponse =
-      (mode || "json") === "json"
-        ? (r: Response) => r.json()
-        : (r: Response) => r.text();
+    const processResponse = (mode || "json") === "json"
+      ? (r: Response) => r.json()
+      : (r: Response) => r.text();
 
     if (url === undefined) {
       pending.setAtPath([], false, log);
@@ -84,7 +83,7 @@ export function fetchData(
 
     fetch(url, options)
       .then(processResponse)
-      .then(async data => {
+      .then(async (data) => {
         if (thisRun !== currentRun) return;
 
         normalizeToCells(parentCell, data, undefined, log, {
@@ -98,7 +97,7 @@ export function fetchData(
         result.setAtPath([], data, log);
         requestHash.setAtPath([], hash, log);
       })
-      .catch(async err => {
+      .catch(async (err) => {
         if (thisRun !== currentRun) return;
 
         await idle();

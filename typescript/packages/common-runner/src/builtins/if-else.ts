@@ -1,10 +1,10 @@
 import {
+  type DocImpl,
   getDoc,
   getDocLinkOrThrow,
-  type DocImpl,
   type ReactivityLog,
-} from "../cell.js";
-import { type Action } from "../scheduler.js";
+} from "../cell.ts";
+import { type Action } from "../scheduler.ts";
 
 export function ifElse(
   inputsCell: DocImpl<[any, any, any]>,

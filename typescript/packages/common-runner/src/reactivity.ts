@@ -1,4 +1,4 @@
-import { Cancel, isCancel } from "./cancel.js";
+import { Cancel, isCancel } from "./cancel.ts";
 
 export interface ReactiveCell<T> {
   sink(callback: (value: T) => void): () => void;

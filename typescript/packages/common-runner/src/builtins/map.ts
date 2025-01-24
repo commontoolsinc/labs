@@ -1,8 +1,8 @@
-import { type Recipe } from "@commontools/common-builder";
-import { getDoc, DocImpl, ReactivityLog, getDocLinkOrThrow } from "../cell.js";
-import { run, cancels } from "../runner.js";
-import { type Action } from "../scheduler.js";
-import { type AddCancel } from "../cancel.js";
+import { type Recipe } from "@commontools/builder";
+import { DocImpl, getDoc, getDocLinkOrThrow, ReactivityLog } from "../cell.ts";
+import { cancels, run } from "../runner.ts";
+import { type Action } from "../scheduler.ts";
+import { type AddCancel } from "../cancel.ts";
 
 /**
  * Implemention of built-in map module. Unlike regular modules, this will be
@@ -56,8 +56,9 @@ export function map(
       return;
     }
 
-    if (!Array.isArray(list))
+    if (!Array.isArray(list)) {
       throw new Error("map currently only supports arrays");
+    }
 
     // // Hack to get to underlying array that lists cell references, etc.
     const listRef = getDocLinkOrThrow(list);
@@ -91,8 +92,9 @@ export function map(
       result.setAtPath([index], { cell: resultCell, path: [] }, log);
     }
 
-    if (result.get().length > list.length)
+    if (result.get().length > list.length) {
       result.setAtPath(["length"], list.length, log);
+    }
 
     // NOTE: We leave prior results in the list for now, so they reuse prior
     // runs when items reappear

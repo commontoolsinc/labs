@@ -1,46 +1,46 @@
 import {
-  TYPE,
-  type Recipe,
-  type NodeFactory,
-  type Module,
   type Alias,
-  type JSONValue,
+  isAlias,
   isModule,
   isRecipe,
-  isAlias,
   isStreamAlias,
+  type JSONValue,
+  type Module,
+  type NodeFactory,
   popFrame,
-  recipeFromFrame,
   pushFrameFromCause,
-  UnsafeBinding,
+  type Recipe,
+  recipeFromFrame,
+  TYPE,
   unsafe_materializeFactory,
   unsafe_originalRecipe,
-} from "@commontools/common-builder";
+  UnsafeBinding,
+} from "@commontools/builder";
 import {
-  getDoc,
   DocImpl,
-  ReactivityLog,
   DocLink,
+  getDoc,
   isDoc,
   isDocLink,
-} from "./cell.js";
-import { Action, schedule, addEventHandler } from "./scheduler.js";
+  ReactivityLog,
+} from "./cell.ts";
+import { Action, addEventHandler, schedule } from "./scheduler.ts";
 import {
+  containsOpaqueRef,
+  deepCopy,
   extractDefaultValues,
-  unwrapOneLevelAndBindtoCell,
   findAllAliasedCells,
   followAliases,
   mergeObjects,
   sendValueToBinding,
   staticDataToNestedCells,
-  deepCopy,
   unsafe_noteParentOnRecipes,
-  containsOpaqueRef,
-} from "./utils.js";
-import { getModuleByRef } from "./module.js";
-import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.js";
-import "./builtins/index.js";
-import { addRecipe, getRecipe, getRecipeId } from "./recipe-map.js";
+  unwrapOneLevelAndBindtoCell,
+} from "./utils.ts";
+import { getModuleByRef } from "./module.ts";
+import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
+import "./builtins/index.ts";
+import { addRecipe, getRecipe, getRecipeId } from "./recipe-map.ts";
 
 export const cancels = new WeakMap<DocImpl<any>, Cancel>();
 
@@ -78,8 +78,9 @@ export function run<T, R = any>(
   if (cancels.has(resultCell)) {
     // If it's already running and no new recipe or argument are given,
     // we are just returning the result cell
-    if (recipeOrModule === undefined && argument === undefined)
+    if (recipeOrModule === undefined && argument === undefined) {
       return resultCell;
+    }
 
     // Otherwise stop execution of the old recipe. TODO: Await, but this will
     // make all this async.
@@ -160,7 +161,7 @@ export function run<T, R = any>(
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
       // Create aliases for all the top level keys in the object
       argument = Object.fromEntries(
-        Object.keys(value).map(key => [
+        Object.keys(value).map((key) => [
           key,
           { $alias: { cell: ref.cell, path: [...ref.path, key] } },
         ]),
@@ -180,8 +181,7 @@ export function run<T, R = any>(
   if (!resultCell.entityId) resultCell.generateEntityId();
   if (!processCell.entityId) processCell.generateEntityId(resultCell.entityId);
 
-  const internal =
-    processCell.get()?.internal ??
+  const internal = processCell.get()?.internal ??
     (recipe.initial as { internal: any })?.internal;
 
   // Ensure static data is converted to cell references, e.g. for arrays
@@ -208,17 +208,18 @@ export function run<T, R = any>(
   );
 
   // [unsafe closures:] For recipes from closures, add a materialize factory
-  if (recipe[unsafe_originalRecipe])
+  if (recipe[unsafe_originalRecipe]) {
     recipe[unsafe_materializeFactory] = (log: any) => (path: PropertyKey[]) =>
       processCell.getAsQueryResult(path, log);
+  }
 
   for (const node of recipe.nodes) {
     // Generate causal IDs for all cells read and written to by this node, if
     // they don't have any yet.
-    [node.inputs, node.outputs].forEach(bindings =>
+    [node.inputs, node.outputs].forEach((bindings) =>
       findAllAliasedCells(bindings, processCell).forEach(({ cell, path }) => {
         if (!cell.entityId) cell.generateEntityId({ cell: processCell, path });
-      }),
+      })
     );
     instantiateNode(
       node.module,
@@ -343,8 +344,9 @@ function instantiateJavaScriptNode(
       : module.implementation
   ) as (inputs: any) => any;
 
-  if (module.wrapper && module.wrapper in moduleWrappers)
+  if (module.wrapper && module.wrapper in moduleWrappers) {
     fn = moduleWrappers[module.wrapper](fn);
+  }
 
   // Check if any of the read cells is a stream alias
   let streamRef: DocLink | undefined = undefined;
@@ -431,11 +433,14 @@ function instantiateJavaScriptNode(
         ? inputsCell.asCell([], log, module.argumentSchema).get()
         : inputsCell.getAsQueryResult([], log);
 
-      const frame = pushFrameFromCause({ inputs, outputs, fn: fn.toString() }, {
-        recipe,
-        materialize: (path: PropertyKey[]) =>
-          processCell.getAsQueryResult(path, log),
-      } satisfies UnsafeBinding);
+      const frame = pushFrameFromCause(
+        { inputs, outputs, fn: fn.toString() },
+        {
+          recipe,
+          materialize: (path: PropertyKey[]) =>
+            processCell.getAsQueryResult(path, log),
+        } satisfies UnsafeBinding,
+      );
       const result = fn(argument);
 
       if (containsOpaqueRef(result)) {
@@ -473,10 +478,11 @@ function instantiateRawNode(
   addCancel: AddCancel,
   recipe: Recipe,
 ) {
-  if (typeof module.implementation !== "function")
+  if (typeof module.implementation !== "function") {
     throw new Error(
       `Raw module is not a function, got: ${module.implementation}`,
     );
+  }
 
   // Built-ins can define their own scheduling logic, so they'll
   // implement parts of the above themselves.

@@ -1,12 +1,13 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it } from "jsr:@std/testing/bdd";
+import { expect } from "jsr:@std/expect";
 import {
   createRef,
-  getEntityId,
-  getDocByEntityId,
-  setDocByEntityId,
   EntityId,
-} from "../src/cell-map";
-import { getDoc, getDocLinkOrThrow } from "../src/cell.js";
+  getDocByEntityId,
+  getEntityId,
+  setDocByEntityId,
+} from "../src/cell-map.ts";
+import { getDoc, getDocLinkOrThrow } from "../src/cell.ts";
 import { refer } from "merkle-reference";
 
 describe("refer", () => {

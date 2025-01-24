@@ -1,16 +1,17 @@
-import { describe, it, expect } from "vitest";
+import { describe, it } from "jsr:@std/testing/bdd";
+import { expect } from "jsr:@std/expect";
 import {
+  compactifyPaths,
   extractDefaultValues,
+  followAliases,
+  followCellReferences,
   mergeObjects,
+  normalizeToCells,
   sendValueToBinding,
   setNestedValue,
   unwrapOneLevelAndBindtoCell,
-  followCellReferences,
-  followAliases,
-  compactifyPaths,
-  normalizeToCells,
-} from "../src/utils.js";
-import { getDoc, DocLink, ReactivityLog, isDocLink } from "../src/cell.js";
+} from "../src/utils.ts";
+import { DocLink, getDoc, isDocLink, ReactivityLog } from "../src/cell.ts";
 
 describe("extractDefaultValues", () => {
   it("should extract default values from a schema", () => {
@@ -352,7 +353,7 @@ describe("makeArrayElementsAllCells", () => {
     normalizeToCells(getDoc(), input);
 
     expect(input.length).toBe(3);
-    input.forEach(item => {
+    input.forEach((item) => {
       expect(isDocLink(item)).toBe(true);
     });
   });
@@ -380,7 +381,7 @@ describe("makeArrayElementsAllCells", () => {
     expect(refCell).toBeDefined();
     expect(path).toEqual([]);
     expect(Array.isArray(refCell.get())).toBe(true);
-    (refCell.get() as any[]).forEach(item => {
+    (refCell.get() as any[]).forEach((item) => {
       expect(isDocLink(item)).toBe(true);
     });
     expect(isDocLink(input[2])).toBe(true);
@@ -391,10 +392,10 @@ describe("makeArrayElementsAllCells", () => {
     const changed = normalizeToCells(getDoc(), input);
 
     expect(changed).toBe(true);
-    input.arr.forEach(item => {
+    input.arr.forEach((item) => {
       expect(isDocLink(item)).toBe(true);
     });
-    input.nested.arr.forEach(item => {
+    input.nested.arr.forEach((item) => {
       expect(isDocLink(item)).toBe(true);
     });
   });

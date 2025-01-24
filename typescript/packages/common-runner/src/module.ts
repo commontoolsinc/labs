@@ -1,11 +1,11 @@
 import {
+  createNodeFactory,
   type Module,
   type ModuleFactory,
-  createNodeFactory,
-} from "@commontools/common-builder";
-import { type Action } from "./scheduler.js";
-import { type DocImpl } from "./cell.js";
-import { type AddCancel } from "./cancel.js";
+} from "@commontools/builder";
+import { type Action } from "./scheduler.ts";
+import { type DocImpl } from "./cell.ts";
+import { type AddCancel } from "./cancel.ts";
 const moduleMap = new Map<string, Module>();
 
 export function addModuleByRef(ref: string, module: Module) {

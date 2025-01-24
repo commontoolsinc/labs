@@ -1,15 +1,16 @@
-import { describe, it, expect } from "vitest";
+import { describe, it } from "jsr:@std/testing/bdd";
+import { expect } from "jsr:@std/expect";
 import {
   getDoc,
+  isCell,
   isDoc,
   isDocLink,
   isQueryResult,
-  isCell,
   ReactivityLog,
-} from "../src/cell.js";
-import { JSONSchema } from "@commontools/common-builder";
-import { addEventHandler, idle } from "../src/scheduler.js";
-import { compactifyPaths } from "../src/utils.js";
+} from "../src/cell.ts";
+import { JSONSchema } from "@commontools/builder";
+import { addEventHandler, idle } from "../src/scheduler.ts";
+import { compactifyPaths } from "../src/utils.ts";
 
 describe("Cell", () => {
   it("should create a cell with initial value", () => {
@@ -51,7 +52,7 @@ describe("Cell", () => {
   it("should sink changes", () => {
     const c = getDoc(0);
     const values: number[] = [];
-    const unsink = c.sink(value => values.push(value));
+    const unsink = c.sink((value) => values.push(value));
     c.send(1);
     c.send(2);
     c.send(3);
@@ -159,7 +160,7 @@ describe("createProxy", () => {
     const proxy = c.getAsQueryResult([], log);
     proxy.a = [1, 2, 3];
     const result = proxy.a.pop();
-    const pathsRead = log.reads.map(r => r.path.join("."));
+    const pathsRead = log.reads.map((r) => r.path.join("."));
     expect(pathsRead).toContain("a.2");
     expect(pathsRead).not.toContain("a.0");
     expect(pathsRead).not.toContain("a.1");
@@ -197,7 +198,7 @@ describe("createProxy", () => {
     const c = getDoc({ a: [1, 2, 3] });
     const log: ReactivityLog = { reads: [], writes: [] };
     const proxy = c.getAsQueryResult([], log);
-    const result = proxy.a.map(x => x + 1);
+    const result = proxy.a.map((x: any) => x + 1);
     expect(result).toEqual([2, 3, 4]);
     expect(log.reads).toEqual([
       { cell: c, path: [] },
@@ -278,7 +279,7 @@ describe("asCell", () => {
     let eventCount = 0;
 
     addEventHandler(
-      event => {
+      (event) => {
         eventCount++;
         lastEventSeen = event;
       },
@@ -296,7 +297,7 @@ describe("asCell", () => {
   it("should call sink only when the cell changes on the subpath", () => {
     const c = getDoc({ a: { b: 42, c: 10 }, d: 5 });
     const values: number[] = [];
-    c.asCell(["a", "b"]).sink(value => values.push(value));
+    c.asCell(["a", "b"]).sink((value) => values.push(value));
     c.setAtPath(["d"], 50);
     c.setAtPath(["a", "c"], 100);
     c.setAtPath(["a", "b"], 42);
@@ -922,10 +923,14 @@ describe("JSON.stringify bug", () => {
     expect(json).toEqual('{"internal":{"a":1}}');
     expect(JSON.stringify(c.get())).toEqual('{"result":{"data":1}}');
     expect(JSON.stringify(d.get())).toEqual(
-      `{"internal":{"__#2":{"cell":${JSON.stringify(c.entityId)},"path":["result"]}}}`,
+      `{"internal":{"__#2":{"cell":${
+        JSON.stringify(c.entityId)
+      },"path":["result"]}}}`,
     );
     expect(JSON.stringify(e.get())).toEqual(
-      `{"internal":{"a":{"$alias":{"cell":${JSON.stringify(d.entityId)},"path":["internal","__#2","data"]}}}}`,
+      `{"internal":{"a":{"$alias":{"cell":${
+        JSON.stringify(d.entityId)
+      },"path":["internal","__#2","data"]}}}}`,
     );
   });
 });
