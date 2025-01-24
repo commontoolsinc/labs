@@ -1,4 +1,4 @@
-import { html } from "@commontools/common-html";
+import { h } from "@commontools/common-html";
 import {
   recipe,
   UI,
@@ -107,7 +107,7 @@ const generateFlexibleQuery = lift(
     // Add flexible OR conditions for collection names
     if (keywords.length > 0) {
       where.push({
-        Or: keywords.flatMap((keyword) => [
+        Or: keywords.flatMap(keyword => [
           {
             Case: ["?collection", "name", keyword],
           },
@@ -194,46 +194,45 @@ export const search = recipe<{ search: string }>(
     );
 
     const entries = lift(({ data }) =>
-      data.map((r) => ({ row: Object.entries(r).map(([k, v]) => ({ k, v })) })),
+      data.map(r => ({ row: Object.entries(r).map(([k, v]) => ({ k, v })) })),
     )({
       data: normalizedData,
     });
 
     return {
       [NAME]: search,
-      [UI]: html`<div>
-        ${ifElse(
-          result,
-          html`<div>
-            <os-container>
-              <os-colgrid>
-                ${entries.map(({ row }) => {
-                  return html`<os-tile style="aspect-ratio: 1/1;">
-                    <div
-                      style="width: 100%; height: 100%; overflow-y: auto; box-sizing: border-box; overflow-x: hidden; border-radius: 2px; padding: 8px; font-size: 0.8rem;  font-family: monospace;"
-                    >
-                      ${row.map(
-                        ({ k, v }) =>
-                          html`<div style="">
-                            <div
-                              style="font-weight: bold; color: #999; font-size: 0.6rem; height: 16px;"
-                            >
-                              ${truncate({ text: k, length: 32 })}
+      [UI]: (
+        <div>
+          {ifElse(
+            result,
+            <div>
+              <os-container>
+                <os-colgrid>
+                  {entries.map(({ row }) => {
+                    return (
+                      <os-tile style="aspect-ratio: 1/1;">
+                        <div style="width: 100%; height: 100%; overflow-y: auto; box-sizing: border-box; overflow-x: hidden; border-radius: 2px; padding: 8px; font-size: 0.8rem;  font-family: monospace;">
+                          {row.map(({ k, v }) => (
+                            <div style="">
+                              <div style="font-weight: bold; color: #999; font-size: 0.6rem; height: 16px;">
+                                ${truncate({ text: k, length: 32 })}
+                              </div>
+                              <div style="padding: 2px;">
+                                ${truncate({ text: v, length: 24 })}
+                              </div>
                             </div>
-                            <div style="padding: 2px;">
-                              ${truncate({ text: v, length: 24 })}
-                            </div>
-                          </div>`,
-                      )}
-                    </div>
-                  </os-tile>`;
-                })}
-              </os-colgrid>
-            </os-container>
-          </div>`,
-          html`<div>Loading...</div>`,
-        )}
-      </div>`,
+                          ))}
+                        </div>
+                      </os-tile>
+                    );
+                  })}
+                </os-colgrid>
+              </os-container>
+            </div>,
+            <div>Loading...</div>,
+          )}
+        </div>
+      ),
       result,
       // collections,
       data: exportedData,

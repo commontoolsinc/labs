@@ -1,4 +1,4 @@
-import { h, html } from "@commontools/common-html";
+import { h } from "@commontools/common-html";
 import { recipe, lift, NAME, UI, handler } from "@commontools/common-builder";
 import { getEntityId } from "@commontools/common-runner";
 import { Charm, removeCharm, RecipeManifest, closeCharm } from "../data.js";

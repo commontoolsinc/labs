@@ -1,4 +1,4 @@
-import { html } from "@commontools/common-html";
+import { h } from "@commontools/common-html";
 import {
   recipe,
   fetchData,
@@ -15,10 +15,14 @@ interface Item {
 
 // FIXME(ja): there is a bug when the list gets smaller item map fails to shrink
 //   you can see this by returning [{"id": "1", "title": "smaller"}] if results is null
-const maybeList = lift(({ result }) => { return result || []; });
+const maybeList = lift(({ result }) => {
+  return result || [];
+});
 
 const updateUrl = handler<{ detail: { value: string } }, { url: string }>(
-    ({ detail }, state) => { (state.url = detail?.value ?? "untitled") }
+  ({ detail }, state) => {
+    state.url = detail?.value ?? "untitled";
+  },
 );
 
 // FIXME(ja): integrate jsonImport / dataDesigner ability to work with arbitrary schema
@@ -32,15 +36,23 @@ export const fetchExample = recipe<{ url: string }>(
 
     return {
       [NAME]: "Fetch Example",
-      [UI]: html`<div>
-            <common-input
-                value=${url}
-                placeholder="Fetch url"
-                oncommon-input=${updateUrl({ url })}
-            ></common-input>
-            <ul>${items.map(({ title, id }) => html`<li>${title} - ${id}</li>`)}</ul>
-          </div>`,
+      [UI]: (
+        <div>
+          <common-input
+            value={url}
+            placeholder="Fetch url"
+            oncommon-input={updateUrl({ url })}
+          ></common-input>
+          <ul>
+            {items.map(({ title, id }) => (
+              <li>
+                {title} - {id}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ),
       result,
     };
-  }
+  },
 );

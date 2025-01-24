@@ -1,4 +1,4 @@
-import { isVNode, VNode, Props, Child, isSection } from "./view.js";
+import { isVNode, VNode, Props, Child } from "./jsx.js";
 import {
   effect,
   isSendable,
@@ -149,8 +149,6 @@ const bindChildren = (element: HTMLElement, children: Array<Child>): Cancel => {
         }
       };
       replace(replacement);
-    } else if (isSection(child)) {
-      logger.warn("Sections not yet implemented");
     }
   }
   return cancel;

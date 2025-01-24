@@ -6,7 +6,10 @@
     "rootDir": "./src",
     "strict": false,
     "types": ["node", "mocha"],
-    "strictNullChecks": true
+    "strictNullChecks": true,
+    "jsx": "preserve",
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "Fragment"
   },
   "include": ["src/**/*"]
 }
