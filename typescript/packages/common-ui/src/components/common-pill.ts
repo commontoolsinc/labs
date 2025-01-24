@@ -1,6 +1,6 @@
-import { LitElement, html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
-import { baseStyles } from './style.ts';
+import { css, html, LitElement } from "lit";
+import { customElement } from "lit/decorators.js";
+import { baseStyles } from "./style.ts";
 
 @customElement("common-pill")
 export class CommonButtonElement extends LitElement {
@@ -36,7 +36,7 @@ export class CommonButtonElement extends LitElement {
       text-wrap: nowrap;
       width: 100%;
     }
-    `
+    `,
   ];
 
   override render() {

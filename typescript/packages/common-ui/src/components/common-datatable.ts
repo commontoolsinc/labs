@@ -1,8 +1,8 @@
-import { LitElement, html, css } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
-import { repeat } from 'lit/directives/repeat.js';
+import { css, html, LitElement } from "lit";
+import { customElement, property } from "lit/decorators.js";
+import { repeat } from "lit/directives/repeat.js";
 
-@customElement('common-datatable')
+@customElement("common-datatable")
 export class CommonDatatableElement extends LitElement {
   static override styles = css`
   :host {
@@ -38,11 +38,11 @@ export class CommonDatatableElement extends LitElement {
       const cells = repeat(
         this.cols,
         (col) => {
-          return html`<td class="cell">${row[col]}</td>`
-        }
+          return html`<td class="cell">${row[col]}</td>`;
+        },
       );
       return html`<tr class="row">${cells}</tr>`;
-    })
+    });
 
     return html`
     <div class="viewport">

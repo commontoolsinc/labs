@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
@@ -29,7 +29,7 @@ export class CommonHgroup extends LitElement {
       color: var(--secondary-color);
       margin: 0;
     }
-    `
+    `,
   ];
 
   override render() {

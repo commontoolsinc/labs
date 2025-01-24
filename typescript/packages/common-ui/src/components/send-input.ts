@@ -1,7 +1,6 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
-
 
 @customElement("common-send-message")
 export class SendMessageElement extends LitElement {
@@ -38,7 +37,7 @@ export class SendMessageElement extends LitElement {
         detail: { message: value },
         bubbles: true,
         composed: true,
-      })
+      }),
     );
   }
 

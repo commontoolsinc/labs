@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
@@ -89,7 +89,7 @@ export class CommonTodoElement extends LitElement {
           id: this.id,
           value: this.value,
           checked,
-        })
+        }),
       );
     };
 
@@ -101,8 +101,8 @@ export class CommonTodoElement extends LitElement {
         new CommonTodoInputEvent({
           id: this.id,
           value: this.value,
-          checked: this.checked
-        })
+          checked: this.checked,
+        }),
       );
     };
 

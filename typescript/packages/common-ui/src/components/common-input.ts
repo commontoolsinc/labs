@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
@@ -20,7 +20,7 @@ export type CommonKeydown = {
   id: string;
   key: string;
   value: string;
-}
+};
 
 export class CommonKeydownEvent extends Event {
   detail: CommonKeydown;
@@ -34,7 +34,7 @@ export class CommonKeydownEvent extends Event {
 export type CommonBlur = {
   id: string;
   value: string;
-}
+};
 
 export class CommonBlurEvent extends Event {
   detail: CommonBlur;
@@ -95,11 +95,19 @@ export class CommonInputElement extends LitElement {
     };
 
     const onkeydown = (event: KeyboardEvent) => {
-      this.dispatchEvent(new CommonKeydownEvent({ id: this.id, key: event.key, value: this.value }));
+      this.dispatchEvent(
+        new CommonKeydownEvent({
+          id: this.id,
+          key: event.key,
+          value: this.value,
+        }),
+      );
     };
 
     const onblur = () => {
-      this.dispatchEvent(new CommonBlurEvent({ id: this.id, value: this.value }));
+      this.dispatchEvent(
+        new CommonBlurEvent({ id: this.id, value: this.value }),
+      );
     };
 
     return html`

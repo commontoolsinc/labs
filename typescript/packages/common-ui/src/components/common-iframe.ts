@@ -1,13 +1,13 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import {
-  Cell,
-  addAction,
-  removeAction,
   type Action,
+  addAction,
+  Cell,
   type ReactivityLog,
+  removeAction,
 } from "@commontools/runner";
-import { Ref, createRef, ref } from "lit/directives/ref.js";
+import { createRef, Ref, ref } from "lit/directives/ref.js";
 
 @customElement("common-iframe")
 export class CommonIframeElement extends LitElement {
@@ -97,19 +97,17 @@ export class CommonIframeElement extends LitElement {
           : this.context?.[key];
         // TODO: This might cause infinite loops, since the data can be a graph.
         console.log("readResponse", key, value);
-        const copy =
-          typeof value === "string" && value.includes("{")
-            ? JSON.parse(value)
-            : JSON.parse(JSON.stringify(value));
+        const copy = typeof value === "string" && value.includes("{")
+          ? JSON.parse(value)
+          : JSON.parse(JSON.stringify(value));
         this.iframeRef.value?.contentWindow?.postMessage(
           { type: "readResponse", key, value: copy },
           "*",
         );
       } else if (type === "write" && this.context) {
-        const updated =
-          typeof value === "string" && value.includes("{")
-            ? JSON.parse(value)
-            : JSON.parse(JSON.stringify(value));
+        const updated = typeof value === "string" && value.includes("{")
+          ? JSON.parse(value)
+          : JSON.parse(JSON.stringify(value));
         console.log("write", key, updated);
         this.context.getAsQueryResult()[key] = updated;
       } else if (type === "subscribe" && this.context) {
@@ -136,8 +134,9 @@ export class CommonIframeElement extends LitElement {
   private notifySubscribers(key: string, value: any) {
     console.log("notifySubscribers", key, value);
     // TODO: This might cause infinite loops, since the data can be a graph.
-    const copy =
-      value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
+    const copy = value !== undefined
+      ? JSON.parse(JSON.stringify(value))
+      : undefined;
     this.iframeRef.value?.contentWindow?.postMessage(
       { type: "update", key, value: copy },
       "*",
@@ -183,7 +182,8 @@ export class CommonIframeElement extends LitElement {
         style="border: none;"
         @load=${this.handleLoad}
       ></iframe>
-      ${this.errorDetails
+      ${
+      this.errorDetails
         ? html`
             <div class="error-modal">
               <div class="error-content">
@@ -200,7 +200,8 @@ export class CommonIframeElement extends LitElement {
               </div>
             </div>
           `
-        : ""}
+        : ""
+    }
     `;
   }
 }

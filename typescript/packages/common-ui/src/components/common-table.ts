@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 import { ZodObject } from "zod";
@@ -61,8 +61,10 @@ export class CommonCardElement extends LitElement {
       const selfEntry = entries.find(([key]) => key === "self");
 
       return html`
-        ${nonSelfEntries.map(
-          ([key, schema]) => html`
+        ${
+        nonSelfEntries.map(
+          ([key, schema]) =>
+            html`
             <div class="field">
               <div class="label">${key.replace(/([A-Z])/g, " $1").trim()}</div>
               <div class="value">
@@ -70,23 +72,28 @@ export class CommonCardElement extends LitElement {
               </div>
             </div>
           `,
-        )}
-        ${selfEntry
+        )
+      }
+        ${
+        selfEntry
           ? html`
               <div class="field">
                 <div class="label">
                   ${selfEntry[0].replace(/([A-Z])/g, " $1").trim()}
                 </div>
                 <div class="value">
-                  ${this.formatValue(
-                    this.item[selfEntry[0]],
-                    selfEntry[1],
-                    selfEntry[0],
-                  )}
+                  ${
+            this.formatValue(
+              this.item[selfEntry[0]],
+              selfEntry[1],
+              selfEntry[0],
+            )
+          }
                 </div>
               </div>
             `
-          : ""}
+          : ""
+      }
       `;
     }
 
@@ -95,15 +102,19 @@ export class CommonCardElement extends LitElement {
     const selfEntry = entries.find(([key]) => key === "self");
 
     return html`
-      ${nonSelfEntries.map(
-        ([key, value]) => html`
+      ${
+      nonSelfEntries.map(
+        ([key, value]) =>
+          html`
           <div class="field">
             <div class="label">${key.replace(/([A-Z])/g, " $1").trim()}</div>
             <div class="value">${this.formatValue(value, undefined, key)}</div>
           </div>
         `,
-      )}
-      ${selfEntry
+      )
+    }
+      ${
+      selfEntry
         ? html`
             <div class="field">
               <div class="label">
@@ -114,7 +125,8 @@ export class CommonCardElement extends LitElement {
               </div>
             </div>
           `
-        : ""}
+        : ""
+    }
     `;
   }
 
@@ -286,10 +298,12 @@ export class CommonTableElement extends LitElement {
       case "ZodObject":
         return html`
           <span class="complex-value" title=${JSON.stringify(value)}>
-            ${JSON.stringify(value).slice(0, 50)}${JSON.stringify(value)
+            ${JSON.stringify(value).slice(0, 50)}${
+          JSON.stringify(value)
               .length > 50
-              ? "..."
-              : ""}
+            ? "..."
+            : ""
+        }
           </span>
         `;
       case "ZodBoolean":
@@ -427,28 +441,37 @@ export class CommonTableElement extends LitElement {
         <table>
           <thead>
             <tr>
-              ${Object.entries(this.schema.shape).map(
-                ([key]) => html`
+              ${
+      Object.entries(this.schema.shape).map(
+        ([key]) =>
+          html`
                   <th>${key.replace(/([A-Z])/g, " $1").trim()}</th>
                 `,
-              )}
+      )
+    }
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            ${this.data.map(
-              row => html`
+            ${
+      this.data.map(
+        (row) =>
+          html`
                 <tr>
-                  ${Object.entries(this.schema.shape).map(
-                    ([key, schema]) => html`
+                  ${
+            Object.entries(this.schema.shape).map(
+              ([key, schema]) =>
+                html`
                       <td title=${String(row[key])}>
                         ${this.formatValue(row[key], schema)}
                       </td>
                     `,
-                  )}
+            )
+          }
                   <td>
-                    ${this.preview
-                      ? html`
+                    ${
+            this.preview
+              ? html`
                           <button
                             class="preview-button"
                             @click=${() => this.showPreview(row)}
@@ -456,9 +479,11 @@ export class CommonTableElement extends LitElement {
                             Preview
                           </button>
                         `
-                      : ""}
-                    ${this.edit
-                      ? html`
+              : ""
+          }
+                    ${
+            this.edit
+              ? html`
                           <button
                             class="edit-button"
                             @click=${() => this.handleEdit(row)}
@@ -466,9 +491,11 @@ export class CommonTableElement extends LitElement {
                             Edit
                           </button>
                         `
-                      : ""}
-                    ${this.delete
-                      ? html`
+              : ""
+          }
+                    ${
+            this.delete
+              ? html`
                           <button
                             class="delete-button"
                             @click=${() => this.handleDelete(row)}
@@ -476,9 +503,11 @@ export class CommonTableElement extends LitElement {
                             Delete
                           </button>
                         `
-                      : ""}
-                    ${this.download
-                      ? html`
+              : ""
+          }
+                    ${
+            this.download
+              ? html`
                           <button
                             class="download-button"
                             @click=${() => this.handleDownload(row)}
@@ -486,9 +515,11 @@ export class CommonTableElement extends LitElement {
                             Download
                           </button>
                         `
-                      : ""}
-                    ${this.copy
-                      ? html`
+              : ""
+          }
+                    ${
+            this.copy
+              ? html`
                           <button
                             class="copy-button"
                             @click=${() => this.handleCopySelf(row)}
@@ -496,16 +527,19 @@ export class CommonTableElement extends LitElement {
                             Copy Ref
                           </button>
                         `
-                      : ""}
+              : ""
+          }
                   </td>
                 </tr>
               `,
-            )}
+      )
+    }
           </tbody>
         </table>
       </div>
 
-      ${this.selectedItem
+      ${
+      this.selectedItem
         ? html`
             <div class="modal-overlay" @click=${this.closePreview}>
               <div
@@ -522,7 +556,8 @@ export class CommonTableElement extends LitElement {
               </div>
             </div>
           `
-        : ""}
+        : ""
+    }
     `;
   }
 }

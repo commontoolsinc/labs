@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
@@ -100,7 +100,7 @@ export class CommonMediaElement extends LitElement {
       height: var(--img-height);
       width: var(--img-width);
     }
-    `
+    `,
   ];
 
   accessor src: string = "";

@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit";
+import { css, html, LitElement } from "lit";
 import { customElement } from "lit/decorators.js";
 import { baseStyles } from "./style.ts";
 
@@ -50,7 +50,7 @@ export class CommonHscrollElement extends LitElement {
     :host([pad="md"]) .scroll-body {
       padding: var(--pad);
     }
-    `
+    `,
   ];
 
   override render() {
