@@ -213,7 +213,7 @@ export const annotation = recipe<{
         $
         {ifElse(
           acceptedSuggestion,
-          <div>${acceptedSuggestion}</div>,
+          <div>{acceptedSuggestion}</div>,
           <common-suggestions
             suggestions={buildSuggestionsList({ suggestion })}
             onselect-suggestion={acceptSuggestion({
