@@ -1,5 +1,5 @@
 {
-  "name": "@common/builder",
+  "name": "@commontools/builder",
   "version": "0.1.0",
   "exports": "./src/index.ts",
   "imports": {

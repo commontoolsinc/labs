@@ -1,5 +1,5 @@
 {
-  "name": "@common/llm-client",
+  "name": "@commontools/llm-client",
   "version": "0.1.0",
   "exports": "./src/index.ts",
   "imports": {

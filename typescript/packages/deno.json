@@ -1,0 +1,24 @@
+{
+  "workspace": ["./common-ui", "./common-builder", "./llm-client", "./common-runner"],
+  "tasks": {
+    "dev": "deno run --watch -A main.ts"
+  },
+  "fmt": {
+    "indentWidth": 2,
+    "lineWidth": 80,
+    "semiColons": true,
+    "singleQuote": false,
+    "proseWrap": "always"
+  },
+  "lint": {
+    "include": ["./"],
+    "rules": {
+      "tags": ["recommended"],
+      "include": ["ban-untagged-todo"],
+      "exclude": ["no-unused-vars", "no-explicit-any"]
+    }
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@1"
+  }
+}
