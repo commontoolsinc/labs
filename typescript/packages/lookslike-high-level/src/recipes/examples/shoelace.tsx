@@ -1,4 +1,4 @@
-import { cell, handler, NAME, recipe, UI } from "@commontools/common-builder";
+import { handler, NAME, recipe, UI } from "@commontools/common-builder";
 import { h } from "@commontools/common-html";
 
 export const shoelaceDemo = recipe('click demo',

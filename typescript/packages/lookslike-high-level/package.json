@@ -34,8 +34,6 @@
       "dependencies": [
         "../common-builder:build",
         "../common-runner:build",
-        "../common-frp:build",
-        "../common-frp-lit:build",
         "../common-html:build",
         "../common-ui:build",
         "../common-os-ui:build",
@@ -53,8 +51,6 @@
   },
   "dependencies": {
     "@commontools/common-builder": "^0.0.1",
-    "@commontools/common-frp": "^0.0.1",
-    "@commontools/common-frp-lit": "^0.0.1",
     "@commontools/common-html": "^0.0.1",
     "@commontools/common-os-ui": "^0.0.1",
     "@commontools/common-runner": "^0.0.1",

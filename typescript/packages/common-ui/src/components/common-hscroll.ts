@@ -1,12 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
-import { view } from '../hyperscript/render.js';
-import { eventProps } from "../hyperscript/schema-helpers.js";
-
-export const hscroll = view('common-hscroll', {
-  ...eventProps()
-});
 
 @customElement("common-hscroll")
 export class CommonHscrollElement extends LitElement {

@@ -1,8 +1,5 @@
 import { LitElement, html, css } from 'lit-element';
 import { customElement } from 'lit-element/decorators.js';
-import { view } from '../hyperscript/render.js';
-
-export const record = view('common-record', {});
 
 @customElement('common-record')
 export class CommonRecordElement extends LitElement {

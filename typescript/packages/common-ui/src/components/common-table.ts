@@ -1,17 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
-import { view } from "../hyperscript/render.js";
-import { eventProps } from "../hyperscript/schema-helpers.js";
 import { ZodObject } from "zod";
-
-export const commonTable = view("common-table", {
-  ...eventProps(),
-});
-
-export const commonCard = view("common-card", {
-  ...eventProps(),
-});
 
 @customElement("common-card")
 export class CommonCardElement extends LitElement {

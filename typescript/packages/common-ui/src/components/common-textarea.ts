@@ -1,16 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
-import { view } from "../hyperscript/render.js";
-import { eventProps } from "../hyperscript/schema-helpers.js";
-
-export const commonTextarea = view("common-textarea", {
-  ...eventProps(),
-  value: { type: "string" },
-  placeholder: { type: "string" },
-  appearance: { type: "string" },
-  rows: { type: "number" },
-});
 
 export type CommonTextarea = {
   id: string;

@@ -1,11 +1,6 @@
 import { LitElement, html, css } from 'lit-element';
 import { customElement, property } from 'lit-element/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
-import { view } from '../hyperscript/render.js';
-
-export const dict = view('common-dict', {
-  records: { type: 'object' },
-});
 
 @customElement('common-dict')
 export class CommonDictElement extends LitElement {

@@ -1,16 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
-import { view } from "../hyperscript/render.js";
-import { eventProps } from "../hyperscript/schema-helpers.js";
-
-export const unibox = view("common-unibox", {
-  ...eventProps(),
-  id: { type: "string" },
-  value: { type: "string" },
-  placeholder: { type: "string" },
-  label: { type: "string" },
-});
 
 @customElement("common-unibox")
 export class CommonUniboxElement extends LitElement {

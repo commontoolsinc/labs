@@ -244,9 +244,12 @@ export async function saveRecipe(
 }
 
 import smolIframe from "./recipes/smolIframe.js";
+import { shoelaceDemo } from "./recipes/examples/shoelace.js";
+
 
 addCharms([
   run(smolIframe, { data: { count: 1 } }),
+  run(shoelaceDemo, {}),
   // helloWorld.spawn({ helloWorld: 1 }),
   // counter.spawn({ counter: 1 }),
   // importer.spawn({ fetch: 1 }),

@@ -1,12 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { render } from "@commontools/common-ui";
 import { addCharms, runPersistent, type Charm } from "../data.js";
 import { type DocImpl, getRecipe } from "@commontools/common-runner";
-
-export const recipeLink = render.view("common-recipe-link", {
-  recipe: { type: "object" },
-});
 
 @customElement("common-recipe-link")
 export class CommonRecipeLink extends LitElement {

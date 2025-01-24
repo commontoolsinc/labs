@@ -1,13 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { render } from "@commontools/common-ui";
 import { NAME } from "../data.js";
 import { Cell, effect } from "@commontools/common-runner";
-
-export const charmLink = render.view("common-charm-link", {
-  charm: { type: "object" },
-  name: { type: "string" },
-});
 
 @customElement("common-charm-link")
 export class CommonCharmLink extends LitElement {

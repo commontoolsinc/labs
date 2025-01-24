@@ -1,16 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
-import { view } from "../hyperscript/render.js";
-import { eventProps } from "../hyperscript/schema-helpers.js";
-
-export const todo = view("common-todo", {
-  ...eventProps(),
-  id: { type: "string" },
-  checked: { type: "boolean" },
-  placeholder: { type: "string" },
-  value: { type: "string" },
-});
 
 export type Todo = {
   id: string;

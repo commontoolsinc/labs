@@ -8,7 +8,6 @@ export * as CommonInput from "./common-input.js";
 export * as CommonTextarea from "./common-textarea.js";
 export * as CommonInputFile from "./common-input-file.js";
 export * as CommonMedia from "./common-media.js";
-export * as CommonNavPanel from "./common-navpanel.js";
 export * as CommonRecord from "./common-record.js";
 export * as CommonScreen from "./common-screen.js";
 export * as CommonVstack from "./common-vstack.js";

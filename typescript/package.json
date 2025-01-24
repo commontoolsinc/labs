@@ -28,11 +28,7 @@
   "wireit": {
     "build": {
       "dependencies": [
-        "./packages/runtime-demo:build",
-        "./packages/example-module:build",
         "./packages/common-html:build",
-        "./packages/common-frp:build",
-        "./packages/common-frp-lit:build",
         "./packages/common-propagator:build",
         "./packages/common-os-ui:build",
         "./packages/common-ui:build",
@@ -46,13 +42,9 @@
     },
     "clean": {
       "dependencies": [
-        "./packages/runtime-demo:clean",
-        "./packages/example-module:clean",
         "./packages/lookslike-high-level:clean",
         "./packages/collectathon:clean",
         "./packages/common-html:clean",
-        "./packages/common-frp:clean",
-        "./packages/common-frp-lit:clean",
         "./packages/common-propagator:clean",
         "./packages/common-os-ui:clean",
         "./packages/common-ui:clean",
@@ -68,7 +60,6 @@
     }
   },
   "dependencies": {
-    "@commontools/runtime": "^0.0.1",
     "@vue/reactivity": "^3.4.31",
     "merkle-reference": "^1.1.0",
     "zod": "^3.24.1"

@@ -1,8 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
-import { view } from "../hyperscript/render.js";
-import { eventProps } from "../hyperscript/schema-helpers.js";
 import { ZodObject } from "zod";
 import { fromString } from 'merkle-reference';
 
@@ -75,9 +73,6 @@ export class ReferenceFieldElement extends LitElement {
   }
 }
 
-export const commonForm = view("common-form", {
-  ...eventProps(),
-});
 export type ZodFormEvent = {
   path: string;
   value: any;

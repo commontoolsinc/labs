@@ -1,15 +1,7 @@
 import { LitElement, html, css } from "lit-element";
 import { customElement, property } from "lit-element/decorators.js";
 import { baseStyles } from "./style.js";
-import { view } from "../hyperscript/render.js";
-import { eventProps } from "../hyperscript/schema-helpers.js";
 
-export const sendInput = view("common-send-message", {
-  ...eventProps(),
-  name: { type: "string" },
-  placeholder: { type: "string" },
-  appearance: { type: "string" },
-});
 
 @customElement("common-send-message")
 export class SendMessageElement extends LitElement {

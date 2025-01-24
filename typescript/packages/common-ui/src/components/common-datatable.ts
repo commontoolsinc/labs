@@ -1,14 +1,6 @@
 import { LitElement, html, css } from 'lit-element';
 import { customElement, property } from 'lit-element/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
-import { view } from '../hyperscript/render.js';
-import { eventProps } from '../hyperscript/schema-helpers.js';
-
-export const datatable = view('common-datatable', {
-  ...eventProps(),
-  cols: { type: 'array' },
-  rows: { type: 'array' },
-});
 
 @customElement('common-datatable')
 export class CommonDatatableElement extends LitElement {
