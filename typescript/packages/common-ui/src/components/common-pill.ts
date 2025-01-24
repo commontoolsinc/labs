@@ -1,6 +1,6 @@
-import { LitElement, html, css } from 'lit-element';
-import { customElement } from 'lit-element/decorators.js';
-import { baseStyles } from './style.js';
+import { LitElement, html, css } from 'lit';
+import { customElement } from 'lit/decorators.js';
+import { baseStyles } from './style.ts';
 
 @customElement("common-pill")
 export class CommonButtonElement extends LitElement {

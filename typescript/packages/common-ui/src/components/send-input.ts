@@ -1,6 +1,6 @@
-import { LitElement, html, css } from "lit-element";
-import { customElement, property } from "lit-element/decorators.js";
-import { baseStyles } from "./style.js";
+import { LitElement, html, css } from "lit";
+import { customElement, property } from "lit/decorators.js";
+import { baseStyles } from "./style.ts";
 
 
 @customElement("common-send-message")

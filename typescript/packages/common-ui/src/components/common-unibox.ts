@@ -1,6 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "./style.ts";
 
 @customElement("common-unibox")
 export class CommonUniboxElement extends LitElement {
@@ -19,9 +19,9 @@ export class CommonUniboxElement extends LitElement {
     `,
   ];
 
-  @property({ type: String }) value = "";
-  @property({ type: String }) placeholder = "";
-  @property({ type: String }) label = "Search";
+  accessor value: string = "";
+  accessor placeholder: string = "";
+  accessor label: string = "Search";
 
   private handleClick(e: Event & { shiftKey: boolean }) {
     const event = new CustomEvent('submit', {

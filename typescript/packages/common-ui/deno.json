@@ -1,0 +1,11 @@
+{
+  "name": "@commontools/ui",
+  "version": "0.1.0",
+  "exports": "./src/index.ts",
+  "imports": {
+    "lit": "npm:lit@3.1.4",
+    "@cfworker/json-schema": "npm:@cfworker/json-schema@1.12.8",
+    "merkle-reference": "npm:merkle-reference@^1.1.0",
+    "zod": "npm:zod@^3.24.1"
+  }
+}

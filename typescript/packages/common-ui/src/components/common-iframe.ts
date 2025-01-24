@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit-element";
+import { LitElement, html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import {
   Cell,
@@ -6,18 +6,18 @@ import {
   removeAction,
   type Action,
   type ReactivityLog,
-} from "@commontools/common-runner";
+} from "@commontools/runner";
 import { Ref, createRef, ref } from "lit/directives/ref.js";
 
 @customElement("common-iframe")
 export class CommonIframeElement extends LitElement {
-  @property({ type: String }) src = "";
+  accessor src: string = "";
   // HACK: The UI framework already translates the top level cell into updated
   // properties, but we want to only have to deal with one type of listening, so
   // we'll add a an extra level of indirection with the "context" property.
-  @property({ type: Object }) context?: Cell<any> | any;
+  accessor context: Cell<any> | any = undefined;
 
-  @state() private errorDetails: {
+  private errorDetails: {
     message: string;
     source: string;
     lineno: number;

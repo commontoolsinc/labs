@@ -1,6 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "./style.ts";
 
 @customElement("common-grid")
 export class CommonHgroup extends LitElement {

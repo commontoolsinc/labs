@@ -1,12 +1,12 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "./style.ts";
 import { ZodObject } from "zod";
 
 @customElement("common-card")
 export class CommonCardElement extends LitElement {
-  @property({ type: Object }) schema: ZodObject<any> = null;
-  @property({ type: Object }) item: any = null;
+  accessor schema: ZodObject<any> | null = null;
+  accessor item: any | null = null;
 
   static override styles = [
     baseStyles,
@@ -156,14 +156,14 @@ export class CommonCardElement extends LitElement {
 
 @customElement("common-table")
 export class CommonTableElement extends LitElement {
-  @property({ type: Object }) schema: ZodObject<any> = null;
-  @property({ type: Array }) data: any[] = [];
-  @property({ type: Boolean }) edit = false;
-  @property({ type: Boolean }) delete = false;
-  @property({ type: Boolean }) preview = false;
-  @property({ type: Boolean }) download = false;
-  @property({ type: Boolean }) copy = false;
-  @state() selectedItem: any = null;
+  accessor schema: ZodObject<any> = null;
+  accessor data: any[] = [];
+  accessor edit: boolean = false;
+  accessor delete: boolean = false;
+  accessor preview: boolean = false;
+  accessor download: boolean = false;
+  accessor copy: boolean = false;
+  accessor selectedItem: any = null;
 
   static override styles = [
     baseStyles,

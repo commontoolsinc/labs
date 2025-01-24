@@ -1,6 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "./style.ts";
 
 export type Todo = {
   id: string;
@@ -75,9 +75,9 @@ export class CommonTodoElement extends LitElement {
     `,
   ];
 
-  @property({ type: Boolean }) checked = false;
-  @property({ type: String }) placeholder = "";
-  @property({ type: String }) value = "";
+  accessor checked: boolean = false;
+  accessor placeholder: string = "";
+  accessor value: string = "";
 
   override render() {
     const oncheck = (event: Event) => {

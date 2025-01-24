@@ -1,6 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "./style.ts";
 
 interface FileContent {
     file: File;
@@ -56,12 +56,12 @@ export class CommonFileInputElement extends LitElement {
     `,
     ];
 
-    @property({ type: Array }) files: File[] = [];
-    @property({ type: Array }) filesContent: FileContent[] = [];
-    @property({ type: Boolean }) multiple = false;
-    @property({ type: String }) accept: string = "";
-    @property({ type: String }) appearance = "default";
-    @property({ type: String }) loadMode: 'base64' | 'json' | 'text' = 'base64';
+    accessor files: File[] = [];
+    accessor filesContent: FileContent[] = [];
+    accessor multiple: boolean = false;
+    accessor accept: string = "";
+    accessor appearance: string = "default";
+    accessor loadMode: 'base64' | 'json' | 'text' = 'base64';
 
     /**
      * Handles the file input change event.

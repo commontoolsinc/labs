@@ -5,8 +5,8 @@ import {
   readSuggestion,
   Suggestion,
   suggestionTemplate,
-} from "./common-suggestion.js";
-import { getId } from "./identifiable.js";
+} from "./common-suggestion.ts";
+import { getId } from "./identifiable.ts";
 
 
 export class SelectSuggestionEvent extends Event {
@@ -36,10 +36,10 @@ export class CommonSuggestionsElement extends LitElement {
   }
   `;
 
-  @property({ type: Array }) suggestions: Array<Suggestion> = [];
-  @property({ type: Number }) limit = 3;
-  @property({ type: String }) gap = "sm";
-  @property({ type: String }) pad = "none";
+  accessor suggestions: Array<Suggestion> = [];
+  accessor limit: number = 3;
+  accessor gap: string = "sm";
+  accessor pad: string = "none";
 
   override render() {
     const onclick = (event: Event) => {

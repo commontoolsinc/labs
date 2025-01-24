@@ -1,15 +1,15 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { baseStyles } from "./style.js";
+import { baseStyles } from "./style.ts";
 import { ZodObject } from "zod";
 import { fromString } from 'merkle-reference';
 
 // Reference Field Component
 @customElement("reference-field")
-export class ReferenceFieldElement extends LitElement {
-  @property({ type: String }) key = '';
-  @property({ type: String }) value = '';
-  @property({ type: String }) error = '';
+export class ReferenceFieldElement extends LitElement { 
+  accessor key: string = '';
+  accessor value: string = '';
+  accessor error: string = '';
 
   static override styles = css`
     :host {
@@ -90,24 +90,25 @@ export class ZodFormSubmitEvent extends Event {
 @customElement("common-form")
 export class CommonFormElement extends LitElement {
   private _internalValue: { [key: string]: any } = {};
-  @property({ type: Object }) schema: ZodObject<any> = null;
-  @property({ type: String, attribute: 'field-path' }) fieldPath = '';
-  @property({ type: Object }) errors: { [key: string]: any } = {};
-  @property({ type: Boolean }) reset = false;
-  @property({ type: Object }) referenceFields: Set<string> = new Set();
+  accessor schema: ZodObject<any> = null;
+  accessor fieldPath: string = '';
+  accessor errors: { [key: string]: any } = {};
+  accessor reset: boolean = false;
+  accessor referenceFields: Set<string> = new Set();
 
-  @property({ type: Object })
-  get value() {
-    return this._internalValue;
-  }
+  // FIXME(ja): we might need to re-implement this ...
+  accessor value: { [key: string]: any } = {};
+  // get value() {
+  //   return this._internalValue;
+  // }
 
-  set value(newValue: { [key: string]: any }) {
-    const oldValue = this._internalValue;
-    if (JSON.stringify(newValue) !== JSON.stringify(oldValue)) {
-      this._internalValue = { ...newValue };
-      this.requestUpdate('value', oldValue);
-    }
-  }
+  // set value(newValue: { [key: string]: any }) {
+  //   const oldValue = this._internalValue;
+  //   if (JSON.stringify(newValue) !== JSON.stringify(oldValue)) {
+  //     this._internalValue = { ...newValue };
+  //     this.requestUpdate('value', oldValue);
+  //   }
+  // }
 
   override willUpdate(changedProperties: Map<string, any>) {
     if (changedProperties.has('schema') && this.schema) {
