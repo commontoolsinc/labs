@@ -1,24 +1,24 @@
-import { createShadowRef } from "./opaque-ref.js";
+import { createShadowRef } from "./opaque-ref.ts";
 import {
-  Opaque,
-  Module,
-  Recipe,
-  OpaqueRef,
-  NodeRef,
-  isOpaqueRef,
-  JSONValue,
-  JSONSchema,
-  Alias,
-  isAlias,
+  type Alias,
   canBeOpaqueRef,
-  makeOpaqueRef,
-  isStatic,
-  markAsStatic,
-  isShadowRef,
+  isAlias,
+  isOpaqueRef,
   isRecipe,
+  isShadowRef,
+  isStatic,
+  type JSONSchema,
+  type JSONValue,
+  makeOpaqueRef,
+  markAsStatic,
+  type Module,
+  type NodeRef,
+  type Opaque,
+  type OpaqueRef,
+  type Recipe,
   unsafe_originalRecipe,
-} from "./types.js";
-import { getTopFrame } from "./recipe.js";
+} from "./types.ts";
+import { getTopFrame } from "./recipe.ts";
 
 /**
  * Traverse a value, _not_ entering cells
@@ -38,22 +38,22 @@ export function traverseValue(
   if (result !== undefined) value = result;
 
   // Traverse value
-  if (Array.isArray(value))
-    return staticWrap(value.map(v => traverseValue(v, fn)));
-  else if (
+  if (Array.isArray(value)) {
+    return staticWrap(value.map((v) => traverseValue(v, fn)));
+  } else if (
     (!isOpaqueRef(value) &&
       !canBeOpaqueRef(value) &&
       !isShadowRef(value) &&
       typeof value === "object" &&
       value !== null) ||
     isRecipe(value)
-  )
+  ) {
     return staticWrap(
       Object.fromEntries(
         Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)]),
       ),
     );
-  else return staticWrap(value);
+  } else return staticWrap(value);
 }
 
 export function setValueAtPath(
@@ -64,8 +64,9 @@ export function setValueAtPath(
   let parent = obj;
   for (let i = 0; i < path.length - 1; i++) {
     const key = path[i];
-    if (typeof parent[key] !== "object")
+    if (typeof parent[key] !== "object") {
       parent[key] = typeof path[i + 1] === "number" ? [] : {};
+    }
     parent = parent[key];
   }
 
@@ -75,8 +76,9 @@ export function setValueAtPath(
     delete parent[path[path.length - 1]];
     // Truncate array from the end for undefined values
     if (Array.isArray(parent)) {
-      while (parent.length > 0 && parent[parent.length - 1] === undefined)
+      while (parent.length > 0 && parent[parent.length - 1] === undefined) {
         parent.pop();
+      }
     }
   } else parent[path[path.length - 1]] = value;
 
@@ -95,8 +97,9 @@ export function getValueAtPath(obj: any, path: PropertyKey[]): any {
 export function hasValueAtPath(obj: any, path: PropertyKey[]): boolean {
   let current = obj;
   for (const key of path) {
-    if (!current || typeof current !== "object" || !(key in current))
+    if (!current || typeof current !== "object" || !(key in current)) {
       return false;
+    }
     current = current[key];
   }
   return current !== undefined;
@@ -125,15 +128,16 @@ export function toJSONWithAliases(
   path: PropertyKey[] = [],
   processStatic = false,
 ): JSONValue | undefined {
-  if (isStatic(value) && !processStatic)
+  if (isStatic(value) && !processStatic) {
     return markAsStatic(
       toJSONWithAliases(value, paths, ignoreSelfAliases, path, true),
     );
-  // Convert regular cells to opaque refs
+  } // Convert regular cells to opaque refs
   else if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
   // Convert parent opaque refs to shadow refs
-  else if (isOpaqueRef(value) && value.export().frame !== getTopFrame())
+  else if (isOpaqueRef(value) && value.export().frame !== getTopFrame()) {
     value = createShadowRef(value);
+  }
 
   if (isOpaqueRef(value) || isShadowRef(value)) {
     const pathToCell = paths.get(value);
@@ -153,12 +157,14 @@ export function toJSONWithAliases(
       const cell = alias.cell.shadowOf;
       if (cell.export().frame !== getTopFrame()) {
         let frame = getTopFrame();
-        while (frame && frame.parent !== cell.export().frame)
+        while (frame && frame.parent !== cell.export().frame) {
           frame = frame.parent;
-        if (!frame)
+        }
+        if (!frame) {
           throw new Error(
             `Shadow ref alias with parent cell not found in current frame`,
           );
+        }
         return value;
       }
       if (!paths.has(cell)) throw new Error(`Cell not found in paths`);
@@ -179,10 +185,11 @@ export function toJSONWithAliases(
     }
   }
 
-  if (Array.isArray(value))
+  if (Array.isArray(value)) {
     return (value as Opaque<any>).map((v: Opaque<any>, i: number) =>
-      toJSONWithAliases(v, paths, ignoreSelfAliases, [...path, i]),
+      toJSONWithAliases(v, paths, ignoreSelfAliases, [...path, i])
     );
+  }
 
   if (typeof value === "object" || isRecipe(value)) {
     const result: any = {};
@@ -233,7 +240,7 @@ export function createJsonSchema(
             for (let i = 0; i < (value ?? defaultValue).length; i++) {
               const item = value?.[i] ?? defaultValue?.[i];
               if (typeof item === "object" && item !== null) {
-                Object.keys(item).forEach(key => {
+                Object.keys(item).forEach((key) => {
                   if (!(key in properties)) {
                     properties[key] = analyzeType(
                       value?.[i]?.[key],
@@ -251,10 +258,12 @@ export function createJsonSchema(
         } else if (value ?? defaultValue !== null) {
           schema.type = "object";
           schema.properties = {};
-          for (const key of new Set([
-            ...Object.keys(value ?? {}),
-            ...Object.keys(defaultValue ?? {}),
-          ])) {
+          for (
+            const key of new Set([
+              ...Object.keys(value ?? {}),
+              ...Object.keys(defaultValue ?? {}),
+            ])
+          ) {
             schema.properties[key] = analyzeType(
               value?.[key],
               defaultValue?.[key],
@@ -289,10 +298,9 @@ export function createJsonSchema(
 export function moduleToJSON(module: Module) {
   return {
     ...module,
-    implementation:
-      typeof module.implementation === "function"
-        ? module.implementation.toString()
-        : module.implementation,
+    implementation: typeof module.implementation === "function"
+      ? module.implementation.toString()
+      : module.implementation,
   };
 }
 

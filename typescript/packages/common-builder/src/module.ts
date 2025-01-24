@@ -1,22 +1,22 @@
 import type {
-  Module,
   Handler,
-  ModuleFactory,
   HandlerFactory,
+  JSONSchema,
+  Module,
+  ModuleFactory,
+  NodeRef,
   Opaque,
   OpaqueRef,
-  NodeRef,
   toJSON,
-  JSONSchema,
-} from "./types.js";
-import { isModule } from "./types.js";
-import { opaqueRef } from "./opaque-ref.js";
+} from "./types.ts";
+import { isModule } from "./types.ts";
+import { opaqueRef } from "./opaque-ref.ts";
 import {
-  moduleToJSON,
   connectInputAndOutputs,
+  moduleToJSON,
   traverseValue,
-} from "./utils.js";
-import { getTopFrame } from "./recipe.js";
+} from "./utils.ts";
+import { getTopFrame } from "./recipe.ts";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
@@ -75,10 +75,12 @@ export function lift<T, R>(
     implementation = argumentSchema;
     argumentSchema = resultSchema = undefined;
   }
-  if (argumentSchema instanceof z.ZodType)
+  if (argumentSchema instanceof z.ZodType) {
     argumentSchema = zodToJsonSchema(argumentSchema) as JSONSchema;
-  if (resultSchema instanceof z.ZodType)
+  }
+  if (resultSchema instanceof z.ZodType) {
     resultSchema = zodToJsonSchema(resultSchema) as JSONSchema;
+  }
 
   return createNodeFactory({
     type: "javascript",
@@ -125,34 +127,37 @@ export function handler<E, T>(
     eventSchema = stateSchema = undefined;
   }
 
-  if (eventSchema instanceof z.ZodType)
+  if (eventSchema instanceof z.ZodType) {
     eventSchema = zodToJsonSchema(eventSchema) as JSONSchema;
-  if (stateSchema instanceof z.ZodType)
+  }
+  if (stateSchema instanceof z.ZodType) {
     stateSchema = zodToJsonSchema(stateSchema) as JSONSchema;
+  }
 
-  const schema: JSONSchema | undefined =
-    eventSchema || stateSchema
-      ? {
-        type: "object",
-        properties: {
-          $event: eventSchema ?? {},
-          ...(stateSchema?.properties ?? {}),
-        },
-      }
-      : undefined;
+  const schema: JSONSchema | undefined = eventSchema || stateSchema
+    ? {
+      type: "object",
+      properties: {
+        $event: eventSchema ?? {},
+        ...(stateSchema?.properties ?? {}),
+      },
+    }
+    : undefined;
 
-  const module: Handler &
-    toJSON & { bind: (inputs: Opaque<T>) => OpaqueRef<E> } = {
-    type: "javascript",
-    implementation: handler,
-    wrapper: "handler",
-    with: (inputs: Opaque<T>) => factory(inputs),
-    // Overriding the default `bind` method on functions. The wrapper will bind
-    // the actual inputs, so they'll be available as `this`
-    bind: (inputs: Opaque<T>) => factory(inputs),
-    toJSON: () => moduleToJSON(module),
-    ...(schema ? { argumentSchema: schema } : {}),
-  };
+  const module:
+    & Handler
+    & toJSON
+    & { bind: (inputs: Opaque<T>) => OpaqueRef<E> } = {
+      type: "javascript",
+      implementation: handler,
+      wrapper: "handler",
+      with: (inputs: Opaque<T>) => factory(inputs),
+      // Overriding the default `bind` method on functions. The wrapper will bind
+      // the actual inputs, so they'll be available as `this`
+      bind: (inputs: Opaque<T>) => factory(inputs),
+      toJSON: () => moduleToJSON(module),
+      ...(schema ? { argumentSchema: schema } : {}),
+    };
 
   const factory = Object.assign((props: Opaque<T>): OpaqueRef<E> => {
     const stream = opaqueRef();
@@ -185,9 +190,9 @@ export const compute: <T>(fn: () => T) => OpaqueRef<T> = (fn: () => any) =>
 // unsafe closures: like compute, but also convert all functions to handlers
 export const render = <T>(fn: () => T): OpaqueRef<T> =>
   compute(() =>
-    traverseValue(fn(), v => {
+    traverseValue(fn(), (v) => {
       // Modules are functions, so we need to exclude them
       if (!isModule(v) && typeof v === "function") return handler(v)({});
       else return v;
-    }),
+    })
   );

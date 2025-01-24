@@ -1,18 +1,18 @@
 import {
-  OpaqueRef,
-  OpaqueRefMethods,
-  Opaque,
-  NodeRef,
-  NodeFactory,
   isOpaqueRefMarker,
-  ShadowRef,
-  Recipe,
-  UnsafeBinding,
+  type NodeFactory,
+  type NodeRef,
+  type Opaque,
+  type OpaqueRef,
+  type OpaqueRefMethods,
+  type Recipe,
+  type ShadowRef,
   toOpaqueRef,
-} from "./types.js";
-import { setValueAtPath, hasValueAtPath } from "./utils.js";
-import { getTopFrame, recipe } from "./recipe.js";
-import { createNodeFactory } from "./module.js";
+  type UnsafeBinding,
+} from "./types.ts";
+import { hasValueAtPath, setValueAtPath } from "./utils.ts";
+import { getTopFrame, recipe } from "./recipe.ts";
+import { createNodeFactory } from "./module.ts";
 
 let mapFactory: NodeFactory<any, any>;
 
@@ -47,14 +47,15 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
     const methods: OpaqueRefMethods<any> = {
       get: () => unsafe_materialize(unsafe_binding, path),
       set: (newValue: Opaque<any>) => {
-        if (unsafe_binding)
+        if (unsafe_binding) {
           unsafe_materialize(unsafe_binding, path); // TODO: Set value
-        else setValueAtPath(store, ["value", ...path], newValue);
+        } else setValueAtPath(store, ["value", ...path], newValue);
       },
       key: (key: PropertyKey) => createNestedProxy([...path, key]),
       setDefault: (newValue: Opaque<any>) => {
-        if (!hasValueAtPath(store, ["defaultValue", ...path]))
+        if (!hasValueAtPath(store, ["defaultValue", ...path])) {
           setValueAtPath(store, ["defaultValue", ...path], newValue);
+        }
       },
       setPreExisting: (ref: any) => setValueAtPath(store, ["external"], ref),
       setName: (name: string) => {
@@ -67,14 +68,16 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
         path,
         ...store,
       }),
-      unsafe_bindToRecipeAndPath: (recipe: Recipe, path: PropertyKey[]) =>
-        (unsafe_binding = { recipe, path }),
+      unsafe_bindToRecipeAndPath: (
+        recipe: Recipe,
+        path: PropertyKey[],
+      ) => (unsafe_binding = { recipe, path }),
       unsafe_getExternal: () => {
         if (!unsafe_binding) return proxy;
         const value = unsafe_materialize(unsafe_binding, path);
-        if (typeof value === "object" && value !== null && value[toOpaqueRef])
+        if (typeof value === "object" && value !== null && value[toOpaqueRef]) {
           return value[toOpaqueRef]();
-        else return proxy;
+        } else return proxy;
       },
       map: <S>(
         fn: (
@@ -109,10 +112,11 @@ export function opaqueRef<T>(value?: Opaque<T> | T): OpaqueRef<T> {
         let index = 0;
         return {
           next: () => {
-            if (index >= 50)
+            if (index >= 50) {
               throw new Error(
                 "Can't use iterator over an opaque value in an unlimited loop.",
               );
+            }
             return {
               done: false,
               value: createNestedProxy([...path, index++]),
@@ -178,8 +182,9 @@ function unsafe_materialize(
   }
 
   // Walk up the chain until we find the original recipe
-  while (unsafe_binding && unsafe_binding.parent?.recipe === binding.recipe)
+  while (unsafe_binding && unsafe_binding.parent?.recipe === binding.recipe) {
     unsafe_binding = unsafe_binding.parent;
+  }
 
   if (!unsafe_binding) throw new Error("Can't find recipe in parent frames.");
 

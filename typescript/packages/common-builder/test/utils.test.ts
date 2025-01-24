@@ -1,10 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { isAlias, isModule, isRecipe, Opaque } from "../src/types.js";
+import { describe, it } from "jsr:@std/testing/bdd";
+import { expect } from "jsr:@std/expect";
+import { isAlias, isModule, isRecipe, type Opaque } from "../src/types.ts";
 import {
-  setValueAtPath,
   getValueAtPath,
   hasValueAtPath,
-} from "../src/utils.js";
+  setValueAtPath,
+} from "../src/utils.ts";
 
 describe("value type", () => {
   it("can destructure a value without TS errors", () => {

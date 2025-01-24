@@ -1,17 +1,23 @@
-import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, it } from "jsr:@std/testing/bdd";
+import { expect } from "jsr:@std/expect";
 import {
-  isOpaqueRef,
+  type Frame,
   isModule,
-  OpaqueRef,
-  Module,
-  Frame,
-  JSONSchema,
-} from "../src/types.js";
-import { lift, handler } from "../src/module.js";
-import { opaqueRef } from "../src/opaque-ref.js";
-import { pushFrame } from "../src/recipe.js";
-import { popFrame } from "../src/recipe.js";
+  isOpaqueRef,
+  type JSONSchema,
+  type Module,
+  type OpaqueRef,
+} from "../src/types.ts";
+import { handler, lift } from "../src/module.ts";
+import { opaqueRef } from "../src/opaque-ref.ts";
+import { pushFrame } from "../src/recipe.ts";
+import { popFrame } from "../src/recipe.ts";
 import { z } from "zod";
+
+type MouseEvent = {
+  clientX: number;
+  clientY: number;
+};
 
 describe("module", () => {
   let frame: Frame;
@@ -193,7 +199,7 @@ describe("module", () => {
       expect((handlerNode.module as Module).wrapper).toBe("handler");
       expect(handlerNode.inputs.elements).toBe(elements);
     });
-    
+
     it("creates a opaque ref with stream when with is called", () => {
       const clickHandler = handler<MouseEvent, { x: number; y: number }>(
         (event, props) => {
@@ -210,38 +216,6 @@ describe("module", () => {
       expect(nodes.size).toBe(1);
       expect([...nodes][0].module).toMatchObject({ wrapper: "handler" });
       expect([...nodes][0].inputs.$event).toBe(stream);
-    });
-  });
-
-  describe("isolated function", () => {
-    it("creates a node factory for isolated modules", () => {
-      const add = isolated<{ a: number; b: number }, number>(
-        { a: { tag: "number", val: 0 }, b: { tag: "number", val: 0 } },
-        { result: "number" },
-        ({ a, b }) => a + b,
-      );
-      expect(typeof add).toBe("function");
-      const result = add({ a: 1, b: 2 });
-      expect(isOpaqueRef(result)).toBe(true);
-      expect(result.export().nodes.size).toBe(1);
-      const module = [...result.export().nodes][0].module as Module;
-      expect(module.type).toBe("isolated");
-      const definition = module.implementation as JavaScriptModuleDefinition;
-      expect(definition.body).toContain("export const run = () => {");
-      expect(definition.body).toContain(
-        'inputs["a"] = read("a")?.deref()?.val;',
-      );
-      expect(definition.body).toContain(
-        'inputs["b"] = read("b")?.deref()?.val;',
-      );
-      expect(definition.body).toContain('write("result", {');
-      expect(definition.inputs).toMatchObject({
-        a: { tag: "number", val: 0 },
-        b: { tag: "number", val: 0 },
-      });
-      expect(definition.outputs).toMatchObject({
-        result: "number",
-      });
     });
   });
 });

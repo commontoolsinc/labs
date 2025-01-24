@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { Frame, isOpaqueRef, isShadowRef } from "../src/types.js";
-import { createShadowRef, opaqueRef } from "../src/opaque-ref.js";
-import { popFrame, pushFrame } from "../src/recipe.js";
+import { afterEach, beforeEach, describe, it } from "jsr:@std/testing/bdd";
+import { expect } from "jsr:@std/expect";
+import { type Frame, isOpaqueRef, isShadowRef } from "../src/types.ts";
+import { createShadowRef, opaqueRef } from "../src/opaque-ref.ts";
+import { popFrame, pushFrame } from "../src/recipe.ts";
 
 describe("opaqueRef function", () => {
   let frame: Frame;

@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { Recipe, isRecipe, Module, isModule, Opaque } from "../src/types.js";
-import { lift } from "../src/module.js";
-import { recipe } from "../src/recipe.js";
+import { describe, it } from "jsr:@std/testing/bdd";
+import { expect } from "jsr:@std/expect";
+import { isModule, isRecipe, type Module, type Recipe } from "../src/types.ts";
+import { lift } from "../src/module.ts";
+import { recipe } from "../src/recipe.ts";
 import { z } from "zod";
-import { opaqueRef } from "../src/opaque-ref.js";
+import { opaqueRef } from "../src/opaque-ref.ts";
 
 describe("recipe function", () => {
   it("creates a recipe", () => {
@@ -16,7 +17,7 @@ describe("recipe function", () => {
 
   it("creates a recipe, with simple function", () => {
     const doubleRecipe = recipe<{ x: number }>("Double a number", ({ x }) => {
-      const double = lift<number>(x => x * 2);
+      const double = lift<number>((x) => x * 2);
       return { double: double(x) };
     });
     expect(isRecipe(doubleRecipe)).toBe(true);
@@ -39,7 +40,7 @@ describe("recipe function", () => {
 describe("complex recipe function", () => {
   const doubleRecipe = recipe<{ x: number }>("Double a number", ({ x }) => {
     x.setDefault(1);
-    const double = lift<number>(x => x * 2);
+    const double = lift<number>((x) => x * 2);
     return { double: double(double(x)) };
   });
   const { argumentSchema, result, nodes } = doubleRecipe;
@@ -87,7 +88,7 @@ describe("schemas", () => {
       },
     });
     expect(testRecipe.resultSchema).toMatchObject(
-      testRecipe.argumentSchema as unknown as JSON,
+      testRecipe.argumentSchema as unknown as Record<string, unknown>,
     );
   });
 
@@ -95,7 +96,7 @@ describe("schemas", () => {
     const double = lift(
       z.number().describe("A number"),
       z.number().describe("Doubled"),
-      x => x * 2,
+      (x) => x * 2,
     );
     // @ts-ignore-error ZodNumber and number clash to be investigated
     const testRecipe = recipe(
@@ -163,7 +164,7 @@ describe("complex recipe with path aliases", () => {
     const json = JSON.stringify(doubleRecipe);
     const parsed = JSON.parse(json);
     expect(json.length).toBeGreaterThan(200);
-    expect(parsed.nodes[0].module.implementation).toContain(" => ");
+    expect(parsed.nodes[0].module.implementation).toContain("=>");
   });
 });
 
@@ -172,7 +173,7 @@ describe("recipe with map node", () => {
     "Double numbers",
     ({ values }) => {
       const doubled = values.map(({ x }) => {
-        const double = lift<number>(x => x * 2);
+        const double = lift<number>((x) => x * 2);
         return { doubled: double(x) };
       });
       return { doubled };

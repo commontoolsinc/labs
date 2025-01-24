@@ -4,12 +4,11 @@ export const TYPE = "$TYPE";
 export const NAME = "$NAME";
 export const UI = "$UI";
 
-export type OpaqueRef<T> = OpaqueRefMethods<T> &
-  (T extends Array<infer U>
-    ? Array<OpaqueRef<U>>
-    : T extends object
-      ? { [K in keyof T]: OpaqueRef<T[K]> }
-      : T);
+export type OpaqueRef<T> =
+  & OpaqueRefMethods<T>
+  & (T extends Array<infer U> ? Array<OpaqueRef<U>>
+    : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
+    : T);
 
 // Any OpaqueRef is also an Opaque, but can also have static values.
 // Use Opaque<T> in APIs that get inputs from the developer and use OpaqueRef
@@ -17,11 +16,9 @@ export type OpaqueRef<T> = OpaqueRefMethods<T> &
 // module outputs).
 export type Opaque<T> =
   | OpaqueRef<T>
-  | (T extends Array<infer U>
-      ? Array<Opaque<U>>
-      : T extends object
-        ? { [K in keyof T]: Opaque<T[K]> }
-        : T);
+  | (T extends Array<infer U> ? Array<Opaque<U>>
+    : T extends object ? { [K in keyof T]: Opaque<T[K]> }
+    : T);
 
 export type OpaqueRefMethods<T> = {
   get(): OpaqueRef<T>;
@@ -73,21 +70,25 @@ export type toJSON = {
   toJSON(): any;
 };
 
-export type NodeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
-  (Module | Handler | Recipe) &
-  toJSON;
+export type NodeFactory<T, R> =
+  & ((inputs: Opaque<T>) => OpaqueRef<R>)
+  & (Module | Handler | Recipe)
+  & toJSON;
 
-export type RecipeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
-  Recipe &
-  toJSON;
+export type RecipeFactory<T, R> =
+  & ((inputs: Opaque<T>) => OpaqueRef<R>)
+  & Recipe
+  & toJSON;
 
-export type ModuleFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
-  Module &
-  toJSON;
+export type ModuleFactory<T, R> =
+  & ((inputs: Opaque<T>) => OpaqueRef<R>)
+  & Module
+  & toJSON;
 
-export type HandlerFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
-  Handler<T, R> &
-  toJSON;
+export type HandlerFactory<T, R> =
+  & ((inputs: Opaque<T>) => OpaqueRef<R>)
+  & Handler<T, R>
+  & toJSON;
 
 export type JSONValue =
   | string

@@ -56,7 +56,8 @@ When invoking a recipe, the following steps happen:
 - Run loop:
   - Events are dispatched, which will mark cells dirty
   - Effects (e.g. UI rendering) mark cells dirty, and the graph is walked up
-    until the end is reached. The first time this is on declared cells, afterwards on actually used ones.
+    until the end is reached. The first time this is on declared cells,
+    afterwards on actually used ones.
   - All involved nodes are topologically sorted.
   - Repeat until no cells are dirty or a fixed number of maximum iterations have
     been completed.
