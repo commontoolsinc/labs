@@ -22,10 +22,14 @@ import {
   run,
   getRecipeSpec,
   getRecipeName,
+  Action,
+  addAction,
+  removeAction,
 } from "@commontools/runner";
 import { createStorage } from "./storage.js";
 import * as allRecipes from "./recipes/index.js";
 import { buildRecipe } from "./localBuild.js";
+import { IframeIPC } from "@commontools/ui";
 
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.jsx";
@@ -261,3 +265,27 @@ export let annotationsEnabled = getDoc<boolean>(false);
 export const toggleAnnotations = () => {
   annotationsEnabled.send(!annotationsEnabled.get());
 };
+
+IframeIPC.setIframeContextHandler({
+  read(context: any, key: string): any {
+    return context?.getAsQueryResult
+      ? context?.getAsQueryResult([key])
+      : context?.[key];
+  },
+  write(context: any, key: string, value: any) {
+    context.getAsQueryResult()[key] = value;
+  },
+  subscribe(context: any, key: string, callback: (key: string, value: any) => void): any {
+    const action: Action = (log: ReactivityLog) =>
+      callback(
+        key,
+        context.getAsQueryResult([key], log)
+      );
+
+    addAction(action);
+    return action;
+  },
+  unsubscribe(_context: any, receipt: any) {
+    removeAction(receipt);
+  }
+});

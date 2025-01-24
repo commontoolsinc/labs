@@ -5,7 +5,7 @@ import { ZodObject } from "zod";
 
 @customElement("common-card")
 export class CommonCardElement extends LitElement {
-  @property({ type: Object }) schema: ZodObject<any> = null;
+  @property({ type: Object }) schema: ZodObject<any> | null = null;
   @property({ type: Object }) item: any = null;
 
   static override styles = [
@@ -144,7 +144,7 @@ export class CommonCardElement extends LitElement {
 
 @customElement("common-table")
 export class CommonTableElement extends LitElement {
-  @property({ type: Object }) schema: ZodObject<any> = null;
+  @property({ type: Object }) schema: ZodObject<any> | null = null;
   @property({ type: Array }) data: any[] = [];
   @property({ type: Boolean }) edit = false;
   @property({ type: Boolean }) delete = false;
@@ -358,6 +358,7 @@ export class CommonTableElement extends LitElement {
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
+      if (!this.schema) return;
 
       try {
         const text = await file.text();
@@ -401,6 +402,8 @@ export class CommonTableElement extends LitElement {
       return html`<div>No data available</div>`;
     }
 
+    const shape = this.schema ? this.schema.shape : {};
+
     return html`
       <button class="download-all-button" @click=${this.handleDownloadAll}>
         Download All Records
@@ -420,7 +423,7 @@ export class CommonTableElement extends LitElement {
             ${this.data.map(
               (row) => html`
                 <tr>
-                  ${Object.entries(this.schema.shape).map(
+                  ${Object.entries(shape).map(
                     ([key, schema]) => html`
                       <td title=${String(row[key])}>${this.formatValue(row[key], schema)}</td>
                     `,

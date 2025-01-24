@@ -90,7 +90,7 @@ export class ZodFormSubmitEvent extends Event {
 @customElement("common-form")
 export class CommonFormElement extends LitElement {
   private _internalValue: { [key: string]: any } = {};
-  @property({ type: Object }) schema: ZodObject<any> = null;
+  @property({ type: Object }) schema: ZodObject<any> | null = null;
   @property({ type: String, attribute: "field-path" }) fieldPath = "";
   @property({ type: Object }) errors: { [key: string]: any } = {};
   @property({ type: Boolean }) reset = false;
@@ -284,6 +284,9 @@ export class CommonFormElement extends LitElement {
   }
 
   generateSampleData() {
+    if (!this.schema) {
+      return;
+    }
     const sample: any = {};
     for (const [key, fieldSchema] of Object.entries(this.schema.shape)) {
       switch ((fieldSchema as any)._def.typeName) {
@@ -332,6 +335,9 @@ export class CommonFormElement extends LitElement {
   }
 
   handleInput(key: string, event: Event) {
+    if (!this.schema) {
+      return;
+    }
     const fieldSchema = this.schema.shape[key];
     const target = event.target as HTMLInputElement;
     let value: any = target.value;
@@ -430,6 +436,9 @@ export class CommonFormElement extends LitElement {
   }
 
   addArrayItem(key: string) {
+    if (!this.schema) {
+      return;
+    }
     const fieldSchema = this.schema.shape[key];
     const value = [...(this._internalValue[key] || [])];
     value.push(this.getDefaultValue(fieldSchema._def.innerType));
@@ -456,6 +465,9 @@ export class CommonFormElement extends LitElement {
 
   async handleSubmit(e: Event) {
     e.preventDefault();
+    if (!this.schema) {
+      return;
+    }
 
     // Create a copy of the current value to modify
     let submitValue = { ...this._internalValue };
