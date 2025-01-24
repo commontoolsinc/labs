@@ -16,8 +16,8 @@ import {
   type toJSON,
   UI,
   type UnsafeBinding,
-} from "./types.ts";
-import { createShadowRef, opaqueRef } from "./opaque-ref.ts";
+} from "./types";
+import { createShadowRef, opaqueRef } from "./opaque-ref";
 import {
   connectInputAndOutputs,
   createJsonSchema,
@@ -26,7 +26,7 @@ import {
   setValueAtPath,
   toJSONWithAliases,
   traverseValue,
-} from "./utils.ts";
+} from "./utils";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 

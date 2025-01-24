@@ -1,0 +1,22 @@
+{
+  "name": "@commontools/builder",
+  "version": "0.1.0",
+  "description": "builder",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "vitest --exclude=lib/**/*.test.js",
+    "build": "tsc && vite build"
+  },
+  "author": "",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "zod": "^3.24.1",
+    "zod-to-json-schema": "^3.24.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11",
+    "vite-plugin-dts": "^4.5.0",
+    "vitest": "^3.0.4"
+  }
+}

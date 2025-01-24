@@ -1,10 +1,9 @@
-import { describe, it } from "jsr:@std/testing/bdd";
-import { expect } from "jsr:@std/expect";
-import { isModule, isRecipe, type Module, type Recipe } from "../src/types.ts";
-import { lift } from "../src/module.ts";
-import { recipe } from "../src/recipe.ts";
+import { describe, expect, it } from "vitest";
+import { isModule, isRecipe, type Module, type Recipe } from "../src/types";
+import { lift } from "../src/module";
+import { recipe } from "../src/recipe";
 import { z } from "zod";
-import { opaqueRef } from "../src/opaque-ref.ts";
+import { opaqueRef } from "../src/opaque-ref";
 
 describe("recipe function", () => {
   it("creates a recipe", () => {

@@ -9,10 +9,10 @@ import {
   type ShadowRef,
   toOpaqueRef,
   type UnsafeBinding,
-} from "./types.ts";
-import { hasValueAtPath, setValueAtPath } from "./utils.ts";
-import { getTopFrame, recipe } from "./recipe.ts";
-import { createNodeFactory } from "./module.ts";
+} from "./types";
+import { hasValueAtPath, setValueAtPath } from "./utils";
+import { getTopFrame, recipe } from "./recipe";
+import { createNodeFactory } from "./module";
 
 let mapFactory: NodeFactory<any, any>;
 
