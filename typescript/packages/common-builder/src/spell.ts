@@ -81,7 +81,7 @@ export function select(query: any) {
         ...Object.fromEntries(
           Object.keys(schema.properties ?? {}).map((key) => [
             key,
-            self[key as any],
+            (self as any)[key],
           ]),
         ),
       }),
