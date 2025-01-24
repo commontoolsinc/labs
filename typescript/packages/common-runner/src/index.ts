@@ -1,18 +1,18 @@
-export { run, stop } from "./runner.js";
-export { addModuleByRef, raw } from "./module.js";
+export { run, stop } from "./runner.ts";
+export { addModuleByRef, raw } from "./module.ts";
 export {
   type Action,
   idle,
   run as addAction,
   unschedule as removeAction,
-} from "./scheduler.js";
+} from "./scheduler.ts";
 export type {
   Cell,
   DocImpl,
   DocLink,
   QueryResult,
   ReactivityLog,
-} from "./cell.js";
+} from "./cell.ts";
 export {
   doc,
   getDoc,
@@ -23,7 +23,7 @@ export {
   isDocLink,
   isQueryResult,
   isQueryResultForDereferencing,
-} from "./cell.js";
+} from "./cell.ts";
 export {
   effect,
   type GettableCell,
@@ -32,13 +32,13 @@ export {
   isSendable,
   type ReactiveCell,
   type SendableCell,
-} from "./reactivity.js";
+} from "./reactivity.ts";
 export {
   createRef,
   type EntityId,
   getDocByEntityId,
   getEntityId,
-} from "./cell-map.js";
+} from "./cell-map.ts";
 export {
   addRecipe,
   allRecipesByName,
@@ -48,5 +48,5 @@ export {
   getRecipeParents,
   getRecipeSpec,
   getRecipeSrc,
-} from "./recipe-map.js";
-export { type AddCancel, type Cancel, useCancelGroup } from "./cancel.js";
+} from "./recipe-map.ts";
+export { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
