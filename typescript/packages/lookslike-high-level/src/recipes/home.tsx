@@ -36,7 +36,6 @@ export const home = recipe<{
             </common-droppable>
           </div>
         ))}
-        $
         {recipes.map(recipe => (
           <div>
             <common-recipe-link recipe={recipe.recipeId}>
