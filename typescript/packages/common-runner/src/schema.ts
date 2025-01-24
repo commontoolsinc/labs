@@ -1,12 +1,12 @@
-import {
+import  {
   type DocImpl,
   type DocLink,
   isDoc,
   isDocLink,
   type ReactivityLog,
-} from "./cell.ts";
+} from "./cell.js";
 import { isAlias, JSONSchema } from "@commontools/builder";
-import { arrayEqual, followAliases, followCellReferences } from "./utils.ts";
+import { arrayEqual, followAliases, followCellReferences } from "./utils.js";
 
 export function resolveSchema(
   schema: JSONSchema | undefined,

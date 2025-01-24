@@ -3,24 +3,24 @@ import {
   isOpaqueRef,
   isStatic,
   markAsStatic,
-  Recipe,
+  type Recipe,
   unsafe_materializeFactory,
   unsafe_originalRecipe,
   unsafe_parentRecipe,
-  UnsafeBinding,
+  type UnsafeBinding,
 } from "@commontools/builder";
 import {
-  DocImpl,
-  DocLink,
+  type DocImpl,
+  type DocLink,
   getDoc,
   getDocLinkOrThrow,
   isCell,
   isDoc,
   isDocLink,
   isQueryResultForDereferencing,
-  ReactivityLog,
-} from "./cell.ts";
-import { createRef } from "./cell-map.ts";
+  type ReactivityLog,
+} from "./cell.js";
+import { createRef } from "./cell-map.js";
 
 export function extractDefaultValues(schema: any): any {
   if (typeof schema !== "object" || schema === null) return undefined;

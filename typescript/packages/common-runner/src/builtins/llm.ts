@@ -1,6 +1,6 @@
-import { DocImpl, getDoc, ReactivityLog } from "../cell.ts";
-import { makeClient, SimpleContent, SimpleMessage } from "../llm-client.ts";
-import { type Action, idle } from "../scheduler.ts";
+import { DocImpl, getDoc, ReactivityLog } from "../cell.js";
+import { makeClient, SimpleContent, SimpleMessage } from "../llm-client.js";
+import { type Action, idle } from "../scheduler.js";
 import { refer } from "merkle-reference";
 
 // TODO(ja): investigate if generateText should be replaced by

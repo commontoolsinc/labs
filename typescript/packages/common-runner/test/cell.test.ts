@@ -1,5 +1,4 @@
-import { describe, it } from "jsr:@std/testing/bdd";
-import { expect } from "jsr:@std/expect";
+import { describe, it, expect } from "vitest";
 import {
   getDoc,
   isCell,
@@ -7,10 +6,10 @@ import {
   isDocLink,
   isQueryResult,
   ReactivityLog,
-} from "../src/cell.ts";
+} from "../src/cell.js";
 import { JSONSchema } from "@commontools/builder";
-import { addEventHandler, idle } from "../src/scheduler.ts";
-import { compactifyPaths } from "../src/utils.ts";
+import { addEventHandler, idle } from "../src/scheduler.js";
+import { compactifyPaths } from "../src/utils.js";
 
 describe("Cell", () => {
   it("should create a cell with initial value", () => {

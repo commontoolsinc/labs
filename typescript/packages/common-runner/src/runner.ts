@@ -14,17 +14,17 @@ import {
   TYPE,
   unsafe_materializeFactory,
   unsafe_originalRecipe,
-  UnsafeBinding,
+  type UnsafeBinding,
 } from "@commontools/builder";
 import {
-  DocImpl,
-  DocLink,
+  type DocImpl,
+  type DocLink,
   getDoc,
   isDoc,
   isDocLink,
-  ReactivityLog,
-} from "./cell.ts";
-import { Action, addEventHandler, schedule } from "./scheduler.ts";
+  type ReactivityLog,
+} from "./cell.js";
+import { Action, addEventHandler, schedule } from "./scheduler.js";
 import {
   containsOpaqueRef,
   deepCopy,
@@ -36,11 +36,11 @@ import {
   staticDataToNestedCells,
   unsafe_noteParentOnRecipes,
   unwrapOneLevelAndBindtoCell,
-} from "./utils.ts";
-import { getModuleByRef } from "./module.ts";
-import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.ts";
+} from "./utils.js";
+import { getModuleByRef } from "./module.js";
+import { type AddCancel, type Cancel, useCancelGroup } from "./cancel.js";
 import "./builtins/index.ts";
-import { addRecipe, getRecipe, getRecipeId } from "./recipe-map.ts";
+import { addRecipe, getRecipe, getRecipeId } from "./recipe-map.js";
 
 export const cancels = new WeakMap<DocImpl<any>, Cancel>();
 

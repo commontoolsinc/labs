@@ -1,5 +1,4 @@
-import { describe, it } from "jsr:@std/testing/bdd";
-import { expect } from "jsr:@std/expect";
+import { describe, expect, it } from "vitest";
 import {
   compactifyPaths,
   extractDefaultValues,
@@ -10,8 +9,8 @@ import {
   sendValueToBinding,
   setNestedValue,
   unwrapOneLevelAndBindtoCell,
-} from "../src/utils.ts";
-import { DocLink, getDoc, isDocLink, ReactivityLog } from "../src/cell.ts";
+} from "../src/utils.js";
+import { DocLink, getDoc, isDocLink, ReactivityLog } from "../src/cell.js";
 
 describe("extractDefaultValues", () => {
   it("should extract default values from a schema", () => {

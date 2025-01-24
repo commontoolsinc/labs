@@ -8,7 +8,7 @@ import {
   isDoc,
   isDocLink,
   isQueryResultForDereferencing,
-} from "./cell.ts";
+} from "./cell.js";
 import { refer } from "merkle-reference";
 
 export type EntityId = {

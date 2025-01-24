@@ -3,8 +3,8 @@ import {
   getDoc,
   getDocLinkOrThrow,
   type ReactivityLog,
-} from "../cell.ts";
-import { type Action } from "../scheduler.ts";
+} from "../cell.js";
+import { type Action } from "../scheduler.js";
 
 export function ifElse(
   inputsCell: DocImpl<[any, any, any]>,

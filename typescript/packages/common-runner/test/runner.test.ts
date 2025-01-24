@@ -1,9 +1,8 @@
-import { describe, it } from "jsr:@std/testing/bdd";
-import { expect } from "jsr:@std/expect";
-import { Recipe, TYPE } from "@commontools/builder";
-import { run, stop } from "../src/runner.ts";
-import { idle } from "../src/scheduler.ts";
-import { getDoc } from "../src/cell.ts";
+import { describe, it, expect } from "vitest";
+import type { Recipe } from "@commontools/builder";
+import { run, stop } from "../src/runner.js";
+import { idle } from "../src/scheduler.js";
+import { getDoc } from "../src/cell.js";
 
 describe("runRecipe", () => {
   it("should work with passthrough", async () => {

@@ -1,19 +1,16 @@
-import { describe, it } from "jsr:@std/testing/bdd";
-import { assertSpyCalls, spy } from "jsr:@std/testing/mock";
-import { expect } from "jsr:@std/expect";
-import { getDoc, ReactivityLog } from "../src/cell.ts";
+import { describe, it, expect, vi } from "vitest";
+import { getDoc, type ReactivityLog } from "../src/cell.js";
 import {
-  Action,
+  type Action,
   addEventHandler,
-  EventHandler,
+  type EventHandler,
   idle,
   onError,
   queueEvent,
   run,
   schedule,
   unschedule,
-} from "../src/scheduler.ts";
-import { lift } from "@commontools/builder";
+} from "../src/scheduler.js";
 
 describe("scheduler", () => {
   it("should run actions when cells change", async () => {
@@ -182,7 +179,7 @@ describe("scheduler", () => {
       );
     };
 
-    const stopped = spy();
+    const stopped = vi.fn();
     onError(() => stopped());
 
     await run(adder1);
@@ -192,7 +189,7 @@ describe("scheduler", () => {
     await idle();
 
     expect(maxRuns).toBeGreaterThan(0);
-    assertSpyCalls(stopped, 1);
+    expect(stopped).toHaveBeenCalledOnce();
   });
 
   it("should not loop on r/w changes on its own output", async () => {
@@ -203,7 +200,7 @@ describe("scheduler", () => {
         .asCell([], log)
         .send(counter.getAsQueryResult([], log) + by.getAsQueryResult([], log));
 
-    const stopped = spy();
+    const stopped = vi.fn();
     onError(() => stopped());
 
     await run(inc);
@@ -215,7 +212,7 @@ describe("scheduler", () => {
     await idle();
     expect(counter.get()).toBe(3);
 
-    assertSpyCalls(stopped, 0);
+    expect(stopped).not.toHaveBeenCalled();
   });
 
   it("should immediately run actions that have no dependencies", async () => {

@@ -1,6 +1,6 @@
-import { DocImpl, getDoc, ReactivityLog } from "../cell.ts";
-import { normalizeToCells } from "../utils.ts";
-import { type Action, idle } from "../scheduler.ts";
+import { DocImpl, getDoc, ReactivityLog } from "../cell.js";
+import { normalizeToCells } from "../utils.js";
+import { type Action, idle } from "../scheduler.js";
 
 /**
  * Stream data from a URL, used for querying Synopsys.

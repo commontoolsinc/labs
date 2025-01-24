@@ -1,9 +1,9 @@
-import { addModuleByRef, raw } from "../module.ts";
-import { map } from "./map.ts";
-import { fetchData } from "./fetch-data.ts";
-import { streamData } from "./stream-data.ts";
-import { llm } from "./llm.ts";
-import { ifElse } from "./if-else.ts";
+import { addModuleByRef, raw } from "../module.js";
+import { map } from "./map.js";
+import { fetchData } from "./fetch-data.js";
+import { streamData } from "./stream-data.js";
+import { llm } from "./llm.js";
+import { ifElse } from "./if-else.js";
 
 addModuleByRef("map", raw(map));
 addModuleByRef("fetchData", raw(fetchData));

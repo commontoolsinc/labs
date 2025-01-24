@@ -1,8 +1,8 @@
 import { type Recipe } from "@commontools/builder";
-import { DocImpl, getDoc, getDocLinkOrThrow, ReactivityLog } from "../cell.ts";
-import { cancels, run } from "../runner.ts";
-import { type Action } from "../scheduler.ts";
-import { type AddCancel } from "../cancel.ts";
+import { DocImpl, getDoc, getDocLinkOrThrow, ReactivityLog } from "../cell.js";
+import { cancels, run } from "../runner.js";
+import { type Action } from "../scheduler.js";
+import { type AddCancel } from "../cancel.js";
 
 /**
  * Implemention of built-in map module. Unlike regular modules, this will be
