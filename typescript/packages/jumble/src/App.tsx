@@ -1,12 +1,13 @@
+import { useAllBlobs } from './api';
 import './App.css'
-import { BlobTable } from './BlobList'
+import BlobCanvas from './BlobCanvas'
 
 function App() {
+  const { blobs } = useAllBlobs();
+
   return (
     <>
-      <div>
-        <BlobTable />
-      </div>
+      <BlobCanvas blobs={blobs} />
     </>
   )
 }
