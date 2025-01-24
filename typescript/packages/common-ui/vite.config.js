@@ -5,6 +5,14 @@ import { resolve } from "path";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  test: {
+    browser: {
+      enabled: true,
+      provider: "playwright",
+      headless: true,
+      name: "chromium",
+    },
+  },
   build: {
     rollupOptions: {
       input: {

@@ -9,7 +9,8 @@
   "scripts": {
     "build": "wireit",
     "clean": "wireit",
-    "test": "npm run build && web-test-runner \"test/**/*.test.js\" --node-resolve",
+    "test": "npm run build && web-test-runner test/**/*.test.js --node-resolve",
+    "vitest": "npm run build && vitest",
     "watch": "web-test-runner test/**/*.test.js --node-resolve --watch",
     "dev": "vite"
   },
@@ -36,7 +37,6 @@
     }
   },
   "dependencies": {
-    "@gozala/co-dom": "0.4.0",
     "@commontools/common-system": "^0.0.1",
     "@cfworker/json-schema": "^1.12.8",
     "@shoelace-style/shoelace": "^2.18.0",
@@ -45,6 +45,9 @@
     "vite-plugin-static-copy": "^2.0.0"
   },
   "devDependencies": {
+    "vitest": "2.0.5",
+    "@vitest/browser": "2.0.5",
+    "playwright": "*",
     "@web/test-runner": "^0.18.2",
     "mocha": "^10.4.0",
     "tslib": "^2.6.2",

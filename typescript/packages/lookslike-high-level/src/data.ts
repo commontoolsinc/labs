@@ -22,10 +22,14 @@ import {
   run,
   getRecipeSpec,
   getRecipeName,
+  Action,
+  addAction,
+  removeAction,
 } from "@commontools/common-runner";
 import { createStorage } from "./storage.js";
 import * as allRecipes from "./recipes/index.js";
 import { buildRecipe } from "./localBuild.js";
+import { IframeIPC } from "@commontools/common-ui";
 
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.js";
@@ -330,8 +334,8 @@ export type CharmAction = CharmActionFn & {
   set: (opener: CharmActionFn) => void;
 };
 
-let charmOpener: CharmActionFn | CharmAction = () => {};
-let charmCloser: CharmActionFn | CharmAction = () => {};
+let charmOpener: CharmActionFn | CharmAction = () => { };
+let charmCloser: CharmActionFn | CharmAction = () => { };
 export const openCharm = (charmId: string | EntityId | DocImpl<any>) =>
   charmOpener(charmId);
 export const closeCharm = (charmId: string | EntityId | DocImpl<any>) =>
@@ -356,3 +360,27 @@ export let annotationsEnabled = getDoc<boolean>(false);
 export const toggleAnnotations = () => {
   annotationsEnabled.send(!annotationsEnabled.get());
 };
+
+IframeIPC.setIframeContextHandler({
+  read(context: any, key: string): any {
+    return context?.getAsQueryResult
+      ? context?.getAsQueryResult([key])
+      : context?.[key];
+  },
+  write(context: any, key: string, value: any) {
+    context.getAsQueryResult()[key] = value;
+  },
+  subscribe(context: any, key: string, callback: (key: string, value: any) => void): any {
+    const action: Action = (log: ReactivityLog) =>
+      callback(
+        key,
+        context.getAsQueryResult([key], log)
+      );
+
+    addAction(action);
+    return action;
+  },
+  unsubscribe(_context: any, receipt: any) {
+    removeAction(receipt);
+  }
+});
