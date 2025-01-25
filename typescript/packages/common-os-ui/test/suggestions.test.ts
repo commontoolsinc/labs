@@ -1,8 +1,8 @@
-import * as assert from "node:assert/strict";
-import { createRect } from "../../shared/position.js";
-import * as suggestions from "./suggestions.js";
-import * as suggestionsPlugin from "./prosemirror/suggestions-plugin.js";
-import * as completion from "./completion.js";
+import { describe, expect, it } from "vitest";
+import { createRect } from "../src/shared/position.js";
+import * as suggestions from "../src/components/editor/suggestions.js";
+import * as suggestionsPlugin from "../src/components/editor/prosemirror/suggestions-plugin.js";
+import * as completion from "../src/components/editor/completion.js";
 
 describe("suggestions.update", () => {
   it("should handle activeUpdateMsg", () => {
@@ -16,10 +16,10 @@ describe("suggestions.update", () => {
     const initialState = suggestions.model();
     const newState = suggestions.update(initialState, updateMsg);
 
-    assert.deepStrictEqual(newState.active, suggestion);
-    assert.deepStrictEqual(newState.coords, createRect(10, 20, 100, 50));
-    assert.strictEqual(newState.selectedCompletion, 0);
-    assert.strictEqual(newState.completions.length, 0);
+    expect(newState.active).toEqual(suggestion);
+    expect(newState.coords).toEqual(createRect(10, 20, 100, 50));
+    expect(newState.selectedCompletion).toEqual(0);
+    expect(newState.completions.length).toEqual(0);
   });
 
   it("should handle inactiveUpdateMsg", () => {
@@ -28,8 +28,8 @@ describe("suggestions.update", () => {
     const initialState = suggestions.model();
     const newState = suggestions.update(initialState, updateMsg);
 
-    assert.strictEqual(newState.active, null);
-    assert.strictEqual(newState.selectedCompletion, 0);
+    expect(newState.active).toBeNull();
+    expect(newState.selectedCompletion).toEqual(0);
   });
 
   it("should handle arrowUp message", () => {
@@ -49,7 +49,7 @@ describe("suggestions.update", () => {
 
     const newState = suggestions.update(stateWithCompletions, arrowUpMsg);
 
-    assert.strictEqual(newState.selectedCompletion, 0);
+    expect(newState.selectedCompletion).toEqual(0);
   });
 
   it("should handle arrowDown message", () => {
@@ -69,7 +69,7 @@ describe("suggestions.update", () => {
 
     const newState = suggestions.update(stateWithCompletions, arrowDownMsg);
 
-    assert.strictEqual(newState.selectedCompletion, 2);
+    expect(newState.selectedCompletion).toEqual(2);
   });
 
   it("should clamp selectedCompletion within bounds", () => {
@@ -87,14 +87,14 @@ describe("suggestions.update", () => {
 
     const arrowUpMsg = suggestions.createArrowUpMsg();
     const newState1 = suggestions.update(stateWithCompletions, arrowUpMsg);
-    assert.strictEqual(newState1.selectedCompletion, 0);
+    expect(newState1.selectedCompletion).toEqual(0);
 
     const arrowDownMsg = suggestions.createArrowDownMsg();
     const newState2 = suggestions.update(
       { ...stateWithCompletions, selectedCompletion: 2 },
       arrowDownMsg,
     );
-    assert.strictEqual(newState2.selectedCompletion, 2);
+    expect(newState2.selectedCompletion).toEqual(2);
   });
 
   it("should return the same state for unknown message types", () => {
@@ -102,6 +102,6 @@ describe("suggestions.update", () => {
     const unknownMsg = { type: "unknown" } as unknown as suggestions.Msg;
 
     const nextState = suggestions.update(initialState, unknownMsg);
-    assert.strictEqual(nextState, initialState);
+    expect(nextState).toEqual(initialState);
   });
 });

@@ -1,5 +1,5 @@
-import { createStore, cursor, unknown } from "./store.js";
-import * as assert from "node:assert/strict";
+import { describe, expect, it } from "vitest";
+import { createStore, cursor, unknown } from "../src/shared/store.js";
 
 describe("createStore", () => {
   type State = { count: number };
@@ -27,7 +27,7 @@ describe("createStore", () => {
       state,
       update,
     });
-    assert.deepEqual(store.get(), state);
+    expect(store.get()).toEqual(state);
   });
 
   it("should update state when sending a message", () => {
@@ -38,33 +38,35 @@ describe("createStore", () => {
     });
 
     store.send({ type: "increment" });
-    assert.deepEqual(store.get(), { count: 1 });
+    expect(store.get()).toEqual({ count: 1 });
 
     store.send({ type: "decrement" });
-    assert.deepEqual(store.get(), { count: 0 });
+    expect(store.get()).toEqual({ count: 0 });
   });
 
-  it("should notify listeners when state changes", (done) => {
+  it("should notify listeners when state changes", () => {
     const initialState = init();
     const store = createStore({
       state: initialState,
       update,
     });
 
-    let callCount = 0;
+    return new Promise<void>((resolve) => {
+      let callCount = 0;
 
-    const cleanup = store.sink((state) => {
-      callCount++;
-      if (callCount === 1) {
-        assert.deepEqual(state, initialState);
-      } else if (callCount === 2) {
-        assert.deepEqual(state, { count: 1 });
-        cleanup();
-        done();
-      }
+      const cleanup = store.sink((state) => {
+        callCount++;
+        if (callCount === 1) {
+          expect(state).toEqual(initialState);
+        } else if (callCount === 2) {
+          expect(state).toEqual({ count: 1 });
+          cleanup();
+          resolve();
+        }
+      });
+
+      store.send({ type: "increment" });
     });
-
-    store.send({ type: "increment" });
   });
 
   it("should not notify listeners after cleanup", () => {
@@ -80,17 +82,17 @@ describe("createStore", () => {
     });
 
     store.send({ type: "increment" });
-    assert.equal(callCount, 2); // Initial call + after increment
+    expect(callCount).toEqual(2); // Initial call + after increment
 
     cleanup();
     store.send({ type: "increment" });
-    assert.equal(callCount, 2); // Should not have increased
+    expect(callCount).toEqual(2); // Should not have increased
   });
 
   it("should perform effects", async () => {
     const initialState = init();
 
-    const decrementLater = async () => {
+    const decrementLater = async (): Promise<Msg> => { 
       await sleep(10);
       return { type: "decrement" };
     };
@@ -107,11 +109,11 @@ describe("createStore", () => {
     });
 
     effectStore.send({ type: "increment" });
-    assert.deepEqual(effectStore.get(), { count: 1 });
+    expect(effectStore.get()).toEqual({ count: 1 });
 
     await sleep(20);
 
-    assert.deepEqual(effectStore.get(), { count: 0 });
+    expect(effectStore.get()).toEqual({ count: 0 });
   });
 });
 
@@ -163,7 +165,7 @@ describe("cursor", () => {
       type: "changeName",
       name: "Alice",
     });
-    assert.deepEqual(newState, {
+    expect(newState).toEqual({
       ...initialBigState,
       user: { ...initialBigState.user, name: "Alice" },
     });
@@ -171,11 +173,11 @@ describe("cursor", () => {
 
   it("should not modify other parts of the state", () => {
     const newState = userCursor(initialBigState, { type: "incrementAge" });
-    assert.deepEqual(newState, {
+    expect(newState).toEqual({
       ...initialBigState,
       user: { ...initialBigState.user, age: 31 },
     });
-    assert.deepEqual(newState.settings, initialBigState.settings);
+    expect(newState.settings).toEqual(initialBigState.settings);
   });
 
   it("should return the same state object if no changes are made", () => {
@@ -183,6 +185,6 @@ describe("cursor", () => {
       type: "changeName",
       name: "John",
     });
-    assert.strictEqual(newState, initialBigState);
+    expect(newState).toEqual(initialBigState);
   });
 });

@@ -1,11 +1,11 @@
-import { createCancelGroup } from "./cancel.js";
-import * as assert from "node:assert/strict";
+import { describe, expect, it } from "vitest";
+import { createCancelGroup } from "../src/shared/cancel.js";
 
 describe("cleanupGroup", () => {
   it("should create a cleanup group with add and cleanup methods", () => {
     const group = createCancelGroup();
-    assert.equal(typeof group.add, "function");
-    assert.equal(typeof group, "function");
+    expect(typeof group.add).toBe("function");
+    expect(typeof group).toBe("function");
   });
 
   it("should execute added cleanup functions when cleanup is called", () => {
@@ -21,7 +21,7 @@ describe("cleanupGroup", () => {
 
     group();
 
-    assert.equal(count, 2);
+    expect(count).toEqual(2);
   });
 
   it("should not execute cleanup functions more than once", () => {
@@ -38,7 +38,7 @@ describe("cleanupGroup", () => {
     group();
     group();
 
-    assert.equal(count, 2);
+    expect(count).toEqual(2);
   });
 
   it("should allow adding cleanup functions after cleanup has been called", () => {
@@ -55,11 +55,11 @@ describe("cleanupGroup", () => {
     });
     group();
 
-    assert.equal(count, 2);
+    expect(count).toEqual(2);
   });
 
   it("should handle empty cleanup group", () => {
     const group = createCancelGroup();
-    assert.doesNotThrow(() => group());
+    expect(() => group()).not.toThrow();
   });
 });
