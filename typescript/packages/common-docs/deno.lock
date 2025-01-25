@@ -12,6 +12,7 @@
     "jsr:@std/encoding@0.221": "0.221.0",
     "jsr:@std/encoding@^1.0.5": "1.0.6",
     "jsr:@std/fmt@0.221": "0.221.0",
+    "jsr:@std/fs@*": "1.0.10",
     "jsr:@std/fs@0.221": "0.221.0",
     "jsr:@std/fs@^1.0.10": "1.0.10",
     "jsr:@std/internal@^1.0.5": "1.0.5",

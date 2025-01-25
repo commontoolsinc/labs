@@ -1,10 +1,9 @@
-import { Database } from "jsr:@db/sqlite";
 import { refer } from "npm:merkle-reference";
-import * as FS from "@std/fs";
-import * as Replica from "./replica.ts";
+import * as FS from "jsr:@std/fs";
+import * as Replica from "./store.ts";
 
 export interface Command {
-  push?: OperationSet<Push>;
+  push?: OperationSet<Assertion>;
   pull?: OperationSet<Pull>;
 
   watch?: OperationSet<Address>;
@@ -18,42 +17,66 @@ export interface Address {
   /**
    * Repository containing addressed document.
    */
-  replica: RepositoryID;
+  from: RepositoryID;
+
   /**
    * Document being addressed.
    */
-  entity: DocumentID;
+  this: DocumentID;
 }
 
-/**
- * Represents a revision of the document in the repository.
- */
-export interface Revision extends Address {
-  version: Checksum;
-}
+export type Reference<Data extends JSONValue = JSONValue> = string & {
+  toString(): Reference<Data>;
+};
 
-/**
- * Represents a state of the document in the repository.
- */
-export interface State extends Revision {
-  value: JSONValue;
-}
+export type BaseRevision = {
+  is: { this: DocumentID };
+  was?: void;
+};
+
+export type SubsequentRevision = {
+  is: JSONValue;
+  was: Reference<Revision>;
+};
+
+export type Revision = BaseRevision | SubsequentRevision;
 
 /**
  * Operation to swap document value in the target repository.
  */
-export interface Push extends Address {
+export interface Assertion {
+  /**
+   * Stable document identifier that uniquely identifies the document.
+   */
+  of: DocumentID;
+
   /**
    * New state of the document.
    */
-  value: JSONValue;
+  is: JSONValue;
 
   /**
    * Assumed state of the document, that needs to be true for push to
    * succeed. Omitting implies new document creation.
    */
-  version?: Checksum;
+  was?: Reference<Revision>;
 }
+
+export interface Retraction {
+  /**
+   * Document being retracted.
+   */
+  of: DocumentID;
+
+  /**
+   * Version of the document being retracted.
+   */
+  is: Reference<Revision>;
+}
+
+export type Transaction =
+  | { assert: Assertion; retract?: undefined }
+  | { retract: Retraction; assert?: undefined };
 
 export type PushResult = Result<Revision, PushError>;
 
@@ -61,26 +84,22 @@ export type PushError = ReplicaNotFound | EntityNotFound | ConflictError;
 
 export interface ConflictError extends Error {
   name: "ConflictError";
-  replica: RepositoryID;
-  entity: DocumentID;
+  at: RepositoryID;
+  of: DocumentID;
   /**
    * Expected version of the document.
    */
-  expected?: Checksum;
+  expected: Reference<Revision>;
   /**
-   * Actual version of the document.
+   * Actual document in the repository.
    */
-  actual: Checksum;
-  /**
-   * Current state of the document.
-   */
-  value: JSONValue;
+  actual: Revision;
 }
 
 /**
  * Operation for pulling latest document state. If `version` is specified and
  * it is current result will be {@link Revision} omitting `value` of the
- * document otherwise it will be {@link State}.
+ * document otherwise it will be {@link DocumentState}.
  *
  * If `value` is desired just omit `version`.
  */
@@ -89,7 +108,7 @@ export interface Pull extends Address {
 }
 
 export type InferPullResult<Operation extends Pull> = Result<
-  Operation["version"] extends Checksum ? Revision | State : State,
+  Operation["version"] extends Checksum ? Revision : Revision,
   PullError
 >;
 
@@ -106,8 +125,8 @@ export interface EntityNotFound extends Error {
   entity: DocumentID;
 }
 
-export type WatchResult = Result<State, BadAddress>;
-export type UnwatchResult = Result<Revision, BadAddress>;
+export type WatchResult = Result<Transaction, BadAddress>;
+export type UnwatchResult = Result<Address, BadAddress>;
 
 export type BadAddress = ReplicaNotFound | EntityNotFound;
 
@@ -172,9 +191,11 @@ export type JSONValue =
   | JSONObject
   | JSONArray;
 
-export interface JSONObject {
-  [key: string]: JSONValue;
-}
+// export interface JSONObject {
+//   [key: string]: unknown;
+// }
+
+export interface JSONObject extends Record<string, JSONValue> {}
 
 export interface JSONArray extends Array<JSONValue> {}
 
@@ -186,87 +207,107 @@ export interface StoreOptions {
   url: URL;
 }
 
-/**
- * Starts a service at a given path.
- */
-export const open = async (options: Open) => {
-  await FS.ensureDir(options.store.url);
-  return new Service(options);
-};
+// /**
+//  * Starts a service at a given path.
+//  */
+// export const open = async (options: Open) => {
+//   await FS.ensureDir(options.store.url);
+//   return new Repository(options);
+// };
 
-class Service {
-  constructor(
-    public options: Open,
-    public connections: Map<RepositoryID, Replica.Replica> = new Map(),
-  ) {}
+// class Repository {
+//   constructor(
+//     public options: Open,
+//     public connections: Map<RepositoryID, Replica.Session> = new Map(),
+//   ) {}
 
-  /**
-   *
-   */
-  pull(operation: Pull) {
-    return pull(this, operation);
-  }
-}
+//   /**
+//    *
+//    */
+//   pull(operation: Pull) {
+//     return pull(this, operation);
+//   }
+//   push(operation: Assertion) {
+//     return push(this, operation);
+//   }
+// }
 
-export interface ServiceState {
+export interface RepositoryModel {
   options: Open;
-  connections: Map<RepositoryID, Replica.Replica>;
+  connections: Map<RepositoryID, Replica.Session>;
 }
 
-/**
- * Pulls the entity from the replica.
- */
-export const pull = async <Operation extends Pull>(
-  state: ServiceState,
-  { replica, entity, version }: Operation,
-): Promise<InferPullResult<Operation>> => {
-  const connection = await Replica.connect({
-    url: state.options.store.url,
-    pool: state.connections,
-  });
+// /**
+//  * Pulls the entity state from the replica.
+//  */
+// export const pull = async <Operation extends Pull>(
+//   state: RepositoryModel,
+//   { replica, entity, version }: Operation,
+// ): Promise<InferPullResult<Operation>> => {
+//   const connection = await Replica.connect({
+//     url: new URL(`${replica}.sqlite`, state.options.store.url),
+//     pool: state.connections,
+//   });
 
-  if (connection.error) {
-    return connection;
-  }
+//   if (connection.error) {
+//     return connection;
+//   }
 
-  const { ok, error } = await Replica.select(connection.ok, { entity });
-  if (error) {
-    return { error };
-  }
+//   const select = await Replica.select(connection.ok, { entity });
+//   if (select.error) {
+//     return select;
+//   }
 
-  // If specific version is current leave out the `value` as sending it would
-  // be redundant.
-  if (ok.version === version) {
-    delete (ok as Partial<State>).value;
-  }
+//   // If specific version is current leave out the `value` as sending it would
+//   // be redundant.
+//   if (select.ok.version === version) {
+//     delete (select.ok as Partial<State>).value;
+//   }
 
-  return { ok };
-};
+//   return select;
+// };
 
-export const push = async (
-  state: ServiceState,
-  { value, version, ...address }: Push,
-): Promise<PushResult> => {
-  const checksum = refer(value).toString();
-  const connection =
-    version === undefined
-      ? await Replica.open({
-          url: new URL(`${address.replica}.sqlite`, state.options.store.url),
-          pool: state.connections,
-        })
-      : await Replica.connect({
-          url: new URL(`${address.replica}.sqlite`, state.options.store.url),
-          pool: state.connections,
-        });
+// /**
+//  * Pushes new entity state to the replica. If specified `version` is no longer
+//  * current the operation will fail.
+//  */
+// export const push = async (
+//   state: RepositoryModel,
+//   { value, version, ...address }: Assertion,
+// ): Promise<PushResult> => {
+//   // If version is omitted it implies new document creation, in which case we
+//   // create replica if it does not exist already which is why we use open in
+//   // such case. If version is specified however we should fail if replica does
+//   // not exist which is why we use connect in that case.
+//   const connection =
+//     version === undefined
+//       ? await Replica.open({
+//           url: new URL(`${address.replica}.sqlite`, state.options.store.url),
+//           pool: state.connections,
+//         })
+//       : await Replica.connect({
+//           url: new URL(`${address.replica}.sqlite`, state.options.store.url),
+//           pool: state.connections,
+//         });
 
-  if (connection.error) {
-    return connection;
-  }
+//   if (connection.error) {
+//     return connection;
+//   }
 
-  return await Replica.assert(connection.ok, {
-    entity: address.entity,
-    value,
-    version,
-    as: checksum,
-  });
-};
+//   // if we reached this far we have a replica connection which we will use to
+//   // assert new state. Assertion will fail if assumed `version` is not a current
+//   // version of the document (or if document does not exist).
+//   return await Replica.assert(connection.ok, {
+//     entity: address.entity,
+//     value,
+//     version,
+//     as: refer(value).toString(),
+//   });
+// };
+
+// /**
+//  *
+//  * @param state
+//  * @param address
+//  */
+// export const watch = async (state: RepositoryModel, address: Address) => {};

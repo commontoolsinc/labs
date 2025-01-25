@@ -1,263 +1,146 @@
-import { Database, type DatabaseOpenOptions } from "@db/sqlite";
-import type {
+import {
+  PushError,
   Result,
-  DocumentID,
+  Address,
+  Transaction,
   RepositoryID,
-  ReplicaNotFound,
-  EntityNotFound,
-  ConflictError,
-  State,
-  JSONValue,
-  Checksum,
-  Revision,
 } from "./lib.ts";
-import { add } from "./main.ts";
+import { Commit } from "./store.ts";
+import { refer } from "merkle-reference";
+import * as Repository from "./store.ts";
+import * as Subscription from "./subscription.ts";
 
-export type {
-  RepositoryID,
-  DocumentID,
-  ReplicaNotFound,
-  EntityNotFound,
-  ConflictError,
-  Revision,
-  State,
-};
+export type TransactionError = PushError;
 
-const TABLE = "state";
-const ENTITY = "entity";
-const VALUE = "value";
-const VERSION = "version";
+export type TransactionResult = Result<Commit, TransactionError>;
 
-const PREPARE = `
-CREATE TABLE IF NOT EXISTS ${TABLE} (
-  ${ENTITY} TEXT PRIMARY KEY,
-  ${VALUE} JSON NOT NULL,
-  ${VERSION} TEXT NOT NULL
-);`;
-
-const SELECT = `SELECT
-${ENTITY}, ${VALUE}, ${VERSION}
-FROM ${TABLE} WHERE ${ENTITY} = :entity;`;
-
-const INSERT = `
-INSERT INTO ${TABLE} (${ENTITY}, ${VALUE}, ${VERSION})
-VALUES (:entity, :value, :version);
-`;
-
-const UPDATE = `
-UPDATE ${TABLE}
-SET ${VALUE} = :value,
-    ${VERSION} = :as
-WHERE ${ENTITY} = :entity AND ${VERSION} = :version;
-`;
-
-export type Options = {
-  url: URL;
-  pool: Map<RepositoryID, Replica>;
-};
-
-export interface FileURL extends URL {
-  protocol: "file:";
+export interface Transactor {
+  transact(transaction: Transaction): Promise<TransactionResult>;
 }
 
-export interface MemoryURL extends URL {
-  protocol: "memory:";
+export interface Model {
+  store: URL;
+  subscribers: Map<string, Set<Subscription.Subscriber>>;
+  repositories: Map<string, Repository.Session>;
 }
 
-export type Address = FileURL | MemoryURL;
+export interface Session {
+  watch(address: Address, subscriber: Subscription.Subscriber): void;
+  unwatch(address: Address, subscriber: Subscription.Subscriber): void;
+}
 
-class Replica {
+export class Replica {
+  store: URL;
   constructor(
-    public id: RepositoryID,
-    public database: Database,
-  ) {}
+    options: Options,
+    public subscribers: Map<string, Set<Subscription.Subscriber>> = new Map(),
+    public repositories: Map<RepositoryID, Repository.Session> = new Map(),
+  ) {
+    this.store = options.store;
+  }
+  subscribe(address: Address) {
+    return subscribe(this, address);
+  }
+
+  transact(transaction: Transaction) {
+    return transact(this, transaction);
+  }
+
+  query(selector: Address) {
+    return query(this, selector);
+  }
+
+  watch(address: Address, subscriber: Subscription.Subscriber) {
+    return watch(this, address, subscriber);
+  }
+  unwatch(address: Address, subscriber: Subscription.Subscriber) {
+    return unwatch(this, address, subscriber);
+  }
 }
 
-export type { Replica };
+export const subscribe = (session: Session, address: Address) =>
+  Subscription.open(session).watch(address);
 
-const toAddress = (url: URL) => {
-  const { pathname } = url;
-  const base = pathname.split("/").pop() as string;
-  const id = base.endsWith(".sqlite") ? base.slice(0, -".sqlite".length) : base;
-
-  return { location: url.protocol === "file:" ? url : ":memory:", id };
-};
-
-/**
- * Creates a connection to the existing replica. Errors if replica does not
- * exist.
- */
-export const connect = async ({
-  url,
-  pool,
-}: Options): Promise<Result<Replica, ReplicaNotFound>> => {
-  const replica = pool.get(url.href);
-  if (replica) {
-    return { ok: replica };
+export const query = (session: Model, selector: Address) => {
+  const repository = session.repositories.get(selector.from);
+  if (repository) {
+    return repository.query(selector);
   } else {
-    const address = toAddress(url);
-    try {
-      const database = await new Database(address.location, { create: false });
-      database.prepare(PREPARE).run();
-      const replica = new Replica(address.id, database);
-      pool.set(url.href, replica);
-      return { ok: replica };
-    } catch {
-      return { error: new ReplicaNotFoundError(address.id) };
-    }
-  }
-};
-
-export const open = async ({
-  url,
-  pool,
-}: Options): Promise<Result<Replica, never>> => {
-  const replica = pool.get(url.href);
-  if (replica) {
-    return { ok: replica };
-  } else {
-    const { location, id } = toAddress(url);
-    const database = await new Database(location, { create: true });
-    database.prepare(PREPARE).run();
-    const replica = new Replica(id, database);
-    pool.set(id, replica);
-    return { ok: replica };
-  }
-};
-
-export const close = async (replica: Replica) => {
-  await replica.database.close();
-};
-export interface Select {
-  entity: DocumentID;
-}
-export const select = (
-  replica: Replica,
-  { entity }: Select,
-): Result<State, EntityNotFound> => {
-  const state = replica.database.prepare(SELECT).get({ entity });
-
-  if (state === undefined) {
-    return { error: new EntityNotFoundError(replica.id, entity) };
-  } else {
-    const { value, version } = state as { value: string; version: string };
     return {
       ok: {
-        replica: replica.id,
-        entity,
-        value: JSON.parse(value),
-        version,
+        ...Repository.IMPLICIT,
+        this: selector.this,
       },
     };
   }
 };
 
-export interface Assertion {
-  entity: DocumentID;
-  value: JSONValue;
-  version?: Checksum;
-  as: Checksum;
-}
+export const watch = (
+  session: Model,
+  address: Address,
+  subscriber: Subscription.Subscriber,
+) => {
+  const channel = Subscription.formatAddress(address);
+  const subscribers = session.subscribers.get(channel);
+  if (subscribers) {
+    subscribers.add(subscriber);
+  } else {
+    session.subscribers.set(channel, new Set([subscriber]));
+  }
 
-export interface Insert {
-  entity: DocumentID;
-  value: JSONValue;
-  version: Checksum;
-}
+  const result = query(session, address);
+  subscriber.transact({
+    assert: result.ok
+      ? { of: address.this, is: result.ok, was: { "#": result.ok["#"] } }
+      : { of: address.this, is: Repository.IMPLICIT, was: Repository.IMPLICIT },
+  });
+};
 
-export const insert = (
-  replica: Replica,
-  { entity, value, version }: Insert,
-): Result<Revision, ConflictError> => {
-  try {
-    replica.database.run(INSERT, { entity, value, version });
-    return { ok: { replica: replica.id, entity, version } };
-  } catch {
-    const result = select(replica, { entity });
-    return {
-      error: new RevisionError(
-        replica.id,
-        entity,
-        undefined,
-        result.ok?.version as string,
-        result.ok?.value as JSONValue,
-      ),
-    };
+export const unwatch = (
+  session: Model,
+  address: Address,
+  subscriber: Subscription.Subscriber,
+) => {
+  const channel = Subscription.formatAddress(address);
+  const subscribers = session.subscribers.get(channel);
+  if (subscribers) {
+    subscribers.delete(subscriber);
   }
 };
 
-interface Update extends Insert {
-  as: Checksum;
-}
+export const transact = async (session: Model, transaction: Transaction) => {
+  const address = transaction.assert ?? transaction.retract;
+  let repository = session.repositories.get(address.replica);
+  if (!repository) {
+    const result = await Repository.open({
+      url: new URL(`./address.replica.sqlite`, session.store),
+    });
+    repository = result.ok as Repository.Session;
+    session.repositories.set(address.replica, repository);
+  }
 
-export const update = (
-  replica: Replica,
-  { entity, value, version, as }: Update,
-): Result<Revision, ConflictError | EntityNotFound> => {
-  try {
-    const count = replica.database.run(UPDATE, { entity, value, version, as });
-    // If 0 rows were updated we did not found either an entity or an expected
-    // version. In such case we try to select the entity to determine whether
-    // it is version conflict or non-existing entity.
-    if (count === 0) {
-      const result = select(replica, { entity });
-      return result.error
-        ? result
-        : {
-            error: new RevisionError(
-              replica.id,
-              entity,
-              version,
-              result.ok.version,
-              result.ok.value,
-            ),
-          };
-    } else {
-      return { ok: { replica: replica.id, entity, version: as } };
+  const result = await repository.transact(transaction);
+  if (result.error) {
+    return result;
+  } else if (result.ok.before.version !== result.ok.after.version) {
+    const channel = Subscription.formatAddress(address);
+    const subscribers = session.subscribers.get(channel);
+    if (subscribers) {
+      const promises = [];
+      for (const subscriber of subscribers) {
+        promises.push(subscriber.transact(transaction));
+      }
+      await Promise.all(promises);
     }
-  } catch {
-    return { error: new EntityNotFoundError(replica.id, entity) };
   }
+
+  return result;
 };
 
-export const assert = (
-  replica: Replica,
-  { entity, value, version, as }: Assertion,
-) =>
-  version === undefined
-    ? insert(replica, { entity, value, version: as })
-    : update(replica, { entity, value, version, as });
-
-export class ReplicaNotFoundError extends Error implements ReplicaNotFound {
-  override name = "ReplicaNotFound" as const;
-  constructor(public replica: RepositoryID) {
-    super(`Replica not found: ${replica}`);
-  }
+export interface Options {
+  store: URL;
 }
 
-export class EntityNotFoundError extends Error implements EntityNotFound {
-  override name = "EntityNotFound" as const;
-  constructor(
-    public replica: RepositoryID,
-    public entity: DocumentID,
-  ) {
-    super(`Entity ${entity} not found in ${replica}`);
-  }
-}
-
-export class RevisionError extends Error implements ConflictError {
-  override name = "ConflictError" as const;
-  constructor(
-    public replica: RepositoryID,
-    public entity: DocumentID,
-    public expected: Checksum | undefined,
-    public actual: Checksum,
-    public value: JSONValue,
-  ) {
-    super(
-      expected === undefined
-        ? `Can not create ${entity} at ${replica}, because it already exists`
-        : `Can not update ${entity} at ${replica}, because expected ${expected} version, instead of current ${actual} version`,
-    );
-  }
-}
+export const open = async (options: Options) => {
+  return await new Replica(options);
+};
