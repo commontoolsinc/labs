@@ -2,3 +2,4 @@ packages:
   - "common-builder"
   - "common-runner"
   - "llm-client"
+  - "common-ui"

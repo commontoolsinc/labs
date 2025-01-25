@@ -1,6 +1,6 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
-import { baseStyles } from "./style.ts";
+import { customElement } from "lit/decorators.js";
+import { baseStyles } from "./style.js";
 import { ZodObject } from "zod";
 
 @customElement("common-card")
@@ -168,14 +168,14 @@ export class CommonCardElement extends LitElement {
 
 @customElement("common-table")
 export class CommonTableElement extends LitElement {
-  accessor schema: ZodObject<any> = null;
+  accessor schema: ZodObject<any> | null = null;
   accessor data: any[] = [];
   accessor edit: boolean = false;
   accessor delete: boolean = false;
   accessor preview: boolean = false;
   accessor download: boolean = false;
   accessor copy: boolean = false;
-  accessor selectedItem: any = null;
+  accessor selectedItem: any | null = null;
 
   static override styles = [
     baseStyles,
@@ -397,7 +397,7 @@ export class CommonTableElement extends LitElement {
         const validItems = [];
         for (const item of items) {
           try {
-            const validItem = this.schema.parse(item);
+            const validItem = this.schema?.parse(item);
             validItems.push(validItem);
           } catch (err) {
             console.error("Validation failed for item:", item, err);
@@ -459,7 +459,7 @@ export class CommonTableElement extends LitElement {
           html`
                 <tr>
                   ${
-            Object.entries(this.schema.shape).map(
+            Object.entries(this.schema?.shape || {}).map(
               ([key, schema]) =>
                 html`
                       <td title=${String(row[key])}>

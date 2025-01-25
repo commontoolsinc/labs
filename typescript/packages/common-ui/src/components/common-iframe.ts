@@ -1,5 +1,5 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { customElement } from "lit/decorators.js";
 import {
   type Action,
   addAction,

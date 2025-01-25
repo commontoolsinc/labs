@@ -1,6 +1,6 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property } from "lit/decorators.js";
-import { baseStyles } from "./style.ts";
+import { customElement } from "lit/decorators.js";
+import { baseStyles } from "./style.js";
 
 export type CommonTextarea = {
   id: string;

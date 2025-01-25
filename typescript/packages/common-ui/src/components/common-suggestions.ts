@@ -1,12 +1,12 @@
 import { css, html, LitElement } from "lit";
-import { customElement, property } from "lit/decorators.js";
+import { customElement } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import {
   readSuggestion,
   Suggestion,
   suggestionTemplate,
-} from "./common-suggestion.ts";
-import { getId } from "./identifiable.ts";
+} from "./common-suggestion.js";
+import { getId } from "./identifiable.js";
 
 export class SelectSuggestionEvent extends Event {
   detail: Suggestion;

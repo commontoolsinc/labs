@@ -1,6 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { customElement } from "lit/decorators.js";
-import { baseStyles } from "./style.ts";
+import { baseStyles } from "./style.js";
 
 @customElement("common-hgroup")
 export class CommonHgroup extends LitElement {

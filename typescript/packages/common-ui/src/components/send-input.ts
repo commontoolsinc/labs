@@ -1,6 +1,6 @@
 import { css, html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { baseStyles } from "./style.ts";
+import { baseStyles } from "./style.js";
 
 @customElement("common-send-message")
 export class SendMessageElement extends LitElement {
@@ -20,15 +20,16 @@ export class SendMessageElement extends LitElement {
   ];
 
   @property({ type: String })
-  name: string;
+  name: string | undefined = undefined;
 
   @property({ type: String })
-  placeholder: string;
+  placeholder: string | undefined = undefined;
 
   send(event: Event) {
     event.preventDefault();
 
-    const inputEl = this.shadowRoot.getElementById("input") as HTMLInputElement;
+    const inputEl = this.shadowRoot?.getElementById("input") as HTMLInputElement;
+    if (!inputEl) return;
     const value = inputEl.value;
     inputEl.value = "";
 
