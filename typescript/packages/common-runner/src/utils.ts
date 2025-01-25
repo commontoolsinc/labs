@@ -1,24 +1,24 @@
 import {
   isAlias,
+  isOpaqueRef,
   isStatic,
   markAsStatic,
+  type Recipe,
+  unsafe_materializeFactory,
   unsafe_originalRecipe,
   unsafe_parentRecipe,
-  Recipe,
-  UnsafeBinding,
-  unsafe_materializeFactory,
-  isOpaqueRef,
-} from "@commontools/common-builder";
+  type UnsafeBinding,
+} from "@commontools/builder";
 import {
+  type DocImpl,
+  type DocLink,
   getDoc,
-  isDoc,
+  getDocLinkOrThrow,
   isCell,
-  DocImpl,
-  ReactivityLog,
-  DocLink,
+  isDoc,
   isDocLink,
   isQueryResultForDereferencing,
-  getDocLinkOrThrow,
+  type ReactivityLog,
 } from "./cell.js";
 import { createRef } from "./cell-map.js";
 
@@ -46,7 +46,7 @@ export function extractDefaultValues(schema: any): any {
 // Recursively calls itself for nested objects, passing on any objects that
 // matching properties.
 export function mergeObjects(...objects: any[]): any {
-  objects = objects.filter(obj => obj !== undefined);
+  objects = objects.filter((obj) => obj !== undefined);
   if (objects.length === 0) return undefined;
   if (objects.length === 1) return objects[0];
 
@@ -64,14 +64,15 @@ export function mergeObjects(...objects: any[]): any {
       isAlias(obj) ||
       isDocLink(obj) ||
       isStatic(obj)
-    )
+    ) {
       return obj;
+    }
 
     // Then merge objects, only passing those on that have any values.
     for (const key of Object.keys(obj)) {
       if (seen.has(key)) continue;
       seen.add(key);
-      const merged = mergeObjects(...objects.map(obj => obj[key]));
+      const merged = mergeObjects(...objects.map((obj) => obj[key]));
       if (merged !== undefined) result[key] = merged;
     }
   }
@@ -92,19 +93,24 @@ export function sendValueToBinding(
 ) {
   if (isAlias(binding)) {
     const ref = followAliases(binding, cell, log);
-    if (!isDocLink(value) && !isDoc(value) && !isAlias(value))
+    if (!isDocLink(value) && !isDoc(value) && !isAlias(value)) {
       normalizeToCells(cell, value, ref.cell.getAtPath(ref.path), log, binding);
+    }
     setNestedValue(ref.cell, ref.path, value, log);
   } else if (Array.isArray(binding)) {
-    if (Array.isArray(value))
-      for (let i = 0; i < Math.min(binding.length, value.length); i++)
+    if (Array.isArray(value)) {
+      for (let i = 0; i < Math.min(binding.length, value.length); i++) {
         sendValueToBinding(cell, binding[i], value[i], log);
+      }
+    }
   } else if (typeof binding === "object" && binding !== null) {
-    for (const key of Object.keys(binding))
+    for (const key of Object.keys(binding)) {
       if (key in value) sendValueToBinding(cell, binding[key], value[key], log);
+    }
   } else {
-    if (binding !== value)
+    if (binding !== value) {
       throw new Error(`Got ${value} instead of ${binding}`);
+    }
   }
 }
 
@@ -136,31 +142,34 @@ export function setNestedValue(
     !isCell(value)
   ) {
     let success = true;
-    for (const key in value)
-      if (key in destValue)
+    for (const key in value) {
+      if (key in destValue) {
         success &&= setNestedValue(
           currentCell,
           [...path, key],
           value[key],
           log,
         );
-      else {
+      } else {
         if (currentCell.isFrozen()) success = false;
         else currentCell.setAtPath([...path, key], value[key], log);
       }
-    for (const key in destValue)
+    }
+    for (const key in destValue) {
       if (!(key in value)) {
         if (currentCell.isFrozen()) success = false;
         else currentCell.setAtPath([...path, key], undefined, log);
       }
+    }
 
     return success;
   } else if (isDocLink(value) && isDocLink(destValue)) {
     if (
       value.cell !== destValue.cell ||
       !arrayEqual(value.path, destValue.path)
-    )
+    ) {
       currentCell.setAtPath(path, value, log);
+    }
     return true;
   } else if (!Object.is(destValue, value)) {
     // Use Object.is for comparison to handle NaN and -0 correctly
@@ -197,15 +206,15 @@ export function unwrapOneLevelAndBindtoCell<T>(
   cell: DocImpl<any>,
 ): T {
   function convert(binding: any, processStatic = false): any {
-    if (isStatic(binding) && !processStatic)
+    if (isStatic(binding) && !processStatic) {
       return markAsStatic(convert(binding, true));
-    else if (isAlias(binding)) {
-      if (typeof binding.$alias.cell === "number")
-        if (binding.$alias.cell === 1)
+    } else if (isAlias(binding)) {
+      if (typeof binding.$alias.cell === "number") {
+        if (binding.$alias.cell === 1) {
           // Moved to the next-to-top level. Don't assign a cell, so that on
           // next unwrap, the right cell be assigned.
           return { $alias: { path: binding.$alias.path } };
-        else
+        } else {
           return {
             // Otherwise decrease count by one
             $alias: {
@@ -213,7 +222,8 @@ export function unwrapOneLevelAndBindtoCell<T>(
               path: binding.$alias.path,
             },
           };
-      else
+        }
+      } else {
         return {
           // Bind to passed cell, if there isn't already one
           $alias: {
@@ -221,16 +231,18 @@ export function unwrapOneLevelAndBindtoCell<T>(
             path: binding.$alias.path,
           },
         };
-    } else if (isDoc(binding))
+      }
+    } else if (isDoc(binding)) {
       return binding; // Don't enter cells
-    else if (Array.isArray(binding))
-      return binding.map(value => convert(value));
-    else if (typeof binding === "object" && binding !== null) {
+    } else if (Array.isArray(binding)) {
+      return binding.map((value) => convert(value));
+    } else if (typeof binding === "object" && binding !== null) {
       const result: any = Object.fromEntries(
         Object.entries(binding).map(([key, value]) => [key, convert(value)]),
       );
-      if (binding[unsafe_originalRecipe])
+      if (binding[unsafe_originalRecipe]) {
         result[unsafe_originalRecipe] = binding[unsafe_originalRecipe];
+      }
       return result;
     } else return binding;
   }
@@ -241,9 +253,11 @@ export function unsafe_noteParentOnRecipes(recipe: Recipe, binding: any) {
   if (typeof binding !== "object" || binding === null) return;
 
   // For now we just do top-level bindings
-  for (const key in binding)
-    if (binding[key][unsafe_originalRecipe])
+  for (const key in binding) {
+    if (binding[key][unsafe_originalRecipe]) {
       binding[key][unsafe_parentRecipe] = recipe;
+    }
+  }
 }
 
 export function unsafe_createParentBindings(
@@ -251,12 +265,13 @@ export function unsafe_createParentBindings(
   log: ReactivityLog,
 ): UnsafeBinding | undefined {
   if (!recipe || !recipe[unsafe_originalRecipe]) return undefined;
-  else
+  else {
     return {
       recipe: recipe[unsafe_originalRecipe]!,
       materialize: recipe[unsafe_materializeFactory]!(log),
       parent: unsafe_createParentBindings(recipe[unsafe_parentRecipe]!, log),
     };
+  }
 }
 
 // Traverses binding and returns all cells reacheable through aliases.
@@ -271,7 +286,7 @@ export function findAllAliasedCells(
       if (typeof binding.$alias.cell === "number") return;
       const cell = binding.$alias.cell ?? origCell;
       const path = binding.$alias.path;
-      if (cells.find(c => c.cell === cell && c.path === path)) return;
+      if (cells.find((c) => c.cell === cell && c.path === path)) return;
       cells.push({ cell, path });
       find(cell.getAtPath(path), cell);
     } else if (Array.isArray(binding)) {
@@ -350,11 +365,12 @@ export function compactifyPaths(entries: DocLink[]): DocLink[] {
     for (let i = 0; i < paths.length; i++) {
       const earlier = paths.slice(0, i);
       if (
-        earlier.some(path =>
-          path.every((key, index) => key === paths[i][index]),
+        earlier.some((path) =>
+          path.every((key, index) => key === paths[i][index])
         )
-      )
+      ) {
         continue;
+      }
       result.push({ cell, path: paths[i] });
     }
   }
@@ -376,9 +392,9 @@ export function transformToCells(
 ): any {
   if (isQueryResultForDereferencing(value)) {
     const ref = followCellReferences(getDocLinkOrThrow(value));
-    if (cell === ref.cell)
+    if (cell === ref.cell) {
       return transformToCells(cell, cell.getAtPath(ref.path), log);
-    else return ref.cell.asCell(ref.path, log);
+    } else return ref.cell.asCell(ref.path, log);
   } else if (isAlias(value)) {
     const ref = followCellReferences(followAliases(value, cell, log), log);
     return ref.cell.asCell(ref.path, log);
@@ -391,17 +407,18 @@ export function transformToCells(
     return value;
   }
 
-  if (typeof value === "object" && value !== null)
-    if (Array.isArray(value))
-      return value.map(value => transformToCells(cell, value, log));
-    else
+  if (typeof value === "object" && value !== null) {
+    if (Array.isArray(value)) {
+      return value.map((value) => transformToCells(cell, value, log));
+    } else {
       return Object.fromEntries(
         Object.entries(value).map(([key, value]) => [
           key,
           transformToCells(cell, value, log),
         ]),
       );
-  else return value;
+    }
+  } else return value;
 }
 
 /**
@@ -479,14 +496,13 @@ export function normalizeToCells(
       if (!(isDoc(item) || isDocLink(item) || isAlias(item) || isCell(item))) {
         // TODO: Should this depend on the value if there is no id provided?
         // This is probably generating extra churn on ids.
-        itemId =
-          typeof item === "object" && item !== null && "id" in item
-            ? createRef({ id: item.id }, { parent: cause })
-            : createRef(value[i], {
-                parent: cause,
-                index: i,
-                preceeding: preceedingItemId,
-              });
+        itemId = typeof item === "object" && item !== null && "id" in item
+          ? createRef({ id: item.id }, { parent: cause })
+          : createRef(value[i], {
+            parent: cause,
+            index: i,
+            preceeding: preceedingItemId,
+          });
         const different = normalizeToCells(
           parentCell,
           value[i],
@@ -573,18 +589,17 @@ export function isEqualCellReferences(a: DocLink, b: DocLink): boolean {
 
 export function containsOpaqueRef(value: any): boolean {
   if (isOpaqueRef(value)) return true;
-  if (typeof value === "object" && value !== null)
+  if (typeof value === "object" && value !== null) {
     return Object.values(value).some(containsOpaqueRef);
+  }
   return false;
 }
 
 export function deepCopy(value: any): any {
   if (isDoc(value) || isCell(value)) return value;
-  if (typeof value === "object" && value !== null)
-    return Array.isArray(value)
-      ? value.map(deepCopy)
-      : Object.fromEntries(
-          Object.entries(value).map(([key, value]) => [key, deepCopy(value)]),
-        );
-  else return value;
+  if (typeof value === "object" && value !== null) {
+    return Array.isArray(value) ? value.map(deepCopy) : Object.fromEntries(
+      Object.entries(value).map(([key, value]) => [key, deepCopy(value)]),
+    );
+  } else return value;
 }

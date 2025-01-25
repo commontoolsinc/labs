@@ -1,4 +1,4 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   UI,
@@ -10,13 +10,8 @@ import {
   str,
   createJsonSchema,
   cell,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import { z } from "zod";
-import { truncateAsciiArt } from "../loader.js";
-
-const stringify = lift(({ obj }) => {
-  return JSON.stringify(obj, null, 2);
-});
 
 const tap = lift(x => {
   console.log(x, JSON.stringify(x, null, 2));
@@ -103,12 +98,6 @@ const grabSuggestions = lift<{ result?: string }, Suggestion[]>(
       return [];
     }
     return parsedData.data;
-  },
-);
-
-const getSuggestion = lift(
-  ({ suggestions, index }: { suggestions: Suggestion[]; index: number }) => {
-    return suggestions[index] || { behaviour: "", prompt: "" };
   },
 );
 
@@ -303,25 +292,6 @@ const grabHTML = lift<{ result?: string }, string | undefined>(({ result }) => {
   return html;
 });
 
-const tail = lift<
-  { pending: boolean; partial?: string; lines: number },
-  string
->(({ pending, partial, lines }) => {
-  if (!partial || !pending) {
-    return "";
-  }
-  return partial.split("\n").slice(-lines).join("\n");
-});
-
-const dots = lift<{ pending: boolean; partial?: string }, string>(
-  ({ pending, partial }) => {
-    if (!partial || !pending) {
-      return "";
-    }
-    return truncateAsciiArt(partial.length / 3.0);
-  },
-);
-
 const progress = lift<{ pending: boolean; partial?: string }, number>(
   ({ pending, partial }) => {
     if (!partial || !pending) {
@@ -330,50 +300,6 @@ const progress = lift<{ pending: boolean; partial?: string }, number>(
     return (partial.length - responsePrefill.length) / 2048.0;
   },
 );
-
-const buildTransformPrompt = lift(({ prompt, data }) => {
-  let fullPrompt = prompt;
-  if (data) {
-    fullPrompt += `\n\nHere's the previous JSON for reference:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``;
-  }
-
-  return {
-    messages: [fullPrompt, "```json\n"],
-    system: `Transform JSON document  as needed for the user to accomplish their goal, respond within a json block , e.g.
-\`\`\`json
-...
-\`\`\`
-
-No field can be set to null or undefined.`,
-    stop: "```",
-  };
-});
-
-const mostRelevantFields = lift(({ prompt, schema }) => {
-  let fullPrompt = prompt;
-  if (schema) {
-    fullPrompt += `\n\n<schema>\n\`\`\`json\n${JSON.stringify(schema, null, 2)}\n</schema>\`\`\``;
-  }
-
-  return {
-    messages: [fullPrompt, "```json\n"],
-    system: `Filter this JSON schema to include only the fields relevant to the user's task. Do not restructure or change the schema other than removing irrelevant details. However, if there is no current schema at all, imagine one. Respond with a valid JSON schema.`,
-    stop: "```",
-  };
-});
-
-const grabKeywords = lift<{ result?: string }, any>(({ result }) => {
-  if (!result) {
-    return [];
-  }
-  const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
-  if (!jsonMatch) {
-    console.error("No JSON found in text:", result);
-    return [];
-  }
-  let rawData = JSON.parse(jsonMatch[1]);
-  return rawData;
-});
 
 const consoleLogHandler = handler<
   { detail: any },

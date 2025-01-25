@@ -1,6 +1,6 @@
 // This file is setting up example data
 
-import { NAME, Recipe, Module, TYPE, UI } from "@commontools/common-builder";
+import { NAME, Recipe, Module, TYPE, UI } from "@commontools/builder";
 import {
   addModuleByRef,
   addRecipe,
@@ -22,7 +22,7 @@ import {
   run,
   getRecipeSpec,
   getRecipeName,
-} from "@commontools/common-runner";
+} from "@commontools/runner";
 import { createStorage } from "./storage.js";
 import * as allRecipes from "./recipes/index.js";
 import { buildRecipe } from "./localBuild.js";
@@ -30,44 +30,6 @@ import { buildRecipe } from "./localBuild.js";
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.jsx";
 import "./recipes/playlist.jsx";
-
-// import FetchExample from "./recipes/fetcher.jsx";
-import FetchService from "./effects/fetch.js";
-import GmailService from "./effects/gmail.js";
-import { refer, UI as ViewService } from "@commontools/common-system";
-
-import * as helloWorld from "./spells/01_helloWorld.jsx";
-import * as counter from "./spells/02_counter.jsx";
-import * as desugared from "./spells/03_desugared.jsx";
-import * as tamagotchi from "./spells/04_tamagotchi.jsx";
-import * as readingList from "./spells/05_readingList.jsx";
-import * as chat from "./spells/06_chat.jsx";
-import * as sharedTags from "./spells/07_sharedTags.jsx";
-import * as workbench from "./spells/08_workbench.jsx";
-import * as importer from "./spells/09_importer.jsx";
-import { composed } from "./spells/10_composed.jsx";
-import github from "./spells/11_github.jsx";
-import form from "./spells/13_form.jsx";
-import * as helloWorldWithLikes from "./spells/12_helloWorldWithLikes.jsx";
-import * as llmChat from "./spells/14_llm_chat.jsx";
-import * as countdown from "./spells/countdown.jsx";
-import * as themeable from "./spells/themeable.jsx";
-import TimerService from "./effects/timer.js";
-import { settings } from "./spells/settings.jsx";
-import { emailComposer } from "./spells/15_email_composer.jsx";
-import { addressBook } from "./spells/16_contacts.jsx";
-import { formTest } from "./spells/17_complex_form.jsx";
-import { musicLibrary } from "./spells/18_music.jsx";
-import { spellManager } from "./spells/19_process_manager.jsx";
-import { shaderManager } from "./spells/20_shader_editor.jsx";
-import { schemaGenerator } from "./spells/21_model_builder.jsx";
-import { search } from "./spells/22_search.jsx";
-import { notebook } from "./spells/23_notes.jsx";
-import { quotedb } from "./spells/24_quotes.jsx";
-import { activity } from "./spells/25_activity.jsx";
-import { activityRef } from "./sugar/activity.js";
-import { stackLayout } from "./spells/26_stacks.jsx";
-import { canvasLayout } from "./spells/27_canvas.jsx";
 
 export type Charm = {
   [NAME]?: string;

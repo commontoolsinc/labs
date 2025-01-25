@@ -1,4 +1,4 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   NAME,
@@ -6,7 +6,7 @@ import {
   handler,
   lift,
   llm,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 

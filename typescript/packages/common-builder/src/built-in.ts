@@ -1,5 +1,5 @@
-import { lift, createNodeFactory } from "./module.js";
-import { Opaque, OpaqueRef, NodeFactory } from "./types.js";
+import { createNodeFactory, lift } from "./module.js";
+import type { NodeFactory, Opaque, OpaqueRef } from "./types.js";
 
 export const llm = createNodeFactory({
   type: "ref",

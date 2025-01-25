@@ -4,7 +4,7 @@ import {
   handler,
   lift,
   recipe,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 
 export type Request = Parameters<typeof fetchData>[0];
 
@@ -15,7 +15,7 @@ export const resource = recipe<
 >("Resource", ({ request }) => {
   const id = cell(0);
   const payload = lift(
-    ({ id, request }: { id: number; request: Request }) => request,
+    ({ id, request }: { id: number; request: Request }) => { console.log(id); return request},
   );
   const refetch = handler((_: unknown, state: { id: number }) => {
     state.id++;

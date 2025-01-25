@@ -1,16 +1,9 @@
 import ts from "typescript";
-import * as commonHtml from "@commontools/common-html";
-import * as commonBuilder from "@commontools/common-builder";
-import * as commonSystem from "@commontools/common-system";
+import * as commonHtml from "@commontools/html";
+import * as commonBuilder from "@commontools/builder";
 import * as zod from "zod";
 import * as zodToJsonSchema from "zod-to-json-schema";
 
-import * as collectionSugar from "./sugar/build.js";
-import * as querySugar from "./sugar/query.js";
-import * as eventSugar from "./sugar/event.js";
-import * as zodSugar from "./sugar/zod.js";
-import * as sugar from "./sugar.js";
-import * as spellUtil from "./spells/spell.jsx";
 import * as merkleReference from "merkle-reference";
 
 // NOTE(ja): this isn't currently doing typechecking, but it could...
@@ -103,24 +96,10 @@ export const tsToExports = async (
       return localImports[moduleName];
     }
     switch (moduleName) {
-      case "../sugar/build.js":
-        return collectionSugar;
-      case "../sugar/query.js":
-        return querySugar;
-      case "../sugar/event.js":
-        return eventSugar;
-      case "../sugar/zod.js":
-        return zodSugar;
-      case "../sugar.js":
-        return sugar;
-      case "./spell.jsx":
-        return spellUtil;
-      case "@commontools/common-html":
+      case "@commontools/html":
         return commonHtml;
-      case "@commontools/common-builder":
+      case "@commontools/builder":
         return commonBuilder;
-      case "@commontools/common-system":
-        return commonSystem;
       case "zod":
         return zod;
       case "merkle-reference":

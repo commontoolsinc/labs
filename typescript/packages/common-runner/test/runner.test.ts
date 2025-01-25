@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Recipe, TYPE } from "@commontools/common-builder";
+import type { Recipe } from "@commontools/builder";
 import { run, stop } from "../src/runner.js";
 import { idle } from "../src/scheduler.js";
 import { getDoc } from "../src/cell.js";

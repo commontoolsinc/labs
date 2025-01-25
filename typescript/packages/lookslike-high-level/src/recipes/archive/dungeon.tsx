@@ -1,11 +1,11 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   handler,
   UI,
   NAME,
   navigateTo,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import { iframe } from "../iframe.js";
 
 type Position = { x: number; y: number };

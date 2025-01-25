@@ -1,5 +1,5 @@
-import { h } from "@commontools/common-html";
-import { recipe, lift, UI } from "@commontools/common-builder";
+import { h } from "@commontools/html";
+import { recipe, lift, UI } from "@commontools/builder";
 import { addSuggestion, description } from "../suggestions.js";
 import { type TodoItem } from "./todo-list.jsx";
 

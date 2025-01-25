@@ -1,4 +1,4 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   lift,
   UI,
@@ -6,7 +6,7 @@ import {
   render,
   NAME,
   cell,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import { z } from "zod";
 
 export const counter = lift<{ count: number }>(state => {

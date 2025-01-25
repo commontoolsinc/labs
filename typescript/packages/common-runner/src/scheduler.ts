@@ -1,6 +1,6 @@
-import { DocImpl, DocLink, ReactivityLog } from "./cell.js";
+import type { DocImpl, DocLink, ReactivityLog } from "./cell.js";
 import { compactifyPaths, pathAffected } from "./utils.js";
-import { type Cancel } from "./cancel.js";
+import type { Cancel } from "./cancel.js";
 
 export type Action = (log: ReactivityLog) => any;
 export type EventHandler = (event: any) => any;
@@ -30,7 +30,7 @@ export function schedule(action: Action, log: ReactivityLog): Cancel {
 }
 
 export function unschedule(fn: Action): void {
-  cancels.get(fn)?.forEach(cancel => cancel());
+  cancels.get(fn)?.forEach((cancel) => cancel());
   cancels.delete(fn);
   dependencies.delete(fn);
   pending.delete(fn);
@@ -42,7 +42,7 @@ export async function run(action: Action): Promise<any> {
 
   if (running) await running;
 
-  running = new Promise(async resolve => {
+  running = new Promise(async (resolve) => {
     try {
       const result = await action(log);
 
@@ -59,7 +59,7 @@ export async function run(action: Action): Promise<any> {
               queueExecution();
               pending.add(action);
             }
-          }),
+          })
         ),
       );
 
@@ -75,7 +75,7 @@ export async function run(action: Action): Promise<any> {
 }
 
 export async function idle() {
-  return new Promise<void>(async resolve => {
+  return new Promise<void>(async (resolve) => {
     if (running) await running;
     if (pending.size === 0 && eventQueue.length === 0) resolve();
     idlePromises.push(resolve);
@@ -140,15 +140,15 @@ async function execute() {
   // scheduled actions.
   pending.clear();
   dirty.clear();
-  for (const fn of order) cancels.get(fn)?.forEach(cancel => cancel());
+  for (const fn of order) cancels.get(fn)?.forEach((cancel) => cancel());
 
   // Now run all functions. This will create new listeners to mark cells dirty
   // and schedule the next run.
   for (const fn of order) {
     loopCounter.set(fn, (loopCounter.get(fn) || 0) + 1);
-    if (loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN)
+    if (loopCounter.get(fn)! > MAX_ITERATIONS_PER_RUN) {
       handleError(new Error("Too many iterations"));
-    else await run(fn);
+    } else await run(fn);
   }
 
   if (pending.size === 0 && eventQueue.length === 0) {
@@ -195,13 +195,13 @@ function topologicalSort(
         const { writes } = dependencies.get(action)!;
         for (const write of writes) {
           if (
-            Array.from(relevantActions).some(relevantAction =>
+            Array.from(relevantActions).some((relevantAction) =>
               dependencies
                 .get(relevantAction)!
                 .reads.some(
                   ({ cell, path }) =>
                     cell === write.cell && pathAffected(write.path, path),
-                ),
+                )
             )
           ) {
             relevantActions.add(action);
@@ -255,7 +255,7 @@ function topologicalSort(
     if (queue.length === 0) {
       // Handle cycle: choose an unvisited node with the lowest in-degree
       const unvisitedAction = Array.from(relevantActions)
-        .filter(action => !visited.has(action))
+        .filter((action) => !visited.has(action))
         .reduce((a, b) => (inDegree.get(a)! < inDegree.get(b)! ? a : b));
       queue.push(unvisitedAction);
     }

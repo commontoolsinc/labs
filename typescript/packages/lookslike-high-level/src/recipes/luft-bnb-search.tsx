@@ -1,4 +1,4 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   lift,
@@ -9,7 +9,7 @@ import {
   navigateTo,
   UI,
   NAME,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import { addSuggestion, description } from "../suggestions.js";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
@@ -224,11 +224,9 @@ const computeBookingDatesFromEvent = lift(({ date }) => {
 
 const describeFirstResult = lift(({ places, startDate, endDate }) => {
   return places && places.length
-    ? `${places[0].propertyType} ${startDate}-${endDate} in ${
-        places[0].location
-      }. ${"⭐".repeat(Math.round(places[0].rating))} (${places[0].rating}). $${
-        places[0].pricePerNight
-      } per night`
+    ? `${places[0].propertyType} ${startDate}-${endDate} in ${places[0].location
+    }. ${"⭐".repeat(Math.round(places[0].rating))} (${places[0].rating}). $${places[0].pricePerNight
+    } per night`
     : "Searching...";
 });
 
