@@ -1,27 +1,27 @@
 import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
+import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 
 export type CommonAudioRecording = {
-  id: string;
-  blob: Blob;
-  transcription?: string;
+    id: string;
+    blob: Blob;
+    transcription?: string;
 };
 
 export class CommonAudioRecordingEvent extends Event {
-  detail: CommonAudioRecording;
+    detail: CommonAudioRecording;
 
-  constructor(detail: CommonAudioRecording) {
-    super("common-audio-recording", { bubbles: true, composed: true });
-    this.detail = detail;
-  }
+    constructor(detail: CommonAudioRecording) {
+        super("common-audio-recording", { bubbles: true, composed: true });
+        this.detail = detail;
+    }
 }
 
 @customElement("common-audio-recorder")
 export class CommonAudioRecorderElement extends LitElement {
-  static override styles = [
-    baseStyles,
-    css`
+    static override styles = [
+        baseStyles,
+        css`
       :host {
         display: block;
       }
@@ -37,101 +37,100 @@ export class CommonAudioRecorderElement extends LitElement {
         border-radius: var(--radius);
       }
     `,
-  ];
+    ];
 
-  accessor transcribe: boolean = false;
-  accessor url: string = "/api/ai/voice/transcribe";
+    @property({ type: Boolean })
+    transcribe = false;
 
-  private mediaRecorder?: MediaRecorder;
-  private audioChunks: Blob[] = [];
-  private isRecording = false;
+    @property({ type: String })
+    url = "/api/ai/voice/transcribe";
 
-  private async runTranscription(audioBlob: Blob) {
-    if (!this.transcribe || !this.url) return;
+    private mediaRecorder?: MediaRecorder;
+    private audioChunks: Blob[] = [];
+    private isRecording = false;
 
-    try {
-      const response = await fetch(this.url, {
-        method: "POST",
-        body: audioBlob,
-      });
-      const data = await response.json();
+    private async runTranscription(audioBlob: Blob) {
+        if (!this.transcribe || !this.url) return;
 
-      this.dispatchEvent(
-        new CommonAudioRecordingEvent({
-          id: this.id,
-          blob: audioBlob,
-          transcription: data.transcription,
-        }),
-      );
-    } catch (error) {
-      console.error("Transcription error:", error);
-      this.dispatchEvent(
-        new CustomEvent("common-error", {
-          detail: { id: this.id, error, blob: audioBlob },
-        }),
-      );
+        try {
+            const response = await fetch(this.url, {
+                method: "POST",
+                body: audioBlob,
+            });
+            const data = await response.json();
+
+            this.dispatchEvent(new CommonAudioRecordingEvent({
+                id: this.id,
+                blob: audioBlob,
+                transcription: data.transcription
+            }));
+        } catch (error) {
+            console.error("Transcription error:", error);
+            this.dispatchEvent(
+                new CustomEvent("common-error", {
+                    detail: { id: this.id, error, blob: audioBlob },
+                }),
+            );
+        }
     }
-  }
 
-  private async startRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-      });
-      this.mediaRecorder = new MediaRecorder(stream);
+    private async startRecording() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: true,
+            });
+            this.mediaRecorder = new MediaRecorder(stream);
 
-      this.mediaRecorder.ondataavailable = (event) => {
-        this.audioChunks.push(event.data);
-      };
+            this.mediaRecorder.ondataavailable = (event) => {
+                this.audioChunks.push(event.data);
+            };
 
-      this.mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(this.audioChunks, {
-          type: "audio/wav",
-        });
-        this.dispatchEvent(
-          new CommonAudioRecordingEvent({
-            id: this.id,
-            blob: audioBlob,
-          }),
-        );
-        await this.runTranscription(audioBlob);
-      };
+            this.mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(this.audioChunks, {
+                    type: "audio/wav",
+                });
+                this.dispatchEvent(new CommonAudioRecordingEvent({
+                    id: this.id,
+                    blob: audioBlob
+                }));
+                await this.runTranscription(audioBlob);
+            };
 
-      this.audioChunks = [];
-      this.mediaRecorder.start();
-      this.isRecording = true;
-      this.requestUpdate();
-    } catch (error) {
-      console.error("Error accessing microphone:", error);
-      this.dispatchEvent(new CustomEvent("common-error", { detail: error }));
+            this.audioChunks = [];
+            this.mediaRecorder.start();
+            this.isRecording = true;
+            this.requestUpdate();
+        } catch (error) {
+            console.error("Error accessing microphone:", error);
+            this.dispatchEvent(new CustomEvent("common-error", { detail: error }));
+        }
     }
-  }
 
-  private stopRecording() {
-    if (this.mediaRecorder) {
-      this.mediaRecorder.stop();
-      this.mediaRecorder.stream.getTracks().forEach((track) => track.stop());
-      this.isRecording = false;
-      this.requestUpdate();
+    private stopRecording() {
+        if (this.mediaRecorder) {
+            this.mediaRecorder.stop();
+            this.mediaRecorder.stream.getTracks().forEach((track) =>
+                track.stop()
+            );
+            this.isRecording = false;
+            this.requestUpdate();
+        }
     }
-  }
 
-  override render() {
-    return html`
-      <div @click=${this.startRecording} class=${
-      this.isRecording ? "hidden" : ""
-    }>
+    override render() {
+        return html`
+      <div @click=${this.startRecording} class=${this.isRecording ? "hidden" : ""
+            }>
         <slot name="start">
           <button>Start Recording</button>
         </slot>
       </div>
-      <div @click=${this.stopRecording} class=${
-      !this.isRecording ? "hidden" : ""
-    }>
+      <div @click=${this.stopRecording} class=${!this.isRecording ? "hidden" : ""
+            }>
         <slot name="stop">
           <button>Finish Recording</button>
         </slot>
       </div>
     `;
-  }
+    }
 }

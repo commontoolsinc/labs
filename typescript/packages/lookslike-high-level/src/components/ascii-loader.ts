@@ -51,8 +51,6 @@ export class CommonAsciiLoader extends LitElement {
     const z = new Array(width * height).fill(0);
     const luminanceChars = "@$#*!=;:~-,.";
 
-    const R1 = 1;
-    const R2 = 2;
     const K2 = 7;
 
     const cosA = Math.cos(this.A),

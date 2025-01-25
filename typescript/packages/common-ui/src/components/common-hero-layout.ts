@@ -1,4 +1,4 @@
-import { css, html, LitElement } from "lit";
+import { LitElement, html, css } from "lit";
 import { customElement } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 
@@ -33,7 +33,7 @@ export class CommonHeroLayoutElement extends LitElement {
       grid-area: secondary;
       overflow-y: auto;
     }
-    `,
+    `
   ];
 
   override render() {

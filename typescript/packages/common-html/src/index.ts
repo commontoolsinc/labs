@@ -1,15 +1,15 @@
 export {
   view,
-  View,
-  Context,
+  type View,
+  type Context,
   parse,
-  ParseError,
+  type ParseError,
   vnode,
-  VNode,
+  type VNode,
   binding,
-  Binding,
+  type Binding,
   section,
-  Section,
+  type Section,
 } from "./view.js";
 export { html } from "./html.js";
 export { render, setNodeSanitizer, setEventSanitizer } from "./render.js";

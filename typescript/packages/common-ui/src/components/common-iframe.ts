@@ -1,23 +1,23 @@
-import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
+import { LitElement, html, css } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
 import {
-  type Action,
-  addAction,
   Cell,
-  type ReactivityLog,
+  addAction,
   removeAction,
+  type Action,
+  type ReactivityLog,
 } from "@commontools/runner";
-import { createRef, Ref, ref } from "lit/directives/ref.js";
+import { Ref, createRef, ref } from "lit/directives/ref.js";
 
 @customElement("common-iframe")
 export class CommonIframeElement extends LitElement {
-  accessor src: string = "";
+  @property({ type: String }) src = "";
   // HACK: The UI framework already translates the top level cell into updated
   // properties, but we want to only have to deal with one type of listening, so
   // we'll add a an extra level of indirection with the "context" property.
-  accessor context: Cell<any> | any = undefined;
+  @property({ type: Object }) context?: Cell<any> | any;
 
-  private errorDetails: {
+  @state() private errorDetails: {
     message: string;
     source: string;
     lineno: number;
@@ -97,17 +97,19 @@ export class CommonIframeElement extends LitElement {
           : this.context?.[key];
         // TODO: This might cause infinite loops, since the data can be a graph.
         console.log("readResponse", key, value);
-        const copy = typeof value === "string" && value.includes("{")
-          ? JSON.parse(value)
-          : JSON.parse(JSON.stringify(value));
+        const copy =
+          typeof value === "string" && value.includes("{")
+            ? JSON.parse(value)
+            : JSON.parse(JSON.stringify(value));
         this.iframeRef.value?.contentWindow?.postMessage(
           { type: "readResponse", key, value: copy },
           "*",
         );
       } else if (type === "write" && this.context) {
-        const updated = typeof value === "string" && value.includes("{")
-          ? JSON.parse(value)
-          : JSON.parse(JSON.stringify(value));
+        const updated =
+          typeof value === "string" && value.includes("{")
+            ? JSON.parse(value)
+            : JSON.parse(JSON.stringify(value));
         console.log("write", key, updated);
         this.context.getAsQueryResult()[key] = updated;
       } else if (type === "subscribe" && this.context) {
@@ -134,9 +136,8 @@ export class CommonIframeElement extends LitElement {
   private notifySubscribers(key: string, value: any) {
     console.log("notifySubscribers", key, value);
     // TODO: This might cause infinite loops, since the data can be a graph.
-    const copy = value !== undefined
-      ? JSON.parse(JSON.stringify(value))
-      : undefined;
+    const copy =
+      value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
     this.iframeRef.value?.contentWindow?.postMessage(
       { type: "update", key, value: copy },
       "*",
@@ -182,8 +183,7 @@ export class CommonIframeElement extends LitElement {
         style="border: none;"
         @load=${this.handleLoad}
       ></iframe>
-      ${
-      this.errorDetails
+      ${this.errorDetails
         ? html`
             <div class="error-modal">
               <div class="error-content">
@@ -200,8 +200,7 @@ export class CommonIframeElement extends LitElement {
               </div>
             </div>
           `
-        : ""
-    }
+        : ""}
     `;
   }
 }

@@ -1,4 +1,4 @@
-import { css, html, LitElement } from "lit";
+import { LitElement, html, css } from "lit";
 import { customElement } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 
@@ -28,7 +28,7 @@ export class CommonHgroup extends LitElement {
         grid-template-columns: 1fr 1fr 1fr 1fr;
       }
     }
-    `,
+    `
   ];
 
   override render() {

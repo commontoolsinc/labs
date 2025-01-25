@@ -1,5 +1,5 @@
-import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
+import { LitElement, html, css } from "lit";
+import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 
 export type Todo = {
@@ -75,9 +75,9 @@ export class CommonTodoElement extends LitElement {
     `,
   ];
 
-  accessor checked: boolean = false;
-  accessor placeholder: string = "";
-  accessor value: string = "";
+  @property({ type: Boolean }) checked = false;
+  @property({ type: String }) placeholder = "";
+  @property({ type: String }) value = "";
 
   override render() {
     const oncheck = (event: Event) => {
@@ -89,7 +89,7 @@ export class CommonTodoElement extends LitElement {
           id: this.id,
           value: this.value,
           checked,
-        }),
+        })
       );
     };
 
@@ -101,8 +101,8 @@ export class CommonTodoElement extends LitElement {
         new CommonTodoInputEvent({
           id: this.id,
           value: this.value,
-          checked: this.checked,
-        }),
+          checked: this.checked
+        })
       );
     };
 

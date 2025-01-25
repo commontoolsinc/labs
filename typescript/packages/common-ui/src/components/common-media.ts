@@ -1,5 +1,5 @@
-import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
+import { LitElement, html, css } from "lit";
+import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 
 @customElement("common-media")
@@ -100,11 +100,11 @@ export class CommonMediaElement extends LitElement {
       height: var(--img-height);
       width: var(--img-width);
     }
-    `,
+    `
   ];
 
-  accessor src: string = "";
-  accessor thumbsize: string = "md";
+  @property({ type: String }) src = "";
+  @property({ type: String }) thumbsize = "md";
 
   override render() {
     return html`

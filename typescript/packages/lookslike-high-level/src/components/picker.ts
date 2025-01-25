@@ -103,7 +103,7 @@ export default class PickerElement extends LitElement {
   override render() {
     const showDropdown = this.hasFocus;
     const items = this.filteredItems;
-    const selectedItem = this.items.find(item => item.value === this.value);
+    // const selectedItem = this.items.find(item => item.value === this.value);
 
     return html`
       <div class="picker">

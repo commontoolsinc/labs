@@ -1,4 +1,4 @@
-import { css, html, LitElement } from "lit";
+import { LitElement, html, css } from "lit";
 import { customElement } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 
@@ -34,7 +34,7 @@ export class CommonButtonElement extends LitElement {
       text-wrap: nowrap;
       width: 100%;
     }
-    `,
+    `
   ];
 
   override render() {

@@ -23,6 +23,7 @@ export * as CommonPill from "./common-pill.js";
 export * as CommonHscroll from "./common-hscroll.js";
 export * as CommonHgroup from "./common-hgroup.js";
 export * as CommonGrid from "./common-grid.js";
+export * as shoelace from "./shoelace/index.js";
 export * as style from "./style.js";
 export * as CommonAudioRecorder from "./common-audio-recorder.js";
 export * as CommonForm from "./common-form.js";

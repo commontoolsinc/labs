@@ -1,5 +1,5 @@
-import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
+import { LitElement, html, css } from "lit";
+import {customElement} from "lit/decorators.js";
 
 @customElement("common-screen")
 export class CommonScreenElement extends LitElement {

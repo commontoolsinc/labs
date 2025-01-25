@@ -1,5 +1,5 @@
-import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
+import { LitElement, html, css } from "lit";
+import { customElement, property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 import {
   readSuggestion,
@@ -7,6 +7,7 @@ import {
   suggestionTemplate,
 } from "./common-suggestion.js";
 import { getId } from "./identifiable.js";
+
 
 export class SelectSuggestionEvent extends Event {
   detail: Suggestion;
@@ -35,10 +36,10 @@ export class CommonSuggestionsElement extends LitElement {
   }
   `;
 
-  accessor suggestions: Array<Suggestion> = [];
-  accessor limit: number = 3;
-  accessor gap: string = "sm";
-  accessor pad: string = "none";
+  @property({ type: Array }) suggestions: Array<Suggestion> = [];
+  @property({ type: Number }) limit = 3;
+  @property({ type: String }) gap = "sm";
+  @property({ type: String }) pad = "none";
 
   override render() {
     const onclick = (event: Event) => {

@@ -12,7 +12,6 @@ import {
   cell,
 } from "@commontools/builder";
 import { z } from "zod";
-import { truncateAsciiArt } from "../loader.js";
 
 const tap = lift(x => {
   console.log(x, JSON.stringify(x, null, 2));

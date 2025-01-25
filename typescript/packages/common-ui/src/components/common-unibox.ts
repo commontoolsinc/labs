@@ -1,5 +1,5 @@
-import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
+import { LitElement, html, css } from "lit";
+import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 
 @customElement("common-unibox")
@@ -19,18 +19,18 @@ export class CommonUniboxElement extends LitElement {
     `,
   ];
 
-  accessor value: string = "";
-  accessor placeholder: string = "";
-  accessor label: string = "Search";
+  @property({ type: String }) value = "";
+  @property({ type: String }) placeholder = "";
+  @property({ type: String }) label = "Search";
 
   private handleClick(e: Event & { shiftKey: boolean }) {
-    const event = new CustomEvent("submit", {
+    const event = new CustomEvent('submit', {
       bubbles: true,
       composed: true,
-      detail: { value: this.value, shiftHeld: e.shiftKey },
+      detail: { value: this.value, shiftHeld: e.shiftKey }
     });
     this.dispatchEvent(event);
-    this.value = "";
+    this.value = '';
   }
 
   private handleChange(event: Event) {
@@ -39,7 +39,7 @@ export class CommonUniboxElement extends LitElement {
   }
 
   private handleEnter(event: KeyboardEvent) {
-    if (event.key === "Enter") {
+    if (event.key === 'Enter') {
       this.handleClick(event);
     }
   }

@@ -1,5 +1,5 @@
-import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
+import { LitElement, html, css } from "lit";
+import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 
 export type CommonTextarea = {
@@ -81,10 +81,10 @@ export class CommonTextareaElement extends LitElement {
     `,
   ];
 
-  accessor value: string = "";
-  accessor placeholder: string = "";
-  accessor appearance: string = "default";
-  accessor rows: number = 3;
+  @property({ type: String }) value = "";
+  @property({ type: String }) placeholder = "";
+  @property({ type: String }) appearance = "default";
+  @property({ type: Number }) rows = 3;
 
   override render() {
     const oninput = (event: Event) => {

@@ -1,8 +1,8 @@
-import { css, html, LitElement } from "lit";
-import { customElement } from "lit/decorators.js";
-import { repeat } from "lit/directives/repeat.js";
+import { LitElement, html, css } from 'lit';
+import { customElement, property } from 'lit/decorators.js';
+import { repeat } from 'lit/directives/repeat.js';
 
-@customElement("common-dict")
+@customElement('common-dict')
 export class CommonDictElement extends LitElement {
   static override styles = css`
     :host {
@@ -17,7 +17,8 @@ export class CommonDictElement extends LitElement {
     }
   `;
 
-  accessor records: Record<string, string> = {};
+  @property({ type: Object })
+  records: Record<string, string> = {};
 
   override render() {
     const records = repeat(Object.entries(this.records), ([key, value]) => {
