@@ -824,12 +824,15 @@ packages:
     resolution: {integrity: sha512-aRwf9Bh9g+x206/pNN9Ty6DUZA4NQJuK9ET0zUA10223aoxhB+p6/GG01vmhB9DU53Nukj5nMBy5AxJQ/6vmLQ==}
     engines: {node: '>=14.17.0'}
 
+<<<<<<< HEAD
   '@tootallnate/quickjs-emscripten@0.23.0':
     resolution: {integrity: sha512-C5Mc6rdnsaJDjO3UpGW/CQTHtCKaYlScZTly4JIu97Jxo/odCiH0ITnDXSJPTOrEKk/ycSZ0AOgTmkDtkOsvIA==}
 
   '@types/accepts@1.3.7':
     resolution: {integrity: sha512-Pay9fq2lM2wXPWbteBsRAGiWH2hig4ZE2asK+mm7kUzlxRTfL961rj89I6zV/E3PcIkDqyuBEcMxFT7rccugeQ==}
 
+=======
+>>>>>>> 8342ac00 (revert most of the changes for deno to common-ui)
   '@types/argparse@1.0.38':
     resolution: {integrity: sha512-ebDJ9b0e702Yr7pWgB0jzm+CX4Srzz8RcXtLJDJB+BSccqMa36uyH/zUsSYao5+BD1ytv3k3rPYCq4mAE1hsXA==}
 
@@ -998,6 +1001,7 @@ packages:
   '@types/node@22.10.10':
     resolution: {integrity: sha512-X47y/mPNzxviAGY5TcYPtYL8JsY3kAq2n8fMmKoRCxq/c4v4pyGNCzM2R6+M5/umG4ZfHuT+sgqDYqWc9rJ6ww==}
 
+<<<<<<< HEAD
   '@types/parse5@6.0.3':
     resolution: {integrity: sha512-SuT16Q1K51EAVPz1K29DJ/sXjhSQ0zjvsypYJ6tlwVsRV9jwW5Adq2ch8Dq8kDBCkYnELS7N7VNCSB5nC56t/g==}
 
@@ -1019,6 +1023,11 @@ packages:
   '@types/serve-static@1.15.7':
     resolution: {integrity: sha512-W8Ym+h8nhuRwaKPaDw34QUkwsGi6Rc4yYqvKFo5rm2FUEhCFbzVWrxXUxuKK8TASjWsysJY0nsmNCGhCOIsrOw==}
 
+=======
+  '@types/react@19.0.8':
+    resolution: {integrity: sha512-9P/o1IGdfmQxrujGbIMDyYaaCykhLKc0NGCtYcECNUr9UAaDe4gwvV9bR6tvd5Br1SG0j+PBpbKr2UYY8CwqSw==}
+
+>>>>>>> 8342ac00 (revert most of the changes for deno to common-ui)
   '@types/trusted-types@2.0.7':
     resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
 
@@ -1445,10 +1454,13 @@ packages:
   crelt@1.0.6:
     resolution: {integrity: sha512-VQ2MBenTq1fWZUH9DJNGti7kKv6EeAuYr3cLwxUWhIu1baTaXh4Ib5W2CqHVqib4/MqbYGJqiL3Zb8GJZr3l4g==}
 
+<<<<<<< HEAD
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
 
+=======
+>>>>>>> 8342ac00 (revert most of the changes for deno to common-ui)
   csstype@3.1.3:
     resolution: {integrity: sha512-M1uQkMl8rQK/szD0LNhtqxIPLpimGm8sOBwU7lLnCpSbTyY3yeU1Vc7l4KT5zT4s/yOxHH5O7tIuuLOCnLADRw==}
 
@@ -2454,6 +2466,7 @@ packages:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
 
+<<<<<<< HEAD
   puppeteer-core@23.11.1:
     resolution: {integrity: sha512-3HZ2/7hdDKZvZQ7dhhITOUg4/wOrDRjyK2ZBllRB0ZCOi9u0cwq1ACHDjBB+nX+7+kltHjQvBRdeY7+W0T+7Gg==}
     engines: {node: '>=18'}
@@ -2475,6 +2488,11 @@ packages:
     resolution: {integrity: sha512-8zGqypfENjCIqGhgXToC8aB2r7YrBX+AQAfIPs/Mlk+BtPTztOvTS01NRW/3Eh60J+a48lt8qsCzirQ6loCVfA==}
     engines: {node: '>= 0.8'}
 
+=======
+  qr-creator@1.0.0:
+    resolution: {integrity: sha512-C0cqfbS1P5hfqN4NhsYsUXePlk9BO+a45bAQ3xLYjBL3bOIFzoVEjs79Fado9u9BPBD3buHi3+vY+C8tHh4qMQ==}
+
+>>>>>>> 8342ac00 (revert most of the changes for deno to common-ui)
   react@19.0.0:
     resolution: {integrity: sha512-V8AVnmPIICiWpGfm6GLzCR/W5FXLchHop40W4nXBmdlEceh16rCN8O8LNWm5bh5XUX91fh7KpA+W0TgMKmgTpQ==}
     engines: {node: '>=0.10.0'}
@@ -3554,12 +3572,15 @@ snapshots:
       - '@floating-ui/utils'
       - '@types/react'
 
+<<<<<<< HEAD
   '@tootallnate/quickjs-emscripten@0.23.0': {}
 
   '@types/accepts@1.3.7':
     dependencies:
       '@types/node': 22.10.10
 
+=======
+>>>>>>> 8342ac00 (revert most of the changes for deno to common-ui)
   '@types/argparse@1.0.38': {}
 
   '@types/babel__code-frame@7.0.6': {}
@@ -3767,16 +3788,20 @@ snapshots:
     dependencies:
       undici-types: 6.20.0
 
+<<<<<<< HEAD
   '@types/parse5@6.0.3': {}
 
   '@types/qs@6.9.18': {}
 
   '@types/range-parser@1.2.7': {}
 
+=======
+>>>>>>> 8342ac00 (revert most of the changes for deno to common-ui)
   '@types/react@19.0.8':
     dependencies:
       csstype: 3.1.3
 
+<<<<<<< HEAD
   '@types/resolve@1.20.2': {}
 
   '@types/send@0.17.4':
@@ -3790,6 +3815,8 @@ snapshots:
       '@types/node': 22.10.10
       '@types/send': 0.17.4
 
+=======
+>>>>>>> 8342ac00 (revert most of the changes for deno to common-ui)
   '@types/trusted-types@2.0.7': {}
 
   '@types/ws@7.4.7':
@@ -4373,12 +4400,15 @@ snapshots:
 
   crelt@1.0.6: {}
 
+<<<<<<< HEAD
   cross-spawn@7.0.6:
     dependencies:
       path-key: 3.1.1
       shebang-command: 2.0.0
       which: 2.0.2
 
+=======
+>>>>>>> 8342ac00 (revert most of the changes for deno to common-ui)
   csstype@3.1.3: {}
 
   cytoscape-cose-bilkent@4.1.0(cytoscape@3.31.0):
@@ -5438,6 +5468,7 @@ snapshots:
 
   punycode@2.3.1: {}
 
+<<<<<<< HEAD
   puppeteer-core@23.11.1:
     dependencies:
       '@puppeteer/browsers': 2.6.1
@@ -5469,6 +5500,10 @@ snapshots:
       iconv-lite: 0.4.24
       unpipe: 1.0.0
 
+=======
+  qr-creator@1.0.0: {}
+
+>>>>>>> 8342ac00 (revert most of the changes for deno to common-ui)
   react@19.0.0: {}
 
   readdirp@4.1.1: {}
