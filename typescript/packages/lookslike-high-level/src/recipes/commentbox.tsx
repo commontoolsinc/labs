@@ -6,9 +6,9 @@ import {
   select,
   Spell,
   $
-} from "@commontools/common-builder";
-import { h } from "@commontools/common-html";
-import { doc } from "@commontools/common-runner";
+} from "@commontools/builder";
+import { h } from "@commontools/html";
+import { doc } from "@commontools/runner";
 
 type Meta = {
   category: string;

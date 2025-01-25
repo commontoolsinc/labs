@@ -1,7 +1,7 @@
-import { UI, NAME, lift, recipe } from "@commontools/common-builder";
+import { UI, NAME, lift, recipe } from "@commontools/builder";
 import * as z from "zod";
 import { jsonSchemaQuery } from "../query.js";
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 
 const stringify = lift(({ obj }) => {
   return JSON.stringify(obj, null, 2);

@@ -1,8 +1,8 @@
 import { css, html, LitElement } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
-import { style } from "@commontools/common-ui";
-import { render } from "@commontools/common-html";
+import { style } from "@commontools/ui";
+import { render } from "@commontools/html";
 import {
   addCharms,
   Charm,
@@ -23,11 +23,10 @@ import {
   getRecipe,
   idle,
   run,
-} from "@commontools/common-runner";
+} from "@commontools/runner";
 import { repeat } from "lit/directives/repeat.js";
 import { iframe } from "../recipes/iframe.js";
-import { search } from "../recipes/search.js";
-import { NAME, TYPE } from "@commontools/common-builder";
+import { NAME, TYPE } from "@commontools/builder";
 import { matchRoute, navigate } from "../router.js";
 import * as Schema from "../schema.js";
 import { buildRecipe } from "../localBuild.js";
@@ -258,12 +257,12 @@ export class CommonWindowManager extends LitElement {
       });
 
     const onSearchSubmit = (event: CustomEvent) => {
-      console.log("Search submitted:", event.detail.value);
-      this.searchOpen = false;
-      this.input = "";
-      runPersistent(search, {
-        search: event.detail.value,
-      }).then(charm => this.openCharm(charm));
+      console.log("FIXME - Search submitted but is unimplemented:", event.detail.value);
+      // this.searchOpen = false;
+      // this.input = "";
+      // runPersistent(search, {
+      //   search: event.detail.value,
+      // }).then(charm => this.openCharm(charm));
     };
 
     const onAiBoxSubmit = (event: CustomEvent) => {

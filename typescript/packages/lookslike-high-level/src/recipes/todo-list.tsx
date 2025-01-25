@@ -1,5 +1,5 @@
-import { h } from "@commontools/common-html";
-import { recipe, handler, UI, NAME } from "@commontools/common-builder";
+import { h } from "@commontools/html";
+import { recipe, handler, UI, NAME } from "@commontools/builder";
 import { z } from "zod";
 
 const TodoItem = z.object({

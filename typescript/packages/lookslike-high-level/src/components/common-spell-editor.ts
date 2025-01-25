@@ -6,12 +6,11 @@ import {
   getRecipeSpec,
   getRecipeSrc,
   run,
-} from "@commontools/common-runner";
+} from "@commontools/runner";
 import { addCharms } from "../data.js";
 import { tsToExports } from "../localBuild.js";
 import { iterate, llmTweakSpec, generateSuggestions } from "./spell-ai.js";
 import { createRef, ref } from "lit/directives/ref.js";
-import { spinner } from "../../../common-ui/lib/components/shoelace/index.js";
 
 // NOTE(ja): copied from sidebar.ts ... we need a toasty?
 const toasty = (message: string) => {
@@ -65,7 +64,7 @@ export class CommonSpellEditor extends LitElement {
   entityId = '';
 
   @property({ type: Array })
-  suggestions: string[] = [];
+  suggestions: { behaviour: string; prompt: string }[] = [];
 
   private editorRef = createRef<HTMLElement>();
 
@@ -211,7 +210,7 @@ export class CommonSpellEditor extends LitElement {
               composed: true,
             }),
           );
-          if (data) {
+          if (keepData) {
             toasty("Welcome to a new version of this charm!");
           } else {
             toasty("Welcome to a new charm!");
@@ -248,16 +247,16 @@ export class CommonSpellEditor extends LitElement {
 
     return html`
       <div style="margin: 10px;">
-        <button @click=${compileAndUpdate} ?disabled=${this.compileErrors || this.workingSrc === this.recipeSrc}>🔄 Run w/Current Data</button>
+        <button @click=${compileAndUpdate} ?disabled=${this.compileErrors || this.workingSrc === this.recipeSrc}>♻ Run w/Current Data</button>
         <button @click=${compileAndRunNew} ?disabled=${this.compileErrors || this.workingSrc === this.recipeSrc}>🐣 Run w/New Data</button>
         <button @click=${() => askLLM()} ?disabled=${this.llmRunning || this.workingSpec === this.recipeSpec}>
-          ${this.llmRunning ? html`<sl-spinner></sl-spinner>` : ""} ✨ code it
+          ${this.llmRunning ? "🔄" : ""} ✨ code it
         </button>
         <button
           @click=${() => askLLM({ fixit: this.compileErrors })}
           ?disabled=${this.llmRunning || !this.compileErrors}
         >
-          ${this.llmRunning ? html`<sl-spinner></sl-spinner>` : ""} 🪓 fix it
+          ${this.llmRunning ? "🔄" : ""} 🪓 fix it
         </button>
         <button
           @click=${revert}

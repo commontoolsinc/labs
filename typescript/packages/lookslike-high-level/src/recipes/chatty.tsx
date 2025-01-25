@@ -1,4 +1,4 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   llm,
   recipe,
@@ -6,7 +6,7 @@ import {
   UI,
   lift,
   ifElse,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import { z } from "zod";
 
 const genImage = lift(

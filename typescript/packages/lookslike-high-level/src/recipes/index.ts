@@ -1,4 +1,4 @@
-import { addRecipe } from "@commontools/common-runner";
+import { addRecipe } from "@commontools/runner";
 
 import articleQuerySrc from "./articleQuery.tsx?raw";
 import { articleQuery } from "./articleQuery.js";
@@ -42,17 +42,17 @@ import counters from "./counters.js";
 addRecipe(counters, countersSrc, counterSpec);
 export { counters };
 
-import dataDesignerSrc from "./dataDesigner.ts?raw";
+import dataDesignerSrc from "./dataDesigner.tsx?raw";
 import { dataDesigner } from "./dataDesigner.js";
 addRecipe(dataDesigner, dataDesignerSrc);
 export { dataDesigner };
 
-import fetchExampleSrc from "./fetchExample.ts?raw";
+import fetchExampleSrc from "./fetchExample.tsx?raw";
 import { fetchExample } from "./fetchExample.js";
 addRecipe(fetchExample, fetchExampleSrc);
 export { fetchExample };
 
-import generatorSrc from "./generator.ts?raw";
+import generatorSrc from "./generator.tsx?raw";
 import { generator } from "./generator.js";
 addRecipe(generator, generatorSrc);
 export { generator };
@@ -62,17 +62,17 @@ import { generativeImage } from "./generativeImage.js";
 addRecipe(generativeImage, generativeImageSrc);
 export { generativeImage };
 
-import importCalendarSrc from "./archive/importCalendar.ts?raw";
+import importCalendarSrc from "./archive/importCalendar.tsx?raw";
 import { importCalendar } from "./archive/importCalendar.js";
 addRecipe(importCalendar, importCalendarSrc);
 export { importCalendar };
 
-import jsonImporterSrc from "./archive/jsonImport.ts?raw";
+import jsonImporterSrc from "./archive/jsonImport.tsx?raw";
 import { jsonImporter } from "./archive/jsonImport.js";
 addRecipe(jsonImporter, jsonImporterSrc);
 export { jsonImporter };
 
-import luftBnBSearchSrc from "./luft-bnb-search.ts?raw";
+import luftBnBSearchSrc from "./luft-bnb-search.tsx?raw";
 import { luftBnBSearch } from "./luft-bnb-search.js";
 addRecipe(luftBnBSearch, luftBnBSearchSrc);
 export { luftBnBSearch };
@@ -82,7 +82,7 @@ import { prompt } from "./prompts.js";
 addRecipe(prompt, promptSrc);
 export { prompt };
 
-import playlistForTripSrc from "./playlist.ts?raw";
+import playlistForTripSrc from "./playlist.tsx?raw";
 import { playlistForTrip } from "./playlist.js";
 addRecipe(playlistForTrip, playlistForTripSrc);
 export { playlistForTrip };
@@ -97,11 +97,6 @@ import { routine } from "./routine.js";
 addRecipe(routine, routineSrc);
 export { routine };
 
-import searchSrc from "./search.ts?raw";
-import { search } from "./search.js";
-addRecipe(search, searchSrc);
-export { search };
-
 import shoelaceDemoSrc from "./examples/shoelace.tsx?raw";
 import { shoelaceDemo } from "./examples/shoelace.js";
 addRecipe(shoelaceDemo, shoelaceDemoSrc);
@@ -111,11 +106,6 @@ import todoListSrc from "./todo-list.tsx?raw";
 import todoList from "./todo-list.js";
 addRecipe(todoList, todoListSrc);
 export { todoList };
-
-import todoQuerySrc from "./todoQuery.tsx?raw";
-import { todoQuery } from "./todoQuery.js";
-addRecipe(todoQuery, todoQuerySrc);
-export { todoQuery };
 
 import tweetsSrc from "./tweets.tsx?raw";
 import { tweets } from "./tweets.js";

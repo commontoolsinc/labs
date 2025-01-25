@@ -1,4 +1,4 @@
-import { html } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   NAME,
@@ -6,9 +6,9 @@ import {
   handler,
   lift,
   llm,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import { z } from "zod";
-import zodToJsonSchema from "zod-to-json-schema";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => {
@@ -117,31 +117,31 @@ export const generator = recipe<{
 
   return {
     [NAME]: "data generator",
-    [UI]: html`<div>
+    [UI]: <div>
       <p>Text</p>
       <common-input
-        value=${textprompt}
+        value={textprompt}
         placeholder="Request to LLM"
-        oncommon-input=${updateValue({ value: textprompt })}
+        oncommon-input={updateValue({ value: textprompt })}
       ></common-input>
       <p>${maybeText}</p>
 
       <p>JSON</p>
       <common-input
-        value=${jsonprompt}
+        value={jsonprompt}
         placeholder="Request to LLM"
-        oncommon-input=${updateValue({ value: jsonprompt })}
+        oncommon-input={updateValue({ value: jsonprompt })}
       ></common-input>
       <pre>${jsonify({ data })}</pre>
 
       <p>HTML</p>
       <common-input
-        value=${htmlprompt}
+        value={htmlprompt}
         placeholder="Request to LLM"
-        oncommon-input=${updateValue({ value: htmlprompt })}
+        oncommon-input={updateValue({ value: htmlprompt })}
       ></common-input>
-      <common-iframe src=${maybeHTML}></common-iframe>
-    </div>`,
+      <common-iframe src={maybeHTML}></common-iframe>
+    </div>,
     prompt,
     data,
   };

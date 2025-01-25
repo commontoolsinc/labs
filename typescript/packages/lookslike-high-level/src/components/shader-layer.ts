@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit-element";
+import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { createRef, ref } from "lit/directives/ref.js";
 
@@ -13,8 +13,8 @@ export class ShaderLayer extends LitElement {
   private canvasRef = createRef<HTMLCanvasElement>();
   private gl?: WebGLRenderingContext;
   private program?: WebGLProgram;
-  private timeLocation?: WebGLUniformLocation;
-  private resolutionLocation?: WebGLUniformLocation;
+  private timeLocation?: WebGLUniformLocation | null;
+  private resolutionLocation?: WebGLUniformLocation | null;
   private animationFrame?: number;
   private startTime = performance.now();
   private vertexShader?: WebGLShader;

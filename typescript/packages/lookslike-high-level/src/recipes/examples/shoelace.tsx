@@ -1,5 +1,5 @@
-import { handler, NAME, recipe, UI } from "@commontools/common-builder";
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
+import { handler, NAME, recipe, UI } from "@commontools/builder";
 
 export const shoelaceDemo = recipe('click demo',
   ({ }) => {

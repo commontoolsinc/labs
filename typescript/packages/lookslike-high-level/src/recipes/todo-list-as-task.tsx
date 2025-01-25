@@ -1,7 +1,7 @@
-import { html } from "@commontools/common-html";
-import { recipe, lift, UI } from "@commontools/common-builder";
+import { h } from "@commontools/html";
+import { recipe, lift, UI } from "@commontools/builder";
 import { addSuggestion, description } from "../suggestions.js";
-import { type TodoItem } from "./todo-list.js";
+import { type TodoItem } from "./todo-list.jsx";
 
 const getListSummary = lift((items: TodoItem[]) => {
   const notDoneTitles = items.flatMap((item) =>
@@ -26,15 +26,15 @@ export const todoListAsTask = recipe<{
   task.done = allDone(list.items);
 
   return {
-    [UI]: html` <details>
+    [UI]: <details>
       <summary>
         <common-vstack gap="sm">
-          <span>${getListSummary(list.items)}</span>
-          <common-charm-link $charm=${list} />
+          <span>{getListSummary(list.items)}</span>
+          <common-charm-link $charm={list} />
         </common-vstack>
       </summary>
-      ${list[UI]}
-    </details>`,
+      {list[UI]}
+    </details>,
   };
 });
 

@@ -1,4 +1,4 @@
-import { html } from "@commontools/common-html";
+import { html } from "@commontools/html";
 import {
   recipe,
   UI,
@@ -6,11 +6,10 @@ import {
   lift,
   llm,
   handler,
-  ifElse,
   str,
   createJsonSchema,
   cell,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 
 const stringify = lift(({ obj }) => {
   return JSON.stringify(obj, null, 2);

@@ -1,6 +1,6 @@
-import { UI, NAME, lift, recipe } from "@commontools/common-builder";
+import { h } from "@commontools/html";
+import { UI, NAME, lift, recipe } from "@commontools/builder";
 import * as z from "zod";
-import { h } from "@commontools/common-html";
 import { datalogQuery } from "../query.js";
 
 const stringify = lift(({ obj }) => {

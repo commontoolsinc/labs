@@ -1,12 +1,12 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   NAME,
   UI,
   handler,
-  lift,
+  derive,
   str,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import { z } from "zod";
 
 const PositionSchema = z.object({
@@ -76,10 +76,8 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value),
 );
 
-const count = lift(({ items }: { items: [] }) => items?.length || 0);
-
 export default recipe(DungeonGameSchema, state => {
-  const walls = count({ items: state.walls });
+  const walls = derive(state, ({ walls }) => walls?.length || 0);
 
   return {
     [NAME]: "Dungeon Explorer",

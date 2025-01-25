@@ -1,4 +1,4 @@
-import { Recipe } from "@commontools/common-builder";
+import { Recipe } from "@commontools/builder";
 
 export type Suggestion = {
   // Description of the suggestion

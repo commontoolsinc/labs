@@ -4,8 +4,8 @@ import {
   RecipeFactory,
   Opaque,
   OpaqueRef
-} from "@commontools/common-builder";
-import { streamData } from "@commontools/common-builder";
+} from "@commontools/builder";
+import { streamData } from "@commontools/builder";
 import * as z from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { jsonToDatalogQuery, jsonSchemaToPlaceholder } from "./schema.js";

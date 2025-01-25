@@ -1,5 +1,5 @@
-import { h } from "@commontools/common-html";
-import { recipe, UI, NAME, derive } from "@commontools/common-builder";
+import { h } from "@commontools/html";
+import { recipe, UI, NAME, derive } from "@commontools/builder";
 
 import src from "./smolIframe.html?raw"; // this loads the html file using VITE.js as a string from the html file on disk
 

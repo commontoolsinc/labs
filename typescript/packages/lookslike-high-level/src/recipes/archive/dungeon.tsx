@@ -1,12 +1,12 @@
-import { html } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   handler,
   UI,
   NAME,
   navigateTo,
-} from "@commontools/common-builder";
-import { iframe } from "../iframe.js";
+} from "@commontools/builder";
+import { iframe } from "../iframe.jsx";
 
 type Position = { x: number; y: number };
 type Actor = {
@@ -105,32 +105,32 @@ export const dungeon = recipe<DungeonGame>("Dungeon Game", (state) => {
 
   return {
     [NAME]: "Dungeon Adventure",
-    [UI]: html`
+    [UI]: 
       <div>
           <img width="100%" src="https://www.krea.ai/api/img?f=webp&i=https%3A%2F%2Ftest1-emgndhaqd0c9h2db.a01.azurefd.net%2Fimages%2F9fab7a72-1c5d-4d69-ad2d-e734cf3ec660.png"></img>
           <div style="border: 1px dashed red;">
           <common-input
-            value=${state.player.name}
+            value={state.player.name}
             placeholder="name"
-            oncommon-input=${updateValue({ value: state.player.name })}
+            oncommon-input={updateValue({ value: state.player.name })}
           ></common-input>
           </div>
-          <h1>Welcome, ${state.player.name}!</h1>
-        <common-button onclick=${cloneRecipe({
+          <h1>Welcome, {state.player.name}!</h1>
+        <common-button onclick={cloneRecipe({
           state,
           subtitle: "Character Status",
           prompt: "character status and top down map of the area",
         })}
           >Character Status</common-button
         >
-        <common-button onclick=${cloneRecipe({
+        <common-button onclick={cloneRecipe({
           state,
           subtitle: "Inventory",
           prompt: "inventory view",
         })}
             >Inventory</common-button
         >
-        <common-button onclick=${cloneRecipe({
+        <common-button onclick={cloneRecipe({
           state,
           subtitle: "Skeleton Status",
           prompt:
@@ -138,7 +138,7 @@ export const dungeon = recipe<DungeonGame>("Dungeon Game", (state) => {
         })}
             >Skeleton Status</common-button
         >
-        <common-button onclick=${cloneRecipe({
+        <common-button onclick={cloneRecipe({
           state,
           subtitle: "Battle",
           prompt:
@@ -146,7 +146,7 @@ export const dungeon = recipe<DungeonGame>("Dungeon Game", (state) => {
         })}
             >Battle</common-button
         >
-        <common-button onclick=${cloneRecipe({
+        <common-button onclick={cloneRecipe({
           state,
           subtitle: "Chat",
           prompt:
@@ -154,7 +154,7 @@ export const dungeon = recipe<DungeonGame>("Dungeon Game", (state) => {
         })}
             >Chat</common-button
         >
-        <common-button onclick=${cloneRecipe({
+        <common-button onclick={cloneRecipe({
           state,
           subtitle: "Dragon Battle",
           prompt:
@@ -162,7 +162,7 @@ export const dungeon = recipe<DungeonGame>("Dungeon Game", (state) => {
         })}
             >Dragon Battle</common-button
         >
-        <common-button onclick=${cloneRecipe({
+        <common-button onclick={cloneRecipe({
           state,
           subtitle: "3D Viewer",
           prompt:
@@ -170,21 +170,21 @@ export const dungeon = recipe<DungeonGame>("Dungeon Game", (state) => {
         })}
             >3D Viewer</common-button
         >
-        <common-button onclick=${cloneRecipe({
+        <common-button onclick={cloneRecipe({
           state,
           subtitle: "Map Editor",
           prompt: "grid-based map editor for walls",
         })}
             >Map Editor</common-button
         >
-        <common-button onclick=${cloneRecipe({
+        <common-button onclick={cloneRecipe({
           state,
           subtitle: "Dialogue Editor",
           prompt: "edit dialogue for any actor",
         })}
             >Dialogue Script Editor</common-button
         >
-        <common-button onclick=${cloneRecipe({
+        <common-button onclick={cloneRecipe({
           state,
           subtitle: "Campfire",
           prompt:
@@ -193,6 +193,5 @@ export const dungeon = recipe<DungeonGame>("Dungeon Game", (state) => {
             >Campfire</common-button
         >
       </div>
-    `,
   };
 });

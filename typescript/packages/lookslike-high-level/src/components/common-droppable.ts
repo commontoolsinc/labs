@@ -1,11 +1,11 @@
-import { LitElement, html } from "lit-element";
+import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import {
   getDocByEntityId,
   isGettable,
   isSendable,
   Cell,
-} from "@commontools/common-runner";
+} from "@commontools/runner";
 import { openCharm } from "../data.js";
 @customElement("common-droppable")
 export default class DroppableElement extends LitElement {

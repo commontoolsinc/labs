@@ -1,7 +1,7 @@
 import { css, html, LitElement, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { when } from "lit/directives/when.js";
-import { style } from "@commontools/common-ui";
+import { style } from "@commontools/ui";
 import {
   Charm,
   charms,
@@ -11,11 +11,11 @@ import {
   TYPE,
   UI,
 } from "../data.js";
-import { getDoc, DocImpl, getRecipe, isDoc } from "@commontools/common-runner";
+import { getDoc, DocImpl, getRecipe, isDoc } from "@commontools/runner";
 import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.js";
-import { render } from "@commontools/common-html";
+import { render } from "@commontools/html";
 
 const toasty = (message: string) => {
   const toastEl = document.createElement("div");

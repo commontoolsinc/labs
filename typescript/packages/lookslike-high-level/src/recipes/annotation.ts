@@ -1,4 +1,4 @@
-import { html, type View } from "@commontools/common-html";
+import { html, type View } from "@commontools/html";
 import {
   recipe,
   lift,
@@ -9,14 +9,14 @@ import {
   TYPE,
   ifElse,
   llm,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import { type Charm, openCharm } from "../data.js";
 import {
   run,
   getDocLinkOrValue,
   getEntityId,
   getDocByEntityId,
-} from "@commontools/common-runner";
+} from "@commontools/runner";
 import { suggestions } from "../suggestions.js";
 import { z } from "zod";
 

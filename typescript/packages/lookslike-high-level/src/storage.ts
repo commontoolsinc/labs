@@ -11,15 +11,15 @@ import {
   idle,
   isQueryResultForDereferencing,
   getDocLinkOrThrow,
-} from "@commontools/common-runner";
-import { isStatic, markAsStatic } from "@commontools/common-builder";
+} from "@commontools/runner";
+import { isStatic, markAsStatic } from "@commontools/builder";
 import {
   StorageProvider,
   StorageValue,
   LocalStorageProvider,
   InMemoryStorageProvider,
 } from "./storage-providers.js";
-import { debug } from "@commontools/common-html";
+import { debug } from "@commontools/html";
 
 export function log(...args: any[]) {
   // Get absolute time in milliseconds since Unix epoch

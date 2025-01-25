@@ -4,7 +4,7 @@ import {
   handler,
   lift,
   recipe,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 
 export type Request = Parameters<typeof fetchData>[0];
 

@@ -1,7 +1,7 @@
-import { LitElement, html, css } from "lit-element";
+import { LitElement, html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
-import { Cell } from "@commontools/common-runner";
+import { Cell } from "@commontools/runner";
 
 @customElement("common-draggable")
 export default class DraggableElement extends LitElement {

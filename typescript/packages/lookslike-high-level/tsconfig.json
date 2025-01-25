@@ -3,7 +3,7 @@
   "moduleResolution": "nodenext",
   "compilerOptions": {
     "lib": ["es2022", "esnext.array", "esnext", "dom"],
-    "outDir": "./",
+    "outDir": "./lib",
     "declaration": true,
     "jsx": "preserve",
     "jsxFactory": "h",

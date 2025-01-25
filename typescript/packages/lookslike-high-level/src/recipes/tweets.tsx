@@ -1,12 +1,5 @@
-import { h } from "@commontools/common-html";
-import {
-  recipe,
-  UI,
-  NAME,
-  lift,
-  ifElse,
-  str,
-} from "@commontools/common-builder";
+import { h } from "@commontools/html";
+import { recipe, UI, NAME, lift, ifElse, str } from "@commontools/builder";
 import { z } from "zod";
 import { zodSchemaQuery } from "../query.js";
 
@@ -30,11 +23,6 @@ const Tweets = z
 const dateStringToNiceDateString = lift((dateString: string) => {
   const date = new Date(dateString);
   return date.toDateString();
-});
-
-const tap = lift((x) => {
-  console.log("tap!", JSON.stringify(x));
-  return x;
 });
 
 export const tweets = recipe(Tweets, ({ username }) => {

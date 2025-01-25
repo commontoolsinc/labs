@@ -1,6 +1,6 @@
-import { html } from "@commontools/common-html";
-import { recipe, lift, NAME, UI, handler } from "@commontools/common-builder";
-import { getEntityId } from "@commontools/common-runner";
+import { html } from "@commontools/html";
+import { recipe, lift, NAME, UI, handler } from "@commontools/builder";
+import { getEntityId } from "@commontools/runner";
 import { Charm, removeCharm, RecipeManifest, closeCharm } from "../data.js";
 
 const getCharmsWithNameAndUI = lift<Charm[], { charm: Charm }[]>((charms) =>

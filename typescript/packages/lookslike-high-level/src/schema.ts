@@ -1,5 +1,4 @@
-import { isQueryResultForDereferencing } from "@commontools/common-runner";
-import { getDocLinkOrThrow } from "@commontools/common-runner";
+import { isQueryResultForDereferencing, getDocLinkOrThrow } from "@commontools/runner";
 import { z } from "zod";
 
 export function jsonSchemaToPlaceholder(schema: any): any {

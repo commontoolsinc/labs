@@ -1,13 +1,11 @@
+import { h } from "@commontools/html";
 import {
   UI,
   NAME,
   lift,
-  handler,
   recipe,
-  fetchData,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import * as z from "zod";
-import { h } from "@commontools/common-html";
 import { zodSchemaQuery } from "../../query.js";
 
 export const schema = z.object({
@@ -16,8 +14,6 @@ export const schema = z.object({
   backgroundColor: z.string(),
   border: z.string(),
 });
-
-type Rectangle = z.infer<typeof schema>;
 
 const tap = lift((x) => {
   console.log("poly", x, JSON.stringify(x, null, 2));

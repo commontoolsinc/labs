@@ -1,5 +1,5 @@
-import { html } from "@commontools/common-html";
-import { recipe, handler, UI, NAME, ifElse, lift } from "@commontools/common-builder";
+import { h } from "@commontools/html";
+import { recipe, handler, UI, NAME, ifElse, lift } from "@commontools/builder";
 
 interface CalendarEvent {
   datetime: string;
@@ -264,10 +264,6 @@ const formatDateTime = lift((dateTimeString: string): string => {
   return `${year}-${month}-${day} ${hours}:${minutes}`;
 });
 
-const lastEvent = lift((events: CalendarEvent[]): CalendarEvent | undefined => {
-  return events[0];
-});
-
 const anyEvents = lift((events: CalendarEvent[]): boolean => {
   return events.length > 0;
 });
@@ -276,45 +272,40 @@ const countEvents = lift((events: CalendarEvent[]): number => {
   return events.length;
 });
 
-export const importCalendar = recipe<{ importing: boolean, progress: number, importedEvents: CalendarEvent[] }>("Import Calendar", ({ importing, progress, importedEvents}) => {
+export const importCalendar = recipe<{ importing: boolean, progress: number, importedEvents: CalendarEvent[] }>("Import Calendar", ({ importing, progress, importedEvents }) => {
   importing.setDefault(false)
   progress.setDefault(0)
   importedEvents.setDefault([])
 
   return {
     [NAME]: "Import Calendar",
-    [UI]: html`
+    [UI]:
       <div>
-          <label>ben@common.tools</label>
-          ${ifElse(
+        <label>ben@common.tools</label>
+        {
+          ifElse(
             importing,
-            html`
-                <div>
-                </div>
-              `,
-            html`
-                <common-button
-                  onclick=${startImport({ importing, progress, importedEvents })}
-                >Import Calendar</common-button>
-              `
-          )}
+            <div></div>,
+            <common-button
+              onclick={startImport({ importing, progress, importedEvents })}
+            > Import Calendar </common-button>
+          )
+        }
 
 
         <div>
-          <h3>Imported Events:</h3>
+          <h3>Imported Events: </h3>
           <common-vstack gap="sm">
-            ${ifElse(
-              anyEvents(importedEvents),
-              html`
-                  <div>
-                <div>Number of events imported: ${countEvents(importedEvents)}</div>
-                  </div>
-              `,
-              html`<div>No events imported yet.</div>`
-            )}
+            {
+              ifElse(
+                anyEvents(importedEvents),
+                <div>Number of events imported: {countEvents(importedEvents)}</div>
+                ,
+                <div>No events imported yet.</div>
+              )}
           </common-vstack>
         </div>
-        <table>
+        < table >
           <thead>
             <tr>
               <th>DateTime</th>
@@ -323,17 +314,17 @@ export const importCalendar = recipe<{ importing: boolean, progress: number, imp
             </tr>
           </thead>
           <tbody>
-            ${importedEvents.map(event => html`
+            {importedEvents.map(e =>
               <tr>
-                <td>${formatDateTime(event.datetime)}</td>
-                <td>${event.title}</td>
-                <td>${event.calendar}</td>
+                <td>{formatDateTime(e.datetime)}</td>
+                <td>{e.title}</td>
+                <td>{e.calendar}</td>
               </tr>
-            `)}
+            )}
           </tbody>
         </table>
       </div>
-    `,
+    ,
     importedEvents,
   };
 });

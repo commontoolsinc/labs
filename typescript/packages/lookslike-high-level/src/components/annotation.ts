@@ -1,14 +1,14 @@
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ref, createRef } from "lit/directives/ref.js";
-import { render, View } from "@commontools/common-html";
+import { render, View } from "@commontools/html";
 import { charms, UI, annotationsEnabled } from "../data.js";
 import {
   run,
   getDoc,
   DocImpl,
   getDocLinkOrValue,
-} from "@commontools/common-runner";
+} from "@commontools/runner";
 import { annotation } from "../recipes/annotation.js";
 
 @customElement("common-annotation-toggle")

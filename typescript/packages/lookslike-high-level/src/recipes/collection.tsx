@@ -1,12 +1,12 @@
-import { h } from "@commontools/common-html";
-import { recipe, handler, UI, NAME, derive } from "@commontools/common-builder";
+import { h } from "@commontools/html";
+import { recipe, handler, UI, NAME, derive } from "@commontools/builder";
 import { z } from "zod";
 import {
   getDocLinkOrThrow,
   run,
   isDocLink,
   getDocByEntityId,
-} from "@commontools/common-runner";
+} from "@commontools/runner";
 
 const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
   ({ detail }, state) => {

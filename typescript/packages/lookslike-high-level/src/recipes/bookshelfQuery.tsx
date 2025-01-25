@@ -6,10 +6,10 @@ import {
   recipe,
   fetchData,
   str,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import * as z from "zod";
 import { buildTransactionRequest, zodSchemaQuery } from "../query.js";
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 
 export const schema = z
   .object({

@@ -1,4 +1,4 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   handler,
@@ -7,7 +7,7 @@ import {
   derive,
   lift,
   cell,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import { z } from "zod";
 
 const BookItem = z.object({
