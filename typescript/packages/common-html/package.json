@@ -1,62 +1,25 @@
 {
-  "name": "@commontools/common-html",
-  "author": "The Common Authors",
-  "version": "0.0.1",
-  "description": "Render DOM from templates",
-  "license": "UNLICENSED",
-  "private": true,
+  "name": "@commontools/html",
+  "version": "0.1.0",
+  "description": "html",
   "type": "module",
+  "main": "src/index.js",
   "scripts": {
-    "test": "npm run build && mocha lib/test/**/*.test.js",
-    "test-browser": "npm run build && web-test-runner \"lib/test-browser/**/*.test.js\" --node-resolve",
-    "build": "wireit",
-    "clean": "wireit",
-    "dev": "npm run build && vite example"
+    "test": "vitest --exclude=lib/**/*.test.js",
+    "build": "tsc && vite build"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/commontoolsinc/labs.git"
-  },
-  "bugs": {
-    "url": "https://github.com/commontoolsinc/labs/issues"
-  },
-  "homepage": "https://github.com/commontoolsinc/labs#readme",
-  "exports": "./lib/index.js",
-  "files": [
-    "./lib/index.js"
-  ],
+  "keywords": [],
+  "author": "",
+  "license": "UNLICENSED",
   "dependencies": {
-    "htmlparser2": "^9.1.0",
-    "@commontools/common-propagator": "^0.0.1"
+    "@commontools/builder": "workspace:*",
+    "@commontools/runner": "workspace:*",
+    "htmlparser2": "^10.0.0"
   },
   "devDependencies": {
-    "vite": "^5.3.3",
-    "@types/mocha": "^10.0.7",
-    "@types/node": "^20.14.10",
-    "@types/sax": "^1.2.7",
-    "@web/test-runner": "^0.18.2",
-    "mocha": "^10.6.0",
-    "tslib": "^2.6.2",
-    "typescript": "^5.2.2",
-    "wireit": "^0.14.4"
-  },
-  "wireit": {
-    "build": {
-      "dependencies": [
-        "../common-runner:build",
-        "../common-builder:build",
-        "../common-propagator:build"
-      ],
-      "files": [
-        "./src/**/*"
-      ],
-      "output": [
-        "./lib/**/*"
-      ],
-      "command": "tsc --build -f"
-    },
-    "clean": {
-      "command": "rm -rf ./lib ./.wireit"
-    }
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11",
+    "vite-plugin-dts": "^4.5.0",
+    "vitest": "^3.0.4"
   }
 }

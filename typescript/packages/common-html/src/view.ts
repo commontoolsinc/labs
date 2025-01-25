@@ -1,7 +1,7 @@
 import { Parser } from "htmlparser2";
 import * as logger from "./logger.js";
-import { path } from "@commontools/common-propagator/path.js";
-import { markAsStatic } from "@commontools/common-builder";
+import { path } from "./path.js";
+import { markAsStatic } from "@commontools/builder";
 
 /** Parse a markup string and context into a view */
 export const view = (markup: string, context: Context): View => {

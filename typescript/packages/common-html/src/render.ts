@@ -20,8 +20,8 @@ import {
   type Cell,
   ReactiveCell,
   isCell,
-} from "@commontools/common-runner";
-import { JSONSchema } from "@commontools/common-builder";
+} from "@commontools/runner";
+import { JSONSchema } from "@commontools/builder";
 import * as logger from "./logger.js";
 
 const schema: JSONSchema = {
