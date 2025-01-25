@@ -1,15 +1,5 @@
 import { addRecipe } from "@commontools/runner";
 
-import articleQuerySrc from "./articleQuery.tsx?raw";
-import { articleQuery } from "./articleQuery.js";
-addRecipe(articleQuery, articleQuerySrc);
-export { articleQuery };
-
-import bookshelfQuerySrc from "./bookshelfQuery.tsx?raw";
-import { bookshelfQuery } from "./bookshelfQuery.js";
-addRecipe(bookshelfQuery, bookshelfQuerySrc);
-export { bookshelfQuery };
-
 import chatSrc from "./chatty.tsx?raw";
 import { chat } from "./chatty.js";
 addRecipe(chat, chatSrc);
@@ -106,11 +96,6 @@ import todoListSrc from "./todo-list.tsx?raw";
 import todoList from "./todo-list.js";
 addRecipe(todoList, todoListSrc);
 export { todoList };
-
-import tweetsSrc from "./tweets.tsx?raw";
-import { tweets } from "./tweets.js";
-addRecipe(tweets, tweetsSrc);
-export { tweets };
 
 import wikiSrc from "./wiki.tsx?raw";
 import wiki from "./wiki.js";
