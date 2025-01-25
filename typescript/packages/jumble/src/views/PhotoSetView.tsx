@@ -1,11 +1,44 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { getPhotoSetByName } from "@/utils/photoset";
+import { useDropzone } from "react-dropzone";
+import { getPhotoSetByName, updatePhotoSet } from "@/utils/photoset";
 
 export default function PhotoSetView() {
   const { photosetName } = useParams();
   const navigate = useNavigate();
-
   const photoset = getPhotoSetByName(photosetName || "");
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    accept: {
+      "image/*": [".png", ".jpg", ".jpeg", ".gif"],
+    },
+    onDrop: async acceptedFiles => {
+      if (!photoset) return;
+
+      const newImages = await Promise.all(
+        acceptedFiles.map(async file => {
+          const dataUrl = await new Promise<string>(resolve => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(file);
+          });
+
+          return {
+            id: crypto.randomUUID(),
+            dataUrl,
+            createdAt: new Date().toISOString(),
+          };
+        }),
+      );
+
+      const updatedPhotoset = {
+        ...photoset,
+        images: [...photoset.images, ...newImages],
+      };
+      updatePhotoSet(updatedPhotoset);
+      // Force a re-render by updating the reference
+      window.location.reload();
+    },
+  });
 
   if (!photoset) {
     return (
@@ -44,6 +77,21 @@ export default function PhotoSetView() {
           <span>Create Spell</span>
           <span className="text-lg">✨</span>
         </button>
+      </div>
+
+      <div
+        {...getRootProps()}
+        className={`mb-8 p-6 border-2 border-dashed rounded-lg text-center cursor-pointer
+          ${isDragActive ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-gray-400"}`}
+      >
+        <input {...getInputProps()} />
+        {isDragActive ? (
+          <p className="text-blue-500">Drop the images here...</p>
+        ) : (
+          <p className="text-gray-500">
+            Drag & drop images here, or click to select files
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">

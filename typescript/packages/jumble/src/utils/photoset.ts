@@ -12,8 +12,16 @@ export interface PhotoSet {
 const STORAGE_KEY = "photosets";
 
 export function getPhotoSets(): PhotoSet[] {
-  const data = localStorage.getItem(STORAGE_KEY);
-  return data ? JSON.parse(data) : [];
+  try {
+    const data = localStorage.getItem(STORAGE_KEY);
+    const sets = data ? JSON.parse(data) : [];
+    // Ensure we always return an array
+    return Array.isArray(sets) ? sets : [];
+  } catch (e) {
+    // If there's any error parsing the JSON, return empty array
+    console.error("Error loading photosets:", e);
+    return [];
+  }
 }
 
 export function savePhotoSet(photoset: PhotoSet): void {
