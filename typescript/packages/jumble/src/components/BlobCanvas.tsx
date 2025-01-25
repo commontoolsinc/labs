@@ -1,9 +1,8 @@
-import { useSprings, animated } from "@react-spring/web";
 import { useDrag } from "@use-gesture/react";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { createClusters, Cluster } from "./clustering-utils.ts";
-import { ClusterStats } from "./clustering-stats.ts";
-import { JsonTable } from "./BlobViewer.tsx";
+import { createClusters, Cluster } from "@/utils/clustering-utils.ts";
+import { JsonTable } from "@/components/BlobViewer.tsx";
+import { animated, useSprings } from "@react-spring/web";
 
 // Constants for grid and layout
 const GRID_SIZE = 8;
@@ -50,7 +49,20 @@ interface BlobSet {
   createdAt: Date;
 }
 
-type Blob = {
+interface NavigationEntry {
+  type: "item" | "cluster";
+  id: string;
+  timestamp: number;
+}
+
+interface Suggestion {
+  id: string;
+  type: "item" | "cluster";
+  label: string;
+  relationship: "same-cluster" | "different-cluster";
+}
+
+export type BlobItem = {
   id: string;
   data: unknown;
   x: number;
@@ -63,6 +75,7 @@ type Blob = {
   rotateX?: number;
   rotateY?: number;
 };
+
 const BlobCanvas: React.FC<{ blobs: [string, unknown][] }> = ({ blobs }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -81,7 +94,7 @@ const BlobCanvas: React.FC<{ blobs: [string, unknown][] }> = ({ blobs }) => {
   );
   const [currentHistoryIndex, setCurrentHistoryIndex] = useState<number>(-1);
 
-  const [items, setItems] = useState<Blob[]>(() =>
+  const [items, setItems] = useState<BlobItem[]>(() =>
     createInitialItems(blobs, positionedItems.current),
   );
 
@@ -307,7 +320,15 @@ const BlobCanvas: React.FC<{ blobs: [string, unknown][] }> = ({ blobs }) => {
     );
   };
 
-  const [springs, api] = useSprings(items.length, i => ({
+  const [springs, api] = useSprings<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    transform: string;
+    zIndex: number;
+    opacity: number;
+  }>(items.length, i => ({
     x: items[i].x,
     y: items[i].y,
     width: CARD_WIDTH,
@@ -887,7 +908,7 @@ const BlobCanvas: React.FC<{ blobs: [string, unknown][] }> = ({ blobs }) => {
 function createInitialItems(
   blobs: [string, unknown][],
   savedPositions: Record<string, { x: number; y: number }>,
-): Blob[] {
+): BlobItem[] {
   return blobs.map(([id, data], i) => {
     const savedPosition = savedPositions[id];
     const gridPosition = getInitialGridPosition(i);
@@ -917,7 +938,7 @@ const getInitialGridPosition = (index: number) => ({
 });
 
 const isIntersecting = (
-  item: Blob,
+  item: BlobItem,
   selection: { left: number; top: number; width: number; height: number },
 ) => {
   const itemRight = item.x + CARD_WIDTH;

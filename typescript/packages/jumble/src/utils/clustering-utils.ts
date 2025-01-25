@@ -1,3 +1,5 @@
+import { type BlobItem } from "@/components/BlobCanvas.tsx";
+
 // clustering-utils.ts
 export type Token = {
   type: "word" | "hashtag";
@@ -5,7 +7,7 @@ export type Token = {
   weight: number;
 };
 
-export const extractTokens = (blob: any): Token[] => {
+export const extractTokens = (blob: BlobItem): Token[] => {
   // Convert blob data to string and extract meaningful tokens
   const text = JSON.stringify(blob).toLowerCase();
 
@@ -51,18 +53,24 @@ export const calculateSimilarity = (
 
   let similarityScore = 0;
 
-  // Calculate intersection
+  // Calculate intersection from A -> B
   for (const token of tokensA) {
     if (setB.has(token.value)) {
       similarityScore += token.weight;
     }
   }
 
-  // Normalize by total possible similarity
-  const totalPossible = Math.max(
-    tokensA.reduce((sum, t) => sum + t.weight, 0),
-    tokensB.reduce((sum, t) => sum + t.weight, 0),
-  );
+  // Calculate intersection from B -> A
+  for (const token of tokensB) {
+    if (setA.has(token.value)) {
+      similarityScore += token.weight;
+    }
+  }
+
+  // Normalize by total possible similarity (sum of all weights)
+  const totalPossible =
+    tokensA.reduce((sum, t) => sum + t.weight, 0) +
+    tokensB.reduce((sum, t) => sum + t.weight, 0);
 
   return similarityScore / totalPossible;
 };
@@ -76,7 +84,7 @@ export type Cluster = {
 };
 
 export const createClusters = (
-  items: Blob[],
+  items: BlobItem[],
   similarityThreshold: number = 0.3,
 ): Cluster[] => {
   // Extract tokens for all items
