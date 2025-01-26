@@ -11,12 +11,12 @@ export default function PhotoSetView() {
     accept: {
       "image/*": [".png", ".jpg", ".jpeg", ".gif"],
     },
-    onDrop: async acceptedFiles => {
+    onDrop: async (acceptedFiles) => {
       if (!photoset) return;
 
       const newImages = await Promise.all(
-        acceptedFiles.map(async file => {
-          const dataUrl = await new Promise<string>(resolve => {
+        acceptedFiles.map(async (file) => {
+          const dataUrl = await new Promise<string>((resolve) => {
             const reader = new FileReader();
             reader.onload = () => resolve(reader.result as string);
             reader.readAsDataURL(file);
@@ -35,21 +35,26 @@ export default function PhotoSetView() {
         images: [...photoset.images, ...newImages],
       };
       updatePhotoSet(updatedPhotoset);
-      // Force a re-render by updating the reference
       window.location.reload();
     },
   });
+
+  const handleDeleteImage = (imageId: string) => {
+    if (!photoset) return;
+    const updatedPhotoset = {
+      ...photoset,
+      images: photoset.images.filter((img) => img.id !== imageId),
+    };
+    updatePhotoSet(updatedPhotoset);
+    window.location.reload();
+  };
 
   if (!photoset) {
     return (
       <div className="max-w-7xl mx-auto mt-10 p-6">
         <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-900">
-            PhotoSet not found
-          </h2>
-          <p className="mt-2 text-gray-600">
-            The photoset "{photosetName}" could not be found.
-          </p>
+          <h2 className="text-2xl font-bold text-gray-900">PhotoSet not found</h2>
+          <p className="mt-2 text-gray-600">The photoset "{photosetName}" could not be found.</p>
           <button
             onClick={() => navigate("/")}
             className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
@@ -79,41 +84,36 @@ export default function PhotoSetView() {
         </button>
       </div>
 
-      <div
-        {...getRootProps()}
-        className={`mb-8 p-6 border-2 border-dashed rounded-lg text-center cursor-pointer
-          ${isDragActive ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-gray-400"}`}
-      >
-        <input {...getInputProps()} />
-        {isDragActive ? (
-          <p className="text-blue-500">Drop the images here...</p>
-        ) : (
-          <p className="text-gray-500">
-            Drag & drop images here, or click to select files
-          </p>
-        )}
-      </div>
+      <div className={`min-h-[400px] ${isDragActive ? "bg-blue-50" : ""} transition-colors`}>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+          {photoset.images.map((image) => (
+            <div
+              key={image.id}
+              className="relative aspect-square rounded-lg shadow-md hover:shadow-lg transition-all transform hover:-translate-y-[1px] group"
+            >
+              <img
+                src={image.dataUrl}
+                alt={`Image in ${photoset.name}`}
+                className="w-full h-full object-cover"
+              />
+              <button
+                onClick={() => handleDeleteImage(image.id)}
+                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                ×
+              </button>
+            </div>
+          ))}
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-        {photoset.images.map(image => (
           <div
-            key={image.id}
-            className="aspect-square rounded-lg overflow-hidden shadow-md hover:shadow-lg transition-shadow"
+            {...getRootProps()}
+            className="aspect-square rounded-lg border-2 border-dashed border-gray-300 hover:border-gray-400 transition-colors flex items-center justify-center cursor-pointer"
           >
-            <img
-              src={image.dataUrl}
-              alt={`Image in ${photoset.name}`}
-              className="w-full h-full object-cover"
-            />
+            <input {...getInputProps()} />
+            <div className="text-4xl text-gray-400">+</div>
           </div>
-        ))}
-      </div>
-
-      {photoset.images.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-gray-500">No images in this photoset</p>
         </div>
-      )}
+      </div>
     </div>
   );
 }
