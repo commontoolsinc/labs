@@ -199,9 +199,6 @@ export class OsCloseButton extends LitElement {
       this.dispatchEvent(new SidebarCloseEvent());
     };
 
-    return html`<os-icon-button
-      @click="${onClick}"
-      icon="close"
-    ></os-icon-button>`;
+    return html`<os-icon-button @click="${onClick}" icon="close"></os-icon-button>`;
   }
 }

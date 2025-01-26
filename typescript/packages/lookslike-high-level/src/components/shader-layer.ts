@@ -4,10 +4,10 @@ import { createRef, ref } from "lit/directives/ref.js";
 
 @customElement("shader-layer")
 export class ShaderLayer extends LitElement {
-  @property({ type: String }) shader = '';
+  @property({ type: String }) shader = "";
   @property({ type: Number }) width = 640;
   @property({ type: Number }) height = 480;
-  @property({ type: String }) blendMode = 'default';
+  @property({ type: String }) blendMode = "default";
   @property({ type: String, reflect: true }) errorMessage: string | null = null;
 
   private canvasRef = createRef<HTMLCanvasElement>();
@@ -44,7 +44,7 @@ export class ShaderLayer extends LitElement {
       position: absolute;
       top: 0;
       left: 0;
-      background: rgba(0,0,0,0.8);
+      background: rgba(0, 0, 0, 0.8);
     }
   `;
 
@@ -79,11 +79,11 @@ export class ShaderLayer extends LitElement {
 
     canvas.width = this.width;
     canvas.height = this.height;
-    canvas.style.setProperty('--blend-mode', this.blendMode);
+    canvas.style.setProperty("--blend-mode", this.blendMode);
 
-    const gl = canvas.getContext('webgl', {
+    const gl = canvas.getContext("webgl", {
       alpha: true,
-      premultipliedAlpha: false
+      premultipliedAlpha: false,
     });
     if (!gl) {
       this.errorMessage = "WebGL not supported";
@@ -103,14 +103,17 @@ export class ShaderLayer extends LitElement {
     }
     this.vertexShader = vertexShader;
 
-    gl.shaderSource(vertexShader, `
+    gl.shaderSource(
+      vertexShader,
+      `
       attribute vec2 position;
       varying vec2 v_texCoord;
       void main() {
         v_texCoord = (position + 1.0) * 0.5;
         gl_Position = vec4(position, 0.0, 1.0);
       }
-    `);
+    `,
+    );
     gl.compileShader(vertexShader);
 
     if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
@@ -119,14 +122,7 @@ export class ShaderLayer extends LitElement {
       return;
     }
 
-    const positions = new Float32Array([
-      -1, -1,
-      1, -1,
-      -1, 1,
-      -1, 1,
-      1, -1,
-      1, 1
-    ]);
+    const positions = new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]);
     const positionBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
@@ -211,10 +207,12 @@ export class ShaderLayer extends LitElement {
   }
 
   override updated(changedProperties: Map<string, any>) {
-    if (changedProperties.has('shader') ||
-        changedProperties.has('width') ||
-        changedProperties.has('height') ||
-        changedProperties.has('blendMode')) {
+    if (
+      changedProperties.has("shader") ||
+      changedProperties.has("width") ||
+      changedProperties.has("height") ||
+      changedProperties.has("blendMode")
+    ) {
       this.setupWebGL();
     }
   }

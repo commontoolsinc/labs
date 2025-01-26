@@ -36,8 +36,6 @@ const titleGroup = view(
   { input: inputState, oninput: inputEvents },
 );
 
-const container = html`
-  <div class="container">${timeView} ${titleGroup}</div>
-`;
+const container = html` <div class="container">${timeView} ${titleGroup}</div> `;
 
 const _cancel = render(document.body, container);

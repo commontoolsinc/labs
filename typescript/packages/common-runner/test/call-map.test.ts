@@ -1,10 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  createRef,
-  type EntityId,
-  getDocByEntityId,
-  getEntityId,
-} from "../src/cell-map.js";
+import { createRef, type EntityId, getDocByEntityId, getEntityId } from "../src/cell-map.js";
 import { getDoc } from "../src/cell.js";
 import { refer } from "merkle-reference";
 
@@ -53,9 +48,7 @@ describe("cell-map", () => {
       expect(getEntityId(c.asCell(["foo"]))).not.toEqual(c.entityId);
       expect(getEntityId({ cell: c, path: ["foo"] })).not.toEqual(c.entityId);
 
-      expect(getEntityId(c.getAsQueryResult(["foo"]))).toEqual(
-        getEntityId(c.asCell(["foo"])),
-      );
+      expect(getEntityId(c.getAsQueryResult(["foo"]))).toEqual(getEntityId(c.asCell(["foo"])));
       expect(getEntityId(c.getAsQueryResult(["foo"]))).toEqual(
         getEntityId({ cell: c, path: ["foo"] }),
       );

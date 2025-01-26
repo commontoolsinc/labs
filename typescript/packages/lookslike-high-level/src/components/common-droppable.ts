@@ -1,11 +1,6 @@
 import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import {
-  getDocByEntityId,
-  isGettable,
-  isSendable,
-  Cell,
-} from "@commontools/runner";
+import { getDocByEntityId, isGettable, isSendable, Cell } from "@commontools/runner";
 import { openCharm } from "../data.js";
 @customElement("common-droppable")
 export default class DroppableElement extends LitElement {
@@ -48,11 +43,7 @@ export default class DroppableElement extends LitElement {
     const parsedData = JSON.parse(data);
 
     // TODO: Either replace with something more unique or traverse
-    if (
-      typeof parsedData === "object" &&
-      parsedData !== null &&
-      parsedData.cell
-    ) {
+    if (typeof parsedData === "object" && parsedData !== null && parsedData.cell) {
       const cell = getDocByEntityId(parsedData.cell, false);
       if (cell) parsedData.cell = cell;
     }
@@ -80,16 +71,14 @@ export default class DroppableElement extends LitElement {
           if (parsedData !== undefined) items.push(parsedData);
         });
       } else if (item.type.startsWith("text/plain")) {
-        item.getAsString(data => {
+        item.getAsString((data) => {
           if (data !== undefined) items.push(data);
         });
       }
     }
 
     if (items.length === 0 && e.dataTransfer.getData("application/json")) {
-      items.push(
-        this.#handleJsonDrop(e.dataTransfer.getData("application/json")),
-      );
+      items.push(this.#handleJsonDrop(e.dataTransfer.getData("application/json")));
     }
 
     if (items.length === 0 && e.dataTransfer.getData("text/plain")) {
@@ -99,8 +88,7 @@ export default class DroppableElement extends LitElement {
     console.log("droppable", items);
     if (items.length > 0) this.droppable.send(items);
 
-    if (this.opentarget && !this._openedTarget)
-      openCharm(this.opentarget!.getAsDocLink().cell);
+    if (this.opentarget && !this._openedTarget) openCharm(this.opentarget!.getAsDocLink().cell);
   }
 
   #handleDragLeave(e: DragEvent) {

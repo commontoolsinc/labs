@@ -1,12 +1,5 @@
 import { h } from "@commontools/html";
-import {
-  recipe,
-  NAME,
-  UI,
-  handler,
-  derive,
-  str,
-} from "@commontools/builder";
+import { recipe, NAME, UI, handler, derive, str } from "@commontools/builder";
 import { z } from "zod";
 
 const PositionSchema = z.object({
@@ -45,12 +38,7 @@ export const DungeonGameSchema = z.object({
     hp: 100,
     xp: 0,
     inventory: ["sword", "shield", "crumpled felt hat"],
-    dialogue: [
-      "Hello, I am an adventurer.",
-      "Oof, my knee!",
-      "I need a potion.",
-      "I am the best.",
-    ],
+    dialogue: ["Hello, I am an adventurer.", "Oof, my knee!", "I need a potion.", "I am the best."],
   }),
   skeleton: ActorSchema.default({
     name: "Skeleton",
@@ -76,17 +64,14 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value),
 );
 
-export default recipe(DungeonGameSchema, state => {
+export default recipe(DungeonGameSchema, (state) => {
   const walls = derive(state, ({ walls }) => walls?.length || 0);
 
   return {
     [NAME]: "Dungeon Explorer",
     [UI]: (
       <div>
-        <img
-          width="256px"
-          src={str`/api/ai/img?prompt=Dungeon+Game+player+${state.player.name}`}
-        />
+        <img width="256px" src={str`/api/ai/img?prompt=Dungeon+Game+player+${state.player.name}`} />
         <div style="border: 1px dashed red;">
           <common-input
             value={state.player.name}

@@ -1,14 +1,5 @@
 import { h } from "@commontools/html";
-import {
-  recipe,
-  UI,
-  NAME,
-  lift,
-  handler,
-  str,
-  cell,
-  createJsonSchema,
-} from "@commontools/builder";
+import { recipe, UI, NAME, lift, handler, str, cell, createJsonSchema } from "@commontools/builder";
 
 const formatData = lift(({ obj }) => {
   console.log("stringify", obj);
@@ -40,17 +31,13 @@ const onData = handler<CustomEvent, { data: any }>(({ detail }, state) => {
   state.data = detail;
 });
 
-const onSave = handler<MouseEvent, { data: any; collection: string }>(
-  (_, state) => {
-    console.log("onSave", state.data);
-    const ok = confirm(
-      `import "${JSON.stringify(state.data)}" to "${state.collection}"?`,
-    );
-    if (ok) {
-      alert("imported");
-    }
-  },
-);
+const onSave = handler<MouseEvent, { data: any; collection: string }>((_, state) => {
+  console.log("onSave", state.data);
+  const ok = confirm(`import "${JSON.stringify(state.data)}" to "${state.collection}"?`);
+  if (ok) {
+    alert("imported");
+  }
+});
 
 export const jsonImporter = recipe<{
   title: string;

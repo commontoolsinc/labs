@@ -24,13 +24,13 @@ export class CommonUniboxElement extends LitElement {
   @property({ type: String }) label = "Search";
 
   private handleClick(e: Event & { shiftKey: boolean }) {
-    const event = new CustomEvent('submit', {
+    const event = new CustomEvent("submit", {
       bubbles: true,
       composed: true,
-      detail: { value: this.value, shiftHeld: e.shiftKey }
+      detail: { value: this.value, shiftHeld: e.shiftKey },
     });
     this.dispatchEvent(event);
-    this.value = '';
+    this.value = "";
   }
 
   private handleChange(event: Event) {
@@ -39,7 +39,7 @@ export class CommonUniboxElement extends LitElement {
   }
 
   private handleEnter(event: KeyboardEvent) {
-    if (event.key === 'Enter') {
+    if (event.key === "Enter") {
       this.handleClick(event);
     }
   }
@@ -56,7 +56,9 @@ export class CommonUniboxElement extends LitElement {
           @keydown=${this.handleEnter}
         >
         </common-input>
-        <common-button class="unibox-button" @click=${this.handleClick}>${this.label}</common-button>
+        <common-button class="unibox-button" @click=${this.handleClick}
+          >${this.label}</common-button
+        >
       </div>
     `;
   }

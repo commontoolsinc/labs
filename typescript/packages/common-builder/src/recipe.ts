@@ -92,12 +92,7 @@ export function recipe<T, R>(
   const frame = pushFrame();
   const inputs = opaqueRef<Required<T>>();
   const outputs = fn!(inputs);
-  const result = factoryFromRecipe<T, R>(
-    argumentSchema,
-    resultSchema,
-    inputs,
-    outputs,
-  );
+  const result = factoryFromRecipe<T, R>(argumentSchema, resultSchema, inputs, outputs);
   popFrame(frame);
   return result;
 }
@@ -128,20 +123,13 @@ function factoryFromRecipe<T, R>(
     traverseValue(value, (value) => {
       if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
       if (isOpaqueRef(value)) value = value.unsafe_getExternal();
-      if (
-        (isOpaqueRef(value) || isShadowRef(value)) &&
-        !cells.has(value) &&
-        !shadows.has(value)
-      ) {
+      if ((isOpaqueRef(value) || isShadowRef(value)) && !cells.has(value) && !shadows.has(value)) {
         if (isOpaqueRef(value) && value.export().frame !== getTopFrame()) {
           value = createShadowRef(value.export().value);
         }
         if (isShadowRef(value)) {
           shadows.add(value);
-          if (
-            isOpaqueRef(value.shadowOf) &&
-            value.shadowOf.export().frame === getTopFrame()
-          ) {
+          if (isOpaqueRef(value.shadowOf) && value.shadowOf.export().frame === getTopFrame()) {
             cells.add(value.shadowOf);
           }
         } else if (isOpaqueRef(value)) {
@@ -166,11 +154,7 @@ function factoryFromRecipe<T, R>(
   // First from results
   if (typeof outputs === "object" && outputs !== null) {
     Object.entries(outputs).forEach(([key, value]) => {
-      if (
-        isOpaqueRef(value) &&
-        !value.export().path.length &&
-        !value.export().name
-      ) {
+      if (isOpaqueRef(value) && !value.export().path.length && !value.export().name) {
         value.setName(key);
       }
     });
@@ -182,9 +166,7 @@ function factoryFromRecipe<T, R>(
     cell.export().nodes.forEach((node: NodeRef) => {
       if (typeof node.inputs === "object" && node.inputs !== null) {
         Object.entries(node.inputs).forEach(([key, input]) => {
-          if (
-            isOpaqueRef(input) && input.cell === cell && !cell.export().name
-          ) {
+          if (isOpaqueRef(input) && input.cell === cell && !cell.export().name) {
             cell.setName(key);
           }
         });
@@ -223,11 +205,7 @@ function factoryFromRecipe<T, R>(
   const result = toJSONWithAliases(outputs ?? {}, paths, true)!;
 
   // Collect default values for the inputs
-  const defaults = toJSONWithAliases(
-    inputs.export().defaultValue ?? {},
-    paths,
-    true,
-  )!;
+  const defaults = toJSONWithAliases(inputs.export().defaultValue ?? {}, paths, true)!;
 
   // Set initial values for all cells, add non-inputs defaults
   const initial: any = {};
@@ -258,11 +236,7 @@ function factoryFromRecipe<T, R>(
 
     delete argumentSchema.properties?.[UI]; // TODO: This should be a schema for views
     if (argumentSchema.properties?.internal?.properties) {
-      for (
-        const key of Object.keys(
-          argumentSchema.properties.internal.properties as any,
-        )
-      ) {
+      for (const key of Object.keys(argumentSchema.properties.internal.properties as any)) {
         if (key.startsWith("__#")) {
           delete (argumentSchema as any).properties.internal.properties[key];
         }
@@ -274,9 +248,10 @@ function factoryFromRecipe<T, R>(
     argumentSchema = argumentSchemaArg as unknown as JSONSchema;
   }
 
-  const resultSchema: JSONSchema = resultSchemaArg instanceof z.ZodType
-    ? (zodToJsonSchema(resultSchemaArg) as JSONSchema)
-    : resultSchemaArg ?? ({} as JSONSchema);
+  const resultSchema: JSONSchema =
+    resultSchemaArg instanceof z.ZodType
+      ? (zodToJsonSchema(resultSchemaArg) as JSONSchema)
+      : (resultSchemaArg ?? ({} as JSONSchema));
 
   const serializedNodes = Array.from(nodes).map((node) => {
     const module = toJSONWithAliases(node.module, paths) as Module;
@@ -319,9 +294,7 @@ function factoryFromRecipe<T, R>(
   // TODO: Does OpaqueRef cause issues here?
   [...cells]
     .filter((cell) => !cell.export().path.length) // Only bind root cells
-    .forEach((cell) =>
-      cell.unsafe_bindToRecipeAndPath(recipeFactory, paths.get(cell)!)
-    );
+    .forEach((cell) => cell.unsafe_bindToRecipeAndPath(recipeFactory, paths.get(cell)!));
 
   return recipeFactory;
 }
@@ -334,10 +307,7 @@ export function pushFrame(frame?: Frame): Frame {
   return frame;
 }
 
-export function pushFrameFromCause(
-  cause: any,
-  unsafe_binding?: UnsafeBinding,
-): Frame {
+export function pushFrameFromCause(cause: any, unsafe_binding?: UnsafeBinding): Frame {
   const frame = {
     parent: getTopFrame(),
     cause,

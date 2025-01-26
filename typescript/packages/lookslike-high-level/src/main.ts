@@ -4,17 +4,14 @@ export { fab } from "@commontools/os-ui";
 export { components as myComponents } from "./components.js";
 import { setDebug } from "@commontools/html";
 import "./router.js";
-import './gmail.js'
+import "./gmail.js";
 
 setDebug(!!(import.meta as any).env.VITE_DEBUG);
 
 // src/main.js or src/main.ts
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register(
-    new URL("./synopsys.worker.ts", import.meta.url),
-    {
-      type: "module",
-      scope: "/data/",
-    },
-  );
+  navigator.serviceWorker.register(new URL("./synopsys.worker.ts", import.meta.url), {
+    type: "module",
+    scope: "/data/",
+  });
 }

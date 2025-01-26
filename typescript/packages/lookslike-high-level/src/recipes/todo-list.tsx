@@ -29,20 +29,17 @@ const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
   },
 );
 
-const updateItem = handler<
-  { detail: { checked: boolean; value: string } },
-  { item: TodoItem }
->(({ detail }, { item }) => {
-  item.done = detail.checked;
-  item.title = detail.value;
-});
-
-const deleteItem = handler<{}, { items: TodoItem[]; item: TodoItem }>(
-  ({}, { item, items }) => {
-    let idx = items.findIndex((i) => i.title === item.title);
-    if (idx !== -1) items.splice(idx, 1);
+const updateItem = handler<{ detail: { checked: boolean; value: string } }, { item: TodoItem }>(
+  ({ detail }, { item }) => {
+    item.done = detail.checked;
+    item.title = detail.value;
   },
 );
+
+const deleteItem = handler<{}, { items: TodoItem[]; item: TodoItem }>(({}, { item, items }) => {
+  let idx = items.findIndex((i) => i.title === item.title);
+  if (idx !== -1) items.splice(idx, 1);
+});
 
 export default recipe(TodoList, ({ title, items }) => {
   return {
@@ -78,11 +75,7 @@ export default recipe(TodoList, ({ title, items }) => {
                   ontodo-checked={updateItem({ item })}
                   ontodo-input={updateItem({ item })}
                 />
-                <sl-button
-                  outline
-                  variant="danger"
-                  onclick={deleteItem({ item, items })}
-                >
+                <sl-button outline variant="danger" onclick={deleteItem({ item, items })}>
                   Delete
                 </sl-button>
               </common-hstack>
@@ -100,20 +93,16 @@ export default recipe(TodoList, ({ title, items }) => {
     title,
     items,
     "action/drop/schema": { type: "string" },
-    "action/drop/handler": handler<any[], { items: TodoItem[] }>(
-      (event, { items }) => {
-        console.log("todo drag handler", event);
-        event.forEach((item) => {
-          let newItem;
-          if (typeof item === "object" && item !== null && "title" in item)
-            newItem = item;
-          else if (typeof item === "string")
-            newItem = { title: item, done: false };
-          else newItem = { title: item.toString(), done: false };
-          console.log("todo drag handler newItem", newItem, item);
-          items.push(newItem);
-        });
-      },
-    )({ items }),
+    "action/drop/handler": handler<any[], { items: TodoItem[] }>((event, { items }) => {
+      console.log("todo drag handler", event);
+      event.forEach((item) => {
+        let newItem;
+        if (typeof item === "object" && item !== null && "title" in item) newItem = item;
+        else if (typeof item === "string") newItem = { title: item, done: false };
+        else newItem = { title: item.toString(), done: false };
+        console.log("todo drag handler newItem", newItem, item);
+        items.push(newItem);
+      });
+    })({ items }),
   };
 });

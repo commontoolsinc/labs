@@ -68,7 +68,7 @@ export default class PickerElement extends LitElement {
   private get filteredItems() {
     const filterLower = this.filter.toLowerCase();
     return this.items.filter(
-      item =>
+      (item) =>
         item.label.toLowerCase().includes(filterLower) ||
         item.value.toString().toLowerCase().includes(filterLower),
     );
@@ -117,10 +117,8 @@ export default class PickerElement extends LitElement {
         />
         <div class="dropdown ${showDropdown ? "show" : ""}">
           ${items.map(
-            item => html`
-              <div class="item" @mousedown=${this.selectItem.bind(this, item)}>
-                ${item.label}
-              </div>
+            (item) => html`
+              <div class="item" @mousedown=${this.selectItem.bind(this, item)}>${item.label}</div>
             `,
           )}
         </div>

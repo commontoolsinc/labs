@@ -1,12 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  getDoc,
-  isCell,
-  isDoc,
-  isDocLink,
-  isQueryResult,
-  ReactivityLog,
-} from "../src/cell.js";
+import { getDoc, isCell, isDoc, isDocLink, isQueryResult, ReactivityLog } from "../src/cell.js";
 import { JSONSchema } from "@commontools/builder";
 import { addEventHandler, idle } from "../src/scheduler.js";
 import { compactifyPaths } from "../src/utils.js";
@@ -903,10 +896,7 @@ describe("asCell with schema", () => {
 describe("JSON.stringify bug", () => {
   it("should not modify the value of the cell", () => {
     const c = getDoc({ result: { data: 1 } }, "json-test");
-    const d = getDoc(
-      { internal: { "__#2": { cell: c, path: ["result"] } } },
-      "json-test2",
-    );
+    const d = getDoc({ internal: { "__#2": { cell: c, path: ["result"] } } }, "json-test2");
     const e = getDoc(
       {
         internal: {
@@ -922,14 +912,12 @@ describe("JSON.stringify bug", () => {
     expect(json).toEqual('{"internal":{"a":1}}');
     expect(JSON.stringify(c.get())).toEqual('{"result":{"data":1}}');
     expect(JSON.stringify(d.get())).toEqual(
-      `{"internal":{"__#2":{"cell":${
-        JSON.stringify(c.entityId)
-      },"path":["result"]}}}`,
+      `{"internal":{"__#2":{"cell":${JSON.stringify(c.entityId)},"path":["result"]}}}`,
     );
     expect(JSON.stringify(e.get())).toEqual(
-      `{"internal":{"a":{"$alias":{"cell":${
-        JSON.stringify(d.entityId)
-      },"path":["internal","__#2","data"]}}}}`,
+      `{"internal":{"a":{"$alias":{"cell":${JSON.stringify(
+        d.entityId,
+      )},"path":["internal","__#2","data"]}}}}`,
     );
   });
 });

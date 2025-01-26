@@ -1,10 +1,5 @@
 import { h } from "@commontools/html";
-import {
-  recipe,
-  handler,
-  cell,
-  lift,
-} from "@commontools/builder";
+import { recipe, handler, cell, lift } from "@commontools/builder";
 import { z } from "zod";
 
 const schema = z
@@ -38,9 +33,7 @@ export const generativeImage = recipe(schema, ({ prompt }) => {
   debouncedPrompt.setDefault("");
   timeoutId.setDefault(0);
 
-  const genImageUrl = lift(
-    ({ prompt }) => `/api/ai/img/?prompt=${encodeURIComponent(prompt)}`,
-  );
+  const genImageUrl = lift(({ prompt }) => `/api/ai/img/?prompt=${encodeURIComponent(prompt)}`);
 
   return (
     <common-vstack>

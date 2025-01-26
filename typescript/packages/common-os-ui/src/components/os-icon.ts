@@ -41,8 +41,6 @@ export class OsIcon extends LitElement {
   @property({ type: String }) icon = "";
 
   override render() {
-    return html`
-      <div class="icon material-symbols-rounded">${this.icon}</div>
-    `;
+    return html` <div class="icon material-symbols-rounded">${this.icon}</div> `;
   }
 }

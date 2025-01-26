@@ -23,8 +23,8 @@ type GoogleToken = {
 const CLIENT_ID = (import.meta as any).env.VITE_GOOGLE_CLIENT_ID;
 const API_KEY = (import.meta as any).env.VITE_GOOGLE_API_KEY;
 const SCOPES = [
-  'https://www.googleapis.com/auth/gmail.readonly',
-  'https://www.googleapis.com/auth/gmail.send'
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/gmail.send",
 ];
 
 export let tokenClient: google.accounts.oauth2.TokenClient;
@@ -37,30 +37,29 @@ export function getToken() {
   return gapi.client.getToken();
 }
 
-
 async function initializeGapiClient() {
-  await new Promise((resolve) => gapi.load('client', resolve));
+  await new Promise((resolve) => gapi.load("client", resolve));
   await gapi.client.init({
     apiKey: API_KEY,
-    discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/gmail/v1/rest'],
+    discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/gmail/v1/rest"],
   });
 }
 
 function gisLoaded() {
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CLIENT_ID,
-    scope: SCOPES.join(' '),
-    callback: '', // defined later
+    scope: SCOPES.join(" "),
+    callback: "", // defined later
   });
 }
 
 function checkExistingToken() {
-    const savedToken = localStorage.getItem('gmail_token');
-    if (savedToken) {
-        const token = JSON.parse(savedToken);
-        gapi.client.setToken(token);
-        hasToken = true;
-    }
+  const savedToken = localStorage.getItem("gmail_token");
+  if (savedToken) {
+    const token = JSON.parse(savedToken);
+    gapi.client.setToken(token);
+    hasToken = true;
+  }
 }
 
 export function attemptAuth(cb?: (resp: GoogleToken) => void) {
@@ -68,35 +67,35 @@ export function attemptAuth(cb?: (resp: GoogleToken) => void) {
     if ((resp as any).error !== undefined) {
       throw resp;
     }
-    localStorage.setItem('gmail_token', JSON.stringify(resp));
+    localStorage.setItem("gmail_token", JSON.stringify(resp));
     hasToken = true;
     cb?.(resp);
   };
 
   if (gapi.client.getToken() === null) {
-    tokenClient.requestAccessToken({ prompt: 'consent' });
+    tokenClient.requestAccessToken({ prompt: "consent" });
   } else {
-    tokenClient.requestAccessToken({ prompt: '' });
+    tokenClient.requestAccessToken({ prompt: "" });
   }
 }
 
 export async function listEmails() {
   try {
     const response = await gapi.client.gmail.users.messages.list({
-      userId: 'me',
+      userId: "me",
       maxResults: 10,
     });
 
     const messages = response.result.messages;
     if (!messages || messages.length === 0) {
-      console.log('No messages found.');
+      console.log("No messages found.");
       return;
     }
 
     // Get the full message details
     for (const message of messages) {
       const email = await gapi.client.gmail.users.messages.get({
-        userId: 'me',
+        userId: "me",
         id: message.id,
       });
       console.log(email.result.snippet);

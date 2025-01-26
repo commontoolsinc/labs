@@ -6,6 +6,13 @@
   "license": "UNLICENSED",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "npm": "please-use-pnpm",
+    "yarn": "please-use-pnpm",
+    "pnpm": ">= 10.0.0",
+    "node": "20.11.0"
+  },
   "scripts": {
     "build": "wireit",
     "clean": "wireit",

@@ -18,8 +18,7 @@ describe("createStore", () => {
     }
   };
 
-  const sleep = (ms: number) =>
-    new Promise((resolve) => setTimeout(resolve, ms));
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   it("should initialize with the correct state", () => {
     const state = init();
@@ -92,7 +91,7 @@ describe("createStore", () => {
   it("should perform effects", async () => {
     const initialState = init();
 
-    const decrementLater = async (): Promise<Msg> => { 
+    const decrementLater = async (): Promise<Msg> => {
       await sleep(10);
       return { type: "decrement" };
     };
@@ -129,9 +128,7 @@ describe("cursor", () => {
   };
 
   type UserState = BigState["user"];
-  type UserMsg =
-    | { type: "changeName"; name: string }
-    | { type: "incrementAge" };
+  type UserMsg = { type: "changeName"; name: string } | { type: "incrementAge" };
 
   const initialBigState: BigState = {
     user: { name: "John", age: 30 },

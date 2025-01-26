@@ -42,9 +42,7 @@ export function jsonSchemaToPlaceholder(schema: any): any {
 
 export function extractKeysFromJsonSchema(schema: any): string[] {
   // For primitive types, return empty array
-  if (
-    ["string", "number", "integer", "boolean", "null"].includes(schema.type)
-  ) {
+  if (["string", "number", "integer", "boolean", "null"].includes(schema.type)) {
     return [];
   }
 
@@ -62,9 +60,7 @@ export function extractKeysFromJsonSchema(schema: any): string[] {
         // Add the current key
         keys.push(key);
         // Recursively get nested keys and prefix them with current key
-        const nestedKeys = extractKeysFromJsonSchema(value).map(
-          k => `${key}.${k}`,
-        );
+        const nestedKeys = extractKeysFromJsonSchema(value).map((k) => `${key}.${k}`);
         keys.push(...nestedKeys);
       }
     }
@@ -165,9 +161,7 @@ export function extractKeysFromZodSchema(schema: z.ZodTypeAny): string[] {
       // Add the current key
       keys.push(key);
       // Recursively get nested keys and prefix them with current key
-      const nestedKeys = extractKeysFromZodSchema(value as any).map(
-        k => `${key}.${k}`,
-      );
+      const nestedKeys = extractKeysFromZodSchema(value as any).map((k) => `${key}.${k}`);
       keys.push(...nestedKeys);
     }
 
@@ -181,10 +175,7 @@ export function extractKeysFromZodSchema(schema: z.ZodTypeAny): string[] {
   }
 
   // Handle optional and nullable
-  if (
-    schema._def.typeName === "ZodOptional" ||
-    schema._def.typeName === "ZodNullable"
-  ) {
+  if (schema._def.typeName === "ZodOptional" || schema._def.typeName === "ZodNullable") {
     return extractKeysFromZodSchema(schema._def.innerType);
   }
 
@@ -311,19 +302,14 @@ export function generateZodCode(schema: any, indent: number = 0): string {
     default:
       // Handle arrays
       if (schema.type === "array") {
-        const itemsSchema = schema.items
-          ? generateZodCode(schema.items, indent)
-          : "z.any()";
+        const itemsSchema = schema.items ? generateZodCode(schema.items, indent) : "z.any()";
         zodSchema = `z.array(${itemsSchema})`;
       }
       // Handle objects
       else if (schema.type === "object") {
         const properties = schema.properties || {};
         const zodProperties = Object.entries(properties)
-          .map(
-            ([key, value]) =>
-              `${innerSpacing}${key}: ${generateZodCode(value, indent + 1)}`,
-          )
+          .map(([key, value]) => `${innerSpacing}${key}: ${generateZodCode(value, indent + 1)}`)
           .join(",\n");
         zodSchema = `z.object({\n${zodProperties}\n${spacing}})`;
       }

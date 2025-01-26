@@ -65,21 +65,14 @@ export const navigateTo = createNodeFactory({
 // str`Hello, ${name}!`
 //
 // TODO: This should be a built-in module
-export function str(
-  strings: TemplateStringsArray,
-  ...values: any[]
-): OpaqueRef<string> {
+export function str(strings: TemplateStringsArray, ...values: any[]): OpaqueRef<string> {
   const interpolatedString = ({
     strings,
     values,
   }: {
     strings: TemplateStringsArray;
     values: any[];
-  }) =>
-    strings.reduce(
-      (result, str, i) => result + str + (i < values.length ? values[i] : ""),
-      "",
-    );
+  }) => strings.reduce((result, str, i) => result + str + (i < values.length ? values[i] : ""), "");
 
   return lift(interpolatedString)({ strings, values });
 }

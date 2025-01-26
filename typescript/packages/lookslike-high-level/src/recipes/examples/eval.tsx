@@ -91,23 +91,21 @@ const grabJs = lift<{ result?: string }, string | undefined>(({ result }) => {
   return html;
 });
 
-const progress = lift<{ pending: boolean; partial?: string }, number>(
-  ({ pending, partial }) => {
-    if (!partial || !pending) {
-      return 0;
-    }
-    return (partial.length - responsePrefill.length) / 2048.0;
-  },
-);
+const progress = lift<{ pending: boolean; partial?: string }, number>(({ pending, partial }) => {
+  if (!partial || !pending) {
+    return 0;
+  }
+  return (partial.length - responsePrefill.length) / 2048.0;
+});
 
 const getInnerCode = (str: string) => {
-  const firstBrace = str.indexOf('{');
+  const firstBrace = str.indexOf("{");
   let depth = 1;
   let i = firstBrace + 1;
 
   while (depth > 0 && i < str.length) {
-    if (str[i] === '{') depth++;
-    if (str[i] === '}') depth--;
+    if (str[i] === "{") depth++;
+    if (str[i] === "}") depth--;
     i++;
   }
 
@@ -119,7 +117,7 @@ const naughty = lift(({ src, data }) => {
     return;
   }
   const innerCode = getInnerCode(src);
-  const fn = new Function('data', innerCode);
+  const fn = new Function("data", innerCode);
   try {
     return fn(data);
   } catch (e) {
@@ -145,7 +143,7 @@ export const evalJs = recipe<{
 
   const query = copy({ value: prompt });
   const lastSrc = copy({ value: src });
-  const error = cell({ error: false, detail: {} })
+  const error = cell({ error: false, detail: {} });
 
   // FIXME(ja): this html is a bit of a mess as changing src triggers suggestions and view (showing streaming)
   const {
@@ -158,9 +156,11 @@ export const evalJs = recipe<{
 
   return {
     [NAME]: str`${title} UI`,
-    [UI]: <div style="height: 100%">
-      <pre>${stringify({ obj: naughty({ src: grabJs({ result }), data }) })}</pre>
-    </div>,
+    [UI]: (
+      <div style="height: 100%">
+        <pre>${stringify({ obj: naughty({ src: grabJs({ result }), data }) })}</pre>
+      </div>
+    ),
     icon: "preview",
     prompt,
     title,
@@ -168,6 +168,6 @@ export const evalJs = recipe<{
     schema,
     partialHTML,
     addToPrompt: addToPrompt({ prompt, src, lastSrc, query }),
-    loadingProgress
+    loadingProgress,
   };
 });

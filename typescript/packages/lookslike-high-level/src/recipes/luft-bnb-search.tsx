@@ -17,9 +17,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 const LuftBnBPlace = z.object({
   id: z.string().describe("Unique identifier for the listing"),
   title: z.string().describe("Title of the listing"),
-  location: z
-    .string()
-    .describe("Street corner, Neighborhood and city of the listing"),
+  location: z.string().describe("Street corner, Neighborhood and city of the listing"),
   propertyType: z.enum(["Apartment", "House", "Room"]),
   pricePerNight: z.number().min(0),
   numberOfGuests: z.number().int().min(1),
@@ -55,9 +53,7 @@ const copy = lift(({ value }: { value: string }) => value);
 
 const asStars = lift((rating: number) => "⭐".repeat(Math.round(rating)));
 
-const justMonthAndDay = lift((isoDate: string) =>
-  isoDate.split("T")[0].slice(5),
-);
+const justMonthAndDay = lift((isoDate: string) => isoDate.split("T")[0].slice(5));
 
 const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value),
@@ -112,12 +108,8 @@ export const luftBnBSearch = recipe<{
 }>("Luft BnB Search", ({ startDate, endDate, location }) => {
   // TODO: This works because we recreate the recipe every time, but really this
   // should be dynamically generated at runtime.
-  startDate.setDefault(
-    new Date(new Date().getTime() + 86400).toISOString().split("T")[0],
-  );
-  endDate.setDefault(
-    new Date(new Date().getTime() + 3 * 86400).toISOString().split("T")[0],
-  );
+  startDate.setDefault(new Date(new Date().getTime() + 86400).toISOString().split("T")[0]);
+  endDate.setDefault(new Date(new Date().getTime() + 3 * 86400).toISOString().split("T")[0]);
   // TODO: This should be the user's default location, not hardcoded
   location.setDefault("San Francisco");
 
@@ -165,7 +157,7 @@ export const luftBnBSearch = recipe<{
         {ifElse(
           pending,
           <div>Searching...</div>,
-          places.map(place => (
+          places.map((place) => (
             <common-vstack gap="xs">
               <div>{place.title}</div>
               <div>
@@ -187,9 +179,7 @@ export const luftBnBSearch = recipe<{
     ),
     location,
     places,
-    [NAME]: str`LuftBnB ${justMonthAndDay(startDate)} - ${justMonthAndDay(
-      endDate,
-    )} in ${location}`,
+    [NAME]: str`LuftBnB ${justMonthAndDay(startDate)} - ${justMonthAndDay(endDate)} in ${location}`,
   };
 });
 
@@ -201,8 +191,8 @@ export const luftBnBBooking = recipe<{
   return {
     [UI]: (
       <div>
-        Booked {place.title} LuftBnB from {startDate} to {endDate} for $
-        {place.pricePerNight} per night
+        Booked {place.title} LuftBnB from {startDate} to {endDate} for ${place.pricePerNight} per
+        night
       </div>
     ),
     [NAME]: str`Booking for LuftBnB in ${place.location}`,
@@ -213,20 +203,18 @@ export const luftBnBBooking = recipe<{
 });
 
 const computeBookingDatesFromEvent = lift(({ date }) => {
-  const startDate = new Date(new Date(date).getTime() - 86400)
-    .toISOString()
-    .split("T")[0];
-  const endDate = new Date(new Date(date).getTime() + 86400)
-    .toISOString()
-    .split("T")[0];
+  const startDate = new Date(new Date(date).getTime() - 86400).toISOString().split("T")[0];
+  const endDate = new Date(new Date(date).getTime() + 86400).toISOString().split("T")[0];
   return { startDate, endDate };
 });
 
 const describeFirstResult = lift(({ places, startDate, endDate }) => {
   return places && places.length
-    ? `${places[0].propertyType} ${startDate}-${endDate} in ${places[0].location
-    }. ${"⭐".repeat(Math.round(places[0].rating))} (${places[0].rating}). $${places[0].pricePerNight
-    } per night`
+    ? `${places[0].propertyType} ${startDate}-${endDate} in ${
+        places[0].location
+      }. ${"⭐".repeat(Math.round(places[0].rating))} (${places[0].rating}). $${
+        places[0].pricePerNight
+      } per night`
     : "Searching...";
 });
 
@@ -284,58 +272,49 @@ const generateNearbyPlaceQuery = lift(({ routine, places }) => {
   const jsonSchema = JSON.stringify(zodToJsonSchema(NearbyPlace), null, 2);
 
   return {
-    messages: [
-      `generate ${initialData.length} ${locationType} with pun names`,
-      "```json\n[",
-    ],
+    messages: [`generate ${initialData.length} ${locationType} with pun names`, "```json\n["],
     system: `Generate a list of ${locationType} places in json format\n\n<schema>${jsonSchema}</schema>`,
     stop: "```",
   };
 });
 
 // FIXME(ja): validate that the recommendations work here...
-const grabNearbyPlaces = lift<{ result?: string }, NearbyPlace[]>(
-  ({ result }) => {
-    if (!result) {
-      return [];
-    }
-    const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
-    if (!jsonMatch) {
-      console.error("No JSON found in text:", result);
-      return [];
-    }
+const grabNearbyPlaces = lift<{ result?: string }, NearbyPlace[]>(({ result }) => {
+  if (!result) {
+    return [];
+  }
+  const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
+  if (!jsonMatch) {
+    console.error("No JSON found in text:", result);
+    return [];
+  }
 
-    let rawData = JSON.parse(jsonMatch[1]);
-    let parsedData = z.array(NearbyPlace).safeParse(rawData);
-    if (!parsedData.success) {
-      console.error("Invalid JSON:", parsedData.error);
-      return [];
-    }
-    return parsedData.data;
-  },
-);
+  let rawData = JSON.parse(jsonMatch[1]);
+  let parsedData = z.array(NearbyPlace).safeParse(rawData);
+  if (!parsedData.success) {
+    console.error("Invalid JSON:", parsedData.error);
+    return [];
+  }
+  return parsedData.data;
+});
 
 // NOTE: This writes results into `places`
 const annotatePlacesWithNearbyPlaces = lift(({ nearbyPlaces, places }) => {
-  (nearbyPlaces ?? []).forEach(
-    (place: { name: string; walkingDistance: number }, i: number) => {
-      if (place)
-        places[i].annotationUI = (
-          <div>
-            {place.name} is {place.walkingDistance} min away
-          </div>
-        );
-    },
-  );
+  (nearbyPlaces ?? []).forEach((place: { name: string; walkingDistance: number }, i: number) => {
+    if (place)
+      places[i].annotationUI = (
+        <div>
+          {place.name} is {place.walkingDistance} min away
+        </div>
+      );
+  });
 });
 
 const nearbyPlacesForRoutine = recipe<{
   routine: { locations: string[] };
   places: LuftBnBPlace[];
 }>("annotate places for routine", ({ routine, places }) => {
-  const nearbyPlaces = grabNearbyPlaces(
-    llm(generateNearbyPlaceQuery({ routine, places })),
-  );
+  const nearbyPlaces = grabNearbyPlaces(llm(generateNearbyPlaceQuery({ routine, places })));
 
   annotatePlacesWithNearbyPlaces({ nearbyPlaces, places });
 

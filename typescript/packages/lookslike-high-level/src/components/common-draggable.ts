@@ -46,11 +46,7 @@ export default class DraggableElement extends LitElement {
     const classes = classMap({ dragging: this._altKey, draggable: true });
 
     return html`
-      <div
-        draggable="true"
-        @dragstart=${this.#handleDragStart}
-        class=${classes}
-      >
+      <div draggable="true" @dragstart=${this.#handleDragStart} class=${classes}>
         <div class="draggable-scrim"></div>
         <slot></slot>
       </div>

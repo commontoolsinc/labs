@@ -1,13 +1,5 @@
 import { h } from "@commontools/html";
-import {
-  recipe,
-  handler,
-  UI,
-  NAME,
-  derive,
-  lift,
-  cell,
-} from "@commontools/builder";
+import { recipe, handler, UI, NAME, derive, lift, cell } from "@commontools/builder";
 import { z } from "zod";
 
 const BookItem = z.object({
@@ -24,20 +16,17 @@ const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
   },
 );
 
-const updateItem = handler<
-  { detail: { checked: boolean; value: string } },
-  { item: BookItem }
->(({ detail }, { item }) => {
-  item.done = detail.checked;
-});
-
-const deleteItem = handler<{}, { list: BookItem[]; item: BookItem }>(
-  ({}, { item, list }) => {
-    let idx = list.findIndex((i) => i.title === item.title);
-    if (idx !== -1) list.splice(idx, 1);
-    console.log("deleted item", item, idx);
+const updateItem = handler<{ detail: { checked: boolean; value: string } }, { item: BookItem }>(
+  ({ detail }, { item }) => {
+    item.done = detail.checked;
   },
 );
+
+const deleteItem = handler<{}, { list: BookItem[]; item: BookItem }>(({}, { item, list }) => {
+  let idx = list.findIndex((i) => i.title === item.title);
+  if (idx !== -1) list.splice(idx, 1);
+  console.log("deleted item", item, idx);
+});
 
 const oneWayCopyFn = lift(({ external, seen, internal }) => {
   const previousCells = seen.map((item: any) => JSON.stringify(item));
@@ -82,18 +71,11 @@ export default recipe(
                 <common-hstack>
                   <common-todo
                     checked={item.done}
-                    value={derive(
-                      item,
-                      ({ title, author }) => `${title} by ${author}`,
-                    )}
+                    value={derive(item, ({ title, author }) => `${title} by ${author}`)}
                     ontodo-checked={updateItem({ item })}
                     ontodo-input={updateItem({ item })}
                   />
-                  <sl-button
-                    outline
-                    variant="danger"
-                    onclick={deleteItem({ item, list })}
-                  >
+                  <sl-button outline variant="danger" onclick={deleteItem({ item, list })}>
                     Delete
                   </sl-button>
                 </common-hstack>

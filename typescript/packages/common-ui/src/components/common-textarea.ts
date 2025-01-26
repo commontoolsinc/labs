@@ -105,9 +105,7 @@ export class CommonTextareaElement extends LitElement {
     };
 
     const onblur = () => {
-      this.dispatchEvent(
-        new CommonTextareaBlurEvent({ id: this.id, value: this.value }),
-      );
+      this.dispatchEvent(new CommonTextareaBlurEvent({ id: this.id, value: this.value }));
     };
 
     return html`

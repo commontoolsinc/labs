@@ -261,9 +261,7 @@ describe("followCellReferences", () => {
     cellA.send({ ref: { cell: cellB, path: ["ref"] } });
     cellB.send({ ref: { cell: cellA, path: ["ref"] } });
     const reference: DocLink = { cell: cellA, path: ["ref"] };
-    expect(() => followCellReferences(reference)).toThrow(
-      "Reference cycle detected",
-    );
+    expect(() => followCellReferences(reference)).toThrow("Reference cycle detected");
   });
 });
 
@@ -427,8 +425,7 @@ describe("makeArrayElementsAllCells", () => {
 
     expect(changed).toBe(true);
     expect(
-      (newInput[0] as unknown as DocLink).cell !==
-        (previousInput[0] as unknown as DocLink).cell,
+      (newInput[0] as unknown as DocLink).cell !== (previousInput[0] as unknown as DocLink).cell,
     ).toBeTruthy();
     expect(isDocLink(newInput[0])).toBe(true);
     expect((newInput[0] as unknown as DocLink).cell.get()).toBe(43);
@@ -451,9 +448,7 @@ describe("makeArrayElementsAllCells", () => {
 
     expect(changed).toBe(true);
     expect(isDocLink(newInput.arr[0])).toBe(true);
-    expect((newInput.arr[0] as unknown as DocLink).cell).toBe(
-      previousInput.arr[0].cell,
-    );
+    expect((newInput.arr[0] as unknown as DocLink).cell).toBe(previousInput.arr[0].cell);
     expect(isDocLink(newInput.arr[1])).toBe(true);
     expect((newInput.arr[1] as unknown as DocLink).cell.get()).toBe(3);
     expect(isDocLink(newInput.nested.value)).toBe(false);

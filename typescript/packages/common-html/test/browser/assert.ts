@@ -38,11 +38,7 @@ export const equal = (actual: unknown, expected: unknown, message = "") => {
   }
 };
 
-export const matchObject = (
-  actual: unknown,
-  expected: unknown,
-  message = "",
-) => {
+export const matchObject = (actual: unknown, expected: unknown, message = "") => {
   if (!isObject(actual) || !isObject(expected)) {
     throw new AssertionError({
       message: message || "Both arguments must be objects",

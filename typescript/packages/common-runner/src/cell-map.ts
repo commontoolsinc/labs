@@ -22,10 +22,7 @@ export type EntityId = {
  * @param source - The source object.
  * @param cause - Optional causal source. Otherwise a random n is used.
  */
-export const createRef = (
-  source: Object = {},
-  cause: any = crypto.randomUUID(),
-): EntityId => {
+export const createRef = (source: Object = {}, cause: any = crypto.randomUUID()): EntityId => {
   try {
     // Unwrap query result proxies, replace cells with their ids and remove
     // functions and undefined values, since `merkle-reference` doesn't support
@@ -40,11 +37,7 @@ export const createRef = (
       if (typeof obj === "object" && obj !== null && "/" in obj) return obj;
 
       // If there is a .toJSON method, replace obj with it, then descend.
-      if (
-        typeof obj === "object" &&
-        obj !== null &&
-        typeof obj.toJSON === "function"
-      ) {
+      if (typeof obj === "object" && obj !== null && typeof obj.toJSON === "function") {
         obj = obj.toJSON() ?? obj;
       }
 

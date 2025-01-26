@@ -1,11 +1,5 @@
 import { h } from "@commontools/html";
-import {
-  recipe,
-  handler,
-  UI,
-  NAME,
-  navigateTo,
-} from "@commontools/builder";
+import { recipe, handler, UI, NAME, navigateTo } from "@commontools/builder";
 import { iframe } from "../iframe.jsx";
 
 type Position = { x: number; y: number };
@@ -32,26 +26,22 @@ const updateValue = handler<{ detail: { value: string } }, { value: string }>(
   ({ detail }, state) => detail?.value && (state.value = detail.value),
 );
 
-const cloneRecipe = handler<
-  {},
-  { state: DungeonGame; subtitle: string; prompt: string }
->((_, { prompt, state, subtitle }) => {
-  let fieldsToInclude = Object.entries(state).reduce((acc, [key, value]) => {
-    if (!key.startsWith("$") && !key.startsWith("_")) {
-      acc[key] = value;
-    }
-    return acc;
-  }, {} as any);
+const cloneRecipe = handler<{}, { state: DungeonGame; subtitle: string; prompt: string }>(
+  (_, { prompt, state, subtitle }) => {
+    let fieldsToInclude = Object.entries(state).reduce((acc, [key, value]) => {
+      if (!key.startsWith("$") && !key.startsWith("_")) {
+        acc[key] = value;
+      }
+      return acc;
+    }, {} as any);
 
-  return navigateTo(
-    iframe({ data: fieldsToInclude, title: `Dungeon: ${subtitle}`, prompt }),
-  );
-});
+    return navigateTo(iframe({ data: fieldsToInclude, title: `Dungeon: ${subtitle}`, prompt }));
+  },
+);
 
 const generateNoise = (x: number, y: number, scale: number = 0.1): number => {
   const noise =
-    Math.sin(x * scale) * Math.cos(y * scale) +
-    Math.sin((x * scale) / 2 + (y * scale) / 2);
+    Math.sin(x * scale) * Math.cos(y * scale) + Math.sin((x * scale) / 2 + (y * scale) / 2);
   return noise > 0 ? 1 : 0;
 };
 
@@ -67,7 +57,7 @@ const createNoiseGrid = (w: number, h: number): Position[] => {
   return walls;
 };
 
-export const dungeon = recipe<DungeonGame>("Dungeon Game", state => {
+export const dungeon = recipe<DungeonGame>("Dungeon Game", (state) => {
   state.walls.setDefault(createNoiseGrid(10, 10));
   // state.player.setDefault({ x: 5, y: 5})
   state.width.setDefault(10);
@@ -78,12 +68,7 @@ export const dungeon = recipe<DungeonGame>("Dungeon Game", state => {
     hp: 100,
     xp: 0,
     inventory: ["sword", "shield", "crumpled felt hat"],
-    dialogue: [
-      "Hello, I am an adventurer.",
-      "Oof, my knee!",
-      "I need a potion.",
-      "I am the best.",
-    ],
+    dialogue: ["Hello, I am an adventurer.", "Oof, my knee!", "I need a potion.", "I am the best."],
   });
   state.dungeonFloor.setDefault(1);
   state.skeleton.setDefault({
@@ -141,8 +126,7 @@ export const dungeon = recipe<DungeonGame>("Dungeon Game", state => {
           onclick={cloneRecipe({
             state,
             subtitle: "Skeleton Status",
-            prompt:
-              "status from skeleton's perspective (selectable) with movement controls",
+            prompt: "status from skeleton's perspective (selectable) with movement controls",
           })}
         >
           Skeleton Status
@@ -151,8 +135,7 @@ export const dungeon = recipe<DungeonGame>("Dungeon Game", state => {
           onclick={cloneRecipe({
             state,
             subtitle: "Battle",
-            prompt:
-              "battle between player and skeleton with emoji battle graphics and loot",
+            prompt: "battle between player and skeleton with emoji battle graphics and loot",
           })}
         >
           Battle

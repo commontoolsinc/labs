@@ -1,17 +1,8 @@
 import { h } from "@commontools/html";
-import {
-  llm,
-  recipe,
-  NAME,
-  UI,
-  lift,
-  ifElse,
-} from "@commontools/builder";
+import { llm, recipe, NAME, UI, lift, ifElse } from "@commontools/builder";
 import { z } from "zod";
 
-const genImage = lift(
-  ({ prompt }) => `/api/ai/img/?prompt=${encodeURIComponent(prompt)}`,
-);
+const genImage = lift(({ prompt }) => `/api/ai/img/?prompt=${encodeURIComponent(prompt)}`);
 
 const Chat = z
   .object({
@@ -44,12 +35,8 @@ const prepImage = lift(({ answer, prompt, question }) => {
 });
 
 export const chat = recipe(Chat, ({ prompt, question }) => {
-  const { partial: answer, result: finalAnswer } = llm(
-    prepText({ prompt, question }),
-  );
-  const { result: imgAnswer } = llm(
-    prepImage({ answer: finalAnswer, prompt, question }),
-  );
+  const { partial: answer, result: finalAnswer } = llm(prepText({ prompt, question }));
+  const { result: imgAnswer } = llm(prepImage({ answer: finalAnswer, prompt, question }));
 
   return {
     [NAME]: "prompt",
@@ -61,12 +48,7 @@ export const chat = recipe(Chat, ({ prompt, question }) => {
         {ifElse(answer, <span>{answer}</span>, <span>{prompt}</span>)}
         {ifElse(
           imgAnswer,
-          <img
-            src={genImage({ prompt: imgAnswer })}
-            width={128}
-            height={128}
-            title={imgAnswer}
-          />,
+          <img src={genImage({ prompt: imgAnswer })} width={128} height={128} title={imgAnswer} />,
           <span></span>,
         )}
 

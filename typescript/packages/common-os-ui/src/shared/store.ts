@@ -83,10 +83,7 @@ export const createStore = <State, Msg>({
 };
 
 export const forward =
-  <ParentMsg, ChildMsg>(
-    send: (msg: ParentMsg) => void,
-    tag: (child: ChildMsg) => ParentMsg,
-  ) =>
+  <ParentMsg, ChildMsg>(send: (msg: ParentMsg) => void, tag: (child: ChildMsg) => ParentMsg) =>
   (msg: ChildMsg) => {
     send(tag(msg));
   };

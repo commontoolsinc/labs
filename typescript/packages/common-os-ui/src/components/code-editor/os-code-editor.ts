@@ -142,11 +142,7 @@ export class OsCodeEditor extends ReactiveElement {
     });
     this.#editorView = createEditor({
       element: editorRoot,
-      extensions: [
-        this.#lang.of(defaultLang),
-        this.#tabSize.of(EditorState.tabSize.of(4)),
-        ext
-      ],
+      extensions: [this.#lang.of(defaultLang), this.#tabSize.of(EditorState.tabSize.of(4)), ext],
     });
 
     this.destroy.add(() => {

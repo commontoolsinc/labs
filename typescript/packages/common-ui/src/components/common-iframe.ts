@@ -81,9 +81,7 @@ export class CommonIframeElement extends LitElement {
           lineno,
           colno,
           stacktrace,
-          error: value.error
-            ? value.error.stack || value.error.toString()
-            : null,
+          error: value.error ? value.error.stack || value.error.toString() : null,
         });
       }
 
@@ -116,10 +114,7 @@ export class CommonIframeElement extends LitElement {
         console.log("subscribing", key, this.context);
 
         const action: Action = (log: ReactivityLog) =>
-          this.notifySubscribers(
-            key,
-            this.context.getAsQueryResult([key], log),
-          );
+          this.notifySubscribers(key, this.context.getAsQueryResult([key], log));
 
         addAction(action);
         if (!this.subscriptions.has(key)) this.subscriptions.set(key, [action]);
@@ -136,12 +131,8 @@ export class CommonIframeElement extends LitElement {
   private notifySubscribers(key: string, value: any) {
     console.log("notifySubscribers", key, value);
     // TODO: This might cause infinite loops, since the data can be a graph.
-    const copy =
-      value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
-    this.iframeRef.value?.contentWindow?.postMessage(
-      { type: "update", key, value: copy },
-      "*",
-    );
+    const copy = value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
+    this.iframeRef.value?.contentWindow?.postMessage({ type: "update", key, value: copy }, "*");
   }
   private boundHandleMessage = this.handleMessage.bind(this);
 
@@ -166,9 +157,7 @@ export class CommonIframeElement extends LitElement {
   }
 
   private fixError() {
-    this.dispatchEvent(
-      new CustomEvent("fix", { detail: this.errorDetails, bubbles: true }),
-    );
+    this.dispatchEvent(new CustomEvent("fix", { detail: this.errorDetails, bubbles: true }));
     this.errorDetails = null;
   }
 

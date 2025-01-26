@@ -70,29 +70,17 @@ export class CommonAsciiLoader extends LitElement {
         const t = sini * cosj_add * cosA - sinj * sinA;
 
         const x = Math.floor(
-          width / 2 +
-            25 *
-              (1 + this.progress) *
-              mess *
-              (cosi * cosj_add * cosB - t * sinB)
+          width / 2 + 25 * (1 + this.progress) * mess * (cosi * cosj_add * cosB - t * sinB),
         );
         const y = Math.floor(
-          height / 2 +
-            10 *
-              (1 + this.progress) *
-              mess *
-              (cosi * cosj_add * sinB + t * cosB)
+          height / 2 + 10 * (1 + this.progress) * mess * (cosi * cosj_add * sinB + t * cosB),
         );
         const o = x + width * y;
 
-        const luminance =
-          cosi * cosj * sinB - cosj * sinA - sinj * cosA - sini * sinj * cosB;
+        const luminance = cosi * cosj * sinB - cosj * sinA - sinj * cosA - sini * sinj * cosB;
         if (y >= 0 && y < height && x >= 0 && x < width && mess > z[o]) {
           z[o] = mess;
-          b[o] =
-            luminanceChars[
-              Math.max(0, Math.min(11, Math.floor(8 * luminance)))
-            ];
+          b[o] = luminanceChars[Math.max(0, Math.min(11, Math.floor(8 * luminance)))];
         }
       }
     }

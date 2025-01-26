@@ -1,14 +1,6 @@
 export { opaqueRef as cell, stream } from "./opaque-ref.js";
 export { $, event, select, Spell } from "./spell.js";
-export {
-  byRef,
-  compute,
-  createNodeFactory,
-  derive,
-  handler,
-  lift,
-  render,
-} from "./module.js";
+export { byRef, compute, createNodeFactory, derive, handler, lift, render } from "./module.js";
 export {
   getTopFrame,
   popFrame,
@@ -17,14 +9,7 @@ export {
   recipe,
   recipeFromFrame,
 } from "./recipe.js";
-export {
-  fetchData,
-  ifElse,
-  llm,
-  navigateTo,
-  str,
-  streamData,
-} from "./built-in.js";
+export { fetchData, ifElse, llm, navigateTo, str, streamData } from "./built-in.js";
 export {
   type Alias,
   type Frame,
@@ -60,9 +45,4 @@ export {
 } from "./types.js";
 
 // This should be a separate package, but for now it's easier to keep it here.
-export {
-  createJsonSchema,
-  deepEqual,
-  getValueAtPath,
-  setValueAtPath,
-} from "./utils.js";
+export { createJsonSchema, deepEqual, getValueAtPath, setValueAtPath } from "./utils.js";

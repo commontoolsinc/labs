@@ -7,13 +7,10 @@ import { idle } from "../src/scheduler.js";
 
 describe("Recipe Runner", () => {
   it("should run a simple recipe", async () => {
-    const simpleRecipe = recipe<{ value: number }>(
-      "Simple Recipe",
-      ({ value }) => {
-        const doubled = lift((x: number) => x * 2)(value);
-        return { result: doubled };
-      },
-    );
+    const simpleRecipe = recipe<{ value: number }>("Simple Recipe", ({ value }) => {
+      const doubled = lift((x: number) => x * 2)(value);
+      return { result: doubled };
+    });
 
     const result = run(simpleRecipe, { value: 5 });
 
@@ -30,16 +27,13 @@ describe("Recipe Runner", () => {
       return { squared };
     });
 
-    const outerRecipe = recipe<{ value: number }>(
-      "Outer Recipe",
-      ({ value }) => {
-        const { squared } = innerRecipe({ x: value });
-        const result = lift((n: number) => {
-          return n + 1;
-        })(squared);
-        return { result };
-      },
-    );
+    const outerRecipe = recipe<{ value: number }>("Outer Recipe", ({ value }) => {
+      const { squared } = innerRecipe({ x: value });
+      const result = lift((n: number) => {
+        return n + 1;
+      })(squared);
+      return { result };
+    });
 
     const result = run(outerRecipe, { value: 4 });
 
@@ -96,9 +90,7 @@ describe("Recipe Runner", () => {
   });
 
   it("should handle recipes with map nodes with closures", async () => {
-    const double = lift<{ x: number; factor: number }>(
-      ({ x, factor }) => x * factor,
-    );
+    const double = lift<{ x: number; factor: number }>(({ x, factor }) => x * factor);
 
     const doubleArray = recipe<{ values: number[]; factor: number }>(
       "Double numbers",
@@ -121,19 +113,15 @@ describe("Recipe Runner", () => {
   });
 
   it("should execute handlers", async () => {
-    const incHandler = handler<
-      { amount: number },
-      { counter: { value: number } }
-    >(({ amount }, { counter }) => {
-      counter.value += amount;
-    });
-
-    const incRecipe = recipe<{ counter: { value: number } }>(
-      "Increment counter",
-      ({ counter }) => {
-        return { counter, stream: incHandler({ counter }) };
+    const incHandler = handler<{ amount: number }, { counter: { value: number } }>(
+      ({ amount }, { counter }) => {
+        counter.value += amount;
       },
     );
+
+    const incRecipe = recipe<{ counter: { value: number } }>("Increment counter", ({ counter }) => {
+      return { counter, stream: incHandler({ counter }) };
+    });
 
     const result = run(incRecipe, { counter: { value: 0 } });
 
@@ -150,19 +138,16 @@ describe("Recipe Runner", () => {
 
   it("should execute handlers that use bind and this", async () => {
     // Switch to `function` so that we can set the type of `this`.
-    const incHandler = handler<
-      { amount: number },
-      { counter: { value: number } }
-    >(function (this: { counter: { value: number } }, { amount }) {
+    const incHandler = handler<{ amount: number }, { counter: { value: number } }>(function (
+      this: { counter: { value: number } },
+      { amount },
+    ) {
       this.counter.value += amount;
     });
 
-    const incRecipe = recipe<{ counter: { value: number } }>(
-      "Increment counter",
-      ({ counter }) => {
-        return { counter, stream: incHandler.bind({ counter }) };
-      },
-    );
+    const incRecipe = recipe<{ counter: { value: number } }>("Increment counter", ({ counter }) => {
+      return { counter, stream: incHandler.bind({ counter }) };
+    });
 
     const result = run(incRecipe, { counter: { value: 0 } });
 
@@ -179,18 +164,13 @@ describe("Recipe Runner", () => {
 
   it("should execute handlers that use bind and this (no types)", async () => {
     // Switch to `function` so that we can set the type of `this`.
-    const incHandler = handler(
-      function (this: { counter: { value: number } }, { amount }) {
-        this.counter.value += amount;
-      },
-    );
+    const incHandler = handler(function (this: { counter: { value: number } }, { amount }) {
+      this.counter.value += amount;
+    });
 
-    const incRecipe = recipe<{ counter: { value: number } }>(
-      "Increment counter",
-      ({ counter }) => {
-        return { counter, stream: incHandler.bind({ counter }) };
-      },
-    );
+    const incRecipe = recipe<{ counter: { value: number } }>("Increment counter", ({ counter }) => {
+      return { counter, stream: incHandler.bind({ counter }) };
+    });
 
     const result = run(incRecipe, { counter: { value: 0 } });
 
@@ -282,15 +262,12 @@ describe("Recipe Runner", () => {
       return multiply({ x, y });
     });
 
-    const multiplyRecipe = recipe<{ x: number; y: number }>(
-      "multiply",
-      (args) => {
-        return {
-          result1: multiplyGenerator(args),
-          result2: multiplyGenerator2(args),
-        };
-      },
-    );
+    const multiplyRecipe = recipe<{ x: number; y: number }>("multiply", (args) => {
+      return {
+        result1: multiplyGenerator(args),
+        result2: multiplyGenerator2(args),
+      };
+    });
 
     const result = run(multiplyRecipe, { x, y });
 
@@ -330,13 +307,10 @@ describe("Recipe Runner", () => {
 
     const double = byRef("double");
 
-    const simpleRecipe = recipe<{ value: number }>(
-      "Simple Recipe",
-      ({ value }) => {
-        const doubled = double(value);
-        return { result: doubled };
-      },
-    );
+    const simpleRecipe = recipe<{ value: number }>("Simple Recipe", ({ value }) => {
+      const doubled = double(value);
+      return { result: doubled };
+    });
 
     const result = run(simpleRecipe, { value: 5 });
 
@@ -414,14 +388,8 @@ describe("Recipe Runner", () => {
     const sumRecipe = recipe<{ data: { items: Array<{ value: number }> } }>(
       "Sum Items",
       ({ data }) => {
-        const result = lift(
-          schema,
-          { type: "number" },
-          ({ data }) =>
-            data.items.reduce(
-              (sum: number, item: any) => sum + item.get().value,
-              0,
-            ),
+        const result = lift(schema, { type: "number" }, ({ data }) =>
+          data.items.reduce((sum: number, item: any) => sum + item.get().value, 0),
         )({ data });
         return { result };
       },
@@ -453,14 +421,11 @@ describe("Recipe Runner", () => {
     const dynamicRecipe = recipe<{ context: Record<string, number> }>(
       "Dynamic Context",
       ({ context }) => {
-        const result = lift(
-          schema,
-          { type: "number" },
-          ({ context }) =>
-            Object.values(context ?? {}).reduce(
-              (sum: number, val) => sum + (val as Cell<number>).get(),
-              0,
-            ),
+        const result = lift(schema, { type: "number" }, ({ context }) =>
+          Object.values(context ?? {}).reduce(
+            (sum: number, val) => sum + (val as Cell<number>).get(),
+            0,
+          ),
         )({ context });
         return { result };
       },
@@ -498,12 +463,9 @@ describe("Recipe Runner", () => {
       },
     );
 
-    const incRecipe = recipe<{ counter: number }>(
-      "Increment counter",
-      ({ counter }) => {
-        return { counter, stream: incHandler({ counter }) };
-      },
-    );
+    const incRecipe = recipe<{ counter: number }>("Increment counter", ({ counter }) => {
+      return { counter, stream: incHandler({ counter }) };
+    });
 
     const result = run(incRecipe, { counter: 0 });
 

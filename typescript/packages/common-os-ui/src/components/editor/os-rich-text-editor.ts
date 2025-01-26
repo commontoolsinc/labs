@@ -42,8 +42,7 @@ export const createHashtagMsg = (value: suggestions.Msg): HashtagMsg =>
 
 export type InfoMsg = ValueMsg<"info", string>;
 
-export const createInfoMsg = (value: string): InfoMsg =>
-  freeze({ type: "info", value });
+export const createInfoMsg = (value: string): InfoMsg => freeze({ type: "info", value });
 
 export type Msg = MentionMsg | HashtagMsg | InfoMsg;
 
@@ -125,9 +124,7 @@ export const createFx = ({
   fetchCompletions,
 }: {
   view: EditorView;
-  fetchCompletions: (
-    suggestion: Suggestion,
-  ) => Promise<Array<completion.Model>>;
+  fetchCompletions: (suggestion: Suggestion) => Promise<Array<completion.Model>>;
 }) => {
   const suggestionsFx = suggestions.createFx({
     view,
@@ -176,9 +173,7 @@ const schema = new Schema({
 
 /** Parse a text string into a document of schema type */
 export const parseTextToDoc = (text: string): Node => {
-  const content = text
-    .split("\n")
-    .map((p) => schema.nodes.paragraph.create(null, schema.text(p)));
+  const content = text.split("\n").map((p) => schema.nodes.paragraph.create(null, schema.text(p)));
 
   return schema.nodes.doc.create(null, content);
 };
@@ -357,8 +352,7 @@ export class OsRichTextEditor extends HTMLElement {
     // Create fx driver
     const fx = createFx({
       view: this.#editorView,
-      fetchCompletions: (suggestion: Suggestion) =>
-        this.fetchCompletions(suggestion),
+      fetchCompletions: (suggestion: Suggestion) => this.fetchCompletions(suggestion),
     });
 
     this.#store = createStore({
@@ -398,15 +392,11 @@ export class OsRichTextEditor extends HTMLElement {
     const mentionState = this.#store.get().mention;
 
     const onHashtagClickCompletion = (event: ClickCompletion) => {
-      this.#store.send(
-        createHashtagMsg(suggestions.createClickCompletionMsg(event.detail)),
-      );
+      this.#store.send(createHashtagMsg(suggestions.createClickCompletionMsg(event.detail)));
     };
 
     const onMentionClickCompletion = (event: ClickCompletion) => {
-      this.#store.send(
-        createMentionMsg(suggestions.createClickCompletionMsg(event.detail)),
-      );
+      this.#store.send(createMentionMsg(suggestions.createClickCompletionMsg(event.detail)));
     };
 
     return html`

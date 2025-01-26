@@ -2,7 +2,6 @@ import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 
-
 @customElement("common-send-message")
 export class SendMessageElement extends LitElement {
   static override styles = [
@@ -39,7 +38,7 @@ export class SendMessageElement extends LitElement {
         detail: { message: value },
         bubbles: true,
         composed: true,
-      })
+      }),
     );
   }
 
@@ -58,9 +57,7 @@ export class SendMessageElement extends LitElement {
           @keydown=${this.keyDown}
         >
         </common-input>
-        <common-button class="unibox-button" @click=${this.send}
-          >${this.name}</common-button
-        >
+        <common-button class="unibox-button" @click=${this.send}>${this.name}</common-button>
       </div>
     `;
   }

@@ -5,18 +5,16 @@ import { recipe, UI, NAME, derive } from "@commontools/builder";
 import src from "./smolIframe.html?raw";
 
 export default recipe<{
-    data: { count: number };
+  data: { count: number };
 }>("smol-iframe", ({ data }) => {
-
-    return {
-        [NAME]: 'smol iframe',
-        [UI]: <div style="height: 100%">
-            <p>outside of iframe, data: {derive(data, data => JSON.stringify(data))}</p>
-            <common-iframe
-                src={src}
-                $context={data}
-            ></common-iframe>
-        </div>,
-        data
-    };
+  return {
+    [NAME]: "smol iframe",
+    [UI]: (
+      <div style="height: 100%">
+        <p>outside of iframe, data: {derive(data, (data) => JSON.stringify(data))}</p>
+        <common-iframe src={src} $context={data}></common-iframe>
+      </div>
+    ),
+    data,
+  };
 });

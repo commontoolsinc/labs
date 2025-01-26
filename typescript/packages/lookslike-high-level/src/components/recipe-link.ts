@@ -39,10 +39,7 @@ export class CommonRecipeLink extends LitElement {
 
   override render() {
     return html`
-      <a
-        href="/recipe/${this.recipe ?? "unknown"}"
-        @click="${this.handleClick}"
-      >
+      <a href="/recipe/${this.recipe ?? "unknown"}" @click="${this.handleClick}">
         <slot></slot>
       </a>
     `;

@@ -1,24 +1,24 @@
-import { LitElement, html, css } from 'lit';
-import { customElement } from 'lit/decorators.js';
+import { LitElement, html, css } from "lit";
+import { customElement } from "lit/decorators.js";
 
-@customElement('common-record')
+@customElement("common-record")
 export class CommonRecordElement extends LitElement {
   static override styles = css`
-  :host {
-    display: block;
-  }
+    :host {
+      display: block;
+    }
 
-  .record-key {
-    font-weight: bold;
-  }
+    .record-key {
+      font-weight: bold;
+    }
 
-  .record-key::marker {
-    font-size: 12px;
-  }
+    .record-key::marker {
+      font-size: 12px;
+    }
 
-  .record-value {
-    margin-top: 4px;
-  }
+    .record-value {
+      margin-top: 4px;
+    }
   `;
 
   override render() {

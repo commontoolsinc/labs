@@ -1,22 +1,7 @@
 import { h, type VNode } from "@commontools/html";
-import {
-  recipe,
-  lift,
-  handler,
-  cell,
-  UI,
-  NAME,
-  TYPE,
-  ifElse,
-  llm,
-} from "@commontools/builder";
+import { recipe, lift, handler, cell, UI, NAME, TYPE, ifElse, llm } from "@commontools/builder";
 import { type Charm, openCharm } from "../data.js";
-import {
-  run,
-  getDocLinkOrValue,
-  getEntityId,
-  getDocByEntityId,
-} from "@commontools/runner";
+import { run, getDocLinkOrValue, getEntityId, getDocByEntityId } from "@commontools/runner";
 import { suggestions } from "../suggestions.js";
 import { z } from "zod";
 
@@ -103,9 +88,9 @@ const filterMatchingCharms = lift<{
   charmInfo: CharmInfo[];
 }>(({ matchedIndices, charmInfo }) =>
   (matchedIndices ?? [])
-    .filter(item => item.confidence > MINIMUM_CONFIDENCE)
-    .map(item => charmInfo.find(charm => charm.index === item.index))
-    .filter(charm => charm !== undefined),
+    .filter((item) => item.confidence > MINIMUM_CONFIDENCE)
+    .map((item) => charmInfo.find((charm) => charm.index === item.index))
+    .filter((charm) => charm !== undefined),
 );
 
 const findSuggestion = lift<{
@@ -113,11 +98,11 @@ const findSuggestion = lift<{
   data: { [key: string]: any };
 }>(({ matchingCharms, data }) => {
   const suggestion = suggestions.find(
-    suggestion =>
-      Object.values(suggestion.charms ?? {}).every(type =>
-        matchingCharms.find(charm => charm.type === type),
+    (suggestion) =>
+      Object.values(suggestion.charms ?? {}).every((type) =>
+        matchingCharms.find((charm) => charm.type === type),
       ) &&
-      Object.values(suggestion.bindings ?? {}).every(binding =>
+      Object.values(suggestion.bindings ?? {}).every((binding) =>
         Object.keys(data ?? {}).includes(binding),
       ),
   );
@@ -125,15 +110,11 @@ const findSuggestion = lift<{
   if (suggestion) {
     const bindings = Object.entries(suggestion.charms).map(([key, type]) => [
       key,
-      matchingCharms.find(charm => charm.type === type),
+      matchingCharms.find((charm) => charm.type === type),
     ]) as [string, { id: string; name: string; type: string }][];
 
-    const nameBindings = Object.fromEntries(
-      bindings.map(([key, charm]) => [key, charm.name]),
-    );
-    const charmBindings = Object.fromEntries(
-      bindings.map(([key, charm]) => [key, charm.id]),
-    );
+    const nameBindings = Object.fromEntries(bindings.map(([key, charm]) => [key, charm.name]));
+    const charmBindings = Object.fromEntries(bindings.map(([key, charm]) => [key, charm.id]));
 
     const description = suggestion.description
       .map((part, i) => (i % 2 === 0 ? part : nameBindings[part]))
@@ -172,9 +153,10 @@ const acceptSuggestion = handler<
 
   const accepted = run<any, Charm>(acceptedRecipe, {
     ...Object.fromEntries(
-      Object.entries(suggestion.bindings as { [key: string]: string }).map(
-        ([key, value]) => [key, getDocLinkOrValue(data[value])],
-      ),
+      Object.entries(suggestion.bindings as { [key: string]: string }).map(([key, value]) => [
+        key,
+        getDocLinkOrValue(data[value]),
+      ]),
     ),
     ...Object.fromEntries(
       Object.entries(suggestion.boundCharms).map(([key, value]) => [

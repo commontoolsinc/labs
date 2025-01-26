@@ -1,15 +1,5 @@
 import { h } from "@commontools/html";
-import {
-  recipe,
-  UI,
-  NAME,
-  lift,
-  llm,
-  handler,
-  str,
-  cell,
-  ifElse,
-} from "@commontools/builder";
+import { recipe, UI, NAME, lift, llm, handler, str, cell, ifElse } from "@commontools/builder";
 import { truncateAsciiArt } from "../loader.js";
 
 const formatData = lift(({ obj }) => {
@@ -17,7 +7,7 @@ const formatData = lift(({ obj }) => {
   return JSON.stringify(obj || {}, null, 2);
 });
 
-const tap = lift(x => {
+const tap = lift((x) => {
   console.log(x, JSON.stringify(x, null, 2));
   return x;
 });
@@ -64,22 +54,17 @@ const grabJSON = lift<{ result?: string }, any>(({ result }) => {
 
 const copy = lift(({ value }: { value: any }) => value);
 
-const addToPrompt = handler<
-  { prompt: string },
-  { prompt: string; query: string }
->((e, state) => {
+const addToPrompt = handler<{ prompt: string }, { prompt: string; query: string }>((e, state) => {
   state.prompt = (state.prompt ? state.prompt + "\n" : "") + e.prompt;
   state.query = state.prompt;
 });
 
-const dots = lift<{ pending: boolean; partial?: string }, string>(
-  ({ pending, partial }) => {
-    if (!partial || !pending) {
-      return "";
-    }
-    return truncateAsciiArt(partial.length / 2.0);
-  },
-);
+const dots = lift<{ pending: boolean; partial?: string }, string>(({ pending, partial }) => {
+  if (!partial || !pending) {
+    return "";
+  }
+  return truncateAsciiArt(partial.length / 2.0);
+});
 
 export const dataDesigner = recipe<{
   title: string;

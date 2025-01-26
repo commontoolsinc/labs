@@ -13,9 +13,7 @@ export interface StorageProvider {
    * @param batch - Batch of entity IDs & values to send.
    * @returns Promise that resolves when the value is sent.
    */
-  send<T = any>(
-    batch: { entityId: EntityId; value: StorageValue<T> }[],
-  ): Promise<void>;
+  send<T = any>(batch: { entityId: EntityId; value: StorageValue<T> }[]): Promise<void>;
 
   /**
    * Sync a value from storage. Use `get()` to retrieve the value.
@@ -42,10 +40,7 @@ export interface StorageProvider {
    * @param callback - Callback function.
    * @returns Cancel function to stop the subscription.
    */
-  sink<T = any>(
-    entityId: EntityId,
-    callback: (value: StorageValue<T>) => void,
-  ): Cancel;
+  sink<T = any>(entityId: EntityId, callback: (value: StorageValue<T>) => void): Cancel;
 
   /**
    * Destroy the storage provider. Used for tests only.
@@ -60,18 +55,13 @@ abstract class BaseStorageProvider implements StorageProvider {
   protected waitingForSync = new Map<string, Promise<void>>();
   protected waitingForSyncResolvers = new Map<string, () => void>();
 
-  abstract send<T = any>(
-    batch: { entityId: EntityId; value: StorageValue<T> }[],
-  ): Promise<void>;
+  abstract send<T = any>(batch: { entityId: EntityId; value: StorageValue<T> }[]): Promise<void>;
 
   abstract sync(entityId: EntityId, expectedInStorage: boolean): Promise<void>;
 
   abstract get<T = any>(entityId: EntityId): StorageValue<T> | undefined;
 
-  sink<T = any>(
-    entityId: EntityId,
-    callback: (value: StorageValue<T>) => void,
-  ): Cancel {
+  sink<T = any>(entityId: EntityId, callback: (value: StorageValue<T>) => void): Cancel {
     const key = JSON.stringify(entityId);
 
     if (!this.subscribers.has(key))
@@ -89,19 +79,14 @@ abstract class BaseStorageProvider implements StorageProvider {
     log("notify subscribers", key, JSON.stringify(value));
     const listeners = this.subscribers.get(key);
     if (this.waitingForSync.has(key) && listeners && listeners.size > 0)
-      throw new Error(
-        "Subscribers are expected to only start after first sync.",
-      );
+      throw new Error("Subscribers are expected to only start after first sync.");
     this.resolveWaitingForSync(key);
     if (listeners) for (const listener of listeners) listener(value);
   }
 
   protected waitForSync(key: string): Promise<void> {
     if (!this.waitingForSync.has(key))
-      this.waitingForSync.set(
-        key,
-        new Promise((r) => this.waitingForSyncResolvers.set(key, r)),
-      );
+      this.waitingForSync.set(key, new Promise((r) => this.waitingForSyncResolvers.set(key, r)));
     log("waiting for sync", key, [...this.waitingForSync.keys()]);
     return this.waitingForSync.get(key)!;
   }
@@ -123,9 +108,7 @@ abstract class BaseStorageProvider implements StorageProvider {
  * But for testing we can create multiple instances that share the memory.
  */
 const inMemoryStorage = new Map<string, StorageValue>();
-const inMemoryStorageSubscribers = new Set<
-  (key: string, value: StorageValue) => void
->();
+const inMemoryStorageSubscribers = new Set<(key: string, value: StorageValue) => void>();
 export class InMemoryStorageProvider extends BaseStorageProvider {
   private handleStorageUpdateFn: (key: string, value: any) => void;
   private lastValues = new Map<string, string | undefined>();
@@ -144,9 +127,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async send<T = any>(
-    batch: { entityId: EntityId; value: StorageValue<T> }[],
-  ): Promise<void> {
+  async send<T = any>(batch: { entityId: EntityId; value: StorageValue<T> }[]): Promise<void> {
     for (const { entityId, value } of batch) {
       const key = JSON.stringify(entityId);
       const valueString = JSON.stringify(value);
@@ -159,10 +140,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async sync(
-    entityId: EntityId,
-    expectedInStorage: boolean = false,
-  ): Promise<void> {
+  async sync(entityId: EntityId, expectedInStorage: boolean = false): Promise<void> {
     const key = JSON.stringify(entityId);
     log("sync in memory", key, this.lastValues.get(key));
     if (inMemoryStorage.has(key))
@@ -205,16 +183,12 @@ export class LocalStorageProvider extends BaseStorageProvider {
     window.addEventListener("storage", this.handleStorageEventFn);
   }
 
-  async send<T = any>(
-    batch: { entityId: EntityId; value: StorageValue<T> }[],
-  ): Promise<void> {
+  async send<T = any>(batch: { entityId: EntityId; value: StorageValue<T> }[]): Promise<void> {
     for (const { entityId, value } of batch) {
       const key = this.getKey(entityId);
       const storeValue = JSON.stringify(value);
       if (this.lastValues.get(key) !== storeValue) {
-        if (
-          (localStorage.getItem(key) ?? undefined) !== this.lastValues.get(key)
-        ) {
+        if ((localStorage.getItem(key) ?? undefined) !== this.lastValues.get(key)) {
           log(
             "localstorage changed, aborting update",
             key,
@@ -235,10 +209,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async sync(
-    entityId: EntityId,
-    expectedInStorage: boolean = false,
-  ): Promise<void> {
+  async sync(entityId: EntityId, expectedInStorage: boolean = false): Promise<void> {
     const key = this.getKey(entityId);
     const value = localStorage.getItem(key);
     log("sync localstorage", key, value);
@@ -249,10 +220,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
         // is just that a batch is written by the other tab, and we encounter a
         // dependency in the beginning of the batch before the whole batch is
         // written.
-        setTimeout(
-          () => this.resolveWaitingForSync(this.entityIdStrFromKey(key)),
-          1000,
-        );
+        setTimeout(() => this.resolveWaitingForSync(this.entityIdStrFromKey(key)), 1000);
         return this.waitForSync(this.entityIdStrFromKey(key));
       } else this.lastValues.delete(key);
     else this.lastValues.set(key, value);

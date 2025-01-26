@@ -1,12 +1,5 @@
 import { h } from "@commontools/html";
-import {
-  recipe,
-  fetchData,
-  UI,
-  handler,
-  NAME,
-  lift,
-} from "@commontools/builder";
+import { recipe, fetchData, UI, handler, NAME, lift } from "@commontools/builder";
 
 interface Item {
   id: string;
@@ -19,40 +12,35 @@ const maybeList = lift(({ result }) => {
   return result || [];
 });
 
-const updateUrl = handler<{ detail: { value: string } }, { url: string }>(
-  ({ detail }, state) => {
-    state.url = detail?.value ?? "untitled";
-  },
-);
+const updateUrl = handler<{ detail: { value: string } }, { url: string }>(({ detail }, state) => {
+  state.url = detail?.value ?? "untitled";
+});
 
 // FIXME(ja): integrate jsonImport / dataDesigner ability to work with arbitrary schema
-export const fetchExample = recipe<{ url: string }>(
-  "Fetch Example",
-  ({ url }) => {
-    url.setDefault("https://anotherjesse-restfuljsonblobapi.web.val.run/items");
+export const fetchExample = recipe<{ url: string }>("Fetch Example", ({ url }) => {
+  url.setDefault("https://anotherjesse-restfuljsonblobapi.web.val.run/items");
 
-    const { result } = fetchData<Item[]>({ url });
-    const items = maybeList({ result });
+  const { result } = fetchData<Item[]>({ url });
+  const items = maybeList({ result });
 
-    return {
-      [NAME]: "Fetch Example",
-      [UI]: (
-        <div>
-          <common-input
-            value={url}
-            placeholder="Fetch url"
-            oncommon-input={updateUrl({ url })}
-          ></common-input>
-          <ul>
-            {items.map(({ title, id }: { title: string; id: string }) => (
-              <li>
-                {title} - {id}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ),
-      result,
-    };
-  },
-);
+  return {
+    [NAME]: "Fetch Example",
+    [UI]: (
+      <div>
+        <common-input
+          value={url}
+          placeholder="Fetch url"
+          oncommon-input={updateUrl({ url })}
+        ></common-input>
+        <ul>
+          {items.map(({ title, id }: { title: string; id: string }) => (
+            <li>
+              {title} - {id}
+            </li>
+          ))}
+        </ul>
+      </div>
+    ),
+    result,
+  };
+});

@@ -16,18 +16,18 @@ export class OsAiBox extends LitElement {
       }
 
       .plain-input {
-          background: transparent;
-          box-sizing: border-box;
-          -webkit-appearance: none;
-          appearance: none;
-          width: 100%;
-          height: var(--height);
-          border: 0;
-          display: block;
-          padding-top: calc((var(--height) - 1.2em) / 2);
-          padding-bottom: calc((var(--height) - 1.2em) / 2);
-          resize: none;
-          line-height: 1.2em;
+        background: transparent;
+        box-sizing: border-box;
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: var(--height);
+        border: 0;
+        display: block;
+        padding-top: calc((var(--height) - 1.2em) / 2);
+        padding-bottom: calc((var(--height) - 1.2em) / 2);
+        resize: none;
+        line-height: 1.2em;
       }
 
       .plain-input:focus {

@@ -40,9 +40,7 @@ export type Charm = {
 
 export { NAME, TYPE, UI };
 
-const storage = createStorage(
-  (import.meta as any).env.VITE_STORAGE_TYPE ?? "memory",
-);
+const storage = createStorage((import.meta as any).env.VITE_STORAGE_TYPE ?? "memory");
 
 export const charms = getDoc<DocLink[]>([], "charms");
 (window as any).charms = charms;
@@ -52,17 +50,15 @@ export async function addCharms(newCharms: DocImpl<any>[]) {
 
   await idle();
 
-  const currentCharmsIds = charms
-    .get()
-    .map(({ cell }) => JSON.stringify(cell.entityId));
+  const currentCharmsIds = charms.get().map(({ cell }) => JSON.stringify(cell.entityId));
   const charmsToAdd = newCharms.filter(
-    cell => !currentCharmsIds.includes(JSON.stringify(cell.entityId)),
+    (cell) => !currentCharmsIds.includes(JSON.stringify(cell.entityId)),
   );
 
   if (charmsToAdd.length > 0) {
     charms.send([
       ...charms.get(),
-      ...charmsToAdd.map(cell => ({ cell, path: [] }) satisfies DocLink),
+      ...charmsToAdd.map((cell) => ({ cell, path: [] }) satisfies DocLink),
     ]);
   }
 }
@@ -96,20 +92,15 @@ export async function runPersistent(
     const inputProperties =
       typeof inputs === "object" && inputs !== null ? Object.keys(inputs) : [];
     for (const key in properties) {
-      if (
-        !(key in inputProperties) &&
-        properties[key].description?.includes("#")
-      ) {
+      if (!(key in inputProperties) && properties[key].description?.includes("#")) {
         const hashtag = properties[key].description.match(/#(\w+)/)?.[1];
         if (hashtag) {
           charms.get().forEach(({ cell }) => {
             const type = cell.sourceCell?.get()?.[TYPE];
             const recipe = getRecipe(type);
-            const charmProperties = (recipe?.resultSchema as any)
-              ?.properties as any;
-            const matchingProperty = Object.keys(charmProperties ?? {}).find(
-              property =>
-                charmProperties[property].description?.includes(`#${hashtag}`),
+            const charmProperties = (recipe?.resultSchema as any)?.properties as any;
+            const matchingProperty = Object.keys(charmProperties ?? {}).find((property) =>
+              charmProperties[property].description?.includes(`#${hashtag}`),
             );
             if (matchingProperty) {
               inputs = {
@@ -123,11 +114,7 @@ export async function runPersistent(
     }
   }
 
-  return run(
-    recipe,
-    inputs,
-    await storage.syncCell(createRef({ recipe, inputs }, cause)),
-  );
+  return run(recipe, inputs, await storage.syncCell(createRef({ recipe, inputs }, cause)));
 }
 
 export async function syncCharm(
@@ -179,12 +166,7 @@ export async function syncRecipe(id: string) {
   recipesKnownToStorage.add(recipeId);
 }
 
-export async function saveRecipe(
-  id: string,
-  src: string,
-  spec?: string,
-  parents?: string[],
-) {
+export async function saveRecipe(id: string, src: string, spec?: string, parents?: string[]) {
   if (recipesKnownToStorage.has(id)) return;
   recipesKnownToStorage.add(id);
 
@@ -207,7 +189,6 @@ export async function saveRecipe(
 
 import smolIframe from "./recipes/smolIframe.js";
 import { shoelaceDemo } from "./recipes/examples/shoelace.js";
-
 
 addCharms([
   run(smolIframe, { data: { count: 1 } }),
@@ -252,13 +233,10 @@ export type RecipeManifest = {
   recipeId: string;
 };
 
-export const recipes: RecipeManifest[] = Object.entries(allRecipes).map(
-  ([name, recipe]) => ({
-    name:
-      (recipe.argumentSchema as { description: string })?.description ?? name,
-    recipeId: addRecipe(recipe),
-  }),
-);
+export const recipes: RecipeManifest[] = Object.entries(allRecipes).map(([name, recipe]) => ({
+  name: (recipe.argumentSchema as { description: string })?.description ?? name,
+  recipeId: addRecipe(recipe),
+}));
 
 (window as any).recipes = allRecipesByName();
 
@@ -294,10 +272,8 @@ export type CharmAction = CharmActionFn & {
 
 let charmOpener: CharmActionFn | CharmAction = () => {};
 let charmCloser: CharmActionFn | CharmAction = () => {};
-export const openCharm = (charmId: string | EntityId | DocImpl<any>) =>
-  charmOpener(charmId);
-export const closeCharm = (charmId: string | EntityId | DocImpl<any>) =>
-  charmCloser(charmId);
+export const openCharm = (charmId: string | EntityId | DocImpl<any>) => charmOpener(charmId);
+export const closeCharm = (charmId: string | EntityId | DocImpl<any>) => charmCloser(charmId);
 openCharm.set = (opener: CharmActionFn) => {
   charmOpener = opener;
 };

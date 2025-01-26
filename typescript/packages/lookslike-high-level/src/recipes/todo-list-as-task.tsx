@@ -4,18 +4,16 @@ import { addSuggestion, description } from "../suggestions.js";
 import { type TodoItem } from "./todo-list.jsx";
 
 const getListSummary = lift((items: TodoItem[]) => {
-  const notDoneTitles = items.flatMap(item => (item.done ? [] : [item.title]));
+  const notDoneTitles = items.flatMap((item) => (item.done ? [] : [item.title]));
 
   return (
     items.length +
     " items. " +
-    (notDoneTitles.length
-      ? "Open tasks: " + notDoneTitles.join(", ")
-      : "All done.")
+    (notDoneTitles.length ? "Open tasks: " + notDoneTitles.join(", ") : "All done.")
   );
 });
 
-const allDone = lift((items: TodoItem[]) => items.every(item => item.done));
+const allDone = lift((items: TodoItem[]) => items.every((item) => item.done));
 
 export const todoListAsTask = recipe<{
   list: { [UI]: any; items: TodoItem[] };

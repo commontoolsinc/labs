@@ -1,14 +1,5 @@
 import { h } from "@commontools/html";
-import {
-  recipe,
-  handler,
-  lift,
-  str,
-  cell,
-  llm,
-  UI,
-  NAME,
-} from "@commontools/builder";
+import { recipe, handler, lift, str, cell, llm, UI, NAME } from "@commontools/builder";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
@@ -24,9 +15,7 @@ const Place = z.object({
   rating: z.number().min(0).max(5),
 });
 
-const imageUrl = lift(
-  ({ prompt }) => `/api/ai/img/?prompt=${encodeURIComponent(prompt)}`,
-);
+const imageUrl = lift(({ prompt }) => `/api/ai/img/?prompt=${encodeURIComponent(prompt)}`);
 
 type Place = z.infer<typeof Place>;
 
@@ -68,10 +57,7 @@ const grabJson = lift<{ result?: string }, PlaceList>(({ result }) => {
   return parsedData.data;
 });
 
-const searchPlaces = handler<
-  {},
-  { prompt: string; what: string; where: string }
->(({}, state) => {
+const searchPlaces = handler<{}, { prompt: string; what: string; where: string }>(({}, state) => {
   state.prompt = `generate 10 places that match they query: ${state.what} in ${state.where}`;
 });
 
@@ -121,11 +107,9 @@ export const localSearch = recipe<typeof Search>(Search, ({ what, where }) => {
             />
           </common-vstack>
         </common-hstack>
-        <common-button onclick={searchPlaces({ what, where, prompt })}>
-          Search
-        </common-button>
+        <common-button onclick={searchPlaces({ what, where, prompt })}>Search</common-button>
         <common-vstack gap="md">
-          {places.map(place => (
+          {places.map((place) => (
             <common-hstack>
               <img
                 src={imageUrl(
@@ -146,11 +130,7 @@ export const localSearch = recipe<typeof Search>(Search, ({ what, where }) => {
                   <br />
                   {place.city}, {place.state} {place.zip}
                 </small>
-                <sl-rating
-                  label="Rating"
-                  readonly
-                  value={place.rating}
-                ></sl-rating>
+                <sl-rating label="Rating" readonly value={place.rating}></sl-rating>
               </sl-card>
             </common-hstack>
           ))}

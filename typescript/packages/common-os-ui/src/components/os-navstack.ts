@@ -123,9 +123,6 @@ export class OsNavBackButton extends LitElement {
       this.dispatchEvent(new NavBackEvent());
     };
 
-    return html`<os-icon-button
-      @click="${onClick}"
-      icon="arrow_back"
-    ></os-icon-button>`;
+    return html`<os-icon-button @click="${onClick}" icon="arrow_back"></os-icon-button>`;
   }
 }

@@ -6,13 +6,10 @@ import * as assert from "./assert.js";
 
 describe("recipes with HTML", () => {
   it("renders a simple UI", async () => {
-    const simpleRecipe = recipe<{ value: number }>(
-      "Simple UI Recipe",
-      ({ value }) => {
-        const doubled = lift((x: number) => x * 2)(value);
-        return { [UI]: <div>{doubled}</div> };
-      },
-    );
+    const simpleRecipe = recipe<{ value: number }>("Simple UI Recipe", ({ value }) => {
+      const doubled = lift((x: number) => x * 2)(value);
+      return { [UI]: <div>{doubled}</div> };
+    });
 
     const result = run(simpleRecipe, { value: 5 });
 
@@ -42,7 +39,7 @@ describe("recipes with HTML", () => {
           <div>
             <h1>{title}</h1>
             <ul>
-              {items.map(item => (
+              {items.map((item) => (
                 <li>{item.title}</li>
               ))}
             </ul>
@@ -76,12 +73,12 @@ describe("recipes with HTML", () => {
       title: { name: string };
       items: { title: string; done: boolean }[];
     }>("todo list", ({ title }) => {
-      const { [UI]: summaryUI } = recipe<
-        { title: { name: string } },
-        { [UI]: VNode }
-      >("summary", ({ title }) => {
-        return { [UI]: <div>{title.name}</div> };
-      })({ title });
+      const { [UI]: summaryUI } = recipe<{ title: { name: string } }, { [UI]: VNode }>(
+        "summary",
+        ({ title }) => {
+          return { [UI]: <div>{title.name}</div> };
+        },
+      )({ title });
       return { [UI]: <div>{summaryUI}</div> };
     });
 
@@ -127,10 +124,10 @@ describe("recipes with HTML", () => {
       { test: 456, ok: true },
     ];
 
-    const nestedMapRecipe = recipe<any[]>("nested map recipe", data => ({
+    const nestedMapRecipe = recipe<any[]>("nested map recipe", (data) => ({
       [UI]: (
         <div>
-          {data.map(row => (
+          {data.map((row) => (
             <ul>
               {entries(row).map(([k, v]) => (
                 <li>

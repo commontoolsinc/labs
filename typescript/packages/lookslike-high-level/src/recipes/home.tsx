@@ -3,10 +3,8 @@ import { recipe, lift, NAME, UI, handler } from "@commontools/builder";
 import { getEntityId } from "@commontools/runner";
 import { Charm, removeCharm, RecipeManifest, closeCharm } from "../data.js";
 
-const getCharmsWithNameAndUI = lift<Charm[], { charm: Charm }[]>(charms =>
-  (charms ?? [])
-    .filter(charm => charm && charm[UI] && charm[NAME])
-    .map(charm => ({ charm })),
+const getCharmsWithNameAndUI = lift<Charm[], { charm: Charm }[]>((charms) =>
+  (charms ?? []).filter((charm) => charm && charm[UI] && charm[NAME]).map((charm) => ({ charm })),
 );
 
 const deleteCharm = handler<{}, { charm: Charm }>((_, { charm }) => {
@@ -36,11 +34,9 @@ export const home = recipe<{
             </common-droppable>
           </div>
         ))}
-        {recipes.map(recipe => (
+        {recipes.map((recipe) => (
           <div>
-            <common-recipe-link recipe={recipe.recipeId}>
-              👨‍🍳 {recipe.name}
-            </common-recipe-link>
+            <common-recipe-link recipe={recipe.recipeId}>👨‍🍳 {recipe.name}</common-recipe-link>
           </div>
         ))}
         <common-annotation-toggle />

@@ -114,9 +114,7 @@ export function run<T, R = any>(
     recipeOrModule = getRecipe(recipeId);
     if (!recipeOrModule) throw new Error(`Unknown recipe: ${recipeId}`);
   } else if (!recipeOrModule) {
-    console.warn(
-      "No recipe provided and no recipe found in process cell. Not running.",
-    );
+    console.warn("No recipe provided and no recipe found in process cell. Not running.");
     return resultCell;
   }
 
@@ -152,9 +150,7 @@ export function run<T, R = any>(
   // TODO: If new keys are added after first load, this won't work.
   if (isDoc(argument) || isDocLink(argument)) {
     // If it's a cell, turn it into a cell reference
-    const ref = isDocLink(argument)
-      ? argument
-      : ({ cell: argument, path: [] } satisfies DocLink);
+    const ref = isDocLink(argument) ? argument : ({ cell: argument, path: [] } satisfies DocLink);
 
     // Get value, but just to get the keys. Throw if it isn't an object.
     const value = ref.cell.getAsQueryResult(ref.path);
@@ -181,16 +177,10 @@ export function run<T, R = any>(
   if (!resultCell.entityId) resultCell.generateEntityId();
   if (!processCell.entityId) processCell.generateEntityId(resultCell.entityId);
 
-  const internal = processCell.get()?.internal ??
-    (recipe.initial as { internal: any })?.internal;
+  const internal = processCell.get()?.internal ?? (recipe.initial as { internal: any })?.internal;
 
   // Ensure static data is converted to cell references, e.g. for arrays
-  argument = staticDataToNestedCells(
-    processCell,
-    argument,
-    undefined,
-    resultCell,
-  );
+  argument = staticDataToNestedCells(processCell, argument, undefined, resultCell);
 
   // TODO: Move up, only do this if it's not from the sourceCell
   if (defaults) argument = mergeObjects(argument, deepCopy(defaults));
@@ -203,9 +193,7 @@ export function run<T, R = any>(
   });
 
   // Send "query" to results to the result cell
-  resultCell.send(
-    unwrapOneLevelAndBindtoCell<R>(recipe.result as R, processCell),
-  );
+  resultCell.send(unwrapOneLevelAndBindtoCell<R>(recipe.result as R, processCell));
 
   // [unsafe closures:] For recipes from closures, add a materialize factory
   if (recipe[unsafe_originalRecipe]) {
@@ -219,16 +207,9 @@ export function run<T, R = any>(
     [node.inputs, node.outputs].forEach((bindings) =>
       findAllAliasedCells(bindings, processCell).forEach(({ cell, path }) => {
         if (!cell.entityId) cell.generateEntityId({ cell: processCell, path });
-      })
+      }),
     );
-    instantiateNode(
-      node.module,
-      node.inputs,
-      node.outputs,
-      processCell,
-      addCancel,
-      recipe,
-    );
+    instantiateNode(node.module, node.inputs, node.outputs, processCell, addCancel, recipe);
   }
 
   return resultCell;
@@ -280,32 +261,13 @@ function instantiateNode(
         );
         break;
       case "raw":
-        instantiateRawNode(
-          module,
-          inputBindings,
-          outputBindings,
-          processCell,
-          addCancel,
-          recipe,
-        );
+        instantiateRawNode(module, inputBindings, outputBindings, processCell, addCancel, recipe);
         break;
       case "passthrough":
-        instantiatePassthroughNode(
-          module,
-          inputBindings,
-          outputBindings,
-          processCell,
-          addCancel,
-        );
+        instantiatePassthroughNode(module, inputBindings, outputBindings, processCell, addCancel);
         break;
       case "recipe":
-        instantiateRecipeNode(
-          module,
-          inputBindings,
-          outputBindings,
-          processCell,
-          addCancel,
-        );
+        instantiateRecipeNode(module, inputBindings, outputBindings, processCell, addCancel);
         break;
       default:
         throw new Error(`Unknown module type: ${module.type}`);
@@ -325,10 +287,7 @@ function instantiateJavaScriptNode(
   addCancel: AddCancel,
   recipe: Recipe,
 ) {
-  const inputs = unwrapOneLevelAndBindtoCell(
-    inputBindings as { [key: string]: any },
-    processCell,
-  );
+  const inputs = unwrapOneLevelAndBindtoCell(inputBindings as { [key: string]: any }, processCell);
 
   // TODO: This isn't correct, as module can write into passed cells. We
   // should look at the schema to find out what cells are read and
@@ -339,9 +298,7 @@ function instantiateJavaScriptNode(
   const writes = findAllAliasedCells(outputs, processCell);
 
   let fn = (
-    typeof module.implementation === "string"
-      ? eval(module.implementation)
-      : module.implementation
+    typeof module.implementation === "string" ? eval(module.implementation) : module.implementation
   ) as (inputs: any) => any;
 
   if (module.wrapper && module.wrapper in moduleWrappers) {
@@ -395,8 +352,7 @@ function instantiateJavaScriptNode(
 
       const frame = pushFrameFromCause(cause, {
         recipe,
-        materialize: (path: PropertyKey[]) =>
-          processCell.getAsQueryResult(path),
+        materialize: (path: PropertyKey[]) => processCell.getAsQueryResult(path),
       });
 
       const argument = module.argumentSchema
@@ -406,11 +362,7 @@ function instantiateJavaScriptNode(
 
       // If handler returns a graph created by builder, run it
       if (containsOpaqueRef(result)) {
-        const resultRecipe = recipeFromFrame(
-          "event handler result",
-          undefined,
-          () => result,
-        );
+        const resultRecipe = recipeFromFrame("event handler result", undefined, () => result);
 
         const resultCell = run(resultRecipe);
         addCancel(cancels.get(resultCell));
@@ -433,32 +385,19 @@ function instantiateJavaScriptNode(
         ? inputsCell.asCell([], log, module.argumentSchema).get()
         : inputsCell.getAsQueryResult([], log);
 
-      const frame = pushFrameFromCause(
-        { inputs, outputs, fn: fn.toString() },
-        {
-          recipe,
-          materialize: (path: PropertyKey[]) =>
-            processCell.getAsQueryResult(path, log),
-        } satisfies UnsafeBinding,
-      );
+      const frame = pushFrameFromCause({ inputs, outputs, fn: fn.toString() }, {
+        recipe,
+        materialize: (path: PropertyKey[]) => processCell.getAsQueryResult(path, log),
+      } satisfies UnsafeBinding);
       const result = fn(argument);
 
       if (containsOpaqueRef(result)) {
-        const resultRecipe = recipeFromFrame(
-          "action result",
-          undefined,
-          () => result,
-        );
+        const resultRecipe = recipeFromFrame("action result", undefined, () => result);
 
         resultCell = run(resultRecipe, undefined, resultCell);
         addCancel(cancels.get(resultCell));
 
-        sendValueToBinding(
-          processCell,
-          outputs,
-          { cell: resultCell, path: [] },
-          log,
-        );
+        sendValueToBinding(processCell, outputs, { cell: resultCell, path: [] }, log);
       } else {
         sendValueToBinding(processCell, outputs, result, log);
       }
@@ -479,22 +418,14 @@ function instantiateRawNode(
   recipe: Recipe,
 ) {
   if (typeof module.implementation !== "function") {
-    throw new Error(
-      `Raw module is not a function, got: ${module.implementation}`,
-    );
+    throw new Error(`Raw module is not a function, got: ${module.implementation}`);
   }
 
   // Built-ins can define their own scheduling logic, so they'll
   // implement parts of the above themselves.
 
-  const mappedInputBindings = unwrapOneLevelAndBindtoCell(
-    inputBindings,
-    processCell,
-  );
-  const mappedOutputBindings = unwrapOneLevelAndBindtoCell(
-    outputBindings,
-    processCell,
-  );
+  const mappedInputBindings = unwrapOneLevelAndBindtoCell(inputBindings, processCell);
+  const mappedOutputBindings = unwrapOneLevelAndBindtoCell(outputBindings, processCell);
 
   // For `map` and future other node types that take closures, we need to
   // note the parent recipe on the closure recipes.
@@ -505,8 +436,7 @@ function instantiateRawNode(
 
   const action = module.implementation(
     getDoc(mappedInputBindings),
-    (result: any) =>
-      sendValueToBinding(processCell, mappedOutputBindings, result),
+    (result: any) => sendValueToBinding(processCell, mappedOutputBindings, result),
     addCancel,
     inputCells, // cause
     processCell,
@@ -545,10 +475,7 @@ function instantiateRecipeNode(
   addCancel: AddCancel,
 ) {
   if (!isRecipe(module.implementation)) throw new Error(`Invalid recipe`);
-  const recipe = unwrapOneLevelAndBindtoCell(
-    module.implementation,
-    processCell,
-  );
+  const recipe = unwrapOneLevelAndBindtoCell(module.implementation, processCell);
   const inputs = unwrapOneLevelAndBindtoCell(inputBindings, processCell);
   const resultCell = getDoc(undefined, {
     recipe: module.implementation,

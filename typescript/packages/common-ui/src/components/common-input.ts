@@ -20,7 +20,7 @@ export type CommonKeydown = {
   id: string;
   key: string;
   value: string;
-}
+};
 
 export class CommonKeydownEvent extends Event {
   detail: CommonKeydown;
@@ -34,7 +34,7 @@ export class CommonKeydownEvent extends Event {
 export type CommonBlur = {
   id: string;
   value: string;
-}
+};
 
 export class CommonBlurEvent extends Event {
   detail: CommonBlur;
@@ -95,7 +95,9 @@ export class CommonInputElement extends LitElement {
     };
 
     const onkeydown = (event: KeyboardEvent) => {
-      this.dispatchEvent(new CommonKeydownEvent({ id: this.id, key: event.key, value: this.value }));
+      this.dispatchEvent(
+        new CommonKeydownEvent({ id: this.id, key: event.key, value: this.value }),
+      );
     };
 
     const onblur = () => {

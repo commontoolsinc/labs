@@ -1,12 +1,5 @@
 import { h } from "@commontools/html";
-import {
-  recipe,
-  NAME,
-  UI,
-  handler,
-  lift,
-  llm,
-} from "@commontools/builder";
+import { recipe, NAME, UI, handler, lift, llm } from "@commontools/builder";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
@@ -20,8 +13,7 @@ const prepText = lift(({ prompt }) => {
   if (prompt) {
     return {
       messages: [prompt, "It was"],
-      system:
-        "You are a helpful assistant that generates text for testing.  Respond in text",
+      system: "You are a helpful assistant that generates text for testing.  Respond in text",
     };
   }
   return {};
@@ -34,31 +26,28 @@ const prepHTML = lift(({ prompt }) => {
   if (prompt) {
     return {
       messages: [prompt, "```html\n<html>"],
-      system:
-        "You are a helpful assistant that generates HTML for testing.  Respond in HTML",
+      system: "You are a helpful assistant that generates HTML for testing.  Respond in HTML",
       stop: "```",
     };
   }
   return {};
 });
-const grabHtml = lift<{ partial?: string; pending?: boolean }, string>(
-  ({ partial, pending }) => {
-    if (!partial) {
-      return "";
-    }
+const grabHtml = lift<{ partial?: string; pending?: boolean }, string>(({ partial, pending }) => {
+  if (!partial) {
+    return "";
+  }
 
-    if (pending) {
-      return `<code>${partial.split("\n").slice(-5).join("\n").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>`;
-    }
+  if (pending) {
+    return `<code>${partial.split("\n").slice(-5).join("\n").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</code>`;
+  }
 
-    const html = partial.match(/```html\n([\s\S]+?)```/)?.[1];
-    if (!html) {
-      console.error("No HTML found in text", partial);
-      return "";
-    }
-    return html;
-  },
-);
+  const html = partial.match(/```html\n([\s\S]+?)```/)?.[1];
+  if (!html) {
+    console.error("No HTML found in text", partial);
+    return "";
+  }
+  return html;
+});
 
 const Character = z.object({
   name: z.string(),
@@ -79,25 +68,23 @@ const prepJSON = lift(({ prompt }) => {
   }
   return {};
 });
-const grabJson = lift<{ result?: string }, Character | undefined>(
-  ({ result }) => {
-    if (!result) {
-      return;
-    }
-    const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
-    if (!jsonMatch) {
-      console.error("No JSON found in text:", result);
-      return;
-    }
-    let rawData = JSON.parse(jsonMatch[1]);
-    let parsedData = Character.safeParse(rawData);
-    if (!parsedData.success) {
-      console.error("Invalid JSON:", parsedData.error);
-      return;
-    }
-    return parsedData.data;
-  },
-);
+const grabJson = lift<{ result?: string }, Character | undefined>(({ result }) => {
+  if (!result) {
+    return;
+  }
+  const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
+  if (!jsonMatch) {
+    console.error("No JSON found in text:", result);
+    return;
+  }
+  let rawData = JSON.parse(jsonMatch[1]);
+  let parsedData = Character.safeParse(rawData);
+  if (!parsedData.success) {
+    console.error("Invalid JSON:", parsedData.error);
+    return;
+  }
+  return parsedData.data;
+});
 const jsonify = lift(({ data }) => JSON.stringify(data, null, 2));
 
 export const generator = recipe<{

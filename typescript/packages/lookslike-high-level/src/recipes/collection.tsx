@@ -1,12 +1,7 @@
 import { h } from "@commontools/html";
 import { recipe, handler, UI, NAME, derive } from "@commontools/builder";
 import { z } from "zod";
-import {
-  getDocLinkOrThrow,
-  run,
-  isDocLink,
-  getDocByEntityId,
-} from "@commontools/runner";
+import { getDocLinkOrThrow, run, isDocLink, getDocByEntityId } from "@commontools/runner";
 
 const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
   ({ detail }, state) => {
@@ -32,10 +27,10 @@ export default recipe(
             oncommon-input={updateTitle({ title })}
           />
           <os-colgrid>
-            {items.map(item => (
+            {items.map((item) => (
               <common-draggable $entity={item}>
                 <common-card>
-                  {derive(item, item =>
+                  {derive(item, (item) =>
                     typeof item === "object" && item !== null ? (
                       item[UI] ? (
                         item[UI]
@@ -57,39 +52,33 @@ export default recipe(
       title,
       items,
       "action/drop/schema": { type: "string" },
-      "action/drop/handler": handler<any[], { items: any[] }>(
-        (event, { items }) => {
-          console.log("collection drag handler", event);
-          const ref = getDocLinkOrThrow(event);
-          const list = ref.cell.getAtPath(ref.path);
-          list?.forEach((item: any) => {
-            // We do all this to find the spell parameter on the cell reference.
-            // If it's there, create a new charm with it. Otherwise turn this
-            // back into a query result proxy.
-            if (isDocLink(item)) {
-              // If there's a spell, run it to get the cell reference.
-              const spell = (item as { spell?: string }).spell;
-              if (spell)
-                item = { cell: run(JSON.parse(spell), item), path: [] };
-              // If there is a resultRef, let's use that instead.
-              else if (
-                item.path.length === 0 &&
-                item.cell.getAtPath(["resultRef"])
-              )
-                item = item.cell.getAtPath(["resultRef"]);
-              item = item.cell.getAsQueryResult(item.path);
-            } else if (typeof item === "string") {
-              const match = item.match(/https?:\/\/.*\/charm\/(.*)/);
-              if (match) {
-                const charmId = decodeURIComponent(match[1]);
-                const cell = getDocByEntityId(charmId);
-                if (cell) item = cell.getAsQueryResult();
-              }
+      "action/drop/handler": handler<any[], { items: any[] }>((event, { items }) => {
+        console.log("collection drag handler", event);
+        const ref = getDocLinkOrThrow(event);
+        const list = ref.cell.getAtPath(ref.path);
+        list?.forEach((item: any) => {
+          // We do all this to find the spell parameter on the cell reference.
+          // If it's there, create a new charm with it. Otherwise turn this
+          // back into a query result proxy.
+          if (isDocLink(item)) {
+            // If there's a spell, run it to get the cell reference.
+            const spell = (item as { spell?: string }).spell;
+            if (spell) item = { cell: run(JSON.parse(spell), item), path: [] };
+            // If there is a resultRef, let's use that instead.
+            else if (item.path.length === 0 && item.cell.getAtPath(["resultRef"]))
+              item = item.cell.getAtPath(["resultRef"]);
+            item = item.cell.getAsQueryResult(item.path);
+          } else if (typeof item === "string") {
+            const match = item.match(/https?:\/\/.*\/charm\/(.*)/);
+            if (match) {
+              const charmId = decodeURIComponent(match[1]);
+              const cell = getDocByEntityId(charmId);
+              if (cell) item = cell.getAsQueryResult();
             }
-            items.push(item);
-          });
-        },
-      )({ items }),
+          }
+          items.push(item);
+        });
+      })({ items }),
     };
   },
 );

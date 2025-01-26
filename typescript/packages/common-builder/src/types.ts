@@ -4,11 +4,12 @@ export const TYPE = "$TYPE";
 export const NAME = "$NAME";
 export const UI = "$UI";
 
-export type OpaqueRef<T> =
-  & OpaqueRefMethods<T>
-  & (T extends Array<infer U> ? Array<OpaqueRef<U>>
-    : T extends object ? { [K in keyof T]: OpaqueRef<T[K]> }
-    : T);
+export type OpaqueRef<T> = OpaqueRefMethods<T> &
+  (T extends Array<infer U>
+    ? Array<OpaqueRef<U>>
+    : T extends object
+      ? { [K in keyof T]: OpaqueRef<T[K]> }
+      : T);
 
 // Any OpaqueRef is also an Opaque, but can also have static values.
 // Use Opaque<T> in APIs that get inputs from the developer and use OpaqueRef
@@ -16,9 +17,11 @@ export type OpaqueRef<T> =
 // module outputs).
 export type Opaque<T> =
   | OpaqueRef<T>
-  | (T extends Array<infer U> ? Array<Opaque<U>>
-    : T extends object ? { [K in keyof T]: Opaque<T[K]> }
-    : T);
+  | (T extends Array<infer U>
+      ? Array<Opaque<U>>
+      : T extends object
+        ? { [K in keyof T]: Opaque<T[K]> }
+        : T);
 
 export type OpaqueRefMethods<T> = {
   get(): OpaqueRef<T>;
@@ -70,25 +73,15 @@ export type toJSON = {
   toJSON(): any;
 };
 
-export type NodeFactory<T, R> =
-  & ((inputs: Opaque<T>) => OpaqueRef<R>)
-  & (Module | Handler | Recipe)
-  & toJSON;
+export type NodeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
+  (Module | Handler | Recipe) &
+  toJSON;
 
-export type RecipeFactory<T, R> =
-  & ((inputs: Opaque<T>) => OpaqueRef<R>)
-  & Recipe
-  & toJSON;
+export type RecipeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) & Recipe & toJSON;
 
-export type ModuleFactory<T, R> =
-  & ((inputs: Opaque<T>) => OpaqueRef<R>)
-  & Module
-  & toJSON;
+export type ModuleFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) & Module & toJSON;
 
-export type HandlerFactory<T, R> =
-  & ((inputs: Opaque<T>) => OpaqueRef<R>)
-  & Handler<T, R>
-  & toJSON;
+export type HandlerFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) & Handler<T, R> & toJSON;
 
 export type JSONValue =
   | string
@@ -99,14 +92,7 @@ export type JSONValue =
   | { [key: string]: JSONValue };
 
 export type JSONSchema = {
-  type?:
-    | "object"
-    | "array"
-    | "string"
-    | "integer"
-    | "number"
-    | "boolean"
-    | "null";
+  type?: "object" | "array" | "string" | "integer" | "number" | "boolean" | "null";
   properties?: { [key: string]: JSONSchema };
   description?: string;
   default?: JSONValue;
@@ -149,8 +135,7 @@ export type Handler<T = any, R = any> = Module & {
 
 export function isModule(value: any): value is Module {
   return (
-    (typeof value === "function" || typeof value === "object") &&
-    typeof value.type === "string"
+    (typeof value === "function" || typeof value === "object") && typeof value.type === "string"
   );
 }
 
@@ -237,11 +222,7 @@ export type Static = {
 };
 
 export function isStatic(value: any): value is Static {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    value[isStaticMarker] === true
-  );
+  return typeof value === "object" && value !== null && value[isStaticMarker] === true;
 }
 
 export function markAsStatic(value: any): any {

@@ -1,8 +1,4 @@
-import {
-  createNodeFactory,
-  type Module,
-  type ModuleFactory,
-} from "@commontools/builder";
+import { createNodeFactory, type Module, type ModuleFactory } from "@commontools/builder";
 import type { Action } from "./scheduler.js";
 import type { DocImpl } from "./cell.js";
 import type { AddCancel } from "./cancel.js";

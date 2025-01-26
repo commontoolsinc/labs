@@ -31,10 +31,7 @@ const schema: JSONSchema = {
 };
 
 /** Render a view into a parent element */
-export const render = (
-  parent: HTMLElement,
-  view: VNode | Cell<VNode>,
-): Cancel => {
+export const render = (parent: HTMLElement, view: VNode | Cell<VNode>): Cancel => {
   // If this is a reactive cell, ensure the schema is VNode
   if (isCell(view)) view = view.asSchema(schema);
   return effect(view, (view: VNode) => renderImpl(parent, view));
@@ -77,11 +74,7 @@ const bindChildren = (element: HTMLElement, children: Array<Child>): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
 
   for (const child of children) {
-    if (
-      typeof child === "string" ||
-      typeof child === "number" ||
-      typeof child === "boolean"
-    ) {
+    if (typeof child === "string" || typeof child === "number" || typeof child === "boolean") {
       // Bind static content
       element.append(child.toString());
     } else if (isVNode(child)) {
@@ -137,10 +130,7 @@ const bindChildren = (element: HTMLElement, children: Array<Child>): Cancel => {
           }
         } else {
           if (typeof replacement === "object") {
-            console.warn(
-              "unexpected object when value was expected",
-              replacement,
-            );
+            console.warn("unexpected object when value was expected", replacement);
             replacement = JSON.stringify(replacement);
           }
           const text = document.createTextNode(`${replacement}`);
@@ -162,13 +152,11 @@ const bindProps = (element: HTMLElement, props: Props): Cancel => {
       // If prop is an event, we need to add an event listener
       if (isEventProp(propKey)) {
         if (!isSendable(replacement)) {
-          throw new TypeError(
-            `Event prop "${propKey}" does not have a send method`,
-          );
+          throw new TypeError(`Event prop "${propKey}" does not have a send method`);
         }
         const key = cleanEventProp(propKey);
         if (key != null) {
-          const cancel = listen(element, key, event => {
+          const cancel = listen(element, key, (event) => {
             const sanitizedEvent = sanitizeEvent(event);
             replacement.send(sanitizedEvent);
           });
@@ -182,7 +170,7 @@ const bindProps = (element: HTMLElement, props: Props): Cancel => {
         const key = propKey.slice(1);
         setProp(element, key, replacement);
       } else {
-        const cancel = effect(replacement, replacement => {
+        const cancel = effect(replacement, (replacement) => {
           // Replacements are set as properties not attributes to avoid
           // string serialization of complex datatypes.
           setProp(element, propKey, replacement);
@@ -206,11 +194,7 @@ const cleanEventProp = (key: string) => {
 };
 
 /** Attach an event listener, returning a function to cancel the listener */
-const listen = (
-  element: HTMLElement,
-  key: string,
-  callback: (event: Event) => void,
-) => {
+const listen = (element: HTMLElement, key: string, callback: (event: Event) => void) => {
   element.addEventListener(key, callback);
   return () => {
     element.removeEventListener(key, callback);

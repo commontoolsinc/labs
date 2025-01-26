@@ -50,7 +50,7 @@ export class CommonCharmLink extends LitElement {
 
     let { [NAME]: name } = this.charm.get() ?? {};
 
-    effect(name, name => {
+    effect(name, (name) => {
       this.nameFromCharm = name as string;
       if (!skipUpdate) this.requestUpdate();
       skipUpdate = false;
@@ -73,9 +73,7 @@ export class CommonCharmLink extends LitElement {
 
     const name = this.name ?? this.nameFromCharm ?? "(unknown)";
     return html`
-      <a
-        href="/charm/${JSON.stringify(this.charm.entityId)}"
-        @click="${this.handleClick}"
+      <a href="/charm/${JSON.stringify(this.charm.entityId)}" @click="${this.handleClick}"
         >💎 ${name}</a
       >
     `;

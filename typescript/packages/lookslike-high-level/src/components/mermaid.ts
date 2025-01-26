@@ -9,7 +9,7 @@ export default class MermaidElement extends LitElement {
 
   private panzoomInstance: ReturnType<typeof panzoom> | null = null;
 
-  static override  styles = css`
+  static override styles = css`
     :host {
       display: block;
       width: 100%;
@@ -62,8 +62,8 @@ export default class MermaidElement extends LitElement {
       startOnLoad: false,
       theme: "default",
       er: {
-        useMaxWidth: true
-      }
+        useMaxWidth: true,
+      },
     });
   }
 
@@ -86,10 +86,10 @@ export default class MermaidElement extends LitElement {
       container.innerHTML = svg;
 
       // Ensure the SVG takes up space
-      const svgElement = container.querySelector('svg');
+      const svgElement = container.querySelector("svg");
       if (svgElement) {
-        svgElement.style.width = '100%';
-        svgElement.style.height = '100%';
+        svgElement.style.width = "100%";
+        svgElement.style.height = "100%";
       }
 
       // Wait for the SVG to be added to the DOM before initializing panzoom
@@ -115,7 +115,7 @@ export default class MermaidElement extends LitElement {
       maxZoom: 5,
       minZoom: 0.1,
       bounds: true,
-      boundsPadding: 0.1
+      boundsPadding: 0.1,
     });
   }
 

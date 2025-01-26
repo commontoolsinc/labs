@@ -11,10 +11,7 @@ export const classes = (classRecord: Record<string, boolean>) => {
 export const animationFrame = () =>
   new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-export const toggleInvisible = async (
-  element: HTMLElement,
-  isInvisible: boolean,
-) => {
+export const toggleInvisible = async (element: HTMLElement, isInvisible: boolean) => {
   element.ariaHidden = isInvisible ? "true" : "false";
   element.classList.toggle("invisible", isInvisible);
 };

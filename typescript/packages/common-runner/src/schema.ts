@@ -1,10 +1,4 @@
-import  {
-  type DocImpl,
-  type DocLink,
-  isDoc,
-  isDocLink,
-  type ReactivityLog,
-} from "./cell.js";
+import { type DocImpl, type DocLink, isDoc, isDocLink, type ReactivityLog } from "./cell.js";
 import { isAlias, JSONSchema } from "@commontools/builder";
 import { arrayEqual, followAliases, followCellReferences } from "./utils.js";
 
@@ -12,12 +6,8 @@ export function resolveSchema(
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined = schema,
 ): JSONSchema | undefined {
-  if (
-    typeof schema === "object" &&
-    schema !== null &&
-    Object.keys(schema).length > 0
-  ) {
-    let resolvedSchema = schema.$ref === "#" ? rootSchema ?? schema : schema;
+  if (typeof schema === "object" && schema !== null && Object.keys(schema).length > 0) {
+    let resolvedSchema = schema.$ref === "#" ? (rootSchema ?? schema) : schema;
     if (schema.asCell) {
       // Remove reference flag from schema, so it's describing the destination
       // schema. That means we can't describe a schema that points to top-level
@@ -87,18 +77,8 @@ export function validateAndTransform(
 
     // Handle explicitly defined properties
     if (resolvedSchema.properties) {
-      for (
-        const [key, propSchema] of Object.entries(
-          resolvedSchema.properties,
-        )
-      ) {
-        result[key] = validateAndTransform(
-          cell,
-          [...path, key],
-          propSchema,
-          log,
-          rootSchema,
-        );
+      for (const [key, propSchema] of Object.entries(resolvedSchema.properties)) {
+        result[key] = validateAndTransform(cell, [...path, key], propSchema, log, rootSchema);
       }
     }
 
@@ -109,9 +89,7 @@ export function validateAndTransform(
         typeof resolvedSchema.additionalProperties === "object"
           ? resolvedSchema.additionalProperties
           : undefined;
-      const keys = typeof value === "object" && value !== null
-        ? Object.keys(value)
-        : [];
+      const keys = typeof value === "object" && value !== null ? Object.keys(value) : [];
       for (const key of keys) {
         if (!resolvedSchema.properties || !(key in resolvedSchema.properties)) {
           result[key] = validateAndTransform(
@@ -133,13 +111,7 @@ export function validateAndTransform(
       return [];
     }
     return value.map((_, i) =>
-      validateAndTransform(
-        cell,
-        [...path, i],
-        resolvedSchema.items!,
-        log,
-        rootSchema,
-      )
+      validateAndTransform(cell, [...path, i], resolvedSchema.items!, log, rootSchema),
     );
   }
 

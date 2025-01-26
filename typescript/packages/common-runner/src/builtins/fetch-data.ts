@@ -63,9 +63,8 @@ export function fetchData(
     if (hash === previousCallHash || hash === requestHash.get()) return;
     previousCallHash = hash;
 
-    const processResponse = (mode || "json") === "json"
-      ? (r: Response) => r.json()
-      : (r: Response) => r.text();
+    const processResponse =
+      (mode || "json") === "json" ? (r: Response) => r.json() : (r: Response) => r.text();
 
     if (url === undefined) {
       pending.setAtPath([], false, log);

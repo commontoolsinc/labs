@@ -13,7 +13,7 @@ import {
 } from "@commontools/builder";
 import { z } from "zod";
 
-const tap = lift(x => {
+const tap = lift((x) => {
   console.log(x, JSON.stringify(x, null, 2));
   return x;
 });
@@ -81,25 +81,23 @@ Respond in a json block.
   };
 });
 
-const grabSuggestions = lift<{ result?: string }, Suggestion[]>(
-  ({ result }) => {
-    if (!result) {
-      return [];
-    }
-    const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
-    if (!jsonMatch) {
-      console.error("No JSON found in text:", result);
-      return [];
-    }
-    let rawData = JSON.parse(jsonMatch[1]);
-    let parsedData = Suggestion.array().safeParse(rawData["suggestions"] || []);
-    if (!parsedData.success) {
-      console.error("Invalid JSON:", parsedData.error);
-      return [];
-    }
-    return parsedData.data;
-  },
-);
+const grabSuggestions = lift<{ result?: string }, Suggestion[]>(({ result }) => {
+  if (!result) {
+    return [];
+  }
+  const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
+  if (!jsonMatch) {
+    console.error("No JSON found in text:", result);
+    return [];
+  }
+  let rawData = JSON.parse(jsonMatch[1]);
+  let parsedData = Suggestion.array().safeParse(rawData["suggestions"] || []);
+  if (!parsedData.success) {
+    console.error("Invalid JSON:", parsedData.error);
+    return [];
+  }
+  return parsedData.data;
+});
 
 const responsePrefill = `<html>
 <head>
@@ -292,24 +290,21 @@ const grabHTML = lift<{ result?: string }, string | undefined>(({ result }) => {
   return html;
 });
 
-const progress = lift<{ pending: boolean; partial?: string }, number>(
-  ({ pending, partial }) => {
-    if (!partial || !pending) {
-      return 0;
-    }
-    return (partial.length - responsePrefill.length) / 2048.0;
+const progress = lift<{ pending: boolean; partial?: string }, number>(({ pending, partial }) => {
+  if (!partial || !pending) {
+    return 0;
+  }
+  return (partial.length - responsePrefill.length) / 2048.0;
+});
+
+const consoleLogHandler = handler<{ detail: any }, { error: any; lastSrc: string; src: string }>(
+  (event, state) => {
+    console.log("event", event);
+    state.lastSrc = state.src;
+    state.error.error = true;
+    state.error.detail = event.detail;
   },
 );
-
-const consoleLogHandler = handler<
-  { detail: any },
-  { error: any; lastSrc: string; src: string }
->((event, state) => {
-  console.log("event", event);
-  state.lastSrc = state.src;
-  state.error.error = true;
-  state.error.detail = event.detail;
-});
 
 export const iframe = recipe<{
   title: string;

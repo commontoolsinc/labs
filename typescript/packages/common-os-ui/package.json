@@ -4,8 +4,17 @@
   "description": "os ui",
   "main": "src/index.js",
   "type": "module",
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "npm": "please-use-pnpm",
+    "yarn": "please-use-pnpm",
+    "pnpm": ">= 10.0.0",
+    "node": "20.11.0"
+  },
   "scripts": {
     "test": "vitest --exclude=lib/**/*.test.js",
+    "format": "prettier --write . --ignore-path ../../../.prettierignore",
+    "lint": "eslint .",
     "build": "tsc && vite build"
   },
   "author": "",
@@ -35,7 +44,13 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@eslint/js": "^9.19.0",
     "@types/node": "^22.10.10",
+    "eslint": "^9.19.0",
+    "eslint-config-prettier": "^10.0.1",
+    "eslint-plugin-prettier": "^5.2.3",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2",
     "typescript": "^5.7.3",
     "vite": "^6.0.11",
     "vite-plugin-dts": "^4.5.0",

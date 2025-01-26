@@ -1,12 +1,5 @@
 import { h } from "@commontools/html";
-import {
-  recipe,
-  handler,
-  UI,
-  NAME,
-  ifElse,
-  lift,
-} from "@commontools/builder";
+import { recipe, handler, UI, NAME, ifElse, lift } from "@commontools/builder";
 
 interface CalendarEvent {
   datetime: string;
@@ -300,9 +293,7 @@ export const importCalendar = recipe<{
         {ifElse(
           importing,
           <div></div>,
-          <common-button
-            onclick={startImport({ importing, progress, importedEvents })}
-          >
+          <common-button onclick={startImport({ importing, progress, importedEvents })}>
             Import Calendar
           </common-button>,
         )}
@@ -313,9 +304,7 @@ export const importCalendar = recipe<{
             {ifElse(
               anyEvents(importedEvents),
               <div>
-                <div>
-                  Number of events imported: ${countEvents(importedEvents)}
-                </div>
+                <div>Number of events imported: ${countEvents(importedEvents)}</div>
               </div>,
               <div>No events imported yet.</div>,
             )}
@@ -330,7 +319,7 @@ export const importCalendar = recipe<{
             </tr>
           </thead>
           <tbody>
-            {importedEvents.map(event => (
+            {importedEvents.map((event) => (
               <tr>
                 <td>{formatDateTime(event.datetime)}</td>
                 <td>{event.title}</td>
