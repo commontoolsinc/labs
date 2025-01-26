@@ -4,106 +4,79 @@ import type {
   DocumentID,
   RepositoryID,
   ReplicaNotFound,
-  EntityNotFound,
+  MemoryNotFound,
   ConflictError,
   Revision,
   JSONObject,
-  Reference,
+  JSONValue,
 } from "./lib.ts";
-import { refer } from "merkle-reference";
+import { fromString, refer, Reference } from "npm:merkle-reference";
 
 export type {
   RepositoryID,
   DocumentID,
   ReplicaNotFound,
-  EntityNotFound,
+  MemoryNotFound,
   ConflictError,
   Revision,
   Reference,
 };
 
-const STATE = "state";
-const REVISION = "revision";
-const OF = "of";
-const WAS = "was";
-const IS = "value";
-const PROOF = "proof";
-
-export const IMPLICIT = {
-  "#": refer({}).toString(),
-} as const;
-
-const UNIT = refer({}).toString();
-
 export const PREPARE = `
 BEGIN TRANSACTION;
 
--- Setup table for storing documents keyed by merkle-reference.
-CREATE TABLE IF NOT EXISTS ${REVISION} (
-  ${IS} TEXT PRIMARY KEY,
-  ${WAS} TEXT,
-  ${PROOF} JSON NOT NULL
-);
--- Setup table for tracking current document state.
-CREATE TABLE IF NOT EXISTS ${STATE} (
-  ${OF} TEXT PRIMARY KEY,
-  ${IS} TEXT NOT NULL,
-  FOREIGN KEY(${IS}) REFERENCES ${REVISION}(${IS})
+-- Create table for storing JSON data.
+CREATE TABLE IF NOT EXISTS datum (
+  this    TEXT PRIMARY KEY,     -- Merkle reference for this JSON
+  source  JSON NOT NULL         -- Source for this JSON
 );
 
--- Insert a record for an empty document as it is used as implicit for
--- non-existing documents.
--- INSERT OR IGNORE INTO ${REVISION} (${IS}, ${WAS}, ${PROOF}) VALUES ('${UNIT}', ${UNIT}, '{}');
+CREATE TABLE IF NOT EXISTS fact (
+  this    TEXT PRIMARY KEY,     -- Merkle reference for { the, of, is, cause }
+  the     TEXT NOT NULL,        -- Kind of a fact e.g. "application/json"
+  of      TEXT NOT NULL,        -- Entity identifier fact is about
+  'is'    TEXT NOT NULL,        -- Value entity is claimed to have
+  cause   TEXT,                 -- Causal reference to prior fact
+  FOREIGN KEY('is') REFERENCES datum(this)
+);
+
+CREATE TABLE IF NOT EXISTS memory (
+  the     TEXT NOT NULL,        -- Kind of a fact e.g. "application/json"
+  of      TEXT NOT NULL,        -- Entity identifier fact is about
+  fact    TEXT NOT NULL,        -- Link to the fact,
+  FOREIGN KEY(fact) REFERENCES fact(this),
+  PRIMARY KEY (the, of)         -- Ensure that we have only one fact per entity
+);
 
 COMMIT;
 `;
 
-const INIT_2 = `
-BEGIN TRANSACTION;
+const IMPORT_DATUM = `INSERT OR IGNORE INTO datum (this, source) VALUES (:this, :source);`;
 
--- Try creating a revision for the document
-INSERT OR IGNORE INTO ${REVISION} (${IS}, ${WAS}, ${PROOF})
-VALUES (:is, :was, :proof);
+const IMPORT_FACT = `INSERT OR IGNORE INTO fact (this, the, of, 'is', cause) VALUES (:this, :the, :of, :is, :cause);`;
 
--- Try creating a state record for the document
-INSERT OR IGNORE INTO ${STATE} (${OF}, ${IS})
-VALUES (:of, :is);
+const IMPORT_MEMORY = `INSERT OR IGNORE INTO memory (the, of, fact) VALUES (:the, :of, :fact);`;
 
-COMMIT;
-`;
+const SWAP = `UPDATE memory SET fact = :fact WHERE fact = :cause;`;
 
-const INIT = `
-INSERT OR IGNORE INTO ${STATE} (${OF}, ${IS})
-VALUES (:of, :is);
-`;
+const DELETE = `DELETE FROM memory WHERE the = :the AND of = :of AND fact = :fact;`;
 
-const IMPORT = `
-INSERT OR IGNORE INTO ${REVISION} (${IS}, ${WAS}, ${PROOF})
-VALUES (:is, :was, :proof);`;
-
-const EXPORT = `SELECT
-  ${STATE}.${OF},
-  ${REVISION}.${WAS},
-  ${REVISION}.${PROOF}
+const EXPORT = `SELECT 
+  memory.the as the,
+  memory.of as of,
+  memory.fact as fact,
+  datum.source as 'is',
+  fact.cause as cause
 FROM
-  ${STATE}
+  memory
 JOIN
-  ${REVISION}
-ON
-  ${STATE}.${IS} = ${REVISION}.${IS};
+  fact ON memory.fact = fact.this
+JOIN
+  datum ON fact.'is' = datum.this
 WHERE
-  ${STATE}.${OF} = :of;
-`;
-
-const UPDATE = `
-UPDATE ${STATE}
-SET ${IS} = :is
-WHERE ${OF} = :of AND ${IS} = :was;
-`;
-
-const DELETE = `
-DELETE FROM ${STATE}
-WHERE ${OF} = :of AND ${IS} = :is;
+  memory.the = :the
+  AND
+  memory.of = :entity;
 `;
 
 export type Options = {
@@ -116,10 +89,11 @@ export interface Model {
 }
 
 export interface Selector {
-  this: DocumentID;
+  the: string;
+  of: DocumentID;
 }
 
-export type SelectError = EntityNotFound;
+export type SelectError = MemoryNotFound;
 
 export interface Session {
   /**
@@ -128,19 +102,20 @@ export interface Session {
    * transaction fails with `ConflictError`. Otherwise document is updated to
    * the new value.
    */
-  transact(transact: Transaction): Result<Commit, ConflictError>;
+  transact(transact: Transaction): Result<Commit, ConflictError | StoreError>;
   /**
    * Query can be used to retrieve a document from the store. At the moment
    * you can only pass the `entity` selector.œ
    */
-  query(selector: Selector): Result<Assertion, never>;
+  query(selector: Selector): Result<Fact, MemoryNotFound | StoreError>;
 }
 
 export interface Commit {
-  at: RepositoryID;
+  in: RepositoryID;
+  the: string;
   of: DocumentID;
-  was: Reference<Revision>;
-  is: Reference<Revision>;
+  is: Reference<JSONValue>;
+  cause?: Reference<Fact>;
 }
 
 export class Store implements Model, Session {
@@ -182,7 +157,9 @@ const readAddress = (url: URL) => {
   return { location: url.protocol === "file:" ? url : ":memory:", id };
 };
 
-export interface Assertion {
+export type Fact = {
+  the: string;
+
   /**
    * Stable document identifier that uniquely identifies the document.
    */
@@ -191,22 +168,24 @@ export interface Assertion {
   /**
    * Document state being asserted.
    */
-  is: JSONObject;
+  is: JSONValue;
 
   /**
    * Version `this` document is expected to be at. If `version` invariant is
    * not met assertion fails with `ConflictError`.
    */
-  was?: Reference<Revision>;
-}
+  cause?: Reference<Fact>;
+};
 
 export interface Retraction {
+  the: string;
   of: DocumentID;
-  is: Reference;
+  is: Reference<JSONValue>;
+  cause?: Reference<Fact>;
 }
 
 export type Transaction =
-  | { assert: Assertion; retract?: undefined }
+  | { assert: Fact; retract?: undefined }
   | { retract: Retraction; assert?: undefined };
 
 /**
@@ -239,134 +218,177 @@ export const close = async ({ store }: Model) => {
   await store.close();
 };
 
+type MemoryView = {
+  id: string;
+  the: string;
+  of: DocumentID;
+  is: string;
+  cause: string | null;
+};
+
 export const query = (
-  { store }: Model,
-  selector: Selector,
-): Result<Assertion, never> => {
-  const row = store.prepare(EXPORT).get({ of: selector.this }) as
-    | { was?: string; proof: string }
+  { id, store }: Model,
+  { the, of }: Selector,
+): Result<Fact, MemoryNotFound | StoreError> => {
+  try {
+    const fact = pull({ id, store }, { the, of });
+    if (fact) {
+      return { ok: fact };
+    } else {
+      return { error: new MemoryNotFoundError(the, of, id) };
+    }
+  } catch (error) {
+    return { error: new StoreError((error as Error).message) };
+  }
+};
+
+const pull = ({ store }: Model, { the, of }: Selector): Fact | undefined => {
+  const row = store.prepare(EXPORT).get({ the, entity: of }) as
+    | MemoryView
     | undefined;
 
   // If we do not have a record for this document we simply derive initial
   // revision.
   if (row === undefined) {
-    return {
-      ok: {
-        of: selector.this,
-        is: { this: selector.this },
-      },
-    };
+    return undefined;
   }
   // If we do have a row we parse and return it.
   else {
-    const is = JSON.parse(row.proof);
-    return {
-      ok:
-        row.was == null
-          ? { of: selector.this, is }
-          : { of: selector.this, is, was: row.was },
-    };
+    const is = JSON.parse(row.is);
+    const cause = row.cause
+      ? (fromString(row.cause) as Reference<Fact>)
+      : undefined;
+    const fact = cause == null ? { the, of, is } : { the, of, is, cause };
+    return fact;
   }
 };
 
-export const unit = Object.freeze({});
+const derive = (source: Fact | Retraction) => {
+  const { the, of } = source;
+  const is = refer(source.is) as Reference<JSONValue>;
+  const cause = source.cause
+    ? (refer(source.cause) as Reference<Fact>)
+    : undefined;
+  const fact = refer(
+    cause ? { the, of, is, cause } : { the, of, is },
+  ) as Reference<Fact>;
+
+  return {
+    fact,
+    the,
+    of,
+    is,
+    cause,
+  };
+};
+
+const swap = ({ store, id }: Model, source: Fact) => {
+  const { the, of, is, cause, fact } = derive(source);
+
+  // First we try to import JSON into a datum table.
+  store.run(IMPORT_DATUM, {
+    this: is.toString(),
+    source: JSON.stringify(source.is),
+  });
+
+  // Then we try to import a asserted fact into a fact table.
+  store.run(IMPORT_FACT, {
+    this: fact.toString(),
+    the,
+    of,
+    is: is.toString(),
+    cause: cause?.toString() ?? null,
+  });
+
+  // If no prior fact was referenced we expect no memory record so we try
+  // to create a new one.
+  if (!cause) {
+    store.run(IMPORT_MEMORY, { the, of, fact: fact.toString() });
+  }
+
+  // Finally we will swap memory record to point from the prior fact `cause`
+  // to the new fact. If there was no causal reference to prior fact we use
+  // the fact itself as a cause. This is will be either a redundant because we
+  // have created this exact record in previous step or there was record with
+  // referring to a different fact in which case no rows will be updated and
+  // we will know that expected state does not match an actual state so we'll
+  // need to raise a `ConflictError`.
+  const updated = store.run(SWAP, {
+    fact: fact.toString(),
+    cause: (cause ?? fact).toString(),
+  });
+
+  if (updated === 0) {
+    const actual = pull({ id, store }, { the, of }) ?? null;
+    // If actual state matches desired state update was just duplicate call,
+    // while technically this is a conflict we do not treat it as such as
+    // there is no point to error if asserted state is an actual state.
+    if (refer(actual).toString() !== fact.toString()) {
+      throw new RevisionError(id, the, of, cause ?? null, actual);
+    }
+  }
+};
 
 export const assert = (
   session: Model,
-  assertion: Assertion,
-): Result<Commit, ConflictError> => {
-  const of = assertion.of;
-  const genesis = { is: { this: of } };
-  const base = refer(genesis).toString();
-  const was = assertion.was ?? base;
+  { the, of, is, cause }: Fact,
+): Result<Commit, ConflictError | StoreError> => {
+  const transact = session.store.transaction(swap);
 
-  const revision = { is: assertion.is, was } as Revision;
-  const is = refer(revision).toString();
+  try {
+    transact(session, { the, of, is, cause });
 
-  session.store.transaction(() => {
-    // When assertion expects document in it's initial state we need to ensure
-    // that we have corresponding revision and state records.
-    if (was === base) {
-      session.store.run(IMPORT, {
-        is: base,
-        was: null,
-        proof: JSON.stringify(genesis.is),
-      });
-
-      session.store.run(INIT, {
+    return {
+      ok: {
+        in: session.id,
+        the,
         of,
-        is: base,
-      });
-    }
-
-    // Next we also need to create a revision for the asserted state in order
-    // to ensure foreign key constraint when updating state record.
-    session.store.run(IMPORT, {
-      is,
-      was,
-      proof: JSON.stringify(revision.is),
-    });
-  })();
-
-  // Here we will update state from expected `was` revision to asserted
-  // revision that corresponds to `is` state. If document does not have an
-  // expected revision no records will be updated.
-  const updated = session.store.run(UPDATE, { of, was, is });
-
-  // If no rows were updated that implies that current state does not match
-  // expected since state. In such case we produce a conflict error.
-  if (updated === 0) {
-    // We need to determine the current state of the document in order to
-    // include it in the error so that caller has enough context to rebase
-    // their document state and retry.
-    const { of: _, ...revision } = query(session, { this: of }).ok as Assertion;
-
-    if (refer(revision).toString() !== was) {
-      return {
-        error: new RevisionError(session.id, of, was, revision as Revision),
-      };
-    }
+        is: refer(is),
+        ...(cause ? { cause: refer(cause) } : {}),
+      },
+    };
+  } catch (error) {
+    return error instanceof RevisionError
+      ? { error }
+      : // SQLite transactions may produce various errors when DB is busy, locked
+        // or file is corrupt. We wrap those in a generic store error.
+        // @see https://www.sqlite.org/rescode.html
+        { error: new StoreError((error as Error).message) };
   }
-
-  // If some rows were updated we generate a commit record.
-  return {
-    ok: {
-      at: session.id,
-      of,
-      is,
-      was,
-    },
-  };
 };
 
 export const retract = (
   session: Model,
-  { of, is }: Retraction,
+  source: Retraction,
 ): Result<Commit, ConflictError> => {
+  const { the, of, is, cause, fact } = derive(source);
+
   // We attempt to delete state record for the document. It will update 1 or 0
   // rows depending on whether expected state matches current state.
-  const deleted = session.store.run(DELETE, { of, is });
+  const deleted = session.store.run(DELETE, { the, of, fact: fact.toString() });
   // If no rows were deleted and assumed state is not implicit we had a wrong
   // assumption about the document state.
 
   if (deleted === 0) {
-    const { of: _, ...revision } = query(session, { this: of }).ok as Assertion;
-    // If actual state is implicit and it is the one we assumed we do not
-    // actually have a conflict it's just we don't have row for the implicit
-    // state.
-    if (revision.was !== is) {
+    const result = query(session, { the, of });
+    if (result.error) {
       return {
-        error: new RevisionError(session.id, of, is, revision as Revision),
+        error: new RevisionError(session.id, the, of, fact, null),
+      };
+    } else {
+      return {
+        error: new RevisionError(session.id, the, of, fact, result.ok),
       };
     }
   }
 
   return {
     ok: {
-      at: session.id,
+      in: session.id,
+      the,
       of,
-      is: refer({ is: { this: of } }).toString(),
-      was: is,
+      is,
+      ...(cause ? { cause } : {}),
     },
   };
 };
@@ -374,7 +396,7 @@ export const retract = (
 export const transact = (
   model: Model,
   transact: Transaction,
-): Result<Commit, ConflictError> =>
+): Result<Commit, ConflictError | StoreError> =>
   transact.assert
     ? assert(model, transact.assert)
     : retract(model, transact.retract);
@@ -388,14 +410,64 @@ export class ReplicaNotFoundError extends Error implements ReplicaNotFound {
 
 export class RevisionError extends Error implements ConflictError {
   override name = "ConflictError" as const;
+  in: string;
   constructor(
-    public at: RepositoryID,
+    at: RepositoryID,
+    public the: string,
     public of: DocumentID,
-    public expected: Reference<Revision>,
-    public actual: Revision,
+    public expected: Reference<Fact> | null,
+    public actual: Fact | null,
   ) {
     super(
-      `Document ${of} at ${at} was expected to be ${expected} instead of actual ${refer(actual)}`,
+      expected == null
+        ? `The ${the} of ${of} in ${at} already exists as ${refer(actual)}`
+        : actual == null
+          ? `The ${the} of ${of} in ${at} was expected to be ${expected}, but it does not exists`
+          : `The ${the} of ${of} in ${at} was expected to be ${expected}, but it is ${refer(actual)}`,
     );
+
+    this.in = at;
+  }
+
+  toJSON() {}
+}
+
+export class StoreError extends Error {
+  override name = "StoreError" as const;
+  constructor(message: string) {
+    super(message);
+  }
+
+  toJSON() {
+    return {
+      name: this.name,
+      message: this.message,
+      stack: this.stack,
+    };
+  }
+}
+
+class MemoryNotFoundError extends Error implements MemoryNotFound {
+  override name = "MemoryNotFound" as const;
+  in: string;
+  constructor(
+    public the: string,
+    public of: DocumentID,
+    at: RepositoryID,
+    message: string = `No ${the} for ${of} found in ${at}`,
+  ) {
+    super(message);
+    this.in = at;
+  }
+  toJSON() {
+    return {
+      name: this.name,
+      message: this.message,
+      stack: this.stack,
+
+      the: this.the,
+      of: this.of,
+      in: this.in,
+    };
   }
 }
