@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useDropzone } from "react-dropzone";
-import { getPhotoSetByName, updatePhotoSet } from "@/utils/photoset";
+import { getPhotoSetByName, updatePhotoSet, deletePhotoSet } from "@/utils/photoset";
 
 export default function PhotoSetView() {
   const { photosetName } = useParams();
@@ -49,6 +49,13 @@ export default function PhotoSetView() {
     window.location.reload();
   };
 
+  const handleDeletePhotoset = () => {
+    if (confirm("Are you sure you want to delete this photoset?")) {
+      deletePhotoSet(photoset.id);
+      navigate("/experiments/photoflow");
+    }
+  };
+
   if (!photoset) {
     return (
       <div className="max-w-7xl mx-auto mt-10 p-6">
@@ -75,13 +82,21 @@ export default function PhotoSetView() {
             Created on {new Date(photoset.createdAt).toLocaleDateString()}
           </p>
         </div>
-        <button
-          onClick={() => navigate(`/data/${photosetName}/spells/new`)}
-          className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2"
-        >
-          <span>Create Spell</span>
-          <span className="text-lg">✨</span>
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleDeletePhotoset}
+            className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+          >
+            Delete PhotoSet
+          </button>
+          <button
+            onClick={() => navigate(`/experiments/photoflow/${photosetName}/spells/new`)}
+            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2"
+          >
+            <span>Create Spell</span>
+            <span className="text-lg">✨</span>
+          </button>
+        </div>
       </div>
 
       <div className={`min-h-[400px] ${isDragActive ? "bg-blue-50" : ""} transition-colors`}>

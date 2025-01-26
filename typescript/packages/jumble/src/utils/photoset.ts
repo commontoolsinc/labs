@@ -31,14 +31,20 @@ export function savePhotoSet(photoset: PhotoSet): void {
 }
 
 export function getPhotoSetByName(name: string): PhotoSet | undefined {
-  return getPhotoSets().find(set => set.name === name);
+  return getPhotoSets().find((set) => set.name === name);
 }
 
 export function updatePhotoSet(photoset: PhotoSet): void {
   const sets = getPhotoSets();
-  const index = sets.findIndex(set => set.id === photoset.id);
+  const index = sets.findIndex((set) => set.id === photoset.id);
   if (index !== -1) {
     sets[index] = photoset;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sets));
   }
+}
+
+export function deletePhotoSet(id: string): void {
+  const sets = getPhotoSets();
+  const filteredSets = sets.filter((set) => set.id !== id);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(filteredSets));
 }
