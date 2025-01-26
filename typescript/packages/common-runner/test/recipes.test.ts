@@ -1,14 +1,8 @@
 import { describe, it, expect } from "vitest";
-import {
-  recipe,
-  lift,
-  handler,
-  byRef,
-  JSONSchema,
-} from "@commontools/common-builder";
+import { byRef, handler, JSONSchema, lift, recipe } from "@commontools/builder";
 import { run } from "../src/runner.js";
 import { addModuleByRef } from "../src/module.js";
-import { getDoc, Cell } from "../src/cell.js";
+import { Cell, getDoc } from "../src/cell.js";
 import { idle } from "../src/scheduler.js";
 
 describe("Recipe Runner", () => {
@@ -83,7 +77,7 @@ describe("Recipe Runner", () => {
       "Multiply numbers",
       ({ values }) => {
         const multiplied = values.map(({ x }, index, array) => {
-          const multiply = lift<number>(x => x * (index + 1) * array.length);
+          const multiply = lift<number>((x) => x * (index + 1) * array.length);
           return { multiplied: multiply(x) };
         });
         return { multiplied };
@@ -109,7 +103,7 @@ describe("Recipe Runner", () => {
     const doubleArray = recipe<{ values: number[]; factor: number }>(
       "Double numbers",
       ({ values, factor }) => {
-        const doubled = values.map(x => double({ x, factor }));
+        const doubled = values.map((x) => double({ x, factor }));
         return { doubled };
       },
     );
@@ -159,7 +153,7 @@ describe("Recipe Runner", () => {
     const incHandler = handler<
       { amount: number },
       { counter: { value: number } }
-    >(function ({ amount }) {
+    >(function (this: { counter: { value: number } }, { amount }) {
       this.counter.value += amount;
     });
 
@@ -185,9 +179,11 @@ describe("Recipe Runner", () => {
 
   it("should execute handlers that use bind and this (no types)", async () => {
     // Switch to `function` so that we can set the type of `this`.
-    const incHandler = handler(function ({ amount }) {
-      this.counter.value += amount;
-    });
+    const incHandler = handler(
+      function (this: { counter: { value: number } }, { amount }) {
+        this.counter.value += amount;
+      },
+    );
 
     const incRecipe = recipe<{ counter: { value: number } }>(
       "Increment counter",
@@ -274,7 +270,7 @@ describe("Recipe Runner", () => {
       return x * y;
     });
 
-    const multiplyGenerator = lift<{ x: number; y: number }>(args => {
+    const multiplyGenerator = lift<{ x: number; y: number }>((args) => {
       runCounts.multiplyGenerator++;
       return multiply(args);
     });
@@ -288,7 +284,7 @@ describe("Recipe Runner", () => {
 
     const multiplyRecipe = recipe<{ x: number; y: number }>(
       "multiply",
-      args => {
+      (args) => {
         return {
           result1: multiplyGenerator(args),
           result2: multiplyGenerator2(args),
@@ -418,8 +414,14 @@ describe("Recipe Runner", () => {
     const sumRecipe = recipe<{ data: { items: Array<{ value: number }> } }>(
       "Sum Items",
       ({ data }) => {
-        const result = lift(schema, { type: "number" }, ({ data }) =>
-          data.items.reduce((sum, item) => sum + item.get().value, 0),
+        const result = lift(
+          schema,
+          { type: "number" },
+          ({ data }) =>
+            data.items.reduce(
+              (sum: number, item: any) => sum + item.get().value,
+              0,
+            ),
         )({ data });
         return { result };
       },
@@ -451,11 +453,14 @@ describe("Recipe Runner", () => {
     const dynamicRecipe = recipe<{ context: Record<string, number> }>(
       "Dynamic Context",
       ({ context }) => {
-        const result = lift(schema, { type: "number" }, ({ context }) =>
-          Object.values(context ?? {}).reduce(
-            (sum: number, val) => sum + (val as Cell<number>).get(),
-            0,
-          ),
+        const result = lift(
+          schema,
+          { type: "number" },
+          ({ context }) =>
+            Object.values(context ?? {}).reduce(
+              (sum: number, val) => sum + (val as Cell<number>).get(),
+              0,
+            ),
         )({ context });
         return { result };
       },

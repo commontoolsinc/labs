@@ -1,7 +1,7 @@
 import {
+  type DocImpl,
   getDoc,
   getDocLinkOrThrow,
-  type DocImpl,
   type ReactivityLog,
 } from "../cell.js";
 import { type Action } from "../scheduler.js";

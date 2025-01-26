@@ -1,5 +1,5 @@
-import { h } from "@commontools/common-html";
-import { recipe, NAME, UI, handler } from "@commontools/common-builder";
+import { h } from "@commontools/html";
+import { recipe, NAME, UI, handler } from "@commontools/builder";
 import { z } from "zod";
 
 const update = handler<{ detail: { value: string } }, { input: string, output: string, timeoutId: number }>(

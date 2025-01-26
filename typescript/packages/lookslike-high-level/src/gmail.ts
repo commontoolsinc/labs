@@ -80,7 +80,7 @@ export function attemptAuth(cb?: (resp: GoogleToken) => void) {
   }
 }
 
-async function listEmails() {
+export async function listEmails() {
   try {
     const response = await gapi.client.gmail.users.messages.list({
       userId: 'me',

@@ -1,5 +1,5 @@
-import { LitElement, html, css } from 'lit-element';
-import { customElement, property } from 'lit-element/decorators.js';
+import { LitElement, html, css } from 'lit';
+import { customElement, property } from 'lit/decorators.js';
 import { repeat } from 'lit/directives/repeat.js';
 
 @customElement('common-datatable')
@@ -31,10 +31,10 @@ export class CommonDatatableElement extends LitElement {
   `;
 
   @property({ type: Array })
-  cols: Array<string>;
+  cols: Array<string> = [];
 
   @property({ type: Array })
-  rows: Array<Record<string, string>>;
+  rows: Array<Record<string, string>> = [];
 
   override render() {
     const rows = repeat(this.rows, (row) => {

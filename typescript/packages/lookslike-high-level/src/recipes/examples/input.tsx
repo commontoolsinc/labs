@@ -1,5 +1,5 @@
-import { handler, recipe } from "@commontools/common-builder";
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
+import { handler, recipe } from "@commontools/builder";
 
 export const input = recipe(
   "Input with JSX",

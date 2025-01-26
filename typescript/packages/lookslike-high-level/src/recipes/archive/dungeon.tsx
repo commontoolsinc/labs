@@ -1,12 +1,12 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   handler,
   UI,
   NAME,
   navigateTo,
-} from "@commontools/common-builder";
-import { iframe } from "../iframe.js";
+} from "@commontools/builder";
+import { iframe } from "../iframe.jsx";
 
 type Position = { x: number; y: number };
 type Actor = {

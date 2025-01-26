@@ -1,4 +1,4 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   UI,
@@ -8,7 +8,7 @@ import {
   str,
   cell,
   createJsonSchema,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 
 const formatData = lift(({ obj }) => {
   console.log("stringify", obj);
@@ -25,17 +25,6 @@ const deriveJsonSchema = lift(({ data }) => {
 
   return schema;
 });
-
-const onInput = handler<KeyboardEvent, { value: string }>((input, state) => {
-  state.value = (input.target as HTMLTextAreaElement).value;
-});
-
-const onAcceptData = handler<void, { json: string; data: string }>(
-  (_, state) => {
-    console.log("accept data", state.json, state.data);
-    state.data = JSON.parse(JSON.stringify(state.json));
-  },
-);
 
 const tryParseJson = lift(({ jsonText }) => {
   try {

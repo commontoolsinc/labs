@@ -1,4 +1,4 @@
-import { LitElement, html } from "lit-element";
+import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { until } from "lit/directives/until.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";

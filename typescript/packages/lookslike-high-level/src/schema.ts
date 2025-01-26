@@ -1,5 +1,4 @@
-import { isQueryResultForDereferencing } from "@commontools/common-runner";
-import { getDocLinkOrThrow } from "@commontools/common-runner";
+import { isQueryResultForDereferencing, getDocLinkOrThrow } from "@commontools/runner";
 import { z } from "zod";
 
 export function jsonSchemaToPlaceholder(schema: any): any {
@@ -192,52 +191,6 @@ export function extractKeysFromZodSchema(schema: z.ZodTypeAny): string[] {
   return [];
 }
 
-export const jsonToDatalogQuery = (jsonObj: any) => {
-  const select: Record<string, any> = {};
-  const where: Array<any> = [];
-
-  if (typeof jsonObj !== "object" || jsonObj === null)
-    return { select: {}, where: [] };
-
-  function processObject(root: string, obj: any, path: string, selectObj: any) {
-    for (const [key, value] of Object.entries(obj)) {
-      const currentPath = path ? `${path}/${key}` : key;
-      const varName = `?${currentPath}`.replace(/\//g, "_");
-
-      if (Array.isArray(value)) {
-        if (value[0] === null) {
-          throw new Error("Cannot handle null values in arrays");
-        }
-
-        where.push({ Case: ["?item", key, `?${key}[]`] });
-        where.push({ Case: [`?${key}[]`, `?[${key}]`, `?${key}`] });
-
-        if (typeof value[0] === "object") {
-          selectObj[key] = [{ ".": `?${key}` }];
-          processObject(`?${key}`, value[0], currentPath, selectObj[key][0]);
-          selectObj[`.${key}`] = `?${key}[]`;
-        } else {
-          selectObj[key] = [`?${key}`];
-        }
-      } else if (typeof value === "object" && value !== null) {
-        selectObj[key] = {};
-        processObject(root, value, currentPath, selectObj[key]);
-      } else {
-        selectObj[key] = varName;
-        where.push({ Case: [root, key, varName] });
-      }
-    }
-  }
-
-  select["."] = "?item";
-  processObject("?item", jsonObj, "", select);
-
-  return {
-    select,
-    where,
-  };
-};
-
 export function inferJsonSchema(data: unknown): any {
   // Handle null
   if (data === null) {
@@ -427,6 +380,3 @@ export default recipe(Schema, (state) => {
 });
 `;
 };
-
-// const zodSchemaCode = generateZodCode(inferredSchema);
-// console.log(zodSchemaCode);

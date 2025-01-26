@@ -1,5 +1,5 @@
-import { h } from "@commontools/common-html";
-import { recipe, NAME, UI, handler, lift, llm, cell, ifElse } from "@commontools/common-builder";
+import { h } from "@commontools/html";
+import { recipe, NAME, UI, handler, lift, llm, cell, ifElse } from "@commontools/builder";
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
@@ -53,7 +53,7 @@ const grabJson = lift<{ result?: string, pending?: boolean }, { pending: boolean
 
 const jsonify = lift(({ data }) => JSON.stringify(data, null, 2))
 
-const loadData = handler<{ detail: { filesContent } }, { data: any }>(
+const loadData = handler<{ detail: { filesContent: any } }, { data: any }>(
     ({ detail: { filesContent } }, state) => {
         state.data = filesContent[0].content;
     });

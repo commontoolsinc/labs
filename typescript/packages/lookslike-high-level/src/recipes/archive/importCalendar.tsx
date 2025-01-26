@@ -1,4 +1,4 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   handler,
@@ -6,7 +6,7 @@ import {
   NAME,
   ifElse,
   lift,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 
 interface CalendarEvent {
   datetime: string;
@@ -273,10 +273,6 @@ const formatDateTime = lift((dateTimeString: string): string => {
   const hours = String(date.getHours()).padStart(2, "0");
   const minutes = String(date.getMinutes()).padStart(2, "0");
   return `${year}-${month}-${day} ${hours}:${minutes}`;
-});
-
-const lastEvent = lift((events: CalendarEvent[]): CalendarEvent | undefined => {
-  return events[0];
 });
 
 const anyEvents = lift((events: CalendarEvent[]): boolean => {

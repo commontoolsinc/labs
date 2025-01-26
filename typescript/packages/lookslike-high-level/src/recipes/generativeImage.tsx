@@ -1,13 +1,11 @@
+import { h } from "@commontools/html";
 import {
   recipe,
-  NAME,
-  UI,
   handler,
   cell,
   lift,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import { z } from "zod";
-import { h } from "@commontools/common-html";
 
 const schema = z
   .object({

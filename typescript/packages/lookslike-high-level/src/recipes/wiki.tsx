@@ -1,4 +1,4 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   lift,
@@ -9,7 +9,7 @@ import {
   UI,
   str,
   ifElse,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 

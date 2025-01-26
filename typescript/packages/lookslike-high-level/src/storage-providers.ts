@@ -1,4 +1,4 @@
-import type { EntityId, Cancel } from "@commontools/common-runner";
+import type { EntityId, Cancel } from "@commontools/runner";
 import { log } from "./storage.js";
 
 export interface StorageValue<T = any> {

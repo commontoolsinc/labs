@@ -1,4 +1,4 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   handler,
@@ -8,7 +8,7 @@ import {
   llm,
   UI,
   NAME,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
@@ -37,7 +37,7 @@ const jsonSchema = JSON.stringify(zodToJsonSchema(PlaceList), null, 2);
 
 const buildPrompt = lift<
   { prompt?: string },
-  { messages: string[]; system: string; stop?: string }
+  { messages?: string[]; system?: string; stop?: string }
 >(({ prompt }) => {
   if (!prompt) {
     return {};

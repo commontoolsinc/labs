@@ -1,12 +1,11 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   createRef,
-  getEntityId,
+  type EntityId,
   getDocByEntityId,
-  setDocByEntityId,
-  EntityId,
-} from "../src/cell-map";
-import { getDoc, getDocLinkOrThrow } from "../src/cell.js";
+  getEntityId,
+} from "../src/cell-map.js";
+import { getDoc } from "../src/cell.js";
 import { refer } from "merkle-reference";
 
 describe("refer", () => {

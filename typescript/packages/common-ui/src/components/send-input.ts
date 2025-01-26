@@ -1,5 +1,5 @@
-import { LitElement, html, css } from "lit-element";
-import { customElement, property } from "lit-element/decorators.js";
+import { LitElement, html, css } from "lit";
+import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
 
 
@@ -21,15 +21,16 @@ export class SendMessageElement extends LitElement {
   ];
 
   @property({ type: String })
-  name: string;
+  name: string = "";
 
   @property({ type: String })
-  placeholder: string;
+  placeholder: string = "";
 
   send(event: Event) {
     event.preventDefault();
 
-    const inputEl = this.shadowRoot.getElementById("input") as HTMLInputElement;
+    const inputEl = this.shadowRoot?.getElementById("input") as HTMLInputElement;
+    if (!inputEl) return;
     const value = inputEl.value;
     inputEl.value = "";
 

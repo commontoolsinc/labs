@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit-element";
+import { LitElement, html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import {
   Cell,
@@ -6,7 +6,7 @@ import {
   removeAction,
   type Action,
   type ReactivityLog,
-} from "@commontools/common-runner";
+} from "@commontools/runner";
 import { Ref, createRef, ref } from "lit/directives/ref.js";
 
 @customElement("common-iframe")

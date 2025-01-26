@@ -1,4 +1,4 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   fetchData,
@@ -6,7 +6,7 @@ import {
   handler,
   NAME,
   lift,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 
 interface Item {
   id: string;
@@ -44,7 +44,7 @@ export const fetchExample = recipe<{ url: string }>(
             oncommon-input={updateUrl({ url })}
           ></common-input>
           <ul>
-            {items.map(({ title, id }) => (
+            {items.map(({ title, id }: { title: string; id: string }) => (
               <li>
                 {title} - {id}
               </li>

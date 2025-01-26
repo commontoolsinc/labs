@@ -1,5 +1,5 @@
-import { LitElement, html, css } from 'lit-element';
-import { customElement } from 'lit-element/decorators.js';
+import { LitElement, html, css } from 'lit';
+import { customElement } from 'lit/decorators.js';
 
 @customElement('common-record')
 export class CommonRecordElement extends LitElement {

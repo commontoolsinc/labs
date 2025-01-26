@@ -1,4 +1,4 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   Spell,
   type OpaqueRef,
@@ -6,7 +6,7 @@ import {
   select,
   $,
   derive,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 
 type Counter = {
   title: string;

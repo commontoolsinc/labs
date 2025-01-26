@@ -5,7 +5,7 @@ import {
   LocalStorageProvider,
   StorageProvider,
 } from "../src/storage-providers.js";
-import { getDoc, DocImpl, createRef } from "@commontools/common-runner";
+import { getDoc, DocImpl, createRef } from "@commontools/runner";
 
 // Create a mock window object
 const createMockWindow = () => {

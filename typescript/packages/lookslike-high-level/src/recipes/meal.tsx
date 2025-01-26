@@ -1,19 +1,16 @@
+import { h } from "@commontools/html";
 import {
   UI,
   NAME,
-  lift,
   recipe,
   handler,
   derive,
   Opaque,
-  OpaqueRef,
-} from "@commontools/common-builder";
-import { richTextEditor } from "@commontools/common-os-ui";
+  llm,
+} from "@commontools/builder";
 
 import z from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { h } from "@commontools/common-html";
-import { llm } from "@commontools/common-builder";
 
 const Cookware = z.object({
   name: z.string().describe("Name of the cookware"),

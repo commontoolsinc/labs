@@ -1,9 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { isAlias, isModule, isRecipe, Opaque } from "../src/types.js";
+import { describe, expect, it } from "vitest";
+import { isAlias, isModule, isRecipe, type Opaque } from "../src/types.js";
 import {
-  setValueAtPath,
   getValueAtPath,
   hasValueAtPath,
+  setValueAtPath,
 } from "../src/utils.js";
 
 describe("value type", () => {

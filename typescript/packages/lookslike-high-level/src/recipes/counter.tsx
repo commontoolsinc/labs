@@ -1,12 +1,12 @@
-import { h } from "@commontools/common-html";
-import { Spell, type OpaqueRef, handler } from "@commontools/common-builder";
+import { h } from "@commontools/html";
+import { Spell, type OpaqueRef, handler } from "@commontools/builder";
 
 type CounterState = {
   title: string;
   count: number;
 };
 
-const thisHandler = handler<{}, { count: number }>(function () {
+const thisHandler = handler<{}, { count: number }>(function (this: any) {
   this.count += 1;
 });
 

@@ -1,4 +1,4 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   str,
@@ -7,10 +7,10 @@ import {
   ifElse,
   UI,
   NAME,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import { addSuggestion, description } from "../suggestions.js";
 import { z } from "zod";
-import zodToJsonSchema from "zod-to-json-schema";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 const Playlist = z.object({
   title: z.string().describe("Title of the playlist"),
@@ -26,15 +26,15 @@ const Playlist = z.object({
 type Playlist = z.infer<typeof Playlist>;
 const jsonSchema = JSON.stringify(zodToJsonSchema(Playlist), null, 2);
 
-const grabJson = lift<{ result: string }, Playlist | undefined>(
+const grabJson = lift<{ result?: string }, Playlist | undefined>(
   ({ result }) => {
     if (!result) {
-      return {};
+      return;
     }
     const jsonMatch = result.match(/```json\n([\s\S]+?)```/);
     if (!jsonMatch) {
       console.error("No JSON found in text:", result);
-      return {};
+      return;
     }
     let rawData = JSON.parse(jsonMatch[1]);
     let parsedData = Playlist.safeParse(rawData);

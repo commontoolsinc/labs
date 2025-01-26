@@ -1,14 +1,4 @@
-import { addRecipe } from "@commontools/common-runner";
-
-import articleQuerySrc from "./articleQuery.tsx?raw";
-import { articleQuery } from "./articleQuery.js";
-addRecipe(articleQuery, articleQuerySrc);
-export { articleQuery };
-
-import bookshelfQuerySrc from "./bookshelfQuery.tsx?raw";
-import { bookshelfQuery } from "./bookshelfQuery.js";
-addRecipe(bookshelfQuery, bookshelfQuerySrc);
-export { bookshelfQuery };
+import { addRecipe } from "@commontools/runner";
 
 import chatSrc from "./chatty.tsx?raw";
 import { chat } from "./chatty.js";
@@ -97,11 +87,6 @@ import { routine } from "./routine.js";
 addRecipe(routine, routineSrc);
 export { routine };
 
-import searchSrc from "./search.tsx?raw";
-import { search } from "./search.jsx";
-addRecipe(search, searchSrc);
-export { search };
-
 import shoelaceDemoSrc from "./examples/shoelace.tsx?raw";
 import { shoelaceDemo } from "./examples/shoelace.js";
 addRecipe(shoelaceDemo, shoelaceDemoSrc);
@@ -111,16 +96,6 @@ import todoListSrc from "./todo-list.tsx?raw";
 import todoList from "./todo-list.js";
 addRecipe(todoList, todoListSrc);
 export { todoList };
-
-import todoQuerySrc from "./todoQuery.tsx?raw";
-import { todoQuery } from "./todoQuery.js";
-addRecipe(todoQuery, todoQuerySrc);
-export { todoQuery };
-
-import tweetsSrc from "./tweets.tsx?raw";
-import { tweets } from "./tweets.js";
-addRecipe(tweets, tweetsSrc);
-export { tweets };
 
 import wikiSrc from "./wiki.tsx?raw";
 import wiki from "./wiki.js";
