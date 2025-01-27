@@ -47,14 +47,12 @@ const iframeRecipe: Recipe = {
 }
 
 const runIframeRecipe = ({argumentSchema, resultSchema, src, name}: Recipe) => 
-  recipe(argumentSchema, resultSchema, (data) => {
-
-  return {
+  recipe(argumentSchema, resultSchema, (data) => ({
     [NAME]: name,
     [UI]: (
       <common-iframe src={src} $context={data}></common-iframe>
     ),
-  };
-});
+    // FIXME: add resultSchema to the result
+  }));
 
 export default runIframeRecipe(iframeRecipe);
