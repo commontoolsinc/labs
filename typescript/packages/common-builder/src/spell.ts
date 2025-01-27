@@ -124,7 +124,6 @@ export abstract class Spell<T extends Record<string, any>> {
    * @returns An OpaqueRef stream for the event
    */
   dispatch(event: string) {
-    console.log("dispatch", event, this.streams[event]);
     return this.streams[event];
   }
 
