@@ -14,7 +14,8 @@ type Recipe = {
 }
 
 //<SRC>
-const src = "<p>hello world</p>";
+// const src = "<p>hello world</p>";\
+import src from "./smolIframe.html?raw";
 //</SRC>
 
 //<ARGUMENT SCHEMA>
