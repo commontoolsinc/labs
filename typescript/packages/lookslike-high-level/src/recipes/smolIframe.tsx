@@ -2,6 +2,8 @@ import { h } from "@commontools/html";
 import { recipe, UI, NAME } from "@commontools/builder";
 import type { JSONSchema } from "@commontools/builder";
 
+//<TYPE>IFRAME V0</TYPE>
+
 type Recipe = {
   type: "iframe",
   src: string,
@@ -11,8 +13,11 @@ type Recipe = {
   name: string,
 }
 
-// @ts-ignore this loads the html file using VITE.js as a string from the html file on disk
-import src from "./smolIframe.html?raw";
+//<SRC>
+const src = "<p>hello world</p>";
+//</SRC>
+
+//<ARGUMENT SCHEMA>
 const argumentSchema = {
   type: "object",
   properties: {
@@ -23,7 +28,9 @@ const argumentSchema = {
   },
   description: "SMOL Counter demo"
 } as JSONSchema;
+//</ARGUMENT SCHEMA>
 
+//<RESULT SCHEMA>
 const resultSchema = {
   type: "object",
   properties: {
@@ -34,8 +41,15 @@ const resultSchema = {
   },
   description: "SMOL Counter demo"
 } as JSONSchema;
+//</RESULT SCHEMA>
 
+//<SPEC>
 const spec = "emoji style counter that increments by 1 when clicked"
+//</SPEC>
+
+//<NAME>
+const name = "smol iframe"
+//</NAME>
 
 const iframeRecipe: Recipe = {
   type: "iframe",
@@ -43,7 +57,7 @@ const iframeRecipe: Recipe = {
   argumentSchema,
   resultSchema,
   spec,
-  name: "smol iframe",
+  name,
 }
 
 const runIframeRecipe = ({argumentSchema, resultSchema, src, name}: Recipe) => 
