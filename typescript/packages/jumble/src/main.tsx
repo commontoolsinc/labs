@@ -3,12 +3,18 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import "@/styles/index.css";
 import Home from "@/views/Home.tsx";
+import PhotoFlowIndex from "@/views/experiments/photoflow/Index.tsx";
+import PhotoSetView from "@/views/experiments/photoflow/PhotoSetView.tsx";
+import NewSpell from "@/views/experiments/photoflow/NewSpell.tsx";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <Router>
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/experiments/photoflow" element={<PhotoFlowIndex />} />
+        <Route path="/experiments/photoflow/:photosetName" element={<PhotoSetView />} />
+        <Route path="/experiments/photoflow/:photosetName/spells/new" element={<NewSpell />} />
       </Routes>
     </Router>
   </StrictMode>,
