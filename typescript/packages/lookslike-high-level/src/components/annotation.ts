@@ -9,13 +9,13 @@ import { annotation } from "../recipes/annotation.jsx";
 @customElement("common-annotation-toggle")
 export class CommonAnnotationToggle extends LitElement {
   override render() {
-    return <div></div>;
-    //   ${(!annotationsEnabled.get() &&
-    //     html`<button @click=${toggleAnnotations}>
-    //       Enable Annotation Suggestions
-    //     </button>`) ||
-    //   html`<div></div>`}
-    // </div>`;
+    return html`<div>
+      ${(!annotationsEnabled.get() &&
+        html`<button @click=${toggleAnnotations}>
+          Enable Annotation Suggestions
+        </button>`) ||
+      html`<div></div>`}
+    </div>`;
   }
 
   override firstUpdated() {
