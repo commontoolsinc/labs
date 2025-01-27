@@ -1,0 +1,7 @@
+{
+  "extends": "next/core-web-vitals",
+  "rules": {
+    "@typescript-eslint/no-non-null-assertion": "off",
+    "@next/next/no-img-element": "off"
+  }
+}
