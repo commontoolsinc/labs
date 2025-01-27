@@ -1,7 +1,8 @@
-import { useState, KeyboardEvent } from "react";
+import { useState, KeyboardEvent, useEffect, useRef } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { EditorView } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
+import { javascript } from "@codemirror/lang-javascript";
 import EmojiPicker, { EmojiClickData } from "emoji-picker-react";
 import {
   LuPlay,
@@ -11,6 +12,7 @@ import {
   LuWandSparkles,
   LuArrowRight,
   LuCheck,
+  LuLoader,
 } from "react-icons/lu";
 import { HiSparkles } from "react-icons/hi2";
 import ReactMarkdown from "react-markdown";
@@ -46,9 +48,22 @@ interface ScratchpadProps {
   isOpen: boolean;
   onClose: () => void;
   photosetName: string;
+  onViewChange?: (view: ViewType) => void;
+  onUnlockTimelineView?: () => void;
 }
 
-export default function Scratchpad({ isOpen, onClose, photosetName }: ScratchpadProps) {
+interface CodePreview {
+  code: string;
+  language: string;
+}
+
+export default function Scratchpad({
+  isOpen,
+  onClose,
+  photosetName,
+  onViewChange,
+  onUnlockTimelineView,
+}: ScratchpadProps) {
   const [status, setStatus] = useState<ScratchpadStatus>("idle");
   const [message, setMessage] = useState("");
   const [content, setContent] = useState(
@@ -58,11 +73,68 @@ export default function Scratchpad({ isOpen, onClose, photosetName }: Scratchpad
   const [emoji, setEmoji] = useState("✨");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [editMode, setEditMode] = useState<EditMode>("view");
+  const [codePreview, setCodePreview] = useState<CodePreview | null>(null);
+  const [showCodeEditor, setShowCodeEditor] = useState(false);
+  const [isEditingCode, setIsEditingCode] = useState(false);
+  const [editedCode, setEditedCode] = useState<string>("");
 
   const currentState = scratchpadStates[status];
 
+  // Add ref for the input
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Add effect to focus input when sidebar opens
+  useEffect(() => {
+    if (isOpen) {
+      // Small delay to ensure DOM is ready
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (status === "thinking") {
+      const timer = setTimeout(() => {
+        setStatus("idle");
+        const lines = content.split("\n");
+        const lastLine = lines[lines.length - 1];
+        if (lastLine.toLowerCase().includes("timeline")) {
+          setCodePreview({
+            language: "tsx",
+            code: `export function TimelineView({ images }) {
+  return (
+    <div className="space-y-8">
+      {images.map((image) => (
+        <div key={image.id} className="flex gap-4">
+          <div className="w-20 text-sm text-gray-500">
+            {new Date(image.createdAt)
+              .toLocaleDateString()}
+          </div>
+          <div className="flex-1">
+            <div className="w-48 h-48 rounded-lg overflow-hidden">
+              <img 
+                src={image.dataUrl}
+                alt=""
+                className="w-full h-full object-cover"
+              />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}`,
+          });
+        }
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [status, content]);
+
   const handleSubmit = () => {
     if (!message.trim()) return;
+    console.log("Submitting message:", message);
     setContent(content + "\n" + "- " + message);
     setMessage("");
     setStatus("thinking");
@@ -71,6 +143,29 @@ export default function Scratchpad({ isOpen, onClose, photosetName }: Scratchpad
   const handleSaveEdit = () => {
     setEditMode("view");
     setStatus("thinking");
+  };
+
+  const handleCodePreviewClick = () => {
+    if (onViewChange) {
+      onViewChange("timeline");
+      onUnlockTimelineView?.();
+      onClose();
+    }
+  };
+
+  const handleCodeEdit = () => {
+    setIsEditingCode(true);
+    setEditedCode(codePreview?.code || "");
+  };
+
+  const handleCodeSave = () => {
+    if (codePreview) {
+      setCodePreview({
+        ...codePreview,
+        code: editedCode,
+      });
+    }
+    setIsEditingCode(false);
   };
 
   return (
@@ -142,6 +237,78 @@ export default function Scratchpad({ isOpen, onClose, photosetName }: Scratchpad
             <div className="prose prose-sm max-w-none">
               <ReactMarkdown>{content}</ReactMarkdown>
             </div>
+
+            {/* Thinking Indicator */}
+            {status === "thinking" && (
+              <div className="mt-6 flex flex-col items-center gap-3 text-gray-500">
+                <LuLoader className="w-6 h-6 animate-spin" />
+                <div className="text-sm status-thinking">Thinking...</div>
+              </div>
+            )}
+
+            {/* Code Preview */}
+            {codePreview && !showCodeEditor && (
+              <div className="mt-4 w-full rounded-lg border border-gray-200 p-3 cursor-pointer hover:border-blue-500 transition-colors overflow-hidden bg-[#282c34]">
+                <div className="text-xs text-gray-500 mb-2 flex justify-between items-center">
+                  <span>TimelineSpell.tsx</span>
+                  {!isEditingCode && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCodeEdit();
+                      }}
+                      className="text-gray-400 hover:text-gray-200"
+                    >
+                      <LuPencil size={16} />
+                    </button>
+                  )}
+                  {isEditingCode && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCodeSave();
+                      }}
+                      className="text-gray-400 hover:text-gray-200"
+                    >
+                      <LuCheck size={16} />
+                    </button>
+                  )}
+                </div>
+                <div onClick={!isEditingCode ? handleCodePreviewClick : undefined}>
+                  <CodeMirror
+                    value={isEditingCode ? editedCode : codePreview.code}
+                    height="192px"
+                    theme="dark"
+                    extensions={[javascript()]}
+                    editable={isEditingCode}
+                    onChange={(value) => isEditingCode && setEditedCode(value)}
+                    basicSetup={{
+                      lineNumbers: false,
+                      foldGutter: false,
+                      indentOnInput: true,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Expanded Code Editor */}
+            {showCodeEditor && (
+              <div className="mt-4">
+                <CodeMirror
+                  value={codePreview?.code || ""}
+                  height="400px"
+                  theme="light"
+                  extensions={[markdown(), EditorView.lineWrapping]}
+                  editable={false}
+                  basicSetup={{
+                    lineNumbers: true,
+                    foldGutter: false,
+                    indentOnInput: true,
+                  }}
+                />
+              </div>
+            )}
           </>
         ) : (
           <div className="h-full flex flex-col">
@@ -169,19 +336,29 @@ export default function Scratchpad({ isOpen, onClose, photosetName }: Scratchpad
 
       {/* Chat Input */}
       <div className="p-2">
-        <div className="flex items-center gap-2 bg-white rounded-lg shadow-sm border border-gray-200 px-3 py-2">
-          <HiSparkles className="text-gray-400 w-5 h-5" />
+        <div
+          className={`flex items-center gap-2 bg-white rounded-lg shadow-sm border border-gray-200 px-3 py-2 ${
+            status === "thinking" ? "opacity-50" : ""
+          }`}
+        >
+          {status === "thinking" ? (
+            <LuLoader className="w-5 h-5 text-blue-500 animate-spin" />
+          ) : (
+            <HiSparkles className="text-gray-400 w-5 h-5" />
+          )}
           <input
+            ref={inputRef}
             type="text"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyPress={(e) => e.key === "Enter" && handleSubmit()}
-            placeholder="Imagine..."
-            className="flex-1 outline-none border-none bg-transparent text-gray-800 placeholder-gray-400"
+            placeholder={status === "thinking" ? "Thinking..." : "Imagine..."}
+            disabled={status === "thinking"}
+            className="flex-1 outline-none border-none bg-transparent text-gray-800 placeholder-gray-400 disabled:cursor-not-allowed"
           />
           <button
             onClick={handleSubmit}
-            disabled={!message.trim()}
+            disabled={!message.trim() || status === "thinking"}
             className="text-gray-400 hover:text-gray-600 disabled:opacity-50"
           >
             <LuArrowRight className="w-5 h-5" />

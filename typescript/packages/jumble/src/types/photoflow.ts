@@ -1,1 +1,1 @@
-export type ViewType = "grid" | "table";
+export type ViewType = "grid" | "table" | "timeline";

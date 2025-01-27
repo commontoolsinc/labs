@@ -6,6 +6,7 @@ import Header from "@/components/photoflow/Header";
 import ViewToggle from "@/components/photoflow/ViewToggle";
 import type { ViewType } from "@/types/photoflow";
 import Scratchpad from "@/components/photoflow/Scratchpad";
+import { TimelineView } from "@/components/photoflow/TimelineView";
 
 export default function PhotoSetView() {
   const { photosetName } = useParams();
@@ -13,6 +14,7 @@ export default function PhotoSetView() {
   const photoset = getPhotoSetByName(photosetName || "");
   const [view, setView] = useState<ViewType>("grid");
   const [isScratchpadOpen, setIsScratchpadOpen] = useState(false);
+  const [timelineUnlocked, setTimelineUnlocked] = useState(false);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: {
@@ -61,6 +63,10 @@ export default function PhotoSetView() {
       deletePhotoSet(photoset.id);
       navigate("/experiments/photoflow");
     }
+  };
+
+  const handleViewChange = (newView: ViewType) => {
+    setView(newView);
   };
 
   const renderGridView = () => (
@@ -167,7 +173,7 @@ export default function PhotoSetView() {
 
   return (
     <>
-      <Header />
+      <Header onOpenScratchpad={() => setIsScratchpadOpen(true)} />
       <div className="max-w-7xl mx-auto mt-10 p-6">
         <div className="flex justify-between items-center mb-8">
           <div>
@@ -177,19 +183,18 @@ export default function PhotoSetView() {
             </p>
           </div>
           <div className="flex items-center gap-4">
-            <ViewToggle view={view} setView={setView} />
-            <button
-              onClick={() => setIsScratchpadOpen(true)}
-              className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2"
-            >
-              <span>Create Spell</span>
-              <span className="text-lg">✨</span>
-            </button>
+            <ViewToggle view={view} setView={setView} showTimeline={timelineUnlocked} />
           </div>
         </div>
 
         <div className={`min-h-[400px] ${isDragActive ? "bg-blue-50" : ""} transition-colors`}>
-          {view === "grid" ? renderGridView() : renderTableView()}
+          {view === "grid" ? (
+            renderGridView()
+          ) : view === "table" ? (
+            renderTableView()
+          ) : (
+            <TimelineView images={photoset.images} />
+          )}
         </div>
 
         {photoset.images.length === 0 && (
@@ -206,6 +211,8 @@ export default function PhotoSetView() {
         isOpen={isScratchpadOpen}
         onClose={() => setIsScratchpadOpen(false)}
         photosetName={photoset.name}
+        onViewChange={handleViewChange}
+        onUnlockTimelineView={() => setTimelineUnlocked(true)}
       />
     </>
   );
