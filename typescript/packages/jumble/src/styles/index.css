@@ -103,3 +103,17 @@ button:focus-visible {
 .read-the-docs {
   color: #888;
 }
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.status-thinking {
+  animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}

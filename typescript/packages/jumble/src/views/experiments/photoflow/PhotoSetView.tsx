@@ -5,12 +5,14 @@ import { getPhotoSetByName, updatePhotoSet, deletePhotoSet } from "@/utils/photo
 import Header from "@/components/photoflow/Header";
 import ViewToggle from "@/components/photoflow/ViewToggle";
 import type { ViewType } from "@/types/photoflow";
+import Scratchpad from "@/components/photoflow/Scratchpad";
 
 export default function PhotoSetView() {
   const { photosetName } = useParams();
   const navigate = useNavigate();
   const photoset = getPhotoSetByName(photosetName || "");
   const [view, setView] = useState<ViewType>("grid");
+  const [isScratchpadOpen, setIsScratchpadOpen] = useState(false);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: {
@@ -177,7 +179,7 @@ export default function PhotoSetView() {
           <div className="flex items-center gap-4">
             <ViewToggle view={view} setView={setView} />
             <button
-              onClick={() => navigate(`/experiments/photoflow/${photosetName}/spells/new`)}
+              onClick={() => setIsScratchpadOpen(true)}
               className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2"
             >
               <span>Create Spell</span>
@@ -200,6 +202,11 @@ export default function PhotoSetView() {
           </div>
         )}
       </div>
+      <Scratchpad
+        isOpen={isScratchpadOpen}
+        onClose={() => setIsScratchpadOpen(false)}
+        photosetName={photoset.name}
+      />
     </>
   );
 }
