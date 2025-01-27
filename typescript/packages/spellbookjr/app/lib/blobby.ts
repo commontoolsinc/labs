@@ -1,5 +1,5 @@
 const BASE_URL =
-  process.env.BLOBBY_BASE_URL || "https://paas.saga-castor.ts.net/blobby";
+  process.env.BLOBBY_BASE_URL || "https://toolshed.commontools.dev/api/storage/blobby";
 
 export const getAllBlobs = async () => {
   const response = await fetch(`${BASE_URL}/blob?all=true`);
