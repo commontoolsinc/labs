@@ -195,7 +195,7 @@ import smolIframe from "./recipes/smolIframe.js";
 import { shoelaceDemo } from "./recipes/examples/shoelace.js";
 
 addCharms([
-  run(smolIframe, { data: { count: 1 } }),
+  run(smolIframe, { count: 1 }),
   run(shoelaceDemo, {}),
 ]);
 
@@ -241,8 +241,8 @@ export type CharmAction = CharmActionFn & {
   set: (opener: CharmActionFn) => void;
 };
 
-let charmOpener: CharmActionFn | CharmAction = () => {};
-let charmCloser: CharmActionFn | CharmAction = () => {};
+let charmOpener: CharmActionFn | CharmAction = () => { };
+let charmCloser: CharmActionFn | CharmAction = () => { };
 export const openCharm = (charmId: string | EntityId | DocImpl<any>) => charmOpener(charmId);
 export const closeCharm = (charmId: string | EntityId | DocImpl<any>) => charmCloser(charmId);
 openCharm.set = (opener: CharmActionFn) => {

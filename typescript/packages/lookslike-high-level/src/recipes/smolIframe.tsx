@@ -1,28 +1,28 @@
 import { h } from "@commontools/html";
-import { recipe, UI, NAME, derive } from "@commontools/builder";
-import { z } from "zod";
+import { recipe, UI, NAME } from "@commontools/builder";
+import type { JSONSchema } from "@commontools/builder";
 
 // @ts-ignore this loads the html file using VITE.js as a string from the html file on disk
 import src from "./smolIframe.html?raw";
 
-const DataSchema = z.object({
-  data: z
-    .object({
-      count: z.number().default(0),
-    })
-})
-  .describe("SMOL Counter demo");
+const jsonSchema = {
+  type: "object",
+  properties: {
+    count: {
+      type: "number",
+      default: 0
+    },
+  },
+  description: "SMOL Counter demo"
+} as JSONSchema;
 
-export default recipe(DataSchema, ({ data }) => {
-  const { count } = data;
+
+export default recipe(jsonSchema, (data) => {
   return {
+    type: "iframe",
     [NAME]: "smol iframe",
     [UI]: (
-      <div style="height: 100%">
-        <p>outside of iframe, data: {derive({ count }, (data) => JSON.stringify(data))}</p>
-        <common-iframe src={src} $context={data}></common-iframe>
-      </div>
+      <common-iframe src={src} $context={data}></common-iframe>
     ),
-    count,
   };
 });
