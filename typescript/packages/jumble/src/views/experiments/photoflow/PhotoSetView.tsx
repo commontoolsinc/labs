@@ -171,7 +171,7 @@ export default function PhotoSetView() {
       <div className="max-w-7xl mx-auto mt-10 p-6">
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">{photoset.name}</h1>
+            <h2 className="text-5xl font-black text-gray-900">{photoset.name}</h2>
             <p className="text-gray-500 mt-1">
               Created on {new Date(photoset.createdAt).toLocaleDateString()}
             </p>

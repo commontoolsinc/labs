@@ -3,10 +3,20 @@ import CodeMirror from "@uiw/react-codemirror";
 import { EditorView } from "@codemirror/view";
 import { markdown } from "@codemirror/lang-markdown";
 import EmojiPicker, { EmojiClickData } from "emoji-picker-react";
-import { LuPlay, LuCode, LuMenu, LuSquare, LuWandSparkles, LuArrowRight } from "react-icons/lu";
+import {
+  LuPlay,
+  LuPencil,
+  LuMenu,
+  LuSquare,
+  LuWandSparkles,
+  LuArrowRight,
+  LuCheck,
+} from "react-icons/lu";
 import { HiSparkles } from "react-icons/hi2";
+import ReactMarkdown from "react-markdown";
 
 type ScratchpadStatus = "idle" | "thinking" | "casting";
+type EditMode = "view" | "edit";
 
 interface ScratchpadState {
   icon: React.ComponentType<{ size: number; strokeWidth?: number }>;
@@ -41,28 +51,26 @@ interface ScratchpadProps {
 export default function Scratchpad({ isOpen, onClose, photosetName }: ScratchpadProps) {
   const [status, setStatus] = useState<ScratchpadStatus>("idle");
   const [message, setMessage] = useState("");
-  const [content, setContent] = useState("- ");
-  const [title, setTitle] = useState(`${photosetName} Spell`);
+  const [content, setContent] = useState(
+    "A simple list view of a Set of images.\n\n- images are displayed in a grid view by default\n- toggle to show a table view ",
+  );
+  const [title, setTitle] = useState(`${photosetName}`);
   const [emoji, setEmoji] = useState("✨");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [editMode, setEditMode] = useState<EditMode>("view");
 
   const currentState = scratchpadStates[status];
 
-  const onEmojiClick = (emojiData: EmojiClickData) => {
-    setEmoji(emojiData.emoji);
-    setShowEmojiPicker(false);
-  };
-
   const handleSubmit = () => {
     if (!message.trim()) return;
+    setContent(content + "\n" + "- " + message);
+    setMessage("");
     setStatus("thinking");
-    // Additional logic here
   };
 
-  const handleKeyPress = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      handleSubmit();
-    }
+  const handleSaveEdit = () => {
+    setEditMode("view");
+    setStatus("thinking");
   };
 
   return (
@@ -104,7 +112,12 @@ export default function Scratchpad({ isOpen, onClose, photosetName }: Scratchpad
           </button>
           {showEmojiPicker && (
             <div className="absolute top-16 left-4 z-50">
-              <EmojiPicker onEmojiClick={onEmojiClick} />
+              <EmojiPicker
+                onEmojiClick={(data) => {
+                  setEmoji(data.emoji);
+                  setShowEmojiPicker(false);
+                }}
+              />
             </div>
           )}
           <input
@@ -116,32 +129,53 @@ export default function Scratchpad({ isOpen, onClose, photosetName }: Scratchpad
         </div>
       </div>
 
-      {/* Editor Area */}
-      <div className="flex-1 overflow-hidden m-2 rounded-lg">
-        <CodeMirror
-          value={content}
-          height="100%"
-          theme="light"
-          extensions={[markdown(), EditorView.lineWrapping]}
-          onChange={(value) => setContent(value)}
-          basicSetup={{
-            lineNumbers: false,
-            foldGutter: false,
-            indentOnInput: true,
-          }}
-          className="h-full [&_.cm-editor]:bg-[#f5f5f5]"
-        />
+      {/* Content Area */}
+      <div className="flex-1 overflow-auto m-2 rounded-lg bg-white p-4 relative">
+        {editMode === "view" ? (
+          <>
+            <button
+              onClick={() => setEditMode("edit")}
+              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600"
+            >
+              <LuPencil size={16} />
+            </button>
+            <div className="prose prose-sm max-w-none">
+              <ReactMarkdown>{content}</ReactMarkdown>
+            </div>
+          </>
+        ) : (
+          <div className="h-full flex flex-col">
+            <CodeMirror
+              value={content}
+              height="100%"
+              theme="light"
+              extensions={[markdown(), EditorView.lineWrapping]}
+              onChange={(value) => setContent(value)}
+              basicSetup={{
+                lineNumbers: false,
+                foldGutter: false,
+                indentOnInput: true,
+              }}
+            />
+            <button
+              onClick={handleSaveEdit}
+              className="absolute top-2 right-2 text-gray-400 hover:text-gray-600"
+            >
+              <LuCheck size={16} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Chat Input */}
-      <div className="p-4">
+      <div className="p-2">
         <div className="flex items-center gap-2 bg-white rounded-lg shadow-sm border border-gray-200 px-3 py-2">
           <HiSparkles className="text-gray-400 w-5 h-5" />
           <input
             type="text"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onKeyPress={(e) => e.key === "Enter" && handleSubmit()}
             placeholder="Imagine..."
             className="flex-1 outline-none border-none bg-transparent text-gray-800 placeholder-gray-400"
           />

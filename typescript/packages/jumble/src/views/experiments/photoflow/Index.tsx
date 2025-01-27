@@ -145,7 +145,7 @@ export default function PhotoFlowIndex() {
       <Header setIsCreateModalOpen={setIsCreateModalOpen} />
       <div className="max-w-7xl mx-auto mt-10 p-6">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-semibold text-gray-900">My Sets</h2>
+          <h2 className="text-5xl font-black text-gray-900">My Sets</h2>
           <ViewToggle view={view} setView={setView} />
         </div>
 
