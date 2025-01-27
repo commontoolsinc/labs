@@ -30,7 +30,6 @@ class MetadataSpell extends Spell<Meta> {
   }
 
   override render({ category, submittedAt }: OpaqueRef<Meta>) {
-    console.log("Metadata render", category, submittedAt);
     return (
       <div>
         <h2>Metadata</h2>
