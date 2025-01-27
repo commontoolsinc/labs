@@ -20,6 +20,11 @@ import collection from "./collection.js";
 addRecipe(collection, collectionSrc);
 export { collection };
 
+import smolIframeSrc from "./smolIframe.tsx?raw";
+import smolIframe from "./smolIframe.js";
+addRecipe(smolIframe, smolIframeSrc);
+export { smolIframe };
+
 import counterSrc from "./counter.tsx?raw";
 import counter from "./counter.js";
 addRecipe(counter, counterSrc);
