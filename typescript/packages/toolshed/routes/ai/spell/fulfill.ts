@@ -223,7 +223,7 @@ function decomposeSchema(
         }
       } // Handle regular objects
       else if (
-        !("type" in value) ||
+        !("type" in (value as Record<string, unknown>)) ||
         isObject((value as Record<string, unknown>).properties)
       ) {
         const objectSchema = {
@@ -447,7 +447,7 @@ function extractPathData(
   data: Record<string, unknown>,
   path: string[],
 ): Record<string, unknown> | null {
-  let current: any = data;
+  let current = data;
 
   // Special handling for "items" in the path
   for (const key of path) {
@@ -458,7 +458,7 @@ function extractPathData(
       return current;
     }
 
-    current = current[key];
+    current = current[key] as Record<string, unknown>;
   }
 
   return current;
