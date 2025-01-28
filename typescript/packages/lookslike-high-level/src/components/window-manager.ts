@@ -603,7 +603,6 @@ export class CommonWindowManager extends LitElement {
           const searchParams = new URLSearchParams(url.search);
           const encodedData = searchParams.get("data");
           let initialData = {};
-          debugger;
 
           const fulfillUrl =
             typeof window !== "undefined"
@@ -624,7 +623,7 @@ export class CommonWindowManager extends LitElement {
               options: {
                 format: "json",
                 validate: true,
-                maxExamples: 5,
+                maxExamples: 25,
               },
             }),
           });
