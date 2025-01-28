@@ -8,11 +8,14 @@ import { IframeIPC } from "../index.js";
 // many traditional uses of CSP.
 const CSP = "" +
   // Disable all fetch directives by default
-  "default-src 'none';" +
+  "default-src 'self';" +
   // Allow CDN scripts, unsafe inline.
   "script-src 'unsafe-inline' unpkg.com cdn.tailwindcss.com;" +
   // unsafe inline.
-  "style-src 'unsafe-inline';";
+  "style-src 'unsafe-inline';" +
+  // Disabling until we have a concrete case.
+  "form-action 'none';" +
+  "";
 
 // @summary A sandboxed iframe to execute arbitrary scripts.
 // @tag common-iframe
