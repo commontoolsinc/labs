@@ -3,15 +3,14 @@ import {
   Transaction as DBTransaction,
   SqliteError,
 } from "jsr:@db/sqlite";
-import type { Result, ReplicaNotFound, MemoryNotFound } from "./lib.ts";
 import { fromString, refer, Reference } from "npm:merkle-reference";
 import type {
+  Result,
   ReplicaID,
   Entity,
   Fact,
-  Claim,
+  Statement,
   Retraction,
-  Assertion,
   JSONValue,
   ConflictError,
   TransactionError,
@@ -19,10 +18,11 @@ import type {
   ToJSON,
   ConnectionError,
   Unclaimed,
+  Transaction,
+  Assertion,
+  Claim,
 } from "./interface.ts";
 import * as Error from "./error.ts";
-
-export type { ReplicaNotFound, MemoryNotFound, Reference };
 
 export const PREPARE = `
 BEGIN TRANSACTION;
@@ -105,7 +105,10 @@ export interface Session {
    * transaction fails with `ConflictError`. Otherwise document is updated to
    * the new value.
    */
-  transact<Tr extends Transaction>(transact: Tr): InferTransactionResult<Tr>;
+  transact(
+    transact: Transaction,
+  ): Result<Fact, ToJSON<ConflictError> | ToJSON<TransactionError>>;
+
   /**
    * Query can be used to retrieve a document from the store. At the moment
    * you can only pass the `entity` selector.
@@ -152,16 +155,6 @@ const readAddress = (url: URL) => {
   return { location: url.protocol === "file:" ? url : ":memory:", id };
 };
 
-export type Transaction =
-  | { assert: Assertion; retract?: undefined }
-  | { retract: Assertion | Claim; assert?: undefined };
-
-export type InferTransactionResult<Transaction> = Transaction extends {
-  assert: Assertion;
-}
-  ? Result<Assertion, ToJSON<ConflictError> | ToJSON<TransactionError>>
-  : Result<Retraction, ToJSON<ConflictError> | ToJSON<TransactionError>>;
-
 /**
  * Creates a connection to the existing replica. Errors if replica does not
  * exist.
@@ -180,12 +173,18 @@ export const connect = async ({
   }
 };
 
-export const open = async ({ url }: Options): Promise<Result<Store, never>> => {
-  const { location, id } = readAddress(url);
-  const database = await new Database(location, { create: true });
-  database.exec(PREPARE);
-  const session = new Store(id, database);
-  return { ok: session };
+export const open = async ({
+  url,
+}: Options): Promise<Result<Store, ToJSON<ConnectionError>>> => {
+  try {
+    const { location, id } = readAddress(url);
+    const database = await new Database(location, { create: true });
+    database.exec(PREPARE);
+    const session = new Store(id, database);
+    return { ok: session };
+  } catch (cause) {
+    throw Error.connection(url, cause as SqliteError);
+  }
 };
 
 export const close = async ({ store }: Model) => {
@@ -376,7 +375,7 @@ const execute = <
 
 export const assert = (
   session: Model,
-  { the, of, is, cause }: Claim & { is: JSONValue },
+  { the, of, is, cause }: Claim,
 ): Result<Assertion, ToJSON<ConflictError> | ToJSON<TransactionError>> =>
   execute(session.store.transaction(swap), session, {
     the,
@@ -387,7 +386,7 @@ export const assert = (
 
 export const retract = (
   session: Model,
-  { the, of, cause, ...source }: Assertion | Claim,
+  { the, of, cause, ...source }: Statement,
 ): Result<Retraction, ToJSON<ConflictError> | ToJSON<TransactionError>> =>
   execute(session.store.transaction(swap), session, {
     the,
@@ -396,13 +395,10 @@ export const retract = (
       cause == null ? init({ the, of }) : refer({ ...source, the, of, cause }),
   });
 
-export const transact = <In extends Transaction>(
-  model: Model,
-  transact: In,
-): InferTransactionResult<In> =>
+export const transact = (model: Model, transact: Transaction) =>
   transact.assert
-    ? (assert(model, transact.assert) as InferTransactionResult<In>)
-    : (retract(model, transact.retract) as InferTransactionResult<In>);
+    ? assert(model, transact.assert)
+    : retract(model, transact.retract);
 
 export const query = (
   { id, store }: Model,

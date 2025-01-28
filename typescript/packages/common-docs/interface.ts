@@ -45,7 +45,7 @@ export interface Unclaimed {
  * succession denoted by causal reference (cause) to a prior fact about the
  * same memory ({the, of}).
  */
-export interface Claim {
+export interface Statement {
   /**
    * Type of the fact, usually formatted as media type. By default we expect
    * this to be  "application/json", but in the future we may support other
@@ -72,14 +72,17 @@ export interface Claim {
   cause?: Reference<Fact> | Reference<Unclaimed> | null;
 }
 
+export interface Claim extends Statement {
+  is: JSONValue;
+}
+
 /**
- * `Assertion` is just like a {@link Claim} except the value MUST be inline
+ * `Assertion` is just like a {@link Statement} except the value MUST be inline
  * {@link JSONValue} as opposed to reference to one. {@link Assertion}s are used
- * to assert facts, wile {@link Claim}s are used to retract them. This allows
+ * to assert facts, wile {@link Statement}s are used to retract them. This allows
  * retracting over the wire without having to sending JSON values back and forth.
  */
 export interface Assertion extends Claim {
-  is: JSONValue;
   cause: Reference<Fact> | Reference<Unclaimed>;
 }
 
@@ -87,12 +90,12 @@ export interface Assertion extends Claim {
  * Represents retracted {@link Assertion}. It is effectively a tombstone
  * denoting assertion that no longer hold and is a fact in itself.
  */
-export type Retraction = {
+export interface Retraction {
   the: The;
   of: Entity;
   is?: undefined;
   cause: Reference<Assertion>;
-};
+}
 
 /**
  * Facts represent a memory in the replica. They are either current and
@@ -100,6 +103,21 @@ export type Retraction = {
  * by {@link Retraction}.
  */
 export type Fact = Assertion | Retraction;
+
+export type Assert = {
+  assert: Claim;
+  retract?: undefined;
+};
+
+export type Retract = {
+  retract: Statement;
+  assert?: undefined;
+};
+export type Transaction = Assert | Retract;
+
+export type InferTransactionResult<Transaction> = Transaction extends Assert
+  ? Result<Assertion, ToJSON<ConflictError> | ToJSON<TransactionError>>
+  : Result<Retraction, ToJSON<ConflictError> | ToJSON<TransactionError>>;
 
 /**
  * Selector that replica can be queried by.
@@ -125,6 +143,30 @@ export type JSONValue =
 export interface JSONObject extends Record<string, JSONValue> {}
 
 export interface JSONArray extends Array<JSONValue> {}
+
+export type AsyncResult<T extends {} = {}, E extends Error = Error> = Promise<
+  Result<T, E>
+>;
+
+export type Result<T extends {} = {}, E extends Error = Error> =
+  | Ok<T>
+  | Fail<E>;
+
+export interface Ok<T extends {}> {
+  ok: T;
+  /**
+   * Discriminant to differentiate between Ok and Fail.
+   */
+  error?: undefined;
+}
+
+export interface Fail<E extends Error> {
+  error: E;
+  /**
+   * Discriminant to differentiate between Ok and Fail.
+   */
+  ok?: undefined;
+}
 
 export type Conflict = {
   /**
@@ -188,4 +230,22 @@ export interface QueryError extends Error {
   name: "QueryError";
   cause: SystemError;
   selector: In<Selector>;
+}
+
+export interface Change {
+  [In: ReplicaID]: {
+    [Of: Entity]: {
+      [The: The]: Update | Delete;
+    };
+  };
+}
+
+export type Update = {
+  "+": { is: JSONValue; cause?: Reference<Fact> };
+  "-"?: undefined;
+};
+
+export interface Delete {
+  "-": { is: Reference<JSONValue>; cause?: Reference<Fact> };
+  "+"?: undefined;
 }

@@ -1,8 +1,10 @@
-import { Address, Transaction } from "./lib.ts";
-import * as Replica from "./replica.ts";
+import { Selector, In, Fact, Unclaimed } from "./interface.ts";
+import * as Replica from "./router.ts";
+
+export type State = Fact | Unclaimed;
 
 export interface Subscriber {
-  transact(transaction: Transaction): void;
+  integrate(state: State): void;
 }
 
 /**
@@ -10,15 +12,16 @@ export interface Subscriber {
  * document addresses to the underlying subscription.
  */
 export interface SubscriptionSession extends Subscriber {
+  stream: ReadableStream<State>;
   /**
    * Add a new address to be observed.
    */
-  watch(address: Address): void;
+  watch(address: In<Selector>): void;
 
   /**
    * Removes an address from this subscription.
    */
-  unwatch(address: Address): void;
+  unwatch(address: In<Selector>): void;
 
   /**
    * Close the underlying subscription.
@@ -27,11 +30,11 @@ export interface SubscriptionSession extends Subscriber {
 }
 
 export class Subscription implements SubscriptionSession {
-  controller: ReadableStreamDefaultController<Transaction> | undefined;
-  stream: ReadableStream<Transaction>;
-  channels: Map<string, Address> = new Map();
+  controller: ReadableStreamDefaultController<State> | undefined;
+  stream: ReadableStream<State>;
+  channels: Map<string, In<Selector>> = new Map();
   constructor(public replica: Replica.Session) {
-    this.stream = new ReadableStream<Transaction>({
+    this.stream = new ReadableStream<State>({
       start: source => {
         this.controller = source;
       },
@@ -41,16 +44,16 @@ export class Subscription implements SubscriptionSession {
     });
   }
 
-  watch(address: Address) {
+  watch(address: In<Selector>) {
     return watch(this, address);
   }
 
-  unwatch(address: Address) {
+  unwatch(address: In<Selector>) {
     return unwatch(this, address);
   }
 
-  transact(transaction: Transaction) {
-    return transact(this, transaction);
+  integrate(state: State) {
+    return integrate(this, state);
   }
 
   close() {
@@ -58,12 +61,9 @@ export class Subscription implements SubscriptionSession {
   }
 }
 
-export const transact = (
-  subscription: Subscription,
-  transaction: Transaction,
-) => {
+export const integrate = (subscription: Subscription, state: State) => {
   if (subscription.controller) {
-    subscription.controller.enqueue(transaction);
+    subscription.controller.enqueue(state);
   } else {
     throw new Error("Subscription is cancelled");
   }
@@ -81,7 +81,7 @@ export const close = (subscription: Subscription) => {
   }
 };
 
-export const watch = (subscription: Subscription, address: Address) => {
+export const watch = (subscription: Subscription, address: In<Selector>) => {
   const channel = formatAddress(address);
   if (!subscription.channels.has(channel)) {
     subscription.channels.set(channel, address);
@@ -91,15 +91,15 @@ export const watch = (subscription: Subscription, address: Address) => {
   return subscription;
 };
 
-export const unwatch = (subscription: Subscription, address: Address) => {
-  const channel = formatAddress(address);
+export const unwatch = (subscription: Subscription, selector: In<Selector>) => {
+  const channel = formatAddress(selector);
   if (subscription.channels.has(channel)) {
-    subscription.replica.unwatch(address, subscription);
+    subscription.replica.unwatch(selector, subscription);
     subscription.channels.delete(channel);
   }
 
   return subscription;
 };
 
-export const formatAddress = (address: Address) =>
-  `${address.from}/${address.of}`;
+export const formatAddress = (address: In<Selector>) =>
+  `watch://${address.in}/${address.of}/${address.the}`;
