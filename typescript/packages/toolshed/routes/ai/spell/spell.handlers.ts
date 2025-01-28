@@ -26,6 +26,7 @@ export const ProcessSchemaRequestSchema = z.object({
       format: z.enum(["json", "yaml"]).optional(),
       validate: z.boolean().optional(),
       maxExamples: z.number().default(5).optional(),
+      exact: z.boolean().optional(),
     })
     .optional(),
 });
