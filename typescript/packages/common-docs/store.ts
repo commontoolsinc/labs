@@ -14,8 +14,12 @@ import type {
   FactReference,
   JSONValue,
   ConflictError,
+  TransactionError,
+  QueryError,
+  ToJSON,
+  ConnectionError,
 } from "./interface.ts";
-import { conflict, raise } from "./error.ts";
+import * as Error from "./error.ts";
 
 export type { ReplicaNotFound, MemoryNotFound, Reference };
 
@@ -93,8 +97,6 @@ export interface Selector {
   of: Entity;
 }
 
-export type SelectError = MemoryNotFound;
-
 export interface Session {
   /**
    * Transacts can be used to assert or retract a document from the repository.
@@ -102,12 +104,12 @@ export interface Session {
    * transaction fails with `ConflictError`. Otherwise document is updated to
    * the new value.
    */
-  transact<In extends Transaction>(transact: In): InferTransactionResult<In>;
+  transact<Tr extends Transaction>(transact: Tr): InferTransactionResult<Tr>;
   /**
    * Query can be used to retrieve a document from the store. At the moment
    * you can only pass the `entity` selector.
    */
-  query(selector: Selector): Result<Factor, MemoryNotFound | StoreError>;
+  query(selector: Selector): Result<Factor, ToJSON<QueryError>>;
 }
 
 export class Store implements Model, Session {
@@ -156,8 +158,8 @@ export type Transaction =
 export type InferTransactionResult<Transaction> = Transaction extends {
   assert: Fact;
 }
-  ? Result<Fact, ConflictError | StoreError>
-  : Result<Defunct, ConflictError | StoreError>;
+  ? Result<Fact, ToJSON<ConflictError> | ToJSON<TransactionError>>
+  : Result<Defunct, ToJSON<ConflictError> | ToJSON<TransactionError>>;
 
 /**
  * Creates a connection to the existing replica. Errors if replica does not
@@ -165,15 +167,15 @@ export type InferTransactionResult<Transaction> = Transaction extends {
  */
 export const connect = async ({
   url,
-}: Options): Promise<Result<Store, ReplicaNotFound>> => {
+}: Options): Promise<Result<Store, ToJSON<ConnectionError>>> => {
   const address = readAddress(url);
   try {
     const database = await new Database(address.location, { create: false });
     database.exec(PREPARE);
     const session = new Store(address.id, database);
     return { ok: session };
-  } catch {
-    return { error: new ReplicaNotFoundError(address.id) };
+  } catch (cause) {
+    return { error: Error.connection(url, cause as SqliteError) };
   }
 };
 
@@ -329,7 +331,7 @@ const swap = <T extends Required<Fact> | Defunct>(
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
     // it as a conflict as current state is the asserted one.
     if (refer(actual).toString() !== factor) {
-      throw conflict({
+      throw Error.conflict({
         in: session.id,
         the,
         of,
@@ -349,25 +351,30 @@ const execute = <
   transaction: Tr,
   session: Model,
   factor: Factor,
-): Result<Factor, ConflictError | StoreError> => {
+): Result<Factor, ToJSON<ConflictError> | ToJSON<TransactionError>> => {
   try {
     return {
       ok: transaction(session, factor),
     };
   } catch (error) {
     return (error as Error).name === "ConflictError"
-      ? { error: error as ConflictError }
+      ? { error: error as ToJSON<ConflictError> }
       : // SQLite transactions may produce various errors when DB is busy, locked
         // or file is corrupt. We wrap those in a generic store error.
         // @see https://www.sqlite.org/rescode.html
-        { error: raise({ ...factor, in: session.id }, error as SqliteError) };
+        {
+          error: Error.transaction(
+            { ...factor, in: session.id },
+            error as SqliteError,
+          ),
+        };
   }
 };
 
 export const assert = (
   session: Model,
   { the, of, is, cause = init({ the, of }) }: Fact,
-): Result<Fact, ConflictError | StoreError> =>
+): Result<Fact, ToJSON<ConflictError> | ToJSON<TransactionError>> =>
   execute(session.store.transaction(swap), session, {
     the,
     of,
@@ -378,7 +385,7 @@ export const assert = (
 export const retract = (
   session: Model,
   { the, of, cause, ...source }: Fact | FactReference,
-): Result<Defunct, ConflictError | StoreError> =>
+): Result<Defunct, ToJSON<ConflictError> | ToJSON<TransactionError>> =>
   execute(session.store.transaction(swap<Defunct>), session, {
     the,
     of,
@@ -394,35 +401,13 @@ export const transact = <In extends Transaction>(
     ? (assert(model, transact.assert) as InferTransactionResult<In>)
     : (retract(model, transact.retract) as InferTransactionResult<In>);
 
-export class ReplicaNotFoundError extends Error implements ReplicaNotFound {
-  override name = "ReplicaNotFound" as const;
-  constructor(public replica: ReplicaID) {
-    super(`Replica not found: ${replica}`);
-  }
-}
-
 export const query = (
   { id, store }: Model,
   { the, of }: Selector,
-): Result<Factor, StoreError> => {
+): Result<Factor, ToJSON<QueryError>> => {
   try {
     return { ok: pull({ id, store }, { the, of }) };
   } catch (error) {
-    return { error: new StoreError((error as Error).message) };
+    return { error: Error.query({ the, of, in: id }, error as SqliteError) };
   }
 };
-
-export class StoreError extends Error {
-  override name = "StoreError" as const;
-  constructor(message: string) {
-    super(message);
-  }
-
-  toJSON() {
-    return {
-      name: this.name,
-      message: this.message,
-      stack: this.stack,
-    };
-  }
-}

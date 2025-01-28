@@ -626,8 +626,8 @@ Deno.test("fail to connect to non-existing replica", async () => {
   await assert(session.error, "Replica does not exist");
 
   if (session.error) {
-    assertEquals(session.error.name, "ReplicaNotFound");
-    assertEquals(session.error.replica, alice);
+    assertEquals(session.error.name, "ConnectionError");
+    assertEquals(session.error.address, url.href);
   }
 });
 

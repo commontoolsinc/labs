@@ -76,6 +76,19 @@ export type Defunct = {
 
 export type Factor = Fact | Defunct;
 
+/**
+ * Selector that replica can be queried by.
+ */
+export interface Selector {
+  the: The;
+  of: Entity;
+}
+
+/**
+ * Generic type used to annotate underlying type with a context of the replica.
+ */
+export type In<T> = T & { in: ReplicaID };
+
 export type JSONValue =
   | null
   | boolean
@@ -115,41 +128,39 @@ export type Conflict = {
   actual: Factor | null;
 };
 
-export type ToJSON<T> = {
-  [Key in keyof T]-?: T[Key] extends () => unknown ? never : T[Key];
+export type ToJSON<T> = T & {
+  toJSON(): T;
 };
 
 export interface ConflictError extends Error {
   name: "ConflictError";
   conflict: Conflict;
-  toJSON(): {
-    name: "ConflictError";
-    stack: string;
-    message: string;
-    conflict: Conflict;
-  };
+}
+
+export interface SystemError extends Error {
+  code: number;
+}
+
+export interface ConnectionError extends Error {
+  name: "ConnectionError";
+  cause: SystemError;
+  address: string;
 }
 
 /**
  * Error from the underlying storage.
  */
-export interface StoreError extends Error {
+export interface TransactionError extends Error {
   name: "StoreError";
-  cause: Error & { code: number };
+  cause: SystemError;
   /**
    * Fact being stored when the error occurred.
    */
-  fact: Required<Fact> | Defunct;
-  toJSON(): {
-    name: "StoreError";
-    stack: string;
-    message: string;
-    fact: Required<Fact> | Defunct;
-    cause: {
-      name: string;
-      code: number;
-      message: string;
-      stack: string;
-    };
-  };
+  fact: In<Required<Fact> | Defunct>;
+}
+
+export interface QueryError extends Error {
+  name: "QueryError";
+  cause: SystemError;
+  selector: In<Selector>;
 }

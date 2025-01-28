@@ -5,14 +5,20 @@ import {
   Transaction,
   RepositoryID,
 } from "./lib.ts";
-import { Commit } from "./store.ts";
 import { refer } from "merkle-reference";
-import * as Repository from "./store.ts";
+import * as Replica from "./store.ts";
 import * as Subscription from "./subscription.ts";
 
 export type TransactionError = PushError;
 
 export type TransactionResult = Result<Commit, TransactionError>;
+
+export type RoutedTransaction = {
+  [route: string]: Replica.Transaction;
+};
+export interface Session {
+  transact();
+}
 
 export interface Transactor {
   transact(transaction: Transaction): Promise<TransactionResult>;
@@ -21,7 +27,7 @@ export interface Transactor {
 export interface Model {
   store: URL;
   subscribers: Map<string, Set<Subscription.Subscriber>>;
-  repositories: Map<string, Repository.Session>;
+  repositories: Map<string, Replica.Session>;
 }
 
 export interface Session {
@@ -34,7 +40,7 @@ export class Replica {
   constructor(
     options: Options,
     public subscribers: Map<string, Set<Subscription.Subscriber>> = new Map(),
-    public repositories: Map<RepositoryID, Repository.Session> = new Map(),
+    public repositories: Map<RepositoryID, Replica.Session> = new Map(),
   ) {
     this.store = options.store;
   }
@@ -68,7 +74,7 @@ export const query = (session: Model, selector: Address) => {
   } else {
     return {
       ok: {
-        ...Repository.IMPLICIT,
+        ...Replica.IMPLICIT,
         this: selector.this,
       },
     };
@@ -92,7 +98,7 @@ export const watch = (
   subscriber.transact({
     assert: result.ok
       ? { of: address.this, is: result.ok, was: { "#": result.ok["#"] } }
-      : { of: address.this, is: Repository.IMPLICIT, was: Repository.IMPLICIT },
+      : { of: address.this, is: Replica.IMPLICIT, was: Replica.IMPLICIT },
   });
 };
 
@@ -112,10 +118,10 @@ export const transact = async (session: Model, transaction: Transaction) => {
   const address = transaction.assert ?? transaction.retract;
   let repository = session.repositories.get(address.replica);
   if (!repository) {
-    const result = await Repository.open({
+    const result = await Replica.open({
       url: new URL(`./address.replica.sqlite`, session.store),
     });
-    repository = result.ok as Repository.Session;
+    repository = result.ok as Replica.Session;
     session.repositories.set(address.replica, repository);
   }
 
