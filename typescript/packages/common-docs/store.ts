@@ -33,8 +33,6 @@ SELECT NULL AS this, NULL AS source;
 
 CREATE TABLE IF NOT EXISTS factor (
   this    TEXT PRIMARY KEY,     -- Merkle reference for { the, of, is, cause }
-  the     TEXT NOT NULL,        -- Kind of a fact e.g. "application/json"
-  of      TEXT NOT NULL,        -- Entity identifier fact is about
   'is'    TEXT,                 -- Value entity is claimed to have
   cause   TEXT,                 -- Causal reference to prior fact
   FOREIGN KEY('is') REFERENCES datum(this)
@@ -51,7 +49,7 @@ CREATE TABLE IF NOT EXISTS memory (
 
 const IMPORT_DATUM = `INSERT OR IGNORE INTO datum (this, source) VALUES (:this, :source);`;
 
-const IMPORT_FACTOR = `INSERT OR IGNORE INTO factor (this, the, of, 'is', cause) VALUES (:this, :the, :of, :is, :cause);`;
+const IMPORT_FACTOR = `INSERT OR IGNORE INTO factor (this, 'is', cause) VALUES (:this, :is, :cause);`;
 
 const IMPORT_MEMORY = `INSERT OR IGNORE INTO memory (the, of, factor) VALUES (:the, :of, :factor);`;
 
@@ -158,10 +156,6 @@ export type Cause =
   | Reference<{ is: JSONValue; cause: Cause }>
   | Reference<{ cause: Cause }>;
 
-export interface ImplicitFact extends Fact {
-  cause?: undefined;
-}
-
 /**
  * Represents retracted {@link Fact} and is like tombstone denoting prior
  * existence of the fact.
@@ -172,11 +166,6 @@ export type Defunct = {
   is?: undefined;
   cause: Reference<Fact>;
 };
-
-export const isImplicit = (factor: Factor): factor is ImplicitFact =>
-  factor.cause === undefined;
-export const isFact = (factor: Factor): factor is Fact =>
-  factor.is !== undefined;
 
 export type Factor = Fact | Defunct;
 
@@ -313,7 +302,7 @@ export const init = ({
 }: {
   the: string;
   of: Entity;
-}): Reference<ImplicitFact> => refer(implicit({ the, of }));
+}): Reference<Fact> => refer(implicit({ the, of }));
 
 const pull = ({ store }: Model, { the, of }: Selector): Factor => {
   const row = store.prepare(EXPORT).get({ the, entity: of }) as
@@ -337,16 +326,6 @@ const pull = ({ store }: Model, { the, of }: Selector): Factor => {
     return is === undefined ? { the, of, cause } : { the, of, is, cause };
   }
 };
-
-const selectCause = (
-  { the, of, cause }: { the: string; of: Entity; cause?: Reference<Factor> },
-  implicit: Reference<Factor> = init({ the, of }),
-): { cause?: Reference<Factor> } => ({
-  cause: cause ?? implicit,
-});
-
-const selectIs = ({ is }: { is?: JSONValue | Reference<JSONValue> }) =>
-  is === undefined ? {} : { is: refer(is) };
 
 const importDatum = (
   session: Model,
@@ -392,8 +371,6 @@ const swap = <T extends Required<Fact> | Defunct>(
   // conflicting record exists it is the same record and we ignore.
   session.store.run(IMPORT_FACTOR, {
     this: factor,
-    the,
-    of: of,
     is: importDatum(session, source)?.toString() ?? null,
     cause,
   });
@@ -545,31 +522,6 @@ export class StoreError extends Error {
       name: this.name,
       message: this.message,
       stack: this.stack,
-    };
-  }
-}
-
-class MemoryNotFoundError extends Error implements MemoryNotFound {
-  override name = "MemoryNotFound" as const;
-  in: string;
-  constructor(
-    public the: string,
-    public of: Entity,
-    at: RepositoryID,
-    message: string = `No ${the} for ${of} found in ${at}`,
-  ) {
-    super(message);
-    this.in = at;
-  }
-  toJSON() {
-    return {
-      name: this.name,
-      message: this.message,
-      stack: this.stack,
-
-      the: this.the,
-      of: this.of,
-      in: this.in,
     };
   }
 }
