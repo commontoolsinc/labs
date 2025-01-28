@@ -88,12 +88,27 @@ export const listBlobsHandler: AppRouteHandler<typeof listBlobs> = async (
   const logger = c.get("logger");
   const showAll = c.req.query("all") === "true";
   const showAllWithData = c.req.query("allWithData") !== undefined;
-  // TODO(jake): Replace with actual user when auth is added
   const prefix = c.req.query("prefix");
   const search = c.req.query("search");
+  const keys = c.req.query("keys");
   const user = "system";
 
   try {
+    // If keys are provided, fetch those specific blobs
+    if (keys) {
+      const requestedKeys = keys.split(",");
+      const blobData: Record<string, unknown> = {};
+
+      for (const key of requestedKeys) {
+        const content = await storage.getBlob(key);
+        if (content) {
+          blobData[key] = JSON.parse(content);
+        }
+      }
+
+      return c.json(blobData, 200);
+    }
+
     // Get the list of blobs based on user/all flag
     let blobs = showAll || showAllWithData
       ? await getAllBlobs(redis)
