@@ -25,11 +25,11 @@ import {
   run,
 } from "@commontools/runner";
 import { repeat } from "lit/directives/repeat.js";
-import { iframe } from "../recipes/iframe.jsx";
 import { NAME, TYPE } from "@commontools/builder";
 import { matchRoute, navigate } from "../router.js";
 import * as Schema from "../schema.js";
 import { buildRecipe } from "../localBuild.js";
+import * as iframeSpellAi from "./iframe-spell-ai.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -162,54 +162,12 @@ export class CommonWindowManager extends LitElement {
   private focusedProxy: Charm | null = null;
 
   handleUniboxSubmit(event: CustomEvent) {
-    const charm = this.focusedProxy;
 
     const value = event.detail.value;
     const shiftKey = event.detail.shiftKey;
     console.log("Unibox submitted:", value, shiftKey);
 
-    if (charm) {
-      // modify in place by default, if possible
-      if (!shiftKey && charm.addToPrompt) {
-        this.focusedCharm?.asCell(["addToPrompt"]).send({ prompt: value } as any);
-      } else {
-        // // ben: this is a hack to access the data designer from search (temporarily)
-        // if (charm.data && charm.query) {
-        //   const eid = run(dataDesigner, {
-        //     data: charm.data,
-        //     prompt: value,
-        //     title: value,
-        //   }).entityId!;
-        //   this.openCharm(JSON.stringify(eid));
-        // }
-
-        // pass data forward to new charm
-        const charmValues = charm;
-        let fieldsToInclude = Object.entries(charmValues).reduce((acc, [key, value]) => {
-          if (!key.startsWith("$") && !key.startsWith("_")) {
-            acc[key] = value;
-          }
-          return acc;
-        }, {} as any);
-
-        if (charmValues.data) {
-          fieldsToInclude = charmValues.data;
-        }
-
-        runPersistent(iframe, {
-          data: fieldsToInclude,
-          title: value,
-          prompt: value,
-        }).then((charm) => this.openCharm(charm));
-      }
-    } else {
-      // there is no existing data
-      runPersistent(iframe, {
-        data: {},
-        title: value,
-        prompt: value,
-      }).then((charm) => this.openCharm(charm));
-    }
+    iframeSpellAi.iterate(this.focusedCharm, value, shiftKey);
   }
 
   input: string = "";

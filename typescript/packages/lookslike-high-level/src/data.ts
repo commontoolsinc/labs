@@ -192,9 +192,12 @@ export async function saveRecipe(id: string, src: string, spec?: string, parents
 }
 
 import smolIframe from "./recipes/smolIframe.js";
-import { shoelaceDemo } from "./recipes/examples/shoelace.js";
+import complexIframe from "./recipes/complexIframe.js";
 
-addCharms([run(smolIframe, { count: 1 }), run(shoelaceDemo, {})]);
+addCharms([
+  run(smolIframe, { count: 1 }),
+  run(complexIframe, { count: 42 }),
+]);
 
 export type RecipeManifest = {
   name: string;
