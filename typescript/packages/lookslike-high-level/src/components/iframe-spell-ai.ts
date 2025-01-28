@@ -3,8 +3,9 @@ import { addCharms, openCharm, Charm, TYPE } from "../data.js";
 import { LLMClient } from "@commontools/llm-client";
 import { JSONSchema } from "@commontools/builder";
 import { tsToExports } from "../localBuild.js";
+import { type DocImpl } from "@commontools/runner";
 
-const SELECTED_MODEL = "anthropic:claude-3-5-sonnet-latest";
+const SELECTED_MODEL = "cerebras:llama-3.3-70b";
 
 const responsePrefill =
   "```html\n" +
@@ -136,7 +137,7 @@ type IFrameRecipe = {
   name: string;
 };
 
-const applyTemplate = (iframe: IFrameRecipe) => {
+const buildFullRecipe = (iframe: IFrameRecipe) => {
   return `import { h } from "@commontools/html";
 import { recipe, UI, NAME } from "@commontools/builder";
 import type { JSONSchema } from "@commontools/builder";
@@ -173,19 +174,15 @@ const llmUrl =
 const llm = new LLMClient(llmUrl);
 
 const tweakSrc = async ({
-  oldSrc,
-  oldSpec,
+  iframe,
   newSpec,
-  argumentSchema,
 }: {
-  oldSrc: string;
-  oldSpec: string;
+  iframe: IFrameRecipe;
   newSpec: string;
-  argumentSchema: JSONSchema;
 }) => {
   const messages = [];
-  messages.push(oldSpec);
-  messages.push(`\`\`\`html\n${oldSrc}\n\`\`\``);
+  messages.push(iframe.spec);
+  messages.push(`\`\`\`html\n${iframe.src}\n\`\`\``);
   messages.push(`The user asked you to update/change the source code by the following:
 \`\`\`
 ${newSpec}
@@ -225,7 +222,7 @@ ${newSpec}
     When using React ref's, always handle the undefined or null case. If you're using a ref for setup, include it the dependencies for useEffect.
 
     <view-model-schema>
-      ${JSON.stringify(argumentSchema, null, 2)}
+      ${JSON.stringify(iframe.argumentSchema, null, 2)}
     </view-model-schema>
     
     You can use the generateImage function to get a url for a generated image.`;
@@ -240,7 +237,7 @@ ${newSpec}
   let text = await llm.sendRequest(payload);
 
   // FIXME(ja): this is a hack to get the prefill to work
-  if (!text.startsWith(responsePrefill)) {
+  if (!text.startsWith("```html\n")) {
     text = responsePrefill + text;
   }
   return text.split("```html\n")[1].split("\n```")[0];
@@ -256,64 +253,70 @@ function parseIframeRecipe(source: string) {
   return JSON.parse(match[1]) as IFrameRecipe;
 }
 
-export async function iterate(charm: Charm | null, value: string, shiftKey: boolean) {
-  if (!charm) {
-    console.log("FIXME, no charm, what should we do?");
-    return;
-  }
-
+const getIframeRecipe = (charm: Charm) => {
   const recipeId = charm.sourceCell?.get()?.[TYPE];
-  console.log("recipeId", recipeId);
+  if (!recipeId) {
+    console.error("FIXME, no recipeId, what should we do?");
+    return {};
+  }
 
   const recipe = getRecipe(recipeId);
   if (!recipe) {
-    console.log("FIXME, no recipe, what should we do?");
+    console.error("FIXME, no recipe, what should we do?");
+    return {};
+  }
+  const src = getRecipeSrc(recipeId);
+  if (!src) {
+    console.error("FIXME, no src, what should we do?");
+    return {};
+  }
+
+  return { recipeId, iframe: parseIframeRecipe(src) };
+};
+
+export async function iterate(charm: DocImpl<Charm> | null, value: string, shiftKey: boolean) {
+  if (!charm) {
+    console.error("FIXME, no charm, what should we do?");
     return;
   }
 
-  const oldRecipeSrc = getRecipeSrc(recipeId);
-  if (!oldRecipeSrc) {
-    console.log("FIXME, no src, what should we do?");
+  const { recipeId, iframe } = getIframeRecipe(charm);
+  if (!iframe) {
+    console.error("FIXME, no iframe, what should we do?");
     return;
   }
-
-  const iframe = parseIframeRecipe(oldRecipeSrc);
-  console.log("iframe", iframe);
 
   const newSpec = shiftKey ? iframe.spec + "\n" + value : value;
 
-  console.log("newSpec", newSpec);
+  const newIFrameSrc = await tweakSrc({ iframe, newSpec });
 
-  const newIFrameSrc = await tweakSrc({
-    oldSrc: iframe.src,
-    oldSpec: iframe.spec,
-    newSpec,
-    argumentSchema: iframe.argumentSchema,
-  });
+  const newRecipeSrc = buildFullRecipe({ ...iframe, src: newIFrameSrc, spec: newSpec });
 
-  const newRecipeSrc = applyTemplate({ ...iframe, src: newIFrameSrc, spec: newSpec });
+  const { exports, errors } = await tsToExports(newRecipeSrc);
 
-  tsToExports(newRecipeSrc).then(({ exports, errors }) => {
-    if (errors) {
-      console.error("errors", errors);
-      return;
-    }
+  if (errors) {
+    console.error("errors", errors);
+    return;
+  }
 
-    let { default: recipe } = exports;
+  let { default: recipe } = exports;
 
-    if (recipe) {
-      // NOTE(ja): adding a recipe triggers saving to blobby
-      const parents = recipeId ? [recipeId] : undefined;
-      addRecipe(recipe, newRecipeSrc, newSpec, parents);
+  if (recipe) {
+    // NOTE(ja): adding a recipe triggers saving to blobby
+    const parents = recipeId ? [recipeId] : undefined;
+    addRecipe(recipe, newRecipeSrc, newSpec, parents);
 
-      const data = charm.getAsQueryResult();
+    // FIXME(ja): get the data from the charm
+    // const data = charm.getAsQueryResult();
 
-      // FIXME(ja): get the data from the charm
-      const newCharm = run(recipe, data);
+    // if you want to replace the running charm:
+    // const newCharm = run(recipe, undefined, charm);
 
-      addCharms([newCharm]);
-      const charmId = JSON.stringify(newCharm.entityId);
-      openCharm(charmId);
-    }
-  });
+    // if you want to run a new charm:
+    const newCharm = run(recipe, { cell: charm.sourceCell, path: ["argument"] });
+
+    addCharms([newCharm]);
+    const charmId = JSON.stringify(newCharm.entityId);
+    openCharm(charmId);
+  }
 }
