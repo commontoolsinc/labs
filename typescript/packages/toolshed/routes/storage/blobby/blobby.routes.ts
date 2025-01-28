@@ -96,6 +96,9 @@ export const listBlobs = createRoute({
     query: z.object({
       all: z.string().optional(),
       allWithData: z.string().optional(),
+      prefix: z.string().optional(),
+      search: z.string().optional(),
+      keys: z.string().optional(),
     }),
   },
   responses: {

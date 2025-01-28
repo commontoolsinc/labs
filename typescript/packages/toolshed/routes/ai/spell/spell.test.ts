@@ -14,7 +14,7 @@ const app = createApp()
   .route("/", router)
   .route("/", llmRouter)
   .route("/", blobbyRouter);
-Deno.serve(app.fetch);
+// Deno.serve(app.fetch);
 
 // bf: these are commented out because the LLM is not configured in CI and they will fail
 // they work locally if you have claude set up
