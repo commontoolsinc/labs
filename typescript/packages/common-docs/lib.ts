@@ -1,9 +1,9 @@
-import { refer } from "npm:merkle-reference";
+import { refer, Reference } from "npm:merkle-reference";
 import * as FS from "jsr:@std/fs";
-import * as Replica from "./store.ts";
+import * as Store from "./store.ts";
 
 export interface Command {
-  push?: OperationSet<Assertion>;
+  push?: OperationSet<Fact>;
   pull?: OperationSet<Pull>;
 
   watch?: OperationSet<Address>;
@@ -22,15 +22,11 @@ export interface Address {
   /**
    * Document being addressed.
    */
-  this: DocumentID;
+  this: Entity;
 }
 
-export type Reference<Data extends JSONValue = JSONValue> = string & {
-  toString(): Reference<Data>;
-};
-
 export type BaseRevision = {
-  is: { this: DocumentID };
+  is: { this: Entity };
   was?: void;
 };
 
@@ -44,11 +40,13 @@ export type Revision = BaseRevision | SubsequentRevision;
 /**
  * Operation to swap document value in the target repository.
  */
-export interface Assertion {
+export type Fact = {
+  the: string;
+
   /**
    * Stable document identifier that uniquely identifies the document.
    */
-  of: DocumentID;
+  of: Entity;
 
   /**
    * New state of the document.
@@ -59,14 +57,14 @@ export interface Assertion {
    * Assumed state of the document, that needs to be true for push to
    * succeed. Omitting implies new document creation.
    */
-  was?: Reference<Revision>;
-}
+  cause?: Reference<Fact>;
+};
 
 export interface Retraction {
   /**
    * Document being retracted.
    */
-  of: DocumentID;
+  of: Entity;
 
   /**
    * Version of the document being retracted.
@@ -75,26 +73,12 @@ export interface Retraction {
 }
 
 export type Transaction =
-  | { assert: Assertion; retract?: undefined }
+  | { assert: Fact; retract?: undefined }
   | { retract: Retraction; assert?: undefined };
 
 export type PushResult = Result<Revision, PushError>;
 
-export type PushError = ReplicaNotFound | EntityNotFound | ConflictError;
-
-export interface ConflictError extends Error {
-  name: "ConflictError";
-  at: RepositoryID;
-  of: DocumentID;
-  /**
-   * Expected version of the document.
-   */
-  expected: Reference<Revision>;
-  /**
-   * Actual document in the repository.
-   */
-  actual: Revision;
-}
+export type PushError = ReplicaNotFound | MemoryNotFound | Store.ConflictError;
 
 /**
  * Operation for pulling latest document state. If `version` is specified and
@@ -112,23 +96,24 @@ export type InferPullResult<Operation extends Pull> = Result<
   PullError
 >;
 
-export type PullError = ReplicaNotFound | EntityNotFound;
+export type PullError = ReplicaNotFound | MemoryNotFound;
 
 export interface ReplicaNotFound extends Error {
   name: "ReplicaNotFound";
   replica: RepositoryID;
 }
 
-export interface EntityNotFound extends Error {
-  name: "EntityNotFound";
-  replica: RepositoryID;
-  entity: DocumentID;
+export interface MemoryNotFound extends Error {
+  name: "MemoryNotFound";
+  in: RepositoryID;
+  the: string;
+  of: Entity;
 }
 
 export type WatchResult = Result<Transaction, BadAddress>;
 export type UnwatchResult = Result<Address, BadAddress>;
 
-export type BadAddress = ReplicaNotFound | EntityNotFound;
+export type BadAddress = ReplicaNotFound | MemoryNotFound;
 
 export type InferReceipt<Request extends Command> = {
   [Key in keyof Request & keyof Command]: Request[Key] extends OperationSet
@@ -152,7 +137,7 @@ export type InferOperations<
 export type OperationSet<T = unknown> = Record<string, T>;
 
 export interface Resource {
-  the: DocumentID;
+  the: Entity;
   of: RepositoryID;
 }
 
@@ -179,7 +164,7 @@ export interface Fail<E extends Error> {
 export interface RuntimeError extends Error {}
 
 export type RepositoryID = string;
-export type DocumentID = string;
+export type Entity = string;
 
 export type Checksum = string;
 
@@ -234,7 +219,7 @@ export interface StoreOptions {
 
 export interface RepositoryModel {
   options: Open;
-  connections: Map<RepositoryID, Replica.Session>;
+  connections: Map<RepositoryID, Store.Session>;
 }
 
 // /**

@@ -1,24 +1,19 @@
-import { Database } from "jsr:@db/sqlite";
+import { Database, Transaction as DBTransaction } from "jsr:@db/sqlite";
 import type {
   Result,
-  DocumentID,
+  Entity,
   RepositoryID,
   ReplicaNotFound,
   MemoryNotFound,
-  ConflictError,
-  Revision,
-  JSONObject,
   JSONValue,
 } from "./lib.ts";
 import { fromString, refer, Reference } from "npm:merkle-reference";
 
 export type {
   RepositoryID,
-  DocumentID,
+  Entity,
   ReplicaNotFound,
   MemoryNotFound,
-  ConflictError,
-  Revision,
   Reference,
 };
 
@@ -31,11 +26,16 @@ CREATE TABLE IF NOT EXISTS datum (
   source  JSON NOT NULL         -- Source for this JSON
 );
 
-CREATE TABLE IF NOT EXISTS fact (
+CREATE VIEW IF NOT EXISTS maybe_datum AS
+SELECT * FROM datum
+UNION ALL
+SELECT NULL AS this, NULL AS source;
+
+CREATE TABLE IF NOT EXISTS factor (
   this    TEXT PRIMARY KEY,     -- Merkle reference for { the, of, is, cause }
   the     TEXT NOT NULL,        -- Kind of a fact e.g. "application/json"
   of      TEXT NOT NULL,        -- Entity identifier fact is about
-  'is'    TEXT NOT NULL,        -- Value entity is claimed to have
+  'is'    TEXT,                 -- Value entity is claimed to have
   cause   TEXT,                 -- Causal reference to prior fact
   FOREIGN KEY('is') REFERENCES datum(this)
 );
@@ -43,36 +43,34 @@ CREATE TABLE IF NOT EXISTS fact (
 CREATE TABLE IF NOT EXISTS memory (
   the     TEXT NOT NULL,        -- Kind of a fact e.g. "application/json"
   of      TEXT NOT NULL,        -- Entity identifier fact is about
-  fact    TEXT NOT NULL,        -- Link to the fact,
-  FOREIGN KEY(fact) REFERENCES fact(this),
+  factor  TEXT NOT NULL,        -- Link to the fact,
+  FOREIGN KEY(factor) REFERENCES factor(this),
   PRIMARY KEY (the, of)         -- Ensure that we have only one fact per entity
 );
-
-COMMIT;
 `;
 
 const IMPORT_DATUM = `INSERT OR IGNORE INTO datum (this, source) VALUES (:this, :source);`;
 
-const IMPORT_FACT = `INSERT OR IGNORE INTO fact (this, the, of, 'is', cause) VALUES (:this, :the, :of, :is, :cause);`;
+const IMPORT_FACTOR = `INSERT OR IGNORE INTO factor (this, the, of, 'is', cause) VALUES (:this, :the, :of, :is, :cause);`;
 
-const IMPORT_MEMORY = `INSERT OR IGNORE INTO memory (the, of, fact) VALUES (:the, :of, :fact);`;
+const IMPORT_MEMORY = `INSERT OR IGNORE INTO memory (the, of, factor) VALUES (:the, :of, :factor);`;
 
-const SWAP = `UPDATE memory SET fact = :fact WHERE fact = :cause;`;
-
-const DELETE = `DELETE FROM memory WHERE the = :the AND of = :of AND fact = :fact;`;
+const SWAP = `UPDATE memory SET factor = :factor
+WHERE 
+(:cause IS NULL AND factor IS NULL) OR factor = :cause;`;
 
 const EXPORT = `SELECT 
   memory.the as the,
   memory.of as of,
-  memory.fact as fact,
-  datum.source as 'is',
-  fact.cause as cause
+  memory.factor as factor,
+  maybe_datum.source as 'is',
+  factor.cause as cause
 FROM
   memory
 JOIN
-  fact ON memory.fact = fact.this
+  factor ON memory.factor = factor.this
 JOIN
-  datum ON fact.'is' = datum.this
+  maybe_datum ON factor.'is' = maybe_datum.this OR (factor.'is' IS NULL AND maybe_datum.this IS NULL)
 WHERE
   memory.the = :the
   AND
@@ -90,11 +88,25 @@ export interface Model {
 
 export interface Selector {
   the: string;
-  of: DocumentID;
+  of: Entity;
 }
 
 export type SelectError = MemoryNotFound;
 
+export interface ConflictError extends Error {
+  name: "ConflictError";
+  in: RepositoryID;
+  the: string;
+  of: Entity;
+  /**
+   * Expected version of the document.
+   */
+  expected: Reference<Factor> | null;
+  /**
+   * Actual document in the repository.
+   */
+  actual: Factor | null;
+}
 export interface Session {
   /**
    * Transacts can be used to assert or retract a document from the repository.
@@ -102,21 +114,84 @@ export interface Session {
    * transaction fails with `ConflictError`. Otherwise document is updated to
    * the new value.
    */
-  transact(transact: Transaction): Result<Commit, ConflictError | StoreError>;
+  transact<In extends Transaction>(transact: In): InferTransactionResult<In>;
   /**
    * Query can be used to retrieve a document from the store. At the moment
-   * you can only pass the `entity` selector.œ
+   * you can only pass the `entity` selector.
    */
-  query(selector: Selector): Result<Fact, MemoryNotFound | StoreError>;
+  query(selector: Selector): Result<Factor, MemoryNotFound | StoreError>;
 }
 
-export interface Commit {
-  in: RepositoryID;
+/**
+ * Fact denotes a memory state. It describes immutable value currently assigned
+ * held by the mutable reference identified by `of`. It references a prior fact
+ * or a defunct (retracted fact) it supersedes.
+ */
+export type Fact = {
+  /**
+   * Type of the fact, usually formatted as media type. By default we expect
+   * this to be  "application/json", but in the future we may support other
+   * data types.
+   */
   the: string;
-  of: DocumentID;
-  is: Reference<JSONValue>;
-  cause?: Reference<Fact>;
+
+  /**
+   * Stable memory identifier that uniquely identifies it.
+   */
+  of: Entity;
+
+  /**
+   * Current state of the memory as JSON value.
+   */
+  is?: JSONValue;
+
+  /**
+   * Reference to the previous `Fact`, `Defunct` or `ImplicitFact` being
+   * superseded by this fact. If omitted it implies reference to the implicit
+   * fact corresponding to `{the, of, is:{}}`.
+   */
+  cause?: Reference<Factor>;
+};
+
+export type Cause =
+  | Reference<{ the: string; of: Entity }>
+  | Reference<{ is: JSONValue; cause: Cause }>
+  | Reference<{ cause: Cause }>;
+
+export interface ImplicitFact extends Fact {
+  cause?: undefined;
 }
+
+/**
+ * Represents retracted {@link Fact} and is like tombstone denoting prior
+ * existence of the fact.
+ */
+export type Defunct = {
+  the: string;
+  of: Entity;
+  is?: undefined;
+  cause: Reference<Fact>;
+};
+
+export const isImplicit = (factor: Factor): factor is ImplicitFact =>
+  factor.cause === undefined;
+export const isFact = (factor: Factor): factor is Fact =>
+  factor.is !== undefined;
+
+export type Factor = Fact | Defunct;
+
+/**
+ * `Factor` is similar to `Fact` but instead of holding current value under
+ * `is` field it holds a reference to it. This allows more compact transmission
+ * when recipient is expected to have referenced value or simply does not need
+ * to have one.
+ */
+export type FactReference = {
+  the: string;
+  of: Entity;
+  is: Reference<JSONValue>;
+  cause?: Reference<Factor>;
+};
 
 export class Store implements Model, Session {
   constructor(
@@ -124,7 +199,7 @@ export class Store implements Model, Session {
     public store: Database,
   ) {}
 
-  transact(transaction: Transaction) {
+  transact<In extends Transaction>(transaction: In) {
     return transact(this, transaction);
   }
 
@@ -157,36 +232,26 @@ const readAddress = (url: URL) => {
   return { location: url.protocol === "file:" ? url : ":memory:", id };
 };
 
-export type Fact = {
-  the: string;
-
-  /**
-   * Stable document identifier that uniquely identifies the document.
-   */
-  of: DocumentID;
-
-  /**
-   * Document state being asserted.
-   */
-  is: JSONValue;
-
-  /**
-   * Version `this` document is expected to be at. If `version` invariant is
-   * not met assertion fails with `ConflictError`.
-   */
-  cause?: Reference<Fact>;
-};
-
+/**
+ * It is similar to `Fact` except instead of passing inline `is` a reference to
+ * it could be passed. This is transmission more efficient.
+ */
 export interface Retraction {
   the: string;
-  of: DocumentID;
-  is: Reference<JSONValue>;
+  of: Entity;
+  is: Reference<JSONValue> | JSONValue;
   cause?: Reference<Fact>;
 }
 
 export type Transaction =
   | { assert: Fact; retract?: undefined }
-  | { retract: Retraction; assert?: undefined };
+  | { retract: Fact | FactReference; assert?: undefined };
+
+export type InferTransactionResult<Transaction> = Transaction extends {
+  assert: Fact;
+}
+  ? Result<Fact, ConflictError | StoreError>
+  : Result<Defunct, ConflictError | StoreError>;
 
 /**
  * Creates a connection to the existing replica. Errors if replica does not
@@ -221,131 +286,185 @@ export const close = async ({ store }: Model) => {
 type MemoryView = {
   id: string;
   the: string;
-  of: DocumentID;
+  of: Entity;
   is: string;
   cause: string | null;
 };
 
-export const query = (
-  { id, store }: Model,
-  { the, of }: Selector,
-): Result<Fact, MemoryNotFound | StoreError> => {
-  try {
-    const fact = pull({ id, store }, { the, of });
-    if (fact) {
-      return { ok: fact };
-    } else {
-      return { error: new MemoryNotFoundError(the, of, id) };
-    }
-  } catch (error) {
-    return { error: new StoreError((error as Error).message) };
-  }
-};
+/**
+ * Creates an implicit fact.
+ *
+ * @param {object} source
+ * @param {string} source.the
+ * @param {Entity} source.of
+ * @returns {ImplicitFact}
+ */
+export const implicit = ({ the, of }: { the: string; of: Entity }) => ({
+  the,
+  of,
+});
 
-const pull = ({ store }: Model, { the, of }: Selector): Fact | undefined => {
+/**
+ * Creates a reference to an implicit fact.
+ */
+export const init = ({ the, of }: ImplicitFact): Reference<ImplicitFact> =>
+  refer(implicit({ the, of }));
+
+const pull = ({ store }: Model, { the, of }: Selector): Factor => {
   const row = store.prepare(EXPORT).get({ the, entity: of }) as
     | MemoryView
     | undefined;
 
-  // If we do not have a record for this document we simply derive initial
-  // revision.
+  // If we do not have matching memory we return implicit fact.
   if (row === undefined) {
-    return undefined;
+    return implicit({ the, of });
   }
   // If we do have a row we parse and return it.
   else {
-    const is = JSON.parse(row.is);
+    const is = row.is ? JSON.parse(row.is) : undefined;
+    // If `cause` is `null` it implies reference to the implicit fact.
     const cause = row.cause
       ? (fromString(row.cause) as Reference<Fact>)
-      : undefined;
-    const fact = cause == null ? { the, of, is } : { the, of, is, cause };
-    return fact;
+      : refer(implicit({ the, of }));
+
+    // If `is` is `undefined` it implies that fact was retracted so we return
+    // defunct fact.
+    return is === undefined ? { the, of, cause } : { the, of, is, cause };
   }
 };
 
-const derive = (source: Fact | Retraction) => {
-  const { the, of } = source;
-  const is = refer(source.is) as Reference<JSONValue>;
-  const cause = source.cause
-    ? (refer(source.cause) as Reference<Fact>)
-    : undefined;
-  const fact = refer(
-    cause ? { the, of, is, cause } : { the, of, is },
-  ) as Reference<Fact>;
+const selectCause = (
+  { the, of, cause }: { the: string; of: Entity; cause?: Reference<Factor> },
+  implicit: Reference<Factor> = init({ the, of }),
+): { cause?: Reference<Factor> } => ({
+  cause: cause ?? implicit,
+});
 
-  return {
-    fact,
+const selectIs = ({ is }: { is?: JSONValue | Reference<JSONValue> }) =>
+  is === undefined ? {} : { is: refer(is) };
+
+const swap = ({ store, id }: Model, source: Fact): Fact => {
+  const { the, of } = source;
+  const implicit = init({ the, of });
+  const proof = {
     the,
     of,
-    is,
-    cause,
+    is: refer(source.is) as Reference<JSONValue>,
+    cause: source.cause ?? implicit,
   };
-};
 
-const swap = ({ store, id }: Model, source: Fact) => {
-  const { the, of, is, cause, fact } = derive(source);
+  const is = proof.is.toString();
+  const fact = refer(proof).toString();
+  const cause =
+    proof.cause.toString() === implicit.toString()
+      ? null
+      : proof.cause.toString();
 
   // First we try to import JSON into a datum table.
   store.run(IMPORT_DATUM, {
-    this: is.toString(),
+    this: is,
     source: JSON.stringify(source.is),
   });
 
   // Then we try to import a asserted fact into a fact table.
-  store.run(IMPORT_FACT, {
-    this: fact.toString(),
+  store.run(IMPORT_FACTOR, {
+    this: fact,
     the,
     of,
-    is: is.toString(),
-    cause: cause?.toString() ?? null,
+    is,
+    cause,
   });
 
-  // If no prior fact was referenced we expect no memory record so we try
-  // to create a new one.
+  // If no prior fact was expected we will have either no memory record for it
+  // or we will have a record for `implicit` but created explicitly. If it is
+  // former we will create a desired record, but if it is the latter operation
+  // will be ignored due to primary key constraint.
   if (!cause) {
-    store.run(IMPORT_MEMORY, { the, of, fact: fact.toString() });
+    store.run(IMPORT_MEMORY, { the, of, factor: fact });
   }
 
-  // Finally we will swap memory record to point from the prior fact `cause`
-  // to the new fact. If there was no causal reference to prior fact we use
-  // the fact itself as a cause. This is will be either a redundant because we
-  // have created this exact record in previous step or there was record with
-  // referring to a different fact in which case no rows will be updated and
-  // we will know that expected state does not match an actual state so we'll
-  // need to raise a `ConflictError`.
-  const updated = store.run(SWAP, {
-    fact: fact.toString(),
-    cause: (cause ?? fact).toString(),
-  });
+  // Finally we will swap memory record to point from expected prior fact `cause`
+  // to a derived fact. If no causal reference was expected we use an `implicit`
+  // this way if `implicit` was explicitly created it will be updated but if no
+  // memory record existed previous step would have created desired record and
+  // this update will have no effect. However memory references different fact
+  // this will update 0 records and in such case we likely have a conflict.
+  const updated = store.run(SWAP, { factor: fact, cause });
 
   if (updated === 0) {
+    const expected = cause === null ? null : proof.cause;
     const actual = pull({ id, store }, { the, of }) ?? null;
+
     // If actual state matches desired state update was just duplicate call,
     // while technically this is a conflict we do not treat it as such as
     // there is no point to error if asserted state is an actual state.
     if (refer(actual).toString() !== fact.toString()) {
-      throw new RevisionError(id, the, of, cause ?? null, actual);
+      throw new RevisionError(id, the, of, expected, actual);
     }
   }
+
+  return { the, of, is: source.is, cause: proof.cause };
 };
 
-export const assert = (
-  session: Model,
-  { the, of, is, cause }: Fact,
-): Result<Commit, ConflictError | StoreError> => {
-  const transact = session.store.transaction(swap);
+const revoke = (
+  { id, store }: Model,
+  source: Fact | FactReference,
+): Defunct => {
+  const { the, of } = source;
+  const expected =
+    // If there is no `is` nor `cause` we're retracting implicit fact.
+    source.is === undefined && source.cause === undefined
+      ? { the, of }
+      : { the, of, ...selectIs(source), ...selectCause(source) };
 
+  const defunct = { the, of, cause: refer(expected) };
+  const cause = defunct.cause.toString();
+  const factor = refer(defunct).toString();
+
+  // Try to import the defunct into the factor table.
+  store.run(IMPORT_FACTOR, {
+    this: factor,
+    the,
+    of,
+    is: null,
+    cause,
+  });
+
+  if (!expected.cause) {
+    store.run(IMPORT_MEMORY, { the, of, factor });
+  }
+
+  // Finally we will swap memory record to point from expected prior fact to
+  // a derived factor. However if memory references different fact from one
+  // being revoked 0 records will be updated and in such case we likely have
+  // likely have a conflict.
+  const updated = store.run(SWAP, { factor, cause });
+
+  if (updated === 0) {
+    const actual = pull({ id, store }, { the, of }) ?? null;
+
+    // If actual state matches desired state update was just duplicate call,
+    // while technically this is a conflict we do not treat it as such as
+    // there is no point to error if asserted state is an actual state.
+    if (refer(actual).toString() !== factor) {
+      throw new RevisionError(id, the, of, defunct.cause, actual);
+    }
+  }
+
+  return defunct;
+};
+
+const execute = <
+  Input extends unknown[],
+  Out extends {},
+  Tr extends DBTransaction<(...input: Input) => Out>,
+>(
+  transaction: Tr,
+  ...input: Input
+): Result<Out, ConflictError | StoreError> => {
   try {
-    transact(session, { the, of, is, cause });
-
     return {
-      ok: {
-        in: session.id,
-        the,
-        of,
-        is: refer(is),
-        ...(cause ? { cause: refer(cause) } : {}),
-      },
+      ok: transaction(...input),
     };
   } catch (error) {
     return error instanceof RevisionError
@@ -357,49 +476,25 @@ export const assert = (
   }
 };
 
+export const assert = (
+  session: Model,
+  fact: Fact,
+): Result<Fact, ConflictError | StoreError> =>
+  execute(session.store.transaction(swap), session, fact);
+
 export const retract = (
   session: Model,
-  source: Retraction,
-): Result<Commit, ConflictError> => {
-  const { the, of, is, cause, fact } = derive(source);
+  source: Fact | FactReference,
+): Result<Defunct, ConflictError | StoreError> =>
+  execute(session.store.transaction(revoke), session, source);
 
-  // We attempt to delete state record for the document. It will update 1 or 0
-  // rows depending on whether expected state matches current state.
-  const deleted = session.store.run(DELETE, { the, of, fact: fact.toString() });
-  // If no rows were deleted and assumed state is not implicit we had a wrong
-  // assumption about the document state.
-
-  if (deleted === 0) {
-    const result = query(session, { the, of });
-    if (result.error) {
-      return {
-        error: new RevisionError(session.id, the, of, fact, null),
-      };
-    } else {
-      return {
-        error: new RevisionError(session.id, the, of, fact, result.ok),
-      };
-    }
-  }
-
-  return {
-    ok: {
-      in: session.id,
-      the,
-      of,
-      is,
-      ...(cause ? { cause } : {}),
-    },
-  };
-};
-
-export const transact = (
+export const transact = <In extends Transaction>(
   model: Model,
-  transact: Transaction,
-): Result<Commit, ConflictError | StoreError> =>
+  transact: In,
+): InferTransactionResult<In> =>
   transact.assert
-    ? assert(model, transact.assert)
-    : retract(model, transact.retract);
+    ? (assert(model, transact.assert) as InferTransactionResult<In>)
+    : (retract(model, transact.retract) as InferTransactionResult<In>);
 
 export class ReplicaNotFoundError extends Error implements ReplicaNotFound {
   override name = "ReplicaNotFound" as const;
@@ -414,9 +509,9 @@ export class RevisionError extends Error implements ConflictError {
   constructor(
     at: RepositoryID,
     public the: string,
-    public of: DocumentID,
-    public expected: Reference<Fact> | null,
-    public actual: Fact | null,
+    public of: Entity,
+    public expected: Reference<Fact | Defunct> | null,
+    public actual: Fact | Defunct | null,
   ) {
     super(
       expected == null
@@ -431,6 +526,17 @@ export class RevisionError extends Error implements ConflictError {
 
   toJSON() {}
 }
+
+export const query = (
+  { id, store }: Model,
+  { the, of }: Selector,
+): Result<Factor, StoreError> => {
+  try {
+    return { ok: pull({ id, store }, { the, of }) };
+  } catch (error) {
+    return { error: new StoreError((error as Error).message) };
+  }
+};
 
 export class StoreError extends Error {
   override name = "StoreError" as const;
@@ -452,7 +558,7 @@ class MemoryNotFoundError extends Error implements MemoryNotFound {
   in: string;
   constructor(
     public the: string,
-    public of: DocumentID,
+    public of: Entity,
     at: RepositoryID,
     message: string = `No ${the} for ${of} found in ${at}`,
   ) {

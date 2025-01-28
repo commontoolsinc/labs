@@ -6,8 +6,6 @@ import { createTemporaryDirectory } from "../util.js";
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
 const doc = "4301a667-5388-4477-ba08-d2e6b51a62a3";
 
-const base = refer({ is: { this: doc } }).toString();
-
 const repo = new URL(
   "file:///Users/gozala/Projects/labs/typescript/packages/common-docs/test2.sqlite",
 );
@@ -16,8 +14,8 @@ const test = (
   title: string,
   url: URL,
   run: (replica: Repository.Store) => Promise<unknown>,
-) =>
-  Deno.test(title, async () => {
+) => {
+  const unit = async () => {
     const session = await Repository.open({
       url,
     });
@@ -29,10 +27,19 @@ const test = (
     } finally {
       await Repository.close(session.ok);
     }
-  });
+  };
+
+  if (title.startsWith("only")) {
+    Deno.test.only(title, unit);
+  } else if (title.startsWith("skip")) {
+    Deno.test.ignore(title, unit);
+  } else {
+    Deno.test(title, unit);
+  }
+};
 
 test(
-  "error when querying non existing",
+  "querying non existing memory returns implicit fact",
   new URL(`memory:${alice}`),
   async session => {
     const result = await Repository.query(session, {
@@ -40,43 +47,154 @@ test(
       of: doc,
     });
 
-    assert(result.error, "Document does not exist");
-    assert(result.error.name === "MemoryNotFound");
-    assertEquals(result.error.in, alice);
-    assertEquals(result.error.the, "application/json");
-    assertEquals(result.error.of, doc);
+    assertEquals(
+      result,
+      {
+        ok: {
+          the: "application/json",
+          of: doc,
+        },
+      },
+      "Implicit fact",
+    );
   },
 );
 
-test("create new fact", new URL(`memory:${alice}`), async session => {
-  const result = await Repository.assert(session, {
+test("create new memory", new URL(`memory:${alice}`), async session => {
+  const v1 = {
     the: "application/json",
     of: doc,
     is: { v: 1 },
-  });
+  };
+  const result = await Repository.assert(session, v1);
 
   assertEquals(result, {
     ok: {
-      in: session.id,
       the: "application/json",
       of: doc,
-      is: refer({ v: 1 }),
+      is: { v: 1 },
+      cause: refer({
+        the: "application/json",
+        of: doc,
+      }),
     },
   });
 
-  const { ok: found } = Repository.query(session, {
+  const read = Repository.query(session, {
     the: "application/json",
     of: doc,
   });
 
-  assertEquals(found, {
-    the: "application/json",
-    of: doc,
-    is: { v: 1 },
+  assertEquals(read, {
+    ok: {
+      the: "application/json",
+      of: doc,
+      is: { v: 1 },
+      cause: refer({
+        the: "application/json",
+        of: doc,
+      }),
+    },
   });
 });
 
-test("updates fact", new URL(`memory:${alice}`), async session => {
+test("explicit empty creation", new URL(`memory:${alice}`), async session => {
+  assertEquals(
+    await Repository.query(session, { the: "application/json", of: doc }),
+    {
+      ok: {
+        the: "application/json",
+        of: doc,
+      },
+    },
+  );
+
+  const blank = { the: "application/json", of: doc, is: {} };
+
+  assert(await Repository.assert(session, blank).ok);
+  assert(await Repository.assert(session, blank).ok);
+
+  assertEquals(
+    await Repository.query(session, { the: "application/json", of: doc }),
+    {
+      ok: {
+        the: "application/json",
+        of: doc,
+        is: {},
+        cause: refer({
+          the: "application/json",
+          of: doc,
+        }),
+      },
+    },
+  );
+});
+
+test(
+  "assert with explicit default cause",
+  new URL(`memory:${alice}`),
+  async session => {
+    const result = await Repository.assert(session, {
+      the: "application/json",
+      of: doc,
+      is: { v: 1 },
+      cause: refer({
+        the: "application/json",
+        of: doc,
+      }),
+    });
+
+    assertEquals(result, {
+      ok: {
+        the: "application/json",
+        of: doc,
+        is: { v: 1 },
+        cause: refer({
+          the: "application/json",
+          of: doc,
+        }),
+      },
+    });
+  },
+);
+
+test("explicit {}", new URL(`memory:${alice}`), async session => {
+  const create = await Repository.assert(session, {
+    the: "application/json",
+    of: doc,
+    is: {},
+  });
+
+  assertEquals(create, {
+    ok: {
+      the: "application/json",
+      of: doc,
+      is: {},
+      cause: refer({
+        the: "application/json",
+        of: doc,
+      }),
+    },
+  });
+
+  const update = await Repository.assert(session, {
+    the: "application/json",
+    of: doc,
+    is: { v: 1 },
+    cause: refer(create.ok),
+  });
+
+  assertEquals(update, {
+    ok: {
+      the: "application/json",
+      of: doc,
+      is: { v: 1 },
+      cause: refer(create.ok),
+    },
+  });
+});
+
+test("updates memory", new URL(`memory:${alice}`), async session => {
   const v0 = {
     the: "application/json",
     of: doc,
@@ -88,10 +206,13 @@ test("updates fact", new URL(`memory:${alice}`), async session => {
   assert(create.ok, "Document asserted");
   assertEquals(create, {
     ok: {
-      in: alice,
       the: "application/json",
       of: doc,
-      is: refer({ v: 0 }),
+      is: { v: 0 },
+      cause: refer({
+        the: "application/json",
+        of: doc,
+      }),
     },
   });
 
@@ -99,18 +220,33 @@ test("updates fact", new URL(`memory:${alice}`), async session => {
     the: "application/json",
     of: doc,
     is: { v: 1 },
-    cause: refer(v0),
+    cause: refer({
+      the: "application/json",
+      of: doc,
+      is: { v: 0 },
+      cause: refer({
+        the: "application/json",
+        of: doc,
+      }),
+    }),
   });
 
   assertEquals(
     update,
     {
       ok: {
-        in: alice,
         the: "application/json",
         of: doc,
-        is: refer({ v: 1 }),
-        cause: refer(v0),
+        is: { v: 1 },
+        cause: refer({
+          the: "application/json",
+          of: doc,
+          is: { v: 0 },
+          cause: refer({
+            the: "application/json",
+            of: doc,
+          }),
+        }),
       },
     },
     "updates document",
@@ -118,7 +254,7 @@ test("updates fact", new URL(`memory:${alice}`), async session => {
 });
 
 test(
-  "fails updating non-existing",
+  "fails updating non-existing memory",
   new URL(`memory:${alice}`),
   async session => {
     const v1 = {
@@ -139,40 +275,52 @@ test(
     assertEquals(result.error.in, alice);
     assertEquals(result.error.of, doc);
     assertEquals(result.error.expected, refer(v1));
-    assertEquals(result.error.actual, null);
+    assertEquals(result.error.actual, {
+      the: "application/json",
+      of: doc,
+    });
   },
 );
 
-test("create fails when exists", new URL(`memory:${alice}`), async session => {
-  const create = await Repository.assert(session, {
-    the: "application/json",
-    of: doc,
-    is: { v: 0 },
-  });
+test(
+  "create memory fails if already exists",
+  new URL(`memory:${alice}`),
+  async session => {
+    const create = await Repository.assert(session, {
+      the: "application/json",
+      of: doc,
+      is: { v: 0 },
+    });
 
-  assert(create.ok, "Document created");
+    assert(create.ok, "Document created");
 
-  const conflict = await Repository.assert(session, {
-    the: "application/json",
-    of: doc,
-    is: { v: 1 },
-  });
+    const conflict = await Repository.assert(session, {
+      the: "application/json",
+      of: doc,
+      is: { v: 1 },
+    });
 
-  assert(conflict.error, "Create fail when already exists");
-  assert(conflict.error.name === "ConflictError");
-  assertEquals(conflict.error.expected, null);
-  assertEquals(conflict.error?.actual, {
-    the: "application/json",
-    of: doc,
-    is: { v: 0 },
-  });
-});
+    assert(conflict.error, "Create fail when already exists");
+    assert(conflict.error.name === "ConflictError");
+    assertEquals(conflict.error.expected, null);
+    assertEquals(conflict.error?.actual, {
+      the: "application/json",
+      of: doc,
+      is: { v: 0 },
+      cause: refer({ the: "application/json", of: doc }),
+    });
+  },
+);
 
 test("concurrent update fails", new URL(`memory:${alice}`), async session => {
-  const base = {
+  const init = {
     the: "application/json",
     of: doc,
-    is: {},
+    is: { v: 0 },
+  };
+  const base = {
+    ...init,
+    cause: refer({ the: "application/json", of: doc }),
   };
 
   assert(await Repository.assert(session, base).ok);
@@ -192,10 +340,9 @@ test("concurrent update fails", new URL(`memory:${alice}`), async session => {
   });
 
   assertEquals(a.ok, {
-    in: alice,
     the: "application/json",
     of: doc,
-    is: refer({ a: true }),
+    is: { a: true },
     cause: refer(base),
   });
 
@@ -212,7 +359,7 @@ test("concurrent update fails", new URL(`memory:${alice}`), async session => {
 });
 
 test(
-  "concurrent identical creates succeed",
+  "concurrent identical memory creation succeed",
   new URL(`memory:${alice}`),
   async session => {
     const result = await Repository.assert(session, {
@@ -223,10 +370,10 @@ test(
 
     assertEquals(result, {
       ok: {
-        in: alice,
         the: "application/json",
         of: doc,
-        is: refer({ this: doc }),
+        is: { this: doc },
+        cause: refer({ the: "application/json", of: doc }),
       },
     });
 
@@ -234,30 +381,39 @@ test(
       the: "application/json",
       of: doc,
       is: { this: doc },
+      cause: refer(result.ok),
     });
 
     assertEquals(update, {
       ok: {
-        in: alice,
         the: "application/json",
         of: doc,
-        is: refer({ this: doc }),
+        is: { this: doc },
+        cause: refer(result.ok),
       },
     });
   },
 );
 
 test(
-  "concurrent identical updates succeed",
+  "concurrent identical memory updates succeed",
   new URL(`memory:${alice}`),
   async session => {
-    const v0 = {
+    const seed = {
       the: "application/json",
       of: doc,
       is: { v: 0 },
     };
 
-    assert(await Repository.assert(session, v0).ok);
+    const v0 = {
+      ...seed,
+      cause: refer({
+        the: "application/json",
+        of: doc,
+      }),
+    };
+
+    assert(await Repository.assert(session, seed).ok);
 
     const first = await Repository.assert(session, {
       the: "application/json",
@@ -268,10 +424,9 @@ test(
 
     assertEquals(first, {
       ok: {
-        in: alice,
         the: "application/json",
         of: doc,
-        is: refer({ v: 1 }),
+        is: { v: 1 },
         cause: refer(v0),
       },
     });
@@ -285,29 +440,44 @@ test(
 
     assertEquals(second, {
       ok: {
-        in: alice,
         the: "application/json",
         of: doc,
-        is: refer({ v: 1 }),
+        is: { v: 1 },
         cause: refer(v0),
       },
     });
   },
 );
 
+test("retract implicit", new URL(`memory:${alice}`), async session => {
+  const retract = await Repository.retract(session, {
+    the: "application/json",
+    of: doc,
+  });
+
+  assertEquals(retract.ok, {
+    the: "application/json",
+    of: doc,
+    cause: Repository.init({
+      the: "application/json",
+      of: doc,
+    }),
+  });
+});
+
 test("retract document", new URL(`memory:${alice}`), async session => {
-  const create = await Repository.assert(session, {
+  const v0 = {
     the: "application/json",
     of: doc,
     is: { v: 0 },
-  });
+  };
+  const create = await Repository.assert(session, v0);
 
   assert(create.ok, "Document created");
   assertEquals(await session.query({ the: "application/json", of: doc }), {
     ok: {
-      the: "application/json",
-      of: doc,
-      is: { v: 0 },
+      ...v0,
+      cause: Repository.init({ the: "application/json", of: doc }),
     },
   });
 
@@ -315,30 +485,35 @@ test("retract document", new URL(`memory:${alice}`), async session => {
     retract: {
       the: "application/json",
       of: doc,
-      is: refer({ v: 0 }),
+      is: { v: 0 },
+      cause: Repository.init({
+        the: "application/json",
+        of: doc,
+      }),
     },
   });
 
   assert(drop.ok, "Document retracted");
 
-  // assertEquals(result, {
-  //   ok: {
-  //     at: alice,
-  //     of: doc,
-  //     was: refer({ is: { v: 0 }, was: base }).toString(),
-  //     is: base,
-  //   },
-  // });
+  assertEquals(drop, {
+    ok: {
+      the: "application/json",
+      of: doc,
+      cause: refer(create.ok),
+    },
+  });
 
   const read = await session.query({ the: "application/json", of: doc });
-  assert(read.error, "Memory was retracted");
-  assert(read.error.name === "MemoryNotFound");
-  assertEquals(read.error.in, alice);
-  assertEquals(read.error.the, "application/json");
-  assertEquals(read.error.of, doc);
-  assertMatch(
-    read.error.message,
-    RegExp(`No application/json for ${doc} found in ${alice}`),
+  assertEquals(
+    read,
+    {
+      ok: {
+        the: "application/json",
+        of: doc,
+        cause: refer(create.ok),
+      },
+    },
+    "once retracted `is` no longer included",
   );
 });
 
@@ -346,10 +521,15 @@ test(
   "fails to retract if expected version is out of date",
   new URL(`memory:${alice}`),
   async session => {
-    const v0 = {
+    const base = {
       the: "application/json",
       of: doc,
       is: { v: 0 },
+    };
+
+    const v0 = {
+      ...base,
+      cause: Repository.init(base),
     };
 
     const v1 = {
@@ -370,14 +550,7 @@ test(
     assert(await Repository.assert(session, v1).ok);
     assert(await Repository.assert(session, v2).ok);
 
-    const result = session.transact({
-      retract: {
-        the: "application/json",
-        of: doc,
-        is: refer({ v: 1 }),
-        cause: refer(v0),
-      },
-    });
+    const result = session.transact({ retract: v1 });
 
     assert(result.error, "Retract fails if expected version is out of date");
     assert(result.error.name === "ConflictError");
@@ -389,6 +562,39 @@ test(
         `The application/json of ${doc} in ${alice} was expected to be ${refer(v1)}, but it is ${refer(v2)}`,
       ),
     );
+  },
+);
+
+test(
+  "new memory creation fails after retraction",
+  new URL(`memory:${alice}`),
+  async session => {
+    const v0 = {
+      the: "application/json",
+      of: doc,
+      is: { v: 0 },
+    };
+    const create = await Repository.assert(session, v0);
+
+    assert(create.ok, "Document created");
+
+    const retract = Repository.retract(session, create.ok);
+    assert(retract.ok, "Document retracted");
+
+    const conflict = await Repository.assert(session, {
+      the: "application/json",
+      of: doc,
+      is: { v: 1 },
+    });
+
+    assert(conflict.error, "Create fails if cause not specified");
+    assert(conflict.error.name === "ConflictError");
+    assertEquals(conflict.error.expected, null);
+    assertEquals(conflict.error.actual, {
+      the: "application/json",
+      of: doc,
+      cause: refer(create.ok),
+    });
   },
 );
 
@@ -425,10 +631,10 @@ Deno.test("open creates replica if does not exists", async () => {
       create,
       {
         ok: {
-          in: alice,
           the: "application/json",
           of: doc,
-          is: refer({ v: 0 }),
+          is: { v: 0 },
+          cause: refer({ the: "application/json", of: doc }),
         },
       },
       "created document",
@@ -443,6 +649,7 @@ Deno.test("open creates replica if does not exists", async () => {
       the: "application/json",
       of: doc,
       is: { v: 0 },
+      cause: refer({ the: "application/json", of: doc }),
     });
   } finally {
     await Deno.remove(url);
