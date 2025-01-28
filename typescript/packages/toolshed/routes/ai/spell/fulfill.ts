@@ -510,8 +510,18 @@ function constructSchemaPrompt(
         // Only truncate long string values
         sanitized[key] = value.substring(0, MAX_VALUE_LENGTH) +
           "... [truncated]";
+      } else if (Array.isArray(value)) {
+        // Recursively sanitize array elements
+        sanitized[key] = value.map((item) =>
+          typeof item === "object" && item !== null
+            ? sanitizeObject(item as Record<string, unknown>)
+            : item
+        );
+      } else if (typeof value === "object" && value !== null) {
+        // Recursively sanitize nested objects
+        sanitized[key] = sanitizeObject(value as Record<string, unknown>);
       } else {
-        // Keep everything else as-is
+        // Keep primitives as-is
         sanitized[key] = value;
       }
     }
