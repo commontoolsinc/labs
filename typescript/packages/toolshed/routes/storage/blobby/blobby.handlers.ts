@@ -90,6 +90,7 @@ export const listBlobsHandler: AppRouteHandler<typeof listBlobs> = async (
   const showAllWithData = c.req.query("allWithData") !== undefined;
   // TODO(jake): Replace with actual user when auth is added
   const prefix = c.req.query("prefix");
+  const search = c.req.query("search");
   const user = "system";
 
   try {
@@ -104,6 +105,28 @@ export const listBlobsHandler: AppRouteHandler<typeof listBlobs> = async (
       logger.info(
         { prefix, matchingBlobs: blobs.length },
         "Applied prefix filter",
+      );
+    }
+
+    // Apply fulltext search if specified
+    if (search) {
+      const searchTerm = search.toLowerCase();
+      const matchingBlobs: string[] = [];
+
+      for (const hash of blobs) {
+        const content = await storage.getBlob(hash);
+        if (
+          content &&
+          JSON.stringify(JSON.parse(content)).toLowerCase().includes(searchTerm)
+        ) {
+          matchingBlobs.push(hash);
+        }
+      }
+
+      blobs = matchingBlobs;
+      logger.info(
+        { search, matchingBlobs: blobs.length },
+        "Applied fulltext search",
       );
     }
 

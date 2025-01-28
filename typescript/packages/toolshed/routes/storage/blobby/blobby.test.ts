@@ -164,4 +164,97 @@ Deno.test("blobby storage routes", async (t) => {
       }
     },
   );
+
+  await t.step(
+    "GET /api/storage/blobby?search=test lists blobs containing text",
+    async () => {
+      // Create blobs with different content
+      const matchingContent = {
+        message: "This contains test in the content",
+        other: "field",
+      };
+      const matchingKey = await sha256(JSON.stringify(matchingContent));
+
+      const nonMatchingContent = {
+        message: "This has different content",
+        other: "nothing here",
+      };
+      const nonMatchingKey = await sha256(JSON.stringify(nonMatchingContent));
+
+      // Upload both blobs
+      await app.fetch(
+        new Request(`http://localhost/api/storage/blobby/${matchingKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(matchingContent),
+        }),
+      );
+
+      await app.fetch(
+        new Request(`http://localhost/api/storage/blobby/${nonMatchingKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(nonMatchingContent),
+        }),
+      );
+
+      // Test fulltext search
+      const response = await app.fetch(
+        new Request("http://localhost/api/storage/blobby?search=test"),
+      );
+      assertEquals(response.status, 200);
+
+      const json = await response.json();
+      assertEquals(Array.isArray(json.blobs), true);
+      assertEquals(json.blobs.includes(matchingKey), true);
+      assertEquals(json.blobs.includes(nonMatchingKey), false);
+    },
+  );
+
+  await t.step(
+    "GET /api/storage/blobby?search=test&allWithData=true lists matching blobs with data",
+    async () => {
+      const response = await app.fetch(
+        new Request(
+          "http://localhost/api/storage/blobby?search=test&allWithData=true",
+        ),
+      );
+      assertEquals(response.status, 200);
+
+      const json = await response.json();
+      assertEquals(typeof json, "object");
+
+      // Verify all returned objects contain the search term
+      Object.entries(json).forEach(([key, value]) => {
+        const stringified = JSON.stringify(value).toLowerCase();
+        assertEquals(stringified.includes("test"), true);
+      });
+    },
+  );
+
+  await t.step(
+    "GET /api/storage/blobby?prefix=test-&search=blob combines prefix and search",
+    async () => {
+      const response = await app.fetch(
+        new Request(
+          "http://localhost/api/storage/blobby?prefix=test-&search=blob",
+        ),
+      );
+      assertEquals(response.status, 200);
+
+      const json = await response.json();
+      assertEquals(Array.isArray(json.blobs), true);
+
+      // Verify all returned keys start with prefix and content contains search term
+      for (const key of json.blobs) {
+        assertEquals(key.startsWith("test-"), true);
+        const blobResponse = await app.fetch(
+          new Request(`http://localhost/api/storage/blobby/${key}`),
+        );
+        const blobContent = await blobResponse.json();
+        const stringified = JSON.stringify(blobContent).toLowerCase();
+        assertEquals(stringified.includes("blob"), true);
+      }
+    },
+  );
 });
