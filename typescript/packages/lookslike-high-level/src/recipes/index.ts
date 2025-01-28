@@ -106,3 +106,8 @@ import wikiSrc from "./wiki.tsx?raw";
 import wiki from "./wiki.js";
 addRecipe(wiki, wikiSrc);
 export { wiki };
+
+import articlesIframeSrc from "./articlesIframe.tsx?raw";
+import articlesIframe from "./articlesIframe.js";
+addRecipe(articlesIframe, articlesIframeSrc);
+export { articlesIframe };
