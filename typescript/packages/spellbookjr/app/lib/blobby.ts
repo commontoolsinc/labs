@@ -6,7 +6,9 @@ const SNAP_BASE_URL =
   process.env.SNAP_BASE_URL || "https://paas.saga-castor.ts.net/snap";
 
 export const getAllBlobs = async () => {
-  const response = await fetch(`${BLOBBY_BASE_URL}?all=true`);
+  const response = await fetch(`${BLOBBY_BASE_URL}?all=true`, {
+    cache: "no-store",
+  });
   if (!response.ok) throw new Error("Failed to fetch blobs");
   const data = await response.json();
   return data.blobs as string[];
@@ -14,14 +16,18 @@ export const getAllBlobs = async () => {
 
 // NOTE(jake): This uses tailscale auth to transparently filter on my user.
 export const getMyBlobs = async () => {
-  const response = await fetch(BLOBBY_BASE_URL);
+  const response = await fetch(BLOBBY_BASE_URL, {
+    cache: "no-store",
+  });
   if (!response.ok) throw new Error("Failed to fetch blobs");
   const data = await response.json();
   return data.blobs as string[];
 };
 
 export const getBlobByHash = async (hash: string) => {
-  const response = await fetch(`${BLOBBY_BASE_URL}/${hash}`);
+  const response = await fetch(`${BLOBBY_BASE_URL}/${hash}`, {
+    cache: "no-store",
+  });
 
   if (!response.ok) {
     console.error("Response not ok for hash:", hash);
