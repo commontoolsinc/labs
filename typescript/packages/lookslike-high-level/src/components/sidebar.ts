@@ -309,7 +309,7 @@ export class CommonSidebar extends LitElement {
                       >🔗 Share</a
                     >
                     <a
-                      href="https://paas.saga-castor.ts.net/spellbookjr/recipes/${recipeId}"
+                      href="https://paas.saga-castor.ts.net/spellbookjr/recipes/spell-${recipeId}"
                       target="_blank"
                     >
                       🪄 Spellbook jr</a
