@@ -179,7 +179,6 @@ export async function processSchema(
     },
   };
 }
-
 function decomposeSchema(
   schema: Record<string, unknown>,
   parentPath: string[] = [],
@@ -228,7 +227,7 @@ function decomposeSchema(
         isObject((value as Record<string, unknown>).properties)
       ) {
         const objectSchema = {
-          ...value,
+          ...(value as Record<string, unknown>),
           additionalProperties: true, // Allow additional properties
           required: (value as Record<string, unknown>).required || [], // Maintain required properties
         };
@@ -251,6 +250,16 @@ function decomposeSchema(
         }
       }
     }
+  }
+
+  // If no fragments were created (nothing to decompose),
+  // return the original schema as a single fragment
+  if (fragments.length === 0) {
+    return [{
+      path: [],
+      schema: schema,
+      matches: [],
+    }];
   }
 
   return fragments;
@@ -376,37 +385,20 @@ async function findFragmentMatches(
 
   return matches;
 }
-
 function findMatchingObjectsInSubtree(
   data: unknown,
   schema: Record<string, unknown>,
 ): Array<Record<string, unknown>> {
   const matches: Array<Record<string, unknown>> = [];
 
-  // Helper to check if an object matches our article schema
-  function isMatchingObject(obj: Record<string, unknown>): boolean {
-    // Check for required properties
-    if (!obj.title || typeof obj.title !== "string") return false;
-
-    // Handle both url and sourceUrl
-    const hasValidUrl = (obj.url && typeof obj.url === "string") ||
-      (obj.sourceUrl && typeof obj.sourceUrl === "string");
-
-    return hasValidUrl;
-  }
-
   if (isObject(data)) {
-    // Check if current object matches
-    if (isMatchingObject(data as Record<string, unknown>)) {
-      // Transform to match expected schema
-      matches.push({
-        title: data.title,
-        url: data.sourceUrl || data.url,
-      });
+    // Check if current object matches using the provided schema
+    if (checkSchemaMatch(data as Record<string, unknown>, schema)) {
+      matches.push(data as Record<string, unknown>);
     }
 
     // Recursively check all properties
-    for (const value of Object.values(data)) {
+    for (const value of Object.values(data as Record<string, unknown>)) {
       if (isObject(value)) {
         matches.push(...findMatchingObjectsInSubtree(value, schema));
       } else if (Array.isArray(value)) {
