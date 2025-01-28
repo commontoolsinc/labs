@@ -302,7 +302,7 @@ export class CommonSidebar extends LitElement {
                     style="display: flex; justify-content: space-between; border: 1px solid pink; padding: 10px;"
                   >
                     <a
-                      href="/recipe/${recipeId}"
+                      href="/recipe/spell-${recipeId}"
                       target="_blank"
                       @click=${copyRecipeLink}
                       style="float: right"
