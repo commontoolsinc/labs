@@ -265,13 +265,11 @@ function decomposeSchema(
   return fragments;
 }
 
-async function findExactMatches(
+function findExactMatches(
   fragment: SchemaFragment,
   blobContents: Map<string, Record<string, unknown>>,
   logger: Logger,
-): Promise<
-  Array<{ key: string; data: Record<string, unknown>; similarity: number }>
-> {
+): Array<{ key: string; data: Record<string, unknown>; similarity: number }> {
   const matches: Array<
     { key: string; data: Record<string, unknown>; similarity: number }
   > = [];
@@ -339,13 +337,12 @@ function findExactSubtreeMatches(
 
   return matches;
 }
-async function findFragmentMatches(
+
+function findFragmentMatches(
   fragment: SchemaFragment,
   blobContents: Map<string, Record<string, unknown>>,
   logger: Logger,
-): Promise<
-  Array<{ key: string; data: Record<string, unknown>; similarity: number }>
-> {
+): Array<{ key: string; data: Record<string, unknown>; similarity: number }> {
   const matches: Array<
     { key: string; data: Record<string, unknown>; similarity: number }
   > = [];
@@ -385,6 +382,7 @@ async function findFragmentMatches(
 
   return matches;
 }
+
 function findMatchingObjectsInSubtree(
   data: unknown,
   schema: Record<string, unknown>,
