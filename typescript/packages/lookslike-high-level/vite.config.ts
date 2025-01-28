@@ -9,6 +9,11 @@ export default defineConfig({
   plugins: [dts()],
   server: {
     proxy: {
+      "/api/ai/spell/fulfill": {
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ""),
+      },
       "/api/ai/llm": {
         target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/api/ai/llm",
         changeOrigin: true,

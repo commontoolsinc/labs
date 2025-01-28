@@ -78,7 +78,7 @@ export const SearchSchemaResponseSchema = z.object({
 export type SearchSchemaRequest = z.infer<typeof SearchSchemaRequestSchema>;
 export type SearchSchemaResponse = z.infer<typeof SearchSchemaResponseSchema>;
 
-export const imagine: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
+export const fulfill: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
   const logger: Logger = c.get("logger");
 
   const body = (await c.req.json()) as ProcessSchemaRequest;
