@@ -46,7 +46,7 @@ export async function scanBySchema(
     data: Record<string, unknown>;
   }> = [];
 
-  for (const blobKey of allBlobs) {
+  for (const blobKey of (allBlobs as string[])) {
     try {
       const content = await getBlob(blobKey);
       if (!content) {
