@@ -9,7 +9,7 @@ export async function scanForKey(
   const log = new PrefixedLogger(logger, "scanForKey");
 
   log.info(`Starting key scan for phrase: ${phrase}`);
-  const allBlobs = await getAllBlobs();
+  const allBlobs = await getAllBlobs() as string[];
   log.info(`Retrieved ${allBlobs.length} blobs to scan`);
 
   const matchingExamples: Array<{

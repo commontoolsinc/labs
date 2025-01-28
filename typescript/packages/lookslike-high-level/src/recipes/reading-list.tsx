@@ -2,13 +2,12 @@ import { h } from "@commontools/html";
 import { recipe, handler, UI, NAME, derive, lift, cell } from "@commontools/builder";
 import { z } from "zod";
 
-const BookItem = z.object({
+const ArticleItem = z.object({
   title: z.string(),
-  author: z.string(),
-  done: z.boolean().default(false),
+  url: z.string(),
 });
 
-export type BookItem = z.infer<typeof BookItem>;
+export type ArticleItem = z.infer<typeof ArticleItem>;
 
 const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
   ({ detail }, state) => {
@@ -16,13 +15,13 @@ const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
   },
 );
 
-const updateItem = handler<{ detail: { checked: boolean; value: string } }, { item: BookItem }>(
+const updateItem = handler<{ detail: { checked: boolean; value: string } }, { item: ArticleItem }>(
   ({ detail }, { item }) => {
     item.done = detail.checked;
   },
 );
 
-const deleteItem = handler<{}, { list: BookItem[]; item: BookItem }>(({}, { item, list }) => {
+const deleteItem = handler<{}, { list: ArticleItem[]; item: ArticleItem }>(({}, { item, list }) => {
   let idx = list.findIndex((i) => i.title === item.title);
   if (idx !== -1) list.splice(idx, 1);
   console.log("deleted item", item, idx);
@@ -51,11 +50,11 @@ export default recipe(
   z
     .object({
       title: z.string().default("Reading list"),
-      books: z.array(BookItem).default([]).describe("#booklist"),
+      articles: z.array(ArticleItem).default([]).describe("#readinglist"),
     })
-    .describe("Reading list"),
-  ({ title, books }) => {
-    const list = oneWayCopy(books);
+    .describe("Reading list 2"),
+  ({ title, articles }) => {
+    const list = oneWayCopy(articles);
     return {
       [NAME]: title,
       [UI]: (
@@ -65,23 +64,23 @@ export default recipe(
             placeholder="List title"
             oncommon-input={updateTitle({ title })}
           />
-          <common-vstack gap="sm">
-            {list.map((item: BookItem) => (
+          <div
+            class="card-grid"
+            style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem;"
+          >
+            {list.map((item: ArticleItem) => (
               <common-draggable $entity={item}>
-                <common-hstack>
-                  <common-todo
-                    checked={item.done}
-                    value={derive(item, ({ title, author }) => `${title} by ${author}`)}
-                    ontodo-checked={updateItem({ item })}
-                    ontodo-input={updateItem({ item })}
-                  />
-                  <sl-button outline variant="danger" onclick={deleteItem({ item, list })}>
-                    Delete
-                  </sl-button>
-                </common-hstack>
+                <sl-card>
+                  <h3 slot="header">{item.title}</h3>
+                  <div>
+                    <a href={item.url} target="_blank" rel="noopener noreferrer">
+                      {item.url}
+                    </a>
+                  </div>
+                </sl-card>
               </common-draggable>
             ))}
-          </common-vstack>
+          </div>
         </os-container>
       ),
       title,

@@ -596,13 +596,43 @@ export class CommonWindowManager extends LitElement {
     const recipeMatch = matchRoute("/recipe/:recipeId", url);
     if (recipeMatch) {
       const recipeId = recipeMatch.params.recipeId;
-      syncRecipe(recipeId).then(() => {
+      syncRecipe(recipeId).then(async () => {
         const recipe = getRecipe(recipeId);
         if (recipe) {
           // Get data from URL query parameter if it exists
           const searchParams = new URLSearchParams(url.search);
           const encodedData = searchParams.get("data");
           let initialData = {};
+
+          const fulfillUrl =
+            typeof window !== "undefined"
+              ? window.location.protocol + "//" + window.location.host + "/api/ai/spell/fulfill"
+              : "//api/ai/spell/fulfill";
+
+          // Call AI to analyze input schema and provide suggestions
+          const response = await fetch(fulfillUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              accepts: "application/json",
+            },
+            body: JSON.stringify({
+              schema: recipe.argumentSchema?.properties,
+              many: false,
+              prompt: "",
+              options: {
+                format: "json",
+                validate: true,
+                maxExamples: 25,
+              },
+            }),
+          });
+
+          if (response.ok) {
+            const aiResponse = await response.json();
+            initialData = aiResponse.result;
+            console.log("AI response:", aiResponse);
+          }
 
           if (encodedData) {
             try {

@@ -13,7 +13,7 @@ import * as routes from "./spell.routes.ts";
 const router = createRouter();
 
 const Router = router
-  .openapi(routes.imagine, handlers.imagine)
+  .openapi(routes.fulfill, handlers.fulfill)
   .openapi(routes.search, handlers.search);
 
 export default Router;

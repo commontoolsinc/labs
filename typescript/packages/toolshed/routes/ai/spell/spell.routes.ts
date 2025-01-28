@@ -15,8 +15,8 @@ const ErrorResponseSchema = z.object({
   error: z.string(),
 });
 
-export const imagine = createRoute({
-  path: "/ai/spell/imagine",
+export const fulfill = createRoute({
+  path: "/ai/spell/fulfill",
   method: "post",
   tags,
   request: {
@@ -40,7 +40,7 @@ export const imagine = createRoute({
   },
 });
 
-export type ProcessSchemaRoute = typeof imagine;
+export type ProcessSchemaRoute = typeof fulfill;
 
 export const search = createRoute({
   path: "/ai/spell/search",
