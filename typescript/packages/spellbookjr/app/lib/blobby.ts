@@ -49,5 +49,5 @@ export const getBlobByHash = async (hash: string) => {
 };
 
 export const getBlobScreenshotUrl = (hash: string) => {
-  return `${SNAP_BASE_URL}/${hash}/png`;
+  return `${SNAP_BASE_URL}/screenshot/${hash}/png`;
 };
