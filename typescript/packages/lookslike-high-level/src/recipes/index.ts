@@ -25,6 +25,11 @@ import smolIframe from "./smolIframe.js";
 addRecipe(smolIframe, smolIframeSrc);
 export { smolIframe };
 
+import complexIframeSrc from "./complexIframe.tsx?raw";
+import complexIframe from "./complexIframe.js";
+addRecipe(complexIframe, complexIframeSrc);
+export { complexIframe };
+
 import counterSrc from "./counter.tsx?raw";
 import counter from "./counter.js";
 addRecipe(counter, counterSrc);
