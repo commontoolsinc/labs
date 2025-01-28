@@ -29,14 +29,6 @@ export default defineConfig({
         target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/api/storage/blobby",
         changeOrigin: true,
       },
-      // FIXME(ja): below is for the old spellbookjr
-      "/api/blobby": {
-        target:
-          process.env.BLOBBY_API_URL ??
-          "https://paas.saga-castor.ts.net/blobby",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/blobby/, ""),
-      },
     },
     headers: {
       "*.wasm": {

@@ -130,8 +130,8 @@ export async function syncCharm(
 
 export const BLOBBY_SERVER_URL =
   typeof window !== "undefined"
-    ? window.location.protocol + "//" + window.location.host + "/api/blobby"
-    : "//api/blobby";
+    ? window.location.protocol + "//" + window.location.host + "/api/storage/blobby"
+    : "//api/storage/blobby";
 
 const recipesKnownToStorage = new Set<string>();
 
@@ -145,7 +145,7 @@ export async function syncRecipe(id: string) {
     return;
   }
 
-  const response = await fetch(`${BLOBBY_SERVER_URL}/blob/${id}`);
+  const response = await fetch(`${BLOBBY_SERVER_URL}/spell-${id}`);
   let src: string;
   let spec: string;
   let parents: string[];
@@ -175,7 +175,7 @@ export async function saveRecipe(id: string, src: string, spec?: string, parents
   recipesKnownToStorage.add(id);
 
   console.log("Saving recipe", id);
-  const response = await fetch(`${BLOBBY_SERVER_URL}/blob/${id}`, {
+  const response = await fetch(`${BLOBBY_SERVER_URL}/spell-${id}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -194,10 +194,7 @@ export async function saveRecipe(id: string, src: string, spec?: string, parents
 import smolIframe from "./recipes/smolIframe.js";
 import { shoelaceDemo } from "./recipes/examples/shoelace.js";
 
-addCharms([
-  run(smolIframe, { count: 1 }),
-  run(shoelaceDemo, {}),
-]);
+addCharms([run(smolIframe, { count: 1 }), run(shoelaceDemo, {})]);
 
 export type RecipeManifest = {
   name: string;
@@ -241,8 +238,8 @@ export type CharmAction = CharmActionFn & {
   set: (opener: CharmActionFn) => void;
 };
 
-let charmOpener: CharmActionFn | CharmAction = () => { };
-let charmCloser: CharmActionFn | CharmAction = () => { };
+let charmOpener: CharmActionFn | CharmAction = () => {};
+let charmCloser: CharmActionFn | CharmAction = () => {};
 export const openCharm = (charmId: string | EntityId | DocImpl<any>) => charmOpener(charmId);
 export const closeCharm = (charmId: string | EntityId | DocImpl<any>) => charmCloser(charmId);
 openCharm.set = (opener: CharmActionFn) => {
@@ -268,24 +265,19 @@ export const toggleAnnotations = () => {
 
 IframeIPC.setIframeContextHandler({
   read(context: any, key: string): any {
-    return context?.getAsQueryResult
-      ? context?.getAsQueryResult([key])
-      : context?.[key];
+    return context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
   },
   write(context: any, key: string, value: any) {
     context.getAsQueryResult()[key] = value;
   },
   subscribe(context: any, key: string, callback: (key: string, value: any) => void): any {
     const action: Action = (log: ReactivityLog) =>
-      callback(
-        key,
-        context.getAsQueryResult([key], log)
-      );
+      callback(key, context.getAsQueryResult([key], log));
 
     addAction(action);
     return action;
   },
   unsubscribe(_context: any, receipt: any) {
     removeAction(receipt);
-  }
+  },
 });
