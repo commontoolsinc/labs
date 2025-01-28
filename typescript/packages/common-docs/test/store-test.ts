@@ -273,10 +273,7 @@ test(
       the: "application/json",
       of: doc,
       expected: refer(v1),
-      actual: {
-        the: "application/json",
-        of: doc,
-      },
+      actual: null,
     });
   },
 );
@@ -458,6 +455,7 @@ test(
 );
 
 test("retract implicit", new URL(`memory:${alice}`), async session => {
+  // @ts-expect-error - can not retract non-existing assertion.
   const retract = await Repository.retract(session, {
     the: "application/json",
     of: doc,

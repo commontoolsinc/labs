@@ -20,11 +20,32 @@ export type Entity = string & { toString(): Entity };
 export type The = string & { toString(): The };
 
 /**
- * Fact denotes a memory state. It describes immutable value currently assigned
- * held by the mutable reference identified by `of`. It references a prior fact
- * or a defunct (retracted fact) it supersedes.
+ * Describes not yet claimed memory. It describes a lack of fact about memory.
  */
-export type Fact = {
+export interface Unclaimed {
+  /**
+   * Type of the fact, usually formatted as media type. By default we expect
+   * this to be  "application/json", but in the future we may support other
+   * data types.
+   */
+  the: The;
+
+  /**
+   * Stable memory identifier that uniquely identifies it.
+   */
+  of: Entity;
+
+  is?: undefined;
+  cause?: undefined;
+}
+
+/**
+ * Claim denotes a memory state. It describes an immutable value (is) being
+ * assigned to the mutable entity (of) of a specific type (the) at given
+ * succession denoted by causal reference (cause) to a prior fact about the
+ * same memory ({the, of}).
+ */
+export interface Claim {
   /**
    * Type of the fact, usually formatted as media type. By default we expect
    * this to be  "application/json", but in the future we may support other
@@ -38,43 +59,47 @@ export type Fact = {
   of: Entity;
 
   /**
-   * Current state of the memory as JSON value.
+   * Current value held by the memory. It can be inlined `JSON` value or a
+   * merkle reference to one.
    */
-  is?: JSONValue;
+  is: JSONValue | Reference<JSONValue>;
 
   /**
-   * Reference to the previous `Fact`, `Defunct` or `ImplicitFact` being
-   * superseded by this fact. If omitted it implies reference to the implicit
-   * fact corresponding to `{the, of, is:{}}`.
+   * Reference to the previous `Fact` this one succeeds. When omitted or set
+   * to `null` it implies that this is the first assertion made about the
+   * `{the, of}` and in such case
    */
-  cause?: Reference<Factor>;
-};
+  cause?: Reference<Fact> | Reference<Unclaimed> | null;
+}
 
 /**
- * `Factor` is similar to `Fact` but instead of holding current value under
- * `is` field it holds a reference to it. This allows more compact transmission
- * when recipient is expected to have referenced value or simply does not need
- * to have one.
+ * `Assertion` is just like a {@link Claim} except the value MUST be inline
+ * {@link JSONValue} as opposed to reference to one. {@link Assertion}s are used
+ * to assert facts, wile {@link Claim}s are used to retract them. This allows
+ * retracting over the wire without having to sending JSON values back and forth.
  */
-export type FactReference = {
-  the: The;
-  of: Entity;
-  is: Reference<JSONValue>;
-  cause?: Reference<Factor>;
-};
+export interface Assertion extends Claim {
+  is: JSONValue;
+  cause: Reference<Fact> | Reference<Unclaimed>;
+}
 
 /**
- * Represents retracted {@link Fact} and is like tombstone denoting prior
- * existence of the fact.
+ * Represents retracted {@link Assertion}. It is effectively a tombstone
+ * denoting assertion that no longer hold and is a fact in itself.
  */
-export type Defunct = {
+export type Retraction = {
   the: The;
   of: Entity;
   is?: undefined;
-  cause: Reference<Fact>;
+  cause: Reference<Assertion>;
 };
 
-export type Factor = Fact | Defunct;
+/**
+ * Facts represent a memory in the replica. They are either current and
+ * represented as {@link Assertion} or since retracted and therefor represented
+ * by {@link Retraction}.
+ */
+export type Fact = Assertion | Retraction;
 
 /**
  * Selector that replica can be queried by.
@@ -120,12 +145,12 @@ export type Conflict = {
   /**
    * Expected state in the replica.
    */
-  expected: Reference<Factor> | null;
+  expected: Reference<Fact> | null;
 
   /**
    * Actual memory state in the replica repository.
    */
-  actual: Factor | null;
+  actual: Fact | null;
 };
 
 export type ToJSON<T> = T & {
@@ -156,7 +181,7 @@ export interface TransactionError extends Error {
   /**
    * Fact being stored when the error occurred.
    */
-  fact: In<Required<Fact> | Defunct>;
+  fact: In<Fact>;
 }
 
 export interface QueryError extends Error {

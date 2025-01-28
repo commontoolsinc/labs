@@ -1,6 +1,7 @@
 import { refer, Reference } from "npm:merkle-reference";
 import * as FS from "jsr:@std/fs";
-import * as Store from "./store.ts";
+import * as Replica from "./store.ts";
+import type { Entity, JSONValue, ConflictError } from "./interface.ts";
 
 export interface Command {
   push?: OperationSet<Fact>;
@@ -78,7 +79,7 @@ export type Transaction =
 
 export type PushResult = Result<Revision, PushError>;
 
-export type PushError = ReplicaNotFound | MemoryNotFound | Store.ConflictError;
+export type PushError = ReplicaNotFound | MemoryNotFound | ConflictError;
 
 /**
  * Operation for pulling latest document state. If `version` is specified and
@@ -164,25 +165,12 @@ export interface Fail<E extends Error> {
 export interface RuntimeError extends Error {}
 
 export type RepositoryID = string;
-export type Entity = string;
 
 export type Checksum = string;
-
-export type JSONValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JSONObject
-  | JSONArray;
 
 // export interface JSONObject {
 //   [key: string]: unknown;
 // }
-
-export interface JSONObject extends Record<string, JSONValue> {}
-
-export interface JSONArray extends Array<JSONValue> {}
 
 export interface Open {
   store: StoreOptions;
@@ -219,7 +207,7 @@ export interface StoreOptions {
 
 export interface RepositoryModel {
   options: Open;
-  connections: Map<RepositoryID, Store.Session>;
+  connections: Map<RepositoryID, Replica.Session>;
 }
 
 // /**

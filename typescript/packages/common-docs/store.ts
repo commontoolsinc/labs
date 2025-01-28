@@ -8,16 +8,17 @@ import { fromString, refer, Reference } from "npm:merkle-reference";
 import type {
   ReplicaID,
   Entity,
-  Factor,
-  Defunct,
   Fact,
-  FactReference,
+  Claim,
+  Retraction,
+  Assertion,
   JSONValue,
   ConflictError,
   TransactionError,
   QueryError,
   ToJSON,
   ConnectionError,
+  Unclaimed,
 } from "./interface.ts";
 import * as Error from "./error.ts";
 
@@ -37,7 +38,7 @@ SELECT * FROM datum
 UNION ALL
 SELECT NULL AS this, NULL AS source;
 
-CREATE TABLE IF NOT EXISTS factor (
+CREATE TABLE IF NOT EXISTS fact (
   this    TEXT PRIMARY KEY,     -- Merkle reference for { the, of, is, cause }
   the     TEXT NOT NULL,        -- Kind of a fact e.g. "application/json"
   of      TEXT NOT NULL,        -- Entity identifier fact is about
@@ -49,34 +50,34 @@ CREATE TABLE IF NOT EXISTS factor (
 CREATE TABLE IF NOT EXISTS memory (
   the     TEXT NOT NULL,        -- Kind of a fact e.g. "application/json"
   of      TEXT NOT NULL,        -- Entity identifier fact is about
-  factor  TEXT NOT NULL,        -- Link to the fact,
-  FOREIGN KEY(factor) REFERENCES factor(this),
+  fact  TEXT NOT NULL,        -- Link to the fact,
+  FOREIGN KEY(fact) REFERENCES fact(this),
   PRIMARY KEY (the, of)         -- Ensure that we have only one fact per entity
 );
 `;
 
 const IMPORT_DATUM = `INSERT OR IGNORE INTO datum (this, source) VALUES (:this, :source);`;
 
-const IMPORT_FACTOR = `INSERT OR IGNORE INTO factor (this, the, of, 'is', cause) VALUES (:this, :the, :of, :is, :cause);`;
+const IMPORT_FACT = `INSERT OR IGNORE INTO fact (this, the, of, 'is', cause) VALUES (:this, :the, :of, :is, :cause);`;
 
-const IMPORT_MEMORY = `INSERT OR IGNORE INTO memory (the, of, factor) VALUES (:the, :of, :factor);`;
+const IMPORT_MEMORY = `INSERT OR IGNORE INTO memory (the, of, fact) VALUES (:the, :of, :fact);`;
 
-const SWAP = `UPDATE memory SET factor = :factor
+const SWAP = `UPDATE memory SET fact = :fact
 WHERE 
-(:cause IS NULL AND factor IS NULL) OR factor = :cause;`;
+(:cause IS NULL AND fact IS NULL) OR fact = :cause;`;
 
 const EXPORT = `SELECT 
   memory.the as the,
   memory.of as of,
-  memory.factor as factor,
+  memory.fact as fact,
   maybe_datum.source as 'is',
-  factor.cause as cause
+  fact.cause as cause
 FROM
   memory
 JOIN
-  factor ON memory.factor = factor.this
+  fact ON memory.fact = fact.this
 JOIN
-  maybe_datum ON factor.'is' = maybe_datum.this OR (factor.'is' IS NULL AND maybe_datum.this IS NULL)
+  maybe_datum ON fact.'is' = maybe_datum.this OR (fact.'is' IS NULL AND maybe_datum.this IS NULL)
 WHERE
   memory.the = :the
   AND
@@ -109,7 +110,7 @@ export interface Session {
    * Query can be used to retrieve a document from the store. At the moment
    * you can only pass the `entity` selector.
    */
-  query(selector: Selector): Result<Factor, ToJSON<QueryError>>;
+  query(selector: Selector): Result<Fact | Unclaimed, ToJSON<QueryError>>;
 }
 
 export class Store implements Model, Session {
@@ -152,14 +153,14 @@ const readAddress = (url: URL) => {
 };
 
 export type Transaction =
-  | { assert: Fact; retract?: undefined }
-  | { retract: Fact | FactReference; assert?: undefined };
+  | { assert: Assertion; retract?: undefined }
+  | { retract: Assertion | Claim; assert?: undefined };
 
 export type InferTransactionResult<Transaction> = Transaction extends {
-  assert: Fact;
+  assert: Assertion;
 }
-  ? Result<Fact, ToJSON<ConflictError> | ToJSON<TransactionError>>
-  : Result<Defunct, ToJSON<ConflictError> | ToJSON<TransactionError>>;
+  ? Result<Assertion, ToJSON<ConflictError> | ToJSON<TransactionError>>
+  : Result<Retraction, ToJSON<ConflictError> | ToJSON<TransactionError>>;
 
 /**
  * Creates a connection to the existing replica. Errors if replica does not
@@ -221,23 +222,23 @@ export const init = ({
 }: {
   the: string;
   of: Entity;
-}): Reference<Fact> => refer(implicit({ the, of }));
+}): Reference<Assertion> => refer(implicit({ the, of }));
 
-const pull = ({ store }: Model, { the, of }: Selector): Factor => {
+const pull = ({ store }: Model, { the, of }: Selector): Fact | undefined => {
   const row = store.prepare(EXPORT).get({ the, entity: of }) as
     | MemoryView
     | undefined;
 
   // If we do not have matching memory we return implicit fact.
   if (row === undefined) {
-    return implicit({ the, of });
+    return undefined;
   }
   // If we do have a row we parse and return it.
   else {
     const is = row.is ? JSON.parse(row.is) : undefined;
     // If `cause` is `null` it implies reference to the implicit fact.
     const cause = row.cause
-      ? (fromString(row.cause) as Reference<Fact>)
+      ? (fromString(row.cause) as Reference<Assertion>)
       : refer(implicit({ the, of }));
 
     // If `is` is `undefined` it implies that fact was retracted so we return
@@ -248,7 +249,7 @@ const pull = ({ store }: Model, { the, of }: Selector): Factor => {
 
 const importDatum = (
   session: Model,
-  source: Factor,
+  source: Fact,
 ): Reference<JSONValue> | null => {
   // If source is a {@link Defunct}, then `is` field and we will be `undefined`
   // so we will not need to import any data into the `datum` table.
@@ -264,14 +265,14 @@ const importDatum = (
   }
 };
 
-const swap = <T extends Required<Fact> | Defunct>(
+const swap = <Fact extends Assertion | Retraction>(
   session: Model,
-  source: T,
-): T => {
+  source: Fact,
+): Fact => {
   const { the, of } = source;
   // Derive the merkle reference for the provided factor which is expected to
   // be in normalized form.
-  const factor = refer(source).toString();
+  const fact = refer(source).toString();
   // We do not store implicit facts like `{ the, of }` in the database and
   // we represent causal reference to such implicit facts as `NULL`, therefore
   // we asses if causal reference is to an implicit and if so substitute it
@@ -280,7 +281,9 @@ const swap = <T extends Required<Fact> | Defunct>(
   // explicitly and telling in the error that hash to implicit was expected
   // would be confusing.
   const expected =
-    source.cause.toString() === init(source).toString() ? null : source.cause;
+    source.cause?.toString() === init(source).toString()
+      ? null
+      : (source.cause as Reference<Fact>);
   const cause = expected?.toString() ?? null;
 
   // First we import JSON value in the `is` field into the `datum` table and
@@ -288,8 +291,8 @@ const swap = <T extends Required<Fact> | Defunct>(
   // we ignore as we key those by the merkle reference. Same is true for the
   // `factor` table where we key by the merkle reference of the fact so if
   // conflicting record exists it is the same record and we ignore.
-  session.store.run(IMPORT_FACTOR, {
-    this: factor,
+  session.store.run(IMPORT_FACT, {
+    this: fact,
     the,
     of,
     is: importDatum(session, source)?.toString() ?? null,
@@ -306,7 +309,7 @@ const swap = <T extends Required<Fact> | Defunct>(
     session.store.run(IMPORT_MEMORY, {
       the,
       of,
-      factor,
+      fact,
     });
   }
 
@@ -315,7 +318,7 @@ const swap = <T extends Required<Fact> | Defunct>(
   // is not the case 0 records will be updated indicating a conflict handled
   // below.
   const updated = session.store.run(SWAP, {
-    factor,
+    fact,
     cause,
   });
 
@@ -330,7 +333,7 @@ const swap = <T extends Required<Fact> | Defunct>(
     // If actual state matches desired state it is either was inserted by the
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
     // it as a conflict as current state is the asserted one.
-    if (refer(actual).toString() !== factor) {
+    if (refer(actual).toString() !== fact) {
       throw Error.conflict({
         in: session.id,
         the,
@@ -345,16 +348,16 @@ const swap = <T extends Required<Fact> | Defunct>(
 };
 
 const execute = <
-  Factor extends Required<Fact> | Defunct,
-  Tr extends DBTransaction<(session: Model, factor: Factor) => Factor>,
+  Fact extends Assertion | Retraction,
+  Tr extends DBTransaction<(session: Model, fact: Fact) => Fact>,
 >(
   transaction: Tr,
   session: Model,
-  factor: Factor,
-): Result<Factor, ToJSON<ConflictError> | ToJSON<TransactionError>> => {
+  fact: Fact,
+): Result<Fact, ToJSON<ConflictError> | ToJSON<TransactionError>> => {
   try {
     return {
-      ok: transaction(session, factor),
+      ok: transaction(session, fact),
     };
   } catch (error) {
     return (error as Error).name === "ConflictError"
@@ -364,7 +367,7 @@ const execute = <
         // @see https://www.sqlite.org/rescode.html
         {
           error: Error.transaction(
-            { ...factor, in: session.id },
+            { ...fact, in: session.id },
             error as SqliteError,
           ),
         };
@@ -373,20 +376,20 @@ const execute = <
 
 export const assert = (
   session: Model,
-  { the, of, is, cause = init({ the, of }) }: Fact,
-): Result<Fact, ToJSON<ConflictError> | ToJSON<TransactionError>> =>
+  { the, of, is, cause }: Claim & { is: JSONValue },
+): Result<Assertion, ToJSON<ConflictError> | ToJSON<TransactionError>> =>
   execute(session.store.transaction(swap), session, {
     the,
     of,
     is,
-    cause,
+    cause: cause == null ? init({ the, of }) : cause,
   });
 
 export const retract = (
   session: Model,
-  { the, of, cause, ...source }: Fact | FactReference,
-): Result<Defunct, ToJSON<ConflictError> | ToJSON<TransactionError>> =>
-  execute(session.store.transaction(swap<Defunct>), session, {
+  { the, of, cause, ...source }: Assertion | Claim,
+): Result<Retraction, ToJSON<ConflictError> | ToJSON<TransactionError>> =>
+  execute(session.store.transaction(swap), session, {
     the,
     of,
     cause:
@@ -404,9 +407,9 @@ export const transact = <In extends Transaction>(
 export const query = (
   { id, store }: Model,
   { the, of }: Selector,
-): Result<Factor, ToJSON<QueryError>> => {
+): Result<Fact | Unclaimed, ToJSON<QueryError>> => {
   try {
-    return { ok: pull({ id, store }, { the, of }) };
+    return { ok: pull({ id, store }, { the, of }) ?? implicit({ the, of }) };
   } catch (error) {
     return { error: Error.query({ the, of, in: id }, error as SqliteError) };
   }

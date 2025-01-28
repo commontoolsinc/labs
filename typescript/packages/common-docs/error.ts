@@ -2,7 +2,6 @@ import type {
   ConflictError,
   Conflict,
   Fact,
-  Defunct,
   TransactionError,
   QueryError,
   ToJSON,
@@ -56,7 +55,7 @@ export class TheConflictError extends Error implements ConflictError {
   }
 }
 
-export type InFact = In<Required<Fact> | Defunct>;
+export type InFact = In<Fact>;
 
 export class TheTransactionError extends Error implements TransactionError {
   override name = "StoreError" as const;
