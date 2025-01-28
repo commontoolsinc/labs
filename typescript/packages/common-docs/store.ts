@@ -1,21 +1,23 @@
-import { Database, Transaction as DBTransaction } from "jsr:@db/sqlite";
-import type {
-  Result,
-  Entity,
-  RepositoryID,
-  ReplicaNotFound,
-  MemoryNotFound,
-  JSONValue,
-} from "./lib.ts";
+import {
+  Database,
+  Transaction as DBTransaction,
+  SqliteError,
+} from "jsr:@db/sqlite";
+import type { Result, ReplicaNotFound, MemoryNotFound } from "./lib.ts";
 import { fromString, refer, Reference } from "npm:merkle-reference";
-
-export type {
-  RepositoryID,
+import type {
+  ReplicaID,
   Entity,
-  ReplicaNotFound,
-  MemoryNotFound,
-  Reference,
-};
+  Factor,
+  Defunct,
+  Fact,
+  FactReference,
+  JSONValue,
+  ConflictError,
+} from "./interface.ts";
+import { conflict, raise } from "./error.ts";
+
+export type { ReplicaNotFound, MemoryNotFound, Reference };
 
 export const PREPARE = `
 BEGIN TRANSACTION;
@@ -82,7 +84,7 @@ export type Options = {
 };
 
 export interface Model {
-  id: RepositoryID;
+  id: ReplicaID;
   store: Database;
 }
 
@@ -93,20 +95,6 @@ export interface Selector {
 
 export type SelectError = MemoryNotFound;
 
-export interface ConflictError extends Error {
-  name: "ConflictError";
-  in: RepositoryID;
-  the: string;
-  of: Entity;
-  /**
-   * Expected version of the document.
-   */
-  expected: Reference<Factor> | null;
-  /**
-   * Actual document in the repository.
-   */
-  actual: Factor | null;
-}
 export interface Session {
   /**
    * Transacts can be used to assert or retract a document from the repository.
@@ -122,71 +110,9 @@ export interface Session {
   query(selector: Selector): Result<Factor, MemoryNotFound | StoreError>;
 }
 
-/**
- * Fact denotes a memory state. It describes immutable value currently assigned
- * held by the mutable reference identified by `of`. It references a prior fact
- * or a defunct (retracted fact) it supersedes.
- */
-export type Fact = {
-  /**
-   * Type of the fact, usually formatted as media type. By default we expect
-   * this to be  "application/json", but in the future we may support other
-   * data types.
-   */
-  the: string;
-
-  /**
-   * Stable memory identifier that uniquely identifies it.
-   */
-  of: Entity;
-
-  /**
-   * Current state of the memory as JSON value.
-   */
-  is?: JSONValue;
-
-  /**
-   * Reference to the previous `Fact`, `Defunct` or `ImplicitFact` being
-   * superseded by this fact. If omitted it implies reference to the implicit
-   * fact corresponding to `{the, of, is:{}}`.
-   */
-  cause?: Reference<Factor>;
-};
-
-export type Cause =
-  | Reference<{ the: string; of: Entity }>
-  | Reference<{ is: JSONValue; cause: Cause }>
-  | Reference<{ cause: Cause }>;
-
-/**
- * Represents retracted {@link Fact} and is like tombstone denoting prior
- * existence of the fact.
- */
-export type Defunct = {
-  the: string;
-  of: Entity;
-  is?: undefined;
-  cause: Reference<Fact>;
-};
-
-export type Factor = Fact | Defunct;
-
-/**
- * `Factor` is similar to `Fact` but instead of holding current value under
- * `is` field it holds a reference to it. This allows more compact transmission
- * when recipient is expected to have referenced value or simply does not need
- * to have one.
- */
-export type FactReference = {
-  the: string;
-  of: Entity;
-  is: Reference<JSONValue>;
-  cause?: Reference<Factor>;
-};
-
 export class Store implements Model, Session {
   constructor(
-    public id: RepositoryID,
+    public id: ReplicaID,
     public store: Database,
   ) {}
 
@@ -222,17 +148,6 @@ const readAddress = (url: URL) => {
 
   return { location: url.protocol === "file:" ? url : ":memory:", id };
 };
-
-/**
- * It is similar to `Fact` except instead of passing inline `is` a reference to
- * it could be passed. This is transmission more efficient.
- */
-export interface Retraction {
-  the: string;
-  of: Entity;
-  is: Reference<JSONValue> | JSONValue;
-  cause?: Reference<Fact>;
-}
 
 export type Transaction =
   | { assert: Fact; retract?: undefined }
@@ -414,7 +329,13 @@ const swap = <T extends Required<Fact> | Defunct>(
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
     // it as a conflict as current state is the asserted one.
     if (refer(actual).toString() !== factor) {
-      throw new RevisionError(session.id, the, of, expected, actual);
+      throw conflict({
+        in: session.id,
+        the,
+        of,
+        expected,
+        actual,
+      });
     }
   }
 
@@ -422,24 +343,24 @@ const swap = <T extends Required<Fact> | Defunct>(
 };
 
 const execute = <
-  Out extends {},
-  Input extends unknown[],
-  Tr extends DBTransaction<(...input: Input) => Out>,
+  Factor extends Required<Fact> | Defunct,
+  Tr extends DBTransaction<(session: Model, factor: Factor) => Factor>,
 >(
   transaction: Tr,
-  ...input: Input
-): Result<Out, ConflictError | StoreError> => {
+  session: Model,
+  factor: Factor,
+): Result<Factor, ConflictError | StoreError> => {
   try {
     return {
-      ok: transaction(...input),
+      ok: transaction(session, factor),
     };
   } catch (error) {
-    return error instanceof RevisionError
-      ? { error }
+    return (error as Error).name === "ConflictError"
+      ? { error: error as ConflictError }
       : // SQLite transactions may produce various errors when DB is busy, locked
         // or file is corrupt. We wrap those in a generic store error.
         // @see https://www.sqlite.org/rescode.html
-        { error: new StoreError((error as Error).message) };
+        { error: raise({ ...factor, in: session.id }, error as SqliteError) };
   }
 };
 
@@ -475,33 +396,9 @@ export const transact = <In extends Transaction>(
 
 export class ReplicaNotFoundError extends Error implements ReplicaNotFound {
   override name = "ReplicaNotFound" as const;
-  constructor(public replica: RepositoryID) {
+  constructor(public replica: ReplicaID) {
     super(`Replica not found: ${replica}`);
   }
-}
-
-export class RevisionError extends Error implements ConflictError {
-  override name = "ConflictError" as const;
-  in: string;
-  constructor(
-    at: RepositoryID,
-    public the: string,
-    public of: Entity,
-    public expected: Reference<Fact | Defunct> | null,
-    public actual: Fact | Defunct | null,
-  ) {
-    super(
-      expected == null
-        ? `The ${the} of ${of} in ${at} already exists as ${refer(actual)}`
-        : actual == null
-          ? `The ${the} of ${of} in ${at} was expected to be ${expected}, but it does not exists`
-          : `The ${the} of ${of} in ${at} was expected to be ${expected}, but it is ${refer(actual)}`,
-    );
-
-    this.in = at;
-  }
-
-  toJSON() {}
 }
 
 export const query = (

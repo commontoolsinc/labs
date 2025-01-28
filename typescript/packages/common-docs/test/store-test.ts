@@ -272,12 +272,15 @@ test(
 
     assert(result.error, "Update should fail if document does not exists");
     assert(result.error.name === "ConflictError");
-    assertEquals(result.error.in, alice);
-    assertEquals(result.error.of, doc);
-    assertEquals(result.error.expected, refer(v1));
-    assertEquals(result.error.actual, {
+    assertEquals(result.error.conflict, {
+      in: alice,
       the: "application/json",
       of: doc,
+      expected: refer(v1),
+      actual: {
+        the: "application/json",
+        of: doc,
+      },
     });
   },
 );
@@ -302,12 +305,17 @@ test(
 
     assert(conflict.error, "Create fail when already exists");
     assert(conflict.error.name === "ConflictError");
-    assertEquals(conflict.error.expected, null);
-    assertEquals(conflict.error?.actual, {
+    assertEquals(conflict.error.conflict, {
+      in: alice,
       the: "application/json",
       of: doc,
-      is: { v: 0 },
-      cause: refer({ the: "application/json", of: doc }),
+      expected: null,
+      actual: {
+        the: "application/json",
+        of: doc,
+        is: { v: 0 },
+        cause: refer({ the: "application/json", of: doc }),
+      },
     });
   },
 );
@@ -348,13 +356,17 @@ test("concurrent update fails", new URL(`memory:${alice}`), async session => {
 
   assert(b.error, "Concurrent update was rejected");
   assert(b.error.name === "ConflictError");
-  assertEquals(b.error.of, doc);
-  assertEquals(b.error.expected, refer(base));
-  assertEquals(b.error.actual, {
+  assertEquals(b.error.conflict, {
+    in: alice,
     the: "application/json",
     of: doc,
-    is: { a: true },
-    cause: refer(base),
+    expected: refer(base),
+    actual: {
+      the: "application/json",
+      of: doc,
+      is: { a: true },
+      cause: refer(base),
+    },
   });
 });
 
@@ -556,8 +568,14 @@ test(
 
     assert(result.error, "Retract fails if expected version is out of date");
     assert(result.error.name === "ConflictError");
-    assertEquals(result.error.expected, refer(v1));
-    assertEquals(result.error.actual, v2);
+    assertEquals(result.error.conflict, {
+      in: alice,
+      the: "application/json",
+      of: doc,
+      expected: refer(v1),
+      actual: v2,
+    });
+
     assertMatch(
       result.error.message,
       RegExp(
@@ -591,11 +609,16 @@ test(
 
     assert(conflict.error, "Create fails if cause not specified");
     assert(conflict.error.name === "ConflictError");
-    assertEquals(conflict.error.expected, null);
-    assertEquals(conflict.error.actual, {
+    assertEquals(conflict.error.conflict, {
+      in: alice,
       the: "application/json",
       of: doc,
-      cause: refer(create.ok),
+      expected: null,
+      actual: {
+        the: "application/json",
+        of: doc,
+        cause: refer(create.ok),
+      },
     });
   },
 );
