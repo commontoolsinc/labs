@@ -5,7 +5,9 @@ import { JSONSchema } from "@commontools/builder";
 import { tsToExports } from "../localBuild.js";
 import { type DocImpl } from "@commontools/runner";
 
-const SELECTED_MODEL = "cerebras:llama-3.3-70b";
+// const SELECTED_MODEL = "cerebras:llama-3.3-70b";
+// const SELECTED_MODEL = "anthropic:claude-3-5-sonnet";
+const SELECTED_MODEL = "groq:llama-3.3-70b-specdec";
 
 const responsePrefill =
   "```html\n" +
@@ -173,13 +175,7 @@ const llmUrl =
 
 const llm = new LLMClient(llmUrl);
 
-const tweakSrc = async ({
-  iframe,
-  newSpec,
-}: {
-  iframe: IFrameRecipe;
-  newSpec: string;
-}) => {
+const tweakSrc = async ({ iframe, newSpec }: { iframe: IFrameRecipe; newSpec: string }) => {
   const messages = [];
   messages.push(iframe.spec);
   messages.push(`\`\`\`html\n${iframe.src}\n\`\`\``);
