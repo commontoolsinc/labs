@@ -455,13 +455,15 @@ test("retract implicit", new URL(`memory:${alice}`), async session => {
     of: doc,
   });
 
-  assertEquals(retract.ok, {
-    the: "application/json",
-    of: doc,
-    cause: Repository.init({
+  assertEquals(retract, {
+    ok: {
       the: "application/json",
       of: doc,
-    }),
+      cause: Repository.init({
+        the: "application/json",
+        of: doc,
+      }),
+    },
   });
 });
 
