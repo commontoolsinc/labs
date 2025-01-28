@@ -3,7 +3,6 @@ import { customElement, state } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
 import { style } from "@commontools/ui";
 import { render } from "@commontools/html";
-import { addRecipe, getRecipeSpec, getRecipeSrc, run } from "@commontools/runner";
 import {
   addCharms,
   Charm,
