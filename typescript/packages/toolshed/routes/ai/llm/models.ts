@@ -139,6 +139,21 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
   });
   addModel({
     provider: groqProvider,
+    name: "groq:deepseek-r1-distill-llama-70b",
+    aliases: ["groq:deepseek-r1-distill-llama-70b", "r1-llama-70b"],
+    capabilities: {
+      contextWindow: 128_000,
+      maxOutputTokens: 32768,
+      images: false,
+      prefill: false,
+      systemPrompt: false,
+      stopSequences: false,
+      streaming: true,
+    },
+  });
+
+  addModel({
+    provider: groqProvider,
     name: "groq:llama-3.3-70b-versatile",
     aliases: ["groq:llama-3.3-70b"],
     capabilities: {
