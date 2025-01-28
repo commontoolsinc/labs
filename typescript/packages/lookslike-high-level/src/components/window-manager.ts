@@ -553,7 +553,8 @@ export class CommonWindowManager extends LitElement {
 
     const recipeMatch = matchRoute("/recipe/:recipeId", url);
     if (recipeMatch) {
-      const recipeId = recipeMatch.params.recipeId;
+      let recipeId = recipeMatch.params.recipeId;
+      recipeId = recipeId.replace("spell-", "");
       syncRecipe(recipeId).then(async () => {
         const recipe = getRecipe(recipeId);
         if (recipe) {
