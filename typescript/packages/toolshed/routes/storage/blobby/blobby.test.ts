@@ -97,4 +97,71 @@ Deno.test("blobby storage routes", async (t) => {
       assertEquals(json.error, "Path not found");
     },
   );
+
+  await t.step(
+    "GET /api/storage/blobby?prefix=test- lists blobs with prefix",
+    async () => {
+      const testPrefixContent = {
+        message: "This is a test-prefixed blob",
+      };
+      const testKey = `test-${await sha256(JSON.stringify(testPrefixContent))}`;
+
+      const otherContent = {
+        message: "This is another blob",
+      };
+      const otherKey = `other-${await sha256(JSON.stringify(otherContent))}`;
+
+      await app.fetch(
+        new Request(`http://localhost/api/storage/blobby/${testKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(testPrefixContent),
+        }),
+      );
+
+      await app.fetch(
+        new Request(`http://localhost/api/storage/blobby/${otherKey}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(otherContent),
+        }),
+      );
+
+      const response = await app.fetch(
+        new Request("http://localhost/api/storage/blobby?prefix=test-"),
+      );
+      assertEquals(response.status, 200);
+
+      const json = await response.json();
+      assertEquals(Array.isArray(json.blobs), true);
+      assertEquals(json.blobs.includes(testKey), true);
+      assertEquals(json.blobs.includes(otherKey), false);
+    },
+  );
+
+  await t.step(
+    "GET /api/storage/blobby?prefix=test-&allWithData=true lists prefixed blobs with data",
+    async () => {
+      const response = await app.fetch(
+        new Request(
+          "http://localhost/api/storage/blobby?prefix=test-&allWithData=true",
+        ),
+      );
+      assertEquals(response.status, 200);
+
+      const json = await response.json();
+      assertEquals(typeof json, "object");
+
+      Object.keys(json).forEach((key) => {
+        assertEquals(key.startsWith("test-"), true);
+      });
+
+      const testKeys = Object.keys(json).filter((k) => k.startsWith("test-"));
+      for (const key of testKeys) {
+        assertEquals(typeof json[key].message, "string");
+        assertEquals(typeof json[key].blobCreatedAt, "string");
+        assertEquals(json[key].blobAuthor, "system");
+      }
+    },
+  );
 });

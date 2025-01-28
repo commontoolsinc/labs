@@ -89,12 +89,23 @@ export const listBlobsHandler: AppRouteHandler<typeof listBlobs> = async (
   const showAll = c.req.query("all") === "true";
   const showAllWithData = c.req.query("allWithData") !== undefined;
   // TODO(jake): Replace with actual user when auth is added
+  const prefix = c.req.query("prefix");
   const user = "system";
+
   try {
     // Get the list of blobs based on user/all flag
-    const blobs = showAll || showAllWithData
+    let blobs = showAll || showAllWithData
       ? await getAllBlobs(redis)
       : await getUserBlobs(redis, user);
+
+    // Apply prefix filter if specified
+    if (prefix) {
+      blobs = blobs.filter((key) => key.startsWith(prefix));
+      logger.info(
+        { prefix, matchingBlobs: blobs.length },
+        "Applied prefix filter",
+      );
+    }
 
     // If showAllWithData is true, fetch the full blob data for each hash
     if (showAllWithData) {
