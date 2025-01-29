@@ -15,7 +15,7 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
       "/api/ai/llm": {
-        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/api/ai/llm",
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/ai/img": {

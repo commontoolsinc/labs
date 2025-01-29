@@ -14,6 +14,7 @@ const router = createRouter();
 
 const Router = router
   .openapi(routes.fulfill, handlers.fulfill)
+  .openapi(routes.caster, handlers.caster)
   .openapi(routes.search, handlers.search);
 
 export default Router;

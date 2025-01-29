@@ -9,6 +9,8 @@ import { performSearch } from "./behavior/search.ts";
 import { checkSchemaMatch } from "@/lib/schema-match.ts";
 import { Logger } from "@/lib/prefixed-logger.ts";
 import { processSchema } from "@/routes/ai/spell/fulfill.ts";
+import { candidates } from "@/routes/ai/spell/caster.ts";
+import { CasterSchemaRoute } from "@/routes/ai/spell/spell.routes.ts";
 
 // Process Schema schemas
 export const ProcessSchemaRequestSchema = z.object({
@@ -88,6 +90,14 @@ export const SearchSchemaResponseSchema = z.object({
 export type SearchSchemaRequest = z.infer<typeof SearchSchemaRequestSchema>;
 export type SearchSchemaResponse = z.infer<typeof SearchSchemaResponseSchema>;
 
+export const CasterResponseSchema = z.object({
+  data: z.array(z.string()),
+  consumes: z.array(z.string()),
+  produces: z.array(z.string()),
+});
+
+export type CasterResponse = z.infer<typeof CasterResponseSchema>;
+
 export const fulfill: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
   const logger: Logger = c.get("logger");
   const body = (await c.req.json()) as ProcessSchemaRequest;
@@ -127,6 +137,38 @@ export const search: AppRouteHandler<SearchSchemaRoute> = async (c) => {
     logger.error({ error }, "Error processing search");
     return c.json(
       { error: "Failed to process search" },
+      HttpStatusCodes.INTERNAL_SERVER_ERROR,
+    );
+  }
+};
+
+export const caster: AppRouteHandler<CasterSchemaRoute> = async (c) => {
+  const logger: Logger = c.get("logger");
+  const body = (await c.req.json()) as ProcessSchemaRequest;
+  const startTime = performance.now();
+
+  try {
+    const blobContents = await getAllBlobs({ allWithData: true }) as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const spells = await getAllBlobs({
+      allWithData: true,
+      prefix: "spell-",
+    }) as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const response = await candidates(body.schema, blobContents, spells);
+
+    return c.json(
+      response,
+      HttpStatusCodes.OK,
+    );
+  } catch (error) {
+    logger.error({ error }, "Error processing schema");
+    return c.json(
+      { error: "Failed to process schema" },
       HttpStatusCodes.INTERNAL_SERVER_ERROR,
     );
   }
