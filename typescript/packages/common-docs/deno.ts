@@ -7,13 +7,14 @@ if (error) {
   throw error;
 }
 
-Deno.serve((request) => {
+Deno.serve((request: Request) => {
   if (request.headers.get("upgrade") != "websocket") {
+    const { socket, response } = Deno.upgradeWebSocket(request);
+    memory.subscribe(socket);
+    return response;
+  } else if (request.method === "PATCH") {
+    return memory.patch(request);
+  } else {
     return new Response(null, { status: 501 });
   }
-
-  const { socket, response } = Deno.upgradeWebSocket(request);
-  memory.subscribe(socket);
-
-  return response;
 });

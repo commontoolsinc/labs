@@ -30,6 +30,7 @@ export const open = async (
 export interface MemoryService {
   close(): AsyncResult<{}, SystemError>;
   subscribe(socket: WebSocket): AsyncResult<{}, Error>;
+  patch(request: Request): Promise<Response>;
 }
 
 interface MemoryServiceSession {
@@ -46,6 +47,9 @@ class Service implements MemoryService {
   constructor(public router: Router.Router) {}
   subscribe(socket: WebSocket) {
     return subscribe(this, socket);
+  }
+  patch(request: Request): Promise<Response> {
+    return patch(this, request);
   }
   query(selector: In<Selector>) {
     return this.router.query(selector);
@@ -65,17 +69,13 @@ export const close = ({ router }: MemoryServiceSession) => {
 export const subscribe = (session: MemoryServiceSession, socket: WebSocket) => {
   const subscription = session.router.subscribe({});
   socket.onmessage = (event) => {
-    const command = parse(event.data) as Command;
+    const command = parseCommand(event.data);
     if (command.unwatch) {
       subscription.unwatch(command.unwatch);
     }
 
     if (command.watch) {
       subscription.watch(command.watch);
-    }
-
-    if (command.transact) {
-      session.router.transact(command.transact);
     }
   };
   socket.onclose = () => {
@@ -85,23 +85,50 @@ export const subscribe = (session: MemoryServiceSession, socket: WebSocket) => {
   return pipeToSocket(subscription.stream, socket);
 };
 
-const parse = (source: string) => {
-  const command = JSON.parse(source) as Command;
-  if (command.transact) {
-    command.transact = Object.fromEntries(
-      Object.entries(command.transact).map(([key, value]) => [key, decodeTransaction(value)]),
+export const patch = async (session: MemoryServiceSession, request: Request) => {
+  try {
+    const transaction = asRouterTransaction(await request.json());
+    const result = await session.router.transact(transaction);
+    const body = JSON.stringify(result);
+    const status = result.ok ? 200 : result.error.name === "ConflictError" ? 409 : 500;
+
+    return new Response(body, {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  } catch (cause) {
+    const error = cause as Partial<Error>;
+    return new Response(
+      JSON.stringify({
+        error: {
+          name: error?.name ?? "Error",
+          message: error?.message ?? "Unable to parse request body",
+          stack: error?.stack ?? "",
+        },
+      }),
+      {
+        status: 400,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
     );
   }
-
-  return command;
 };
 
-const decodeTransaction = (transaction: Transaction) =>
-  transaction.assert
-    ? { assert: decodeStatement(transaction.assert) }
-    : { retract: decodeStatement(transaction.retract) };
+const parseCommand = (source: string) => JSON.parse(source) as Command;
 
-const decodeStatement = <S extends Statement>(statement: S): S => {
+const asRouterTransaction = (json: In<Transaction>): In<Transaction> =>
+  Object.fromEntries(Object.entries(json).map(([key, value]) => [key, asTransaction(value)]));
+
+const asTransaction = (transaction: Transaction) =>
+  transaction.assert
+    ? { assert: asStatement(transaction.assert) }
+    : { retract: asStatement(transaction.retract) };
+
+const asStatement = <S extends Statement>(statement: S): S => {
   if (statement.cause && typeof statement.cause["/"] === "string") {
     statement.cause = Reference.fromJSON(statement.cause as unknown as { "/": string });
   }
