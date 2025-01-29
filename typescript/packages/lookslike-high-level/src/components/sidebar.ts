@@ -17,7 +17,6 @@ import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.jsx";
 import { render } from "@commontools/html";
 import { saveRecipe } from "../data.js";
-import { Recipe } from "@commontools/builder";
 const toasty = (message: string) => {
   const toastEl = document.createElement("div");
   toastEl.textContent = message;
@@ -144,8 +143,8 @@ export class CommonSidebar extends LitElement {
       // Add a small delay to ensure focus is complete
       await new Promise((resolve) => setTimeout(resolve, 100));
 
+      const spellbookUrl = `https://paas.saga-castor.ts.net/spellbookjr/recipes/spell-${recipeId}`;
       try {
-        const spellbookUrl = `https://paas.saga-castor.ts.net/spellbookjr/recipes/spell-${recipeId}`;
         await navigator.clipboard.writeText(spellbookUrl);
         toasty("Published to Spellbook Jr! Spellbook link copied to clipboard");
       } catch (err) {

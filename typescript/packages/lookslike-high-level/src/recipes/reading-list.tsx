@@ -1,5 +1,5 @@
 import { h } from "@commontools/html";
-import { recipe, handler, UI, NAME, derive, lift, cell } from "@commontools/builder";
+import { recipe, handler, UI, NAME, lift, cell } from "@commontools/builder";
 import { z } from "zod";
 
 const ArticleItem = z.object({
@@ -14,18 +14,6 @@ const updateTitle = handler<{ detail: { value: string } }, { title: string }>(
     state.title = detail?.value ?? "untitled";
   },
 );
-
-const updateItem = handler<{ detail: { checked: boolean; value: string } }, { item: ArticleItem }>(
-  ({ detail }, { item }) => {
-    item.done = detail.checked;
-  },
-);
-
-const deleteItem = handler<{}, { list: ArticleItem[]; item: ArticleItem }>(({}, { item, list }) => {
-  let idx = list.findIndex((i) => i.title === item.title);
-  if (idx !== -1) list.splice(idx, 1);
-  console.log("deleted item", item, idx);
-});
 
 const oneWayCopyFn = lift(({ external, seen, internal }) => {
   const previousCells = seen.map((item: any) => JSON.stringify(item));
