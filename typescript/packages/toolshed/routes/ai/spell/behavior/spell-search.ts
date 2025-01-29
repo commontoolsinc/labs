@@ -31,7 +31,7 @@ interface SpellSearchParams {
   };
 }
 
-export async function processSpellSearch({
+export function processSpellSearch({
   query,
   referencedKeys,
   spells,
