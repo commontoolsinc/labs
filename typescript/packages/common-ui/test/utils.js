@@ -51,7 +51,6 @@ export function setIframeTestHandler() {
   });
 }
 
-
 export function assertEquals(a, b) {
   if (a !== b) {
     throw new Error(`${a} does not equal ${b}.`);
@@ -95,4 +94,14 @@ export function waitForEvent(element, eventName, timeout = 1000) {
     };
     element.addEventListener(eventName, handler);
   });
+}
+
+export async function waitForCondition(condition, tries = 10, timeout = 100) {
+  while (tries-- > 0) {
+    if (condition()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("waitForCondition tries exhausted");
 }
