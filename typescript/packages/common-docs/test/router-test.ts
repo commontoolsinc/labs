@@ -39,9 +39,10 @@ const memory = new URL(`memory://`);
 
 test("query non-existing", memory, async session => {
   const unclaimed = await session.query({
-    the: "application/json",
-    of: doc,
-    in: alice,
+    [alice]: {
+      the: "application/json",
+      of: doc,
+    },
   });
 
   assertEquals(
@@ -63,7 +64,7 @@ test("create new memory", memory, async session => {
     is: { v: 1 },
   };
 
-  const result = await session.transact({ assert: v1, in: alice });
+  const result = await session.transact({ [alice]: { assert: v1 } });
   assertEquals(result, {
     ok: {
       the: "application/json",
@@ -78,9 +79,10 @@ test("create new memory", memory, async session => {
 
   assertEquals(
     await session.query({
-      in: alice,
-      the: "application/json",
-      of: doc,
+      [alice]: {
+        the: "application/json",
+        of: doc,
+      },
     }),
     {
       ok: {
@@ -98,9 +100,10 @@ test("create new memory", memory, async session => {
 
   assertEquals(
     await session.query({
-      in: bob,
-      the: "application/json",
-      of: doc,
+      [bob]: {
+        the: "application/json",
+        of: doc,
+      },
     }),
     {
       ok: {
@@ -114,22 +117,24 @@ test("create new memory", memory, async session => {
 
 test("create memory fails if already exists", memory, async session => {
   const create = await session.transact({
-    in: alice,
-    assert: {
-      the: "application/json",
-      of: doc,
-      is: { v: 0 },
+    [alice]: {
+      assert: {
+        the: "application/json",
+        of: doc,
+        is: { v: 0 },
+      },
     },
   });
 
   assert(create.ok, "Document created");
 
   const conflict = await session.transact({
-    in: alice,
-    assert: {
-      the: "application/json",
-      of: doc,
-      is: { v: 1 },
+    [alice]: {
+      assert: {
+        the: "application/json",
+        of: doc,
+        is: { v: 1 },
+      },
     },
   });
 

@@ -15,6 +15,7 @@ import {
   ConnectionError,
   SystemError,
 } from "./interface.ts";
+export * from "./interface.ts";
 
 export interface Session {
   transact(
@@ -24,6 +25,8 @@ export interface Session {
   query(
     selector: In<Selector>,
   ): AsyncResult<Fact | Unclaimed, QueryError | ConnectionError>;
+
+  subscribe(address: In<Selector>): Subscription.Subscription;
 
   watch(address: In<Selector>, subscriber: Subscription.Subscriber): void;
   unwatch(address: In<Selector>, subscriber: Subscription.Subscriber): void;
@@ -46,7 +49,7 @@ export class Router implements Session {
   ) {
     this.store = options.store;
   }
-  subscribe(selector: In<Selector>) {
+  subscribe(selector: In<Selector>): Subscription.Subscription {
     return subscribe(this, selector);
   }
 
@@ -75,9 +78,10 @@ export const subscribe = (session: Session, selector: In<Selector>) =>
 
 export const query = async (
   session: Model,
-  selector: In<Selector>,
+  selectors: In<Selector>,
 ): AsyncResult<Fact | Unclaimed, QueryError | ConnectionError> => {
-  const { ok: replica, error } = await resolve(session, selector);
+  const [[route, selector]] = Object.entries(selectors);
+  const { ok: replica, error } = await resolve(session, route);
   if (error) {
     return { error };
   }
@@ -86,45 +90,55 @@ export const query = async (
 
 export const watch = async (
   session: Model,
-  selector: In<Selector>,
+  selectors: In<Selector>,
   subscriber: Subscription.Subscriber,
 ) => {
-  const channel = Subscription.formatAddress(selector);
-  const subscribers = session.subscribers.get(channel);
-  if (subscribers) {
-    subscribers.add(subscriber);
-  } else {
-    session.subscribers.set(channel, new Set([subscriber]));
-  }
+  for (const [space, selector] of Object.entries(selectors)) {
+    const channel = Subscription.formatAddress(space, selector);
+    const subscribers = session.subscribers.get(channel);
+    if (subscribers) {
+      subscribers.add(subscriber);
+    } else {
+      session.subscribers.set(channel, new Set([subscriber]));
+    }
 
-  const result = await query(session, selector);
-  if (result.error) {
-    return result;
-  } else {
-    subscriber.integrate(result.ok);
+    const { ok: replica, error } = await resolve(session, space);
+    if (error) {
+      return { error };
+    }
+
+    const result = await replica.query(selector);
+    if (result.error) {
+      return result;
+    } else {
+      subscriber.integrate({ [space]: result.ok });
+    }
   }
 };
 
 export const unwatch = (
   session: Model,
-  selector: In<Selector>,
+  selectors: In<Selector>,
   subscriber: Subscription.Subscriber,
 ) => {
-  const channel = Subscription.formatAddress(selector);
-  const subscribers = session.subscribers.get(channel);
-  if (subscribers) {
-    subscribers.delete(subscriber);
+  for (const [route, selector] of Object.entries(selectors)) {
+    const channel = Subscription.formatAddress(route, selector);
+    const subscribers = session.subscribers.get(channel);
+    if (subscribers) {
+      subscribers.delete(subscriber);
+    }
   }
 };
 
 export const transact = async (
   session: Model,
-  transaction: In<Transaction>,
+  transactions: In<Transaction>,
 ): Promise<
   Result<Fact, ConflictError | TransactionError | ConnectionError>
 > => {
+  const [[route, transaction]] = Object.entries(transactions);
   const fact = transaction.assert ?? transaction.retract;
-  const { ok: replica, error } = await resolve(session, transaction);
+  const { ok: replica, error } = await resolve(session, route);
   if (error) {
     return { error };
   }
@@ -133,17 +147,14 @@ export const transact = async (
   if (result.error) {
     return result;
   } else {
-    const channel = Subscription.formatAddress({
-      in: transaction.in,
-      of: fact.of,
-      the: fact.the,
-    });
+    const change = { [route]: result.ok };
+    const channel = Subscription.formatAddress(route, fact);
 
     const subscribers = session.subscribers.get(channel);
     if (subscribers) {
       const promises = [];
       for (const subscriber of subscribers) {
-        promises.push(subscriber.integrate(result.ok));
+        promises.push(subscriber.integrate(change));
       }
       await Promise.all(promises);
     }
@@ -154,21 +165,21 @@ export const transact = async (
 
 const resolve = async (
   session: Model,
-  route: { in: ReplicaID },
+  route: ReplicaID,
 ): Promise<Result<Replica.Session, ConnectionError>> => {
-  const replica = session.repositories.get(route.in);
+  const replica = session.repositories.get(route);
   if (replica) {
     return { ok: replica };
   } else {
     const result = await Replica.open({
-      url: new URL(`./${route.in}.sqlite`, session.store),
+      url: new URL(`./${route}.sqlite`, session.store),
     });
 
     if (result.error) {
       return result;
     }
     const replica = result.ok as Replica.Session;
-    session.repositories.set(route.in, replica);
+    session.repositories.set(route, replica);
     return { ok: replica };
   }
 };

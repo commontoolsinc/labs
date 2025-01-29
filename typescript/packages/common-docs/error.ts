@@ -10,6 +10,7 @@ import type {
   In,
   Selector,
 } from "./interface.ts";
+import { ReplicaID } from "./interface.ts";
 import { refer } from "./util.ts";
 
 export const conflict = (info: Conflict): ToJSON<ConflictError> =>
@@ -21,7 +22,7 @@ export const transaction = (
 ): ToJSON<TransactionError> => new TheTransactionError(fact, cause);
 
 export const query = (
-  selector: In<Selector>,
+  selector: Selector & { in: string },
   cause: SystemError,
 ): ToJSON<QueryError> => new TheQueryError(selector, cause);
 
@@ -55,7 +56,7 @@ export class TheConflictError extends Error implements ConflictError {
   }
 }
 
-export type InFact = In<Fact>;
+export type InFact = Fact & { in: string };
 
 export class TheTransactionError extends Error implements TransactionError {
   override name = "StoreError" as const;
@@ -86,7 +87,7 @@ export class TheTransactionError extends Error implements TransactionError {
 export class TheQueryError extends Error implements QueryError {
   override name = "QueryError" as const;
   constructor(
-    public selector: In<Selector>,
+    public selector: Selector & { in: ReplicaID },
     public override cause: SystemError,
   ) {
     const { the, of } = selector;

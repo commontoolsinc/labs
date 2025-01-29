@@ -104,6 +104,8 @@ export interface Retraction {
  */
 export type Fact = Assertion | Retraction;
 
+export type State = Fact | Unclaimed;
+
 export type Assert = {
   assert: Claim;
   retract?: undefined;
@@ -130,7 +132,7 @@ export interface Selector {
 /**
  * Generic type used to annotate underlying type with a context of the replica.
  */
-export type In<T> = T & { in: ReplicaID };
+export type In<T> = { [For: ReplicaID]: T };
 
 export type JSONValue =
   | null
@@ -223,13 +225,13 @@ export interface TransactionError extends Error {
   /**
    * Fact being stored when the error occurred.
    */
-  fact: In<Fact>;
+  fact: Fact & { in: ReplicaID };
 }
 
 export interface QueryError extends Error {
   name: "QueryError";
   cause: SystemError;
-  selector: In<Selector>;
+  selector: Selector & { in: ReplicaID };
 }
 
 export interface Change {
