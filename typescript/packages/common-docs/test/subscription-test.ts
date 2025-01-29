@@ -1,10 +1,11 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
 import * as Router from "../router.ts";
-import { refer } from "merkle-reference";
+import { is, refer } from "merkle-reference";
 
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
 const bob = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
 const doc = "4301a667-5388-4477-ba08-d2e6b51a62a3";
+const doc2 = "2959ac6c-be22-495e-aa5b-b52bd101d354";
 
 const test = (
   title: string,
@@ -97,7 +98,7 @@ test("subscribe receives unclaimed then asserted", memory, async session => {
   ]);
 });
 
-test("only subscribe receives retraction", memory, async session => {
+test("subscribe receives retraction", memory, async session => {
   await session.transact({
     [alice]: {
       assert: {
@@ -151,6 +152,167 @@ test("only subscribe receives retraction", memory, async session => {
       },
     },
   ]);
+});
+
+test("subscription watch / unwatch", memory, async session => {
+  const subscription = session.subscribe({
+    [alice]: {
+      the: "application/json",
+      of: doc,
+    },
+  });
+
+  const two = take(subscription.stream, 2);
+
+  const v1 = await session.transact({
+    [alice]: {
+      assert: {
+        the: "application/json",
+        of: doc2,
+        is: { v: 1 },
+      },
+    },
+  });
+
+  assert(v1.ok, "asserted second doc");
+
+  await session.transact({
+    [alice]: {
+      assert: {
+        the: "application/json",
+        of: doc,
+        is: { v: 2 },
+      },
+    },
+  });
+
+  assertEquals(
+    await two,
+    [
+      {
+        [alice]: {
+          the: "application/json",
+          of: doc,
+        },
+      },
+      {
+        [alice]: {
+          the: "application/json",
+          of: doc,
+          is: { v: 2 },
+          cause: refer({ the: "application/json", of: doc }),
+        },
+      },
+    ],
+    "did not got update for the document was not subscribed to",
+  );
+
+  const next = take(subscription.stream, 1);
+  subscription.watch({ [alice]: { the: "application/json", of: doc2 } });
+
+  assertEquals(
+    await next,
+    [
+      {
+        [alice]: {
+          the: "application/json",
+          of: doc2,
+          is: { v: 1 },
+          cause: refer({ the: "application/json", of: doc2 }),
+        },
+      },
+    ],
+    "got update for the document was subscribed to",
+  );
+
+  subscription.unwatch({ [alice]: { the: "application/json", of: doc } });
+
+  const third = take(subscription.stream, 1);
+
+  const v3 = await session.transact({
+    [alice]: {
+      assert: {
+        the: "application/json",
+        of: doc,
+        is: { v: 3 },
+        cause: refer({
+          the: "application/json",
+          of: doc,
+          is: { v: 2 },
+          cause: {
+            the: "application/json",
+            of: doc,
+          },
+        }),
+      },
+    },
+  });
+  assert(v3.ok);
+
+  const v4 = await session.transact({
+    [alice]: {
+      assert: {
+        the: "application/json",
+        of: doc2,
+        is: { v: 4 },
+        cause: refer({
+          the: "application/json",
+          of: doc2,
+          is: { v: 1 },
+          cause: { the: "application/json", of: doc2 },
+        }),
+      },
+    },
+  });
+  assert(v4.ok);
+
+  assertEquals(
+    await third,
+    [
+      {
+        [alice]: {
+          the: "application/json",
+          of: doc2,
+          is: { v: 4 },
+          cause: refer({
+            the: "application/json",
+            of: doc2,
+            is: { v: 1 },
+            cause: { the: "application/json", of: doc2 },
+          }),
+        },
+      },
+    ],
+    "did not got update for the document was unwatched",
+  );
+});
+
+test("close subscription", memory, async session => {
+  const subscription = session.subscribe({
+    [alice]: {
+      the: "application/json",
+      of: doc,
+    },
+  });
+
+  const inbox = take(subscription.stream, 2);
+
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  subscription.close();
+
+  assertEquals(
+    await inbox,
+    [
+      {
+        [alice]: {
+          the: "application/json",
+          of: doc,
+        },
+      },
+    ],
+    "receives unclaimed fact",
+  );
 });
 
 const take = async <T>(

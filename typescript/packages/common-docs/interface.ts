@@ -233,21 +233,3 @@ export interface QueryError extends Error {
   cause: SystemError;
   selector: Selector & { in: ReplicaID };
 }
-
-export interface Change {
-  [In: ReplicaID]: {
-    [Of: Entity]: {
-      [The: The]: Update | Delete;
-    };
-  };
-}
-
-export type Update = {
-  "+": { is: JSONValue; cause?: Reference<Fact> };
-  "-"?: undefined;
-};
-
-export interface Delete {
-  "-": { is: Reference<JSONValue>; cause?: Reference<Fact> };
-  "+"?: undefined;
-}
