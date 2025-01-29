@@ -26,7 +26,7 @@ export async function processSchema(
   );
 
   // Get all blob keys first
-  const allBlobs = await getAllBlobs(true);
+  const allBlobs = await getAllBlobs({ allWithData: true });
   logger.info(
     { blobCount: allBlobs.length },
     "Retrieved blob keys from storage",

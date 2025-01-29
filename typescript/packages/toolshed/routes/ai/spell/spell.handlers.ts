@@ -91,8 +91,9 @@ export type SearchSchemaRequest = z.infer<typeof SearchSchemaRequestSchema>;
 export type SearchSchemaResponse = z.infer<typeof SearchSchemaResponseSchema>;
 
 export const CasterResponseSchema = z.object({
-  spells: z.array(z.string()),
-  keys: z.array(z.string()),
+  data: z.array(z.string()),
+  consumes: z.array(z.string()),
+  produces: z.array(z.string()),
 });
 
 export type CasterResponse = z.infer<typeof CasterResponseSchema>;
@@ -147,14 +148,21 @@ export const caster: AppRouteHandler<CasterSchemaRoute> = async (c) => {
   const startTime = performance.now();
 
   try {
-    const blobContents = await getAllBlobs(true) as Record<
+    const blobContents = await getAllBlobs({ allWithData: true }) as Record<
       string,
       Record<string, unknown>
     >;
-    const response = await candidates(body.schema, blobContents);
+    const spells = await getAllBlobs({
+      allWithData: true,
+      prefix: "spell-",
+    }) as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const response = await candidates(body.schema, blobContents, spells);
 
     return c.json(
-      { keys: response.map((r) => r.key), spells: [] },
+      response,
       HttpStatusCodes.OK,
     );
   } catch (error) {
