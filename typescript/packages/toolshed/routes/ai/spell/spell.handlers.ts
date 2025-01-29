@@ -1,18 +1,15 @@
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { z } from "zod";
 import { getAllBlobs, getBlob } from "./behavior/effects.ts";
-import { generateText } from "@/lib/llm.ts";
 
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type { ProcessSchemaRoute, SearchSchemaRoute } from "./spell.routes.ts";
 import { performSearch } from "./behavior/search.ts";
-import { checkSchemaMatch } from "@/lib/schema-match.ts";
 import { Logger } from "@/lib/prefixed-logger.ts";
 import { processSchema } from "@/routes/ai/spell/fulfill.ts";
 import { candidates } from "@/routes/ai/spell/caster.ts";
 import { CasterSchemaRoute } from "@/routes/ai/spell/spell.routes.ts";
 
-// Process Schema schemas
 export const ProcessSchemaRequestSchema = z.object({
   schema: z.record(
     z
@@ -20,7 +17,12 @@ export const ProcessSchemaRequestSchema = z.object({
       .or(
         z.number().or(z.boolean().or(z.array(z.any()).or(z.record(z.any())))),
       ),
-  ),
+  ).openapi({
+    example: {
+      title: { type: "string" },
+      url: { type: "string" },
+    },
+  }),
   many: z.boolean().optional(),
   prompt: z.string().optional(),
   options: z
@@ -89,6 +91,24 @@ export const SearchSchemaResponseSchema = z.object({
 
 export type SearchSchemaRequest = z.infer<typeof SearchSchemaRequestSchema>;
 export type SearchSchemaResponse = z.infer<typeof SearchSchemaResponseSchema>;
+
+export const CasterRequestSchema = z.object({
+  schema: z.record(
+    z
+      .string()
+      .or(
+        z.number().or(z.boolean().or(z.array(z.any()).or(z.record(z.any())))),
+      ),
+  ).openapi({
+    example: {
+      title: { type: "string" },
+      url: { type: "string" },
+    },
+  }),
+  prompt: z.string().optional(),
+});
+
+export type CasterRequest = z.infer<typeof CasterRequestSchema>;
 
 export const CasterResponseSchema = z.object({
   data: z.array(z.string()),

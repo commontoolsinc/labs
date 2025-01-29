@@ -2,6 +2,7 @@ import { createRoute } from "@hono/zod-openapi";
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { jsonContent } from "stoker/openapi/helpers";
 import {
+  CasterRequestSchema,
   CasterResponseSchema,
   ProcessSchemaRequestSchema,
   ProcessSchemaResponseSchema,
@@ -78,7 +79,7 @@ export const caster = createRoute({
     body: {
       content: {
         "application/json": {
-          schema: ProcessSchemaRequestSchema,
+          schema: CasterRequestSchema,
         },
       },
     },
