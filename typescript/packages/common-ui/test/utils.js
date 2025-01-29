@@ -51,6 +51,12 @@ export function setIframeTestHandler() {
   });
 }
 
+export function assert(condition) {
+  if (!condition) {
+    throw new Error(`${condition} is not truthy.`);
+  }
+}
+
 export function assertEquals(a, b) {
   if (a !== b) {
     throw new Error(`${a} does not equal ${b}.`);

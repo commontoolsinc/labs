@@ -1,6 +1,10 @@
-import { waitForEvent, invertPromise, setIframeTestHandler, cleanup, render, assertEquals } from "./utils.js";
+import { waitForEvent, assert, invertPromise, setIframeTestHandler, cleanup, render, assertEquals } from "./utils.js";
 
 setIframeTestHandler();
+
+// Cookies should not be set with SameSite=None, but
+// used to test that cookies are not accessible to iframe.
+document.cookie = "testcookie=1; SameSite=None;";
 
 // When CSP is applied to an iframe, the `securitypolicyviolation`
 // event is emitted on the iframe's `document`.
@@ -11,13 +15,16 @@ setIframeTestHandler();
 // content may still work with some imports (e.g. styles/images) failing.
 // If so, we may want to add a new post message "event" in addition
 // to the not-very-CSP-compatible "error" event.
+//
+// Additionally, we want to propagate other errors to the parent frame
+// for inspection.
 const CSP_REPORTER = `
 <script>
 document.addEventListener('securitypolicyviolation', e => {
   window.parent.postMessage({
     type: 'error',
     data: {
-      description: e.violatedDirective,
+      description: "CSP:" + e.violatedDirective,
       source: e.sourceFile,
       lineno: 0,
       colno: 0,
@@ -25,6 +32,18 @@ document.addEventListener('securitypolicyviolation', e => {
     }
   }, '*');
 });
+window.onerror = function (message, source, lineno, colno, error) {
+  window.parent.postMessage({
+    type: "error",
+    data: {
+      description: message,
+      source: source,
+      lineno: lineno,
+      colno: colno,
+      stacktrace: error && error.stack ? error.stack : new Error().stack,
+    },
+  }, '*');
+}
 </script>
 `;
 
@@ -42,46 +61,95 @@ describe("common-iframe CSP", () => {
     `<script>console.log("foo")</script><style>* { background-color: red; }</style><div>foo</div>`,
     null
   ], [
-    "allows self resources",
+    "allows 1P fetch",
     `<script>fetch("${ORIGIN_URL}/foo.js")</script>`,
     null,
   ], [
+    "disallows fetch",
+    `<script>fetch("${SCRIPT_URL}");</script>`,
+    "CSP:connect-src",
+  ], [
     "disallows 3P JS elements",
     `<script src="${SCRIPT_URL}"></script>`,
-    "script-src-elem",
+    "CSP:script-src-elem",
   ], [
     "disallows 3P CSS elements",
     `<link rel="stylesheet" href="${STYLE_URL}">`,
-    "style-src-elem",
+    "CSP:style-src-elem",
   ], [
     "disallows 3P CSS imports",
     `<style>@import url("${STYLE_URL}") print;</style>`,
-    "style-src-elem",
+    "CSP:style-src-elem",
   ], [
     "disallows 3P images in styles",
     `<style>* { background-image: url("${IMG_URL}"); }</style>`,
-    "img-src",
+    "CSP:img-src",
   ], [
     "disallows 3P images in elements",
     `<img src="${IMG_URL}" />`,
-    "img-src",
+    "CSP:img-src",
   ], [
-    "disallows fetch",
-    `<script>fetch("${SCRIPT_URL}");</script>`,
-    "connect-src",
+    "disallows base element",
+    `<base href="${HTML_URL}" />`,
+    "CSP:base-uri",
+  ], [
+    "disallows prefetch",
+    `<link rel="prefetch" href="${HTML_URL}" />`,
+    "CSP:default-src",
+  ], [
+    "disallows Worker",
+    `<script>new Worker("${SCRIPT_URL}")</script>`,
+    /Uncaught SecurityError/,
+  ], [
+    "disallows SharedWorker",
+    `<script>new SharedWorker("${SCRIPT_URL}")</script>`,
+    /Uncaught SecurityError/,
+  ], [
+    "disallows ServiceWorker",
+    `<script>navigator.serviceWorker.register("${SCRIPT_URL}")</script>`,
+    /Uncaught SecurityError/,
+  ], [
+    "disallows cookie access",
+    `<script>let foo = document.cookie;</script>`,
+    /Uncaught SecurityError/,
   ]];
 
-  // These tests do not report correctly.
-  const falseNegatives = [
-    [ // An error isn't fired in the test here, but does correctly
-      // prevents iframe rendering in practice
-      "disallows iframes",
-      `<iframe src="${HTML_URL}"></iframe>`,
-      "frame-src",
+  // /!\ These tests do not report correctly.
+  // /!\ Not sure why! But they correctly are blocked
+  // /!\ in practice. How can we ensure this is properly tested?
+  const falseNegatives = [[
+    "disallows iframes",
+    `<iframe src="${HTML_URL}"></iframe>`,
+    "CSP:frame-src",
+  ], [
+    "disallows navigation",
+    `<script>window.location.href = "${HTML_URL}";</script>`,
+    "CSP:default-src",
+  ]];
+
+  const unknownStatuses = [
+    [
+      // `prerender` is a Chrome-only feature-flagged
+      // source of exfiltration. This *should* be
+      // covered by `default-src`, but TBD on testing that.
+      "disallows prerender",
+      `<link rel="prerender" href="${HTML_URL}" />`,
+      "CSP:default-src",
     ]];
 
   for (let [name, html, expected] of cases) {
-    it(name, async () => {
+    defineTest(name, html, expected);
+  }
+  for (let [name, html, expected] of falseNegatives) {
+    definePending(name, html, expected);
+  }
+  for (let [name, html, expected] of unknownStatuses) {
+    definePending(name, html, expected);
+  }
+});
+
+function defineTest(name, html, expected) {
+  it(name, async () => {
       const body = `
         ${CSP_REPORTER}
         ${html}
@@ -91,8 +159,15 @@ describe("common-iframe CSP", () => {
         await invertPromise(waitForEvent(iframe, "error"));
       } else {
         let event = await waitForEvent(iframe, "error");
-        assertEquals(event.detail.description, expected);
+        if (typeof expected === "string") {
+          assertEquals(event.detail.description, expected);
+        } else {
+          assert(expected.test(event.detail.description));
+        }
       }
-    });
-  }
-});
+  });
+}
+
+function definePending(name, _html, _expected) {
+  it(name);
+}
