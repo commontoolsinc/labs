@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS fact (
 CREATE TABLE IF NOT EXISTS memory (
   the     TEXT NOT NULL,        -- Kind of a fact e.g. "application/json"
   of      TEXT NOT NULL,        -- Entity identifier fact is about
-  fact  TEXT NOT NULL,        -- Link to the fact,
+  fact  TEXT NOT NULL,          -- Link to the fact,
   FOREIGN KEY(fact) REFERENCES fact(this),
   PRIMARY KEY (the, of)         -- Ensure that we have only one fact per entity
 );
