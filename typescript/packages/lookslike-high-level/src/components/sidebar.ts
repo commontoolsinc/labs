@@ -141,12 +141,16 @@ export class CommonSidebar extends LitElement {
     if (success) {
       // Focus the document to ensure clipboard access
       window.focus();
+      // Add a small delay to ensure focus is complete
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
       try {
         const spellbookUrl = `https://paas.saga-castor.ts.net/spellbookjr/recipes/spell-${recipeId}`;
         await navigator.clipboard.writeText(spellbookUrl);
         toasty("Published to Spellbook Jr! Spellbook link copied to clipboard");
       } catch (err) {
-        toasty("Published to Spellbook Jr! (Failed to copy spellbook link)");
+        // If clipboard fails, show the URL in the toast
+        toasty(`Published to Spellbook Jr! Spellbook URL: ${spellbookUrl}`);
         console.error("Failed to copy to clipboard:", err);
       }
     } else {
