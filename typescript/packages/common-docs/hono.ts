@@ -1,12 +1,13 @@
-import { cors } from "@hono/hono/cors";
-import { Hono } from "@hono/hono";
-import { logger } from "@hono/hono/logger";
-import * as Path from "@std/path";
+import { cors } from "jsr:@hono/hono/cors";
+import { Hono } from "jsr:@hono/hono";
+import { upgradeWebSocket } from "jsr:@hono/hono/deno";
+import { logger } from "jsr:@hono/hono/logger";
+import * as Path from "jsr:@std/path";
 import * as Service from "./lib.ts";
 
 // Ensure state directory exists
-const url = new URL("state", Path.toFileUrl(Deno.cwd()));
-const store = await Service.open({ store: { url } });
+const url = new URL("memory", Path.toFileUrl(`${Deno.cwd()}/`));
+const store = await Service.open({ store: url });
 
 const app = new Hono<{}>();
 
@@ -24,12 +25,25 @@ app.use(
   }),
 );
 
-app.put("/state/:replica/:entity", async context => {
+app.put("/state/:replica/:entity", async (context) => {
   const replica = context.req.param("replica");
   const entity = context.req.param("entity");
 });
 
-app.get("/state/:replica/:entity", async context => {
+app.get("/state/:replica/:entity", async (context) => {
   const replica = context.req.param("replica");
   const entity = context.req.param("entity");
 });
+
+app.get('/memory/', upgradeWebSocket(async (context) => ({
+  async onMessage(message, ws) {
+    ws.send
+    message.data
+    
+    console.log("Received message", message);
+  },
+  async onClose() {
+    console.log("Connection closed");
+  },
+}))
+

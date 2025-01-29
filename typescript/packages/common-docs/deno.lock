@@ -16,6 +16,7 @@
     "jsr:@std/fs@0.221": "0.221.0",
     "jsr:@std/fs@^1.0.10": "1.0.10",
     "jsr:@std/internal@^1.0.5": "1.0.5",
+    "jsr:@std/path@*": "1.0.8",
     "jsr:@std/path@0.217": "0.217.0",
     "jsr:@std/path@0.221": "0.221.0",
     "jsr:@std/path@^1.0.8": "1.0.8",

@@ -1,8 +1,4 @@
-import {
-  Database,
-  Transaction as DBTransaction,
-  SqliteError,
-} from "jsr:@db/sqlite";
+import { Database, Transaction as DBTransaction, SqliteError } from "jsr:@db/sqlite";
 import { fromString, refer, Reference } from "npm:merkle-reference";
 import type {
   Result,
@@ -56,6 +52,8 @@ CREATE TABLE IF NOT EXISTS memory (
   FOREIGN KEY(fact) REFERENCES fact(this),
   PRIMARY KEY (the, of)         -- Ensure that we have only one fact per entity
 );
+
+COMMIT;
 `;
 
 const IMPORT_DATUM = `INSERT OR IGNORE INTO datum (this, source) VALUES (:this, :source);`;
@@ -107,9 +105,7 @@ export interface Session {
    * transaction fails with `ConflictError`. Otherwise document is updated to
    * the new value.
    */
-  transact(
-    transact: Transaction,
-  ): Result<Fact, ToJSON<ConflictError> | ToJSON<TransactionError>>;
+  transact(transact: Transaction): Result<Fact, ToJSON<ConflictError> | ToJSON<TransactionError>>;
 
   /**
    * Query can be used to retrieve a document from the store. At the moment
@@ -167,9 +163,7 @@ const readAddress = (url: URL) => {
  * Creates a connection to the existing replica. Errors if replica does not
  * exist.
  */
-export const connect = async ({
-  url,
-}: Options): AsyncResult<Store, ToJSON<ConnectionError>> => {
+export const connect = async ({ url }: Options): AsyncResult<Store, ToJSON<ConnectionError>> => {
   const address = readAddress(url);
   try {
     const database = await new Database(address.location, { create: false });
@@ -181,9 +175,7 @@ export const connect = async ({
   }
 };
 
-export const open = async ({
-  url,
-}: Options): AsyncResult<Store, ToJSON<ConnectionError>> => {
+export const open = async ({ url }: Options): AsyncResult<Store, ToJSON<ConnectionError>> => {
   try {
     const { location, id } = readAddress(url);
     const database = await new Database(location, { create: true });
@@ -228,18 +220,11 @@ export const implicit = ({ the, of }: { the: string; of: Entity }) => ({
 /**
  * Creates a reference to an implicit fact.
  */
-export const init = ({
-  the,
-  of,
-}: {
-  the: string;
-  of: Entity;
-}): Reference<Assertion> => refer(implicit({ the, of }));
+export const init = ({ the, of }: { the: string; of: Entity }): Reference<Assertion> =>
+  refer(implicit({ the, of }));
 
 const pull = ({ store }: Model, { the, of }: Selector): Fact | undefined => {
-  const row = store.prepare(EXPORT).get({ the, entity: of }) as
-    | MemoryView
-    | undefined;
+  const row = store.prepare(EXPORT).get({ the, entity: of }) as MemoryView | undefined;
 
   // If we do not have matching memory we return implicit fact.
   if (row === undefined) {
@@ -259,10 +244,7 @@ const pull = ({ store }: Model, { the, of }: Selector): Fact | undefined => {
   }
 };
 
-const importDatum = (
-  session: Model,
-  source: Fact,
-): Reference<JSONValue> | null => {
+const importDatum = (session: Model, source: Fact): Reference<JSONValue> | null => {
   // If source is a {@link Defunct}, then `is` field and we will be `undefined`
   // so we will not need to import any data into the `datum` table.
   if (source.is === undefined) {
@@ -277,10 +259,7 @@ const importDatum = (
   }
 };
 
-const swap = <Fact extends Assertion | Retraction>(
-  session: Model,
-  source: Fact,
-): Fact => {
+const swap = <Fact extends Assertion | Retraction>(session: Model, source: Fact): Fact => {
   const { the, of } = source;
   // Derive the merkle reference for the provided factor which is expected to
   // be in normalized form.
@@ -293,9 +272,7 @@ const swap = <Fact extends Assertion | Retraction>(
   // explicitly and telling in the error that hash to implicit was expected
   // would be confusing.
   const expected =
-    source.cause?.toString() === init(source).toString()
-      ? null
-      : (source.cause as Reference<Fact>);
+    source.cause?.toString() === init(source).toString() ? null : (source.cause as Reference<Fact>);
   const cause = expected?.toString() ?? null;
 
   // First we import JSON value in the `is` field into the `datum` table and
@@ -378,10 +355,7 @@ const execute = <
         // or file is corrupt. We wrap those in a generic store error.
         // @see https://www.sqlite.org/rescode.html
         {
-          error: Error.transaction(
-            { ...fact, in: session.id },
-            error as SqliteError,
-          ),
+          error: Error.transaction({ ...fact, in: session.id }, error as SqliteError),
         };
   }
 };
@@ -404,14 +378,11 @@ export const retract = (
   execute(session.store.transaction(swap), session, {
     the,
     of,
-    cause:
-      cause == null ? init({ the, of }) : refer({ ...source, the, of, cause }),
+    cause: cause == null ? init({ the, of }) : refer({ ...source, the, of, cause }),
   });
 
 export const transact = (model: Model, transact: Transaction) =>
-  transact.assert
-    ? assert(model, transact.assert)
-    : retract(model, transact.retract);
+  transact.assert ? assert(model, transact.assert) : retract(model, transact.retract);
 
 export const query = (
   { id, store }: Model,
