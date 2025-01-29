@@ -21,6 +21,8 @@ import type {
   Transaction,
   Assertion,
   Claim,
+  AsyncResult,
+  SystemError,
 } from "./interface.ts";
 import * as Error from "./error.ts";
 
@@ -114,6 +116,8 @@ export interface Session {
    * you can only pass the `entity` selector.
    */
   query(selector: Selector): Result<Fact | Unclaimed, ToJSON<QueryError>>;
+
+  close(): AsyncResult<{}, SystemError>;
 }
 
 export class Store implements Model, Session {
@@ -128,6 +132,10 @@ export class Store implements Model, Session {
 
   query(selector: Selector) {
     return query(this, selector);
+  }
+
+  close(): AsyncResult<{}, SystemError> {
+    return close(this);
   }
 }
 
@@ -161,7 +169,7 @@ const readAddress = (url: URL) => {
  */
 export const connect = async ({
   url,
-}: Options): Promise<Result<Store, ToJSON<ConnectionError>>> => {
+}: Options): AsyncResult<Store, ToJSON<ConnectionError>> => {
   const address = readAddress(url);
   try {
     const database = await new Database(address.location, { create: false });
@@ -175,7 +183,7 @@ export const connect = async ({
 
 export const open = async ({
   url,
-}: Options): Promise<Result<Store, ToJSON<ConnectionError>>> => {
+}: Options): AsyncResult<Store, ToJSON<ConnectionError>> => {
   try {
     const { location, id } = readAddress(url);
     const database = await new Database(location, { create: true });
@@ -187,8 +195,13 @@ export const open = async ({
   }
 };
 
-export const close = async ({ store }: Model) => {
-  await store.close();
+export const close = async ({ store }: Model): AsyncResult<{}, SystemError> => {
+  try {
+    await store.close();
+    return { ok: {} };
+  } catch (cause) {
+    return { error: cause as SqliteError };
+  }
 };
 
 type MemoryView = {

@@ -13,6 +13,7 @@ import {
   ConflictError,
   TransactionError,
   ConnectionError,
+  SystemError,
 } from "./interface.ts";
 
 export interface Session {
@@ -26,6 +27,8 @@ export interface Session {
 
   watch(address: In<Selector>, subscriber: Subscription.Subscriber): void;
   unwatch(address: In<Selector>, subscriber: Subscription.Subscriber): void;
+
+  close(): AsyncResult<{}, SystemError>;
 }
 
 export interface Model {
@@ -60,6 +63,10 @@ export class Router implements Session {
   }
   unwatch(selector: In<Selector>, subscriber: Subscription.Subscriber) {
     return unwatch(this, selector, subscriber);
+  }
+
+  close() {
+    return close(this);
   }
 }
 
@@ -154,7 +161,7 @@ const resolve = async (
     return { ok: replica };
   } else {
     const result = await Replica.open({
-      url: new URL(`./address.replica.sqlite`, session.store),
+      url: new URL(`./${route.in}.sqlite`, session.store),
     });
 
     if (result.error) {
@@ -172,4 +179,21 @@ export interface Options {
 
 export const open = async (options: Options): AsyncResult<Router, never> => {
   return { ok: await new Router(options) };
+};
+
+export const close = async (router: Router) => {
+  const promises = [];
+  for (const replica of router.repositories.values()) {
+    promises.push(replica.close());
+  }
+
+  for (const subscribers of router.subscribers.values()) {
+    for (const subscriber of subscribers) {
+      promises.push(subscriber.close());
+    }
+  }
+
+  const results = await Promise.all(promises);
+  const result = results.find(result => result?.error);
+  return result ?? { ok: {} };
 };

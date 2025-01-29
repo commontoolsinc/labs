@@ -5,6 +5,8 @@ export type State = Fact | Unclaimed;
 
 export interface Subscriber {
   integrate(state: State): void;
+
+  close(): void;
 }
 
 /**
@@ -39,7 +41,7 @@ export class Subscription implements SubscriptionSession {
         this.controller = source;
       },
       cancel: () => {
-        this.close();
+        this.cancel();
       },
     });
   }
@@ -54,6 +56,10 @@ export class Subscription implements SubscriptionSession {
 
   integrate(state: State) {
     return integrate(this, state);
+  }
+
+  cancel() {
+    return cancel(this);
   }
 
   close() {
@@ -71,13 +77,20 @@ export const integrate = (subscription: Subscription, state: State) => {
 
 export const open = (replica: Replica.Session) => new Subscription(replica);
 
-export const close = (subscription: Subscription) => {
+export const cancel = (subscription: Subscription) => {
   if (subscription.controller) {
     subscription.controller = undefined;
     for (const [, address] of subscription.channels) {
       subscription.replica.unwatch(address, subscription);
     }
     subscription.channels.clear();
+  }
+};
+
+export const close = (subscription: Subscription) => {
+  if (subscription.controller) {
+    subscription.controller.close();
+    cancel(subscription);
   }
 };
 
