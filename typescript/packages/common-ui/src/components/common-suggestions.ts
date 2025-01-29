@@ -1,21 +1,8 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
-import {
-  readSuggestion,
-  Suggestion,
-  suggestionTemplate,
-} from "./common-suggestion.js";
+import { readSuggestion, Suggestion, suggestionTemplate } from "./common-suggestion.js";
 import { getId } from "./identifiable.js";
-import { view } from "../hyperscript/render.js";
-import { eventProps } from "../hyperscript/schema-helpers.js";
-
-export const suggestions = view("common-suggestions", {
-  ...eventProps(),
-  id: { type: "string" },
-  suggestions: { type: "array" },
-  limit: { type: "number" },
-});
 
 export class SelectSuggestionEvent extends Event {
   detail: Suggestion;
@@ -29,19 +16,19 @@ export class SelectSuggestionEvent extends Event {
 @customElement("common-suggestions")
 export class CommonSuggestionsElement extends LitElement {
   static override styles = css`
-  :host {
-    display: block;
-  }
+    :host {
+      display: block;
+    }
 
-  .suggestions {
-    display: flex;
-    flex-direction: column;
-    gap: var(--unit);
-  }
+    .suggestions {
+      display: flex;
+      flex-direction: column;
+      gap: var(--unit);
+    }
 
-  :host([pad="md"]) .suggestions {
-    padding: var(--pad);
-  }
+    :host([pad="md"]) .suggestions {
+      padding: var(--pad);
+    }
   `;
 
   @property({ type: Array }) suggestions: Array<Suggestion> = [];

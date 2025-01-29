@@ -1,8 +1,6 @@
-import {
-  getAllBlobs,
-  getBlobByHash,
-  getBlobScreenshotUrl,
-} from "@/app/lib/blobby";
+export const dynamic = "force-dynamic";
+
+import { getAllBlobs, getBlobByHash, getBlobScreenshotUrl } from "@/app/lib/blobby";
 import { SearchBox } from "@/app/components/search-box";
 import Header from "@/app/components/header";
 import RecipeCard from "@/app/components/recipe-card";
@@ -14,11 +12,7 @@ interface BlobData {
   likes: number;
 }
 
-export default async function RecipesPage({
-  searchParams,
-}: {
-  searchParams: { q?: string };
-}) {
+export default async function RecipesPage({ searchParams }: { searchParams: { q?: string } }) {
   const searchTerm = searchParams.q?.toLowerCase() || "";
 
   const blobHashes = await getAllBlobs();
@@ -27,7 +21,6 @@ export default async function RecipesPage({
       blobHashes.map(async (hash) => {
         const blob = await getBlobByHash(hash);
 
-        console.log(blob);
         return {
           hash,
           name: blob.recipeName || "Unnamed Recipe",
@@ -39,9 +32,7 @@ export default async function RecipesPage({
   ).map((result) => (result.status === "fulfilled" ? result.value : null));
 
   const validBlobs = blobs.filter((blob): blob is BlobData => blob !== null);
-  const filteredBlobs = validBlobs.filter((blob) =>
-    blob?.name.toLowerCase().includes(searchTerm),
-  );
+  const filteredBlobs = validBlobs.filter((blob) => blob?.name.toLowerCase().includes(searchTerm));
 
   return (
     <>

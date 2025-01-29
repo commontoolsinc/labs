@@ -54,20 +54,17 @@ app.get("/screenshot/*", async (c) => {
   try {
     requestURL = new URL(uri);
   } catch {
+    let id = uri.split("spell-")[1];
+    id = id.split("/png")[0];
     // If the uri is not a valid URL, we assume that it is a recipe ID
-    requestURL = new URL(`http://localhost:5173/recipe/${uri}`);
+    requestURL = new URL(`http://localhost:5173/recipe/${id}`);
   }
 
   const urlHash = await sha256(requestURL.toString());
   const outputPath = join(dataDir, `${urlHash}.png`);
 
   if (await exists(outputPath)) {
-    console.log(
-      "Fetching cached screenshot for",
-      requestURL.toString(),
-      "path: ",
-      outputPath,
-    );
+    console.log("Fetching cached screenshot for", requestURL.toString(), "path: ", outputPath);
     const screenshot = await Deno.readFile(outputPath);
     c.header("Content-Type", "image/png");
     c.header("CT-Cached-Image", "true");

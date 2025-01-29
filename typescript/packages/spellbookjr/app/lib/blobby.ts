@@ -1,8 +1,14 @@
-const BASE_URL =
-  process.env.BLOBBY_BASE_URL || "https://paas.saga-castor.ts.net/blobby";
+const BLOBBY_BASE_URL =
+  process.env.BLOBBY_BASE_URL ||
+  "https://toolshed.commontools.dev/api/storage/blobby";
+
+const SNAP_BASE_URL =
+  process.env.SNAP_BASE_URL || "https://paas.saga-castor.ts.net/snap";
 
 export const getAllBlobs = async () => {
-  const response = await fetch(`${BASE_URL}/blob?all=true`);
+  const response = await fetch(`${BLOBBY_BASE_URL}?all=true&prefix=spell-`, {
+    cache: "no-store",
+  });
   if (!response.ok) throw new Error("Failed to fetch blobs");
   const data = await response.json();
   return data.blobs as string[];
@@ -10,14 +16,18 @@ export const getAllBlobs = async () => {
 
 // NOTE(jake): This uses tailscale auth to transparently filter on my user.
 export const getMyBlobs = async () => {
-  const response = await fetch(`${BASE_URL}/blob`);
+  const response = await fetch(`${BLOBBY_BASE_URL}?prefix=spell-`, {
+    cache: "no-store",
+  });
   if (!response.ok) throw new Error("Failed to fetch blobs");
   const data = await response.json();
   return data.blobs as string[];
 };
 
 export const getBlobByHash = async (hash: string) => {
-  const response = await fetch(`${BASE_URL}/blob/${hash}`);
+  const response = await fetch(`${BLOBBY_BASE_URL}/${hash}`, {
+    cache: "no-store",
+  });
 
   if (!response.ok) {
     console.error("Response not ok for hash:", hash);
@@ -39,5 +49,5 @@ export const getBlobByHash = async (hash: string) => {
 };
 
 export const getBlobScreenshotUrl = (hash: string) => {
-  return `${BASE_URL}/blob/${hash}/png`;
+  return `${SNAP_BASE_URL}/screenshot/${hash}/png`;
 };

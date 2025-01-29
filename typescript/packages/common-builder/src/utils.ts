@@ -1,21 +1,21 @@
 import { createShadowRef } from "./opaque-ref.js";
 import {
-  Opaque,
-  Module,
-  Recipe,
-  OpaqueRef,
-  NodeRef,
-  isOpaqueRef,
-  JSONValue,
-  JSONSchema,
-  Alias,
-  isAlias,
+  type Alias,
   canBeOpaqueRef,
-  makeOpaqueRef,
-  isStatic,
-  markAsStatic,
-  isShadowRef,
+  isAlias,
+  isOpaqueRef,
   isRecipe,
+  isShadowRef,
+  isStatic,
+  type JSONSchema,
+  type JSONValue,
+  makeOpaqueRef,
+  markAsStatic,
+  type Module,
+  type NodeRef,
+  type Opaque,
+  type OpaqueRef,
+  type Recipe,
   unsafe_originalRecipe,
 } from "./types.js";
 import { getTopFrame } from "./recipe.js";
@@ -27,10 +27,7 @@ import { getTopFrame } from "./recipe.js";
  * @param fn - The function to apply to each value, which can return a new value
  * @returns Transformed value
  */
-export function traverseValue(
-  value: Opaque<any>,
-  fn: (value: any) => any,
-): any {
+export function traverseValue(value: Opaque<any>, fn: (value: any) => any): any {
   const staticWrap = isStatic(value) ? markAsStatic : (v: any) => v;
 
   // Perform operation, replaces value if non-undefined is returned
@@ -38,34 +35,29 @@ export function traverseValue(
   if (result !== undefined) value = result;
 
   // Traverse value
-  if (Array.isArray(value))
-    return staticWrap(value.map(v => traverseValue(v, fn)));
-  else if (
+  if (Array.isArray(value)) {
+    return staticWrap(value.map((v) => traverseValue(v, fn)));
+  } else if (
     (!isOpaqueRef(value) &&
       !canBeOpaqueRef(value) &&
       !isShadowRef(value) &&
       typeof value === "object" &&
       value !== null) ||
     isRecipe(value)
-  )
+  ) {
     return staticWrap(
-      Object.fromEntries(
-        Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)]),
-      ),
+      Object.fromEntries(Object.entries(value).map(([key, v]) => [key, traverseValue(v, fn)])),
     );
-  else return staticWrap(value);
+  } else return staticWrap(value);
 }
 
-export function setValueAtPath(
-  obj: any,
-  path: PropertyKey[],
-  value: any,
-): boolean {
+export function setValueAtPath(obj: any, path: PropertyKey[], value: any): boolean {
   let parent = obj;
   for (let i = 0; i < path.length - 1; i++) {
     const key = path[i];
-    if (typeof parent[key] !== "object")
+    if (typeof parent[key] !== "object") {
       parent[key] = typeof path[i + 1] === "number" ? [] : {};
+    }
     parent = parent[key];
   }
 
@@ -75,8 +67,9 @@ export function setValueAtPath(
     delete parent[path[path.length - 1]];
     // Truncate array from the end for undefined values
     if (Array.isArray(parent)) {
-      while (parent.length > 0 && parent[parent.length - 1] === undefined)
+      while (parent.length > 0 && parent[parent.length - 1] === undefined) {
         parent.pop();
+      }
     }
   } else parent[path[path.length - 1]] = value;
 
@@ -95,8 +88,9 @@ export function getValueAtPath(obj: any, path: PropertyKey[]): any {
 export function hasValueAtPath(obj: any, path: PropertyKey[]): boolean {
   let current = obj;
   for (const key of path) {
-    if (!current || typeof current !== "object" || !(key in current))
+    if (!current || typeof current !== "object" || !(key in current)) {
       return false;
+    }
     current = current[key];
   }
   return current !== undefined;
@@ -125,15 +119,14 @@ export function toJSONWithAliases(
   path: PropertyKey[] = [],
   processStatic = false,
 ): JSONValue | undefined {
-  if (isStatic(value) && !processStatic)
-    return markAsStatic(
-      toJSONWithAliases(value, paths, ignoreSelfAliases, path, true),
-    );
-  // Convert regular cells to opaque refs
+  if (isStatic(value) && !processStatic) {
+    return markAsStatic(toJSONWithAliases(value, paths, ignoreSelfAliases, path, true));
+  } // Convert regular cells to opaque refs
   else if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
   // Convert parent opaque refs to shadow refs
-  else if (isOpaqueRef(value) && value.export().frame !== getTopFrame())
+  else if (isOpaqueRef(value) && value.export().frame !== getTopFrame()) {
     value = createShadowRef(value);
+  }
 
   if (isOpaqueRef(value) || isShadowRef(value)) {
     const pathToCell = paths.get(value);
@@ -153,12 +146,12 @@ export function toJSONWithAliases(
       const cell = alias.cell.shadowOf;
       if (cell.export().frame !== getTopFrame()) {
         let frame = getTopFrame();
-        while (frame && frame.parent !== cell.export().frame)
+        while (frame && frame.parent !== cell.export().frame) {
           frame = frame.parent;
-        if (!frame)
-          throw new Error(
-            `Shadow ref alias with parent cell not found in current frame`,
-          );
+        }
+        if (!frame) {
+          throw new Error(`Shadow ref alias with parent cell not found in current frame`);
+        }
         return value;
       }
       if (!paths.has(cell)) throw new Error(`Cell not found in paths`);
@@ -179,21 +172,17 @@ export function toJSONWithAliases(
     }
   }
 
-  if (Array.isArray(value))
+  if (Array.isArray(value)) {
     return (value as Opaque<any>).map((v: Opaque<any>, i: number) =>
       toJSONWithAliases(v, paths, ignoreSelfAliases, [...path, i]),
     );
+  }
 
   if (typeof value === "object" || isRecipe(value)) {
     const result: any = {};
     let hasValue = false;
     for (const key in value as any) {
-      const jsonValue = toJSONWithAliases(
-        value[key],
-        paths,
-        ignoreSelfAliases,
-        [...path, key],
-      );
+      const jsonValue = toJSONWithAliases(value[key], paths, ignoreSelfAliases, [...path, key]);
       if (jsonValue !== undefined) {
         result[key] = jsonValue;
         hasValue = true;
@@ -208,10 +197,7 @@ export function toJSONWithAliases(
   return value;
 }
 
-export function createJsonSchema(
-  defaultValues: any,
-  referenceValues: any,
-): JSONSchema {
+export function createJsonSchema(defaultValues: any, referenceValues: any): JSONSchema {
   function analyzeType(value: any, defaultValue: any): JSONSchema {
     if (isAlias(value)) {
       const path = value.$alias.path;
@@ -233,12 +219,9 @@ export function createJsonSchema(
             for (let i = 0; i < (value ?? defaultValue).length; i++) {
               const item = value?.[i] ?? defaultValue?.[i];
               if (typeof item === "object" && item !== null) {
-                Object.keys(item).forEach(key => {
+                Object.keys(item).forEach((key) => {
                   if (!(key in properties)) {
-                    properties[key] = analyzeType(
-                      value?.[i]?.[key],
-                      defaultValue?.[i]?.[key],
-                    );
+                    properties[key] = analyzeType(value?.[i]?.[key], defaultValue?.[i]?.[key]);
                   }
                 });
               }
@@ -255,19 +238,14 @@ export function createJsonSchema(
             ...Object.keys(value ?? {}),
             ...Object.keys(defaultValue ?? {}),
           ])) {
-            schema.properties[key] = analyzeType(
-              value?.[key],
-              defaultValue?.[key],
-            );
+            schema.properties[key] = analyzeType(value?.[key], defaultValue?.[key]);
           }
         } else {
           schema.type = "null";
         }
         break;
       case "number":
-        schema.type = Number.isInteger(value ?? defaultValue)
-          ? "integer"
-          : "number";
+        schema.type = Number.isInteger(value ?? defaultValue) ? "integer" : "number";
         break;
       case "undefined":
         break;

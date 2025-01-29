@@ -67,10 +67,7 @@ export class OsCharmRow extends LitElement {
     return html`
       <div class="charm-row toolbar">
         <div class="hstack gap-sm toolbar-start">
-          <os-charm-icon
-            class="charm-row-icon"
-            icon="${this.icon}"
-          ></os-charm-icon>
+          <os-charm-icon class="charm-row-icon" icon="${this.icon}"></os-charm-icon>
           <div class="charm-row-text body">${this.text}</div>
         </div>
         <div class="hstack gap-sm toolbar-end charm-row-extra">

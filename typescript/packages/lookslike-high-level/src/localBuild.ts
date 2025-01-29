@@ -1,16 +1,9 @@
 import ts from "typescript";
-import * as commonHtml from "@commontools/common-html";
-import * as commonBuilder from "@commontools/common-builder";
-import * as commonSystem from "@commontools/common-system";
+import * as commonHtml from "@commontools/html";
+import * as commonBuilder from "@commontools/builder";
 import * as zod from "zod";
 import * as zodToJsonSchema from "zod-to-json-schema";
 
-import * as collectionSugar from "./sugar/build.js";
-import * as querySugar from "./sugar/query.js";
-import * as eventSugar from "./sugar/event.js";
-import * as zodSugar from "./sugar/zod.js";
-import * as sugar from "./sugar.js";
-import * as spellUtil from "./spells/spell.jsx";
 import * as merkleReference from "merkle-reference";
 
 // NOTE(ja): this isn't currently doing typechecking, but it could...
@@ -24,8 +17,7 @@ const importCache: Record<string, any> = {};
 
 const ensureRequires = async (js: string): Promise<Record<string, any>> => {
   const requires = /require\((['"])([^'"]+)\1\)/g;
-  const sagaCastorPattern =
-    /https:\/\/paas\.saga-castor\.ts\.net\/blobby\/blob\/[^/]+\/src/;
+  const sagaCastorPattern = /https:\/\/paas\.saga-castor\.ts\.net\/blobby\/blob\/[^/]+\/src/;
 
   const matches = [...js.matchAll(requires)];
   const localImports: Record<string, any> = {};
@@ -34,12 +26,10 @@ const ensureRequires = async (js: string): Promise<Record<string, any>> => {
     if (sagaCastorPattern.test(modulePath)) {
       if (!importCache[modulePath]) {
         // Fetch and compile the module
-        const importSrc = await fetch(modulePath).then(resp => resp.text());
+        const importSrc = await fetch(modulePath).then((resp) => resp.text());
         const importedModule = await tsToExports(importSrc);
         if (importedModule.errors) {
-          throw new Error(
-            `Failed to import ${modulePath}: ${importedModule.errors}`,
-          );
+          throw new Error(`Failed to import ${modulePath}: ${importedModule.errors}`);
         }
         importCache[modulePath] = importedModule.exports;
       }
@@ -49,9 +39,7 @@ const ensureRequires = async (js: string): Promise<Record<string, any>> => {
   return localImports;
 };
 
-export const tsToExports = async (
-  src: string,
-): Promise<{ exports?: any; errors?: string }> => {
+export const tsToExports = async (src: string): Promise<{ exports?: any; errors?: string }> => {
   // Add error handling for compilation
   const result = ts.transpileModule(src, {
     compilerOptions: {
@@ -69,16 +57,14 @@ export const tsToExports = async (
   // Check for compilation errors
   if (result.diagnostics && result.diagnostics.length > 0) {
     const errors = result.diagnostics
-      .map(diagnostic => {
-        const message = ts.flattenDiagnosticMessageText(
-          diagnostic.messageText,
-          "\n",
-        );
+      .map((diagnostic) => {
+        const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
         let locationInfo = "";
 
         if (diagnostic.file && diagnostic.start !== undefined) {
-          const { line, character } =
-            diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
+          const { line, character } = diagnostic.file.getLineAndCharacterOfPosition(
+            diagnostic.start,
+          );
           locationInfo = `[${line + 1}:${character + 1}] `; // +1 because TypeScript uses 0-based positions
         }
 
@@ -103,24 +89,10 @@ export const tsToExports = async (
       return localImports[moduleName];
     }
     switch (moduleName) {
-      case "../sugar/build.js":
-        return collectionSugar;
-      case "../sugar/query.js":
-        return querySugar;
-      case "../sugar/event.js":
-        return eventSugar;
-      case "../sugar/zod.js":
-        return zodSugar;
-      case "../sugar.js":
-        return sugar;
-      case "./spell.jsx":
-        return spellUtil;
-      case "@commontools/common-html":
+      case "@commontools/html":
         return commonHtml;
-      case "@commontools/common-builder":
+      case "@commontools/builder":
         return commonBuilder;
-      case "@commontools/common-system":
-        return commonSystem;
       case "zod":
         return zod;
       case "merkle-reference":

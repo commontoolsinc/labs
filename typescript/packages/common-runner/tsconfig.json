@@ -1,13 +1,16 @@
 {
   "extends": "../../tsconfig.base.json",
+  "moduleResolution": "nodenext",
   "compilerOptions": {
     "lib": ["es2022", "esnext.array", "esnext", "dom"],
     "outDir": "./lib",
-    "rootDir": "./src",
+    "declaration": true,
+    "jsx": "preserve",
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "Fragment",
     "experimentalDecorators": true,
-    "useDefineForClassFields": false,
-    "strictNullChecks": true
+    "useDefineForClassFields": false
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"],
-  "exclude": ["test"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "src/**/*.tsx", "vite-env.d.ts"],
+  "exclude": []
 }

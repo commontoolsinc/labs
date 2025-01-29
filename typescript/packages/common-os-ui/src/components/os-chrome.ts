@@ -1,4 +1,4 @@
-import { LitElement, css, html } from "lit-element";
+import { LitElement, css, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
 import { base } from "../shared/styles.js";
@@ -199,9 +199,6 @@ export class OsCloseButton extends LitElement {
       this.dispatchEvent(new SidebarCloseEvent());
     };
 
-    return html`<os-icon-button
-      @click="${onClick}"
-      icon="close"
-    ></os-icon-button>`;
+    return html`<os-icon-button @click="${onClick}" icon="close"></os-icon-button>`;
   }
 }

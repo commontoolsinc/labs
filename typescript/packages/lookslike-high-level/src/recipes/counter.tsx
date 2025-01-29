@@ -1,12 +1,12 @@
-import { h } from "@commontools/common-html";
-import { Spell, type OpaqueRef, handler } from "@commontools/common-builder";
+import { h } from "@commontools/html";
+import { Spell, type OpaqueRef, handler } from "@commontools/builder";
 
 type CounterState = {
   title: string;
   count: number;
 };
 
-const thisHandler = handler<{}, { count: number }>(function () {
+const thisHandler = handler<{}, { count: number }>(function (this: any) {
   this.count += 1;
 });
 
@@ -18,7 +18,7 @@ export class CounterSpell extends Spell<CounterState> {
   constructor() {
     super();
 
-    this.addEventListener("increment", self => {
+    this.addEventListener("increment", (self) => {
       console.log("self", self);
       const { count } = self;
       this.update(self, { count: count + 1 });
@@ -41,15 +41,9 @@ export class CounterSpell extends Spell<CounterState> {
       <div>
         <common-input value={title} oncommon-input={this.dispatch("title")} />
         <p>count: {count}</p>
-        <common-button onclick={this.dispatch("increment")}>
-          dispatch
-        </common-button>
-        <common-button onclick={thisHandler.bind({ count })}>
-          this
-        </common-button>
-        <common-button onclick={withHandler.with({ count })}>
-          with
-        </common-button>
+        <common-button onclick={this.dispatch("increment")}>dispatch</common-button>
+        <common-button onclick={thisHandler.bind({ count })}>this</common-button>
+        <common-button onclick={withHandler.with({ count })}>with</common-button>
       </div>
     );
   }

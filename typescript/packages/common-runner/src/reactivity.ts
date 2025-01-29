@@ -18,9 +18,7 @@ export interface SendableCell<T> {
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export const isReactive = <T = unknown>(
-  value: ReactiveCell<T> | T,
-): value is ReactiveCell<T> => {
+export const isReactive = <T = unknown>(value: ReactiveCell<T> | T): value is ReactiveCell<T> => {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -35,14 +33,9 @@ export const isReactive = <T = unknown>(
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export const isGettable = <T = unknown>(
-  value: unknown,
-): value is GettableCell<T> => {
+export const isGettable = <T = unknown>(value: unknown): value is GettableCell<T> => {
   return (
-    typeof value === "object" &&
-    value !== null &&
-    "get" in value &&
-    typeof value.get === "function"
+    typeof value === "object" && value !== null && "get" in value && typeof value.get === "function"
   );
 };
 
@@ -52,9 +45,7 @@ export const isGettable = <T = unknown>(
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export const isSendable = <T = unknown>(
-  value: unknown,
-): value is SendableCell<T> => {
+export const isSendable = <T = unknown>(value: unknown): value is SendableCell<T> => {
   return (
     typeof value === "object" &&
     value !== null &&

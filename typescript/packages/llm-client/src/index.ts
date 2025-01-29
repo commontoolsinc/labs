@@ -7,13 +7,13 @@ export type SimpleContent = string | TypedContent[];
 
 type TypedContent =
   | {
-      type: "text";
-      text: string;
-    }
+    type: "text";
+    text: string;
+  }
   | {
-      type: "image";
-      url: string;
-    };
+    type: "image";
+    url: string;
+  };
 
 type LLMRequest = {
   messages: SimpleMessage[] | SimpleContent[];
@@ -60,7 +60,7 @@ export class LLMClient {
 
     // the server might return cached data instead of a stream
     if (response.headers.get("content-type") === "application/json") {
-      let data = (await response.json()) as SimpleMessage;
+      const data = (await response.json()) as SimpleMessage;
       // FIXME(ja): can the LLM ever return anything other than a string?
       return data.content as string;
     }

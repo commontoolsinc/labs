@@ -1,17 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
-import { getDoc, ReactivityLog } from "../src/cell.js";
+import { getDoc, type ReactivityLog } from "../src/cell.js";
 import {
-  Action,
+  type Action,
+  addEventHandler,
+  type EventHandler,
+  idle,
+  onError,
+  queueEvent,
   run,
   schedule,
-  idle,
   unschedule,
-  onError,
-  addEventHandler,
-  queueEvent,
-  EventHandler,
 } from "../src/scheduler.js";
-import { lift } from "@commontools/common-builder";
 
 describe("scheduler", () => {
   it("should run actions when cells change", async () => {
@@ -19,11 +18,9 @@ describe("scheduler", () => {
     const a = getDoc(1);
     const b = getDoc(2);
     const c = getDoc(0);
-    const adder: Action = log => {
+    const adder: Action = (log) => {
       runCount++;
-      c.asCell([], log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
-      );
+      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
     };
     await run(adder);
     expect(runCount).toBe(1);
@@ -39,11 +36,9 @@ describe("scheduler", () => {
     const a = getDoc(1);
     const b = getDoc(2);
     const c = getDoc(0);
-    const adder: Action = log => {
+    const adder: Action = (log) => {
       runCount++;
-      c.asCell([], log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
-      );
+      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
     };
     schedule(adder, {
       reads: [
@@ -65,11 +60,9 @@ describe("scheduler", () => {
     const a = getDoc(1);
     const b = getDoc(2);
     const c = getDoc(0);
-    const adder: Action = log => {
+    const adder: Action = (log) => {
       runCount++;
-      c.asCell([], log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
-      );
+      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
     };
     await run(adder);
     expect(runCount).toBe(1);
@@ -92,11 +85,9 @@ describe("scheduler", () => {
     const a = getDoc(1);
     const b = getDoc(2);
     const c = getDoc(0);
-    const adder: Action = log => {
+    const adder: Action = (log) => {
       runCount++;
-      c.asCell([], log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
-      );
+      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
     };
     const cancel = schedule(adder, {
       reads: [
@@ -125,17 +116,13 @@ describe("scheduler", () => {
     const c = getDoc(0);
     const d = getDoc(1);
     const e = getDoc(0);
-    const adder1: Action = log => {
+    const adder1: Action = (log) => {
       runs.push("adder1");
-      c.asCell([], log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
-      );
+      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
     };
-    const adder2: Action = log => {
+    const adder2: Action = (log) => {
       runs.push("adder2");
-      e.asCell([], log).send(
-        c.getAsQueryResult([], log) + d.getAsQueryResult([], log),
-      );
+      e.asCell([], log).send(c.getAsQueryResult([], log) + d.getAsQueryResult([], log));
     };
     await run(adder1);
     await run(adder2);
@@ -163,21 +150,15 @@ describe("scheduler", () => {
     const c = getDoc(0);
     const d = getDoc(1);
     const e = getDoc(0);
-    const adder1: Action = log => {
-      c.asCell([], log).send(
-        a.getAsQueryResult([], log) + b.getAsQueryResult([], log),
-      );
+    const adder1: Action = (log) => {
+      c.asCell([], log).send(a.getAsQueryResult([], log) + b.getAsQueryResult([], log));
     };
-    const adder2: Action = log => {
-      e.asCell([], log).send(
-        c.getAsQueryResult([], log) + d.getAsQueryResult([], log),
-      );
+    const adder2: Action = (log) => {
+      e.asCell([], log).send(c.getAsQueryResult([], log) + d.getAsQueryResult([], log));
     };
-    const adder3: Action = log => {
+    const adder3: Action = (log) => {
       if (--maxRuns <= 0) return;
-      c.asCell([], log).send(
-        e.getAsQueryResult([], log) + b.getAsQueryResult([], log),
-      );
+      c.asCell([], log).send(e.getAsQueryResult([], log) + b.getAsQueryResult([], log));
     };
 
     const stopped = vi.fn();
@@ -190,13 +171,13 @@ describe("scheduler", () => {
     await idle();
 
     expect(maxRuns).toBeGreaterThan(0);
-    expect(stopped).toHaveBeenCalled();
+    expect(stopped).toHaveBeenCalledOnce();
   });
 
   it("should not loop on r/w changes on its own output", async () => {
     const counter = getDoc(0);
     const by = getDoc(1);
-    const inc: Action = log =>
+    const inc: Action = (log) =>
       counter
         .asCell([], log)
         .send(counter.getAsQueryResult([], log) + by.getAsQueryResult([], log));
@@ -231,7 +212,7 @@ describe("event handling", () => {
     const eventResultCell = getDoc(0);
     let eventCount = 0;
 
-    const eventHandler: EventHandler = event => {
+    const eventHandler: EventHandler = (event) => {
       eventCount++;
       eventResultCell.send(event);
     };
@@ -252,7 +233,7 @@ describe("event handling", () => {
     const eventCell = getDoc(0);
     let eventCount = 0;
 
-    const eventHandler: EventHandler = event => {
+    const eventHandler: EventHandler = (event) => {
       eventCount++;
       eventCell.send(event);
     };
@@ -300,7 +281,7 @@ describe("event handling", () => {
     const eventCell = getDoc(0);
     const events: number[] = [];
 
-    const eventHandler: EventHandler = event => {
+    const eventHandler: EventHandler = (event) => {
       events.push(event);
     };
 
@@ -322,7 +303,7 @@ describe("event handling", () => {
     let actionCount = 0;
     let lastEventSeen = 0;
 
-    const eventHandler: EventHandler = event => {
+    const eventHandler: EventHandler = (event) => {
       eventCount++;
       eventResultCell.send(event);
     };

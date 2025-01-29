@@ -33,10 +33,7 @@ export const isVerEqual = (curr: EditorState, next: EditorState): boolean =>
   getVer(curr) === getVer(next);
 
 /** Apply state to editor view, but only if version does not match */
-export const updateVerState = (
-  view: EditorView,
-  state: EditorState,
-): boolean => {
+export const updateVerState = (view: EditorView, state: EditorState): boolean => {
   if (isVerEqual(view.state, state)) {
     if (debug()) console.info("State version matches existing editor state");
     return false;

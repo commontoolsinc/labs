@@ -1,14 +1,13 @@
-# TypeScript
+Use pnpm for the non-deno based code in ./packages
 
-This workspace contains TypeScript that at times may target the web, Deno, Node.js or arbitrary Wasm runtimes.
+This provides test/dev/build experience that works accross a shared "workspace",
+allowing changes in one package to trigger reload/rebuild flows in each
 
-## Setup
+See https://pnpm.io/installation
 
-Building requires building some Rust components. Ensure the cargo target and tools are configured:
+## Commmon Tasks
 
-```
-rustup target add wasm32-wasi
-cargo install wasm-tools wit-deps-cli
-
-npm install
-```
+ - Add Dependency: `pnpm add ____`
+ - Install Dependencies: `pnpm install`
+ - Run Tests: `pnpm run test`
+ - Dev Mode (vitejs server): `pnpm run dev`

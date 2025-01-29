@@ -56,6 +56,4 @@ export type Suggestion = Identifiable & {
 };
 
 export const suggestionTemplate = (suggestion: Suggestion) =>
-  html` <common-suggestion id="${suggestion.id}">
-    ${suggestion.title}
-  </common-suggestion>`;
+  html` <common-suggestion id="${suggestion.id}"> ${suggestion.title} </common-suggestion>`;

@@ -1,17 +1,11 @@
 import { html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { when } from "lit/directives/when.js";
-import {
-  addRecipe,
-  getRecipeSpec,
-  getRecipeSrc,
-  run,
-} from "@commontools/common-runner";
+import { addRecipe, getRecipeSpec, getRecipeSrc, run } from "@commontools/runner";
 import { addCharms } from "../data.js";
 import { tsToExports } from "../localBuild.js";
 import { iterate, llmTweakSpec, generateSuggestions } from "./spell-ai.js";
 import { createRef, ref } from "lit/directives/ref.js";
-import { spinner } from "../../../common-ui/lib/components/shoelace/index.js";
 
 // NOTE(ja): copied from sidebar.ts ... we need a toasty?
 const toasty = (message: string) => {
@@ -34,14 +28,14 @@ const toasty = (message: string) => {
 
 @customElement("common-spell-editor")
 export class CommonSpellEditor extends LitElement {
-  @property({ type: String, attribute: 'recipe-id' })
-  recipeId = '';
+  @property({ type: String, attribute: "recipe-id" })
+  recipeId = "";
 
-  @property({ type: String, attribute: 'working-src' })
-  workingSrc = '';
+  @property({ type: String, attribute: "working-src" })
+  workingSrc = "";
 
   @property({ type: String })
-  spell = '';
+  spell = "";
 
   @property({ type: Boolean })
   llmRunning = false;
@@ -62,48 +56,51 @@ export class CommonSpellEditor extends LitElement {
   data: any = null;
 
   @property({ type: String })
-  entityId = '';
+  entityId = "";
 
   @property({ type: Array })
-  suggestions: string[] = [];
+  suggestions: { behaviour: string; prompt: string }[] = [];
 
   private editorRef = createRef<HTMLElement>();
 
   override updated(changedProperties: Map<string, any>) {
     let makeSuggestions = false;
-    if (changedProperties.has('recipeId')) {
+    if (changedProperties.has("recipeId")) {
       // Handle recipe ID changes
       if (this.recipeId) {
-        this.workingSrc = getRecipeSrc(this.recipeId) ?? '';
+        this.workingSrc = getRecipeSrc(this.recipeId) ?? "";
         this.recipeSrc = this.workingSrc;
-        this.workingSpec = getRecipeSpec(this.recipeId) ?? '';
+        this.workingSpec = getRecipeSpec(this.recipeId) ?? "";
         this.recipeSpec = this.workingSpec;
         makeSuggestions = true;
       } else {
         if (!this.spell) {
-          this.workingSrc = '';
-          this.recipeSrc = '';
-          this.workingSpec = '';
-          this.recipeSpec = '';
+          this.workingSrc = "";
+          this.recipeSrc = "";
+          this.workingSpec = "";
+          this.recipeSpec = "";
         }
       }
     }
 
-    if (changedProperties.has('spell')) {
+    if (changedProperties.has("spell")) {
       if (this.spell) {
         this.workingSrc = this.spell;
         this.recipeSrc = this.spell;
-        this.workingSpec = '';
-        this.recipeSpec = '';
+        this.workingSpec = "";
+        this.recipeSpec = "";
         makeSuggestions = true;
       }
     }
 
-    if (changedProperties.has('workingSrc') && this.workingSrc !== changedProperties.get('workingSrc')) {
+    if (
+      changedProperties.has("workingSrc") &&
+      this.workingSrc !== changedProperties.get("workingSrc")
+    ) {
       console.log("setting src", this.workingSrc.slice(0, 100));
-      this.compileErrors = '';
+      this.compileErrors = "";
       tsToExports(this.workingSrc).then(({ errors }) => {
-        this.compileErrors = errors || '';
+        this.compileErrors = errors || "";
       });
     }
 
@@ -119,10 +116,8 @@ export class CommonSpellEditor extends LitElement {
   }
 
   override render() {
-    const onSpecChanged = (e: CustomEvent) =>
-      (this.workingSpec = e.detail.state.doc.toString());
-    const onSrcChanged = (e: CustomEvent) =>
-      (this.workingSrc = e.detail.state.doc.toString());
+    const onSpecChanged = (e: CustomEvent) => (this.workingSpec = e.detail.state.doc.toString());
+    const onSrcChanged = (e: CustomEvent) => (this.workingSrc = e.detail.state.doc.toString());
 
     const revert = () => {
       this.workingSrc = this.recipeSrc;
@@ -211,7 +206,7 @@ export class CommonSpellEditor extends LitElement {
               composed: true,
             }),
           );
-          if (data) {
+          if (keepData) {
             toasty("Welcome to a new version of this charm!");
           } else {
             toasty("Welcome to a new charm!");
@@ -219,7 +214,12 @@ export class CommonSpellEditor extends LitElement {
         }
 
         if (spell) {
-          const charm = spell.spawn({ root: Math.random().toString() }, "compiled", this.workingSrc, keepData ? this.entityId : undefined);
+          const charm = spell.spawn(
+            { root: Math.random().toString() },
+            "compiled",
+            this.workingSrc,
+            keepData ? this.entityId : undefined,
+          );
           addCharms([charm]);
           this.dispatchEvent(
             new CustomEvent("open-charm", {
@@ -248,27 +248,37 @@ export class CommonSpellEditor extends LitElement {
 
     return html`
       <div style="margin: 10px;">
-        <button @click=${compileAndUpdate} ?disabled=${this.compileErrors || this.workingSrc === this.recipeSrc}>🔄 Run w/Current Data</button>
-        <button @click=${compileAndRunNew} ?disabled=${this.compileErrors || this.workingSrc === this.recipeSrc}>🐣 Run w/New Data</button>
-        <button @click=${() => askLLM()} ?disabled=${this.llmRunning || this.workingSpec === this.recipeSpec}>
-          ${this.llmRunning ? html`<sl-spinner></sl-spinner>` : ""} ✨ code it
+        <button
+          @click=${compileAndUpdate}
+          ?disabled=${this.compileErrors || this.workingSrc === this.recipeSrc}
+        >
+          ♻ Run w/Current Data
+        </button>
+        <button
+          @click=${compileAndRunNew}
+          ?disabled=${this.compileErrors || this.workingSrc === this.recipeSrc}
+        >
+          🐣 Run w/New Data
+        </button>
+        <button
+          @click=${() => askLLM()}
+          ?disabled=${this.llmRunning || this.workingSpec === this.recipeSpec}
+        >
+          ${this.llmRunning ? "🔄" : ""} ✨ code it
         </button>
         <button
           @click=${() => askLLM({ fixit: this.compileErrors })}
           ?disabled=${this.llmRunning || !this.compileErrors}
         >
-          ${this.llmRunning ? html`<sl-spinner></sl-spinner>` : ""} 🪓 fix it
+          ${this.llmRunning ? "🔄" : ""} 🪓 fix it
         </button>
         <button
           @click=${revert}
-          ?disabled=${this.recipeSrc === this.workingSrc &&
-      this.recipeSpec === this.workingSpec}
+          ?disabled=${this.recipeSrc === this.workingSrc && this.recipeSpec === this.workingSpec}
         >
           ↩️ revert
         </button>
-        <button @click=${tweakSpec} ?disabled=${this.llmRunning}>
-          🔧 tweak spec
-        </button>
+        <button @click=${tweakSpec} ?disabled=${this.llmRunning}>🔧 tweak spec</button>
       </div>
       ${when(
         this.compileErrors,
@@ -293,7 +303,9 @@ ${this.compileErrors}</pre
             html`<div style="margin-bottom: 10px;">
               ${this.suggestions.map(
                 (s) =>
-                html`<button @click=${() => applySuggestion(s)}>[${s.behaviour}] ${s.prompt}</button>`,
+                  html`<button @click=${() => applySuggestion(s)}>
+                    [${s.behaviour}] ${s.prompt}
+                  </button>`,
               )}
             </div>`,
         )}

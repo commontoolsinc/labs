@@ -37,6 +37,7 @@
     "npm:hono@^4.4.6": "4.6.16",
     "npm:hono@^4.6.16": "4.6.16",
     "npm:jsonschema@^1.5.0": "1.5.0",
+    "npm:mistreevous@4.2.0": "4.2.0",
     "npm:pino-pretty@13": "13.0.0",
     "npm:pino@^9.4.0": "9.6.0",
     "npm:pino@^9.6.0": "9.6.0",
@@ -4223,8 +4224,17 @@
     "long@5.2.4": {
       "integrity": "sha512-qtzLbJE8hq7VabR3mISmVGtoXP8KGc2Z/AT8OuqlYD7JTR3oqrgwdjnk07wpj1twXxYmgDXgoKVWUG/fReSzHg=="
     },
+    "lotto-draw@1.0.2": {
+      "integrity": "sha512-1ih414A35BWpApfNlWAHBKOBLSxTj45crAJ+CMWF/kVY5nx6N22DA1OVF/FWW5WM5CGJbIMRh1O+xe8ukyoQ8Q=="
+    },
     "minimist@1.2.8": {
       "integrity": "sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA=="
+    },
+    "mistreevous@4.2.0": {
+      "integrity": "sha512-ZlqX7Fp2O/wYG9QFIT/I1bRDBi6o2ko4S006/G17VT0YWgN1emVMJNAcNSxfD0u4Tg/HOfHziJe+J4L7Un7spA==",
+      "dependencies": [
+        "lotto-draw"
+      ]
     },
     "module-details-from-path@1.0.3": {
       "integrity": "sha512-ySViT69/76t8VhE1xXHK6Ch4NcDd26gx0MzKXLO+F7NOtnqH68d9zF94nT8ZWSxXh8ELOERsnJO/sWt1xZYw5A=="
@@ -4574,6 +4584,7 @@
       "npm:hono-pino@0.7",
       "npm:hono@^4.6.16",
       "npm:jsonschema@^1.5.0",
+      "npm:mistreevous@4.2.0",
       "npm:pino-pretty@13",
       "npm:pino@^9.6.0",
       "npm:redis@^4.7.0",

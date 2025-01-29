@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit-element";
+import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 
 interface Item {
@@ -68,7 +68,7 @@ export default class PickerElement extends LitElement {
   private get filteredItems() {
     const filterLower = this.filter.toLowerCase();
     return this.items.filter(
-      item =>
+      (item) =>
         item.label.toLowerCase().includes(filterLower) ||
         item.value.toString().toLowerCase().includes(filterLower),
     );
@@ -103,7 +103,7 @@ export default class PickerElement extends LitElement {
   override render() {
     const showDropdown = this.hasFocus;
     const items = this.filteredItems;
-    const selectedItem = this.items.find(item => item.value === this.value);
+    // const selectedItem = this.items.find(item => item.value === this.value);
 
     return html`
       <div class="picker">
@@ -117,10 +117,8 @@ export default class PickerElement extends LitElement {
         />
         <div class="dropdown ${showDropdown ? "show" : ""}">
           ${items.map(
-            item => html`
-              <div class="item" @mousedown=${this.selectItem.bind(this, item)}>
-                ${item.label}
-              </div>
+            (item) => html`
+              <div class="item" @mousedown=${this.selectItem.bind(this, item)}>${item.label}</div>
             `,
           )}
         </div>

@@ -1,0 +1,8 @@
+packages:
+  - "lookslike-high-level"
+  - "common-builder"
+  - "common-runner"
+  - "llm-client"
+  - "common-ui"
+  - "common-os-ui"
+  - "common-html"

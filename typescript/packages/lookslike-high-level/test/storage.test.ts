@@ -5,7 +5,7 @@ import {
   LocalStorageProvider,
   StorageProvider,
 } from "../src/storage-providers.js";
-import { getDoc, DocImpl, createRef } from "@commontools/common-runner";
+import { getDoc, DocImpl, createRef } from "@commontools/runner";
 
 // Create a mock window object
 const createMockWindow = () => {
@@ -56,14 +56,12 @@ const createMockWindow = () => {
     addEventListener: vi.fn((event: string, callback: (event: any) => void) => {
       if (event === "storage") listeners.add(callback);
     }),
-    removeEventListener: vi.fn(
-      (event: string, callback: (event: any) => void) => {
-        if (event === "storage") listeners.delete(callback);
-      },
-    ),
+    removeEventListener: vi.fn((event: string, callback: (event: any) => void) => {
+      if (event === "storage") listeners.delete(callback);
+    }),
     dispatchEvent: vi.fn((event: any) => {
       if (event.type === "storage") {
-        listeners.forEach(callback => callback(event));
+        listeners.forEach((callback) => callback(event));
       }
     }),
     location: {
@@ -105,7 +103,7 @@ if (typeof StorageEvent === "undefined") {
 describe("Storage", () => {
   const storageTypes = ["memory", "local"] as const;
 
-  storageTypes.forEach(storageType => {
+  storageTypes.forEach((storageType) => {
     describe(storageType, () => {
       let storage: Storage;
       let storage2: StorageProvider;
@@ -272,9 +270,7 @@ describe("Storage", () => {
         });
 
         it("should throw an error for invalid storage type", () => {
-          expect(() => createStorage("invalid" as any)).toThrow(
-            "Invalid storage type",
-          );
+          expect(() => createStorage("invalid" as any)).toThrow("Invalid storage type");
         });
       });
     });

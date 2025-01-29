@@ -1,21 +1,13 @@
 import { css, html, LitElement, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { when } from "lit/directives/when.js";
-import { style } from "@commontools/common-ui";
-import {
-  Charm,
-  charms,
-  NAME,
-  recipes,
-  runPersistent,
-  TYPE,
-  UI,
-} from "../data.js";
-import { getDoc, DocImpl, getRecipe, isDoc } from "@commontools/common-runner";
+import { style } from "@commontools/ui";
+import { Charm, charms, NAME, recipes, runPersistent, TYPE, UI } from "../data.js";
+import { getDoc, DocImpl, getRecipe, isDoc } from "@commontools/runner";
 import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
-import { home } from "../recipes/home.js";
-import { render } from "@commontools/common-html";
+import { home } from "../recipes/home.jsx";
+import { render } from "@commontools/html";
 
 const toasty = (message: string) => {
   const toastEl = document.createElement("div");
@@ -50,9 +42,7 @@ export class CommonDebug extends LitElement {
   override render() {
     return html`
       <pre slot="content">
-${typeof this.content === "string"
-          ? this.content
-          : JSON.stringify(this.content, null, 2)}</pre
+${typeof this.content === "string" ? this.content : JSON.stringify(this.content, null, 2)}</pre
       >
     `;
   }
@@ -125,9 +115,7 @@ export class CommonSidebar extends LitElement {
     this.dispatchEvent(event);
   }
 
-  protected override async updated(
-    _changedProperties: PropertyValues,
-  ): Promise<void> {
+  protected override async updated(_changedProperties: PropertyValues): Promise<void> {
     super.updated(_changedProperties);
 
     if (_changedProperties.has("sidebarTab") && this.homeCharm) {
@@ -135,14 +123,12 @@ export class CommonSidebar extends LitElement {
     }
 
     if (!this.homeCharm && this.homeRef.value) {
-      this.homeCharm = runPersistent(home, { charms, recipes }, "home").then(
-        home => {
-          const view = home.asCell<Charm>().key(UI);
-          if (!view.getAsQueryResult()) throw new Error("Charm has no UI");
-          render(this.homeRef.value!, view);
-          return home;
-        },
-      );
+      this.homeCharm = runPersistent(home, { charms, recipes }, "home").then((home) => {
+        const view = home.asCell<Charm>().key(UI);
+        if (!view.getAsQueryResult()) throw new Error("Charm has no UI");
+        render(this.homeRef.value!, view);
+        return home;
+      });
     }
 
     if (_changedProperties.has("focusedCharm")) {
@@ -178,8 +164,7 @@ export class CommonSidebar extends LitElement {
   override render() {
     const data = this.getFieldOrDefault("data", {});
     const recipeId = this.focusedCharm?.sourceCell?.get()?.[TYPE];
-    const argument =
-      this.focusedCharm?.sourceCell?.getAsQueryResult()?.argument;
+    const argument = this.focusedCharm?.sourceCell?.getAsQueryResult()?.argument;
     const recipe = getRecipe(recipeId);
     const schema = recipe?.argumentSchema || {};
     const query = this.getFieldOrDefault("query", {});
@@ -262,9 +247,7 @@ export class CommonSidebar extends LitElement {
                 <div slot="label">Linked Charms</div>
                 <div>
                   ${this.linkedCharms.map(
-                    charm => html`
-                      <common-charm-link .charm=${charm}></common-charm-link>
-                    `,
+                    (charm) => html` <common-charm-link .charm=${charm}></common-charm-link> `,
                   )}
                 </div>
               </os-sidebar-group>
@@ -282,7 +265,7 @@ export class CommonSidebar extends LitElement {
                   <os-code-editor
                     slot="content"
                     language="application/json"
-                    .source=${watchCell(query, q => JSON.stringify(q, null, 2))}
+                    .source=${watchCell(query, (q) => JSON.stringify(q, null, 2))}
                     @doc-change=${onQueryChanged}
                   ></os-code-editor>
                 </div>
@@ -319,14 +302,14 @@ export class CommonSidebar extends LitElement {
                     style="display: flex; justify-content: space-between; border: 1px solid pink; padding: 10px;"
                   >
                     <a
-                      href="/recipe/${recipeId}"
+                      href="/recipe/spell-${recipeId}"
                       target="_blank"
                       @click=${copyRecipeLink}
                       style="float: right"
                       >🔗 Share</a
                     >
                     <a
-                      href="https://paas.saga-castor.ts.net/spellbookjr/recipes/${recipeId}"
+                      href="https://paas.saga-castor.ts.net/spellbookjr/recipes/spell-${recipeId}"
                       target="_blank"
                     >
                       🪄 Spellbook jr</a
@@ -373,9 +356,7 @@ export class CommonSidebar extends LitElement {
                   Data<span
                     id="log-button"
                     @click=${() =>
-                      console.log(
-                        JSON.stringify(this.focusedCharm?.getAsQueryResult()),
-                      )}
+                      console.log(JSON.stringify(this.focusedCharm?.getAsQueryResult()))}
                     >log</span
                   >
                 </div>
@@ -383,7 +364,7 @@ export class CommonSidebar extends LitElement {
                   <os-code-editor
                     slot="content"
                     language="application/json"
-                    .source=${watchCell(data, q => JSON.stringify(q, null, 2))}
+                    .source=${watchCell(data, (q) => JSON.stringify(q, null, 2))}
                     @doc-change=${onDataChanged}
                   ></os-code-editor>
                 </div>

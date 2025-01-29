@@ -1,8 +1,8 @@
 import { css, html, LitElement } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
-import { style } from "@commontools/common-ui";
-import { render } from "@commontools/common-html";
+import { style } from "@commontools/ui";
+import { render } from "@commontools/html";
 import {
   addCharms,
   Charm,
@@ -23,14 +23,13 @@ import {
   getRecipe,
   idle,
   run,
-} from "@commontools/common-runner";
+} from "@commontools/runner";
 import { repeat } from "lit/directives/repeat.js";
-import { iframe } from "../recipes/iframe.js";
-import { search } from "../recipes/search.js";
-import { NAME, TYPE } from "@commontools/common-builder";
+import { NAME, TYPE } from "@commontools/builder";
 import { matchRoute, navigate } from "../router.js";
 import * as Schema from "../schema.js";
 import { buildRecipe } from "../localBuild.js";
+import * as iframeSpellAi from "./iframe-spell-ai.js";
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -163,59 +162,12 @@ export class CommonWindowManager extends LitElement {
   private focusedProxy: Charm | null = null;
 
   handleUniboxSubmit(event: CustomEvent) {
-    const charm = this.focusedProxy;
 
     const value = event.detail.value;
     const shiftKey = event.detail.shiftKey;
     console.log("Unibox submitted:", value, shiftKey);
 
-    if (charm) {
-      // modify in place by default, if possible
-      if (!shiftKey && charm.addToPrompt) {
-        this.focusedCharm
-          ?.asCell(["addToPrompt"])
-          .send({ prompt: value } as any);
-      } else {
-        // // ben: this is a hack to access the data designer from search (temporarily)
-        // if (charm.data && charm.query) {
-        //   const eid = run(dataDesigner, {
-        //     data: charm.data,
-        //     prompt: value,
-        //     title: value,
-        //   }).entityId!;
-        //   this.openCharm(JSON.stringify(eid));
-        // }
-
-        // pass data forward to new charm
-        const charmValues = charm;
-        let fieldsToInclude = Object.entries(charmValues).reduce(
-          (acc, [key, value]) => {
-            if (!key.startsWith("$") && !key.startsWith("_")) {
-              acc[key] = value;
-            }
-            return acc;
-          },
-          {} as any,
-        );
-
-        if (charmValues.data) {
-          fieldsToInclude = charmValues.data;
-        }
-
-        runPersistent(iframe, {
-          data: fieldsToInclude,
-          title: value,
-          prompt: value,
-        }).then(charm => this.openCharm(charm));
-      }
-    } else {
-      // there is no existing data
-      runPersistent(iframe, {
-        data: {},
-        title: value,
-        prompt: value,
-      }).then(charm => this.openCharm(charm));
-    }
+    iframeSpellAi.iterate(this.focusedCharm, value, shiftKey);
   }
 
   input: string = "";
@@ -249,7 +201,7 @@ export class CommonWindowManager extends LitElement {
     this.focusedCharm
       ?.asCell()
       .key("suggestions")
-      ?.sink(suggestions => {
+      ?.sink((suggestions) => {
         const s = suggestions?.items;
         if (!s) return;
 
@@ -258,12 +210,12 @@ export class CommonWindowManager extends LitElement {
       });
 
     const onSearchSubmit = (event: CustomEvent) => {
-      console.log("Search submitted:", event.detail.value);
-      this.searchOpen = false;
-      this.input = "";
-      runPersistent(search, {
-        search: event.detail.value,
-      }).then(charm => this.openCharm(charm));
+      console.log("FIXME - Search submitted but is unimplemented:", event.detail.value);
+      // this.searchOpen = false;
+      // this.input = "";
+      // runPersistent(search, {
+      //   search: event.detail.value,
+      // }).then(charm => this.openCharm(charm));
     };
 
     const onAiBoxSubmit = (event: CustomEvent) => {
@@ -271,13 +223,7 @@ export class CommonWindowManager extends LitElement {
       this.handleUniboxSubmit(event);
     };
 
-    const onSuggestionsSelected = ({
-      prompt,
-      behavior,
-    }: {
-      prompt: string;
-      behavior: string;
-    }) => {
+    const onSuggestionsSelected = ({ prompt, behavior }: { prompt: string; behavior: string }) => {
       console.log("Suggestion selected:", prompt, behavior);
       this.handleUniboxSubmit(
         new CustomEvent("submit", {
@@ -293,9 +239,7 @@ export class CommonWindowManager extends LitElement {
     const onSidebarTabChanged = (event: CustomEvent) => {
       this.sidebarTab = event.detail.tab;
       this.wideSidebar =
-        this.sidebarTab === "source" ||
-        this.sidebarTab === "data" ||
-        this.sidebarTab === "query";
+        this.sidebarTab === "source" || this.sidebarTab === "data" || this.sidebarTab === "query";
     };
 
     const onImportLocalData = (event: CustomEvent) => {
@@ -331,7 +275,7 @@ export class CommonWindowManager extends LitElement {
           if (recipe) {
             addRecipe(recipe, src, "render data", []);
 
-            runPersistent(recipe, data[0]).then(charm => this.openCharm(charm));
+            runPersistent(recipe, data[0]).then((charm) => this.openCharm(charm));
           }
         });
       }
@@ -343,23 +287,16 @@ export class CommonWindowManager extends LitElement {
         locationtitle=${this.focusedProxy?.[NAME] || "Untitled"}
         @location=${this.onLocationClicked}
       >
-        <os-avatar
-          slot="toolbar-start"
-          name="Ben"
-          .onclick=${this.onHome}
-        ></os-avatar>
+        <os-avatar slot="toolbar-start" name="Ben" .onclick=${this.onHome}></os-avatar>
 
         <os-dialog .open=${this.searchOpen} @closedialog=${onCloseDialog}>
-          <os-ai-box
-            @submit=${onSearchSubmit}
-            placeholder="Search or imagine..."
-          ></os-ai-box>
+          <os-ai-box @submit=${onSearchSubmit} placeholder="Search or imagine..."></os-ai-box>
 
           <os-charm-chip-group>
             ${repeat(
               this.charms,
-              charm => charm.entityId!.toString(),
-              charm => {
+              (charm) => charm.entityId!.toString(),
+              (charm) => {
                 if (!charm.get()) return;
 
                 const charmId = charm.entityId!;
@@ -392,8 +329,8 @@ export class CommonWindowManager extends LitElement {
         <os-fabgroup class="pin-br" slot="overlay" @submit=${onAiBoxSubmit}>
           ${repeat(
             Array.isArray(this.suggestions) ? this.suggestions : [],
-            suggestion => suggestion.prompt,
-            suggestion => html`
+            (suggestion) => suggestion.prompt,
+            (suggestion) => html`
               <os-bubble
                 icon=${suggestion.behavior === "fork" ? "call_split" : "add"}
                 text=${suggestion.prompt}
@@ -416,8 +353,8 @@ export class CommonWindowManager extends LitElement {
           : html``}
         ${repeat(
           this.charms,
-          charm => charm.entityId!.toString(),
-          charm => {
+          (charm) => charm.entityId!.toString(),
+          (charm) => {
             if (!charm.get()) return;
 
             const charmId = charm.entityId!;
@@ -447,9 +384,7 @@ export class CommonWindowManager extends LitElement {
                   <h1 class="window-title" @click=${onNavigate}>
                     ${charm.getAsQueryResult()[NAME]}
                   </h1>
-                  <button class="close-button" @click="${this.onClose}">
-                    ×
-                  </button>
+                  <button class="close-button" @click="${this.onClose}">×</button>
                 </div>
                 <div class="charm" ${ref(charmRef)}></div>
               </div>
@@ -516,8 +451,8 @@ export class CommonWindowManager extends LitElement {
     this.updateComplete.then(() => {
       while (this.newCharmRefs.length > 0) {
         const [charm, charmRef] = this.newCharmRefs.pop()!;
-        effect(charm.asCell<Charm>(), charm =>
-          effect(charm[UI], view => {
+        effect(charm.asCell<Charm>(), (charm) =>
+          effect(charm[UI], (view) => {
             if (!view) {
               console.log("no UI");
               return;
@@ -543,9 +478,7 @@ export class CommonWindowManager extends LitElement {
   }
 
   private scrollToAndHighlight(charmId: string, animate: boolean) {
-    const window = this.renderRoot.querySelector(
-      `[data-charm-id="${CSS.escape(charmId)}"]`,
-    );
+    const window = this.renderRoot.querySelector(`[data-charm-id="${CSS.escape(charmId)}"]`);
     if (window) {
       window.scrollIntoView({
         behavior: "smooth",
@@ -564,9 +497,7 @@ export class CommonWindowManager extends LitElement {
     if (windowElement) {
       const charmId = windowElement.getAttribute("data-charm-id");
       if (charmId) {
-        this.charms = this.charms.filter(
-          charm => JSON.stringify(charm.entityId) !== charmId,
-        );
+        this.charms = this.charms.filter((charm) => JSON.stringify(charm.entityId) !== charmId);
         this.charmRefs.delete(charmId);
       }
     }
@@ -578,15 +509,12 @@ export class CommonWindowManager extends LitElement {
 
     const charmMatch = matchRoute("/charm/:charmId", url);
 
-    if (
-      charmMatch &&
-      JSON.stringify(this.focusedCharm?.entityId) !== charmMatch.params.charmId
-    ) {
+    if (charmMatch && JSON.stringify(this.focusedCharm?.entityId) !== charmMatch.params.charmId) {
       console.log("charmMatch", charmMatch.params.charmId);
       // TODO: Add a timeout here, show loading state and error state
       setTimeout(() => {
         syncCharm(charmMatch.params.charmId, true).then(
-          charm =>
+          (charm) =>
             (charm && charm.get() && this.openCharm(charm)) ||
             navigate(`/charm/${charmMatch.params.charmId}`),
         );
@@ -610,13 +538,13 @@ export class CommonWindowManager extends LitElement {
         }
       }
 
-      fetch(decodeURIComponent(srcUrl)).then(async response => {
+      fetch(decodeURIComponent(srcUrl)).then(async (response) => {
         const src = await response.text();
         buildRecipe(src).then(({ recipe }) => {
           if (recipe) {
             addRecipe(recipe, src, "render data", []);
             runPersistent(recipe, initialData)
-              .then(charm => this.openCharm(charm))
+              .then((charm) => this.openCharm(charm))
               .then(() => console.log("Recipe successfully loaded"));
           }
         });
@@ -625,14 +553,45 @@ export class CommonWindowManager extends LitElement {
 
     const recipeMatch = matchRoute("/recipe/:recipeId", url);
     if (recipeMatch) {
-      const recipeId = recipeMatch.params.recipeId;
-      syncRecipe(recipeId).then(() => {
+      let recipeId = recipeMatch.params.recipeId;
+      recipeId = recipeId.replace("spell-", "");
+      syncRecipe(recipeId).then(async () => {
         const recipe = getRecipe(recipeId);
         if (recipe) {
           // Get data from URL query parameter if it exists
           const searchParams = new URLSearchParams(url.search);
           const encodedData = searchParams.get("data");
           let initialData = {};
+
+          const fulfillUrl =
+            typeof window !== "undefined"
+              ? window.location.protocol + "//" + window.location.host + "/api/ai/spell/fulfill"
+              : "//api/ai/spell/fulfill";
+
+          // Call AI to analyze input schema and provide suggestions
+          const response = await fetch(fulfillUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              accepts: "application/json",
+            },
+            body: JSON.stringify({
+              schema: recipe.argumentSchema?.properties,
+              many: false,
+              prompt: "",
+              options: {
+                format: "json",
+                validate: true,
+                maxExamples: 25,
+              },
+            }),
+          });
+
+          if (response.ok) {
+            const aiResponse = await response.json();
+            initialData = aiResponse.result;
+            console.log("AI response:", aiResponse);
+          }
 
           if (encodedData) {
             try {
@@ -653,9 +612,7 @@ export class CommonWindowManager extends LitElement {
     super.connectedCallback();
     this.addEventListener("open-charm", this.handleAddWindow);
     window.addEventListener("routeChange", this.#onRouteChange.bind(this));
-    this.#onRouteChange(
-      new CustomEvent("routeChange", { detail: window.location.href }),
-    );
+    this.#onRouteChange(new CustomEvent("routeChange", { detail: window.location.href }));
     openCharm.set(this.openCharm.bind(this));
     closeCharm.set(this.closeCharm.bind(this));
   }

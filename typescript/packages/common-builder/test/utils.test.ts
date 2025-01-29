@@ -1,10 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { isAlias, isModule, isRecipe, Opaque } from "../src/types.js";
-import {
-  setValueAtPath,
-  getValueAtPath,
-  hasValueAtPath,
-} from "../src/utils.js";
+import { describe, expect, it } from "vitest";
+import { isAlias, isModule, isRecipe, type Opaque } from "../src/types.js";
+import { getValueAtPath, hasValueAtPath, setValueAtPath } from "../src/utils.js";
 
 describe("value type", () => {
   it("can destructure a value without TS errors", () => {
@@ -40,9 +36,7 @@ describe("utility functions", () => {
   });
 
   it("isModule correctly identifies modules", () => {
-    expect(isModule({ type: "javascript", implementation: () => {} })).toBe(
-      true,
-    );
+    expect(isModule({ type: "javascript", implementation: () => {} })).toBe(true);
     expect(isModule({ notModule: "something" })).toBe(false);
   });
 

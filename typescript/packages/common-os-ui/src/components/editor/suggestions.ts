@@ -32,14 +32,9 @@ export const createArrowUpMsg = plugin.createArrowUpMsg;
 export type ArrowDownMsg = plugin.ArrowDownMsg;
 export const createArrowDownMsg = plugin.createArrowDownMsg;
 
-export type SetCompletionsMsg = ValueMsg<
-  "setCompletions",
-  Array<completion.Model>
->;
+export type SetCompletionsMsg = ValueMsg<"setCompletions", Array<completion.Model>>;
 
-export const createSetCompletionsMsg = (
-  value: Array<completion.Model>,
-): SetCompletionsMsg =>
+export const createSetCompletionsMsg = (value: Array<completion.Model>): SetCompletionsMsg =>
   freeze({
     type: "setCompletions",
     value,
@@ -47,9 +42,7 @@ export const createSetCompletionsMsg = (
 
 export type ClickCompletionMsg = ValueMsg<"clickCompletion", completion.Model>;
 
-export const createClickCompletionMsg = (
-  value: completion.Model,
-): ClickCompletionMsg =>
+export const createClickCompletionMsg = (value: completion.Model): ClickCompletionMsg =>
   freeze({
     type: "clickCompletion",
     value,
@@ -90,11 +83,7 @@ export const model = (): Model =>
     completions: [],
   });
 
-const updateActiveUpdate = (
-  state: Model,
-  active: Suggestion,
-  coords: Rect,
-): Model => {
+const updateActiveUpdate = (state: Model, active: Suggestion, coords: Rect): Model => {
   return freeze({
     ...state,
     active,
@@ -121,10 +110,7 @@ const updateSelectedCompletion = (state: Model, offset: number): Model => {
   });
 };
 
-const updateSetCompletions = (
-  state: Model,
-  completions: Array<completion.Model>,
-): Model => {
+const updateSetCompletions = (state: Model, completions: Array<completion.Model>): Model => {
   return freeze({
     ...state,
     selectedCompletion: 0,
@@ -172,9 +158,7 @@ export const createFx = ({
   fetchCompletions,
 }: {
   view: EditorView;
-  fetchCompletions: (
-    suggestion: Suggestion,
-  ) => Promise<Array<completion.Model>>;
+  fetchCompletions: (suggestion: Suggestion) => Promise<Array<completion.Model>>;
 }): FxDriver<Model, Msg> => {
   const fetchCompletionsFx = (active: Suggestion) => async () => {
     const completions = await fetchCompletions(active);
@@ -210,22 +194,14 @@ export const createFx = ({
 };
 
 const replaceFx =
-  (
-    view: EditorView,
-    suggestion: Suggestion | null,
-    completion: string | null,
-  ) =>
-  async () => {
+  (view: EditorView, suggestion: Suggestion | null, completion: string | null) => async () => {
     if (suggestion == null) {
       return createInfoMsg("No active suggestion to replace");
     }
     if (completion == null) {
       return createInfoMsg("No completion to replace");
     }
-    executeCommand(
-      view,
-      replaceWithText(suggestion.from, suggestion.to, completion),
-    );
+    executeCommand(view, replaceWithText(suggestion.from, suggestion.to, completion));
     return createInfoMsg("Replaced suggestion with completion");
   };
 

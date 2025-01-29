@@ -163,17 +163,10 @@ export default recipe(Schema, ({ items, title }) => {
 \`\`\`
 `;
 
-export const llmTweakSpec = async ({
-  spec,
-  change,
-}: {
-  spec: string;
-  change: string;
-}) => {
+export const llmTweakSpec = async ({ spec, change }: { spec: string; change: string }) => {
   const payload = {
     model: SELECTED_MODEL,
-    system:
-      "You are a spec editor for @commontools recipes.  Please respond with the full spec.",
+    system: "You are a spec editor for @commontools recipes.  Please respond with the full spec.",
     messages: [
       "what is the current spec?",
       `\`\`\`markdown\n${spec}\n\`\`\``,
@@ -294,9 +287,7 @@ Respond in a json block.
   const stop = "\n```";
 
   messages.push(instructions);
-  messages.push(
-    `\`\`\`json\n{"suggestions": [{"behaviour": "append", "prompt":`,
-  );
+  messages.push(`\`\`\`json\n{"suggestions": [{"behaviour": "append", "prompt":`);
 
   const payload = {
     model: SELECTED_MODEL,

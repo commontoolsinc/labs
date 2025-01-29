@@ -1,31 +1,31 @@
 import {
-  Recipe,
-  RecipeFactory,
-  NodeRef,
-  Opaque,
-  OpaqueRef,
-  isOpaqueRef,
-  Node,
-  Module,
-  toJSON,
-  JSONSchema,
-  UI,
   canBeOpaqueRef,
-  makeOpaqueRef,
-  Frame,
-  ShadowRef,
+  type Frame,
+  isOpaqueRef,
   isShadowRef,
-  UnsafeBinding,
+  type JSONSchema,
+  makeOpaqueRef,
+  type Module,
+  type Node,
+  type NodeRef,
+  type Opaque,
+  type OpaqueRef,
+  type Recipe,
+  type RecipeFactory,
+  type ShadowRef,
+  type toJSON,
+  UI,
+  type UnsafeBinding,
 } from "./types.js";
 import { createShadowRef, opaqueRef } from "./opaque-ref.js";
 import {
-  traverseValue,
-  setValueAtPath,
-  toJSONWithAliases,
+  connectInputAndOutputs,
   createJsonSchema,
   moduleToJSON,
   recipeToJSON,
-  connectInputAndOutputs,
+  setValueAtPath,
+  toJSONWithAliases,
+  traverseValue,
 } from "./utils.js";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
@@ -92,12 +92,7 @@ export function recipe<T, R>(
   const frame = pushFrame();
   const inputs = opaqueRef<Required<T>>();
   const outputs = fn!(inputs);
-  const result = factoryFromRecipe<T, R>(
-    argumentSchema,
-    resultSchema,
-    inputs,
-    outputs,
-  );
+  const result = factoryFromRecipe<T, R>(argumentSchema, resultSchema, inputs, outputs);
   popFrame(frame);
   return result;
 }
@@ -125,23 +120,18 @@ function factoryFromRecipe<T, R>(
   const nodes = new Set<NodeRef>();
 
   const collectCellsAndNodes = (value: Opaque<any>) =>
-    traverseValue(value, value => {
+    traverseValue(value, (value) => {
       if (canBeOpaqueRef(value)) value = makeOpaqueRef(value);
       if (isOpaqueRef(value)) value = value.unsafe_getExternal();
-      if (
-        (isOpaqueRef(value) || isShadowRef(value)) &&
-        !cells.has(value) &&
-        !shadows.has(value)
-      ) {
-        if (isOpaqueRef(value) && value.export().frame !== getTopFrame())
+      if ((isOpaqueRef(value) || isShadowRef(value)) && !cells.has(value) && !shadows.has(value)) {
+        if (isOpaqueRef(value) && value.export().frame !== getTopFrame()) {
           value = createShadowRef(value.export().value);
+        }
         if (isShadowRef(value)) {
           shadows.add(value);
-          if (
-            isOpaqueRef(value.shadowOf) &&
-            value.shadowOf.export().frame === getTopFrame()
-          )
+          if (isOpaqueRef(value.shadowOf) && value.shadowOf.export().frame === getTopFrame()) {
             cells.add(value.shadowOf);
+          }
         } else if (isOpaqueRef(value)) {
           cells.add(value);
           value.export().nodes.forEach((node: NodeRef) => {
@@ -162,31 +152,31 @@ function factoryFromRecipe<T, R>(
   // Fill in reasonable names for all cells, where possible:
 
   // First from results
-  if (typeof outputs === "object" && outputs !== null)
+  if (typeof outputs === "object" && outputs !== null) {
     Object.entries(outputs).forEach(([key, value]) => {
-      if (
-        isOpaqueRef(value) &&
-        !value.export().path.length &&
-        !value.export().name
-      )
+      if (isOpaqueRef(value) && !value.export().path.length && !value.export().name) {
         value.setName(key);
+      }
     });
+  }
 
   // Then from assignments in nodes
-  cells.forEach(cell => {
+  cells.forEach((cell) => {
     if (cell.export().path.length) return;
     cell.export().nodes.forEach((node: NodeRef) => {
-      if (typeof node.inputs === "object" && node.inputs !== null)
+      if (typeof node.inputs === "object" && node.inputs !== null) {
         Object.entries(node.inputs).forEach(([key, input]) => {
-          if (isOpaqueRef(input) && input.cell === cell && !cell.export().name)
+          if (isOpaqueRef(input) && input.cell === cell && !cell.export().name) {
             cell.setName(key);
+          }
         });
+      }
     });
   });
 
   // [For unsafe bindings] Also collect otherwise disconnected cells and nodes,
   // since they might only be mentioned via a code closure in a lifted function.
-  getTopFrame()?.opaqueRefs.forEach(ref => collectCellsAndNodes(ref));
+  getTopFrame()?.opaqueRefs.forEach((ref) => collectCellsAndNodes(ref));
 
   // Then assign paths on the recipe cell for all cells. For now we just assign
   // incremental counters, since we don't have access to the original variable
@@ -206,7 +196,7 @@ function factoryFromRecipe<T, R>(
     if (!paths.has(top)) paths.set(top, ["internal", name ?? `__#${count++}`]);
     if (path.length) paths.set(cell, [...paths.get(top)!, ...path]);
   });
-  shadows.forEach(shadow => {
+  shadows.forEach((shadow) => {
     if (paths.has(shadow)) return;
     paths.set(shadow, []);
   });
@@ -215,15 +205,11 @@ function factoryFromRecipe<T, R>(
   const result = toJSONWithAliases(outputs ?? {}, paths, true)!;
 
   // Collect default values for the inputs
-  const defaults = toJSONWithAliases(
-    inputs.export().defaultValue ?? {},
-    paths,
-    true,
-  )!;
+  const defaults = toJSONWithAliases(inputs.export().defaultValue ?? {}, paths, true)!;
 
   // Set initial values for all cells, add non-inputs defaults
   const initial: any = {};
-  cells.forEach(cell => {
+  cells.forEach((cell) => {
     // Only process roots of extra cells:
     if (cell === inputs) return;
     const { path, value, defaultValue } = cell.export();
@@ -235,7 +221,7 @@ function factoryFromRecipe<T, R>(
   });
 
   // External cells all have to be added to the initial state
-  cells.forEach(cell => {
+  cells.forEach((cell) => {
     const { external } = cell.export();
     if (external) setValueAtPath(initial, paths.get(cell)!, external);
   });
@@ -249,12 +235,13 @@ function factoryFromRecipe<T, R>(
     argumentSchema.description = argumentSchemaArg;
 
     delete argumentSchema.properties?.[UI]; // TODO: This should be a schema for views
-    if (argumentSchema.properties?.internal?.properties)
-      for (const key of Object.keys(
-        argumentSchema.properties.internal.properties as any,
-      ))
-        if (key.startsWith("__#"))
+    if (argumentSchema.properties?.internal?.properties) {
+      for (const key of Object.keys(argumentSchema.properties.internal.properties as any)) {
+        if (key.startsWith("__#")) {
           delete (argumentSchema as any).properties.internal.properties[key];
+        }
+      }
+    }
   } else if (argumentSchemaArg instanceof z.ZodType) {
     argumentSchema = zodToJsonSchema(argumentSchemaArg) as JSONSchema;
   } else {
@@ -264,9 +251,9 @@ function factoryFromRecipe<T, R>(
   const resultSchema: JSONSchema =
     resultSchemaArg instanceof z.ZodType
       ? (zodToJsonSchema(resultSchemaArg) as JSONSchema)
-      : resultSchemaArg ?? ({} as JSONSchema);
+      : (resultSchemaArg ?? ({} as JSONSchema));
 
-  const serializedNodes = Array.from(nodes).map(node => {
+  const serializedNodes = Array.from(nodes).map((node) => {
     const module = toJSONWithAliases(node.module, paths) as Module;
     const inputs = toJSONWithAliases(node.inputs, paths)!;
     const outputs = toJSONWithAliases(node.outputs, paths)!;
@@ -306,10 +293,8 @@ function factoryFromRecipe<T, R>(
   // Bind all cells to the recipe
   // TODO: Does OpaqueRef cause issues here?
   [...cells]
-    .filter(cell => !cell.export().path.length) // Only bind root cells
-    .forEach(cell =>
-      cell.unsafe_bindToRecipeAndPath(recipeFactory, paths.get(cell)!),
-    );
+    .filter((cell) => !cell.export().path.length) // Only bind root cells
+    .forEach((cell) => cell.unsafe_bindToRecipeAndPath(recipeFactory, paths.get(cell)!));
 
   return recipeFactory;
 }
@@ -322,10 +307,7 @@ export function pushFrame(frame?: Frame): Frame {
   return frame;
 }
 
-export function pushFrameFromCause(
-  cause: any,
-  unsafe_binding?: UnsafeBinding,
-): Frame {
+export function pushFrameFromCause(cause: any, unsafe_binding?: UnsafeBinding): Frame {
   const frame = {
     parent: getTopFrame(),
     cause,

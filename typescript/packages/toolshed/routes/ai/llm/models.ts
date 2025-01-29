@@ -70,7 +70,7 @@ const addModel = ({
   const model = provider(modelName);
 
   const config: ModelConfig = {
-    model,
+    model: (model as unknown) as string,
     capabilities,
     aliases,
   };
@@ -137,6 +137,21 @@ if (env.CTTS_AI_LLM_GROQ_API_KEY) {
   const groqProvider = createGroq({
     apiKey: env.CTTS_AI_LLM_GROQ_API_KEY,
   });
+  addModel({
+    provider: groqProvider,
+    name: "groq:deepseek-r1-distill-llama-70b",
+    aliases: ["groq:deepseek-r1-distill-llama-70b", "r1-llama-70b"],
+    capabilities: {
+      contextWindow: 128_000,
+      maxOutputTokens: 32768,
+      images: false,
+      prefill: false,
+      systemPrompt: false,
+      stopSequences: false,
+      streaming: true,
+    },
+  });
+
   addModel({
     provider: groqProvider,
     name: "groq:llama-3.3-70b-versatile",
@@ -251,7 +266,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
 if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
   const vertexProvider = createVertex({
     googleAuthOptions: {
-      credentials: env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS,
+      credentials: env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS as any, // bf: taming type errors
     },
     project: env.CTTS_AI_LLM_GOOGLE_VERTEX_PROJECT,
     location: env.CTTS_AI_LLM_GOOGLE_VERTEX_LOCATION,

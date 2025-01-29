@@ -1,8 +1,5 @@
-import { recipe, NAME } from "@commontools/common-builder";
+import { recipe, NAME } from "@commontools/builder";
 
-export const reservation = recipe<{ title: string }>(
-  "Reservation",
-  ({ title }) => ({
-    [NAME]: title,
-  }),
-);
+export const reservation = recipe<{ title: string }>("Reservation", ({ title }) => ({
+  [NAME]: title,
+}));

@@ -80,8 +80,7 @@ export class OsFloatingCompletions extends LitElement {
   #renderCompletion = (completion: completion.Model, index: number) => {
     const classes = classMap({
       completion: true,
-      "completion--active":
-        clamp(this.selected, 0, this.completions.length - 1) === index,
+      "completion--active": clamp(this.selected, 0, this.completions.length - 1) === index,
     });
 
     const onclick = (_event: MouseEvent) => {

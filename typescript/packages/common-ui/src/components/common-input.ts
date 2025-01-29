@@ -1,15 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
-import { view } from "../hyperscript/render.js";
-import { eventProps } from "../hyperscript/schema-helpers.js";
-
-export const commonInput = view("common-input", {
-  ...eventProps(),
-  value: { type: "string" },
-  placeholder: { type: "string" },
-  appearance: { type: "string" },
-});
 
 export type CommonInput = {
   id: string;
@@ -29,7 +20,7 @@ export type CommonKeydown = {
   id: string;
   key: string;
   value: string;
-}
+};
 
 export class CommonKeydownEvent extends Event {
   detail: CommonKeydown;
@@ -43,7 +34,7 @@ export class CommonKeydownEvent extends Event {
 export type CommonBlur = {
   id: string;
   value: string;
-}
+};
 
 export class CommonBlurEvent extends Event {
   detail: CommonBlur;
@@ -104,7 +95,9 @@ export class CommonInputElement extends LitElement {
     };
 
     const onkeydown = (event: KeyboardEvent) => {
-      this.dispatchEvent(new CommonKeydownEvent({ id: this.id, key: event.key, value: this.value }));
+      this.dispatchEvent(
+        new CommonKeydownEvent({ id: this.id, key: event.key, value: this.value }),
+      );
     };
 
     const onblur = () => {

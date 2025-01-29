@@ -1,13 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { render } from "@commontools/common-ui";
 import { NAME } from "../data.js";
-import { Cell, effect } from "@commontools/common-runner";
-
-export const charmLink = render.view("common-charm-link", {
-  charm: { type: "object" },
-  name: { type: "string" },
-});
+import { Cell, effect } from "@commontools/runner";
 
 @customElement("common-charm-link")
 export class CommonCharmLink extends LitElement {
@@ -56,7 +50,7 @@ export class CommonCharmLink extends LitElement {
 
     let { [NAME]: name } = this.charm.get() ?? {};
 
-    effect(name, name => {
+    effect(name, (name) => {
       this.nameFromCharm = name as string;
       if (!skipUpdate) this.requestUpdate();
       skipUpdate = false;
@@ -79,9 +73,7 @@ export class CommonCharmLink extends LitElement {
 
     const name = this.name ?? this.nameFromCharm ?? "(unknown)";
     return html`
-      <a
-        href="/charm/${JSON.stringify(this.charm.entityId)}"
-        @click="${this.handleClick}"
+      <a href="/charm/${JSON.stringify(this.charm.entityId)}" @click="${this.handleClick}"
         >💎 ${name}</a
       >
     `;

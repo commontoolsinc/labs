@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { Recipe, isRecipe, Module, isModule, Opaque } from "../src/types.js";
+import { describe, expect, it } from "vitest";
+import { isModule, isRecipe, type Module, type Recipe } from "../src/types.js";
 import { lift } from "../src/module.js";
 import { recipe } from "../src/recipe.js";
 import { z } from "zod";
@@ -16,7 +16,7 @@ describe("recipe function", () => {
 
   it("creates a recipe, with simple function", () => {
     const doubleRecipe = recipe<{ x: number }>("Double a number", ({ x }) => {
-      const double = lift<number>(x => x * 2);
+      const double = lift<number>((x) => x * 2);
       return { double: double(x) };
     });
     expect(isRecipe(doubleRecipe)).toBe(true);
@@ -39,7 +39,7 @@ describe("recipe function", () => {
 describe("complex recipe function", () => {
   const doubleRecipe = recipe<{ x: number }>("Double a number", ({ x }) => {
     x.setDefault(1);
-    const double = lift<number>(x => x * 2);
+    const double = lift<number>((x) => x * 2);
     return { double: double(double(x)) };
   });
   const { argumentSchema, result, nodes } = doubleRecipe;
@@ -60,9 +60,7 @@ describe("complex recipe function", () => {
 
   it("has the correct nodes", () => {
     expect(nodes.length).toBe(2);
-    expect(isModule(nodes[0].module) && nodes[0].module.type).toBe(
-      "javascript",
-    );
+    expect(isModule(nodes[0].module) && nodes[0].module.type).toBe("javascript");
     expect(nodes[0].inputs).toEqual({ $alias: { path: ["argument", "x"] } });
     expect(nodes[0].outputs).toEqual({
       $alias: { path: ["internal", "__#0"] },
@@ -87,7 +85,7 @@ describe("schemas", () => {
       },
     });
     expect(testRecipe.resultSchema).toMatchObject(
-      testRecipe.argumentSchema as unknown as JSON,
+      testRecipe.argumentSchema as unknown as Record<string, unknown>,
     );
   });
 
@@ -95,7 +93,7 @@ describe("schemas", () => {
     const double = lift(
       z.number().describe("A number"),
       z.number().describe("Doubled"),
-      x => x * 2,
+      (x) => x * 2,
     );
     // @ts-ignore-error ZodNumber and number clash to be investigated
     const testRecipe = recipe(
@@ -142,9 +140,7 @@ describe("complex recipe with path aliases", () => {
 
   it("has the correct nodes", () => {
     expect(nodes.length).toBe(2);
-    expect(isModule(nodes[0].module) && nodes[0].module.type).toBe(
-      "javascript",
-    );
+    expect(isModule(nodes[0].module) && nodes[0].module.type).toBe("javascript");
     expect(nodes[0].inputs).toEqual({
       x: { $alias: { path: ["argument", "x"] } },
     });
@@ -163,21 +159,18 @@ describe("complex recipe with path aliases", () => {
     const json = JSON.stringify(doubleRecipe);
     const parsed = JSON.parse(json);
     expect(json.length).toBeGreaterThan(200);
-    expect(parsed.nodes[0].module.implementation).toContain(" => ");
+    expect(parsed.nodes[0].module.implementation).toContain("=>");
   });
 });
 
 describe("recipe with map node", () => {
-  const doubleArray = recipe<{ values: { x: number }[] }>(
-    "Double numbers",
-    ({ values }) => {
-      const doubled = values.map(({ x }) => {
-        const double = lift<number>(x => x * 2);
-        return { doubled: double(x) };
-      });
-      return { doubled };
-    },
-  );
+  const doubleArray = recipe<{ values: { x: number }[] }>("Double numbers", ({ values }) => {
+    const doubled = values.map(({ x }) => {
+      const double = lift<number>((x) => x * 2);
+      return { doubled: double(x) };
+    });
+    return { doubled };
+  });
 
   it("correctly serializes to a single map node", () => {
     expect(doubleArray.nodes.length).toBe(1);
@@ -221,9 +214,7 @@ describe("recipe with map node that references a parent cell", () => {
   );
 
   it("correctly creates references to the parent cells", () => {
-    expect(
-      (multiplyArray.nodes[0].inputs as { op: Recipe }).op.nodes[0].inputs,
-    ).toEqual({
+    expect((multiplyArray.nodes[0].inputs as { op: Recipe }).op.nodes[0].inputs).toEqual({
       x: { $alias: { cell: 1, path: ["argument", "element", "x"] } },
       factor: { $alias: { path: ["argument", "factor"] } },
     });
@@ -232,26 +223,20 @@ describe("recipe with map node that references a parent cell", () => {
 
 describe("recipe with map node that references a parent cell in another recipe", () => {
   it("correctly creates references to the parent cells", () => {
-    const multiplyArray = recipe<{ values: { x: number }[] }>(
-      "Double numbers",
-      ({ values }) => {
-        const wrapper = recipe("Wrapper", () => {
-          const multiplied = values.map(({ x }, index) => {
-            const multiply = lift<{ x: number; factor: number }>(
-              ({ x, factor }) => ({
-                x: x * factor,
-              }),
-            );
-            return { multiplied: multiply({ x, factor: index }) };
-          });
-          return { multiplied };
+    const multiplyArray = recipe<{ values: { x: number }[] }>("Double numbers", ({ values }) => {
+      const wrapper = recipe("Wrapper", () => {
+        const multiplied = values.map(({ x }, index) => {
+          const multiply = lift<{ x: number; factor: number }>(({ x, factor }) => ({
+            x: x * factor,
+          }));
+          return { multiplied: multiply({ x, factor: index }) };
         });
-        return wrapper({ values });
-      },
-    );
+        return { multiplied };
+      });
+      return wrapper({ values });
+    });
 
-    const subRecipe = (multiplyArray.nodes[0].module as Module)
-      .implementation as Recipe;
+    const subRecipe = (multiplyArray.nodes[0].module as Module).implementation as Recipe;
     expect(isRecipe(subRecipe)).toBeTruthy();
     const subSubRecipe = (subRecipe.nodes[0].inputs as { op: Recipe }).op;
     expect(isRecipe(subSubRecipe)).toBeTruthy();

@@ -8,6 +8,7 @@ import * as routes from "./blobby.routes.ts";
 import env from "@/env.ts";
 import { createClient } from "redis";
 import type { RedisClientType } from "redis";
+import { cors } from "hono/cors";
 
 const router = createRouter();
 
@@ -38,10 +39,12 @@ router.use("*", async (c, next) => {
   }
 });
 
-router
+router.use(cors());
+
+const Router = router
   .openapi(routes.uploadBlob, handlers.uploadBlobHandler)
   .openapi(routes.getBlob, handlers.getBlobHandler)
   .openapi(routes.getBlobPath, handlers.getBlobPathHandler)
   .openapi(routes.listBlobs, handlers.listBlobsHandler);
 
-export default router;
+export default Router;

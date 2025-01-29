@@ -1,13 +1,10 @@
-import { handler, recipe } from "@commontools/common-builder";
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
+import { handler, recipe } from "@commontools/builder";
 
-export const input = recipe(
-  "Input with JSX",
-  ({ value }: { value: string }) => {
-    const onChange = handler<InputEvent, { value: string }>((e, state) => {
-      state.value = (e.target as HTMLInputElement).value;
-    });
+export const input = recipe("Input with JSX", ({ value }: { value: string }) => {
+  const onChange = handler<InputEvent, { value: string }>((e, state) => {
+    state.value = (e.target as HTMLInputElement).value;
+  });
 
-    return <input value={value} oninput={onChange({ value })}></input>;
-  },
-);
+  return <input value={value} oninput={onChange({ value })}></input>;
+});

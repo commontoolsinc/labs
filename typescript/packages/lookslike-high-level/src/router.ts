@@ -18,23 +18,15 @@ export function navigate(url: string) {
 }
 
 window.addEventListener("popstate", () => {
-  window.dispatchEvent(
-    new CustomEvent("routeChange", { detail: window.location.pathname }),
-  );
+  window.dispatchEvent(new CustomEvent("routeChange", { detail: window.location.pathname }));
 });
 
 window.addEventListener("pushState", () => {
-  window.dispatchEvent(
-    new CustomEvent("routeChange", { detail: window.location.pathname }),
-  );
+  window.dispatchEvent(new CustomEvent("routeChange", { detail: window.location.pathname }));
 });
 
 window.addEventListener("replaceState", () => {
-  window.dispatchEvent(
-    new CustomEvent("routeChange", { detail: window.location.pathname }),
-  );
+  window.dispatchEvent(new CustomEvent("routeChange", { detail: window.location.pathname }));
 });
 
-window.dispatchEvent(
-  new CustomEvent("routeChange", { detail: window.location.pathname }),
-);
+window.dispatchEvent(new CustomEvent("routeChange", { detail: window.location.pathname }));

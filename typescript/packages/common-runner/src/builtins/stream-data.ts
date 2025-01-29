@@ -1,6 +1,6 @@
-import { getDoc, DocImpl, ReactivityLog } from "../cell.js";
+import { DocImpl, getDoc, ReactivityLog } from "../cell.js";
 import { normalizeToCells } from "../utils.js";
-import { idle, type Action } from "../scheduler.js";
+import { type Action, idle } from "../scheduler.js";
 
 /**
  * Stream data from a URL, used for querying Synopsys.
@@ -81,7 +81,7 @@ export function streamData(
     const thisRun = ++status.run;
 
     fetch(url, { ...options, signal })
-      .then(async response => {
+      .then(async (response) => {
         const reader = response.body?.getReader();
         const utf8 = new TextDecoder();
 
@@ -141,7 +141,7 @@ export function streamData(
           }
         }
       })
-      .catch(async e => {
+      .catch(async (e) => {
         if (e instanceof DOMException && e.name === "AbortError") {
           return;
         }

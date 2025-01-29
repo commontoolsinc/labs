@@ -1,6 +1,6 @@
 import { directive } from "lit/directive.js";
 import { AsyncDirective } from "lit/async-directive.js";
-import { Cell } from "@commontools/common-runner";
+import { Cell } from "@commontools/runner";
 
 const id = <T>(x: T) => x;
 

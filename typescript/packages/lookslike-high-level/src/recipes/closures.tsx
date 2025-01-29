@@ -1,15 +1,8 @@
-import { h } from "@commontools/common-html";
-import {
-  lift,
-  UI,
-  compute,
-  render,
-  NAME,
-  cell,
-} from "@commontools/common-builder";
+import { h } from "@commontools/html";
+import { lift, UI, compute, render, NAME, cell } from "@commontools/builder";
 import { z } from "zod";
 
-export const counter = lift<{ count: number }>(state => {
+export const counter = lift<{ count: number }>((state) => {
   return {
     [UI]: render(() => (
       <div>
@@ -29,9 +22,7 @@ export const counter = lift<{ count: number }>(state => {
 });
 
 export default lift(
-  z
-    .object({ test: z.string().default("Test string") })
-    .describe("Closures experiment"),
+  z.object({ test: z.string().default("Test string") }).describe("Closures experiment"),
   z.object({}),
   ({ test }) => {
     // Just test data
@@ -44,10 +35,10 @@ export default lift(
     const ui = compute(() => <div>{`${concat}`}!</div>);
 
     // The inner function is a recipe, so this worked before
-    const listUI = list.map(item => <li>#{item}</li>);
+    const listUI = list.map((item) => <li>#{item}</li>);
 
     // Now let's do a computation closure inside the recipe closure!
-    const listUI2 = list.map(item => (
+    const listUI2 = list.map((item) => (
       <li>
         {compute(() => (
           <span>#{item * 2}</span>

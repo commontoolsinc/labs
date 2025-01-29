@@ -6,9 +6,11 @@ import { z } from "zod";
 const tags = ["AI Language Models"];
 
 export const MessageSchema = z.object({
-  role: z.enum(["user", "assistant"]),
+  role: z.string(),
   content: z.string(),
 });
+
+export type LLMResponseMessage = z.infer<typeof MessageSchema>;
 
 export const LLMRequestSchema = z.object({
   messages: z.array(MessageSchema),
@@ -55,16 +57,24 @@ const JsonResponse = z.object({
   }),
 });
 
+export type LLMJSONResponse = z.infer<typeof JsonResponse>;
+
+const GetModelsRouteQueryParams = z.object({
+  search: z.string().optional(),
+  capability: z.string().optional(),
+  task: z.string().optional(),
+});
+
+export type GetModelsRouteQueryParams = z.infer<
+  typeof GetModelsRouteQueryParams
+>;
+
 // Route definitions
 export const getModels = createRoute({
   path: "/api/ai/llm/models",
   method: "get",
   tags,
-  query: z.object({
-    search: z.string().optional(),
-    capability: z.string().optional(),
-    task: z.string().optional(),
-  }),
+  query: GetModelsRouteQueryParams,
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
       ModelsResponseSchema.openapi({

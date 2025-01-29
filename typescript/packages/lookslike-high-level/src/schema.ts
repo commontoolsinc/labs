@@ -1,5 +1,4 @@
-import { isQueryResultForDereferencing } from "@commontools/common-runner";
-import { getDocLinkOrThrow } from "@commontools/common-runner";
+import { isQueryResultForDereferencing, getDocLinkOrThrow } from "@commontools/runner";
 import { z } from "zod";
 
 export function jsonSchemaToPlaceholder(schema: any): any {
@@ -43,9 +42,7 @@ export function jsonSchemaToPlaceholder(schema: any): any {
 
 export function extractKeysFromJsonSchema(schema: any): string[] {
   // For primitive types, return empty array
-  if (
-    ["string", "number", "integer", "boolean", "null"].includes(schema.type)
-  ) {
+  if (["string", "number", "integer", "boolean", "null"].includes(schema.type)) {
     return [];
   }
 
@@ -63,9 +60,7 @@ export function extractKeysFromJsonSchema(schema: any): string[] {
         // Add the current key
         keys.push(key);
         // Recursively get nested keys and prefix them with current key
-        const nestedKeys = extractKeysFromJsonSchema(value).map(
-          k => `${key}.${k}`,
-        );
+        const nestedKeys = extractKeysFromJsonSchema(value).map((k) => `${key}.${k}`);
         keys.push(...nestedKeys);
       }
     }
@@ -166,9 +161,7 @@ export function extractKeysFromZodSchema(schema: z.ZodTypeAny): string[] {
       // Add the current key
       keys.push(key);
       // Recursively get nested keys and prefix them with current key
-      const nestedKeys = extractKeysFromZodSchema(value as any).map(
-        k => `${key}.${k}`,
-      );
+      const nestedKeys = extractKeysFromZodSchema(value as any).map((k) => `${key}.${k}`);
       keys.push(...nestedKeys);
     }
 
@@ -182,61 +175,12 @@ export function extractKeysFromZodSchema(schema: z.ZodTypeAny): string[] {
   }
 
   // Handle optional and nullable
-  if (
-    schema._def.typeName === "ZodOptional" ||
-    schema._def.typeName === "ZodNullable"
-  ) {
+  if (schema._def.typeName === "ZodOptional" || schema._def.typeName === "ZodNullable") {
     return extractKeysFromZodSchema(schema._def.innerType);
   }
 
   return [];
 }
-
-export const jsonToDatalogQuery = (jsonObj: any) => {
-  const select: Record<string, any> = {};
-  const where: Array<any> = [];
-
-  if (typeof jsonObj !== "object" || jsonObj === null)
-    return { select: {}, where: [] };
-
-  function processObject(root: string, obj: any, path: string, selectObj: any) {
-    for (const [key, value] of Object.entries(obj)) {
-      const currentPath = path ? `${path}/${key}` : key;
-      const varName = `?${currentPath}`.replace(/\//g, "_");
-
-      if (Array.isArray(value)) {
-        if (value[0] === null) {
-          throw new Error("Cannot handle null values in arrays");
-        }
-
-        where.push({ Case: ["?item", key, `?${key}[]`] });
-        where.push({ Case: [`?${key}[]`, `?[${key}]`, `?${key}`] });
-
-        if (typeof value[0] === "object") {
-          selectObj[key] = [{ ".": `?${key}` }];
-          processObject(`?${key}`, value[0], currentPath, selectObj[key][0]);
-          selectObj[`.${key}`] = `?${key}[]`;
-        } else {
-          selectObj[key] = [`?${key}`];
-        }
-      } else if (typeof value === "object" && value !== null) {
-        selectObj[key] = {};
-        processObject(root, value, currentPath, selectObj[key]);
-      } else {
-        selectObj[key] = varName;
-        where.push({ Case: [root, key, varName] });
-      }
-    }
-  }
-
-  select["."] = "?item";
-  processObject("?item", jsonObj, "", select);
-
-  return {
-    select,
-    where,
-  };
-};
 
 export function inferJsonSchema(data: unknown): any {
   // Handle null
@@ -358,19 +302,14 @@ export function generateZodCode(schema: any, indent: number = 0): string {
     default:
       // Handle arrays
       if (schema.type === "array") {
-        const itemsSchema = schema.items
-          ? generateZodCode(schema.items, indent)
-          : "z.any()";
+        const itemsSchema = schema.items ? generateZodCode(schema.items, indent) : "z.any()";
         zodSchema = `z.array(${itemsSchema})`;
       }
       // Handle objects
       else if (schema.type === "object") {
         const properties = schema.properties || {};
         const zodProperties = Object.entries(properties)
-          .map(
-            ([key, value]) =>
-              `${innerSpacing}${key}: ${generateZodCode(value, indent + 1)}`,
-          )
+          .map(([key, value]) => `${innerSpacing}${key}: ${generateZodCode(value, indent + 1)}`)
           .join(",\n");
         zodSchema = `z.object({\n${zodProperties}\n${spacing}})`;
       }
@@ -427,6 +366,3 @@ export default recipe(Schema, (state) => {
 });
 `;
 };
-
-// const zodSchemaCode = generateZodCode(inferredSchema);
-// console.log(zodSchemaCode);

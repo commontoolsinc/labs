@@ -77,17 +77,11 @@ export type NodeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
   (Module | Handler | Recipe) &
   toJSON;
 
-export type RecipeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
-  Recipe &
-  toJSON;
+export type RecipeFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) & Recipe & toJSON;
 
-export type ModuleFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
-  Module &
-  toJSON;
+export type ModuleFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) & Module & toJSON;
 
-export type HandlerFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) &
-  Handler<T, R> &
-  toJSON;
+export type HandlerFactory<T, R> = ((inputs: Opaque<T>) => OpaqueRef<R>) & Handler<T, R> & toJSON;
 
 export type JSONValue =
   | string
@@ -98,14 +92,7 @@ export type JSONValue =
   | { [key: string]: JSONValue };
 
 export type JSONSchema = {
-  type?:
-    | "object"
-    | "array"
-    | "string"
-    | "integer"
-    | "number"
-    | "boolean"
-    | "null";
+  type?: "object" | "array" | "string" | "integer" | "number" | "boolean" | "null";
   properties?: { [key: string]: JSONSchema };
   description?: string;
   default?: JSONValue;
@@ -148,8 +135,7 @@ export type Handler<T = any, R = any> = Module & {
 
 export function isModule(value: any): value is Module {
   return (
-    (typeof value === "function" || typeof value === "object") &&
-    typeof value.type === "string"
+    (typeof value === "function" || typeof value === "object") && typeof value.type === "string"
   );
 }
 
@@ -236,11 +222,7 @@ export type Static = {
 };
 
 export function isStatic(value: any): value is Static {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    value[isStaticMarker] === true
-  );
+  return typeof value === "object" && value !== null && value[isStaticMarker] === true;
 }
 
 export function markAsStatic(value: any): any {

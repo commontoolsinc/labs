@@ -1,21 +1,23 @@
-import { h } from "@commontools/common-html";
-import { recipe, UI, NAME, derive } from "@commontools/common-builder";
+import { h } from "@commontools/html";
+import { recipe, UI, NAME, JSONSchema } from "@commontools/builder";
 
-import src from "./smolIframe.html?raw"; // this loads the html file using VITE.js as a string from the html file on disk
+import src from "./smolIframe.html?raw";
 
-export default recipe<{
-    data: { count: number };
-}>("smol-iframe", ({ data }) => {
+const argumentSchema = {
+  type: "object",
+  properties: {
+    count: {
+      type: "number",
+      default: 0
+    },
+  },
+  description: "SMOL Counter demo"
+} as JSONSchema;
 
-    return {
-        [NAME]: 'smol iframe',
-        [UI]: <div style="height: 100%">
-            <p>outside of iframe, data: {derive(data, data => JSON.stringify(data))}</p>
-            <common-iframe
-                src={src}
-                $context={data}
-            ></common-iframe>
-        </div>,
-        data
-    };
-});
+export default recipe(argumentSchema, (data) => ({
+  [NAME]: "smol iframe",
+  [UI]: (
+    <common-iframe src={src} $context={data}></common-iframe>
+  ),
+}));
+

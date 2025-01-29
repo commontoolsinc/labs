@@ -1,21 +1,11 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
-import { view } from "../hyperscript/render.js";
-import { eventProps } from "../hyperscript/schema-helpers.js";
 import { ZodObject } from "zod";
-
-export const commonTable = view("common-table", {
-  ...eventProps(),
-});
-
-export const commonCard = view("common-card", {
-  ...eventProps(),
-});
 
 @customElement("common-card")
 export class CommonCardElement extends LitElement {
-  @property({ type: Object }) schema: ZodObject<any> = null;
+  @property({ type: Object }) schema: ZodObject<any> | null = null;
   @property({ type: Object }) item: any = null;
 
   static override styles = [
@@ -75,24 +65,16 @@ export class CommonCardElement extends LitElement {
           ([key, schema]) => html`
             <div class="field">
               <div class="label">${key.replace(/([A-Z])/g, " $1").trim()}</div>
-              <div class="value">
-                ${this.formatValue(this.item[key], schema, key)}
-              </div>
+              <div class="value">${this.formatValue(this.item[key], schema, key)}</div>
             </div>
           `,
         )}
         ${selfEntry
           ? html`
               <div class="field">
-                <div class="label">
-                  ${selfEntry[0].replace(/([A-Z])/g, " $1").trim()}
-                </div>
+                <div class="label">${selfEntry[0].replace(/([A-Z])/g, " $1").trim()}</div>
                 <div class="value">
-                  ${this.formatValue(
-                    this.item[selfEntry[0]],
-                    selfEntry[1],
-                    selfEntry[0],
-                  )}
+                  ${this.formatValue(this.item[selfEntry[0]], selfEntry[1], selfEntry[0])}
                 </div>
               </div>
             `
@@ -116,12 +98,8 @@ export class CommonCardElement extends LitElement {
       ${selfEntry
         ? html`
             <div class="field">
-              <div class="label">
-                ${selfEntry[0].replace(/([A-Z])/g, " $1").trim()}
-              </div>
-              <div class="value">
-                ${this.formatValue(selfEntry[1], undefined, selfEntry[0])}
-              </div>
+              <div class="label">${selfEntry[0].replace(/([A-Z])/g, " $1").trim()}</div>
+              <div class="value">${this.formatValue(selfEntry[1], undefined, selfEntry[0])}</div>
             </div>
           `
         : ""}
@@ -166,7 +144,7 @@ export class CommonCardElement extends LitElement {
 
 @customElement("common-table")
 export class CommonTableElement extends LitElement {
-  @property({ type: Object }) schema: ZodObject<any> = null;
+  @property({ type: Object }) schema: ZodObject<any> | null = null;
   @property({ type: Array }) data: any[] = [];
   @property({ type: Boolean }) edit = false;
   @property({ type: Boolean }) delete = false;
@@ -296,10 +274,7 @@ export class CommonTableElement extends LitElement {
       case "ZodObject":
         return html`
           <span class="complex-value" title=${JSON.stringify(value)}>
-            ${JSON.stringify(value).slice(0, 50)}${JSON.stringify(value)
-              .length > 50
-              ? "..."
-              : ""}
+            ${JSON.stringify(value).slice(0, 50)}${JSON.stringify(value).length > 50 ? "..." : ""}
           </span>
         `;
       case "ZodBoolean":
@@ -383,6 +358,7 @@ export class CommonTableElement extends LitElement {
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
+      if (!this.schema) return;
 
       try {
         const text = await file.text();
@@ -426,83 +402,64 @@ export class CommonTableElement extends LitElement {
       return html`<div>No data available</div>`;
     }
 
+    const shape = this.schema ? this.schema.shape : {};
+
     return html`
       <button class="download-all-button" @click=${this.handleDownloadAll}>
         Download All Records
       </button>
-      <button class="import-button" @click=${this.handleImport}>
-        Import JSON
-      </button>
+      <button class="import-button" @click=${this.handleImport}>Import JSON</button>
       <div class="table-container">
         <table>
           <thead>
             <tr>
               ${Object.entries(this.schema.shape).map(
-                ([key]) => html`
-                  <th>${key.replace(/([A-Z])/g, " $1").trim()}</th>
-                `,
+                ([key]) => html` <th>${key.replace(/([A-Z])/g, " $1").trim()}</th> `,
               )}
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             ${this.data.map(
-              row => html`
+              (row) => html`
                 <tr>
-                  ${Object.entries(this.schema.shape).map(
+                  ${Object.entries(shape).map(
                     ([key, schema]) => html`
-                      <td title=${String(row[key])}>
-                        ${this.formatValue(row[key], schema)}
-                      </td>
+                      <td title=${String(row[key])}>${this.formatValue(row[key], schema)}</td>
                     `,
                   )}
                   <td>
                     ${this.preview
                       ? html`
-                          <button
-                            class="preview-button"
-                            @click=${() => this.showPreview(row)}
-                          >
+                          <button class="preview-button" @click=${() => this.showPreview(row)}>
                             Preview
                           </button>
                         `
                       : ""}
                     ${this.edit
                       ? html`
-                          <button
-                            class="edit-button"
-                            @click=${() => this.handleEdit(row)}
-                          >
+                          <button class="edit-button" @click=${() => this.handleEdit(row)}>
                             Edit
                           </button>
                         `
                       : ""}
                     ${this.delete
                       ? html`
-                          <button
-                            class="delete-button"
-                            @click=${() => this.handleDelete(row)}
-                          >
+                          <button class="delete-button" @click=${() => this.handleDelete(row)}>
                             Delete
                           </button>
                         `
                       : ""}
                     ${this.download
                       ? html`
-                          <button
-                            class="download-button"
-                            @click=${() => this.handleDownload(row)}
-                          >
+                          <button class="download-button" @click=${() => this.handleDownload(row)}>
                             Download
                           </button>
                         `
                       : ""}
                     ${this.copy
                       ? html`
-                          <button
-                            class="copy-button"
-                            @click=${() => this.handleCopySelf(row)}
-                          >
+                          <button class="copy-button" @click=${() => this.handleCopySelf(row)}>
                             Copy Ref
                           </button>
                         `
@@ -518,17 +475,9 @@ export class CommonTableElement extends LitElement {
       ${this.selectedItem
         ? html`
             <div class="modal-overlay" @click=${this.closePreview}>
-              <div
-                class="modal-content"
-                @click=${(e: Event) => e.stopPropagation()}
-              >
-                <button class="close-button" @click=${this.closePreview}>
-                  ×
-                </button>
-                <common-card
-                  .schema=${this.schema}
-                  .item=${this.selectedItem}
-                ></common-card>
+              <div class="modal-content" @click=${(e: Event) => e.stopPropagation()}>
+                <button class="close-button" @click=${this.closePreview}>×</button>
+                <common-card .schema=${this.schema} .item=${this.selectedItem}></common-card>
               </div>
             </div>
           `

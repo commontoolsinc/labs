@@ -1,4 +1,4 @@
-import { LitElement, html, css } from "lit-element";
+import { LitElement, html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 
 interface LayoutItem {
@@ -96,7 +96,7 @@ export default class CanvasLayoutElement extends LitElement {
     const padding = 10;
 
     // Remove items that no longer exist
-    const currentIds = new Set(slottedElements.map(el => el.id));
+    const currentIds = new Set(slottedElements.map((el) => el.id));
     for (const [id] of this.items) {
       if (!currentIds.has(id)) {
         this.items.delete(id);
@@ -140,7 +140,7 @@ export default class CanvasLayoutElement extends LitElement {
     // Use composedPath to find the first element in our shadow root
     const path = e.composedPath();
     const element = path.find(
-      el => el instanceof HTMLElement && el.getRootNode() === this.shadowRoot,
+      (el) => el instanceof HTMLElement && el.getRootNode() === this.shadowRoot,
     ) as HTMLElement | undefined;
 
     if (!element) return;
@@ -176,17 +176,11 @@ export default class CanvasLayoutElement extends LitElement {
       const rect = this.getBoundingClientRect();
       const newX = Math.max(
         0,
-        Math.min(
-          e.clientX - this.dragOffset.x - rect.left,
-          rect.width - this.dragItem.width,
-        ),
+        Math.min(e.clientX - this.dragOffset.x - rect.left, rect.width - this.dragItem.width),
       );
       const newY = Math.max(
         0,
-        Math.min(
-          e.clientY - this.dragOffset.y - rect.top,
-          rect.height - this.dragItem.height,
-        ),
+        Math.min(e.clientY - this.dragOffset.y - rect.top, rect.height - this.dragItem.height),
       );
 
       this.dragItem.x = newX;
@@ -207,24 +201,16 @@ export default class CanvasLayoutElement extends LitElement {
 
     if (this.resizeItem) {
       const rect = this.getBoundingClientRect();
-      const deltaX =
-        e.clientX - rect.left - (this.resizeItem.x + this.resizeStart.width);
-      const deltaY =
-        e.clientY - rect.top - (this.resizeItem.y + this.resizeStart.height);
+      const deltaX = e.clientX - rect.left - (this.resizeItem.x + this.resizeStart.width);
+      const deltaY = e.clientY - rect.top - (this.resizeItem.y + this.resizeStart.height);
 
       const newWidth = Math.max(
         50,
-        Math.min(
-          this.resizeStart.width + deltaX,
-          rect.width - this.resizeItem.x,
-        ),
+        Math.min(this.resizeStart.width + deltaX, rect.width - this.resizeItem.x),
       );
       const newHeight = Math.max(
         50,
-        Math.min(
-          this.resizeStart.height + deltaY,
-          rect.height - this.resizeItem.y,
-        ),
+        Math.min(this.resizeStart.height + deltaY, rect.height - this.resizeItem.y),
       );
 
       this.resizeItem.width = newWidth;
@@ -253,7 +239,7 @@ export default class CanvasLayoutElement extends LitElement {
     return html`
       <div class="canvas-area">
         ${Array.from(this.items.values()).map(
-          item => html`
+          (item) => html`
             <div
               class="item"
               data-item-id="${item.id}"

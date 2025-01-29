@@ -1,33 +1,33 @@
-import { isAlias, isStreamAlias } from "@commontools/common-builder";
+import { isAlias, isStreamAlias } from "@commontools/builder";
 import {
-  getValueAtPath,
-  setValueAtPath,
-  deepEqual,
   cell as opaqueRef,
-  toOpaqueRef,
-  type OpaqueRef,
-  getTopFrame,
+  deepEqual,
   type Frame,
+  getTopFrame,
+  getValueAtPath,
   type JSONSchema,
-} from "@commontools/common-builder";
+  type OpaqueRef,
+  setValueAtPath,
+  toOpaqueRef,
+} from "@commontools/builder";
 import {
-  followCellReferences,
-  followAliases,
-  setNestedValue,
-  pathAffected,
-  transformToCells,
-  normalizeToCells,
   arrayEqual,
+  followAliases,
+  followCellReferences,
+  normalizeToCells,
+  pathAffected,
+  setNestedValue,
+  transformToCells,
 } from "./utils.js";
 import { queueEvent } from "./scheduler.js";
 import {
-  setDocByEntityId,
-  getEntityId,
   createRef,
   type EntityId,
   getDocByEntityId,
+  getEntityId,
+  setDocByEntityId,
 } from "./cell-map.js";
-import { type Cancel } from "./cancel.js";
+import type { Cancel } from "./cancel.js";
 import { validateAndTransform } from "./schema.js";
 
 /**
@@ -335,20 +335,14 @@ export function getDoc<T>(value?: T, cause?: any): DocImpl<T> {
 
   const self: DocImpl<T> = {
     get: () => value as T,
-    getAsQueryResult: <Path extends PropertyKey[]>(
-      path?: Path,
-      log?: ReactivityLog,
-    ) =>
-      createQueryResultProxy(self, path ?? [], log) as QueryResult<
-        DeepKeyLookup<T, Path>
-      >,
+    getAsQueryResult: <Path extends PropertyKey[]>(path?: Path, log?: ReactivityLog) =>
+      createQueryResultProxy(self, path ?? [], log) as QueryResult<DeepKeyLookup<T, Path>>,
     asCell: <Q = T, Path extends PropertyKey[] = []>(
       path?: Path,
       log?: ReactivityLog,
       schema?: JSONSchema,
     ) => createCell<Q>(self, path || [], log, schema),
-    send: (newValue: T, log?: ReactivityLog) =>
-      self.setAtPath([], newValue, log),
+    send: (newValue: T, log?: ReactivityLog) => self.setAtPath([], newValue, log),
     updates: (callback: (value: T, path: PropertyKey[]) => void) => {
       callbacks.add(callback);
       return () => callbacks.delete(callback);
@@ -392,7 +386,7 @@ export function getDoc<T>(value?: T, cause?: any): DocImpl<T> {
     toJSON: () =>
       typeof entityId?.toJSON === "function"
         ? entityId.toJSON()
-        : (entityId as { "/": string }) ?? { "/": "" },
+        : ((entityId as { "/": string }) ?? { "/": "" }),
     get value(): T {
       return value as T;
     },
@@ -408,10 +402,11 @@ export function getDoc<T>(value?: T, cause?: any): DocImpl<T> {
       return sourceCell;
     },
     set sourceCell(cell: DocImpl<any> | undefined) {
-      if (sourceCell && sourceCell !== cell)
+      if (sourceCell && sourceCell !== cell) {
         throw new Error(
           `Source cell already set: ${JSON.stringify(sourceCell)} -> ${JSON.stringify(cell)}`,
         );
+      }
       sourceCell = cell;
     },
     get ephemeral(): boolean {
@@ -471,13 +466,14 @@ function createCell<T>(
       ref = undefined;
       if (isQueryResultForDereferencing(target)) ref = target[getDocLink];
       else if (isDocLink(target)) ref = target;
-      else if (isDoc(target))
+      else if (isDoc(target)) {
         ref = { cell: target, path: [] } satisfies DocLink;
-      else if (isAlias(target))
+      } else if (isAlias(target)) {
         ref = {
           cell: target.$alias.cell ?? doc,
           path: target.$alias.path,
         } satisfies DocLink;
+      }
 
       if (ref) {
         log?.reads.push({ cell: ref.cell, path: ref.path });
@@ -504,8 +500,9 @@ function createCell<T>(
         send: (newValue: T) => self.set(newValue),
         update: (value: Partial<T>) => {
           const previousValue = doc.getAtPath(path);
-          if (typeof previousValue !== "object" || previousValue === null)
+          if (typeof previousValue !== "object" || previousValue === null) {
             throw new Error("Can't update non-object value");
+          }
           const newValue = {
             ...previousValue,
             ...value,
@@ -514,8 +511,9 @@ function createCell<T>(
         },
         push: (value: any) => {
           const array = doc.getAtPath(path) ?? [];
-          if (!Array.isArray(array))
+          if (!Array.isArray(array)) {
             throw new Error("Can't push into non-array value");
+          }
 
           // Every element pushed to the array should be it's own doc or link to
           // one. So if it isn't already, make it one.
@@ -552,10 +550,10 @@ function createCell<T>(
         key: <K extends keyof T>(key: K) => {
           const currentSchema =
             schema?.type === "object"
-              ? schema.properties?.[key as string] ??
+              ? (schema.properties?.[key as string] ??
                 (typeof schema.additionalProperties === "object"
                   ? schema.additionalProperties
-                  : undefined)
+                  : undefined))
               : schema?.type === "array"
                 ? schema.items
                 : undefined;
@@ -564,10 +562,8 @@ function createCell<T>(
         asSchema: (newSchema: JSONSchema) => {
           return createCell(doc, path, log, newSchema);
         },
-        getAsQueryResult: (
-          subPath: PropertyKey[] = [],
-          newLog?: ReactivityLog,
-        ) => createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
+        getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
+          createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
         getAsDocLink: () => ({ cell: doc, path }) satisfies DocLink,
         toJSON: () => doc.toJSON(),
         get value(): T {
@@ -578,9 +574,7 @@ function createCell<T>(
         },
         [isCellMarker]: true,
         get copyTrap(): boolean {
-          throw new Error(
-            "Copy trap: Don't copy renderer cells. Create references instead.",
-          );
+          throw new Error("Copy trap: Don't copy renderer cells. Create references instead.");
         },
         schema,
       };
@@ -673,8 +667,9 @@ export function createQueryResultProxy<T>(
     }
   }
 
-  if (valuePath.length > 30)
+  if (valuePath.length > 30) {
     console.warn("Query result with long path [2]", JSON.stringify(valuePath));
+  }
 
   // Now target is the end of the path. It might still be a cell, alias or cell
   // reference, so we follow these as well.
@@ -694,10 +689,11 @@ export function createQueryResultProxy<T>(
   return new Proxy(target as object, {
     get: (target, prop, receiver) => {
       if (typeof prop === "symbol") {
-        if (prop === getDocLink)
+        if (prop === getDocLink) {
           return { cell: valueCell, path: valuePath } satisfies DocLink;
-        else if (prop === toOpaqueRef)
+        } else if (prop === toOpaqueRef) {
           return () => makeOpaqueRef(valueCell, valuePath);
+        }
 
         const value = Reflect.get(target, prop, receiver);
         if (typeof value === "function") return value.bind(receiver);
@@ -726,32 +722,28 @@ export function createQueryResultProxy<T>(
               // creates cell value proxies on demand.
               let copy: any;
               if (isReadWrite === ArrayMethodType.WriteOnly) copy = [...target];
-              else
+              else {
                 copy = target.map((_, index) =>
-                  createProxyForArrayValue(
-                    index,
-                    valueCell,
-                    [...valuePath, index],
-                    log,
-                  ),
+                  createProxyForArrayValue(index, valueCell, [...valuePath, index], log),
                 );
+              }
 
               let result = method.apply(copy, args);
 
               // Unwrap results and return as value proxies
               if (isProxyForArrayValue(result)) result = result.valueOf();
-              else if (Array.isArray(result))
-                result = result.map(value =>
+              else if (Array.isArray(result)) {
+                result = result.map((value) =>
                   isProxyForArrayValue(value) ? value.valueOf() : value,
                 );
+              }
 
-              if (isReadWrite === ArrayMethodType.ReadWrite)
+              if (isReadWrite === ArrayMethodType.ReadWrite) {
                 // Undo the proxy wrapping and assign original items.
                 copy = copy.map((value: any) =>
-                  isProxyForArrayValue(value)
-                    ? target[value[originalIndex]]
-                    : value,
+                  isProxyForArrayValue(value) ? target[value[originalIndex]] : value,
                 );
+              }
 
               // Turn any newly added elements into cells. And if there was a
               // change at all, update the cell.
@@ -764,8 +756,9 @@ export function createQueryResultProxy<T>(
               setNestedValue(valueCell, valuePath, copy, log);
 
               if (Array.isArray(result)) {
-                if (!valueCell.entityId)
+                if (!valueCell.entityId) {
                   throw new Error("No entity id for cell holding array");
+                }
 
                 const cause = {
                   parent: valueCell.entityId,
@@ -793,19 +786,10 @@ export function createQueryResultProxy<T>(
 
       if (Array.isArray(target) && prop === "length") {
         const oldLength = target.length;
-        const result = setNestedValue(
-          valueCell,
-          [...valuePath, prop],
-          value,
-          log,
-        );
+        const result = setNestedValue(valueCell, [...valuePath, prop], value, log);
         const newLength = value;
         if (result) {
-          for (
-            let i = Math.min(oldLength, newLength);
-            i < Math.max(oldLength, newLength);
-            i++
-          ) {
+          for (let i = Math.min(oldLength, newLength); i < Math.max(oldLength, newLength); i++) {
             log?.writes.push({ cell: valueCell, path: [...valuePath, i] });
             queueEvent({ cell: valueCell, path: [...valuePath, i] }, undefined);
           }
@@ -828,7 +812,7 @@ export function createQueryResultProxy<T>(
             list: { cell: valueCell.entityId, path: valuePath },
             previous:
               Number(prop) > 0
-                ? target[Number(prop) - 1].cell?.entityId ?? Number(prop) - 1
+                ? (target[Number(prop) - 1].cell?.entityId ?? Number(prop) - 1)
                 : null,
           }),
           path: [],
@@ -885,14 +869,15 @@ const docLinkToOpaqueRef = new WeakMap<
 function makeOpaqueRef(doc: DocImpl<any>, path: PropertyKey[]): OpaqueRef<any> {
   const frame = getTopFrame();
   if (!frame) throw new Error("No frame");
-  if (!docLinkToOpaqueRef.has(frame))
+  if (!docLinkToOpaqueRef.has(frame)) {
     docLinkToOpaqueRef.set(frame, new WeakMap());
+  }
   let opaqueRefs = docLinkToOpaqueRef.get(frame)!.get(doc);
   if (!opaqueRefs) {
     opaqueRefs = [];
     docLinkToOpaqueRef.get(frame)!.set(doc, opaqueRefs);
   }
-  let ref = opaqueRefs.find(p => arrayEqual(path, p.path))?.opaqueRef;
+  let ref = opaqueRefs.find((p) => arrayEqual(path, p.path))?.opaqueRef;
   if (!ref) {
     ref = opaqueRef();
     ref.setPreExisting({ $alias: { cell: doc, path } });
@@ -935,9 +920,7 @@ export function getDocLinkOrThrow(value: any): DocLink {
  * @returns {boolean}
  */
 export function isDoc(value: any): value is DocImpl<any> {
-  return (
-    typeof value === "object" && value !== null && value[isDocMarker] === true
-  );
+  return typeof value === "object" && value !== null && value[isDocMarker] === true;
 }
 
 const isDocMarker = Symbol("isDoc");
@@ -949,9 +932,7 @@ const isDocMarker = Symbol("isDoc");
  * @returns {boolean}
  */
 export function isCell(value: any): value is Cell<any> {
-  return (
-    typeof value === "object" && value !== null && value[isCellMarker] === true
-  );
+  return typeof value === "object" && value !== null && value[isCellMarker] === true;
 }
 
 const isCellMarker = Symbol("isCell");
@@ -964,10 +945,7 @@ const isCellMarker = Symbol("isCell");
  */
 export function isDocLink(value: any): value is DocLink {
   return (
-    typeof value === "object" &&
-    value !== null &&
-    isDoc(value.cell) &&
-    Array.isArray(value.path)
+    typeof value === "object" && value !== null && isDoc(value.cell) && Array.isArray(value.path)
   );
 }
 
@@ -978,11 +956,7 @@ export function isDocLink(value: any): value is DocLink {
  * @returns {boolean}
  */
 export function isQueryResult(value: any): value is QueryResult<any> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    value[getDocLink] !== undefined
-  );
+  return typeof value === "object" && value !== null && value[getDocLink] !== undefined;
 }
 
 const getDocLink = Symbol("isQueryResultProxy");
@@ -994,9 +968,7 @@ const getDocLink = Symbol("isQueryResultProxy");
  * @param {any} value - The value to check.
  * @returns {boolean}
  */
-export function isQueryResultForDereferencing(
-  value: any,
-): value is QueryResultInternals {
+export function isQueryResultForDereferencing(value: any): value is QueryResultInternals {
   return isQueryResult(value);
 }
 

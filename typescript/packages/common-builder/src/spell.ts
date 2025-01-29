@@ -1,10 +1,4 @@
-import {
-  derive,
-  type OpaqueRef,
-  recipe,
-  stream,
-  UI,
-} from "@commontools/common-builder";
+import { derive, type OpaqueRef, recipe, stream, UI } from "./index.js";
 
 // $ is a proxy that just collect paths, so that one can call [getPath] on it
 // and get an array. For example for `q = $.foo.bar[0]` `q[getPath]` yields
@@ -85,10 +79,7 @@ export function select(query: any) {
       select({
         ...resolve$(self, query),
         ...Object.fromEntries(
-          Object.keys(schema.properties ?? {}).map(key => [
-            key,
-            self[key as any],
-          ]),
+          Object.keys(schema.properties ?? {}).map((key) => [key, (self as any)[key]]),
         ),
       }),
   });
@@ -133,7 +124,6 @@ export abstract class Spell<T extends Record<string, any>> {
    * @returns An OpaqueRef stream for the event
    */
   dispatch(event: string) {
-    console.log("dispatch", event, this.streams[event]);
     return this.streams[event];
   }
 
@@ -192,12 +182,10 @@ export abstract class Spell<T extends Record<string, any>> {
 
       this.eventListeners.forEach(({ type, handlerFn }) => {
         this.streams[type] ??= stream();
-        derive({ self, $event: this.streams[type] }, ({ self, $event }) =>
-          handlerFn(self, $event),
-        );
+        derive({ self, $event: this.streams[type] }, ({ self, $event }) => handlerFn(self, $event));
       });
 
-      this.rules.forEach(rule => {
+      this.rules.forEach((rule) => {
         // condition:
         //  ($) => { foo: $.foo }
         //  select({ foo: $.foo })
@@ -211,9 +199,7 @@ export abstract class Spell<T extends Record<string, any>> {
         let condition = rule.condition(self);
 
         if (Array.isArray(condition)) {
-          condition = Object.fromEntries(
-            condition.map(key => [key, self[key]]),
-          );
+          condition = Object.fromEntries(condition.map((key) => [key, self[key]]));
         } else if (
           condition &&
           typeof condition === "object" &&

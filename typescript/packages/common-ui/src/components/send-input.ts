@@ -1,15 +1,6 @@
-import { LitElement, html, css } from "lit-element";
-import { customElement, property } from "lit-element/decorators.js";
+import { LitElement, html, css } from "lit";
+import { customElement, property } from "lit/decorators.js";
 import { baseStyles } from "./style.js";
-import { view } from "../hyperscript/render.js";
-import { eventProps } from "../hyperscript/schema-helpers.js";
-
-export const sendInput = view("common-send-message", {
-  ...eventProps(),
-  name: { type: "string" },
-  placeholder: { type: "string" },
-  appearance: { type: "string" },
-});
 
 @customElement("common-send-message")
 export class SendMessageElement extends LitElement {
@@ -29,15 +20,16 @@ export class SendMessageElement extends LitElement {
   ];
 
   @property({ type: String })
-  name: string;
+  name: string = "";
 
   @property({ type: String })
-  placeholder: string;
+  placeholder: string = "";
 
   send(event: Event) {
     event.preventDefault();
 
-    const inputEl = this.shadowRoot.getElementById("input") as HTMLInputElement;
+    const inputEl = this.shadowRoot?.getElementById("input") as HTMLInputElement;
+    if (!inputEl) return;
     const value = inputEl.value;
     inputEl.value = "";
 
@@ -46,7 +38,7 @@ export class SendMessageElement extends LitElement {
         detail: { message: value },
         bubbles: true,
         composed: true,
-      })
+      }),
     );
   }
 
@@ -65,9 +57,7 @@ export class SendMessageElement extends LitElement {
           @keydown=${this.keyDown}
         >
         </common-input>
-        <common-button class="unibox-button" @click=${this.send}
-          >${this.name}</common-button
-        >
+        <common-button class="unibox-button" @click=${this.send}>${this.name}</common-button>
       </div>
     `;
   }

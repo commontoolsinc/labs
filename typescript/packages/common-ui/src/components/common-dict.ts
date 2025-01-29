@@ -1,13 +1,8 @@
-import { LitElement, html, css } from 'lit-element';
-import { customElement, property } from 'lit-element/decorators.js';
-import { repeat } from 'lit/directives/repeat.js';
-import { view } from '../hyperscript/render.js';
+import { LitElement, html, css } from "lit";
+import { customElement, property } from "lit/decorators.js";
+import { repeat } from "lit/directives/repeat.js";
 
-export const dict = view('common-dict', {
-  records: { type: 'object' },
-});
-
-@customElement('common-dict')
+@customElement("common-dict")
 export class CommonDictElement extends LitElement {
   static override styles = css`
     :host {
@@ -23,15 +18,15 @@ export class CommonDictElement extends LitElement {
   `;
 
   @property({ type: Object })
-  records: Record<string, string>;
+  records: Record<string, string> = {};
 
   override render() {
     const records = repeat(Object.entries(this.records), ([key, value]) => {
       return html`
-      <common-record>
-        <span slot="key">${key}</span>
-        ${value}
-      </common-record>
+        <common-record>
+          <span slot="key">${key}</span>
+          ${value}
+        </common-record>
       `;
     });
 

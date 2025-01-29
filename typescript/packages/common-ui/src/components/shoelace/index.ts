@@ -7,19 +7,19 @@ import { registerIconLibrary } from "@shoelace-style/shoelace";
  * This should typically be called on `document`.
  * Calling with no arguments will perform this on `document`.
  */
-export const adoptShoelaceStyles = (
-  host: Document | ShadowRoot = window.document,
-) => {
-  host.adoptedStyleSheets = [theme.styleSheet];
+export const adoptShoelaceStyles = (host: Document | ShadowRoot = window.document) => {
+  host.adoptedStyleSheets = [theme.styleSheet!];
 };
 
 export const registerShoelaceIcons = () => {
   registerIconLibrary("material", {
-    resolver: (name) => {
+    resolver: (name: string) => {
       const match = name.match(/^(.*?)(_(round|sharp))?$/);
-      return `https://cdn.jsdelivr.net/npm/@material-icons/svg@1.0.5/svg/${match[1]}/${match[3] || "outline"}.svg`;
+      return match
+        ? `https://cdn.jsdelivr.net/npm/@material-icons/svg@1.0.5/svg/${match[1]}/${match[3] || "outline"}.svg`
+        : "about:blank";
     },
-    mutator: (svg) => svg.setAttribute("fill", "currentColor"),
+    mutator: (svg: SVGElement) => svg.setAttribute("fill", "currentColor"),
   });
 };
 

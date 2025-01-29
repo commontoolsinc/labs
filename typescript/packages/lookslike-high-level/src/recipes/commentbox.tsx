@@ -1,14 +1,6 @@
-import {
-  derive,
-  type OpaqueRef,
-  UI,
-  ifElse,
-  select,
-  Spell,
-  $
-} from "@commontools/common-builder";
-import { h } from "@commontools/common-html";
-import { doc } from "@commontools/common-runner";
+import { derive, type OpaqueRef, UI, ifElse, select, Spell, $ } from "@commontools/builder";
+import { h } from "@commontools/html";
+import { doc } from "@commontools/runner";
 
 type Meta = {
   category: string;
@@ -38,7 +30,6 @@ class MetadataSpell extends Spell<Meta> {
   }
 
   override render({ category, submittedAt }: OpaqueRef<Meta>) {
-    console.log("Metadata render", category, submittedAt);
     return (
       <div>
         <h2>Metadata</h2>
@@ -71,7 +62,7 @@ export class CommentBoxSpell extends Spell<CommentsState> {
   constructor() {
     super();
 
-    this.addEventListener("random", self => {
+    this.addEventListener("random", (self) => {
       console.log("random", self);
 
       const metadata: Meta = doc({
@@ -82,14 +73,14 @@ export class CommentBoxSpell extends Spell<CommentsState> {
       this.update(self, { meta: metadata });
     });
 
-    this.addEventListener("submit", self => {
+    this.addEventListener("submit", (self) => {
       console.log("submit", self);
     });
 
     this.addRule(
       select({ category: $.meta.category, title: $.title }),
       ({ self, category, title }) =>
-        this.update(self, { metaLength: title.length + (category ?? "").length })
+        this.update(self, { metaLength: title.length + (category ?? "").length }),
     );
   }
 
@@ -108,7 +99,7 @@ export class CommentBoxSpell extends Spell<CommentsState> {
         <h1>{title}</h1>
         <p>{description}</p>
         <p>metaLength: {metaLength}</p>
-        <pre>{derive(meta, meta => JSON.stringify(meta, null, 2))}</pre>
+        <pre>{derive(meta, (meta) => JSON.stringify(meta, null, 2))}</pre>
         {ifElse(
           meta,
           <div>

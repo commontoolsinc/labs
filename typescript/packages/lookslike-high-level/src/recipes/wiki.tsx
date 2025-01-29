@@ -1,4 +1,4 @@
-import { h } from "@commontools/common-html";
+import { h } from "@commontools/html";
 import {
   recipe,
   lift,
@@ -9,7 +9,7 @@ import {
   UI,
   str,
   ifElse,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
@@ -75,76 +75,65 @@ const grabJSON = lift<{ result?: string }, ExploreResult>(({ result }) => {
 // this is a bit of a hack to extend the canon with the current page title and text
 // and expose it in a way that works inside the `map` of each related title
 const contextify = lift(({ related, canon, text, title, maxLength }) => {
-  const newCanon =
-    `<title>${title}</title>\n<text>${text}</text>\n\n${canon}`.slice(
-      0,
-      maxLength,
-    );
+  const newCanon = `<title>${title}</title>\n<text>${text}</text>\n\n${canon}`.slice(0, maxLength);
   return (related || []).map(({ title }: { title: string }) => ({
     title,
     canon: newCanon,
   }));
 });
 
-const launcher = handler<PointerEvent, { title: string; canon: string }>(
-  (_, { title, canon }) => navigateTo(wiki({ title, canon })),
+const launcher = handler<PointerEvent, { title: string; canon: string }>((_, { title, canon }) =>
+  navigateTo(wiki({ title, canon })),
 );
 
 const imgUrl = lift(({ prompt }) =>
-  prompt
-    ? `/api/ai/img/?prompt=${encodeURIComponent(prompt)}`
-    : "/api/ai/img?prompt=infinite+void",
+  prompt ? `/api/ai/img/?prompt=${encodeURIComponent(prompt)}` : "/api/ai/img?prompt=infinite+void",
 );
 
-const wiki = recipe<{ title: string; canon: string }>(
-  "Wiki",
-  ({ title, canon }) => {
-    title.setDefault("Mystical Creatures");
-    canon.setDefault(
-      "A mythical creature is a creature that is not real.  But let's pretend they are real.",
-    );
+const wiki = recipe<{ title: string; canon: string }>("Wiki", ({ title, canon }) => {
+  title.setDefault("Mystical Creatures");
+  canon.setDefault(
+    "A mythical creature is a creature that is not real.  But let's pretend they are real.",
+  );
 
-    const { result, pending } = llm(prep({ title, canon }));
-    const { text, prompt, related } = grabJSON({ result });
-    const img = imgUrl({ prompt });
+  const { result, pending } = llm(prep({ title, canon }));
+  const { text, prompt, related } = grabJSON({ result });
+  const img = imgUrl({ prompt });
 
-    text.setDefault("");
-    related.setDefault([]);
+  text.setDefault("");
+  related.setDefault([]);
 
-    const relatedWithClosure = contextify({
-      related,
-      canon,
-      text,
-      title,
-      maxLength: 4000,
-    });
+  const relatedWithClosure = contextify({
+    related,
+    canon,
+    text,
+    title,
+    maxLength: 4000,
+  });
 
-    return {
-      [NAME]: str`${title} ~ Wiki Page`,
-      [UI]: (
-        <os-container>
-          <h3>{title}</h3>
-          {ifElse(
-            pending,
-            <p>
-              <i>generating...</i>
-            </p>,
-            <p>{text}</p>,
-          )}
-          {ifElse(prompt, <img src={img} width={256} />, <i></i>)}
-          <ul>
-            {relatedWithClosure.map(
-              ({ title, canon }: { title: string; canon: string }) => (
-                <li onclick={launcher({ title, canon })}>{title}</li>
-              ),
-            )}
-          </ul>
-        </os-container>
-      ),
-      title,
-      canon,
-    };
-  },
-);
+  return {
+    [NAME]: str`${title} ~ Wiki Page`,
+    [UI]: (
+      <os-container>
+        <h3>{title}</h3>
+        {ifElse(
+          pending,
+          <p>
+            <i>generating...</i>
+          </p>,
+          <p>{text}</p>,
+        )}
+        {ifElse(prompt, <img src={img} width={256} />, <i></i>)}
+        <ul>
+          {relatedWithClosure.map(({ title, canon }: { title: string; canon: string }) => (
+            <li onclick={launcher({ title, canon })}>{title}</li>
+          ))}
+        </ul>
+      </os-container>
+    ),
+    title,
+    canon,
+  };
+});
 
 export default wiki;

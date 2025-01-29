@@ -1,6 +1,6 @@
 // This file is setting up example data
 
-import { NAME, Recipe, Module, TYPE, UI } from "@commontools/common-builder";
+import { NAME, Recipe, Module, TYPE, UI } from "@commontools/builder";
 import {
   addModuleByRef,
   addRecipe,
@@ -22,52 +22,18 @@ import {
   run,
   getRecipeSpec,
   getRecipeName,
-} from "@commontools/common-runner";
+  Action,
+  addAction,
+  removeAction,
+} from "@commontools/runner";
 import { createStorage } from "./storage.js";
 import * as allRecipes from "./recipes/index.js";
 import { buildRecipe } from "./localBuild.js";
+import { IframeIPC } from "@commontools/ui";
 
 // Necessary, so that suggestions are indexed.
-import "./recipes/todo-list-as-task.js";
-import "./recipes/playlist.js";
-
-// import FetchExample from "./recipes/fetcher.jsx";
-import FetchService from "./effects/fetch.js";
-import GmailService from "./effects/gmail.js";
-import { refer, UI as ViewService } from "@commontools/common-system";
-
-import * as helloWorld from "./spells/01_helloWorld.jsx";
-import * as counter from "./spells/02_counter.jsx";
-import * as desugared from "./spells/03_desugared.jsx";
-import * as tamagotchi from "./spells/04_tamagotchi.jsx";
-import * as readingList from "./spells/05_readingList.jsx";
-import * as chat from "./spells/06_chat.jsx";
-import * as sharedTags from "./spells/07_sharedTags.jsx";
-import * as workbench from "./spells/08_workbench.jsx";
-import * as importer from "./spells/09_importer.jsx";
-import { composed } from "./spells/10_composed.jsx";
-import github from "./spells/11_github.jsx";
-import form from "./spells/13_form.jsx";
-import * as helloWorldWithLikes from "./spells/12_helloWorldWithLikes.jsx";
-import * as llmChat from "./spells/14_llm_chat.jsx";
-import * as countdown from "./spells/countdown.jsx";
-import * as themeable from "./spells/themeable.jsx";
-import TimerService from "./effects/timer.js";
-import { settings } from "./spells/settings.jsx";
-import { emailComposer } from "./spells/15_email_composer.jsx";
-import { addressBook } from "./spells/16_contacts.jsx";
-import { formTest } from "./spells/17_complex_form.jsx";
-import { musicLibrary } from "./spells/18_music.jsx";
-import { spellManager } from "./spells/19_process_manager.jsx";
-import { shaderManager } from "./spells/20_shader_editor.jsx";
-import { schemaGenerator } from "./spells/21_model_builder.jsx";
-import { search } from "./spells/22_search.jsx";
-import { notebook } from "./spells/23_notes.jsx";
-import { quotedb } from "./spells/24_quotes.jsx";
-import { activity } from "./spells/25_activity.jsx";
-import { activityRef } from "./sugar/activity.js";
-import { stackLayout } from "./spells/26_stacks.jsx";
-import { canvasLayout } from "./spells/27_canvas.jsx";
+import "./recipes/todo-list-as-task.jsx";
+import "./recipes/playlist.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -78,9 +44,7 @@ export type Charm = {
 
 export { NAME, TYPE, UI };
 
-const storage = createStorage(
-  (import.meta as any).env.VITE_STORAGE_TYPE ?? "memory",
-);
+const storage = createStorage((import.meta as any).env.VITE_STORAGE_TYPE ?? "memory");
 
 export const charms = getDoc<DocLink[]>([], "charms");
 (window as any).charms = charms;
@@ -90,17 +54,15 @@ export async function addCharms(newCharms: DocImpl<any>[]) {
 
   await idle();
 
-  const currentCharmsIds = charms
-    .get()
-    .map(({ cell }) => JSON.stringify(cell.entityId));
+  const currentCharmsIds = charms.get().map(({ cell }) => JSON.stringify(cell.entityId));
   const charmsToAdd = newCharms.filter(
-    cell => !currentCharmsIds.includes(JSON.stringify(cell.entityId)),
+    (cell) => !currentCharmsIds.includes(JSON.stringify(cell.entityId)),
   );
 
   if (charmsToAdd.length > 0) {
     charms.send([
       ...charms.get(),
-      ...charmsToAdd.map(cell => ({ cell, path: [] }) satisfies DocLink),
+      ...charmsToAdd.map((cell) => ({ cell, path: [] }) satisfies DocLink),
     ]);
   }
 }
@@ -134,20 +96,15 @@ export async function runPersistent(
     const inputProperties =
       typeof inputs === "object" && inputs !== null ? Object.keys(inputs) : [];
     for (const key in properties) {
-      if (
-        !(key in inputProperties) &&
-        properties[key].description?.includes("#")
-      ) {
+      if (!(key in inputProperties) && properties[key].description?.includes("#")) {
         const hashtag = properties[key].description.match(/#(\w+)/)?.[1];
         if (hashtag) {
           charms.get().forEach(({ cell }) => {
             const type = cell.sourceCell?.get()?.[TYPE];
             const recipe = getRecipe(type);
-            const charmProperties = (recipe?.resultSchema as any)
-              ?.properties as any;
-            const matchingProperty = Object.keys(charmProperties ?? {}).find(
-              property =>
-                charmProperties[property].description?.includes(`#${hashtag}`),
+            const charmProperties = (recipe?.resultSchema as any)?.properties as any;
+            const matchingProperty = Object.keys(charmProperties ?? {}).find((property) =>
+              charmProperties[property].description?.includes(`#${hashtag}`),
             );
             if (matchingProperty) {
               inputs = {
@@ -161,11 +118,7 @@ export async function runPersistent(
     }
   }
 
-  return run(
-    recipe,
-    inputs,
-    await storage.syncCell(createRef({ recipe, inputs }, cause)),
-  );
+  return run(recipe, inputs, await storage.syncCell(createRef({ recipe, inputs }, cause)));
 }
 
 export async function syncCharm(
@@ -177,8 +130,8 @@ export async function syncCharm(
 
 export const BLOBBY_SERVER_URL =
   typeof window !== "undefined"
-    ? window.location.protocol + "//" + window.location.host + "/api/blobby"
-    : "//api/blobby";
+    ? window.location.protocol + "//" + window.location.host + "/api/storage/blobby"
+    : "//api/storage/blobby";
 
 const recipesKnownToStorage = new Set<string>();
 
@@ -192,7 +145,7 @@ export async function syncRecipe(id: string) {
     return;
   }
 
-  const response = await fetch(`${BLOBBY_SERVER_URL}/blob/${id}`);
+  const response = await fetch(`${BLOBBY_SERVER_URL}/spell-${id}`);
   let src: string;
   let spec: string;
   let parents: string[];
@@ -217,17 +170,12 @@ export async function syncRecipe(id: string) {
   recipesKnownToStorage.add(recipeId);
 }
 
-export async function saveRecipe(
-  id: string,
-  src: string,
-  spec?: string,
-  parents?: string[],
-) {
+export async function saveRecipe(id: string, src: string, spec?: string, parents?: string[]) {
   if (recipesKnownToStorage.has(id)) return;
   recipesKnownToStorage.add(id);
 
   console.log("Saving recipe", id);
-  const response = await fetch(`${BLOBBY_SERVER_URL}/blob/${id}`, {
+  const response = await fetch(`${BLOBBY_SERVER_URL}/spell-${id}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -244,42 +192,11 @@ export async function saveRecipe(
 }
 
 import smolIframe from "./recipes/smolIframe.js";
+import complexIframe from "./recipes/complexIframe.js";
 
 addCharms([
-  run(smolIframe, { data: { count: 1 } }),
-  // helloWorld.spawn({ helloWorld: 1 }),
-  // counter.spawn({ counter: 1 }),
-  // importer.spawn({ fetch: 1 }),
-  // sharedTags.spawn({ sharedDataInstance: 2 }),
-  // tamagotchi.spawn({ tamagochi: 1 }),
-  // tamagotchi.spawn({ tamagochi: 3 }),
-  // // readingList.spawn({ readingList: 1, }),
-  // // chat.spawn({ chat: 2, }),
-  // // workbench.spawn({ workbench: 1 }),
-  // form.spawn({ geneticsLab: 1 }),
-  // llmChat.spawn({ llmChat: 7 }),
-  // settings.spawn({ settings: 1 }),
-  // // composed.spawn({ composed: 1 }),
-  // // helloWorldWithLikes.spawn({ helloWorldWithLikes: 1 }),
-  // countdown.spawn({ countdown: 1 }),
-  // themeable.spawn({ themeable: 1 }),
-  // emailComposer.spawn({ email: 1 }),
-  // addressBook.spawn({ contacts: 1 }),
-  // formTest.spawn({ formTest: 1 }),
-  // musicLibrary.spawn({ musicLibrary: 1 }),
-  // spellManager.spawn({ spellManager: 1 }),
-  // shaderManager.spawn({ shaderManager: 1 }),
-  // schemaGenerator.spawn({ schemaGenerator: 1 }),
-  // search.spawn({ search: 1 }),
-  // notebook.spawn({ notes: 1 }),
-  // quotedb.spawn({ quotes: 1 }),
-  // activity.spawn(activityRef),
-  // stackLayout.spawn({ stack: 1 }),
-  // canvasLayout.spawn({ canvas: 1 }),
-  // FetchService.spawn() as any,
-  // GmailService.spawn() as any,
-  // ViewService.spawn() as any,
-  // TimerService.spawn() as any,
+  run(smolIframe, { count: 1 }),
+  run(complexIframe, { count: 42 }),
 ]);
 
 export type RecipeManifest = {
@@ -287,13 +204,10 @@ export type RecipeManifest = {
   recipeId: string;
 };
 
-export const recipes: RecipeManifest[] = Object.entries(allRecipes).map(
-  ([name, recipe]) => ({
-    name:
-      (recipe.argumentSchema as { description: string })?.description ?? name,
-    recipeId: addRecipe(recipe),
-  }),
-);
+export const recipes: RecipeManifest[] = Object.entries(allRecipes).map(([name, recipe]) => ({
+  name: (recipe.argumentSchema as { description: string })?.description ?? name,
+  recipeId: addRecipe(recipe),
+}));
 
 (window as any).recipes = allRecipesByName();
 
@@ -329,10 +243,8 @@ export type CharmAction = CharmActionFn & {
 
 let charmOpener: CharmActionFn | CharmAction = () => {};
 let charmCloser: CharmActionFn | CharmAction = () => {};
-export const openCharm = (charmId: string | EntityId | DocImpl<any>) =>
-  charmOpener(charmId);
-export const closeCharm = (charmId: string | EntityId | DocImpl<any>) =>
-  charmCloser(charmId);
+export const openCharm = (charmId: string | EntityId | DocImpl<any>) => charmOpener(charmId);
+export const closeCharm = (charmId: string | EntityId | DocImpl<any>) => charmCloser(charmId);
 openCharm.set = (opener: CharmActionFn) => {
   charmOpener = opener;
 };
@@ -353,3 +265,22 @@ export let annotationsEnabled = getDoc<boolean>(false);
 export const toggleAnnotations = () => {
   annotationsEnabled.send(!annotationsEnabled.get());
 };
+
+IframeIPC.setIframeContextHandler({
+  read(context: any, key: string): any {
+    return context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
+  },
+  write(context: any, key: string, value: any) {
+    context.getAsQueryResult()[key] = value;
+  },
+  subscribe(context: any, key: string, callback: (key: string, value: any) => void): any {
+    const action: Action = (log: ReactivityLog) =>
+      callback(key, context.getAsQueryResult([key], log));
+
+    addAction(action);
+    return action;
+  },
+  unsubscribe(_context: any, receipt: any) {
+    removeAction(receipt);
+  },
+});

@@ -1,5 +1,3 @@
-import { VNode, Child } from "./view.js";
-
 declare global {
   namespace JSX {
     interface IntrinsicElements {
@@ -8,9 +6,9 @@ declare global {
   }
 }
 
-const Fragment = "Fragment";
+export const Fragment = "Fragment";
 
-function h(
+export function h(
   name: string | ((...args: any[]) => any),
   props: { [key: string]: any } | null,
   ...children: Child[]
@@ -29,4 +27,25 @@ function h(
     };
 }
 
-export { h, Fragment };
+/**
+ * Dynamic properties. Can either be string type (static) or a Mustache
+ * variable (dynamic).
+ */
+export type Props = {
+  [key: string]: string | number | boolean | object | Array<any> | null;
+};
+
+/** A child in a view can be one of a few things */
+export type Child = VNode | string;
+
+/** A "virtual view node", e.g. a virtual DOM element */
+export type VNode = {
+  type: "vnode";
+  name: string;
+  props: Props;
+  children: Array<Child>;
+};
+
+export const isVNode = (value: unknown): value is VNode => {
+  return (value as VNode)?.type === "vnode";
+};

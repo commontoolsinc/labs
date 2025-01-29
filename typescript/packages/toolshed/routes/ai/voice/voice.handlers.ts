@@ -1,12 +1,15 @@
 import { fal } from "@fal-ai/client";
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
+  ErrorResponseSchema,
+  SuccessResponseSchema,
   TranscribeVoiceRoute,
   TranscriptionChunk,
 } from "./voice.routes.ts";
 import env from "@/env.ts";
 import { ensureDir } from "@std/fs";
 import { crypto } from "@std/crypto";
+import { z } from "zod";
 import type { Logger } from "pino";
 
 // Configure FAL client
@@ -69,7 +72,7 @@ function formatResponse(
   transcription: string,
   chunks: TranscriptionChunk[],
   responseType: "full" | "text" | "chunks",
-) {
+): z.infer<typeof SuccessResponseSchema> {
   switch (responseType) {
     case "text":
       return { response_type: "text" as const, transcription };
@@ -120,6 +123,7 @@ export const transcribeVoice: AppRouteHandler<TranscribeVoiceRoute> = async (
         cachedResult.chunks,
         responseType,
       ),
+      200,
     );
   }
 
@@ -152,7 +156,10 @@ export const transcribeVoice: AppRouteHandler<TranscribeVoiceRoute> = async (
     };
     await saveTranscriptionToCache(cachePath, transcriptionResult, logger);
 
-    return c.json(formatResponse(transcription, chunks, responseType));
+    return c.json(
+      formatResponse(transcription, chunks, responseType),
+      200,
+    );
   } catch (error) {
     logger.error({ error }, "Transcription failed");
     return c.json({ error: "Failed to transcribe audio" }, 500);

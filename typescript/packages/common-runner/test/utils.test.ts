@@ -1,16 +1,16 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
+  compactifyPaths,
   extractDefaultValues,
+  followAliases,
+  followCellReferences,
   mergeObjects,
+  normalizeToCells,
   sendValueToBinding,
   setNestedValue,
   unwrapOneLevelAndBindtoCell,
-  followCellReferences,
-  followAliases,
-  compactifyPaths,
-  normalizeToCells,
 } from "../src/utils.js";
-import { getDoc, DocLink, ReactivityLog, isDocLink } from "../src/cell.js";
+import { DocLink, getDoc, isDocLink, ReactivityLog } from "../src/cell.js";
 
 describe("extractDefaultValues", () => {
   it("should extract default values from a schema", () => {
@@ -261,9 +261,7 @@ describe("followCellReferences", () => {
     cellA.send({ ref: { cell: cellB, path: ["ref"] } });
     cellB.send({ ref: { cell: cellA, path: ["ref"] } });
     const reference: DocLink = { cell: cellA, path: ["ref"] };
-    expect(() => followCellReferences(reference)).toThrow(
-      "Reference cycle detected",
-    );
+    expect(() => followCellReferences(reference)).toThrow("Reference cycle detected");
   });
 });
 
@@ -352,7 +350,7 @@ describe("makeArrayElementsAllCells", () => {
     normalizeToCells(getDoc(), input);
 
     expect(input.length).toBe(3);
-    input.forEach(item => {
+    input.forEach((item) => {
       expect(isDocLink(item)).toBe(true);
     });
   });
@@ -380,7 +378,7 @@ describe("makeArrayElementsAllCells", () => {
     expect(refCell).toBeDefined();
     expect(path).toEqual([]);
     expect(Array.isArray(refCell.get())).toBe(true);
-    (refCell.get() as any[]).forEach(item => {
+    (refCell.get() as any[]).forEach((item) => {
       expect(isDocLink(item)).toBe(true);
     });
     expect(isDocLink(input[2])).toBe(true);
@@ -391,10 +389,10 @@ describe("makeArrayElementsAllCells", () => {
     const changed = normalizeToCells(getDoc(), input);
 
     expect(changed).toBe(true);
-    input.arr.forEach(item => {
+    input.arr.forEach((item) => {
       expect(isDocLink(item)).toBe(true);
     });
-    input.nested.arr.forEach(item => {
+    input.nested.arr.forEach((item) => {
       expect(isDocLink(item)).toBe(true);
     });
   });
@@ -427,8 +425,7 @@ describe("makeArrayElementsAllCells", () => {
 
     expect(changed).toBe(true);
     expect(
-      (newInput[0] as unknown as DocLink).cell !==
-        (previousInput[0] as unknown as DocLink).cell,
+      (newInput[0] as unknown as DocLink).cell !== (previousInput[0] as unknown as DocLink).cell,
     ).toBeTruthy();
     expect(isDocLink(newInput[0])).toBe(true);
     expect((newInput[0] as unknown as DocLink).cell.get()).toBe(43);
@@ -451,9 +448,7 @@ describe("makeArrayElementsAllCells", () => {
 
     expect(changed).toBe(true);
     expect(isDocLink(newInput.arr[0])).toBe(true);
-    expect((newInput.arr[0] as unknown as DocLink).cell).toBe(
-      previousInput.arr[0].cell,
-    );
+    expect((newInput.arr[0] as unknown as DocLink).cell).toBe(previousInput.arr[0].cell);
     expect(isDocLink(newInput.arr[1])).toBe(true);
     expect((newInput.arr[1] as unknown as DocLink).cell.get()).toBe(3);
     expect(isDocLink(newInput.nested.value)).toBe(false);
