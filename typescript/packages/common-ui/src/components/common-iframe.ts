@@ -7,14 +7,37 @@ import { IframeIPC } from "../index.js";
 // origin-less styles and scripts to be used, defeating
 // many traditional uses of CSP.
 const CSP = "" +
-  // Disable all fetch directives by default
-  "default-src 'self';" +
-  // Allow CDN scripts, unsafe inline.
-  "script-src 'unsafe-inline' unpkg.com cdn.tailwindcss.com;" +
-  // unsafe inline.
-  "style-src 'unsafe-inline';" +
+  // Disable all fetch directives. Re-enable
+  // each specific fetch directive as needed.
+  "default-src 'none';" +
+  // Scripts: Allow 1P, inline, and CDNs.
+  "script-src 'self' 'unsafe-inline' unpkg.com cdn.tailwindcss.com;" +
+  // Styles: Allow 1P, inline.
+  "style-src 'self' 'unsafe-inline';" +
+  // Images: Allow 1P, inline.
+  "img-src 'self' 'unsafe-inline';" +
   // Disabling until we have a concrete case.
   "form-action 'none';" +
+  // Disable <base> element
+  "base-uri 'none';" +
+  // Iframes/Workers: Use default (disabled)
+  "child-src 'none';" +
+  // Ping/XHR/Fetch/Sockets: Allow 1P only
+  "connect-src 'self';" +
+  // This is a deprecated/Chrome-only CSP directive.
+  // This blocks `<link rel="prefetch">` and
+  // the Chrome-only `<link rel="prerender">`.
+  // `default-src` is used correctly as a fallback for
+  // prefetch
+  //"prefetch-src 'none';" +
+  // Fonts: Use default (disabled)
+  //"font-src 'none';" +
+  // Media: Use default (disabled)
+  //"media-src 'none';" +
+  // Manifest: Use default (disabled)
+  //"manifest-src 'none';" +
+  // Object/Embeds: Use default (disabled)
+  //"object-src 'none';" +
   "";
 
 // @summary A sandboxed iframe to execute arbitrary scripts.
@@ -31,6 +54,7 @@ const CSP = "" +
 //
 // ## Incomplete Security Considerations
 //
+// * `document.baseURI` is accessible in an iframe, leaking the parent URL
 // * Currently without CFC, data can be written in the iframe containing other sensitive data,
 //   or newly synthesized fingerprinting via capabilities (accelerometer, webrtc, canvas),
 //   and saved back into the database, where some other vector of exfiltration could occur.
