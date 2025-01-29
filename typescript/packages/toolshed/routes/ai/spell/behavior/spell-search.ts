@@ -37,7 +37,7 @@ export function processSpellSearch({
   spells,
   blobs,
   options = {},
-}: SpellSearchParams): Promise<SpellSearchResult> {
+}: SpellSearchParams): SpellSearchResult {
   const spellMatches: SpellSearchResult["spells"] = [];
   const blobMatches: SpellSearchResult["blobs"] = [];
 
