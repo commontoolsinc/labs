@@ -170,8 +170,17 @@ export async function syncRecipe(id: string) {
   recipesKnownToStorage.add(recipeId);
 }
 
-export async function saveRecipe(id: string, src: string, spec?: string, parents?: string[]) {
-  if (recipesKnownToStorage.has(id)) return;
+export async function saveRecipe(
+  id: string,
+  src: string,
+  spec?: string,
+  parents?: string[],
+  spellbookTitle?: string,
+  spellbookTags?: string[],
+) {
+  // If the recipe is already known to storage, we don't need to save it again,
+  // unless the user is trying to attach a spellbook title or tags.
+  if (recipesKnownToStorage.has(id) && !spellbookTitle) return;
   recipesKnownToStorage.add(id);
 
   console.log("Saving recipe", id);
@@ -186,6 +195,8 @@ export async function saveRecipe(id: string, src: string, spec?: string, parents
       spec,
       parents,
       recipeName: getRecipeName(id),
+      spellbookTitle,
+      spellbookTags,
     }),
   });
   return response.ok;
@@ -194,10 +205,7 @@ export async function saveRecipe(id: string, src: string, spec?: string, parents
 import smolIframe from "./recipes/smolIframe.js";
 import complexIframe from "./recipes/complexIframe.js";
 
-addCharms([
-  run(smolIframe, { count: 1 }),
-  run(complexIframe, { count: 42 }),
-]);
+addCharms([run(smolIframe, { count: 1 }), run(complexIframe, { count: 42 })]);
 
 export type RecipeManifest = {
   name: string;
