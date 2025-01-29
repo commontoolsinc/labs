@@ -1,5 +1,8 @@
 import type { EntityId, Cancel } from "@commontools/runner";
 import { log } from "./storage.js";
+import { fromJSON, refer, type Reference } from "merkle-reference";
+import z from "zod";
+import type { State, In, ReplicaID, Entity, Fact, Unclaimed, Selector } from "@commontools/memory";
 
 export interface StorageValue<T = any> {
   value: T;
@@ -277,4 +280,227 @@ export class LocalStorageProvider extends BaseStorageProvider {
       }
     }
   };
+}
+
+type Revision<T extends Fact | Unclaimed = Fact | Unclaimed> = {
+  this: Reference<T>;
+  value: T;
+};
+
+export class RemoteStorageProvider extends BaseStorageProvider {
+  static State = z.object({
+    the: z.string(),
+    of: z.string(),
+    is: z
+      .unknown({})
+      .optional()
+      .refine((value) => {
+        if (value && typeof (value as Record<string, unknown>)["/"] === "string") {
+          return fromJSON(value as { "/": string });
+        } else {
+          return value;
+        }
+      }),
+    cause: z
+      .object({
+        "/": z.string(),
+      })
+      .refine(fromJSON)
+      .optional(),
+  });
+
+  static Update = z.record(RemoteStorageProvider.State);
+  connection: WebSocket | null;
+
+  constructor(
+    public address: URL,
+    public replica: ReplicaID = "common-knowledge",
+    public the: string = "application/json",
+    public subscriptions: Map<string, In<Selector>> = new Map(),
+    public local: Map<ReplicaID, Map<Entity, Revision>> = new Map(),
+    public consumers: Map<string, Set<() => void>> = new Map(),
+  ) {
+    super();
+    this.connection = this.open(new WebSocket(address.href));
+  }
+
+  space(id: ReplicaID): Map<Entity, Revision> {
+    const space = this.local.get(id);
+    if (space) {
+      return space;
+    } else {
+      const space = new Map();
+      this.local.set(id, space);
+      return space;
+    }
+  }
+
+  revision(entity: Entity): Revision | undefined {
+    const space = this.space(this.replica);
+    const revision = space.get(entity);
+    if (revision) {
+      return revision;
+    }
+  }
+
+  subscribe(selectors: In<Selector>): void {
+    for (const [replica, selector] of Object.entries(selectors)) {
+      const address = `${replica}/${selector.of}/${selector.the}`;
+      this.subscriptions.set(address, { [replica]: selector });
+    }
+
+    this.connection?.send(JSON.stringify(selectors));
+  }
+
+  async sync(entityId: EntityId, expectedInStorage: boolean = false): Promise<void> {
+    const entity = entityId.toString();
+    const revision = this.revision(entity);
+    if (!revision) {
+      this.subscribe({
+        [this.replica]: {
+          the: this.the,
+          of: entity,
+        },
+      });
+
+      // TODO: Not sure I understand how behavior should be changed when
+      // `expectedInStorage` is true vs false. 🤔 Should we not resume
+      // if we remote tells use entity is unclaimed and `expectedInStorage`
+      // is true?
+      return new Promise((resume) => {
+        const waiting = this.consumers.get(entity);
+        if (waiting) {
+          waiting.add(resume);
+        } else {
+          this.consumers.set(entity, new Set([resume]));
+        }
+      });
+    }
+  }
+
+  get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
+    const revision = this.revision(entityId.toString());
+    // TODO: Not sue what to do if the remote value does not match the
+    // `StorageValue<T>`.
+    return revision ? (revision.value.is as StorageValue<T> | undefined) : undefined;
+  }
+  async send<T = any>(changes: { entityId: EntityId; value: StorageValue<T> }[]): Promise<void> {
+    const promises = [];
+    for (const { entityId, value } of changes) {
+      const of = entityId.toString();
+      const assertion = {
+        the: this.the,
+        of: entityId.toString(),
+        is: value,
+        cause: this.revision(of),
+      };
+
+      // TODO: We may get a conflict here, and need to handle it somehow.
+      promises.push(
+        fetch(this.address.href, {
+          method: "PATCH",
+          body: JSON.stringify({ [this.replica]: assertion }),
+        }),
+      );
+    }
+
+    await Promise.all(promises);
+  }
+
+  receive(data: string) {
+    const update = RemoteStorageProvider.Update.parse(JSON.parse(data)) as In<State>;
+    for (const [at, state] of Object.entries(update)) {
+      let space = this.space(at);
+
+      const remote = Object.entries(state) as [Entity, Fact | Unclaimed][];
+      for (const [entity, fact] of remote) {
+        const before = this.revision(entity);
+        const after = { this: refer(fact), value: fact };
+        if (before?.this?.toString() !== after.this.toString()) {
+          space.set(entity, after);
+
+          const consumers = this.consumers.get(entity);
+          for (const consumer of consumers ?? []) {
+            consumer();
+          }
+        }
+      }
+    }
+  }
+
+  handleEvent(event: MessageEvent) {
+    switch (event.type) {
+      case "message":
+        return this.receive(event.data);
+      case "open":
+        return this.connect(event.target as WebSocket);
+      case "close":
+        return this.disconnect(event);
+      case "error":
+        return this.disconnect(event);
+    }
+  }
+  open(socket: WebSocket) {
+    socket.addEventListener("message", this);
+    socket.addEventListener("open", this);
+    socket.addEventListener("close", this);
+    socket.addEventListener("error", this);
+    return socket;
+  }
+
+  connect(_socket: WebSocket) {
+    for (const selector of this.subscriptions.values()) {
+      this.connection?.send(JSON.stringify({ watch: selector }));
+    }
+  }
+
+  disconnect(event: Event) {
+    const socket = event.target as WebSocket;
+    // If connection is `null` provider was closed and we do nothing on
+    // disconnect.
+    if (this.connection === socket) {
+      this.connection = this.open(new WebSocket(this.address.href));
+    }
+  }
+
+  async close(): Promise<{}> {
+    const { connection } = this;
+    this.connection = null;
+    if (connection && connection.readyState !== WebSocket.CLOSED) {
+      connection.close();
+      return RemoteStorageProvider.closed(connection);
+    } else {
+      return {};
+    }
+  }
+  async destroy(): Promise<void> {
+    await this.close();
+  }
+
+  /**
+   * Creates a promise that succeeds when the socket is closed or fails with
+   * the error event if the socket errors.
+   */
+  static closed(socket: WebSocket) {
+    if (socket.readyState === WebSocket.CLOSED) {
+      return {};
+    } else {
+      return new Promise((succeed, fail) => {
+        socket.addEventListener(
+          "close",
+          () => {
+            succeed({});
+          },
+          { once: true },
+        );
+        socket.addEventListener(
+          "error",
+          (event) => {
+            fail(event);
+          },
+          { once: true },
+        );
+      });
+    }
+  }
 }

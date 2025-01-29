@@ -1,0 +1,6 @@
+{
+  "name": "@commontools/memory",
+  "exports": {
+    ".": "./lib.ts"
+  }
+}

@@ -34,6 +34,10 @@ export default defineConfig({
         target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/api/storage/blobby",
         changeOrigin: true,
       },
+      "/api/storage/memory": {
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/api/storage/memory",
+        changeOrigin: true,
+      },
     },
     headers: {
       "*.wasm": {
