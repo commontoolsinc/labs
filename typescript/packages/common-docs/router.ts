@@ -1,5 +1,7 @@
 import * as Replica from "./store.ts";
 import * as Subscription from "./subscription.ts";
+import * as Error from "./error.ts";
+import * as FS from "jsr:@std/fs";
 import {
   In,
   Fact,
@@ -188,8 +190,17 @@ export interface Options {
   store: URL;
 }
 
-export const open = async (options: Options): AsyncResult<Router, never> => {
-  return { ok: await new Router(options) };
+export const open = async (
+  options: Options,
+): AsyncResult<Router, ConnectionError> => {
+  try {
+    if (options.store.protocol === "file:") {
+      await FS.ensureDir(options.store);
+    }
+    return { ok: await new Router(options) };
+  } catch (cause) {
+    return { error: Error.connection(options.store, cause as SystemError) };
+  }
 };
 
 export const close = async (router: Router) => {
