@@ -3,12 +3,17 @@ import { z } from "zod";
 import { getAllBlobs, getBlob } from "./behavior/effects.ts";
 
 import type { AppRouteHandler } from "@/lib/types.ts";
-import type { ProcessSchemaRoute, SearchSchemaRoute } from "./spell.routes.ts";
+import type {
+  ProcessSchemaRoute,
+  SearchSchemaRoute,
+  SpellSearchRoute,
+} from "./spell.routes.ts";
 import { performSearch } from "./behavior/search.ts";
 import { Logger } from "@/lib/prefixed-logger.ts";
 import { processSchema } from "@/routes/ai/spell/fulfill.ts";
 import { candidates } from "@/routes/ai/spell/caster.ts";
 import { CasterSchemaRoute } from "@/routes/ai/spell/spell.routes.ts";
+import { processSpellSearch } from "@/routes/ai/spell/behavior/spell-search.ts";
 
 export const ProcessSchemaRequestSchema = z.object({
   schema: z.record(
@@ -118,6 +123,46 @@ export const CasterResponseSchema = z.object({
 
 export type CasterResponse = z.infer<typeof CasterResponseSchema>;
 
+export const SpellSearchRequestSchema = z.object({
+  query: z.string(),
+  options: z.object({
+    limit: z.number().optional().default(10),
+    includeCompatibility: z.boolean().optional().default(true),
+  }).optional(),
+});
+
+export const SpellSearchResponseSchema = z.object({
+  spells: z.array(z.object({
+    key: z.string(),
+    name: z.string(),
+    description: z.string(),
+    matchType: z.enum(["reference", "text-match"]),
+    compatibleBlobs: z.array(z.object({
+      key: z.string(),
+      snippet: z.string(),
+    })),
+  })),
+  blobs: z.array(z.object({
+    key: z.string(),
+    snippet: z.string(),
+    matchType: z.enum(["reference", "text-match"]),
+    compatibleSpells: z.array(z.object({
+      key: z.string(),
+      name: z.string(),
+      description: z.string(),
+    })),
+  })),
+  metadata: z.object({
+    processingTime: z.number(),
+    matchedKeys: z.array(z.string()),
+    totalSpellMatches: z.number(),
+    totalBlobMatches: z.number(),
+  }),
+});
+
+export type SpellSearchRequest = z.infer<typeof SpellSearchRequestSchema>;
+export type SpellSearchResponse = z.infer<typeof SpellSearchResponseSchema>;
+
 export const fulfill: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
   const logger: Logger = c.get("logger");
   const body = (await c.req.json()) as ProcessSchemaRequest;
@@ -189,6 +234,58 @@ export const caster: AppRouteHandler<CasterSchemaRoute> = async (c) => {
     logger.error({ error }, "Error processing schema");
     return c.json(
       { error: "Failed to process schema" },
+      HttpStatusCodes.INTERNAL_SERVER_ERROR,
+    );
+  }
+};
+
+export const spellSearch: AppRouteHandler<SpellSearchRoute> = async (c) => {
+  const logger: Logger = c.get("logger");
+  const startTime = performance.now();
+  const body = (await c.req.json()) as SpellSearchRequest;
+
+  try {
+    const keyMatches = body.query.match(/@[\w-]+/g) || [];
+    const referencedKeys = keyMatches.map((k) => k.substring(1));
+
+    const spells = await getAllBlobs({
+      allWithData: true,
+      prefix: "spell-",
+    }) as Record<string, Record<string, unknown>>;
+
+    const blobContents = await getAllBlobs({
+      allWithData: true,
+    }) as Record<string, Record<string, unknown>>;
+
+    const results = await processSpellSearch({
+      query: body.query,
+      referencedKeys,
+      spells,
+      blobs: blobContents,
+      options: body.options,
+    });
+
+    const response = {
+      ...results,
+      metadata: {
+        processingTime: performance.now() - startTime,
+        matchedKeys: referencedKeys,
+        totalSpellMatches: results.spells.length,
+        totalBlobMatches: results.blobs.length,
+      },
+    };
+
+    logger.info({
+      spellMatches: results.spells.length,
+      blobMatches: results.blobs.length,
+      processingTime: response.metadata.processingTime,
+    }, "Spell search completed");
+
+    return c.json(response, HttpStatusCodes.OK);
+  } catch (error) {
+    logger.error({ error }, "Error processing spell search");
+    return c.json(
+      { error: "Failed to process spell search" },
       HttpStatusCodes.INTERNAL_SERVER_ERROR,
     );
   }

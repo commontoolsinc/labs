@@ -8,6 +8,8 @@ import {
   ProcessSchemaResponseSchema,
   SearchSchemaRequestSchema,
   SearchSchemaResponseSchema,
+  SpellSearchRequestSchema,
+  SpellSearchResponseSchema,
 } from "./spell.handlers.ts";
 import { z } from "zod";
 
@@ -45,7 +47,7 @@ export const fulfill = createRoute({
 export type ProcessSchemaRoute = typeof fulfill;
 
 export const search = createRoute({
-  path: "/ai/spell/search",
+  path: "/ai/spell/smart-search",
   method: "post",
   tags,
   request: {
@@ -97,3 +99,30 @@ export const caster = createRoute({
 });
 
 export type CasterSchemaRoute = typeof caster;
+
+export const spellSearch = createRoute({
+  path: "/ai/spell/search",
+  method: "post",
+  tags,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: SpellSearchRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      SpellSearchResponseSchema,
+      "The spell search results",
+    ),
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
+      ErrorResponseSchema,
+      "An error occurred",
+    ),
+  },
+});
+
+export type SpellSearchRoute = typeof spellSearch;
