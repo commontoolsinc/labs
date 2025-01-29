@@ -31,6 +31,9 @@ const CSP = "" +
 //
 // ## Incomplete Security Considerations
 //
+// * Currently without CFC, data can be written in the iframe containing other sensitive data,
+//   or newly synthesized fingerprinting via capabilities (accelerometer, webrtc, canvas),
+//   and saved back into the database, where some other vector of exfiltration could occur.
 // * Exposing iframe status to outer content could be considered leaky,
 //   though all content is inlined, not HTTP URLs.
 //   https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe#error_and_load_event_behavior
@@ -41,7 +44,6 @@ export class CommonIframeElement extends LitElement {
   // HACK: The UI framework already translates the top level cell into updated
   // properties, but we want to only have to deal with one type of listening, so
   // we'll add a an extra level of indirection with the "context" property.
-  //@property({ type: Object }) context?: Cell<any> | any;
   @property({ type: Object }) context?: object;
 
   @state() private errorDetails: IframeIPC.GuestError | null = null;
@@ -114,13 +116,6 @@ export class CommonIframeElement extends LitElement {
       case IframeIPC.GuestMessageType.Error: {
         const { description, source, lineno, colno, stacktrace } = message.data;
         this.errorDetails = { description, source, lineno, colno, stacktrace };
-        console.error("Error details:", {
-          description,
-          source,
-          lineno,
-          colno,
-          stacktrace,
-        });
         this.dispatchEvent(new CustomEvent("error", {
           detail: this.errorDetails,
         }));
@@ -133,7 +128,7 @@ export class CommonIframeElement extends LitElement {
         // TODO: This might cause infinite loops, since the data can be a graph.
         const response: IframeIPC.HostMessage = {
           type: IframeIPC.HostMessageType.Update,
-          data: [key, copyJSON(value)]
+          data: [key, value],
         }
         this.iframeRef.value?.contentWindow?.postMessage(response, "*");
         return;
@@ -241,18 +236,4 @@ export class CommonIframeElement extends LitElement {
         : ""}
     `;
   }
-}
-
-// This applies a de/serialization cycle on `input` to create
-// a clone.
-//
-// /!\ Lacking context for the original purpose of this function.
-// /!\ I suspect this could be removed as unclear where we use/need
-// /!\ auto-parsing JSON-ish strings, and unnecessary cloning
-// /!\ an object before sending over iframe, invoking structured clone algorithm,
-// /!\ duplicating this potentially costly serialization.
-function copyJSON(input: any): any {
-  return typeof input === "string" && input.includes("{")
-    ? JSON.parse(input)
-    : JSON.parse(JSON.stringify(input));
 }
