@@ -2,7 +2,7 @@
   "name": "@commontools/spa",
   "version": "0.1.0",
   "description": "spa",
-  "main": "src/index.js",
+  "main": "src/main.ts",
   "type": "module",
   "packageManager": "pnpm@10.0.0",
   "engines": {
@@ -14,6 +14,7 @@
   "scripts": {
     "dev": "vite",
     "test": "vitest --exclude=lib/**/*.test.js",
+    "e2e": "playwright test",
     "format": "prettier --write . --ignore-path ../../../.prettierignore",
     "lint": "eslint .",
     "build": "tsc && vite build"
@@ -38,6 +39,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",
+    "@playwright/test": "^1.50.0",
     "@types/node": "^22.10.10",
     "eslint": "^9.19.0",
     "eslint-config-prettier": "^10.0.1",

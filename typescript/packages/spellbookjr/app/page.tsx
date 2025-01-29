@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 
-import { getAllBlobs, getBlobByHash, getBlobScreenshotUrl } from "@/app/lib/blobby";
+import { getAllSellbookBlobs, getBlobByHash, getBlobScreenshotUrl } from "@/app/lib/blobby";
 import { SearchBox } from "@/app/components/search-box";
 import Header from "@/app/components/header";
 import RecipeCard from "@/app/components/recipe-card";
@@ -10,12 +10,14 @@ interface BlobData {
   name: string;
   author: string;
   likes: number;
+  spellbookTitle: string;
+  spellbookTags: string[];
 }
 
 export default async function RecipesPage({ searchParams }: { searchParams: { q?: string } }) {
   const searchTerm = searchParams.q?.toLowerCase() || "";
 
-  const blobHashes = await getAllBlobs();
+  const blobHashes = await getAllSellbookBlobs();
   const blobs = (
     await Promise.allSettled(
       blobHashes.map(async (hash) => {
@@ -26,13 +28,20 @@ export default async function RecipesPage({ searchParams }: { searchParams: { q?
           name: blob.recipeName || "Unnamed Recipe",
           author: blob.blobAuthor || "Anonymous",
           likes: blob.likes || 0,
+          spellbookTitle: blob.spellbookTitle || "",
+          spellbookTags: blob.spellbookTags || [],
         };
       }),
     )
   ).map((result) => (result.status === "fulfilled" ? result.value : null));
 
   const validBlobs = blobs.filter((blob): blob is BlobData => blob !== null);
-  const filteredBlobs = validBlobs.filter((blob) => blob?.name.toLowerCase().includes(searchTerm));
+  const filteredBlobs = validBlobs.filter(
+    (blob) =>
+      blob?.name.toLowerCase().includes(searchTerm) ||
+      blob?.spellbookTitle.toLowerCase().includes(searchTerm) ||
+      blob?.spellbookTags.some((tag) => tag.toLowerCase().includes(searchTerm)),
+  );
 
   return (
     <>
@@ -52,6 +61,8 @@ export default async function RecipesPage({ searchParams }: { searchParams: { q?
                 name={blob?.name}
                 author={blob?.author || "Anonymous"}
                 likes={blob?.likes || 0}
+                spellbookTitle={blob?.spellbookTitle || ""}
+                spellbookTags={blob?.spellbookTags || []}
                 imageUrl={getBlobScreenshotUrl(blob?.hash || "")}
               />
             ))}

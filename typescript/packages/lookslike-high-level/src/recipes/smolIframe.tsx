@@ -8,16 +8,13 @@ const argumentSchema = {
   properties: {
     count: {
       type: "number",
-      default: 0
+      default: 0,
     },
   },
-  description: "SMOL Counter demo"
+  description: "SMOL Counter demo",
 } as JSONSchema;
 
 export default recipe(argumentSchema, (data) => ({
   [NAME]: "smol iframe",
-  [UI]: (
-    <common-iframe src={src} $context={data}></common-iframe>
-  ),
+  [UI]: <common-iframe src={src} $context={data}></common-iframe>,
 }));
-

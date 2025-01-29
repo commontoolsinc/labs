@@ -199,7 +199,6 @@ describe("Recipe Runner", () => {
       values.push([counter.value, amount, nested.c]);
     });
 
-    let n = 0;
     const incHandler = handler<
       { amount: number },
       { counter: { value: number }; nested: { a: { b: { c: number } } } }

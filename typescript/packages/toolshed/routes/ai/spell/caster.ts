@@ -13,23 +13,7 @@ export const SpellSchema = z.object({
   recipe: z.object({
     argumentSchema: z.record(z.unknown()),
     resultSchema: z.record(z.unknown()),
-    initial: z.record(z.unknown()),
-    result: z.object({
-      $NAME: z.string(),
-      $UI: z.object({
-        type: z.string(),
-        name: z.string(),
-        props: z.record(z.unknown()),
-        children: z.array(z.unknown()),
-      }),
-    }),
-    nodes: z.array(z.unknown()),
   }),
-  spec: z.string(),
-  parents: z.array(z.string()),
-  recipeName: z.string(),
-  blobCreatedAt: z.string(),
-  blobAuthor: z.string(),
 });
 
 export type Spell = z.infer<typeof SpellSchema>;
@@ -54,10 +38,13 @@ export function candidates(
     try {
       const parsed = SpellSchema.parse(spell);
       validSpells[key] = parsed;
-    } catch (error) {
+    } catch (error: any) {
+      console.log(`Invalid spell ${key}:`, error.message);
       continue;
     }
   }
+
+  console.log("Valid spells:", Object.keys(validSpells));
 
   // Check direct schema matches in blobs
   for (const [key, blobData] of Object.entries(blobContents)) {

@@ -1,5 +1,5 @@
 import { h } from "@commontools/html";
-import { recipe, handler, UI, NAME, ifElse, lift } from "@commontools/builder";
+import { recipe, handler, UI, NAME, ifElse, lift, cell } from "@commontools/builder";
 
 interface CalendarEvent {
   datetime: string;
@@ -277,19 +277,18 @@ const countEvents = lift((events: CalendarEvent[]): number => {
 });
 
 export const importCalendar = recipe<{
-  importing: boolean;
-  progress: number;
   importedEvents: CalendarEvent[];
-}>("Import Calendar", ({ importing, progress, importedEvents }) => {
-  importing.setDefault(false);
-  progress.setDefault(0);
+}>("Import Calendar", ({ importedEvents }) => {
+  const importing = cell(false);
+  const progress = cell(0);
+
   importedEvents.setDefault([]);
 
   return {
     [NAME]: "Import Calendar",
     [UI]: (
       <div>
-        <label>ben@common.tools</label>$
+        <label>ben@common.tools</label>
         {ifElse(
           importing,
           <div></div>,
@@ -300,11 +299,10 @@ export const importCalendar = recipe<{
         <div>
           <h3>Imported Events:</h3>
           <common-vstack gap="sm">
-            $
             {ifElse(
               anyEvents(importedEvents),
               <div>
-                <div>Number of events imported: ${countEvents(importedEvents)}</div>
+                <div>Number of events imported: {countEvents(importedEvents)}</div>
               </div>,
               <div>No events imported yet.</div>,
             )}

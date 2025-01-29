@@ -15,6 +15,6 @@ const router = createRouter();
 const Router = router
   .openapi(routes.fulfill, handlers.fulfill)
   .openapi(routes.caster, handlers.caster)
-  .openapi(routes.search, handlers.search);
+  .openapi(routes.spellSearch, handlers.spellSearch);
 
 export default Router;
