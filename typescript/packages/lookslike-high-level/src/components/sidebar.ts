@@ -3,12 +3,21 @@ import { customElement, property } from "lit/decorators.js";
 import { when } from "lit/directives/when.js";
 import { style } from "@commontools/ui";
 import { Charm, charms, NAME, recipes, runPersistent, TYPE, UI } from "../data.js";
-import { getDoc, DocImpl, getRecipe, isDoc } from "@commontools/runner";
+import {
+  getDoc,
+  DocImpl,
+  getRecipe,
+  isDoc,
+  getRecipeParents,
+  getRecipeSpec,
+  getRecipeSrc,
+} from "@commontools/runner";
 import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.jsx";
 import { render } from "@commontools/html";
-
+import { saveRecipe } from "../data.js";
+import { Recipe } from "@commontools/builder";
 const toasty = (message: string) => {
   const toastEl = document.createElement("div");
   toastEl.textContent = message;
@@ -115,6 +124,36 @@ export class CommonSidebar extends LitElement {
     this.dispatchEvent(event);
   }
 
+  private async handlePublish() {
+    const input = prompt("Enter title and #tags for your spell:");
+    if (!input) return;
+
+    const tags = (input.match(/#[\w-]+/g) || []).map((tag) => tag.slice(1));
+    const title = input.replace(/#[\w-]+/g, "").trim();
+
+    const recipeId = this.focusedCharm?.sourceCell?.get()?.[TYPE];
+    const src = getRecipeSrc(recipeId) || "";
+    const spec = getRecipeSpec(recipeId);
+    const parents = getRecipeParents(recipeId);
+
+    const success = await saveRecipe(recipeId, src, spec, parents, title, tags);
+
+    if (success) {
+      // Focus the document to ensure clipboard access
+      window.focus();
+      try {
+        const spellbookUrl = `https://paas.saga-castor.ts.net/spellbookjr/recipes/spell-${recipeId}`;
+        await navigator.clipboard.writeText(spellbookUrl);
+        toasty("Published to Spellbook Jr! Spellbook link copied to clipboard");
+      } catch (err) {
+        toasty("Published to Spellbook Jr! (Failed to copy spellbook link)");
+        console.error("Failed to copy to clipboard:", err);
+      }
+    } else {
+      toasty("Failed to publish");
+    }
+  }
+
   protected override async updated(_changedProperties: PropertyValues): Promise<void> {
     super.updated(_changedProperties);
 
@@ -202,6 +241,7 @@ export class CommonSidebar extends LitElement {
           icon="data_object"
           @click=${() => this.handleSidebarTabChange("recipe-json")}
         ></os-icon-button>
+        <os-icon-button icon="publish" @click=${() => this.handlePublish()}></os-icon-button>
       </div>
       <os-sidebar-close-button slot="toolbar-end"></os-sidebar-close-button> `;
 
@@ -308,12 +348,7 @@ export class CommonSidebar extends LitElement {
                       style="float: right"
                       >🔗 Share</a
                     >
-                    <a
-                      href="https://paas.saga-castor.ts.net/spellbookjr/recipes/spell-${recipeId}"
-                      target="_blank"
-                    >
-                      🪄 Spellbook jr</a
-                    >
+                    <button @click=${() => this.handlePublish()}>🪄 Publish to Spellbook Jr</button>
                   </div>
                 </div>
                 <div style="margin: 10px;"></div>
