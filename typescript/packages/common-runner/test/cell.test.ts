@@ -906,8 +906,6 @@ describe("JSON.stringify bug", () => {
       "json-test3",
     );
     const proxy = e.getAsQueryResult();
-    const y = proxy.internal;
-    const x = proxy.internal.a;
     const json = JSON.stringify(proxy);
     expect(json).toEqual('{"internal":{"a":1}}');
     expect(JSON.stringify(c.get())).toEqual('{"result":{"data":1}}');
