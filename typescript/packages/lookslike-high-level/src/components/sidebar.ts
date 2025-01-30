@@ -417,11 +417,21 @@ export class CommonSidebar extends LitElement {
     };
 
     const onQueryChanged = (e: CustomEvent) => {
-      this.setField("query", JSON.parse(e.detail.state.doc.toString()));
+      try {
+        const parsed = JSON.parse(e.detail.state.doc.toString());
+        this.setField("query", parsed);
+      } catch (err) {
+        console.warn("Failed to parse query JSON:", err);
+      }
     };
 
     const onDataChanged = (e: CustomEvent) => {
-      this.setField("data", JSON.parse(e.detail.state.doc.toString()));
+      try {
+        const parsed = JSON.parse(e.detail.state.doc.toString());
+        this.setField("data", parsed);
+      } catch (err) {
+        console.warn("Failed to parse data JSON:", err);
+      }
     };
 
     const copyRecipeLink = (event: Event) => {
