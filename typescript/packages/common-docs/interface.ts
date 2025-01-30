@@ -210,7 +210,7 @@ export interface ConnectionError extends Error {
  * Error from the underlying storage.
  */
 export interface TransactionError extends Error {
-  name: "StoreError";
+  name: "TransactionError";
   cause: SystemError;
   /**
    * Fact being stored when the error occurred.
