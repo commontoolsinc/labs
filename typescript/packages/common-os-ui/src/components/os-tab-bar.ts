@@ -100,7 +100,7 @@ export class OsTabBar extends LitElement {
   @property({ type: Array }) items: TabItem[] = [];
   @property({ type: String }) selected = "";
 
-  private handleTabClick(id: string, event: Event) {
+  private handleTabClick(id: string, _event: Event) {
     this.selected = id;
     this.dispatchEvent(
       new CustomEvent("tab-change", {

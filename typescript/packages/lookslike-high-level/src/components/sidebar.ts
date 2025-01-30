@@ -1,6 +1,5 @@
 import { css, html, LitElement, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { when } from "lit/directives/when.js";
 import { style } from "@commontools/ui";
 import { Charm, charms, NAME, recipes, runPersistent, TYPE, UI } from "../data.js";
 import {
