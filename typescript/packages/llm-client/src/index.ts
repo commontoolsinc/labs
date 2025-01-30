@@ -7,18 +7,18 @@ export type SimpleContent = string | TypedContent[];
 
 type TypedContent =
   | {
-    type: "text";
-    text: string;
-  }
+      type: "text";
+      text: string;
+    }
   | {
-    type: "image";
-    url: string;
-  };
+      type: "image";
+      url: string;
+    };
 
-type LLMRequest = {
+export type LLMRequest = {
   messages: SimpleMessage[] | SimpleContent[];
   system?: string;
-  model: string;
+  model: string | string[];
   max_tokens?: number;
   stream?: boolean;
   stop?: string;
@@ -31,47 +31,55 @@ export class LLMClient {
     this.serverUrl = serverUrl;
   }
 
-  async sendRequest(
-    userRequest: LLMRequest,
-    partialCB?: (text: string) => void,
-  ): Promise<string> {
-    const fullRequest: LLMRequest = {
-      ...userRequest,
-      stream: partialCB ? true : false,
-      messages: userRequest.messages.map(processMessage),
-    };
+  async sendRequest(userRequest: LLMRequest, partialCB?: (text: string) => void): Promise<string> {
+    const models = Array.isArray(userRequest.model) ? userRequest.model : [userRequest.model];
 
-    const response = await fetch(this.serverUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(fullRequest),
-    });
+    const errors: Error[] = [];
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(
-        `HTTP error! status: ${response.status}, body: ${errorText}`,
-      );
+    for (const model of models) {
+      try {
+        const fullRequest: LLMRequest = {
+          ...userRequest,
+          model,
+          stream: partialCB ? true : false,
+          messages: userRequest.messages.map(processMessage),
+        };
+
+        const response = await fetch(this.serverUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(fullRequest),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
+        }
+
+        if (!response.body) {
+          throw new Error("No response body");
+        }
+
+        // the server might return cached data instead of a stream
+        if (response.headers.get("content-type") === "application/json") {
+          const data = (await response.json()) as SimpleMessage;
+          // FIXME(ja): can the LLM ever return anything other than a string?
+          return data.content as string;
+        }
+
+        // FIXME(ja): this doesn't handle falling back to other models
+        // if we fail during streaming
+        return await this.stream(response.body, partialCB);
+      } catch (error) {
+        console.error(`Model "${model}" failed:`, error);
+        errors.push(error as Error);
+      }
     }
 
-    if (!response.body) {
-      throw new Error("No response body");
-    }
-
-    // the server might return cached data instead of a stream
-    if (response.headers.get("content-type") === "application/json") {
-      const data = (await response.json()) as SimpleMessage;
-      // FIXME(ja): can the LLM ever return anything other than a string?
-      return data.content as string;
-    }
-
-    return await this.stream(response.body, partialCB);
+    throw new Error("All models failed");
   }
 
-  private async stream(
-    body: ReadableStream,
-    cb?: (partial: string) => void,
-  ): Promise<string> {
+  private async stream(body: ReadableStream, cb?: (partial: string) => void): Promise<string> {
     const reader = body.getReader();
     const decoder = new TextDecoder();
 
@@ -119,10 +127,7 @@ export class LLMClient {
   }
 }
 
-function processMessage(
-  m: SimpleMessage | SimpleContent,
-  idx: number,
-): SimpleMessage {
+function processMessage(m: SimpleMessage | SimpleContent, idx: number): SimpleMessage {
   if (typeof m === "string" || Array.isArray(m)) {
     return {
       role: idx % 2 === 0 ? "user" : "assistant",

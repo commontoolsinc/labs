@@ -7,8 +7,8 @@ import { type DocImpl } from "@commontools/runner";
 
 // const SELECTED_MODEL = "cerebras:llama-3.3-70b";
 // const SELECTED_MODEL = "anthropic:claude-3-5-sonnet";
+// const SELECTED_MODEL = ["groq:llama-3.3-70b-specdec", "cerebras:llama-3.3-70b", "anthropic:claude-3-5-sonnet"];
 const SELECTED_MODEL = "groq:llama-3.3-70b-specdec";
-
 const responsePrefill =
   "```html\n" +
   `<html>
