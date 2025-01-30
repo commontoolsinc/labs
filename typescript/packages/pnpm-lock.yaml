@@ -95,6 +95,49 @@ importers:
         specifier: ^3.0.4
         version: 3.0.4(@types/node@22.10.10)
 
+  common-iframe-sandbox:
+    dependencies:
+      lit:
+        specifier: ^3.2.1
+        version: 3.2.1
+      tslib:
+        specifier: ^2.8.1
+        version: 2.8.1
+    devDependencies:
+      '@eslint/js':
+        specifier: ^9.19.0
+        version: 9.19.0
+      '@types/node':
+        specifier: ^22.10.10
+        version: 22.10.10
+      '@web/test-runner':
+        specifier: ^0.19.0
+        version: 0.19.0
+      eslint:
+        specifier: ^9.19.0
+        version: 9.19.0
+      eslint-config-prettier:
+        specifier: ^10.0.1
+        version: 10.0.1(eslint@9.19.0)
+      eslint-plugin-prettier:
+        specifier: ^5.2.3
+        version: 5.2.3(eslint-config-prettier@10.0.1(eslint@9.19.0))(eslint@9.19.0)(prettier@3.4.2)
+      globals:
+        specifier: ^15.14.0
+        version: 15.14.0
+      prettier:
+        specifier: ^3.4.2
+        version: 3.4.2
+      typescript:
+        specifier: ^5.7.3
+        version: 5.7.3
+      vite:
+        specifier: ^6.0.11
+        version: 6.0.11(@types/node@22.10.10)
+      vite-plugin-dts:
+        specifier: ^4.5.0
+        version: 4.5.0(@types/node@22.10.10)(rollup@4.32.0)(typescript@5.7.3)(vite@6.0.11(@types/node@22.10.10))
+
   common-os-ui:
     dependencies:
       '@cfworker/json-schema':
@@ -246,9 +289,9 @@ importers:
       '@cfworker/json-schema':
         specifier: ^4.1.0
         version: 4.1.0
-      '@commontools/runner':
+      '@commontools/iframe-sandbox':
         specifier: workspace:*
-        version: link:../common-runner
+        version: link:../common-iframe-sandbox
       '@shoelace-style/shoelace':
         specifier: ^2.19.1
         version: 2.19.1(@floating-ui/utils@0.2.9)(@types/react@19.0.8)
@@ -329,6 +372,9 @@ importers:
       '@commontools/html':
         specifier: workspace:*
         version: link:../common-html
+      '@commontools/iframe-sandbox':
+        specifier: workspace:*
+        version: link:../common-iframe-sandbox
       '@commontools/llm-client':
         specifier: workspace:*
         version: link:../llm-client

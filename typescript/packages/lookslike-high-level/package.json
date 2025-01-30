@@ -27,6 +27,7 @@
     "@commontools/llm-client": "workspace:*",
     "@commontools/os-ui": "workspace:*",
     "@commontools/runner": "workspace:*",
+    "@commontools/iframe-sandbox": "workspace:*",
     "@commontools/ui": "workspace:*",
     "lit": "^3.2.1",
     "marked": "^15.0.6",

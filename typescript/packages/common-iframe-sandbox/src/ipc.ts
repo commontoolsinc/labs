@@ -1,23 +1,4 @@
-// Types used by the `common-iframe` IPC.
-
-export interface IframeContextHandler {
-  read(context: any, key: string): any,
-  write(context: any, key: string, value: any): void,
-  subscribe(context: any, key: string, callback: (key: string, value: any) => void): any,
-  unsubscribe(context: any, receipt: any): void,
-}
-
-let IframeHandler: IframeContextHandler | null = null;
-// Set the `IframeContextHandler` singleton. Allows cell synchronizing
-// so that `common-ui` doesn't directly depend on `common-runner`.
-export function setIframeContextHandler(handler: IframeContextHandler) {
-  IframeHandler = handler;
-}
-
-// Get the `IframeContextHandler` singleton.
-export function getIframeContextHandler(): IframeContextHandler | null {
-  return IframeHandler;
-}
+// Types used by the `common-iframe-sandbox` IPC.
 
 export interface GuestError {
   description: string;
