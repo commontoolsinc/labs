@@ -26,6 +26,9 @@ export function register() {
             Authorization: `Bearer ${env.CTTS_AI_LLM_PHOENIX_API_KEY}`,
           },
         }),
+        spanFilter: (span) => {
+          return isOpenInferenceSpan(span);
+        },
       }),
     ],
   });
