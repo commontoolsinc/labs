@@ -244,40 +244,10 @@ export class CommonWindowManager extends LitElement {
     const onImportLocalData = (event: CustomEvent) => {
       const data = event.detail.data;
       console.log("Importing local data:", data);
+      const title = prompt("Enter a title for your recipe:");
+      if (!title) return;
 
-      if (event.detail.shiftKey && this.focusedCharm) {
-        const existingData = this.focusedProxy?.data || {};
-        const mergedData = { ...existingData };
-
-        for (const [key, value] of Object.entries(data)) {
-          if (Array.isArray(value) && Array.isArray(existingData[key])) {
-            mergedData[key] = [...existingData[key], ...value];
-          } else {
-            mergedData[key] = value;
-          }
-        }
-
-        this.focusedCharm.asCell(["data"]).send(mergedData);
-
-        // Update the title to indicate the merge
-        const newTitle = `${this.focusedProxy?.[NAME] || "Untitled"} (Merged ${new Date().toISOString()})`;
-        this.focusedCharm.asCell([NAME]).send(newTitle);
-
-        // Refresh the UI
-        this.requestUpdate();
-      } else {
-        // Create a new charm and query for the imported data
-        const jsonSchema = Schema.inferJsonSchema(data[0]);
-        jsonSchema.description = Object.keys(data[0]).join(", ");
-        const src = Schema.generateZodSpell(jsonSchema);
-        buildRecipe(src).then(({ recipe }) => {
-          if (recipe) {
-            addRecipe(recipe, src, "render data", []);
-
-            runPersistent(recipe, data[0]).then((charm) => this.openCharm(charm));
-          }
-        });
-      }
+      iframeSpellAi.createNewRecipe(data, title);
     };
 
     return html`
