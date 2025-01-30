@@ -6,10 +6,45 @@ Radioactive experiments. Turn back! You will find no API stability here.
 
 ## Overview
 
-Web, Node.js an Deno packages live in [./typescript](./typescript)
+There's a frontend, and a backend.
 
-Rust crates live in [./rust](./rust)
+All of the backend code lives within [Toolshed](./typescript/packages/toolshed), and is written in Deno2.
 
-Refer to [./docs/tools.md](./docs/tools.md) for tool installation.
+All of the frontend code lives within various packages, inside of a pnpm monorepo setup in `./typescript/packages/`.
 
-Run [./scripts/component-demo.sh](./scripts/component-demo.sh) to see some fun Rust / Deno / Web tooling interop in action.
+## Running the backend
+
+For a more detailed guide, see [./typescript/packages/toolshed/README.md](./typescript/packages/toolshed/README.md).
+
+```bash
+cd ./typescript/packages/toolshed
+deno task dev
+```
+
+By default the backend will run at http://localhost:8000
+
+## Running the frontend
+
+For a more detailed guide, see the pnpm monorepo readme [./typescript/packages/README.md](./typescript/packages/README.md).
+
+First, install pnpm
+
+```shell
+brew install pnpm
+```
+
+Then, install the dependencies and run the dev server
+
+```bash
+cd ./typescript/packages/lookslike-high-level
+pnpm install
+pnpm dev
+```
+
+By default, the frontend will run at http://localhost:5173, and it will point to a local backend running at http://localhost:8000.
+
+If you are not actively making updates to the backend, you can also point to the backend running in the cloud, by running the following command:
+
+```shell
+TOOLSHED_API_URL=https://toolshed.commontools.dev/ pnpm run dev
+```
