@@ -46,7 +46,7 @@ export async function takeScreenshot(
     await page.waitForSelector(selector);
     console.log('Clicking sidebar close button...');
     await page.click(selector);
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(2000);
     console.log('Waiting for network to settle after sidebar close...');
 
     // Take screenshot
