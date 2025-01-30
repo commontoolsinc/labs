@@ -8,27 +8,24 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { SEMRESATTRS_PROJECT_NAME } from "@arizeai/openinference-semantic-conventions";
 import env from "@/env.ts";
 
-// For troubleshooting, set the log level to DiagLogLevel.DEBUG
-// This is not required and should not be added in a production setting
-diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.DEBUG);
+diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.ERROR);
 
 export function register() {
   registerOTel({
     serviceName: env.CTTS_AI_LLM_PHOENIX_PROJECT,
     attributes: {
-      // This is not required but it will allow you to send traces to a specific project in phoenix
       [SEMRESATTRS_PROJECT_NAME]: env.CTTS_AI_LLM_PHOENIX_PROJECT,
     },
     spanProcessors: [
       new OpenInferenceSimpleSpanProcessor({
         exporter: new OTLPTraceExporter({
           url: env.CTTS_AI_LLM_PHOENIX_URL,
+          headers: {
+            "Content-Type": "application/x-protobuf", // Changed from application/json
+            api_key: env.CTTS_AI_LLM_PHOENIX_API_KEY,
+            Authorization: `Bearer ${env.CTTS_AI_LLM_PHOENIX_API_KEY}`,
+          },
         }),
-        spanFilter: (span) => {
-          // Only export spans that are OpenInference to remove non-generative spans
-          // This should be removed if you want to export all spans
-          return isOpenInferenceSpan(span);
-        },
       }),
     ],
   });
