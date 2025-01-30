@@ -1,9 +1,11 @@
 import { getRecipe, getRecipeSrc, addRecipe, run } from "@commontools/runner";
 import { addCharms, openCharm, Charm, TYPE } from "../data.js";
 import { LLMClient } from "@commontools/llm-client";
-import { JSONSchema } from "@commontools/builder";
+import { createJsonSchema, JSONSchema } from "@commontools/builder";
 import { tsToExports } from "../localBuild.js";
 import { type DocImpl } from "@commontools/runner";
+
+import demoSrc from "./demo.html?raw";
 
 const SELECTED_MODEL = ["groq:llama-3.3-70b-specdec", "cerebras:llama-3.3-70b", "anthropic:claude-3-5-sonnet"];
 
@@ -30,6 +32,7 @@ const responsePrefill =
       return false;
     };
 
+    // subscriptions have to be to a leaf node, not an object
     window.subscribeToKey = function (key) {
       console.log('iframe: Subscribing to', key);
       window.parent.postMessage({
@@ -173,11 +176,17 @@ const llmUrl =
 
 const llm = new LLMClient(llmUrl);
 
-const tweakSrc = async ({ iframe, newSpec }: { iframe: IFrameRecipe; newSpec: string }) => {
+const genSrc = async ({ src, spec, newSpec, schema }: { src?: string; spec?: string; newSpec: string; schema: JSONSchema }) => {
   const messages = [];
-  messages.push(iframe.spec);
-  messages.push(`\`\`\`html\n${iframe.src}\n\`\`\``);
-  messages.push(`The user asked you to update/change the source code by the following:
+  if (spec && src) {
+    messages.push(spec);
+    messages.push(`\`\`\`html\n${src}\n\`\`\``);
+  } else {
+    messages.push("Make a simple counter that works with the following schema: { count: number }");
+    messages.push(demoSrc);
+  }
+
+  messages.push(`The user asked you to ${spec ? "update" : "create"} the source code by the following:
 \`\`\`
 ${newSpec}
 \`\`\``);
@@ -216,7 +225,7 @@ ${newSpec}
     When using React ref's, always handle the undefined or null case. If you're using a ref for setup, include it the dependencies for useEffect.
 
     <view-model-schema>
-      ${JSON.stringify(iframe.argumentSchema, null, 2)}
+      ${JSON.stringify(schema, null, 2)}
     </view-model-schema>
     
     You can use the generateImage function to get a url for a generated image.`;
@@ -282,7 +291,7 @@ export async function iterate(charm: DocImpl<Charm> | null, value: string, shift
 
   const newSpec = shiftKey ? iframe.spec + "\n" + value : value;
 
-  const newIFrameSrc = await tweakSrc({ iframe, newSpec });
+  const newIFrameSrc = await genSrc({ src: iframe.src, spec: iframe.spec, newSpec, schema: iframe.argumentSchema });
 
   const newRecipeSrc = buildFullRecipe({ ...iframe, src: newIFrameSrc, spec: newSpec });
 
@@ -308,6 +317,37 @@ export async function iterate(charm: DocImpl<Charm> | null, value: string, shift
 
     // if you want to run a new charm:
     const newCharm = run(recipe, { cell: charm.sourceCell, path: ["argument"] });
+
+    addCharms([newCharm]);
+    const charmId = JSON.stringify(newCharm.entityId);
+    openCharm(charmId);
+  }
+}
+
+
+export async function createNewRecipe(data: any, newSpec: string) {
+  const schema = createJsonSchema({}, data);
+  schema.description = newSpec;
+
+  const newIFrameSrc = await genSrc({ newSpec, schema });
+
+  const newRecipeSrc = buildFullRecipe({ src: newIFrameSrc, spec: newSpec, argumentSchema: schema, resultSchema: {}, name: newSpec });
+
+  const { exports, errors } = await tsToExports(newRecipeSrc);
+
+  if (errors) {
+    console.error("errors", errors);
+    return;
+  }
+
+  let { default: recipe } = exports;
+
+  if (recipe) {
+    // NOTE(ja): adding a recipe triggers saving to blobby
+    const parents = undefined;
+    addRecipe(recipe, newRecipeSrc, newSpec, parents);
+
+    const newCharm = run(recipe, data);
 
     addCharms([newCharm]);
     const charmId = JSON.stringify(newCharm.entityId);
