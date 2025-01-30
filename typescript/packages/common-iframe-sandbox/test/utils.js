@@ -1,4 +1,4 @@
-import { IframeIPC } from "../lib/src/index.js";
+import { setIframeContextHandler } from "../lib/src/index.js";
 
 export class ContextShim {
   constructor(object = {}) {
@@ -35,7 +35,7 @@ export class ContextShim {
 }
 
 export function setIframeTestHandler() {
-  IframeIPC.setIframeContextHandler({
+  setIframeContextHandler({
     read(context, key) {
       return context.get(key);
     },
@@ -68,9 +68,9 @@ export function render(src, context = {}) {
   return new Promise(resolve => {
     const parent = document.createElement('div');
     parent.id = FIXTURE_ID;
-    const iframe = document.createElement('common-iframe');
+    const iframe = document.createElement('common-iframe-sandbox');
     iframe.context = context;
-    iframe.addEventListener('load', e => {
+    iframe.addEventListener('load', _ => {
       resolve(iframe);
     })
     parent.appendChild(iframe);
