@@ -28,6 +28,7 @@ export const ProcessSchemaRequestSchema = z.object({
       url: { type: "string" },
     },
   }),
+  tags: z.array(z.string()).optional(),
   many: z.boolean().optional(),
   prompt: z.string().optional(),
   options: z
@@ -110,6 +111,7 @@ export const CasterRequestSchema = z.object({
       url: { type: "string" },
     },
   }),
+  tags: z.array(z.string()).optional(),
   prompt: z.string().optional(),
 });
 
@@ -125,6 +127,7 @@ export type CasterResponse = z.infer<typeof CasterResponseSchema>;
 
 export const SpellSearchRequestSchema = z.object({
   query: z.string(),
+  tags: z.array(z.string()).optional(),
   options: z.object({
     limit: z.number().optional().default(10),
     includeCompatibility: z.boolean().optional().default(true),
@@ -211,6 +214,7 @@ export const caster: AppRouteHandler<CasterSchemaRoute> = async (c) => {
   const logger: Logger = c.get("logger");
   const body = (await c.req.json()) as ProcessSchemaRequest;
   const startTime = performance.now();
+  const tags = body.tags || [];
 
   try {
     const blobContents = await getAllBlobs({ allWithData: true }) as Record<
@@ -224,7 +228,7 @@ export const caster: AppRouteHandler<CasterSchemaRoute> = async (c) => {
       string,
       Record<string, unknown>
     >;
-    const response = await candidates(body.schema, blobContents, spells);
+    const response = await candidates(body.schema, blobContents, spells, tags);
 
     return c.json(
       response,
@@ -263,6 +267,7 @@ export const spellSearch: AppRouteHandler<SpellSearchRoute> = async (c) => {
       spells,
       blobs: blobContents,
       options: body.options,
+      tags: body.tags,
     });
 
     const response = {

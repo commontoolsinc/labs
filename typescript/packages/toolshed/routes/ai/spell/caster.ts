@@ -23,10 +23,26 @@ export interface SchemaAnalysis {
   produces: string[];
 }
 
+function calculateTagScore(item: unknown, tags: string[]): number {
+  // Convert item to string for searching
+  const itemString = JSON.stringify(item).toLowerCase();
+
+  // Count how many tags match (in hashtag form)
+  const matchingTags = tags.filter((tag) =>
+    itemString.includes(`#${tag.toLowerCase()}`)
+  );
+
+  // Return a score between 0 and 0.5 based on percentage of matching tags
+  return matchingTags.length > 0
+    ? (matchingTags.length / tags.length) * 0.5
+    : 0;
+}
+
 export function candidates(
   schema: Record<string, unknown>,
   blobContents: Record<string, Record<string, unknown>>,
   spells: Record<string, unknown>,
+  tags: string[],
 ): SchemaAnalysis {
   const data: SchemaCandidate[] = [];
   const consumes: SchemaCandidate[] = [];
@@ -49,11 +65,13 @@ export function candidates(
   // Check direct schema matches in blobs
   for (const [key, blobData] of Object.entries(blobContents)) {
     try {
+      const tagScore = calculateTagScore(blobData, tags);
+
       // Check if the entire blob matches the schema
       if (checkSchemaMatch(blobData, schema)) {
         data.push({
           key,
-          similarity: 1.0,
+          similarity: 1.0 + tagScore,
         });
         continue;
       }
@@ -67,7 +85,7 @@ export function candidates(
         if (hasMatchingItems) {
           data.push({
             key,
-            similarity: 1.0,
+            similarity: 1.0 + tagScore,
           });
           continue;
         }
@@ -81,7 +99,7 @@ export function candidates(
         ) {
           data.push({
             key,
-            similarity: 0.9,
+            similarity: 0.9 + tagScore,
           });
           break;
         }
@@ -94,7 +112,7 @@ export function candidates(
           if (hasMatchingItems) {
             data.push({
               key,
-              similarity: 0.9,
+              similarity: 0.9 + tagScore,
             });
             break;
           }
@@ -121,6 +139,8 @@ export function candidates(
         JSON.stringify(spell.recipe.resultSchema, null, 2),
       );
 
+      const tagScore = calculateTagScore(spell, tags);
+
       // Check if our schema matches the spell's argument schema
       const consumesMatch = schemaIntersection(
         schema,
@@ -130,7 +150,7 @@ export function candidates(
       if (consumesMatch) {
         consumes.push({
           key,
-          similarity: 1.0,
+          similarity: 1.0 + tagScore,
         });
       }
 
@@ -143,7 +163,7 @@ export function candidates(
       if (producesMatch) {
         produces.push({
           key,
-          similarity: 1.0,
+          similarity: 1.0 + tagScore,
         });
       }
     } catch (error) {

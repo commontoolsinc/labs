@@ -15,13 +15,32 @@ import {
   SchemaFragment,
 } from "@/routes/ai/spell/schema.ts";
 
+function calculateTagRank(
+  data: Record<string, unknown>,
+  tags: string[],
+): number {
+  if (!tags || tags.length === 0) return 0;
+
+  const stringifiedData = JSON.stringify(data).toLowerCase();
+  let rank = 0;
+
+  for (const tag of tags) {
+    if (stringifiedData.includes(tag.toLowerCase())) {
+      rank++;
+    }
+  }
+
+  return rank;
+}
+
 export async function processSchema(
   body: ProcessSchemaRequest,
   logger: Logger,
   startTime: number,
 ): Promise<ProcessSchemaResponse> {
+  const tags = body.tags || [];
   logger.info(
-    { schema: body.schema, many: body.many, options: body.options },
+    { schema: body.schema, many: body.many, options: body.options, tags },
     "Starting schema processing request",
   );
 
@@ -56,6 +75,7 @@ export async function processSchema(
     const matches = findExactMatches(
       exactFragment.schema,
       blobContents,
+      tags,
     );
     exactFragment.matches = matches;
     fragmentsWithMatches = [exactFragment];
@@ -98,6 +118,7 @@ export async function processSchema(
           fragment,
           blobContents,
           logger,
+          tags,
         );
         totalMatches += matches.length;
         return { ...fragment, matches };
@@ -176,6 +197,16 @@ export async function processSchema(
       schemaFormat: body.options?.format || "json",
       fragments: fragmentsWithMatches,
       reassembledExample: reassembled,
+      tagMatchInfo: {
+        usedTags: tags,
+        matchRanks: fragmentsWithMatches.map((f) => ({
+          path: f.path.join("."),
+          matches: f.matches.map((m) => ({
+            key: m.key,
+            rank: m.rank,
+          })),
+        })),
+      },
     },
   };
 }

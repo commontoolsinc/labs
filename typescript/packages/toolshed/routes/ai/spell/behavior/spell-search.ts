@@ -23,6 +23,7 @@ interface SpellSearchResult {
 
 interface SpellSearchParams {
   query: string;
+  tags?: string[];
   referencedKeys: string[];
   spells: Record<string, Record<string, unknown>>;
   blobs: Record<string, Record<string, unknown>>;
@@ -31,8 +32,22 @@ interface SpellSearchParams {
   };
 }
 
+function calculateRank(itemStr: string, tags: string[] = []): number {
+  let rank = 0;
+  const hashTags = tags.map((tag) => `#${tag.toLowerCase()}`);
+
+  for (const tag of hashTags) {
+    const matches =
+      (itemStr.toLowerCase().match(new RegExp(tag, "g")) || []).length;
+    rank += matches;
+  }
+
+  return rank;
+}
+
 export function processSpellSearch({
   query,
+  tags = [],
   referencedKeys,
   spells,
   blobs,
@@ -73,24 +88,26 @@ export function processSpellSearch({
 
   // Perform text search if we haven't hit the limit
   if (searchTerms) {
-    // Search spells
+    // Search spells with tags
     if (spellMatches.length < limit) {
       const textSpellMatches = searchSpells(
         searchTerms,
         spells,
         blobs,
         limit - spellMatches.length,
+        tags,
       );
       spellMatches.push(...textSpellMatches);
     }
 
-    // Search blobs
+    // Search blobs with tags
     if (blobMatches.length < limit) {
       const textBlobMatches = searchBlobs(
         searchTerms,
         blobs,
         spells,
         limit - blobMatches.length,
+        tags,
       );
       blobMatches.push(...textBlobMatches);
     }
@@ -107,25 +124,29 @@ function searchSpells(
   spells: Record<string, Record<string, unknown>>,
   blobs: Record<string, Record<string, unknown>>,
   limit: number,
+  tags: string[] = [],
 ): SpellSearchResult["spells"] {
-  const matches = [];
+  const matches: Array<SpellSearchResult["spells"][0] & { rank: number }> = [];
 
   for (const [key, spell] of Object.entries(spells)) {
     const spellStr = JSON.stringify(spell).toLowerCase();
     if (spellStr.includes(searchTerms)) {
+      const rank = calculateRank(spellStr, tags);
       matches.push({
         key,
         name: spell.name as string || key,
         description: spell.description as string || "No description",
         matchType: "text-match" as const,
         compatibleBlobs: findCompatibleBlobs(spell, blobs),
+        rank,
       });
     }
-
-    if (matches.length >= limit) break;
   }
 
-  return matches;
+  return matches
+    .sort((a, b) => b.rank - a.rank)
+    .slice(0, limit)
+    .map(({ rank, ...rest }) => rest);
 }
 
 function searchBlobs(
@@ -133,33 +154,38 @@ function searchBlobs(
   blobs: Record<string, Record<string, unknown>>,
   spells: Record<string, Record<string, unknown>>,
   limit: number,
+  tags: string[] = [],
 ): SpellSearchResult["blobs"] {
-  const matches = [];
+  const matches: Array<SpellSearchResult["blobs"][0] & { rank: number }> = [];
 
   for (const [key, blob] of Object.entries(blobs)) {
-    if (key.startsWith("spell-")) continue; // Skip spells in blob search
+    if (key.startsWith("spell-")) continue;
 
     const blobStr = JSON.stringify(blob).toLowerCase();
     if (blobStr.includes(searchTerms)) {
+      const rank = calculateRank(blobStr, tags);
       matches.push({
         key,
         snippet: getRelevantSnippet(blobStr),
         matchType: "text-match" as const,
         compatibleSpells: findCompatibleSpells(blob, spells),
+        rank,
       });
     }
-
-    if (matches.length >= limit) break;
   }
 
-  return matches;
+  return matches
+    .sort((a, b) => b.rank - a.rank)
+    .slice(0, limit)
+    .map(({ rank, ...rest }) => rest);
 }
 
 function findCompatibleSpells(
   blob: Record<string, unknown>,
   spells: Record<string, Record<string, unknown>>,
 ): Array<{ key: string; name: string; description: string }> {
-  const compatible = [];
+  const compatible: Array<{ key: string; name: string; description: string }> =
+    [];
   const blobStr = JSON.stringify(blob).toLowerCase();
 
   for (const [key, spell] of Object.entries(spells)) {
@@ -183,7 +209,7 @@ function findCompatibleBlobs(
   spell: Record<string, unknown>,
   blobs: Record<string, Record<string, unknown>>,
 ): Array<{ key: string; snippet: string }> {
-  const compatible = [];
+  const compatible: Array<{ key: string; snippet: string }> = [];
   const spellStr = JSON.stringify(spell).toLowerCase();
 
   for (const [key, blob] of Object.entries(blobs)) {
