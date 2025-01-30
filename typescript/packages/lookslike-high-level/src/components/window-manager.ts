@@ -162,7 +162,6 @@ export class CommonWindowManager extends LitElement {
   private focusedProxy: Charm | null = null;
 
   handleUniboxSubmit(event: CustomEvent) {
-
     const value = event.detail.value;
     const shiftKey = event.detail.shiftKey;
     console.log("Unibox submitted:", value, shiftKey);

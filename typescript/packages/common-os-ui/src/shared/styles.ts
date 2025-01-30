@@ -220,7 +220,6 @@ export const base = css`
     grid-template-areas: "start center end";
     align-items: center;
     gap: var(--gap-sm);
-
     .toolbar-start {
       grid-area: start;
       display: flex;
@@ -237,7 +236,7 @@ export const base = css`
       gap: var(--button-gap);
       align-items: center;
       justify-content: flex-end;
-      flex-shrink: 1;
+      margin-left: auto;
     }
 
     .toolbar-center {

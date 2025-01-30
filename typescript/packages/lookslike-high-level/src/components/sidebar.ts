@@ -17,6 +17,8 @@ import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.jsx";
 import { render } from "@commontools/html";
 import { saveRecipe } from "../data.js";
+
+// bf: TODO, send a "toast" event on window and an use another element to handle it
 const toasty = (message: string) => {
   const toastEl = document.createElement("div");
   toastEl.textContent = message;
@@ -87,22 +89,52 @@ export class CommonSidebar extends LitElement {
       :host {
         display: block;
         height: 100%;
-      }
-
-      .nav-buttons {
         display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-        padding: 4px;
-        text-align: justify;
-        text-justify: distribute;
+        flex-direction: column;
       }
 
-      os-icon-button,
-      os-sidebar-close-button {
-        scale: 0.9;
-        width: 40px;
-        flex: 0 0 auto;
+      os-navstack {
+        flex: 1;
+        min-height: 0;
+      }
+
+      .panel-container {
+        position: relative;
+        height: 100%;
+        overflow: hidden;
+      }
+
+      os-navpanel {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        transition:
+          transform 0.1s ease,
+          opacity 0.1s ease;
+        opacity: 0;
+        transform: translateX(15px);
+        pointer-events: none;
+      }
+
+      os-navpanel.active {
+        opacity: 1;
+        transform: translateX(0);
+        pointer-events: auto;
+      }
+
+      os-navpanel.exit {
+        opacity: 0;
+        transform: translateX(-15px);
+      }
+
+      .close-button {
+        transition: none;
+      }
+
+      .sidebar-content {
+        padding: var(--gap-xsm);
+        padding-bottom: 0;
+        box-sizing: border-box;
       }
     `,
   ];
@@ -115,6 +147,17 @@ export class CommonSidebar extends LitElement {
   };
 
   private handleSidebarTabChange(tabName: string) {
+    const currentPanel = this.shadowRoot?.querySelector(".active");
+    if (currentPanel) {
+      currentPanel.classList.add("exit");
+      setTimeout(() => {
+        currentPanel.classList.remove("exit");
+        this.sidebarTab = tabName;
+      }, 100); // Match transition duration
+    } else {
+      this.sidebarTab = tabName;
+    }
+
     const event = new CustomEvent("tab-changed", {
       detail: { tab: tabName },
       bubbles: true,
@@ -138,9 +181,7 @@ export class CommonSidebar extends LitElement {
     const success = await saveRecipe(recipeId, src, spec, parents, title, tags);
 
     if (success) {
-      // Focus the document to ensure clipboard access
       window.focus();
-      // Add a small delay to ensure focus is complete
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       const spellbookUrl = `https://paas.saga-castor.ts.net/spellbookjr/recipes/spell-${recipeId}`;
@@ -148,7 +189,6 @@ export class CommonSidebar extends LitElement {
         await navigator.clipboard.writeText(spellbookUrl);
         toasty("Published to Spellbook Jr! Spellbook link copied to clipboard");
       } catch (err) {
-        // If clipboard fails, show the URL in the toast
         toasty(`Published to Spellbook Jr! Spellbook URL: ${spellbookUrl}`);
         console.error("Failed to copy to clipboard:", err);
       }
@@ -203,6 +243,14 @@ export class CommonSidebar extends LitElement {
     }
   }
 
+  private renderPanel(id: string, content: unknown) {
+    return html`
+      <os-navpanel class=${this.sidebarTab === id ? "active sidebar-content" : "sidebar-content"}>
+        <os-sidebar-group> ${content} </os-sidebar-group>
+      </os-navpanel>
+    `;
+  }
+
   override render() {
     const data = this.getFieldOrDefault("data", {});
     const recipeId = this.focusedCharm?.sourceCell?.get()?.[TYPE];
@@ -210,43 +258,6 @@ export class CommonSidebar extends LitElement {
     const recipe = getRecipe(recipeId);
     const schema = recipe?.argumentSchema || {};
     const query = this.getFieldOrDefault("query", {});
-
-    const sidebarNav = html`<div class="nav-buttons" slot="toolbar-start">
-        <os-icon-button
-          icon="home"
-          @click=${() => this.handleSidebarTabChange("home")}
-        ></os-icon-button>
-        <os-icon-button
-          icon="message"
-          @click=${() => this.handleSidebarTabChange("prompt")}
-        ></os-icon-button>
-        <os-icon-button
-          icon="sync_alt"
-          @click=${() => this.handleSidebarTabChange("links")}
-        ></os-icon-button>
-        <os-icon-button
-          icon="query_stats"
-          @click=${() => this.handleSidebarTabChange("query")}
-        ></os-icon-button>
-        <os-icon-button
-          icon="database"
-          @click=${() => this.handleSidebarTabChange("data")}
-        ></os-icon-button>
-        <os-icon-button
-          icon="schema"
-          @click=${() => this.handleSidebarTabChange("schema")}
-        ></os-icon-button>
-        <os-icon-button
-          icon="code"
-          @click=${() => this.handleSidebarTabChange("source")}
-        ></os-icon-button>
-        <os-icon-button
-          icon="data_object"
-          @click=${() => this.handleSidebarTabChange("recipe-json")}
-        ></os-icon-button>
-        <os-icon-button icon="publish" @click=${() => this.handlePublish()}></os-icon-button>
-      </div>
-      <os-sidebar-close-button slot="toolbar-end"></os-sidebar-close-button> `;
 
     const onSpecChanged = (e: CustomEvent) => {
       this.workingSpec = e.detail.state.doc.toString();
@@ -267,178 +278,136 @@ export class CommonSidebar extends LitElement {
       toasty("Copied recipe link to clipboard");
     };
 
+    const tabs = [
+      { id: "home", icon: "home", label: "Home" },
+      { id: "prompt", icon: "message", label: "Prompt" },
+      { id: "links", icon: "sync_alt", label: "Links" },
+      { id: "query", icon: "query_stats", label: "Query" },
+      { id: "data", icon: "database", label: "Data" },
+      { id: "schema", icon: "schema", label: "Schema" },
+      { id: "source", icon: "code", label: "Source" },
+      { id: "recipe-json", icon: "data_object", label: "JSON" },
+    ];
+
+    const panels = {
+      home: html`
+        <div slot="label">Pinned</div>
+        <div ${ref(this.homeRef)}></div>
+      `,
+      links: html`
+        <div slot="label">Linked Charms</div>
+        <div>
+          ${this.linkedCharms.map(
+            (charm) => html`<common-charm-link .charm=${charm}></common-charm-link>`,
+          )}
+        </div>
+      `,
+      query: html`
+        <div slot="label">Query</div>
+        <div>
+          <os-code-editor
+            slot="content"
+            language="application/json"
+            .source=${watchCell(query, (q) => JSON.stringify(q, null, 2))}
+            @doc-change=${onQueryChanged}
+          ></os-code-editor>
+        </div>
+      `,
+      schema: html`
+        <div slot="label">Schema</div>
+        <div>
+          <os-code-editor
+            slot="content"
+            language="application/json"
+            .source=${JSON.stringify(schema, null, 2)}
+          ></os-code-editor>
+        </div>
+      `,
+      source: html`
+        <div slot="label">
+          <div
+            style="display: flex; justify-content: space-between; border: 1px solid pink; padding: 10px;"
+          >
+            <a
+              href="/recipe/spell-${recipeId}"
+              target="_blank"
+              @click=${copyRecipeLink}
+              style="float: right"
+              class="close-button"
+              >🔗 Share</a
+            >
+            <button @click=${() => this.handlePublish()} class="close-button">
+              🪄 Publish to Spellbook Jr
+            </button>
+          </div>
+        </div>
+        <div style="margin: 10px;"></div>
+        <div>
+          <common-spell-editor .recipeId=${recipeId} .data=${argument}></common-spell-editor>
+        </div>
+      `,
+      "recipe-json": html`
+        <div slot="label">Recipe JSON</div>
+        <div>
+          <os-code-editor
+            slot="content"
+            language="application/json"
+            .source=${JSON.stringify(getRecipe(recipeId), null, 2)}
+          ></os-code-editor>
+        </div>
+      `,
+      data: html`
+        <div slot="label">
+          Data<span
+            id="log-button"
+            @click=${() => console.log(JSON.stringify(this.focusedCharm?.getAsQueryResult()))}
+            class="close-button"
+            >log</span
+          >
+        </div>
+        <div>
+          <os-code-editor
+            slot="content"
+            language="application/json"
+            .source=${watchCell(data, (q) => JSON.stringify(q, null, 2))}
+            @doc-change=${onDataChanged}
+          ></os-code-editor>
+        </div>
+      `,
+      prompt: html`
+        <div slot="label">
+          Spec
+          <a
+            href="/recipe/${recipeId}"
+            target="_blank"
+            @click=${copyRecipeLink}
+            style="float: right"
+            class="close-button"
+            >🔗 Share</a
+          >
+        </div>
+        <div>
+          <os-code-editor
+            slot="content"
+            language="text/markdown"
+            .source=${this.workingSpec}
+            @doc-change=${onSpecChanged}
+          ></os-code-editor>
+        </div>
+      `,
+    };
+
     return html`
       <os-navstack>
-        ${when(
-          this.sidebarTab === "home",
-          () =>
-            html`<os-navpanel safearea>
-              ${sidebarNav}
-              <os-sidebar-group safearea>
-                <div slot="label">Pinned</div>
-                <div ${ref(this.homeRef)}></div>
-              </os-sidebar-group>
-            </os-navpanel>`,
-          () => html``,
-        )}
-        ${when(
-          this.sidebarTab === "links",
-          () =>
-            html`<os-navpanel safearea>
-              ${sidebarNav}
-              <os-sidebar-group>
-                <div slot="label">Linked Charms</div>
-                <div>
-                  ${this.linkedCharms.map(
-                    (charm) => html` <common-charm-link .charm=${charm}></common-charm-link> `,
-                  )}
-                </div>
-              </os-sidebar-group>
-            </os-navpanel>`,
-          () => html``,
-        )}
-        ${when(
-          this.sidebarTab === "query",
-          () =>
-            html`<os-navpanel safearea>
-              ${sidebarNav}
-              <os-sidebar-group>
-                <div slot="label">Query</div>
-                <div>
-                  <os-code-editor
-                    slot="content"
-                    language="application/json"
-                    .source=${watchCell(query, (q) => JSON.stringify(q, null, 2))}
-                    @doc-change=${onQueryChanged}
-                  ></os-code-editor>
-                </div>
-              </os-sidebar-group>
-            </os-navpanel>`,
-          () => html``,
-        )}
-        ${when(
-          this.sidebarTab === "schema",
-          () =>
-            html`<os-navpanel safearea>
-              ${sidebarNav}
-              <os-sidebar-group>
-                <div slot="label">Schema</div>
-                <div>
-                  <os-code-editor
-                    slot="content"
-                    language="application/json"
-                    .source=${JSON.stringify(schema, null, 2)}
-                  ></os-code-editor>
-                </div>
-              </os-sidebar-group>
-            </os-navpanel>`,
-          () => html``,
-        )}
-        ${when(
-          this.sidebarTab === "source",
-          () =>
-            html`<os-navpanel safearea>
-              ${sidebarNav}
-              <os-sidebar-group>
-                <div slot="label">
-                  <div
-                    style="display: flex; justify-content: space-between; border: 1px solid pink; padding: 10px;"
-                  >
-                    <a
-                      href="/recipe/spell-${recipeId}"
-                      target="_blank"
-                      @click=${copyRecipeLink}
-                      style="float: right"
-                      >🔗 Share</a
-                    >
-                    <button @click=${() => this.handlePublish()}>🪄 Publish to Spellbook Jr</button>
-                  </div>
-                </div>
-                <div style="margin: 10px;"></div>
-
-                <div>
-                  <common-spell-editor
-                    .recipeId=${recipeId}
-                    .data=${argument}
-                  ></common-spell-editor>
-                </div>
-              </os-sidebar-group>
-            </os-navpanel>`,
-          () => html``,
-        )}
-        ${when(
-          this.sidebarTab === "recipe-json",
-          () =>
-            html`<os-navpanel safearea>
-              ${sidebarNav}
-              <os-sidebar-group>
-                <div slot="label">Recipe JSON</div>
-                <div>
-                  <os-code-editor
-                    slot="content"
-                    language="application/json"
-                    .source=${JSON.stringify(getRecipe(recipeId), null, 2)}
-                  ></os-code-editor>
-                </div>
-              </os-sidebar-group>
-            </os-navpanel>`,
-          () => html``,
-        )}
-        ${when(
-          this.sidebarTab === "data",
-          () =>
-            html`<os-navpanel safearea>
-              ${sidebarNav}
-              <os-sidebar-group>
-                <div slot="label">
-                  Data<span
-                    id="log-button"
-                    @click=${() =>
-                      console.log(JSON.stringify(this.focusedCharm?.getAsQueryResult()))}
-                    >log</span
-                  >
-                </div>
-                <div>
-                  <os-code-editor
-                    slot="content"
-                    language="application/json"
-                    .source=${watchCell(data, (q) => JSON.stringify(q, null, 2))}
-                    @doc-change=${onDataChanged}
-                  ></os-code-editor>
-                </div>
-              </os-sidebar-group>
-            </os-navpanel>`,
-          () => html``,
-        )}
-        ${when(
-          this.sidebarTab === "prompt",
-          () =>
-            html`<os-navpanel safearea>
-              ${sidebarNav}
-              <os-sidebar-group>
-                <div slot="label">
-                  Spec
-                  <a
-                    href="/recipe/${recipeId}"
-                    target="_blank"
-                    @click=${copyRecipeLink}
-                    style="float: right"
-                    >🔗 Share</a
-                  >
-                </div>
-                <div>
-                  <os-code-editor
-                    slot="content"
-                    language="text/markdown"
-                    .source=${this.workingSpec}
-                    @doc-change=${onSpecChanged}
-                  ></os-code-editor>
-                </div>
-              </os-sidebar-group>
-            </os-navpanel>`,
-          () => html``,
-        )}
+        <div class="panel-container">
+          ${Object.entries(panels).map(([id, content]) => this.renderPanel(id, content))}
+        </div>
       </os-navstack>
+      <os-tab-bar
+        .items=${tabs}
+        .selected=${this.sidebarTab}
+        @tab-change=${(e: CustomEvent) => this.handleSidebarTabChange(e.detail.selected)}
+      ></os-tab-bar>
     `;
   }
 }
