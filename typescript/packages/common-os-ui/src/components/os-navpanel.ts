@@ -44,7 +44,6 @@ export class OsNavpanel extends LitElement {
           </div>
           <div class="toolbar-end gap-sm hstack">
             <slot name="toolbar-end"></slot>
-            <os-sidebar-close-button></os-sidebar-close-button>
           </div>
         </nav>
         <div class="navpanel-content vstack gap">

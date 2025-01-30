@@ -246,6 +246,10 @@ export class CommonSidebar extends LitElement {
   private renderPanel(id: string, content: unknown) {
     return html`
       <os-navpanel class=${this.sidebarTab === id ? "active sidebar-content" : "sidebar-content"}>
+        <common-hstack slot="toolbar-end" gap="sm">
+          <os-icon-button icon="publish" @click=${() => this.handlePublish()}></os-icon-button>
+          <os-sidebar-close-button></os-sidebar-close-button>
+        </common-hstack>
         <os-sidebar-group> ${content} </os-sidebar-group>
       </os-navpanel>
     `;
