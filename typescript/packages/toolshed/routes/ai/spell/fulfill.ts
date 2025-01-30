@@ -203,7 +203,7 @@ export async function processSchema(
           path: f.path.join("."),
           matches: f.matches.map((m) => ({
             key: m.key,
-            rank: m.rank,
+            rank: calculateTagRank(m.data, tags),
           })),
         })),
       },

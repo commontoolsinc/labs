@@ -5,6 +5,7 @@ export interface SchemaMatch<T = Record<string, unknown>> {
   key: string;
   data: T;
   similarity: number;
+  tagScore?: number;
 }
 
 export interface SchemaFragment {
@@ -14,25 +15,48 @@ export interface SchemaFragment {
     key: string;
     data: Record<string, unknown>;
     similarity: number;
+    tagScore?: number;
   }>;
+}
+
+export function calculateTagScore(data: unknown, tags: string[]): number {
+  if (!tags || tags.length === 0) return 0;
+
+  const dataStr = JSON.stringify(data).toLowerCase();
+  let score = 0;
+
+  for (const tag of tags) {
+    const regex = new RegExp(tag.toLowerCase(), "g");
+    const matches = dataStr.match(regex);
+    if (matches) {
+      score += matches.length;
+    }
+  }
+
+  return score;
 }
 
 export function findExactMatches(
   schema: Record<string, unknown>,
   data: Map<string, Record<string, unknown>>,
+  tags: string[] = [],
 ): SchemaMatch[] {
   const matches: SchemaMatch[] = [];
 
   for (const [key, value] of data) {
     const subtreeMatches = findExactSubtreeMatches(value, schema);
-    matches.push(...subtreeMatches.map((matchData) => ({
-      key,
-      data: matchData,
-      similarity: 1.0,
-    })));
+    matches.push(...subtreeMatches.map((matchData) => {
+      const tagScore = calculateTagScore(matchData, tags);
+      return {
+        key,
+        data: matchData,
+        similarity: 1.0 + (tagScore * 0.1),
+        tagScore,
+      };
+    }));
   }
 
-  return matches;
+  return matches.sort((a, b) => b.similarity - a.similarity);
 }
 
 export function findExactSubtreeMatches(
@@ -161,9 +185,22 @@ export function findFragmentMatches(
   fragment: SchemaFragment,
   blobContents: Map<string, Record<string, unknown>>,
   logger: Logger,
-): Array<{ key: string; data: Record<string, unknown>; similarity: number }> {
+  tags: string[] = [],
+): Array<
+  {
+    key: string;
+    data: Record<string, unknown>;
+    similarity: number;
+    tagScore?: number;
+  }
+> {
   const matches: Array<
-    { key: string; data: Record<string, unknown>; similarity: number }
+    {
+      key: string;
+      data: Record<string, unknown>;
+      similarity: number;
+      tagScore?: number;
+    }
   > = [];
 
   logger.debug(
@@ -173,33 +210,37 @@ export function findFragmentMatches(
 
   for (const [blobKey, blobData] of blobContents) {
     try {
-      // For each blob, look for matching objects at any level
       const subtreeMatches = findMatchingObjectsInSubtree(
         blobData,
         fragment.schema,
       );
 
       for (const match of subtreeMatches) {
+        const tagScore = calculateTagScore(match, tags);
         matches.push({
           key: blobKey,
           data: match,
-          similarity: 1.0,
+          similarity: 1.0 + (tagScore * 0.1),
+          tagScore,
         });
       }
     } catch (error) {
       logger.error({ error, blobKey }, "Error processing blob");
     }
   }
+
+  const sortedMatches = matches.sort((a, b) => b.similarity - a.similarity);
+
   logger.info(
     {
       fragmentPath: fragment.path.join("."),
-      matchCount: matches.length,
-      matches,
+      matchCount: sortedMatches.length,
+      matches: sortedMatches,
     },
-    "Found matching objects",
+    "Found and ranked matching objects",
   );
 
-  return matches;
+  return sortedMatches;
 }
 
 function findMatchingObjectsInSubtree(

@@ -60,6 +60,13 @@ export const ProcessSchemaResponseSchema = z.object({
       }),
     ),
     reassembledExample: z.record(z.any()),
+    tagMatchInfo: z.object({
+      usedTags: z.any(),
+      matchRanks: z.array(z.object({
+        path: z.any(),
+        matches: z.any(),
+      })),
+    }),
   }),
 });
 
