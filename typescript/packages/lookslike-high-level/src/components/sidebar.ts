@@ -1,6 +1,7 @@
 import { css, html, LitElement, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { style } from "@commontools/ui";
+import { when } from "lit/directives/when.js";
 import { Charm, charms, NAME, recipes, runPersistent, TYPE, UI } from "../data.js";
 import {
   getDoc,
@@ -246,7 +247,9 @@ export class CommonSidebar extends LitElement {
     return html`
       <os-navpanel class=${this.sidebarTab === id ? "active sidebar-content" : "sidebar-content"}>
         <common-hstack slot="toolbar-end" gap="sm">
-          <os-icon-button icon="publish" @click=${() => this.handlePublish()}></os-icon-button>
+          ${when(this.focusedCharm, () => html`
+            <os-icon-button icon="publish" @click=${() => this.handlePublish()}></os-icon-button>
+          `)}
           <os-sidebar-close-button></os-sidebar-close-button>
         </common-hstack>
         <os-sidebar-group> ${content} </os-sidebar-group>
