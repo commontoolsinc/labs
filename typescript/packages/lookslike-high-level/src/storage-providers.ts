@@ -406,7 +406,18 @@ export class RemoteStorageProvider implements StorageProvider {
     return `watch://${space}/${of}/${the}`;
   }
   static toEntity(source: EntityId) {
-    return typeof source["/"] === "string" ? source["/"] : source.toString();
+    if (typeof source["/"] === "string") {
+      return source["/"];
+    } else if (source.toJSON) {
+      return source.toJSON()["/"];
+    } else {
+      throw Object.assign(
+        new TypeError(`💣 Got entity ID that is neither merkle reference nor {'/'}`),
+        {
+          cause: source,
+        },
+      );
+    }
   }
 
   unwatch(selectors: In<Selector>, subscriber: Subscriber): void {
@@ -446,7 +457,7 @@ export class RemoteStorageProvider implements StorageProvider {
 
   sink<T = any>(entityId: EntityId, callback: (value: StorageValue<T>) => void): Cancel {
     const of = RemoteStorageProvider.toEntity(entityId);
-    console.log(">> sink", of);
+
     const selector = { [this.replica]: { the: this.the, of } };
     const subscriber = new Sink(this, selector, callback as (value: StorageValue<unknown>) => void);
 
@@ -457,7 +468,6 @@ export class RemoteStorageProvider implements StorageProvider {
   async sync(entityId: EntityId, expectedInStorage: boolean = false): Promise<void> {
     // Just wait to have a local revision.
     const of = RemoteStorageProvider.toEntity(entityId);
-    console.log(">> sync", of, expectedInStorage);
     const revision = this.revision(of);
     // We need to wait if we don't have a local revision, or if if we have a
     // retracted or unclaimed state while expecting value to be in storage.
@@ -471,10 +481,7 @@ export class RemoteStorageProvider implements StorageProvider {
       const selector = { [this.replica]: { the: this.the, of } };
       const subscriber = new Sync(this, selector, expectedInStorage);
       this.watch(selector, subscriber);
-      await Promise.race([
-        subscriber.promise,
-        new Promise((resolve) => setTimeout(resolve, 10_000)),
-      ]);
+      await subscriber.promise;
     }
   }
 
@@ -485,17 +492,13 @@ export class RemoteStorageProvider implements StorageProvider {
     const revision = this.revision(of);
 
     const value = revision ? (revision.value.is as StorageValue<T> | undefined) : undefined;
-    console.log("<< get", of, value);
     return value;
   }
   async send<T = any>(changes: { entityId: EntityId; value: StorageValue<T> }[]): Promise<void> {
-    console.log("!!!!!");
-
     const promises = [];
     const { the } = this;
     for (const { entityId, value: is } of changes) {
       const of = RemoteStorageProvider.toEntity(entityId);
-      console.log("send", of, is);
       const assertion = {
         the,
         of,
@@ -505,7 +508,6 @@ export class RemoteStorageProvider implements StorageProvider {
         cause: this.revision(of)?.this,
       };
 
-      console.log("transact", assertion);
       promises.push(this.transact({ [this.replica]: { assert: assertion } }));
     }
 
@@ -513,7 +515,7 @@ export class RemoteStorageProvider implements StorageProvider {
     // We could probably update local revisions here when this happens, although
     for (const result of results) {
       if (result.error) {
-        console.error(`🙅‍♂️`, result.error, refer(result.error.conflict.actual).toString());
+        console.error(`🙅‍♂️`, result.error);
       }
     }
   }
@@ -522,7 +524,6 @@ export class RemoteStorageProvider implements StorageProvider {
     const space = this.space(remote.at);
     const local = this.revision(remote.value.of);
     if (local?.this.toString() !== remote.this.toString()) {
-      console.log("update", remote.value.of.toString(), { local, remote });
       space.set(remote.value.of, remote);
       const { value } = remote;
 
@@ -537,7 +538,6 @@ export class RemoteStorageProvider implements StorageProvider {
   receive(data: string) {
     const update = RemoteStorageProvider.Update.parse(JSON.parse(data)) as In<State>;
 
-    console.log("!!!!!!!!!!!", update);
     for (const [at, state] of Object.entries(update)) {
       this.update({ at, this: refer(state), value: state });
     }
@@ -681,8 +681,6 @@ class Sink extends Subscriber {
           ? ({} as StorageValue<unknown>)
           : (state.is as unknown as StorageValue<unknown>);
 
-      console.log("<< sink", Object.values(this.selector)[0].of, value);
-
       this.notify(value);
     }
   }
@@ -701,7 +699,6 @@ class Sync extends Subscriber {
   }
   integrate(state: State) {
     if (state.is !== undefined || !this.expectedInStorage) {
-      console.log("<< sync", Object.values(this.selector)[0].of, state);
       this.notify!();
       this.cancel();
     }
