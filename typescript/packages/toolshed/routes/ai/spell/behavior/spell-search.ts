@@ -209,8 +209,8 @@ function findCompatibleSpells(
 function findCompatibleBlobs(
   spell: Record<string, unknown>,
   blobs: Record<string, Record<string, unknown>>,
-): Array<{ key: string; snippet: string; data: unknown; }> {
-  const compatible: Array<{ key: string; snippet: string; data: unknown; }> = [];
+): Array<{ key: string; snippet: string; data: unknown }> {
+  const compatible: Array<{ key: string; snippet: string; data: unknown }> = [];
   const spellStr = JSON.stringify(spell).toLowerCase();
 
   for (const [key, blob] of Object.entries(blobs)) {
@@ -224,7 +224,7 @@ function findCompatibleBlobs(
       compatible.push({
         key,
         snippet: getRelevantSnippet(blobStr),
-        data: blob
+        data: blob,
       });
     }
   }
