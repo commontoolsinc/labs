@@ -124,11 +124,11 @@ export function candidates(
       console.log("Input schema:", JSON.stringify(schema, null, 2));
       console.log(
         "Spell argument schema:",
-        JSON.stringify(spell.recipe.argumentSchema, null, 2),
+        JSON.stringify(spell.argumentSchema, null, 2),
       );
       console.log(
         "Spell result schema:",
-        JSON.stringify(spell.recipe.resultSchema, null, 2),
+        JSON.stringify(spell.resultSchema, null, 2),
       );
 
       const tagScore = calculateTagScore(spell, tags);
@@ -136,7 +136,7 @@ export function candidates(
       // Check if our schema matches the spell's argument schema
       const consumesMatch = schemaIntersection(
         schema,
-        spell.recipe.argumentSchema,
+        spell.argumentSchema,
       );
       console.log("Consumes match result:", consumesMatch);
       if (consumesMatch) {
@@ -149,7 +149,7 @@ export function candidates(
       // Check if our schema matches the spell's result schema
       const producesMatch = schemaIntersection(
         schema,
-        spell.recipe.resultSchema,
+        spell.resultSchema,
       );
       console.log("Produces match result:", producesMatch);
       if (producesMatch) {

@@ -30,7 +30,7 @@ interface SpellSearchParams {
   query: string;
   tags?: string[];
   referencedKeys: string[];
-  spells: Record<string, Spell>;
+  spells: Record<string, Record<string, unknown>>;
   blobs: Record<string, Record<string, unknown>>;
   options?: {
     limit?: number;
