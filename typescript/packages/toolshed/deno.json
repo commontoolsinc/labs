@@ -24,6 +24,7 @@
   "nodeModulesDir": "auto",
   "imports": {
     "@/": "./",
+    "@commontools/memory": "../common-docs/lib.ts",
     "@ai-sdk/amazon-bedrock": "npm:@ai-sdk/amazon-bedrock@^1.0.8",
     "@ai-sdk/anthropic": "npm:@ai-sdk/anthropic@^1.0.8",
     "@ai-sdk/cerebras": "npm:@ai-sdk/cerebras@^0.0.1",
