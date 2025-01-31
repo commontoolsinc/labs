@@ -1,3 +1,7 @@
+import { checkSchemaMatch } from "@/lib/schema-match.ts";
+import { Spell, SpellSchema } from "../spell.ts";
+import { Schema } from "jsonschema";
+
 interface SpellSearchResult {
   spells: Array<{
     key: string;
@@ -26,7 +30,7 @@ interface SpellSearchParams {
   query: string;
   tags?: string[];
   referencedKeys: string[];
-  spells: Record<string, Record<string, unknown>>;
+  spells: Record<string, Spell>;
   blobs: Record<string, Record<string, unknown>>;
   options?: {
     limit?: number;
@@ -45,7 +49,6 @@ function calculateRank(itemStr: string, tags: string[] = []): number {
 
   return rank;
 }
-
 export function processSpellSearch({
   query,
   tags = [],
@@ -54,75 +57,107 @@ export function processSpellSearch({
   blobs,
   options = {},
 }: SpellSearchParams): SpellSearchResult {
-  const spellMatches: SpellSearchResult["spells"] = [];
-  const blobMatches: SpellSearchResult["blobs"] = [];
+  try {
+    const spellMatches: SpellSearchResult["spells"] = [];
+    const blobMatches: SpellSearchResult["blobs"] = [];
 
-  const limit = options.limit || 10;
-  const searchTerms = query.toLowerCase().replace(/@\w+/g, "").trim();
+    console.log(spells);
 
-  // Handle @references first
-  for (const key of referencedKeys) {
-    const spellKey = `spell-${key}`;
-    const blobKey = key;
-
-    // Check for referenced spells
-    if (spells[spellKey]) {
-      spellMatches.push({
-        key: spellKey,
-        name: spells[spellKey].name as string || spellKey,
-        description: spells[spellKey].description as string || "No description",
-        matchType: "reference",
-        compatibleBlobs: findCompatibleBlobs(spells[spellKey], blobs),
-      });
+    // Parse spells using schema
+    const validSpells: Record<string, Spell> = {};
+    for (const [key, spell] of Object.entries(spells)) {
+      try {
+        const parsed = SpellSchema.parse(spell);
+        validSpells[key] = parsed;
+        console.log("checked spell", parsed);
+      } catch (error: any) {
+        console.log(`Invalid spell ${key}:`, error.message);
+        continue;
+      }
     }
 
-    // Check for referenced blobs
-    if (blobs[blobKey] && !blobKey.startsWith("spell-")) {
-      blobMatches.push({
-        key: blobKey,
-        snippet: getRelevantSnippet(JSON.stringify(blobs[blobKey])),
-        matchType: "reference",
-        compatibleSpells: findCompatibleSpells(blobs[blobKey], spells),
-      });
+    console.log("Valid spells:", Object.keys(validSpells));
+
+    const limit = options.limit || 10;
+    const searchTerms = query.toLowerCase().replace(/@\w+/g, "").trim();
+
+    // Handle @references first
+    for (const key of referencedKeys) {
+      const spellKey = `spell-${key}`;
+      const blobKey = key;
+
+      // Check for referenced spells
+      if (validSpells[spellKey]) {
+        spellMatches.push({
+          key: spellKey,
+          name: validSpells[spellKey].spellbookTitle as string || spellKey,
+          description:
+            validSpells[spellKey].recipe.argumentSchema.description as string ||
+            "No description",
+          matchType: "reference",
+          compatibleBlobs: findCompatibleBlobs(validSpells[spellKey], blobs),
+        });
+      }
+
+      // Check for referenced blobs
+      if (blobs[blobKey] && !blobKey.startsWith("spell-")) {
+        blobMatches.push({
+          key: blobKey,
+          snippet: getRelevantSnippet(JSON.stringify(blobs[blobKey])),
+          matchType: "reference",
+          compatibleSpells: findCompatibleSpells(blobs[blobKey], validSpells),
+        });
+      }
     }
+
+    // Perform text search if we haven't hit the limit
+    if (searchTerms) {
+      // Search spells with tags
+      if (spellMatches.length < limit) {
+        const textSpellMatches = searchSpells(
+          searchTerms,
+          validSpells,
+          blobs,
+          limit - spellMatches.length,
+          tags,
+        );
+        spellMatches.push(...textSpellMatches);
+      }
+
+      // Search blobs with tags
+      if (blobMatches.length < limit) {
+        const textBlobMatches = searchBlobs(
+          searchTerms,
+          blobs,
+          validSpells,
+          limit - blobMatches.length,
+          tags,
+        );
+        blobMatches.push(...textBlobMatches);
+      }
+    }
+
+    return {
+      spells: spellMatches.slice(0, limit),
+      blobs: blobMatches.slice(0, limit),
+    };
+  } catch (error) {
+    console.error("Error in processSpellSearch:", {
+      error,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : undefined,
+      query,
+      referencedKeys,
+      spellKeys: Object.keys(spells),
+      blobKeys: Object.keys(blobs),
+    });
+    return { spells: [], blobs: [] };
   }
-
-  // Perform text search if we haven't hit the limit
-  if (searchTerms) {
-    // Search spells with tags
-    if (spellMatches.length < limit) {
-      const textSpellMatches = searchSpells(
-        searchTerms,
-        spells,
-        blobs,
-        limit - spellMatches.length,
-        tags,
-      );
-      spellMatches.push(...textSpellMatches);
-    }
-
-    // Search blobs with tags
-    if (blobMatches.length < limit) {
-      const textBlobMatches = searchBlobs(
-        searchTerms,
-        blobs,
-        spells,
-        limit - blobMatches.length,
-        tags,
-      );
-      blobMatches.push(...textBlobMatches);
-    }
-  }
-
-  return {
-    spells: spellMatches.slice(0, limit),
-    blobs: blobMatches.slice(0, limit),
-  };
 }
 
 function searchSpells(
   searchTerms: string,
-  spells: Record<string, Record<string, unknown>>,
+  spells: Record<string, Spell>,
   blobs: Record<string, Record<string, unknown>>,
   limit: number,
   tags: string[] = [],
@@ -135,8 +170,9 @@ function searchSpells(
       const rank = calculateRank(spellStr, tags);
       matches.push({
         key,
-        name: spell.name as string || key,
-        description: spell.description as string || "No description",
+        name: spell.spellbookTitle as string || key,
+        description: spell.recipe.argumentSchema?.description as string ||
+          "No description",
         matchType: "text-match" as const,
         compatibleBlobs: findCompatibleBlobs(spell, blobs),
         rank,
@@ -153,7 +189,7 @@ function searchSpells(
 function searchBlobs(
   searchTerms: string,
   blobs: Record<string, Record<string, unknown>>,
-  spells: Record<string, Record<string, unknown>>,
+  spells: Record<string, Spell>,
   limit: number,
   tags: string[] = [],
 ): SpellSearchResult["blobs"] {
@@ -183,7 +219,7 @@ function searchBlobs(
 
 function findCompatibleSpells(
   blob: Record<string, unknown>,
-  spells: Record<string, Record<string, unknown>>,
+  spells: Record<string, Spell>,
 ): Array<{ key: string; name: string; description: string }> {
   const compatible: Array<{ key: string; name: string; description: string }> =
     [];
@@ -192,13 +228,14 @@ function findCompatibleSpells(
   for (const [key, spell] of Object.entries(spells)) {
     const spellStr = JSON.stringify(spell).toLowerCase();
     if (
-      hasMatchingSchema(spell, blob) ||
+      checkSchemaMatch(blob, spell.recipe.argumentSchema.properties) ||
       spellStr.includes(blob.key?.toString().toLowerCase() || "")
     ) {
       compatible.push({
         key,
-        name: spell.name as string || key,
-        description: spell.description as string || "No description",
+        name: spell.spellbookTitle as string || key,
+        description: spell.recipe.argumentSchema.description as string ||
+          "No description",
       });
     }
   }
@@ -207,7 +244,7 @@ function findCompatibleSpells(
 }
 
 function findCompatibleBlobs(
-  spell: Record<string, unknown>,
+  spell: Spell,
   blobs: Record<string, Record<string, unknown>>,
 ): Array<{ key: string; snippet: string; data: unknown }> {
   const compatible: Array<{ key: string; snippet: string; data: unknown }> = [];
@@ -218,7 +255,7 @@ function findCompatibleBlobs(
 
     const blobStr = JSON.stringify(blob).toLowerCase();
     if (
-      hasMatchingSchema(spell, blob) ||
+      checkSchemaMatch(blob, spell.recipe.argumentSchema.properties) ||
       spellStr.includes(key.toLowerCase())
     ) {
       compatible.push({

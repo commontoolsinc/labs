@@ -2,21 +2,13 @@ import { checkSchemaMatch } from "@/lib/schema-match.ts";
 import { isObject } from "@/routes/ai/spell/schema.ts";
 import { Schema } from "jsonschema";
 import { z } from "zod";
+import { Recipe, RecipeSchema } from "./spell.ts";
 
 export interface SchemaCandidate {
   key: string;
   similarity: number;
 }
 
-export const SpellSchema = z.object({
-  src: z.string(),
-  recipe: z.object({
-    argumentSchema: z.record(z.unknown()),
-    resultSchema: z.record(z.unknown()),
-  }),
-});
-
-export type Spell = z.infer<typeof SpellSchema>;
 export interface SchemaAnalysis {
   data: string[];
   consumes: string[];
@@ -49,10 +41,10 @@ export function candidates(
   const produces: SchemaCandidate[] = [];
 
   // Parse spells using schema
-  const validSpells: Record<string, Spell> = {};
+  const validSpells: Record<string, Recipe> = {};
   for (const [key, spell] of Object.entries(spells)) {
     try {
-      const parsed = SpellSchema.parse(spell);
+      const parsed = RecipeSchema.parse(spell);
       validSpells[key] = parsed;
     } catch (error: any) {
       console.log(`Invalid spell ${key}:`, error.message);
