@@ -27,8 +27,7 @@ See [context.ts](/typescript/packages/common-iframe-sandbox/src/context.ts).
 
 * Support updating the `src` property.
 * Flushing subscriptions inbetween frame loads.
-* Uniquely identify context handler calls so that they can be mapped to the correct iframe instance when there are multiple active sandboxed iframes.
-* Support browsers that do not support `HTMLIFrameElement.prototype.csp` (non-chromium).
+* Audit the IPC communication (`postMessage()`) with origin-bounds and ensure other frames can't spoof messages.
 * Abort on unsupported browsers.
 * Further testing.
 

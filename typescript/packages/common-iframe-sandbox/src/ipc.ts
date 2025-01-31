@@ -1,5 +1,80 @@
 // Types used by the `common-iframe-sandbox` IPC.
 
+// Diagram of the IPC messages between the Host
+// environment, and the intermediary guest iframe.
+//
+// ┌──────────────┐              ┌───────────────┐
+// │     Host     │              │     Guest     │
+// └───────┬──────┘              └───────┬───────┘
+//         │                             │        
+//         │◄───────────READY────────────┤        
+//         │                             │        
+//         ├────────────INIT────────────►│        
+//    ┌───►│                             │
+//    │    ├────────LOAD-DOCUMENT───────►│        
+//    │    │                             │        
+//    │    │◄───────────LOAD─────────────┤        
+//    │    │                             │◄───┐   
+//    │    │◄────────PASSTHROUGH────────►│    │   
+//    │    ▼                             ▼    │   
+//    └────┘                             └────┘   
+
+export enum IPCHostMessageType {
+  // Host initializing guest with data (namely, ID).
+  Init = "init",
+  // Host instructing guest to load a new document.
+  LoadDocument = "load-document",
+  // Host instructing guest to pass through a `HostMessage`.
+  Passthrough = "passthrough",
+}
+
+export type IPCHostMessage =
+  | { id: any, type: IPCHostMessageType.Init }
+  | { id: any, type: IPCHostMessageType.LoadDocument, data: string }
+  | { id: any, type: IPCHostMessageType.Passthrough, data: HostMessage }
+
+export enum IPCGuestMessageType {
+  // Guest alerting the host that it is ready.
+  Ready = "ready",
+  // An error occurred in the outer frame.
+  Error = "error",
+  // Guest inner frame has loaded.
+  Load = "load",
+  // Guest passing a `GuestMessage`.
+  Passthrough = "passthrough",
+}
+
+export type IPCGuestMessage =
+  | { type: IPCGuestMessageType.Ready }
+  | { id: any, type: IPCGuestMessageType.Load }
+  | { id: any, type: IPCGuestMessageType.Error, data: any }
+  | { id: any, type: IPCGuestMessageType.Passthrough, data: GuestMessage };
+
+export function isIPCGuestMessage(message: any): message is IPCGuestMessage {
+  if (typeof message !== "object" || !("type" in message)) {
+    return false;
+  }
+  switch (message.type) {
+    case IPCGuestMessageType.Ready: {
+      return true;
+    }
+    case IPCGuestMessageType.Error:
+    case IPCGuestMessageType.Passthrough:
+    case IPCGuestMessageType.Load: {
+      if (message.type !== IPCGuestMessageType.Load &&
+          (!("data" in message) || message.data == null)) {
+            return false;
+      }
+      if (message.type === IPCGuestMessageType.Passthrough &&
+          !isGuestMessage(message.data)) {
+        return false;
+      }
+      return ("id" in message) && message.id != null
+    }
+  }
+  return false;
+}
+
 export interface GuestError {
   description: string;
   source: string;
