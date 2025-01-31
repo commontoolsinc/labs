@@ -29,7 +29,7 @@ import {
 import { createStorage } from "./storage.js";
 import * as allRecipes from "./recipes/index.js";
 import { buildRecipe } from "./localBuild.js";
-import { IframeIPC } from "@commontools/ui";
+import { setIframeContextHandler } from "@commontools/iframe-sandbox";
 
 // Necessary, so that suggestions are indexed.
 import "./recipes/todo-list-as-task.jsx";
@@ -205,7 +205,6 @@ export async function saveRecipe(
 import smolIframe from "./recipes/smolIframe.js";
 import complexIframe from "./recipes/complexIframe.js";
 
-// addCharms([run(smolIframe, { count: 1 }), run(complexIframe, { count: 42 })]);
 addCharms([
   await runPersistent(smolIframe, { count: 1 }, "smol iframe"),
   await runPersistent(complexIframe, { count: 42 }, "complex iframe"),
@@ -278,7 +277,7 @@ export const toggleAnnotations = () => {
   annotationsEnabled.send(!annotationsEnabled.get());
 };
 
-IframeIPC.setIframeContextHandler({
+setIframeContextHandler({
   read(context: any, key: string): any {
     return context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
   },
