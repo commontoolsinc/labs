@@ -1,5 +1,33 @@
 import { Schema, Validator } from "jsonschema";
 
+function checkSubtrees(
+  obj: unknown,
+  validator: Validator,
+  jsonSchema: Schema,
+): boolean {
+  try {
+    if (typeof obj !== "object" || obj === null) {
+      return false;
+    }
+
+    if (Array.isArray(obj)) {
+      return obj.some((item) => checkSubtrees(item, validator, jsonSchema));
+    }
+
+    const result = validator.validate(obj, jsonSchema);
+    if (result.valid) {
+      return true;
+    }
+
+    return Object.values(obj).some((value) =>
+      checkSubtrees(value, validator, jsonSchema)
+    );
+  } catch (err) {
+    console.error("Error checking subtrees:", err);
+    return false;
+  }
+}
+
 export function checkSchemaMatch(
   data: Record<string, unknown>,
   schema: Schema,
@@ -38,29 +66,7 @@ export function checkSchemaMatch(
       return false;
     }
 
-    function checkSubtrees(obj: unknown): boolean {
-      try {
-        if (typeof obj !== "object" || obj === null) {
-          return false;
-        }
-
-        if (Array.isArray(obj)) {
-          return obj.some((item) => checkSubtrees(item));
-        }
-
-        const result = validator.validate(obj, jsonSchema as Schema);
-        if (result.valid) {
-          return true;
-        }
-
-        return Object.values(obj).some((value) => checkSubtrees(value));
-      } catch (err) {
-        console.error("Error checking subtrees:", err);
-        return false;
-      }
-    }
-
-    return checkSubtrees(data);
+    return checkSubtrees(data, validator, jsonSchema as Schema);
   } catch (err) {
     console.error("Top level error in checkSchemaMatch:", err);
     return false;
