@@ -7,8 +7,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npx vite build",
-    "dev": "npx vite",
+    "build": "vite build",
+    "dev": "vite",
     "test": "vitest",
     "check": "tsc --build"
   },
@@ -21,6 +21,7 @@
   },
   "homepage": "https://github.com/commontoolsinc/labs#readme",
   "dependencies": {
+    "@commontools/ui": "workspace:*",
     "@codemirror/lang-markdown": "^6.3.2",
     "@react-spring/web": "^9.7.5",
     "@tailwindcss/typography": "^0.5.16",

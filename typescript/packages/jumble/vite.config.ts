@@ -5,11 +5,12 @@ import tailwindcss from "@tailwindcss/vite";
 
 // https://vite.dev/config/
 export default defineConfig({
-  // @ts-ignore
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // NOTE: We need to import local modules from the pnpm workspace.
+      "@commontools/ui": path.resolve(__dirname, "../common-ui/src/index.ts"),
     },
   },
 });
