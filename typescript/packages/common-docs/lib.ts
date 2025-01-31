@@ -12,7 +12,7 @@ import {
   Statement,
   SystemError,
 } from "./interface.ts";
-import * as Reference from "npm:merkle-reference";
+import * as Reference from "merkle-reference";
 
 export { Router };
 

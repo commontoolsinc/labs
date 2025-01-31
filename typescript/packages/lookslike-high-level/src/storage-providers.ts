@@ -1,6 +1,6 @@
 import type { EntityId, Cancel } from "@commontools/runner";
 import { log } from "./storage.js";
-import { fromJSON, refer, type Reference } from "merkle-reference";
+import { fromJSON, fromBytes, refer, type Reference } from "merkle-reference";
 import z from "zod";
 import type {
   State,
@@ -9,6 +9,7 @@ import type {
   Entity,
   Unclaimed,
   Selector,
+  Claim,
   Fact,
   ConflictError,
   TransactionError,
@@ -16,9 +17,9 @@ import type {
   Result,
   Command,
   ConnectionError,
+  JSONValue,
   AsyncResult,
 } from "@commontools/memory";
-import { integrate } from "../../common-docs/subscription.js";
 
 export interface StorageValue<T = any> {
   value: T;
@@ -299,6 +300,7 @@ export class LocalStorageProvider extends BaseStorageProvider {
 }
 
 type Revision<T extends Fact | Unclaimed = Fact | Unclaimed> = {
+  at: ReplicaID;
   this: Reference<T>;
   value: T;
 };
@@ -309,34 +311,47 @@ export class RemoteStorageProvider implements StorageProvider {
     of: z.string(),
     is: z
       .unknown({})
-      .optional()
-      .refine((value) => {
+      .transform((value) => {
         if (value && typeof (value as Record<string, unknown>)["/"] === "string") {
           return fromJSON(value as { "/": string });
         } else {
           return value;
         }
-      }),
+      })
+      .optional(),
     cause: z
       .object({
         "/": z.string(),
       })
-      .refine(fromJSON)
+      .transform((value) => {
+        return fromJSON(value);
+      })
       .optional(),
   });
 
   static Update = z.record(RemoteStorageProvider.State);
-  connection: WebSocket | null;
+  connection: WebSocket | null = null;
+  session: Promise<WebSocket>;
+  address: URL;
+  replica: ReplicaID;
+  the: string;
 
-  constructor(
-    public address: URL,
-    public replica: ReplicaID = "common-knowledge",
-    public the: string = "application/json",
-    public subscriptions: Map<string, In<Selector>> = new Map(),
-    public local: Map<ReplicaID, Map<Entity, Revision>> = new Map(),
-    public subscribers: Map<string, Set<Subscriber>> = new Map(),
-  ) {
-    this.connection = this.open(new WebSocket(address.href));
+  subscriptions: Map<string, In<Selector>> = new Map();
+  subscribers: Map<string, Set<Subscriber>> = new Map();
+  local: Map<ReplicaID, Map<Entity, Revision>> = new Map();
+  constructor({
+    address,
+    replica = "common-knowledge",
+    the = "application/json",
+  }: {
+    address: URL;
+    replica?: ReplicaID;
+    the?: string;
+  }) {
+    this.address = address;
+    this.replica = replica;
+    this.the = the;
+    this.session = this.open();
   }
 
   space(id: ReplicaID): Map<Entity, Revision> {
@@ -358,11 +373,12 @@ export class RemoteStorageProvider implements StorageProvider {
     }
   }
 
-  perform(command: Command) {
+  async perform(command: Command) {
+    const session = await this.session;
     if (command.unwatch) {
-      this.connection?.send(JSON.stringify(command));
+      session.send(JSON.stringify(command));
     } else if (command.watch) {
-      this.connection?.send(JSON.stringify(command));
+      session.send(JSON.stringify(command));
     }
   }
 
@@ -389,6 +405,9 @@ export class RemoteStorageProvider implements StorageProvider {
   static formatAddress(space: ReplicaID, { of, the }: Selector) {
     return `watch://${space}/${of}/${the}`;
   }
+  static toEntity(source: EntityId) {
+    return typeof source["/"] === "string" ? source["/"] : source.toString();
+  }
 
   unwatch(selectors: In<Selector>, subscriber: Subscriber): void {
     for (const [replica, selector] of Object.entries(selectors)) {
@@ -399,7 +418,7 @@ export class RemoteStorageProvider implements StorageProvider {
           subscribers.delete(subscriber);
           if (subscribers.size === 0) {
             this.subscribers.delete(address);
-            this.perform({ unwatch: { [replica]: selector } });
+            // this.perform({ unwatch: { [replica]: selector } });
           }
         }
       }
@@ -426,7 +445,9 @@ export class RemoteStorageProvider implements StorageProvider {
   }
 
   sink<T = any>(entityId: EntityId, callback: (value: StorageValue<T>) => void): Cancel {
-    const selector = { [this.replica]: { the: this.the, of: entityId.toString() } };
+    const of = RemoteStorageProvider.toEntity(entityId);
+    console.log(">> sink", of);
+    const selector = { [this.replica]: { the: this.the, of } };
     const subscriber = new Sink(this, selector, callback as (value: StorageValue<unknown>) => void);
 
     this.watch(selector, subscriber);
@@ -435,8 +456,9 @@ export class RemoteStorageProvider implements StorageProvider {
   }
   async sync(entityId: EntityId, expectedInStorage: boolean = false): Promise<void> {
     // Just wait to have a local revision.
-    const entity = entityId.toString();
-    const revision = this.revision(entity);
+    const of = RemoteStorageProvider.toEntity(entityId);
+    console.log(">> sync", of, expectedInStorage);
+    const revision = this.revision(of);
     // We need to wait if we don't have a local revision, or if if we have a
     // retracted or unclaimed state while expecting value to be in storage.
     const wait = !revision
@@ -446,64 +468,78 @@ export class RemoteStorageProvider implements StorageProvider {
         : false;
 
     if (wait) {
-      const selector = { [this.replica]: { the: this.the, of: entity } };
+      const selector = { [this.replica]: { the: this.the, of } };
       const subscriber = new Sync(this, selector, expectedInStorage);
       this.watch(selector, subscriber);
-      await subscriber.promise;
+      await Promise.race([
+        subscriber.promise,
+        new Promise((resolve) => setTimeout(resolve, 10_000)),
+      ]);
     }
   }
 
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
     // Does not exists return `undefined`, if not an object return `{}`
+    const of = RemoteStorageProvider.toEntity(entityId);
 
-    const revision = this.revision(entityId.toString());
-    // TODO: Not sue what to do if the remote value does not match the
-    // `StorageValue<T>`.
-    return revision ? (revision.value.is as StorageValue<T> | undefined) : undefined;
+    const revision = this.revision(of);
+
+    const value = revision ? (revision.value.is as StorageValue<T> | undefined) : undefined;
+    console.log("<< get", of, value);
+    return value;
   }
   async send<T = any>(changes: { entityId: EntityId; value: StorageValue<T> }[]): Promise<void> {
+    console.log("!!!!!");
+
     const promises = [];
-    for (const { entityId, value } of changes) {
-      const of = entityId.toString();
+    const { the } = this;
+    for (const { entityId, value: is } of changes) {
+      const of = RemoteStorageProvider.toEntity(entityId);
+      console.log("send", of, is);
       const assertion = {
-        the: this.the,
-        of: entityId.toString(),
-        is: value,
+        the,
+        of,
+        // I think we should update storage provider API so it works with `StorageValue`
+        // and makes no other type assumptions.
+        is: is as unknown as JSONValue,
         cause: this.revision(of)?.this,
       };
 
-      // TODO: We may get a conflict here, and need to handle it somehow.
-      promises.push(
-        // TODO: update local revision if gets rejected.
-        fetch(this.address.href, {
-          method: "PATCH",
-          body: JSON.stringify({ [this.replica]: assertion }),
-        }),
-      );
+      console.log("transact", assertion);
+      promises.push(this.transact({ [this.replica]: { assert: assertion } }));
     }
 
-    await Promise.all(promises);
+    const results = await Promise.all(promises);
+    // We could probably update local revisions here when this happens, although
+    for (const result of results) {
+      if (result.error) {
+        console.error(`🙅‍♂️`, result.error, refer(result.error.conflict.actual).toString());
+      }
+    }
+  }
+
+  update(remote: Revision) {
+    const space = this.space(remote.at);
+    const local = this.revision(remote.value.of);
+    if (local?.this.toString() !== remote.this.toString()) {
+      console.log("update", remote.value.of.toString(), { local, remote });
+      space.set(remote.value.of, remote);
+      const { value } = remote;
+
+      const address = RemoteStorageProvider.formatAddress(remote.at, value);
+      const subscribers = this.subscribers.get(address);
+      for (const subscriber of subscribers ?? []) {
+        subscriber.integrate(value);
+      }
+    }
   }
 
   receive(data: string) {
     const update = RemoteStorageProvider.Update.parse(JSON.parse(data)) as In<State>;
+
+    console.log("!!!!!!!!!!!", update);
     for (const [at, state] of Object.entries(update)) {
-      let space = this.space(at);
-
-      const remote = Object.entries(state) as [Entity, Fact | Unclaimed][];
-      for (const [entity, fact] of remote) {
-        const before = this.revision(entity);
-        const after = { this: refer(fact), value: fact };
-        if (before?.this?.toString() !== after.this.toString()) {
-          space.set(entity, after);
-
-          const address = RemoteStorageProvider.formatAddress(at, fact);
-          const subscribers = this.subscribers.get(address);
-          for (const subscriber of subscribers ?? []) {
-            subscriber.integrate(after.value);
-          }
-        }
-      }
+      this.update({ at, this: refer(state), value: state });
     }
   }
 
@@ -519,12 +555,23 @@ export class RemoteStorageProvider implements StorageProvider {
         return this.disconnect(event);
     }
   }
-  open(socket: WebSocket) {
+  open(): Promise<WebSocket> {
+    const { connection } = this;
+    if (connection) {
+      connection.removeEventListener("message", this);
+      connection.removeEventListener("open", this);
+      connection.removeEventListener("close", this);
+      connection.removeEventListener("error", this);
+    }
+
+    const socket = new WebSocket(this.address.href);
+    this.connection = socket;
     socket.addEventListener("message", this);
     socket.addEventListener("open", this);
     socket.addEventListener("close", this);
     socket.addEventListener("error", this);
-    return socket;
+
+    return RemoteStorageProvider.opened(socket);
   }
 
   connect(_socket: WebSocket) {
@@ -538,7 +585,7 @@ export class RemoteStorageProvider implements StorageProvider {
     // If connection is `null` provider was closed and we do nothing on
     // disconnect.
     if (this.connection === socket) {
-      this.connection = this.open(new WebSocket(this.address.href));
+      this.open();
     }
   }
 
@@ -582,6 +629,25 @@ export class RemoteStorageProvider implements StorageProvider {
       });
     }
   }
+  static async opened(socket: WebSocket) {
+    if (socket.readyState === WebSocket.CONNECTING) {
+      await new Promise((resolve) => {
+        socket.addEventListener("open", resolve, { once: true });
+        socket.addEventListener("error", resolve, { once: true });
+      });
+    }
+
+    switch (socket.readyState) {
+      case WebSocket.OPEN:
+        return socket;
+      case WebSocket.CLOSING:
+        throw new Error(`Socket is closing`);
+      case WebSocket.CLOSED:
+        throw new Error(`Socket is closed`);
+      default:
+        throw new Error(`Socket is in unknown state`);
+    }
+  }
 }
 
 abstract class Subscriber {
@@ -615,6 +681,8 @@ class Sink extends Subscriber {
           ? ({} as StorageValue<unknown>)
           : (state.is as unknown as StorageValue<unknown>);
 
+      console.log("<< sink", Object.values(this.selector)[0].of, value);
+
       this.notify(value);
     }
   }
@@ -633,6 +701,7 @@ class Sync extends Subscriber {
   }
   integrate(state: State) {
     if (state.is !== undefined || !this.expectedInStorage) {
+      console.log("<< sync", Object.values(this.selector)[0].of, state);
       this.notify!();
       this.cancel();
     }

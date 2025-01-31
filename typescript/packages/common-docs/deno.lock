@@ -120,6 +120,11 @@
       "jsr:@std/fs@^1.0.10",
       "jsr:@std/path@^1.0.8",
       "npm:merkle-reference@^2.0.1"
-    ]
+    ],
+    "packageJson": {
+      "dependencies": [
+        "npm:merkle-reference@^2.0.1"
+      ]
+    }
   }
 }

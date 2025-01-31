@@ -17,6 +17,7 @@ import {
   ConnectionError,
   SystemError,
 } from "./interface.ts";
+import { refer } from "merkle-reference";
 export * from "./interface.ts";
 
 export interface Session {
@@ -24,9 +25,7 @@ export interface Session {
     transaction: In<Transaction>,
   ): AsyncResult<Fact, ConflictError | TransactionError | ConnectionError>;
 
-  query(
-    selector: In<Selector>,
-  ): AsyncResult<Fact | Unclaimed, QueryError | ConnectionError>;
+  query(selector: In<Selector>): AsyncResult<Fact | Unclaimed, QueryError | ConnectionError>;
 
   subscribe(address: In<Selector>): Subscription.Subscription;
 
@@ -135,9 +134,7 @@ export const unwatch = (
 export const transact = async (
   session: Model,
   transactions: In<Transaction>,
-): Promise<
-  Result<Fact, ConflictError | TransactionError | ConnectionError>
-> => {
+): Promise<Result<Fact, ConflictError | TransactionError | ConnectionError>> => {
   const [[route, transaction]] = Object.entries(transactions);
   const fact = transaction.assert ?? transaction.retract;
   const { ok: replica, error } = await resolve(session, route);
@@ -190,9 +187,7 @@ export interface Options {
   store: URL;
 }
 
-export const open = async (
-  options: Options,
-): AsyncResult<Router, ConnectionError> => {
+export const open = async (options: Options): AsyncResult<Router, ConnectionError> => {
   try {
     if (options.store.protocol === "file:") {
       await FS.ensureDir(options.store);
@@ -216,6 +211,6 @@ export const close = async (router: Router) => {
   }
 
   const results = await Promise.all(promises);
-  const result = results.find(result => result?.error);
+  const result = results.find((result) => result?.error);
   return result ?? { ok: {} };
 };

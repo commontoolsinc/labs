@@ -53,6 +53,21 @@ CREATE TABLE IF NOT EXISTS memory (
   PRIMARY KEY (the, of)         -- Ensure that we have only one fact per entity
 );
 
+CREATE VIEW IF NOT EXISTS state AS
+SELECT 
+  memory.the as the,
+  memory.of as of,
+  maybe_datum.source as 'is',
+  fact.cause as cause,
+  memory.fact as fact,
+  maybe_datum.this as proof
+FROM
+  memory
+JOIN
+  fact ON memory.fact = fact.this
+JOIN
+  maybe_datum ON fact.'is' = maybe_datum.this OR (fact.'is' IS NULL AND maybe_datum.this IS NULL);
+
 COMMIT;
 `;
 
@@ -117,10 +132,7 @@ export interface Session {
 }
 
 export class Store implements Model, Session {
-  constructor(
-    public id: ReplicaID,
-    public store: Database,
-  ) {}
+  constructor(public id: ReplicaID, public store: Database) {}
 
   transact<In extends Transaction>(transaction: In) {
     return transact(this, transaction);

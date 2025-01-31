@@ -205,7 +205,11 @@ export async function saveRecipe(
 import smolIframe from "./recipes/smolIframe.js";
 import complexIframe from "./recipes/complexIframe.js";
 
-addCharms([run(smolIframe, { count: 1 }), run(complexIframe, { count: 42 })]);
+// addCharms([run(smolIframe, { count: 1 }), run(complexIframe, { count: 42 })]);
+addCharms([
+  await runPersistent(smolIframe, { count: 1 }, "smol iframe"),
+  await runPersistent(complexIframe, { count: 42 }, "complex iframe"),
+]);
 
 export type RecipeManifest = {
   name: string;
