@@ -17,7 +17,6 @@ import {
   ConnectionError,
   SystemError,
 } from "./interface.ts";
-import { refer } from "merkle-reference";
 export * from "./interface.ts";
 
 export interface Session {

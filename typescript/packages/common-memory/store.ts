@@ -1,5 +1,5 @@
 import { Database, Transaction as DBTransaction, SqliteError } from "jsr:@db/sqlite";
-import { fromString, refer, Reference } from "npm:merkle-reference";
+import { fromString, refer, Reference } from "merkle-reference";
 import type {
   Result,
   ReplicaID,

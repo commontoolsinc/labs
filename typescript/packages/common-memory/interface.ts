@@ -1,4 +1,4 @@
-import type { Reference } from "npm:merkle-reference";
+import type { Reference } from "merkle-reference";
 
 export type { Reference };
 

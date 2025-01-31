@@ -7,7 +7,6 @@ import type {
   ToJSON,
   SystemError,
   ConnectionError,
-  In,
   Selector,
 } from "./interface.ts";
 import { ReplicaID } from "./interface.ts";

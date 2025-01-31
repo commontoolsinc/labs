@@ -49,12 +49,6 @@ importers:
         specifier: ^3.0.4
         version: 3.0.4(@types/node@22.10.10)
 
-  common-docs:
-    dependencies:
-      merkle-reference:
-        specifier: ^2.0.1
-        version: 2.0.1
-
   common-html:
     dependencies:
       '@commontools/builder':
@@ -100,6 +94,12 @@ importers:
       vitest:
         specifier: ^3.0.4
         version: 3.0.4(@types/node@22.10.10)
+
+  common-memory:
+    dependencies:
+      merkle-reference:
+        specifier: ^2.0.1
+        version: 2.0.1
 
   common-os-ui:
     dependencies:
@@ -340,7 +340,7 @@ importers:
         version: link:../llm-client
       '@commontools/memory':
         specifier: workspace:*
-        version: link:../common-docs
+        version: link:../common-memory
       '@commontools/os-ui':
         specifier: workspace:*
         version: link:../common-os-ui
