@@ -21,7 +21,10 @@ export const transact = createRoute({
   responses: {
     [HttpStatusCodes.OK]: jsonContent(z.object({}), "Successful transaction"),
     [HttpStatusCodes.CONFLICT]: jsonContent(z.object({}), "Conflict occurred"),
-    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(z.object({}), "Storage error"),
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
+      z.object({}),
+      "Storage error",
+    ),
   },
 });
 

@@ -58,7 +58,9 @@ const EnvSchema = z.object({
   BLOBBY_REDIS_URL: z.string().default("redis://localhost:6379"),
   // ===========================================================================
   // Memory Store
-  MEMORY_URL: z.string().default(new URL(`./cache/memory/`, Path.toFileUrl(`${Deno.cwd()}/`)).href),
+  MEMORY_URL: z.string().default(
+    new URL(`./cache/memory/`, Path.toFileUrl(`${Deno.cwd()}/`)).href,
+  ),
 });
 
 export type env = z.infer<typeof EnvSchema>;
