@@ -16,8 +16,8 @@ import {
 
 import {
   addRecipe,
-  effect,
   DocImpl,
+  effect,
   EntityId,
   getEntityId,
   getRecipe,
@@ -30,6 +30,58 @@ import { matchRoute, navigate } from "../router.js";
 import * as Schema from "../schema.js";
 import { buildRecipe } from "../localBuild.js";
 import * as iframeSpellAi from "./iframe-spell-ai.js";
+
+async function castSpell(value: string, openCharm: (charmId: string) => void) {
+  const searchUrl =
+    typeof window !== "undefined"
+      ? window.location.protocol + "//" + window.location.host + "/api/ai/spell/search"
+      : "//api/ai/spell/search";
+
+  // Search for suggested spells based on input
+  const response = await fetch(searchUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      accepts: "application/json",
+    },
+    body: JSON.stringify({
+      query: value,
+      tags: [],
+      options: {
+        limit: 10,
+        includeCompatibility: true,
+      },
+    }),
+  });
+
+  if (response.ok) {
+    const searchResponse: {
+      spells: {
+        key: string;
+        name: string;
+        description: string;
+        compatibleBlobs: { data: unknown; key: string; snippet: string }[];
+      }[];
+      blobs: string[];
+    } = await response.json();
+    console.log("Search response:", searchResponse);
+
+    let recipeKey = searchResponse.spells?.[0]?.key;
+    let blob = searchResponse.spells?.[0]?.compatibleBlobs?.[0];
+
+    if (recipeKey && blob) {
+      const recipeId = recipeKey.replace("spell-", "");
+      await syncRecipe(recipeId);
+
+      const recipe = getRecipe(recipeId);
+      if (!recipe) return;
+
+      const charm: DocImpl<Charm> = await runPersistent(recipe, blob.data);
+      addCharms([charm]);
+      openCharm(JSON.stringify(charm.entityId));
+    }
+  }
+}
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -162,12 +214,15 @@ export class CommonWindowManager extends LitElement {
   private focusedProxy: Charm | null = null;
 
   handleUniboxSubmit(event: CustomEvent) {
-
     const value = event.detail.value;
     const shiftKey = event.detail.shiftKey;
     console.log("Unibox submitted:", value, shiftKey);
 
-    iframeSpellAi.iterate(this.focusedCharm, value, shiftKey);
+    if (this.focusedCharm) {
+      iframeSpellAi.iterate(this.focusedCharm, value, shiftKey);
+    } else {
+      castSpell(value, this.openCharm.bind(this));
+    }
   }
 
   input: string = "";
@@ -245,40 +300,10 @@ export class CommonWindowManager extends LitElement {
     const onImportLocalData = (event: CustomEvent) => {
       const data = event.detail.data;
       console.log("Importing local data:", data);
+      const title = prompt("Enter a title for your recipe:");
+      if (!title) return;
 
-      if (event.detail.shiftKey && this.focusedCharm) {
-        const existingData = this.focusedProxy?.data || {};
-        const mergedData = { ...existingData };
-
-        for (const [key, value] of Object.entries(data)) {
-          if (Array.isArray(value) && Array.isArray(existingData[key])) {
-            mergedData[key] = [...existingData[key], ...value];
-          } else {
-            mergedData[key] = value;
-          }
-        }
-
-        this.focusedCharm.asCell(["data"]).send(mergedData);
-
-        // Update the title to indicate the merge
-        const newTitle = `${this.focusedProxy?.[NAME] || "Untitled"} (Merged ${new Date().toISOString()})`;
-        this.focusedCharm.asCell([NAME]).send(newTitle);
-
-        // Refresh the UI
-        this.requestUpdate();
-      } else {
-        // Create a new charm and query for the imported data
-        const jsonSchema = Schema.inferJsonSchema(data[0]);
-        jsonSchema.description = Object.keys(data[0]).join(", ");
-        const src = Schema.generateZodSpell(jsonSchema);
-        buildRecipe(src).then(({ recipe }) => {
-          if (recipe) {
-            addRecipe(recipe, src, "render data", []);
-
-            runPersistent(recipe, data[0]).then((charm) => this.openCharm(charm));
-          }
-        });
-      }
+      iframeSpellAi.createNewRecipe(data, title);
     };
 
     return html`

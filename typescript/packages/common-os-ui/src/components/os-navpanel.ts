@@ -22,10 +22,6 @@ export class OsNavpanel extends LitElement {
         height: 100%;
       }
 
-      .navpanel-toolbar {
-        height: var(--toolbar-height);
-      }
-
       .navpanel-content {
         width: 100%;
         height: 100%;
@@ -42,7 +38,7 @@ export class OsNavpanel extends LitElement {
   override render() {
     return html`
       <div class="navpanel">
-        <nav class="navpanel-toolbar toolbar pad-h">
+        <nav class="navpanel-toolbar toolbar">
           <div class="toolbar-start gap-sm hstack">
             <slot name="toolbar-start"></slot>
           </div>

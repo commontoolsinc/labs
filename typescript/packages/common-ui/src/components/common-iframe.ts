@@ -1,43 +1,13 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
-import { Ref, createRef, ref } from "lit/directives/ref.js";
-import { IframeIPC } from "../index.js";
+import { CommonIframeSandboxElement as _, IPC } from "@commontools/iframe-sandbox";
 
-// This CSP directive uses 'unsafe-inline' to allow
-// origin-less styles and scripts to be used, defeating
-// many traditional uses of CSP.
-const CSP = "" +
-  // Disable all fetch directives by default
-  "default-src 'self';" +
-  // Allow CDN scripts, unsafe inline.
-  "script-src 'unsafe-inline' unpkg.com cdn.tailwindcss.com;" +
-  // unsafe inline.
-  "style-src 'unsafe-inline';" +
-  // Disabling until we have a concrete case.
-  "form-action 'none';" +
-  "";
-
-// @summary A sandboxed iframe to execute arbitrary scripts.
+// @summary An iframe to execute arbitrary scripts. See `@commontools/iframe-sandbox`
+//          for security details.
 // @tag common-iframe
 // @prop {string} src - String representation of HTML content to load within an iframe.
 // @prop context - Cell context.
-// @event {CustomEvent} error - An error from the iframe.
 // @event {CustomEvent} load - The iframe was successfully loaded.
-//
-// ## Missing Functionality
-//
-// * Support updating the `src` property.
-// * Flushing subscriptions inbetween frame loads.
-//
-// ## Incomplete Security Considerations
-//
-// * Currently without CFC, data can be written in the iframe containing other sensitive data,
-//   or newly synthesized fingerprinting via capabilities (accelerometer, webrtc, canvas),
-//   and saved back into the database, where some other vector of exfiltration could occur.
-// * Exposing iframe status to outer content could be considered leaky,
-//   though all content is inlined, not HTTP URLs.
-//   https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe#error_and_load_event_behavior
-//
 @customElement("common-iframe")
 export class CommonIframeElement extends LitElement {
   @property({ type: String }) src = "";
@@ -46,11 +16,7 @@ export class CommonIframeElement extends LitElement {
   // we'll add a an extra level of indirection with the "context" property.
   @property({ type: Object }) context?: object;
 
-  @state() private errorDetails: IframeIPC.GuestError | null = null;
-
-  private iframeRef: Ref<HTMLIFrameElement> = createRef();
-
-  private subscriptions: Map<string, any> = new Map();
+  @state() private errorDetails: IPC.GuestError | null = null;
 
   static override styles = css`
     .error-modal {
@@ -85,112 +51,12 @@ export class CommonIframeElement extends LitElement {
     }
   `;
 
-  private handleMessage = (event: MessageEvent) => {
-    if (event.data?.source == "react-devtools-content-script") {
-      return;
-    }
-
-    if (event.source !== this.iframeRef.value?.contentWindow) {
-      return;
-    }
-
-    const IframeHandler = IframeIPC.getIframeContextHandler();
-    if (IframeHandler == null) {
-      console.error("common-iframe: No iframe handler defined.");
-      return;
-    }
-
-    if (!this.context) {
-      console.error("common-iframe: missing `context`.");
-      return;
-    }
-
-    if (!IframeIPC.isGuestMessage(event.data)) {
-      console.error("common-iframe: Malformed message from guest.");
-      return;
-    }
-
-    const message: IframeIPC.GuestMessage = event.data;
-
-    switch (message.type) {
-      case IframeIPC.GuestMessageType.Error: {
-        const { description, source, lineno, colno, stacktrace } = message.data;
-        this.errorDetails = { description, source, lineno, colno, stacktrace };
-        this.dispatchEvent(new CustomEvent("error", {
-          detail: this.errorDetails,
-        }));
-        return;
-      }
-
-      case IframeIPC.GuestMessageType.Read: {
-        const key = message.data;
-        const value = IframeHandler.read(this.context, key);
-        // TODO: This might cause infinite loops, since the data can be a graph.
-        const response: IframeIPC.HostMessage = {
-          type: IframeIPC.HostMessageType.Update,
-          data: [key, value],
-        }
-        this.iframeRef.value?.contentWindow?.postMessage(response, "*");
-        return;
-      }
-
-      case IframeIPC.GuestMessageType.Write: {
-        const [key, value] = message.data;
-        IframeHandler.write(this.context, key, value);
-        return;
-      }
-
-      case IframeIPC.GuestMessageType.Subscribe: {
-        const key = message.data;
-
-        if (this.subscriptions.has(key)) {
-          console.warn("common-iframe: Already subscribed to `${key}`");
-          return;
-        }
-        let receipt = IframeHandler.subscribe(this.context, key, (key, value) => this.notifySubscribers(key, value));
-        this.subscriptions.set(key, receipt);
-        return;
-      }
-
-      case IframeIPC.GuestMessageType.Unsubscribe: {
-        const key = message.data;
-        let receipt = this.subscriptions.get(key);
-        if (!receipt) {
-          return;
-        }
-        IframeHandler.unsubscribe(this.context, receipt);
-        this.subscriptions.delete(key);
-        return;
-      }
-    };
-  }
-
-  private notifySubscribers(key: string, value: any) {
-    // TODO: This might cause infinite loops, since the data can be a graph.
-    // /!\ Why is this serialized?
-    const copy =
-      value !== undefined ? JSON.parse(JSON.stringify(value)) : undefined;
-    const response: IframeIPC.HostMessage = {
-      type: IframeIPC.HostMessageType.Update,
-      data: [key, copy],
-    }
-    this.iframeRef.value?.contentWindow?.postMessage(response, "*");
-  }
-
-  private boundHandleMessage = this.handleMessage.bind(this);
-
-  override connectedCallback() {
-    super.connectedCallback();
-    window.addEventListener("message", this.boundHandleMessage);
-  }
-
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    window.removeEventListener("message", this.boundHandleMessage);
-  }
-
-  private handleLoad() {
+  private onLoad() {
     this.dispatchEvent(new CustomEvent("load"));
+  }
+  
+  private onError(e: CustomEvent) {
+    this.errorDetails = e.detail;
   }
 
   private dismissError() {
@@ -206,15 +72,14 @@ export class CommonIframeElement extends LitElement {
 
   override render() {
     return html`
-      <iframe
-        ${ref(this.iframeRef)}
-        sandbox="allow-scripts allow-forms allow-pointer-lock"
-        csp="${CSP}"
-        .srcdoc=${this.src}
+      <common-iframe-sandbox
+        .context=${this.context}
+        .src=${this.src}
         height="100%"
         width="100%"
         style="border: none;"
-        @load=${this.handleLoad}
+        @load=${this.onLoad}
+        @error=${this.onError}
       ></iframe>
       ${this.errorDetails
         ? html`

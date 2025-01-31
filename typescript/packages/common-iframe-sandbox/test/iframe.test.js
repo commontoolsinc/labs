@@ -1,4 +1,4 @@
-import { waitForCondition, ContextShim, setIframeTestHandler, cleanup, render } from "./utils.js";
+import { waitForCondition, assertEquals, ContextShim, setIframeTestHandler, cleanup, render } from "./utils.js";
 
 setIframeTestHandler();
 
@@ -90,5 +90,83 @@ write("ready", true);
     context.set("a", 5);
     await new Promise((resolve) => setTimeout(resolve, 100));
     await waitForCondition(() => compareDeepEquals(context.get("updates"), [["a", 2], ["a", 3]]));
+  });
+  
+  it("handles multiple iframes", async () => {
+    let context1 = new ContextShim({ a: 1 });
+    let context2 = new ContextShim({ b: 100 });
+
+    const body1 = `
+${API_SHIM}
+<script>
+write("b", 1);
+</script>`;
+
+    const body2 = `
+${API_SHIM}
+<script>
+onUpdate = (key, value) => {
+  if (key === "b" && value === 100) {
+    write("a", 200); 
+  }
+};
+read("b");
+</script>`;
+    const _iframe1 = await render(body1, context1);
+    const _iframe2 = await render(body2, context2);
+    await waitForCondition(() => context1.get("a") === 1 && context1.get("b") === 1);
+    await waitForCondition(() => context2.get("a") === 200 && context2.get("b") === 100);
+  });
+
+  it("handles loading new documents", async () => {
+    let context = new ContextShim({ a: 1 });
+
+    const body1 = `
+${API_SHIM}
+<script>
+write("b", 1);
+</script>`;
+    const body2 = `
+${API_SHIM}
+<script>
+write("c", 1);
+</script>`;
+    const iframe = await render(body1, context);
+    await waitForCondition(() => context.get("b") === 1);
+    iframe.src = body2; 
+    await waitForCondition(() => context.get("c") === 1);
+  });
+  
+  it("cancels subscriptions between documents", async () => {
+    let context = new ContextShim({ a: 1 });
+
+    const body1 = `
+${API_SHIM}
+<script>
+subscribe("a");
+write("ready1", true);
+</script>`;
+    const body2 = `
+${API_SHIM}
+<script>
+onUpdate = (key, value) => {
+  if (key === "b") {
+    write("got-b-update", true);
+  }
+  if (key === "a") {
+    write("got-a-update", true); 
+  }
+};
+subscribe("b");
+write("ready2", true);
+</script>`;
+    const iframe = await render(body1, context);
+    await waitForCondition(() => context.get("ready1") === true);
+    iframe.src = body2; 
+    await waitForCondition(() => context.get("ready2") === true);
+    context.set("a", 1000);
+    context.set("b", 1000);
+    await waitForCondition(() => context.get("got-b-update") === true);
+    assertEquals(context.get("got-a-update"), undefined);
   });
 });

@@ -2,41 +2,49 @@ import { checkSchemaMatch } from "@/lib/schema-match.ts";
 import { isObject } from "@/routes/ai/spell/schema.ts";
 import { Schema } from "jsonschema";
 import { z } from "zod";
+import { Recipe, RecipeSchema } from "./spell.ts";
 
 export interface SchemaCandidate {
   key: string;
   similarity: number;
 }
 
-export const SpellSchema = z.object({
-  src: z.string(),
-  recipe: z.object({
-    argumentSchema: z.record(z.unknown()),
-    resultSchema: z.record(z.unknown()),
-  }),
-});
-
-export type Spell = z.infer<typeof SpellSchema>;
 export interface SchemaAnalysis {
   data: string[];
   consumes: string[];
   produces: string[];
 }
 
+function calculateTagScore(item: unknown, tags: string[]): number {
+  // Convert item to string for searching
+  const itemString = JSON.stringify(item).toLowerCase();
+
+  // Count how many tags match (in hashtag form)
+  const matchingTags = tags.filter((tag) =>
+    itemString.includes(`#${tag.toLowerCase()}`)
+  );
+
+  // Return a score between 0 and 0.5 based on percentage of matching tags
+  return matchingTags.length > 0
+    ? (matchingTags.length / tags.length) * 0.5
+    : 0;
+}
+
 export function candidates(
   schema: Record<string, unknown>,
   blobContents: Record<string, Record<string, unknown>>,
   spells: Record<string, unknown>,
+  tags: string[],
 ): SchemaAnalysis {
   const data: SchemaCandidate[] = [];
   const consumes: SchemaCandidate[] = [];
   const produces: SchemaCandidate[] = [];
 
   // Parse spells using schema
-  const validSpells: Record<string, Spell> = {};
+  const validSpells: Record<string, Recipe> = {};
   for (const [key, spell] of Object.entries(spells)) {
     try {
-      const parsed = SpellSchema.parse(spell);
+      const parsed = RecipeSchema.parse(spell);
       validSpells[key] = parsed;
     } catch (error: any) {
       console.log(`Invalid spell ${key}:`, error.message);
@@ -49,11 +57,13 @@ export function candidates(
   // Check direct schema matches in blobs
   for (const [key, blobData] of Object.entries(blobContents)) {
     try {
+      const tagScore = calculateTagScore(blobData, tags);
+
       // Check if the entire blob matches the schema
       if (checkSchemaMatch(blobData, schema)) {
         data.push({
           key,
-          similarity: 1.0,
+          similarity: 1.0 + tagScore,
         });
         continue;
       }
@@ -67,7 +77,7 @@ export function candidates(
         if (hasMatchingItems) {
           data.push({
             key,
-            similarity: 1.0,
+            similarity: 1.0 + tagScore,
           });
           continue;
         }
@@ -81,7 +91,7 @@ export function candidates(
         ) {
           data.push({
             key,
-            similarity: 0.9,
+            similarity: 0.9 + tagScore,
           });
           break;
         }
@@ -94,7 +104,7 @@ export function candidates(
           if (hasMatchingItems) {
             data.push({
               key,
-              similarity: 0.9,
+              similarity: 0.9 + tagScore,
             });
             break;
           }
@@ -114,36 +124,38 @@ export function candidates(
       console.log("Input schema:", JSON.stringify(schema, null, 2));
       console.log(
         "Spell argument schema:",
-        JSON.stringify(spell.recipe.argumentSchema, null, 2),
+        JSON.stringify(spell.argumentSchema, null, 2),
       );
       console.log(
         "Spell result schema:",
-        JSON.stringify(spell.recipe.resultSchema, null, 2),
+        JSON.stringify(spell.resultSchema, null, 2),
       );
+
+      const tagScore = calculateTagScore(spell, tags);
 
       // Check if our schema matches the spell's argument schema
       const consumesMatch = schemaIntersection(
         schema,
-        spell.recipe.argumentSchema,
+        spell.argumentSchema,
       );
       console.log("Consumes match result:", consumesMatch);
       if (consumesMatch) {
         consumes.push({
           key,
-          similarity: 1.0,
+          similarity: 1.0 + tagScore,
         });
       }
 
       // Check if our schema matches the spell's result schema
       const producesMatch = schemaIntersection(
         schema,
-        spell.recipe.resultSchema,
+        spell.resultSchema,
       );
       console.log("Produces match result:", producesMatch);
       if (producesMatch) {
         produces.push({
           key,
-          similarity: 1.0,
+          similarity: 1.0 + tagScore,
         });
       }
     } catch (error) {

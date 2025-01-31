@@ -41,12 +41,12 @@ export async function takeScreenshot(
     console.log('Page loaded, network idle');
 
     // Close the sidebar
-    const selector = "os-navstack > os-navpanel > os-sidebar-close-button";
+    const selector = "os-sidebar-close-button";
     console.log('Waiting for sidebar close button...');
     await page.waitForSelector(selector);
     console.log('Clicking sidebar close button...');
     await page.click(selector);
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(2000);
     console.log('Waiting for network to settle after sidebar close...');
 
     // Take screenshot
