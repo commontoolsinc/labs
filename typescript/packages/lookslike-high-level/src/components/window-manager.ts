@@ -16,8 +16,8 @@ import {
 
 import {
   addRecipe,
-  effect,
   DocImpl,
+  effect,
   EntityId,
   getEntityId,
   getRecipe,
@@ -30,6 +30,58 @@ import { matchRoute, navigate } from "../router.js";
 import * as Schema from "../schema.js";
 import { buildRecipe } from "../localBuild.js";
 import * as iframeSpellAi from "./iframe-spell-ai.js";
+
+async function castSpell(value: string, openCharm: (charmId: string) => void) {
+  const searchUrl =
+    typeof window !== "undefined"
+      ? window.location.protocol + "//" + window.location.host + "/api/ai/spell/search"
+      : "//api/ai/spell/search";
+
+  // Search for suggested spells based on input
+  const response = await fetch(searchUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      accepts: "application/json",
+    },
+    body: JSON.stringify({
+      query: value,
+      tags: [],
+      options: {
+        limit: 10,
+        includeCompatibility: true,
+      },
+    }),
+  });
+
+  if (response.ok) {
+    const searchResponse: {
+      spells: {
+        key: string;
+        name: string;
+        description: string;
+        compatibleBlobs: { data: unknown; key: string; snippet: string }[];
+      }[];
+      blobs: string[];
+    } = await response.json();
+    console.log("Search response:", searchResponse);
+
+    let recipeKey = searchResponse.spells?.[0]?.key;
+    let blob = searchResponse.spells?.[0]?.compatibleBlobs?.[0];
+
+    if (recipeKey && blob) {
+      const recipeId = recipeKey.replace("spell-", "");
+      await syncRecipe(recipeId);
+
+      const recipe = getRecipe(recipeId);
+      if (!recipe) return;
+
+      const charm: DocImpl<Charm> = await runPersistent(recipe, blob.data);
+      addCharms([charm]);
+      openCharm(JSON.stringify(charm.entityId));
+    }
+  }
+}
 
 @customElement("common-window-manager")
 export class CommonWindowManager extends LitElement {
@@ -166,7 +218,11 @@ export class CommonWindowManager extends LitElement {
     const shiftKey = event.detail.shiftKey;
     console.log("Unibox submitted:", value, shiftKey);
 
-    iframeSpellAi.iterate(this.focusedCharm, value, shiftKey);
+    if (this.focusedCharm) {
+      iframeSpellAi.iterate(this.focusedCharm, value, shiftKey);
+    } else {
+      castSpell(value, this.openCharm.bind(this));
+    }
   }
 
   input: string = "";
