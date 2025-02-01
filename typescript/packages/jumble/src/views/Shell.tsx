@@ -3,6 +3,7 @@ import "@commontools/ui";
 import React from "react";
 import { useCharms } from "@/contexts/CharmsContext";
 import RunnerWrapper from "@/components/RunnerWrapper";
+import CharmRunner from "@/components/CharmRunner";
 
 const handleClick = () => {
   console.log("clicked");
@@ -25,13 +26,12 @@ export default function Shell() {
 
   const handleLoadCounterCharm = async () => {
     try {
-      // Dynamically import the file as raw text (does not execute it)
-      const mod = await import("@/recipes/counter.tsx?raw");
-      const counterSource: string = mod.default;
+      const mod = await import("@/recipes/counter.tsx");
+      const counterFactory = mod.default;
       const counterCharm = {
         entityId: `counter-${Date.now()}`,
         name: "Counter Charm",
-        ui: <RunnerWrapper recipeFactory={counterSource} />, // using the string from disk as ui
+        ui: counterFactory,
       };
       await runCharm(counterCharm);
     } catch (error) {
@@ -59,10 +59,10 @@ export default function Shell() {
       </button>
 
       <div className="border border-red-500 mt-4 p-2">
-        <pre>{JSON.stringify(focusedCharm, null, 2)}</pre>
+        {focusedCharm ? <CharmRunner charm={focusedCharm} /> : <div>No focused charm</div>}
       </div>
 
-      <div className="mt-4">
+      {/* <div className="mt-4">
         {charms.map((charm) => (
           <div key={charm.entityId} className="p-4 mb-4 border rounded">
             <h2 className="text-lg font-bold">{charm.name}</h2>
@@ -75,7 +75,7 @@ export default function Shell() {
             </button>
           </div>
         ))}
-      </div>
+      </div> */}
     </div>
   );
 }

@@ -7,7 +7,7 @@ export interface RecipeFactory {
 }
 
 type RunnerWrapperProps = {
-  recipeFactory: string | RecipeFactory;
+  recipeFactory: RecipeFactory;
 };
 
 export default function RunnerWrapper({ recipeFactory }: RunnerWrapperProps) {
@@ -15,13 +15,8 @@ export default function RunnerWrapper({ recipeFactory }: RunnerWrapperProps) {
 
   useEffect(() => {
     if (containerRef.current) {
-      if (typeof recipeFactory === "string") {
-        // Render the raw text inside a pre tag
-        containerRef.current.innerHTML = `<pre>${recipeFactory}</pre>`;
-      } else {
-        const element = recipeFactory.render();
-        createRoot(containerRef.current).render(element);
-      }
+      const element = recipeFactory.render();
+      createRoot(containerRef.current).render(element);
     }
   }, [recipeFactory]);
 
