@@ -350,9 +350,15 @@ importers:
 
   jumble:
     dependencies:
+      '@codemirror/lang-javascript':
+        specifier: ^6.2.2
+        version: 6.2.2
       '@codemirror/lang-markdown':
         specifier: ^6.3.2
         version: 6.3.2
+      '@codemirror/view':
+        specifier: ^6.36.2
+        version: 6.36.2
       '@commontools/ui':
         specifier: workspace:*
         version: link:../common-ui

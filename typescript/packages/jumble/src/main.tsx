@@ -11,7 +11,7 @@ import Shell from "@/views/Shell.tsx";
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <Router>
-      <Routes>
+      <Routes>f
         <Route path="/" element={<Home />} />
 
         <Route path="/shell" element={<Shell />} />

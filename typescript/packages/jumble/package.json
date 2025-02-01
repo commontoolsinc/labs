@@ -21,8 +21,10 @@
   },
   "homepage": "https://github.com/commontoolsinc/labs#readme",
   "dependencies": {
-    "@commontools/ui": "workspace:*",
+    "@codemirror/lang-javascript": "^6.2.2",
     "@codemirror/lang-markdown": "^6.3.2",
+    "@codemirror/view": "^6.36.2",
+    "@commontools/ui": "workspace:*",
     "@react-spring/web": "^9.7.5",
     "@tailwindcss/typography": "^0.5.16",
     "@tailwindcss/vite": "^4.0.1",
