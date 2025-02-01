@@ -1,6 +1,6 @@
 # Common Memory
 
-Persistent, transactional memory store.
+Persistent, transactional memory store.m
 
 ## Getting Started
 
@@ -165,3 +165,52 @@ type Notification = { [space: string]: State }
 [UUID]:https://en.wikipedia.org/wiki/Universally_unique_identifier
 [CAS]:https://en.wikipedia.org/wiki/Compare-and-swap
 [IPLD Links in DAG-JSON]:https://ipld.io/specs/codecs/dag-json/spec/#links
+
+## Persistence
+
+Service persists each memory space into a separate SQLite database with a following schema.
+
+> ℹ️ SQLite is admittedly an odd choice for persisting JSON documents, but at the currently convenience has being prioritized over everything else.
+
+```mermaid
+---
+title: Database Schema
+---
+erDiagram
+datum {
+  this    TEXT PK "Merkle reference for this JSON"
+  source  JSON    "Source for this JSON"
+}
+
+maybe_datum {
+  this    U
+  source  U
+}
+
+null_datum {
+  this   NULL PK  "Represents undefined"
+  source NULL     "Null is used to represent undefined JSON"
+}
+
+fact {
+  this    TEXT PK "Merkle reference for { the, of, is, cause }"
+  the     TEXT "Kind of a fact e.g. 'application/json'"
+  of      TEXT "Entity identifier fact is about"
+  is      TEXT-NULL FK "Value entity is claimed to have"
+  cause   TEXT-NULL    "Causal reference to prior fact"
+}
+
+memory {
+  the   TEXT  PK "Kind of a fact e.g. 'application/json'"
+  of    TEXT  PK "Entity identifier fact is about"
+  fact  TEXT FK  "Link to the fact"
+}
+
+
+
+fact }|--|| maybe_datum: is-this
+fact ||--|| fact: cause-this
+memory ||--|| fact: fact-this
+datum ||--|| maybe_datum: union
+null_datum ||--|| maybe_datum: union
+```
