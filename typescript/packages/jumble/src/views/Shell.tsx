@@ -28,12 +28,12 @@ export default function Shell() {
       // Dynamically import the file as raw text (does not execute it)
       const mod = await import("@/recipes/counter.tsx?raw");
       const counterSource: string = mod.default;
-      const charm = {
+      const counterCharm = {
         entityId: `counter-${Date.now()}`,
         name: "Counter Charm",
         ui: <RunnerWrapper recipeFactory={counterSource} />, // using the string from disk as ui
       };
-      addCharm(charm);
+      await runCharm(counterCharm);
     } catch (error) {
       console.error("Failed to load counter charm", error);
     }
@@ -58,8 +58,23 @@ export default function Shell() {
         Load & Run Counter Charm
       </button>
 
-      <div className="border border-red-500">
+      <div className="border border-red-500 mt-4 p-2">
         <pre>{JSON.stringify(focusedCharm, null, 2)}</pre>
+      </div>
+
+      <div className="mt-4">
+        {charms.map((charm) => (
+          <div key={charm.entityId} className="p-4 mb-4 border rounded">
+            <h2 className="text-lg font-bold">{charm.name}</h2>
+            <div>{charm.ui}</div>
+            <button
+              onClick={() => removeCharm(charm.entityId)}
+              className="mt-2 px-2 py-1 bg-red-500 text-white rounded"
+            >
+              Close
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   );
