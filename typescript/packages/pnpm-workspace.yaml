@@ -7,4 +7,5 @@ packages:
   - "common-iframe-sandbox"
   - "common-os-ui"
   - "common-html"
+  - "common-memory"
   - "jumble"

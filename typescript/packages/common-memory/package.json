@@ -1,0 +1,9 @@
+{
+  "name": "@commontools/memory",
+  "exports": {
+    ".": "./lib.ts"
+  },
+  "dependencies": {
+    "merkle-reference": "^2.0.1"
+  }
+}

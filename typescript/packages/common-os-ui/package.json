@@ -33,7 +33,7 @@
     "@floating-ui/dom": "^1.6.13",
     "codemirror": "^6.0.1",
     "lit": "^3.2.1",
-    "merkle-reference": "^1.1.0",
+    "merkle-reference": "^2.0.1",
     "prosemirror-commands": "^1.6.2",
     "prosemirror-history": "^1.4.1",
     "prosemirror-keymap": "^1.2.2",

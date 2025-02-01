@@ -18,6 +18,7 @@ import {
   StorageValue,
   LocalStorageProvider,
   InMemoryStorageProvider,
+  RemoteStorageProvider,
 } from "./storage-providers.js";
 import { debug } from "@commontools/html";
 
@@ -575,13 +576,17 @@ class StorageImpl implements Storage {
   }
 }
 
-export function createStorage(type: "local" | "memory"): Storage {
+export function createStorage(type: "local" | "memory" | "remote"): Storage {
   let storageProvider: StorageProvider;
 
   if (type === "local") {
     storageProvider = new LocalStorageProvider();
   } else if (type === "memory") {
     storageProvider = new InMemoryStorageProvider();
+  } else if (type === "remote") {
+    storageProvider = new RemoteStorageProvider({
+      address: new URL("/api/storage/memory", new URL(location.href)),
+    });
   } else {
     throw new Error("Invalid storage type");
   }

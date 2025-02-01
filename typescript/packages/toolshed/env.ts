@@ -1,4 +1,5 @@
 import { z } from "zod";
+import * as Path from "jsr:@std/path";
 
 // NOTE: This is where we define the environment variable types and defaults.
 const EnvSchema = z.object({
@@ -56,6 +57,10 @@ const EnvSchema = z.object({
   // ===========================================================================
   BLOBBY_REDIS_URL: z.string().default("redis://localhost:6379"),
   // ===========================================================================
+  // Memory Store
+  MEMORY_URL: z.string().default(
+    new URL(`./cache/memory/`, Path.toFileUrl(`${Deno.cwd()}/`)).href,
+  ),
 });
 
 export type env = z.infer<typeof EnvSchema>;

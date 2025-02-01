@@ -23,7 +23,7 @@
   "dependencies": {
     "@commontools/builder": "workspace:*",
     "@commontools/llm-client": "workspace:*",
-    "merkle-reference": "^1.1.0"
+    "merkle-reference": "^2.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",
