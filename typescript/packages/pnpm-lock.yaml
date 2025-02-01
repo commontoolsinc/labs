@@ -359,6 +359,12 @@ importers:
       '@codemirror/view':
         specifier: ^6.36.2
         version: 6.36.2
+      '@commontools/builder':
+        specifier: workspace:*
+        version: link:../common-builder
+      '@commontools/runner':
+        specifier: workspace:*
+        version: link:../common-runner
       '@commontools/ui':
         specifier: workspace:*
         version: link:../common-ui
