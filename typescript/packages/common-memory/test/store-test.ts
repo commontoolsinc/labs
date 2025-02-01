@@ -1,7 +1,6 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
 import * as Repository from "../store.ts";
-import { refer } from "../util.ts";
-import { createTemporaryDirectory } from "../util.js";
+import { refer, createTemporaryDirectory } from "../util.ts";
 
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
 const doc = "4301a667-5388-4477-ba08-d2e6b51a62a3";
@@ -547,7 +546,9 @@ test(
     assertMatch(
       result.error.message,
       RegExp(
-        `The application/json of ${doc} in ${alice} was expected to be ${refer(v1)}, but it is ${refer(v2)}`,
+        `The application/json of ${doc} in ${alice} was expected to be ${refer(
+          v1,
+        )}, but it is ${refer(v2)}`,
       ),
     );
   },

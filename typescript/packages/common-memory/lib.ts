@@ -40,7 +40,6 @@ interface MemoryServiceSession {
 export type Command = {
   watch?: In<Selector>;
   unwatch?: In<Selector>;
-  transact?: In<Transaction>;
 };
 
 class Service implements MemoryService {
