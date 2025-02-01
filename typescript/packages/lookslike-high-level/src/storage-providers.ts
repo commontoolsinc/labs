@@ -50,7 +50,7 @@ export interface StorageProvider {
   destroy(): Promise<void>;
 }
 
-abstract class BaseStorageProvider implements StorageProvider {
+export abstract class BaseStorageProvider implements StorageProvider {
   protected subscribers = new Map<string, Set<(value: StorageValue) => void>>();
   protected waitingForSync = new Map<string, Promise<void>>();
   protected waitingForSyncResolvers = new Map<string, () => void>();

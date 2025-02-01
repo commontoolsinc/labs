@@ -44,7 +44,7 @@ export type Charm = {
 
 export { NAME, TYPE, UI };
 
-const storage = createStorage((import.meta as any).env.VITE_STORAGE_TYPE ?? "memory");
+const storage = createStorage((import.meta as any).env.VITE_STORAGE_TYPE ?? "redis");
 
 export const charms = getDoc<DocLink[]>([], "charms");
 (window as any).charms = charms;
@@ -206,8 +206,8 @@ import smolIframe from "./recipes/smolIframe.js";
 import complexIframe from "./recipes/complexIframe.js";
 
 addCharms([
-  await runPersistent(smolIframe, { count: 1 }, "smol iframe"),
-  await runPersistent(complexIframe, { count: 42 }, "complex iframe"),
+  // await runPersistent(smolIframe, { count: 1 }, "smol iframe"),
+  // await runPersistent(complexIframe, { count: 42 }, "complex iframe"),
 ]);
 
 export type RecipeManifest = {

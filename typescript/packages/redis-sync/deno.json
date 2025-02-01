@@ -1,0 +1,9 @@
+{
+  "tasks": {
+    "dev": "deno run --watch main.ts"
+  },
+  "imports": {
+    "@db/redis": "jsr:@db/redis@^0.37.1",
+    "@std/assert": "jsr:@std/assert@1"
+  }
+}

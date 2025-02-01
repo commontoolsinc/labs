@@ -1,0 +1,49 @@
+{
+  "version": "4",
+  "specifiers": {
+    "jsr:@db/redis@~0.37.1": "0.37.1",
+    "jsr:@std/assert@1": "1.0.11",
+    "jsr:@std/async@1": "1.0.10",
+    "jsr:@std/bytes@1": "1.0.5",
+    "jsr:@std/bytes@^1.0.2-rc.3": "1.0.5",
+    "jsr:@std/internal@^1.0.5": "1.0.5",
+    "jsr:@std/io@0.224.5": "0.224.5"
+  },
+  "jsr": {
+    "@db/redis@0.37.1": {
+      "integrity": "46ca414091c47b64ddccbac621754713b6261599f559584b8498ee871acff348",
+      "dependencies": [
+        "jsr:@std/async",
+        "jsr:@std/bytes@1",
+        "jsr:@std/io"
+      ]
+    },
+    "@std/assert@1.0.11": {
+      "integrity": "2461ef3c368fe88bc60e186e7744a93112f16fd110022e113a0849e94d1c83c1",
+      "dependencies": [
+        "jsr:@std/internal"
+      ]
+    },
+    "@std/async@1.0.10": {
+      "integrity": "2ff1b1c7d33d1416159989b0f69e59ec7ee8cb58510df01e454def2108b3dbec"
+    },
+    "@std/bytes@1.0.5": {
+      "integrity": "4465dd739d7963d964c809202ebea6d5c6b8e3829ef25c6a224290fbb8a1021e"
+    },
+    "@std/internal@1.0.5": {
+      "integrity": "54a546004f769c1ac9e025abd15a76b6671ddc9687e2313b67376125650dc7ba"
+    },
+    "@std/io@0.224.5": {
+      "integrity": "cb84fe655d1273fca94efcff411465027a8b0b4225203f19d6ee98d9c8920a2d",
+      "dependencies": [
+        "jsr:@std/bytes@^1.0.2-rc.3"
+      ]
+    }
+  },
+  "workspace": {
+    "dependencies": [
+      "jsr:@db/redis@~0.37.1",
+      "jsr:@std/assert@1"
+    ]
+  }
+}

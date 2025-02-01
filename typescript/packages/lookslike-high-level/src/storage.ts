@@ -20,6 +20,7 @@ import {
   InMemoryStorageProvider,
 } from "./storage-providers.js";
 import { debug } from "@commontools/html";
+import { RedisStorageProvider } from "./redis-storage-provider.js";
 
 export function log(...args: any[]) {
   // Get absolute time in milliseconds since Unix epoch
@@ -100,6 +101,7 @@ type Job = {
  * those up as well. For now, we wait until we reach a stable point, i.e. no
  * loading cells pending, but we might instead want to eventually queue up
  * changes instead.
+ *
  *
  * Following references depends on the direction of the write: When writing from
  * a cell to storage, we turn cell references into ids. When writing from
@@ -582,6 +584,8 @@ export function createStorage(type: "local" | "memory"): Storage {
     storageProvider = new LocalStorageProvider();
   } else if (type === "memory") {
     storageProvider = new InMemoryStorageProvider();
+  } else if (type === "redis") {
+    storageProvider = new RedisStorageProvider();
   } else {
     throw new Error("Invalid storage type");
   }
