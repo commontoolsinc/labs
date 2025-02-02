@@ -292,8 +292,8 @@ export async function iterate(charm: DocImpl<Charm> | null, value: string, shift
   const newSpec = shiftKey ? iframe.spec + "\n" + value : value;
 
   const newIFrameSrc = await genSrc({ src: iframe.src, spec: iframe.spec, newSpec, schema: iframe.argumentSchema });
-
-  const newRecipeSrc = buildFullRecipe({ ...iframe, src: newIFrameSrc, spec: newSpec });
+  const name = newIFrameSrc.match(/<title>(.*?)<\/title>/)?.[1] ?? newSpec;
+  const newRecipeSrc = buildFullRecipe({ ...iframe, src: newIFrameSrc, spec: newSpec, name });
 
   const { exports, errors } = await tsToExports(newRecipeSrc);
 
@@ -330,8 +330,8 @@ export async function createNewRecipe(data: any, newSpec: string) {
   schema.description = newSpec;
 
   const newIFrameSrc = await genSrc({ newSpec, schema });
-
-  const newRecipeSrc = buildFullRecipe({ src: newIFrameSrc, spec: newSpec, argumentSchema: schema, resultSchema: {}, name: newSpec });
+  const name = newIFrameSrc.match(/<title>(.*?)<\/title>/)?.[1] ?? newSpec;
+  const newRecipeSrc = buildFullRecipe({ src: newIFrameSrc, spec: newSpec, argumentSchema: schema, resultSchema: {}, name });
 
   const { exports, errors } = await tsToExports(newRecipeSrc);
 
