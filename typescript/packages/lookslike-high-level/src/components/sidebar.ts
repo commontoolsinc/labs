@@ -2,7 +2,10 @@ import { css, html, LitElement, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { style } from "@commontools/ui";
 import { when } from "lit/directives/when.js";
-import { Charm, charms, NAME, recipes, runPersistent, TYPE, UI } from "../data.js";
+import { Charm, charms, runPersistent } from "@commontools/charm";
+import { BLOBBY_SERVER_URL, recipes } from "../data.js"
+import {  refer } from "merkle-reference";
+
 import {
   getDoc,
   DocImpl,
@@ -12,12 +15,25 @@ import {
   getRecipeSpec,
   getRecipeSrc,
 } from "@commontools/runner";
+import { NAME, TYPE, UI } from "@commontools/builder";
 import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.jsx";
 import { render } from "@commontools/html";
 import { saveRecipe } from "../data.js";
 import { createNewRecipe } from "./iframe-spell-ai.js";
+
+const uploadBlob = async (data: any) => {
+  const id = refer(data).toString();
+
+  await fetch(`${BLOBBY_SERVER_URL}/data-${id}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+};
 
 // bf: TODO, send a "toast" event on window and an use another element to handle it
 const toasty = (message: string) => {
@@ -305,6 +321,9 @@ export class CommonSidebar extends LitElement {
           "Discovering a hidden cove that seems to exist in multiple dimensions simultaneously",
       },
     };
+
+    // also posted the data json to blobby ... would spellcaster work with this data?
+    uploadBlob(data);
 
     await createNewRecipe(data, "a simple display of the users data");
   }

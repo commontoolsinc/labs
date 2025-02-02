@@ -4,15 +4,16 @@ import { createRef, Ref, ref } from "lit/directives/ref.js";
 import { style } from "@commontools/ui";
 import { render } from "@commontools/html";
 import {
-  addCharms,
-  Charm,
   closeCharm,
   openCharm,
-  runPersistent,
-  syncCharm,
   syncRecipe,
-  UI,
 } from "../data.js";
+import {
+  syncCharm,
+  addCharms,
+  Charm,
+  runPersistent,
+} from "@commontools/charm";
 
 import {
   addRecipe,
@@ -25,9 +26,8 @@ import {
   run,
 } from "@commontools/runner";
 import { repeat } from "lit/directives/repeat.js";
-import { NAME, TYPE } from "@commontools/builder";
+import { UI, NAME, TYPE } from "@commontools/builder";
 import { matchRoute, navigate } from "../router.js";
-import * as Schema from "../schema.js";
 import { buildRecipe } from "../localBuild.js";
 import * as iframeSpellAi from "./iframe-spell-ai.js";
 
@@ -303,7 +303,7 @@ export class CommonWindowManager extends LitElement {
       const title = prompt("Enter a title for your recipe:");
       if (!title) return;
 
-      iframeSpellAi.createNewRecipe(data, title);
+      iframeSpellAi.castNewRecipe(data, title);
     };
 
     return html`

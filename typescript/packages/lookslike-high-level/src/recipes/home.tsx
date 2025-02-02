@@ -1,7 +1,8 @@
 import { h } from "@commontools/html";
 import { recipe, lift, NAME, UI, handler } from "@commontools/builder";
 import { getEntityId } from "@commontools/runner";
-import { Charm, removeCharm, RecipeManifest, closeCharm } from "../data.js";
+import {  RecipeManifest, closeCharm } from "../data.js";
+import { Charm, removeCharm } from "@commontools/charm";
 
 const getCharmsWithNameAndUI = lift<Charm[], { charm: Charm }[]>((charms) =>
   (charms ?? []).filter((charm) => charm && charm[UI] && charm[NAME]).map((charm) => ({ charm })),

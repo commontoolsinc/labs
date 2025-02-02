@@ -1,6 +1,6 @@
 import type { EntityId, Cancel } from "@commontools/runner";
 import { log } from "./storage.js";
-import { fromJSON, fromBytes, refer, type Reference } from "merkle-reference";
+import { fromJSON, refer, type Reference } from "merkle-reference";
 import z from "zod";
 import type {
   State,
@@ -9,7 +9,6 @@ import type {
   Entity,
   Unclaimed,
   Selector,
-  Claim,
   Fact,
   ConflictError,
   TransactionError,

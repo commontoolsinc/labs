@@ -1,5 +1,6 @@
 packages:
   - "lookslike-high-level"
+  - "common-charm"
   - "common-builder"
   - "common-runner"
   - "llm-client"

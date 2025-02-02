@@ -1,7 +1,8 @@
 import { getRecipe, getRecipeSrc, addRecipe, run } from "@commontools/runner";
-import { addCharms, openCharm, Charm, TYPE } from "../data.js";
+import { addCharms, Charm } from "@commontools/charm";
+import { openCharm } from "../data.js";
 import { LLMClient } from "@commontools/llm-client";
-import { createJsonSchema, JSONSchema } from "@commontools/builder";
+import { createJsonSchema, JSONSchema, TYPE } from "@commontools/builder";
 import { tsToExports } from "../localBuild.js";
 import { type DocImpl } from "@commontools/runner";
 
@@ -325,7 +326,7 @@ export async function iterate(charm: DocImpl<Charm> | null, value: string, shift
 }
 
 
-export async function createNewRecipe(data: any, newSpec: string) {
+export async function castNewRecipe(data: any, newSpec: string) {
   const schema = createJsonSchema({}, data);
   schema.description = newSpec;
 
