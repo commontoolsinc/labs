@@ -326,7 +326,7 @@ export async function iterate(charm: DocImpl<Charm> | null, value: string, shift
 }
 
 
-export async function createNewRecipe(data: any, newSpec: string) {
+export async function castNewRecipe(data: any, newSpec: string) {
   const schema = createJsonSchema({}, data);
   schema.description = newSpec;
 

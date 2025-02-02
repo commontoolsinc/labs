@@ -303,7 +303,7 @@ export class CommonWindowManager extends LitElement {
       const title = prompt("Enter a title for your recipe:");
       if (!title) return;
 
-      iframeSpellAi.createNewRecipe(data, title);
+      iframeSpellAi.castNewRecipe(data, title);
     };
 
     return html`
