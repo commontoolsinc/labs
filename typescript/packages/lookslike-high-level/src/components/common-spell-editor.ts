@@ -2,7 +2,7 @@ import { html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { when } from "lit/directives/when.js";
 import { addRecipe, getRecipeSpec, getRecipeSrc, run } from "@commontools/runner";
-import { addCharms } from "../data.js";
+import { addCharms } from "@commontools/charm";
 import { tsToExports } from "../localBuild.js";
 import { iterate, llmTweakSpec, generateSuggestions } from "./spell-ai.js";
 import { createRef, ref } from "lit/directives/ref.js";

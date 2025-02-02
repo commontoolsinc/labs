@@ -1,6 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { addCharms, runPersistent, type Charm } from "../data.js";
+import { addCharms, runPersistent, type Charm } from "@commontools/charm";
 import { type DocImpl, getRecipe } from "@commontools/runner";
 
 @customElement("common-recipe-link")

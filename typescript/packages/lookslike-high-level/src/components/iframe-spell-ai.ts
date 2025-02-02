@@ -1,7 +1,8 @@
 import { getRecipe, getRecipeSrc, addRecipe, run } from "@commontools/runner";
-import { addCharms, openCharm, Charm, TYPE } from "../data.js";
+import { addCharms, Charm } from "@commontools/charm";
+import { openCharm } from "../data.js";
 import { LLMClient } from "@commontools/llm-client";
-import { createJsonSchema, JSONSchema } from "@commontools/builder";
+import { createJsonSchema, JSONSchema, TYPE } from "@commontools/builder";
 import { tsToExports } from "../localBuild.js";
 import { type DocImpl } from "@commontools/runner";
 

@@ -1,6 +1,6 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { NAME } from "../data.js";
+import { NAME } from "@commontools/builder";
 import { Cell, effect } from "@commontools/runner";
 
 @customElement("common-charm-link")

@@ -20,7 +20,7 @@ import {
   InMemoryStorageProvider,
   RemoteStorageProvider,
 } from "./storage-providers.js";
-import { debug } from "@commontools/html";
+import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
 
 export function log(...args: any[]) {
   // Get absolute time in milliseconds since Unix epoch

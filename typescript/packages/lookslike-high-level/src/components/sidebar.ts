@@ -2,7 +2,9 @@ import { css, html, LitElement, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { style } from "@commontools/ui";
 import { when } from "lit/directives/when.js";
-import { Charm, charms, NAME, recipes, runPersistent, TYPE, UI } from "../data.js";
+import { Charm, charms, runPersistent } from "@commontools/charm";
+import { recipes } from "../data.js"
+
 import {
   getDoc,
   DocImpl,
@@ -12,6 +14,7 @@ import {
   getRecipeSpec,
   getRecipeSrc,
 } from "@commontools/runner";
+import { NAME, TYPE, UI } from "@commontools/builder";
 import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.jsx";
