@@ -1,5 +1,5 @@
 {
-  "name": "@commontools/spa",
+  "name": "@commontools/lookslike-high-level",
   "version": "0.1.0",
   "description": "spa",
   "main": "src/main.ts",

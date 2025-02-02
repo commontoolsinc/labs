@@ -365,6 +365,9 @@ importers:
       '@commontools/html':
         specifier: workspace:*
         version: link:../common-html
+      '@commontools/lookslike-high-level':
+        specifier: workspace:*
+        version: link:../lookslike-high-level
       '@commontools/runner':
         specifier: workspace:*
         version: link:../common-runner

@@ -1,12 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from "react";
-
-export type Charm = {
-  entityId: string;
-  name: string;
-  ui: React.ReactNode;
-  recipeId?: string;
-  minimized?: boolean;
-};
+import { type Charm } from "@commontools/lookslike-high-level";
 
 export type CharmsContextType = {
   charms: Charm[];

@@ -32,8 +32,8 @@ import { buildRecipe } from "./localBuild.js";
 import { setIframeContextHandler } from "@commontools/iframe-sandbox";
 
 // Necessary, so that suggestions are indexed.
-import "./recipes/todo-list-as-task.jsx";
-import "./recipes/playlist.jsx";
+// import "./recipes/todo-list-as-task.jsx";
+// import "./recipes/playlist.jsx";
 
 export type Charm = {
   [NAME]?: string;
@@ -206,8 +206,8 @@ import smolIframe from "./recipes/smolIframe.js";
 import complexIframe from "./recipes/complexIframe.js";
 
 addCharms([
-  await runPersistent(smolIframe, { count: 1 }, "smol iframe"),
-  await runPersistent(complexIframe, { count: 42 }, "complex iframe"),
+  // await runPersistent(smolIframe, { count: 1 }, "smol iframe"),
+  // await runPersistent(complexIframe, { count: 42 }, "complex iframe"),
 ]);
 
 export type RecipeManifest = {

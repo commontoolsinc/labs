@@ -9,6 +9,8 @@ const handleClick = () => {
   console.log("clicked");
 };
 
+import { runPersistent } from "@commontools/lookslike-high-level";
+
 export default function Shell() {
   const { charms, focusedCharm, addCharm, removeCharm, runCharm } = useCharms();
 
@@ -28,12 +30,15 @@ export default function Shell() {
     try {
       const mod = await import("@/recipes/smol.tsx");
       const smolFactory = mod.default;
-      const smolCharm = {
-        entityId: `smol-${Date.now()}`,
-        name: "smol Charm",
-        ui: smolFactory,
-      };
-      await runCharm(smolCharm);
+      console.log(smolFactory);
+      // const smolCharm = {
+      //   entityId: `smol-${Date.now()}`,
+      //   name: "smol Charm",
+      //   ui: smolFactory,
+      // };
+      const charm = await runPersistent(smolFactory);
+      console.log(charm)
+      await runCharm(charm);
     } catch (error) {
       console.error("Failed to load counter charm", error);
     }

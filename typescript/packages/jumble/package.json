@@ -28,6 +28,7 @@
     "@commontools/builder": "workspace:*",
     "@commontools/runner": "workspace:*",
     "@commontools/html": "workspace:*",
+    "@commontools/lookslike-high-level": "workspace:*",
     "@react-spring/web": "^9.7.5",
     "@tailwindcss/typography": "^0.5.16",
     "@tailwindcss/vite": "^4.0.1",
