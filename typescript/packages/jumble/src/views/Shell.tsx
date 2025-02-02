@@ -24,16 +24,16 @@ export default function Shell() {
     addCharm(dummyCharm);
   };
 
-  const handleLoadCounterCharm = async () => {
+  const handleLoadSmolCharm = async () => {
     try {
-      const mod = await import("@/recipes/counter.tsx");
-      const counterFactory = mod.default;
-      const counterCharm = {
-        entityId: `counter-${Date.now()}`,
-        name: "Counter Charm",
-        ui: counterFactory,
+      const mod = await import("@/recipes/smol.tsx");
+      const smolFactory = mod.default;
+      const smolCharm = {
+        entityId: `smol-${Date.now()}`,
+        name: "smol Charm",
+        ui: smolFactory,
       };
-      await runCharm(counterCharm);
+      await runCharm(smolCharm);
     } catch (error) {
       console.error("Failed to load counter charm", error);
     }
@@ -52,10 +52,10 @@ export default function Shell() {
         Add Dummy Charm
       </button>
       <button
-        onClick={handleLoadCounterCharm}
+        onClick={handleLoadSmolCharm}
         className="mt-4 ml-4 px-4 py-2 bg-green-500 text-white rounded"
       >
-        Load & Run Counter Charm
+        Load & Run Smol Charm
       </button>
 
       <div className="border border-red-500 mt-4 p-2">
