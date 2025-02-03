@@ -13,7 +13,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "test": "vitest --exclude=lib/**/*.test.js",
+    "test": "vitest run --exclude=lib/**/*.test.js --exclude=e2e/*",
     "e2e": "playwright test",
     "format": "prettier --write . --ignore-path ../../../.prettierignore",
     "lint": "eslint .",
