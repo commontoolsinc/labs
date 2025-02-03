@@ -3,8 +3,8 @@ import { customElement, property } from "lit/decorators.js";
 import { style } from "@commontools/ui";
 import { when } from "lit/directives/when.js";
 import { Charm, charms, runPersistent } from "@commontools/charm";
-import { BLOBBY_SERVER_URL, recipes } from "../data.js"
-import {  refer } from "merkle-reference";
+import { BLOBBY_SERVER_URL, recipes } from "../data.js";
+import { refer } from "merkle-reference";
 
 import {
   getDoc,
@@ -21,7 +21,7 @@ import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.jsx";
 import { render } from "@commontools/html";
 import { saveRecipe } from "../data.js";
-import { createNewRecipe } from "./iframe-spell-ai.js";
+import { castNewRecipe } from "./iframe-spell-ai.js";
 
 const uploadBlob = async (data: any) => {
   const id = refer(data).toString();
@@ -325,7 +325,7 @@ export class CommonSidebar extends LitElement {
     // also posted the data json to blobby ... would spellcaster work with this data?
     uploadBlob(data);
 
-    await createNewRecipe(data, "a simple display of the users data");
+    await castNewRecipe(data, "a simple display of the users data");
   }
 
   private async handlePublish() {
