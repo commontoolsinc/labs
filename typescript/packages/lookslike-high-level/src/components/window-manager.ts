@@ -3,16 +3,14 @@ import { customElement, state } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
 import { style } from "@commontools/ui";
 import { render } from "@commontools/html";
-import {
-  closeCharm,
-  openCharm,
-  syncRecipe,
-} from "../data.js";
+import { closeCharm, openCharm } from "../data.js";
 import {
   syncCharm,
   addCharms,
   Charm,
   runPersistent,
+  syncRecipe,
+  buildRecipe,
 } from "@commontools/charm";
 
 import {
@@ -28,7 +26,6 @@ import {
 import { repeat } from "lit/directives/repeat.js";
 import { UI, NAME, TYPE } from "@commontools/builder";
 import { matchRoute, navigate } from "../router.js";
-import { buildRecipe } from "../localBuild.js";
 import * as iframeSpellAi from "./iframe-spell-ai.js";
 import { SpellSearchResult } from "./search-results.js";
 import { toasty } from "./toasty.js";

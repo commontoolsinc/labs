@@ -1,6 +1,7 @@
 import { h, type VNode } from "@commontools/html";
 import { recipe, lift, handler, cell, UI, NAME, TYPE, ifElse, llm } from "@commontools/builder";
-import { type Charm, openCharm } from "../data.js";
+import { type Charm } from "@commontools/charm";
+import { openCharm } from "../data.js";
 import { run, getDocLinkOrValue, getEntityId, getDocByEntityId } from "@commontools/runner";
 import { suggestions } from "../suggestions.js";
 import { z } from "zod";

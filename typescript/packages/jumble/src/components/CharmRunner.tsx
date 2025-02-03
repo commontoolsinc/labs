@@ -121,10 +121,10 @@ export function CharmRunner({
   }, [argument, charmImport]);
 
   return (
-    <div className={className}>
+    <>
       {isLoading && <div>Loading...</div>}
       {error && <div>Error loading charm</div>}
-      <div ref={containerRef}></div>
-    </div>
+      <div className={className} ref={containerRef}></div>
+    </>
   );
 }

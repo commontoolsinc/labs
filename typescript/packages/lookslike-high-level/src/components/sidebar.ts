@@ -2,7 +2,7 @@ import { css, html, LitElement, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { style } from "@commontools/ui";
 import { when } from "lit/directives/when.js";
-import { Charm, charms, runPersistent } from "@commontools/charm";
+import { Charm, charms, runPersistent, saveRecipe } from "@commontools/charm";
 import { BLOBBY_SERVER_URL, recipes } from "../data.js";
 import { refer } from "merkle-reference";
 
@@ -20,7 +20,6 @@ import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.jsx";
 import { render } from "@commontools/html";
-import { saveRecipe } from "../data.js";
 import { castNewRecipe } from "./iframe-spell-ai.js";
 import { toasty } from "./toasty.js";
 

@@ -115,7 +115,7 @@ export class OsTabBar extends LitElement {
     return html`
       <div class="tab-container">
         <div class="reserved-space"></div>
-        ${this.items.map(
+        ${this.items?.map(
           (item) => html`
             <div class="tab-item">
               <button

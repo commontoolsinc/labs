@@ -429,6 +429,9 @@ importers:
       '@commontools/iframe-sandbox':
         specifier: workspace:*
         version: link:../common-iframe-sandbox
+      '@commontools/os-ui':
+        specifier: workspace:*
+        version: link:../common-os-ui
       '@commontools/runner':
         specifier: workspace:*
         version: link:../common-runner
@@ -459,6 +462,9 @@ importers:
       emoji-picker-react:
         specifier: ^4.12.0
         version: 4.12.0(react@18.3.1)
+      merkle-reference:
+        specifier: ^2.0.1
+        version: 2.0.1
       react:
         specifier: ^18.3.1
         version: 18.3.1
