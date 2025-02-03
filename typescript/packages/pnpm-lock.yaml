@@ -429,6 +429,9 @@ importers:
       '@commontools/iframe-sandbox':
         specifier: workspace:*
         version: link:../common-iframe-sandbox
+      '@commontools/os-ui':
+        specifier: workspace:*
+        version: link:../common-os-ui
       '@commontools/runner':
         specifier: workspace:*
         version: link:../common-runner

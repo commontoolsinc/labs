@@ -25,6 +25,7 @@
     "@codemirror/lang-markdown": "^6.3.2",
     "@codemirror/view": "^6.36.2",
     "@commontools/ui": "workspace:*",
+    "@commontools/os-ui": "workspace:*",
     "@commontools/builder": "workspace:*",
     "@commontools/runner": "workspace:*",
     "@commontools/html": "workspace:*",
