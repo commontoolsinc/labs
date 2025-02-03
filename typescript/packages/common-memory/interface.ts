@@ -2,6 +2,11 @@ import type { Reference } from "merkle-reference";
 
 export type { Reference };
 
+export type Command = {
+  watch?: In<Selector>;
+  unwatch?: In<Selector>;
+};
+
 /**
  * Unique identifier for the store.
  */

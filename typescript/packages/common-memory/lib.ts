@@ -37,10 +37,6 @@ interface MemoryServiceSession {
   router: Router.Router;
 }
 
-export type Command = {
-  watch?: In<Selector>;
-  unwatch?: In<Selector>;
-};
 
 class Service implements MemoryService {
   constructor(public router: Router.Router) {}
