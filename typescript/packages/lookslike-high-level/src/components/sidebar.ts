@@ -22,6 +22,7 @@ import { home } from "../recipes/home.jsx";
 import { render } from "@commontools/html";
 import { saveRecipe } from "../data.js";
 import { castNewRecipe } from "./iframe-spell-ai.js";
+import { toasty } from "./toasty.js";
 
 const uploadBlob = async (data: any) => {
   const id = refer(data).toString();
@@ -33,25 +34,6 @@ const uploadBlob = async (data: any) => {
     },
     body: JSON.stringify(data),
   });
-};
-
-// bf: TODO, send a "toast" event on window and an use another element to handle it
-const toasty = (message: string) => {
-  const toastEl = document.createElement("div");
-  toastEl.textContent = message;
-  toastEl.style.cssText = `
-    position: fixed;
-    top: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: #333;
-    color: white;
-    padding: 8px 16px;
-    border-radius: 4px;
-    z-index: 1000;
-  `;
-  document.body.appendChild(toastEl);
-  setTimeout(() => toastEl.remove(), 3000);
 };
 
 @customElement("common-debug")

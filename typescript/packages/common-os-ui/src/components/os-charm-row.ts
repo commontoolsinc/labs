@@ -45,6 +45,15 @@ export class OsCharmRow extends LitElement {
           max-width: calc(var(--u) * 90);
         }
 
+        .charm-row-subtitle {
+          color: var(--text-secondary);
+          font-size: 0.9em;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          max-width: calc(var(--u) * 90);
+        }
+
         & > .charm-row-extra {
           opacity: 0;
           transition: opacity var(--dur-md) var(--ease-out-expo);
@@ -63,12 +72,18 @@ export class OsCharmRow extends LitElement {
   @property({ type: String })
   text = "";
 
+  @property({ type: String })
+  subtitle = "";
+
   override render() {
     return html`
       <div class="charm-row toolbar">
         <div class="hstack gap-sm toolbar-start">
           <os-charm-icon class="charm-row-icon" icon="${this.icon}"></os-charm-icon>
-          <div class="charm-row-text body">${this.text}</div>
+          <div class="vstack">
+            <div class="charm-row-text body">${this.text}</div>
+            ${this.subtitle ? html`<div class="charm-row-subtitle">${this.subtitle}</div>` : ""}
+          </div>
         </div>
         <div class="hstack gap-sm toolbar-end charm-row-extra">
           <os-icon-button-plain icon="more_vert"></os-icon-button-plain>

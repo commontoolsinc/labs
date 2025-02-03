@@ -30,8 +30,10 @@ import { UI, NAME, TYPE } from "@commontools/builder";
 import { matchRoute, navigate } from "../router.js";
 import { buildRecipe } from "../localBuild.js";
 import * as iframeSpellAi from "./iframe-spell-ai.js";
+import { SpellSearchResult } from "./search-results.js";
+import { toasty } from "./toasty.js";
 
-async function castSpell(value: string, openCharm: (charmId: string) => void) {
+async function castSpell(value: string, showResults: (results: SpellSearchResult[]) => void) {
   const searchUrl =
     typeof window !== "undefined"
       ? window.location.protocol + "//" + window.location.host + "/api/ai/spell/search"
@@ -48,7 +50,7 @@ async function castSpell(value: string, openCharm: (charmId: string) => void) {
       query: value,
       tags: [],
       options: {
-        limit: 10,
+        limit: 32,
         includeCompatibility: true,
       },
     }),
@@ -66,20 +68,7 @@ async function castSpell(value: string, openCharm: (charmId: string) => void) {
     } = await response.json();
     console.log("Search response:", searchResponse);
 
-    let recipeKey = searchResponse.spells?.[0]?.key;
-    let blob = searchResponse.spells?.[0]?.compatibleBlobs?.[0];
-
-    if (recipeKey && blob) {
-      const recipeId = recipeKey.replace("spell-", "");
-      await syncRecipe(recipeId);
-
-      const recipe = getRecipe(recipeId);
-      if (!recipe) return;
-
-      const charm: DocImpl<Charm> = await runPersistent(recipe, blob.data);
-      addCharms([charm]);
-      openCharm(JSON.stringify(charm.entityId));
-    }
+    showResults(searchResponse.spells as any);
   }
 }
 
@@ -213,6 +202,9 @@ export class CommonWindowManager extends LitElement {
   @state()
   private focusedProxy: Charm | null = null;
 
+  @state()
+  private spellSearchResults: SpellSearchResult[] = [];
+
   handleUniboxSubmit(event: CustomEvent) {
     const value = event.detail.value;
     const shiftKey = event.detail.shiftKey;
@@ -221,7 +213,39 @@ export class CommonWindowManager extends LitElement {
     if (this.focusedCharm) {
       iframeSpellAi.iterate(this.focusedCharm, value, shiftKey);
     } else {
-      castSpell(value, this.openCharm.bind(this));
+      castSpell(value, this.showResults.bind(this));
+    }
+  }
+
+  showResults(results: SpellSearchResult[]) {
+    if (!results || results.length === 0) {
+      toasty("No results");
+      return;
+    }
+    this.spellSearchResults = results;
+  }
+
+  async onSpellCast(event: CustomEvent) {
+    const { spell: result, blob } = event.detail;
+    const recipeKey = result?.key;
+
+    if (recipeKey && blob) {
+      toasty("Syncing...");
+      const recipeId = recipeKey.replace("spell-", "");
+      await syncRecipe(recipeId);
+
+      const recipe = getRecipe(recipeId);
+      if (!recipe) return;
+
+      toasty("Casting...");
+      const charm: DocImpl<Charm> = await runPersistent(recipe, blob.data);
+      addCharms([charm]);
+      openCharm(JSON.stringify(charm.entityId));
+      toasty("Ready!");
+
+      this.spellSearchResults = [];
+    } else {
+      toasty("Failed to cast");
     }
   }
 
@@ -350,6 +374,12 @@ export class CommonWindowManager extends LitElement {
             )}
           </os-charm-chip-group>
         </os-dialog>
+
+        <common-search-results
+          .searchOpen=${this.spellSearchResults.length > 0}
+          .results=${this.spellSearchResults}
+          @spell-cast=${this.onSpellCast}
+        ></common-search-results>
 
         <os-fabgroup class="pin-br" slot="overlay" @submit=${onAiBoxSubmit}>
           ${repeat(
