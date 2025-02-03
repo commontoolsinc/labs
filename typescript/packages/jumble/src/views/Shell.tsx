@@ -1,11 +1,9 @@
 // This is all you need to import/register the @commontools/ui web components
 import "@commontools/ui";
-import React, { useRef } from "react";
-import { type Charm, runPersistent, addCharms } from "@commontools/charm";
-import { effect, idle, run } from "@commontools/runner";
-import { render } from "@commontools/html";
 import { setIframeContextHandler } from "@commontools/iframe-sandbox";
 import { Action, ReactivityLog, addAction, removeAction } from "@commontools/runner";
+import { CharmRunner } from "@/components/CharmRunner";
+import { useState } from "react";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 setIframeContextHandler({
@@ -28,53 +26,24 @@ setIframeContextHandler({
 });
 
 export default function Shell() {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [count, setCount] = useState(0);
 
-  const handleLoadSmolCharm = async () => {
-    try {
-      // load the recipe, BUT you can't use JSX because
-      // JSX here would be react JSX, not common/html JSX
-      // even though the recipe imports our `h` function
-      const mod = await import("@/recipes/smol.tsx");
-      const smolFactory = mod.default;
-
-      // run the charm (this makes the logic go, cells, etc)
-      // but nothing about rendering...
-      const charm = await runPersistent(smolFactory);
-      addCharms([charm]);
-      
-      await idle();
-      run(undefined, undefined, charm);
-      await idle();
-
-      // connect the cells of the charm (reactive docs) and the 
-      // view (recipe VDOM) to be rendered using common/html
-      // into a specific DOM element (created in react)
-      console.log("charm", JSON.stringify(charm, null, 2));
-      effect(charm.asCell<Charm>(), (charm) => {
-        console.log("charm", JSON.stringify(charm, null, 2));
-        effect(charm['$UI'], (view) => {
-          console.log("view", JSON.stringify(view, null, 2));
-          render(containerRef.current as HTMLElement, view);
-        });
-      });
-    } catch (error) {
-      console.error("Failed to load counter charm", error);
-    }
+  const incrementCount = () => {
+    setCount((c) => c + 1);
   };
 
   return (
     <div className="h-full relative">
-      <button
-        onClick={handleLoadSmolCharm}
-        className="mt-4 ml-4 px-4 py-2 bg-green-500 text-white rounded"
-      >
-        Load & Run Smol Charm
+      <button onClick={incrementCount} className="mb-4 px-4 py-2 bg-blue-500 text-white rounded">
+        Increment Count ({count})
       </button>
 
-      <div className="border border-red-500 mt-4 p-2">
-        <div ref={containerRef}></div>
-      </div>
+      <CharmRunner
+        charmImport={() => import("@/recipes/smol.tsx")}
+        argument={{ count }}
+        className="border border-red-500 mt-4 p-2"
+        autoLoad
+      />
     </div>
   );
 }

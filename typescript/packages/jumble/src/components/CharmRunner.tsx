@@ -1,53 +1,130 @@
-import React, { useRef, useEffect } from "react";
-import { effect } from "@commontools/runner";
-import type { DocImpl } from "@commontools/runner";
-import { createRoot, Root } from "react-dom/client";
-import { UI } from "@commontools/builder";
+import React, { useRef } from "react";
+import { render } from "@commontools/html";
+import { addCharms, Charm, runPersistent } from "@commontools/charm";
+import { effect, idle, run } from "@commontools/runner";
 
-export interface CharmRunnerProps {
-  // Accept either a full reactive DocImpl or a plain charm with a ui prop.
-  charm: DocImpl<any> | { ui: React.ReactNode };
+interface CharmRunnerProps {
+  charmImport: () => Promise<any>;
+  argument?: any;
+  autoLoad?: boolean;
+  className?: string;
 }
 
-export default function CharmRunner({ charm }: CharmRunnerProps) {
+export function CharmRunner({
+  charmImport,
+  argument,
+  autoLoad = false,
+  className = "",
+}: CharmRunnerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const rootRef = useRef<Root | null>(null);
+  const [error, setError] = React.useState<Error | null>(null);
+  const [isLoading, setIsLoading] = React.useState(false);
+  const charmInstance = useRef<any>(null);
+  const cleanupFns = useRef<Array<() => void>>([]);
+  // Add a mounting key to help us detect remounts
+  const mountingKey = useRef(0);
 
-  useEffect(() => {
-    // Helper: updates the container with the new view, re-using the root.
-    const updateContainer = (view: any) => {
-      if (containerRef.current) {
-        if (!rootRef.current) {
-          rootRef.current = createRoot(containerRef.current);
-        }
-        if (React.isValidElement(view)) {
-          rootRef.current.render(view);
-        } else {
-          // If view is raw html, update innerHTML
-          containerRef.current.innerHTML = view;
-        }
-      }
-    };
-
-    // If the charm doesn't have asCell (i.e. not reactive), immediately update.
-    if (typeof (charm as any).asCell !== "function") {
-      updateContainer((charm as { ui: React.ReactNode }).ui);
-      return;
+  const cleanup = () => {
+    cleanupFns.current.forEach((fn) => fn());
+    cleanupFns.current = [];
+    if (charmInstance.current) {
+      charmInstance.current = null;
     }
+    if (containerRef.current) {
+      containerRef.current.innerHTML = "";
+    }
+  };
 
-    // If charm is reactive, subscribe to its UI cell.
-    const unsubscribe = effect((charm as DocImpl<any>).asCell(UI), (view: any) => {
-      if (!view) {
-        console.warn("No UI for charm", charm);
+  const loadAndRunCharm = React.useCallback(async () => {
+    if (!containerRef.current) return;
+
+    // Increment mounting key for this attempt
+    const currentMountKey = ++mountingKey.current;
+
+    cleanup();
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const module = await charmImport();
+      const factory = module.default;
+
+      if (!factory) {
+        throw new Error("Invalid charm module: missing default export");
+      }
+
+      // Check if this is still the most recent mounting attempt
+      if (currentMountKey !== mountingKey.current) {
         return;
       }
-      updateContainer(view);
-    });
 
+      const charm = await runPersistent(factory);
+
+      // Check again after async operation
+      if (currentMountKey !== mountingKey.current) {
+        return;
+      }
+
+      addCharms([charm]);
+
+      await idle();
+      run(undefined, argument, charm);
+      await idle();
+
+      // Final check before setting up effects
+      if (currentMountKey !== mountingKey.current) {
+        return;
+      }
+
+      const cleanupCharm = effect(charm.asCell<Charm>(), (charm) => {
+        const cleanupUI = effect(charm["$UI"], (view) => {
+          if (containerRef.current) {
+            render(containerRef.current, view);
+          }
+        });
+        cleanupFns.current.push(cleanupUI);
+      });
+      cleanupFns.current.push(cleanupCharm);
+
+      charmInstance.current = charm;
+    } catch (err) {
+      if (currentMountKey === mountingKey.current) {
+        setError(err as Error);
+      }
+    } finally {
+      if (currentMountKey === mountingKey.current) {
+        setIsLoading(false);
+      }
+    }
+  }, [charmImport, argument]);
+
+  // Clean up on unmount
+  React.useEffect(() => {
     return () => {
-      unsubscribe();
+      mountingKey.current++;
+      cleanup();
     };
-  }, [charm]);
+  }, []);
 
-  return <div ref={containerRef} />;
+  // Handle autoLoad
+  React.useEffect(() => {
+    if (autoLoad) {
+      loadAndRunCharm();
+    }
+  }, [autoLoad, loadAndRunCharm]);
+
+  // Handle prop changes
+  React.useEffect(() => {
+    if (charmInstance.current) {
+      loadAndRunCharm();
+    }
+  }, [argument, charmImport]);
+
+  return (
+    <div className={className}>
+      {isLoading && <div>Loading...</div>}
+      {error && <div>Error loading charm</div>}
+      <div ref={containerRef}></div>
+    </div>
+  );
 }
