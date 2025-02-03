@@ -24,24 +24,25 @@ export default defineConfig({
         changeOrigin: true,
       },
       "/api/ai/img": {
-        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/api/ai/img",
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/ai/voice": {
-        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/api/ai/voice",
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/ai/webreader": {
-        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/api/ai/webreader",
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/storage/blobby": {
-        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/api/storage/blobby",
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
         changeOrigin: true,
       },
       "/api/storage/memory": {
-        target: "http://localhost:8001/api/storage/memory",
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
         ws: true,
+        changeOrigin: true,
         rewriteWsOrigin: true,
       },
     },
