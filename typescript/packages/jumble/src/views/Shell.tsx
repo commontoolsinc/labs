@@ -4,10 +4,9 @@ import { setIframeContextHandler } from "@commontools/iframe-sandbox";
 import { Action, ReactivityLog, addAction, removeAction } from "@commontools/runner";
 import { CharmRunner } from "@/components/CharmRunner";
 import { WebComponent } from "@/components/WebComponent";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import * as osUi from "@commontools/os-ui";
-import { OsChrome } from "@commontools/os-ui/src/components/os-chrome";
 console.log(osUi);
 import "@commontools/os-ui/src/static/main.css";
 import Sidebar from "@/components/Sidebar";
@@ -34,46 +33,6 @@ setIframeContextHandler({
     removeAction(receipt);
   },
 });
-
-interface OsChromeProps {
-  wide?: boolean;
-  locationTitle?: string;
-  children?: React.ReactNode;
-  onLocation?: () => void;
-}
-
-function Chrome({
-  wide = false,
-  locationTitle = "Test",
-  children = "test",
-  onLocation,
-}: OsChromeProps) {
-  const chromeRef = useRef<OsChrome>(null);
-
-  useEffect(() => {
-    const element = chromeRef.current;
-    if (!element) return;
-
-    (element as any).wide = wide;
-    element.locationtitle = locationTitle;
-
-    const handleLocation = () => {
-      if (onLocation) {
-        onLocation();
-      }
-    };
-
-    element.addEventListener("location", handleLocation);
-
-    return () => {
-      element.removeEventListener("location", handleLocation);
-    };
-  }, [wide, locationTitle, onLocation]);
-
-  return <os-chrome ref={chromeRef}>{children}</os-chrome>;
-}
-
-// bf: probably not the best way to make a cell but it works
 
 function Content() {
   const [count, setCount] = useState(0);
