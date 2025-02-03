@@ -576,7 +576,7 @@ class StorageImpl implements Storage {
   }
 }
 
-export function createStorage(type: "local" | "memory" | "remote"): Storage {
+export function createStorage(type: "local" | "memory" | "remote", replica: string = "common-knowledge"): Storage {
   let storageProvider: StorageProvider;
 
   if (type === "local") {
@@ -586,6 +586,7 @@ export function createStorage(type: "local" | "memory" | "remote"): Storage {
   } else if (type === "remote") {
     storageProvider = new RemoteStorageProvider({
       address: new URL("/api/storage/memory", new URL(location.href)),
+      replica,
     });
   } else {
     throw new Error("Invalid storage type");

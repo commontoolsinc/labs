@@ -370,6 +370,7 @@ export class RemoteStorageProvider implements StorageProvider {
     if (revision) {
       return revision;
     }
+    return;
   }
 
   async perform(command: Command) {

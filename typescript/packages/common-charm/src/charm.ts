@@ -1,5 +1,16 @@
 import { Module, NAME, Recipe, TYPE, UI } from "@commontools/builder";
-import { getDoc, type DocLink, DocImpl, EntityId, idle, createRef, getRecipe, isDoc, isDocLink, run } from "@commontools/runner";
+import {
+  getDoc,
+  type DocLink,
+  DocImpl,
+  EntityId,
+  idle,
+  createRef,
+  getRecipe,
+  isDoc,
+  isDocLink,
+  run,
+} from "@commontools/runner";
 import { createStorage } from "./storage.js";
 
 export type Charm = {
@@ -9,7 +20,15 @@ export type Charm = {
   [key: string]: any;
 };
 
-export const storage = createStorage((import.meta as any).env.VITE_STORAGE_TYPE ?? "memory");
+// FIXME(ja): we shouldn't assume we are in a browser environment here.
+const defaultReplica = "common-knowledge";
+const urlParams = new URLSearchParams(window.location.search);
+const replica = urlParams.get("replica") ?? defaultReplica;
+const storageType = urlParams.get("replica")
+  ? "remote"
+  : ((import.meta as any).env.VITE_STORAGE_TYPE ?? "memory");
+
+export const storage = createStorage(storageType, replica);
 export const charms = getDoc<DocLink[]>([], "charms");
 (window as any).charms = charms;
 
