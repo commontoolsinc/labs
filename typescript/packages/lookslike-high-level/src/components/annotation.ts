@@ -5,6 +5,8 @@ import { render } from "@commontools/html";
 import { annotationsEnabled } from "../data.js";
 import { run, getDoc, DocImpl, getDocLinkOrValue } from "@commontools/runner";
 import { annotation } from "../recipes/annotation.jsx";
+import { UI } from "@commontools/builder";
+import { charms } from "@commontools/charm";
 
 @customElement("common-annotation-toggle")
 export class CommonAnnotationToggle extends LitElement {

@@ -58,17 +58,6 @@ export default class SearchResults extends LitElement {
     this.dispatchEvent(new CustomEvent("close"));
   }
 
-  private handleSearch(e: CustomEvent) {
-    const query = e.detail.query;
-    this.dispatchEvent(new CustomEvent("search", { detail: { query } }));
-  }
-
-  private handleResultClick(result: SpellSearchResult) {
-    this.focusedResult = result;
-    this.dispatchEvent(new CustomEvent("select", { detail: { result } }));
-    this.searchOpen = false;
-  }
-
   override render() {
     return html`
       <style>

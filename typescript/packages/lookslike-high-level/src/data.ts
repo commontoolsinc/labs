@@ -27,8 +27,8 @@ export const BLOBBY_SERVER_URL =
 // import "./recipes/todo-list-as-task.jsx";
 // import "./recipes/playlist.jsx";
 
-import smolIframe from "./recipes/smolIframe.js";
-import complexIframe from "./recipes/complexIframe.js";
+// import smolIframe from "./recipes/smolIframe.js";
+// import complexIframe from "./recipes/complexIframe.js";
 
 addCharms([
   // await runPersistent(smolIframe, { count: 1 }, "smol iframe"),

@@ -508,7 +508,10 @@ export class RemoteStorageProvider implements StorageProvider {
         cause: this.revision(of)?.this,
       };
 
-      promises.push(this.transact({ [this.replica]: { assert: assertion } }));
+      promises.push(this.transact({ [this.replica]: { assert: {
+        ...assertion,
+        cause: assertion.cause as Reference<Fact> | null | undefined
+      } } }));
     }
 
     const results = await Promise.all(promises);
