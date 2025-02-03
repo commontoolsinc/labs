@@ -1,0 +1,35 @@
+name: E2E Tests
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [22]
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache-dependency-path: typescript/packages/pnpm-lock.yaml
+    - name: Install dependencies
+      run: |
+        cd typescript/packages
+        pnpm install
+        pnpx playwright install --with-deps
+    - name: E2E Tests
+      run: |
+        cd typescript/packages/lookslike-high-level
+        pnpm e2e
