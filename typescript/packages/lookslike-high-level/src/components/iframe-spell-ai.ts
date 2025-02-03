@@ -1,14 +1,17 @@
 import { getRecipe, getRecipeSrc, addRecipe, run } from "@commontools/runner";
-import { addCharms, Charm } from "@commontools/charm";
+import { addCharms, Charm, tsToExports } from "@commontools/charm";
 import { openCharm } from "../data.js";
 import { LLMClient } from "@commontools/llm-client";
 import { createJsonSchema, JSONSchema, TYPE } from "@commontools/builder";
-import { tsToExports } from "../localBuild.js";
 import { type DocImpl } from "@commontools/runner";
 
 import demoSrc from "./demo.html?raw";
 
-const SELECTED_MODEL = ["groq:llama-3.3-70b-specdec", "cerebras:llama-3.3-70b", "anthropic:claude-3-5-sonnet"];
+const SELECTED_MODEL = [
+  "groq:llama-3.3-70b-specdec",
+  "cerebras:llama-3.3-70b",
+  "anthropic:claude-3-5-sonnet",
+];
 
 const responsePrefill =
   "```html\n" +
@@ -177,7 +180,17 @@ const llmUrl =
 
 const llm = new LLMClient(llmUrl);
 
-const genSrc = async ({ src, spec, newSpec, schema }: { src?: string; spec?: string; newSpec: string; schema: JSONSchema }) => {
+const genSrc = async ({
+  src,
+  spec,
+  newSpec,
+  schema,
+}: {
+  src?: string;
+  spec?: string;
+  newSpec: string;
+  schema: JSONSchema;
+}) => {
   const messages = [];
   if (spec && src) {
     messages.push(spec);
@@ -228,7 +241,7 @@ ${newSpec}
     <view-model-schema>
       ${JSON.stringify(schema, null, 2)}
     </view-model-schema>
-    
+
     You can use the generateImage function to get a url for a generated image.`;
 
   const payload = {
@@ -292,7 +305,12 @@ export async function iterate(charm: DocImpl<Charm> | null, value: string, shift
 
   const newSpec = shiftKey ? iframe.spec + "\n" + value : value;
 
-  const newIFrameSrc = await genSrc({ src: iframe.src, spec: iframe.spec, newSpec, schema: iframe.argumentSchema });
+  const newIFrameSrc = await genSrc({
+    src: iframe.src,
+    spec: iframe.spec,
+    newSpec,
+    schema: iframe.argumentSchema,
+  });
   const name = newIFrameSrc.match(/<title>(.*?)<\/title>/)?.[1] ?? newSpec;
   const newRecipeSrc = buildFullRecipe({ ...iframe, src: newIFrameSrc, spec: newSpec, name });
 
@@ -325,14 +343,19 @@ export async function iterate(charm: DocImpl<Charm> | null, value: string, shift
   }
 }
 
-
 export async function castNewRecipe(data: any, newSpec: string) {
   const schema = createJsonSchema({}, data);
   schema.description = newSpec;
 
   const newIFrameSrc = await genSrc({ newSpec, schema });
   const name = newIFrameSrc.match(/<title>(.*?)<\/title>/)?.[1] ?? newSpec;
-  const newRecipeSrc = buildFullRecipe({ src: newIFrameSrc, spec: newSpec, argumentSchema: schema, resultSchema: {}, name });
+  const newRecipeSrc = buildFullRecipe({
+    src: newIFrameSrc,
+    spec: newSpec,
+    argumentSchema: schema,
+    resultSchema: {},
+    name,
+  });
 
   const { exports, errors } = await tsToExports(newRecipeSrc);
 
