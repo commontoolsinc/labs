@@ -1,7 +1,8 @@
 import * as Memory from "./lib.ts";
 import * as Path from "jsr:@std/path";
 
-const STORE = new URL(`./${Deno.env.get("STORE") ?? "memory"}/`, Path.toFileUrl(`${Deno.cwd()}/`));
+const storePath = (Deno.env.get("STORE") ?? "memory").replace(/\/?$/, '/');
+const STORE = new URL(storePath, Path.toFileUrl(`${Deno.cwd()}/`));
 const { ok: memory, error } = await Memory.open({
   store: STORE,
 });
