@@ -124,6 +124,11 @@ export type Retract = {
 };
 export type Instruction = Assert | Retract;
 
+export type Commit = {
+  count: number;
+  transaction: Transaction;
+};
+
 export type Transaction = Instruction[];
 
 export type InferTransactionResult<Instruction> = Instruction extends Assert
