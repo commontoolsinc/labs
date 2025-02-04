@@ -16,12 +16,20 @@ import {
 } from "@commontools/runner";
 import * as allRecipes from "./recipes/index.js";
 import { setIframeContextHandler } from "@commontools/iframe-sandbox";
-import { addCharms } from "@commontools/charm";
+import { CharmManager } from "@commontools/charm";
 
 export const BLOBBY_SERVER_URL =
   typeof window !== "undefined"
     ? window.location.protocol + "//" + window.location.host + "/api/storage/blobby"
     : "//api/storage/blobby";
+
+
+export const charmManager = (() => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const replica = urlParams.get("replica") ?? undefined;
+  const storageType = replica ? "remote" : ((import.meta as any).env.VITE_STORAGE_TYPE ?? "memory");
+  return new CharmManager(replica, storageType);
+})();
 
 // Necessary, so that suggestions are indexed.
 // import "./recipes/todo-list-as-task.jsx";
@@ -30,7 +38,7 @@ export const BLOBBY_SERVER_URL =
 // import smolIframe from "./recipes/smolIframe.js";
 // import complexIframe from "./recipes/complexIframe.js";
 
-addCharms([
+charmManager.add([
   // await runPersistent(smolIframe, { count: 1 }, "smol iframe"),
   // await runPersistent(complexIframe, { count: 42 }, "complex iframe"),
 ]);

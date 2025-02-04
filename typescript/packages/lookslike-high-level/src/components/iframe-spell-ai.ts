@@ -1,6 +1,6 @@
 import { getRecipe, getRecipeSrc, addRecipe, run } from "@commontools/runner";
-import { addCharms, Charm, tsToExports } from "@commontools/charm";
-import { openCharm } from "../data.js";
+import { Charm, tsToExports } from "@commontools/charm";
+import { charmManager, openCharm } from "../data.js";
 import { LLMClient } from "@commontools/llm-client";
 import { createJsonSchema, JSONSchema, TYPE } from "@commontools/builder";
 import { type DocImpl } from "@commontools/runner";
@@ -337,7 +337,7 @@ export async function iterate(charm: DocImpl<Charm> | null, value: string, shift
     // if you want to run a new charm:
     const newCharm = run(recipe, { cell: charm.sourceCell, path: ["argument"] });
 
-    addCharms([newCharm]);
+    charmManager.add([newCharm]);
     const charmId = JSON.stringify(newCharm.entityId);
     openCharm(charmId);
   }
@@ -373,7 +373,7 @@ export async function castNewRecipe(data: any, newSpec: string) {
 
     const newCharm = run(recipe, data);
 
-    addCharms([newCharm]);
+    charmManager.add([newCharm]);
     const charmId = JSON.stringify(newCharm.entityId);
     openCharm(charmId);
   }

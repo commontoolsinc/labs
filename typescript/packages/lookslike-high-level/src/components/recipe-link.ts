@@ -1,7 +1,8 @@
 import { LitElement, html, css } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { addCharms, runPersistent, type Charm } from "@commontools/charm";
+import { type Charm } from "@commontools/charm";
 import { type DocImpl, getRecipe } from "@commontools/runner";
+import { charmManager } from "../data.js";
 
 @customElement("common-recipe-link")
 export class CommonRecipeLink extends LitElement {
@@ -25,8 +26,8 @@ export class CommonRecipeLink extends LitElement {
     const recipe = getRecipe(this.recipe);
     if (!recipe) return;
 
-    const charm: DocImpl<Charm> = await runPersistent(recipe);
-    addCharms([charm]);
+    const charm: DocImpl<Charm> = await charmManager.runPersistent(recipe);
+    charmManager.add([charm]);
 
     this.dispatchEvent(
       new CustomEvent("open-charm", {

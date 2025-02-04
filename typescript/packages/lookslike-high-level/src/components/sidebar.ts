@@ -2,8 +2,8 @@ import { css, html, LitElement, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { style } from "@commontools/ui";
 import { when } from "lit/directives/when.js";
-import { Charm, charms, runPersistent, saveRecipe } from "@commontools/charm";
-import { BLOBBY_SERVER_URL, recipes } from "../data.js";
+import { Charm, saveRecipe } from "@commontools/charm";
+import { charmManager, BLOBBY_SERVER_URL, recipes } from "../data.js";
 import { refer } from "merkle-reference";
 
 import {
@@ -348,7 +348,8 @@ export class CommonSidebar extends LitElement {
     }
 
     if (!this.homeCharm && this.homeRef.value) {
-      this.homeCharm = runPersistent(home, { charms, recipes }, "home").then((home) => {
+      let charms = charmManager.getCharms();
+      this.homeCharm = charmManager.runPersistent(home, { charms, recipes }, "home").then((home) => {
         const view = home.asCell<Charm>().key(UI);
         if (!view.getAsQueryResult()) throw new Error("Charm has no UI");
         render(this.homeRef.value!, view);

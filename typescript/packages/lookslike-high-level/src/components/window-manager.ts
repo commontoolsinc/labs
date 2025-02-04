@@ -3,17 +3,13 @@ import { customElement, state } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
 import { style } from "@commontools/ui";
 import { render } from "@commontools/html";
-import { closeCharm, openCharm } from "../data.js";
+import { charmManager, closeCharm, openCharm } from "../data.js";
 import {
-  syncCharm,
-  addCharms,
   Charm,
-  runPersistent,
   syncRecipe,
   buildRecipe,
   replica,
 } from "@commontools/charm";
-
 import {
   addRecipe,
   DocImpl,
@@ -237,8 +233,8 @@ export class CommonWindowManager extends LitElement {
       if (!recipe) return;
 
       toasty("Casting...");
-      const charm: DocImpl<Charm> = await runPersistent(recipe, blob.data);
-      addCharms([charm]);
+      const charm: DocImpl<Charm> = await charmManager.runPersistent(recipe, blob.data);
+      charmManager.add([charm]);
       openCharm(JSON.stringify(charm.entityId));
       toasty("Ready!");
 
@@ -461,13 +457,13 @@ export class CommonWindowManager extends LitElement {
 
   private idAliases = new Map<string, string>();
   async openCharm(charmToOpen: string | EntityId | DocImpl<any>) {
-    let charm = await syncCharm(charmToOpen);
+    let charm = await charmManager.sync(charmToOpen);
     let charmId = JSON.stringify(charm.entityId!);
 
     if (typeof charmToOpen === "string" && this.idAliases.has(charmToOpen)) {
       charmToOpen = this.idAliases.get(charmToOpen)!;
       console.log("Using alias", charmToOpen);
-      charm = await syncCharm(charmToOpen);
+      charm = await charmManager.sync(charmToOpen);
       charmId = JSON.stringify(charm.entityId!);
     }
 
@@ -487,7 +483,7 @@ export class CommonWindowManager extends LitElement {
     this.focusedCharm = charm;
     this.focusedProxy = charm?.getAsQueryResult();
 
-    addCharms([charm]);
+    charmManager.add([charm]);
     this.location = this.focusedProxy?.[NAME] || "-";
 
     const existingWindow = this.renderRoot.querySelector(
@@ -567,7 +563,7 @@ export class CommonWindowManager extends LitElement {
       console.log("charmMatch", charmMatch.params.charmId);
       // TODO: Add a timeout here, show loading state and error state
       setTimeout(() => {
-        syncCharm(charmMatch.params.charmId, true).then(
+        charmManager.sync(charmMatch.params.charmId, true).then(
           (charm) =>
             (charm && charm.get() && this.openCharm(charm)) ||
             navigate(`/charm/${charmMatch.params.charmId}`),
@@ -597,7 +593,7 @@ export class CommonWindowManager extends LitElement {
         buildRecipe(src).then(({ recipe }) => {
           if (recipe) {
             addRecipe(recipe, src, "render data", []);
-            runPersistent(recipe, initialData)
+            charmManager.runPersistent(recipe, initialData)
               .then((charm) => this.openCharm(charm))
               .then(() => console.log("Recipe successfully loaded"));
           }
