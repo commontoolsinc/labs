@@ -33,7 +33,7 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: "2.1.5"
+          deno-version: "2.1.9"
 
       - name: Cache dependencies
         uses: actions/cache@v3
@@ -73,10 +73,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
         with:
-          node-version: "22"
+          deno-version: "2.1.9"
 
       # - name: Build high-level app
       #   working-directory: typescript/packages/lookslike-high-level
@@ -87,9 +87,6 @@ jobs:
       #     cp -r dist/* ../toolshed/lookslike-highlevel-dist/
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Vendor dependencies into the container
-        run: deno task vendor
 
       - name: Deploy to Fly.io
         run: flyctl deploy --remote-only
