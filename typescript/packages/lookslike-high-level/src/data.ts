@@ -102,16 +102,29 @@ export const toggleAnnotations = () => {
   annotationsEnabled.send(!annotationsEnabled.get());
 };
 
+// This is to prepare Proxy objects to be serialized
+// before sent between frame boundaries via structured clone algorithm.
+// There should be a more efficient generalized method for doing
+// so instead of an extra JSON parse/stringify cycle.
+const serializeProxyObjects = (proxy: any) => {
+  return proxy == undefined ? undefined : JSON.parse(JSON.stringify(proxy));
+}
+
 setIframeContextHandler({
   read(context: any, key: string): any {
-    return context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
+    let data = context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
+    let serialized = serializeProxyObjects(data);
+    return serialized;
   },
   write(context: any, key: string, value: any) {
     context.getAsQueryResult()[key] = value;
   },
   subscribe(context: any, key: string, callback: (key: string, value: any) => void): any {
-    const action: Action = (log: ReactivityLog) =>
-      callback(key, context.getAsQueryResult([key], log));
+    const action: Action = (log: ReactivityLog) => {
+      let data = context.getAsQueryResult([key], log);
+      let serialized = serializeProxyObjects(data);
+      callback(key, serialized);
+    };
 
     addAction(action);
     return action;

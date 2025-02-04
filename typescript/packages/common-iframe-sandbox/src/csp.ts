@@ -39,5 +39,3 @@ export const CSP = `` +
   // Object/Embeds: Use default (disabled)
   //`object-src 'none';` +
   ``;
-
-export const META_TAG_CSP = `<meta http-equiv="Content-Security-Policy" content="${CSP}" />`;
