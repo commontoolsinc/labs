@@ -46,7 +46,9 @@ Deno.test("test subscription", async (t) => {
   const server = Deno.serve(app.fetch);
   const entity = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
 
-  const url = new URL(`http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`);
+  const url = new URL(
+    `http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+  );
   const socket = new WebSocket(url.href);
 
   await new Promise((resolve) => (socket.onopen = resolve));
