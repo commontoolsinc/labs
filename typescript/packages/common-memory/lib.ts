@@ -31,7 +31,7 @@ export const open = async (
 export interface MemoryService {
   close(): AsyncResult<{}, SystemError>;
   subscribe(socket: WebSocket): AsyncResult<{}, Error>;
-  patch(request: Request): Promise<Response>;
+  patch(request: { json(): Promise<any> }): Promise<Response>;
 }
 
 interface MemoryServiceSession {
@@ -43,7 +43,7 @@ class Service implements MemoryService {
   subscribe(socket: WebSocket) {
     return subscribe(this, socket);
   }
-  patch(request: Request): Promise<Response> {
+  patch(request: { json(): Promise<any> }): Promise<Response> {
     return patch(this, request);
   }
   query(selector: In<Selector>) {
@@ -63,11 +63,7 @@ export const close = ({ router }: MemoryServiceSession) => {
 
 export const subscribe = (session: MemoryServiceSession, socket: WebSocket) => {
   const subscription = session.router.subscribe({});
-  socket.onopen = () => {
-    console.log("socket opened");
-  };
   socket.onmessage = (event) => {
-    console.log("server received a message");
     const command = parseCommand(event.data);
     if (command.unwatch) {
       subscription.unwatch(command.unwatch);
@@ -78,14 +74,13 @@ export const subscribe = (session: MemoryServiceSession, socket: WebSocket) => {
     }
   };
   socket.onclose = () => {
-    console.log("socket closed");
     subscription.close();
   };
 
   return pipeToSocket(subscription.stream, socket);
 };
 
-export const patch = async (session: MemoryServiceSession, request: Request) => {
+export const patch = async (session: MemoryServiceSession, request: { json(): Promise<any> }) => {
   try {
     const transaction = asRouterTransaction(await request.json());
     const result = await session.router.transact(transaction);
@@ -99,6 +94,7 @@ export const patch = async (session: MemoryServiceSession, request: Request) => 
       },
     });
   } catch (cause) {
+    console.log(cause);
     const error = cause as Partial<Error>;
     return new Response(
       JSON.stringify({

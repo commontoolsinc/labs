@@ -387,6 +387,9 @@ export class RemoteStorageProvider implements StorageProvider {
   ): AsyncResult<Fact, ConflictError | TransactionError | ConnectionError> {
     const response = await fetch(this.address.href, {
       method: "PATCH",
+      headers: {
+        'content-type': 'application/json'
+      },
       body: JSON.stringify(transaction),
     });
 
