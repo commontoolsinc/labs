@@ -8,6 +8,7 @@ import aiWebReader from "@/routes/ai/webreader/webreader.index.ts";
 import aiSpell from "@/routes/ai/spell/spell.index.ts";
 import discord from "@/routes/integrations/discord/discord.index.ts";
 import blobby from "@/routes/storage/blobby/blobby.index.ts";
+import memory from "@/routes/storage/memory/memory.index.ts";
 import lookslikeHighlevelApp from "@/routes/lookslike-highlevel-app/lookslike-highlevel-app.index.ts";
 
 const app = createApp();
@@ -23,6 +24,7 @@ const routes = [
   aiSpell,
   discord,
   blobby,
+  memory,
   lookslikeHighlevelApp,
 ] as const;
 

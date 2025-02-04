@@ -7,6 +7,7 @@ import {
   AsyncResult,
   ConnectionError,
   In,
+  Command,
   Transaction,
   Selector,
   Statement,
@@ -30,20 +31,19 @@ export const open = async (
 export interface MemoryService {
   close(): AsyncResult<{}, SystemError>;
   subscribe(socket: WebSocket): AsyncResult<{}, Error>;
-  patch(request: Request): Promise<Response>;
+  patch(request: { json(): Promise<any> }): Promise<Response>;
 }
 
 interface MemoryServiceSession {
   router: Router.Router;
 }
 
-
 class Service implements MemoryService {
   constructor(public router: Router.Router) {}
   subscribe(socket: WebSocket) {
     return subscribe(this, socket);
   }
-  patch(request: Request): Promise<Response> {
+  patch(request: { json(): Promise<any> }): Promise<Response> {
     return patch(this, request);
   }
   query(selector: In<Selector>) {
@@ -80,7 +80,7 @@ export const subscribe = (session: MemoryServiceSession, socket: WebSocket) => {
   return pipeToSocket(subscription.stream, socket);
 };
 
-export const patch = async (session: MemoryServiceSession, request: Request) => {
+export const patch = async (session: MemoryServiceSession, request: { json(): Promise<any> }) => {
   try {
     const transaction = asRouterTransaction(await request.json());
     const result = await session.router.transact(transaction);
@@ -94,6 +94,7 @@ export const patch = async (session: MemoryServiceSession, request: Request) => 
       },
     });
   } catch (cause) {
+    console.log(cause);
     const error = cause as Partial<Error>;
     return new Response(
       JSON.stringify({

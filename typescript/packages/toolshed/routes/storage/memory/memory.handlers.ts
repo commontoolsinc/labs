@@ -14,11 +14,9 @@ if (error) {
 export const transact: AppRouteHandler<typeof Routes.transact> = (c) =>
   // @ts-expect-error - AppRouteHandler does not like Promise<Response> here as
   // it wants to know status code and not sure how to use my own response
-  memory.patch(c.req.raw);
+  memory.patch(c.req);
 
-export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (
-  c,
-): Response => {
+export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
   const { socket, response } = Deno.upgradeWebSocket(c.req.raw);
   memory.subscribe(socket);
   return response;
