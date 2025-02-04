@@ -647,12 +647,12 @@ Deno.test("open creates replica if does not exists", async () => {
 });
 
 test("list empty store", new URL(`memory:${alice}`), async (session) => {
-  const result = await session.list("application/json");
+  const result = session.list("application/json");
   assertEquals(result, { ok: [] }, "empty list when no facts exist");
 });
 
 test("list single fact", new URL(`memory:${alice}`), async (session) => {
-  await session.transact({
+  session.transact({
     assert: {
       the: "application/json",
       of: doc,
@@ -660,7 +660,7 @@ test("list single fact", new URL(`memory:${alice}`), async (session) => {
     },
   });
 
-  const result = await session.list("application/json");
+  const result = session.list("application/json");
   assertEquals(result, {
     ok: [
       {

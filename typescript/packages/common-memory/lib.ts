@@ -87,9 +87,8 @@ export const subscribe = (session: MemoryServiceSession, socket: WebSocket) => {
 
   return pipeToSocket(subscription.stream, socket);
 };
-export const get = async (session: MemoryServiceSession, request: Request, path: string) => {
-  console.log("GET", path);
-  let result;
+
+export const get = async (session: MemoryServiceSession, _request: Request, path: string) => {
   const parts = path.split("/").filter(Boolean);
   const replicaName = parts[0];
 
@@ -110,26 +109,22 @@ export const get = async (session: MemoryServiceSession, request: Request, path:
     );
   }
 
-  if (parts.length <= 1) {
-    console.log("LIST");
-    result = await session.router.list({
-      [replicaName]: {
-        the: "application/json",
-      },
-    });
-  } else {
-    result = await session.router.query({
-      [replicaName]: {
-        the: "application/json",
-        of: parts.slice(1).join("/"),
-      },
-    });
-  }
-  const body = JSON.stringify(result);
-  const status = result.ok ? 200 : 500;
+  const result =
+    parts.length <= 1
+      ? await session.router.list({
+          [replicaName]: {
+            the: "application/json",
+          },
+        })
+      : await session.router.query({
+          [replicaName]: {
+            the: "application/json",
+            of: parts.slice(1).join("/"),
+          },
+        });
 
-  return new Response(body, {
-    status,
+  return new Response(JSON.stringify(result), {
+    status: result.ok ? 200 : 500,
     headers: {
       "Content-Type": "application/json",
     },
