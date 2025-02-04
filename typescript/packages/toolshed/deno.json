@@ -2,7 +2,8 @@
   "tasks": {
     "dev": "deno run -A --watch --env-file=.env index.ts",
     "test": "deno test -A --env-file=.env.test",
-    "build-lookslike": "deno run -A scripts/build-lookslike.ts"
+    "build-lookslike": "deno run -A scripts/build-lookslike.ts",
+    "vendor": "cp -r ../common-memory ./vendor/common-memory"
   },
   "fmt": {
     "indentWidth": 2,
