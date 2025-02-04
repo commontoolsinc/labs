@@ -153,3 +153,266 @@ test("create memory fails if already exists", memory, async session => {
     },
   });
 });
+
+// List tests
+
+test("list empty memory", memory, async (session) => {
+  const result = await session.list({
+    [alice]: { the: "application/json" }
+  });
+
+  assertEquals(result, {
+    ok: [],
+  }, "empty list when no facts exist");
+});
+
+test("list single fact", memory, async (session) => {
+  // First create a fact
+  await session.transact({
+    [alice]: {
+      assert: {
+        the: "application/json",
+        of: doc,
+        is: { v: 1 },
+      },
+    },
+  });
+
+  const result = await session.list({
+    [alice]: { the: "application/json" }
+  });
+
+  assertEquals(result, {
+    ok: [
+      {
+        of: doc,
+        is: { v: 1 },
+      },
+    ],
+  }, "lists single fact");
+});
+
+test("list multiple facts", memory, async (session) => {
+  const doc2 = "second-doc-uuid";
+
+  // Create multiple facts
+  await session.transact({
+    [alice]: {
+      assert: {
+        the: "application/json",
+        of: doc,
+        is: { v: 1 },
+      },
+    },
+  });
+
+  await session.transact({
+    [alice]: {
+      assert: {
+        the: "application/json",
+        of: doc2,
+        is: { v: 2 },
+      },
+    },
+  });
+
+  const result = await session.list({
+    [alice]: { the: "application/json" }
+  });
+
+  assertEquals(result, {
+    ok: [
+      {
+        of: doc,
+        is: { v: 1 },
+      },
+      {
+        of: doc2,
+        is: { v: 2 },
+      },
+    ],
+  }, "lists multiple facts");
+});
+
+test("list includes retracted facts", memory, async (session) => {
+  // First create and then retract a fact
+  await session.transact({
+    [alice]: {
+      assert: {
+        the: "application/json",
+        of: doc,
+        is: { v: 1 },
+      },
+    },
+  });
+
+  const fact = (await session.query({
+    [alice]: {
+      the: "application/json",
+      of: doc,
+    },
+  })).ok;
+
+  await session.transact({
+    [alice]: {
+      retract: fact,
+    },
+  });
+
+  const result = await session.list({
+    [alice]: { the: "application/json" }
+  });
+
+  assertEquals(result, {
+    ok: [
+      {
+        of: doc,
+        is: undefined,
+      },
+    ],
+  }, "includes retracted facts with undefined value");
+});
+
+test("list different fact types", memory, async (session) => {
+  // Create facts of different types
+  await session.transact({
+    [alice]: {
+      assert: {
+        the: "application/json",
+        of: doc,
+        is: { v: 1 },
+      },
+    },
+  });
+
+  await session.transact({
+    [alice]: {
+      assert: {
+        the: "text/plain",
+        of: doc,
+        is: "Hello",
+      },
+    },
+  });
+
+  const jsonResult = await session.list({
+    [alice]: { the: "application/json" }
+  });
+
+  const textResult = await session.list({
+    [alice]: { the: "text/plain" }
+  });
+
+  assertEquals(jsonResult, {
+    ok: [
+      {
+        of: doc,
+        is: { v: 1 },
+      },
+    ],
+  }, "lists json facts");
+
+  assertEquals(textResult, {
+    ok: [
+      {
+        of: doc,
+        is: "Hello",
+      },
+    ],
+  }, "lists text facts");
+});
+
+test("list facts from different replicas", memory, async (session) => {
+  // Create facts in different replica spaces
+  await session.transact({
+    [alice]: {
+      assert: {
+        the: "application/json",
+        of: doc,
+        is: { v: 1 },
+      },
+    },
+  });
+
+  await session.transact({
+    [bob]: {
+      assert: {
+        the: "application/json",
+        of: doc,
+        is: { v: 2 },
+      },
+    },
+  });
+
+  const aliceResult = await session.list({
+    [alice]: { the: "application/json" }
+  });
+
+  const bobResult = await session.list({
+    [bob]: { the: "application/json" }
+  });
+
+  assertEquals(aliceResult, {
+    ok: [
+      {
+        of: doc,
+        is: { v: 1 },
+      },
+    ],
+  }, "lists alice's facts");
+
+  assertEquals(bobResult, {
+    ok: [
+      {
+        of: doc,
+        is: { v: 2 },
+      },
+    ],
+  }, "lists bob's facts");
+});
+
+test("list from non-existent replica", memory, async (session) => {
+  const result = await session.list({
+    [alice]: { the: "application/json" }
+  });
+  assertEquals(result, { ok: [] }, "empty list from new replica");
+});
+
+test("list from multiple replicas", memory, async (session) => {
+  // Create facts in different replicas
+  await session.transact({
+    [alice]: {
+      assert: {
+        the: "application/json",
+        of: doc,
+        is: { v: 1 },
+      }
+    }
+  });
+
+  await session.transact({
+    [bob]: {
+      assert: {
+        the: "application/json",
+        of: doc,
+        is: { v: 2 },
+      }
+    }
+  });
+
+  const aliceResult = await session.list({
+    [alice]: { the: "application/json" }
+  });
+
+  const bobResult = await session.list({
+    [bob]: { the: "application/json" }
+  });
+
+  assertEquals(aliceResult, {
+    ok: [{ of: doc, is: { v: 1 } }]
+  }, "lists alice's facts");
+
+  assertEquals(bobResult, {
+    ok: [{ of: doc, is: { v: 2 } }]
+  }, "lists bob's facts");
+});

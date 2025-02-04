@@ -27,6 +27,7 @@ export interface Session {
   ): AsyncResult<Fact, ConflictError | TransactionError | ConnectionError>;
 
   query(selector: In<Selector>): AsyncResult<Fact | Unclaimed, QueryError | ConnectionError>;
+  list(query: In<{ the: string }>): AsyncResult<ListResult[], ListError | ConnectionError>;
 
   subscribe(address: In<Selector>): Subscription.Subscription;
 
