@@ -7,6 +7,7 @@ import {
   AsyncResult,
   ConnectionError,
   In,
+  Command,
   Transaction,
   Selector,
   Statement,
@@ -37,7 +38,6 @@ interface MemoryServiceSession {
   router: Router.Router;
 }
 
-
 class Service implements MemoryService {
   constructor(public router: Router.Router) {}
   subscribe(socket: WebSocket) {
@@ -63,7 +63,11 @@ export const close = ({ router }: MemoryServiceSession) => {
 
 export const subscribe = (session: MemoryServiceSession, socket: WebSocket) => {
   const subscription = session.router.subscribe({});
+  socket.onopen = () => {
+    console.log("socket opened");
+  };
   socket.onmessage = (event) => {
+    console.log("server received a message");
     const command = parseCommand(event.data);
     if (command.unwatch) {
       subscription.unwatch(command.unwatch);
@@ -74,6 +78,7 @@ export const subscribe = (session: MemoryServiceSession, socket: WebSocket) => {
     }
   };
   socket.onclose = () => {
+    console.log("socket closed");
     subscription.close();
   };
 
