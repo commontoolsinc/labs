@@ -43,7 +43,7 @@ Deno.test("test transaction", async (t) => {
 });
 
 Deno.test("test subscription", async (t) => {
-  const server = Deno.serve(app.fetch);
+  const server = Deno.serve({ port: 9000 }, app.fetch);
   const entity = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
 
   const url = new URL(
