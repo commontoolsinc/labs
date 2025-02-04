@@ -7,7 +7,7 @@ import {
   AsyncResult,
   ConnectionError,
   In,
-  Transaction,
+  Instruction,
   Selector,
   Statement,
   SystemError,
@@ -37,7 +37,6 @@ interface MemoryServiceSession {
   router: Router.Router;
 }
 
-
 class Service implements MemoryService {
   constructor(public router: Router.Router) {}
   subscribe(socket: WebSocket) {
@@ -49,7 +48,7 @@ class Service implements MemoryService {
   query(selector: In<Selector>) {
     return this.router.query(selector);
   }
-  transact(transaction: In<Transaction>) {
+  transact(transaction: In<Instruction>) {
     return this.router.transact(transaction);
   }
   close() {
@@ -115,10 +114,10 @@ export const patch = async (session: MemoryServiceSession, request: Request) => 
 
 const parseCommand = (source: string) => JSON.parse(source) as Command;
 
-const asRouterTransaction = (json: In<Transaction>): In<Transaction> =>
+const asRouterTransaction = (json: In<Instruction>): In<Instruction> =>
   Object.fromEntries(Object.entries(json).map(([key, value]) => [key, asTransaction(value)]));
 
-const asTransaction = (transaction: Transaction) =>
+const asTransaction = (transaction: Instruction) =>
   transaction.assert
     ? { assert: asStatement(transaction.assert) }
     : { retract: asStatement(transaction.retract) };

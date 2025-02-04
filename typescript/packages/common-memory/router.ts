@@ -6,7 +6,7 @@ import {
   In,
   Fact,
   Selector,
-  Transaction,
+  Instruction,
   Result,
   AsyncResult,
   QueryError,
@@ -21,7 +21,7 @@ export * from "./interface.ts";
 
 export interface Session {
   transact(
-    transaction: In<Transaction>,
+    transaction: In<Instruction>,
   ): AsyncResult<Fact, ConflictError | TransactionError | ConnectionError>;
 
   query(selector: In<Selector>): AsyncResult<Fact | Unclaimed, QueryError | ConnectionError>;
@@ -53,7 +53,7 @@ export class Router implements Session {
     return subscribe(this, selector);
   }
 
-  transact(transaction: In<Transaction>) {
+  transact(transaction: In<Instruction>) {
     return transact(this, transaction);
   }
 
@@ -132,7 +132,7 @@ export const unwatch = (
 
 export const transact = async (
   session: Model,
-  transactions: In<Transaction>,
+  transactions: In<Instruction>,
 ): Promise<Result<Fact, ConflictError | TransactionError | ConnectionError>> => {
   const [[route, transaction]] = Object.entries(transactions);
   const fact = transaction.assert ?? transaction.retract;

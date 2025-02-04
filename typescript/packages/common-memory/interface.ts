@@ -78,7 +78,8 @@ export interface Statement {
 }
 
 export interface Claim extends Statement {
-  is: JSONValue;
+  is: Reference<JSONValue>;
+  cause: Reference<Fact> | Reference<Unclaimed>;
 }
 
 /**
@@ -87,7 +88,8 @@ export interface Claim extends Statement {
  * to assert facts, wile {@link Statement}s are used to retract them. This allows
  * retracting over the wire without having to sending JSON values back and forth.
  */
-export interface Assertion extends Claim {
+export interface Assertion extends Statement {
+  is: JSONValue;
   cause: Reference<Fact> | Reference<Unclaimed>;
 }
 
@@ -112,17 +114,19 @@ export type Fact = Assertion | Retraction;
 export type State = Fact | Unclaimed;
 
 export type Assert = {
-  assert: Claim;
+  assert: Assertion;
   retract?: undefined;
 };
 
 export type Retract = {
-  retract: Statement;
+  retract: Claim;
   assert?: undefined;
 };
-export type Transaction = Assert | Retract;
+export type Instruction = Assert | Retract;
 
-export type InferTransactionResult<Transaction> = Transaction extends Assert
+export type Transaction = Instruction[];
+
+export type InferTransactionResult<Instruction> = Instruction extends Assert
   ? Result<Assertion, ToJSON<ConflictError> | ToJSON<TransactionError>>
   : Result<Retraction, ToJSON<ConflictError> | ToJSON<TransactionError>>;
 

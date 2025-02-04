@@ -14,9 +14,8 @@ import type {
   ToJSON,
   ConnectionError,
   Unclaimed,
-  Transaction,
+  Instruction,
   Assertion,
-  Claim,
   AsyncResult,
   SystemError,
 } from "./interface.ts";
@@ -120,7 +119,7 @@ export interface Session {
    * transaction fails with `ConflictError`. Otherwise document is updated to
    * the new value.
    */
-  transact(transact: Transaction): Result<Fact, ToJSON<ConflictError> | ToJSON<TransactionError>>;
+  transact(transact: Instruction): Result<Fact, ToJSON<ConflictError> | ToJSON<TransactionError>>;
 
   /**
    * Query can be used to retrieve a document from the store. At the moment
@@ -134,7 +133,7 @@ export interface Session {
 export class Store implements Model, Session {
   constructor(public id: ReplicaID, public store: Database) {}
 
-  transact<In extends Transaction>(transaction: In) {
+  transact<In extends Instruction>(transaction: In) {
     return transact(this, transaction);
   }
 
@@ -374,7 +373,7 @@ const execute = <
 
 export const assert = (
   session: Model,
-  { the, of, is, cause }: Claim,
+  { the, of, is, cause }: Assertion,
 ): Result<Assertion, ToJSON<ConflictError> | ToJSON<TransactionError>> =>
   execute(session.store.transaction(swap), session, {
     the,
@@ -393,7 +392,7 @@ export const retract = (
     cause: cause == null ? init({ the, of }) : refer({ ...source, the, of, cause }),
   });
 
-export const transact = (model: Model, transact: Transaction) =>
+export const transact = (model: Model, transact: Instruction) =>
   transact.assert ? assert(model, transact.assert) : retract(model, transact.retract);
 
 export const query = (
