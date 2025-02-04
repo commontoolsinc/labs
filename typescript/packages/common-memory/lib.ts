@@ -32,6 +32,8 @@ export interface MemoryService {
   close(): AsyncResult<{}, SystemError>;
   subscribe(socket: WebSocket): AsyncResult<{}, Error>;
   patch(request: { json(): Promise<any> }): Promise<Response>;
+  // bf: may need to update this like the above?
+  get(request: Request, path: string): Promise<Response>;
 }
 
 interface MemoryServiceSession {
@@ -45,6 +47,12 @@ class Service implements MemoryService {
   }
   patch(request: { json(): Promise<any> }): Promise<Response> {
     return patch(this, request);
+  }
+  get(request: Request, path: string) {
+    return get(this, request, path);
+  }
+  list(query: In<{ the: string }>) {
+    return this.router.list(query);
   }
   query(selector: In<Selector>) {
     return this.router.query(selector);
@@ -78,6 +86,54 @@ export const subscribe = (session: MemoryServiceSession, socket: WebSocket) => {
   };
 
   return pipeToSocket(subscription.stream, socket);
+};
+export const get = async (session: MemoryServiceSession, request: Request, path: string) => {
+  console.log("GET", path);
+  let result;
+  const parts = path.split("/").filter(Boolean);
+  const replicaName = parts[0];
+
+  if (!replicaName) {
+    return new Response(
+      JSON.stringify({
+        error: {
+          name: "BadRequestError",
+          message: "Missing replica name in path",
+        },
+      }),
+      {
+        status: 400,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    );
+  }
+
+  if (parts.length <= 1) {
+    console.log("LIST");
+    result = await session.router.list({
+      [replicaName]: {
+        the: "application/json",
+      },
+    });
+  } else {
+    result = await session.router.query({
+      [replicaName]: {
+        the: "application/json",
+        of: parts.slice(1).join("/"),
+      },
+    });
+  }
+  const body = JSON.stringify(result);
+  const status = result.ok ? 200 : 500;
+
+  return new Response(body, {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
 };
 
 export const patch = async (session: MemoryServiceSession, request: { json(): Promise<any> }) => {

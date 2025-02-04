@@ -25,6 +25,9 @@ from ${STORE}`);
       return response;
     } else if (request.method === "PATCH") {
       return memory.patch(request);
+    } else if (request.method === "GET") {
+      const url = new URL(request.url);
+      return memory.get(request, url.pathname);
     } else {
       console.log("Not implemented", request.method, request.url);
       return new Response(null, { status: 501 });

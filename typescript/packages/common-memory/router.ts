@@ -16,7 +16,9 @@ import {
   TransactionError,
   ConnectionError,
   SystemError,
+  ListError,
 } from "./interface.ts";
+import { ListResult } from "./store.ts";
 export * from "./interface.ts";
 
 export interface Session {
@@ -61,6 +63,10 @@ export class Router implements Session {
     return query(this, selector);
   }
 
+  list(query: In<{ the: string }>) {
+    return list(this, query);
+  }
+
   watch(selector: In<Selector>, subscriber: Subscription.Subscriber) {
     return watch(this, selector, subscriber);
   }
@@ -86,6 +92,19 @@ export const query = async (
     return { error };
   }
   return replica.query(selector);
+};
+
+export const list = async (
+  session: Model,
+  queries: In<{ the: string }>,
+): AsyncResult<ListResult[], ListError | ConnectionError> => {
+  const [[route, query]] = Object.entries(queries);
+  const { ok: replica, error } = await resolve(session, route);
+  if (error) {
+    return { error };
+  }
+
+  return replica.list(query.the);
 };
 
 export const watch = async (
