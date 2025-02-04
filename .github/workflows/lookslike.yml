@@ -1,0 +1,37 @@
+name: Lookslike CI
+
+on:
+  push:
+    branches: [main, llhl-build]
+  pull_request:
+    branches: [main, llhl-build]
+
+jobs:
+  lookslike-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./typescript/packages/lookslike-high-level
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        working-directory: ./typescript/packages
+        run: pnpm install --frozen-lockfile
+
+      # - name: Build
+      #   run: pnpm run build --if-present
+
+      # - name: Test
+      #   run: pnpm test
