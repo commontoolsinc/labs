@@ -34,14 +34,14 @@ export const subscribe = createRoute({
   tags,
   request: {
     headers: z.object({
-      connection: z.literal("upgrade"),
+      connection: z.literal("Upgrade"),
       upgrade: z.literal("websocket"),
     }),
   },
   responses: {
     [HttpStatusCodes.OK]: {
       headers: z.object({
-        connection: z.literal("upgrade"),
+        connection: z.literal("Upgrade"),
         upgrade: z.literal("websocket"),
         "sec-websocket-accept": z.string(),
         date: z.string(),
