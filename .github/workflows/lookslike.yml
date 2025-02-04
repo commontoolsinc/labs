@@ -1,0 +1,60 @@
+name: Lookslike CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lookslike-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.11.0"
+          cache: "pnpm"
+          cache-dependency-path: "./typescript/packages/pnpm-lock.yaml"
+
+      - name: Install Dependencies
+        working-directory: ./typescript/packages
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: ./typescript/packages/lookslike-high-level
+        run: pnpm run build
+
+      - name: Update index.html main script reference
+        working-directory: ./typescript/packages/lookslike-high-level
+        run: |
+          # Copy index.html into the dist folder (if not already done)
+          cp index.html dist/index.html
+
+          # List the dist folder for debugging/logging
+          echo "Contents of dist before change:"
+          ls dist
+
+          # Get the main file name from dist matching main-*.js
+          MAIN_JS=$(ls dist | grep '^main-.*\.js' | head -n 1)
+          echo "Replacing main.ts with: $MAIN_JS"
+
+          # Update the script src in dist/index.html, replacing src/main.ts with src/{MAIN_JS}
+          sed -i "s/src\/main\.ts/$MAIN_JS/" dist/index.html
+
+          echo ${{ github.sha }}
+
+      - uses: ryand56/r2-upload-action@latest
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: ${{ secrets.R2_BUCKET }}
+          source-dir: ./typescript/packages/lookslike-high-level/dist
+          destination-dir: lookslike-high-level/${{ github.sha }}
