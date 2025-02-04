@@ -88,6 +88,9 @@ jobs:
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
+      - name: Vendor dependencies into the container
+        run: deno task vendor
+
       - name: Deploy to Fly.io
         run: flyctl deploy --remote-only
         env:
