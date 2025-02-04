@@ -24,25 +24,29 @@ export class CommonIframeSandboxElement extends LitElement {
   private initialized: boolean = false;
   private subscriptions: Map<string, any> = new Map();
 
-  private onMessage = (event: MessageEvent) => {
-    if (event.data?.source == "react-devtools-content-script") {
-      return;
+  // Called when the outer frame emits
+  // `IPCGuestMessageType.Ready`, only once, upon
+  // the initial render. 
+  private onOuterReady() {
+    if (this.initialized) {
+      throw new Error(`common-iframe-sandbox: Already initialized.`);
     }
+    this.initialized = true;
+    this.toGuest({
+      id: this.frameId,
+      type: IPC.IPCHostMessageType.Init,
+    });
+    if (this.src) {
+      this.loadInnerDoc();
+    }
+  }
 
+  // Message from the outer frame.
+  private onMessage = (event: MessageEvent) => {
     if (event.source !== this.iframeRef.value?.contentWindow) {
       return;
     }
 
-    const IframeHandler = getIframeContextHandler();
-    if (IframeHandler == null) {
-      console.error("common-iframe-sandbox: No iframe handler defined.");
-      return;
-    }
-
-    if (!this.context) {
-      console.error("common-iframe-sandbox: missing `context`.");
-      return;
-    }
 
     if (!IPC.isIPCGuestMessage(event.data)) {
       console.error("common-iframe-sandbox: Malformed message from guest.", event.data);
@@ -61,81 +65,85 @@ export class CommonIframeSandboxElement extends LitElement {
         return;
       }
       case IPC.IPCGuestMessageType.Ready: {
-        if (this.initialized) {
-          console.error(`common-iframe-sandbox: Already initialized. This should not occur.`);
-          return;
-        }
-        this.initialized = true;
-        this.toGuest({
-          id: this.frameId,
-          type: IPC.IPCHostMessageType.Init,
-        });
-        if (this.src) {
-          this.updateInnerDoc();
-        }
+        this.onOuterReady();
         return;
       }
       case IPC.IPCGuestMessageType.Passthrough: {
-        const message: IPC.GuestMessage = outerMessage.data;
-        switch (message.type) {
-          case IPC.GuestMessageType.Error: {
-            const { description, source, lineno, colno, stacktrace } = message.data;
-            const error = { description, source, lineno, colno, stacktrace };
-            this.dispatchEvent(new CustomEvent("error", {
-              detail: error,
-            }));
-            return;
-          }
-
-          case IPC.GuestMessageType.Read: {
-            const key = message.data;
-            const value = IframeHandler.read(this.context, key);
-            const response: IPC.IPCHostMessage = {
-              id: this.frameId,
-              type: IPC.IPCHostMessageType.Passthrough,
-              data: {
-                type: IPC.HostMessageType.Update,
-                data: [key, value],
-              },
-            };
-            this.toGuest(response);
-            return;
-          }
-
-          case IPC.GuestMessageType.Write: {
-            const [key, value] = message.data;
-            IframeHandler.write(this.context, key, value);
-            return;
-          }
-
-          case IPC.GuestMessageType.Subscribe: {
-            const key = message.data;
-
-            if (this.subscriptions.has(key)) {
-              console.warn("common-iframe-sandbox: Already subscribed to `${key}`");
-              return;
-            }
-            let receipt = IframeHandler.subscribe(this.context, key, (key, value) => this.notifySubscribers(key, value));
-            this.subscriptions.set(key, receipt);
-            return;
-          }
-
-          case IPC.GuestMessageType.Unsubscribe: {
-            const key = message.data;
-            let receipt = this.subscriptions.get(key);
-            if (!receipt) {
-              return;
-            }
-            IframeHandler.unsubscribe(this.context, receipt);
-            this.subscriptions.delete(key);
-            return;
-          }
-        };
+        this.onGuestMessage(outerMessage.data);
+        return;
       }
     }
   }
 
-  private updateInnerDoc() {
+  // Message from the inner frame.
+  private onGuestMessage(message: IPC.GuestMessage) {
+    const IframeHandler = getIframeContextHandler();
+    if (IframeHandler == null) {
+      console.error("common-iframe-sandbox: No iframe handler defined.");
+      return;
+    }
+
+    if (!this.context) {
+      console.warn("common-iframe-sandbox: missing `context`.");
+      return;
+    }
+
+    switch (message.type) {
+      case IPC.GuestMessageType.Error: {
+        const { description, source, lineno, colno, stacktrace } = message.data;
+        const error = { description, source, lineno, colno, stacktrace };
+        this.dispatchEvent(new CustomEvent("error", {
+          detail: error,
+        }));
+        return;
+      }
+
+      case IPC.GuestMessageType.Read: {
+        const key = message.data;
+        const value = IframeHandler.read(this.context, key);
+        this.toGuest({
+          id: this.frameId,
+          type: IPC.IPCHostMessageType.Passthrough,
+          data: {
+            type: IPC.HostMessageType.Update,
+            data: [key, value],
+          },
+        });
+        return;
+      }
+
+      case IPC.GuestMessageType.Write: {
+        const [key, value] = message.data;
+        IframeHandler.write(this.context, key, value);
+        return;
+      }
+      
+      case IPC.GuestMessageType.Subscribe: {
+        const key = message.data;
+
+        if (this.subscriptions.has(key)) {
+          console.warn("common-iframe-sandbox: Already subscribed to `${key}`");
+          return;
+        }
+        let receipt = IframeHandler.subscribe(this.context, key, (key, value) => this.notifySubscribers(key, value));
+        this.subscriptions.set(key, receipt);
+        return;
+      }
+
+      case IPC.GuestMessageType.Unsubscribe: {
+        const key = message.data;
+        let receipt = this.subscriptions.get(key);
+        if (!receipt) {
+          return;
+        }
+        IframeHandler.unsubscribe(this.context, receipt);
+        this.subscriptions.delete(key);
+        return;
+      }
+    }
+  } 
+
+  private loadInnerDoc() {
     // Remove all active subscriptions when navigating
     // to a new document.
     const IframeHandler = getIframeContextHandler();
@@ -183,7 +191,7 @@ export class CommonIframeSandboxElement extends LitElement {
 
   override willUpdate(changedProperties: PropertyValues<this>) {
     if (changedProperties.has('src') && this.initialized) {
-      this.updateInnerDoc();
+      this.loadInnerDoc();
     }
   }
 
