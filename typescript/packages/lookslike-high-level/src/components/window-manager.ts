@@ -4,12 +4,7 @@ import { createRef, Ref, ref } from "lit/directives/ref.js";
 import { style } from "@commontools/ui";
 import { render } from "@commontools/html";
 import { charmManager, closeCharm, openCharm } from "../data.js";
-import {
-  Charm,
-  syncRecipe,
-  buildRecipe,
-  replica,
-} from "@commontools/charm";
+import { Charm, syncRecipe, buildRecipe } from "@commontools/charm";
 import {
   addRecipe,
   DocImpl,
@@ -41,7 +36,7 @@ async function castSpell(value: string, showResults: (results: SpellSearchResult
       accepts: "application/json",
     },
     body: JSON.stringify({
-      replica: replica,
+      replica: charmManager.replica,
       query: value,
       tags: [],
       options: {
