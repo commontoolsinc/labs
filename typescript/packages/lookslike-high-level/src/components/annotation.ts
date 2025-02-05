@@ -2,11 +2,10 @@ import { LitElement, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { ref, createRef } from "lit/directives/ref.js";
 import { render } from "@commontools/html";
-import { annotationsEnabled } from "../data.js";
+import { annotationsEnabled, charmManager } from "../data.js";
 import { run, getDoc, DocImpl, getDocLinkOrValue } from "@commontools/runner";
 import { annotation } from "../recipes/annotation.jsx";
 import { UI } from "@commontools/builder";
-import { charms } from "@commontools/charm";
 
 @customElement("common-annotation-toggle")
 export class CommonAnnotationToggle extends LitElement {
@@ -63,7 +62,7 @@ export class CommonAnnotation extends LitElement {
         query: this.queryCell,
         target: this.targetCell,
         data: this.dataCell,
-        charms,
+        charms: charmManager.getCharms(),
       });
 
       render(this.annotationRef.value, this.annotation.asCell<{ [UI]: any }>().key(UI));
