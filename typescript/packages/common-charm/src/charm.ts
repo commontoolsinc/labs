@@ -23,7 +23,7 @@ export type Charm = {
 // FIXME(ja): we shouldn't assume we are in a browser environment here.
 const defaultReplica = "common-knowledge";
 const urlParams = new URLSearchParams(window.location.search);
-const replica = urlParams.get("replica") ?? defaultReplica;
+export const replica = urlParams.get("replica") ?? defaultReplica;
 const storageType = urlParams.get("replica")
   ? "remote"
   : ((import.meta as any).env.VITE_STORAGE_TYPE ?? "memory");

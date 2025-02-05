@@ -1,6 +1,6 @@
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { z } from "zod";
-import { getAllBlobs, getBlob } from "./behavior/effects.ts";
+import { getAllBlobs, getAllMemories, getBlob } from "./behavior/effects.ts";
 
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
@@ -106,6 +106,7 @@ export type SearchSchemaRequest = z.infer<typeof SearchSchemaRequestSchema>;
 export type SearchSchemaResponse = z.infer<typeof SearchSchemaResponseSchema>;
 
 export const CasterRequestSchema = z.object({
+  replica: z.string(),
   schema: z.record(
     z
       .string()
@@ -133,6 +134,7 @@ export const CasterResponseSchema = z.object({
 export type CasterResponse = z.infer<typeof CasterResponseSchema>;
 
 export const SpellSearchRequestSchema = z.object({
+  replica: z.string(),
   query: z.string(),
   tags: z.array(z.string()).optional(),
   options: z.object({
@@ -224,10 +226,8 @@ export const caster: AppRouteHandler<CasterSchemaRoute> = async (c) => {
   const tags = body.tags || [];
 
   try {
-    const blobContents = await getAllBlobs({ allWithData: true }) as Record<
-      string,
-      Record<string, unknown>
-    >;
+    const memories = await getAllMemories(body.replica);
+
     const spells = await getAllBlobs({
       allWithData: true,
       prefix: "spell-",
@@ -235,7 +235,7 @@ export const caster: AppRouteHandler<CasterSchemaRoute> = async (c) => {
       string,
       Record<string, unknown>
     >;
-    const response = await candidates(body.schema, blobContents, spells, tags);
+    const response = await candidates(body.schema, memories, spells, tags);
 
     return c.json(
       response,
@@ -264,15 +264,13 @@ export const spellSearch: AppRouteHandler<SpellSearchRoute> = async (c) => {
       prefix: "spell-",
     }) as Record<string, Record<string, unknown>>;
 
-    const blobContents = await getAllBlobs({
-      allWithData: true,
-    }) as Record<string, Record<string, unknown>>;
+    const memories = await getAllMemories(body.replica);
 
-    const results = await processSpellSearch({
+    const results = processSpellSearch({
       query: body.query,
       referencedKeys,
       spells,
-      blobs: blobContents,
+      blobs: memories,
       options: body.options,
       tags: body.tags,
     });

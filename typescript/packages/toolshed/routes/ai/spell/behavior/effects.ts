@@ -9,6 +9,29 @@ export interface BlobOptions {
   keys?: string;
 }
 
+
+export async function getAllMemories(
+  replica: string,
+): Promise<Record<string, any>> {
+  const res = await client.api.storage.memory.$post({
+    json: { [replica]: { the: "application/json" } },
+  });
+  const data = await res.json();
+  if ("error" in data) {
+    throw new Error(data.error);
+  }
+  const memories: { the: string; of: string; is: any }[] = data.ok || data;
+
+  const memoryMap: { [key: string]: any } = {};
+  memories.forEach((memory) => {
+    const value = memory.is?.value.argument;
+    if (value) {
+      memoryMap[memory.of] = value;
+    }
+  });
+  return memoryMap;
+}
+
 export async function getAllBlobs(
   options: BlobOptions = {},
 ): Promise<string[] | { [id: string]: any }> {

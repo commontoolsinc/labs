@@ -11,6 +11,7 @@ import {
   runPersistent,
   syncRecipe,
   buildRecipe,
+  replica,
 } from "@commontools/charm";
 
 import {
@@ -44,6 +45,7 @@ async function castSpell(value: string, showResults: (results: SpellSearchResult
       accepts: "application/json",
     },
     body: JSON.stringify({
+      replica: replica,
       query: value,
       tags: [],
       options: {
