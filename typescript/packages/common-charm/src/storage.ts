@@ -145,6 +145,7 @@ class StorageImpl implements Storage {
   private currentBatchPromise: Promise<void> = new Promise((r) => (this.currentBatchResolve = r));
   private lastBatchTime: number = 0;
   private lastBatchDebounceCount: number = 0;
+  private lastRemoteValues = new Map<DocImpl<any>, any>();
 
   private cancel: Cancel;
   private addCancel: AddCancel;
@@ -344,6 +345,9 @@ class StorageImpl implements Storage {
       this.readValues.set(cell, newValue);
 
       this._addToBatch([{ cell, type: "cell" }]);
+
+      // Mark that this value came from remote.
+      this.lastRemoteValues.set(cell, newValue.value);
     }
   }
 
@@ -547,6 +551,13 @@ class StorageImpl implements Storage {
     this.addCancel(
       cell.updates((value) => {
         log("got from cell", JSON.stringify(cell.entityId), JSON.stringify(value));
+        // If this update matches the value we just integrated from remote,
+        // skip sending it upstream.
+        const remoteValue = this.lastRemoteValues.get(cell);
+        if (remoteValue !== undefined && JSON.stringify(value) === JSON.stringify(remoteValue)) {
+          log("Skipping _batchForStorage (remote update)", JSON.stringify(cell.entityId));
+          return;
+        }
         return this._batchForStorage(cell);
       }),
     );
@@ -576,7 +587,10 @@ class StorageImpl implements Storage {
   }
 }
 
-export function createStorage(type: "local" | "memory" | "remote", replica: string = "common-knowledge"): Storage {
+export function createStorage(
+  type: "local" | "memory" | "remote",
+  replica: string = "common-knowledge",
+): Storage {
   let storageProvider: StorageProvider;
 
   if (type === "local") {
