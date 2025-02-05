@@ -6,11 +6,7 @@ const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
 const bob = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
 const doc = "4301a667-5388-4477-ba08-d2e6b51a62a3";
 
-const test = (
-  title: string,
-  url: URL,
-  run: (replica: Router.Session) => Promise<unknown>,
-) => {
+const test = (title: string, url: URL, run: (replica: Router.Session) => Promise<unknown>) => {
   const unit = async () => {
     const open = await Router.open({
       store: url,
@@ -37,7 +33,7 @@ const test = (
 
 const memory = new URL(`memory://`);
 
-test("query non-existing", memory, async session => {
+test("query non-existing", memory, async (session) => {
   const unclaimed = await session.query({
     [alice]: {
       the: "application/json",
@@ -57,7 +53,7 @@ test("query non-existing", memory, async session => {
   );
 });
 
-test("create new memory", memory, async session => {
+test("create new memory", memory, async (session) => {
   const v1 = {
     the: "application/json",
     of: doc,
@@ -115,7 +111,7 @@ test("create new memory", memory, async session => {
   );
 });
 
-test("create memory fails if already exists", memory, async session => {
+test("create memory fails if already exists", memory, async (session) => {
   const create = await session.transact({
     [alice]: {
       assert: {
@@ -158,12 +154,16 @@ test("create memory fails if already exists", memory, async session => {
 
 test("list empty memory", memory, async (session) => {
   const result = await session.list({
-    [alice]: { the: "application/json" }
+    [alice]: { the: "application/json" },
   });
 
-  assertEquals(result, {
-    ok: [],
-  }, "empty list when no facts exist");
+  assertEquals(
+    result,
+    {
+      ok: [],
+    },
+    "empty list when no facts exist",
+  );
 });
 
 test("list single fact", memory, async (session) => {
@@ -179,17 +179,21 @@ test("list single fact", memory, async (session) => {
   });
 
   const result = await session.list({
-    [alice]: { the: "application/json" }
+    [alice]: { the: "application/json" },
   });
 
-  assertEquals(result, {
-    ok: [
-      {
-        of: doc,
-        is: { v: 1 },
-      },
-    ],
-  }, "lists single fact");
+  assertEquals(
+    result,
+    {
+      ok: [
+        {
+          of: doc,
+          is: { v: 1 },
+        },
+      ],
+    },
+    "lists single fact",
+  );
 });
 
 test("list multiple facts", memory, async (session) => {
@@ -217,24 +221,28 @@ test("list multiple facts", memory, async (session) => {
   });
 
   const result = await session.list({
-    [alice]: { the: "application/json" }
+    [alice]: { the: "application/json" },
   });
 
-  assertEquals(result, {
-    ok: [
-      {
-        of: doc,
-        is: { v: 1 },
-      },
-      {
-        of: doc2,
-        is: { v: 2 },
-      },
-    ],
-  }, "lists multiple facts");
+  assertEquals(
+    result,
+    {
+      ok: [
+        {
+          of: doc,
+          is: { v: 1 },
+        },
+        {
+          of: doc2,
+          is: { v: 2 },
+        },
+      ],
+    },
+    "lists multiple facts",
+  );
 });
 
-test("list includes retracted facts", memory, async (session) => {
+test("list excludes retracted facts", memory, async (session) => {
   // First create and then retract a fact
   await session.transact({
     [alice]: {
@@ -246,12 +254,14 @@ test("list includes retracted facts", memory, async (session) => {
     },
   });
 
-  const fact = (await session.query({
-    [alice]: {
-      the: "application/json",
-      of: doc,
-    },
-  })).ok;
+  const fact = (
+    await session.query({
+      [alice]: {
+        the: "application/json",
+        of: doc,
+      },
+    })
+  ).ok;
 
   await session.transact({
     [alice]: {
@@ -260,17 +270,16 @@ test("list includes retracted facts", memory, async (session) => {
   });
 
   const result = await session.list({
-    [alice]: { the: "application/json" }
+    [alice]: { the: "application/json" },
   });
 
-  assertEquals(result, {
-    ok: [
-      {
-        of: doc,
-        is: undefined,
-      },
-    ],
-  }, "includes retracted facts with undefined value");
+  assertEquals(
+    result,
+    {
+      ok: [],
+    },
+    "excludes retracted facts with undefined value",
+  );
 });
 
 test("list different fact types", memory, async (session) => {
@@ -296,30 +305,38 @@ test("list different fact types", memory, async (session) => {
   });
 
   const jsonResult = await session.list({
-    [alice]: { the: "application/json" }
+    [alice]: { the: "application/json" },
   });
 
   const textResult = await session.list({
-    [alice]: { the: "text/plain" }
+    [alice]: { the: "text/plain" },
   });
 
-  assertEquals(jsonResult, {
-    ok: [
-      {
-        of: doc,
-        is: { v: 1 },
-      },
-    ],
-  }, "lists json facts");
+  assertEquals(
+    jsonResult,
+    {
+      ok: [
+        {
+          of: doc,
+          is: { v: 1 },
+        },
+      ],
+    },
+    "lists json facts",
+  );
 
-  assertEquals(textResult, {
-    ok: [
-      {
-        of: doc,
-        is: "Hello",
-      },
-    ],
-  }, "lists text facts");
+  assertEquals(
+    textResult,
+    {
+      ok: [
+        {
+          of: doc,
+          is: "Hello",
+        },
+      ],
+    },
+    "lists text facts",
+  );
 });
 
 test("list facts from different replicas", memory, async (session) => {
@@ -345,35 +362,43 @@ test("list facts from different replicas", memory, async (session) => {
   });
 
   const aliceResult = await session.list({
-    [alice]: { the: "application/json" }
+    [alice]: { the: "application/json" },
   });
 
   const bobResult = await session.list({
-    [bob]: { the: "application/json" }
+    [bob]: { the: "application/json" },
   });
 
-  assertEquals(aliceResult, {
-    ok: [
-      {
-        of: doc,
-        is: { v: 1 },
-      },
-    ],
-  }, "lists alice's facts");
+  assertEquals(
+    aliceResult,
+    {
+      ok: [
+        {
+          of: doc,
+          is: { v: 1 },
+        },
+      ],
+    },
+    "lists alice's facts",
+  );
 
-  assertEquals(bobResult, {
-    ok: [
-      {
-        of: doc,
-        is: { v: 2 },
-      },
-    ],
-  }, "lists bob's facts");
+  assertEquals(
+    bobResult,
+    {
+      ok: [
+        {
+          of: doc,
+          is: { v: 2 },
+        },
+      ],
+    },
+    "lists bob's facts",
+  );
 });
 
 test("list from non-existent replica", memory, async (session) => {
   const result = await session.list({
-    [alice]: { the: "application/json" }
+    [alice]: { the: "application/json" },
   });
   assertEquals(result, { ok: [] }, "empty list from new replica");
 });
@@ -386,8 +411,8 @@ test("list from multiple replicas", memory, async (session) => {
         the: "application/json",
         of: doc,
         is: { v: 1 },
-      }
-    }
+      },
+    },
   });
 
   await session.transact({
@@ -396,23 +421,31 @@ test("list from multiple replicas", memory, async (session) => {
         the: "application/json",
         of: doc,
         is: { v: 2 },
-      }
-    }
+      },
+    },
   });
 
   const aliceResult = await session.list({
-    [alice]: { the: "application/json" }
+    [alice]: { the: "application/json" },
   });
 
   const bobResult = await session.list({
-    [bob]: { the: "application/json" }
+    [bob]: { the: "application/json" },
   });
 
-  assertEquals(aliceResult, {
-    ok: [{ of: doc, is: { v: 1 } }]
-  }, "lists alice's facts");
+  assertEquals(
+    aliceResult,
+    {
+      ok: [{ of: doc, is: { v: 1 } }],
+    },
+    "lists alice's facts",
+  );
 
-  assertEquals(bobResult, {
-    ok: [{ of: doc, is: { v: 2 } }]
-  }, "lists bob's facts");
+  assertEquals(
+    bobResult,
+    {
+      ok: [{ of: doc, is: { v: 2 } }],
+    },
+    "lists bob's facts",
+  );
 });
