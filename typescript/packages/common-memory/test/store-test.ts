@@ -660,12 +660,13 @@ test("list single fact", new URL(`memory:${alice}`), async (session) => {
     },
   });
 
-  const result = session.list("application/json");
+  const result = session.list({ the: "application/json" });
   assertEquals(result, {
     ok: [
       {
         of: doc,
         is: { v: 1 },
+        the: "application/json",
       },
     ],
   });
@@ -684,7 +685,7 @@ test("list excludes retracted facts", new URL(`memory:${alice}`), async (session
   assert(fact.ok);
   session.transact({ retract: fact.ok });
 
-  const result = session.list("application/json");
+  const result = session.list({ the: "application/json" });
   assertEquals(result, {
     ok: [],
   });

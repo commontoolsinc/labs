@@ -153,7 +153,7 @@ test("create memory fails if already exists", memory, async (session) => {
 // List tests
 
 test("list empty memory", memory, async (session) => {
-  const result = await session.list({
+  const result = await session.query({
     [alice]: { the: "application/json" },
   });
 
@@ -178,7 +178,7 @@ test("list single fact", memory, async (session) => {
     },
   });
 
-  const result = await session.list({
+  const result = await session.query({
     [alice]: { the: "application/json" },
   });
 
@@ -189,6 +189,7 @@ test("list single fact", memory, async (session) => {
         {
           of: doc,
           is: { v: 1 },
+          the: "application/json",
         },
       ],
     },
@@ -220,7 +221,7 @@ test("list multiple facts", memory, async (session) => {
     },
   });
 
-  const result = await session.list({
+  const result = await session.query({
     [alice]: { the: "application/json" },
   });
 
@@ -231,10 +232,12 @@ test("list multiple facts", memory, async (session) => {
         {
           of: doc,
           is: { v: 1 },
+          the: "application/json",
         },
         {
           of: doc2,
           is: { v: 2 },
+          the: "application/json",
         },
       ],
     },
@@ -269,7 +272,7 @@ test("list excludes retracted facts", memory, async (session) => {
     },
   });
 
-  const result = await session.list({
+  const result = await session.query({
     [alice]: { the: "application/json" },
   });
 
@@ -304,11 +307,11 @@ test("list different fact types", memory, async (session) => {
     },
   });
 
-  const jsonResult = await session.list({
+  const jsonResult = await session.query({
     [alice]: { the: "application/json" },
   });
 
-  const textResult = await session.list({
+  const textResult = await session.query({
     [alice]: { the: "text/plain" },
   });
 
@@ -319,6 +322,7 @@ test("list different fact types", memory, async (session) => {
         {
           of: doc,
           is: { v: 1 },
+          the: "application/json",
         },
       ],
     },
@@ -332,6 +336,7 @@ test("list different fact types", memory, async (session) => {
         {
           of: doc,
           is: "Hello",
+          the: "text/plain",
         },
       ],
     },
@@ -361,11 +366,11 @@ test("list facts from different replicas", memory, async (session) => {
     },
   });
 
-  const aliceResult = await session.list({
+  const aliceResult = await session.query({
     [alice]: { the: "application/json" },
   });
 
-  const bobResult = await session.list({
+  const bobResult = await session.query({
     [bob]: { the: "application/json" },
   });
 
@@ -376,6 +381,7 @@ test("list facts from different replicas", memory, async (session) => {
         {
           of: doc,
           is: { v: 1 },
+          the: "application/json",
         },
       ],
     },
@@ -389,6 +395,7 @@ test("list facts from different replicas", memory, async (session) => {
         {
           of: doc,
           is: { v: 2 },
+          the: "application/json",
         },
       ],
     },
@@ -397,7 +404,7 @@ test("list facts from different replicas", memory, async (session) => {
 });
 
 test("list from non-existent replica", memory, async (session) => {
-  const result = await session.list({
+  const result = await session.query({
     [alice]: { the: "application/json" },
   });
   assertEquals(result, { ok: [] }, "empty list from new replica");
@@ -425,18 +432,18 @@ test("list from multiple replicas", memory, async (session) => {
     },
   });
 
-  const aliceResult = await session.list({
+  const aliceResult = await session.query({
     [alice]: { the: "application/json" },
   });
 
-  const bobResult = await session.list({
+  const bobResult = await session.query({
     [bob]: { the: "application/json" },
   });
 
   assertEquals(
     aliceResult,
     {
-      ok: [{ of: doc, is: { v: 1 } }],
+      ok: [{ of: doc, is: { v: 1 }, the: "application/json" }],
     },
     "lists alice's facts",
   );
@@ -444,7 +451,7 @@ test("list from multiple replicas", memory, async (session) => {
   assertEquals(
     bobResult,
     {
-      ok: [{ of: doc, is: { v: 2 } }],
+      ok: [{ of: doc, is: { v: 2 }, the: "application/json" }],
     },
     "lists bob's facts",
   );
