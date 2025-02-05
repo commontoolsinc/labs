@@ -229,6 +229,12 @@ export interface QueryError extends Error {
   selector: Selector & { in: ReplicaID };
 }
 
+export interface ListError extends Error {
+  name: "ListError";
+  cause: SystemError;
+  selector: { in: ReplicaID; the?: string; of?: string };
+}
+
 /**
  * Utility type for defining a [keyed union] type as in IPLD Schema. In practice
  * this just works around typescript limitation that requires discriminant field

@@ -32,6 +32,10 @@ export interface MemoryService {
   close(): AsyncResult<{}, SystemError>;
   subscribe(socket: WebSocket): AsyncResult<{}, Error>;
   patch(request: { json(): Promise<any> }): Promise<Response>;
+  query(
+    request: { json(): Promise<any> },
+    selector: In<{ the?: string; of?: string }>,
+  ): Promise<Response>;
 }
 
 interface MemoryServiceSession {
@@ -46,8 +50,8 @@ class Service implements MemoryService {
   patch(request: { json(): Promise<any> }): Promise<Response> {
     return patch(this, request);
   }
-  query(selector: In<Selector>) {
-    return this.router.query(selector);
+  query(request: { json(): Promise<any> }): Promise<Response> {
+    return query(this, request);
   }
   transact(transaction: In<Transaction>) {
     return this.router.transact(transaction);
@@ -86,6 +90,40 @@ export const patch = async (session: MemoryServiceSession, request: { json(): Pr
     const result = await session.router.transact(transaction);
     const body = JSON.stringify(result);
     const status = result.ok ? 200 : result.error.name === "ConflictError" ? 409 : 500;
+
+    return new Response(body, {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  } catch (cause) {
+    console.log(cause);
+    const error = cause as Partial<Error>;
+    return new Response(
+      JSON.stringify({
+        error: {
+          name: error?.name ?? "Error",
+          message: error?.message ?? "Unable to parse request body",
+          stack: error?.stack ?? "",
+        },
+      }),
+      {
+        status: 400,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    );
+  }
+};
+
+export const query = async (session: MemoryServiceSession, request: { json(): Promise<any> }) => {
+  try {
+    const selector = await request.json();
+    const result = await session.router.query(selector);
+    const body = JSON.stringify(result);
+    const status = result.ok ? 200 : 404;
 
     return new Response(body, {
       status,

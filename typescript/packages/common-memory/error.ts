@@ -8,6 +8,8 @@ import type {
   SystemError,
   ConnectionError,
   Selector,
+  ListError,
+  The,
 } from "./interface.ts";
 import { ReplicaID } from "./interface.ts";
 import { refer } from "./util.ts";
@@ -18,9 +20,14 @@ export const transaction = (fact: InFact, cause: SystemError): ToJSON<Transactio
   new TheTransactionError(fact, cause);
 
 export const query = (
-  selector: Selector & { in: string },
+  selector: Selector & { in: ReplicaID },
   cause: SystemError,
 ): ToJSON<QueryError> => new TheQueryError(selector, cause);
+
+export const list = (
+  selector: { in: ReplicaID; the?: string; of?: string },
+  cause: SystemError,
+): ToJSON<ListError> => new TheListError(selector, cause);
 
 export const connection = (address: URL, cause: SystemError): ToJSON<ConnectionError> =>
   new TheConnectionError(address.href, cause);
@@ -84,6 +91,32 @@ export class TheQueryError extends Error implements QueryError {
     super(`Query ${JSON.stringify({ the, of })} in ${selector.in} failed: ${cause.message}`);
   }
   toJSON(): QueryError {
+    return {
+      name: this.name,
+      stack: this.stack ?? "",
+      message: this.message,
+      selector: this.selector,
+      cause: {
+        name: this.cause.name,
+        code: this.cause.code,
+        message: this.cause.message,
+        stack: this.cause.stack ?? "",
+      },
+    };
+  }
+}
+
+export class TheListError extends Error implements ListError {
+  override name = "ListError" as const;
+  constructor(
+    public selector: { in: ReplicaID; the?: string; of?: string },
+    public override cause: SystemError,
+  ) {
+    super(
+      `List query ${JSON.stringify({ the: selector.the, of: selector.of })} in ${selector.in} failed: ${cause.message}`,
+    );
+  }
+  toJSON(): ListError {
     return {
       name: this.name,
       stack: this.stack ?? "",

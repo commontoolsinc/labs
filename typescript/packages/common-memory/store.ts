@@ -19,6 +19,7 @@ import type {
   Claim,
   AsyncResult,
   SystemError,
+  ListError,
 } from "./interface.ts";
 import * as Error from "./error.ts";
 
@@ -54,7 +55,7 @@ CREATE TABLE IF NOT EXISTS memory (
 );
 
 CREATE VIEW IF NOT EXISTS state AS
-SELECT 
+SELECT
   memory.the as the,
   memory.of as of,
   maybe_datum.source as 'is',
@@ -78,10 +79,10 @@ const IMPORT_FACT = `INSERT OR IGNORE INTO fact (this, the, of, 'is', cause) VAL
 const IMPORT_MEMORY = `INSERT OR IGNORE INTO memory (the, of, fact) VALUES (:the, :of, :fact);`;
 
 const SWAP = `UPDATE memory SET fact = :fact
-WHERE 
+WHERE
 (:cause IS NULL AND fact IS NULL) OR fact = :cause;`;
 
-const EXPORT = `SELECT 
+const EXPORT = `SELECT
   memory.the as the,
   memory.of as of,
   memory.fact as fact,
@@ -113,6 +114,11 @@ export interface Selector {
   of: Entity;
 }
 
+export interface ListResult {
+  of: Entity;
+  is?: JSONValue;
+}
+
 export interface Session {
   /**
    * Transacts can be used to assert or retract a document from the repository.
@@ -128,11 +134,19 @@ export interface Session {
    */
   query(selector: Selector): Result<Fact | Unclaimed, ToJSON<QueryError>>;
 
+  /**
+   * Lists all entities and their values for a specific fact type
+   */
+  list(selector: Partial<Selector>): Result<Unclaimed[], ToJSON<ListError>>;
+
   close(): AsyncResult<{}, SystemError>;
 }
 
 export class Store implements Model, Session {
-  constructor(public id: ReplicaID, public store: Database) {}
+  constructor(
+    public id: ReplicaID,
+    public store: Database,
+  ) {}
 
   transact<In extends Transaction>(transaction: In) {
     return transact(this, transaction);
@@ -140,6 +154,10 @@ export class Store implements Model, Session {
 
   query(selector: Selector) {
     return query(this, selector);
+  }
+
+  list(selector: Partial<Selector>) {
+    return list(this, selector);
   }
 
   close(): AsyncResult<{}, SystemError> {
@@ -404,5 +422,44 @@ export const query = (
     return { ok: pull({ id, store }, { the, of }) ?? implicit({ the, of }) };
   } catch (error) {
     return { error: Error.query({ the, of, in: id }, error as SqliteError) };
+  }
+};
+
+export const list = (
+  { id, store }: Model,
+  params: Partial<Selector>,
+): Result<Unclaimed[], ToJSON<ListError>> => {
+  try {
+    const LIST_QUERY = `
+      SELECT
+        state.of as 'of',
+        state.the as 'the',
+        state."is" as 'is'
+      FROM state
+      WHERE (:the IS NULL OR state.the = :the)
+      AND (:of IS NULL OR state.of = :of)
+      AND state."is" IS NOT NULL
+    `;
+
+    const rows = store.prepare(LIST_QUERY).all({
+      the: params.the ?? null,
+      of: params.of ?? null,
+    }) as Array<{
+      of: Entity;
+      the: string;
+      is: string;
+    }>;
+
+    return {
+      ok: rows.map((row) => ({
+        the: row.the,
+        of: row.of,
+        is: JSON.parse(row.is),
+      })),
+    };
+  } catch (error) {
+    return {
+      error: Error.list({ ...params, in: id }, error as SqliteError),
+    };
   }
 };

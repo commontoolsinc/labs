@@ -21,3 +21,7 @@ export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
   memory.subscribe(socket);
   return response;
 };
+
+export const query: AppRouteHandler<typeof Routes.query> = (c) =>
+  // @ts-expect-error - Same reason as transact handler
+  memory.query(c.req);
