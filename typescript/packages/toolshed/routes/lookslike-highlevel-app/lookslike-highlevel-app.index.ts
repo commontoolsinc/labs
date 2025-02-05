@@ -1,21 +1,34 @@
 import { createRouter } from "@/lib/create-app.ts";
-import { serveStatic } from "hono/deno";
 
 const router = createRouter();
 
-const Router = router.get(
-  "/app/latest/*",
-  serveStatic({
-    root: "./lookslike-highlevel-dist",
-    rewriteRequestPath: (path) => {
-      // Handle root path by serving index.html
-      if (path === "/app/latest" || path === "/app/latest/") {
-        return "/index.html";
-      }
-      // Remove /app/latest prefix for all other paths
-      return path.replace("/app/latest", "");
-    },
-  }),
-);
+// NOTE(jake): the cdn maintains /latest as the most recent build.
+router.get("/app/:gitsha/*", async (c) => {
+  const { gitsha } = c.req.param();
 
-export default Router;
+  // Remove the "/app/:gitsha" prefix from the requested path
+  let path = c.req.path.replace(new RegExp(`^/app/${gitsha}`), "");
+
+  // Default to index.html if root is requested
+  if (path === "" || path === "/") {
+    path = "/index.html";
+  }
+
+  // Preserve any query parameters
+  const queryStr = c.req.url.includes("?")
+    ? c.req.url.substring(c.req.url.indexOf("?"))
+    : "";
+
+  // Use the provided gitsha to target the correct folder on the CDN
+  const targetUrl =
+    `https://static.commontools.dev/lookslike-high-level/${gitsha}${path}${queryStr}`;
+
+  // Proxy the request to the CDN, preserving HTTP method and headers
+  const response = await fetch(targetUrl, {
+    method: c.req.method,
+    headers: c.req.header(),
+  });
+  return response;
+});
+
+export default router;
