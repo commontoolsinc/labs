@@ -395,6 +395,12 @@ export class CommonSidebar extends LitElement {
     return html`
       <os-navpanel class=${this.sidebarTab === id ? "active sidebar-content" : "sidebar-content"}>
         <common-hstack slot="toolbar-end" gap="sm">
+          ${when(
+            charmManager.getReplica(),
+            () =>
+              html`<os-icon-button icon="cloud_sync" title=${charmManager.getReplica()}></os-icon-button>`,
+            () => html`<os-icon-button icon="cloud_off" title="Local"></os-icon-button>`,
+          )}
           <os-icon-button icon="warning" @click=${() => this.handleDrop()}></os-icon-button>
           ${when(
             this.focusedCharm,
