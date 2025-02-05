@@ -21,3 +21,12 @@ cd ./typescript/packages/jumble
 pnpm install
 pnpm tauri dev
 ```
+
+To start the tauri ios app, run the following commands:
+
+```bash
+brew install cocoapods
+cd ./typescript/packages/jumble
+pnpm install
+pnpm tauri dev:ios
+```
