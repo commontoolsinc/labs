@@ -4,6 +4,17 @@ const router = createRouter();
 
 // NOTE(jake): the cdn maintains /latest as the most recent build.
 router.get("/app/:gitsha/*", async (c) => {
+  // If no trailing slash is provided (i.e. the path is empty), redirect to force it.
+  if (!c.req.url.endsWith("/")) {
+    const queryStr = c.req.url.includes("?")
+      ? c.req.url.substring(c.req.url.indexOf("?"))
+      : "";
+    return new Response(null, {
+      status: 302,
+      headers: { "Location": `${c.req.url}/` },
+    });
+  }
+
   const { gitsha } = c.req.param();
 
   // Remove the "/app/:gitsha" prefix from the requested path
