@@ -99,7 +99,7 @@ export const query = async (
 
 export const list = async (
   session: Model,
-  queries: In<{ the: string }>,
+  queries: In<Partial<Selector>>,
 ): AsyncResult<ListResult[], ListError | ConnectionError> => {
   const [[route, query]] = Object.entries(queries);
   const { ok: replica, error } = await resolve(session, route);
@@ -107,7 +107,7 @@ export const list = async (
     return { error };
   }
 
-  return replica.list(query.the);
+  return replica.list(query);
 };
 
 export const watch = async (
