@@ -72,7 +72,20 @@ export const query = createRoute({
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
-      z.array(z.any()),
+      z.object({
+        ok: z.union([
+          z.array(z.object({
+            the: z.any(),
+            of: z.any(),
+            is: z.any(),
+          })),
+          z.object({
+            the: z.any(),
+            of: z.any(),
+            is: z.any(),
+          }),
+        ]),
+      }),
       "Matching records found",
     ),
     [HttpStatusCodes.NOT_FOUND]: jsonContent(

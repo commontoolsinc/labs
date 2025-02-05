@@ -17,7 +17,7 @@ export async function getAllMemories(
   });
   const data = await res.json();
   if ("error" in data) {
-    throw new Error(data.error);
+    throw new Error(`${data?.error}`);
   }
   const memories: { the: string; of: string; is: any }[] = data.ok || data;
 
