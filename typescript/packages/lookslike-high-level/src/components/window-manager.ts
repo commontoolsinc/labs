@@ -36,7 +36,7 @@ async function castSpell(value: string, showResults: (results: SpellSearchResult
       accepts: "application/json",
     },
     body: JSON.stringify({
-      replica: charmManager.replica,
+      replica: charmManager.getReplica(),
       query: value,
       tags: [],
       options: {

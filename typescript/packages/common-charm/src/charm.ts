@@ -25,12 +25,16 @@ export type StorageType = "remote" | "memory" | "local";
 export class CharmManager {
   private storage: Storage;
   private charms: DocImpl<DocLink[]>;
-  public replica: string;
+  private replica: string;
 
   constructor(replica = "common-knowledge", storageType: StorageType) {
     this.storage = createStorage(storageType, replica);
     this.charms = getDoc<DocLink[]>([], "charms");
     this.replica = replica;
+  }
+
+  getReplica(): string {
+    return this.replica;
   }
 
   getCharms(): DocImpl<DocLink[]> {
