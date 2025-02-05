@@ -86,6 +86,8 @@ export class CommonInputElement extends LitElement {
   @property({ type: String }) placeholder = "";
   @property({ type: String }) appearance = "default";
 
+  @property({ type: Boolean }) password = false;
+
   override render() {
     const oninput = (event: Event) => {
       const value = (event.target as HTMLInputElement).value;
@@ -113,7 +115,7 @@ export class CommonInputElement extends LitElement {
           @blur="${onblur}"
           .value="${this.value}"
           .placeholder="${this.placeholder}"
-          type="text"
+          type="${this.password ? "password" : "text"}"
         />
       </div>
     `;

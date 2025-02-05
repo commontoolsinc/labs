@@ -25,6 +25,11 @@ import smolIframe from "./smolIframe.js";
 addRecipe(smolIframe, smolIframeSrc);
 export { smolIframe };
 
+import blueSkySrc from "./blue-sky.jsx?raw";
+import blueSky from "./blue-sky.jsx";
+addRecipe(blueSky, blueSkySrc);
+export { blueSky };
+
 // import complexIframeSrc from "./complexIframe.tsx?raw";
 // import complexIframe from "./complexIframe.js";
 // addRecipe(complexIframe, complexIframeSrc);
