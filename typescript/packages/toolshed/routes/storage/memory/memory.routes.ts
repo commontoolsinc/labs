@@ -53,3 +53,35 @@ export const subscribe = createRoute({
     },
   },
 });
+
+export const query = createRoute({
+  method: "post",
+  path: "/api/storage/memory",
+  tags,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.record(z.object({
+            the: z.any().optional(),
+            of: z.any().optional(),
+          })),
+        },
+      },
+    },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      z.array(z.any()),
+      "Matching records found",
+    ),
+    [HttpStatusCodes.NOT_FOUND]: jsonContent(
+      z.array(z.any()),
+      "No matching records found",
+    ),
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
+      z.object({}),
+      "Storage error",
+    ),
+  },
+});

@@ -25,7 +25,7 @@ export const query = (
 ): ToJSON<QueryError> => new TheQueryError(selector, cause);
 
 export const list = (
-  selector: { the: string, in: ReplicaID },
+  selector: { in: ReplicaID; the?: string; of?: string },
   cause: SystemError,
 ): ToJSON<ListError> => new TheListError(selector, cause);
 
@@ -108,16 +108,20 @@ export class TheQueryError extends Error implements QueryError {
 
 export class TheListError extends Error implements ListError {
   override name = "ListError" as const;
-  constructor(public query: { the: string; in: ReplicaID }, public override cause: SystemError) {
-    const { the } = query;
-    super(`List query ${JSON.stringify({ the })} in ${query.in} failed: ${cause.message}`);
+  constructor(
+    public selector: { in: ReplicaID; the?: string; of?: string },
+    public override cause: SystemError,
+  ) {
+    super(
+      `List query ${JSON.stringify({ the: selector.the, of: selector.of })} in ${selector.in} failed: ${cause.message}`,
+    );
   }
   toJSON(): ListError {
     return {
       name: this.name,
       stack: this.stack ?? "",
       message: this.message,
-      query: this.query,
+      selector: this.selector,
       cause: {
         name: this.cause.name,
         code: this.cause.code,

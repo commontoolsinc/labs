@@ -232,7 +232,7 @@ export interface QueryError extends Error {
 export interface ListError extends Error {
   name: "ListError";
   cause: SystemError;
-  query: { the: The, in: ReplicaID };
+  selector: { in: ReplicaID; the?: string; of?: string };
 }
 
 /**

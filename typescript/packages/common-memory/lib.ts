@@ -32,8 +32,10 @@ export interface MemoryService {
   close(): AsyncResult<{}, SystemError>;
   subscribe(socket: WebSocket): AsyncResult<{}, Error>;
   patch(request: { json(): Promise<any> }): Promise<Response>;
-  // bf: may need to update this like the above?
-  get(request: Request, path: string): Promise<Response>;
+  query(
+    request: { json(): Promise<any> },
+    selector: In<{ the?: string; of?: string }>,
+  ): Promise<Response>;
 }
 
 interface MemoryServiceSession {
@@ -48,14 +50,8 @@ class Service implements MemoryService {
   patch(request: { json(): Promise<any> }): Promise<Response> {
     return patch(this, request);
   }
-  get(request: Request, path: string) {
-    return get(this, request, path);
-  }
-  list(query: In<{ the: string }>) {
-    return this.router.list(query);
-  }
-  query(selector: In<Selector>) {
-    return this.router.query(selector);
+  query(request: { json(): Promise<any> }): Promise<Response> {
+    return query(this, request);
   }
   transact(transaction: In<Transaction>) {
     return this.router.transact(transaction);
@@ -88,16 +84,28 @@ export const subscribe = (session: MemoryServiceSession, socket: WebSocket) => {
   return pipeToSocket(subscription.stream, socket);
 };
 
-export const get = async (session: MemoryServiceSession, _request: Request, path: string) => {
-  const parts = path.split("/").filter(Boolean);
-  const replicaName = parts[0];
+export const patch = async (session: MemoryServiceSession, request: { json(): Promise<any> }) => {
+  try {
+    const transaction = asRouterTransaction(await request.json());
+    const result = await session.router.transact(transaction);
+    const body = JSON.stringify(result);
+    const status = result.ok ? 200 : result.error.name === "ConflictError" ? 409 : 500;
 
-  if (!replicaName) {
+    return new Response(body, {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  } catch (cause) {
+    console.log(cause);
+    const error = cause as Partial<Error>;
     return new Response(
       JSON.stringify({
         error: {
-          name: "BadRequestError",
-          message: "Missing replica name in path",
+          name: error?.name ?? "Error",
+          message: error?.message ?? "Unable to parse request body",
+          stack: error?.stack ?? "",
         },
       }),
       {
@@ -108,35 +116,14 @@ export const get = async (session: MemoryServiceSession, _request: Request, path
       },
     );
   }
-
-  const result =
-    parts.length <= 1
-      ? await session.router.list({
-          [replicaName]: {
-            the: "application/json",
-          },
-        })
-      : await session.router.query({
-          [replicaName]: {
-            the: "application/json",
-            of: parts.slice(1).join("/"),
-          },
-        });
-
-  return new Response(JSON.stringify(result), {
-    status: result.ok ? 200 : 500,
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
 };
 
-export const patch = async (session: MemoryServiceSession, request: { json(): Promise<any> }) => {
+export const query = async (session: MemoryServiceSession, request: { json(): Promise<any> }) => {
   try {
-    const transaction = asRouterTransaction(await request.json());
-    const result = await session.router.transact(transaction);
+    const selector = await request.json();
+    const result = await session.router.query(selector);
     const body = JSON.stringify(result);
-    const status = result.ok ? 200 : result.error.name === "ConflictError" ? 409 : 500;
+    const status = result.ok ? 200 : 404;
 
     return new Response(body, {
       status,

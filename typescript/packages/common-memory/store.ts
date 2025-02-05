@@ -137,7 +137,7 @@ export interface Session {
   /**
    * Lists all entities and their values for a specific fact type
    */
-  list(the: string): Result<ListResult[], ToJSON<ListError>>;
+  list(selector: Partial<Selector>): Result<Unclaimed[], ToJSON<ListError>>;
 
   close(): AsyncResult<{}, SystemError>;
 }
@@ -156,8 +156,8 @@ export class Store implements Model, Session {
     return query(this, selector);
   }
 
-  list(the: string) {
-    return list(this, the);
+  list(selector: Partial<Selector>) {
+    return list(this, selector);
   }
 
   close(): AsyncResult<{}, SystemError> {
@@ -427,32 +427,39 @@ export const query = (
 
 export const list = (
   { id, store }: Model,
-  the: string,
-): Result<ListResult[], ToJSON<ListError>> => {
+  params: Partial<Selector>,
+): Result<Unclaimed[], ToJSON<ListError>> => {
   try {
     const LIST_QUERY = `
       SELECT
         state.of as 'of',
+        state.the as 'the',
         state."is" as 'is'
       FROM state
-      WHERE state.the = :the
+      WHERE (:the IS NULL OR state.the = :the)
+      AND (:of IS NULL OR state.of = :of)
       AND state."is" IS NOT NULL
     `;
 
-    const rows = store.prepare(LIST_QUERY).all({ the }) as Array<{
+    const rows = store.prepare(LIST_QUERY).all({
+      the: params.the ?? null,
+      of: params.of ?? null,
+    }) as Array<{
       of: Entity;
+      the: string;
       is: string;
     }>;
 
     return {
       ok: rows.map((row) => ({
+        the: row.the,
         of: row.of,
         is: JSON.parse(row.is),
       })),
     };
   } catch (error) {
     return {
-      error: Error.list({ the, in: id }, error as SqliteError),
+      error: Error.list({ ...params, in: id }, error as SqliteError),
     };
   }
 };
