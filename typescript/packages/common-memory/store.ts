@@ -23,7 +23,6 @@ import type {
 } from "./interface.ts";
 import * as Error from "./error.ts";
 
-
 export const PREPARE = `
 BEGIN TRANSACTION;
 
@@ -144,7 +143,10 @@ export interface Session {
 }
 
 export class Store implements Model, Session {
-  constructor(public id: ReplicaID, public store: Database) {}
+  constructor(
+    public id: ReplicaID,
+    public store: Database,
+  ) {}
 
   transact<In extends Transaction>(transaction: In) {
     return transact(this, transaction);
@@ -425,7 +427,7 @@ export const query = (
 
 export const list = (
   { id, store }: Model,
-  the: string
+  the: string,
 ): Result<ListResult[], ToJSON<ListError>> => {
   try {
     const LIST_QUERY = `
@@ -434,22 +436,23 @@ export const list = (
         state."is" as 'is'
       FROM state
       WHERE state.the = :the
+      AND state."is" IS NOT NULL
     `;
 
     const rows = store.prepare(LIST_QUERY).all({ the }) as Array<{
       of: Entity;
-      is: string | null;
+      is: string;
     }>;
 
     return {
-      ok: rows.map(row => ({
+      ok: rows.map((row) => ({
         of: row.of,
-        is: row.is ? JSON.parse(row.is) : undefined
-      }))
+        is: JSON.parse(row.is),
+      })),
     };
   } catch (error) {
     return {
-      error: Error.list({ the, in: id }, error as SqliteError)
+      error: Error.list({ the, in: id }, error as SqliteError),
     };
   }
 };
