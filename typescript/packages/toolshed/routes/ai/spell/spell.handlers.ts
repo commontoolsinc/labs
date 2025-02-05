@@ -221,7 +221,7 @@ export const search: AppRouteHandler<SearchSchemaRoute> = async (c) => {
 
 export const caster: AppRouteHandler<CasterSchemaRoute> = async (c) => {
   const logger: Logger = c.get("logger");
-  const body = (await c.req.json()) as ProcessSchemaRequest;
+  const body = (await c.req.json()) as CasterRequest;
   const startTime = performance.now();
   const tags = body.tags || [];
 

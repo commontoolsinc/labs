@@ -88,12 +88,10 @@ export const query = createRoute({
       }),
       "Matching records found",
     ),
-    [HttpStatusCodes.NOT_FOUND]: jsonContent(
-      z.array(z.any()),
-      "No matching records found",
-    ),
     [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
-      z.object({}),
+      z.object({
+        error: z.string(),
+      }),
       "Storage error",
     ),
   },

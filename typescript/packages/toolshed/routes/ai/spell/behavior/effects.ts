@@ -19,7 +19,15 @@ export async function getAllMemories(
   if ("error" in data) {
     throw new Error(`${data?.error}`);
   }
-  const memories: { the: string; of: string; is: any }[] = data.ok || data;
+  const rawMemories: { the?: string; of?: string; is?: any }[] =
+    Array.isArray(data.ok) ? data.ok : [data.ok];
+  const memories: { the: string; of: string; is: any }[] = rawMemories
+    .filter((m) => m.the && m.of && m.is)
+    .map((m: any) => ({
+      the: m.the,
+      of: m.of,
+      is: m.is,
+    }));
 
   const memoryMap: { [key: string]: any } = {};
   memories.forEach((memory) => {
