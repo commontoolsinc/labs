@@ -1,6 +1,6 @@
 import React, { useRef } from "react";
 import { render } from "@commontools/html";
-import { addCharms, Charm, runPersistent } from "@commontools/charm";
+import { CharmManager, Charm } from "@commontools/charm";
 import { effect, idle, run } from "@commontools/runner";
 
 interface CharmRunnerProps {
@@ -9,6 +9,14 @@ interface CharmRunnerProps {
   autoLoad?: boolean;
   className?: string;
 }
+
+const charmManager = (() => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const replica = urlParams.get("replica") ?? undefined;
+  const storageType = replica ? "remote" : ((import.meta as any).env.VITE_STORAGE_TYPE ?? "memory");
+  return new CharmManager(replica, storageType);
+})();
+
 
 export function CharmRunner({
   charmImport,
@@ -58,14 +66,14 @@ export function CharmRunner({
         return;
       }
 
-      const charm = await runPersistent(factory);
+      const charm = await charmManager.runPersistent(factory);
 
       // Check again after async operation
       if (currentMountKey !== mountingKey.current) {
         return;
       }
 
-      addCharms([charm]);
+      charmManager.add([charm]);
 
       await idle();
       run(undefined, argument, charm);
