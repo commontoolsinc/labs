@@ -9,7 +9,6 @@ export interface BlobOptions {
   keys?: string;
 }
 
-
 export async function getAllMemories(
   replica: string,
 ): Promise<Record<string, any>> {
