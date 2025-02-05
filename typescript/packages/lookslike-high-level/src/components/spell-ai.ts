@@ -251,7 +251,8 @@ export const generateSuggestions = async ({
   originalSpec: string;
   originalSrc: string;
 }) => {
-  return [];
+  console.log("TODO: generateSuggestions", originalSpec, originalSrc);
+  return { suggestions: [] };
 };
 
 export const brokenGenerateSuggestions = async ({
