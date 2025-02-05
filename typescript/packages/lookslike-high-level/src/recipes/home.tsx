@@ -1,8 +1,8 @@
 import { h } from "@commontools/html";
 import { recipe, lift, NAME, UI, handler } from "@commontools/builder";
 import { getEntityId } from "@commontools/runner";
-import {  RecipeManifest, closeCharm } from "../data.js";
-import { Charm, removeCharm } from "@commontools/charm";
+import { charmManager, RecipeManifest, closeCharm } from "../data.js";
+import { Charm } from "@commontools/charm";
 
 const getCharmsWithNameAndUI = lift<Charm[], { charm: Charm }[]>((charms) =>
   (charms ?? []).filter((charm) => charm && charm[UI] && charm[NAME]).map((charm) => ({ charm })),
@@ -11,7 +11,7 @@ const getCharmsWithNameAndUI = lift<Charm[], { charm: Charm }[]>((charms) =>
 const deleteCharm = handler<{}, { charm: Charm }>((_, { charm }) => {
   const charmId = getEntityId(charm)!;
   console.log("deleteCharm", charmId);
-  removeCharm(charmId);
+  charmManager.remove(charmId);
   closeCharm(charmId);
 });
 
