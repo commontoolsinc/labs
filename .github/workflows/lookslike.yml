@@ -50,6 +50,14 @@ jobs:
 
           echo ${{ github.sha }}
 
+          # create a tar.gz of the dist folder
+          tar -czvf dist.tar.gz dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${GITHUB_SHA}.tar.gz
+          path: dist.tar.gz
+
       - uses: ryand56/r2-upload-action@latest
         with:
           r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
@@ -58,3 +66,8 @@ jobs:
           r2-bucket: ${{ secrets.R2_BUCKET }}
           source-dir: ./typescript/packages/lookslike-high-level/dist
           destination-dir: lookslike-high-level/${{ github.sha }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${GITHUB_SHA}.tar.gz
+          path: dist.tar.gz
