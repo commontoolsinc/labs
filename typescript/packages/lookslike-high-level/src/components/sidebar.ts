@@ -23,6 +23,7 @@ import { render } from "@commontools/html";
 import { castNewRecipe } from "./iframe-spell-ai.js";
 import { toasty } from "./toasty.js";
 
+// FIXME(ja): is this still needed with ben's changes?
 const uploadBlob = async (data: any) => {
   const id = refer(data).toString();
 
@@ -304,6 +305,7 @@ export class CommonSidebar extends LitElement {
     };
 
     // also posted the data json to blobby ... would spellcaster work with this data?
+    // FIXME(ja): is this still needed with ben's changes?
     uploadBlob(data);
 
     await castNewRecipe(data, "a simple display of the users data");
@@ -349,12 +351,14 @@ export class CommonSidebar extends LitElement {
 
     if (!this.homeCharm && this.homeRef.value) {
       let charms = charmManager.getCharms();
-      this.homeCharm = charmManager.runPersistent(home, { charms, recipes }, "home").then((home) => {
-        const view = home.asCell<Charm>().key(UI);
-        if (!view.getAsQueryResult()) throw new Error("Charm has no UI");
-        render(this.homeRef.value!, view);
-        return home;
-      });
+      this.homeCharm = charmManager
+        .runPersistent(home, { charms, recipes }, "home")
+        .then((home) => {
+          const view = home.asCell<Charm>().key(UI);
+          if (!view.getAsQueryResult()) throw new Error("Charm has no UI");
+          render(this.homeRef.value!, view);
+          return home;
+        });
     }
 
     if (_changedProperties.has("focusedCharm")) {

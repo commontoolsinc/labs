@@ -312,8 +312,11 @@ export class CommonWindowManager extends LitElement {
     };
 
     const onImportLocalData = (event: CustomEvent) => {
-      const data = event.detail.data;
+      const [data] = event.detail.data;
+      if (!data) return;
+
       console.log("Importing local data:", data);
+      // FIXME(ja): this needs better error handling
       const title = prompt("Enter a title for your recipe:");
       if (!title) return;
 
@@ -558,11 +561,13 @@ export class CommonWindowManager extends LitElement {
       console.log("charmMatch", charmMatch.params.charmId);
       // TODO: Add a timeout here, show loading state and error state
       setTimeout(() => {
-        charmManager.sync(charmMatch.params.charmId, true).then(
-          (charm) =>
-            (charm && charm.get() && this.openCharm(charm)) ||
-            navigate(`/charm/${charmMatch.params.charmId}`),
-        );
+        charmManager
+          .sync(charmMatch.params.charmId, true)
+          .then(
+            (charm) =>
+              (charm && charm.get() && this.openCharm(charm)) ||
+              navigate(`/charm/${charmMatch.params.charmId}`),
+          );
       }, 100);
     }
 
@@ -588,7 +593,8 @@ export class CommonWindowManager extends LitElement {
         buildRecipe(src).then(({ recipe }) => {
           if (recipe) {
             addRecipe(recipe, src, "render data", []);
-            charmManager.runPersistent(recipe, initialData)
+            charmManager
+              .runPersistent(recipe, initialData)
               .then((charm) => this.openCharm(charm))
               .then(() => console.log("Recipe successfully loaded"));
           }

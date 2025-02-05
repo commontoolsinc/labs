@@ -9,7 +9,7 @@ import demoSrc from "./demo.html?raw";
 
 const SELECTED_MODEL = [
   "groq:llama-3.3-70b-specdec",
-  "cerebras:llama-3.3-70b",
+  // "cerebras:llama-3.3-70b",
   "anthropic:claude-3-5-sonnet",
 ];
 
@@ -346,6 +346,7 @@ export async function iterate(charm: DocImpl<Charm> | null, value: string, shift
 export async function castNewRecipe(data: any, newSpec: string) {
   const schema = createJsonSchema({}, data);
   schema.description = newSpec;
+  console.log("schema", schema);
 
   const newIFrameSrc = await genSrc({ newSpec, schema });
   const name = newIFrameSrc.match(/<title>(.*?)<\/title>/)?.[1] ?? newSpec;

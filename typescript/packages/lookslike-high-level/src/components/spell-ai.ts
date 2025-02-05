@@ -251,6 +251,16 @@ export const generateSuggestions = async ({
   originalSpec: string;
   originalSrc: string;
 }) => {
+  return [];
+};
+
+export const brokenGenerateSuggestions = async ({
+  originalSpec,
+  originalSrc,
+}: {
+  originalSpec: string;
+  originalSrc: string;
+}) => {
   const messages = [];
 
   const instructions = `Given the current spec:
