@@ -1,13 +1,13 @@
 import { Database, Transaction as DBTransaction, SqliteError } from "jsr:@db/sqlite";
-import { fromString, refer, Reference } from "merkle-reference";
+import { fromString, refer, Reference } from "npm:merkle-reference";
 import type {
   Result,
   ReplicaID,
   Entity,
   Fact,
-  Statement,
   Transaction,
   JSONValue,
+  Retraction,
   ConflictError,
   TransactionError,
   QueryError,
@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS fact (
   of      TEXT NOT NULL,        -- Entity identifier fact is about
   'is'    TEXT,                 -- Value entity is claimed to have
   cause   TEXT,                 -- Causal reference to prior fact
+  since   INTEGER NOT NULL,     -- Lamport clock since when this fact was in effect
   FOREIGN KEY('is') REFERENCES datum(this)
 );
 
@@ -59,7 +60,8 @@ SELECT
   maybe_datum.source as 'is',
   fact.cause as cause,
   memory.fact as fact,
-  maybe_datum.this as proof
+  maybe_datum.this as proof,
+  fact.since as since
 FROM
   memory
 JOIN
@@ -72,7 +74,7 @@ COMMIT;
 
 const IMPORT_DATUM = `INSERT OR IGNORE INTO datum (this, source) VALUES (:this, :source);`;
 
-const IMPORT_FACT = `INSERT OR IGNORE INTO fact (this, the, of, 'is', cause) VALUES (:this, :the, :of, :is, :cause);`;
+const IMPORT_FACT = `INSERT OR IGNORE INTO fact (this, the, of, 'is', cause, since) VALUES (:this, :the, :of, :is, :cause, :since);`;
 
 const IMPORT_MEMORY = `INSERT OR IGNORE INTO memory (the, of, fact) VALUES (:the, :of, :fact);`;
 
@@ -85,7 +87,8 @@ const EXPORT = `SELECT
   memory.of as of,
   memory.fact as fact,
   maybe_datum.source as 'is',
-  fact.cause as cause
+  fact.cause as cause,
+  fact.since as since
 FROM
   memory
 JOIN
@@ -208,7 +211,7 @@ export const close = async ({ store }: Model): AsyncResult<{}, SystemError> => {
 };
 
 type MemoryView = {
-  id: string;
+  fact: string;
   the: string;
   of: Entity;
   is: string;
@@ -270,121 +273,138 @@ const importDatum = (session: Model, source: Fact): Reference<JSONValue> | null 
   }
 };
 
-const retract = ({ the, of, cause, ...source }: Statement) => ({
-  the,
-  of,
-  cause: cause == null ? init({ the, of }) : refer({ ...source, the, of, cause }),
-});
-
-export const assert = ({ the, of, is, cause }: Assertion) => ({
-  the,
-  of,
-  is,
-  cause: cause == null ? init({ the, of }) : cause,
-});
-
-const swap = (session: Model, transaction: Transaction): Commit => {
-  const current = session.store.prepare(EXPORT).get({
-    the: "application/metadata+json",
-    of: refer({}).toString(),
-  }) as Commit;
-
-  const commit = {
-    cause: refer(current),
-    transaction,
-    count: current.count + 1,
-  };
-
-  for (const instruction of transaction) {
-    const source = instruction.assert ? assert(instruction.assert) : retract(instruction.retract);
-
-    const { the, of } = source;
-    // Derive the merkle reference for the provided factor which is expected to
-    // be in normalized form.
-    const fact = refer(source).toString();
-    // We do not store implicit facts like `{ the, of }` in the database and
-    // we represent causal reference to such implicit facts as `NULL`, therefore
-    // we asses if causal reference is to an implicit and if so substitute it
-    // with `null`. We also use `null` for an implicit `cause` in the
-    // `RevisionError`, that is because callers aren't expected to specify them
-    // explicitly and telling in the error that hash to implicit was expected
-    // would be confusing.
-    const expected =
-      source.cause?.toString() === init(source).toString()
-        ? null
-        : (source.cause as Reference<Fact>);
-    const cause = expected?.toString() ?? null;
-
-    // First we import JSON value in the `is` field into the `datum` table and
-    // then we import the fact into the `factor` table. If `datum` already exists
-    // we ignore as we key those by the merkle reference. Same is true for the
-    // `factor` table where we key by the merkle reference of the fact so if
-    // conflicting record exists it is the same record and we ignore.
-    session.store.run(IMPORT_FACT, {
-      this: fact,
-      the,
-      of,
-      is: importDatum(session, source)?.toString() ?? null,
-      cause,
-    });
-
-    // Now if referenced cause is for an implicit fact, we will not have a record
-    // for it in the memory table to update in the next step. We also can not
-    // create such record as we don't have corresponding records in the `factor`
-    // or `datum` tables. Therefore instead we try to create a record for the
-    // desired update. If conflicting record exists this will be ignored, but that
-    // is fine as update in the next step will update it to the desired state.
-    if (expected == null) {
-      session.store.run(IMPORT_MEMORY, {
-        the,
-        of,
-        fact,
-      });
-    }
-
-    // Here we finally perform a memory swap. Note that update is conditional and
-    // will only update if current record has the same `cause` reference. If that
-    // is not the case 0 records will be updated indicating a conflict handled
-    // below.
-    const updated = session.store.run(SWAP, {
-      fact,
-      cause,
-    });
-
-    // If no records were updated it implies that there was no record with
-    // matching `cause`. It may be because `cause` referenced implicit fact
-    // in which case which case `IMPORT_MEMORY` provisioned desired record and
-    // update would not have applied. Or it could be that `cause` in the database
-    // is different from the one being asserted. We will asses this by pulling
-    // the record and comparing it to desired state.
-    if (updated === 0) {
-      const actual = pull(session, source) ?? null;
-      // If actual state matches desired state it is either was inserted by the
-      // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
-      // it as a conflict as current state is the asserted one.
-      if (refer(actual).toString() !== fact) {
-        throw Error.conflict({
-          in: session.id,
-          the,
-          of,
-          expected,
-          actual,
-        });
+const iterate = function* (transaction: Transaction): Iterable<Fact> {
+  for (const [the, entities] of Object.entries(transaction.changes)) {
+    for (const [of, changes] of Object.entries(entities)) {
+      for (const [cause, change] of Object.entries(changes)) {
+        if (change.is === undefined) {
+          yield { the, of, cause: fromString(cause) } as Retraction;
+        } else {
+          yield { the, of, is: change.is, cause: fromString(cause) } as Assertion;
+        }
       }
     }
   }
+};
 
-  return {};
+const swap = (
+  session: Model,
+  fact: Fact,
+  { since, transaction }: { since: number; transaction: Transaction },
+) => {
+  const { the, of } = fact;
+  // Derive the merkle reference for the provided factor which is expected to
+  // be in normalized form.
+  const id = refer(fact).toString();
+  // We do not store implicit facts like `{ the, of }` in the database and
+  // we represent causal reference to such implicit facts as `NULL`, therefore
+  // we asses if causal reference is to an implicit and if so substitute it
+  // with `null`. We also use `null` for an implicit `cause` in the
+  // `RevisionError`, that is because callers aren't expected to specify them
+  // explicitly and telling in the error that hash to implicit was expected
+  // would be confusing.
+  const expected =
+    fact.cause?.toString() === init(fact).toString() ? null : (fact.cause as Reference<Fact>);
+  const cause = expected?.toString() ?? null;
+
+  // First we import JSON value in the `is` field into the `datum` table and
+  // then we import the fact into the `factor` table. If `datum` already exists
+  // we ignore as we key those by the merkle reference. Same is true for the
+  // `factor` table where we key by the merkle reference of the fact so if
+  // conflicting record exists it is the same record and we ignore.
+  session.store.run(IMPORT_FACT, {
+    this: id,
+    the,
+    of,
+    is: importDatum(session, fact)?.toString() ?? null,
+    cause,
+    since,
+  });
+
+  // Now if referenced cause is for an implicit fact, we will not have a record
+  // for it in the memory table to update in the next step. We also can not
+  // create such record as we don't have corresponding records in the `factor`
+  // or `datum` tables. Therefore instead we try to create a record for the
+  // desired update. If conflicting record exists this will be ignored, but that
+  // is fine as update in the next step will update it to the desired state.
+  if (expected == null) {
+    session.store.run(IMPORT_MEMORY, {
+      the,
+      of,
+      fact: id,
+    });
+  }
+
+  // Here we finally perform a memory swap. Note that update is conditional and
+  // will only update if current record has the same `cause` reference. If that
+  // is not the case 0 records will be updated indicating a conflict handled
+  // below.
+  const updated = session.store.run(SWAP, {
+    fact: id,
+    cause,
+  });
+
+  // If no records were updated it implies that there was no record with
+  // matching `cause`. It may be because `cause` referenced implicit fact
+  // in which case which case `IMPORT_MEMORY` provisioned desired record and
+  // update would not have applied. Or it could be that `cause` in the database
+  // is different from the one being asserted. We will asses this by pulling
+  // the record and comparing it to desired state.
+  if (updated === 0) {
+    const actual = pull(session, fact) ?? null;
+    // If actual state matches desired state it is either was inserted by the
+    // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
+    // it as a conflict as current state is the asserted one.
+    if (refer(actual).toString() !== id) {
+      throw Error.conflict(transaction, {
+        in: transaction.subject,
+        the,
+        of,
+        expected,
+        actual,
+      });
+    }
+  }
+};
+
+const commit = (session: Model, transaction: Transaction): Commit => {
+  const space = refer(transaction.subject).toString();
+  const row = session.store.prepare(EXPORT).get({
+    the: "application/json",
+    entity: space,
+  }) as MemoryView | undefined;
+
+  const [since, cause] = row
+    ? [(JSON.parse(row.is) as Commit["is"]).since + 1, fromString(row.fact) as Reference<Assertion>]
+    : [0, init({ the: "application/json", of: space })];
+
+  for (const fact of iterate(transaction)) {
+    swap(session, fact, { since, transaction });
+  }
+
+  const commit: Commit = {
+    the: "application/json",
+    of: space,
+    is: {
+      since,
+      transaction,
+    },
+    cause,
+  };
+
+  swap(session, commit, { since, transaction });
+
+  return commit;
 };
 
 const execute = <Tr extends DBTransaction<(session: Model, transaction: Transaction) => Commit>>(
-  transaction: Tr,
+  commit: Tr,
   session: Model,
-  instructions: Transaction,
+  transaction: Transaction,
 ): Result<Commit, ToJSON<ConflictError> | ToJSON<TransactionError>> => {
   try {
     return {
-      ok: transaction(session, instructions),
+      ok: commit(session, transaction),
     };
   } catch (error) {
     return (error as Error).name === "ConflictError"
@@ -393,13 +413,13 @@ const execute = <Tr extends DBTransaction<(session: Model, transaction: Transact
         // or file is corrupt. We wrap those in a generic store error.
         // @see https://www.sqlite.org/rescode.html
         {
-          error: Error.transaction({ ...fact, in: session.id }, error as SqliteError),
+          error: Error.transaction(transaction, error as SqliteError),
         };
   }
 };
 
 export const transact = (session: Model, transaction: Transaction) =>
-  execute(session.store.transaction(swap), session, transaction);
+  execute(session.store.transaction(commit), session, transaction);
 
 export const query = (
   { id, store }: Model,

@@ -124,12 +124,29 @@ export type Retract = {
 };
 export type Instruction = Assert | Retract;
 
-export type Commit = {
-  count: number;
-  transaction: Transaction;
+export interface Commit extends Assertion {
+  is: {
+    since: number;
+    transaction: Transaction;
+  };
+}
+
+export type Changes = {
+  [the: The]: {
+    [of: Entity]: {
+      [cause: string]: {
+        is?: JSONValue;
+      };
+    };
+  };
 };
 
-export type Transaction = Instruction[];
+export type Transaction = {
+  issuer: string;
+  subject: ReplicaID;
+  changes: Changes;
+  meta?: Record<string, string>;
+};
 
 export type InferTransactionResult<Instruction> = Instruction extends Assert
   ? Result<Assertion, ToJSON<ConflictError> | ToJSON<TransactionError>>
@@ -207,6 +224,8 @@ export type ToJSON<T> = T & {
 
 export interface ConflictError extends Error {
   name: "ConflictError";
+
+  transaction: Transaction;
   conflict: Conflict;
 }
 
@@ -229,7 +248,7 @@ export interface TransactionError extends Error {
   /**
    * Fact being stored when the error occurred.
    */
-  fact: Fact & { in: ReplicaID };
+  transaction: Transaction;
 }
 
 export interface QueryError extends Error {

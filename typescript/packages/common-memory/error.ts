@@ -8,14 +8,18 @@ import type {
   SystemError,
   ConnectionError,
   Selector,
+  Transaction,
 } from "./interface.ts";
 import { ReplicaID } from "./interface.ts";
 import { refer } from "./util.ts";
 
-export const conflict = (info: Conflict): ToJSON<ConflictError> => new TheConflictError(info);
+export const conflict = (transaction: Transaction, info: Conflict): ToJSON<ConflictError> =>
+  new TheConflictError(transaction, info);
 
-export const transaction = (fact: InFact, cause: SystemError): ToJSON<TransactionError> =>
-  new TheTransactionError(fact, cause);
+export const transaction = (
+  transaction: Transaction,
+  cause: SystemError,
+): ToJSON<TransactionError> => new TheTransactionError(transaction, cause);
 
 export const query = (
   selector: Selector & { in: string },
@@ -28,7 +32,7 @@ export const connection = (address: URL, cause: SystemError): ToJSON<ConnectionE
 export class TheConflictError extends Error implements ConflictError {
   override name = "ConflictError" as const;
   conflict: Conflict;
-  constructor(conflict: Conflict) {
+  constructor(public transaction: Transaction, conflict: Conflict) {
     super(
       conflict.expected == null
         ? `The ${conflict.the} of ${conflict.of} in ${conflict.in} already exists as ${refer(
@@ -50,6 +54,7 @@ export class TheConflictError extends Error implements ConflictError {
       stack: this.stack ?? "",
       message: this.message,
       conflict: this.conflict,
+      transaction: this.transaction,
     };
   }
 }
@@ -58,15 +63,15 @@ export type InFact = Fact & { in: string };
 
 export class TheTransactionError extends Error implements TransactionError {
   override name = "TransactionError" as const;
-  constructor(public fact: InFact, public override cause: SystemError) {
-    super(`Failed to update ${fact.the} of ${fact.of} in ${fact.in}: ${cause.message}`);
+  constructor(public transaction: Transaction, public override cause: SystemError) {
+    super(`Failed to commit transaction because: ${cause.message}`);
   }
   toJSON(): TransactionError {
     return {
       name: this.name,
       stack: this.stack ?? "",
       message: this.message,
-      fact: this.fact,
+      transaction: this.transaction,
       cause: {
         name: this.cause.name,
         code: this.cause.code,
