@@ -82,3 +82,12 @@ jobs:
           key: ${{ secrets.TOOLSHED_SSH_PRIVATE_KEY }}
           script: |
             ./deploy.sh
+
+      - name: Mark Sentry Release
+        uses: getsentry/action-sentry-cli@latest
+        with:
+          args: releases new ${{ github.sha }} && releases finalize ${{ github.sha }}
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
