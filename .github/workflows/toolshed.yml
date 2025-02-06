@@ -84,7 +84,7 @@ jobs:
             ./deploy.sh
 
       - name: Mark Sentry Release
-        uses: getsentry/action-sentry-cli@v2
+        uses: getsentry/action-sentry-cli@v1
         with:
           args: releases new ${{ github.sha }} && releases finalize ${{ github.sha }}
         env:
