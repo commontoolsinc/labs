@@ -131,11 +131,16 @@ export interface Commit extends Assertion {
   };
 }
 
+export type Differential =
+  | { is?: void; "/"?: void } // Retraction
+  | { is: JSONValue; "/"?: void } // assertion
+  | Reference<JSONValue>; // claim
+
 export type Changes = {
   [the: The]: {
     [of: Entity]: {
       [cause: string]: {
-        is?: JSONValue;
+        ["="]?: JSONValue;
       };
     };
   };
@@ -169,7 +174,7 @@ export type JSONValue = null | boolean | number | string | JSONObject | JSONArra
 
 export interface JSONObject extends Record<string, JSONValue> {}
 
-export interface JSONArray extends Array<JSONValue> {}
+export interface JSONArray extends ArrayLike<JSONValue> {}
 
 export type AsyncResult<T extends {} = {}, E extends Error = Error> = Promise<Result<T, E>>;
 

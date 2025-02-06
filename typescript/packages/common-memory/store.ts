@@ -1,5 +1,5 @@
 import { Database, Transaction as DBTransaction, SqliteError } from "jsr:@db/sqlite";
-import { fromString, refer, Reference } from "npm:merkle-reference";
+import { fromJSON, fromString, refer, Reference, is as isReference } from "npm:merkle-reference";
 import type {
   Result,
   ReplicaID,
@@ -13,6 +13,7 @@ import type {
   QueryError,
   ToJSON,
   ConnectionError,
+  Claim,
   Unclaimed,
   Commit,
   Assertion,
@@ -273,11 +274,13 @@ const importDatum = (session: Model, source: Fact): Reference<JSONValue> | null 
   }
 };
 
-const iterate = function* (transaction: Transaction): Iterable<Fact> {
+const iterate = function* (transaction: Transaction): Iterable<Fact | Claim> {
   for (const [the, entities] of Object.entries(transaction.changes)) {
     for (const [of, changes] of Object.entries(entities)) {
       for (const [cause, change] of Object.entries(changes)) {
-        if (change.is === undefined) {
+        if (isReference(change)) {
+          yield { the, of, is: change, cause: fromString(cause) } as Claim;
+        } else if (change.is === undefined) {
           yield { the, of, cause: fromString(cause) } as Retraction;
         } else {
           yield { the, of, is: change.is, cause: fromString(cause) } as Assertion;
@@ -289,13 +292,13 @@ const iterate = function* (transaction: Transaction): Iterable<Fact> {
 
 const swap = (
   session: Model,
-  fact: Fact,
+  claim: Fact | Claim,
   { since, transaction }: { since: number; transaction: Transaction },
 ) => {
-  const { the, of } = fact;
-  // Derive the merkle reference for the provided factor which is expected to
+  const { the, of } = claim;
+  // Derive the merkle reference for the provided claim which is expected to
   // be in normalized form.
-  const id = refer(fact).toString();
+  const fact = refer(claim).toString();
   // We do not store implicit facts like `{ the, of }` in the database and
   // we represent causal reference to such implicit facts as `NULL`, therefore
   // we asses if causal reference is to an implicit and if so substitute it
@@ -304,22 +307,26 @@ const swap = (
   // explicitly and telling in the error that hash to implicit was expected
   // would be confusing.
   const expected =
-    fact.cause?.toString() === init(fact).toString() ? null : (fact.cause as Reference<Fact>);
+    claim.cause?.toString() === init(claim).toString() ? null : (claim.cause as Reference<Fact>);
   const cause = expected?.toString() ?? null;
 
-  // First we import JSON value in the `is` field into the `datum` table and
-  // then we import the fact into the `factor` table. If `datum` already exists
-  // we ignore as we key those by the merkle reference. Same is true for the
-  // `factor` table where we key by the merkle reference of the fact so if
-  // conflicting record exists it is the same record and we ignore.
-  session.store.run(IMPORT_FACT, {
-    this: id,
-    the,
-    of,
-    is: importDatum(session, fact)?.toString() ?? null,
-    cause,
-    since,
-  });
+  // If `claim.is` is a reference we are not asserting anything new we are just
+  // claiming that
+  if (!isReference(claim.is)) {
+    // First we import JSON value in the `is` field into the `datum` table and
+    // then we import the fact into the `factor` table. If `datum` already exists
+    // we ignore as we key those by the merkle reference. Same is true for the
+    // `factor` table where we key by the merkle reference of the fact so if
+    // conflicting record exists it is the same record and we ignore.
+    session.store.run(IMPORT_FACT, {
+      this: fact,
+      the,
+      of,
+      is: importDatum(session, claim)?.toString() ?? null,
+      cause,
+      since,
+    });
+  }
 
   // Now if referenced cause is for an implicit fact, we will not have a record
   // for it in the memory table to update in the next step. We also can not
@@ -331,7 +338,7 @@ const swap = (
     session.store.run(IMPORT_MEMORY, {
       the,
       of,
-      fact: id,
+      fact,
     });
   }
 
@@ -340,7 +347,7 @@ const swap = (
   // is not the case 0 records will be updated indicating a conflict handled
   // below.
   const updated = session.store.run(SWAP, {
-    fact: id,
+    fact,
     cause,
   });
 
@@ -351,11 +358,11 @@ const swap = (
   // is different from the one being asserted. We will asses this by pulling
   // the record and comparing it to desired state.
   if (updated === 0) {
-    const actual = pull(session, fact) ?? null;
+    const actual = pull(session, claim) ?? null;
     // If actual state matches desired state it is either was inserted by the
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
     // it as a conflict as current state is the asserted one.
-    if (refer(actual).toString() !== id) {
+    if (refer(actual).toString() !== fact) {
       throw Error.conflict(transaction, {
         in: transaction.subject,
         the,

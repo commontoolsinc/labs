@@ -3,6 +3,7 @@ import * as Repository from "../store.ts";
 import { refer, createTemporaryDirectory } from "../util.ts";
 import { ensureSymlink } from "@std/fs/ensure-symlink";
 import { transaction } from "../error.ts";
+import { toString } from "../entity.ts";
 
 const the = "application/json";
 const doc = "baedreigv6dnlwjzyyzk2z2ld2kapmu6hvqp46f3axmgdowebqgbts5jksi";
@@ -458,92 +459,136 @@ test("concurrent update fails", new URL(`memory:${alice}`), async (session) => {
   });
 });
 
-// test(
-//   "concurrent identical memory creation succeed",
-//   new URL(`memory:${alice}`),
-//   async (session) => {
-//     const result = await Repository.assert(session, {
-//       the: "application/json",
-//       of: doc,
-//       is: { this: doc },
-//     });
+test(
+  "concurrent identical memory creation succeed",
+  new URL(`memory:${alice}`),
+  async (session) => {
+    const init = {
+      issuer: alice,
+      subject: space,
+      changes: {
+        [the]: {
+          [doc]: {
+            [Repository.init({ the, of: doc }).toString()]: {
+              is: { this: doc },
+            },
+          },
+        },
+      },
+    };
+    const result = await Repository.transact(session, init);
+    const v0 = {
+      the,
+      of: doc,
+      is: { this: doc },
+      cause: refer({ the, of: doc }),
+    };
 
-//     assertEquals(result, {
-//       ok: {
-//         the: "application/json",
-//         of: doc,
-//         is: { this: doc },
-//         cause: refer({ the: "application/json", of: doc }),
-//       },
-//     });
+    assertEquals(result, {
+      ok: {
+        the,
+        of: refer(space).toString(),
+        is: {
+          since: 0,
+          transaction: init,
+        },
+        cause: refer({ the, of: refer(space).toString() }),
+      },
+    });
 
-//     const update = await Repository.assert(session, {
-//       the: "application/json",
-//       of: doc,
-//       is: { this: doc },
-//       cause: refer(result.ok),
-//     });
+    const update = await Repository.transact(session, init);
 
-//     assertEquals(update, {
-//       ok: {
-//         the: "application/json",
-//         of: doc,
-//         is: { this: doc },
-//         cause: refer(result.ok),
-//       },
-//     });
-//   },
-// );
+    assertEquals(update, {
+      ok: {
+        the,
+        of: refer(space).toString(),
+        is: {
+          since: 1,
+          transaction: init,
+        },
+        cause: refer(result.ok),
+      },
+    });
+  },
+);
 
-// test("concurrent identical memory updates succeed", new URL(`memory:${alice}`), async (session) => {
-//   const seed = {
-//     the: "application/json",
-//     of: doc,
-//     is: { v: 0 },
-//   };
+test("concurrent identical memory updates succeed", new URL(`memory:${alice}`), async (session) => {
+  const v0 = { the, of: doc };
 
-//   const v0 = {
-//     ...seed,
-//     cause: refer({
-//       the: "application/json",
-//       of: doc,
-//     }),
-//   };
+  const t0 = {
+    issuer: alice,
+    subject: space,
+    changes: {
+      [the]: {
+        [doc]: {
+          [refer(v0).toString()]: {
+            is: { v: 1 },
+          },
+        },
+      },
+    },
+  };
+  const c0 = await Repository.transact(session, t0);
 
-//   assert(await Repository.assert(session, seed).ok);
+  assertEquals(c0, {
+    ok: {
+      the,
+      of: refer(space).toString(),
+      is: {
+        since: 0,
+        transaction: t0,
+      },
+      cause: refer({ the, of: refer(space).toString() }),
+    },
+  });
 
-//   const first = await Repository.assert(session, {
-//     the: "application/json",
-//     of: doc,
-//     is: { v: 1 },
-//     cause: refer(v0),
-//   });
+  const v1 = {
+    ...v0,
+    is: { v: 1 },
+    cause: refer(v0),
+  };
 
-//   assertEquals(first, {
-//     ok: {
-//       the: "application/json",
-//       of: doc,
-//       is: { v: 1 },
-//       cause: refer(v0),
-//     },
-//   });
+  const t1 = {
+    issuer: alice,
+    subject: space,
+    changes: {
+      [the]: {
+        [doc]: {
+          [refer(v1).toString()]: {
+            is: { v: 2 },
+          },
+        },
+      },
+    },
+  };
 
-//   const second = await Repository.assert(session, {
-//     the: "application/json",
-//     of: doc,
-//     is: { v: 1 },
-//     cause: refer(v0),
-//   });
+  const c1 = await Repository.transact(session, t1);
+  assertEquals(c1, {
+    ok: {
+      the,
+      of: refer(space).toString(),
+      is: {
+        since: 1,
+        transaction: t1,
+      },
+      cause: refer(c0.ok),
+    },
+  });
 
-//   assertEquals(second, {
-//     ok: {
-//       the: "application/json",
-//       of: doc,
-//       is: { v: 1 },
-//       cause: refer(v0),
-//     },
-//   });
-// });
+  const c2 = await Repository.transact(session, t1);
+
+  assertEquals(c2, {
+    ok: {
+      the,
+      of: refer(space).toString(),
+      is: {
+        since: 2,
+        transaction: t1,
+      },
+      cause: refer(c1.ok),
+    },
+  });
+});
 
 // test("retract implicit", new URL(`memory:${alice}`), async (session) => {
 //   // @ts-expect-error - can not retract non-existing assertion.
