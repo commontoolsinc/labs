@@ -57,12 +57,61 @@
           "*",
         );
       };
+
+      window.llm = (() => {
+        const inflight = [];
+
+        async function llm(payload) {
+          return new Promise((resolve, reject) => {
+            let stringified = JSON.stringify(payload);
+            inflight.push([stringified, resolve, reject]);
+            window.parent.postMessage({
+              type: "llm-request",
+              data: stringified,
+            }, "*");
+          });
+        };
+
+        window.addEventListener("message", e => {
+          if (e.data.type !== "llm-response") {
+            return;
+          }
+          let { request, data, error } = e.data;
+          let index = inflight.findIndex(([payload, res, rej]) => request === payload);
+          if (index !== -1) {
+            let [_, res, rej] = inflight[index];
+            inflight.splice(index, 1);
+            if (data) {
+              res(data);
+            } else {
+              rej(data);
+            }
+          }
+        });
+        return llm;
+      })();
     </script>
     <title>Emoji Counter</title>
   </head>
 
   <body>
     <div id="root"></div>
+    <script>
+        async function runLLM() {
+          let res = await llm({
+            model:"groq:llama-3.3-70b-specdec",
+            system:"tell me a short story",
+            stop: "\n```",
+            stream: false,
+            messages: [{
+              role: "user",
+              content: "Tell me a short story"
+            }],
+          });
+          console.log("response from LLM:", res.content);
+        }
+        runLLM();
+    </script>
     <script type="text/babel">
       const emojis = ["😊", "🎉", "🌟", "🚀", "💫", "✨", "🌈", "🎨", "🎭", "🎪"];
 
