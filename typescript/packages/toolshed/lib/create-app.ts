@@ -14,12 +14,6 @@ export function createRouter() {
   });
 }
 
-export function onError(err: unknown, c: Context) {
-  const logger = c.get("logger");
-  logger.error("Server Error:", err);
-  return c.json({ error: "Internal Server Error" }, 500);
-}
-
 export default function createApp() {
   const app = createRouter();
 
@@ -29,7 +23,6 @@ export default function createApp() {
   app.use(pinoLogger());
 
   app.notFound(notFound);
-  app.onError(onError);
   return app;
 }
 
