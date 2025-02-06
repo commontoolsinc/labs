@@ -34,6 +34,7 @@
     "npm:@arizeai/openinference-semantic-conventions@1": "1.0.0",
     "npm:@arizeai/openinference-vercel@2": "2.0.0_@opentelemetry+api@1.9.0",
     "npm:@fal-ai/client@^1.2.2": "1.2.2",
+    "npm:@hono/sentry@^1.2.0": "1.2.0_hono@4.6.16",
     "npm:@hono/zod-openapi@~0.18.3": "0.18.3_hono@4.6.16_zod@3.24.1",
     "npm:@hono/zod-validator@~0.4.2": "0.4.2_hono@4.6.16_zod@3.24.1",
     "npm:@opentelemetry/api@^1.9.0": "1.9.0",
@@ -3406,6 +3407,13 @@
         "robot3"
       ]
     },
+    "@hono/sentry@1.2.0_hono@4.6.16": {
+      "integrity": "sha512-9mS8GrkGtR4YxM1CViL4Ft8LFQ9YhCoXeqKnUA1AUmrvA5PhUU/V+xoo8Autw0nVriin3liX5/lPrwWz3muwiw==",
+      "dependencies": [
+        "hono",
+        "toucan-js"
+      ]
+    },
     "@hono/zod-openapi@0.18.3_hono@4.6.16_zod@3.24.1": {
       "integrity": "sha512-bNlRDODnp7P9Fs13ZPajEOt13G0XwXKfKRHMEFCphQsFiD1Y+twzHaglpNAhNcflzR1DQwHY92ZS06b4LTPbIQ==",
       "dependencies": [
@@ -3612,6 +3620,22 @@
       "dependencies": [
         "@scalar/openapi-types",
         "@unhead/schema"
+      ]
+    },
+    "@sentry/core@8.9.2": {
+      "integrity": "sha512-ixm8NISFlPlEo3FjSaqmq4nnd13BRHoafwJ5MG+okCz6BKGZ1SexEggP42/QpGvDprUUHnfncG6WUMgcarr1zA==",
+      "dependencies": [
+        "@sentry/types",
+        "@sentry/utils"
+      ]
+    },
+    "@sentry/types@8.9.2": {
+      "integrity": "sha512-+LFOyQGl+zk5SZRGZD2MEURf7i5RHgP/mt3s85Rza+vz8M211WJ0YsjkIGUJFSY842nged5QLx4JysLaBlLymg=="
+    },
+    "@sentry/utils@8.9.2": {
+      "integrity": "sha512-A4srR9mEBFdVXwSEKjQ94msUbVkMr8JeFiEj9ouOFORw/Y/ux/WV2bWVD/ZI9wq0TcTNK8L1wBgU8UMS5lIq3A==",
+      "dependencies": [
+        "@sentry/types"
       ]
     },
     "@smithy/abort-controller@4.0.1": {
@@ -4509,6 +4533,14 @@
     "throttleit@2.1.0": {
       "integrity": "sha512-nt6AMGKW1p/70DF/hGBdJB57B8Tspmbp5gfJ8ilhLnt7kkr2ye7hzD6NVG8GGErk2HWF34igrL2CXmNIkzKqKw=="
     },
+    "toucan-js@4.1.0": {
+      "integrity": "sha512-KaD6yfjFuOiFfKccvJ95EICwxus+g2mfPUHyxfPCq7yzsEg5Qi2wpym0cxsZI7oS4t3S7/HwL1v+2TW5/pGAUA==",
+      "dependencies": [
+        "@sentry/core",
+        "@sentry/types",
+        "@sentry/utils"
+      ]
+    },
     "tr46@0.0.3": {
       "integrity": "sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw=="
     },
@@ -4646,6 +4678,7 @@
       "npm:@arizeai/openinference-semantic-conventions@1",
       "npm:@arizeai/openinference-vercel@2",
       "npm:@fal-ai/client@^1.2.2",
+      "npm:@hono/sentry@^1.2.0",
       "npm:@hono/zod-openapi@~0.18.3",
       "npm:@hono/zod-validator@~0.4.2",
       "npm:@opentelemetry/api@^1.9.0",

@@ -3,7 +3,8 @@ import { Context } from "hono";
 import { notFound, serveEmojiFavicon } from "stoker/middlewares";
 import { defaultHook } from "stoker/openapi";
 import { pinoLogger } from "@/middlewares/pino-logger.ts";
-
+import { sentry } from "@hono/sentry";
+import env from "@/env.ts";
 import type { AppBindings, AppOpenAPI } from "@/lib/types.ts";
 
 export function createRouter() {
@@ -21,6 +22,8 @@ export function onError(err: unknown, c: Context) {
 
 export default function createApp() {
   const app = createRouter();
+
+  app.use("*", sentry({ dsn: env.SENTRY_DSN }));
 
   app.use(serveEmojiFavicon("🪓"));
   app.use(pinoLogger());
