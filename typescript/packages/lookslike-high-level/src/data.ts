@@ -35,13 +35,15 @@ export const charmManager = (() => {
 // import "./recipes/todo-list-as-task.jsx";
 // import "./recipes/playlist.jsx";
 
-// import smolIframe from "./recipes/smolIframe.js";
+import smolIframe from "./recipes/smolIframe.js";
 // import complexIframe from "./recipes/complexIframe.js";
 
-charmManager.add([
-  // await runPersistent(smolIframe, { count: 1 }, "smol iframe"),
-  // await runPersistent(complexIframe, { count: 42 }, "complex iframe"),
-]);
+(async function addCharms() {
+  charmManager.add([
+    await charmManager.runPersistent(smolIframe, { count: 1 }, "smol iframe"),
+    // await runPersistent(complexIframe, { count: 42 }, "complex iframe"),
+  ]);
+})();
 
 export type RecipeManifest = {
   name: string;
@@ -140,4 +142,16 @@ setIframeContextHandler({
   unsubscribe(_context: any, receipt: any) {
     removeAction(receipt);
   },
+  async onLLMRequest(_context: any, payload: string) {
+    let res = await fetch(`${window.location.origin}/api/ai/llm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" } ,
+      body: payload,
+    });
+    if (res.ok) {
+      return await res.json();
+    } else {
+      throw new Error("LLM request failed");
+    }
+  }
 });

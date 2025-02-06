@@ -19,8 +19,12 @@ export class CommonIframeSandboxElement extends LitElement {
   @property({ type: String }) src = "";
   @property({ type: Object }) context?: object;
 
-  private iframeRef: Ref<HTMLIFrameElement> = createRef();
+  // Static id for this component for its lifetime.
   private frameId: number = ++FRAME_IDS;
+  // An incrementing id for each new page load to disambiguate
+  // requests between inner page loads. 
+  private instanceId: number = 0;
+  private iframeRef: Ref<HTMLIFrameElement> = createRef();
   private initialized: boolean = false;
   private subscriptions: Map<string, any> = new Map();
 
@@ -140,6 +144,47 @@ export class CommonIframeSandboxElement extends LitElement {
         this.subscriptions.delete(key);
         return;
       }
+      
+      case IPC.GuestMessageType.LLMRequest: {
+        const payload = message.data;
+        let promise = IframeHandler.onLLMRequest(this.context, payload);
+        let instanceId = this.instanceId;
+        promise.then((result: object) => {
+          if (this.instanceId !== instanceId) {
+            // Inner frame was reloaded. This LLM response was
+            // from a previous page. Abort.
+            return;
+          }
+          console.log("sending back to guest", result);
+          this.toGuest({
+            id: this.frameId,
+            type: IPC.IPCHostMessageType.Passthrough,
+            data: {
+              type: IPC.HostMessageType.LLMResponse,
+              request: payload,
+              data: result,
+              error: undefined,
+            },
+          });
+        }, (error: any) => {
+          if (this.instanceId !== instanceId) {
+            // Inner frame was reloaded. This LLM response was
+            // from a previous page. Abort.
+            return;
+          }
+          this.toGuest({
+            id: this.frameId,
+            type: IPC.IPCHostMessageType.Passthrough,
+            data: {
+              type: IPC.HostMessageType.LLMResponse,
+              request: payload,
+              data: null,
+              error,
+            },
+          });
+        });
+        return;
+      }
     }
   } 
 
@@ -154,6 +199,8 @@ export class CommonIframeSandboxElement extends LitElement {
       this.subscriptions.clear();
     }
 
+    ++this.instanceId;
+    
     this.toGuest({
       id: this.frameId,
       type: IPC.IPCHostMessageType.LoadDocument,

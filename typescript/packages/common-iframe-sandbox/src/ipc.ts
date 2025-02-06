@@ -95,10 +95,12 @@ export function isGuestError(e: object): e is GuestError {
 
 export enum HostMessageType {
   Update = "update",
+  LLMResponse = "llm-response",
 }
 
 export type HostMessage =
-  | { type: HostMessageType.Update, data: [string, any] };
+  | { type: HostMessageType.Update, data: [string, any] }
+  | { type: HostMessageType.LLMResponse, request: string, data: object | null, error: any };
 
 export enum GuestMessageType {
   Error = "error",
@@ -106,6 +108,7 @@ export enum GuestMessageType {
   Unsubscribe = "unsubscribe",
   Write = "write",
   Read = "read",
+  LLMRequest = "llm-request",
 }
 
 export type GuestMessage =
@@ -113,7 +116,8 @@ export type GuestMessage =
   | { type: GuestMessageType.Subscribe, data: string }
   | { type: GuestMessageType.Unsubscribe, data: string }
   | { type: GuestMessageType.Read, data: string }
-  | { type: GuestMessageType.Write, data: [string, any] };
+  | { type: GuestMessageType.Write, data: [string, any] }
+  | { type: GuestMessageType.LLMRequest, data: string };
 
 export function isGuestMessage(message: any): message is GuestMessage {
   if (typeof message !== "object" ||
@@ -127,6 +131,7 @@ export function isGuestMessage(message: any): message is GuestMessage {
     case GuestMessageType.Error: {
       return isGuestError(message.data);
     }
+    case GuestMessageType.LLMRequest:
     case GuestMessageType.Subscribe:
     case GuestMessageType.Read:
     case GuestMessageType.Unsubscribe: {
