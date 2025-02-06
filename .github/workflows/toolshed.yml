@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - toolshed-redo
   pull_request:
     branches:
       - main
@@ -63,7 +64,7 @@ jobs:
   deploy:
     needs: test
     timeout-minutes: 10
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/toolshed')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/toolshed' || github.ref == 'refs/heads/toolshed-redo')
     runs-on: ubuntu-latest
     environment: production
     defaults:
@@ -73,25 +74,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@master
         with:
-          deno-version: "2.1.9"
-
-      # - name: Build high-level app
-      #   working-directory: typescript/packages/lookslike-high-level
-      #   run: |
-      #     npm install
-      #     npm run build
-      #     mkdir -p ../toolshed/lookslike-highlevel-dist
-      #     cp -r dist/* ../toolshed/lookslike-highlevel-dist/
-
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Vendor dependencies into the container
-        run: deno task vendor
-
-      - name: Deploy to Fly.io
-        run: flyctl deploy --remote-only
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          host: ${{ secrets.TOOLSHED_HOST }}
+          username: jake
+          key: ${{ secrets.TOOLSHED_SSH_PRIVATE_KEY }}
+          script: |
+            ./deploy.sh

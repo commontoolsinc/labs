@@ -8,8 +8,9 @@ import type {
 import { addBlobToUser, getAllBlobs, getUserBlobs } from "./lib/redis.ts";
 import type { RedisClientType } from "redis";
 import { DiskStorage } from "@/routes/storage/blobby/lib/storage.ts";
+import env from "@/env.ts";
 
-const DATA_DIR = "./cache/blobby";
+const DATA_DIR = `${env.CACHE_DIR}/blobby`;
 
 export const storage = new DiskStorage(DATA_DIR);
 await storage.init();
