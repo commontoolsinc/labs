@@ -4,15 +4,17 @@ import { setIframeContextHandler } from "@commontools/iframe-sandbox";
 import { Action, ReactivityLog, addAction, removeAction } from "@commontools/runner";
 import { CharmRunner } from "@/components/CharmRunner";
 import { WebComponent } from "@/components/WebComponent";
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import * as osUi from "@commontools/os-ui";
 console.log(osUi);
 import "@commontools/os-ui/src/static/main.css";
 import Sidebar from "@/components/Sidebar";
 import { useCell } from "@/hooks/use-charm";
-import { sidebar } from "./state";
+import { replica, searchResults, sidebar } from "./state";
 import "./main.css";
+import { castSpell } from "@/search";
+import SearchResults from "@/components/SearchResults";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 setIframeContextHandler({
@@ -36,10 +38,13 @@ setIframeContextHandler({
 
 function Content() {
   const [count, setCount] = useState(0);
-
-  const incrementCount = () => {
+  const incrementCount = useCallback(() => {
     setCount((c) => c + 1);
-  };
+  }, [setCount]);
+
+  // must be mindful to avoid re-rendering CharmRunner unnecessarily
+  const argument = useMemo(() => ({ count }), [count]);
+  const charmImport = useCallback(() => import("@/recipes/smol.tsx"), []);
 
   return (
     <>
@@ -48,8 +53,8 @@ function Content() {
       </button>
 
       <CharmRunner
-        charmImport={() => import("@/recipes/smol.tsx")}
-        argument={{ count }}
+        charmImport={charmImport}
+        argument={argument}
         className="w-full h-full"
         autoLoad
       />
@@ -59,27 +64,41 @@ function Content() {
 
 export default function Shell() {
   const [sidebarTab] = useCell(sidebar);
+  const [replicaName] = useCell(replica);
+  const [spellResults, setSearchResults] = useCell(searchResults);
+
+  const onSubmit = useCallback(
+    async (ev: CustomEvent) => {
+      const spells = await castSpell(replicaName, ev.detail.value);
+      setSearchResults(spells);
+    },
+    [replicaName, setSearchResults],
+  );
+
+  const onClose = useCallback(() => {
+    setSearchResults([]);
+  }, [setSearchResults]);
+
+  const onSpellCast = useCallback((spell: any, blob: any) => {
+    console.log("Casting spell:", spell, blob);
+  }, []);
 
   return (
     <div className="h-full relative">
       <WebComponent
         as={"os-chrome"}
         wide={sidebarTab === "source" || sidebarTab === "data" || sidebarTab === "query"}
-        locationTitle="Hello World"
-        onLocation={() => {
-          debugger;
-        }}
+        locationTitle={replicaName}
       >
         <Content />
-
-        <WebComponent
-          slot="overlay"
-          as="os-fabgroup"
-          className="pin-br"
-          onSubmit={() => {
-            console.log("submitted");
-          }}
+        <SearchResults
+          searchOpen={spellResults.length > 0}
+          results={spellResults}
+          onClose={onClose}
+          onSpellCast={onSpellCast}
         />
+
+        <WebComponent slot="overlay" as="os-fabgroup" className="pin-br" onSubmit={onSubmit} />
 
         <os-navstack slot="sidebar">
           <Sidebar workingSpec="" focusedCharm={null} linkedCharms={[]} />
