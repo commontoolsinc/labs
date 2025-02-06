@@ -4,10 +4,10 @@ on:
   push:
     branches:
       - main
+      - toolshed-redo
   pull_request:
     branches:
       - main
-      - toolshed-redo
 
 jobs:
   test:
