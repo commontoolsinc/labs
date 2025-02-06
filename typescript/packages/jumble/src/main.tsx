@@ -20,8 +20,8 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/experiments/photoflow/:photosetName" element={<PhotoSetView />} />
           <Route path="/experiments/photoflow/:photosetName/spells/new" element={<NewSpell />} />
 
-          <Route path="/shell" element={<Shell />} />
-          <Route path="/charm/:id" element={<CharmDetail />} />
+          <Route path="/shell/*" element={<Shell />} />
+          {/* <Route path="/charm/:id" element={<CharmDetail />} /> */}
         </Routes>
       </Router>
     </CharmsProvider>

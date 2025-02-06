@@ -43,6 +43,10 @@ export class CharmManager {
     return this.charms;
   }
 
+  async init() {
+    await this.storage.syncCell(this.charms);
+  }
+
   async add(newCharms: DocImpl<any>[]) {
     await this.storage.syncCell(this.charms);
     await idle();
@@ -60,17 +64,18 @@ export class CharmManager {
     }
   }
 
+  async get(id: EntityId): Promise<DocImpl<any> | undefined> {
+    const charm = this.charms.get().find(({ cell }) => cell.entityId === id);
+    if (!charm) return undefined;
+    return charm.cell;
+  }
+
   async remove(id: EntityId) {
     const newCharms = this.charms.get().filter(({ cell }) => cell.entityId !== id);
     if (newCharms.length !== this.charms.get().length) this.charms.send(newCharms);
   }
 
-
-  async runPersistent(
-    recipe: Recipe | Module,
-    inputs?: any,
-    cause?: any,
-  ): Promise<DocImpl<any>> {
+  async runPersistent(recipe: Recipe | Module, inputs?: any, cause?: any): Promise<DocImpl<any>> {
     await idle();
 
     // Fill in missing parameters from other charms. It's a simple match on

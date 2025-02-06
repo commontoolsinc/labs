@@ -2,10 +2,10 @@ import React from "react";
 import { WebComponent } from "./WebComponent";
 import { getRecipe } from "@commontools/runner";
 import { useCell } from "@/hooks/use-charm";
-import { sidebar } from "@/views/state";
+import { charmManager, sidebar } from "@/views/state";
+import { NAME, UI } from "@commontools/builder";
 
 interface SidebarProps {
-  homeRef: any;
   linkedCharms: any[];
   workingSpec: string;
   focusedCharm: any;
@@ -25,7 +25,6 @@ const Sidebar: React.FC<
     onSpecChanged: (value: string) => void;
   }
 > = ({
-  homeRef,
   linkedCharms,
   workingSpec,
   focusedCharm,
@@ -61,7 +60,6 @@ const Sidebar: React.FC<
     home: (
       <div>
         <div>Pinned</div>
-        <div ref={homeRef}></div>
       </div>
     ),
     links: (
