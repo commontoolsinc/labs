@@ -11,7 +11,7 @@ import { ensureDir } from "@std/fs";
 // Configure FAL client
 fal.config({ credentials: env.FAL_API_KEY });
 
-const CACHE_DIR = "./cache/ai-img";
+const CACHE_DIR = `${env.CACHE_DIR}/ai-img`;
 
 export const generateImage: AppRouteHandler<GenerateImageRoute> = async (c) => {
   const logger = c.get("logger");

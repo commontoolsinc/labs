@@ -1,7 +1,8 @@
 import { ensureDir } from "https://deno.land/std/fs/mod.ts";
 import { colors, timestamp } from "./cli.ts";
+import env from "@/env.ts";
 
-export const CACHE_DIR = "./cache/llm-api-cache";
+export const CACHE_DIR = `${env.CACHE_DIR}/llm-api-cache`;
 
 interface CacheItem {
   messages: Array<{ role: string; content: string }>;

@@ -15,7 +15,7 @@ import type { Logger } from "pino";
 // Configure FAL client
 fal.config({ credentials: env.FAL_API_KEY });
 
-const CACHE_DIR = "./cache/ai-voice";
+const CACHE_DIR = `${env.CACHE_DIR}/ai-voice`;
 const ALLOWED_CONTENT_TYPES = ["audio/wav", "audio/mpeg"] as const;
 type AllowedContentType = typeof ALLOWED_CONTENT_TYPES[number];
 

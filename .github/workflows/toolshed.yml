@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - main
+      - toolshed-redo
 
 jobs:
   test:
@@ -63,7 +64,7 @@ jobs:
   deploy:
     needs: test
     timeout-minutes: 10
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/toolshed')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/toolshed' || github.ref == 'refs/heads/toolshed-redo')
     runs-on: ubuntu-latest
     environment: production
     defaults:
@@ -91,7 +92,11 @@ jobs:
       - name: Vendor dependencies into the container
         run: deno task vendor
 
-      - name: Deploy to Fly.io
-        run: flyctl deploy --remote-only
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.TOOLSHED_HOST }}
+          username: jake
+          key: ${{ secrets.TOOLSHED_SSH_PRIVATE_KEY }}
+          script: |
+            ./deploy.sh
