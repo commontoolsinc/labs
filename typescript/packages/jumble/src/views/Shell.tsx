@@ -11,7 +11,7 @@ import {
 } from "@commontools/runner";
 import { WebComponent } from "@/components/WebComponent";
 import { useCallback } from "react";
-import { useParams } from "react-router-dom";
+
 import * as osUi from "@commontools/os-ui";
 // bf: load bearing console.log
 console.log(osUi);
@@ -47,18 +47,6 @@ setIframeContextHandler({
   unsubscribe(_context: any, receipt: any) {
     removeAction(receipt);
   },
-  async onLLMRequest(_context: any, payload: string) {
-    const res = await fetch(`${window.location.origin}/api/ai/llm`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload,
-    });
-    if (res.ok) {
-      return await res.json();
-    } else {
-      throw new Error("LLM request failed");
-    }
-  },
 });
 
 async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: any) {
@@ -82,7 +70,6 @@ async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: a
 }
 
 export default function Shell() {
-  const { charmId } = useParams<{ charmId: string }>();
   const [sidebarTab] = useCell(sidebar);
   const [replicaName] = useCell(replica);
   const [spellResults, setSearchResults] = useCell(searchResults);
@@ -91,6 +78,7 @@ export default function Shell() {
 
   const onSubmit = useCallback(
     async (ev: CustomEvent) => {
+      const charmId = window.location.pathname.match(/\/charm\/([^/]+)/)?.[1] ?? null;
       if (charmId) {
         console.log("Iterating charm", charmId);
         const charm = (await charmManager.get(charmId)) ?? null;
@@ -102,7 +90,7 @@ export default function Shell() {
         setSearchResults(spells);
       }
     },
-    [replicaName, setSearchResults, navigate, charmManager, charmId],
+    [replicaName, setSearchResults, navigate, charmManager],
   );
 
   const onClose = useCallback(() => {
@@ -156,16 +144,12 @@ export default function Shell() {
             linkedCharms={[]}
             workingSpec="example spec"
             handlePublish={() => {}}
-            recipeId={charmId}
+            recipeId="dummy-recipe-id"
             schema={{ imagine: "a schema" }}
             copyRecipeLink={() => {}}
             data={{ imagine: "some data" }}
-            onDataChanged={(value: string) => {
-              console.log("onDataChanged", value);
-            }}
-            onSpecChanged={(value: string) => {
-              console.log("onSpecChanged", value);
-            }}
+            onDataChanged={(value: string) => {}}
+            onSpecChanged={(value: string) => {}}
           />
         </os-navstack>
       </WebComponent>
