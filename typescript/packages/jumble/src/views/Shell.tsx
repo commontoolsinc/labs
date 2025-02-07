@@ -23,7 +23,7 @@ import { replica, searchResults, sidebar } from "./state";
 import "./main.css";
 import { castSpell } from "@/search";
 import SearchResults from "@/components/SearchResults";
-import { Charm, CharmManager, iterate, syncRecipe } from "@commontools/charm";
+import { Charm, CharmManager, iterate, syncRecipe, castNewRecipe } from "@commontools/charm";
 import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import CharmDetail from "./CharmDetail";
 import CharmList from "./CharmList";
@@ -125,6 +125,22 @@ export default function Shell() {
     }
   }, []);
 
+  const onImportLocalData = async () => {
+    const data = {
+      count: 0,
+    };
+    console.log("Importing local data:", data);
+    // FIXME(ja): this needs better error handling
+    const title = prompt("Enter a title for your recipe:");
+    if (!title) return;
+
+    const charmId = await castNewRecipe(charmManager, data, title);
+    console.log("charmId", charmId);
+    // if (charmId) {
+    //   openCharm(charmId);
+    // }
+  };
+
   return (
     <div className="h-full relative">
       <WebComponent
@@ -133,6 +149,10 @@ export default function Shell() {
         locationTitle={replicaName}
         onLocation={onLocation}
       >
+        <a href="#" onClick={onImportLocalData}>
+          Import Thingy
+        </a>
+
         <NavLink to="/" slot="toolbar-start">
           <WebComponent as="os-avatar" name="Ben"></WebComponent>
         </NavLink>
