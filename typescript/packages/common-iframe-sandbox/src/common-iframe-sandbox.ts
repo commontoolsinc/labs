@@ -155,7 +155,6 @@ export class CommonIframeSandboxElement extends LitElement {
             // from a previous page. Abort.
             return;
           }
-          console.log("sending back to guest", result);
           this.toGuest({
             id: this.frameId,
             type: IPC.IPCHostMessageType.Passthrough,
