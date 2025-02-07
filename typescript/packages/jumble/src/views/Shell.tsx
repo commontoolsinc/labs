@@ -1,7 +1,6 @@
 // This is all you need to import/register the @commontools/ui web components
 import "@commontools/ui";
 import { setIframeContextHandler } from "@commontools/iframe-sandbox";
-
 import {
   Action,
   DocImpl,
@@ -11,43 +10,35 @@ import {
   getRecipe,
   removeAction,
 } from "@commontools/runner";
-import { CharmRenderer } from "@/components/CharmRunner";
+import { CharmRenderer, CharmRunner } from "@/components/CharmRunner";
 import { WebComponent } from "@/components/WebComponent";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import * as osUi from "@commontools/os-ui";
-console.log(osUi); // FIXME(ja): load bearing console.log - without this osUi doesn't load
+console.log(osUi);
 import "@commontools/os-ui/src/static/main.css";
 import Sidebar from "@/components/Sidebar";
 import { useCell } from "@/hooks/use-charm";
-import { charmManager, replica, searchResults, sidebar } from "./state";
+import { charmManager, focusedCharm, replica, searchResults, sidebar } from "./state";
 import "./main.css";
 import { castSpell } from "@/search";
 import SearchResults from "@/components/SearchResults";
 import { Charm, syncRecipe } from "@commontools/charm";
 import { NAME, UI } from "@commontools/builder";
-
+import { setFips } from "node:crypto";
+import { Route, Router, Routes, useParams } from "react-router-dom";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
-const serializeProxyObjects = (proxy: any) => {
-  return proxy == undefined ? undefined : JSON.parse(JSON.stringify(proxy));
-}
-
 setIframeContextHandler({
   read(context: any, key: string): any {
-    let data = context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
-    let serialized = serializeProxyObjects(data);
-    return serialized;
+    return context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
   },
   write(context: any, key: string, value: any) {
     context.getAsQueryResult()[key] = value;
   },
   subscribe(context: any, key: string, callback: (key: string, value: any) => void): any {
-    const action: Action = (log: ReactivityLog) => {
-      let data = context.getAsQueryResult([key], log);
-      let serialized = serializeProxyObjects(data);
-      callback(key, serialized);
-    };
+    const action: Action = (log: ReactivityLog) =>
+      callback(key, context.getAsQueryResult([key], log));
 
     addAction(action);
     return action;
@@ -57,6 +48,33 @@ setIframeContextHandler({
   },
 });
 
+function Content() {
+  const [count, setCount] = useState(0);
+  const incrementCount = useCallback(() => {
+    setCount((c) => c + 1);
+  }, [setCount]);
+
+  // must be mindful to avoid re-rendering CharmRunner unnecessarily
+  const argument = useMemo(() => ({ count }), [count]);
+  const charmImport = useCallback(() => import("@/recipes/smol.tsx"), []);
+  const onCharmReady = useCallback(() => {}, []);
+
+  return (
+    <>
+      <button onClick={incrementCount} className="mb-4 px-4 py-2 bg-blue-500 text-white rounded">
+        Increment Count ({count})
+      </button>
+
+      <CharmRunner
+        charmImport={charmImport}
+        argument={argument}
+        className="w-full h-full"
+        autoLoad
+        onCharmReady={onCharmReady}
+      />
+    </>
+  );
+}
 function Charms({ onCharmClick }: { onCharmClick?: (charmId: EntityId) => void }) {
   const [charms] = useCell(charmManager.getCharms());
   console.log("charms", charms);
@@ -85,11 +103,34 @@ function Charms({ onCharmClick }: { onCharmClick?: (charmId: EntityId) => void }
   );
 }
 
+function CharmRoute() {
+  const { charmId } = useParams();
+  const [currentFocus, setCurrentFocus] = useState<Charm | null>(null);
+
+  useEffect(() => {
+    async function loadCharm() {
+      debugger;
+      if (charmId) {
+        // failing to create valid EntityId, need to go fromString()
+        const charm = (await charmManager.get(JSON.parse(charmId))) ?? null;
+        setCurrentFocus(charm);
+      }
+    }
+    loadCharm();
+  }, [charmId]);
+
+  if (!currentFocus) {
+    return <div>Loading...</div>;
+  }
+
+  return <CharmRenderer className="h-full" charm={currentFocus} />;
+}
+
 export default function Shell() {
   const [sidebarTab] = useCell(sidebar);
-  const replicaName = replica;
+  const [replicaName] = useCell(replica);
   const [spellResults, setSearchResults] = useCell(searchResults);
-  const [currentFocus, setFocus] = useState<DocImpl<Charm> | null>(null);
+  const [currentFocus, setFocus] = useState<Charm | null>(null);
 
   const onSubmit = useCallback(
     async (ev: CustomEvent) => {
@@ -131,16 +172,14 @@ export default function Shell() {
   const onCharmClick = useCallback(
     async (charmId: EntityId) => {
       console.log(charmId);
-      history.pushState({}, "", `/charm/${encodeURIComponent(JSON.stringify(charmId))}`);
-
-      // FIXME(ja): getEntityId doesn't work currently?
-      const charm = charmManager.getCharms().get().find(({ cell }) => cell.entityId?.['/'] == charmId['/']);
-      if (charm) setFocus(charm.cell as DocImpl<Charm>);
+      history.pushState({}, "", `/shell/charm/${encodeURIComponent(JSON.stringify(charmId))}`);
+      // setFocus(charm);
     },
     [setFocus],
   );
 
   console.log("currentFocus", currentFocus);
+  const params = useParams();
 
   return (
     <div className="h-full relative">
@@ -149,12 +188,11 @@ export default function Shell() {
         wide={sidebarTab === "source" || sidebarTab === "data" || sidebarTab === "query"}
         locationTitle={replicaName}
       >
-        
+        <Routes>
+          <Route path="charm/:charmId" element={<CharmRoute />} />
+        </Routes>
         {currentFocus ? (
-          <>
-            <button onClick={() => setFocus(null)}>close</button>
-            <CharmRenderer className="h-full" charm={currentFocus} />
-          </>
+          <CharmRenderer className="h-full" charm={currentFocus} />
         ) : (
           <Charms onCharmClick={onCharmClick} />
         )}
