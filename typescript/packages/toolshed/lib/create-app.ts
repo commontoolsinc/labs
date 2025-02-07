@@ -17,7 +17,7 @@ export function createRouter() {
 export default function createApp() {
   const app = createRouter();
 
-  app.use("*", sentry({ dsn: env.SENTRY_DSN }));
+  app.use("*", sentry({ dsn: env.SENTRY_DSN, tracesSampleRate: 1.0 }));
 
   app.use(serveEmojiFavicon("🪓"));
   app.use(pinoLogger());
