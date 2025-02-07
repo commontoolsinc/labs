@@ -86,7 +86,7 @@ jobs:
       - name: Mark Sentry Release
         uses: getsentry/action-release@v1
         with:
-          args: releases new ${{ github.sha }} && releases finalize ${{ github.sha }}
+          environment: production
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
