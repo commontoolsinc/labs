@@ -41,6 +41,7 @@
     "npm:@opentelemetry/exporter-trace-otlp-proto@~0.57.1": "0.57.1_@opentelemetry+api@1.9.0",
     "npm:@opentelemetry/resources@^1.30.1": "1.30.1_@opentelemetry+api@1.9.0",
     "npm:@scalar/hono-api-reference@~0.5.165": "0.5.165_hono@4.6.16",
+    "npm:@sentry/deno@^8.54.0": "8.54.0",
     "npm:@types/node@*": "22.5.4",
     "npm:@vercel/otel@^1.10.0": "1.10.0_@opentelemetry+api@1.9.0_@opentelemetry+api-logs@0.57.1_@opentelemetry+instrumentation@0.57.1__@opentelemetry+api@1.9.0_@opentelemetry+resources@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-logs@0.57.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-metrics@1.30.1__@opentelemetry+api@1.9.0_@opentelemetry+sdk-trace-base@1.30.1__@opentelemetry+api@1.9.0",
     "npm:ai@*": "4.0.29_zod@3.24.1",
@@ -3622,11 +3623,20 @@
         "@unhead/schema"
       ]
     },
+    "@sentry/core@8.54.0": {
+      "integrity": "sha512-03bWf+D1j28unOocY/5FDB6bUHtYlm6m6ollVejhg45ZmK9iPjdtxNWbrLsjT1WRym0Tjzowu+A3p+eebYEv0Q=="
+    },
     "@sentry/core@8.9.2": {
       "integrity": "sha512-ixm8NISFlPlEo3FjSaqmq4nnd13BRHoafwJ5MG+okCz6BKGZ1SexEggP42/QpGvDprUUHnfncG6WUMgcarr1zA==",
       "dependencies": [
         "@sentry/types",
         "@sentry/utils"
+      ]
+    },
+    "@sentry/deno@8.54.0": {
+      "integrity": "sha512-ft91SMX6HD2lGq/7QND3vZnzOkjFayJdDLXWFtfBDhSjTUIp+SyMA2FFxlkLKRawXi9eqxrCexCWSyd9Q0biMQ==",
+      "dependencies": [
+        "@sentry/core@8.54.0"
       ]
     },
     "@sentry/types@8.9.2": {
@@ -4536,7 +4546,7 @@
     "toucan-js@4.1.0": {
       "integrity": "sha512-KaD6yfjFuOiFfKccvJ95EICwxus+g2mfPUHyxfPCq7yzsEg5Qi2wpym0cxsZI7oS4t3S7/HwL1v+2TW5/pGAUA==",
       "dependencies": [
-        "@sentry/core",
+        "@sentry/core@8.9.2",
         "@sentry/types",
         "@sentry/utils"
       ]
@@ -4685,6 +4695,7 @@
       "npm:@opentelemetry/exporter-trace-otlp-proto@~0.57.1",
       "npm:@opentelemetry/resources@^1.30.1",
       "npm:@scalar/hono-api-reference@~0.5.165",
+      "npm:@sentry/deno@^8.54.0",
       "npm:@vercel/otel@^1.10.0",
       "npm:ai@^4.0.36",
       "npm:hono-pino@0.7",
