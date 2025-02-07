@@ -47,6 +47,18 @@ setIframeContextHandler({
   unsubscribe(_context: any, receipt: any) {
     removeAction(receipt);
   },
+  async onLLMRequest(_context: any, payload: string) {
+    const res = await fetch(`${window.location.origin}/api/ai/llm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+    });
+    if (res.ok) {
+      return await res.json();
+    } else {
+      throw new Error("LLM request failed");
+    }
+  },
 });
 
 async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: any) {
