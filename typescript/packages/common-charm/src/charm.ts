@@ -64,8 +64,8 @@ export class CharmManager {
     }
   }
 
-  async get(id: EntityId): Promise<DocImpl<any> | undefined> {
-    const charm = this.charms.get().find(({ cell }) => cell.entityId === id);
+  async get(id: string): Promise<DocImpl<any> | undefined> {
+    const charm = this.charms.get().find(({ cell }) => cell.entityId?.["/"] === id);
     if (!charm) return undefined;
     return charm.cell;
   }

@@ -15,18 +15,19 @@ import { WebComponent } from "@/components/WebComponent";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import * as osUi from "@commontools/os-ui";
+// bf: load bearing console.log
 console.log(osUi);
+
 import "@commontools/os-ui/src/static/main.css";
 import Sidebar from "@/components/Sidebar";
 import { useCell } from "@/hooks/use-charm";
-import { charmManager, focusedCharm, replica, searchResults, sidebar } from "./state";
+import { charmManager, replica, searchResults, sidebar } from "./state";
 import "./main.css";
 import { castSpell } from "@/search";
 import SearchResults from "@/components/SearchResults";
 import { Charm, syncRecipe } from "@commontools/charm";
 import { NAME, UI } from "@commontools/builder";
-import { setFips } from "node:crypto";
-import { Route, Router, Routes, useParams } from "react-router-dom";
+import { NavLink, Route, Routes, useParams } from "react-router-dom";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 setIframeContextHandler({
@@ -48,34 +49,7 @@ setIframeContextHandler({
   },
 });
 
-function Content() {
-  const [count, setCount] = useState(0);
-  const incrementCount = useCallback(() => {
-    setCount((c) => c + 1);
-  }, [setCount]);
-
-  // must be mindful to avoid re-rendering CharmRunner unnecessarily
-  const argument = useMemo(() => ({ count }), [count]);
-  const charmImport = useCallback(() => import("@/recipes/smol.tsx"), []);
-  const onCharmReady = useCallback(() => {}, []);
-
-  return (
-    <>
-      <button onClick={incrementCount} className="mb-4 px-4 py-2 bg-blue-500 text-white rounded">
-        Increment Count ({count})
-      </button>
-
-      <CharmRunner
-        charmImport={charmImport}
-        argument={argument}
-        className="w-full h-full"
-        autoLoad
-        onCharmReady={onCharmReady}
-      />
-    </>
-  );
-}
-function Charms({ onCharmClick }: { onCharmClick?: (charmId: EntityId) => void }) {
+function Charms() {
   const [charms] = useCell(charmManager.getCharms());
   console.log("charms", charms);
 
@@ -85,18 +59,19 @@ function Charms({ onCharmClick }: { onCharmClick?: (charmId: EntityId) => void }
         <div
           key={index}
           className="bg-white border border-gray-100 rounded-lg overflow-hidden cursor-pointer hover:border-gray-300 transition-colors duration-200"
-          onClick={() => onCharmClick?.(charm.cell.entityId!)}
         >
-          <div className="p-4">
-            <h3 className="text-xl font-semibold text-gray-800 mb-4">
-              {charm.cell.get()[NAME] || "Unnamed Charm"}
-            </h3>
-            <div className="w-full bg-gray-50 rounded border border-gray-100 p-3">
-              <pre className="w-full h-24 overflow-hidden whitespace-pre-wrap text-xs text-gray-500">
-                {JSON.stringify(charm.cell.get()[UI], null, 2)}
-              </pre>
+          <NavLink to={`/shell/charm/${charm.cell.entityId?.["/"]}`}>
+            <div className="p-4">
+              <h3 className="text-xl font-semibold text-gray-800 mb-4">
+                {charm.cell.get()[NAME] || "Unnamed Charm"}
+              </h3>
+              <div className="w-full bg-gray-50 rounded border border-gray-100 p-3">
+                <pre className="w-full h-24 overflow-hidden whitespace-pre-wrap text-xs text-gray-500">
+                  {JSON.stringify(charm.cell.get()[UI], null, 2)}
+                </pre>
+              </div>
             </div>
-          </div>
+          </NavLink>
         </div>
       ))}
     </div>
@@ -109,10 +84,9 @@ function CharmRoute() {
 
   useEffect(() => {
     async function loadCharm() {
-      debugger;
       if (charmId) {
-        // failing to create valid EntityId, need to go fromString()
-        const charm = (await charmManager.get(JSON.parse(charmId))) ?? null;
+        await charmManager.init();
+        const charm = (await charmManager.get(charmId)) ?? null;
         setCurrentFocus(charm);
       }
     }
@@ -130,7 +104,6 @@ export default function Shell() {
   const [sidebarTab] = useCell(sidebar);
   const [replicaName] = useCell(replica);
   const [spellResults, setSearchResults] = useCell(searchResults);
-  const [currentFocus, setFocus] = useState<Charm | null>(null);
 
   const onSubmit = useCallback(
     async (ev: CustomEvent) => {
@@ -169,18 +142,6 @@ export default function Shell() {
     [setSearchResults],
   );
 
-  const onCharmClick = useCallback(
-    async (charmId: EntityId) => {
-      console.log(charmId);
-      history.pushState({}, "", `/shell/charm/${encodeURIComponent(JSON.stringify(charmId))}`);
-      // setFocus(charm);
-    },
-    [setFocus],
-  );
-
-  console.log("currentFocus", currentFocus);
-  const params = useParams();
-
   return (
     <div className="h-full relative">
       <WebComponent
@@ -190,12 +151,8 @@ export default function Shell() {
       >
         <Routes>
           <Route path="charm/:charmId" element={<CharmRoute />} />
+          <Route index element={<Charms />} />
         </Routes>
-        {currentFocus ? (
-          <CharmRenderer className="h-full" charm={currentFocus} />
-        ) : (
-          <Charms onCharmClick={onCharmClick} />
-        )}
 
         <SearchResults
           searchOpen={spellResults.length > 0}

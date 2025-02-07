@@ -7,7 +7,6 @@ import PhotoFlowIndex from "@/views/experiments/photoflow/Index.tsx";
 import PhotoSetView from "@/views/experiments/photoflow/PhotoSetView.tsx";
 import NewSpell from "@/views/experiments/photoflow/NewSpell.tsx";
 import Shell from "@/views/Shell.tsx";
-import CharmDetail from "@/views/CharmDetail";
 import { CharmsProvider } from "@/contexts/CharmsContext";
 
 createRoot(document.getElementById("root")!).render(
