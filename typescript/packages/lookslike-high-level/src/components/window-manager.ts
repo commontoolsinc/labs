@@ -4,7 +4,7 @@ import { createRef, Ref, ref } from "lit/directives/ref.js";
 import { style } from "@commontools/ui";
 import { render } from "@commontools/html";
 import { charmManager, closeCharm, openCharm } from "../data.js";
-import { Charm, syncRecipe, buildRecipe } from "@commontools/charm";
+import { Charm, syncRecipe, buildRecipe, iterate, castNewRecipe } from "@commontools/charm";
 import {
   addRecipe,
   DocImpl,
@@ -18,7 +18,6 @@ import {
 import { repeat } from "lit/directives/repeat.js";
 import { UI, NAME, TYPE } from "@commontools/builder";
 import { matchRoute, navigate } from "../router.js";
-import * as iframeSpellAi from "./iframe-spell-ai.js";
 import { SpellSearchResult } from "./search-results.js";
 import { toasty } from "./toasty.js";
 
@@ -195,15 +194,18 @@ export class CommonWindowManager extends LitElement {
   @state()
   private spellSearchResults: SpellSearchResult[] = [];
 
-  handleUniboxSubmit(event: CustomEvent) {
+  async handleUniboxSubmit(event: CustomEvent) {
     const value = event.detail.value;
     const shiftKey = event.detail.shiftKey;
     console.log("Unibox submitted:", value, shiftKey);
 
     if (this.focusedCharm) {
-      iframeSpellAi.iterate(this.focusedCharm, value, shiftKey);
+      const charmId = await iterate(charmManager, this.focusedCharm, value, shiftKey);
+      if (charmId) {
+        openCharm(charmId);
+      }
     } else {
-      castSpell(value, this.showResults.bind(this));
+      await castSpell(value, this.showResults.bind(this));
     }
   }
 
@@ -228,6 +230,7 @@ export class CommonWindowManager extends LitElement {
       if (!recipe) return;
 
       toasty("Casting...");
+      debugger;
       const charm: DocImpl<Charm> = await charmManager.runPersistent(recipe, blob.data);
       charmManager.add([charm]);
       openCharm(JSON.stringify(charm.entityId));
@@ -311,7 +314,7 @@ export class CommonWindowManager extends LitElement {
         this.sidebarTab === "source" || this.sidebarTab === "data" || this.sidebarTab === "query";
     };
 
-    const onImportLocalData = (event: CustomEvent) => {
+    const onImportLocalData = async (event: CustomEvent) => {
       const [data] = event.detail.data;
       if (!data) return;
 
@@ -320,7 +323,10 @@ export class CommonWindowManager extends LitElement {
       const title = prompt("Enter a title for your recipe:");
       if (!title) return;
 
-      iframeSpellAi.castNewRecipe(data, title);
+      const charmId = await castNewRecipe(charmManager, data, title);
+      if (charmId) {
+        openCharm(charmId);
+      }
     };
 
     return html`

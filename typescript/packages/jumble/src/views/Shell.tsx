@@ -4,15 +4,13 @@ import { setIframeContextHandler } from "@commontools/iframe-sandbox";
 import {
   Action,
   DocImpl,
-  EntityId,
   ReactivityLog,
   addAction,
   getRecipe,
   removeAction,
 } from "@commontools/runner";
-import { CharmRenderer, CharmRunner } from "@/components/CharmRunner";
 import { WebComponent } from "@/components/WebComponent";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback } from "react";
 
 import * as osUi from "@commontools/os-ui";
 // bf: load bearing console.log
@@ -21,13 +19,15 @@ console.log(osUi);
 import "@commontools/os-ui/src/static/main.css";
 import Sidebar from "@/components/Sidebar";
 import { useCell } from "@/hooks/use-charm";
-import { charmManager, replica, searchResults, sidebar } from "./state";
+import { replica, searchResults, sidebar } from "./state";
 import "./main.css";
 import { castSpell } from "@/search";
 import SearchResults from "@/components/SearchResults";
-import { Charm, syncRecipe } from "@commontools/charm";
-import { NAME, UI } from "@commontools/builder";
-import { NavLink, Route, Routes, useParams } from "react-router-dom";
+import { Charm, CharmManager, iterate, syncRecipe } from "@commontools/charm";
+import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import CharmDetail from "./CharmDetail";
+import CharmList from "./CharmList";
+import { useCharmManager } from "@/contexts/CharmManagerContext";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 setIframeContextHandler({
@@ -49,68 +49,48 @@ setIframeContextHandler({
   },
 });
 
-function Charms() {
-  const [charms] = useCell(charmManager.getCharms());
-  console.log("charms", charms);
+async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: any) {
+  const recipeKey = result?.key;
 
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-8">
-      {charms.map((charm, index) => (
-        <div
-          key={index}
-          className="bg-white border border-gray-100 rounded-lg overflow-hidden cursor-pointer hover:border-gray-300 transition-colors duration-200"
-        >
-          <NavLink to={`/shell/charm/${charm.cell.entityId?.["/"]}`}>
-            <div className="p-4">
-              <h3 className="text-xl font-semibold text-gray-800 mb-4">
-                {charm.cell.get()[NAME] || "Unnamed Charm"}
-              </h3>
-              <div className="w-full bg-gray-50 rounded border border-gray-100 p-3">
-                <pre className="w-full h-24 overflow-hidden whitespace-pre-wrap text-xs text-gray-500">
-                  {JSON.stringify(charm.cell.get()[UI], null, 2)}
-                </pre>
-              </div>
-            </div>
-          </NavLink>
-        </div>
-      ))}
-    </div>
-  );
-}
+  if (recipeKey && blob) {
+    console.log("Syncing...");
+    const recipeId = recipeKey.replace("spell-", "");
+    await syncRecipe(recipeId);
 
-function CharmRoute() {
-  const { charmId } = useParams();
-  const [currentFocus, setCurrentFocus] = useState<Charm | null>(null);
+    const recipe = getRecipe(recipeId);
+    if (!recipe) return;
 
-  useEffect(() => {
-    async function loadCharm() {
-      if (charmId) {
-        await charmManager.init();
-        const charm = (await charmManager.get(charmId)) ?? null;
-        setCurrentFocus(charm);
-      }
-    }
-    loadCharm();
-  }, [charmId]);
-
-  if (!currentFocus) {
-    return <div>Loading...</div>;
+    console.log("Casting...");
+    const charm: DocImpl<Charm> = await charmManager.runPersistent(recipe, blob.data);
+    charmManager.add([charm]);
+    console.log("Ready!");
+  } else {
+    console.log("Failed to cast");
   }
-
-  return <CharmRenderer className="h-full" charm={currentFocus} />;
 }
 
 export default function Shell() {
   const [sidebarTab] = useCell(sidebar);
   const [replicaName] = useCell(replica);
   const [spellResults, setSearchResults] = useCell(searchResults);
+  const navigate = useNavigate();
+  const { charmManager } = useCharmManager();
 
   const onSubmit = useCallback(
     async (ev: CustomEvent) => {
-      const spells = await castSpell(replicaName, ev.detail.value);
-      setSearchResults(spells);
+      const charmId = window.location.pathname.match(/\/charm\/([^/]+)/)?.[1] ?? null;
+      if (charmId) {
+        console.log("Iterating charm", charmId);
+        const charm = (await charmManager.get(charmId)) ?? null;
+        const newCharmId = await iterate(charmManager, charm, ev.detail.value, ev.detail.shiftKey);
+        navigate(`/charm/${newCharmId}`);
+      } else {
+        console.log("Casting spell", ev.detail.value);
+        const spells = await castSpell(replicaName, ev.detail.value);
+        setSearchResults(spells);
+      }
     },
-    [replicaName, setSearchResults],
+    [replicaName, setSearchResults, navigate, charmManager],
   );
 
   const onClose = useCallback(() => {
@@ -119,39 +99,34 @@ export default function Shell() {
 
   const onSpellCast = useCallback(
     async (result: any, blob: any) => {
-      const recipeKey = result?.key;
-
-      if (recipeKey && blob) {
-        console.log("Syncing...");
-        const recipeId = recipeKey.replace("spell-", "");
-        await syncRecipe(recipeId);
-
-        const recipe = getRecipe(recipeId);
-        if (!recipe) return;
-
-        console.log("Casting...");
-        const charm: DocImpl<Charm> = await charmManager.runPersistent(recipe, blob.data);
-        charmManager.add([charm]);
-        console.log("Ready!");
-
-        setSearchResults([]);
-      } else {
-        console.log("Failed to cast");
-      }
+      await castSpellAsCharm(charmManager, result, blob);
+      setSearchResults([]);
     },
-    [setSearchResults],
+    [setSearchResults, charmManager],
   );
+
+  const onLocation = useCallback((_: CustomEvent) => {
+    const name = prompt("Set new replica bame: ");
+    if (name) {
+      replica.send(name);
+    }
+  }, []);
 
   return (
     <div className="h-full relative">
       <WebComponent
         as={"os-chrome"}
-        wide={sidebarTab === "source" || sidebarTab === "data" || sidebarTab === "query"}
+        wide={sidebarTab === "source"}
         locationTitle={replicaName}
+        onLocation={onLocation}
       >
+        <NavLink to="/" slot="toolbar-start">
+          <WebComponent as="os-avatar" name="Ben"></WebComponent>
+        </NavLink>
+
         <Routes>
-          <Route path="charm/:charmId" element={<CharmRoute />} />
-          <Route index element={<Charms />} />
+          <Route path="charm/:charmId" element={<CharmDetail />} />
+          <Route index element={<CharmList />} />
         </Routes>
 
         <SearchResults
@@ -164,7 +139,18 @@ export default function Shell() {
         <WebComponent slot="overlay" as="os-fabgroup" className="pin-br" onSubmit={onSubmit} />
 
         <os-navstack slot="sidebar">
-          <Sidebar workingSpec="" focusedCharm={null} linkedCharms={[]} />
+          {/* bf: most of these are stubbed, need to pass real values in */}
+          <Sidebar
+            linkedCharms={[]}
+            workingSpec="example spec"
+            handlePublish={() => {}}
+            recipeId="dummy-recipe-id"
+            schema={{ imagine: "a schema" }}
+            copyRecipeLink={() => {}}
+            data={{ imagine: "some data" }}
+            onDataChanged={(value: string) => {}}
+            onSpecChanged={(value: string) => {}}
+          />
         </os-navstack>
       </WebComponent>
     </div>

@@ -1,20 +1,28 @@
-import React from "react";
+import { Charm } from "@commontools/charm";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import { useCharms } from "@/contexts/CharmsContext";
+import { CharmRenderer } from "@/components/CharmRunner";
+import { useCharmManager } from "@/contexts/CharmManagerContext";
 
 export default function CharmDetail() {
-  const { id } = useParams<{ id: string }>();
-  const { charms } = useCharms();
-  const charm = charms.find((c) => c.entityId === id);
+  const { charmManager } = useCharmManager();
+  const { charmId } = useParams();
+  const [currentFocus, setCurrentFocus] = useState<Charm | null>(null);
 
-  if (!charm) {
-    return <div>Charm not found</div>;
+  useEffect(() => {
+    async function loadCharm() {
+      if (charmId) {
+        await charmManager.init();
+        const charm = (await charmManager.get(charmId)) ?? null;
+        setCurrentFocus(charm);
+      }
+    }
+    loadCharm();
+  }, [charmId, charmManager]);
+
+  if (!currentFocus) {
+    return <div>Loading...</div>;
   }
 
-  return (
-    <div className="p-4">
-      <h2>Charm Detail: {charm.name}</h2>
-      <div>{charm.ui}</div>
-    </div>
-  );
+  return <CharmRenderer className="h-full" charm={currentFocus} />;
 }

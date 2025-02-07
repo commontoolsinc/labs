@@ -1,11 +1,11 @@
-import { getRecipe, getRecipeSrc, addRecipe, run } from "@commontools/runner";
-import { Charm, tsToExports } from "@commontools/charm";
-import { charmManager, openCharm } from "../data.js";
+import { addRecipe, getRecipe, getRecipeSrc, run } from "@commontools/runner";
 import { LLMClient } from "@commontools/llm-client";
 import { createJsonSchema, JSONSchema, TYPE } from "@commontools/builder";
 import { type DocImpl } from "@commontools/runner";
 
 import demoSrc from "./demo.html?raw";
+import { tsToExports } from "./localBuild.js";
+import { Charm, CharmManager } from "./charm.js";
 
 const SELECTED_MODEL = [
   "groq:llama-3.3-70b-specdec",
@@ -200,10 +200,12 @@ const genSrc = async ({
     messages.push(demoSrc);
   }
 
-  messages.push(`The user asked you to ${spec ? "update" : "create"} the source code by the following:
+  messages.push(
+    `The user asked you to ${spec ? "update" : "create"} the source code by the following:
 \`\`\`
 ${newSpec}
-\`\`\``);
+\`\`\``,
+  );
   messages.push(responsePrefill);
 
   const system = `generate a complete HTML document within a html block , e.g.
@@ -291,16 +293,21 @@ const getIframeRecipe = (charm: Charm) => {
   return { recipeId, iframe: parseIframeRecipe(src) };
 };
 
-export async function iterate(charm: DocImpl<Charm> | null, value: string, shiftKey: boolean) {
+export async function iterate(
+  charmManager: CharmManager,
+  charm: DocImpl<Charm> | null,
+  value: string,
+  shiftKey: boolean,
+): Promise<string | null> {
   if (!charm) {
     console.error("FIXME, no charm, what should we do?");
-    return;
+    return null;
   }
 
   const { recipeId, iframe } = getIframeRecipe(charm);
   if (!iframe) {
     console.error("FIXME, no iframe, what should we do?");
-    return;
+    return null;
   }
 
   const newSpec = shiftKey ? iframe.spec + "\n" + value : value;
@@ -312,13 +319,18 @@ export async function iterate(charm: DocImpl<Charm> | null, value: string, shift
     schema: iframe.argumentSchema,
   });
   const name = newIFrameSrc.match(/<title>(.*?)<\/title>/)?.[1] ?? newSpec;
-  const newRecipeSrc = buildFullRecipe({ ...iframe, src: newIFrameSrc, spec: newSpec, name });
+  const newRecipeSrc = buildFullRecipe({
+    ...iframe,
+    src: newIFrameSrc,
+    spec: newSpec,
+    name,
+  });
 
   const { exports, errors } = await tsToExports(newRecipeSrc);
 
   if (errors) {
     console.error("errors", errors);
-    return;
+    return null;
   }
 
   let { default: recipe } = exports;
@@ -335,15 +347,24 @@ export async function iterate(charm: DocImpl<Charm> | null, value: string, shift
     // const newCharm = run(recipe, undefined, charm);
 
     // if you want to run a new charm:
-    const newCharm = run(recipe, { cell: charm.sourceCell, path: ["argument"] });
+    const newCharm = run(recipe, {
+      cell: charm.sourceCell,
+      path: ["argument"],
+    });
 
     charmManager.add([newCharm]);
     const charmId = JSON.stringify(newCharm.entityId);
-    openCharm(charmId);
+    return charmId;
   }
+
+  return null;
 }
 
-export async function castNewRecipe(data: any, newSpec: string) {
+export async function castNewRecipe(
+  charmManager: CharmManager,
+  data: any,
+  newSpec: string,
+): Promise<string | null> {
   const schema = createJsonSchema({}, data);
   schema.description = newSpec;
   console.log("schema", schema);
@@ -362,7 +383,7 @@ export async function castNewRecipe(data: any, newSpec: string) {
 
   if (errors) {
     console.error("errors", errors);
-    return;
+    return null;
   }
 
   let { default: recipe } = exports;
@@ -376,6 +397,8 @@ export async function castNewRecipe(data: any, newSpec: string) {
 
     charmManager.add([newCharm]);
     const charmId = JSON.stringify(newCharm.entityId);
-    openCharm(charmId);
+    return charmId;
   }
+
+  return null;
 }

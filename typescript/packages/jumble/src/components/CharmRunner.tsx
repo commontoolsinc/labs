@@ -1,7 +1,7 @@
 import React, { useRef } from "react";
 import { render } from "@commontools/html";
 import { effect, idle, run } from "@commontools/runner";
-import { charmManager } from "@/views/state";
+import { useCharmManager } from "@/contexts/CharmManagerContext";
 
 interface CharmLoaderProps {
   charmImport: () => Promise<any>;
@@ -25,6 +25,7 @@ function useCharmLoader({
   const [error, setError] = React.useState<Error | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const mountingKey = useRef(0);
+  const { charmManager } = useCharmManager();
 
   const loadCharm = React.useCallback(async () => {
     const currentMountKey = ++mountingKey.current;
