@@ -120,6 +120,11 @@ export class CharmManager {
     return run(recipe, inputs, await this.storage.syncCell(createRef({ recipe, inputs }, cause)));
   }
 
+  async syncRecipe(charm: Charm) {
+    const recipeId = charm.sourceCell?.get()?.[TYPE];
+    if (recipeId) await this.storage.syncCell(recipeId);
+  }
+
   async sync(
     entityId: string | EntityId | DocImpl<any>,
     waitForStorage: boolean = false,

@@ -14,6 +14,8 @@ export default function CharmDetail() {
       if (charmId) {
         await charmManager.init();
         const charm = (await charmManager.get(charmId)) ?? null;
+        charmManager.syncRecipe(charm!);
+
         setCurrentFocus(charm);
       }
     }

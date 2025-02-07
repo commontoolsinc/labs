@@ -93,6 +93,7 @@ export default function Shell() {
       const charmId = window.location.pathname.match(/\/charm\/([^/]+)/)?.[1] ?? null;
       if (charmId) {
         console.log("Iterating charm", charmId);
+
         const charm = (await charmManager.get(charmId)) ?? null;
         const newCharmId = await iterate(charmManager, charm, ev.detail.value, ev.detail.shiftKey);
         navigate(`/charm/${newCharmId}`);
