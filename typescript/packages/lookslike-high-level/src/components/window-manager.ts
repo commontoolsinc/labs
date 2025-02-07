@@ -4,7 +4,7 @@ import { createRef, Ref, ref } from "lit/directives/ref.js";
 import { style } from "@commontools/ui";
 import { render } from "@commontools/html";
 import { charmManager, closeCharm, openCharm } from "../data.js";
-import { Charm, syncRecipe, buildRecipe, iterate, castNewRecipe } from "@commontools/charm";
+import { Charm, buildRecipe, iterate, castNewRecipe } from "@commontools/charm";
 import {
   addRecipe,
   DocImpl,
@@ -224,7 +224,7 @@ export class CommonWindowManager extends LitElement {
     if (recipeKey && blob) {
       toasty("Syncing...");
       const recipeId = recipeKey.replace("spell-", "");
-      await syncRecipe(recipeId);
+      await charmManager.syncRecipeBlobby(recipeId);
 
       const recipe = getRecipe(recipeId);
       if (!recipe) return;
@@ -611,7 +611,7 @@ export class CommonWindowManager extends LitElement {
     if (recipeMatch) {
       let recipeId = recipeMatch.params.recipeId;
       recipeId = recipeId.replace("spell-", "");
-      syncRecipe(recipeId).then(async () => {
+      charmManager.syncRecipeBlobby({"/": recipeId}).then(async () => {
         const recipe = getRecipe(recipeId);
         if (recipe) {
           // Get data from URL query parameter if it exists

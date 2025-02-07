@@ -134,7 +134,11 @@ export class CharmManager {
   }
 
   async syncRecipeBlobby(entityId: string) {
-    await syncRecipeBlobby(entityId);
+    if (typeof entityId === "string") {
+      await syncRecipeBlobby(entityId);
+    } else  {
+      await syncRecipeBlobby(entityId["/"]);
+    } 
   }
 
   async sync(

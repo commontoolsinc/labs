@@ -10,7 +10,7 @@ import { Charm, CharmManager } from "./charm.js";
 const SELECTED_MODEL = [
   "groq:llama-3.3-70b-specdec",
   // "cerebras:llama-3.3-70b",
-  "anthropic:claude-3-5-sonnet",
+  "anthropic:claude-3-5-sonnet-latest",
 ];
 
 const responsePrefill =

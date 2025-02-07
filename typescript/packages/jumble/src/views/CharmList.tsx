@@ -3,6 +3,16 @@ import { NavLink } from "react-router-dom";
 import { NAME, UI } from "@commontools/builder";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 
+function charmId(charm: Charm) {
+  const id = charm.cell.entityId?.["/"];
+  if (typeof id === "string") {
+    return id;
+  } else {
+    debugger
+    return id;
+  }
+}
+
 export default function CharmList() {
   const { charmManager } = useCharmManager();
   const [charms] = useCell(charmManager.getCharms());
@@ -14,7 +24,7 @@ export default function CharmList() {
           key={index}
           className="bg-white border border-gray-100 rounded-lg overflow-hidden cursor-pointer hover:border-gray-300 transition-colors duration-200"
         >
-          <NavLink to={`/charm/${charm.cell.entityId?.["/"]}`}>
+          <NavLink to={`/charm/${charmId(charm)}`}>
             <div className="p-4">
               <h3 className="text-xl font-semibold text-gray-800 mb-4">
                 {charm.cell.get()[NAME] || "Unnamed Charm"}
