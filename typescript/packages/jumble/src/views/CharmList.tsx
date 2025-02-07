@@ -6,7 +6,6 @@ import { useCharmManager } from "@/contexts/CharmManagerContext";
 export default function CharmList() {
   const { charmManager } = useCharmManager();
   const [charms] = useCell(charmManager.getCharms());
-  console.log("charms", charms);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-8">

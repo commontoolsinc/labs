@@ -230,7 +230,6 @@ export class CommonWindowManager extends LitElement {
       if (!recipe) return;
 
       toasty("Casting...");
-      debugger;
       const charm: DocImpl<Charm> = await charmManager.runPersistent(recipe, blob.data);
       charmManager.add([charm]);
       openCharm(JSON.stringify(charm.entityId));

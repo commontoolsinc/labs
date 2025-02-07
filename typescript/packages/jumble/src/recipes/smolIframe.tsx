@@ -16,5 +16,5 @@ const argumentSchema = {
 
 export default recipe(argumentSchema, (data) => ({
   [NAME]: "smol iframe",
-  [UI]: <common-iframe src={src} $context={data}></common-iframe>,
+  [UI]: h("common-iframe", { src, $context: data }),
 }));
