@@ -119,7 +119,18 @@ export class CharmManager {
       }
     }
 
-    return run(recipe, inputs, await this.storage.syncCell(createRef({ recipe, inputs }, cause)));
+    const charm = run(recipe, inputs, await this.storage.syncCell(createRef({ recipe, inputs }, cause)));
+    await idle()
+    await this.add([charm]);
+    await idle()
+
+    console.log("syncing charms...");
+    await this.storage.syncCell(this.charms, true);
+    console.log("charms count", this.charms.get().length);
+
+    console.log("latest charm", charm.entityId?.toJSON()?.["/"]);
+    await idle()
+        return charm;
   }
 
   // FIXME(JA): this really really really needs to be revisited
@@ -133,6 +144,7 @@ export class CharmManager {
     if (recipeId) await this.storage.syncCell({'/': recipeId});
   }
 
+  // FIXME(ja): blobby seems to be using toString not toJSON
   async syncRecipeBlobby(entityId: string) {
     if (typeof entityId === "string") {
       await syncRecipeBlobby(entityId);

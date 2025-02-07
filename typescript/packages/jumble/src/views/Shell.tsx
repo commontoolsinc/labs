@@ -96,7 +96,10 @@ export default function Shell() {
 
         const charm = (await charmManager.get(charmId)) ?? null;
         const newCharmId = await iterate(charmManager, charm, ev.detail.value, ev.detail.shiftKey);
-        navigate(`/charm/${newCharmId}`);
+        if (newCharmId) {
+          const id = (newCharmId as any).toJSON()["/"];
+          navigate(`/charm/${id}`);
+        }
       } else {
         console.log("Casting spell", ev.detail.value);
         const spells = await castSpell(replicaName, ev.detail.value);
@@ -134,8 +137,7 @@ export default function Shell() {
     const title = prompt("Enter a title for your recipe:");
     if (!title) return;
 
-    const charmId = await castNewRecipe(charmManager, data, title);
-    console.log("charmId", charmId);
+    await castNewRecipe(charmManager, data, title);
     // if (charmId) {
     //   openCharm(charmId);
     // }

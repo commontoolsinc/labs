@@ -4,16 +4,15 @@ import { NAME, UI } from "@commontools/builder";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 
 function charmId(charm: Charm) {
-  const id = charm.cell.entityId?.["/"];
-  if (typeof id === "string") {
-    return id;
+  if (typeof charm.cell.entityId['/'] === 'string') {
+    return charm.cell.entityId['/'];
   } else {
-    debugger
-    return id;
+    return charm.cell.toJSON()['/'];
   }
 }
 
-export default function CharmList() {
+export default function CharmList() {``
+  console.log("CharmList");
   const { charmManager } = useCharmManager();
   const [charms] = useCell(charmManager.getCharms());
 

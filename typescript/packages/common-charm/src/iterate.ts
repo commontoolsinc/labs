@@ -347,7 +347,7 @@ export async function iterate(
     // const newCharm = run(recipe, undefined, charm);
 
     // if you want to run a new charm:
-    const newCharm = run(recipe, {
+    const newCharm = await charmManager.runPersistent(recipe, {
       cell: charm.sourceCell,
       path: ["argument"],
     });
@@ -394,7 +394,7 @@ export async function castNewRecipe(
     const parents = undefined;
     addRecipe(recipe, newRecipeSrc, newSpec, parents);
 
-    const newCharm = run(recipe, data);
+    const newCharm = await charmManager.runPersistent(recipe, data);
 
     charmManager.add([newCharm]);
     await charmManager.syncRecipe(newCharm);
