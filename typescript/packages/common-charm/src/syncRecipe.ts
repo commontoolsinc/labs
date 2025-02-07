@@ -15,7 +15,8 @@ export const BLOBBY_SERVER_URL =
 
 const recipesKnownToStorage = new Set<string>();
 
-export async function syncRecipe(id: string) {
+// FIXME(JA): this really really really needs to be revisited
+export async function syncRecipeBlobby(id: string) {
   if (getRecipe(id)) {
     if (recipesKnownToStorage.has(id)) return;
     const src = getRecipeSrc(id);

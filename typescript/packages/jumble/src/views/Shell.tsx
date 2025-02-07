@@ -23,7 +23,7 @@ import { replica, searchResults, sidebar } from "./state";
 import "./main.css";
 import { castSpell } from "@/search";
 import SearchResults from "@/components/SearchResults";
-import { Charm, CharmManager, iterate, syncRecipe, castNewRecipe } from "@commontools/charm";
+import { Charm, CharmManager, iterate, castNewRecipe } from "@commontools/charm";
 import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import CharmDetail from "./CharmDetail";
 import CharmList from "./CharmList";

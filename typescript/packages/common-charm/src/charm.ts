@@ -12,6 +12,7 @@ import {
   run,
 } from "@commontools/runner";
 import { createStorage, Storage } from "./storage.js";
+import { syncRecipeBlobby } from "./syncRecipe.js";
 
 export type Charm = {
   [NAME]?: string;
@@ -57,6 +58,7 @@ export class CharmManager {
     );
 
     if (charmsToAdd.length > 0) {
+      console.log("add charms", charmsToAdd);
       this.charms.send([
         ...this.charms.get(),
         ...charmsToAdd.map((cell) => ({ cell, path: [] }) satisfies DocLink),
@@ -120,9 +122,19 @@ export class CharmManager {
     return run(recipe, inputs, await this.storage.syncCell(createRef({ recipe, inputs }, cause)));
   }
 
+  // FIXME(JA): this really really really needs to be revisited
   async syncRecipe(charm: Charm) {
+    await this.syncRecipeCells(charm);
+    await this.syncRecipeBlobby(charm.sourceCell?.get()?.[TYPE]);
+  }
+
+  async syncRecipeCells(charm: Charm) {
     const recipeId = charm.sourceCell?.get()?.[TYPE];
-    if (recipeId) await this.storage.syncCell(recipeId);
+    if (recipeId) await this.storage.syncCell({'/': recipeId});
+  }
+
+  async syncRecipeBlobby(entityId: string) {
+    await syncRecipeBlobby(entityId);
   }
 
   async sync(

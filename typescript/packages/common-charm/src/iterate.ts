@@ -1,4 +1,4 @@
-import { addRecipe, getRecipe, getRecipeSrc, run } from "@commontools/runner";
+import { addRecipe, EntityId, getRecipe, getRecipeSrc, run } from "@commontools/runner";
 import { LLMClient } from "@commontools/llm-client";
 import { createJsonSchema, JSONSchema, TYPE } from "@commontools/builder";
 import { type DocImpl } from "@commontools/runner";
@@ -298,16 +298,16 @@ export async function iterate(
   charm: DocImpl<Charm> | null,
   value: string,
   shiftKey: boolean,
-): Promise<string | null> {
+): Promise<EntityId | undefined> {
   if (!charm) {
     console.error("FIXME, no charm, what should we do?");
-    return null;
+    return;
   }
 
   const { recipeId, iframe } = getIframeRecipe(charm);
   if (!iframe) {
     console.error("FIXME, no iframe, what should we do?");
-    return null;
+    return;
   }
 
   const newSpec = shiftKey ? iframe.spec + "\n" + value : value;
@@ -330,7 +330,7 @@ export async function iterate(
 
   if (errors) {
     console.error("errors", errors);
-    return null;
+    return;
   }
 
   let { default: recipe } = exports;
@@ -353,18 +353,19 @@ export async function iterate(
     });
 
     charmManager.add([newCharm]);
-    const charmId = JSON.stringify(newCharm.entityId);
-    return charmId;
+    await charmManager.syncRecipe(newCharm);
+
+    return newCharm.entityId;
   }
 
-  return null;
+  return;
 }
 
 export async function castNewRecipe(
   charmManager: CharmManager,
   data: any,
   newSpec: string,
-): Promise<string | null> {
+): Promise<EntityId | undefined> {
   const schema = createJsonSchema({}, data);
   schema.description = newSpec;
   console.log("schema", schema);
@@ -383,7 +384,7 @@ export async function castNewRecipe(
 
   if (errors) {
     console.error("errors", errors);
-    return null;
+    return;
   }
 
   let { default: recipe } = exports;
@@ -396,9 +397,10 @@ export async function castNewRecipe(
     const newCharm = run(recipe, data);
 
     charmManager.add([newCharm]);
-    const charmId = JSON.stringify(newCharm.entityId);
-    return charmId;
+    await charmManager.syncRecipe(newCharm);
+
+    return newCharm.entityId;
   }
 
-  return null;
+  return;
 }
