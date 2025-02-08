@@ -120,17 +120,10 @@ export class CharmManager {
     }
 
     const charm = run(recipe, inputs, await this.storage.syncCell(createRef({ recipe, inputs }, cause)));
-    await idle()
-    await this.add([charm]);
-    await idle()
-
-    console.log("syncing charms...");
-    await this.storage.syncCell(this.charms, true);
-    console.log("charms count", this.charms.get().length);
-
-    console.log("latest charm", charm.entityId?.toJSON()?.["/"]);
-    await idle()
-        return charm;
+    // FIXME(ja): should we add / sync explicitly here?
+    // await this.add([charm]);
+    // await this.storage.syncCell(this.charms, true);
+    return charm;
   }
 
   // FIXME(JA): this really really really needs to be revisited

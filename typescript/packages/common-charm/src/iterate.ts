@@ -1,4 +1,4 @@
-import { addRecipe, EntityId, getRecipe, getRecipeSrc, run } from "@commontools/runner";
+import { addRecipe, EntityId, getRecipe, getRecipeSrc } from "@commontools/runner";
 import { LLMClient } from "@commontools/llm-client";
 import { createJsonSchema, JSONSchema, TYPE } from "@commontools/builder";
 import { type DocImpl } from "@commontools/runner";

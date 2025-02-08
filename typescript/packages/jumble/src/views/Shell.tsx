@@ -30,16 +30,29 @@ import CharmList from "./CharmList";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
+// This is to prepare Proxy objects to be serialized
+// before sent between frame boundaries via structured clone algorithm.
+// There should be a more efficient generalized method for doing
+// so instead of an extra JSON parse/stringify cycle.
+const serializeProxyObjects = (proxy: any) => {
+  return proxy == undefined ? undefined : JSON.parse(JSON.stringify(proxy));
+};
+
 setIframeContextHandler({
   read(context: any, key: string): any {
-    return context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
+    let data = context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
+    let serialized = serializeProxyObjects(data);
+    return serialized;
   },
   write(context: any, key: string, value: any) {
     context.getAsQueryResult()[key] = value;
   },
   subscribe(context: any, key: string, callback: (key: string, value: any) => void): any {
-    const action: Action = (log: ReactivityLog) =>
-      callback(key, context.getAsQueryResult([key], log));
+    const action: Action = (log: ReactivityLog) => {
+      let data = context.getAsQueryResult([key], log);
+      let serialized = serializeProxyObjects(data);
+      callback(key, serialized);
+    };
 
     addAction(action);
     return action;
@@ -48,7 +61,7 @@ setIframeContextHandler({
     removeAction(receipt);
   },
   async onLLMRequest(_context: any, payload: string) {
-    const res = await fetch(`${window.location.origin}/api/ai/llm`, {
+    let res = await fetch(`${window.location.origin}/api/ai/llm`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload,
@@ -67,7 +80,7 @@ async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: a
   if (recipeKey && blob) {
     console.log("Syncing...");
     const recipeId = recipeKey.replace("spell-", "");
-    await syncRecipe(recipeId);
+    await charmManager.syncRecipeBlobby(recipeId);
 
     const recipe = getRecipe(recipeId);
     if (!recipe) return;

@@ -471,7 +471,7 @@ export class CommonWindowManager extends LitElement {
     }
 
     const recipeId = charm?.sourceCell?.get()[TYPE];
-    if (recipeId) await syncRecipe(recipeId);
+    if (recipeId) await charmManager.syncRecipeBlobby(recipeId);
     await idle();
     run(undefined, undefined, charm);
     await idle();
@@ -611,7 +611,7 @@ export class CommonWindowManager extends LitElement {
     if (recipeMatch) {
       let recipeId = recipeMatch.params.recipeId;
       recipeId = recipeId.replace("spell-", "");
-      charmManager.syncRecipeBlobby({"/": recipeId}).then(async () => {
+      charmManager.syncRecipeBlobby(recipeId).then(async () => {
         const recipe = getRecipe(recipeId);
         if (recipe) {
           // Get data from URL query parameter if it exists
