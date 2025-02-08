@@ -67,7 +67,7 @@ export class CharmManager {
   }
 
   async get(id: string): Promise<DocImpl<any> | undefined> {
-    const charm = this.charms.get().find(({ cell }) => cell.entityId?.["/"] === id);
+    const charm = this.charms.get().find(({ cell }) => JSON.stringify(cell.entityId) === JSON.stringify({'/' : id}));
     if (!charm) return undefined;
     return charm.cell;
   }
