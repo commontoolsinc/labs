@@ -6,6 +6,8 @@ import { sidebar } from "@/views/state";
 import { NAME } from "@commontools/builder";
 import { NavLink } from "react-router-dom";
 import { Charm } from "@commontools/charm";
+import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { charmId } from "@/utils/charms";
 
 export interface SidebarProps {
   linkedCharms: DocImpl<Charm>[];
@@ -28,13 +30,17 @@ const Sidebar: React.FC<SidebarProps> = ({
   onDataChanged,
   onSpecChanged,
 }) => {
+  const { charmManager } = useCharmManager();
+
   const [sidebarTab, setSidebarTab] = useCell(sidebar);
+  const [charms] = useCell(charmManager.getCharms());
 
   const handleSidebarTabChange = (newTab: string) => {
     setSidebarTab(newTab);
   };
 
   const tabs = [
+    { id: "home", icon: "home", label: "Home" },
     { id: "prompt", icon: "message", label: "Prompt" },
     { id: "links", icon: "sync_alt", label: "Links" },
     { id: "data", icon: "database", label: "Data" },
@@ -46,6 +52,15 @@ const Sidebar: React.FC<SidebarProps> = ({
     home: (
       <div>
         <div>Pinned</div>
+        <ul>
+          {charms.map((charm) => (
+            <li key={charmId(charm)}>
+              <NavLink to={`/charm/${charmId(charm)}`}>
+                {charm.cell.get()[NAME] || "unknown"}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
       </div>
     ),
     links: (
@@ -53,7 +68,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         <div>Linked Charms</div>
         <div>
           {linkedCharms.map((charm) => (
-            <NavLink to={`/charm/${charm.entityId!}`}>{charm.get()[NAME]}</NavLink>
+            <NavLink to={`/charm/${charmId(charm)}`}>{charm.get()[NAME]}</NavLink>
           ))}
         </div>
       </div>

@@ -2,14 +2,7 @@ import { useCell } from "@/hooks/use-charm";
 import { NavLink } from "react-router-dom";
 import { NAME, UI } from "@commontools/builder";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
-
-function charmId(charm: Charm) {
-  if (typeof charm.cell.entityId['/'] === 'string') {
-    return charm.cell.entityId['/'];
-  } else {
-    return charm.cell.toJSON()['/'];
-  }
-}
+import { charmId } from "@/utils/charms";
 
 export default function CharmList() {``
   console.log("CharmList");

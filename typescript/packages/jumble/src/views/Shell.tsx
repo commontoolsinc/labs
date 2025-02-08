@@ -14,7 +14,7 @@ import { useCallback } from "react";
 
 import * as osUi from "@commontools/os-ui";
 // bf: load bearing console.log
-console.log(osUi);
+console.log("initializing os-ui", osUi);
 
 import "@commontools/os-ui/src/static/main.css";
 import Sidebar from "@/components/Sidebar";
@@ -97,6 +97,7 @@ export default function Shell() {
         const charm = (await charmManager.get(charmId)) ?? null;
         const newCharmId = await iterate(charmManager, charm, ev.detail.value, ev.detail.shiftKey);
         if (newCharmId) {
+          // FIXME(ja): this is a hack to get the charm id
           const id = (newCharmId as any).toJSON()["/"];
           navigate(`/charm/${id}`);
         }
