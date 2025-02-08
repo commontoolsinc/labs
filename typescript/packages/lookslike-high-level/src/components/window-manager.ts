@@ -27,6 +27,8 @@ async function castSpell(value: string, showResults: (results: SpellSearchResult
       ? window.location.protocol + "//" + window.location.host + "/api/ai/spell/search"
       : "//api/ai/spell/search";
 
+  console.log("searchUrl", searchUrl);
+
   // Search for suggested spells based on input
   const response = await fetch(searchUrl, {
     method: "POST",
