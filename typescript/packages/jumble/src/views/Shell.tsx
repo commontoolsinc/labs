@@ -6,6 +6,7 @@ import {
   DocImpl,
   ReactivityLog,
   addAction,
+  getDoc,
   getRecipe,
   removeAction,
 } from "@commontools/runner";
@@ -86,7 +87,11 @@ async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: a
     if (!recipe) return;
 
     console.log("Casting...");
-    const charm: DocImpl<Charm> = await charmManager.runPersistent(recipe, blob.data);
+    const doc = await charmManager.sync({ "/": blob.key }, true);
+    const charm: DocImpl<Charm> = await charmManager.runPersistent(recipe, {
+      cell: doc,
+      path: ["argument"],
+    });
     charmManager.add([charm]);
     console.log("Ready!");
   } else {
