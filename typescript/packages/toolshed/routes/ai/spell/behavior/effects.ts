@@ -31,7 +31,8 @@ export async function getAllMemories(
 
   const memoryMap: { [key: string]: any } = {};
   memories.forEach((memory) => {
-    const value = memory.is?.value.argument;
+    // FIXME(ja): using jumble can result in memory.is == {}
+    const value = memory.is?.value?.argument;
     if (value) {
       memoryMap[memory.of] = value;
     }

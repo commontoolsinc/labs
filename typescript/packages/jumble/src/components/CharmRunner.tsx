@@ -1,55 +1,34 @@
 import React, { useRef } from "react";
 import { render } from "@commontools/html";
-import { CharmManager, Charm } from "@commontools/charm";
 import { effect, idle, run } from "@commontools/runner";
+import { useCharmManager } from "@/contexts/CharmManagerContext";
 
-interface CharmRunnerProps {
+interface CharmLoaderProps {
   charmImport: () => Promise<any>;
   argument?: any;
   autoLoad?: boolean;
+  onCharmReady: (charm: any) => void;
+}
+
+interface CharmRendererProps {
+  charm: any;
+  argument?: any;
   className?: string;
 }
 
-const charmManager = (() => {
-  const urlParams = new URLSearchParams(window.location.search);
-  const replica = urlParams.get("replica") ?? undefined;
-  const storageType = replica ? "remote" : ((import.meta as any).env.VITE_STORAGE_TYPE ?? "memory");
-  return new CharmManager(replica, storageType);
-})();
-
-
-export function CharmRunner({
+function useCharmLoader({
   charmImport,
   argument,
   autoLoad = false,
-  className = "",
-}: CharmRunnerProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  onCharmReady,
+}: CharmLoaderProps) {
   const [error, setError] = React.useState<Error | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
-  const charmInstance = useRef<any>(null);
-  const cleanupFns = useRef<Array<() => void>>([]);
-  // Add a mounting key to help us detect remounts
   const mountingKey = useRef(0);
+  const { charmManager } = useCharmManager();
 
-  const cleanup = () => {
-    cleanupFns.current.forEach((fn) => fn());
-    cleanupFns.current = [];
-    if (charmInstance.current) {
-      charmInstance.current = null;
-    }
-    if (containerRef.current) {
-      containerRef.current.innerHTML = "";
-    }
-  };
-
-  const loadAndRunCharm = React.useCallback(async () => {
-    if (!containerRef.current) return;
-
-    // Increment mounting key for this attempt
+  const loadCharm = React.useCallback(async () => {
     const currentMountKey = ++mountingKey.current;
-
-    cleanup();
     setIsLoading(true);
     setError(null);
 
@@ -61,17 +40,10 @@ export function CharmRunner({
         throw new Error("Invalid charm module: missing default export");
       }
 
-      // Check if this is still the most recent mounting attempt
-      if (currentMountKey !== mountingKey.current) {
-        return;
-      }
+      if (currentMountKey !== mountingKey.current) return;
 
       const charm = await charmManager.runPersistent(factory);
-
-      // Check again after async operation
-      if (currentMountKey !== mountingKey.current) {
-        return;
-      }
+      if (currentMountKey !== mountingKey.current) return;
 
       charmManager.add([charm]);
 
@@ -79,22 +51,9 @@ export function CharmRunner({
       run(undefined, argument, charm);
       await idle();
 
-      // Final check before setting up effects
-      if (currentMountKey !== mountingKey.current) {
-        return;
-      }
+      if (currentMountKey !== mountingKey.current) return;
 
-      const cleanupCharm = effect(charm.asCell<Charm>(), (charm) => {
-        const cleanupUI = effect(charm["$UI"], (view) => {
-          if (containerRef.current) {
-            render(containerRef.current, view);
-          }
-        });
-        cleanupFns.current.push(cleanupUI);
-      });
-      cleanupFns.current.push(cleanupCharm);
-
-      charmInstance.current = charm;
+      onCharmReady(charm);
     } catch (err) {
       if (currentMountKey === mountingKey.current) {
         setError(err as Error);
@@ -104,35 +63,62 @@ export function CharmRunner({
         setIsLoading(false);
       }
     }
-  }, [charmImport, argument]);
+  }, [charmImport, argument, onCharmReady]);
 
-  // Clean up on unmount
-  React.useEffect(() => {
-    return () => {
-      mountingKey.current++;
-      cleanup();
-    };
-  }, []);
-
-  // Handle autoLoad
   React.useEffect(() => {
     if (autoLoad) {
-      loadAndRunCharm();
+      loadCharm();
     }
-  }, [autoLoad, loadAndRunCharm]);
+    return () => {
+      mountingKey.current++;
+    };
+  }, [autoLoad, loadCharm]);
 
-  // Handle prop changes
+  return { error, isLoading };
+}
+
+export function CharmRenderer({ charm, className = "" }: CharmRendererProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cleanupFns = useRef<Array<() => void>>([]);
+
   React.useEffect(() => {
-    if (charmInstance.current) {
-      loadAndRunCharm();
-    }
-  }, [argument, charmImport]);
+    const container = containerRef.current;
+    if (!container) return;
+
+    const cleanupCharm = effect(charm.asCell(), (charm) => {
+      const cleanupUI = effect(charm["$UI"], (view) => {
+        if (container) {
+          render(container, view);
+        }
+      });
+      cleanupFns.current.push(cleanupUI);
+    });
+    cleanupFns.current.push(cleanupCharm);
+
+    return () => {
+      cleanupFns.current.forEach((fn) => fn());
+      cleanupFns.current = [];
+      if (container) {
+        container.innerHTML = "";
+      }
+    };
+  }, [charm]);
+
+  return <div className={className} ref={containerRef}></div>;
+}
+
+export function CharmRunner(props: CharmLoaderProps & Omit<CharmRendererProps, "charm">) {
+  const [charm, setCharm] = React.useState<any>(null);
+  const { error, isLoading } = useCharmLoader({
+    ...props,
+    onCharmReady: setCharm,
+  });
 
   return (
     <>
       {isLoading && <div>Loading...</div>}
       {error && <div>Error loading charm</div>}
-      <div className={className} ref={containerRef}></div>
+      {charm && <CharmRenderer charm={charm} className={props.className} />}
     </>
   );
 }

@@ -57,6 +57,9 @@ importers:
       '@commontools/html':
         specifier: workspace:*
         version: link:../common-html
+      '@commontools/llm-client':
+        specifier: workspace:*
+        version: link:../llm-client
       '@commontools/memory':
         specifier: workspace:*
         version: link:../common-memory
@@ -462,6 +465,9 @@ importers:
       emoji-picker-react:
         specifier: ^4.12.0
         version: 4.12.0(react@18.3.1)
+      merkle-reference:
+        specifier: ^2.0.1
+        version: 2.0.1
       react:
         specifier: ^18.3.1
         version: 18.3.1

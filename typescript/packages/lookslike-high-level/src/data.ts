@@ -28,6 +28,7 @@ export const charmManager = (() => {
   const urlParams = new URLSearchParams(window.location.search);
   const replica = urlParams.get("replica") ?? undefined;
   const storageType = replica ? "remote" : ((import.meta as any).env.VITE_STORAGE_TYPE ?? "memory");
+  console.log("charmManager", replica, storageType);  
   return new CharmManager(replica, storageType);
 })();
 
@@ -118,7 +119,7 @@ export const toggleAnnotations = () => {
 // so instead of an extra JSON parse/stringify cycle.
 const serializeProxyObjects = (proxy: any) => {
   return proxy == undefined ? undefined : JSON.parse(JSON.stringify(proxy));
-}
+};
 
 setIframeContextHandler({
   read(context: any, key: string): any {
@@ -145,7 +146,7 @@ setIframeContextHandler({
   async onLLMRequest(_context: any, payload: string) {
     let res = await fetch(`${window.location.origin}/api/ai/llm`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" } ,
+      headers: { "Content-Type": "application/json" },
       body: payload,
     });
     if (res.ok) {
@@ -153,5 +154,5 @@ setIframeContextHandler({
     } else {
       throw new Error("LLM request failed");
     }
-  }
+  },
 });

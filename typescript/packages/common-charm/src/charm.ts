@@ -12,6 +12,7 @@ import {
   run,
 } from "@commontools/runner";
 import { createStorage, Storage } from "./storage.js";
+import { syncRecipeBlobby } from "./syncRecipe.js";
 
 export type Charm = {
   [NAME]?: string;
@@ -43,6 +44,10 @@ export class CharmManager {
     return this.charms;
   }
 
+  async init() {
+    await this.storage.syncCell(this.charms);
+  }
+
   async add(newCharms: DocImpl<any>[]) {
     await this.storage.syncCell(this.charms);
     await idle();
@@ -53,6 +58,7 @@ export class CharmManager {
     );
 
     if (charmsToAdd.length > 0) {
+      console.log("add charms", charmsToAdd);
       this.charms.send([
         ...this.charms.get(),
         ...charmsToAdd.map((cell) => ({ cell, path: [] }) satisfies DocLink),
@@ -60,17 +66,18 @@ export class CharmManager {
     }
   }
 
+  async get(id: string): Promise<DocImpl<any> | undefined> {
+    const charm = this.charms.get().find(({ cell }) => JSON.stringify(cell.entityId) === JSON.stringify({'/' : id}));
+    if (!charm) return undefined;
+    return charm.cell;
+  }
+
   async remove(id: EntityId) {
     const newCharms = this.charms.get().filter(({ cell }) => cell.entityId !== id);
     if (newCharms.length !== this.charms.get().length) this.charms.send(newCharms);
   }
 
-
-  async runPersistent(
-    recipe: Recipe | Module,
-    inputs?: any,
-    cause?: any,
-  ): Promise<DocImpl<any>> {
+  async runPersistent(recipe: Recipe | Module, inputs?: any, cause?: any): Promise<DocImpl<any>> {
     await idle();
 
     // Fill in missing parameters from other charms. It's a simple match on
@@ -112,7 +119,31 @@ export class CharmManager {
       }
     }
 
-    return run(recipe, inputs, await this.storage.syncCell(createRef({ recipe, inputs }, cause)));
+    const charm = run(recipe, inputs, await this.storage.syncCell(createRef({ recipe, inputs }, cause)));
+    // FIXME(ja): should we add / sync explicitly here?
+    // await this.add([charm]);
+    // await this.storage.syncCell(this.charms, true);
+    return charm;
+  }
+
+  // FIXME(JA): this really really really needs to be revisited
+  async syncRecipe(charm: Charm) {
+    await this.syncRecipeCells(charm);
+    await this.syncRecipeBlobby(charm.sourceCell?.get()?.[TYPE]);
+  }
+
+  async syncRecipeCells(charm: Charm) {
+    const recipeId = charm.sourceCell?.get()?.[TYPE];
+    if (recipeId) await this.storage.syncCell({'/': recipeId});
+  }
+
+  // FIXME(ja): blobby seems to be using toString not toJSON
+  async syncRecipeBlobby(entityId: string) {
+    if (typeof entityId === "string") {
+      await syncRecipeBlobby(entityId);
+    } else  {
+      await syncRecipeBlobby(entityId["/"]);
+    } 
   }
 
   async sync(

@@ -2,8 +2,8 @@ import { css, html, LitElement, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { style } from "@commontools/ui";
 import { when } from "lit/directives/when.js";
-import { Charm, saveRecipe } from "@commontools/charm";
-import { charmManager, BLOBBY_SERVER_URL, recipes } from "../data.js";
+import { Charm, saveRecipe, castNewRecipe } from "@commontools/charm";
+import { charmManager, BLOBBY_SERVER_URL, recipes, openCharm } from "../data.js";
 import { refer } from "merkle-reference";
 
 import {
@@ -20,7 +20,6 @@ import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.jsx";
 import { render } from "@commontools/html";
-import { castNewRecipe } from "./iframe-spell-ai.js";
 import { toasty } from "./toasty.js";
 
 // FIXME(ja): is this still needed with ben's changes?
@@ -308,7 +307,10 @@ export class CommonSidebar extends LitElement {
     // FIXME(ja): is this still needed with ben's changes?
     uploadBlob(data);
 
-    await castNewRecipe(data, "a simple display of the users data");
+    const charmId = await castNewRecipe(charmManager, data, "a simple display of the users data");
+    if (charmId) {
+      openCharm(charmId);
+    }
   }
 
   private async handlePublish() {
@@ -398,7 +400,10 @@ export class CommonSidebar extends LitElement {
           ${when(
             charmManager.getReplica(),
             () =>
-              html`<os-icon-button icon="cloud_sync" title=${charmManager.getReplica()}></os-icon-button>`,
+              html`<os-icon-button
+                icon="cloud_sync"
+                title=${charmManager.getReplica()}
+              ></os-icon-button>`,
             () => html`<os-icon-button icon="cloud_off" title="Local"></os-icon-button>`,
           )}
           <os-icon-button icon="warning" @click=${() => this.handleDrop()}></os-icon-button>

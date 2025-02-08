@@ -4,7 +4,7 @@ import { createRef, Ref, ref } from "lit/directives/ref.js";
 import { style } from "@commontools/ui";
 import { render } from "@commontools/html";
 import { charmManager, closeCharm, openCharm } from "../data.js";
-import { Charm, syncRecipe, buildRecipe } from "@commontools/charm";
+import { Charm, buildRecipe, iterate, castNewRecipe } from "@commontools/charm";
 import {
   addRecipe,
   DocImpl,
@@ -18,7 +18,6 @@ import {
 import { repeat } from "lit/directives/repeat.js";
 import { UI, NAME, TYPE } from "@commontools/builder";
 import { matchRoute, navigate } from "../router.js";
-import * as iframeSpellAi from "./iframe-spell-ai.js";
 import { SpellSearchResult } from "./search-results.js";
 import { toasty } from "./toasty.js";
 
@@ -27,6 +26,8 @@ async function castSpell(value: string, showResults: (results: SpellSearchResult
     typeof window !== "undefined"
       ? window.location.protocol + "//" + window.location.host + "/api/ai/spell/search"
       : "//api/ai/spell/search";
+
+  console.log("searchUrl", searchUrl);
 
   // Search for suggested spells based on input
   const response = await fetch(searchUrl, {
@@ -195,15 +196,18 @@ export class CommonWindowManager extends LitElement {
   @state()
   private spellSearchResults: SpellSearchResult[] = [];
 
-  handleUniboxSubmit(event: CustomEvent) {
+  async handleUniboxSubmit(event: CustomEvent) {
     const value = event.detail.value;
     const shiftKey = event.detail.shiftKey;
     console.log("Unibox submitted:", value, shiftKey);
 
     if (this.focusedCharm) {
-      iframeSpellAi.iterate(this.focusedCharm, value, shiftKey);
+      const charmId = await iterate(charmManager, this.focusedCharm, value, shiftKey);
+      if (charmId) {
+        openCharm(charmId);
+      }
     } else {
-      castSpell(value, this.showResults.bind(this));
+      await castSpell(value, this.showResults.bind(this));
     }
   }
 
@@ -222,7 +226,7 @@ export class CommonWindowManager extends LitElement {
     if (recipeKey && blob) {
       toasty("Syncing...");
       const recipeId = recipeKey.replace("spell-", "");
-      await syncRecipe(recipeId);
+      await charmManager.syncRecipeBlobby(recipeId);
 
       const recipe = getRecipe(recipeId);
       if (!recipe) return;
@@ -311,7 +315,7 @@ export class CommonWindowManager extends LitElement {
         this.sidebarTab === "source" || this.sidebarTab === "data" || this.sidebarTab === "query";
     };
 
-    const onImportLocalData = (event: CustomEvent) => {
+    const onImportLocalData = async (event: CustomEvent) => {
       const [data] = event.detail.data;
       if (!data) return;
 
@@ -320,7 +324,10 @@ export class CommonWindowManager extends LitElement {
       const title = prompt("Enter a title for your recipe:");
       if (!title) return;
 
-      iframeSpellAi.castNewRecipe(data, title);
+      const charmId = await castNewRecipe(charmManager, data, title);
+      if (charmId) {
+        openCharm(charmId);
+      }
     };
 
     return html`
@@ -466,7 +473,7 @@ export class CommonWindowManager extends LitElement {
     }
 
     const recipeId = charm?.sourceCell?.get()[TYPE];
-    if (recipeId) await syncRecipe(recipeId);
+    if (recipeId) await charmManager.syncRecipeBlobby(recipeId);
     await idle();
     run(undefined, undefined, charm);
     await idle();
@@ -606,7 +613,7 @@ export class CommonWindowManager extends LitElement {
     if (recipeMatch) {
       let recipeId = recipeMatch.params.recipeId;
       recipeId = recipeId.replace("spell-", "");
-      syncRecipe(recipeId).then(async () => {
+      charmManager.syncRecipeBlobby(recipeId).then(async () => {
         const recipe = getRecipe(recipeId);
         if (recipe) {
           // Get data from URL query parameter if it exists

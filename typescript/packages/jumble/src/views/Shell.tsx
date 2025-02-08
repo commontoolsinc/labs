@@ -1,30 +1,58 @@
 // This is all you need to import/register the @commontools/ui web components
 import "@commontools/ui";
 import { setIframeContextHandler } from "@commontools/iframe-sandbox";
-import { Action, ReactivityLog, addAction, removeAction } from "@commontools/runner";
-import { CharmRunner } from "@/components/CharmRunner";
+import {
+  Action,
+  DocImpl,
+  ReactivityLog,
+  addAction,
+  getRecipe,
+  removeAction,
+} from "@commontools/runner";
 import { WebComponent } from "@/components/WebComponent";
-import { useState } from "react";
+import { useCallback } from "react";
 
 import * as osUi from "@commontools/os-ui";
-console.log(osUi);
+// bf: load bearing console.log
+console.log("initializing os-ui", osUi);
+
 import "@commontools/os-ui/src/static/main.css";
 import Sidebar from "@/components/Sidebar";
 import { useCell } from "@/hooks/use-charm";
-import { sidebar } from "./state";
+import { replica, searchResults, sidebar } from "./state";
 import "./main.css";
+import { castSpell } from "@/search";
+import SearchResults from "@/components/SearchResults";
+import { Charm, CharmManager, iterate, castNewRecipe } from "@commontools/charm";
+import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import CharmDetail from "./CharmDetail";
+import CharmList from "./CharmList";
+import { useCharmManager } from "@/contexts/CharmManagerContext";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
+// This is to prepare Proxy objects to be serialized
+// before sent between frame boundaries via structured clone algorithm.
+// There should be a more efficient generalized method for doing
+// so instead of an extra JSON parse/stringify cycle.
+const serializeProxyObjects = (proxy: any) => {
+  return proxy == undefined ? undefined : JSON.parse(JSON.stringify(proxy));
+};
+
 setIframeContextHandler({
   read(context: any, key: string): any {
-    return context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
+    let data = context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
+    let serialized = serializeProxyObjects(data);
+    return serialized;
   },
   write(context: any, key: string, value: any) {
     context.getAsQueryResult()[key] = value;
   },
   subscribe(context: any, key: string, callback: (key: string, value: any) => void): any {
-    const action: Action = (log: ReactivityLog) =>
-      callback(key, context.getAsQueryResult([key], log));
+    const action: Action = (log: ReactivityLog) => {
+      let data = context.getAsQueryResult([key], log);
+      let serialized = serializeProxyObjects(data);
+      callback(key, serialized);
+    };
 
     addAction(action);
     return action;
@@ -32,57 +60,146 @@ setIframeContextHandler({
   unsubscribe(_context: any, receipt: any) {
     removeAction(receipt);
   },
+  async onLLMRequest(_context: any, payload: string) {
+    let res = await fetch(`${window.location.origin}/api/ai/llm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+    });
+    if (res.ok) {
+      return await res.json();
+    } else {
+      throw new Error("LLM request failed");
+    }
+  },
 });
 
-function Content() {
-  const [count, setCount] = useState(0);
+async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: any) {
+  const recipeKey = result?.key;
 
-  const incrementCount = () => {
-    setCount((c) => c + 1);
-  };
+  if (recipeKey && blob) {
+    console.log("Syncing...");
+    const recipeId = recipeKey.replace("spell-", "");
+    await charmManager.syncRecipeBlobby(recipeId);
 
-  return (
-    <>
-      <button onClick={incrementCount} className="mb-4 px-4 py-2 bg-blue-500 text-white rounded">
-        Increment Count ({count})
-      </button>
+    const recipe = getRecipe(recipeId);
+    if (!recipe) return;
 
-      <CharmRunner
-        charmImport={() => import("@/recipes/smol.tsx")}
-        argument={{ count }}
-        className="w-full h-full"
-        autoLoad
-      />
-    </>
-  );
+    console.log("Casting...");
+    const charm: DocImpl<Charm> = await charmManager.runPersistent(recipe, blob.data);
+    charmManager.add([charm]);
+    console.log("Ready!");
+  } else {
+    console.log("Failed to cast");
+  }
 }
 
 export default function Shell() {
   const [sidebarTab] = useCell(sidebar);
+  const [replicaName] = useCell(replica);
+  const [spellResults, setSearchResults] = useCell(searchResults);
+  const navigate = useNavigate();
+  const { charmManager } = useCharmManager();
+
+  const onSubmit = useCallback(
+    async (ev: CustomEvent) => {
+      const charmId = window.location.pathname.match(/\/charm\/([^/]+)/)?.[1] ?? null;
+      if (charmId) {
+        console.log("Iterating charm", charmId);
+
+        const charm = (await charmManager.get(charmId)) ?? null;
+        const newCharmId = await iterate(charmManager, charm, ev.detail.value, ev.detail.shiftKey);
+        if (newCharmId) {
+          // FIXME(ja): this is a hack to get the charm id
+          const id = (newCharmId as any).toJSON()["/"];
+          navigate(`/charm/${id}`);
+        }
+      } else {
+        console.log("Casting spell", ev.detail.value);
+        const spells = await castSpell(replicaName, ev.detail.value);
+        setSearchResults(spells);
+      }
+    },
+    [replicaName, setSearchResults, navigate, charmManager],
+  );
+
+  const onClose = useCallback(() => {
+    setSearchResults([]);
+  }, [setSearchResults]);
+
+  const onSpellCast = useCallback(
+    async (result: any, blob: any) => {
+      await castSpellAsCharm(charmManager, result, blob);
+      setSearchResults([]);
+    },
+    [setSearchResults, charmManager],
+  );
+
+  const onLocation = useCallback((_: CustomEvent) => {
+    const name = prompt("Set new replica bame: ");
+    if (name) {
+      replica.send(name);
+    }
+  }, []);
+
+  const onImportLocalData = async () => {
+    const data = {
+      count: 0,
+    };
+    console.log("Importing local data:", data);
+    // FIXME(ja): this needs better error handling
+    const title = prompt("Enter a title for your recipe:");
+    if (!title) return;
+
+    await castNewRecipe(charmManager, data, title);
+    // if (charmId) {
+    //   openCharm(charmId);
+    // }
+  };
 
   return (
     <div className="h-full relative">
       <WebComponent
         as={"os-chrome"}
-        wide={sidebarTab === "source" || sidebarTab === "data" || sidebarTab === "query"}
-        locationTitle="Hello World"
-        onLocation={() => {
-          debugger;
-        }}
+        wide={sidebarTab === "source"}
+        locationTitle={replicaName}
+        onLocation={onLocation}
       >
-        <Content />
+        <a href="#" onClick={onImportLocalData}>
+          Import Thingy
+        </a>
 
-        <WebComponent
-          slot="overlay"
-          as="os-fabgroup"
-          className="pin-br"
-          onSubmit={() => {
-            console.log("submitted");
-          }}
+        <NavLink to="/" slot="toolbar-start">
+          <WebComponent as="os-avatar" name="Ben"></WebComponent>
+        </NavLink>
+
+        <Routes>
+          <Route path="charm/:charmId" element={<CharmDetail />} />
+          <Route index element={<CharmList />} />
+        </Routes>
+
+        <SearchResults
+          searchOpen={spellResults.length > 0}
+          results={spellResults}
+          onClose={onClose}
+          onSpellCast={onSpellCast}
         />
 
+        <WebComponent slot="overlay" as="os-fabgroup" className="pin-br" onSubmit={onSubmit} />
+
         <os-navstack slot="sidebar">
-          <Sidebar workingSpec="" focusedCharm={null} linkedCharms={[]} />
+          {/* bf: most of these are stubbed, need to pass real values in */}
+          <Sidebar
+            linkedCharms={[]}
+            workingSpec="example spec"
+            handlePublish={() => {}}
+            recipeId="dummy-recipe-id"
+            schema={{ imagine: "a schema" }}
+            copyRecipeLink={() => {}}
+            data={{ imagine: "some data" }}
+            onDataChanged={(value: string) => {}}
+            onSpecChanged={(value: string) => {}}
+          />
         </os-navstack>
       </WebComponent>
     </div>
