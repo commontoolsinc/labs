@@ -5,116 +5,89 @@
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script>
-    window.onerror = function (message, source, lineno, colno, error) {
-      window.parent.postMessage({
-        type: 'error',
-        data: {
-          description: message,
-          source: source,
-          lineno: lineno,
-          colno: colno,
-          stacktrace: error && error.stack ? error.stack : new Error().stack
-        }
-      }, '*');
-      return false;
+window.onerror = function (message, source, lineno, colno, error) {
+  window.parent.postMessage(
+    {
+      type: "error",
+      data: {
+        description: message,
+        source: source,
+        lineno: lineno,
+        colno: colno,
+        stacktrace: error && error.stack ? error.stack : new Error().stack,
+      },
+    },
+    "*",
+  );
+  return false;
+};
+
+function useDoc(key) {
+  const [doc, setDoc] = React.useState(undefined);
+
+  React.useEffect(() => {
+    function handleMessage(event) {
+      if (
+        event.data &&
+        event.data.type === "update" &&
+        Array.isArray(event.data.data) &&
+        event.data.data[0] === key
+      ) {
+        setDoc(event.data.data[1]);
+      }
+    }
+
+    window.addEventListener("message", handleMessage);
+    window.parent.postMessage({ type: "subscribe", data: key }, "*");
+
+    return () => {
+      window.removeEventListener("message", handleMessage);
+      window.parent.postMessage({ type: "unsubscribe", data: key }, "*");
     };
+  }, [key]);
 
-    // subscriptions have to be to a leaf node, not an object
-    window.subscribeToKey = function (key) {
-      console.log('iframe: Subscribing to', key);
+  const updateDoc = (newValue) => {
+    window.parent.postMessage({ type: "write", data: [key, newValue] }, "*");
+  };
+
+  return [doc, updateDoc];
+}
+
+window.llm = (() => {
+  const inflight = [];
+
+  async function llm(payload) {
+    return new Promise((resolve, reject) => {
+      let stringified = JSON.stringify(payload);
+      inflight.push([stringified, resolve, reject]);
       window.parent.postMessage({
-        type: 'subscribe',
-        data: key,
-      }, '*');
+        type: "llm-request",
+        data: stringified,
+      }, "*");
+    });
+  };
+
+  window.addEventListener("message", e => {
+    if (e.data.type !== "llm-response") {
+      return;
     }
-
-    window.unsubscribeFromKey = function (key) {
-      console.log('iframe: unsubscribing to', key);
-      window.parent.postMessage({
-        type: 'unsubscribe',
-        data: key,
-      }, '*');
+    let { request, data, error } = e.data;
+    let index = inflight.findIndex(([payload, res, rej]) => request === payload);
+    if (index !== -1) {
+      let [_, res, rej] = inflight[index];
+      inflight.splice(index, 1);
+      if (data) {
+        res(data);
+      } else {
+        rej(data);
+      }
     }
-
-    window.writeData = function (key, value) {
-      console.log('iframe: Writing data', key, value);
-      window.parent.postMessage({
-        type: 'write',
-        data: [key, value],
-      }, '*');
-    }
-
-
+  });
+  return llm;
+})();
 
 window.generateImage = function(prompt) {
   return '/api/ai/img?prompt=' + encodeURIComponent(prompt);
-}
-
-
-/**
- * Sends a request to the LLM API.
- * @param {string} system - The system message for the LLM.
- * @param {Array} messages - The array of messages for the LLM.
- * @returns {Promise<any>} - The raw response from the LLM.
- */
-window.sendLLMRequest = async function(system, messages) {
-  console.log('iframe: Asking LLM', system, messages);
-  const response = await fetch('/api/ai/llm', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
-      system: system,
-      model: "anthropic:claude-3-5-sonnet"
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`);
-  }
-
-  return await response.json();
-}
-
-/**
- * Processes the LLM response based on the specified mode.
- * @param {string} responseText - The raw response text from the LLM.
- * @param {string} mode - The mode for processing the response: 'json', 'html', or 'text'.
- * @returns {any} - The processed response.
- */
-window.processLLMResponse = function(responseText, mode) {
-  switch (mode) {
-    case 'json':
-      try {
-        return JSON.parse(responseText);
-      } catch (e) {
-        const jsonMatch = responseText.match(/{[\\w\\W]+?}/);
-        if (jsonMatch) {
-          return JSON.parse(jsonMatch[1]);
-        }
-        throw new Error('Failed to parse JSON response');
-      }
-    case 'html':
-      const htmlMatch = responseText.match(/<html>(.*?)<\/html>/);
-      return htmlMatch ? htmlMatch[1] : responseText;
-    default:
-      return responseText;
-  }
-}
-
-/**
- * Sends a request to the LLM API and processes the response based on the specified mode.
- * @param {string} system - The system message for the LLM.
- * @param {Array} messages - The array of messages for the LLM.
- * @param {string} mode - The mode for processing the response: 'json', 'html', or 'text'.
- * @returns {Promise<any>} - The processed response from the LLM.
- */
-window.llm = async function(system, messages, mode = 'text') {
-  const responseJson = await window.sendLLMRequest(system, messages);
-  const responseText = responseJson.content;
-  return window.processLLMResponse(responseText, mode);
 }
 </script>
 <title>
