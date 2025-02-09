@@ -58,6 +58,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               <NavLink to={`/charm/${charmId(charm)}`}>
                 {charm.cell.get()[NAME] || "unknown"}
               </NavLink>
+              <button onClick={() => charmManager.remove(charm)}>×</button>
             </li>
           ))}
         </ul>

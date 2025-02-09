@@ -72,8 +72,10 @@ export class CharmManager {
     return charm.cell;
   }
 
-  async remove(id: EntityId) {
-    const newCharms = this.charms.get().filter(({ cell }) => cell.entityId !== id);
+  // note: removing a charm doesn't clean up the charm's cells
+  async remove(idOrCharm: EntityId | DocLink) {
+    const id = isDocLink(idOrCharm) ? idOrCharm?.cell?.entityId?.["/"] : idOrCharm;
+    const newCharms = this.charms.get().filter(({ cell }) => cell.entityId["/"] !== id);
     if (newCharms.length !== this.charms.get().length) this.charms.send(newCharms);
   }
 
