@@ -1,8 +1,8 @@
 import { LitElement, html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 
-@customElement("common-import")
-export class CommonFileImporter extends LitElement {
+@customElement("os-common-import")
+export class OsCommonImport extends LitElement {
   @state() private importedContent: object | null = null;
   @state() private draggedFilesCount: number = 0;
 
@@ -55,19 +55,6 @@ export class CommonFileImporter extends LitElement {
     this.requestUpdate();
   }
 
-  private async importToSynopsys(data: any) {
-    if (!data) {
-      throw new Error("No data to import");
-    }
-
-    const result = await fetch(`/api/data`, {
-      method: "PATCH",
-      body: JSON.stringify([{ Import: data }]),
-    }).then((res) => res.json());
-
-    console.log("synopsys import", result);
-  }
-
   private onDrop(e: DragEvent) {
     e.preventDefault();
     this.classList.remove("dragover");
@@ -78,7 +65,6 @@ export class CommonFileImporter extends LitElement {
       Promise.all(Array.from(files).map((file) => this.readFile(file)))
         .then((contents) => {
           this.importedContent = contents.flat();
-          this.importToSynopsys(contents);
           console.log(this.importedContent);
           this.dispatchEvent(
             new CustomEvent("common-data", {

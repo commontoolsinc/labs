@@ -6,12 +6,11 @@ import {
   DocImpl,
   ReactivityLog,
   addAction,
-  getDoc,
   getRecipe,
   removeAction,
 } from "@commontools/runner";
 import { WebComponent } from "@/components/WebComponent";
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 import * as osUi from "@commontools/os-ui";
 // bf: load bearing console.log
@@ -99,12 +98,20 @@ async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: a
   }
 }
 
+interface CommonDataEvent extends CustomEvent {
+  detail: {
+    shiftKey: boolean;
+    data: any[];
+  };
+}
+
 export default function Shell() {
   const [sidebarTab] = useCell(sidebar);
   const [replicaName] = useCell(replica);
   const [spellResults, setSearchResults] = useCell(searchResults);
   const navigate = useNavigate();
   const { charmManager } = useCharmManager();
+  const commonImportRef = useRef<HTMLElement | null>(null);
 
   const onSubmit = useCallback(
     async (ev: CustomEvent) => {
@@ -147,20 +154,30 @@ export default function Shell() {
     }
   }, []);
 
-  const onImportLocalData = async () => {
-    const data = {
-      count: 0,
-    };
+  const onImportLocalData = (event: CommonDataEvent) => {
+    const [data] = event.detail.data;
     console.log("Importing local data:", data);
     // FIXME(ja): this needs better error handling
     const title = prompt("Enter a title for your recipe:");
     if (!title) return;
 
-    await castNewRecipe(charmManager, data, title);
+    castNewRecipe(charmManager, data, title);
     // if (charmId) {
     //   openCharm(charmId);
     // }
   };
+
+  useEffect(() => {
+    const current = commonImportRef.current;
+    if (current) {
+      current.addEventListener("common-data", onImportLocalData as EventListener);
+    }
+    return () => {
+      if (current) {
+        current.removeEventListener("common-data", onImportLocalData as EventListener);
+      }
+    };
+  }, []);
 
   return (
     <div className="h-full relative">
@@ -170,9 +187,12 @@ export default function Shell() {
         locationTitle={replicaName}
         onLocation={onLocation}
       >
-        <a href="#" onClick={onImportLocalData}>
-          Import Thingy
-        </a>
+        <os-common-import ref={commonImportRef}>
+          <div style={{ display: "flex", alignItems: "center" }}>
+            <os-ai-icon></os-ai-icon>
+            <p>Imagine or drop json to begin</p>
+          </div>
+        </os-common-import>
 
         <NavLink to="/" slot="toolbar-start">
           <WebComponent as="os-avatar" name="Ben"></WebComponent>
@@ -197,13 +217,13 @@ export default function Shell() {
           <Sidebar
             linkedCharms={[]}
             workingSpec="example spec"
-            handlePublish={() => {}}
+            handlePublish={() => { }}
             recipeId="dummy-recipe-id"
             schema={{ imagine: "a schema" }}
-            copyRecipeLink={() => {}}
+            copyRecipeLink={() => { }}
             data={{ imagine: "some data" }}
-            onDataChanged={(value: string) => {}}
-            onSpecChanged={(value: string) => {}}
+            onDataChanged={(value: string) => { }}
+            onSpecChanged={(value: string) => { }}
           />
         </os-navstack>
       </WebComponent>
