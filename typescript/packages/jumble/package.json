@@ -28,6 +28,7 @@
     "@commontools/charm": "workspace:*",
     "@commontools/html": "workspace:*",
     "@commontools/iframe-sandbox": "workspace:*",
+    "@commontools/llm-client": "workspace:*",
     "@commontools/os-ui": "workspace:*",
     "@commontools/runner": "workspace:*",
     "@commontools/ui": "workspace:*",

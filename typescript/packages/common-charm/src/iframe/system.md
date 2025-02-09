@@ -55,13 +55,14 @@ function MyComponent() {
 
 Sends a request to the parent window with a payload object.
 Waits for an "llm-response" message from the parent.
+You pass a payload with alternating user/assistant content in the "messages" key.
 Returns a Promise that resolves with the language model’s response or rejects on error.
 
 **Example**:
 
 ```jsx
 async function fetchLLMResponse() {
-  const promptPayload = { prompt: 'Give me a fun fact', temperature: 0.7 };
+  const promptPayload = { messages: ['Hi', 'How can I help you today?', 'tell me a joke']};
   try {
     const result = await window.llm(promptPayload);
     console.log('LLM responded:', result);

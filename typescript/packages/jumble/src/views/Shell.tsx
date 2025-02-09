@@ -28,6 +28,7 @@ import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import CharmDetail from "./CharmDetail";
 import CharmList from "./CharmList";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { LLMClient } from "@commontools/llm-client";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized
@@ -37,6 +38,14 @@ import { useCharmManager } from "@/contexts/CharmManagerContext";
 const serializeProxyObjects = (proxy: any) => {
   return proxy == undefined ? undefined : JSON.parse(JSON.stringify(proxy));
 };
+
+
+const llmUrl =
+  typeof window !== "undefined"
+    ? window.location.protocol + "//" + window.location.host + "/api/ai/llm"
+    : "//api/ai/llm";
+
+const llm = new LLMClient(llmUrl);
 
 setIframeContextHandler({
   read(context: any, key: string): any {
@@ -61,16 +70,15 @@ setIframeContextHandler({
     removeAction(receipt);
   },
   async onLLMRequest(_context: any, payload: string) {
-    let res = await fetch(`${window.location.origin}/api/ai/llm`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload,
-    });
-    if (res.ok) {
-      return await res.json();
-    } else {
-      throw new Error("LLM request failed");
+    console.log("onLLMRequest", payload);
+    const jsonPayload = JSON.parse(payload);
+    if (!jsonPayload.model) {
+      jsonPayload.model = ["groq:llama-3.3-70b-specdec", "anthropic:claude-3-5-sonnet-latest"];
     }
+
+    const res = await llm.sendRequest(jsonPayload);
+    console.log("onLLMRequest res", res);
+    return res;
   },
 });
 

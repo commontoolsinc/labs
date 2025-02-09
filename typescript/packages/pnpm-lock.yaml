@@ -432,6 +432,9 @@ importers:
       '@commontools/iframe-sandbox':
         specifier: workspace:*
         version: link:../common-iframe-sandbox
+      '@commontools/llm-client':
+        specifier: workspace:*
+        version: link:../llm-client
       '@commontools/os-ui':
         specifier: workspace:*
         version: link:../common-os-ui
