@@ -5,7 +5,7 @@ import { type DocImpl } from "@commontools/runner";
 
 import { tsToExports } from "./localBuild.js";
 import { Charm, CharmManager } from "./charm.js";
-import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.js";
+import { buildFullRecipe, getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.js";
 import { buildPrompt } from "./iframe/prompt.js";
 
 
@@ -51,7 +51,7 @@ export async function iterate(
     return;
   }
 
-  const { recipeId, iframe } = getIframeRecipe(charm);
+  const { iframe } = getIframeRecipe(charm);
   if (!iframe) {
     console.error("FIXME, no compatible iframe found in charm, what should we do?");
     return;
@@ -65,6 +65,18 @@ export async function iterate(
     newSpec,
     schema: iframe.argumentSchema,
   });
+
+  return saveNewRecipeVersion(charmManager, charm, newIFrameSrc, newSpec);
+}
+
+export const saveNewRecipeVersion = async (charmManager: CharmManager, charm: Charm, newIFrameSrc: string, newSpec: string) => {
+  const { recipeId, iframe } = getIframeRecipe(charm);
+
+  if (!recipeId || !iframe) {
+    console.error("FIXME, no recipeId or iframe, what should we do?");
+    return;
+  }
+
   const name = newIFrameSrc.match(/<title>(.*?)<\/title>/)?.[1] ?? newSpec;
   const newRecipeSrc = buildFullRecipe({
     ...iframe,

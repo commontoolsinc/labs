@@ -78,7 +78,7 @@ setIframeContextHandler({
 
     const res = await llm.sendRequest(jsonPayload);
     console.log("onLLMRequest res", res);
-    return res;
+    return res as any;
   },
 });
 
@@ -108,7 +108,6 @@ async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: a
 
 interface CommonDataEvent extends CustomEvent {
   detail: {
-    shiftKey: boolean;
     data: any[];
   };
 }
@@ -198,7 +197,8 @@ export default function Shell() {
         <os-common-import ref={commonImportRef}>
           <div style={{ display: "flex", alignItems: "center" }}>
             <os-ai-icon></os-ai-icon>
-            <p>Imagine or drop json to begin</p>
+            <p>Imagine or drop json to begin ...
+              or <button onClick={() => onImportLocalData({ detail: { data: [{ "gallery": [{ "title": "pizza", "prompt": "a yummy pizza" }] }] } })}>ai image gallery</button></p>
           </div>
         </os-common-import>
 
