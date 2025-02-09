@@ -34,10 +34,10 @@ export const buildPrompt = ({
     }
   
     messages.push(
-      `The user asked you to ${spec ? "update" : "create"} the source code by the following:
-  \`\`\`
-  ${newSpec}
-  \`\`\``,
+      `The user asked you to ${spec ? "update" : "create"} the source code with the following comments:
+\`\`\`
+${newSpec}
+\`\`\``,
     );
     messages.push(responsePrefill);
   
