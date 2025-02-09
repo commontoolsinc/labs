@@ -141,7 +141,7 @@ export default function Shell() {
   );
 
   const onLocation = useCallback((_: CustomEvent) => {
-    const name = prompt("Set new replica bame: ");
+    const name = prompt("Set new replica name: ");
     if (name) {
       replica.send(name);
     }
