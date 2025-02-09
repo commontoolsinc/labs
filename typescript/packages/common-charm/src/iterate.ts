@@ -5,7 +5,7 @@ import { type DocImpl } from "@commontools/runner";
 
 import { tsToExports } from "./localBuild.js";
 import { Charm, CharmManager } from "./charm.js";
-import { buildFullRecipe, getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.js";
+import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.js";
 import { buildPrompt } from "./iframe/prompt.js";
 
 
