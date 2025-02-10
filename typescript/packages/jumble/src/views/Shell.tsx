@@ -113,7 +113,7 @@ export default function Shell() {
 
   const onSubmit = useCallback(
     async (ev: CustomEvent) => {
-      const charmId = window.location.pathname.match(/\/charm\/([^/]+)/)?.[1] ?? null;
+      const charmId = window.location.pathname.match(/\/[^/]+\/([^/]+)/)?.[1] ?? null;
       if (charmId) {
         console.log("Iterating charm", charmId);
 
@@ -122,7 +122,7 @@ export default function Shell() {
         if (newCharmId) {
           // FIXME(ja): this is a hack to get the charm id
           const id = (newCharmId as any).toJSON()["/"];
-          navigate(`/charm/${id}`);
+          navigate(`/${replicaName}/${id}`);
         }
       } else {
         console.log("Casting spell", ev.detail.value);
