@@ -1,6 +1,6 @@
 import { Charm, saveNewRecipeVersion } from "@commontools/charm";
 import React from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { CharmRenderer } from "@/components/CharmRunner";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { getIframeRecipe } from "@commontools/charm";
@@ -61,6 +61,7 @@ interface CharmDetailsProps {
   changes: boolean;
 }
 
+
 function CharmDetails({
   spring,
   charm,
@@ -69,6 +70,16 @@ function CharmDetails({
   onSaveChanges,
   changes,
 }: CharmDetailsProps) {
+  const { charmManager } = useCharmManager();
+  const navigate = useNavigate();
+
+  const deleteCharm = async () => {
+    const result = await charmManager.remove(charm.entityId['/']);
+    if (result) {
+      navigate("/");
+    }
+  };
+
   return (
     <animated.div
       style={{
@@ -79,7 +90,10 @@ function CharmDetails({
     >
       <div className="bg-white rounded-lg shadow-lg">
         <div className="p-6">
-          {changes && <button onClick={onSaveChanges}>save changes</button>}
+          <div>
+            <button onClick={() => deleteCharm()}>delete charm</button>
+            {changes && <button onClick={onSaveChanges}>save changes</button>}
+          </div>
           <OsCodeEditor
             style={{ width: "100%", height: "600px" }}
             language="text/html"
@@ -108,22 +122,24 @@ function CharmDetails({
           </table>
           <details>
             <table className="text-sm font-mono border-collapse">
-              <tr>
-                <td className="pr-4 text-gray-600">charm sourceCell id:</td>
-                <td>
-                  <pre className="bg-gray-50 p-2 rounded">
-                    {JSON.stringify(charm.sourceCell.get(), null, 2)}
-                  </pre>
-                </td>
-              </tr>
-              <tr>
-                <td className="pr-4 text-gray-600">charm get() id:</td>
-                <td>
-                  <pre className="bg-gray-50 p-2 rounded">
-                    {JSON.stringify(charm.get(), null, 2)}
-                  </pre>
-                </td>
-              </tr>
+              <tbody>
+                <tr>
+                  <td className="pr-4 text-gray-600">charm sourceCell id:</td>
+                  <td>
+                    <pre className="bg-gray-50 p-2 rounded">
+                      {JSON.stringify(charm.sourceCell.get(), null, 2)}
+                    </pre>
+                  </td>
+                </tr>
+                <tr>
+                  <td className="pr-4 text-gray-600">charm get() id:</td>
+                  <td>
+                    <pre className="bg-gray-50 p-2 rounded">
+                      {JSON.stringify(charm.get(), null, 2)}
+                    </pre>
+                  </td>
+                </tr>
+              </tbody>
             </table>
           </details>
         </div>

@@ -76,7 +76,11 @@ export class CharmManager {
   async remove(idOrCharm: EntityId | DocLink) {
     const id = isDocLink(idOrCharm) ? idOrCharm?.cell?.entityId?.["/"] : idOrCharm;
     const newCharms = this.charms.get().filter(({ cell }) => JSON.stringify(cell.entityId) !== JSON.stringify({'/' : id}));
-    if (newCharms.length !== this.charms.get().length) this.charms.send(newCharms);
+    if (newCharms.length !== this.charms.get().length) {
+      this.charms.send(newCharms);
+      return true;
+    }
+    return false;
   }
 
   async runPersistent(recipe: Recipe | Module, inputs?: any, cause?: any): Promise<DocImpl<any>> {
