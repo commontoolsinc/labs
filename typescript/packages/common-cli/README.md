@@ -1,0 +1,1 @@
+deno run --import-map=import_map.json --unstable-sloppy-imports -A main.ts
