@@ -148,26 +148,12 @@ export class OsChrome extends LitElement {
                 locationtitle="${this.locationtitle}"
               ></os-location>
             </div>
-            <div class="toolbar-end">
-              <os-icon-button
-                @click=${onSidebarButton}
-                slot="end"
-                icon="menu"
-                class=${classMap({
-                  fade: true,
-                  "fade-out": this.sidebar,
-                })}
-                ?activated=${this.sidebar}
-              ></os-icon-button>
-            </div>
+            <div class="toolbar-end"></div>
           </nav>
           <div class="chrome-main-content">
             <slot></slot>
           </div>
         </section>
-        <aside class="chrome-sidebar">
-          <slot name="sidebar"></slot>
-        </aside>
       </div>
     `;
   }

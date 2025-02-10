@@ -2,6 +2,7 @@ import React, { useRef } from "react";
 import { render } from "@commontools/html";
 import { effect, idle, run } from "@commontools/runner";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { DitheredCube } from "./Loader";
 
 interface CharmLoaderProps {
   charmImport: () => Promise<any>;

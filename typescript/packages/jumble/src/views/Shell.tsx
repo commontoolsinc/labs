@@ -10,7 +10,7 @@ import {
   removeAction,
 } from "@commontools/runner";
 import { WebComponent } from "@/components/WebComponent";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback } from "react";
 
 import * as osUi from "@commontools/os-ui";
 // bf: load bearing console.log
@@ -29,6 +29,7 @@ import CharmDetail from "./CharmDetail";
 import CharmList from "./CharmList";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { LLMClient } from "@commontools/llm-client";
+import { ZoomLayout } from "@/components/ZoomLayout";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized
@@ -38,7 +39,6 @@ import { LLMClient } from "@commontools/llm-client";
 const serializeProxyObjects = (proxy: any) => {
   return proxy == undefined ? undefined : JSON.parse(JSON.stringify(proxy));
 };
-
 
 const llmUrl =
   typeof window !== "undefined"
@@ -118,7 +118,6 @@ export default function Shell() {
   const [spellResults, setSearchResults] = useCell(searchResults);
   const navigate = useNavigate();
   const { charmManager } = useCharmManager();
-  const commonImportRef = useRef<HTMLElement | null>(null);
 
   const onSubmit = useCallback(
     async (ev: CustomEvent) => {
@@ -161,31 +160,6 @@ export default function Shell() {
     }
   }, []);
 
-  const onImportLocalData = (event: CommonDataEvent) => {
-    const [data] = event.detail.data;
-    console.log("Importing local data:", data);
-    // FIXME(ja): this needs better error handling
-    const title = prompt("Enter a title for your recipe:");
-    if (!title) return;
-
-    castNewRecipe(charmManager, data, title);
-    // if (charmId) {
-    //   openCharm(charmId);
-    // }
-  };
-
-  useEffect(() => {
-    const current = commonImportRef.current;
-    if (current) {
-      current.addEventListener("common-data", onImportLocalData as EventListener);
-    }
-    return () => {
-      if (current) {
-        current.removeEventListener("common-data", onImportLocalData as EventListener);
-      }
-    };
-  }, []);
-
   return (
     <div className="h-full relative">
       <WebComponent
@@ -194,22 +168,16 @@ export default function Shell() {
         locationTitle={replicaName}
         onLocation={onLocation}
       >
-        <os-common-import ref={commonImportRef}>
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <os-ai-icon></os-ai-icon>
-            <p>Imagine or drop json to begin ...
-              or <button onClick={() => onImportLocalData({ detail: { data: [{ "gallery": [{ "title": "pizza", "prompt": "a yummy pizza" }] }] } })}>ai image gallery</button></p>
-          </div>
-        </os-common-import>
-
         <NavLink to="/" slot="toolbar-start">
           <WebComponent as="os-avatar" name="Ben"></WebComponent>
         </NavLink>
 
-        <Routes>
-          <Route path="charm/:charmId" element={<CharmDetail />} />
-          <Route index element={<CharmList />} />
-        </Routes>
+        <div className="relative h-full">
+          <Routes>
+            <Route path="charm/:charmId" element={<CharmDetail />} />
+            <Route index element={<CharmList />} />
+          </Routes>
+        </div>
 
         <SearchResults
           searchOpen={spellResults.length > 0}
@@ -219,21 +187,6 @@ export default function Shell() {
         />
 
         <WebComponent slot="overlay" as="os-fabgroup" className="pin-br" onSubmit={onSubmit} />
-
-        <os-navstack slot="sidebar">
-          {/* bf: most of these are stubbed, need to pass real values in */}
-          <Sidebar
-            linkedCharms={[]}
-            workingSpec="example spec"
-            handlePublish={() => { }}
-            recipeId="dummy-recipe-id"
-            schema={{ imagine: "a schema" }}
-            copyRecipeLink={() => { }}
-            data={{ imagine: "some data" }}
-            onDataChanged={(value: string) => { }}
-            onSpecChanged={(value: string) => { }}
-          />
-        </os-navstack>
       </WebComponent>
     </div>
   );

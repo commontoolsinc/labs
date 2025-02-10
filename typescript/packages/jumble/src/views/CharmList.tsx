@@ -2,22 +2,66 @@ import { useCell } from "@/hooks/use-charm";
 import { NavLink } from "react-router-dom";
 import { NAME, UI } from "@commontools/builder";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { Charm, CharmManager, iterate, castNewRecipe } from "@commontools/charm";
 import { charmId } from "@/utils/charms";
+import { useEffect, useRef } from "react";
+import { Card } from "@/components/Card";
+import { DitheredCube } from "@/components/Loader";
 
-export default function CharmList() {``
+export default function CharmList() {
   console.log("CharmList");
   const { charmManager } = useCharmManager();
   const [charms] = useCell(charmManager.getCharms());
+  const commonImportRef = useRef<HTMLElement | null>(null);
+
+  const onImportLocalData = (event: CommonDataEvent) => {
+    const [data] = event.detail.data;
+    console.log("Importing local data:", data);
+    // FIXME(ja): this needs better error handling
+    const title = prompt("Enter a title for your recipe:");
+    if (!title) return;
+
+    castNewRecipe(charmManager, data, title);
+    // if (charmId) {
+    //   openCharm(charmId);
+    // }
+  };
+
+  useEffect(() => {
+    const current = commonImportRef.current;
+    if (current) {
+      current.addEventListener("common-data", onImportLocalData as EventListener);
+    }
+    return () => {
+      if (current) {
+        current.removeEventListener("common-data", onImportLocalData as EventListener);
+      }
+    };
+  }, []);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-8">
+      <os-common-import ref={commonImportRef}>
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <os-ai-icon></os-ai-icon>
+          <p>
+            Imagine or drop json to begin ... or{" "}
+            <button
+              onClick={() =>
+                onImportLocalData({
+                  detail: { data: [{ gallery: [{ title: "pizza", prompt: "a yummy pizza" }] }] },
+                })
+              }
+            >
+              ai image gallery
+            </button>
+          </p>
+        </div>
+      </os-common-import>
       {charms.map((charm, index) => (
-        <div
-          key={index}
-          className="bg-white border border-gray-100 rounded-lg overflow-hidden cursor-pointer hover:border-gray-300 transition-colors duration-200"
-        >
+        <Card details key={index}>
           <NavLink to={`/charm/${charmId(charm)}`}>
-            <div className="p-4">
+            <div className="p-4" style={{ viewTransitionName: `charm-${charmId(charm)}` }}>
               <h3 className="text-xl font-semibold text-gray-800 mb-4">
                 {charm.cell.get()[NAME] || "Unnamed Charm"}
               </h3>
@@ -28,7 +72,7 @@ export default function CharmList() {``
               </div>
             </div>
           </NavLink>
-        </div>
+        </Card>
       ))}
     </div>
   );
