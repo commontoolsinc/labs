@@ -1,6 +1,4 @@
-import { CSP } from './csp.js';
-
-const HOST_ORIGIN = new URL(window.location.href).origin;
+import { CSP, HOST_ORIGIN } from './csp.js';
 
 export default `
 <!DOCTYPE html>

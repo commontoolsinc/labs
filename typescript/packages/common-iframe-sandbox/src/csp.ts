@@ -3,6 +3,11 @@ const SCRIPT_CDNS = [
   'https://cdn.tailwindcss.com'
 ];
 
+// In Chromium browsers, "'self'" selects the top frame origin from
+// null origins. In Firefox this does not apply. Instead, use
+// the top frame origin explicitly.
+export const HOST_ORIGIN = new URL(window.location.href).origin;
+
 // This CSP directive uses 'unsafe-inline' to allow
 // origin-less styles and scripts to be used, defeating
 // many traditional uses of CSP.
@@ -11,11 +16,11 @@ export const CSP = `` +
   // each specific fetch directive as needed.
   `default-src 'none';` +
   // Scripts: Allow 1P, inline, and CDNs.
-  `script-src 'self' 'unsafe-inline' ${SCRIPT_CDNS.join(' ')};` +
+  `script-src ${HOST_ORIGIN} 'unsafe-inline' ${SCRIPT_CDNS.join(' ')};` +
   // Styles: Allow 1P, inline.
-  `style-src 'self' 'unsafe-inline';` +
+  `style-src ${HOST_ORIGIN} 'unsafe-inline';` +
   // Images: Allow 1P, inline.
-  `img-src 'self' 'unsafe-inline';` +
+  `img-src ${HOST_ORIGIN} 'unsafe-inline';` +
   // Disabling until we have a concrete case.
   `form-action 'none';` +
   // Disable <base> element
