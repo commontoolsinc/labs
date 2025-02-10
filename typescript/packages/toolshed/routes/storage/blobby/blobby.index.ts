@@ -12,7 +12,7 @@ import { cors } from "hono/cors";
 
 const router = createRouter();
 
-router.use("*", async (c, next) => {
+router.use("/api/storage/blobby/*", async (c, next) => {
   const logger = c.get("logger");
   try {
     const redis = createClient({
@@ -34,12 +34,22 @@ router.use("*", async (c, next) => {
     logger.info("Closing Redis connection");
     await redis.quit();
   } catch (error) {
-    logger.error({ error }, "Error in Redis middleware");
+    logger.error(error, "Error in Redis middleware");
     throw error;
   }
 });
 
-router.use(cors());
+router.use(
+  "/api/storage/blobby/*",
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+    exposeHeaders: ["Content-Length", "X-Disk-Cache"],
+    maxAge: 3600,
+    credentials: true,
+  }),
+);
 
 const Router = router
   .openapi(routes.uploadBlob, handlers.uploadBlobHandler)

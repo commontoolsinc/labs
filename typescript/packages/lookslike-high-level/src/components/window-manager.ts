@@ -3,16 +3,8 @@ import { customElement, state } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
 import { style } from "@commontools/ui";
 import { render } from "@commontools/html";
-import { closeCharm, openCharm } from "../data.js";
-import {
-  syncCharm,
-  addCharms,
-  Charm,
-  runPersistent,
-  syncRecipe,
-  buildRecipe,
-} from "@commontools/charm";
-
+import { charmManager, closeCharm, openCharm } from "../data.js";
+import { Charm, buildRecipe, iterate, castNewRecipe } from "@commontools/charm";
 import {
   addRecipe,
   DocImpl,
@@ -26,7 +18,6 @@ import {
 import { repeat } from "lit/directives/repeat.js";
 import { UI, NAME, TYPE } from "@commontools/builder";
 import { matchRoute, navigate } from "../router.js";
-import * as iframeSpellAi from "./iframe-spell-ai.js";
 import { SpellSearchResult } from "./search-results.js";
 import { toasty } from "./toasty.js";
 
@@ -36,6 +27,8 @@ async function castSpell(value: string, showResults: (results: SpellSearchResult
       ? window.location.protocol + "//" + window.location.host + "/api/ai/spell/search"
       : "//api/ai/spell/search";
 
+  console.log("searchUrl", searchUrl);
+
   // Search for suggested spells based on input
   const response = await fetch(searchUrl, {
     method: "POST",
@@ -44,6 +37,7 @@ async function castSpell(value: string, showResults: (results: SpellSearchResult
       accepts: "application/json",
     },
     body: JSON.stringify({
+      replica: charmManager.getReplica(),
       query: value,
       tags: [],
       options: {
@@ -202,15 +196,18 @@ export class CommonWindowManager extends LitElement {
   @state()
   private spellSearchResults: SpellSearchResult[] = [];
 
-  handleUniboxSubmit(event: CustomEvent) {
+  async handleUniboxSubmit(event: CustomEvent) {
     const value = event.detail.value;
     const shiftKey = event.detail.shiftKey;
     console.log("Unibox submitted:", value, shiftKey);
 
     if (this.focusedCharm) {
-      iframeSpellAi.iterate(this.focusedCharm, value, shiftKey);
+      const charmId = await iterate(charmManager, this.focusedCharm, value, shiftKey);
+      if (charmId) {
+        openCharm(charmId);
+      }
     } else {
-      castSpell(value, this.showResults.bind(this));
+      await castSpell(value, this.showResults.bind(this));
     }
   }
 
@@ -229,14 +226,14 @@ export class CommonWindowManager extends LitElement {
     if (recipeKey && blob) {
       toasty("Syncing...");
       const recipeId = recipeKey.replace("spell-", "");
-      await syncRecipe(recipeId);
+      await charmManager.syncRecipeBlobby(recipeId);
 
       const recipe = getRecipe(recipeId);
       if (!recipe) return;
 
       toasty("Casting...");
-      const charm: DocImpl<Charm> = await runPersistent(recipe, blob.data);
-      addCharms([charm]);
+      const charm: DocImpl<Charm> = await charmManager.runPersistent(recipe, blob.data);
+      charmManager.add([charm]);
       openCharm(JSON.stringify(charm.entityId));
       toasty("Ready!");
 
@@ -318,13 +315,19 @@ export class CommonWindowManager extends LitElement {
         this.sidebarTab === "source" || this.sidebarTab === "data" || this.sidebarTab === "query";
     };
 
-    const onImportLocalData = (event: CustomEvent) => {
-      const data = event.detail.data;
+    const onImportLocalData = async (event: CustomEvent) => {
+      const [data] = event.detail.data;
+      if (!data) return;
+
       console.log("Importing local data:", data);
+      // FIXME(ja): this needs better error handling
       const title = prompt("Enter a title for your recipe:");
       if (!title) return;
 
-      iframeSpellAi.castNewRecipe(data, title);
+      const charmId = await castNewRecipe(charmManager, data, title);
+      if (charmId) {
+        openCharm(charmId);
+      }
     };
 
     return html`
@@ -459,18 +462,18 @@ export class CommonWindowManager extends LitElement {
 
   private idAliases = new Map<string, string>();
   async openCharm(charmToOpen: string | EntityId | DocImpl<any>) {
-    let charm = await syncCharm(charmToOpen);
+    let charm = await charmManager.sync(charmToOpen);
     let charmId = JSON.stringify(charm.entityId!);
 
     if (typeof charmToOpen === "string" && this.idAliases.has(charmToOpen)) {
       charmToOpen = this.idAliases.get(charmToOpen)!;
       console.log("Using alias", charmToOpen);
-      charm = await syncCharm(charmToOpen);
+      charm = await charmManager.sync(charmToOpen);
       charmId = JSON.stringify(charm.entityId!);
     }
 
     const recipeId = charm?.sourceCell?.get()[TYPE];
-    if (recipeId) await syncRecipe(recipeId);
+    if (recipeId) await charmManager.syncRecipeBlobby(recipeId);
     await idle();
     run(undefined, undefined, charm);
     await idle();
@@ -485,7 +488,7 @@ export class CommonWindowManager extends LitElement {
     this.focusedCharm = charm;
     this.focusedProxy = charm?.getAsQueryResult();
 
-    addCharms([charm]);
+    charmManager.add([charm]);
     this.location = this.focusedProxy?.[NAME] || "-";
 
     const existingWindow = this.renderRoot.querySelector(
@@ -565,11 +568,13 @@ export class CommonWindowManager extends LitElement {
       console.log("charmMatch", charmMatch.params.charmId);
       // TODO: Add a timeout here, show loading state and error state
       setTimeout(() => {
-        syncCharm(charmMatch.params.charmId, true).then(
-          (charm) =>
-            (charm && charm.get() && this.openCharm(charm)) ||
-            navigate(`/charm/${charmMatch.params.charmId}`),
-        );
+        charmManager
+          .sync(charmMatch.params.charmId, true)
+          .then(
+            (charm) =>
+              (charm && charm.get() && this.openCharm(charm)) ||
+              navigate(`/charm/${charmMatch.params.charmId}`),
+          );
       }, 100);
     }
 
@@ -595,7 +600,8 @@ export class CommonWindowManager extends LitElement {
         buildRecipe(src).then(({ recipe }) => {
           if (recipe) {
             addRecipe(recipe, src, "render data", []);
-            runPersistent(recipe, initialData)
+            charmManager
+              .runPersistent(recipe, initialData)
               .then((charm) => this.openCharm(charm))
               .then(() => console.log("Recipe successfully loaded"));
           }
@@ -607,7 +613,7 @@ export class CommonWindowManager extends LitElement {
     if (recipeMatch) {
       let recipeId = recipeMatch.params.recipeId;
       recipeId = recipeId.replace("spell-", "");
-      syncRecipe(recipeId).then(async () => {
+      charmManager.syncRecipeBlobby(recipeId).then(async () => {
         const recipe = getRecipe(recipeId);
         if (recipe) {
           // Get data from URL query parameter if it exists

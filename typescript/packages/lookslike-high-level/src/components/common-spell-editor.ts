@@ -2,10 +2,11 @@ import { html, LitElement } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { when } from "lit/directives/when.js";
 import { addRecipe, getRecipeSpec, getRecipeSrc, run } from "@commontools/runner";
-import { addCharms, tsToExports } from "@commontools/charm";
+import { tsToExports } from "@commontools/charm";
 import { iterate, llmTweakSpec, generateSuggestions } from "./spell-ai.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { toasty } from "./toasty.js";
+import { charmManager } from "../data.js";
 
 @customElement("common-spell-editor")
 export class CommonSpellEditor extends LitElement {
@@ -178,7 +179,7 @@ export class CommonSpellEditor extends LitElement {
           //           defaults, update to new defaults
           const charm = run(recipe, keepData ? this.data : {});
 
-          addCharms([charm]);
+          charmManager.add([charm]);
           const charmId = JSON.stringify(charm.entityId);
           this.dispatchEvent(
             new CustomEvent("open-charm", {
@@ -201,7 +202,7 @@ export class CommonSpellEditor extends LitElement {
             this.workingSrc,
             keepData ? this.entityId : undefined,
           );
-          addCharms([charm]);
+          charmManager.add([charm]);
           this.dispatchEvent(
             new CustomEvent("open-charm", {
               detail: { charmId: JSON.stringify(charm.entityId) },

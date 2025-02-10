@@ -1,7 +1,7 @@
 import { h } from "@commontools/html";
 import { recipe, UI, NAME, JSONSchema } from "@commontools/builder";
 
-import src from "./smol.html?raw";
+import src from "./smolIFrame.html?raw";
 
 const argumentSchema = {
   type: "object",

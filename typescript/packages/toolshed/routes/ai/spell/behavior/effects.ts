@@ -9,6 +9,37 @@ export interface BlobOptions {
   keys?: string;
 }
 
+export async function getAllMemories(
+  replica: string,
+): Promise<Record<string, any>> {
+  const res = await client.api.storage.memory.$post({
+    json: { [replica]: { the: "application/json" } },
+  });
+  const data = await res.json();
+  if ("error" in data) {
+    throw new Error(`${data?.error}`);
+  }
+  const rawMemories: { the?: string; of?: string; is?: any }[] =
+    Array.isArray(data.ok) ? data.ok : [data.ok];
+  const memories: { the: string; of: string; is: any }[] = rawMemories
+    .filter((m) => m.the && m.of && m.is)
+    .map((m: any) => ({
+      the: m.the,
+      of: m.of,
+      is: m.is,
+    }));
+
+  const memoryMap: { [key: string]: any } = {};
+  memories.forEach((memory) => {
+    // FIXME(ja): using jumble can result in memory.is == {}
+    const value = memory.is?.value?.argument;
+    if (value) {
+      memoryMap[memory.of] = value;
+    }
+  });
+  return memoryMap;
+}
+
 export async function getAllBlobs(
   options: BlobOptions = {},
 ): Promise<string[] | { [id: string]: any }> {

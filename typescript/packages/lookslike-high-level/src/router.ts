@@ -14,7 +14,19 @@ export function matchRoute(urlPattern: string, url: URL) {
 }
 
 export function navigate(url: string) {
-  history.pushState(null, "", url);
+  // Merge existing query params with new URL
+  const newUrl = new URL(url, window.location.href);
+  const currentParams = new URLSearchParams(window.location.search);
+  const newParams = new URLSearchParams(newUrl.search);
+
+  currentParams.forEach((value, key) => {
+    if (!newParams.has(key)) {
+      newParams.set(key, value);
+    }
+  });
+
+  newUrl.search = newParams.toString();
+  history.pushState(null, "", newUrl.toString());
 }
 
 window.addEventListener("popstate", () => {

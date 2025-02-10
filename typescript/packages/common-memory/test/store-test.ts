@@ -1124,3 +1124,48 @@ Deno.test("open creates replica if does not exists", async () => {
     await Deno.remove(url);
   }
 });
+
+test("list empty store", new URL(`memory:${alice}`), async (session) => {
+  const result = session.list("application/json");
+  assertEquals(result, { ok: [] }, "empty list when no facts exist");
+});
+
+test("list single fact", new URL(`memory:${alice}`), async (session) => {
+  session.transact({
+    assert: {
+      the: "application/json",
+      of: doc,
+      is: { v: 1 },
+    },
+  });
+
+  const result = session.list({ the: "application/json" });
+  assertEquals(result, {
+    ok: [
+      {
+        of: doc,
+        is: { v: 1 },
+        the: "application/json",
+      },
+    ],
+  });
+});
+
+test("list excludes retracted facts", new URL(`memory:${alice}`), async (session) => {
+  // Create and then retract a fact
+  const fact = session.transact({
+    assert: {
+      the: "application/json",
+      of: doc,
+      is: { v: 1 },
+    },
+  });
+
+  assert(fact.ok);
+  session.transact({ retract: fact.ok });
+
+  const result = session.list({ the: "application/json" });
+  assertEquals(result, {
+    ok: [],
+  });
+});

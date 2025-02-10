@@ -16,7 +16,9 @@ import {
   TransactionError,
   ConnectionError,
   SystemError,
+  ListError,
 } from "./interface.ts";
+import { ListResult } from "./store.ts";
 export * from "./interface.ts";
 
 export interface Session {
@@ -24,7 +26,9 @@ export interface Session {
     transaction: In<Instruction>,
   ): AsyncResult<Fact, ConflictError | TransactionError | ConnectionError>;
 
-  query(selector: In<Selector>): AsyncResult<Fact | Unclaimed, QueryError | ConnectionError>;
+  query(
+    selector: In<Partial<Selector>>,
+  ): AsyncResult<Fact | Unclaimed | Unclaimed[], QueryError | ListError | ConnectionError>;
 
   subscribe(address: In<Selector>): Subscription.Subscription;
 
@@ -57,7 +61,7 @@ export class Router implements Session {
     return transact(this, transaction);
   }
 
-  query(selector: In<Selector>) {
+  query(selector: In<Partial<Selector>>) {
     return query(this, selector);
   }
 
@@ -78,14 +82,32 @@ export const subscribe = (session: Session, selector: In<Selector>) =>
 
 export const query = async (
   session: Model,
-  selectors: In<Selector>,
-): AsyncResult<Fact | Unclaimed, QueryError | ConnectionError> => {
+  selectors: In<Partial<Selector>>,
+): AsyncResult<Fact | Unclaimed | Unclaimed[], ListError | QueryError | ConnectionError> => {
   const [[route, selector]] = Object.entries(selectors);
   const { ok: replica, error } = await resolve(session, route);
   if (error) {
     return { error };
   }
-  return replica.query(selector);
+
+  if (selector?.the && selector?.of) {
+    return replica.query({ the: selector.the, of: selector.of });
+  } else {
+    return replica.list(selector);
+  }
+};
+
+export const list = async (
+  session: Model,
+  queries: In<Partial<Selector>>,
+): AsyncResult<ListResult[], ListError | ConnectionError> => {
+  const [[route, query]] = Object.entries(queries);
+  const { ok: replica, error } = await resolve(session, route);
+  if (error) {
+    return { error };
+  }
+
+  return replica.list(query);
 };
 
 export const watch = async (

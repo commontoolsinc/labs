@@ -21,3 +21,4 @@ export * as codeEditor from "./components/code-editor/os-code-editor.js";
 export * as floatingCompletions from "./components/os-floating-completions.js";
 export * as avatar from "./components/os-avatar.js";
 export * as tabBar from "./components/os-tab-bar.js";
+export * as commonImport from "./components/os-common-import.js";

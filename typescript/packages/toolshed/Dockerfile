@@ -1,11 +1,15 @@
-FROM denoland/deno:2.1.5
+FROM denoland/deno:2.1.9
+
+# Use a regular shell with built-in commands like `timeout`
+SHELL ["/bin/bash", "-c"]
 
 WORKDIR /app
 
 # Create cache directories and set permissions before switching user
 RUN mkdir -p /app/node_modules/.deno && \
     mkdir -p /app/cache && \
-    mkdir -p /app/lookslike-highlevel-dist && \
+    mkdir -p /app/vendor/lookslike-highlevel-dist && \
+    mkdir -p /app/vendor/common-memory && \
     chown -R deno:deno /app
 
 # Prefer not to run as root.
@@ -13,6 +17,11 @@ USER deno
 
 # Copy the pre-built assets first
 # COPY --chown=deno:deno lookslike-highlevel-dist /app/lookslike-highlevel-dist
+
+# FIXME(jake): We need to sort out a better way to handle deno dependencies...
+# NOTE(jake): We need to put common-memory in the vendor directory
+# so that it can be used by the app.
+COPY --chown=deno:deno ./vendor/common-memory /common-memory
 
 # Then copy the rest of the app
 COPY --chown=deno:deno . .

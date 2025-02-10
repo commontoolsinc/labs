@@ -8,6 +8,7 @@ const EnvSchema = z.object({
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
+  CACHE_DIR: z.string().default("./cache"),
 
   // ===========================================================================
   // (/routes/ai/llm) Environment variables for LLM Providers
@@ -61,6 +62,12 @@ const EnvSchema = z.object({
   MEMORY_URL: z.string().default(
     new URL(`./cache/memory/`, Path.toFileUrl(`${Deno.cwd()}/`)).href,
   ),
+  // ===========================================================================
+  // Sentry DSN global middleware
+  //   * /lib/create-app.ts
+  // ===========================================================================
+  SENTRY_DSN: z.string().default(""),
+  // ===========================================================================
 });
 
 export type env = z.infer<typeof EnvSchema>;

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - toolshed-redo
   pull_request:
     branches:
       - main
@@ -33,7 +34,7 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: "2.1.5"
+          deno-version: "2.1.9"
 
       - name: Cache dependencies
         uses: actions/cache@v3
@@ -63,7 +64,7 @@ jobs:
   deploy:
     needs: test
     timeout-minutes: 10
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/toolshed')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/toolshed' || github.ref == 'refs/heads/toolshed-redo')
     runs-on: ubuntu-latest
     environment: production
     defaults:
@@ -73,22 +74,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@master
         with:
-          node-version: "22"
+          host: ${{ secrets.TOOLSHED_HOST }}
+          username: jake
+          key: ${{ secrets.TOOLSHED_SSH_PRIVATE_KEY }}
+          script: |
+            ./deploy.sh
 
-      # - name: Build high-level app
-      #   working-directory: typescript/packages/lookslike-high-level
-      #   run: |
-      #     npm install
-      #     npm run build
-      #     mkdir -p ../toolshed/lookslike-highlevel-dist
-      #     cp -r dist/* ../toolshed/lookslike-highlevel-dist/
-
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Deploy to Fly.io
-        run: flyctl deploy --remote-only
+      - name: Mark Sentry Release
+        uses: getsentry/action-release@v1
+        with:
+          environment: production
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}

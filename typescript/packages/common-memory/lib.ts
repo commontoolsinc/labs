@@ -7,6 +7,7 @@ import {
   AsyncResult,
   ConnectionError,
   In,
+  Command,
   Instruction,
   Selector,
   Statement,
@@ -30,7 +31,13 @@ export const open = async (
 export interface MemoryService {
   close(): AsyncResult<{}, SystemError>;
   subscribe(socket: WebSocket): AsyncResult<{}, Error>;
-  patch(request: Request): Promise<Response>;
+  patch(request: { json(): Promise<any> }): Promise<Response>;
+  patchJson(json: In<Transaction>): Promise<AsyncResult<any, Error>>;
+  query(
+    request: { json(): Promise<any> },
+    selector: In<{ the?: string; of?: string }>,
+  ): Promise<Response>;
+  queryJson(selector: object): Promise<AsyncResult<any, Error>>;
 }
 
 interface MemoryServiceSession {
@@ -42,11 +49,17 @@ class Service implements MemoryService {
   subscribe(socket: WebSocket) {
     return subscribe(this, socket);
   }
-  patch(request: Request): Promise<Response> {
+  patch(request: { json(): Promise<any> }): Promise<Response> {
     return patch(this, request);
   }
-  query(selector: In<Selector>) {
-    return this.router.query(selector);
+  patchJson(json: In<Transaction>): Promise<AsyncResult<any, Error>> {
+    return patchJson(this.router, json);
+  }
+  query(request: { json(): Promise<any> }): Promise<Response> {
+    return query(this, request);
+  }
+  queryJson(selector: object): Promise<AsyncResult<any, Error>> {
+    return queryJson(this.router, selector as In<Partial<Selector>>);
   }
   transact(transaction: In<Instruction>) {
     return this.router.transact(transaction);
@@ -64,6 +77,11 @@ export const subscribe = (session: MemoryServiceSession, socket: WebSocket) => {
   const subscription = session.router.subscribe({});
   socket.onmessage = (event) => {
     const command = parseCommand(event.data);
+    if (!command) {
+      console.error("Invalid command", event.data);
+      return;
+    }
+
     if (command.unwatch) {
       subscription.unwatch(command.unwatch);
     }
@@ -79,7 +97,7 @@ export const subscribe = (session: MemoryServiceSession, socket: WebSocket) => {
   return pipeToSocket(subscription.stream, socket);
 };
 
-export const patch = async (session: MemoryServiceSession, request: Request) => {
+export const patch = async (session: MemoryServiceSession, request: { json(): Promise<any> }) => {
   try {
     const transaction = asRouterTransaction(await request.json());
     const result = await session.router.transact(transaction);
@@ -93,6 +111,41 @@ export const patch = async (session: MemoryServiceSession, request: Request) => 
       },
     });
   } catch (cause) {
+    console.log(cause);
+    const error = cause as Partial<Error>;
+    return new Response(
+      JSON.stringify({
+        error: {
+          name: error?.name ?? "Error",
+          message: error?.message ?? "Unable to parse request body",
+          stack: error?.stack ?? "",
+        },
+      }),
+      {
+        status: 400,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      },
+    );
+  }
+};
+
+export const query = async (session: MemoryServiceSession, request: { json(): Promise<any> }) => {
+  try {
+    const selector = await request.json();
+    const result = await session.router.query(selector);
+    const body = JSON.stringify(result);
+    const status = result.ok ? 200 : 404;
+
+    return new Response(body, {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  } catch (cause) {
+    console.log(cause);
     const error = cause as Partial<Error>;
     return new Response(
       JSON.stringify({
@@ -114,7 +167,10 @@ export const patch = async (session: MemoryServiceSession, request: Request) => 
 
 const parseCommand = (source: string) => JSON.parse(source) as Command;
 
-const asRouterTransaction = (json: In<Instruction>): In<Instruction> =>
+/**
+ * Converts a raw JSON transaction object into a router transaction
+ */
+const asRouterTransaction = (json: In<Transaction>): In<Transaction> =>
   Object.fromEntries(Object.entries(json).map(([key, value]) => [key, asTransaction(value)]));
 
 const asTransaction = (transaction: Instruction) =>
@@ -126,12 +182,34 @@ const asStatement = <S extends Statement>(statement: S): S => {
   if (statement.cause && typeof statement.cause["/"] === "string") {
     statement.cause = Reference.fromJSON(statement.cause as unknown as { "/": string });
   }
-
   if (statement.is && (statement.is as { "/"?: string })["/"]) {
     statement.is = Reference.fromJSON(statement.is as { "/": string });
   }
-
   return statement;
+};
+
+/**
+ * New library-level patch function that accepts already-parsed JSON
+ * and returns a plain result for consumers to build HTTP responses as needed.
+ */
+export const patchJson = async (
+  session: Router.Router,
+  json: In<Transaction>,
+): Promise<AsyncResult<any, Error>> => {
+  try {
+    const transaction = asRouterTransaction(json);
+    const result = await session.transact(transaction);
+    return result;
+  } catch (cause) {
+    const error = cause as Partial<Error>;
+    return {
+      error: {
+        name: error?.name ?? "Error",
+        message: error?.message ?? "Unable to process transaction",
+        stack: error?.stack ?? "",
+      },
+    };
+  }
 };
 
 const pipeToSocket = async <T>(
@@ -146,5 +224,25 @@ const pipeToSocket = async <T>(
     return { ok: {} };
   } catch (error) {
     return { error: error as Error };
+  }
+};
+
+export const queryJson = async (
+  session: Router.Router,
+  selector: object,
+): Promise<AsyncResult<any, Error>> => {
+  try {
+    const result = await session.query(selector as In<Partial<Selector>>);
+    return result;
+  } catch (cause) {
+    console.error(cause);
+    const error = cause as Partial<Error>;
+    return {
+      error: {
+        name: error?.name ?? "Error",
+        message: error?.message ?? "Unable to process query",
+        stack: error?.stack ?? "",
+      },
+    };
   }
 };

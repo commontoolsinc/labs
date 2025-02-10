@@ -7,3 +7,6 @@ lookslike-highlevel-dist/
 # This allows lib to be tracked in the toolshed project
 !lib/
 !lib/**
+
+vendor/
+vendor/**

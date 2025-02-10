@@ -4,10 +4,10 @@ import * as handlers from "./memory.handlers.ts";
 import { cors } from "hono/cors";
 
 const router = createRouter();
-router.use(cors());
 
 const Router = router
   .openapi(routes.transact, handlers.transact)
-  .openapi(routes.subscribe, handlers.subscribe);
+  .openapi(routes.subscribe, handlers.subscribe)
+  .openapi(routes.query, handlers.query);
 
 export default Router;

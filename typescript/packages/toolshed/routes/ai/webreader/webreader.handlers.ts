@@ -7,7 +7,7 @@ import env from "@/env.ts";
 import { sha256 } from "@/lib/sha2.ts";
 import { ensureDir } from "@std/fs";
 
-const CACHE_DIR = "./cache/ai-webreader";
+const CACHE_DIR = `${env.CACHE_DIR}/ai-webreader`;
 const JINA_API_ENDPOINT = `https://r.jina.ai/`;
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes in milliseconds
 

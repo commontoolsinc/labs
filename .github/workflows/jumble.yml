@@ -1,0 +1,58 @@
+name: Jumble CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  jumble-build:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.0.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.11.0"
+          cache: "pnpm"
+          cache-dependency-path: "./typescript/packages/pnpm-lock.yaml"
+
+      - name: Install Dependencies
+        working-directory: ./typescript/packages
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: ./typescript/packages/jumble
+        run: pnpm run build
+        env:
+          VITE_STORAGE_TYPE: "remote"
+          TOOLSHED_API_URL: ${{ secrets.TOOLSHED_API_URL }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.sha }}.tar.gz
+          path: ./typescript/packages/jumble/dist.tar.gz
+
+      - uses: ryand56/r2-upload-action@v1.4
+        if: github.ref == 'refs/heads/main'
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: ${{ secrets.R2_BUCKET }}
+          source-dir: ./typescript/packages/jumble/dist
+          destination-dir: jumble/latest
+
+      - uses: ryand56/r2-upload-action@v1.4
+        with:
+          r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+          r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          r2-bucket: ${{ secrets.R2_BUCKET }}
+          source-dir: ./typescript/packages/jumble/dist
+          destination-dir: jumble/${{ github.sha }}

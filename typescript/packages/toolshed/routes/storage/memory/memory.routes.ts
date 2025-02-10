@@ -34,14 +34,14 @@ export const subscribe = createRoute({
   tags,
   request: {
     headers: z.object({
-      connection: z.literal("upgrade"),
+      connection: z.literal("Upgrade"),
       upgrade: z.literal("websocket"),
     }),
   },
   responses: {
     [HttpStatusCodes.OK]: {
       headers: z.object({
-        connection: z.literal("upgrade"),
+        connection: z.literal("Upgrade"),
         upgrade: z.literal("websocket"),
         "sec-websocket-accept": z.string(),
         date: z.string(),
@@ -51,5 +51,48 @@ export const subscribe = createRoute({
     [HttpStatusCodes.INTERNAL_SERVER_ERROR]: {
       description: "Upgrade to websocket failed",
     },
+  },
+});
+
+export const query = createRoute({
+  method: "post",
+  path: "/api/storage/memory",
+  tags,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.record(z.object({
+            the: z.any().optional(),
+            of: z.any().optional(),
+          })),
+        },
+      },
+    },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      z.object({
+        ok: z.union([
+          z.array(z.object({
+            the: z.any(),
+            of: z.any(),
+            is: z.any(),
+          })),
+          z.object({
+            the: z.any(),
+            of: z.any(),
+            is: z.any(),
+          }),
+        ]),
+      }),
+      "Matching records found",
+    ),
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
+      z.object({
+        error: z.string(),
+      }),
+      "Storage error",
+    ),
   },
 });

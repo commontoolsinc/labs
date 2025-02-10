@@ -53,6 +53,12 @@ const STYLE_URL = "https://common.tools/static/main.css";
 const IMG_URL = "https://common.tools/static/text.png";
 const ORIGIN_URL = new URL(window.location.href).origin;
 
+function openWindow(target) {
+  return `<script>
+    let win = window.open("${HTML_URL}", "${target}");
+    if (win) throw new Error("Window Opened");</script>`;
+}
+
 describe("common-iframe CSP", () => {
   afterEach(cleanup);
 
@@ -63,6 +69,30 @@ describe("common-iframe CSP", () => {
   ], [
     "allows 1P fetch",
     `<script>fetch("${ORIGIN_URL}/foo.js")</script>`,
+    null,
+  ], [
+    "allows 1P img",
+    `<img src="${ORIGIN_URL}/foo.jpg" />`,
+    null,
+  ], [
+    "allows 1P CSS",
+    `<link rel="stylesheet" href="${ORIGIN_URL}/styles.css">`,
+    null,
+  ], [
+    "disallows opening windows (_blank)",
+    openWindow("_blank"),
+    null,
+  ], [
+    "disallows opening windows (_parent)",
+    openWindow("_parent"),
+    null,
+  ], [
+    "disallows opening windows (_self)",
+    openWindow("_self"),
+    null,
+  ], [
+    "disallows opening windows (_top)",
+    openWindow("_top"),
     null,
   ], [
     "disallows fetch",

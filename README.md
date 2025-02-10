@@ -36,9 +36,9 @@ brew install pnpm
 Then, install the dependencies and run the dev server
 
 ```bash
-cd ./typescript/packages/lookslike-high-level
+cd ./typescript/packages/jumble
 pnpm install
-pnpm dev
+pnpm run dev
 ```
 
 By default, the frontend will run at http://localhost:5173, and it will point to a local backend running at http://localhost:8000.
@@ -46,5 +46,5 @@ By default, the frontend will run at http://localhost:5173, and it will point to
 If you are not actively making updates to the backend, you can also point to the backend running in the cloud, by running the following command:
 
 ```shell
-TOOLSHED_API_URL=https://toolshed.commontools.dev/ pnpm run dev
+VITE_STORAGE_TYPE=remote TOOLSHED_API_URL=https://toolshed.saga-castor.ts.net/ pnpm run dev
 ```

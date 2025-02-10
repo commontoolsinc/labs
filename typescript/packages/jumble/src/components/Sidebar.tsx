@@ -1,46 +1,39 @@
 import React from "react";
 import { WebComponent } from "./WebComponent";
-import { getRecipe } from "@commontools/runner";
+import { DocImpl, getRecipe } from "@commontools/runner";
 import { useCell } from "@/hooks/use-charm";
 import { sidebar } from "@/views/state";
+import { NAME } from "@commontools/builder";
+import { NavLink } from "react-router-dom";
+import { Charm } from "@commontools/charm";
+import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { charmId } from "@/utils/charms";
 
-interface SidebarProps {
-  homeRef: any;
-  linkedCharms: any[];
+export interface SidebarProps {
+  linkedCharms: DocImpl<Charm>[];
   workingSpec: string;
-  focusedCharm: any;
   handlePublish: () => void;
   recipeId: string;
+  schema: any;
+  copyRecipeLink: () => void;
+  data: any;
+  onDataChanged: (value: string) => void;
+  onSpecChanged: (value: string) => void;
 }
 
-const Sidebar: React.FC<
-  SidebarProps & {
-    query: any;
-    onQueryChanged: (value: string) => void;
-    schema: any;
-    copyRecipeLink: () => void;
-    argument: any;
-    data: any;
-    onDataChanged: (value: string) => void;
-    onSpecChanged: (value: string) => void;
-  }
-> = ({
-  homeRef,
+const Sidebar: React.FC<SidebarProps> = ({
   linkedCharms,
   workingSpec,
-  focusedCharm,
-  handlePublish,
   recipeId,
-  query,
-  onQueryChanged,
   schema,
-  copyRecipeLink,
-  argument,
   data,
   onDataChanged,
   onSpecChanged,
 }) => {
+  const { charmManager } = useCharmManager();
+
   const [sidebarTab, setSidebarTab] = useCell(sidebar);
+  const [charms] = useCell(charmManager.getCharms());
 
   const handleSidebarTabChange = (newTab: string) => {
     setSidebarTab(newTab);
@@ -50,10 +43,8 @@ const Sidebar: React.FC<
     { id: "home", icon: "home", label: "Home" },
     { id: "prompt", icon: "message", label: "Prompt" },
     { id: "links", icon: "sync_alt", label: "Links" },
-    { id: "query", icon: "query_stats", label: "Query" },
     { id: "data", icon: "database", label: "Data" },
     { id: "schema", icon: "schema", label: "Schema" },
-    { id: "source", icon: "code", label: "Source" },
     { id: "recipe-json", icon: "data_object", label: "JSON" },
   ];
 
@@ -61,7 +52,16 @@ const Sidebar: React.FC<
     home: (
       <div>
         <div>Pinned</div>
-        <div ref={homeRef}></div>
+        <ul>
+          {charms.map((charm) => (
+            <li key={charmId(charm)}>
+              <NavLink to={`/charm/${charmId(charm)}`}>
+                {charm.cell.get()[NAME] || "unknown"}
+              </NavLink>
+              <button onClick={() => charmManager.remove(charm)}>×</button>
+            </li>
+          ))}
+        </ul>
       </div>
     ),
     links: (
@@ -69,21 +69,8 @@ const Sidebar: React.FC<
         <div>Linked Charms</div>
         <div>
           {linkedCharms.map((charm) => (
-            <common-charm-link charm={charm} />
+            <NavLink to={`/charm/${charmId(charm)}`}>{charm.get()[NAME]}</NavLink>
           ))}
-        </div>
-      </div>
-    ),
-    query: (
-      <div>
-        <div>Query</div>
-        <div>
-          <os-code-editor
-            slot="content"
-            language="application/json"
-            source={JSON.stringify(query, null, 2)}
-            onDocChange={onQueryChanged}
-          />
         </div>
       </div>
     ),
@@ -91,7 +78,8 @@ const Sidebar: React.FC<
       <div>
         <div>Schema</div>
         <div>
-          <os-code-editor
+          <WebComponent
+            as="os-code-editor"
             slot="content"
             language="application/json"
             source={JSON.stringify(schema, null, 2)}
@@ -99,42 +87,12 @@ const Sidebar: React.FC<
         </div>
       </div>
     ),
-    source: (
-      <div>
-        <div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              border: "1px solid pink",
-              padding: "10px",
-            }}
-          >
-            <a
-              href={`/recipe/spell-${recipeId}`}
-              target="_blank"
-              onClick={copyRecipeLink}
-              style={{ float: "right" }}
-              className="close-button"
-            >
-              🔗 Share
-            </a>
-            <button onClick={handlePublish} className="close-button">
-              🪄 Publish to Spellbook Jr
-            </button>
-          </div>
-        </div>
-        <div style={{ margin: "10px" }}></div>
-        <div>
-          <common-spell-editor recipeId={recipeId} data={argument} />
-        </div>
-      </div>
-    ),
     "recipe-json": (
       <div>
         <div>Recipe JSON</div>
         <div>
-          <os-code-editor
+          <WebComponent
+            as="os-code-editor"
             slot="content"
             language="application/json"
             source={JSON.stringify(getRecipe(recipeId), null, 2)}
@@ -155,7 +113,8 @@ const Sidebar: React.FC<
           </span>
         </div>
         <div>
-          <os-code-editor
+          <WebComponent
+            as="os-code-editor"
             slot="content"
             language="application/json"
             source={JSON.stringify(data, null, 2)}
@@ -167,19 +126,8 @@ const Sidebar: React.FC<
     prompt: (
       <div>
         <div>
-          Spec
-          <a
-            href={`/recipe/${recipeId}`}
-            target="_blank"
-            onClick={copyRecipeLink}
-            style={{ float: "right" }}
-            className="close-button"
-          >
-            🔗 Share
-          </a>
-        </div>
-        <div>
-          <os-code-editor
+          <WebComponent
+            as="os-code-editor"
             slot="content"
             language="text/markdown"
             source={workingSpec}

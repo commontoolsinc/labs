@@ -2,8 +2,8 @@ import { css, html, LitElement, PropertyValues } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import { style } from "@commontools/ui";
 import { when } from "lit/directives/when.js";
-import { Charm, charms, runPersistent, saveRecipe } from "@commontools/charm";
-import { BLOBBY_SERVER_URL, recipes } from "../data.js";
+import { Charm, saveRecipe, castNewRecipe } from "@commontools/charm";
+import { charmManager, BLOBBY_SERVER_URL, recipes, openCharm } from "../data.js";
 import { refer } from "merkle-reference";
 
 import {
@@ -20,9 +20,9 @@ import { watchCell } from "../watchCell.js";
 import { createRef, ref } from "lit/directives/ref.js";
 import { home } from "../recipes/home.jsx";
 import { render } from "@commontools/html";
-import { castNewRecipe } from "./iframe-spell-ai.js";
 import { toasty } from "./toasty.js";
 
+// FIXME(ja): is this still needed with ben's changes?
 const uploadBlob = async (data: any) => {
   const id = refer(data).toString();
 
@@ -304,9 +304,13 @@ export class CommonSidebar extends LitElement {
     };
 
     // also posted the data json to blobby ... would spellcaster work with this data?
+    // FIXME(ja): is this still needed with ben's changes?
     uploadBlob(data);
 
-    await castNewRecipe(data, "a simple display of the users data");
+    const charmId = await castNewRecipe(charmManager, data, "a simple display of the users data");
+    if (charmId) {
+      openCharm(charmId);
+    }
   }
 
   private async handlePublish() {
@@ -348,12 +352,15 @@ export class CommonSidebar extends LitElement {
     }
 
     if (!this.homeCharm && this.homeRef.value) {
-      this.homeCharm = runPersistent(home, { charms, recipes }, "home").then((home) => {
-        const view = home.asCell<Charm>().key(UI);
-        if (!view.getAsQueryResult()) throw new Error("Charm has no UI");
-        render(this.homeRef.value!, view);
-        return home;
-      });
+      let charms = charmManager.getCharms();
+      this.homeCharm = charmManager
+        .runPersistent(home, { charms, recipes }, "home")
+        .then((home) => {
+          const view = home.asCell<Charm>().key(UI);
+          if (!view.getAsQueryResult()) throw new Error("Charm has no UI");
+          render(this.homeRef.value!, view);
+          return home;
+        });
     }
 
     if (_changedProperties.has("focusedCharm")) {
@@ -390,6 +397,15 @@ export class CommonSidebar extends LitElement {
     return html`
       <os-navpanel class=${this.sidebarTab === id ? "active sidebar-content" : "sidebar-content"}>
         <common-hstack slot="toolbar-end" gap="sm">
+          ${when(
+            charmManager.getReplica(),
+            () =>
+              html`<os-icon-button
+                icon="cloud_sync"
+                title=${charmManager.getReplica()}
+              ></os-icon-button>`,
+            () => html`<os-icon-button icon="cloud_off" title="Local"></os-icon-button>`,
+          )}
           <os-icon-button icon="warning" @click=${() => this.handleDrop()}></os-icon-button>
           ${when(
             this.focusedCharm,

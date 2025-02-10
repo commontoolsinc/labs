@@ -16,24 +16,35 @@ import {
 } from "@commontools/runner";
 import * as allRecipes from "./recipes/index.js";
 import { setIframeContextHandler } from "@commontools/iframe-sandbox";
-import { addCharms } from "@commontools/charm";
+import { CharmManager } from "@commontools/charm";
 
 export const BLOBBY_SERVER_URL =
   typeof window !== "undefined"
     ? window.location.protocol + "//" + window.location.host + "/api/storage/blobby"
     : "//api/storage/blobby";
 
+
+export const charmManager = (() => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const replica = urlParams.get("replica") ?? undefined;
+  const storageType = replica ? "remote" : ((import.meta as any).env.VITE_STORAGE_TYPE ?? "memory");
+  console.log("charmManager", replica, storageType);  
+  return new CharmManager(replica, storageType);
+})();
+
 // Necessary, so that suggestions are indexed.
 // import "./recipes/todo-list-as-task.jsx";
 // import "./recipes/playlist.jsx";
 
-// import smolIframe from "./recipes/smolIframe.js";
+import smolIframe from "./recipes/smolIframe.js";
 // import complexIframe from "./recipes/complexIframe.js";
 
-addCharms([
-  // await runPersistent(smolIframe, { count: 1 }, "smol iframe"),
-  // await runPersistent(complexIframe, { count: 42 }, "complex iframe"),
-]);
+(async function addCharms() {
+  charmManager.add([
+    await charmManager.runPersistent(smolIframe, { count: 1 }, "smol iframe"),
+    // await runPersistent(complexIframe, { count: 42 }, "complex iframe"),
+  ]);
+})();
 
 export type RecipeManifest = {
   name: string;
@@ -102,21 +113,46 @@ export const toggleAnnotations = () => {
   annotationsEnabled.send(!annotationsEnabled.get());
 };
 
+// This is to prepare Proxy objects to be serialized
+// before sent between frame boundaries via structured clone algorithm.
+// There should be a more efficient generalized method for doing
+// so instead of an extra JSON parse/stringify cycle.
+const serializeProxyObjects = (proxy: any) => {
+  return proxy == undefined ? undefined : JSON.parse(JSON.stringify(proxy));
+};
+
 setIframeContextHandler({
   read(context: any, key: string): any {
-    return context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
+    let data = context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
+    let serialized = serializeProxyObjects(data);
+    return serialized;
   },
   write(context: any, key: string, value: any) {
     context.getAsQueryResult()[key] = value;
   },
   subscribe(context: any, key: string, callback: (key: string, value: any) => void): any {
-    const action: Action = (log: ReactivityLog) =>
-      callback(key, context.getAsQueryResult([key], log));
+    const action: Action = (log: ReactivityLog) => {
+      let data = context.getAsQueryResult([key], log);
+      let serialized = serializeProxyObjects(data);
+      callback(key, serialized);
+    };
 
     addAction(action);
     return action;
   },
   unsubscribe(_context: any, receipt: any) {
     removeAction(receipt);
+  },
+  async onLLMRequest(_context: any, payload: string) {
+    let res = await fetch(`${window.location.origin}/api/ai/llm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: payload,
+    });
+    if (res.ok) {
+      return await res.json();
+    } else {
+      throw new Error("LLM request failed");
+    }
   },
 });
