@@ -6,6 +6,7 @@ import { castNewRecipe } from "@commontools/charm";
 import { charmId } from "@/utils/charms";
 import { useEffect, useRef } from "react";
 import { Card } from "@/components/Card";
+import { useParams } from "react-router-dom";
 
 export interface CommonDataEvent extends CustomEvent {
   detail: {
@@ -14,7 +15,7 @@ export interface CommonDataEvent extends CustomEvent {
 }
 
 export default function CharmList() {
-  console.log("CharmList");
+  const { replicaName } = useParams<{ replicaName: string }>();
   const { charmManager } = useCharmManager();
   const [charms] = useCell(charmManager.getCharms());
   const commonImportRef = useRef<HTMLElement | null>(null);
@@ -66,10 +67,10 @@ export default function CharmList() {
         </div>
       </os-common-import>
       {charms.map((charm, index) => (
-        <>{
-          charm.cell && (
+        <>
+          {charm.cell && (
             <Card details key={index}>
-              <NavLink to={`/charm/${charmId(charm)}`}>
+              <NavLink to={`/${replicaName}/${charmId(charm)}`}>
                 <div className="p-4" style={{ viewTransitionName: `charm-${charmId(charm)}` }}>
                   <h3 className="text-xl font-semibold text-gray-800 mb-4">
                     {charm.cell.get()?.[NAME] || "Unnamed Charm"}
@@ -82,8 +83,8 @@ export default function CharmList() {
                 </div>
               </NavLink>
             </Card>
-          )
-        }</>
+          )}
+        </>
       ))}
     </div>
   );

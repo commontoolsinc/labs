@@ -1,10 +1,10 @@
-import React, { createContext, useContext, useEffect, useRef } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { CharmManager } from "@commontools/charm";
-import { replica } from "@/views/state";
-import { effect } from "@commontools/runner";
+import { useParams } from "react-router-dom";
 
 export type CharmManagerContextType = {
   charmManager: CharmManager;
+  currentReplica: string;
 };
 
 const CharmManagerContext = createContext<CharmManagerContextType>(null!);
@@ -12,34 +12,27 @@ const CharmManagerContext = createContext<CharmManagerContextType>(null!);
 const defaultManager = new CharmManager(undefined, "memory");
 
 export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [charmManager, setCharmManager] = React.useState<CharmManager>(defaultManager);
+  const { replicaName } = useParams<{ replicaName: string }>();
+  const effectiveReplica = replicaName || "common-knowledge";
+
+  const [charmManager, setCharmManager] = useState<CharmManager>(defaultManager);
   const previousReplicaRef = useRef<string | undefined>();
 
   useEffect(() => {
+    if (previousReplicaRef.current === effectiveReplica) {
+      return;
+    }
+    previousReplicaRef.current = effectiveReplica;
 
-    const cleanup = effect(replica, (newReplica) => {
-      // FIXME(ja): bug where effect calls multiple times even when replica 
-      // hasn't changed can result in multiple charm managers being created
-      // also this doesn't clean up the previous charm manager
-      if (previousReplicaRef.current === newReplica) {
-        return;
-      }
-      previousReplicaRef.current = newReplica;
-
-      // Create new charm manager instance with updated replica
-      const storageType = (import.meta as any).env.VITE_STORAGE_TYPE ?? "remote";
-      const manager = new CharmManager(newReplica, storageType);
-      manager.init();
-      setCharmManager(manager);
-    });
-
-    return () => {
-      cleanup();
-    };
-  }, [setCharmManager]);
+    // Create new charm manager instance with updated replica
+    const storageType = (import.meta as any).env.VITE_STORAGE_TYPE ?? "remote";
+    const manager = new CharmManager(effectiveReplica, storageType);
+    manager.init();
+    setCharmManager(manager);
+  }, [effectiveReplica]);
 
   return (
-    <CharmManagerContext.Provider value={{ charmManager: charmManager! }}>
+    <CharmManagerContext.Provider value={{ charmManager, currentReplica: effectiveReplica }}>
       {children}
     </CharmManagerContext.Provider>
   );
