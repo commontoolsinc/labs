@@ -74,9 +74,8 @@ test("create new memory", new URL(`memory:${space}`), async (session) => {
   });
 
   assertEquals(result, {
-    ok: {
-      the: "application/json",
-      of: refer(space).toString(),
+    ok: Repository.toCommit({
+      subject: space,
       is: {
         since: 0,
         transaction: {
@@ -93,11 +92,7 @@ test("create new memory", new URL(`memory:${space}`), async (session) => {
           },
         },
       },
-      cause: refer({
-        the: the,
-        of: refer(space).toString(),
-      }),
-    },
+    }),
   });
 
   const read = Repository.query(session, {
@@ -168,18 +163,13 @@ test("explicit {}", new URL(`memory:${space}`), async (session) => {
   const init = await Repository.transact(session, create);
 
   assertEquals(init, {
-    ok: {
-      the,
-      of: refer(space).toString(),
+    ok: Repository.toCommit({
+      subject: space,
       is: {
         since: 0,
         transaction: create,
       },
-      cause: refer({
-        the,
-        of: refer(space).toString(),
-      }),
-    },
+    }),
   });
 
   const update = {
@@ -197,15 +187,14 @@ test("explicit {}", new URL(`memory:${space}`), async (session) => {
   };
 
   assertEquals(await Repository.transact(session, update), {
-    ok: {
-      the,
-      of: refer(space).toString(),
+    ok: Repository.toCommit({
+      subject: space,
       is: {
         since: 1,
         transaction: update,
       },
       cause: refer(init.ok),
-    },
+    }),
   });
 });
 
@@ -227,18 +216,13 @@ test("updates memory", new URL(`memory:${space}`), async (session) => {
   const create = await Repository.transact(session, init);
 
   assertEquals(create, {
-    ok: {
-      the,
-      of: refer(space).toString(),
+    ok: Repository.toCommit({
+      subject: space,
       is: {
         since: 0,
         transaction: init,
       },
-      cause: refer({
-        the,
-        of: refer(space).toString(),
-      }),
-    },
+    }),
   });
 
   const change = {
@@ -265,15 +249,14 @@ test("updates memory", new URL(`memory:${space}`), async (session) => {
   assertEquals(
     update,
     {
-      ok: {
-        the,
-        of: refer(space).toString(),
+      ok: Repository.toCommit({
+        subject: space,
         is: {
           transaction: change,
           since: 1,
         },
         cause: refer(create.ok),
-      },
+      }),
     },
     "updates document",
   );
@@ -385,7 +368,8 @@ test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
     cause: base,
   };
 
-  assert(await Repository.transact(session, init).ok);
+  const create = await Repository.transact(session, init);
+  assert(create.ok);
 
   const updateA = {
     issuer: alice,
@@ -403,26 +387,17 @@ test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
 
   const a = await Repository.transact(session, updateA);
 
-  assertEquals(a.ok, {
-    the,
-    of: refer(space).toString(),
-    is: {
-      transaction: updateA,
-      since: 1,
-    },
-    cause: refer({
-      the,
-      of: refer(space).toString(),
+  assertEquals(
+    a.ok,
+    Repository.toCommit({
+      subject: space,
       is: {
-        transaction: init,
-        since: 0,
+        transaction: updateA,
+        since: 1,
       },
-      cause: {
-        the,
-        of: refer(space).toString(),
-      },
+      cause: refer(create.ok),
     }),
-  });
+  );
 
   const updateB = {
     issuer: alice,
@@ -482,29 +457,26 @@ test(
     };
 
     assertEquals(result, {
-      ok: {
-        the,
-        of: refer(space).toString(),
+      ok: Repository.toCommit({
+        subject: space,
         is: {
           since: 0,
           transaction: init,
         },
-        cause: refer({ the, of: refer(space).toString() }),
-      },
+      }),
     });
 
     const update = await Repository.transact(session, init);
 
     assertEquals(update, {
-      ok: {
-        the,
-        of: refer(space).toString(),
+      ok: Repository.toCommit({
+        subject: space,
         is: {
           since: 1,
           transaction: init,
         },
         cause: refer(result.ok),
-      },
+      }),
     });
   },
 );
@@ -528,15 +500,13 @@ test("concurrent identical memory updates succeed", new URL(`memory:${space}`), 
   const c0 = await Repository.transact(session, t0);
 
   assertEquals(c0, {
-    ok: {
-      the,
-      of: refer(space).toString(),
+    ok: Repository.toCommit({
+      subject: space,
       is: {
         since: 0,
         transaction: t0,
       },
-      cause: refer({ the, of: refer(space).toString() }),
-    },
+    }),
   });
 
   const v1 = {
@@ -561,29 +531,27 @@ test("concurrent identical memory updates succeed", new URL(`memory:${space}`), 
 
   const c1 = await Repository.transact(session, t1);
   assertEquals(c1, {
-    ok: {
-      the,
-      of: refer(space).toString(),
+    ok: Repository.toCommit({
+      subject: space,
       is: {
         since: 1,
         transaction: t1,
       },
       cause: refer(c0.ok),
-    },
+    }),
   });
 
   const c2 = await Repository.transact(session, t1);
 
   assertEquals(c2, {
-    ok: {
-      the,
-      of: refer(space).toString(),
+    ok: Repository.toCommit({
+      subject: space,
       is: {
         since: 2,
         transaction: t1,
       },
       cause: refer(c1.ok),
-    },
+    }),
   });
 });
 
@@ -603,15 +571,13 @@ test("retract implicit", new URL(`memory:${space}`), async (session) => {
   const retraction = await Repository.transact(session, retract);
 
   assertEquals(retraction, {
-    ok: {
-      the,
-      of: refer(space).toString(),
+    ok: Repository.toCommit({
+      subject: space,
       is: {
         since: 0,
         transaction: retract,
       },
-      cause: refer({ the, of: refer(space).toString() }),
-    },
+    }),
   });
 });
 
@@ -656,15 +622,14 @@ test("retract document", new URL(`memory:${space}`), async (session) => {
   const drop = session.transact(retract);
 
   assertEquals(drop, {
-    ok: {
-      the,
-      of: refer(space).toString(),
+    ok: Repository.toCommit({
+      subject: space,
       is: {
         since: 1,
         transaction: retract,
       },
       cause: refer(create.ok),
-    },
+    }),
   });
 
   assertEquals(
@@ -812,15 +777,14 @@ test("new memory creation fails after retraction", new URL(`memory:${alice}`), a
 
   const retract = Repository.transact(session, t2);
   assertEquals(retract, {
-    ok: {
-      the,
-      of: refer(space).toString(),
+    ok: Repository.toCommit({
+      subject: space,
       is: {
         since: 1,
         transaction: t2,
       },
       cause: refer(create.ok),
-    },
+    }),
   });
 
   const t3 = {
@@ -898,15 +862,13 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
 
   const init = await session.transact(tr1);
   assertEquals(init, {
-    ok: {
-      the,
-      of: refer(space).toString(),
+    ok: Repository.toCommit({
+      subject: space,
       is: {
         since: 0,
         transaction: tr1,
       },
-      cause: Repository.init({ of: refer(space).toString() }),
-    },
+    }),
   });
 
   assertEquals(
@@ -964,15 +926,14 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
 
   const update = await session.transact(tr2);
   assertEquals(update, {
-    ok: {
-      the,
-      of: refer(space).toString(),
+    ok: Repository.toCommit({
+      subject: space,
       is: {
         since: 1,
         transaction: tr2,
       },
       cause: refer(init.ok),
-    },
+    }),
   });
 
   const doc1v2 = { ...doc1v1, is: { v: 2 }, cause: refer(doc1v1) };
@@ -1096,15 +1057,13 @@ Deno.test("open creates replica if does not exists", async () => {
     assertEquals(
       create,
       {
-        ok: {
-          the,
-          of: refer(space).toString(),
+        ok: Repository.toCommit({
+          subject: space,
           is: {
             since: 0,
             transaction: t1,
           },
-          cause: refer({ the, of: refer(space).toString() }),
-        },
+        }),
       },
       "created document",
     );
@@ -1125,17 +1084,23 @@ Deno.test("open creates replica if does not exists", async () => {
   }
 });
 
-test("list empty store", new URL(`memory:${alice}`), async (session) => {
-  const result = session.list("application/json");
+test("list empty store", new URL(`memory:${space}`), async (session) => {
+  const result = session.list({ the: "application/json" });
   assertEquals(result, { ok: [] }, "empty list when no facts exist");
 });
 
-test("list single fact", new URL(`memory:${alice}`), async (session) => {
+test("list single fact", new URL(`memory:${space}`), async (session) => {
   session.transact({
-    assert: {
-      the: "application/json",
-      of: doc,
-      is: { v: 1 },
+    issuer: alice,
+    subject: space,
+    changes: {
+      [the]: {
+        [doc]: {
+          [Repository.init({ of: doc }).toString()]: {
+            is: { v: 1 },
+          },
+        },
+      },
     },
   });
 
@@ -1143,26 +1108,45 @@ test("list single fact", new URL(`memory:${alice}`), async (session) => {
   assertEquals(result, {
     ok: [
       {
+        the: "application/json",
         of: doc,
         is: { v: 1 },
-        the: "application/json",
+        cause: Repository.init({ of: doc }),
       },
     ],
   });
 });
 
-test("list excludes retracted facts", new URL(`memory:${alice}`), async (session) => {
+test("list excludes retracted facts", new URL(`memory:${space}`), async (session) => {
   // Create and then retract a fact
   const fact = session.transact({
-    assert: {
-      the: "application/json",
-      of: doc,
-      is: { v: 1 },
+    issuer: alice,
+    subject: space,
+    changes: {
+      [the]: {
+        [doc]: {
+          [Repository.init({ of: doc }).toString()]: {
+            is: { v: 1 },
+          },
+        },
+      },
     },
   });
 
   assert(fact.ok);
-  session.transact({ retract: fact.ok });
+  const retract = session.transact({
+    issuer: alice,
+    subject: space,
+    changes: {
+      [the]: {
+        [doc]: {
+          [refer({ the, of: doc, is: { v: 1 }, cause: Repository.init({ of: doc }) }).toString()]:
+            null,
+        },
+      },
+    },
+  });
+  assert(retract.ok);
 
   const result = session.list({ the: "application/json" });
   assertEquals(result, {

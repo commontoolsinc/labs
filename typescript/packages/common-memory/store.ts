@@ -56,6 +56,9 @@ CREATE TABLE IF NOT EXISTS memory (
   PRIMARY KEY (the, of)         -- Ensure that we have only one fact per entity
 );
 
+CREATE INDEX memory_the ON memory (the); -- Index to filter by "the" field
+CREATE INDEX memory_of ON memory (of);   -- Index to query by "of" field
+
 CREATE VIEW IF NOT EXISTS state AS
 SELECT
   memory.the as the,
@@ -141,7 +144,7 @@ export interface Session {
   /**
    * Lists all entities and their values for a specific fact type
    */
-  list(selector: Partial<Selector>): Result<Unclaimed[], ToJSON<ListError>>;
+  list(selector: Partial<Selector>): Result<Assertion[], ToJSON<ListError>>;
 
   close(): AsyncResult<{}, SystemError>;
 }
@@ -399,30 +402,54 @@ const swap = (
   }
 };
 
+const THE_COMMIT = "application/commit+json";
+
+const toSubjectEntity = (subject: ReplicaID) => refer(subject).toString();
+
+/**
+ * Derives a fact for the commit entity from the source data.
+ */
+export const toCommit = ({
+  subject,
+  is,
+  cause,
+}: {
+  subject: ReplicaID;
+  is: Commit["is"];
+  cause?: Reference<Fact>;
+}) => {
+  const of = toSubjectEntity(subject);
+  return {
+    the: THE_COMMIT,
+    of,
+    is,
+    cause: cause ?? init({ the: THE_COMMIT, of }),
+  };
+};
+
 const commit = (session: Model, transaction: Transaction): Commit => {
-  const space = refer(transaction.subject).toString();
+  const space = toSubjectEntity(transaction.subject);
   const row = session.store.prepare(EXPORT).get({
-    the: "application/json",
+    the: THE_COMMIT,
     entity: space,
   }) as MemoryView | undefined;
 
   const [since, cause] = row
     ? [(JSON.parse(row.is) as Commit["is"]).since + 1, fromString(row.fact) as Reference<Assertion>]
-    : [0, init({ the: "application/json", of: space })];
+    : [0, init({ the: THE_COMMIT, of: space })];
 
   for (const fact of iterate(transaction)) {
     swap(session, fact, { since, transaction });
   }
 
-  const commit: Commit = {
-    the: "application/json",
-    of: space,
+  const commit = toCommit({
+    subject: transaction.subject,
     is: {
       since,
       transaction,
     },
     cause,
-  };
+  });
 
   swap(session, { assert: commit }, { since, transaction });
 
@@ -467,13 +494,14 @@ export const query = (
 export const list = (
   { id, store }: Model,
   params: Partial<Selector>,
-): Result<Unclaimed[], ToJSON<ListError>> => {
+): Result<Assertion[], ToJSON<ListError>> => {
   try {
     const LIST_QUERY = `
       SELECT
         state.of as 'of',
         state.the as 'the',
-        state."is" as 'is'
+        state."is" as 'is',
+        state.cause as 'cause'
       FROM state
       WHERE (:the IS NULL OR state.the = :the)
       AND (:of IS NULL OR state.of = :of)
@@ -487,6 +515,7 @@ export const list = (
       of: Entity;
       the: string;
       is: string;
+      cause: string | null;
     }>;
 
     return {
@@ -494,6 +523,9 @@ export const list = (
         the: row.the,
         of: row.of,
         is: JSON.parse(row.is),
+        cause: row.cause
+          ? (fromString(row.cause) as Reference<Assertion>)
+          : refer(implicit({ the: row.the, of: row.of })),
       })),
     };
   } catch (error) {
