@@ -74,9 +74,11 @@ function CharmDetails({
   const navigate = useNavigate();
 
   const deleteCharm = async () => {
-    const result = await charmManager.remove(charm.entityId['/']);
-    if (result) {
-      navigate("/");
+    if (confirm("Are you sure you want to delete this charm?")) {
+      const result = await charmManager.remove(charm.entityId['/']);
+      if (result) {
+        navigate("/");
+      }
     }
   };
 
