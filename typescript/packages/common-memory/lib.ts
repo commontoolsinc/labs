@@ -77,6 +77,11 @@ export const subscribe = (session: MemoryServiceSession, socket: WebSocket) => {
   const subscription = session.router.subscribe({});
   socket.onmessage = (event) => {
     const command = parseCommand(event.data);
+    if (!command) {
+      console.error("Invalid command", event.data);
+      return;
+    }
+
     if (command.unwatch) {
       subscription.unwatch(command.unwatch);
     }
