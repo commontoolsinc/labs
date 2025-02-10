@@ -1,6 +1,5 @@
 import { LitElement, css, html } from "lit";
 import { customElement, property } from "lit/decorators.js";
-import { classMap } from "lit/directives/class-map.js";
 import { base } from "../shared/styles.js";
 
 /**
@@ -121,10 +120,6 @@ export class OsChrome extends LitElement {
   override render() {
     const onSidebarClose = () => {
       this.sidebar = false;
-    };
-
-    const onSidebarButton = () => {
-      this.sidebar = !this.sidebar;
     };
 
     const onLocationClick = () => {
