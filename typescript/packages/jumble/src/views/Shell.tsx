@@ -10,20 +10,19 @@ import {
   removeAction,
 } from "@commontools/runner";
 import { WebComponent } from "@/components/WebComponent";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback } from "react";
 
 import * as osUi from "@commontools/os-ui";
 // bf: load bearing console.log
 console.log("initializing os-ui", osUi);
 
 import "@commontools/os-ui/src/static/main.css";
-import Sidebar from "@/components/Sidebar";
-import { useCell } from "@/hooks/use-charm";
+import { useCell } from "@/hooks/use-cell";
 import { replica, searchResults, sidebar } from "./state";
 import "./main.css";
 import { castSpell } from "@/search";
 import SearchResults from "@/components/SearchResults";
-import { Charm, CharmManager, iterate, castNewRecipe } from "@commontools/charm";
+import { Charm, CharmManager, iterate } from "@commontools/charm";
 import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import CharmDetail from "./CharmDetail";
 import CharmList from "./CharmList";
@@ -39,7 +38,6 @@ const serializeProxyObjects = (proxy: any) => {
   return proxy == undefined ? undefined : JSON.parse(JSON.stringify(proxy));
 };
 
-
 const llmUrl =
   typeof window !== "undefined"
     ? window.location.protocol + "//" + window.location.host + "/api/ai/llm"
@@ -49,8 +47,8 @@ const llm = new LLMClient(llmUrl);
 
 setIframeContextHandler({
   read(context: any, key: string): any {
-    let data = context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
-    let serialized = serializeProxyObjects(data);
+    const data = context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
+    const serialized = serializeProxyObjects(data);
     return serialized;
   },
   write(context: any, key: string, value: any) {
@@ -58,8 +56,8 @@ setIframeContextHandler({
   },
   subscribe(context: any, key: string, callback: (key: string, value: any) => void): any {
     const action: Action = (log: ReactivityLog) => {
-      let data = context.getAsQueryResult([key], log);
-      let serialized = serializeProxyObjects(data);
+      const data = context.getAsQueryResult([key], log);
+      const serialized = serializeProxyObjects(data);
       callback(key, serialized);
     };
 
@@ -106,19 +104,12 @@ async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: a
   }
 }
 
-interface CommonDataEvent extends CustomEvent {
-  detail: {
-    data: any[];
-  };
-}
-
 export default function Shell() {
   const [sidebarTab] = useCell(sidebar);
   const [replicaName] = useCell(replica);
   const [spellResults, setSearchResults] = useCell(searchResults);
   const navigate = useNavigate();
   const { charmManager } = useCharmManager();
-  const commonImportRef = useRef<HTMLElement | null>(null);
 
   const onSubmit = useCallback(
     async (ev: CustomEvent) => {
@@ -154,36 +145,11 @@ export default function Shell() {
     [setSearchResults, charmManager],
   );
 
-  const onLocation = useCallback((_: CustomEvent) => {
+  const onLocation = useCallback(() => {
     const name = prompt("Set new replica name: ");
     if (name) {
       replica.send(name);
     }
-  }, []);
-
-  const onImportLocalData = (event: CommonDataEvent) => {
-    const [data] = event.detail.data;
-    console.log("Importing local data:", data);
-    // FIXME(ja): this needs better error handling
-    const title = prompt("Enter a title for your recipe:");
-    if (!title) return;
-
-    castNewRecipe(charmManager, data, title);
-    // if (charmId) {
-    //   openCharm(charmId);
-    // }
-  };
-
-  useEffect(() => {
-    const current = commonImportRef.current;
-    if (current) {
-      current.addEventListener("common-data", onImportLocalData as EventListener);
-    }
-    return () => {
-      if (current) {
-        current.removeEventListener("common-data", onImportLocalData as EventListener);
-      }
-    };
   }, []);
 
   return (
@@ -194,22 +160,16 @@ export default function Shell() {
         locationTitle={replicaName}
         onLocation={onLocation}
       >
-        <os-common-import ref={commonImportRef}>
-          <div style={{ display: "flex", alignItems: "center" }}>
-            <os-ai-icon></os-ai-icon>
-            <p>Imagine or drop json to begin ...
-              or <button onClick={() => onImportLocalData({ detail: { data: [{ "gallery": [{ "title": "pizza", "prompt": "a yummy pizza" }] }] } })}>ai image gallery</button></p>
-          </div>
-        </os-common-import>
-
         <NavLink to="/" slot="toolbar-start">
           <WebComponent as="os-avatar" name="Ben"></WebComponent>
         </NavLink>
 
-        <Routes>
-          <Route path="charm/:charmId" element={<CharmDetail />} />
-          <Route index element={<CharmList />} />
-        </Routes>
+        <div className="relative h-full">
+          <Routes>
+            <Route path="charm/:charmId" element={<CharmDetail />} />
+            <Route index element={<CharmList />} />
+          </Routes>
+        </div>
 
         <SearchResults
           searchOpen={spellResults.length > 0}
@@ -219,21 +179,6 @@ export default function Shell() {
         />
 
         <WebComponent slot="overlay" as="os-fabgroup" className="pin-br" onSubmit={onSubmit} />
-
-        <os-navstack slot="sidebar">
-          {/* bf: most of these are stubbed, need to pass real values in */}
-          <Sidebar
-            linkedCharms={[]}
-            workingSpec="example spec"
-            handlePublish={() => { }}
-            recipeId="dummy-recipe-id"
-            schema={{ imagine: "a schema" }}
-            copyRecipeLink={() => { }}
-            data={{ imagine: "some data" }}
-            onDataChanged={(value: string) => { }}
-            onSpecChanged={(value: string) => { }}
-          />
-        </os-navstack>
       </WebComponent>
     </div>
   );
