@@ -5,13 +5,14 @@ const router = createRouter();
 const BASE_TARGET_URL = "https://static.commontools.dev/jumble/latest";
 
 router.get("/*", async (c) => {
-  let proxiedUrl: string;
   const path = c.req.path;
+  let proxiedUrl: string;
 
-  if (path === "/" || path === "/index.html") {
-    proxiedUrl = `${BASE_TARGET_URL}/index.html`;
-  } else {
+  // Only proxy asset files. For all other routes return index.html.
+  if (path.startsWith("/assets")) {
     proxiedUrl = `${BASE_TARGET_URL}${path}`;
+  } else {
+    proxiedUrl = `${BASE_TARGET_URL}/index.html`;
   }
 
   // NOTE(jake): Leaving these here for debugging.
