@@ -89,20 +89,22 @@ function CharmDetails({
             source={getIframeRecipe(charm).iframe?.src}
           />
           <table className="text-sm font-mono border-collapse">
-            <tr>
-              <td className="pr-4 text-gray-600">charm id:</td>
-              <td>
-                <pre className="bg-gray-50 p-2 rounded">{JSON.stringify(charm, null, 2)}</pre>
-              </td>
-            </tr>
-            <tr>
-              <td className="pr-4 text-gray-600">charm sourceCell id:</td>
-              <td>
-                <pre className="bg-gray-50 p-2 rounded">
-                  {JSON.stringify(charm.sourceCell, null, 2)}
-                </pre>
-              </td>
-            </tr>
+            <tbody>
+              <tr>
+                <td className="pr-4 text-gray-600">charm id:</td>
+                <td>
+                  <pre className="bg-gray-50 p-2 rounded">{JSON.stringify(charm, null, 2)}</pre>
+                </td>
+              </tr>
+              <tr>
+                <td className="pr-4 text-gray-600">charm sourceCell id:</td>
+                <td>
+                  <pre className="bg-gray-50 p-2 rounded">
+                    {JSON.stringify(charm.sourceCell, null, 2)}
+                  </pre>
+                </td>
+              </tr>
+            </tbody>
           </table>
           <details>
             <table className="text-sm font-mono border-collapse">
