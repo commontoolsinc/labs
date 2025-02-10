@@ -116,7 +116,7 @@ export class OsChrome extends LitElement {
   ];
 
   @property({ type: String }) locationtitle = "";
-  @property({ type: Boolean, reflect: true }) sidebar = true;
+  @property({ type: Boolean, reflect: true }) sidebar = false;
 
   override render() {
     const onSidebarClose = () => {

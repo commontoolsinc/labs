@@ -17,19 +17,17 @@ import * as osUi from "@commontools/os-ui";
 console.log("initializing os-ui", osUi);
 
 import "@commontools/os-ui/src/static/main.css";
-import Sidebar from "@/components/Sidebar";
-import { useCell } from "@/hooks/use-charm";
+import { useCell } from "@/hooks/use-cell";
 import { replica, searchResults, sidebar } from "./state";
 import "./main.css";
 import { castSpell } from "@/search";
 import SearchResults from "@/components/SearchResults";
-import { Charm, CharmManager, iterate, castNewRecipe } from "@commontools/charm";
+import { Charm, CharmManager, iterate } from "@commontools/charm";
 import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import CharmDetail from "./CharmDetail";
 import CharmList from "./CharmList";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { LLMClient } from "@commontools/llm-client";
-import { ZoomLayout } from "@/components/ZoomLayout";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized
@@ -49,8 +47,8 @@ const llm = new LLMClient(llmUrl);
 
 setIframeContextHandler({
   read(context: any, key: string): any {
-    let data = context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
-    let serialized = serializeProxyObjects(data);
+    const data = context?.getAsQueryResult ? context?.getAsQueryResult([key]) : context?.[key];
+    const serialized = serializeProxyObjects(data);
     return serialized;
   },
   write(context: any, key: string, value: any) {
@@ -58,8 +56,8 @@ setIframeContextHandler({
   },
   subscribe(context: any, key: string, callback: (key: string, value: any) => void): any {
     const action: Action = (log: ReactivityLog) => {
-      let data = context.getAsQueryResult([key], log);
-      let serialized = serializeProxyObjects(data);
+      const data = context.getAsQueryResult([key], log);
+      const serialized = serializeProxyObjects(data);
       callback(key, serialized);
     };
 
@@ -106,12 +104,6 @@ async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: a
   }
 }
 
-interface CommonDataEvent extends CustomEvent {
-  detail: {
-    data: any[];
-  };
-}
-
 export default function Shell() {
   const [sidebarTab] = useCell(sidebar);
   const [replicaName] = useCell(replica);
@@ -153,7 +145,7 @@ export default function Shell() {
     [setSearchResults, charmManager],
   );
 
-  const onLocation = useCallback((_: CustomEvent) => {
+  const onLocation = useCallback(() => {
     const name = prompt("Set new replica name: ");
     if (name) {
       replica.send(name);

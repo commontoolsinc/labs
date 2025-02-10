@@ -1,24 +1,31 @@
-import { useEffect, useState } from "react";
-import { DocImpl, effect } from "@commontools/runner";
+import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { Charm, getIframeRecipe, IFrameRecipe } from "@commontools/charm";
+import React from "react";
 
-export function useCell<T>(cell: DocImpl<T>): [T, (value: T) => void] {
-  const [value, setValue] = useState<T>(cell.get());
+export const useCharm = (charmId: string | undefined) => {
+  const { charmManager } = useCharmManager();
+  const [currentFocus, setCurrentFocus] = React.useState<Charm | null>(null);
+  const [iframeRecipe, setIframeRecipe] = React.useState<IFrameRecipe | null>(null);
 
-  useEffect(() => {
-    // Set up effect to update state when cell changes
-    const cleanup = effect(cell, (newValue) => {
-      setValue(newValue);
-    });
+  React.useEffect(() => {
+    async function loadCharm() {
+      if (charmId) {
+        await charmManager.init();
+        const charm = (await charmManager.get(charmId)) ?? null;
+        if (charm) {
+          await charmManager.syncRecipe(charm);
+          const ir = getIframeRecipe(charm);
+          setIframeRecipe(ir?.iframe ?? null);
+          console.log({ iframeRecipe: ir });
+        }
+        setCurrentFocus(charm);
+      }
+    }
+    loadCharm();
+  }, [charmId, charmManager]);
 
-    // Clean up effect when component unmounts or cell changes
-    return cleanup;
-  }, [cell]);
-
-  // Return tuple of current value and setter function
-  return [
-    value,
-    (newValue: T) => {
-      cell.asCell().set(newValue);
-    },
-  ];
-}
+  return {
+    currentFocus,
+    iframeRecipe,
+  };
+};

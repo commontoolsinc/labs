@@ -1,12 +1,17 @@
-import { useCell } from "@/hooks/use-charm";
+import { useCell } from "@/hooks/use-cell";
 import { NavLink } from "react-router-dom";
 import { NAME, UI } from "@commontools/builder";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
-import { Charm, CharmManager, iterate, castNewRecipe } from "@commontools/charm";
+import { castNewRecipe } from "@commontools/charm";
 import { charmId } from "@/utils/charms";
 import { useEffect, useRef } from "react";
 import { Card } from "@/components/Card";
-import { DitheredCube } from "@/components/Loader";
+
+export interface CommonDataEvent extends CustomEvent {
+  detail: {
+    data: any[];
+  };
+}
 
 export default function CharmList() {
   console.log("CharmList");
@@ -48,9 +53,11 @@ export default function CharmList() {
             Imagine or drop json to begin ... or{" "}
             <button
               onClick={() =>
-                onImportLocalData({
-                  detail: { data: [{ gallery: [{ title: "pizza", prompt: "a yummy pizza" }] }] },
-                })
+                onImportLocalData(
+                  new CustomEvent("common-data", {
+                    detail: { data: [{ gallery: [{ title: "pizza", prompt: "a yummy pizza" }] }] },
+                  }),
+                )
               }
             >
               ai image gallery

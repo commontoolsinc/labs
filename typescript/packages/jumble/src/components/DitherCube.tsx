@@ -2,6 +2,8 @@ import { useRef } from "react";
 import { Canvas, useFrame, extend } from "@react-three/fiber";
 import { OrthographicCamera, Effects } from "@react-three/drei";
 import * as THREE from "three";
+
+// @ts-expect-error no types provided
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass";
 
 // Define the shader
@@ -53,37 +55,6 @@ class DitheringPassClass extends ShaderPass {
 
 // Extend the pass
 extend({ DitheringPass: DitheringPassClass });
-
-const MovingLights = () => {
-  const light1Ref = useRef<THREE.PointLight>(null);
-  const light2Ref = useRef<THREE.PointLight>(null);
-  const light3Ref = useRef<THREE.PointLight>(null);
-
-  useFrame((state) => {
-    const time = state.clock.getElapsedTime();
-
-    if (light1Ref.current) {
-      light1Ref.current.position.x = Math.sin(time * 0.07) * 5;
-      light1Ref.current.position.y = Math.cos(time * 0.05) * 5;
-    }
-    if (light2Ref.current) {
-      light2Ref.current.position.x = Math.cos(time * 0.03) * 5;
-      light2Ref.current.position.z = Math.sin(time * 0.04) * 5;
-    }
-    if (light3Ref.current) {
-      light3Ref.current.position.y = Math.sin(time * 0.02) * 5;
-      light3Ref.current.position.z = Math.cos(time * 0.06) * 5;
-    }
-  });
-
-  return (
-    <>
-      <pointLight ref={light1Ref} position={[2, 0, 0]} intensity={5} color="#ff4444" />
-      <pointLight ref={light2Ref} position={[0, 2, 0]} intensity={5} color="#44ff44" />
-      <pointLight ref={light3Ref} position={[0, 0, 2]} intensity={5} color="#4444ff" />
-    </>
-  );
-};
 
 const OrbitingCube = ({
   orbitSpeed,

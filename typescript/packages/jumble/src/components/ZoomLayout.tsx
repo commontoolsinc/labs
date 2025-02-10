@@ -26,7 +26,7 @@ export function ZoomLayout({ children }: { children: React.ReactNode }) {
     },
   });
 
-  return transitions((style, _item) => (
+  return transitions((style) => (
     <animated.div
       style={{
         ...style,

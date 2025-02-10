@@ -112,7 +112,7 @@ export class OsCodeEditor extends ReactiveElement {
   source = "";
 
   @property({ type: String })
-  language = MimeType.markdown;
+  language: MimeType = MimeType.markdown;
 
   get editor(): EditorState | undefined {
     return this.#editorView?.state;
