@@ -23,7 +23,7 @@ import "./main.css";
 import { castSpell } from "@/search";
 import SearchResults from "@/components/SearchResults";
 import { Charm, CharmManager, iterate } from "@commontools/charm";
-import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { NavLink, Routes, Route, useNavigate, useParams } from "react-router-dom";
 import CharmDetail from "./CharmDetail";
 import CharmList from "./CharmList";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
@@ -105,10 +105,10 @@ async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: a
 }
 
 export default function Shell() {
-  const [sidebarTab] = useCell(sidebar);
-  const [replicaName] = useCell(replica);
-  const [spellResults, setSearchResults] = useCell(searchResults);
+  const { replicaName } = useParams<{ replicaName: string }>();
   const navigate = useNavigate();
+  const [sidebarTab] = useCell(sidebar);
+  const [spellResults, setSearchResults] = useCell(searchResults);
   const { charmManager } = useCharmManager();
 
   const onSubmit = useCallback(
@@ -148,9 +148,9 @@ export default function Shell() {
   const onLocation = useCallback(() => {
     const name = prompt("Set new replica name: ");
     if (name) {
-      replica.send(name);
+      navigate(`/${name}`);
     }
-  }, []);
+  }, [navigate]);
 
   return (
     <div className="h-full relative">
@@ -160,13 +160,13 @@ export default function Shell() {
         locationTitle={replicaName}
         onLocation={onLocation}
       >
-        <NavLink to="/" slot="toolbar-start">
+        <NavLink to={`/${replicaName}`} slot="toolbar-start">
           <WebComponent as="os-avatar" name="Ben"></WebComponent>
         </NavLink>
 
         <div className="relative h-full">
           <Routes>
-            <Route path="charm/:charmId" element={<CharmDetail />} />
+            <Route path="/:charmId" element={<CharmDetail />} />
             <Route index element={<CharmList />} />
           </Routes>
         </div>
