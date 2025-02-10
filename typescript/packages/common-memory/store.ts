@@ -236,8 +236,13 @@ export const implicit = ({ the, of }: { the: string; of: Entity }) => ({
 /**
  * Creates a reference to an implicit fact.
  */
-export const init = ({ the, of }: { the: string; of: Entity }): Reference<Assertion> =>
-  refer(implicit({ the, of }));
+export const init = ({
+  the = "application/json",
+  of,
+}: {
+  the?: string;
+  of: Entity;
+}): Reference<Assertion> => refer(implicit({ the, of }));
 
 const pull = ({ store }: Model, { the, of }: Selector): Fact | undefined => {
   const row = store.prepare(EXPORT).get({ the, entity: of }) as MemoryView | undefined;

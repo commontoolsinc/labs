@@ -3,7 +3,7 @@ import * as Repository from "../store.ts";
 import { refer, createTemporaryDirectory } from "../util.ts";
 
 const the = "application/json";
-const doc = "baedreigv6dnlwjzyyzk2z2ld2kapmu6hvqp46f3axmgdowebqgbts5jksi";
+const doc = refer({ hello: "world" }).toString();
 const space = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
 
@@ -33,7 +33,7 @@ const test = (title: string, url: URL, run: (replica: Repository.Store) => Promi
 
 test(
   "querying non existing memory returns implicit fact",
-  new URL(`memory:${alice}`),
+  new URL(`memory:${space}`),
   async (session) => {
     const result = await Repository.query(session, {
       the: "application/json",
@@ -363,7 +363,7 @@ test("create memory fails if already exists", new URL(`memory:${space}`), async 
   });
 });
 
-test("concurrent update fails", new URL(`memory:${alice}`), async (session) => {
+test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
   const base = refer({ the, of: doc });
   const init = {
     issuer: alice,
@@ -458,7 +458,7 @@ test("concurrent update fails", new URL(`memory:${alice}`), async (session) => {
 
 test(
   "concurrent identical memory creation succeed",
-  new URL(`memory:${alice}`),
+  new URL(`memory:${space}`),
   async (session) => {
     const init = {
       issuer: alice,
@@ -509,7 +509,7 @@ test(
   },
 );
 
-test("concurrent identical memory updates succeed", new URL(`memory:${alice}`), async (session) => {
+test("concurrent identical memory updates succeed", new URL(`memory:${space}`), async (session) => {
   const v0 = { the, of: doc };
 
   const t0 = {
@@ -587,7 +587,7 @@ test("concurrent identical memory updates succeed", new URL(`memory:${alice}`), 
   });
 });
 
-test("retract implicit", new URL(`memory:${alice}`), async (session) => {
+test("retract implicit", new URL(`memory:${space}`), async (session) => {
   const retract = {
     issuer: alice,
     subject: space,
@@ -615,7 +615,7 @@ test("retract implicit", new URL(`memory:${alice}`), async (session) => {
   });
 });
 
-test("retract document", new URL(`memory:${alice}`), async (session) => {
+test("retract document", new URL(`memory:${space}`), async (session) => {
   const v1 = {
     issuer: alice,
     subject: space,
@@ -687,7 +687,7 @@ test("retract document", new URL(`memory:${alice}`), async (session) => {
 
 test(
   "fails to retract if expected version is out of date",
-  new URL(`memory:${alice}`),
+  new URL(`memory:${space}`),
   async (session) => {
     const v0 = { the, of: doc };
     const v1 = { the, of: doc, is: { v: 1 }, cause: refer(v0) };
@@ -852,6 +852,207 @@ test("new memory creation fails after retraction", new URL(`memory:${alice}`), a
       cause: refer(v1),
     },
   });
+});
+
+test("batch updates", new URL(`memory:${space}`), async (session) => {
+  const doc2 = refer({ hi: "world" }).toString();
+  const doc3 = refer({ chao: "world" }).toString();
+
+  const doc1v0 = Repository.init({ of: doc });
+  const doc2v0 = Repository.init({ of: doc2 });
+  const tr1 = {
+    issuer: alice,
+    subject: space,
+    meta: {
+      message: "initialize",
+    },
+    changes: {
+      [the]: {
+        [doc]: {
+          [doc1v0.toString()]: {
+            is: { v: 1 },
+          },
+        },
+        [doc2]: {
+          [doc2v0.toString()]: {
+            is: { v: 2 },
+          },
+        },
+      },
+    },
+  };
+
+  const doc1v1 = {
+    the,
+    of: doc,
+    is: { v: 1 },
+    cause: doc1v0,
+  };
+
+  const doc2v1 = {
+    the,
+    of: doc2,
+    is: { v: 2 },
+    cause: doc2v0,
+  };
+
+  const init = await session.transact(tr1);
+  assertEquals(init, {
+    ok: {
+      the,
+      of: refer(space).toString(),
+      is: {
+        since: 0,
+        transaction: tr1,
+      },
+      cause: Repository.init({ of: refer(space).toString() }),
+    },
+  });
+
+  assertEquals(
+    await session.query({
+      the,
+      of: doc,
+    }),
+    {
+      ok: doc1v1,
+    },
+  );
+
+  assertEquals(
+    await session.query({
+      the,
+      of: doc2,
+    }),
+    {
+      ok: doc2v1,
+    },
+  );
+
+  const doc3v0 = Repository.init({ of: doc3 });
+
+  const tr2 = {
+    issuer: alice,
+    subject: space,
+    meta: {
+      message: "update",
+    },
+    changes: {
+      [the]: {
+        // Update
+        [doc]: {
+          [refer(doc1v1).toString()]: {
+            is: {
+              v: 2,
+            },
+          },
+        },
+        // Ensure
+        [doc2]: {
+          [refer(doc2v1).toString()]: {},
+        },
+        [doc3]: {
+          [refer(doc3v0).toString()]: {
+            is: {
+              doc3: { v: 1 },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  const update = await session.transact(tr2);
+  assertEquals(update, {
+    ok: {
+      the,
+      of: refer(space).toString(),
+      is: {
+        since: 1,
+        transaction: tr2,
+      },
+      cause: refer(init.ok),
+    },
+  });
+
+  const doc1v2 = { ...doc1v1, is: { v: 2 }, cause: refer(doc1v1) };
+  assertEquals(
+    await session.query({
+      the,
+      of: doc,
+    }),
+    {
+      ok: doc1v2,
+    },
+  );
+
+  assertEquals(
+    await session.query({
+      the,
+      of: doc2,
+    }),
+    {
+      ok: doc2v1,
+    },
+  );
+
+  const doc3v1 = { the, of: doc3, is: { doc3: { v: 1 } }, cause: doc3v0 };
+  assertEquals(
+    await session.query({
+      the,
+      of: doc3,
+    }),
+    {
+      ok: doc3v1,
+    },
+  );
+
+  // Fails on mismatched invariant
+
+  const tr3 = {
+    issuer: alice,
+    subject: space,
+    meta: {
+      message: "bad invariant",
+    },
+    changes: {
+      [the]: {
+        // Out of date invariant
+        [doc]: {
+          [refer(doc1v1).toString()]: {},
+        },
+        [doc3]: {
+          [refer(doc3v1).toString()]: {
+            is: {
+              doc3: { v: 2 },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  const badInvariant = session.transact(tr3);
+  assert(badInvariant.error);
+  assert(badInvariant.error.name == "ConflictError");
+  assertEquals(badInvariant.error.conflict, {
+    in: space,
+    the,
+    of: doc,
+    expected: refer(doc1v1),
+    actual: doc1v2,
+  });
+
+  assertEquals(
+    await session.query({
+      the,
+      of: doc3,
+    }),
+    {
+      ok: doc3v1,
+    },
+    "doc3 was not updated",
+  );
 });
 
 Deno.test("fail to connect to non-existing replica", async () => {
