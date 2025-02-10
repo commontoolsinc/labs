@@ -77,11 +77,18 @@ export interface Statement {
   cause?: Reference<Fact> | Reference<Unclaimed> | null;
 }
 
-export interface Claim extends Statement {
-  is: Reference<JSONValue>;
-  cause: Reference<Fact> | Reference<Unclaimed>;
-}
+// export interface Claim extends Statement {
+//   is: Reference<JSONValue>;
+//   cause: Reference<Fact> | Reference<Unclaimed>;
+// }
 
+export interface Claim {
+  the: The;
+  of: Entity;
+
+  is?: undefined;
+  cause: Reference<Assertion> | Reference<Unclaimed>;
+}
 /**
  * `Assertion` is just like a {@link Statement} except the value MUST be inline
  * {@link JSONValue} as opposed to reference to one. {@link Assertion}s are used
@@ -116,12 +123,21 @@ export type State = Fact | Unclaimed;
 export type Assert = {
   assert: Assertion;
   retract?: undefined;
+  confirm?: undefined;
 };
 
 export type Retract = {
-  retract: Claim;
+  retract: Retraction;
   assert?: undefined;
+  confirm?: undefined;
 };
+
+export type Confirm = {
+  confirm: Claim;
+  assert?: undefined;
+  retract?: undefined;
+};
+
 export type Instruction = Assert | Retract;
 
 export interface Commit extends Assertion {
@@ -131,17 +147,14 @@ export interface Commit extends Assertion {
   };
 }
 
-export type Differential =
-  | { is?: void; "/"?: void } // Retraction
-  | { is: JSONValue; "/"?: void } // assertion
-  | Reference<JSONValue>; // claim
+type RetractFact = null;
+type ClaimFact = { is?: void };
+type AssertFact = { is: JSONValue };
 
 export type Changes = {
   [the: The]: {
     [of: Entity]: {
-      [cause: string]: {
-        ["="]?: JSONValue;
-      };
+      [cause: string]: RetractFact | AssertFact | ClaimFact;
     };
   };
 };

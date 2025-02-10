@@ -7,18 +7,19 @@ import type {
   Fact,
   Transaction,
   JSONValue,
-  Retraction,
   ConflictError,
   TransactionError,
   QueryError,
   ToJSON,
   ConnectionError,
-  Claim,
   Unclaimed,
   Commit,
   Assertion,
   AsyncResult,
   SystemError,
+  Retract,
+  Assert,
+  Confirm,
 } from "./interface.ts";
 import * as Error from "./error.ts";
 
@@ -259,31 +260,25 @@ const pull = ({ store }: Model, { the, of }: Selector): Fact | undefined => {
   }
 };
 
-const importDatum = (session: Model, source: Fact): Reference<JSONValue> | null => {
-  // If source is a {@link Defunct}, then `is` field and we will be `undefined`
-  // so we will not need to import any data into the `datum` table.
-  if (source.is === undefined) {
-    return null;
-  } else {
-    const is = refer(source.is);
-    session.store.run(IMPORT_DATUM, {
-      this: is.toString(),
-      source: JSON.stringify(source.is),
-    });
-    return is;
-  }
+const importDatum = (session: Model, source: Assertion): Reference<JSONValue> => {
+  const is = refer(source.is);
+  session.store.run(IMPORT_DATUM, {
+    this: is.toString(),
+    source: JSON.stringify(source.is),
+  });
+  return is;
 };
 
-const iterate = function* (transaction: Transaction): Iterable<Fact | Claim> {
+const iterate = function* (transaction: Transaction): Iterable<Retract | Assert | Confirm> {
   for (const [the, entities] of Object.entries(transaction.changes)) {
     for (const [of, changes] of Object.entries(entities)) {
       for (const [cause, change] of Object.entries(changes)) {
-        if (isReference(change)) {
-          yield { the, of, is: change, cause: fromString(cause) } as Claim;
+        if (change == null) {
+          yield { retract: { the, of, cause: fromString(cause) } } as Retract;
         } else if (change.is === undefined) {
-          yield { the, of, cause: fromString(cause) } as Retraction;
+          yield { confirm: { the, of, cause: fromString(cause) } } as Confirm;
         } else {
-          yield { the, of, is: change.is, cause: fromString(cause) } as Assertion;
+          yield { assert: { the, of, is: change.is, cause: fromString(cause) } } as Assert;
         }
       }
     }
@@ -292,15 +287,23 @@ const iterate = function* (transaction: Transaction): Iterable<Fact | Claim> {
 
 const swap = (
   session: Model,
-  claim: Fact | Claim,
+  source: Retract | Assert | Confirm,
   { since, transaction }: { since: number; transaction: Transaction },
 ) => {
+  const claim = source.assert ?? source.retract ?? source.confirm;
   const { the, of } = claim;
-  // Derive the merkle reference for the provided claim which is expected to
-  // be in normalized form.
-  const fact = refer(claim).toString();
+
+  // Derive the merkle reference to the fact that memory will have after
+  // successful update. If we have an assertion or retraction we derive fact
+  // from it, but if it is a confirmation `cause` is the fact itself.
+  const fact = source.assert
+    ? refer(source.assert).toString()
+    : source.retract
+    ? refer(source.retract).toString()
+    : source.confirm.cause.toString();
+
   // We do not store implicit facts like `{ the, of }` in the database and
-  // we represent causal reference to such implicit facts as `NULL`, therefore
+  // we represent causal reference to such implicit facts via `NULL`, therefore
   // we asses if causal reference is to an implicit and if so substitute it
   // with `null`. We also use `null` for an implicit `cause` in the
   // `RevisionError`, that is because callers aren't expected to specify them
@@ -310,9 +313,10 @@ const swap = (
     claim.cause?.toString() === init(claim).toString() ? null : (claim.cause as Reference<Fact>);
   const cause = expected?.toString() ?? null;
 
-  // If `claim.is` is a reference we are not asserting anything new we are just
-  // claiming that
-  if (!isReference(claim.is)) {
+  // If this is an assertion we need to import asserted data and then insert
+  // fact referencing it. If it is retraction we don't have data to import
+  // but we do still need to create fact record.
+  if (source.assert || source.retract) {
     // First we import JSON value in the `is` field into the `datum` table and
     // then we import the fact into the `factor` table. If `datum` already exists
     // we ignore as we key those by the merkle reference. Same is true for the
@@ -322,7 +326,7 @@ const swap = (
       this: fact,
       the,
       of,
-      is: importDatum(session, claim)?.toString() ?? null,
+      is: source.assert ? importDatum(session, source.assert).toString() : null,
       cause,
       since,
     });
@@ -330,7 +334,7 @@ const swap = (
 
   // Now if referenced cause is for an implicit fact, we will not have a record
   // for it in the memory table to update in the next step. We also can not
-  // create such record as we don't have corresponding records in the `factor`
+  // create such record as we don't have corresponding records in the `fact`
   // or `datum` tables. Therefore instead we try to create a record for the
   // desired update. If conflicting record exists this will be ignored, but that
   // is fine as update in the next step will update it to the desired state.
@@ -359,6 +363,7 @@ const swap = (
   // the record and comparing it to desired state.
   if (updated === 0) {
     const actual = pull(session, claim) ?? null;
+
     // If actual state matches desired state it is either was inserted by the
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
     // it as a conflict as current state is the asserted one.
@@ -399,7 +404,7 @@ const commit = (session: Model, transaction: Transaction): Commit => {
     cause,
   };
 
-  swap(session, commit, { since, transaction });
+  swap(session, { assert: commit }, { since, transaction });
 
   return commit;
 };
