@@ -71,6 +71,14 @@ describe("common-iframe CSP", () => {
     `<script>fetch("${ORIGIN_URL}/foo.js")</script>`,
     null,
   ], [
+    "allows 1P img",
+    `<img src="${ORIGIN_URL}/foo.jpg" />`,
+    null,
+  ], [
+    "allows 1P CSS",
+    `<link rel="stylesheet" href="${ORIGIN_URL}/styles.css">`,
+    null,
+  ], [
     "disallows opening windows (_blank)",
     openWindow("_blank"),
     null,
