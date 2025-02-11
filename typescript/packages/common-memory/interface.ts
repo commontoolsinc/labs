@@ -100,6 +100,15 @@ export interface Assertion extends Statement {
   cause: Reference<Fact> | Reference<Unclaimed>;
 }
 
+export type Asserted = {
+  is: JSONValue;
+  cause: Reference<Asserted> | Reference<Retracted> | Reference<Unclaimed>;
+};
+
+export type Retracted = {
+  cause: Reference<Asserted>;
+};
+
 /**
  * Represents retracted {@link Assertion}. It is effectively a tombstone
  * denoting assertion that no longer hold and is a fact in itself.
@@ -166,36 +175,36 @@ export type Principal = string;
 export type Transaction = {
   iss: Principal;
   sub: Space;
-  cmd: "/space/transact";
+  cmd: "/memory/transact";
   args: { changes: Changes };
+  meta?: Meta;
+};
+
+export type Sync = {
+  iss: Principal;
+  sub: Space;
+  cmd: "/space/sync";
+  args: {
+    changes: {
+      [the: The]: {
+        [of: Entity]: Unit;
+      };
+    };
+  };
   meta?: Meta;
 };
 
 export type Query = {
   iss: Principal;
   sub: Space;
-  cmd: "/space/query";
+  cmd: "/memory/query";
   args: { selector: Selector };
 };
 
-export type List = {
+export type Subscription = {
   iss: Principal;
   sub: Space;
-  cmd: "/space/list";
-  args: { selector: Partial<Selector> };
-};
-
-export type Subscribe = {
-  iss: Principal;
-  sub: Space;
-  cmd: "/space/subscribe";
-  args: { selector: Selector };
-};
-
-export type Unsubscribe = {
-  iss: Principal;
-  sub: Space;
-  cmd: "/space/unsubscribe";
+  cmd: "/memory/query";
   args: { selector: Selector };
 };
 
@@ -209,8 +218,10 @@ export type InferTransactionResult<Instruction> = Instruction extends Assert
 export interface Selector {
   the?: The;
   of?: Entity;
-  is?: {};
+  is?: Unit;
 }
+
+export type Unit = {};
 
 /**
  * Generic type used to annotate underlying type with a context of the replica.
@@ -223,11 +234,11 @@ export interface JSONObject extends Record<string, JSONValue> {}
 
 export interface JSONArray extends ArrayLike<JSONValue> {}
 
-export type AsyncResult<T extends {} = {}, E extends Error = Error> = Promise<Result<T, E>>;
+export type AsyncResult<T extends Unit = Unit, E extends Error = Error> = Promise<Result<T, E>>;
 
-export type Result<T extends {} = {}, E extends Error = Error> = Ok<T> | Fail<E>;
+export type Result<T extends Unit = Unit, E extends Error = Error> = Ok<T> | Fail<E>;
 
-export interface Ok<T extends {}> {
+export interface Ok<T extends Unit> {
   ok: T;
   /**
    * Discriminant to differentiate between Ok and Fail.

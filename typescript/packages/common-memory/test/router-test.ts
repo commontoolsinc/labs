@@ -1,10 +1,12 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
 import * as Router from "../router.ts";
+import * as Space from "../space.ts";
 import { refer } from "merkle-reference";
 
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
-const bob = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
-const doc = "4301a667-5388-4477-ba08-d2e6b51a62a3";
+const space = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
+const doc = refer({ hello: "world" }).toString();
+const the = "application/json";
 
 const test = (title: string, url: URL, run: (replica: Router.Session) => Promise<unknown>) => {
   const unit = async () => {
@@ -35,21 +37,23 @@ const memory = new URL(`memory://`);
 
 test("query non-existing", memory, async (session) => {
   const unclaimed = await session.query({
-    [alice]: {
-      the: "application/json",
-      of: doc,
+    iss: alice,
+    sub: space,
+    cmd: "/memory/query",
+    args: {
+      selector: {
+        the: "application/json",
+        of: doc,
+      },
     },
   });
 
   assertEquals(
     unclaimed,
     {
-      ok: {
-        the: "application/json",
-        of: doc,
-      },
+      ok: [],
     },
-    "return unclaimed fact",
+    "no matching facts",
   );
 });
 
@@ -60,52 +64,77 @@ test("create new memory", memory, async (session) => {
     is: { v: 1 },
   };
 
-  const result = await session.transact({ [alice]: { assert: v1 } });
-  assertEquals(result, {
-    ok: {
-      the: "application/json",
-      of: doc,
-      is: { v: 1 },
-      cause: refer({
-        the: "application/json",
-        of: doc,
-      }),
+  const tr1 = {
+    iss: alice,
+    sub: space,
+    cmd: "/memory/transact" as const,
+    args: {
+      changes: {
+        [the]: {
+          [doc]: {
+            [refer({ the, of: doc }).toString()]: {
+              is: { v: 1 },
+            },
+          },
+        },
+      },
     },
+  };
+
+  const result = await session.transact(tr1);
+
+  assertEquals(result, {
+    ok: Space.toCommit({
+      subject: space,
+      is: {
+        since: 0,
+        transaction: tr1,
+      },
+    }),
   });
 
   assertEquals(
     await session.query({
-      [alice]: {
-        the: "application/json",
-        of: doc,
+      cmd: "/memory/query",
+      iss: alice,
+      sub: space,
+      args: {
+        selector: {
+          the,
+          of: doc,
+        },
       },
     }),
     {
-      ok: {
-        the: "application/json",
-        of: doc,
-        is: { v: 1 },
-        cause: refer({
-          the: "application/json",
+      ok: [
+        {
+          the,
           of: doc,
-        }),
-      },
+          is: { v: 1 },
+          cause: refer({
+            the,
+            of: doc,
+          }),
+        },
+      ],
     },
     "fact was added to the memory",
   );
 
   assertEquals(
     await session.query({
-      [bob]: {
-        the: "application/json",
-        of: doc,
+      cmd: "/memory/query",
+      iss: alice,
+      sub: alice,
+      args: {
+        selector: {
+          the,
+          of: doc,
+        },
       },
     }),
     {
-      ok: {
-        the: "application/json",
-        of: doc,
-      },
+      ok: [],
     },
     "fact is unclaimed in other memory space",
   );
@@ -113,11 +142,18 @@ test("create new memory", memory, async (session) => {
 
 test("create memory fails if already exists", memory, async (session) => {
   const create = await session.transact({
-    [alice]: {
-      assert: {
-        the: "application/json",
-        of: doc,
-        is: { v: 0 },
+    cmd: "/memory/transact",
+    iss: alice,
+    sub: space,
+    args: {
+      changes: {
+        [the]: {
+          [doc]: {
+            [Space.init({ the, of: doc }).toString()]: {
+              is: { v: 0 },
+            },
+          },
+        },
       },
     },
   });
@@ -125,11 +161,18 @@ test("create memory fails if already exists", memory, async (session) => {
   assert(create.ok, "Document created");
 
   const conflict = await session.transact({
-    [alice]: {
-      assert: {
-        the: "application/json",
-        of: doc,
-        is: { v: 1 },
+    cmd: "/memory/transact",
+    iss: alice,
+    sub: space,
+    args: {
+      changes: {
+        [the]: {
+          [doc]: {
+            [Space.init({ the, of: doc }).toString()]: {
+              is: { v: 1 },
+            },
+          },
+        },
       },
     },
   });
@@ -137,7 +180,7 @@ test("create memory fails if already exists", memory, async (session) => {
   assert(conflict.error, "Create fail when already exists");
   assert(conflict.error.name === "ConflictError");
   assertEquals(conflict.error.conflict, {
-    in: alice,
+    in: space,
     the: "application/json",
     of: doc,
     expected: null,
@@ -145,7 +188,7 @@ test("create memory fails if already exists", memory, async (session) => {
       the: "application/json",
       of: doc,
       is: { v: 0 },
-      cause: refer({ the: "application/json", of: doc }),
+      cause: refer({ the, of: doc }),
     },
   });
 });
@@ -154,7 +197,14 @@ test("create memory fails if already exists", memory, async (session) => {
 
 test("list empty memory", memory, async (session) => {
   const result = await session.query({
-    [alice]: { the: "application/json" },
+    iss: alice,
+    sub: space,
+    cmd: "/memory/query",
+    args: {
+      selector: {
+        the,
+      },
+    },
   });
 
   assertEquals(
@@ -169,17 +219,29 @@ test("list empty memory", memory, async (session) => {
 test("list single fact", memory, async (session) => {
   // First create a fact
   await session.transact({
-    [alice]: {
-      assert: {
-        the: "application/json",
-        of: doc,
-        is: { v: 1 },
+    cmd: "/memory/transact",
+    iss: alice,
+    sub: space,
+    args: {
+      changes: {
+        [the]: {
+          [doc]: {
+            [Space.init({ the, of: doc }).toString()]: {
+              is: { v: 1 },
+            },
+          },
+        },
       },
     },
   });
 
   const result = await session.query({
-    [alice]: { the: "application/json" },
+    cmd: "/memory/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector: { the },
+    },
   });
 
   assertEquals(
@@ -187,9 +249,10 @@ test("list single fact", memory, async (session) => {
     {
       ok: [
         {
+          the,
           of: doc,
           is: { v: 1 },
-          the: "application/json",
+          cause: Space.init({ the, of: doc }),
         },
       ],
     },
@@ -202,27 +265,34 @@ test("list multiple facts", memory, async (session) => {
 
   // Create multiple facts
   await session.transact({
-    [alice]: {
-      assert: {
-        the: "application/json",
-        of: doc,
-        is: { v: 1 },
-      },
-    },
-  });
-
-  await session.transact({
-    [alice]: {
-      assert: {
-        the: "application/json",
-        of: doc2,
-        is: { v: 2 },
+    cmd: "/memory/transact",
+    iss: alice,
+    sub: space,
+    args: {
+      changes: {
+        [the]: {
+          [doc]: {
+            [Space.init({ the, of: doc }).toString()]: {
+              is: { v: 1 },
+            },
+          },
+          [doc2]: {
+            [Space.init({ the, of: doc2 }).toString()]: {
+              is: { v: 2 },
+            },
+          },
+        },
       },
     },
   });
 
   const result = await session.query({
-    [alice]: { the: "application/json" },
+    cmd: "/memory/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector: { the: "application/json" },
+    },
   });
 
   assertEquals(
@@ -230,14 +300,16 @@ test("list multiple facts", memory, async (session) => {
     {
       ok: [
         {
+          the: "application/json",
           of: doc,
           is: { v: 1 },
-          the: "application/json",
+          cause: Space.init({ the, of: doc }),
         },
         {
+          the: "application/json",
           of: doc2,
           is: { v: 2 },
-          the: "application/json",
+          cause: Space.init({ the, of: doc2 }),
         },
       ],
     },
@@ -248,32 +320,72 @@ test("list multiple facts", memory, async (session) => {
 test("list excludes retracted facts", memory, async (session) => {
   // First create and then retract a fact
   await session.transact({
-    [alice]: {
-      assert: {
-        the: "application/json",
-        of: doc,
-        is: { v: 1 },
+    cmd: "/memory/transact",
+    iss: alice,
+    sub: space,
+    args: {
+      changes: {
+        [the]: {
+          [doc]: {
+            [Space.init({ the, of: doc }).toString()]: {
+              is: { v: 1 },
+            },
+          },
+        },
       },
     },
   });
 
-  const fact = (
+  assertEquals(
     await session.query({
-      [alice]: {
-        the: "application/json",
-        of: doc,
+      cmd: "/memory/query",
+      iss: alice,
+      sub: space,
+      args: {
+        selector: {
+          the,
+          of: doc,
+        },
       },
-    })
-  ).ok;
+    }),
+    {
+      ok: [
+        {
+          the,
+          of: doc,
+          is: { v: 1 },
+          cause: Space.init({ the, of: doc }),
+        },
+      ],
+    },
+  );
 
   await session.transact({
-    [alice]: {
-      retract: fact,
+    cmd: "/memory/transact",
+    iss: alice,
+    sub: space,
+    args: {
+      changes: {
+        [the]: {
+          [doc]: {
+            [refer({ is: { v: 1 }, cause: Space.init({ the, of: doc }) }).toString()]: null,
+          },
+        },
+      },
     },
   });
 
   const result = await session.query({
-    [alice]: { the: "application/json" },
+    cmd: "/memory/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector: {
+        the,
+        of: doc,
+        is: {},
+      },
+    },
   });
 
   assertEquals(
@@ -286,33 +398,52 @@ test("list excludes retracted facts", memory, async (session) => {
 });
 
 test("list different fact types", memory, async (session) => {
+  const tr = {
+    cmd: "/memory/transact",
+    iss: alice,
+    sub: space,
+    args: {
+      changes: {
+        [the]: {
+          [doc]: {
+            [Space.init({ the, of: doc }).toString()]: {
+              is: { v: 1 },
+            },
+          },
+        },
+        ["text/plain"]: {
+          [doc]: {
+            [Space.init({ the: "text/plain", of: doc }).toString()]: {
+              is: "Hello",
+            },
+          },
+        },
+      },
+    },
+  } as const;
   // Create facts of different types
-  await session.transact({
-    [alice]: {
-      assert: {
-        the: "application/json",
-        of: doc,
-        is: { v: 1 },
-      },
-    },
-  });
-
-  await session.transact({
-    [alice]: {
-      assert: {
-        the: "text/plain",
-        of: doc,
-        is: "Hello",
-      },
-    },
-  });
+  await session.transact(tr);
 
   const jsonResult = await session.query({
-    [alice]: { the: "application/json" },
+    cmd: "/memory/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector: {
+        the,
+      },
+    },
   });
 
   const textResult = await session.query({
-    [alice]: { the: "text/plain" },
+    cmd: "/memory/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector: {
+        the: "text/plain",
+      },
+    },
   });
 
   assertEquals(
@@ -320,9 +451,10 @@ test("list different fact types", memory, async (session) => {
     {
       ok: [
         {
+          the: "application/json",
           of: doc,
           is: { v: 1 },
-          the: "application/json",
+          cause: Space.init({ the, of: doc }),
         },
       ],
     },
@@ -334,9 +466,10 @@ test("list different fact types", memory, async (session) => {
     {
       ok: [
         {
+          the: "text/plain",
           of: doc,
           is: "Hello",
-          the: "text/plain",
+          cause: Space.init({ the: "text/plain", of: doc }),
         },
       ],
     },
@@ -347,41 +480,70 @@ test("list different fact types", memory, async (session) => {
 test("list facts from different replicas", memory, async (session) => {
   // Create facts in different replica spaces
   await session.transact({
-    [alice]: {
-      assert: {
-        the: "application/json",
-        of: doc,
-        is: { v: 1 },
+    cmd: "/memory/transact",
+    iss: alice,
+    sub: space,
+    args: {
+      changes: {
+        [the]: {
+          [doc]: {
+            [Space.init({ the, of: doc }).toString()]: {
+              is: { v: 1 },
+            },
+          },
+        },
       },
     },
   });
 
   await session.transact({
-    [bob]: {
-      assert: {
-        the: "application/json",
-        of: doc,
-        is: { v: 2 },
+    cmd: "/memory/transact",
+    iss: alice,
+    sub: alice,
+    args: {
+      changes: {
+        [the]: {
+          [doc]: {
+            [Space.init({ the, of: doc }).toString()]: {
+              is: { v: 2 },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const spaceResult = await session.query({
+    cmd: "/memory/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector: {
+        the,
       },
     },
   });
 
   const aliceResult = await session.query({
-    [alice]: { the: "application/json" },
-  });
-
-  const bobResult = await session.query({
-    [bob]: { the: "application/json" },
+    cmd: "/memory/query",
+    iss: alice,
+    sub: alice,
+    args: {
+      selector: {
+        the,
+      },
+    },
   });
 
   assertEquals(
-    aliceResult,
+    spaceResult,
     {
       ok: [
         {
+          the: "application/json",
           of: doc,
           is: { v: 1 },
-          the: "application/json",
+          cause: Space.init({ the, of: doc }),
         },
       ],
     },
@@ -389,13 +551,14 @@ test("list facts from different replicas", memory, async (session) => {
   );
 
   assertEquals(
-    bobResult,
+    aliceResult,
     {
       ok: [
         {
+          the: "application/json",
           of: doc,
           is: { v: 2 },
-          the: "application/json",
+          cause: Space.init({ the, of: doc }),
         },
       ],
     },
@@ -405,54 +568,14 @@ test("list facts from different replicas", memory, async (session) => {
 
 test("list from non-existent replica", memory, async (session) => {
   const result = await session.query({
-    [alice]: { the: "application/json" },
+    cmd: "/memory/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector: {
+        the,
+      },
+    },
   });
   assertEquals(result, { ok: [] }, "empty list from new replica");
-});
-
-test("list from multiple replicas", memory, async (session) => {
-  // Create facts in different replicas
-  await session.transact({
-    [alice]: {
-      assert: {
-        the: "application/json",
-        of: doc,
-        is: { v: 1 },
-      },
-    },
-  });
-
-  await session.transact({
-    [bob]: {
-      assert: {
-        the: "application/json",
-        of: doc,
-        is: { v: 2 },
-      },
-    },
-  });
-
-  const aliceResult = await session.query({
-    [alice]: { the: "application/json" },
-  });
-
-  const bobResult = await session.query({
-    [bob]: { the: "application/json" },
-  });
-
-  assertEquals(
-    aliceResult,
-    {
-      ok: [{ of: doc, is: { v: 1 }, the: "application/json" }],
-    },
-    "lists alice's facts",
-  );
-
-  assertEquals(
-    bobResult,
-    {
-      ok: [{ of: doc, is: { v: 2 }, the: "application/json" }],
-    },
-    "lists bob's facts",
-  );
 });

@@ -2,7 +2,7 @@ import * as Router from "./router.ts";
 export * from "./interface.ts";
 export * from "./util.ts";
 export * as Error from "./error.ts";
-export * as Replica from "./store.ts";
+export * as Space from "./space.ts";
 import {
   AsyncResult,
   ConnectionError,
@@ -12,6 +12,7 @@ import {
   Selector,
   Statement,
   SystemError,
+  Transaction,
 } from "./interface.ts";
 import * as Reference from "merkle-reference";
 
@@ -32,12 +33,12 @@ export interface MemoryService {
   close(): AsyncResult<{}, SystemError>;
   subscribe(socket: WebSocket): AsyncResult<{}, Error>;
   patch(request: { json(): Promise<any> }): Promise<Response>;
-  patchJson(json: In<Transaction>): Promise<AsyncResult<any, Error>>;
+  // patchJson(json: In<Transaction>): Promise<AsyncResult<any, Error>>;
   query(
     request: { json(): Promise<any> },
     selector: In<{ the?: string; of?: string }>,
   ): Promise<Response>;
-  queryJson(selector: object): Promise<AsyncResult<any, Error>>;
+  // queryJson(selector: object): Promise<AsyncResult<any, Error>>;
 }
 
 interface MemoryServiceSession {
@@ -52,16 +53,16 @@ class Service implements MemoryService {
   patch(request: { json(): Promise<any> }): Promise<Response> {
     return patch(this, request);
   }
-  patchJson(json: In<Transaction>): Promise<AsyncResult<any, Error>> {
-    return patchJson(this.router, json);
-  }
+  // patchJson(json: In<Transaction>): Promise<AsyncResult<any, Error>> {
+  //   return patchJson(this.router, json);
+  // }
   query(request: { json(): Promise<any> }): Promise<Response> {
     return query(this, request);
   }
-  queryJson(selector: object): Promise<AsyncResult<any, Error>> {
-    return queryJson(this.router, selector as In<Partial<Selector>>);
-  }
-  transact(transaction: In<Instruction>) {
+  // queryJson(selector: object): Promise<AsyncResult<any, Error>> {
+  //   return queryJson(this.router, selector as In<Partial<Selector>>);
+  // }
+  transact(transaction: Transaction) {
     return this.router.transact(transaction);
   }
   close() {

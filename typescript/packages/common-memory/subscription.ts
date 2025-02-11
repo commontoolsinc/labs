@@ -1,8 +1,8 @@
-import { Selector, In, Space, State } from "./interface.ts";
+import { Selector, Space, Changes, Subscription as SubscriptionQuery } from "./interface.ts";
 import * as Replica from "./router.ts";
 
 export interface Subscriber {
-  integrate(state: In<State>): void;
+  integrate(delta: { [space: Space]: Changes }): void;
 
   close(): void;
 }
@@ -12,17 +12,17 @@ export interface Subscriber {
  * document addresses to the underlying subscription.
  */
 export interface Subscription {
-  stream: ReadableStream<In<State>>;
+  stream: ReadableStream<{ [space: Space]: Changes }>;
 
   /**
    * Add a new address to be observed.
    */
-  watch(address: In<Selector>): void;
+  watch(address: SubscriptionQuery): void;
 
   /**
    * Removes an address from this subscription.
    */
-  unwatch(address: In<Selector>): void;
+  unwatch(address: SubscriptionQuery): void;
 
   /**
    * Close the underlying subscription.
@@ -31,17 +31,17 @@ export interface Subscription {
 }
 
 export interface Session extends Subscriber {
-  controller: ReadableStreamDefaultController<In<State>> | undefined;
-  channels: Map<string, In<Selector>>;
+  controller: ReadableStreamDefaultController<{ [space: Space]: Changes }> | undefined;
+  channels: Map<string, SubscriptionQuery>;
   replica: Replica.Session;
 }
 
 export class TheSubscription implements Session, Subscription, Subscriber {
-  controller: ReadableStreamDefaultController<In<State>> | undefined;
-  stream: ReadableStream<In<State>>;
-  channels: Map<string, In<Selector>> = new Map();
+  controller: ReadableStreamDefaultController<{ [space: Space]: Changes }> | undefined;
+  stream: ReadableStream<{ [space: Space]: Changes }>;
+  channels: Map<string, SubscriptionQuery> = new Map();
   constructor(public replica: Replica.Session) {
-    this.stream = new ReadableStream<In<State>>({
+    this.stream = new ReadableStream<{ [space: Space]: Changes }>({
       start: (source) => {
         this.controller = source;
       },
@@ -51,18 +51,18 @@ export class TheSubscription implements Session, Subscription, Subscriber {
     });
   }
 
-  watch(selectors: In<Selector>) {
-    watch(this, selectors);
+  watch(source: SubscriptionQuery) {
+    watch(this, source);
     return this;
   }
 
-  unwatch(selectors: In<Selector>) {
-    unwatch(this, selectors);
+  unwatch(source: SubscriptionQuery) {
+    unwatch(this, source);
     return this;
   }
 
-  integrate(change: In<State>) {
-    return integrate(this, change);
+  integrate(changes: { [space: Space]: Changes }) {
+    return integrate(this, changes);
   }
 
   cancel() {
@@ -74,9 +74,9 @@ export class TheSubscription implements Session, Subscription, Subscriber {
   }
 }
 
-export const integrate = (session: Session, change: In<State>) => {
+export const integrate = (session: Session, changes: { [space: Space]: Changes }) => {
   if (session.controller) {
-    session.controller.enqueue(change);
+    session.controller.enqueue(changes);
   } else {
     throw new Error("Subscription is cancelled");
   }
@@ -101,26 +101,31 @@ export const close = (session: Session) => {
   }
 };
 
-export const watch = (session: Session, selectors: In<Selector>) => {
-  for (const [space, selector] of Object.entries(selectors)) {
-    const channel = formatAddress(space, selector);
-    if (!session.channels.has(channel)) {
-      const address = { [space]: selector };
-      session.channels.set(channel, address);
-      session.replica.watch(address, session);
-    }
+export const watch = (session: Session, source: SubscriptionQuery) => {
+  const {
+    sub: space,
+    args: { selector },
+  } = source;
+
+  const channel = formatAddress(space, selector);
+  if (!session.channels.has(channel)) {
+    session.channels.set(channel, source);
+    session.replica.watch(source, session);
   }
 };
 
-export const unwatch = (session: Session, selectors: In<Selector>) => {
-  for (const [space, selector] of Object.entries(selectors)) {
-    const channel = formatAddress(space, selector);
-    if (session.channels.has(channel)) {
-      session.replica.unwatch({ [space]: selector }, session);
-      session.channels.delete(channel);
-    }
+export const unwatch = (session: Session, source: SubscriptionQuery) => {
+  const {
+    sub: space,
+    args: { selector },
+  } = source;
+
+  const channel = formatAddress(space, selector);
+  if (session.channels.has(channel)) {
+    session.replica.unwatch(source, session);
+    session.channels.delete(channel);
   }
 };
 
-export const formatAddress = (space: Space, { of, the }: Selector) =>
-  `watch://${space}/${of}/${the}`;
+export const formatAddress = (space: Space, { of = "_", the = "_" }: Selector) =>
+  `watch:///${space}/${of}/${the}`;

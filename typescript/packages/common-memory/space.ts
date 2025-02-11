@@ -143,7 +143,7 @@ export interface Session {
   /**
    * Queries space for matching entities based on provided selector.
    */
-  query(source: Query): Result<State[], ToJSON<QueryError>>;
+  query(source: Query): Result<Fact[], ToJSON<QueryError>>;
 
   close(): AsyncResult<{}, SystemError>;
 }
@@ -311,9 +311,9 @@ const swap = (
   // successful update. If we have an assertion or retraction we derive fact
   // from it, but if it is a confirmation `cause` is the fact itself.
   const fact = source.assert
-    ? refer(source.assert).toString()
+    ? refer({ is: claim.is, cause: claim.cause }).toString()
     : source.retract
-    ? refer(source.retract).toString()
+    ? refer({ cause: claim.cause }).toString()
     : source.confirm.cause.toString();
 
   // We do not store implicit facts like `{ the, of }` in the database and
@@ -381,7 +381,7 @@ const swap = (
     // If actual state matches desired state it is either was inserted by the
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
     // it as a conflict as current state is the asserted one.
-    if (refer(actual).toString() !== fact) {
+    if (identify(actual ?? { cause: null }) !== fact) {
       throw Error.conflict(transaction, {
         in: transaction.sub,
         the,
@@ -392,6 +392,9 @@ const swap = (
     }
   }
 };
+
+const identify = ({ is, cause }: Fact) =>
+  (is === undefined ? refer({ cause }) : refer({ cause, is })).toString();
 
 const THE_COMMIT = "application/commit+json";
 
@@ -479,7 +482,7 @@ export const transaction = ({
   changes: Changes;
   meta?: Meta;
 }): Transaction => ({
-  cmd: "/space/transact",
+  cmd: "/memory/transact",
   iss: issuer,
   sub: subject,
   args: { changes },
@@ -489,7 +492,7 @@ export const transaction = ({
 export const transact = (session: Model, transaction: Transaction) =>
   execute(session.store.transaction(commit), session, transaction);
 
-export const query = (session: Model, source: Query): Result<State[], ToJSON<QueryError>> => {
+export const query = (session: Model, source: Query): Result<Fact[], ToJSON<QueryError>> => {
   try {
     return { ok: select(session, source.args.selector) };
   } catch (error) {

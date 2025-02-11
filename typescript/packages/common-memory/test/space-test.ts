@@ -36,7 +36,7 @@ test(
   new URL(`memory:${space}`),
   async (session) => {
     const result = await Space.query(session, {
-      cmd: "/space/query",
+      cmd: "/memory/query",
       iss: alice,
       sub: space,
       args: {
@@ -103,7 +103,7 @@ test("create new memory", new URL(`memory:${space}`), async (session) => {
   });
 
   const read = Space.query(session, {
-    cmd: "/space/query",
+    cmd: "/memory/query",
     iss: alice,
     sub: space,
     args: {
@@ -132,7 +132,7 @@ test("create new memory", new URL(`memory:${space}`), async (session) => {
 test("explicit empty creation", new URL(`memory:${space}`), async (session) => {
   assertEquals(
     await Space.query(session, {
-      cmd: "/space/query",
+      cmd: "/memory/query",
       iss: alice,
       sub: space,
       args: {
@@ -160,7 +160,7 @@ test("explicit empty creation", new URL(`memory:${space}`), async (session) => {
 
   assertEquals(
     await Space.query(session, {
-      cmd: "/space/query",
+      cmd: "/memory/query",
       iss: alice,
       sub: space,
       args: {
@@ -219,7 +219,7 @@ test("explicit {}", new URL(`memory:${space}`), async (session) => {
     changes: {
       [the]: {
         [doc]: {
-          [refer({ the, of: doc, is: {}, cause: refer({ the, of: doc }) }).toString()]: {
+          [refer({ is: {}, cause: refer({ the, of: doc }) }).toString()]: {
             is: { v: 1 },
           },
         },
@@ -234,7 +234,7 @@ test("explicit {}", new URL(`memory:${space}`), async (session) => {
         since: 1,
         transaction: update,
       },
-      cause: refer(init.ok),
+      cause: refer({ is: init.ok?.is, cause: init.ok?.cause }),
     }),
   });
 });
@@ -273,8 +273,6 @@ test("updates memory", new URL(`memory:${space}`), async (session) => {
       [the]: {
         [doc]: {
           [refer({
-            the,
-            of: doc,
             is: { v: 0 },
             cause: Space.init({ the, of: doc }),
           }).toString()]: {
@@ -296,7 +294,7 @@ test("updates memory", new URL(`memory:${space}`), async (session) => {
           transaction: change,
           since: 1,
         },
-        cause: refer(create.ok),
+        cause: refer({ is: create.ok?.is, cause: create.ok?.cause }),
       }),
     },
     "updates document",
@@ -421,7 +419,7 @@ test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
     changes: {
       [the]: {
         [space]: {
-          [refer(created).toString()]: {
+          [refer({ is: created.is, cause: created.cause }).toString()]: {
             is: { a: true },
           },
         },
@@ -439,7 +437,7 @@ test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
         transaction: updateA,
         since: 1,
       },
-      cause: refer(create.ok),
+      cause: refer({ is: create.ok.is, cause: create.ok.cause }),
     }),
   );
 
@@ -449,7 +447,7 @@ test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
     changes: {
       [the]: {
         [doc]: {
-          [refer(created).toString()]: {
+          [refer({ is: created.is, cause: created.cause }).toString()]: {
             is: { b: true },
           },
         },
@@ -465,12 +463,12 @@ test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
     in: space,
     the: "application/json",
     of: doc,
-    expected: refer(created),
+    expected: refer({ is: created.is, cause: created.cause }),
     actual: {
       the: "application/json",
       of: doc,
       is: { a: true },
-      cause: refer(created),
+      cause: refer({ is: created.is, cause: created.cause }),
     },
   });
 });
@@ -519,7 +517,7 @@ test(
           since: 1,
           transaction: init,
         },
-        cause: refer(result.ok),
+        cause: refer({ is: result.ok?.is, cause: result.ok?.cause }),
       }),
     });
   },
@@ -565,7 +563,7 @@ test("concurrent identical memory updates succeed", new URL(`memory:${space}`), 
     changes: {
       [the]: {
         [doc]: {
-          [refer(v1).toString()]: {
+          [refer({ is: v1.is, cause: v1.cause }).toString()]: {
             is: { v: 2 },
           },
         },
@@ -581,7 +579,7 @@ test("concurrent identical memory updates succeed", new URL(`memory:${space}`), 
         since: 1,
         transaction: t1,
       },
-      cause: refer(c0.ok),
+      cause: refer({ is: c0.ok?.is, cause: c0.ok?.cause }),
     }),
   });
 
@@ -594,7 +592,7 @@ test("concurrent identical memory updates succeed", new URL(`memory:${space}`), 
         since: 2,
         transaction: t1,
       },
-      cause: refer(c1.ok),
+      cause: refer({ is: c1.ok?.is, cause: c1.ok?.cause }),
     }),
   });
 });
@@ -625,7 +623,7 @@ test("retract implicit", new URL(`memory:${space}`), async (session) => {
   });
 
   const includeRetracted = await session.query({
-    cmd: "/space/query",
+    cmd: "/memory/query",
     iss: alice,
     sub: space,
     args: {
@@ -647,7 +645,7 @@ test("retract implicit", new URL(`memory:${space}`), async (session) => {
   });
 
   const withoutRetracted = await session.query({
-    cmd: "/space/query",
+    cmd: "/memory/query",
     iss: alice,
     sub: space,
     args: {
@@ -683,7 +681,7 @@ test("retract document", new URL(`memory:${space}`), async (session) => {
   assert(create.ok, "Document created");
   assertEquals(
     await session.query({
-      cmd: "/space/query",
+      cmd: "/memory/query",
       iss: alice,
       sub: space,
       args: { selector: { the: "application/json", of: doc } },
@@ -706,7 +704,7 @@ test("retract document", new URL(`memory:${space}`), async (session) => {
     changes: {
       [the]: {
         [doc]: {
-          [refer({ the, of: doc, is: { v: 1 }, cause: { the, of: doc } }).toString()]: null,
+          [refer({ is: { v: 1 }, cause: { the, of: doc } }).toString()]: null,
         },
       },
     },
@@ -721,13 +719,13 @@ test("retract document", new URL(`memory:${space}`), async (session) => {
         since: 1,
         transaction: retract,
       },
-      cause: refer(create.ok),
+      cause: refer({ is: create.ok.is, cause: create.ok.cause }),
     }),
   });
 
   assertEquals(
     await session.query({
-      cmd: "/space/query",
+      cmd: "/memory/query",
       iss: alice,
       sub: space,
       args: {
@@ -743,8 +741,6 @@ test("retract document", new URL(`memory:${space}`), async (session) => {
           the: "application/json",
           of: doc,
           cause: refer({
-            the,
-            of: doc,
             is: { v: 1 },
             cause: { the, of: doc },
           }),
@@ -761,8 +757,8 @@ test(
   async (session) => {
     const v0 = { the, of: doc };
     const v1 = { the, of: doc, is: { v: 1 }, cause: refer(v0) };
-    const v2 = { the, of: doc, is: { v: 2 }, cause: refer(v1) };
-    const v3 = { the, of: doc, is: { v: 3 }, cause: refer(v2) };
+    const v2 = { the, of: doc, is: { v: 2 }, cause: refer({ is: v1.is, cause: v1.cause }) };
+    const v3 = { the, of: doc, is: { v: 3 }, cause: refer({ is: v2.is, cause: v2.cause }) };
 
     const t1 = Space.transaction({
       issuer: alice,
@@ -784,7 +780,7 @@ test(
       changes: {
         [the]: {
           [doc]: {
-            [refer(v1).toString()]: {
+            [refer({ is: v1.is, cause: v1.cause }).toString()]: {
               is: { v: 2 },
             },
           },
@@ -798,7 +794,7 @@ test(
       changes: {
         [the]: {
           [doc]: {
-            [refer(v2).toString()]: {
+            [refer({ is: v2.is, cause: v2.cause }).toString()]: {
               is: { v: 3 },
             },
           },
@@ -817,7 +813,7 @@ test(
         changes: {
           [the]: {
             [doc]: {
-              [refer(v1).toString()]: null, // currently it's v2 instead
+              [refer({ is: v1.is, cause: v1.cause }).toString()]: null, // currently it's v2 instead
             },
           },
         },
@@ -830,16 +826,17 @@ test(
       the,
       in: space,
       of: doc,
-      expected: refer(v1),
+      expected: refer({ is: v1.is, cause: v1.cause }),
       actual: v3,
     });
 
     assertMatch(
       result.error.message,
       RegExp(
-        `The application/json of ${doc} in ${space} was expected to be ${refer(
-          v1,
-        )}, but it is ${refer(v3)}`,
+        `The application/json of ${doc} in ${space} was expected to be ${refer({
+          is: v1.is,
+          cause: v1.cause,
+        })}, but it is ${refer({ is: v3.is, cause: v3.cause })}`,
       ),
     );
   },
@@ -876,7 +873,7 @@ test("new memory creation fails after retraction", new URL(`memory:${alice}`), a
     changes: {
       [the]: {
         [doc]: {
-          [refer(v1).toString()]: null,
+          [refer({ is: v1.is, cause: v1.cause }).toString()]: null,
         },
       },
     },
@@ -890,7 +887,7 @@ test("new memory creation fails after retraction", new URL(`memory:${alice}`), a
         since: 1,
         transaction: t2,
       },
-      cause: refer(create.ok),
+      cause: refer({ is: create.ok.is, cause: create.ok.cause }),
     }),
   });
 
@@ -920,7 +917,7 @@ test("new memory creation fails after retraction", new URL(`memory:${alice}`), a
     actual: {
       the: "application/json",
       of: doc,
-      cause: refer(v1),
+      cause: refer({ is: v1.is, cause: v1.cause }),
     },
   });
 });
@@ -980,7 +977,7 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
 
   assertEquals(
     await session.query({
-      cmd: "/space/query",
+      cmd: "/memory/query",
       iss: alice,
       sub: space,
       args: {
@@ -997,7 +994,7 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
 
   assertEquals(
     await session.query({
-      cmd: "/space/query",
+      cmd: "/memory/query",
       iss: alice,
       sub: space,
       args: {
@@ -1024,7 +1021,7 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
       [the]: {
         // Update
         [doc]: {
-          [refer(doc1v1).toString()]: {
+          [refer({ is: doc1v1.is, cause: doc1v1.cause }).toString()]: {
             is: {
               v: 2,
             },
@@ -1032,7 +1029,7 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
         },
         // Ensure
         [doc2]: {
-          [refer(doc2v1).toString()]: {},
+          [refer({ is: doc2v1.is, cause: doc2v1.cause }).toString()]: {},
         },
         [doc3]: {
           [refer(doc3v0).toString()]: {
@@ -1053,14 +1050,14 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
         since: 1,
         transaction: tr2,
       },
-      cause: refer(init.ok),
+      cause: refer({ is: init.ok?.is, cause: init.ok?.cause }),
     }),
   });
 
-  const doc1v2 = { ...doc1v1, is: { v: 2 }, cause: refer(doc1v1) };
+  const doc1v2 = { ...doc1v1, is: { v: 2 }, cause: refer({ is: doc1v1.is, cause: doc1v1.cause }) };
   assertEquals(
     await session.query({
-      cmd: "/space/query",
+      cmd: "/memory/query",
       iss: alice,
       sub: space,
       args: {
@@ -1077,7 +1074,7 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
 
   assertEquals(
     await session.query({
-      cmd: "/space/query",
+      cmd: "/memory/query",
       iss: alice,
       sub: space,
       args: {
@@ -1095,7 +1092,7 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
   const doc3v1 = { the, of: doc3, is: { doc3: { v: 1 } }, cause: doc3v0 };
   assertEquals(
     await session.query({
-      cmd: "/space/query",
+      cmd: "/memory/query",
       iss: alice,
       sub: space,
       args: {
@@ -1122,10 +1119,10 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
       [the]: {
         // Out of date invariant
         [doc]: {
-          [refer(doc1v1).toString()]: {},
+          [refer({ is: doc1v1.is, cause: doc1v1.cause }).toString()]: {},
         },
         [doc3]: {
-          [refer(doc3v1).toString()]: {
+          [refer({ is: doc3v1.is, cause: doc3v1.cause }).toString()]: {
             is: {
               doc3: { v: 2 },
             },
@@ -1142,13 +1139,13 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
     in: space,
     the,
     of: doc,
-    expected: refer(doc1v1),
+    expected: refer({ is: doc1v1.is, cause: doc1v1.cause }),
     actual: doc1v2,
   });
 
   assertEquals(
     await session.query({
-      cmd: "/space/query",
+      cmd: "/memory/query",
       iss: alice,
       sub: space,
       args: {
@@ -1218,7 +1215,7 @@ Deno.test("open creates replica if does not exists", async () => {
     );
 
     const select = session.query({
-      cmd: "/space/query",
+      cmd: "/memory/query",
       iss: alice,
       sub: space,
       args: {
@@ -1246,7 +1243,7 @@ Deno.test("open creates replica if does not exists", async () => {
 
 test("list empty store", new URL(`memory:${space}`), async (session) => {
   const result = session.query({
-    cmd: "/space/query",
+    cmd: "/memory/query",
     iss: alice,
     sub: space,
     args: {
@@ -1276,7 +1273,7 @@ test("list single fact", new URL(`memory:${space}`), async (session) => {
   assert(write.ok);
 
   const result = session.query({
-    cmd: "/space/query",
+    cmd: "/memory/query",
     iss: alice,
     sub: space,
     args: {
@@ -1322,7 +1319,7 @@ test("list excludes retracted facts", new URL(`memory:${space}`), async (session
     changes: {
       [the]: {
         [doc]: {
-          [refer({ the, of: doc, is: { v: 1 }, cause: Space.init({ of: doc }) }).toString()]: null,
+          [refer({ is: { v: 1 }, cause: Space.init({ of: doc }) }).toString()]: null,
         },
       },
     },
@@ -1331,7 +1328,7 @@ test("list excludes retracted facts", new URL(`memory:${space}`), async (session
   assert(retract.ok);
 
   const result = session.query({
-    cmd: "/space/query",
+    cmd: "/memory/query",
     iss: alice,
     sub: space,
     args: {

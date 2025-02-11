@@ -3,27 +3,24 @@ import * as Subscription from "./subscription.ts";
 import * as Error from "./error.ts";
 import * as FS from "jsr:@std/fs";
 import {
-  In,
-  Fact,
-  Selector,
+  Unit,
   Transaction,
   Commit,
   Result,
   AsyncResult,
   QueryError,
   Query,
-  List,
-  Unclaimed,
+  Changes,
+  State,
   ConflictError,
   TransactionError,
   ConnectionError,
   SystemError,
   Space as Subject,
-  Subscribe,
+  Subscription as SubscriptionQuery,
   ListError,
-  Unsubscribe,
 } from "./interface.ts";
-import { ListResult } from "./space.ts";
+import { refer } from "merkle-reference";
 export * from "./interface.ts";
 
 export interface Session {
@@ -31,16 +28,14 @@ export interface Session {
     transaction: Transaction,
   ): AsyncResult<Commit, ConflictError | TransactionError | ConnectionError>;
 
-  query(
-    query: Query,
-  ): AsyncResult<Fact | Unclaimed | Unclaimed[], QueryError | ListError | ConnectionError>;
+  query(source: Query): AsyncResult<State[], QueryError | ListError | ConnectionError>;
 
   subscribe(): Subscription.Subscription;
 
-  watch(command: Subscribe, subscriber: Subscription.Subscriber): void;
-  unwatch(command: Unsubscribe, subscriber: Subscription.Subscriber): void;
+  watch(source: SubscriptionQuery, subscriber: Subscription.Subscriber): void;
+  unwatch(source: SubscriptionQuery, subscriber: Subscription.Subscriber): void;
 
-  close(): AsyncResult<{}, SystemError>;
+  close(): AsyncResult<Unit, SystemError>;
 }
 
 export interface Model {
@@ -66,15 +61,15 @@ export class Router implements Session {
     return transact(this, transaction);
   }
 
-  query(command: Query) {
-    return query(this, command);
+  query(source: Query) {
+    return query(this, source);
   }
 
-  watch(command: Subscribe, subscriber: Subscription.Subscriber) {
-    return watch(this, command, subscriber);
+  watch(source: SubscriptionQuery, subscriber: Subscription.Subscriber) {
+    return watch(this, source, subscriber);
   }
-  unwatch(command: Unsubscribe, subscriber: Subscription.Subscriber) {
-    return unwatch(this, command, subscriber);
+  unwatch(source: SubscriptionQuery, subscriber: Subscription.Subscriber) {
+    return unwatch(this, source, subscriber);
   }
 
   close() {
@@ -87,35 +82,22 @@ export const subscribe = (session: Session) => Subscription.open(session);
 export const query = async (
   session: Model,
   query: Query,
-): AsyncResult<Fact | Unclaimed | Unclaimed[], ListError | QueryError | ConnectionError> => {
+): AsyncResult<State[], ListError | QueryError | ConnectionError> => {
   const { ok: space, error } = await resolve(session, query.sub);
   if (error) {
     return { error };
   }
 
-  const { selector } = query.args;
-  return space.query({ the: selector.the, of: selector.of });
-};
-
-export const list = async (
-  session: Model,
-  command: List,
-): AsyncResult<ListResult[], ListError | ConnectionError> => {
-  const { ok: space, error } = await resolve(session, command.sub);
-  if (error) {
-    return { error };
-  }
-
-  return space.list(command);
+  return space.query(query);
 };
 
 export const watch = async (
   session: Model,
-  command: Subscribe,
+  source: SubscriptionQuery,
   subscriber: Subscription.Subscriber,
 ) => {
-  const { selector } = command.args;
-  const channel = Subscription.formatAddress(command.sub, selector);
+  const { selector } = source.args;
+  const channel = Subscription.formatAddress(source.sub, selector);
   const subscribers = session.subscribers.get(channel);
   if (subscribers) {
     subscribers.add(subscriber);
@@ -123,26 +105,48 @@ export const watch = async (
     session.subscribers.set(channel, new Set([subscriber]));
   }
 
-  const { ok: space, error } = await resolve(session, command.sub);
+  const { ok: space, error } = await resolve(session, source.sub);
   if (error) {
     return { error };
   }
 
-  const result = await space.query(selector);
+  const result = await space.query(source);
   if (result.error) {
     return result;
   } else {
-    // TODO: Implement this
-    // subscriber.integrate({ [space]: result.ok });
+    const results = result.ok;
+    const { the, of } = selector;
+    if (results.length === 0) {
+      if (the != null && of != null) {
+        subscriber.integrate({
+          [source.sub]: {
+            [the]: {
+              [of]: {},
+            },
+          },
+        });
+      }
+    } else {
+      for (const state of results) {
+        subscriber.integrate({
+          [source.sub]: {
+            [state.the]: {
+              [state.of]:
+                // If `state.is` is undefined it is retraction otherwise it is
+                // assertion.
+                state.is === undefined
+                  ? { [refer({ cause: state.cause }).toString()]: null }
+                  : { [state.cause.toString()]: { is: state.is } },
+            },
+          },
+        });
+      }
+    }
   }
 };
 
-export const unwatch = (
-  session: Model,
-  command: Unsubscribe,
-  subscriber: Subscription.Subscriber,
-) => {
-  const channel = Subscription.formatAddress(command.sub, command.args.selector);
+export const unwatch = (session: Model, source: Query, subscriber: Subscription.Subscriber) => {
+  const channel = Subscription.formatAddress(source.sub, source.args.selector);
   const subscribers = session.subscribers.get(channel);
   if (subscribers) {
     subscribers.delete(subscriber);
@@ -164,8 +168,23 @@ export const transact = async (
   } else {
     // Now go ahead and notify subscribers.
     const promises = [];
+    const changes: Changes = {};
+    for (const [the, entities] of Object.entries(transaction.args.changes)) {
+      changes[the] = changes[the] ?? {};
+      for (const [of, change] of Object.entries(entities)) {
+        changes[the][of] = changes[the][of] ?? {};
+        for (const [cause, state] of Object.entries(change)) {
+          if (state == null) {
+            changes[the][of][cause] = null;
+          } else if (changes.is != undefined) {
+            changes[the][of][cause] = { is: changes.is };
+          }
+        }
+      }
+    }
+
     for (const subscriber of subscribers(session, transaction)) {
-      promises.push(subscriber.integrate(result.ok));
+      promises.push(subscriber.integrate({ [transaction.sub]: changes }));
     }
 
     await Promise.all(promises);

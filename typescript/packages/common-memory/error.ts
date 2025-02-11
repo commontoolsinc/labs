@@ -46,7 +46,7 @@ export class TheConflictError extends Error implements ConflictError {
         ? `The ${conflict.the} of ${conflict.of} in ${conflict.in} was expected to be ${conflict.expected}, but it does not exists`
         : `The ${conflict.the} of ${conflict.of} in ${conflict.in} was expected to be ${
             conflict.expected
-          }, but it is ${refer(conflict.actual)}`,
+          }, but it is ${refer({ is: conflict.actual.is, cause: conflict.actual.cause })}`,
     );
 
     this.conflict = conflict;
