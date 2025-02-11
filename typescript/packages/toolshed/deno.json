@@ -30,6 +30,8 @@
     "@ai-sdk/anthropic": "npm:@ai-sdk/anthropic@^1.1.6",
     "@ai-sdk/cerebras": "npm:@ai-sdk/cerebras@^0.1.8",
     "@ai-sdk/google-vertex": "npm:@ai-sdk/google-vertex@^2.1.12",
+    "@std/cli": "jsr:@std/cli@^1.0.12",
+    "gcp-metadata": "npm:gcp-metadata@6.1.0",
     "@ai-sdk/groq": "npm:@ai-sdk/groq@^1.1.7",
     "@ai-sdk/openai": "npm:@ai-sdk/openai@^1.1.9",
     "@arizeai/openinference-semantic-conventions": "npm:@arizeai/openinference-semantic-conventions@^1.0.0",
