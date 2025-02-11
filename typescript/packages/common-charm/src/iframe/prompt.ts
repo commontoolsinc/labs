@@ -1,6 +1,5 @@
 import { JSONSchema } from "@commontools/builder";
 
-import demoSrc from "./demo.html?raw";
 import prefillHtml from "./prefill.html?raw";
 import systemMd from "./system.md?raw";
 import { LLMRequest } from "@commontools/llm-client";
