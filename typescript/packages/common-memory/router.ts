@@ -1,4 +1,4 @@
-import * as Replica from "./store.ts";
+import * as Space from "./space.ts";
 import * as Subscription from "./subscription.ts";
 import * as Error from "./error.ts";
 import * as FS from "jsr:@std/fs";
@@ -6,34 +6,39 @@ import {
   In,
   Fact,
   Selector,
-  Instruction,
+  Transaction,
+  Commit,
   Result,
   AsyncResult,
   QueryError,
+  Query,
+  List,
   Unclaimed,
-  ReplicaID,
   ConflictError,
   TransactionError,
   ConnectionError,
   SystemError,
+  Space as Subject,
+  Subscribe,
   ListError,
+  Unsubscribe,
 } from "./interface.ts";
-import { ListResult } from "./store.ts";
+import { ListResult } from "./space.ts";
 export * from "./interface.ts";
 
 export interface Session {
   transact(
-    transaction: In<Instruction>,
-  ): AsyncResult<Fact, ConflictError | TransactionError | ConnectionError>;
+    transaction: Transaction,
+  ): AsyncResult<Commit, ConflictError | TransactionError | ConnectionError>;
 
   query(
-    selector: In<Partial<Selector>>,
+    query: Query,
   ): AsyncResult<Fact | Unclaimed | Unclaimed[], QueryError | ListError | ConnectionError>;
 
-  subscribe(address: In<Selector>): Subscription.Subscription;
+  subscribe(): Subscription.Subscription;
 
-  watch(address: In<Selector>, subscriber: Subscription.Subscriber): void;
-  unwatch(address: In<Selector>, subscriber: Subscription.Subscriber): void;
+  watch(command: Subscribe, subscriber: Subscription.Subscriber): void;
+  unwatch(command: Unsubscribe, subscriber: Subscription.Subscriber): void;
 
   close(): AsyncResult<{}, SystemError>;
 }
@@ -41,7 +46,7 @@ export interface Session {
 export interface Model {
   store: URL;
   subscribers: Map<string, Set<Subscription.Subscriber>>;
-  repositories: Map<string, Replica.Session>;
+  repositories: Map<string, Space.Session>;
 }
 
 export class Router implements Session {
@@ -49,27 +54,27 @@ export class Router implements Session {
   constructor(
     options: Options,
     public subscribers: Map<string, Set<Subscription.Subscriber>> = new Map(),
-    public repositories: Map<ReplicaID, Replica.Session> = new Map(),
+    public repositories: Map<Subject, Space.Session> = new Map(),
   ) {
     this.store = options.store;
   }
-  subscribe(selector: In<Selector>): Subscription.Subscription {
-    return subscribe(this, selector);
+  subscribe(): Subscription.Subscription {
+    return subscribe(this);
   }
 
-  transact(transaction: In<Instruction>) {
+  transact(transaction: Transaction) {
     return transact(this, transaction);
   }
 
-  query(selector: In<Partial<Selector>>) {
-    return query(this, selector);
+  query(command: Query) {
+    return query(this, command);
   }
 
-  watch(selector: In<Selector>, subscriber: Subscription.Subscriber) {
-    return watch(this, selector, subscriber);
+  watch(command: Subscribe, subscriber: Subscription.Subscriber) {
+    return watch(this, command, subscriber);
   }
-  unwatch(selector: In<Selector>, subscriber: Subscription.Subscriber) {
-    return unwatch(this, selector, subscriber);
+  unwatch(command: Unsubscribe, subscriber: Subscription.Subscriber) {
+    return unwatch(this, command, subscriber);
   }
 
   close() {
@@ -77,128 +82,141 @@ export class Router implements Session {
   }
 }
 
-export const subscribe = (session: Session, selector: In<Selector>) =>
-  Subscription.open(session).watch(selector);
+export const subscribe = (session: Session) => Subscription.open(session);
 
 export const query = async (
   session: Model,
-  selectors: In<Partial<Selector>>,
+  query: Query,
 ): AsyncResult<Fact | Unclaimed | Unclaimed[], ListError | QueryError | ConnectionError> => {
-  const [[route, selector]] = Object.entries(selectors);
-  const { ok: replica, error } = await resolve(session, route);
+  const { ok: space, error } = await resolve(session, query.sub);
   if (error) {
     return { error };
   }
 
-  if (selector?.the && selector?.of) {
-    return replica.query({ the: selector.the, of: selector.of });
-  } else {
-    return replica.list(selector);
-  }
+  const { selector } = query.args;
+  return space.query({ the: selector.the, of: selector.of });
 };
 
 export const list = async (
   session: Model,
-  queries: In<Partial<Selector>>,
+  command: List,
 ): AsyncResult<ListResult[], ListError | ConnectionError> => {
-  const [[route, query]] = Object.entries(queries);
-  const { ok: replica, error } = await resolve(session, route);
+  const { ok: space, error } = await resolve(session, command.sub);
   if (error) {
     return { error };
   }
 
-  return replica.list(query);
+  return space.list(command);
 };
 
 export const watch = async (
   session: Model,
-  selectors: In<Selector>,
+  command: Subscribe,
   subscriber: Subscription.Subscriber,
 ) => {
-  for (const [space, selector] of Object.entries(selectors)) {
-    const channel = Subscription.formatAddress(space, selector);
-    const subscribers = session.subscribers.get(channel);
-    if (subscribers) {
-      subscribers.add(subscriber);
-    } else {
-      session.subscribers.set(channel, new Set([subscriber]));
-    }
+  const { selector } = command.args;
+  const channel = Subscription.formatAddress(command.sub, selector);
+  const subscribers = session.subscribers.get(channel);
+  if (subscribers) {
+    subscribers.add(subscriber);
+  } else {
+    session.subscribers.set(channel, new Set([subscriber]));
+  }
 
-    const { ok: replica, error } = await resolve(session, space);
-    if (error) {
-      return { error };
-    }
+  const { ok: space, error } = await resolve(session, command.sub);
+  if (error) {
+    return { error };
+  }
 
-    const result = await replica.query(selector);
-    if (result.error) {
-      return result;
-    } else {
-      subscriber.integrate({ [space]: result.ok });
-    }
+  const result = await space.query(selector);
+  if (result.error) {
+    return result;
+  } else {
+    // TODO: Implement this
+    // subscriber.integrate({ [space]: result.ok });
   }
 };
 
 export const unwatch = (
   session: Model,
-  selectors: In<Selector>,
+  command: Unsubscribe,
   subscriber: Subscription.Subscriber,
 ) => {
-  for (const [route, selector] of Object.entries(selectors)) {
-    const channel = Subscription.formatAddress(route, selector);
-    const subscribers = session.subscribers.get(channel);
-    if (subscribers) {
-      subscribers.delete(subscriber);
-    }
+  const channel = Subscription.formatAddress(command.sub, command.args.selector);
+  const subscribers = session.subscribers.get(channel);
+  if (subscribers) {
+    subscribers.delete(subscriber);
   }
 };
 
 export const transact = async (
   session: Model,
-  transactions: In<Instruction>,
-): Promise<Result<Fact, ConflictError | TransactionError | ConnectionError>> => {
-  const [[route, transaction]] = Object.entries(transactions);
-  const fact = transaction.assert ?? transaction.retract;
-  const { ok: replica, error } = await resolve(session, route);
+  transaction: Transaction,
+): Promise<Result<Commit, ConflictError | TransactionError | ConnectionError>> => {
+  const { ok: space, error } = await resolve(session, transaction.sub);
   if (error) {
     return { error };
   }
 
-  const result = await replica.transact(transaction);
+  const result = await space.transact(transaction);
   if (result.error) {
     return result;
   } else {
-    const change = { [route]: result.ok };
-    const channel = Subscription.formatAddress(route, fact);
-
-    const subscribers = session.subscribers.get(channel);
-    if (subscribers) {
-      const promises = [];
-      for (const subscriber of subscribers) {
-        promises.push(subscriber.integrate(change));
-      }
-      await Promise.all(promises);
+    // Now go ahead and notify subscribers.
+    const promises = [];
+    for (const subscriber of subscribers(session, transaction)) {
+      promises.push(subscriber.integrate(result.ok));
     }
+
+    await Promise.all(promises);
   }
 
   return result;
 };
 
+/**
+ * Returns iterator of subscribers that are affected by the given transaction.
+ */
+const subscribers = function* (
+  session: Model,
+  transaction: Transaction,
+): Iterable<Subscription.Subscriber> {
+  const seen = new Set();
+  for (const [the, entities] of Object.entries(transaction.args.changes)) {
+    for (const [of, changes] of Object.entries(entities)) {
+      for (const change of Object.values(changes)) {
+        // If `change.is === {}` we simply confirm that state has not changed
+        // so we don't need to notify those subscribers.
+        if (change == null || change.is != undefined) {
+          const channel = Subscription.formatAddress(transaction.sub, { the, of });
+          for (const subscriber of session.subscribers.get(channel) ?? []) {
+            if (!seen.has(subscriber)) {
+              seen.add(subscriber);
+              yield subscriber;
+            }
+          }
+        }
+      }
+    }
+  }
+};
+
 const resolve = async (
   session: Model,
-  route: ReplicaID,
-): Promise<Result<Replica.Session, ConnectionError>> => {
+  route: Subject,
+): Promise<Result<Space.Session, ConnectionError>> => {
   const replica = session.repositories.get(route);
   if (replica) {
     return { ok: replica };
   } else {
-    const result = await Replica.open({
+    const result = await Space.open({
       url: new URL(`./${route}.sqlite`, session.store),
     });
 
     if (result.error) {
       return result;
     }
-    const replica = result.ok as Replica.Session;
+    const replica = result.ok as Space.Session;
     session.repositories.set(route, replica);
     return { ok: replica };
   }

@@ -11,7 +11,7 @@ import type {
   ListError,
   Transaction,
 } from "./interface.ts";
-import { ReplicaID } from "./interface.ts";
+import { Space } from "./interface.ts";
 import { refer } from "./util.ts";
 
 export const conflict = (transaction: Transaction, info: Conflict): ToJSON<ConflictError> =>
@@ -22,13 +22,11 @@ export const transaction = (
   cause: SystemError,
 ): ToJSON<TransactionError> => new TheTransactionError(transaction, cause);
 
-export const query = (
-  selector: Selector & { in: ReplicaID },
-  cause: SystemError,
-): ToJSON<QueryError> => new TheQueryError(selector, cause);
+export const query = (selector: Selector & { in: Space }, cause: SystemError): ToJSON<QueryError> =>
+  new TheQueryError(selector, cause);
 
 export const list = (
-  selector: { in: ReplicaID; the?: string; of?: string },
+  selector: { in: Space; the?: string; of?: string },
   cause: SystemError,
 ): ToJSON<ListError> => new TheListError(selector, cause);
 
@@ -90,7 +88,7 @@ export class TheTransactionError extends Error implements TransactionError {
 
 export class TheQueryError extends Error implements QueryError {
   override name = "QueryError" as const;
-  constructor(public selector: Selector & { in: ReplicaID }, public override cause: SystemError) {
+  constructor(public selector: Selector & { in: Space }, public override cause: SystemError) {
     const { the, of } = selector;
     super(`Query ${JSON.stringify({ the, of })} in ${selector.in} failed: ${cause.message}`);
   }
@@ -113,7 +111,7 @@ export class TheQueryError extends Error implements QueryError {
 export class TheListError extends Error implements ListError {
   override name = "ListError" as const;
   constructor(
-    public selector: { in: ReplicaID; the?: string; of?: string },
+    public selector: { in: Space; the?: string; of?: string },
     public override cause: SystemError,
   ) {
     super(

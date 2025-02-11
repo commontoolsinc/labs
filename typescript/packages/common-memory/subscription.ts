@@ -1,4 +1,4 @@
-import { Selector, In, ReplicaID, State } from "./interface.ts";
+import { Selector, In, Space, State } from "./interface.ts";
 import * as Replica from "./router.ts";
 
 export interface Subscriber {
@@ -42,7 +42,7 @@ export class TheSubscription implements Session, Subscription, Subscriber {
   channels: Map<string, In<Selector>> = new Map();
   constructor(public replica: Replica.Session) {
     this.stream = new ReadableStream<In<State>>({
-      start: source => {
+      start: (source) => {
         this.controller = source;
       },
       cancel: () => {
@@ -122,5 +122,5 @@ export const unwatch = (session: Session, selectors: In<Selector>) => {
   }
 };
 
-export const formatAddress = (space: ReplicaID, { of, the }: Selector) =>
+export const formatAddress = (space: Space, { of, the }: Selector) =>
   `watch://${space}/${of}/${the}`;

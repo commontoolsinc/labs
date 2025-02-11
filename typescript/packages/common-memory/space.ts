@@ -1,8 +1,8 @@
 import { Database, Transaction as DBTransaction, SqliteError } from "jsr:@db/sqlite";
-import { fromJSON, fromString, refer, Reference, is as isReference } from "npm:merkle-reference";
+import { fromString, refer, Reference } from "npm:merkle-reference";
 import type {
   Result,
-  ReplicaID,
+  Space,
   Entity,
   Fact,
   Transaction,
@@ -21,6 +21,9 @@ import type {
   Assert,
   Confirm,
   ListError,
+  Principal,
+  Changes,
+  Meta,
 } from "./interface.ts";
 import * as Error from "./error.ts";
 
@@ -112,7 +115,7 @@ export type Options = {
 };
 
 export interface Model {
-  id: ReplicaID;
+  id: Space;
   store: Database;
 }
 
@@ -150,7 +153,7 @@ export interface Session {
 }
 
 export class Store implements Model, Session {
-  constructor(public id: ReplicaID, public store: Database) {}
+  constructor(public id: Space, public store: Database) {}
 
   transact(transaction: Transaction) {
     return transact(this, transaction);
@@ -293,7 +296,7 @@ const importDatum = (session: Model, source: Assertion): Reference<JSONValue> =>
 };
 
 const iterate = function* (transaction: Transaction): Iterable<Retract | Assert | Confirm> {
-  for (const [the, entities] of Object.entries(transaction.changes)) {
+  for (const [the, entities] of Object.entries(transaction.args.changes)) {
     for (const [of, changes] of Object.entries(entities)) {
       for (const [cause, change] of Object.entries(changes)) {
         if (change == null) {
@@ -392,7 +395,7 @@ const swap = (
     // it as a conflict as current state is the asserted one.
     if (refer(actual).toString() !== fact) {
       throw Error.conflict(transaction, {
-        in: transaction.subject,
+        in: transaction.sub,
         the,
         of,
         expected,
@@ -404,7 +407,7 @@ const swap = (
 
 const THE_COMMIT = "application/commit+json";
 
-const toSubjectEntity = (subject: ReplicaID) => refer(subject).toString();
+const toSubjectEntity = (subject: Space) => refer(subject).toString();
 
 /**
  * Derives a fact for the commit entity from the source data.
@@ -414,7 +417,7 @@ export const toCommit = ({
   is,
   cause,
 }: {
-  subject: ReplicaID;
+  subject: Space;
   is: Commit["is"];
   cause?: Reference<Fact>;
 }) => {
@@ -428,7 +431,7 @@ export const toCommit = ({
 };
 
 const commit = (session: Model, transaction: Transaction): Commit => {
-  const space = toSubjectEntity(transaction.subject);
+  const space = toSubjectEntity(transaction.sub);
   const row = session.store.prepare(EXPORT).get({
     the: THE_COMMIT,
     entity: space,
@@ -443,7 +446,7 @@ const commit = (session: Model, transaction: Transaction): Commit => {
   }
 
   const commit = toCommit({
-    subject: transaction.subject,
+    subject: transaction.sub,
     is: {
       since,
       transaction,
@@ -476,6 +479,24 @@ const execute = <Tr extends DBTransaction<(session: Model, transaction: Transact
         };
   }
 };
+
+export const transaction = ({
+  issuer,
+  subject,
+  changes,
+  meta,
+}: {
+  issuer: Principal;
+  subject: Space;
+  changes: Changes;
+  meta?: Meta;
+}): Transaction => ({
+  cmd: "/space/transact",
+  iss: issuer,
+  sub: subject,
+  args: { changes },
+  ...(meta ? { meta } : undefined),
+});
 
 export const transact = (session: Model, transaction: Transaction) =>
   execute(session.store.transaction(commit), session, transaction);

@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
-import * as Repository from "../store.ts";
+import * as Space from "../space.ts";
 import { refer, createTemporaryDirectory } from "../util.ts";
 
 const the = "application/json";
@@ -7,9 +7,9 @@ const doc = refer({ hello: "world" }).toString();
 const space = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
 
-const test = (title: string, url: URL, run: (replica: Repository.Store) => Promise<unknown>) => {
+const test = (title: string, url: URL, run: (replica: Space.Store) => Promise<unknown>) => {
   const unit = async () => {
-    const session = await Repository.open({
+    const session = await Space.open({
       url,
     });
 
@@ -18,7 +18,7 @@ const test = (title: string, url: URL, run: (replica: Repository.Store) => Promi
     try {
       await run(session.ok);
     } finally {
-      await Repository.close(session.ok);
+      await Space.close(session.ok);
     }
   };
 
@@ -35,7 +35,7 @@ test(
   "querying non existing memory returns implicit fact",
   new URL(`memory:${space}`),
   async (session) => {
-    const result = await Repository.query(session, {
+    const result = await Space.query(session, {
       the: "application/json",
       of: doc,
     });
@@ -59,26 +59,29 @@ test("create new memory", new URL(`memory:${space}`), async (session) => {
     of: doc,
     is: { v: 1 },
   };
-  const result = await Repository.transact(session, {
-    issuer: alice,
-    subject: space,
-    changes: {
-      [the]: {
-        [doc]: {
-          [refer({ the, of: doc }).toString()]: {
-            is: { v: 1 },
+  const result = await Space.transact(
+    session,
+    Space.transaction({
+      issuer: alice,
+      subject: space,
+      changes: {
+        [the]: {
+          [doc]: {
+            [refer({ the, of: doc }).toString()]: {
+              is: { v: 1 },
+            },
           },
         },
       },
-    },
-  });
+    }),
+  );
 
   assertEquals(result, {
-    ok: Repository.toCommit({
+    ok: Space.toCommit({
       subject: space,
       is: {
         since: 0,
-        transaction: {
+        transaction: Space.transaction({
           issuer: alice,
           subject: space,
           changes: {
@@ -90,12 +93,12 @@ test("create new memory", new URL(`memory:${space}`), async (session) => {
               },
             },
           },
-        },
+        }),
       },
     }),
   });
 
-  const read = Repository.query(session, {
+  const read = Space.query(session, {
     the: "application/json",
     of: doc,
   });
@@ -114,25 +117,25 @@ test("create new memory", new URL(`memory:${space}`), async (session) => {
 });
 
 test("explicit empty creation", new URL(`memory:${space}`), async (session) => {
-  assertEquals(await Repository.query(session, { the: "application/json", of: doc }), {
+  assertEquals(await Space.query(session, { the: "application/json", of: doc }), {
     ok: {
       the: "application/json",
       of: doc,
     },
   });
 
-  const transaction = {
+  const transaction = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
       [the]: { [doc]: { [refer({ the, of: doc }).toString()]: { is: {} } } },
     },
-  };
+  });
 
-  assertEquals(await Repository.transact(session, transaction).ok?.is.since, 0);
-  assertEquals(await Repository.transact(session, transaction).ok?.is.since, 1);
+  assertEquals(await Space.transact(session, transaction).ok?.is.since, 0);
+  assertEquals(await Space.transact(session, transaction).ok?.is.since, 1);
 
-  assertEquals(await Repository.query(session, { the: "application/json", of: doc }), {
+  assertEquals(await Space.query(session, { the: "application/json", of: doc }), {
     ok: {
       the: "application/json",
       of: doc,
@@ -146,7 +149,7 @@ test("explicit empty creation", new URL(`memory:${space}`), async (session) => {
 });
 
 test("explicit {}", new URL(`memory:${space}`), async (session) => {
-  const create = {
+  const create = Space.transaction({
     subject: space,
     issuer: alice,
     changes: {
@@ -158,12 +161,12 @@ test("explicit {}", new URL(`memory:${space}`), async (session) => {
         },
       },
     },
-  };
+  });
 
-  const init = await Repository.transact(session, create);
+  const init = await Space.transact(session, create);
 
   assertEquals(init, {
-    ok: Repository.toCommit({
+    ok: Space.toCommit({
       subject: space,
       is: {
         since: 0,
@@ -172,7 +175,7 @@ test("explicit {}", new URL(`memory:${space}`), async (session) => {
     }),
   });
 
-  const update = {
+  const update = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
@@ -184,10 +187,10 @@ test("explicit {}", new URL(`memory:${space}`), async (session) => {
         },
       },
     },
-  };
+  });
 
-  assertEquals(await Repository.transact(session, update), {
-    ok: Repository.toCommit({
+  assertEquals(await Space.transact(session, update), {
+    ok: Space.toCommit({
       subject: space,
       is: {
         since: 1,
@@ -199,24 +202,24 @@ test("explicit {}", new URL(`memory:${space}`), async (session) => {
 });
 
 test("updates memory", new URL(`memory:${space}`), async (session) => {
-  const init = {
+  const init = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
       [the]: {
         [doc]: {
-          [Repository.init({ the, of: doc }).toString()]: {
+          [Space.init({ the, of: doc }).toString()]: {
             is: { v: 0 },
           },
         },
       },
     },
-  };
+  });
 
-  const create = await Repository.transact(session, init);
+  const create = await Space.transact(session, init);
 
   assertEquals(create, {
-    ok: Repository.toCommit({
+    ok: Space.toCommit({
       subject: space,
       is: {
         since: 0,
@@ -225,7 +228,7 @@ test("updates memory", new URL(`memory:${space}`), async (session) => {
     }),
   });
 
-  const change = {
+  const change = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
@@ -235,21 +238,21 @@ test("updates memory", new URL(`memory:${space}`), async (session) => {
             the,
             of: doc,
             is: { v: 0 },
-            cause: Repository.init({ the, of: doc }),
+            cause: Space.init({ the, of: doc }),
           }).toString()]: {
             is: { v: 1 },
           },
         },
       },
     },
-  };
+  });
 
-  const update = await Repository.transact(session, change);
+  const update = await Space.transact(session, change);
 
   assertEquals(
     update,
     {
-      ok: Repository.toCommit({
+      ok: Space.toCommit({
         subject: space,
         is: {
           transaction: change,
@@ -269,19 +272,22 @@ test("fails updating non-existing memory", new URL(`memory:${space}`), async (se
     is: { v: 2 },
   };
 
-  const result = await Repository.transact(session, {
-    issuer: alice,
-    subject: space,
-    changes: {
-      [the]: {
-        [doc]: {
-          [refer(v1).toString()]: {
-            is: { v: 2 },
+  const result = await Space.transact(
+    session,
+    Space.transaction({
+      issuer: alice,
+      subject: space,
+      changes: {
+        [the]: {
+          [doc]: {
+            [refer(v1).toString()]: {
+              is: { v: 2 },
+            },
           },
         },
       },
-    },
-  });
+    }),
+  );
 
   assert(result.error, "Update should fail if document does not exists");
   assert(result.error.name === "ConflictError");
@@ -296,7 +302,7 @@ test("fails updating non-existing memory", new URL(`memory:${space}`), async (se
 
 test("create memory fails if already exists", new URL(`memory:${space}`), async (session) => {
   const base = refer({ the, of: doc });
-  const create = {
+  const create = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
@@ -308,13 +314,13 @@ test("create memory fails if already exists", new URL(`memory:${space}`), async 
         },
       },
     },
-  };
+  });
 
-  const init = await Repository.transact(session, create);
+  const init = await Space.transact(session, create);
 
   assert(init.ok, "Document created");
 
-  const createRace = {
+  const createRace = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
@@ -326,9 +332,9 @@ test("create memory fails if already exists", new URL(`memory:${space}`), async 
         },
       },
     },
-  };
+  });
 
-  const conflict = await Repository.transact(session, createRace);
+  const conflict = await Space.transact(session, createRace);
 
   assert(conflict.error, "Create fail when already exists");
   assert(conflict.error.name === "ConflictError");
@@ -348,7 +354,7 @@ test("create memory fails if already exists", new URL(`memory:${space}`), async 
 
 test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
   const base = refer({ the, of: doc });
-  const init = {
+  const init = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
@@ -360,7 +366,7 @@ test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
         },
       },
     },
-  };
+  });
   const created = {
     the,
     of: doc,
@@ -368,10 +374,10 @@ test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
     cause: base,
   };
 
-  const create = await Repository.transact(session, init);
+  const create = await Space.transact(session, init);
   assert(create.ok);
 
-  const updateA = {
+  const updateA = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
@@ -383,13 +389,13 @@ test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
         },
       },
     },
-  };
+  });
 
-  const a = await Repository.transact(session, updateA);
+  const a = await Space.transact(session, updateA);
 
   assertEquals(
     a.ok,
-    Repository.toCommit({
+    Space.toCommit({
       subject: space,
       is: {
         transaction: updateA,
@@ -399,7 +405,7 @@ test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
     }),
   );
 
-  const updateB = {
+  const updateB = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
@@ -411,9 +417,9 @@ test("concurrent update fails", new URL(`memory:${space}`), async (session) => {
         },
       },
     },
-  };
+  });
 
-  const b = await Repository.transact(session, updateB);
+  const b = await Space.transact(session, updateB);
   assert(b.error, "Concurrent update was rejected");
   assert(b.error.name === "ConflictError");
 
@@ -435,20 +441,20 @@ test(
   "concurrent identical memory creation succeed",
   new URL(`memory:${space}`),
   async (session) => {
-    const init = {
+    const init = Space.transaction({
       issuer: alice,
       subject: space,
       changes: {
         [the]: {
           [doc]: {
-            [Repository.init({ the, of: doc }).toString()]: {
+            [Space.init({ the, of: doc }).toString()]: {
               is: { this: doc },
             },
           },
         },
       },
-    };
-    const result = await Repository.transact(session, init);
+    });
+    const result = await Space.transact(session, init);
     const v0 = {
       the,
       of: doc,
@@ -457,7 +463,7 @@ test(
     };
 
     assertEquals(result, {
-      ok: Repository.toCommit({
+      ok: Space.toCommit({
         subject: space,
         is: {
           since: 0,
@@ -466,10 +472,10 @@ test(
       }),
     });
 
-    const update = await Repository.transact(session, init);
+    const update = await Space.transact(session, init);
 
     assertEquals(update, {
-      ok: Repository.toCommit({
+      ok: Space.toCommit({
         subject: space,
         is: {
           since: 1,
@@ -484,7 +490,7 @@ test(
 test("concurrent identical memory updates succeed", new URL(`memory:${space}`), async (session) => {
   const v0 = { the, of: doc };
 
-  const t0 = {
+  const t0 = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
@@ -496,11 +502,11 @@ test("concurrent identical memory updates succeed", new URL(`memory:${space}`), 
         },
       },
     },
-  };
-  const c0 = await Repository.transact(session, t0);
+  });
+  const c0 = await Space.transact(session, t0);
 
   assertEquals(c0, {
-    ok: Repository.toCommit({
+    ok: Space.toCommit({
       subject: space,
       is: {
         since: 0,
@@ -515,7 +521,7 @@ test("concurrent identical memory updates succeed", new URL(`memory:${space}`), 
     cause: refer(v0),
   };
 
-  const t1 = {
+  const t1 = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
@@ -527,11 +533,11 @@ test("concurrent identical memory updates succeed", new URL(`memory:${space}`), 
         },
       },
     },
-  };
+  });
 
-  const c1 = await Repository.transact(session, t1);
+  const c1 = await Space.transact(session, t1);
   assertEquals(c1, {
-    ok: Repository.toCommit({
+    ok: Space.toCommit({
       subject: space,
       is: {
         since: 1,
@@ -541,10 +547,10 @@ test("concurrent identical memory updates succeed", new URL(`memory:${space}`), 
     }),
   });
 
-  const c2 = await Repository.transact(session, t1);
+  const c2 = await Space.transact(session, t1);
 
   assertEquals(c2, {
-    ok: Repository.toCommit({
+    ok: Space.toCommit({
       subject: space,
       is: {
         since: 2,
@@ -556,7 +562,7 @@ test("concurrent identical memory updates succeed", new URL(`memory:${space}`), 
 });
 
 test("retract implicit", new URL(`memory:${space}`), async (session) => {
-  const retract = {
+  const retract = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
@@ -566,12 +572,12 @@ test("retract implicit", new URL(`memory:${space}`), async (session) => {
         },
       },
     },
-  };
+  });
 
-  const retraction = await Repository.transact(session, retract);
+  const retraction = await Space.transact(session, retract);
 
   assertEquals(retraction, {
-    ok: Repository.toCommit({
+    ok: Space.toCommit({
       subject: space,
       is: {
         since: 0,
@@ -582,7 +588,7 @@ test("retract implicit", new URL(`memory:${space}`), async (session) => {
 });
 
 test("retract document", new URL(`memory:${space}`), async (session) => {
-  const v1 = {
+  const v1 = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
@@ -594,8 +600,8 @@ test("retract document", new URL(`memory:${space}`), async (session) => {
         },
       },
     },
-  };
-  const create = await Repository.transact(session, v1);
+  });
+  const create = await Space.transact(session, v1);
 
   assert(create.ok, "Document created");
   assertEquals(await session.query({ the: "application/json", of: doc }), {
@@ -607,7 +613,7 @@ test("retract document", new URL(`memory:${space}`), async (session) => {
     },
   });
 
-  const retract = {
+  const retract = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
@@ -617,12 +623,12 @@ test("retract document", new URL(`memory:${space}`), async (session) => {
         },
       },
     },
-  };
+  });
 
   const drop = session.transact(retract);
 
   assertEquals(drop, {
-    ok: Repository.toCommit({
+    ok: Space.toCommit({
       subject: space,
       is: {
         since: 1,
@@ -659,7 +665,7 @@ test(
     const v2 = { the, of: doc, is: { v: 2 }, cause: refer(v1) };
     const v3 = { the, of: doc, is: { v: 3 }, cause: refer(v2) };
 
-    const t1 = {
+    const t1 = Space.transaction({
       issuer: alice,
       subject: space,
       changes: {
@@ -671,9 +677,9 @@ test(
           },
         },
       },
-    };
+    });
 
-    const t2 = {
+    const t2 = Space.transaction({
       issuer: alice,
       subject: space,
       changes: {
@@ -685,9 +691,9 @@ test(
           },
         },
       },
-    };
+    });
 
-    const t3 = {
+    const t3 = Space.transaction({
       issuer: alice,
       subject: space,
       changes: {
@@ -699,23 +705,25 @@ test(
           },
         },
       },
-    };
+    });
 
     assert(await session.transact(t1).ok);
     assert(await session.transact(t2).ok);
     assert(await session.transact(t3).ok);
 
-    const result = session.transact({
-      issuer: alice,
-      subject: space,
-      changes: {
-        [the]: {
-          [doc]: {
-            [refer(v1).toString()]: null, // currently it's v2 instead
+    const result = session.transact(
+      Space.transaction({
+        issuer: alice,
+        subject: space,
+        changes: {
+          [the]: {
+            [doc]: {
+              [refer(v1).toString()]: null, // currently it's v2 instead
+            },
           },
         },
-      },
-    });
+      }),
+    );
 
     assert(result.error, "Retract fails if expected version is out of date");
     assert(result.error.name === "ConflictError");
@@ -739,7 +747,7 @@ test(
 );
 
 test("new memory creation fails after retraction", new URL(`memory:${alice}`), async (session) => {
-  const t1 = {
+  const t1 = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
@@ -751,7 +759,7 @@ test("new memory creation fails after retraction", new URL(`memory:${alice}`), a
         },
       },
     },
-  };
+  });
 
   const v1 = {
     the,
@@ -759,11 +767,11 @@ test("new memory creation fails after retraction", new URL(`memory:${alice}`), a
     is: { v: 1 },
     cause: refer({ the, of: doc }),
   };
-  const create = await Repository.transact(session, t1);
+  const create = await Space.transact(session, t1);
 
   assert(create.ok, "Document created");
 
-  const t2 = {
+  const t2 = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
@@ -773,11 +781,11 @@ test("new memory creation fails after retraction", new URL(`memory:${alice}`), a
         },
       },
     },
-  };
+  });
 
-  const retract = Repository.transact(session, t2);
+  const retract = Space.transact(session, t2);
   assertEquals(retract, {
-    ok: Repository.toCommit({
+    ok: Space.toCommit({
       subject: space,
       is: {
         since: 1,
@@ -787,7 +795,7 @@ test("new memory creation fails after retraction", new URL(`memory:${alice}`), a
     }),
   });
 
-  const t3 = {
+  const t3 = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
@@ -799,9 +807,9 @@ test("new memory creation fails after retraction", new URL(`memory:${alice}`), a
         },
       },
     },
-  };
+  });
 
-  const conflict = await Repository.transact(session, t3);
+  const conflict = await Space.transact(session, t3);
 
   assert(conflict.error, "Create fails if cause not specified");
   assert(conflict.error.name === "ConflictError");
@@ -822,9 +830,9 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
   const doc2 = refer({ hi: "world" }).toString();
   const doc3 = refer({ chao: "world" }).toString();
 
-  const doc1v0 = Repository.init({ of: doc });
-  const doc2v0 = Repository.init({ of: doc2 });
-  const tr1 = {
+  const doc1v0 = Space.init({ of: doc });
+  const doc2v0 = Space.init({ of: doc2 });
+  const tr1 = Space.transaction({
     issuer: alice,
     subject: space,
     meta: {
@@ -844,7 +852,7 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
         },
       },
     },
-  };
+  });
 
   const doc1v1 = {
     the,
@@ -862,7 +870,7 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
 
   const init = await session.transact(tr1);
   assertEquals(init, {
-    ok: Repository.toCommit({
+    ok: Space.toCommit({
       subject: space,
       is: {
         since: 0,
@@ -891,9 +899,9 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
     },
   );
 
-  const doc3v0 = Repository.init({ of: doc3 });
+  const doc3v0 = Space.init({ of: doc3 });
 
-  const tr2 = {
+  const tr2 = Space.transaction({
     issuer: alice,
     subject: space,
     meta: {
@@ -922,11 +930,11 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
         },
       },
     },
-  };
+  });
 
   const update = await session.transact(tr2);
   assertEquals(update, {
-    ok: Repository.toCommit({
+    ok: Space.toCommit({
       subject: space,
       is: {
         since: 1,
@@ -970,7 +978,7 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
 
   // Fails on mismatched invariant
 
-  const tr3 = {
+  const tr3 = Space.transaction({
     issuer: alice,
     subject: space,
     meta: {
@@ -991,7 +999,7 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
         },
       },
     },
-  };
+  });
 
   const badInvariant = session.transact(tr3);
   assert(badInvariant.error);
@@ -1018,7 +1026,7 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
 
 Deno.test("fail to connect to non-existing replica", async () => {
   const url = new URL(`./${alice}.sqlite`, await createTemporaryDirectory());
-  const session = await Repository.connect({ url });
+  const session = await Space.connect({ url });
 
   await assert(session.error, "Replica does not exist");
 
@@ -1032,14 +1040,14 @@ Deno.test("open creates replica if does not exists", async () => {
   const url = new URL(`./${alice}.sqlite`, await createTemporaryDirectory());
 
   try {
-    const open = await Repository.open({
+    const open = await Space.open({
       url,
     });
 
     await assert(open.ok, "Opened a repository");
 
-    const session = open.ok as Repository.Store;
-    const t1 = {
+    const session = open.ok as Space.Store;
+    const t1 = Space.transaction({
       issuer: alice,
       subject: space,
       changes: {
@@ -1051,13 +1059,13 @@ Deno.test("open creates replica if does not exists", async () => {
           },
         },
       },
-    };
-    const create = await Repository.transact(session, t1);
+    });
+    const create = await Space.transact(session, t1);
 
     assertEquals(
       create,
       {
-        ok: Repository.toCommit({
+        ok: Space.toCommit({
           subject: space,
           is: {
             since: 0,
@@ -1090,19 +1098,21 @@ test("list empty store", new URL(`memory:${space}`), async (session) => {
 });
 
 test("list single fact", new URL(`memory:${space}`), async (session) => {
-  session.transact({
+  const tr = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
       [the]: {
         [doc]: {
-          [Repository.init({ of: doc }).toString()]: {
+          [Space.init({ of: doc }).toString()]: {
             is: { v: 1 },
           },
         },
       },
     },
   });
+  const write = await session.transact(tr);
+  assert(write.ok);
 
   const result = session.list({ the: "application/json" });
   assertEquals(result, {
@@ -1111,7 +1121,7 @@ test("list single fact", new URL(`memory:${space}`), async (session) => {
         the: "application/json",
         of: doc,
         is: { v: 1 },
-        cause: Repository.init({ of: doc }),
+        cause: Space.init({ of: doc }),
       },
     ],
   });
@@ -1119,33 +1129,34 @@ test("list single fact", new URL(`memory:${space}`), async (session) => {
 
 test("list excludes retracted facts", new URL(`memory:${space}`), async (session) => {
   // Create and then retract a fact
-  const fact = session.transact({
+  const tr = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
       [the]: {
         [doc]: {
-          [Repository.init({ of: doc }).toString()]: {
+          [Space.init({ of: doc }).toString()]: {
             is: { v: 1 },
           },
         },
       },
     },
   });
+  const fact = await session.transact(tr);
 
   assert(fact.ok);
-  const retract = session.transact({
+  const tr2 = Space.transaction({
     issuer: alice,
     subject: space,
     changes: {
       [the]: {
         [doc]: {
-          [refer({ the, of: doc, is: { v: 1 }, cause: Repository.init({ of: doc }) }).toString()]:
-            null,
+          [refer({ the, of: doc, is: { v: 1 }, cause: Space.init({ of: doc }) }).toString()]: null,
         },
       },
     },
   });
+  const retract = session.transact(tr2);
   assert(retract.ok);
 
   const result = session.list({ the: "application/json" });

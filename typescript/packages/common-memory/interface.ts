@@ -10,7 +10,7 @@ export type Command = {
 /**
  * Unique identifier for the store.
  */
-export type ReplicaID = string & { toString(): ReplicaID };
+export type Space = string & { toString(): Space };
 
 /**
  * Unique identifier for the mutable entity.
@@ -159,11 +159,44 @@ export type Changes = {
   };
 };
 
+export type Meta = Record<string, string>;
+
+export type Principal = string;
+
 export type Transaction = {
-  issuer: string;
-  subject: ReplicaID;
-  changes: Changes;
-  meta?: Record<string, string>;
+  iss: Principal;
+  sub: Space;
+  cmd: "/space/transact";
+  args: { changes: Changes };
+  meta?: Meta;
+};
+
+export type Query = {
+  iss: Principal;
+  sub: Space;
+  cmd: "/space/query";
+  args: { selector: Selector };
+};
+
+export type List = {
+  iss: Principal;
+  sub: Space;
+  cmd: "/space/list";
+  args: { selector: Partial<Selector> };
+};
+
+export type Subscribe = {
+  iss: Principal;
+  sub: Space;
+  cmd: "/space/subscribe";
+  args: { selector: Selector };
+};
+
+export type Unsubscribe = {
+  iss: Principal;
+  sub: Space;
+  cmd: "/space/unsubscribe";
+  args: { selector: Selector };
 };
 
 export type InferTransactionResult<Instruction> = Instruction extends Assert
@@ -181,7 +214,7 @@ export interface Selector {
 /**
  * Generic type used to annotate underlying type with a context of the replica.
  */
-export type In<T> = { [For: ReplicaID]: T };
+export type In<T> = { [For: Space]: T };
 
 export type JSONValue = null | boolean | number | string | JSONObject | JSONArray;
 
@@ -213,7 +246,7 @@ export type Conflict = {
   /**
    * Identifier of the replica where conflict occurred.
    */
-  in: ReplicaID;
+  in: Space;
 
   /**
    * Type of the fact where a conflict occurred.
@@ -272,13 +305,13 @@ export interface TransactionError extends Error {
 export interface QueryError extends Error {
   name: "QueryError";
   cause: SystemError;
-  selector: Selector & { in: ReplicaID };
+  selector: Selector & { in: Space };
 }
 
 export interface ListError extends Error {
   name: "ListError";
   cause: SystemError;
-  selector: { in: ReplicaID; the?: string; of?: string };
+  selector: { in: Space; the?: string; of?: string };
 }
 
 /**
