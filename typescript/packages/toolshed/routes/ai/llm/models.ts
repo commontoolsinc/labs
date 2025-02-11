@@ -223,37 +223,61 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
 
   addModel({
     provider: openAIProvider,
-    name: "openai:o1-preview-2024-09-12",
-    aliases: ["openai:o1-preview-latest", "openai:o1-preview", "o1-preview"],
+    name: "openai:o1",
+    aliases: ["openai:o1-low", "o1-low"],
     capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 32768,
+      contextWindow: 200_000,
+      maxOutputTokens: 100_000,
       images: false,
       prefill: false,
       systemPrompt: false,
       stopSequences: false,
-      streaming: false,
+      streaming: true,
+    },
+    providerOptions: {
+      reasoningEffort: "low",
     },
   });
 
   addModel({
     provider: openAIProvider,
-    name: "openai:o1-mini-2024-09-12",
-    aliases: ["openai:o1-mini-latest", "openai:o1-mini", "o1-mini"],
+    name: "openai:o1",
+    aliases: ["openai:o1-medium", "o1-medium"],
     capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 65536,
+      contextWindow: 200_000,
+      maxOutputTokens: 100_000,
       images: false,
       prefill: false,
       systemPrompt: false,
       stopSequences: false,
-      streaming: false,
+      streaming: true,
+    },
+    providerOptions: {
+      reasoningEffort: "medium",
     },
   });
 
   addModel({
     provider: openAIProvider,
-    name: "openai:o3-mini-low",
+    name: "openai:o1",
+    aliases: ["openai:o1-high", "o1-high"],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 100_000,
+      images: false,
+      prefill: false,
+      systemPrompt: false,
+      stopSequences: false,
+      streaming: true,
+    },
+    providerOptions: {
+      reasoningEffort: "high",
+    },
+  });
+
+  addModel({
+    provider: openAIProvider,
+    name: "openai:o3-mini",
     aliases: ["openai:o3-mini-low-latest", "o3-mini-low"],
     capabilities: {
       contextWindow: 200_000,
@@ -271,7 +295,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
 
   addModel({
     provider: openAIProvider,
-    name: "openai:o3-mini-medium",
+    name: "openai:o3-mini",
     aliases: ["openai:o3-mini-medium-latest", "o3-mini-medium"],
     capabilities: {
       contextWindow: 200_000,
@@ -289,7 +313,7 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
 
   addModel({
     provider: openAIProvider,
-    name: "openai:o3-mini-high",
+    name: "openai:o3-mini",
     aliases: ["openai:o3-mini-high-latest", "o3-mini-high"],
     capabilities: {
       contextWindow: 200_000,
