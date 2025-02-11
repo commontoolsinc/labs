@@ -18,7 +18,7 @@ console.log("initializing os-ui", osUi);
 
 import "@commontools/os-ui/src/static/main.css";
 import { useCell } from "@/hooks/use-cell";
-import { replica, searchResults, sidebar } from "./state";
+import { searchResults, sidebar } from "./state";
 import "./main.css";
 import { castSpell } from "@/search";
 import SearchResults from "@/components/SearchResults";
@@ -105,7 +105,8 @@ async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: a
 }
 
 export default function Shell() {
-  const { replicaName } = useParams<{ replicaName: string }>();
+  // Get the replica name from the URL, defaulting to "common-knowledge"
+  const { replicaName = "common-knowledge" } = useParams<{ replicaName: string }>();
   const navigate = useNavigate();
   const [sidebarTab] = useCell(sidebar);
   const [spellResults, setSearchResults] = useCell(searchResults);
