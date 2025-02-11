@@ -331,13 +331,18 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
 }
 
 if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
+  const credentials = JSON.parse(
+    Deno.readTextFileSync(env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS),
+  );
+
   const vertexProvider = createVertex({
     googleAuthOptions: {
-      credentials: env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS as any, // bf: taming type errors
+      credentials: credentials as any,
     },
     project: env.CTTS_AI_LLM_GOOGLE_VERTEX_PROJECT,
     location: env.CTTS_AI_LLM_GOOGLE_VERTEX_LOCATION,
   });
+
   addModel({
     provider: vertexProvider,
     name: "google:gemini-2.0-flash",

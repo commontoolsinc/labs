@@ -89,6 +89,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
       },
     });
   } catch (error) {
+    console.error("Error in generateText:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
     return c.json({ error: message }, HttpStatusCodes.BAD_REQUEST);
   }

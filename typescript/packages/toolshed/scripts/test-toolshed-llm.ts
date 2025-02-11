@@ -3,9 +3,12 @@
 import { parseArgs } from "@std/cli/parse-args";
 import { colors } from "@/routes/ai/llm/cli.ts";
 
-const API_URL = Deno.env.get("API_URL") || "http://localhost:8000/api/ai/llm";
+const API_URL = Deno.env.get("TOOLSHED_API_URL")
+  ? `${Deno.env.get("TOOLSHED_API_URL")}/api/ai/llm`
+  : "http://localhost:8000/api/ai/llm";
 const TEST_SYSTEM_PROMPT = "Be creative.";
-const TEST_PROMPT = "What's your favorite color?";
+const current_time = new Date().toISOString();
+const TEST_PROMPT = `What's your favorite color? (cachebust:${current_time})`;
 
 async function testLlm(modelName: string) {
   const payload = {
@@ -65,7 +68,7 @@ async function main() {
       models = args.variety.split(",").map((m: string) => m.trim());
     } else {
       models = [
-        "gemini-2.0-flash",
+        "google:gemini-2.0-flash",
         "gemini-2.0-flash-thinking",
         "gemini-2.0-pro",
         "o1-low",
