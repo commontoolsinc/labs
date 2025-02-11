@@ -1,6 +1,6 @@
-import { useRef } from "react";
+import { useRef, useState, useEffect } from "react";
 import { Canvas, useFrame, extend } from "@react-three/fiber";
-import { OrthographicCamera, Effects } from "@react-three/drei";
+import { OrthographicCamera, Effects, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 
 // @ts-expect-error no types provided
@@ -55,80 +55,117 @@ class DitheringPassClass extends ShaderPass {
 
 // Extend the pass
 extend({ DitheringPass: DitheringPassClass });
+function MorphingMesh() {
+  const meshRef = useRef<THREE.Mesh>();
 
-const OrbitingCube = ({
-  orbitSpeed,
-  orbitRadius,
-  phase,
-  color,
-  rotationAxis = "horizontal",
-}: {
-  orbitSpeed: number;
-  orbitRadius: number;
-  phase: number;
-  color: string;
-  rotationAxis?: "horizontal" | "vertical";
-}) => {
-  const meshRef = useRef<THREE.Mesh>(null);
+  useEffect(() => {
+    if (!meshRef.current) return;
 
-  useFrame((state) => {
-    if (meshRef.current) {
-      const time = state.clock.getElapsedTime();
+    // Create base icosphere
+    const baseGeometry = new THREE.IcosahedronGeometry(1, 1); // subdivision level 1
+    const vertexCount = baseGeometry.attributes.position.count;
 
-      if (rotationAxis === "horizontal") {
-        meshRef.current.position.x = Math.cos(time * orbitSpeed + phase) * orbitRadius;
-        meshRef.current.position.z = Math.sin(time * orbitSpeed + phase) * orbitRadius;
-      } else {
-        meshRef.current.position.x = Math.cos(time * orbitSpeed + phase) * orbitRadius;
-        meshRef.current.position.y = Math.sin(time * orbitSpeed + phase) * orbitRadius;
+    // Helper function to map icosphere vertices to target shape positions
+    const createMorphTarget = (shapeFn: (t: THREE.Vector3) => THREE.Vector3) => {
+      const positions = new Float32Array(vertexCount * 3);
+      const positionAttribute = baseGeometry.attributes.position;
+      const tempVector = new THREE.Vector3();
+
+      for (let i = 0; i < vertexCount; i++) {
+        tempVector.fromBufferAttribute(positionAttribute, i);
+        // Normalize to get direction from center
+        tempVector.normalize();
+        // Map to target shape
+        const targetPos = shapeFn(tempVector);
+        positions[i * 3] = targetPos.x;
+        positions[i * 3 + 1] = targetPos.y;
+        positions[i * 3 + 2] = targetPos.z;
       }
 
-      meshRef.current.rotation.x += 0.01;
-      meshRef.current.rotation.y += 0.01;
-    }
+      return new THREE.BufferAttribute(positions, 3);
+    };
+
+    // Shape mapping functions
+    const shapes = [
+      // Cube
+      (v: THREE.Vector3) => {
+        const abs = v.clone().set(Math.abs(v.x), Math.abs(v.y), Math.abs(v.z));
+        const max = Math.max(abs.x, abs.y, abs.z);
+        return v.clone().multiplyScalar(1 / max);
+      },
+      // Sphere (already spherical, just needs radius adjustment)
+      (v: THREE.Vector3) => v.clone().multiplyScalar(0.8),
+      // Octahedron
+      (v: THREE.Vector3) => {
+        const sum = Math.abs(v.x) + Math.abs(v.y) + Math.abs(v.z);
+        return v.clone().multiplyScalar(1 / sum);
+      },
+      // Cylinder
+      (v: THREE.Vector3) => {
+        const cylinderV = v.clone();
+        const radius = Math.sqrt(v.x * v.x + v.z * v.z);
+        if (radius > 0) {
+          cylinderV.x *= 0.7 / radius;
+          cylinderV.z *= 0.7 / radius;
+        }
+        cylinderV.y *= 1.2;
+        return cylinderV;
+      },
+      // Cone
+      (v: THREE.Vector3) => {
+        const coneV = v.clone();
+        const radius = Math.sqrt(v.x * v.x + v.z * v.z);
+        if (radius > 0) {
+          const scale = (1 - (v.y + 1) * 0.5) * 0.8;
+          coneV.x *= scale / radius;
+          coneV.z *= scale / radius;
+        }
+        coneV.y *= 1.2;
+        return coneV;
+      }
+    ];
+
+    // Create morph targets
+    baseGeometry.morphAttributes.position = shapes.map(shapeFn =>
+      createMorphTarget(shapeFn)
+    );
+
+    // Update mesh geometry
+    meshRef.current.geometry = baseGeometry;
+    meshRef.current.morphTargetInfluences = new Array(shapes.length).fill(0);
+
+    return () => {
+      baseGeometry.dispose();
+    };
+  }, []);
+
+  useFrame((state) => {
+    if (!meshRef.current) return;
+
+    const time = state.clock.getElapsedTime();
+    const influences = meshRef.current.morphTargetInfluences;
+
+    if (!influences) return;
+
+    // Animate each influence with an offset
+    influences.forEach((_, index) => {
+      influences[index] = Math.sin(time + index * Math.PI * 0.5) * 0.5 + 0.5;
+    });
   });
 
   return (
     <mesh ref={meshRef}>
-      <boxGeometry args={[0.8, 0.8, 0.8]} />
-      <meshStandardMaterial color={color} roughness={0.2} metalness={0.8} />
+      <meshNormalMaterial morphTargets />
     </mesh>
   );
-};
-
+}
 type DitheredCubeProps = {
   width?: number;
   height?: number;
   className?: string;
 };
 
-const MovingDirectionalLight = () => {
-  const lightRef = useRef<THREE.DirectionalLight>(null);
-
-  useFrame((state) => {
-    if (lightRef.current) {
-      const time = state.clock.getElapsedTime();
-      lightRef.current.position.x = Math.sin(time * 0.5) * 5;
-      lightRef.current.position.y = Math.cos(time * 0.3) * 5;
-      lightRef.current.position.z = Math.sin(time * 0.4) * 5;
-    }
-  });
-
-  return <directionalLight ref={lightRef} position={[5, 5, 5]} intensity={10} />;
-};
-
 export const DitheredCube = ({ width = 512, height = 512, className }: DitheredCubeProps) => {
-  // Create arrays for cube positions in both rings
-  const horizontalCubes = Array.from({ length: 8 }, (_, i) => ({
-    phase: (i * Math.PI * 2) / 8,
-    color: `hsl(${(i * 360) / 8}, 70%, 60%)`,
-  }));
-
-  const verticalCubes = Array.from({ length: 8 }, (_, i) => ({
-    phase: (i * Math.PI * 2) / 8,
-    color: `hsl(${(i * 360) / 8 + 180}, 70%, 60%)`,
-  }));
-
   return (
     <div style={{ width, height, imageRendering: "pixelated" }} className={className}>
       <Canvas
@@ -138,28 +175,10 @@ export const DitheredCube = ({ width = 512, height = 512, className }: DitheredC
         }}
       >
         <OrthographicCamera makeDefault position={[0, 0, 5]} zoom={50} near={0.1} far={1000} />
-        <ambientLight intensity={0.2} />
-        <MovingDirectionalLight />
-        {horizontalCubes.map((cube, i) => (
-          <OrbitingCube
-            key={`h-${i}`}
-            orbitSpeed={1.5}
-            orbitRadius={2}
-            phase={cube.phase}
-            color={cube.color}
-            rotationAxis="horizontal"
-          />
-        ))}
-        {verticalCubes.map((cube, i) => (
-          <OrbitingCube
-            key={`v-${i}`}
-            orbitSpeed={1.3}
-            orbitRadius={2}
-            phase={cube.phase}
-            color={cube.color}
-            rotationAxis="vertical"
-          />
-        ))}
+        <ambientLight intensity={0.5} />
+        <pointLight position={[10, 10, 10]} />
+        <MorphingMesh />
+        <OrbitControls enableZoom={true} />
         <Effects>
           <ditheringPass />
         </Effects>
