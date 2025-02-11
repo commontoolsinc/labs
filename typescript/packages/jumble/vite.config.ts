@@ -39,7 +39,7 @@ export default defineConfig({
         changeOrigin: true,
       },
       "/api/storage/memory": {
-        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        target: process.env.MEMORY_URL ?? process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
         ws: true,
         changeOrigin: true,
         rewriteWsOrigin: true,
