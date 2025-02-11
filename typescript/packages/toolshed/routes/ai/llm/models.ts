@@ -389,11 +389,11 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
 
   addModel({
     provider: perplexityProvider,
-    name: "perplexity:llama-3.1-sonar-large-128k-online",
-    aliases: ["perplexity-lg"],
+    name: "perplexity:sonar-reasoning-pro",
+    aliases: ["sonar-reasoning-pro"],
     capabilities: {
-      contextWindow: 127_072,
-      maxOutputTokens: 8192,
+      contextWindow: 127_000,
+      maxOutputTokens: 8000,
       images: false,
       prefill: false,
       systemPrompt: false,
@@ -404,11 +404,11 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
 
   addModel({
     provider: perplexityProvider,
-    name: "perplexity:llama-3.1-sonar-small-128k-online",
-    aliases: ["perplexity-sm"],
+    name: "perplexity:sonar-pro",
+    aliases: ["sonar-pro"],
     capabilities: {
-      contextWindow: 127_072,
-      maxOutputTokens: 8192,
+      contextWindow: 200_000,
+      maxOutputTokens: 8000,
       images: false,
       prefill: false,
       systemPrompt: false,
@@ -419,11 +419,11 @@ if (env.CTTS_AI_LLM_PERPLEXITY_API_KEY) {
 
   addModel({
     provider: perplexityProvider,
-    name: "perplexity:llama-3.1-sonar-huge-128k-online",
-    aliases: ["perplexity-huge"],
+    name: "perplexity:sonar",
+    aliases: ["sonar"],
     capabilities: {
-      contextWindow: 127_072,
-      maxOutputTokens: 8192,
+      contextWindow: 127_000,
+      maxOutputTokens: 8000,
       images: false,
       prefill: false,
       systemPrompt: false,
