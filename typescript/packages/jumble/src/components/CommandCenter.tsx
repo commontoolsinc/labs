@@ -1,12 +1,14 @@
 import { Command } from "cmdk";
 import { useState, useEffect, useRef } from "react";
 import "./commands.css";
-import { castNewRecipe, iterate } from "@commontools/charm";
+import { castNewRecipe, Charm, CharmManager, iterate } from "@commontools/charm";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { useMatch, useNavigate } from "react-router-dom";
 import { castSpell } from "@/search";
 import { charmId } from "@/utils/charms";
 import { Dialog, VisuallyHidden } from "radix-ui";
+import { NAME } from "@commontools/builder";
+import { DocImpl, getRecipe } from "@commontools/runner";
 
 export function CommandCenter() {
   const [open, setOpen] = useState(false);
@@ -16,11 +18,16 @@ export function CommandCenter() {
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
 
+  // bf: this will need to become a state machine eventualyl
+  const [spellResults, setSpellResults] = useState<any[]>([]);
+  const [charmResults, setCharmResults] = useState<any[]>([]);
+  const [mode, setMode] = useState<"main" | "spellResults" | "charmResults">("main");
+
   const match = useMatch("/:replicaName/:charmId?");
   const focusedCharmId = match?.params.charmId ?? null;
   const focusedReplicaId = match?.params.replicaName ?? null;
 
-  // Handle keyboard shortcut
+  // Handle keyboard shortcut and custom event
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
@@ -29,9 +36,56 @@ export function CommandCenter() {
       }
     };
 
+    const handleOpenCommandCenter = () => {
+      setOpen(true);
+    };
+
     document.addEventListener("keydown", down);
-    return () => document.removeEventListener("keydown", down);
+    window.addEventListener("open-command-center", handleOpenCommandCenter);
+
+    return () => {
+      document.removeEventListener("keydown", down);
+      window.removeEventListener("open-command-center", handleOpenCommandCenter);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!open) {
+      setSearch("");
+      setMode("main");
+      setSpellResults([]);
+      setCharmResults([]);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    setSearch("");
+  }, [mode]);
+
+  async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: any) {
+    const recipeKey = result?.key;
+
+    if (recipeKey && blob) {
+      console.log("Syncing...");
+      const recipeId = recipeKey.replace("spell-", "");
+      await charmManager.syncRecipeBlobby(recipeId);
+
+      const recipe = getRecipe(recipeId);
+      if (!recipe) return;
+
+      console.log("Casting...");
+      const doc = await charmManager.sync({ "/": blob.key }, true);
+      const charm: DocImpl<Charm> = await charmManager.runPersistent(recipe, {
+        cell: doc,
+        path: ["argument"],
+      });
+      charmManager.add([charm]);
+      navigate(`/${focusedReplicaId}/${charmId(charm.entityId!)}`);
+      console.log("Ready!");
+    } else {
+      console.log("Failed to cast");
+    }
+  }
 
   // Command handlers
   const handleNewCharm = async () => {
@@ -94,11 +148,29 @@ export function CommandCenter() {
     };
   }, []);
 
-  const handleSearchCharms = async (query: string) => {
+  const handleSearchCharms = async () => {
     setLoading(true);
-    // Implement async charm search
-    console.log("Searching charms:", query);
-    setLoading(false);
+    try {
+      const charms = charmManager.getCharms().get();
+
+      const results = await Promise.all(
+        charms.map(async (charm) => {
+          const data = charm.cell.get();
+          return {
+            title: data[NAME] + ` (#${charmId(charm.cell.entityId!).slice(-4)})`,
+            id: charmId(charm.cell.entityId!),
+          };
+        }),
+      );
+
+      setCharmResults(results);
+      setMode("charmResults");
+    } catch (error) {
+      console.error("Search charms error:", error);
+      alert("Failed to search charms");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSpellcaster = async () => {
@@ -112,16 +184,14 @@ export function CommandCenter() {
       const spellInput = prompt("Enter your spell:");
       if (!spellInput) return;
 
-      console.log("Casting spell", spellInput);
       const spells = await castSpell(focusedReplicaId, spellInput);
-      // setSearchResults(spells); // Make sure to handle the results
-      console.log("Spell results:", spells);
+      setSpellResults(spells);
+      setMode("spellResults"); // Switch to results view
     } catch (error) {
       console.error("Spellcaster error:", error);
       alert("Failed to cast spell");
     } finally {
       setLoading(false);
-      setOpen(false);
     }
   };
 
@@ -214,7 +284,6 @@ export function CommandCenter() {
     window.dispatchEvent(new CustomEvent("toggle-details"));
     setOpen(false);
   };
-
   return (
     <Command.Dialog title="Common" open={open} onOpenChange={setOpen} label="Command Menu">
       <VisuallyHidden.VisuallyHidden>
@@ -225,7 +294,13 @@ export function CommandCenter() {
       </VisuallyHidden.VisuallyHidden>
 
       <Command.Input
-        placeholder="What would you like to do?"
+        placeholder={
+          mode === "main"
+            ? "What would you like to do?"
+            : mode === "spellResults"
+              ? "Search spell results..."
+              : "Search charms..."
+        }
         value={search}
         onValueChange={setSearch}
       />
@@ -234,34 +309,95 @@ export function CommandCenter() {
 
         {loading && <Command.Loading>Loading...</Command.Loading>}
 
-        <Command.Group heading="Actions">
-          <Command.Item onSelect={handleNewCharm}>New Charm</Command.Item>
-          <Command.Item onSelect={() => handleSearchCharms(search)}>Search Charms</Command.Item>
-          <Command.Item onSelect={handleSpellcaster}>Spellcaster</Command.Item>
-        </Command.Group>
+        {mode === "main" ? (
+          <>
+            <Command.Group heading="Actions">
+              <Command.Item onSelect={handleNewCharm}>New Charm</Command.Item>
+              <Command.Item onSelect={handleSearchCharms}>Search Charms</Command.Item>
+              <Command.Item onSelect={handleSpellcaster}>Spellcaster</Command.Item>
+            </Command.Group>
 
-        <Command.Group heading="Edit">
-          <Command.Item onSelect={() => console.log("Rename")}>Rename Charm</Command.Item>
-          <Command.Item onSelect={handleDeleteCharm}>Delete Charm</Command.Item>
-          <Command.Item onSelect={handleEditRecipe}>Edit Recipe</Command.Item>
-        </Command.Group>
+            <Command.Group heading="Edit">
+              <Command.Item onSelect={() => console.log("Rename")}>Rename Charm</Command.Item>
+              <Command.Item onSelect={handleDeleteCharm}>Delete Charm</Command.Item>
+              <Command.Item onSelect={handleEditRecipe}>Edit Recipe</Command.Item>
+            </Command.Group>
 
-        <Command.Group heading="Navigation">
-          <Command.Item onSelect={handleNavigateBack}>Navigate Back</Command.Item>
-          <Command.Item onSelect={handleNavigateForward}>Navigate Forward</Command.Item>
-          <Command.Item onSelect={handleNavigateHome}>Navigate Home</Command.Item>
-        </Command.Group>
+            <Command.Group heading="Navigation">
+              <Command.Item onSelect={handleNavigateBack}>Navigate Back</Command.Item>
+              <Command.Item onSelect={handleNavigateForward}>Navigate Forward</Command.Item>
+              <Command.Item onSelect={handleNavigateHome}>Navigate Home</Command.Item>
+            </Command.Group>
 
-        <Command.Group heading="View">
-          <Command.Item onSelect={handleSwitchReplica}>Switch Replica</Command.Item>
-          {focusedCharmId && (
-            <Command.Item onSelect={handleToggleDetails}>Toggle Details</Command.Item>
-          )}
-        </Command.Group>
+            <Command.Group heading="View">
+              <Command.Item onSelect={handleSwitchReplica}>Switch Replica</Command.Item>
+              {focusedCharmId && (
+                <Command.Item onSelect={handleToggleDetails}>Toggle Details</Command.Item>
+              )}
+            </Command.Group>
 
-        <Command.Group heading="Data">
-          <Command.Item onSelect={handleImportJSON}>Import JSON</Command.Item>
-        </Command.Group>
+            <Command.Group heading="Data">
+              <Command.Item onSelect={handleImportJSON}>Import JSON</Command.Item>
+            </Command.Group>
+          </>
+        ) : mode === "spellResults" ? (
+          <>
+            <Command.Group heading="Spell Results">
+              {spellResults.map((result, index) => (
+                <Command.Item
+                  key={index}
+                  onSelect={async () => {
+                    console.log("Selected spell result:", result);
+                    await castSpellAsCharm(charmManager, result, result.compatibleBlobs[0]);
+                    setMode("main");
+                    setOpen(false);
+                  }}
+                >
+                  {result.title || result.name || `Result ${index + 1}`}
+                </Command.Item>
+              ))}
+            </Command.Group>
+            <Command.Group>
+              <Command.Item
+                onSelect={() => {
+                  setMode("main");
+                  setSpellResults([]);
+                }}
+              >
+                Back to Main Menu
+              </Command.Item>
+            </Command.Group>
+          </>
+        ) : (
+          <>
+            <Command.Group heading="Charm Results">
+              {charmResults.map((charm, index) => (
+                <Command.Item
+                  key={charm.id}
+                  onSelect={() => {
+                    if (focusedReplicaId && charm.id) {
+                      navigate(`/${focusedReplicaId}/${charm.id}`);
+                      setMode("main");
+                      setOpen(false);
+                    }
+                  }}
+                >
+                  {charm.title || `Charm ${index + 1}`}
+                </Command.Item>
+              ))}
+            </Command.Group>
+            <Command.Group>
+              <Command.Item
+                onSelect={() => {
+                  setMode("main");
+                  setCharmResults([]);
+                }}
+              >
+                Back to Main Menu
+              </Command.Item>
+            </Command.Group>
+          </>
+        )}
       </Command.List>
     </Command.Dialog>
   );

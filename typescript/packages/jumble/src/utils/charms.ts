@@ -9,6 +9,6 @@ export function charmId(charm: Charm | EntityId) {
       return charm.cell.toJSON()["/"];
     }
   } else {
-    return charm.toJSON?.()?.["/"];
+    return charm.toJSON?.()?.["/"] ?? charm["/"];
   }
 }
