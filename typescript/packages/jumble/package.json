@@ -33,7 +33,6 @@
     "@commontools/runner": "workspace:*",
     "@commontools/ui": "workspace:*",
     "@lit/react": "^1.0.7",
-    "@radix-ui/react-popover": "^1.1.6",
     "@react-spring/three": "^9.7.5",
     "@react-spring/web": "^9.7.5",
     "@react-three/drei": "^9.121.4",

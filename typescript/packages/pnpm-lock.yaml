@@ -447,9 +447,6 @@ importers:
       '@lit/react':
         specifier: ^1.0.7
         version: 1.0.7(@types/react@18.3.18)
-      '@radix-ui/react-popover':
-        specifier: ^1.1.6
-        version: 1.1.6(@types/react-dom@18.3.5(@types/react@18.3.18))(@types/react@18.3.18)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@react-spring/three':
         specifier: ^9.7.5
         version: 9.7.5(@react-three/fiber@8.17.14(@types/react@18.3.18)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(three@0.173.0))(react@18.3.1)(three@0.173.0)
