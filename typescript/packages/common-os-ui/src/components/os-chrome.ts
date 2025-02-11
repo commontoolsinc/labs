@@ -121,11 +121,6 @@ export class OsChrome extends LitElement {
       this.sidebar = false;
     };
 
-    const onLocationClick = () => {
-      console.log("Location clicked from chrome!");
-      this.dispatchEvent(new CustomEvent("location"));
-    };
-
     return html`
       <div class="chrome" @sidebarclose="${onSidebarClose}">
         <div class="chrome-overlay">
