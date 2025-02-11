@@ -388,7 +388,7 @@ export class RemoteStorageProvider implements StorageProvider {
     const response = await fetch(this.address.href, {
       method: "PATCH",
       headers: {
-        'content-type': 'application/json'
+        "content-type": "application/json",
       },
       body: JSON.stringify(transaction),
     });
@@ -500,25 +500,40 @@ export class RemoteStorageProvider implements StorageProvider {
   async send<T = any>(changes: { entityId: EntityId; value: StorageValue<T> }[]): Promise<void> {
     const promises = [];
     const { the } = this;
-    for (const { entityId, value: is } of changes) {
+    for (const { entityId, value: newValue } of changes) {
       const of = RemoteStorageProvider.toEntity(entityId);
+      const currentRevision = this.revision(of);
+      // If a revision exists and its current value is identical to the new value,
+      // skip sending a PATCH.
+      if (
+        currentRevision &&
+        JSON.stringify(currentRevision.value.is) === JSON.stringify(newValue)
+      ) {
+        log("RemoteStorageProvider.send: no change detected for", of);
+        continue;
+      }
+
       const assertion = {
         the,
         of,
-        // I think we should update storage provider API so it works with `StorageValue`
-        // and makes no other type assumptions.
-        is: is as unknown as JSONValue,
-        cause: this.revision(of)?.this,
+        // Convert the new value into the format expected by the remote API.
+        is: newValue as unknown as JSONValue,
+        cause: currentRevision?.this,
       };
 
-      promises.push(this.transact({ [this.replica]: { assert: {
-        ...assertion,
-        cause: assertion.cause as Reference<Fact> | null | undefined
-      } } }));
+      promises.push(
+        this.transact({
+          [this.replica]: {
+            assert: {
+              ...assertion,
+              cause: assertion.cause as Reference<Fact> | null | undefined,
+            },
+          },
+        }),
+      );
     }
 
     const results = await Promise.all(promises);
-    // We could probably update local revisions here when this happens, although
     for (const result of results) {
       if (result.error) {
         console.error(`🙅‍♂️`, result.error);
