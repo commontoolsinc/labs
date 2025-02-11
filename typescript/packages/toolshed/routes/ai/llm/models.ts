@@ -47,6 +47,7 @@ const addModel = ({
   name,
   aliases,
   capabilities,
+  providerOptions,
 }: {
   provider:
     | typeof anthropic
@@ -57,6 +58,7 @@ const addModel = ({
   name: string;
   aliases: string[];
   capabilities: Capabilities;
+  providerOptions?: Record<string, any>;
 }) => {
   let modelName = name.includes(":")
     ? name.split(":").slice(1).join(":")
@@ -67,7 +69,9 @@ const addModel = ({
     modelName = name;
   }
 
-  const model = provider(modelName);
+  const model = providerOptions
+    ? provider(modelName, providerOptions)
+    : provider(modelName);
 
   const config: ModelConfig = {
     model: (model as unknown) as string,
@@ -204,23 +208,8 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
   });
   addModel({
     provider: openAIProvider,
-    name: "openai:gpt-4o-2024-08-06",
+    name: "openai:gpt-4o",
     aliases: ["openai:gpt-4o", "openai:gpt-4o-latest", "gpt-4o"],
-    capabilities: {
-      contextWindow: 128_000,
-      maxOutputTokens: 16384,
-      images: true,
-      prefill: false,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-    },
-  });
-
-  addModel({
-    provider: openAIProvider,
-    name: "openai:gpt-4o-mini-2024-07-18",
-    aliases: ["openai:gpt-4o-mini-latest", "openai:gpt-4o-mini", "gpt-4o-mini"],
     capabilities: {
       contextWindow: 128_000,
       maxOutputTokens: 16384,
@@ -259,6 +248,61 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
       systemPrompt: false,
       stopSequences: false,
       streaming: false,
+    },
+  });
+
+  // Add o3-mini variants (reasoning control via providerOptions at runtime)
+  addModel({
+    provider: openAIProvider,
+    name: "openai:o3-mini-low",
+    aliases: ["openai:o3-mini-low-latest", "o3-mini-low"],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 100_000,
+      images: false,
+      prefill: false,
+      systemPrompt: false,
+      stopSequences: false,
+      streaming: true,
+    },
+    providerOptions: {
+      reasoningEffort: "low",
+    },
+  });
+
+  addModel({
+    provider: openAIProvider,
+    name: "openai:o3-mini-medium",
+    aliases: ["openai:o3-mini-medium-latest", "o3-mini-medium"],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 100_000,
+      images: false,
+      prefill: false,
+      systemPrompt: false,
+      stopSequences: false,
+      streaming: true,
+    },
+    providerOptions: {
+      reasoningEffort: "medium",
+    },
+  });
+
+  addModel({
+    provider: openAIProvider,
+    name: "openai:o3-mini-high",
+    aliases: ["openai:o3-mini-high-latest", "o3-mini-high"],
+    capabilities: {
+      contextWindow: 200_000,
+      maxOutputTokens: 100_000,
+      images: false,
+      prefill: false,
+      systemPrompt: false,
+      stopSequences: false,
+      streaming: true,
+    },
+    providerOptions: {
+      reasoningEffort: "high",
     },
   });
 }
