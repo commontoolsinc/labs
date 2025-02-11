@@ -11,6 +11,7 @@ import {
 } from "@commontools/runner";
 import { WebComponent } from "@/components/WebComponent";
 import { useCallback } from "react";
+import { charmId } from "@/utils/charms";
 
 import * as osUi from "@commontools/os-ui";
 // bf: load bearing console.log
@@ -18,16 +19,17 @@ console.log("initializing os-ui", osUi);
 
 import "@commontools/os-ui/src/static/main.css";
 import { useCell } from "@/hooks/use-cell";
-import { replica, searchResults, sidebar } from "./state";
+import { searchResults, sidebar } from "./state";
 import "./main.css";
 import { castSpell } from "@/search";
 import SearchResults from "@/components/SearchResults";
 import { Charm, CharmManager, iterate } from "@commontools/charm";
-import { NavLink, Routes, Route, useNavigate, useParams } from "react-router-dom";
+import { NavLink, Routes, Route, useNavigate, useMatch } from "react-router-dom";
 import CharmDetail from "./CharmDetail";
 import CharmList from "./CharmList";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { LLMClient } from "@commontools/llm-client";
+import { NavPath } from "@/components/NavPath";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized
@@ -105,32 +107,38 @@ async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: a
 }
 
 export default function Shell() {
-  const { replicaName } = useParams<{ replicaName: string }>();
   const navigate = useNavigate();
   const [sidebarTab] = useCell(sidebar);
   const [spellResults, setSearchResults] = useCell(searchResults);
   const { charmManager } = useCharmManager();
 
+  const match = useMatch("/:replicaName/:charmId?");
+  const focusedCharmId = match?.params.charmId ?? null;
+  const focusedReplicaId = match?.params.replicaName ?? null;
+
   const onSubmit = useCallback(
     async (ev: CustomEvent) => {
-      const charmId = window.location.pathname.match(/\/[^/]+\/([^/]+)/)?.[1] ?? null;
-      if (charmId) {
-        console.log("Iterating charm", charmId);
+      if (focusedCharmId) {
+        console.log("Iterating charm", focusedCharmId);
 
-        const charm = (await charmManager.get(charmId)) ?? null;
+        const charm = (await charmManager.get(focusedCharmId)) ?? null;
         const newCharmId = await iterate(charmManager, charm, ev.detail.value, ev.detail.shiftKey);
         if (newCharmId) {
           // FIXME(ja): this is a hack to get the charm id
-          const id = (newCharmId as any).toJSON()["/"];
-          navigate(`/${replicaName}/${id}`);
+          navigate(`/${focusedReplicaId}/${charmId(newCharmId)}`);
         }
       } else {
+        if (!focusedReplicaId) {
+          console.error("No replica name found");
+          return;
+        }
+
         console.log("Casting spell", ev.detail.value);
-        const spells = await castSpell(replicaName, ev.detail.value);
+        const spells = await castSpell(focusedReplicaId, ev.detail.value);
         setSearchResults(spells);
       }
     },
-    [replicaName, setSearchResults, navigate, charmManager],
+    [focusedCharmId, focusedReplicaId, setSearchResults, navigate, charmManager],
   );
 
   const onClose = useCallback(() => {
@@ -154,15 +162,10 @@ export default function Shell() {
 
   return (
     <div className="h-full relative">
-      <WebComponent
-        as={"os-chrome"}
-        wide={sidebarTab === "source"}
-        locationTitle={replicaName}
-        onLocation={onLocation}
-      >
-        <NavLink to={`/${replicaName}`} slot="toolbar-start">
-          <WebComponent as="os-avatar" name="Ben"></WebComponent>
-        </NavLink>
+      <WebComponent as={"os-chrome"}>
+        <div slot="toolbar-start">
+          {focusedReplicaId && <NavPath replicaId={focusedReplicaId} charmId={focusedCharmId} />}
+        </div>
 
         <div className="relative h-full">
           <Routes>
