@@ -1,4 +1,4 @@
-import { CSP, HOST_ORIGIN } from './csp.js';
+import { CSP, HOST_ORIGIN } from "./csp.js";
 
 export default `
 <!DOCTYPE html>
@@ -7,17 +7,27 @@ export default `
 	<meta http-equiv="Content-Security-Policy" content="${CSP}" \/>
   <style>
 html, body {
-  height: 100%;
+  padding: 0;
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
 }
+
+* {
+box-sizing: border-box;
+}
+
 iframe {
-  height: 100%;
-  width: 100%;
+  padding: 0;
+  margin: 0;
+  height: 100vh;
+  width: 100vw;
   border: none;
 }
   <\/style>
 <\/head>
 <body>
-	<iframe 
+	<iframe
     sandbox="allow-scripts"><\/iframe>
 	<script>
 const iframe = document.querySelector("iframe");
@@ -34,7 +44,7 @@ toHost({ type: "ready" });
 
 function onMessage(e) {
   if (!e.data || typeof e.data.type !== "string") {
-    return; 
+    return;
   }
 
   if (e.source === INNER_WINDOW) {
@@ -55,7 +65,7 @@ function onMessage(e) {
     }
 
     if (FRAME_ID == null || FRAME_ID !== e.data.id) {
-      return; 
+      return;
     }
 
     switch (e.data.type) {
@@ -65,8 +75,8 @@ function onMessage(e) {
       }
       case "load-document": {
         iframe.srcdoc = e.data.data;
-        return; 
-      } 
+        return;
+      }
       case "passthrough": {
         toInner(e.data.data);
         return;
@@ -80,7 +90,7 @@ function onInnerLoad(e) {
   // loading the srcdoc contents in some browsers.
   // Ignore, and wait for initialization to occur.
   if (FRAME_ID == null) {
-    return; 
+    return;
   }
   toHost({ type: "load", id: FRAME_ID });
 }

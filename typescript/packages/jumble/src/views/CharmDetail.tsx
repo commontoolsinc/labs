@@ -1,6 +1,6 @@
 import { Charm, saveNewRecipeVersion } from "@commontools/charm";
 import React from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { CharmRenderer } from "@/components/CharmRunner";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { getIframeRecipe } from "@commontools/charm";
@@ -33,7 +33,7 @@ function AnimatedCharmView({ spring, details, scrollProgress, charm }: AnimatedC
       style={{
         ...spring,
         height: "100vh",
-        position: details ? "sticky" : "relative",
+        position: details ? "sticky" : "",
         top: 0,
         transformOrigin: "top",
         overflow: "hidden",
@@ -61,41 +61,17 @@ interface CharmDetailsProps {
   changes: boolean;
 }
 
-
-function CharmDetails({
-  spring,
-  charm,
-  details,
-  onSourceChange,
-  onSaveChanges,
-  changes,
-}: CharmDetailsProps) {
-  const { charmManager } = useCharmManager();
-  const navigate = useNavigate();
-
-  const deleteCharm = async () => {
-    if (confirm("Are you sure you want to delete this charm?")) {
-      const result = await charmManager.remove(charm.entityId['/']);
-      if (result) {
-        navigate("/");
-      }
-    }
-  };
-
+function CharmDetails({ spring, charm, details, onSourceChange }: CharmDetailsProps) {
   return (
     <animated.div
       style={{
         ...spring,
         marginTop: details ? "-20rem" : 0,
       }}
-      className="w-full mx-auto"
+      className="max-w-xl mx-auto"
     >
-      <div className="bg-white rounded-lg shadow-lg">
+      <div className="overflow-x-clip bg-white rounded-lg shadow-lg">
         <div className="p-6">
-          <div>
-            <button onClick={() => deleteCharm()}>delete charm</button>
-            {changes && <button onClick={onSaveChanges}>save changes</button>}
-          </div>
           <OsCodeEditor
             style={{ width: "100%", height: "600px" }}
             language="text/html"
@@ -160,6 +136,12 @@ export default function CharmDetail() {
   const { containerRef, scrollProgress, charmSpring, detailsSpring } =
     useCharmDetailAnimations(details);
 
+  React.useEffect(() => {
+    const handleToggleDetails = () => setDetails(!details);
+    window.addEventListener("toggle-details", handleToggleDetails);
+    return () => window.removeEventListener("toggle-details", handleToggleDetails);
+  }, [details]);
+
   const saveChanges = () => {
     if (workingSrc && iframeRecipe && currentFocus) {
       saveNewRecipeVersion(charmManager, currentFocus, workingSrc, iframeRecipe.spec);
@@ -172,11 +154,7 @@ export default function CharmDetail() {
     <div className="h-full overflow-y-auto" ref={containerRef}>
       <LoadingSpinner visible={!currentFocus} />
       {currentFocus && (
-        <div className="relative min-h-screen">
-          <button className="fixed top-4 right-4 z-10" onClick={() => setDetails(!details)}>
-            {details ? "hide details" : "show details"}
-          </button>
-
+        <div className="relative min-h-screen flex flex-col items-center">
           <AnimatedCharmView
             spring={charmSpring}
             details={details}

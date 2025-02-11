@@ -1,0 +1,57 @@
+[cmdk-dialog] {
+  max-width: 640px;
+  width: 100%;
+  background: white;
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.1),
+    0 4px 6px rgba(0, 0, 0, 0.1);
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 100;
+}
+
+[cmdk-overlay] {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: grid;
+  place-items: center;
+  z-index: 99;
+}
+
+[cmdk-input] {
+  width: 100%;
+  padding: 8px;
+  font-size: 16px;
+  border: none;
+  border-bottom: 1px solid #eee;
+  margin-bottom: 8px;
+  outline: none;
+}
+
+[cmdk-list] {
+  max-height: 400px;
+  overflow: auto;
+}
+
+[cmdk-group-heading] {
+  color: #666;
+  font-size: 12px;
+  padding: 8px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+[cmdk-item] {
+  padding: 8px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+[cmdk-item][data-selected="true"] {
+  background: #eee;
+}

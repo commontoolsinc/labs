@@ -114,17 +114,11 @@ export class OsChrome extends LitElement {
     `,
   ];
 
-  @property({ type: String }) locationtitle = "";
   @property({ type: Boolean, reflect: true }) sidebar = false;
 
   override render() {
     const onSidebarClose = () => {
       this.sidebar = false;
-    };
-
-    const onLocationClick = () => {
-      console.log("Location clicked from chrome!");
-      this.dispatchEvent(new CustomEvent("location"));
     };
 
     return html`
@@ -138,12 +132,11 @@ export class OsChrome extends LitElement {
               <slot name="toolbar-start"></slot>
             </div>
             <div class="toolbar-center">
-              <os-location
-                @click=${onLocationClick}
-                locationtitle="${this.locationtitle}"
-              ></os-location>
+              <slot name="toolbar-center"></slot>
             </div>
-            <div class="toolbar-end"></div>
+            <div class="toolbar-end">
+              <slot name="toolbar-end"></slot>
+            </div>
           </nav>
           <div class="chrome-main-content">
             <slot></slot>
