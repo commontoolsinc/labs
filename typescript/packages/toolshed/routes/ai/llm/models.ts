@@ -375,6 +375,21 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
 
   addModel({
     provider: vertexProvider,
+    name: "google:gemini-2.0-flash-lite-preview-02-05",
+    aliases: ["google:gemini-2.0-flash-lite", "gemini-2.0-flash-lite"],
+    capabilities: {
+      contextWindow: 1_048_576,
+      maxOutputTokens: 8192,
+      images: true,
+      prefill: true,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+    },
+  });
+
+  addModel({
+    provider: vertexProvider,
     name: "google:gemini-2.0-flash-thinking-exp-01-21",
     aliases: ["google:gemini-2.0-flash-thinking", "gemini-2.0-flash-thinking"],
     capabilities: {

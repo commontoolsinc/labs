@@ -68,20 +68,23 @@ async function main() {
       models = args.variety.split(",").map((m: string) => m.trim());
     } else {
       models = [
-        "google:gemini-2.0-flash",
-        "gemini-2.0-flash-thinking",
-        "gemini-2.0-pro",
-        "o1-low",
-        "o1-medium",
-        "o1-high",
-        "o3-mini-low",
-        "o3-mini-medium",
-        "o3-mini-high",
-        "sonar-reasoning-pro",
-        "sonar-pro",
-        "sonar",
-        "groq:llama-3.3-70b",
-        "cerebras:llama-3.3-70b",
+        "google:gemini-2.0-flash-lite",
+        // "google:gemini-2.0-flash",
+        // "gemini-2.0-flash-thinking",
+        // "gemini-2.0-pro",
+        // "o1-low",
+        // "o1-medium",
+        // "o1-high",
+        // "o3-mini-low",
+        // "o3-mini-medium",
+        // "o3-mini-high",
+        // "sonar-reasoning-pro",
+        // "sonar-pro",
+        // "sonar",
+        // "groq:llama-3.3-70b",
+        // "cerebras:llama-3.3-70b",
+        // "groq:deepseek-r1-distill-qwen-32b",
+        // "groq:deepseek-r1-distill-llama-70b",
       ];
     }
   } else if (args._ && args._[0]) {
