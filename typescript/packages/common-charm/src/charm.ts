@@ -67,15 +67,21 @@ export class CharmManager {
   }
 
   async get(id: string): Promise<DocImpl<any> | undefined> {
-    const charm = this.charms.get().find(({ cell }) => JSON.stringify(cell.entityId) === JSON.stringify({'/' : id}));
+    const charm = this.charms
+      .get()
+      .find(({ cell }) => JSON.stringify(cell.entityId) === JSON.stringify({ "/": id }));
     if (!charm) return undefined;
     return charm.cell;
   }
 
   // note: removing a charm doesn't clean up the charm's cells
   async remove(idOrCharm: EntityId | DocLink) {
-    const id = isDocLink(idOrCharm) ? idOrCharm?.cell?.entityId?.["/"] : idOrCharm;
-    const newCharms = this.charms.get().filter(({ cell }) => JSON.stringify(cell.entityId) !== JSON.stringify({'/' : id}));
+    // bf: horrible code, this indicates inconsistent data structures somewhere
+    const id = isDocLink(idOrCharm) ? idOrCharm?.cell?.entityId?.["/"] : idOrCharm["/"];
+    const newCharms = this.charms.get().filter(({ cell }) => {
+      const cellId = cell.entityId?.toJSON?.()["/"] || cell.entityId?.["/"];
+      return cellId !== String(id);
+    });
     if (newCharms.length !== this.charms.get().length) {
       this.charms.send(newCharms);
       return true;
@@ -125,7 +131,11 @@ export class CharmManager {
       }
     }
 
-    const charm = run(recipe, inputs, await this.storage.syncCell(createRef({ recipe, inputs }, cause)));
+    const charm = run(
+      recipe,
+      inputs,
+      await this.storage.syncCell(createRef({ recipe, inputs }, cause)),
+    );
     // FIXME(ja): should we add / sync explicitly here?
     // await this.add([charm]);
     // await this.storage.syncCell(this.charms, true);
@@ -140,16 +150,16 @@ export class CharmManager {
 
   async syncRecipeCells(charm: Charm) {
     const recipeId = charm.sourceCell?.get()?.[TYPE];
-    if (recipeId) await this.storage.syncCell({'/': recipeId});
+    if (recipeId) await this.storage.syncCell({ "/": recipeId });
   }
 
   // FIXME(ja): blobby seems to be using toString not toJSON
   async syncRecipeBlobby(entityId: string) {
     if (typeof entityId === "string") {
       await syncRecipeBlobby(entityId);
-    } else  {
+    } else {
       await syncRecipeBlobby(entityId["/"]);
-    } 
+    }
   }
 
   async sync(

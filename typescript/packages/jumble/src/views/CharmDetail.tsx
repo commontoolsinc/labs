@@ -33,7 +33,7 @@ function AnimatedCharmView({ spring, details, scrollProgress, charm }: AnimatedC
       style={{
         ...spring,
         height: "100vh",
-        position: details ? "sticky" : "relative",
+        position: details ? "sticky" : "",
         top: 0,
         transformOrigin: "top",
         overflow: "hidden",
@@ -61,7 +61,6 @@ interface CharmDetailsProps {
   changes: boolean;
 }
 
-
 function CharmDetails({
   spring,
   charm,
@@ -75,7 +74,7 @@ function CharmDetails({
 
   const deleteCharm = async () => {
     if (confirm("Are you sure you want to delete this charm?")) {
-      const result = await charmManager.remove(charm.entityId['/']);
+      const result = await charmManager.remove(charm.entityId["/"]);
       if (result) {
         navigate("/");
       }
@@ -160,6 +159,12 @@ export default function CharmDetail() {
   const { containerRef, scrollProgress, charmSpring, detailsSpring } =
     useCharmDetailAnimations(details);
 
+  React.useEffect(() => {
+    const handleToggleDetails = () => setDetails(!details);
+    window.addEventListener("toggle-details", handleToggleDetails);
+    return () => window.removeEventListener("toggle-details", handleToggleDetails);
+  }, [details]);
+
   const saveChanges = () => {
     if (workingSrc && iframeRecipe && currentFocus) {
       saveNewRecipeVersion(charmManager, currentFocus, workingSrc, iframeRecipe.spec);
@@ -173,10 +178,6 @@ export default function CharmDetail() {
       <LoadingSpinner visible={!currentFocus} />
       {currentFocus && (
         <div className="relative min-h-screen">
-          <button className="fixed top-4 right-4 z-10" onClick={() => setDetails(!details)}>
-            {details ? "hide details" : "show details"}
-          </button>
-
           <AnimatedCharmView
             spring={charmSpring}
             details={details}

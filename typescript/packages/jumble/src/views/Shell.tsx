@@ -30,6 +30,7 @@ import CharmList from "./CharmList";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { LLMClient } from "@commontools/llm-client";
 import { NavPath } from "@/components/NavPath";
+import { CommandCenter } from "@/components/CommandCenter";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized
@@ -108,7 +109,6 @@ async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: a
 
 export default function Shell() {
   const navigate = useNavigate();
-  const [sidebarTab] = useCell(sidebar);
   const [spellResults, setSearchResults] = useCell(searchResults);
   const { charmManager } = useCharmManager();
 
@@ -180,9 +180,9 @@ export default function Shell() {
           onClose={onClose}
           onSpellCast={onSpellCast}
         />
-
-        <WebComponent slot="overlay" as="os-fabgroup" className="pin-br" onSubmit={onSubmit} />
       </WebComponent>
+
+      <CommandCenter />
     </div>
   );
 }
