@@ -251,7 +251,6 @@ if (env.CTTS_AI_LLM_OPENAI_API_KEY) {
     },
   });
 
-  // Add o3-mini variants (reasoning control via providerOptions at runtime)
   addModel({
     provider: openAIProvider,
     name: "openai:o3-mini-low",
@@ -317,21 +316,7 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
   });
   addModel({
     provider: vertexProvider,
-    name: "google:gemini-1.5-flash-002",
-    aliases: ["google:gemini-1.5-flash", "gemini-1.5-flash"],
-    capabilities: {
-      contextWindow: 1_000_000,
-      maxOutputTokens: 8192,
-      images: true,
-      prefill: true,
-      systemPrompt: true,
-      stopSequences: true,
-      streaming: true,
-    },
-  });
-  addModel({
-    provider: vertexProvider,
-    name: "gemini-2.0-flash-exp",
+    name: "google:gemini-2.0-flash",
     aliases: ["google:gemini-2.0-flash", "gemini-2.0-flash"],
     capabilities: {
       contextWindow: 1_048_576,
@@ -346,10 +331,10 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
 
   addModel({
     provider: vertexProvider,
-    name: "google:gemini-1.5-pro-002",
-    aliases: ["google:gemini-1.5-pro", "gemini-1.5-pro"],
+    name: "google:gemini-2.0-flash-thinking-exp-01-21",
+    aliases: ["google:gemini-2.0-flash-thinking", "gemini-2.0-flash-thinking"],
     capabilities: {
-      contextWindow: 1_000_000,
+      contextWindow: 1_048_576,
       maxOutputTokens: 8192,
       images: true,
       prefill: true,
@@ -358,12 +343,13 @@ if (env.CTTS_AI_LLM_GOOGLE_APPLICATION_CREDENTIALS) {
       streaming: true,
     },
   });
+
   addModel({
     provider: vertexProvider,
-    name: "google:gemini-exp-1206",
-    aliases: ["google:gemini-exp-1206", "gemini-exp-1206"],
+    name: "google:gemini-2.0-pro-exp-02-05",
+    aliases: ["google:gemini-2.0-pro", "gemini-2.0-pro"],
     capabilities: {
-      contextWindow: 2_000_000,
+      contextWindow: 2_097_152,
       maxOutputTokens: 8192,
       images: true,
       prefill: true,
