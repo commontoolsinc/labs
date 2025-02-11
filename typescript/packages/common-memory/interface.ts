@@ -207,8 +207,9 @@ export type InferTransactionResult<Instruction> = Instruction extends Assert
  * Selector that replica can be queried by.
  */
 export interface Selector {
-  the: The;
-  of: Entity;
+  the?: The;
+  of?: Entity;
+  is?: {};
 }
 
 /**

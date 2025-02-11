@@ -32,23 +32,27 @@ const test = (title: string, url: URL, run: (replica: Space.Store) => Promise<un
 };
 
 test(
-  "querying non existing memory returns implicit fact",
+  "querying non existing memory returns no facts",
   new URL(`memory:${space}`),
   async (session) => {
     const result = await Space.query(session, {
-      the: "application/json",
-      of: doc,
+      cmd: "/space/query",
+      iss: alice,
+      sub: space,
+      args: {
+        selector: {
+          the: "application/json",
+          of: doc,
+        },
+      },
     });
 
     assertEquals(
       result,
       {
-        ok: {
-          the: "application/json",
-          of: doc,
-        },
+        ok: [],
       },
-      "Implicit fact",
+      "finds no facts",
     );
   },
 );
@@ -99,30 +103,49 @@ test("create new memory", new URL(`memory:${space}`), async (session) => {
   });
 
   const read = Space.query(session, {
-    the: "application/json",
-    of: doc,
+    cmd: "/space/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector: {
+        the: "application/json",
+        of: doc,
+      },
+    },
   });
 
   assertEquals(read, {
-    ok: {
-      the: "application/json",
-      of: doc,
-      is: { v: 1 },
-      cause: refer({
+    ok: [
+      {
         the: "application/json",
         of: doc,
-      }),
-    },
+        is: { v: 1 },
+        cause: refer({
+          the: "application/json",
+          of: doc,
+        }),
+      },
+    ],
   });
 });
 
 test("explicit empty creation", new URL(`memory:${space}`), async (session) => {
-  assertEquals(await Space.query(session, { the: "application/json", of: doc }), {
-    ok: {
-      the: "application/json",
-      of: doc,
+  assertEquals(
+    await Space.query(session, {
+      cmd: "/space/query",
+      iss: alice,
+      sub: space,
+      args: {
+        selector: {
+          the: "application/json",
+          of: doc,
+        },
+      },
+    }),
+    {
+      ok: [],
     },
-  });
+  );
 
   const transaction = Space.transaction({
     issuer: alice,
@@ -135,17 +158,32 @@ test("explicit empty creation", new URL(`memory:${space}`), async (session) => {
   assertEquals(await Space.transact(session, transaction).ok?.is.since, 0);
   assertEquals(await Space.transact(session, transaction).ok?.is.since, 1);
 
-  assertEquals(await Space.query(session, { the: "application/json", of: doc }), {
-    ok: {
-      the: "application/json",
-      of: doc,
-      is: {},
-      cause: refer({
-        the: "application/json",
-        of: doc,
-      }),
+  assertEquals(
+    await Space.query(session, {
+      cmd: "/space/query",
+      iss: alice,
+      sub: space,
+      args: {
+        selector: {
+          the: "application/json",
+          of: doc,
+        },
+      },
+    }),
+    {
+      ok: [
+        {
+          the: "application/json",
+          of: doc,
+          is: {},
+          cause: refer({
+            the: "application/json",
+            of: doc,
+          }),
+        },
+      ],
     },
-  });
+  );
 });
 
 test("explicit {}", new URL(`memory:${space}`), async (session) => {
@@ -585,6 +623,45 @@ test("retract implicit", new URL(`memory:${space}`), async (session) => {
       },
     }),
   });
+
+  const includeRetracted = await session.query({
+    cmd: "/space/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector: {
+        the,
+        of: doc,
+      },
+    },
+  });
+
+  assertEquals(includeRetracted, {
+    ok: [
+      {
+        the,
+        of: doc,
+        cause: refer({ the, of: doc }),
+      },
+    ],
+  });
+
+  const withoutRetracted = await session.query({
+    cmd: "/space/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector: {
+        the,
+        of: doc,
+        is: {},
+      },
+    },
+  });
+
+  assertEquals(withoutRetracted, {
+    ok: [],
+  });
 });
 
 test("retract document", new URL(`memory:${space}`), async (session) => {
@@ -604,14 +681,24 @@ test("retract document", new URL(`memory:${space}`), async (session) => {
   const create = await Space.transact(session, v1);
 
   assert(create.ok, "Document created");
-  assertEquals(await session.query({ the: "application/json", of: doc }), {
-    ok: {
-      the,
-      of: doc,
-      is: { v: 1 },
-      cause: refer({ the, of: doc }),
+  assertEquals(
+    await session.query({
+      cmd: "/space/query",
+      iss: alice,
+      sub: space,
+      args: { selector: { the: "application/json", of: doc } },
+    }),
+    {
+      ok: [
+        {
+          the,
+          of: doc,
+          is: { v: 1 },
+          cause: refer({ the, of: doc }),
+        },
+      ],
     },
-  });
+  );
 
   const retract = Space.transaction({
     issuer: alice,
@@ -639,18 +726,30 @@ test("retract document", new URL(`memory:${space}`), async (session) => {
   });
 
   assertEquals(
-    await session.query({ the: "application/json", of: doc }),
-    {
-      ok: {
-        the: "application/json",
-        of: doc,
-        cause: refer({
-          the,
+    await session.query({
+      cmd: "/space/query",
+      iss: alice,
+      sub: space,
+      args: {
+        selector: {
+          the: "application/json",
           of: doc,
-          is: { v: 1 },
-          cause: { the, of: doc },
-        }),
+        },
       },
+    }),
+    {
+      ok: [
+        {
+          the: "application/json",
+          of: doc,
+          cause: refer({
+            the,
+            of: doc,
+            is: { v: 1 },
+            cause: { the, of: doc },
+          }),
+        },
+      ],
     },
     "once retracted `is` no longer included",
   );
@@ -881,21 +980,35 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
 
   assertEquals(
     await session.query({
-      the,
-      of: doc,
+      cmd: "/space/query",
+      iss: alice,
+      sub: space,
+      args: {
+        selector: {
+          the,
+          of: doc,
+        },
+      },
     }),
     {
-      ok: doc1v1,
+      ok: [doc1v1],
     },
   );
 
   assertEquals(
     await session.query({
-      the,
-      of: doc2,
+      cmd: "/space/query",
+      iss: alice,
+      sub: space,
+      args: {
+        selector: {
+          the,
+          of: doc2,
+        },
+      },
     }),
     {
-      ok: doc2v1,
+      ok: [doc2v1],
     },
   );
 
@@ -947,32 +1060,53 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
   const doc1v2 = { ...doc1v1, is: { v: 2 }, cause: refer(doc1v1) };
   assertEquals(
     await session.query({
-      the,
-      of: doc,
+      cmd: "/space/query",
+      iss: alice,
+      sub: space,
+      args: {
+        selector: {
+          the,
+          of: doc,
+        },
+      },
     }),
     {
-      ok: doc1v2,
+      ok: [doc1v2],
     },
   );
 
   assertEquals(
     await session.query({
-      the,
-      of: doc2,
+      cmd: "/space/query",
+      iss: alice,
+      sub: space,
+      args: {
+        selector: {
+          the,
+          of: doc2,
+        },
+      },
     }),
     {
-      ok: doc2v1,
+      ok: [doc2v1],
     },
   );
 
   const doc3v1 = { the, of: doc3, is: { doc3: { v: 1 } }, cause: doc3v0 };
   assertEquals(
     await session.query({
-      the,
-      of: doc3,
+      cmd: "/space/query",
+      iss: alice,
+      sub: space,
+      args: {
+        selector: {
+          the,
+          of: doc3,
+        },
+      },
     }),
     {
-      ok: doc3v1,
+      ok: [doc3v1],
     },
   );
 
@@ -1014,11 +1148,18 @@ test("batch updates", new URL(`memory:${space}`), async (session) => {
 
   assertEquals(
     await session.query({
-      the,
-      of: doc3,
+      cmd: "/space/query",
+      iss: alice,
+      sub: space,
+      args: {
+        selector: {
+          the,
+          of: doc3,
+        },
+      },
     }),
     {
-      ok: doc3v1,
+      ok: [doc3v1],
     },
     "doc3 was not updated",
   );
@@ -1077,15 +1218,26 @@ Deno.test("open creates replica if does not exists", async () => {
     );
 
     const select = session.query({
-      the,
-      of: doc,
+      cmd: "/space/query",
+      iss: alice,
+      sub: space,
+      args: {
+        selector: {
+          the,
+          of: doc,
+        },
+      },
     });
 
-    assertEquals(select.ok, {
-      the,
-      of: doc,
-      is: { v: 1 },
-      cause: refer({ the, of: doc }),
+    assertEquals(select, {
+      ok: [
+        {
+          the,
+          of: doc,
+          is: { v: 1 },
+          cause: refer({ the, of: doc }),
+        },
+      ],
     });
   } finally {
     await Deno.remove(url);
@@ -1093,7 +1245,16 @@ Deno.test("open creates replica if does not exists", async () => {
 });
 
 test("list empty store", new URL(`memory:${space}`), async (session) => {
-  const result = session.list({ the: "application/json" });
+  const result = session.query({
+    cmd: "/space/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector: {
+        the: "application/json",
+      },
+    },
+  });
   assertEquals(result, { ok: [] }, "empty list when no facts exist");
 });
 
@@ -1114,7 +1275,17 @@ test("list single fact", new URL(`memory:${space}`), async (session) => {
   const write = await session.transact(tr);
   assert(write.ok);
 
-  const result = session.list({ the: "application/json" });
+  const result = session.query({
+    cmd: "/space/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector: {
+        the: "application/json",
+      },
+    },
+  });
+
   assertEquals(result, {
     ok: [
       {
@@ -1159,7 +1330,18 @@ test("list excludes retracted facts", new URL(`memory:${space}`), async (session
   const retract = session.transact(tr2);
   assert(retract.ok);
 
-  const result = session.list({ the: "application/json" });
+  const result = session.query({
+    cmd: "/space/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector: {
+        the: "application/json",
+        is: {},
+      },
+    },
+  });
+
   assertEquals(result, {
     ok: [],
   });

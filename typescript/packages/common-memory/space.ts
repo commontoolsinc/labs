@@ -4,6 +4,7 @@ import type {
   Result,
   Space,
   Entity,
+  The,
   Fact,
   Transaction,
   JSONValue,
@@ -22,7 +23,9 @@ import type {
   Confirm,
   ListError,
   Principal,
+  Query,
   Changes,
+  State,
   Meta,
 } from "./interface.ts";
 import * as Error from "./error.ts";
@@ -92,22 +95,19 @@ WHERE
 (:cause IS NULL AND fact IS NULL) OR fact = :cause;`;
 
 const EXPORT = `SELECT
-  memory.the as the,
-  memory.of as of,
-  memory.fact as fact,
-  maybe_datum.source as 'is',
-  fact.cause as cause,
-  fact.since as since
+  state.the as the,
+  state.of as of,
+  state.'is' as 'is',
+  state.cause as cause,
+  state.since as since,
+  state.fact as fact
 FROM
-  memory
-JOIN
-  fact ON memory.fact = fact.this
-JOIN
-  maybe_datum ON fact.'is' = maybe_datum.this OR (fact.'is' IS NULL AND maybe_datum.this IS NULL)
+  state
 WHERE
-  memory.the = :the
-  AND
-  memory.of = :entity;
+  (:the IS NULL OR state.the = :the)
+  AND (:of IS NULL OR state.of = :of)
+  AND (:is IS NULL OR state.'is' IS NOT NULL)
+  AND (:since is NULL or state.since > :since)
 `;
 
 export type Options = {
@@ -120,8 +120,10 @@ export interface Model {
 }
 
 export interface Selector {
-  the: string;
-  of: Entity;
+  the?: The;
+  of?: Entity;
+  is?: {};
+  since?: number;
 }
 
 export interface ListResult {
@@ -139,15 +141,9 @@ export interface Session {
   transact(transact: Transaction): Result<Commit, ToJSON<ConflictError> | ToJSON<TransactionError>>;
 
   /**
-   * Query can be used to retrieve a document from the store. At the moment
-   * you can only pass the `entity` selector.
+   * Queries space for matching entities based on provided selector.
    */
-  query(selector: Selector): Result<Fact | Unclaimed, ToJSON<QueryError>>;
-
-  /**
-   * Lists all entities and their values for a specific fact type
-   */
-  list(selector: Partial<Selector>): Result<Assertion[], ToJSON<ListError>>;
+  query(source: Query): Result<State[], ToJSON<QueryError>>;
 
   close(): AsyncResult<{}, SystemError>;
 }
@@ -159,12 +155,8 @@ export class Store implements Model, Session {
     return transact(this, transaction);
   }
 
-  query(selector: Selector) {
-    return query(this, selector);
-  }
-
-  list(selector: Partial<Selector>) {
-    return list(this, selector);
+  query(source: Query) {
+    return query(this, source);
   }
 
   close(): AsyncResult<{}, SystemError> {
@@ -233,12 +225,13 @@ export const close = async ({ store }: Model): AsyncResult<{}, SystemError> => {
   }
 };
 
-type MemoryView = {
+type StateRow = {
   fact: string;
   the: string;
   of: Entity;
   is: string;
   cause: string | null;
+  since: number;
 };
 
 /**
@@ -265,25 +258,20 @@ export const init = ({
   of: Entity;
 }): Reference<Assertion> => refer(implicit({ the, of }));
 
-const pull = ({ store }: Model, { the, of }: Selector): Fact | undefined => {
-  const row = store.prepare(EXPORT).get({ the, entity: of }) as MemoryView | undefined;
+const select = ({ store }: Model, { the, of, is, since }: Selector): Fact[] => {
+  const rows = store.prepare(EXPORT).all({
+    the: the ?? null,
+    of: of ?? null,
+    is: is === undefined ? null : {},
+    since: since ?? null,
+  }) as StateRow[];
 
-  // If we do not have matching memory we return implicit fact.
-  if (row === undefined) {
-    return undefined;
-  }
-  // If we do have a row we parse and return it.
-  else {
-    const is = row.is ? JSON.parse(row.is) : undefined;
-    // If `cause` is `null` it implies reference to the implicit fact.
-    const cause = row.cause
-      ? (fromString(row.cause) as Reference<Assertion>)
-      : refer(implicit({ the, of }));
-
-    // If `is` is `undefined` it implies that fact was retracted so we return
-    // defunct fact.
-    return is === undefined ? { the, of, cause } : { the, of, is, cause };
-  }
+  return rows.map((row) => ({
+    the: row.the,
+    of: row.of,
+    ...(row.is ? { is: JSON.parse(row.is) } : {}),
+    cause: (row.cause ? fromString(row.cause) : init(row)) as Reference<Assertion>,
+  }));
 };
 
 const importDatum = (session: Model, source: Assertion): Reference<JSONValue> => {
@@ -388,7 +376,7 @@ const swap = (
   // is different from the one being asserted. We will asses this by pulling
   // the record and comparing it to desired state.
   if (updated === 0) {
-    const actual = pull(session, claim) ?? null;
+    const actual = select(session, { the, of })[0] ?? null;
 
     // If actual state matches desired state it is either was inserted by the
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
@@ -434,8 +422,8 @@ const commit = (session: Model, transaction: Transaction): Commit => {
   const space = toSubjectEntity(transaction.sub);
   const row = session.store.prepare(EXPORT).get({
     the: THE_COMMIT,
-    entity: space,
-  }) as MemoryView | undefined;
+    of: space,
+  }) as StateRow | undefined;
 
   const [since, cause] = row
     ? [(JSON.parse(row.is) as Commit["is"]).since + 1, fromString(row.fact) as Reference<Assertion>]
@@ -501,57 +489,11 @@ export const transaction = ({
 export const transact = (session: Model, transaction: Transaction) =>
   execute(session.store.transaction(commit), session, transaction);
 
-export const query = (
-  { id, store }: Model,
-  { the, of }: Selector,
-): Result<Fact | Unclaimed, ToJSON<QueryError>> => {
+export const query = (session: Model, source: Query): Result<State[], ToJSON<QueryError>> => {
   try {
-    return { ok: pull({ id, store }, { the, of }) ?? implicit({ the, of }) };
+    return { ok: select(session, source.args.selector) };
   } catch (error) {
-    return { error: Error.query({ the, of, in: id }, error as SqliteError) };
-  }
-};
-
-export const list = (
-  { id, store }: Model,
-  params: Partial<Selector>,
-): Result<Assertion[], ToJSON<ListError>> => {
-  try {
-    const LIST_QUERY = `
-      SELECT
-        state.of as 'of',
-        state.the as 'the',
-        state."is" as 'is',
-        state.cause as 'cause'
-      FROM state
-      WHERE (:the IS NULL OR state.the = :the)
-      AND (:of IS NULL OR state.of = :of)
-      AND state."is" IS NOT NULL
-    `;
-
-    const rows = store.prepare(LIST_QUERY).all({
-      the: params.the ?? null,
-      of: params.of ?? null,
-    }) as Array<{
-      of: Entity;
-      the: string;
-      is: string;
-      cause: string | null;
-    }>;
-
-    return {
-      ok: rows.map((row) => ({
-        the: row.the,
-        of: row.of,
-        is: JSON.parse(row.is),
-        cause: row.cause
-          ? (fromString(row.cause) as Reference<Assertion>)
-          : refer(implicit({ the: row.the, of: row.of })),
-      })),
-    };
-  } catch (error) {
-    return {
-      error: Error.list({ ...params, in: id }, error as SqliteError),
-    };
+    const { the, of } = source.args.selector;
+    return { error: Error.query({ the, of, in: session.id }, error as SqliteError) };
   }
 };
