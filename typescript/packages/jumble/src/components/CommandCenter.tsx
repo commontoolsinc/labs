@@ -6,7 +6,9 @@ import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { useMatch, useNavigate } from "react-router-dom";
 import { castSpell } from "@/search";
 import { charmId } from "@/utils/charms";
-import { Dialog, VisuallyHidden } from "radix-ui";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
+import { Dialog, DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
+
 import { NAME } from "@commontools/builder";
 import { DocImpl, getRecipe } from "@commontools/runner";
 
@@ -286,12 +288,12 @@ export function CommandCenter() {
   };
   return (
     <Command.Dialog title="Common" open={open} onOpenChange={setOpen} label="Command Menu">
-      <VisuallyHidden.VisuallyHidden>
+      <VisuallyHidden>
         <>
-          <Dialog.Title>Common</Dialog.Title>
-          <Dialog.Description>Common commands for managing charms.</Dialog.Description>
+          <DialogTitle>Common</DialogTitle>
+          <DialogDescription>Common commands for managing charms.</DialogDescription>
         </>
-      </VisuallyHidden.VisuallyHidden>
+      </VisuallyHidden>
 
       <Command.Input
         placeholder={
