@@ -7,11 +7,8 @@ import {
   unsafe_materializeFactory,
   unsafe_originalRecipe,
   unsafe_parentRecipe,
-  Recipe,
   UnsafeBinding,
-  unsafe_materializeFactory,
-  isOpaqueRef,
-} from "@commontools/common-builder";
+} from "@commontools/builder";
 import {
   type DocImpl,
   type DocLink,
