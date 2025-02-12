@@ -1,15 +1,16 @@
 import "@commontools/ui";
 import { useCallback } from "react";
-import { NavLink, Outlet, useParams } from "react-router-dom";
+import { NavLink, Outlet, useParams, useLocation } from "react-router-dom";
 
 import { setIframeContextHandler } from "@commontools/iframe-sandbox";
 import { LLMClient } from "@commontools/llm-client";
 import { Action, ReactivityLog, addAction, removeAction } from "@commontools/runner";
 import { MdOutlinePerson, MdOutlineStar } from "react-icons/md";
-
+import { LuPencil } from "react-icons/lu";
 import ShapeLogo from "@/assets/ShapeLogo.svg";
 import { CommandCenter } from "@/components/CommandCenter";
 import { NavPath } from "@/components/NavPath";
+
 import CharmDetail from "@/views/CharmDetail";
 import CharmList from "@/views/CharmList";
 import CharmEditView from "@/views/CharmEditView";
@@ -69,6 +70,15 @@ setIframeContextHandler({
 
 export default function Shell() {
   const { charmId, replicaName } = useParams();
+  const location = useLocation();
+
+  // TOOLBAR START
+  // NOTE(jake): We will want to move this into a Toolbar component at some point
+  const isEditActive = location.pathname.endsWith("/edit");
+  const togglePath = isEditActive
+    ? `/${replicaName}/${charmId}`
+    : `/${replicaName}/${charmId}/edit`;
+  // TOOLBAR END
 
   const onLaunchCommand = useCallback(() => {
     window.dispatchEvent(new CustomEvent("open-command-center"));
@@ -94,12 +104,27 @@ export default function Shell() {
         </div>
       </header>
 
-      <div className="toolbar m-4 p-4 border-2 border-black">
+      {/* TOOLBAR START */}
+      {/* FIXME(jake): This should be a Toolbar component at some point. */}
+      <div className="toolbar m-4 p-4 border-2 border-black flex items-center justify-between">
         <div slot="toolbar-start">
           <NavPath replicaId={replicaName} charmId={charmId} />
         </div>
-      </div>
 
+        <div slot="toolbar-end">
+          <NavLink
+            to={togglePath}
+            className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${
+              isEditActive
+                ? "bg-gray-300 hover:bg-gray-400 text-black"
+                : "bg-transparent text-black  hover:bg-gray-200"
+            }`}
+          >
+            <LuPencil size={16} />
+          </NavLink>
+        </div>
+      </div>
+      {/* TOOLBAR END */}
       <div className="relative h-full">
         <Outlet />
       </div>

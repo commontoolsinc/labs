@@ -16,6 +16,7 @@ export interface CommonDataEvent extends CustomEvent {
 
 export default function CharmList() {
   const { replicaName } = useParams<{ replicaName: string }>();
+  console.log("replicaName", replicaName);
   const { charmManager } = useCharmManager();
   const [charms] = useCell(charmManager.getCharms());
   const commonImportRef = useRef<HTMLElement | null>(null);
