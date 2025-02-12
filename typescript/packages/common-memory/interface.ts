@@ -206,6 +206,7 @@ export type Confirm = {
 export type Instruction = Assert | Retract;
 
 export interface Commit extends Assertion {
+  the: "application/commit+json";
   is: {
     since: number;
     transaction: Transaction;

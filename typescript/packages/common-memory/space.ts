@@ -62,8 +62,8 @@ CREATE TABLE IF NOT EXISTS memory (
   PRIMARY KEY (the, of)         -- Ensure that we have only one fact per entity
 );
 
-CREATE INDEX memory_the ON memory (the); -- Index to filter by "the" field
-CREATE INDEX memory_of ON memory (of);   -- Index to query by "of" field
+CREATE INDEX IF NOT EXISTS memory_the ON memory (the); -- Index to filter by "the" field
+CREATE INDEX IF NOT EXISTS memory_of ON memory (of);   -- Index to query by "of" field
 
 CREATE VIEW IF NOT EXISTS state AS
 SELECT
@@ -384,7 +384,7 @@ export const toCommit = ({
   subject: SubjectSpace;
   is: Commit["is"];
   cause?: Reference<Fact>;
-}) => {
+}): Commit => {
   const of = toSubjectEntity(subject);
   return {
     the: THE_COMMIT,

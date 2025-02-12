@@ -3,7 +3,7 @@ import type * as Routes from "./memory.routes.ts";
 import * as Memory from "@commontools/memory";
 import env from "@/env.ts";
 
-const { ok: memory, error } = await Memory.open({
+const { ok: memory, error } = await Memory.Provider.open({
   store: new URL(env.MEMORY_URL),
 });
 
@@ -13,35 +13,45 @@ if (error) {
 
 export const transact: AppRouteHandler<typeof Routes.transact> = async (c) => {
   try {
-    const parsedBody = await c.req.json();
-    const result = await memory.patchJson(parsedBody);
+    const transaction = await c.req.valid("json");
+    const result = await memory.transact(transaction as Memory.Transaction);
 
-    if ("error" in result) {
-      const status = result.error?.name === "ConflictError" ? 409 : 500;
-      return c.json({ error: result.error?.message }, status);
+    if (result.ok) {
+      return c.json(result, 200);
+    } else {
+      // This is ugly but without this TS inference is failing to infer that
+      // types are correct
+      const { error } = result;
+      if (error.name === "ConflictError") {
+        return c.json({ error }, 409);
+      } else {
+        return c.json({ error }, 503);
+      }
     }
-
-    return c.json({ ok: result.ok }, 200);
-  } catch (err) {
-    return c.json({ error: (err as Error).message }, 500);
+  } catch (cause) {
+    const { message, stack, name } = (cause ?? new Error(cause as any)) as Error;
+    return c.json({ error: { message, name, stack } }, 500);
   }
-};
-
-export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
-  const { socket, response } = Deno.upgradeWebSocket(c.req.raw);
-  memory.subscribe(socket);
-  return response;
 };
 
 export const query: AppRouteHandler<typeof Routes.query> = async (c) => {
   try {
-    const selector = await c.req.json();
-    const result = await memory.queryJson(selector);
-    if ("error" in result) {
-      return c.json({ error: result.error?.message || "Unknown error" }, 500);
+    const query = await c.req.valid("json");
+    const result = await memory.query(query);
+    if (result.ok) {
+      return c.json(result, 200);
+    } else {
+      return c.json(result, 503);
     }
-    return c.json({ ok: result.ok }, 200);
-  } catch (err) {
-    return c.json({ error: (err as Error).message }, 500);
+  } catch (cause) {
+    const { message, stack, name } = (cause ?? new Error(cause as any)) as Error;
+    return c.json({ error: { message, name, stack } }, 500);
   }
+};
+
+export const subscribe: AppRouteHandler<typeof Routes.subscribe> = async (c) => {
+  const { socket, response } = Deno.upgradeWebSocket(c.req.raw);
+  const subscriber = Memory.Subscriber.fromWebSocket(socket);
+  await memory.subscribe(subscriber);
+  return response;
 };

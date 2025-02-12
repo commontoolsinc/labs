@@ -79,7 +79,7 @@ export const patch = async (session: Session, request: Request) => {
     const transaction = (await request.json()) as Transaction;
     const result = await session.memory.transact(transaction);
     const body = JSON.stringify(result);
-    const status = result.ok ? 200 : result.error.name === "ConflictError" ? 409 : 500;
+    const status = result.ok ? 200 : result.error.name === "ConflictError" ? 409 : 503;
 
     return new Response(body, {
       status,
