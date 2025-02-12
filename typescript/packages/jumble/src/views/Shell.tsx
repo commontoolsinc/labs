@@ -1,22 +1,18 @@
-// This is all you need to import/register the @commontools/ui web components
-import "@commontools/ui";
-import { setIframeContextHandler } from "@commontools/iframe-sandbox";
-import { Action, ReactivityLog, addAction, removeAction } from "@commontools/runner";
-import { WebComponent } from "@/components/WebComponent";
 import { useCallback } from "react";
+import { NavLink, Route, Routes, useMatch } from "react-router-dom";
 
-import * as osUi from "@commontools/os-ui";
-// bf: load bearing console.log
-console.log("initializing os-ui", osUi);
-
-import "@commontools/os-ui/src/static/main.css";
-import "./main.css";
-import { Routes, Route, useMatch } from "react-router-dom";
-import CharmDetail from "./CharmDetail";
-import CharmList from "./CharmList";
+import { setIframeContextHandler } from "@commontools/iframe-sandbox";
 import { LLMClient } from "@commontools/llm-client";
-import { NavPath } from "@/components/NavPath";
+import { Action, ReactivityLog, addAction, removeAction } from "@commontools/runner";
+import { MdOutlinePerson, MdOutlineStar } from "react-icons/md";
+
+import ShapeLogo from "@/assets/ShapeLogo.svg";
 import { CommandCenter } from "@/components/CommandCenter";
+import { NavPath } from "@/components/NavPath";
+import CharmDetail from "@/views/CharmDetail";
+import CharmList from "@/views/CharmList";
+
+import "./main.css";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized
@@ -79,28 +75,41 @@ export default function Shell() {
   }, []);
 
   return (
-    <div className="h-full relative">
-      <WebComponent as={"os-chrome"}>
+    <div className="shell h-full bg-gray-50 border-2 border-black">
+      <header className="flex bg-gray-50 items-center justify-between border-b-2 p-2">
+        <NavLink to="/" className="brand flex items-center gap-2">
+          <ShapeLogo width={32} height={32} shapeColor="#000" containerColor="#d2d2d2" />
+          <h1 className="font-bold jetbrains-mono text-sm text-black hover:underline">
+            Common Tools
+          </h1>
+        </NavLink>
+
+        <div className="account">
+          <button className="w-10 h-10 flex items-center justify-center rounded-lg bg-gray-300 hover:bg-gray-400 transition-colors">
+            <MdOutlinePerson size={24} />
+          </button>
+        </div>
+      </header>
+
+      <div className="toolbar m-4 border-2 border-black p-4">
         <div slot="toolbar-start">
           {focusedReplicaId && <NavPath replicaId={focusedReplicaId} charmId={focusedCharmId} />}
         </div>
+      </div>
+      <div className="relative h-full">
+        <Routes>
+          <Route path="/:charmId" element={<CharmDetail />} />
+          <Route index element={<CharmList />} />
+        </Routes>
+      </div>
 
-        <div className="relative h-full">
-          <Routes>
-            <Route path="/:charmId" element={<CharmDetail />} />
-            <Route index element={<CharmList />} />
-          </Routes>
-        </div>
-      </WebComponent>
-
-      <WebComponent
-        slot="overlay"
-        as="os-icon-button"
-        icon="star"
-        size="lg"
-        className="pin-br"
+      <button
         onClick={onLaunchCommand}
-      />
+        className="fixed bottom-2 right-2 w-12 h-12 flex items-center justify-center rounded-lg bg-gray-300 hover:bg-gray-400 transition-colors"
+      >
+        <MdOutlineStar fill="black" size={24} />
+      </button>
+
       <CommandCenter />
     </div>
   );

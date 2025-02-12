@@ -29,7 +29,10 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
     <nav className="flex" aria-label="Breadcrumb">
       <ol className="inline-flex items-center space-x-3 text-md gap-2">
         <li>
-          <NavLink to={`/${replicaId}`} className="text-gray-700 hover:text-gray-900">
+          <NavLink
+            to={`/${replicaId}`}
+            className={charmId ? "text-gray-500" : "text-black font-bold"}
+          >
             {replicaId}
           </NavLink>
         </li>
@@ -40,7 +43,7 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
               <span className="text-gray-500">/</span>
             </li>
             <li>
-              <span className="text-gray-700">{charmName}</span>
+              <span className="text-gray-700 font-bold">{charmName}</span>
             </li>
           </>
         )}
