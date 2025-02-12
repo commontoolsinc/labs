@@ -24,6 +24,7 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
       }
     }
     getCharm();
+    return () => cancel?.();
   }, [charmId, charmManager]);
 
   return (
