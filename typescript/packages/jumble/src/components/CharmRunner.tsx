@@ -42,14 +42,10 @@ function useCharmLoader({
 
       if (currentMountKey !== mountingKey.current) return;
 
-      const charm = await charmManager.runPersistent(factory);
+      const charm = await charmManager.runPersistent(factory, argument);
       if (currentMountKey !== mountingKey.current) return;
 
       charmManager.add([charm]);
-
-      await idle();
-      run(undefined, argument, charm);
-      await idle();
 
       if (currentMountKey !== mountingKey.current) return;
 
@@ -63,7 +59,7 @@ function useCharmLoader({
         setIsLoading(false);
       }
     }
-  }, [charmImport, argument, onCharmReady]);
+  }, [charmImport, argument, onCharmReady, charmManager]);
 
   React.useEffect(() => {
     if (autoLoad) {
