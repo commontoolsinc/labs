@@ -1,5 +1,6 @@
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { Charm, getIframeRecipe, IFrameRecipe } from "@commontools/charm";
+import { effect } from "@commontools/runner";
 import React from "react";
 
 export const useCharm = (charmId: string | undefined) => {
@@ -20,7 +21,16 @@ export const useCharm = (charmId: string | undefined) => {
         setCurrentFocus(charm);
       }
     }
+
     loadCharm();
+
+    // Subscribe to changes in the charms list
+    const cleanup = effect(charmManager.getCharms(), (newCharms) => {
+      loadCharm();
+    });
+
+    // Cleanup subscription when component unmounts or charmId/charmManager changes
+    return () => cleanup();
   }, [charmId, charmManager]);
 
   return {
