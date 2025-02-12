@@ -17,9 +17,7 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
     async function getCharm() {
       if (charmId) {
         const charm = await charmManager.get(charmId);
-        if (charm) {
-          setCharmName(charm.getAsQueryResult()[NAME]);
-        }
+        charm?.asCell([NAME]).sink(setCharmName);
       }
     }
     getCharm();
