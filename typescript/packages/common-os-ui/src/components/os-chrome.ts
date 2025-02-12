@@ -142,6 +142,9 @@ export class OsChrome extends LitElement {
             <slot></slot>
           </div>
         </section>
+        <aside class="chrome-sidebar">
+          <slot name="sidebar"></slot>
+        </aside>
       </div>
     `;
   }
