@@ -72,6 +72,9 @@ export class CharmManager {
       .find(({ cell }) => JSON.stringify(cell.entityId) === JSON.stringify({ "/": id }));
     if (!charm) return undefined;
 
+    // Make sure we have the recipe so we can run it!
+    await this.syncRecipe(charm.cell);
+
     // Make sure the charm is running. This is re-entrant and has no effect if
     // the charm is already running.
     return run(undefined, undefined, charm.cell);
@@ -151,6 +154,7 @@ export class CharmManager {
   }
 
   async syncRecipeCells(charm: Charm) {
+    // NOTE(ja): I don't think this actually syncs the recipe
     const recipeId = charm.sourceCell?.get()?.[TYPE];
     if (recipeId) await this.storage.syncCell({ "/": recipeId });
   }
