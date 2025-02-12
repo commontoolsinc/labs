@@ -3,3 +3,4 @@ export { saveRecipe } from "./syncRecipe.js";
 export { buildRecipe, tsToExports } from "./localBuild.js";
 export { iterate, castNewRecipe, saveNewRecipeVersion } from "./iterate.js";
 export { getIframeRecipe, type IFrameRecipe } from "./iframe/recipe.js";
+export { createStorage, type StorageConfig } from "./storage.js";

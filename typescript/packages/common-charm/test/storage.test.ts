@@ -1,10 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createStorage, Storage } from "../src/storage.js";
-import {
-  InMemoryStorageProvider,
-  LocalStorageProvider,
-  StorageProvider,
-} from "../src/storage-providers.js";
+import { StorageProvider } from "../src/storage/base.js";
+import { InMemoryStorageProvider } from "../src/storage/memory.js";
+import { LocalStorageProvider } from "../src/storage/localstorage.js";
 import { getDoc, DocImpl, createRef } from "@commontools/runner";
 
 // Create a mock window object
@@ -110,7 +108,7 @@ describe("Storage", () => {
       let testCell: DocImpl<any>;
 
       beforeEach(() => {
-        storage = createStorage(storageType);
+        storage = createStorage({ type: storageType as "memory" | "local" });
         if (storageType === "memory") {
           storage2 = new InMemoryStorageProvider();
         } else if (storageType === "local") {
@@ -260,12 +258,12 @@ describe("Storage", () => {
 
       describe("createStorage", () => {
         it("should create memory storage", () => {
-          const memoryStorage = createStorage("memory");
+          const memoryStorage = createStorage({ type: "memory" });
           expect(memoryStorage).toBeDefined();
         });
 
         it("should create local storage", () => {
-          const localStorage = createStorage("local");
+          const localStorage = createStorage({ type: "local" });
           expect(localStorage).toBeDefined();
         });
 
