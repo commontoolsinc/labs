@@ -78,7 +78,10 @@ export default function Shell() {
   return (
     <div className="shell h-full bg-gray-50 border-2 border-black">
       <header className="flex bg-gray-50 items-center justify-between border-b-2 p-2">
-        <NavLink to="/" className="brand flex items-center gap-2">
+        <NavLink
+          to={focusedReplicaId ? `/${focusedReplicaId}` : "/"}
+          className="brand flex items-center gap-2"
+        >
           <ShapeLogo width={32} height={32} shapeColor="#000" containerColor="#d2d2d2" />
           <h1 className="font-bold jetbrains-mono text-sm text-black hover:underline">
             Common Tools
