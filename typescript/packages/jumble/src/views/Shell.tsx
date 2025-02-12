@@ -1,3 +1,4 @@
+import "@commontools/ui";
 import { useCallback } from "react";
 import { NavLink, Route, Routes, useMatch } from "react-router-dom";
 
@@ -91,7 +92,7 @@ export default function Shell() {
         </div>
       </header>
 
-      <div className="toolbar m-4 border-2 border-black p-4">
+      <div className="toolbar m-4 p-4 border-2 border-black">
         <div slot="toolbar-start">
           {focusedReplicaId && <NavPath replicaId={focusedReplicaId} charmId={focusedCharmId} />}
         </div>
@@ -105,7 +106,7 @@ export default function Shell() {
 
       <button
         onClick={onLaunchCommand}
-        className="fixed bottom-2 right-2 w-12 h-12 flex items-center justify-center rounded-lg bg-gray-300 hover:bg-gray-400 transition-colors"
+        className="fixed bottom-2 right-2 w-12 h-12 flex items-center justify-center rounded-lg bg-gray-300 hover:bg-gray-400 transition-colors z-50"
       >
         <MdOutlineStar fill="black" size={24} />
       </button>
