@@ -41,6 +41,9 @@ export class CharmManager {
   }
 
   getCharms(): DocImpl<DocLink[]> {
+    // Start syncing if not already syncing. Will trigger a change to the list
+    // once loaded.
+    this.storage.syncCell(this.charms);
     return this.charms;
   }
 
