@@ -80,20 +80,11 @@ export function CharmRenderer({ charm, className = "" }: CharmRendererProps) {
     const container = containerRef.current;
     if (!container) return;
 
-    // FIXME(ja): we don't have a cleanup function here!
-    // how can we mix all the effects and react useeffect
-    effect(charm.asCell(), (charm) => {
-      effect(charm['$UI'], (view) => {
-        if (!view) {
-          console.log("no UI");
-          return;
-        }
-        render(container, view as any);
-      });
-    });
+    const cleanup = render(container, charm.asCell().key("$UI"));
 
     return () => {
       if (container) {
+        cleanup();
         container.innerHTML = "";
       }
     };
