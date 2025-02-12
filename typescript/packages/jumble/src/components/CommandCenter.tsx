@@ -1,7 +1,7 @@
 import { Command } from "cmdk";
 import { useState, useEffect, useRef } from "react";
 import "./commands.css";
-import { castNewRecipe, Charm, CharmManager, iterate, tsToExports } from "@commontools/charm";
+import { castNewRecipe, Charm, CharmManager, iterate, compileAndRunRecipe } from "@commontools/charm";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { useMatch, useNavigate } from "react-router-dom";
 import { castSpell } from "@/search";
@@ -16,7 +16,8 @@ export function CommandCenter() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const importRef = useRef<HTMLInputElement>();
+  const importJSONRef = useRef<HTMLInputElement | null>(null);
+  const loadRecipeRef = useRef<HTMLInputElement | null>(null);
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
 
@@ -108,7 +109,7 @@ export function CommandCenter() {
   };
 
   const handleImportJSON = async () => {
-    if (!importRef.current) {
+    if (!importJSONRef.current) {
       const input = document.createElement("input");
       input.type = "file";
       input.accept = ".json";
@@ -134,17 +135,22 @@ export function CommandCenter() {
           console.error("Failed to import JSON:", err);
           alert("Failed to import JSON file. Please check the file format.");
         }
+
+        // Reset the input so the file can be chosen again.
+        (e.target as HTMLInputElement).value = "";
       };
 
       document.body.appendChild(input);
-      importRef.current = input;
+      importJSONRef.current = input;
     }
 
-    importRef.current.click();
+    // Always reset the input value before clicking:
+    importJSONRef.current.value = "";
+    importJSONRef.current.click();
   };
 
   const handleLoadRecipe = async () => {
-    if (!importRef.current) {
+    if (!loadRecipeRef.current) {
       const input = document.createElement("input");
       input.type = "file";
       input.accept = ".tsx";
@@ -155,40 +161,32 @@ export function CommandCenter() {
         if (!file) return;
 
         const src = await file.text();
-        const { exports, errors } = await tsToExports(src);
-        if (errors) {
-          console.error("Failed to compile TSX:", errors);
-          setOpen(false);
-          return;
-        }
-        let { default: recipe } = exports
-        console.log("compiled", recipe)
-
-        addRecipe(recipe, src, "imported", undefined);
-        console.log("about to run charm")
-        const newCharm = await charmManager.runPersistent(recipe, {});
-        if (newCharm) {
-          charmManager.add([newCharm]);
-          navigate(`/${focusedReplicaId}/${charmId(newCharm.entityId!)}`);
-        } else {
-          console.error("failed to create a new charm")
+        const id = await compileAndRunRecipe(charmManager, src, "imported", {});
+        if (id) {
+          navigate(`/${focusedReplicaId}/${charmId(id)}`);
         }
 
         setOpen(false);
+        (e.target as HTMLInputElement).value = "";
       };
 
       document.body.appendChild(input);
-      importRef.current = input;
+      loadRecipeRef.current = input;
     }
 
-    importRef.current.click();
+    // Always reset the input value before clicking:
+    loadRecipeRef.current.value = "";
+    loadRecipeRef.current.click();
   };
 
   // Cleanup file input on unmount
   useEffect(() => {
     return () => {
-      if (importRef.current) {
-        document.body.removeChild(importRef.current);
+      if (importJSONRef.current) {
+        document.body.removeChild(importJSONRef.current);
+      }
+      if (loadRecipeRef.current) {
+        document.body.removeChild(loadRecipeRef.current);
       }
     };
   }, []);
