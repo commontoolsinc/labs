@@ -120,8 +120,7 @@
       "jsr:@std/encoding@^1.0.5",
       "jsr:@std/fs@^1.0.10",
       "jsr:@std/path@^1.0.8",
-      "npm:merkle-reference@^2.0.1",
-      "npm:multiformats@13.3.1"
+      "npm:merkle-reference@^2.0.1"
     ],
     "packageJson": {
       "dependencies": [

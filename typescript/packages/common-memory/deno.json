@@ -4,7 +4,9 @@
     "test": "deno test --allow-read --allow-write --allow-net --allow-ffi --allow-env --no-check"
   },
   "test": {
-    "include": ["test/*-test.ts"]
+    "include": [
+      "test/*-test.ts"
+    ]
   },
   "exports": {
     ".": "./lib.ts"
@@ -13,7 +15,6 @@
     "@db/sqlite": "jsr:@db/sqlite@^0.12.0",
     "@std/assert": "jsr:@std/assert@1",
     "@std/fs": "jsr:@std/fs@^1.0.10",
-    "multiformats": "npm:multiformats@13.3.1",
     "merkle-reference": "npm:merkle-reference@^2.0.1",
     "@hono/hono": "jsr:@hono/hono@^4.6.9",
     "@std/encoding": "jsr:@std/encoding@^1.0.5",
