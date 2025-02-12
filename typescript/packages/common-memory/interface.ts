@@ -2,15 +2,71 @@ import type { Reference } from "merkle-reference";
 
 export type { Reference };
 
-export type Command = {
-  watch?: In<Selector>;
-  unwatch?: In<Selector>;
+export type SubscriberCommand = {
+  watch?: Query;
+  unwatch?: Query;
 };
+
+export type SubscriptionCommand = {
+  transact?: Transaction;
+  brief?: Brief;
+};
+
+export type Brief = {
+  sub: SubjectSpace;
+  args: {
+    selector: Selector;
+    selection: Fact[];
+  };
+  meta?: Meta;
+};
+
+export interface Session {
+  /**
+   * Transacts can be used to assert or retract a document from the repository.
+   * If `version` asserted / retracted does not match version of the document
+   * transaction fails with `ConflictError`. Otherwise document is updated to
+   * the new value.
+   */
+  transact(transact: Transaction): TransactionResult;
+
+  /**
+   * Queries space for matching entities based on provided selector.
+   */
+  query(source: Query): QueryResult;
+
+  close(): AwaitResult<Unit, SystemError>;
+}
+
+export interface SpaceSession extends Session {
+  transact(transact: Transaction): Result<Commit, ConflictError | TransactionError>;
+  query(source: Query): Result<Fact[], QueryError>;
+}
+
+export interface MemorySession extends Session {
+  subscribe(subscriber: Subscriber): SubscribeResult;
+}
+
+export type SubscribeResult = AwaitResult<Unit, SystemError>;
+
+export interface Subscription extends TransformStream<SubscriberCommand, SubscriptionCommand> {}
+export interface Subscriber extends TransformStream<SubscriptionCommand, SubscriberCommand> {}
+
+/**
+ * Represents a subscription controller that can be used to publish commands or
+ * to close subscription.
+ */
+export interface SubscriptionController {
+  open: boolean;
+  close(): void;
+  transact(source: Transaction): void;
+  brief(source: Brief): void;
+}
 
 /**
  * Unique identifier for the store.
  */
-export type Space = string & { toString(): Space };
+export type SubjectSpace = string & { toString(): SubjectSpace };
 
 /**
  * Unique identifier for the mutable entity.
@@ -174,36 +230,30 @@ export type Principal = string;
 
 export type Transaction = {
   iss: Principal;
-  sub: Space;
+  sub: SubjectSpace;
   cmd: "/memory/transact";
   args: { changes: Changes };
   meta?: Meta;
 };
 
-export type Sync = {
-  iss: Principal;
-  sub: Space;
-  cmd: "/space/sync";
-  args: {
-    changes: {
-      [the: The]: {
-        [of: Entity]: Unit;
-      };
-    };
-  };
-  meta?: Meta;
-};
+export type TransactionResult = AwaitResult<
+  Commit,
+  ConflictError | TransactionError | ConnectionError
+>;
 
 export type Query = {
   iss: Principal;
-  sub: Space;
+  sub: SubjectSpace;
   cmd: "/memory/query";
   args: { selector: Selector };
 };
 
-export type Subscription = {
+export type QueryResult = AwaitResult<Fact[], QueryError | ConnectionError>;
+export type WatchResult = AwaitResult<Unit, QueryError | ConnectionError>;
+
+export type SubscriptionQuery = {
   iss: Principal;
-  sub: Space;
+  sub: SubjectSpace;
   cmd: "/memory/query";
   args: { selector: Selector };
 };
@@ -218,7 +268,8 @@ export type InferTransactionResult<Instruction> = Instruction extends Assert
 export interface Selector {
   the?: The;
   of?: Entity;
-  is?: Unit;
+  is?: {};
+  since?: number;
 }
 
 export type Unit = {};
@@ -226,7 +277,7 @@ export type Unit = {};
 /**
  * Generic type used to annotate underlying type with a context of the replica.
  */
-export type In<T> = { [For: Space]: T };
+export type In<T> = { [For: SubjectSpace]: T };
 
 export type JSONValue = null | boolean | number | string | JSONObject | JSONArray;
 
@@ -235,6 +286,10 @@ export interface JSONObject extends Record<string, JSONValue> {}
 export interface JSONArray extends ArrayLike<JSONValue> {}
 
 export type AsyncResult<T extends Unit = Unit, E extends Error = Error> = Promise<Result<T, E>>;
+
+export type AwaitResult<T extends Unit = Unit, E extends Error = Error> =
+  | PromiseLike<Result<T, E>>
+  | Result<T, E>;
 
 export type Result<T extends Unit = Unit, E extends Error = Error> = Ok<T> | Fail<E>;
 
@@ -258,7 +313,7 @@ export type Conflict = {
   /**
    * Identifier of the replica where conflict occurred.
    */
-  in: Space;
+  in: SubjectSpace;
 
   /**
    * Type of the fact where a conflict occurred.
@@ -317,13 +372,7 @@ export interface TransactionError extends Error {
 export interface QueryError extends Error {
   name: "QueryError";
   cause: SystemError;
-  selector: Selector & { in: Space };
-}
-
-export interface ListError extends Error {
-  name: "ListError";
-  cause: SystemError;
-  selector: { in: Space; the?: string; of?: string };
+  selector: Selector & { in: SubjectSpace };
 }
 
 /**

@@ -8,10 +8,9 @@ import type {
   SystemError,
   ConnectionError,
   Selector,
-  ListError,
   Transaction,
 } from "./interface.ts";
-import { Space } from "./interface.ts";
+import { SubjectSpace } from "./interface.ts";
 import { refer } from "./util.ts";
 
 export const conflict = (transaction: Transaction, info: Conflict): ToJSON<ConflictError> =>
@@ -22,13 +21,10 @@ export const transaction = (
   cause: SystemError,
 ): ToJSON<TransactionError> => new TheTransactionError(transaction, cause);
 
-export const query = (selector: Selector & { in: Space }, cause: SystemError): ToJSON<QueryError> =>
-  new TheQueryError(selector, cause);
-
-export const list = (
-  selector: { in: Space; the?: string; of?: string },
+export const query = (
+  selector: Selector & { in: SubjectSpace },
   cause: SystemError,
-): ToJSON<ListError> => new TheListError(selector, cause);
+): ToJSON<QueryError> => new TheQueryError(selector, cause);
 
 export const connection = (address: URL, cause: SystemError): ToJSON<ConnectionError> =>
   new TheConnectionError(address.href, cause);
@@ -88,39 +84,14 @@ export class TheTransactionError extends Error implements TransactionError {
 
 export class TheQueryError extends Error implements QueryError {
   override name = "QueryError" as const;
-  constructor(public selector: Selector & { in: Space }, public override cause: SystemError) {
+  constructor(
+    public selector: Selector & { in: SubjectSpace },
+    public override cause: SystemError,
+  ) {
     const { the, of } = selector;
     super(`Query ${JSON.stringify({ the, of })} in ${selector.in} failed: ${cause.message}`);
   }
   toJSON(): QueryError {
-    return {
-      name: this.name,
-      stack: this.stack ?? "",
-      message: this.message,
-      selector: this.selector,
-      cause: {
-        name: this.cause.name,
-        code: this.cause.code,
-        message: this.cause.message,
-        stack: this.cause.stack ?? "",
-      },
-    };
-  }
-}
-
-export class TheListError extends Error implements ListError {
-  override name = "ListError" as const;
-  constructor(
-    public selector: { in: Space; the?: string; of?: string },
-    public override cause: SystemError,
-  ) {
-    super(
-      `List query ${JSON.stringify({ the: selector.the, of: selector.of })} in ${
-        selector.in
-      } failed: ${cause.message}`,
-    );
-  }
-  toJSON(): ListError {
     return {
       name: this.name,
       stack: this.stack ?? "",

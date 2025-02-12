@@ -7,7 +7,7 @@ const doc = refer({ hello: "world" }).toString();
 const space = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
 
-const test = (title: string, url: URL, run: (replica: Space.Store) => Promise<unknown>) => {
+const test = (title: string, url: URL, run: (replica: Space.View) => Promise<unknown>) => {
   const unit = async () => {
     const session = await Space.open({
       url,
@@ -1184,7 +1184,7 @@ Deno.test("open creates replica if does not exists", async () => {
 
     await assert(open.ok, "Opened a repository");
 
-    const session = open.ok as Space.Store;
+    const session = open.ok as Space.View;
     const t1 = Space.transaction({
       issuer: alice,
       subject: space,

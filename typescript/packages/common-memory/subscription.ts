@@ -1,71 +1,80 @@
-import { Selector, Space, Changes, Subscription as SubscriptionQuery } from "./interface.ts";
-import * as Replica from "./router.ts";
+import {
+  Selector,
+  SubjectSpace,
+  Transaction,
+  Brief,
+  SubscriptionQuery,
+  Query,
+  QueryResult,
+  SubscriberCommand,
+  SubscriptionCommand,
+  SubscriptionController,
+} from "./interface.ts";
 
-export interface Subscriber {
-  integrate(delta: { [space: Space]: Changes }): void;
-
-  close(): void;
+interface Memory {
+  query(source: Query): QueryResult;
 }
 
-/**
- * Represents a subscription controller that can be used to add or remove
- * document addresses to the underlying subscription.
- */
-export interface Subscription {
-  stream: ReadableStream<{ [space: Space]: Changes }>;
-
-  /**
-   * Add a new address to be observed.
-   */
-  watch(address: SubscriptionQuery): void;
-
-  /**
-   * Removes an address from this subscription.
-   */
-  unwatch(address: SubscriptionQuery): void;
-
-  /**
-   * Close the underlying subscription.
-   */
-  close(): void;
+export interface Session extends SubscriptionController {
+  controller: ReadableStreamDefaultController<SubscriptionCommand> | undefined;
+  memory: Memory;
+  watched: Set<string>;
 }
 
-export interface Session extends Subscriber {
-  controller: ReadableStreamDefaultController<{ [space: Space]: Changes }> | undefined;
-  channels: Map<string, SubscriptionQuery>;
-  replica: Replica.Session;
-}
-
-export class TheSubscription implements Session, Subscription, Subscriber {
-  controller: ReadableStreamDefaultController<{ [space: Space]: Changes }> | undefined;
-  stream: ReadableStream<{ [space: Space]: Changes }>;
-  channels: Map<string, SubscriptionQuery> = new Map();
-  constructor(public replica: Replica.Session) {
-    this.stream = new ReadableStream<{ [space: Space]: Changes }>({
-      start: (source) => {
-        this.controller = source;
-      },
-      cancel: () => {
-        this.cancel();
-      },
+class Subscription implements Session, SubscriptionController {
+  controller: ReadableStreamDefaultController<SubscriptionCommand> | undefined;
+  readable: ReadableStream<SubscriptionCommand>;
+  writable: WritableStream<SubscriberCommand>;
+  constructor(public memory: Memory, public watched: Set<string>) {
+    this.readable = new ReadableStream<SubscriptionCommand>({
+      start: (controller) => this.connect(controller),
+      cancel: () => this.cancel(),
+    });
+    this.writable = new WritableStream<SubscriberCommand>({
+      write: (command) => this.perform(command),
+      close: () => this.close(),
+      abort: () => this.close(),
     });
   }
 
-  watch(source: SubscriptionQuery) {
-    watch(this, source);
+  connect(controller: ReadableStreamDefaultController<SubscriptionCommand>) {
+    this.controller = controller;
+  }
+
+  get open() {
+    return !!this.controller;
+  }
+
+  async perform(command: SubscriberCommand) {
+    if (command.watch) {
+      await watch(this, command.watch);
+    }
+    if (command.unwatch) {
+      await unwatch(this, command.unwatch);
+    }
+  }
+
+  transact(transaction: Transaction) {
+    return transact(this, transaction);
+  }
+  brief(source: Brief) {
+    return brief(this, source);
+  }
+
+  async watch(source: SubscriptionQuery) {
+    await watch(this, source);
     return this;
   }
 
-  unwatch(source: SubscriptionQuery) {
-    unwatch(this, source);
+  async unwatch(source: SubscriptionQuery) {
+    await unwatch(this, source);
     return this;
-  }
-
-  integrate(changes: { [space: Space]: Changes }) {
-    return integrate(this, changes);
   }
 
   cancel() {
+    return cancel(this);
+  }
+  abort() {
     return cancel(this);
   }
 
@@ -74,23 +83,56 @@ export class TheSubscription implements Session, Subscription, Subscriber {
   }
 }
 
-export const integrate = (session: Session, changes: { [space: Space]: Changes }) => {
+interface SubscriptionSession {
+  memory: Memory;
+
+  queries: Set<string>;
+}
+
+const transact = (session: Session, transaction: Transaction) => {
+  if (match(session, transaction)) {
+    publish(session, { transact: transaction });
+  }
+};
+
+const match = (session: Session, source: Transaction) => {
+  for (const [the, entities] of Object.entries(source.args.changes)) {
+    for (const [of, changes] of Object.entries(entities)) {
+      for (const change of Object.values(changes)) {
+        // If `change.is === {}` we simply confirm that state has not changed
+        // so we don't need to notify those subscribers.
+        if (change == null || change.is != undefined) {
+          const watches =
+            session.watched.has(formatAddress(source.sub, { the, of })) ||
+            session.watched.has(formatAddress(source.sub, { the })) ||
+            session.watched.has(formatAddress(source.sub, { of })) ||
+            session.watched.has(formatAddress(source.sub, {}));
+
+          if (watches) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+  return false;
+};
+
+const brief = (session: Session, brief: Brief) => publish(session, { brief: brief });
+
+const publish = (session: Session, command: SubscriptionCommand) => {
   if (session.controller) {
-    session.controller.enqueue(changes);
+    session.controller.enqueue(command);
   } else {
     throw new Error("Subscription is cancelled");
   }
 };
 
-export const open = (replica: Replica.Session) => new TheSubscription(replica);
+export const open = (memory: Memory) => new Subscription(memory, new Set());
 
 export const cancel = (session: Session) => {
   if (session.controller) {
     session.controller = undefined;
-    for (const [, address] of session.channels) {
-      session.replica.unwatch(address, session);
-    }
-    session.channels.clear();
   }
 };
 
@@ -101,17 +143,31 @@ export const close = (session: Session) => {
   }
 };
 
-export const watch = (session: Session, source: SubscriptionQuery) => {
+export const watch = async (session: Session, source: SubscriptionQuery) => {
   const {
     sub: space,
     args: { selector },
   } = source;
 
   const channel = formatAddress(space, selector);
-  if (!session.channels.has(channel)) {
-    session.channels.set(channel, source);
-    session.replica.watch(source, session);
+
+  if (!session.watched.has(channel)) {
+    session.watched.add(channel);
+    const result = await session.memory.query(source);
+    if (result.error) {
+      return result;
+    } else {
+      session.brief({
+        sub: source.sub,
+        args: {
+          selector: source.args.selector,
+          selection: result.ok,
+        },
+      });
+    }
   }
+
+  return { ok: {} };
 };
 
 export const unwatch = (session: Session, source: SubscriptionQuery) => {
@@ -121,11 +177,9 @@ export const unwatch = (session: Session, source: SubscriptionQuery) => {
   } = source;
 
   const channel = formatAddress(space, selector);
-  if (session.channels.has(channel)) {
-    session.replica.unwatch(source, session);
-    session.channels.delete(channel);
-  }
+
+  session.watched.delete(channel);
 };
 
-export const formatAddress = (space: Space, { of = "_", the = "_" }: Selector) =>
+export const formatAddress = (space: SubjectSpace, { of = "_", the = "_" }: Selector) =>
   `watch:///${space}/${of}/${the}`;

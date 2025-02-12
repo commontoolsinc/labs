@@ -2,9 +2,10 @@ import { Database, Transaction as DBTransaction, SqliteError } from "jsr:@db/sql
 import { fromString, refer, Reference } from "npm:merkle-reference";
 import type {
   Result,
-  Space,
+  SubjectSpace,
   Entity,
-  The,
+  Selector,
+  Unit,
   Fact,
   Transaction,
   JSONValue,
@@ -13,7 +14,6 @@ import type {
   QueryError,
   ToJSON,
   ConnectionError,
-  Unclaimed,
   Commit,
   Assertion,
   AsyncResult,
@@ -21,14 +21,14 @@ import type {
   Retract,
   Assert,
   Confirm,
-  ListError,
   Principal,
   Query,
   Changes,
-  State,
   Meta,
+  SpaceSession,
 } from "./interface.ts";
 import * as Error from "./error.ts";
+export * from "./interface.ts";
 
 export const PREPARE = `
 BEGIN TRANSACTION;
@@ -114,42 +114,13 @@ export type Options = {
   url: URL;
 };
 
-export interface Model {
-  id: Space;
+interface Session {
+  id: SubjectSpace;
   store: Database;
 }
 
-export interface Selector {
-  the?: The;
-  of?: Entity;
-  is?: {};
-  since?: number;
-}
-
-export interface ListResult {
-  of: Entity;
-  is?: JSONValue;
-}
-
-export interface Session {
-  /**
-   * Transacts can be used to assert or retract a document from the repository.
-   * If `version` asserted / retracted does not match version of the document
-   * transaction fails with `ConflictError`. Otherwise document is updated to
-   * the new value.
-   */
-  transact(transact: Transaction): Result<Commit, ToJSON<ConflictError> | ToJSON<TransactionError>>;
-
-  /**
-   * Queries space for matching entities based on provided selector.
-   */
-  query(source: Query): Result<Fact[], ToJSON<QueryError>>;
-
-  close(): AsyncResult<{}, SystemError>;
-}
-
-export class Store implements Model, Session {
-  constructor(public id: Space, public store: Database) {}
+class Space implements Session, SpaceSession {
+  constructor(public id: SubjectSpace, public store: Database) {}
 
   transact(transaction: Transaction) {
     return transact(this, transaction);
@@ -163,6 +134,8 @@ export class Store implements Model, Session {
     return close(this);
   }
 }
+
+export type { Space as View };
 
 /**
  * Takes store URL which is expected to be either `file:` or `memory:` protocol
@@ -192,31 +165,31 @@ const readAddress = (url: URL) => {
  * Creates a connection to the existing replica. Errors if replica does not
  * exist.
  */
-export const connect = async ({ url }: Options): AsyncResult<Store, ToJSON<ConnectionError>> => {
+export const connect = async ({ url }: Options): AsyncResult<Space, ToJSON<ConnectionError>> => {
   const address = readAddress(url);
   try {
     const database = await new Database(address.location, { create: false });
     database.exec(PREPARE);
-    const session = new Store(address.id, database);
+    const session = new Space(address.id, database);
     return { ok: session };
   } catch (cause) {
     return { error: Error.connection(url, cause as SqliteError) };
   }
 };
 
-export const open = async ({ url }: Options): AsyncResult<Store, ToJSON<ConnectionError>> => {
+export const open = async ({ url }: Options): AsyncResult<Space, ToJSON<ConnectionError>> => {
   try {
     const { location, id } = readAddress(url);
     const database = await new Database(location, { create: true });
     database.exec(PREPARE);
-    const session = new Store(id, database);
+    const session = new Space(id, database);
     return { ok: session };
   } catch (cause) {
     throw Error.connection(url, cause as SqliteError);
   }
 };
 
-export const close = async ({ store }: Model): AsyncResult<{}, SystemError> => {
+export const close = async ({ store }: Session): AsyncResult<Unit, SystemError> => {
   try {
     await store.close();
     return { ok: {} };
@@ -258,7 +231,7 @@ export const init = ({
   of: Entity;
 }): Reference<Assertion> => refer(implicit({ the, of }));
 
-const select = ({ store }: Model, { the, of, is, since }: Selector): Fact[] => {
+const select = ({ store }: Session, { the, of, is, since }: Selector): Fact[] => {
   const rows = store.prepare(EXPORT).all({
     the: the ?? null,
     of: of ?? null,
@@ -274,7 +247,7 @@ const select = ({ store }: Model, { the, of, is, since }: Selector): Fact[] => {
   }));
 };
 
-const importDatum = (session: Model, source: Assertion): Reference<JSONValue> => {
+const importDatum = (session: Session, source: Assertion): Reference<JSONValue> => {
   const is = refer(source.is);
   session.store.run(IMPORT_DATUM, {
     this: is.toString(),
@@ -300,7 +273,7 @@ const iterate = function* (transaction: Transaction): Iterable<Retract | Assert 
 };
 
 const swap = (
-  session: Model,
+  session: Session,
   source: Retract | Assert | Confirm,
   { since, transaction }: { since: number; transaction: Transaction },
 ) => {
@@ -398,7 +371,7 @@ const identify = ({ is, cause }: Fact) =>
 
 const THE_COMMIT = "application/commit+json";
 
-const toSubjectEntity = (subject: Space) => refer(subject).toString();
+const toSubjectEntity = (subject: SubjectSpace) => refer(subject).toString();
 
 /**
  * Derives a fact for the commit entity from the source data.
@@ -408,7 +381,7 @@ export const toCommit = ({
   is,
   cause,
 }: {
-  subject: Space;
+  subject: SubjectSpace;
   is: Commit["is"];
   cause?: Reference<Fact>;
 }) => {
@@ -421,7 +394,7 @@ export const toCommit = ({
   };
 };
 
-const commit = (session: Model, transaction: Transaction): Commit => {
+const commit = (session: Session, transaction: Transaction): Commit => {
   const space = toSubjectEntity(transaction.sub);
   const row = session.store.prepare(EXPORT).get({
     the: THE_COMMIT,
@@ -450,9 +423,9 @@ const commit = (session: Model, transaction: Transaction): Commit => {
   return commit;
 };
 
-const execute = <Tr extends DBTransaction<(session: Model, transaction: Transaction) => Commit>>(
+const execute = <Tr extends DBTransaction<(session: Session, transaction: Transaction) => Commit>>(
   commit: Tr,
-  session: Model,
+  session: Session,
   transaction: Transaction,
 ): Result<Commit, ToJSON<ConflictError> | ToJSON<TransactionError>> => {
   try {
@@ -478,7 +451,7 @@ export const transaction = ({
   meta,
 }: {
   issuer: Principal;
-  subject: Space;
+  subject: SubjectSpace;
   changes: Changes;
   meta?: Meta;
 }): Transaction => ({
@@ -489,10 +462,10 @@ export const transaction = ({
   ...(meta ? { meta } : undefined),
 });
 
-export const transact = (session: Model, transaction: Transaction) =>
+export const transact = (session: Session, transaction: Transaction) =>
   execute(session.store.transaction(commit), session, transaction);
 
-export const query = (session: Model, source: Query): Result<Fact[], ToJSON<QueryError>> => {
+export const query = (session: Session, source: Query): Result<Fact[], ToJSON<QueryError>> => {
   try {
     return { ok: select(session, source.args.selector) };
   } catch (error) {

@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
-import * as Router from "../router.ts";
+import * as Memory from "../memory.ts";
 import * as Space from "../space.ts";
 import { refer } from "merkle-reference";
 
@@ -8,9 +8,13 @@ const space = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
 const doc = refer({ hello: "world" }).toString();
 const the = "application/json";
 
-const test = (title: string, url: URL, run: (replica: Router.Session) => Promise<unknown>) => {
+const test = (
+  title: string,
+  url: URL,
+  run: (replica: Memory.MemorySession) => Promise<unknown>,
+) => {
   const unit = async () => {
-    const open = await Router.open({
+    const open = await Memory.open({
       store: url,
     });
 

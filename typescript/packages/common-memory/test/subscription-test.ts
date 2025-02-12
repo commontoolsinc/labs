@@ -1,19 +1,22 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
-import * as Router from "../router.ts";
-import { refer } from "../lib.ts";
+import * as Memory from "../memory.ts";
+import { refer, Space, Subscriber, Subscription } from "../provider.ts";
 
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
-const bob = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
-const doc = "4301a667-5388-4477-ba08-d2e6b51a62a3";
-const doc2 = "2959ac6c-be22-495e-aa5b-b52bd101d354";
+const space = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
+// const doc = refer({ hello: "world" }).toString();
+// const doc2 = refer({ hi: "world" }).toString();
+const doc = "doc-1";
+const doc2 = "doc-2";
+const the = "application/json";
 
 const test = (
   title: string,
   url: URL,
-  run: (replica: Router.Session) => Promise<unknown>,
+  run: (replica: Memory.MemorySession) => Promise<unknown>,
 ) => {
   const unit = async () => {
-    const open = await Router.open({
+    const open = await Memory.open({
       store: url,
     });
 
@@ -38,287 +41,356 @@ const test = (
 
 const memory = new URL(`memory://`);
 
-test("subscribe receives unclaimed state", memory, async session => {
-  const subscription = session.subscribe({
-    [alice]: {
-      the: "application/json",
-      of: doc,
-    },
-  });
+test("subscribe receives unclaimed state", memory, async (session) => {
+  const subscriber = Subscriber.create();
+  await session.subscribe(subscriber);
 
-  const [unclaimed] = await take(subscription.stream, 1);
-
-  assertEquals(
-    unclaimed,
-    {
-      [alice]: {
-        the: "application/json",
+  subscriber.watch({
+    cmd: "/memory/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector: {
+        the,
         of: doc,
       },
     },
-    "receives unclaimed fact",
+  });
+
+  const [none] = await take(subscriber.commands, 1);
+
+  assertEquals(
+    none,
+    {
+      brief: {
+        sub: space,
+        args: {
+          selector: { the, of: doc },
+          selection: [],
+        },
+      },
+    },
+    "no facts found",
   );
 });
 
-test("subscribe receives unclaimed then asserted", memory, async session => {
-  const subscription = session.subscribe({
-    [alice]: {
-      the: "application/json",
-      of: doc,
-    },
+test("subscribe receives unclaimed then asserted", memory, async (session) => {
+  const subscriber = Subscriber.create();
+  await session.subscribe(subscriber);
+
+  const selector = { the, of: doc };
+
+  subscriber.watch({
+    cmd: "/memory/query",
+    iss: alice,
+    sub: space,
+    args: { selector },
   });
 
-  session.transact({
-    [alice]: {
-      assert: {
-        the: "application/json",
-        of: doc,
-        is: { v: 1 },
+  const transaction = {
+    cmd: "/memory/transact",
+    iss: alice,
+    sub: space,
+    args: {
+      changes: {
+        [the]: {
+          [doc]: {
+            [refer({ the, of: doc }).toString()]: {
+              is: { v: 1 },
+            },
+          },
+        },
       },
     },
-  });
+  } as const;
 
-  const updates = await take(subscription.stream, 2);
+  session.transact(transaction);
+
+  const updates = await take(subscriber.commands, 2);
 
   assertEquals(updates, [
     {
-      [alice]: {
-        the: "application/json",
-        of: doc,
+      brief: {
+        sub: space,
+        args: {
+          selector,
+          selection: [],
+        },
       },
     },
     {
-      [alice]: {
-        the: "application/json",
-        of: doc,
-        is: { v: 1 },
-        cause: refer({ the: "application/json", of: doc }),
-      },
+      transact: transaction,
     },
   ]);
 });
 
-test("subscribe receives retraction", memory, async session => {
-  await session.transact({
-    [alice]: {
-      assert: {
-        the: "application/json",
-        of: doc,
-        is: { v: 1 },
+test("subscribe receives retraction", memory, async (session) => {
+  const transaction = Space.transaction({
+    issuer: alice,
+    subject: space,
+    changes: {
+      [the]: {
+        [doc]: {
+          [Space.init({ the, of: doc }).toString()]: {
+            is: { v: 1 },
+          },
+        },
       },
     },
   });
 
-  const subscription = session.subscribe({
-    [alice]: {
-      the: "application/json",
-      of: doc,
-    },
+  await session.transact(transaction);
+
+  const selector = { the, of: doc };
+
+  const subscriber = Subscriber.create();
+  await session.subscribe(subscriber);
+  await subscriber.watch({
+    cmd: "/memory/query",
+    iss: alice,
+    sub: space,
+    args: { selector },
   });
 
-  const retract = await session.transact({
-    [alice]: {
-      retract: {
-        the: "application/json",
-        of: doc,
-        is: { v: 1 },
-        cause: refer({ the: "application/json", of: doc }),
+  const retraction = Space.transaction({
+    issuer: alice,
+    subject: space,
+    changes: {
+      [the]: {
+        [doc]: {
+          [refer({ is: { v: 1 }, cause: Space.init({ the, of: doc }) }).toString()]: null,
+        },
       },
     },
   });
+
+  const retract = await session.transact(retraction);
 
   assert(retract.ok, "retracted");
 
-  const updates = await take(subscription.stream, 2);
+  const updates = await take(subscriber.commands, 2);
   assertEquals(updates, [
     {
-      [alice]: {
-        the: "application/json",
-        of: doc,
-        is: { v: 1 },
-        cause: refer({ the: "application/json", of: doc }),
+      brief: {
+        sub: space,
+        args: {
+          selector,
+          selection: [
+            {
+              the,
+              of: doc,
+              is: { v: 1 },
+              cause: Space.init({ the, of: doc }),
+            },
+          ],
+        },
       },
     },
     {
-      [alice]: {
-        the: "application/json",
-        of: doc,
-        cause: refer({
-          the: "application/json",
-          of: doc,
-          is: { v: 1 },
-          cause: refer({ the: "application/json", of: doc }),
-        }),
-      },
+      transact: retraction,
     },
   ]);
 });
 
-test("subscription watch / unwatch", memory, async session => {
-  const subscription = session.subscribe({
-    [alice]: {
-      the: "application/json",
-      of: doc,
+test("subscription watch / unwatch", memory, async (session) => {
+  const subscriber = Subscriber.create();
+  session.subscribe(subscriber);
+
+  const selector = { the, of: doc };
+
+  subscriber.watch({
+    cmd: "/memory/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector,
     },
   });
 
-  const two = take(subscription.stream, 2);
-
-  const v1 = await session.transact({
-    [alice]: {
-      assert: {
-        the: "application/json",
-        of: doc2,
-        is: { v: 1 },
+  const two = take(subscriber.commands, 2);
+  const t1 = Space.transaction({
+    issuer: alice,
+    subject: space,
+    changes: {
+      [the]: {
+        [doc2]: {
+          [Space.init({ the, of: doc2 }).toString()]: {
+            is: { doc: 2 },
+          },
+        },
       },
     },
   });
+
+  const v1 = await session.transact(t1);
 
   assert(v1.ok, "asserted second doc");
 
-  await session.transact({
-    [alice]: {
-      assert: {
-        the: "application/json",
-        of: doc,
-        is: { v: 2 },
+  const t2 = Space.transaction({
+    issuer: alice,
+    subject: space,
+    changes: {
+      [the]: {
+        [doc]: {
+          [Space.init({ the, of: doc }).toString()]: {
+            is: { doc: 1 },
+          },
+        },
       },
     },
   });
+  await session.transact(t2);
 
   assertEquals(
     await two,
     [
       {
-        [alice]: {
-          the: "application/json",
-          of: doc,
+        brief: {
+          sub: space,
+          args: {
+            selector,
+            selection: [],
+          },
         },
       },
       {
-        [alice]: {
-          the: "application/json",
-          of: doc,
-          is: { v: 2 },
-          cause: refer({ the: "application/json", of: doc }),
-        },
+        transact: t2,
       },
     ],
     "did not got update for the document was not subscribed to",
   );
 
-  const next = take(subscription.stream, 1);
-  subscription.watch({ [alice]: { the: "application/json", of: doc2 } });
+  const next = take(subscriber.commands, 1);
+  const selector2 = { the, of: doc2 };
+  await subscriber.watch({
+    cmd: "/memory/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector: selector2,
+    },
+  });
 
   assertEquals(
     await next,
     [
       {
-        [alice]: {
-          the: "application/json",
-          of: doc2,
-          is: { v: 1 },
-          cause: refer({ the: "application/json", of: doc2 }),
+        brief: {
+          sub: space,
+          args: {
+            selector: selector2,
+            selection: [
+              {
+                the,
+                of: doc2,
+                is: { doc: 2 },
+                cause: Space.init(selector2),
+              },
+            ],
+          },
         },
       },
     ],
     "got update for the document was subscribed to",
   );
 
-  subscription.unwatch({ [alice]: { the: "application/json", of: doc } });
+  subscriber.unwatch({
+    cmd: "/memory/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector,
+    },
+  });
 
-  const third = take(subscription.stream, 1);
+  const third = take(subscriber.commands, 1);
 
-  const v3 = await session.transact({
-    [alice]: {
-      assert: {
-        the: "application/json",
-        of: doc,
-        is: { v: 3 },
-        cause: refer({
-          the: "application/json",
-          of: doc,
-          is: { v: 2 },
-          cause: {
-            the: "application/json",
-            of: doc,
+  const t3 = Space.transaction({
+    issuer: alice,
+    subject: space,
+    changes: {
+      [the]: {
+        [doc]: {
+          [refer({ is: { doc: 1 }, cause: Space.init({ the, of: doc }) }).toString()]: {
+            is: { doc: 1, t: 3 },
           },
-        }),
+        },
       },
     },
   });
+
+  const v3 = await session.transact(t3);
   assert(v3.ok);
 
-  const v4 = await session.transact({
-    [alice]: {
-      assert: {
-        the: "application/json",
-        of: doc2,
-        is: { v: 4 },
-        cause: refer({
-          the: "application/json",
-          of: doc2,
-          is: { v: 1 },
-          cause: { the: "application/json", of: doc2 },
-        }),
+  const t4 = Space.transaction({
+    issuer: alice,
+    subject: space,
+    changes: {
+      [the]: {
+        [doc2]: {
+          [refer({ is: { doc: 2 }, cause: Space.init({ the, of: doc2 }) }).toString()]: {
+            is: {
+              doc: 2,
+              t: 4,
+            },
+          },
+        },
       },
     },
   });
+
+  const v4 = await session.transact(t4);
   assert(v4.ok);
 
   assertEquals(
     await third,
     [
       {
-        [alice]: {
-          the: "application/json",
-          of: doc2,
-          is: { v: 4 },
-          cause: refer({
-            the: "application/json",
-            of: doc2,
-            is: { v: 1 },
-            cause: { the: "application/json", of: doc2 },
-          }),
-        },
+        transact: t4,
       },
     ],
     "did not got update for the document was unwatched",
   );
 });
 
-test("close subscription", memory, async session => {
-  const subscription = session.subscribe({
-    [alice]: {
-      the: "application/json",
-      of: doc,
+test("close subscription", memory, async (session) => {
+  const subscriber = Subscriber.create();
+  session.subscribe(subscriber);
+
+  const selector = { the, of: doc };
+  subscriber.watch({
+    cmd: "/memory/query",
+    iss: alice,
+    sub: space,
+    args: {
+      selector,
     },
   });
 
-  const inbox = take(subscription.stream, 2);
+  const inbox = take(subscriber.commands, 2);
 
-  await new Promise(resolve => setTimeout(resolve, 100));
+  await new Promise((resolve) => setTimeout(resolve, 100));
 
-  subscription.close();
+  subscriber.close();
 
   assertEquals(
     await inbox,
     [
       {
-        [alice]: {
-          the: "application/json",
-          of: doc,
+        brief: {
+          sub: space,
+          args: {
+            selector,
+            selection: [],
+          },
         },
       },
     ],
-    "receives unclaimed fact",
+    "receives brief only",
   );
 });
 
-const take = async <T>(
-  source: ReadableStream<T>,
-  limit: number = Infinity,
-): Promise<T[]> => {
+const take = async <T>(source: ReadableStream<T>, limit: number = Infinity): Promise<T[]> => {
   const results = [];
   const reader = source.getReader();
   try {
