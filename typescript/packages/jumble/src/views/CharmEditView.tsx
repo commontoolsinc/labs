@@ -1,18 +1,10 @@
-import { Charm, saveNewRecipeVersion } from "@commontools/charm";
+import { saveNewRecipeVersion } from "@commontools/charm";
 import React, { useEffect } from "react";
 import { useParams } from "react-router-dom";
-import { CharmRenderer } from "@/components/CharmRunner";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
-import { getIframeRecipe } from "@commontools/charm";
-import { createComponent } from "@lit/react";
-import { codeEditor } from "@commontools/os-ui";
-import { animated } from "@react-spring/web";
 import { LoadingSpinner } from "@/components/Loader";
 import { useCharm } from "@/hooks/use-charm";
-import { useCharmDetailAnimations } from "@/hooks/use-charm-detail-animation";
 import CodeMirror from "@uiw/react-codemirror";
-import { EditorView } from "@codemirror/view";
-import { markdown } from "@codemirror/lang-markdown";
 import { javascript } from "@codemirror/lang-javascript";
 
 function CharmEditView() {
@@ -59,6 +51,7 @@ function CharmEditView() {
           }}
         />
       </div>
+
       {/* NOTE(jake): These are potentially helpful context to have! */}
       {/* <table className="text-sm font-mono border-collapse">
         <tbody>
