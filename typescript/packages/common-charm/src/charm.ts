@@ -68,7 +68,10 @@ export class CharmManager {
       .get()
       .find(({ cell }) => JSON.stringify(cell.entityId) === JSON.stringify({ "/": id }));
     if (!charm) return undefined;
-    return charm.cell;
+
+    // Make sure the charm is running. This is re-entrant and has no effect if
+    // the charm is already running.
+    return run(undefined, undefined, charm.cell);
   }
 
   // note: removing a charm doesn't clean up the charm's cells
@@ -88,7 +91,6 @@ export class CharmManager {
   }
 
   async runPersistent(recipe: Recipe | Module, inputs?: any, cause?: any): Promise<DocImpl<any>> {
-    console.log("runPersistent", recipe, inputs, cause);
     await idle();
 
     // Fill in missing parameters from other charms. It's a simple match on
@@ -130,9 +132,7 @@ export class CharmManager {
       }
     }
 
-    console.log("loading doc", recipe, inputs, cause);
     const doc = await this.storage.syncCell(createRef({ recipe, inputs }, cause));
-    console.log("runPersistent", JSON.stringify(doc.entityId));
     const charm = run(recipe, inputs, doc);
 
     // FIXME(ja): should we add / sync explicitly here?
