@@ -13,13 +13,10 @@ import {
   getDocLinkOrThrow,
 } from "@commontools/runner";
 import { isStatic, markAsStatic } from "@commontools/builder";
-import {
-  StorageProvider,
-  StorageValue,
-  LocalStorageProvider,
-  InMemoryStorageProvider,
-  RemoteStorageProvider,
-} from "./storage-providers.js";
+import { StorageProvider, StorageValue } from "./storage/base.js";
+import { LocalStorageProvider } from "./storage/localstorage.js";
+import { InMemoryStorageProvider } from "./storage/memory.js";
+import { RemoteStorageProvider } from "./storage/remote.js";
 import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
 
 export function log(...args: any[]) {
@@ -73,6 +70,12 @@ export interface Storage {
    * @returns Promise that resolves when the operation is complete.
    */
   destroy(): Promise<void>;
+
+  /**
+   * Get the replica name.
+   * @returns The replica name.
+   */
+  getReplica(): string | undefined;
 }
 
 type Job = {
@@ -574,19 +577,28 @@ class StorageImpl implements Storage {
       throw new Error(`Invalid cell or entity ID: ${subject}`);
     }
   }
+
+  getReplica(): string | undefined {
+    return this.storageProvider.getReplica();
+  }
 }
 
-export function createStorage(type: "local" | "memory" | "remote", replica: string = "common-knowledge"): Storage {
+export type StorageConfig =
+  | { type: "local" }
+  | { type: "memory" }
+  | { type: "remote"; replica: string; url: URL };
+
+export function createStorage(config: StorageConfig): Storage {
   let storageProvider: StorageProvider;
 
-  if (type === "local") {
+  if (config.type === "local") {
     storageProvider = new LocalStorageProvider();
-  } else if (type === "memory") {
+  } else if (config.type === "memory") {
     storageProvider = new InMemoryStorageProvider();
-  } else if (type === "remote") {
+  } else if (config.type === "remote") {
     storageProvider = new RemoteStorageProvider({
-      address: new URL("/api/storage/memory", new URL(location.href)),
-      replica,
+      address: new URL("/api/storage/memory", config.url),
+      replica: config.replica,
     });
   } else {
     throw new Error("Invalid storage type");

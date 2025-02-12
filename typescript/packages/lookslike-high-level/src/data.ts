@@ -17,6 +17,7 @@ import {
 import * as allRecipes from "./recipes/index.js";
 import { setIframeContextHandler } from "@commontools/iframe-sandbox";
 import { CharmManager } from "@commontools/charm";
+import { createStorage } from "@commontools/charm/src/storage";
 
 export const BLOBBY_SERVER_URL =
   typeof window !== "undefined"
@@ -28,8 +29,11 @@ export const charmManager = (() => {
   const urlParams = new URLSearchParams(window.location.search);
   const replica = urlParams.get("replica") ?? undefined;
   const storageType = replica ? "remote" : ((import.meta as any).env.VITE_STORAGE_TYPE ?? "memory");
-  console.log("charmManager", replica, storageType);  
-  return new CharmManager(replica, storageType);
+  console.log("charmManager", replica, storageType);
+  const storage = storageType === "remote" ?
+    createStorage({ type: "remote", replica, url: new URL(location.href) }) :
+    createStorage({ type: storageType as "memory" | "local" });
+  return new CharmManager(storage);
 })();
 
 // Necessary, so that suggestions are indexed.

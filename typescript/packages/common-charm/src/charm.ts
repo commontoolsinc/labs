@@ -11,7 +11,7 @@ import {
   isDocLink,
   run,
 } from "@commontools/runner";
-import { createStorage, Storage } from "./storage.js";
+import { type Storage } from "./storage.js";
 import { syncRecipeBlobby } from "./syncRecipe.js";
 
 export type Charm = {
@@ -24,20 +24,14 @@ export type Charm = {
 export type StorageType = "remote" | "memory" | "local";
 
 export class CharmManager {
-  private storage: Storage;
   private charms: DocImpl<DocLink[]>;
-  private replica?: string;
 
-  constructor(replica = "common-knowledge", storageType: StorageType) {
-    this.storage = createStorage(storageType, replica);
+  constructor(private storage: Storage) {
     this.charms = getDoc<DocLink[]>([], "charms");
-    if (storageType === "remote") {
-      this.replica = replica;
-    }
   }
 
   getReplica(): string | undefined {
-    return this.replica;
+    return this.storage.getReplica();
   }
 
   getCharms(): DocImpl<DocLink[]> {
