@@ -1,6 +1,7 @@
 import "@commontools/ui";
 import { useCallback } from "react";
 import { NavLink, Outlet, useParams, useLocation } from "react-router-dom";
+import { animated } from "@react-spring/web";
 
 import { setIframeContextHandler } from "@commontools/iframe-sandbox";
 import { LLMClient } from "@commontools/llm-client";
@@ -131,12 +132,18 @@ export default function Shell() {
         <Outlet />
       </div>
 
-      <button
+      <animated.button
+        className="
+          flex items-center justify-center fixed bottom-2 right-2 w-12 h-12 z-50
+          border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]
+          hover:translate-y-[-2px] hover:shadow-[2px_2px_0px_0px_rgba(0,0,0,0.7)]
+          transition-[border,box-shadow,transform] duration-100 ease-in-out
+          bg-white cursor-pointer
+        "
         onClick={onLaunchCommand}
-        className="fixed bottom-2 right-2 w-12 h-12 flex items-center justify-center rounded-lg bg-gray-300 hover:bg-gray-400 transition-colors z-50"
       >
         <MdOutlineStar fill="black" size={24} />
-      </button>
+      </animated.button>
 
       <CommandCenter />
     </div>
