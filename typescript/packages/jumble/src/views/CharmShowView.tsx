@@ -4,13 +4,9 @@ import { CharmRenderer } from "@/components/CharmRunner";
 import { LoadingSpinner } from "@/components/Loader";
 import { useCharm } from "@/hooks/use-charm";
 
-function CharmDetail() {
-  console.log("WAT");
+function CharmShowView() {
   const { charmId } = useParams();
   const { currentFocus: charm } = useCharm(charmId);
-
-  console.log("charm", charm);
-  console.log("charmId", charmId);
 
   if (!charm) {
     return (
@@ -27,4 +23,4 @@ function CharmDetail() {
   );
 }
 
-export default CharmDetail;
+export default CharmShowView;

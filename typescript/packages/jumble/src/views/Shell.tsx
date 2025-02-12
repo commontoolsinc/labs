@@ -74,10 +74,10 @@ export default function Shell() {
 
   // TOOLBAR START
   // NOTE(jake): We will want to move this into a Toolbar component at some point
-  const isEditActive = location.pathname.endsWith("/edit");
-  const togglePath = isEditActive
+  const isDetailActive = location.pathname.endsWith("/detail");
+  const togglePath = isDetailActive
     ? `/${replicaName}/${charmId}`
-    : `/${replicaName}/${charmId}/edit`;
+    : `/${replicaName}/${charmId}/detail`;
   // TOOLBAR END
 
   const onLaunchCommand = useCallback(() => {
@@ -116,7 +116,7 @@ export default function Shell() {
             <NavLink
               to={togglePath}
               className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${
-                isEditActive
+                isDetailActive
                   ? "bg-gray-300 hover:bg-gray-400 text-black"
                   : "bg-transparent text-black  hover:bg-gray-200"
               }`}

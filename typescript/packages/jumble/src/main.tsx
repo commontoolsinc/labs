@@ -10,8 +10,8 @@ import { CharmsProvider } from "@/contexts/CharmsContext";
 import "./recipes/index";
 import { CharmsManagerProvider } from "@/contexts/CharmManagerContext";
 import CharmList from "@/views/CharmList";
-import CharmDetail from "@/views/CharmDetail";
-import CharmEditView from "@/views/CharmEditView";
+import CharmShowView from "@/views/CharmShowView";
+import CharmDetailView from "@/views/CharmDetailView";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -35,8 +35,8 @@ createRoot(document.getElementById("root")!).render(
             }
           >
             <Route index element={<CharmList />} />
-            <Route path=":charmId" element={<CharmDetail />} />
-            <Route path=":charmId/edit" element={<CharmEditView />} />
+            <Route path=":charmId" element={<CharmShowView />} />
+            <Route path=":charmId/detail" element={<CharmDetailView />} />
           </Route>
         </Routes>
       </Router>
