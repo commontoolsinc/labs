@@ -112,16 +112,18 @@ export default function Shell() {
         </div>
 
         <div slot="toolbar-end">
-          <NavLink
-            to={togglePath}
-            className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${
-              isEditActive
-                ? "bg-gray-300 hover:bg-gray-400 text-black"
-                : "bg-transparent text-black  hover:bg-gray-200"
-            }`}
-          >
-            <LuPencil size={16} />
-          </NavLink>
+          {charmId && (
+            <NavLink
+              to={togglePath}
+              className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${
+                isEditActive
+                  ? "bg-gray-300 hover:bg-gray-400 text-black"
+                  : "bg-transparent text-black  hover:bg-gray-200"
+              }`}
+            >
+              <LuPencil size={16} />
+            </NavLink>
+          )}
         </div>
       </div>
       {/* TOOLBAR END */}
