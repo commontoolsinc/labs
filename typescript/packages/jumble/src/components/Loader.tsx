@@ -4,7 +4,7 @@ export const LoadingSpinner = ({ visible = true }: { visible?: boolean }) => (
     style={{
       width: visible ? "100%" : 0,
       height: visible ? "100%" : 0,
-      display: "flex",
+      display: visible ? "flex" : "none",
       alignItems: "center",
       justifyContent: "center",
       opacity: visible ? 1 : 0,
