@@ -6,31 +6,32 @@ export function resolveSchema(
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined = schema,
 ): JSONSchema | undefined {
-  if (typeof schema === "object" && schema !== null && Object.keys(schema).length > 0) {
-    let resolvedSchema = schema.$ref === "#" ? (rootSchema ?? schema) : schema;
-    if (schema.asCell) {
-      // Remove reference flag from schema, so it's describing the destination
-      // schema. That means we can't describe a schema that points to top-level
-      // references, but that's on purpose.
-      ({
-        asCell: {},
-        ...resolvedSchema
-      } = schema);
-    }
+  // Treat undefined/null/{} or any other non-object as no schema
+  if (typeof schema !== "object" || schema === null || Object.keys(schema).length === 0)
+    return undefined;
 
-    // Return no schema if all it said is that this was a reference or an
-    // object without properties.
-    if (Object.keys(resolvedSchema).length === 0) return undefined;
-    if (
-      resolvedSchema.type === "object" &&
+  let resolvedSchema = schema.$ref === "#" ? rootSchema : schema;
+
+  // Remove asCell flag from schema, so it's describing the destination
+  // schema. That means we can't describe a schema that points to top-level
+  // references, but that's on purpose.
+  if (schema.asCell && resolvedSchema?.asCell) {
+    resolvedSchema = { ...resolvedSchema };
+    delete resolvedSchema.asCell;
+  }
+
+  // Return no schema if all it said is that this was a reference or an
+  // object without properties.
+  if (
+    resolvedSchema === undefined ||
+    Object.keys(resolvedSchema).length === 0 ||
+    (resolvedSchema.type === "object" &&
       !resolvedSchema.additionalProperties &&
-      !resolvedSchema.properties
-    ) {
-      return undefined;
-    }
+      !resolvedSchema.properties)
+  )
+    return undefined;
 
-    return resolvedSchema;
-  } else return undefined;
+  return resolvedSchema;
 }
 
 export function validateAndTransform(
