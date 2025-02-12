@@ -1,6 +1,6 @@
 import "@commontools/ui";
 import { useCallback } from "react";
-import { NavLink, Route, Routes, useMatch } from "react-router-dom";
+import { NavLink, Outlet, useParams } from "react-router-dom";
 
 import { setIframeContextHandler } from "@commontools/iframe-sandbox";
 import { LLMClient } from "@commontools/llm-client";
@@ -12,6 +12,7 @@ import { CommandCenter } from "@/components/CommandCenter";
 import { NavPath } from "@/components/NavPath";
 import CharmDetail from "@/views/CharmDetail";
 import CharmList from "@/views/CharmList";
+import CharmEditView from "@/views/CharmEditView";
 
 import "./main.css";
 
@@ -67,9 +68,7 @@ setIframeContextHandler({
 });
 
 export default function Shell() {
-  const match = useMatch("/:replicaName/:charmId?");
-  const focusedCharmId = match?.params.charmId ?? null;
-  const focusedReplicaId = match?.params.replicaName ?? null;
+  const { charmId, replicaName } = useParams();
 
   const onLaunchCommand = useCallback(() => {
     window.dispatchEvent(new CustomEvent("open-command-center"));
@@ -79,7 +78,7 @@ export default function Shell() {
     <div className="shell h-full bg-gray-50 border-2 border-black">
       <header className="flex bg-gray-50 items-center justify-between border-b-2 p-2">
         <NavLink
-          to={focusedReplicaId ? `/${focusedReplicaId}` : "/"}
+          to={replicaName ? `/${replicaName}` : "/"}
           className="brand flex items-center gap-2"
         >
           <ShapeLogo width={32} height={32} shapeColor="#000" containerColor="#d2d2d2" />
@@ -97,14 +96,12 @@ export default function Shell() {
 
       <div className="toolbar m-4 p-4 border-2 border-black">
         <div slot="toolbar-start">
-          {focusedReplicaId && <NavPath replicaId={focusedReplicaId} charmId={focusedCharmId} />}
+          {replicaName && charmId && <NavPath replicaId={replicaName} charmId={charmId} />}
         </div>
       </div>
+
       <div className="relative h-full">
-        <Routes>
-          <Route path="/:charmId" element={<CharmDetail />} />
-          <Route index element={<CharmList />} />
-        </Routes>
+        <Outlet />
       </div>
 
       <button

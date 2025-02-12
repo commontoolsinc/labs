@@ -5,10 +5,13 @@ import "@/styles/index.css";
 import PhotoFlowIndex from "@/views/experiments/photoflow/Index.tsx";
 import PhotoSetView from "@/views/experiments/photoflow/PhotoSetView.tsx";
 import NewSpell from "@/views/experiments/photoflow/NewSpell.tsx";
-import Shell from "@/views/Shell.tsx";
+import Shell from "@/views/Shell";
 import { CharmsProvider } from "@/contexts/CharmsContext";
 import "./recipes/index";
-import { CharmsManagerProvider } from "./contexts/CharmManagerContext";
+import { CharmsManagerProvider } from "@/contexts/CharmManagerContext";
+import CharmList from "@/views/CharmList";
+import CharmDetail from "@/views/CharmDetail";
+import CharmEditView from "@/views/CharmEditView";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -23,15 +26,18 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/experiments/photoflow/:photosetName" element={<PhotoSetView />} />
           <Route path="/experiments/photoflow/:photosetName/spells/new" element={<NewSpell />} />
 
-          {/* New replica-based routes */}
           <Route
-            path="/:replicaName/*"
+            path="/:replicaName"
             element={
               <CharmsManagerProvider>
                 <Shell />
               </CharmsManagerProvider>
             }
-          />
+          >
+            <Route index element={<CharmList />} />
+            <Route path=":charmId" element={<CharmDetail />} />
+            <Route path=":charmId/edit" element={<CharmEditView />} />
+          </Route>
         </Routes>
       </Router>
     </CharmsProvider>
