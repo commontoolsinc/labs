@@ -97,7 +97,7 @@ export default function Shell() {
           {focusedReplicaId && <NavPath replicaId={focusedReplicaId} charmId={focusedCharmId} />}
         </div>
       </div>
-      <div className="relative h-full">
+      <div className="h-full overflow-y-auto">
         <Routes>
           <Route path="/:charmId" element={<CharmDetail />} />
           <Route index element={<CharmList />} />
