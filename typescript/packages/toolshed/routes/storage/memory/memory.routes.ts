@@ -7,14 +7,28 @@ export const tags = ["Memory Storage"];
 
 export const Null = z.literal(null);
 export const Unit = z.object({});
-export const Meta = z.record(z.string(), z.string()).describe("Arbitrary metadata");
-export const The = z.string().describe("Type of the fact usually formatted as media type");
-export const Of = z.string().describe("Unique identifier for the mutable entity");
-export const Space = z.string().describe("Unique did:key identifier of the memory space");
-export const Principal = z.string().describe("Unique DID identifier of the issuing principal");
-export const Cause = z.string().describe("Merkle reference to the previous state of the entity");
+export const Meta = z.record(z.string(), z.string()).describe(
+  "Arbitrary metadata",
+);
+export const The = z.string().describe(
+  "Type of the fact usually formatted as media type",
+);
+export const Of = z.string().describe(
+  "Unique identifier for the mutable entity",
+);
+export const Space = z.string().describe(
+  "Unique did:key identifier of the memory space",
+);
+export const Principal = z.string().describe(
+  "Unique DID identifier of the issuing principal",
+);
+export const Cause = z.string().describe(
+  "Merkle reference to the previous state of the entity",
+);
 export const Retract = z.literal(null).describe("Retracts fact");
-export const Claim = z.object({ is: z.undefined().optional() }).describe("Expects fact");
+export const Claim = z.object({ is: z.undefined().optional() }).describe(
+  "Expects fact",
+);
 
 export const JSONValue = z.any().describe("Arbitrary JSON value");
 export const Assert = z
@@ -40,7 +54,9 @@ export const Fact = z.object({
   cause: Reference,
 });
 
-export const Since = z.number().int().describe("Sequence number of the transaction");
+export const Since = z.number().int().describe(
+  "Sequence number of the transaction",
+);
 export const Selector = z.object({
   the: The.optional(),
   of: Of.optional(),
@@ -133,7 +149,10 @@ export const transact = createRoute({
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(ok(Commit), "Successful transaction"),
-    [HttpStatusCodes.CONFLICT]: jsonContent(error(ConflictError), "Conflict occurred"),
+    [HttpStatusCodes.CONFLICT]: jsonContent(
+      error(ConflictError),
+      "Conflict occurred",
+    ),
     [HttpStatusCodes.SERVICE_UNAVAILABLE]: jsonContent(
       error(ConnectionError.or(TransactionError)),
       "Memory service is unable to process transaction",
