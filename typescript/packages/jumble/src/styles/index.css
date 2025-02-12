@@ -38,7 +38,6 @@ html {
   /* scroll-padding-top: 125px; */
   height: 100vh;
   width: 100vw;
-  overflow-y: auto;
 }
 
 #root {
@@ -48,7 +47,6 @@ html {
   background-image: radial-gradient(#ccc 1px, transparent 1px);
   background-size: 10px 10px;
   padding: 15px;
-  overflow-y: auto;
 }
 
 button {
