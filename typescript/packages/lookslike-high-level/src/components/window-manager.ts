@@ -20,6 +20,7 @@ import { UI, NAME, TYPE } from "@commontools/builder";
 import { matchRoute, navigate } from "../router.js";
 import { SpellSearchResult } from "./search-results.js";
 import { toasty } from "./toasty.js";
+import { classMap } from "lit/directives/class-map.js";
 
 async function castSpell(value: string, showResults: (results: SpellSearchResult[]) => void) {
   const searchUrl =
@@ -257,6 +258,9 @@ export class CommonWindowManager extends LitElement {
   @state()
   suggestions: any[] = [];
 
+  @state()
+  sidebar: boolean = false;
+
   onLocationClicked(_event: CustomEvent) {
     console.log("Location clicked in app.");
     this.searchOpen = true;
@@ -330,13 +334,30 @@ export class CommonWindowManager extends LitElement {
       }
     };
 
+    const onSidebarButton = () => {
+      this.sidebar = !this.sidebar;
+    };
+
     return html`
-      <os-chrome
-        ?wide=${this.wideSidebar}
-        locationtitle=${this.focusedProxy?.[NAME] || "Untitled"}
-        @location=${this.onLocationClicked}
-      >
+      <os-chrome ?wide=${this.wideSidebar} sidebar=${this.sidebar}>
+        <os-location slot="toolbar-center"
+            @click=${this.onLocationClicked}
+            locationtitle="${this.focusedProxy?.[NAME] || "Untitled"}"
+        ></os-location>
+
         <os-avatar slot="toolbar-start" name="Ben" .onclick=${this.onHome}></os-avatar>
+
+        <os-icon-button slot="toolbar-end"
+            @click=${onSidebarButton}
+            slot="end"
+            icon="menu"
+            class=${classMap({
+                fade: true,
+                "fade-out": this.sidebar,
+            })}
+            ?activated=${this.sidebar}
+            ></os-icon-button>
+
 
         <os-dialog .open=${this.searchOpen} @closedialog=${onCloseDialog}>
           <os-ai-box @submit=${onSearchSubmit} placeholder="Search or imagine..."></os-ai-box>

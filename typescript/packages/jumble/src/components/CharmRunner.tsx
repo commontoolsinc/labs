@@ -1,6 +1,5 @@
 import React, { useRef } from "react";
 import { render } from "@commontools/html";
-import { effect, idle, run } from "@commontools/runner";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 
 interface CharmLoaderProps {
@@ -42,14 +41,10 @@ function useCharmLoader({
 
       if (currentMountKey !== mountingKey.current) return;
 
-      const charm = await charmManager.runPersistent(factory);
+      const charm = await charmManager.runPersistent(factory, argument);
       if (currentMountKey !== mountingKey.current) return;
 
       charmManager.add([charm]);
-
-      await idle();
-      run(undefined, argument, charm);
-      await idle();
 
       if (currentMountKey !== mountingKey.current) return;
 
@@ -63,7 +58,7 @@ function useCharmLoader({
         setIsLoading(false);
       }
     }
-  }, [charmImport, argument, onCharmReady]);
+  }, [charmImport, argument, onCharmReady, charmManager]);
 
   React.useEffect(() => {
     if (autoLoad) {
@@ -79,25 +74,15 @@ function useCharmLoader({
 
 export function CharmRenderer({ charm, className = "" }: CharmRendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const cleanupFns = useRef<Array<() => void>>([]);
 
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    const cleanupCharm = effect(charm.asCell(), (charm) => {
-      const cleanupUI = effect(charm["$UI"], (view) => {
-        if (container) {
-          render(container, view);
-        }
-      });
-      cleanupFns.current.push(cleanupUI);
-    });
-    cleanupFns.current.push(cleanupCharm);
+    const cleanup = render(container, charm.asCell().key("$UI"));
 
     return () => {
-      cleanupFns.current.forEach((fn) => fn());
-      cleanupFns.current = [];
+      cleanup();
       if (container) {
         container.innerHTML = "";
       }

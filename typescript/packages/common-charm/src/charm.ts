@@ -11,7 +11,7 @@ import {
   isDocLink,
   run,
 } from "@commontools/runner";
-import { createStorage, Storage } from "./storage.js";
+import { type Storage } from "./storage.js";
 import { syncRecipeBlobby } from "./syncRecipe.js";
 
 export type Charm = {
@@ -24,28 +24,21 @@ export type Charm = {
 export type StorageType = "remote" | "memory" | "local";
 
 export class CharmManager {
-  private storage: Storage;
   private charms: DocImpl<DocLink[]>;
-  private replica?: string;
 
-  constructor(replica = "common-knowledge", storageType: StorageType) {
-    this.storage = createStorage(storageType, replica);
+  constructor(private storage: Storage) {
     this.charms = getDoc<DocLink[]>([], "charms");
-    if (storageType === "remote") {
-      this.replica = replica;
-    }
   }
 
   getReplica(): string | undefined {
-    return this.replica;
+    return this.storage.getReplica();
   }
 
   getCharms(): DocImpl<DocLink[]> {
+    // Start syncing if not already syncing. Will trigger a change to the list
+    // once loaded.
+    this.storage.syncCell(this.charms);
     return this.charms;
-  }
-
-  async init() {
-    await this.storage.syncCell(this.charms);
   }
 
   async add(newCharms: DocImpl<any>[]) {
@@ -67,15 +60,29 @@ export class CharmManager {
   }
 
   async get(id: string): Promise<DocImpl<any> | undefined> {
-    const charm = this.charms.get().find(({ cell }) => JSON.stringify(cell.entityId) === JSON.stringify({'/' : id}));
+    await this.storage.syncCell(this.charms);
+    const charm = this.charms
+      .get()
+      .find(({ cell }) => JSON.stringify(cell.entityId) === JSON.stringify({ "/": id }));
     if (!charm) return undefined;
-    return charm.cell;
+
+    // Make sure we have the recipe so we can run it!
+    await this.syncRecipe(charm.cell);
+
+    // Make sure the charm is running. This is re-entrant and has no effect if
+    // the charm is already running.
+    return run(undefined, undefined, charm.cell);
   }
 
   // note: removing a charm doesn't clean up the charm's cells
   async remove(idOrCharm: EntityId | DocLink) {
-    const id = isDocLink(idOrCharm) ? idOrCharm?.cell?.entityId?.["/"] : idOrCharm;
-    const newCharms = this.charms.get().filter(({ cell }) => JSON.stringify(cell.entityId) !== JSON.stringify({'/' : id}));
+    await this.storage.syncCell(this.charms);
+    // bf: horrible code, this indicates inconsistent data structures somewhere
+    const id = isDocLink(idOrCharm) ? idOrCharm?.cell?.entityId?.["/"] : idOrCharm["/"];
+    const newCharms = this.charms.get().filter(({ cell }) => {
+      const cellId = cell.entityId?.toJSON?.()["/"] || cell.entityId?.["/"];
+      return cellId !== String(id);
+    });
     if (newCharms.length !== this.charms.get().length) {
       this.charms.send(newCharms);
       return true;
@@ -125,7 +132,9 @@ export class CharmManager {
       }
     }
 
-    const charm = run(recipe, inputs, await this.storage.syncCell(createRef({ recipe, inputs }, cause)));
+    const doc = await this.storage.syncCell(createRef({ recipe, inputs }, cause));
+    const charm = run(recipe, inputs, doc);
+
     // FIXME(ja): should we add / sync explicitly here?
     // await this.add([charm]);
     // await this.storage.syncCell(this.charms, true);
@@ -139,17 +148,18 @@ export class CharmManager {
   }
 
   async syncRecipeCells(charm: Charm) {
+    // NOTE(ja): I don't think this actually syncs the recipe
     const recipeId = charm.sourceCell?.get()?.[TYPE];
-    if (recipeId) await this.storage.syncCell({'/': recipeId});
+    if (recipeId) await this.storage.syncCell({ "/": recipeId });
   }
 
   // FIXME(ja): blobby seems to be using toString not toJSON
   async syncRecipeBlobby(entityId: string) {
     if (typeof entityId === "string") {
       await syncRecipeBlobby(entityId);
-    } else  {
+    } else {
       await syncRecipeBlobby(entityId["/"]);
-    } 
+    }
   }
 
   async sync(
