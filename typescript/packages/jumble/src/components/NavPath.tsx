@@ -4,8 +4,8 @@ import React, { useEffect } from "react";
 import { NavLink } from "react-router-dom";
 
 type NavPathProps = {
-  replicaId: string;
-  charmId: string | null;
+  replicaId: string | undefined;
+  charmId: string | undefined;
 };
 
 export function NavPath({ replicaId, charmId }: NavPathProps) {

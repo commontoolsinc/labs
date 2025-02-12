@@ -96,7 +96,7 @@ export default function Shell() {
 
       <div className="toolbar m-4 p-4 border-2 border-black">
         <div slot="toolbar-start">
-          {replicaName && charmId && <NavPath replicaId={replicaName} charmId={charmId} />}
+          <NavPath replicaId={replicaName} charmId={charmId} />
         </div>
       </div>
 
