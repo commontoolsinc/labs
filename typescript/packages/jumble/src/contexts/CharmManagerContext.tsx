@@ -27,7 +27,6 @@ export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = ({
     // Create new charm manager instance with updated replica
     const storageType = (import.meta as any).env.VITE_STORAGE_TYPE ?? "remote";
     const manager = new CharmManager(effectiveReplica, storageType);
-    manager.init();
     setCharmManager(manager);
   }, [effectiveReplica]);
 

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from "react";
-import { type Charm } from "@commontools/lookslike-high-level";
+import { type Charm } from "@commontools/charm";
 
 export type CharmsContextType = {
   charms: Charm[];
@@ -32,12 +32,10 @@ export const CharmsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const runCharm = useCallback(
     async (charm: Charm) => {
       // Stub: runs charm asynchronously and then adds it
-      return new Promise<void>((resolve) => {
-        setTimeout(() => {
-          addCharm(charm);
-          resolve();
-        }, 300);
-      });
+
+      // TODO: Is this still needed?
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      addCharm(charm);
     },
     [addCharm],
   );

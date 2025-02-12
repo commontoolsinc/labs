@@ -10,7 +10,6 @@ export const useCharm = (charmId: string | undefined) => {
   React.useEffect(() => {
     async function loadCharm() {
       if (charmId) {
-        await charmManager.init();
         const charm = (await charmManager.get(charmId)) ?? null;
         if (charm) {
           await charmManager.syncRecipe(charm);

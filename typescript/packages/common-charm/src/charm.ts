@@ -44,10 +44,6 @@ export class CharmManager {
     return this.charms;
   }
 
-  async init() {
-    await this.storage.syncCell(this.charms);
-  }
-
   async add(newCharms: DocImpl<any>[]) {
     await this.storage.syncCell(this.charms);
     await idle();
@@ -67,6 +63,7 @@ export class CharmManager {
   }
 
   async get(id: string): Promise<DocImpl<any> | undefined> {
+    await this.storage.syncCell(this.charms);
     const charm = this.charms
       .get()
       .find(({ cell }) => JSON.stringify(cell.entityId) === JSON.stringify({ "/": id }));
@@ -76,6 +73,7 @@ export class CharmManager {
 
   // note: removing a charm doesn't clean up the charm's cells
   async remove(idOrCharm: EntityId | DocLink) {
+    await this.storage.syncCell(this.charms);
     // bf: horrible code, this indicates inconsistent data structures somewhere
     const id = isDocLink(idOrCharm) ? idOrCharm?.cell?.entityId?.["/"] : idOrCharm["/"];
     const newCharms = this.charms.get().filter(({ cell }) => {
@@ -90,6 +88,7 @@ export class CharmManager {
   }
 
   async runPersistent(recipe: Recipe | Module, inputs?: any, cause?: any): Promise<DocImpl<any>> {
+    console.log("runPersistent", recipe, inputs, cause);
     await idle();
 
     // Fill in missing parameters from other charms. It's a simple match on
@@ -131,11 +130,11 @@ export class CharmManager {
       }
     }
 
-    const charm = run(
-      recipe,
-      inputs,
-      await this.storage.syncCell(createRef({ recipe, inputs }, cause)),
-    );
+    console.log("loading doc", recipe, inputs, cause);
+    const doc = await this.storage.syncCell(createRef({ recipe, inputs }, cause));
+    console.log("runPersistent", JSON.stringify(doc.entityId));
+    const charm = run(recipe, inputs, doc);
+
     // FIXME(ja): should we add / sync explicitly here?
     // await this.add([charm]);
     // await this.storage.syncCell(this.charms, true);
