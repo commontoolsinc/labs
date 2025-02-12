@@ -100,7 +100,7 @@ export function CommandCenter() {
 
     const id = await castNewRecipe(charmManager, { gallery: [dummyData] }, title);
     if (id) {
-      navigate(`/${focusedReplicaId}/${id}`);
+      navigate(`/${focusedReplicaId}/${charmId(id)}`);
     }
     setOpen(false);
   };
@@ -125,7 +125,7 @@ export function CommandCenter() {
 
           const id = await castNewRecipe(charmManager, data, title);
           if (id) {
-            navigate(`/${focusedReplicaId}/${id}`);
+            navigate(`/${focusedReplicaId}/${charmId(id)}`);
           }
           setOpen(false);
         } catch (err) {
