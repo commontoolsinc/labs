@@ -1,5 +1,6 @@
 import React, { useRef } from "react";
 import { render } from "@commontools/html";
+import { effect } from "@commontools/runner";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 
 interface CharmLoaderProps {
@@ -79,10 +80,19 @@ export function CharmRenderer({ charm, className = "" }: CharmRendererProps) {
     const container = containerRef.current;
     if (!container) return;
 
-    const cleanup = render(container, charm.asCell().key("$UI"));
+    // FIXME(ja): we don't have a cleanup function here!
+    // how can we mix all the effects and react useeffect
+    effect(charm.asCell(), (charm) => {
+      effect(charm['$UI'], (view) => {
+        if (!view) {
+          console.log("no UI");
+          return;
+        }
+        render(container, view as any);
+      });
+    });
 
     return () => {
-      cleanup();
       if (container) {
         container.innerHTML = "";
       }

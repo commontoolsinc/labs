@@ -1,5 +1,6 @@
 export * as CommonButton from "./common-button.js";
 export * as CommonDatatable from "./common-datatable.js";
+export * as CommonSendMessage from "./send-input.js";
 export * as CommonDict from "./common-dict.js";
 export * as CommonHstack from "./common-hstack.js";
 export * as CommonIframe from "./common-iframe.js";
