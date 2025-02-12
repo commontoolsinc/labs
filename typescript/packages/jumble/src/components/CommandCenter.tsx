@@ -1,7 +1,7 @@
 import { Command } from "cmdk";
 import { useState, useEffect, useRef } from "react";
 import "./commands.css";
-import { castNewRecipe, Charm, CharmManager, iterate } from "@commontools/charm";
+import { castNewRecipe, Charm, CharmManager, iterate, tsToExports } from "@commontools/charm";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { useMatch, useNavigate } from "react-router-dom";
 import { castSpell } from "@/search";
@@ -10,7 +10,7 @@ import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Dialog, DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
 
 import { NAME } from "@commontools/builder";
-import { DocImpl, getRecipe } from "@commontools/runner";
+import { DocImpl, getRecipe, addRecipe } from "@commontools/runner";
 
 export function CommandCenter() {
   const [open, setOpen] = useState(false);
@@ -134,6 +134,47 @@ export function CommandCenter() {
           console.error("Failed to import JSON:", err);
           alert("Failed to import JSON file. Please check the file format.");
         }
+      };
+
+      document.body.appendChild(input);
+      importRef.current = input;
+    }
+
+    importRef.current.click();
+  };
+
+  const handleLoadRecipe = async () => {
+    if (!importRef.current) {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".tsx";
+      input.style.display = "none";
+
+      input.onchange = async (e) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (!file) return;
+
+        const src = await file.text();
+        const { exports, errors } = await tsToExports(src);
+        if (errors) {
+          console.error("Failed to compile TSX:", errors);
+          setOpen(false);
+          return;
+        }
+        let { default: recipe } = exports
+        console.log("compiled", recipe)
+
+        addRecipe(recipe, src, "imported", undefined);
+        console.log("about to run charm")
+        const newCharm = await charmManager.runPersistent(recipe, {});
+        if (newCharm) {
+          charmManager.add([newCharm]);
+          navigate(`/${focusedReplicaId}/${charmId(newCharm.entityId!)}`);
+        } else {
+          console.error("failed to create a new charm")
+        }
+
+        setOpen(false);
       };
 
       document.body.appendChild(input);
@@ -341,6 +382,7 @@ export function CommandCenter() {
             </Command.Group>
             <Command.Group heading="Data">
               <Command.Item onSelect={handleImportJSON}>Import JSON</Command.Item>
+              <Command.Item onSelect={handleLoadRecipe}>Load Recipe</Command.Item>
             </Command.Group>
           </>
         ) : mode === "spellResults" ? (
