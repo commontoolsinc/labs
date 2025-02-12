@@ -23,7 +23,8 @@ export function CommandCenter() {
   // bf: this will need to become a state machine eventualyl
   const [spellResults, setSpellResults] = useState<any[]>([]);
   const [charmResults, setCharmResults] = useState<any[]>([]);
-  const [mode, setMode] = useState<"main" | "spellResults" | "charmResults">("main");
+  const [mode, setMode] = useState<"main" | "spellResults" | "charmResults" | "blobSelection">("main");
+  const [selectedSpell, setSelectedSpell] = useState<any>(null);
 
   const match = useMatch("/:replicaName/:charmId?");
   const focusedCharmId = match?.params.charmId ?? null;
@@ -57,6 +58,7 @@ export function CommandCenter() {
       setMode("main");
       setSpellResults([]);
       setCharmResults([]);
+      setSelectedSpell(null); // Add this line
     }
   }, [open]);
 
@@ -337,7 +339,6 @@ export function CommandCenter() {
                 <Command.Item onSelect={handleToggleDetails}>Toggle Details</Command.Item>
               )}
             </Command.Group>
-
             <Command.Group heading="Data">
               <Command.Item onSelect={handleImportJSON}>Import JSON</Command.Item>
             </Command.Group>
@@ -345,20 +346,32 @@ export function CommandCenter() {
         ) : mode === "spellResults" ? (
           <>
             <Command.Group heading="Spell Results">
-              {spellResults.map((result, index) => (
-                <Command.Item
-                  key={index}
-                  onSelect={async () => {
-                    console.log("Selected spell result:", result);
-                    await castSpellAsCharm(charmManager, result, result.compatibleBlobs[0]);
-                    setMode("main");
-                    setOpen(false);
-                  }}
-                >
-                  {result.title || result.name || `Result ${index + 1}`}
-                </Command.Item>
-              ))}
+              {spellResults
+                .filter(result => result.compatibleBlobs && result.compatibleBlobs.length > 0)
+                .map((result, index) => (
+                  <Command.Item
+                    key={index}
+                    onSelect={async () => {
+                      if (result.compatibleBlobs.length === 1) {
+                        await castSpellAsCharm(charmManager, result, result.compatibleBlobs[0]);
+                        setMode("main");
+                        setOpen(false);
+                      } else {
+                        setSelectedSpell(result);
+                        setMode("blobSelection");
+                      }
+                    }}
+                  >
+                    {`${result.description}#${result.name.slice(-4)} (${result.compatibleBlobs.length})`}
+                  </Command.Item>
+                ))}
             </Command.Group>
+            {spellResults.filter(result => result.compatibleBlobs && result.compatibleBlobs.length > 0)
+              .length === 0 && (
+                <Command.Item onSelect={() => setMode("main")}>
+                  No spells found with compatible blobs
+                </Command.Item>
+              )}
             <Command.Group>
               <Command.Item
                 onSelect={() => {
@@ -367,6 +380,28 @@ export function CommandCenter() {
                 }}
               >
                 Back to Main Menu
+              </Command.Item>
+            </Command.Group>
+          </>
+        ) : mode === "blobSelection" ? (
+          <>
+            <Command.Group heading={`Select blob for ${selectedSpell?.name}`}>
+              {selectedSpell?.compatibleBlobs.map((blob, index) => (
+                <Command.Item
+                  key={index}
+                  onSelect={async () => {
+                    await castSpellAsCharm(charmManager, selectedSpell, blob);
+                    setMode("main");
+                    setOpen(false);
+                  }}
+                >
+                  {`Blob ${index + 1}`}
+                </Command.Item>
+              ))}
+            </Command.Group>
+            <Command.Group>
+              <Command.Item onSelect={() => setMode("spellResults")}>
+                Back to Spell Results
               </Command.Item>
             </Command.Group>
           </>
