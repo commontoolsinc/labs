@@ -43,7 +43,9 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
               <span className="text-gray-500">/</span>
             </li>
             <li>
-              <span className="text-gray-700 font-bold">{charmName}</span>
+              <NavLink to={`/${replicaId}/${charmId}`} className="text-gray-700 font-bold">
+                {charmName}
+              </NavLink>
             </li>
           </>
         )}
