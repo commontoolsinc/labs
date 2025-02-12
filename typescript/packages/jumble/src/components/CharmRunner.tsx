@@ -83,8 +83,8 @@ export function CharmRenderer({ charm, className = "" }: CharmRendererProps) {
     const cleanup = render(container, charm.asCell().key("$UI"));
 
     return () => {
+      cleanup();
       if (container) {
-        cleanup();
         container.innerHTML = "";
       }
     };
