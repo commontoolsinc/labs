@@ -85,39 +85,13 @@ export const saveNewRecipeVersion = async (charmManager: CharmManager, charm: Ch
     name,
   });
 
-  const { exports, errors } = await tsToExports(newRecipeSrc);
-
-  if (errors) {
-    console.error("errors", errors);
-    return;
-  }
-
-  let { default: recipe } = exports;
-
-  if (recipe) {
-    // NOTE(ja): adding a recipe triggers saving to blobby
-    const parents = recipeId ? [recipeId] : undefined;
-    addRecipe(recipe, newRecipeSrc, newSpec, parents);
-
-    // FIXME(ja): get the data from the charm
-    // const data = charm.getAsQueryResult();
-
-    // if you want to replace the running charm:
-    // const newCharm = run(recipe, undefined, charm);
-
-    // if you want to run a new charm:
-    const newCharm = await charmManager.runPersistent(recipe, {
-      cell: charm.sourceCell,
-      path: ["argument"],
-    });
-
-    charmManager.add([newCharm]);
-    await charmManager.syncRecipe(newCharm);
-
-    return newCharm.entityId;
-  }
-
-  return;
+  return compileAndRunRecipe(
+    charmManager,
+    newRecipeSrc,
+    newSpec,
+    { cell: charm.sourceCell, path: ["argument"] },
+    recipeId ? [recipeId] : undefined,
+  );
 }
 
 export async function castNewRecipe(
@@ -139,27 +113,32 @@ export async function castNewRecipe(
     name,
   });
 
-  const { exports, errors } = await tsToExports(newRecipeSrc);
+  return compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, data);
+}
 
+
+export async function compileAndRunRecipe(
+  charmManager: CharmManager,
+  recipeSrc: string,
+  spec: string,
+  runOptions: any,
+  parents?: EntityId[],
+): Promise<EntityId | undefined> {
+  const { exports, errors } = await tsToExports(recipeSrc);
   if (errors) {
-    console.error("errors", errors);
+    console.error("Compilation errors in recipe:", errors);
     return;
   }
-
-  let { default: recipe } = exports;
-
-  if (recipe) {
-    const parents = undefined;
-
-    // NOTE(ja): adding a recipe triggers saving to blobby
-    addRecipe(recipe, newRecipeSrc, newSpec, parents);
-    const newCharm = await charmManager.runPersistent(recipe, data);
-
-    charmManager.add([newCharm]);
-    await charmManager.syncRecipe(newCharm);
-
-    return newCharm.entityId;
+  const recipe = exports.default;
+  if (!recipe) {
+    console.error("No default recipe found in the compiled exports.");
+    return;
   }
-
-  return;
+  const parentsIds = parents?.map(id => id.toString());
+  addRecipe(recipe, recipeSrc, spec, parentsIds);
+  const newCharm = await charmManager.runPersistent(recipe, runOptions);
+  charmManager.add([newCharm]);
+  await charmManager.syncRecipe(newCharm);
+  
+  return newCharm.entityId;
 }

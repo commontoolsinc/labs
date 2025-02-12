@@ -1,5 +1,5 @@
 import { h } from "@commontools/html";
-import { recipe, handler, UI, NAME } from "@commontools/builder";
+import { recipe, handler, UI, NAME, derive } from "@commontools/builder";
 import { z } from "zod";
 
 const TodoItem = z.object({
@@ -36,12 +36,15 @@ const updateItem = handler<{ detail: { checked: boolean; value: string } }, { it
   },
 );
 
-const deleteItem = handler<{}, { items: TodoItem[]; item: TodoItem }>(({}, { item, items }) => {
+const deleteItem = handler<{}, { items: TodoItem[]; item: TodoItem }>(({ }, { item, items }) => {
   let idx = items.findIndex((i) => i.title === item.title);
   if (idx !== -1) items.splice(idx, 1);
 });
 
 export default recipe(TodoList, ({ title, items }) => {
+  derive(items, (items) => {
+    console.log("todo list items changed", { items });
+  });
   return {
     [NAME]: title,
     [UI]: (

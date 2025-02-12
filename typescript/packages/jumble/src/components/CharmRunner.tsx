@@ -1,5 +1,6 @@
 import React, { useRef } from "react";
 import { render } from "@commontools/html";
+import { effect } from "@commontools/runner";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 
 interface CharmLoaderProps {
