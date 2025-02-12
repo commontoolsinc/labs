@@ -14,10 +14,13 @@ export function NavPath({ replicaId, charmId }: NavPathProps) {
   const [charmName, setCharmName] = React.useState<string | null>(null);
 
   useEffect(() => {
+    let cancel: (() => void) | undefined;
+
     async function getCharm() {
       if (charmId) {
         const charm = await charmManager.get(charmId);
-        charm?.asCell([NAME]).sink(setCharmName);
+        cancel?.();
+        cancel = charm?.asCell([NAME]).sink(setCharmName);
       }
     }
     getCharm();
