@@ -10,9 +10,10 @@ import {
 import { NavigateFunction } from "react-router-dom";
 import { castSpell } from "@/search";
 import { charmId } from "@/utils/charms";
-
+import { performIteration } from "@/lib/charmIteration";
 import { NAME } from "@commontools/builder";
 import { DocImpl, getRecipe } from "@commontools/runner";
+import { performIteration } from "@/lib/charmIteration";
 
 export type CommandType = "action" | "input" | "confirm" | "select" | "menu";
 
@@ -221,25 +222,17 @@ export const commands: CommandItem[] = [
     predicate: (ctx) => !!ctx.focusedCharmId,
     placeholder: "What would you like to change?",
     handler: async (ctx, input) => {
-      if (!input || !ctx.focusedCharmId) return;
-      ctx.setLoading(true);
-      try {
-        const charm = await ctx.charmManager.get(ctx.focusedCharmId);
-        const newCharmId = await iterate(
-          ctx.charmManager,
-          charm ?? null,
-          input,
-          false,
-          ctx.preferredModel,
-        );
-        if (newCharmId) {
-          ctx.navigate(`/${ctx.focusedReplicaId}/${charmId(newCharmId)}`);
-        }
-      } catch (error) {
-        console.error("Edit recipe error:", error);
-      } finally {
-        ctx.setLoading(false);
-        ctx.setOpen(false);
+      if (!input || !ctx.focusedCharmId || !ctx.focusedReplicaId) return;
+      const newCharmPath = await performIteration(
+        ctx.charmManager,
+        ctx.focusedCharmId,
+        ctx.focusedReplicaId,
+        input,
+        false,
+        ctx.preferredModel,
+      );
+      if (newCharmPath) {
+        ctx.navigate(newCharmPath);
       }
     },
   },

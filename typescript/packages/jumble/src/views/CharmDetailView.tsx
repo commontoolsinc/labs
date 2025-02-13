@@ -6,6 +6,9 @@ import { LoadingSpinner } from "@/components/Loader";
 import { useCharm } from "@/hooks/use-charm";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
+import { CharmRenderer } from "@/components/CharmRunner";
+import { performIteration } from "@/lib/charmIteration";
+import { charmId } from "@/utils/charms";
 
 type Tab = "iterate" | "code" | "data";
 
@@ -14,10 +17,98 @@ interface IterationTabProps {
 }
 
 const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
+  const { replicaName } = useParams();
+  const navigate = useNavigate();
+  const { charmManager } = useCharmManager();
+
+  const [iterationInput, setIterationInput] = useState("");
+  const [selectedModel, setSelectedModel] = useState("anthropic:claude-3-5-sonnet-latest");
+  const [showVariants, setShowVariants] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleIterate = async () => {
+    if (!iterationInput) return;
+    setLoading(true);
+    try {
+      const newPath = await performIteration(
+        charmManager,
+        charmId(charm),
+        replicaName!,
+        iterationInput,
+        showVariants,
+        selectedModel,
+      );
+      if (newPath) {
+        navigate(`${newPath}/detail#iterate`);
+      }
+    } catch (error) {
+      console.error("Iteration error:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="iteration-tab">
-      <h2 className="text-lg font-semibold mb-2">Iteration</h2>
-      <div>this space intentionally left blank. More soon™️</div>
+    <div className="flex h-full">
+      {/* Left Sidebar */}
+      <div className="w-80 border-r-2 border-black bg-gray-50 flex flex-col gap-4 pr-8">
+        <div className="bg-white border-2 border-black p-4 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]">
+          <h2 className="text-sm font-bold mb-4">Iterate</h2>
+          <div className="flex flex-col gap-4">
+            <textarea
+              placeholder="Tweak your charm"
+              value={iterationInput}
+              onChange={(e) => setIterationInput(e.target.value)}
+              className="w-full h-32 p-2 border-2 border-black resize-none"
+            />
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="variants"
+                checked={showVariants}
+                onChange={(e) => setShowVariants(e.target.checked)}
+                className="border-2 border-black"
+              />
+              <label htmlFor="variants" className="text-sm font-medium">
+                Variants
+              </label>
+            </div>
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-bold">Model</label>
+              <select
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="w-full p-2 border-2 border-black bg-white text-xs"
+              >
+                <option value="anthropic:claude-3-5-sonnet-latest">
+                  Anthropic Claude 3.5 Sonnet ✨
+                </option>
+                <option value="groq:llama-3.3-70b-versatile">Groq Llama 3.3 70B 🔥</option>
+                <option value="openai:o3-mini-low-latest">OpenAI o3-mini-low</option>
+                <option value="openai:o3-mini-medium-latest">OpenAI o3-mini-medium</option>
+                <option value="openai:o3-mini-high-latest">OpenAI o3-mini-high</option>
+                <option value="google:gemini-2.0-pro">Google Gemini 2.0 Pro</option>
+                <option value="google:gemini-2.0-flash">Google Gemini 2.0 Flash</option>
+                <option value="google:gemini-2.0-flash-thinking">
+                  Google Gemini 2.0 Flash Thinking
+                </option>
+                <option value="perplexity:sonar-pro">Perplexity Sonar Pro 🌐</option>
+              </select>
+            </div>
+            <button
+              onClick={handleIterate}
+              disabled={loading}
+              className="px-4 py-2 border-2 border-black bg-gray-50 text-black"
+            >
+              {loading ? "Iterating..." : "Iterate"}
+            </button>
+          </div>
+        </div>
+      </div>
+      {/* Main Content Area */}
+      <div className="flex-1 h-full overflow-y-auto p-4">
+        <CharmRenderer className="w-full h-full" charm={charm} />
+      </div>
     </div>
   );
 };
@@ -137,7 +228,7 @@ function CharmEditView() {
   }
 
   return (
-    <div className="edit-view p-4">
+    <div className="detail-view h-full p-4">
       {/* Tab Navigation */}
       <div className="tabs mb-4 flex gap-2">
         <button
