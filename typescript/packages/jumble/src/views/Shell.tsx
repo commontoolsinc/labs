@@ -1,22 +1,16 @@
 import "@commontools/ui";
+
 import { useCallback } from "react";
-import { NavLink, Outlet, useParams, useLocation } from "react-router-dom";
+import { Outlet, useParams, useLocation } from "react-router-dom";
 import { animated } from "@react-spring/web";
+import { MdOutlineStar } from "react-icons/md";
 
 import { setIframeContextHandler } from "@commontools/iframe-sandbox";
 import { LLMClient } from "@commontools/llm-client";
 import { Action, ReactivityLog, addAction, removeAction } from "@commontools/runner";
-import { MdOutlinePerson, MdOutlineStar } from "react-icons/md";
-import { LuPencil } from "react-icons/lu";
-import ShapeLogo from "@/assets/ShapeLogo.svg";
+
+import ShellHeader from "@/components/ShellHeader";
 import { CommandCenter } from "@/components/CommandCenter";
-import { NavPath } from "@/components/NavPath";
-
-import CharmDetail from "@/views/CharmDetail";
-import CharmList from "@/views/CharmList";
-import CharmEditView from "@/views/CharmEditView";
-
-import "./main.css";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized
@@ -87,32 +81,12 @@ export default function Shell() {
 
   return (
     <div className="shell h-full bg-gray-50 border-2 border-black">
-      <header className="flex bg-gray-50 items-center justify-between border-b-2 p-2">
-        <div className="header-start flex items-center gap-2">
-          <NavLink
-            to={replicaName ? `/${replicaName}` : "/"}
-            className="brand flex items-center gap-2"
-          >
-            <ShapeLogo width={32} height={32} shapeColor="#000" containerColor="#d2d2d2" />
-          </NavLink>
-
-          <NavPath replicaId={replicaName} charmId={charmId} />
-        </div>
-        <div className="header-end">
-          {charmId && (
-            <NavLink
-              to={togglePath}
-              className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors ${
-                isDetailActive
-                  ? "bg-gray-300 hover:bg-gray-400 text-black"
-                  : "bg-transparent text-black  hover:bg-gray-200"
-              }`}
-            >
-              <LuPencil size={16} />
-            </NavLink>
-          )}
-        </div>
-      </header>
+      <ShellHeader
+        replicaName={replicaName}
+        charmId={charmId}
+        isDetailActive={isDetailActive}
+        togglePath={togglePath}
+      />
 
       <div className="relative h-full">
         <Outlet />
