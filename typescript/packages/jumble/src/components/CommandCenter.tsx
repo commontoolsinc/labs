@@ -36,11 +36,14 @@ function CommandProcessor({
 
     case "confirm":
       return (
-        <>
-          <div>{mode.message}</div>
-          <Command.Item onSelect={() => command.handler?.(context)}>Yes</Command.Item>
-          <Command.Item onSelect={onComplete}>No</Command.Item>
-        </>
+        <Command.Group heading={mode.message}>
+          <Command.Item value="yes" onSelect={() => mode.command.handler?.(context)}>
+            Yes
+          </Command.Item>
+          <Command.Item value="no" onSelect={onComplete}>
+            No
+          </Command.Item>
+        </Command.Group>
       );
 
     case "select":
@@ -195,7 +198,14 @@ export function CommandCenter() {
           />
         </div>
         <Command.Input
-          placeholder={mode.type === "input" ? mode.placeholder : "What would you like to do?"}
+          placeholder={
+            mode.type === "confirm"
+              ? "Are you sure?"
+              : mode.type === "input"
+                ? mode.placeholder
+                : "What would you like to do?"
+          }
+          readOnly={mode.type === "confirm"}
           value={search}
           onValueChange={setSearch}
           onKeyDown={(e) => {
