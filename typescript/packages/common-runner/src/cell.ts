@@ -94,6 +94,7 @@ export interface Cell<T> {
   getAsDocLink(): DocLink;
   toJSON(): { "/": string } | undefined;
   value: T;
+  docLink: DocLink;
   entityId: EntityId | undefined;
   [isCellMarker]: true;
   copyTrap: boolean;
@@ -593,6 +594,9 @@ function createRegularCell<T>(
     toJSON: () => doc.toJSON(),
     get value(): T {
       return self.get();
+    },
+    get docLink(): DocLink {
+      return { cell: doc, path };
     },
     get entityId(): EntityId | undefined {
       return getEntityId(self.getAsDocLink());
