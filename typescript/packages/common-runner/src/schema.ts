@@ -59,12 +59,19 @@ export function validateAndTransform(
   ({ cell: doc, path } = followLinks({ cell: doc, path }, seen, log));
   const value = doc.getAtPath(path);
 
+  // TODO: The behavior when one of the options is very permissive (e.g. no type
+  // or an object that allows any props) is not well defined.
   if (resolvedSchema.anyOf && Array.isArray(resolvedSchema.anyOf)) {
+    const options = resolvedSchema.anyOf
+      .map((option) => resolveSchema(option, rootSchema))
+      .filter((option) => option !== undefined);
+
     // If the value is an object (but not an array), only consider branches with type "object"
     if (Array.isArray(value)) {
-      const arrayOptions = resolvedSchema.anyOf.filter((option) => option.type === "array");
+      const arrayOptions = options.filter((option) => option.type === "array");
       if (arrayOptions.length === 0) return undefined;
       if (arrayOptions.length === 1)
+        // slice: Don't include the current path in the seen array, avoiding triggering cycle detection
         return validateAndTransform(doc, path, arrayOptions[0], log, rootSchema, seen.slice(0, -1));
 
       // TODO: Handle more corner cases like empty anyOf, etc.
@@ -85,11 +92,10 @@ export function validateAndTransform(
       );
     } else if (typeof value === "object" && value !== null) {
       // Run extraction for each union branch.
-      const candidates = resolvedSchema.anyOf
+      const candidates = options
         .filter((option) => option.type === "object")
         .map((option) => ({
           schema: option,
-          // Don't include the current path in the seen array, avoiding triggering cycle detection
           result: validateAndTransform(doc, path, option, log, rootSchema, seen.slice(0, -1)),
         }));
 
@@ -109,8 +115,8 @@ export function validateAndTransform(
       }
       return merged;
     } else {
-      const candidates = resolvedSchema.anyOf
-        .filter((option) => option.type !== "object")
+      const candidates = options
+        .filter((option) => option.type !== "object" && option.type !== "array")
         .map((option) => ({
           schema: option,
           result: validateAndTransform(doc, path, option, log, rootSchema, seen.slice(0, -1)),
@@ -118,20 +124,16 @@ export function validateAndTransform(
 
       // Otherwise, for non-object or mixed values, select the candidate whose
       // result's type best matches the expected type.
-      for (const { schema: option, result } of candidates) {
-        const optionResolved = resolveSchema(option, rootSchema);
-        if (
-          optionResolved?.type &&
-          (optionResolved.type === "array"
-            ? Array.isArray(result)
-            : typeof result === optionResolved.type)
-        ) {
-          return result;
-        }
-      }
+      for (const { schema: option, result } of candidates)
+        if (typeof result === option.type) return result;
 
-      // If we get here, we have no candidates that match the expected type.
-      return undefined;
+      // If we get here, we have no candidates that match the expected type. If
+      // one of the options allows any type, return based on undefined schema,
+      // otherwise return undefined.
+      const anyTypeOption = options.find((option) => option.type === undefined);
+      if (anyTypeOption)
+        return validateAndTransform(doc, path, anyTypeOption, log, rootSchema, seen.slice(0, -1));
+      else return undefined;
     }
   }
 
