@@ -588,9 +588,34 @@ export type StorageConfig =
   | { type: "memory" }
   | { type: "remote"; replica: string; url: URL };
 
-export function createStorage(config: StorageConfig): Storage {
-  let storageProvider: StorageProvider;
+// Add this cache at module scope
+const storageCache = new Map<string, Storage>();
 
+export function createStorage(config: StorageConfig): Storage {
+  let key: string;
+
+  switch (config.type) {
+    case "local":
+      key = "local";
+      break;
+    case "memory":
+      key = "memory";
+      break;
+    case "remote":
+      // Use URL.toString() to make sure the URL object is normalized as a string
+      key = `remote|${config.replica}|${config.url.toString()}`;
+      break;
+    default:
+      throw new Error("Invalid storage type");
+  }
+
+  // Return the cached instance if it exists
+  if (storageCache.has(key)) {
+    return storageCache.get(key)!;
+  }
+
+  // Create new storage provider based on config
+  let storageProvider: StorageProvider;
   if (config.type === "local") {
     storageProvider = new LocalStorageProvider();
   } else if (config.type === "memory") {
@@ -604,5 +629,8 @@ export function createStorage(config: StorageConfig): Storage {
     throw new Error("Invalid storage type");
   }
 
-  return new StorageImpl(storageProvider);
+  // Create the StorageImpl instance and cache it.
+  const storage = new StorageImpl(storageProvider);
+  storageCache.set(key, storage);
+  return storage;
 }
