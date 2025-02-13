@@ -12,7 +12,17 @@ const CharmManagerContext = createContext<CharmManagerContextType>(null!);
 
 export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { replicaName } = useParams<{ replicaName: string }>();
-  const effectiveReplica = replicaName || "common-knowledge";
+
+  let effectiveReplica: string;
+  if (replicaName) {
+    // When a replica is provided in the URL, use it and save it as the last visited
+    effectiveReplica = replicaName;
+    localStorage.setItem("lastReplica", replicaName);
+  } else {
+    // Otherwise, pull the last visited replica from local storage.
+    // Falling back to "common-knowledge" if nothing was stored.
+    effectiveReplica = localStorage.getItem("lastReplica") || "common-knowledge";
+  }
 
   // NOTE(ja): disable switching replicas until
   // https://github.com/commontoolsinc/labs/issues/377 is fixed
