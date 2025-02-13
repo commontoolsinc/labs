@@ -78,7 +78,7 @@ export const integrate = (session: Session, change: In<State>) => {
   if (session.controller) {
     session.controller.enqueue(change);
   } else {
-    throw new Error("Subscription is cancelled");
+    console.warn("Subscription is cancelled, not integrating change", change);
   }
 };
 
