@@ -61,7 +61,29 @@ export function validateAndTransform(
 
   if (resolvedSchema.anyOf && Array.isArray(resolvedSchema.anyOf)) {
     // If the value is an object (but not an array), only consider branches with type "object"
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    if (Array.isArray(value)) {
+      const arrayOptions = resolvedSchema.anyOf.filter((option) => option.type === "array");
+      if (arrayOptions.length === 0) return undefined;
+      if (arrayOptions.length === 1)
+        return validateAndTransform(doc, path, arrayOptions[0], log, rootSchema, seen.slice(0, -1));
+
+      // TODO: Handle more corner cases like empty anyOf, etc.
+      const merged: JSONSchema[] = [];
+      for (const option of arrayOptions) {
+        if (option.items?.anyOf && Array.isArray(option.items.anyOf))
+          merged.push(...option.items.anyOf);
+        else if (option.items) merged.push(option.items);
+      }
+
+      return validateAndTransform(
+        doc,
+        path,
+        { type: "array", items: { anyOf: merged } },
+        log,
+        rootSchema,
+        seen.slice(0, -1),
+      );
+    } else if (typeof value === "object" && value !== null) {
       // Run extraction for each union branch.
       const candidates = resolvedSchema.anyOf
         .filter((option) => option.type === "object")

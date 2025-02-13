@@ -362,6 +362,114 @@ describe("Schema Support", () => {
       expect(Array.isArray(resultArray.mixed)).toBe(true);
       expect(resultArray.mixed).toEqual(["bar", "baz"]);
     });
+
+    describe("Array anyOf Support", () => {
+      it("should handle multiple array type options in anyOf", () => {
+        const c = getDoc({
+          data: [1, 2, 3],
+        });
+        const schema: JSONSchema = {
+          type: "object",
+          properties: {
+            data: {
+              anyOf: [
+                { type: "array", items: { type: "number" } },
+                { type: "array", items: { type: "string" } },
+              ],
+            },
+          },
+        };
+
+        const cell = c.asCell([], undefined, schema);
+        const result = cell.get();
+        expect(result.data).toEqual([1, 2, 3]);
+      });
+
+      it("should merge item schemas when multiple array options exist", () => {
+        const c = getDoc({
+          data: ["hello", 42, true],
+        });
+        const schema: JSONSchema = {
+          type: "object",
+          properties: {
+            data: {
+              anyOf: [
+                { type: "array", items: { type: "string" } },
+                { type: "array", items: { type: "number" } },
+              ],
+            },
+          },
+        };
+
+        const cell = c.asCell([], undefined, schema);
+        const result = cell.get();
+        // Should keep string and number values, drop boolean
+        expect(result.data).toEqual(["hello", 42, undefined]);
+      });
+
+      it("should handle nested anyOf in array items", () => {
+        const c = getDoc({
+          data: [
+            { type: "text", value: "hello" },
+            { type: "number", value: 42 },
+          ],
+        });
+        const schema: JSONSchema = {
+          type: "object",
+          properties: {
+            data: {
+              type: "array",
+              items: {
+                anyOf: [
+                  {
+                    type: "object",
+                    properties: {
+                      type: { type: "string" },
+                      value: { type: "string" },
+                    },
+                  },
+                  {
+                    type: "object",
+                    properties: {
+                      type: { type: "string" },
+                      value: { type: "number" },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        };
+
+        const cell = c.asCell([], undefined, schema);
+        const result = cell.get();
+        expect(result.data).toEqual([
+          { type: "text", value: "hello" },
+          { type: "number", value: 42 },
+        ]);
+      });
+
+      it("should return empty array when no array options match", () => {
+        const c = getDoc({
+          data: { key: "value" },
+        });
+        const schema: JSONSchema = {
+          type: "object",
+          properties: {
+            data: {
+              anyOf: [
+                { type: "array", items: { type: "string" } },
+                { type: "array", items: { type: "number" } },
+              ],
+            },
+          },
+        };
+
+        const cell = c.asCell([], undefined, schema);
+        const result = cell.get();
+        expect(result.data).toBeUndefined();
+      });
+    });
   });
 
   describe("Examples", () => {
