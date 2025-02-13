@@ -1,37 +1,84 @@
 import { Command } from "cmdk";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import "./commands.css";
-import { castNewRecipe, Charm, CharmManager, iterate, compileAndRunRecipe } from "@commontools/charm";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { useMatch, useNavigate } from "react-router-dom";
-import { castSpell } from "@/search";
-import { charmId } from "@/utils/charms";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
-import { Dialog, DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
+import { DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
+import { DitheredCube } from "./DitherCube";
+import { CommandContext, CommandItem, CommandMode, commands } from "./commands";
+import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext";
 
-import { NAME } from "@commontools/builder";
-import { DocImpl, getRecipe, addRecipe } from "@commontools/runner";
+function CommandProcessor({
+  mode,
+  command,
+  context,
+  onComplete,
+}: {
+  mode: CommandMode;
+  command: CommandItem;
+  context: CommandContext;
+  onComplete: () => void;
+}) {
+  if (context.loading) {
+    return (
+      <Command.Group>
+        <div className="flex items-center justify-center p-4">
+          <span className="text-sm text-gray-500">Processing...</span>
+        </div>
+      </Command.Group>
+    );
+  }
+
+  switch (mode.type) {
+    case "input":
+      return <></>;
+
+    case "confirm":
+      return (
+        <Command.Group heading={mode.message}>
+          <Command.Item value="yes" onSelect={() => mode.command.handler?.(context)}>
+            Yes
+          </Command.Item>
+          <Command.Item value="no" onSelect={onComplete}>
+            No
+          </Command.Item>
+        </Command.Group>
+      );
+
+    case "select":
+      return (
+        <>
+          {mode.options.map((option) => (
+            <Command.Item
+              key={option.id}
+              onSelect={() => mode.command.handler?.(context, option.value)} // Use mode.command instead
+            >
+              {option.title}
+            </Command.Item>
+          ))}
+        </>
+      );
+
+    default:
+      return null;
+  }
+}
 
 export function CommandCenter() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState<CommandMode>({ type: "main" });
+  const [commandPath, setCommandPath] = useState<CommandItem[]>([]);
   const [search, setSearch] = useState("");
-  const importJSONRef = useRef<HTMLInputElement | null>(null);
-  const loadRecipeRef = useRef<HTMLInputElement | null>(null);
+  const { modelId, setPreferredModel } = usePreferredLanguageModel();
+
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
-
-  // bf: this will need to become a state machine eventualyl
-  const [spellResults, setSpellResults] = useState<any[]>([]);
-  const [charmResults, setCharmResults] = useState<any[]>([]);
-  const [mode, setMode] = useState<"main" | "spellResults" | "charmResults" | "blobSelection">("main");
-  const [selectedSpell, setSelectedSpell] = useState<any>(null);
-
-  const match = useMatch("/:replicaName/:charmId?");
+  const match = useMatch("/:replicaName/:charmId?/*");
   const focusedCharmId = match?.params.charmId ?? null;
   const focusedReplicaId = match?.params.replicaName ?? null;
 
-  // Handle keyboard shortcut and custom event
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
@@ -54,278 +101,82 @@ export function CommandCenter() {
   }, []);
 
   useEffect(() => {
+    setSearch("");
+  }, [mode]);
+
+  useEffect(() => {
     if (!open) {
-      setSearch("");
-      setMode("main");
-      setSpellResults([]);
-      setCharmResults([]);
-      setSelectedSpell(null); // Add this line
+      setMode({ type: "main" });
+      setCommandPath([]);
     }
   }, [open]);
 
   useEffect(() => {
-    setSearch("");
-  }, [mode]);
-
-  async function castSpellAsCharm(charmManager: CharmManager, result: any, blob: any) {
-    const recipeKey = result?.key;
-
-    if (recipeKey && blob) {
-      console.log("Syncing...");
-      const recipeId = recipeKey.replace("spell-", "");
-      await charmManager.syncRecipeBlobby(recipeId);
-
-      const recipe = getRecipe(recipeId);
-      if (!recipe) return;
-
-      console.log("Casting...");
-      const doc = await charmManager.sync({ "/": blob.key }, true);
-      const charm: DocImpl<Charm> = await charmManager.runPersistent(recipe, {
-        cell: doc,
-        path: ["argument"],
-      });
-      charmManager.add([charm]);
-      navigate(`/${focusedReplicaId}/${charmId(charm.entityId!)}`);
-      console.log("Ready!");
-    } else {
-      console.log("Failed to cast");
-    }
-  }
-
-  // Command handlers
-  const handleNewCharm = async () => {
-    const dummyData = {
-      gallery: [{ title: "pizza", prompt: "a yummy pizza" }],
+    const handleEditRecipe = (e: KeyboardEvent) => {
+      if (e.key === "i" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setOpen(true);
+        setMode({
+          type: "input",
+          command: commands.find((cmd) => cmd.id === "edit-recipe")!,
+          placeholder: "What would you like to change?",
+        });
+      }
     };
 
-    const title = prompt("Enter a title for your new charm:");
-    if (!title) return;
+    const handleEditRecipeEvent = () => {
+      if (focusedCharmId) {
+        // Only open if there's a charm focused
+        setOpen(true);
+        setMode({
+          type: "input",
+          command: commands.find((cmd) => cmd.id === "edit-recipe")!,
+          placeholder: "What would you like to change?",
+        });
+      }
+    };
 
-    const id = await castNewRecipe(charmManager, { gallery: [dummyData] }, title);
-    if (id) {
-      navigate(`/${focusedReplicaId}/${charmId(id)}`);
-    }
-    setOpen(false);
-  };
+    document.addEventListener("keydown", handleEditRecipe);
+    window.addEventListener("edit-recipe-command", handleEditRecipeEvent);
 
-  const handleImportJSON = async () => {
-    if (!importJSONRef.current) {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".json";
-      input.style.display = "none";
-
-      input.onchange = async (e) => {
-        const file = (e.target as HTMLInputElement).files?.[0];
-        if (!file) return;
-
-        try {
-          const text = await file.text();
-          const data = JSON.parse(text);
-
-          const title = prompt("Enter a title for your imported recipe:");
-          if (!title) return;
-
-          const id = await castNewRecipe(charmManager, data, title);
-          if (id) {
-            navigate(`/${focusedReplicaId}/${charmId(id)}`);
-          }
-          setOpen(false);
-        } catch (err) {
-          console.error("Failed to import JSON:", err);
-          alert("Failed to import JSON file. Please check the file format.");
-        }
-
-        // Reset the input so the file can be chosen again.
-        (e.target as HTMLInputElement).value = "";
-      };
-
-      document.body.appendChild(input);
-      importJSONRef.current = input;
-    }
-
-    // Always reset the input value before clicking:
-    importJSONRef.current.value = "";
-    importJSONRef.current.click();
-  };
-
-  const handleLoadRecipe = async () => {
-    if (!loadRecipeRef.current) {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".tsx";
-      input.style.display = "none";
-
-      input.onchange = async (e) => {
-        const file = (e.target as HTMLInputElement).files?.[0];
-        if (!file) return;
-
-        const src = await file.text();
-        const id = await compileAndRunRecipe(charmManager, src, "imported", {});
-        if (id) {
-          navigate(`/${focusedReplicaId}/${charmId(id)}`);
-        }
-
-        setOpen(false);
-        (e.target as HTMLInputElement).value = "";
-      };
-
-      document.body.appendChild(input);
-      loadRecipeRef.current = input;
-    }
-
-    // Always reset the input value before clicking:
-    loadRecipeRef.current.value = "";
-    loadRecipeRef.current.click();
-  };
-
-  // Cleanup file input on unmount
-  useEffect(() => {
     return () => {
-      if (importJSONRef.current) {
-        document.body.removeChild(importJSONRef.current);
-      }
-      if (loadRecipeRef.current) {
-        document.body.removeChild(loadRecipeRef.current);
-      }
+      document.removeEventListener("keydown", handleEditRecipe);
+      window.removeEventListener("edit-recipe-command", handleEditRecipeEvent);
     };
-  }, []);
+  }, [focusedCharmId]); // Add focusedCharmId as a dependency
 
-  const handleSearchCharms = async () => {
-    setLoading(true);
-    try {
-      const charms = charmManager.getCharms().get();
-
-      const results = await Promise.all(
-        charms.map(async (charm) => {
-          const data = charm.cell.get();
-          return {
-            title: data[NAME] + ` (#${charmId(charm.cell.entityId!).slice(-4)})`,
-            id: charmId(charm.cell.entityId!),
-          };
-        }),
-      );
-
-      setCharmResults(results);
-      setMode("charmResults");
-    } catch (error) {
-      console.error("Search charms error:", error);
-      alert("Failed to search charms");
-    } finally {
-      setLoading(false);
-    }
+  const context: CommandContext = {
+    charmManager,
+    navigate,
+    focusedCharmId,
+    focusedReplicaId,
+    setOpen,
+    preferredModel: modelId ?? undefined,
+    setPreferredModel,
+    setMode,
+    loading,
+    setLoading,
   };
 
-  const handleSpellcaster = async () => {
-    setLoading(true);
-    try {
-      if (!focusedReplicaId) {
-        console.error("No replica name found");
-        return;
-      }
-
-      const spellInput = prompt("Enter your spell:");
-      if (!spellInput) return;
-
-      const spells = await castSpell(focusedReplicaId, spellInput);
-      setSpellResults(spells);
-      setMode("spellResults"); // Switch to results view
-    } catch (error) {
-      console.error("Spellcaster error:", error);
-      alert("Failed to cast spell");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDeleteCharm = async () => {
-    if (confirm("Are you sure you want to delete this charm?")) {
-      if (!focusedCharmId) {
-        console.error("Cannot delete charm: No charm ID focused");
-        return;
-      }
-      console.log("Deleting charm", focusedCharmId);
-
-      const charm = await charmManager.get(focusedCharmId);
-
-      console.log(charm?.entityId);
-
-      if (!charm || !charm.entityId) {
-        console.error("Cannot delete charm: Failed to get charm data", { focusedCharmId });
-        return;
-      }
-
-      const result = await charmManager.remove(charm?.entityId);
-      console.log("Delete result:", result);
-
-      if (result) {
-        navigate("/");
-      }
+  const handleBack = () => {
+    if (commandPath.length === 1) {
+      setMode({ type: "main" });
+      setCommandPath([]);
     } else {
-      console.log("Cancelled charm deletion");
-    }
-
-    setOpen(false);
-  };
-
-  const handleEditRecipe = async () => {
-    setLoading(true);
-    try {
-      if (!focusedCharmId) {
-        console.error("No charm ID focused");
-        return;
-      }
-
-      const charm = await charmManager.get(focusedCharmId);
-
-      const newRecipe = prompt("Enter new recipe:");
-      if (!newRecipe) return;
-
-      const newCharmId = await iterate(charmManager, charm ?? null, newRecipe, false);
-      if (newCharmId) {
-        navigate(`/${focusedReplicaId}/${charmId(newCharmId)}`);
-      }
-    } catch (error) {
-      console.error("Edit recipe error:", error);
-      alert("Failed to edit recipe");
-    } finally {
-      setLoading(false);
-      setOpen(false);
+      setCommandPath((prev) => prev.slice(0, -1));
+      setMode({
+        type: "menu",
+        path: commandPath.slice(0, -1),
+        parent: commandPath[commandPath.length - 2],
+      });
     }
   };
 
-  const handleNavigateBack = () => {
-    window.history.back();
-    setOpen(false);
-  };
+  const getCurrentCommands = () => {
+    const currentCommands =
+      commandPath.length === 0 ? commands : commandPath[commandPath.length - 1].children || [];
 
-  const handleNavigateForward = () => {
-    window.history.forward();
-    setOpen(false);
-  };
-
-  const handleNavigateHome = () => {
-    if (focusedReplicaId) {
-      navigate(`/${focusedReplicaId}`);
-    }
-    setOpen(false);
-  };
-
-  const handleSwitchReplica = () => {
-    const newReplica = prompt("Enter replica name:");
-    if (newReplica) {
-      navigate(`/${newReplica}`);
-    }
-    setOpen(false);
-  };
-
-  const handleToggleDetails = () => {
-    if (!focusedCharmId) {
-      console.error("Cannot toggle details: No charm focused");
-      return;
-    }
-    window.dispatchEvent(new CustomEvent("toggle-details"));
-    setOpen(false);
+    return currentCommands.filter((cmd) => !cmd.predicate || cmd.predicate(context));
   };
   return (
     <Command.Dialog title="Common" open={open} onOpenChange={setOpen} label="Command Menu">
@@ -336,144 +187,112 @@ export function CommandCenter() {
         </>
       </VisuallyHidden>
 
-      <Command.Input
-        placeholder={
-          mode === "main"
-            ? "What would you like to do?"
-            : mode === "spellResults"
-              ? "Search spell results..."
-              : "Search charms..."
-        }
-        value={search}
-        onValueChange={setSearch}
-      />
+      <div className="flex items-center gap-2">
+        <div className="w-10 h-10 flex-shrink-0">
+          <DitheredCube
+            animationSpeed={loading ? 2 : 1}
+            width={40}
+            height={40}
+            animate={loading}
+            cameraZoom={loading ? 12 : 14}
+          />
+        </div>
+        <Command.Input
+          placeholder={
+            mode.type === "confirm"
+              ? "Are you sure?"
+              : mode.type === "input"
+                ? mode.placeholder
+                : "What would you like to do?"
+          }
+          readOnly={mode.type === "confirm"}
+          value={search}
+          onValueChange={setSearch}
+          onKeyDown={(e) => {
+            if (mode.type === "input" && e.key === "Enter") {
+              e.preventDefault();
+              const command = mode.command;
+              command.handler?.(context, search);
+            }
+          }}
+          style={{ flexGrow: 1 }}
+        />
+      </div>
+
       <Command.List>
-        <Command.Empty>No results found.</Command.Empty>
+        {!loading && mode.type != "input" && <Command.Empty>No results found.</Command.Empty>}
+        {loading && (
+          <Command.Loading>
+            <div className="flex items-center justify-center p-4">
+              <span className="text-sm text-gray-500">Processing...</span>
+            </div>
+          </Command.Loading>
+        )}
 
-        {loading && <Command.Loading>Loading...</Command.Loading>}
-
-        {mode === "main" ? (
+        {mode.type === "main" || mode.type === "menu" ? (
           <>
-            <Command.Group heading="Actions">
-              <Command.Item onSelect={handleNewCharm}>New Charm</Command.Item>
-              <Command.Item onSelect={handleSearchCharms}>Search Charms</Command.Item>
-              <Command.Item onSelect={handleSpellcaster}>Spellcaster</Command.Item>
-            </Command.Group>
-
-            <Command.Group heading="Edit">
-              <Command.Item onSelect={() => console.log("Rename")}>Rename Charm</Command.Item>
-              <Command.Item onSelect={handleDeleteCharm}>Delete Charm</Command.Item>
-              <Command.Item onSelect={handleEditRecipe}>Edit Recipe</Command.Item>
-            </Command.Group>
-
-            <Command.Group heading="Navigation">
-              <Command.Item onSelect={handleNavigateBack}>Navigate Back</Command.Item>
-              <Command.Item onSelect={handleNavigateForward}>Navigate Forward</Command.Item>
-              <Command.Item onSelect={handleNavigateHome}>Navigate Home</Command.Item>
-            </Command.Group>
-
-            <Command.Group heading="View">
-              <Command.Item onSelect={handleSwitchReplica}>Switch Replica</Command.Item>
-              {focusedCharmId && (
-                <Command.Item onSelect={handleToggleDetails}>Toggle Details</Command.Item>
-              )}
-            </Command.Group>
-            <Command.Group heading="Data">
-              <Command.Item onSelect={handleImportJSON}>Import JSON</Command.Item>
-              <Command.Item onSelect={handleLoadRecipe}>Load Recipe</Command.Item>
-            </Command.Group>
-          </>
-        ) : mode === "spellResults" ? (
-          <>
-            <Command.Group heading="Spell Results">
-              {spellResults
-                .filter(result => result.compatibleBlobs && result.compatibleBlobs.length > 0)
-                .map((result, index) => (
-                  <Command.Item
-                    key={index}
-                    onSelect={async () => {
-                      if (result.compatibleBlobs.length === 1) {
-                        await castSpellAsCharm(charmManager, result, result.compatibleBlobs[0]);
-                        setMode("main");
-                        setOpen(false);
-                      } else {
-                        setSelectedSpell(result);
-                        setMode("blobSelection");
-                      }
-                    }}
-                  >
-                    {`${result.description}#${result.name.slice(-4)} (${result.compatibleBlobs.length})`}
-                  </Command.Item>
-                ))}
-            </Command.Group>
-            {spellResults.filter(result => result.compatibleBlobs && result.compatibleBlobs.length > 0)
-              .length === 0 && (
-                <Command.Item onSelect={() => setMode("main")}>
-                  No spells found with compatible blobs
-                </Command.Item>
-              )}
-            <Command.Group>
-              <Command.Item
-                onSelect={() => {
-                  setMode("main");
-                  setSpellResults([]);
-                }}
-              >
-                Back to Main Menu
+            {commandPath.length > 0 && (
+              <Command.Item onSelect={handleBack}>
+                ← Back to {commandPath[commandPath.length - 2]?.title || "Main Menu"}
               </Command.Item>
-            </Command.Group>
-          </>
-        ) : mode === "blobSelection" ? (
-          <>
-            <Command.Group heading={`Select blob for ${selectedSpell?.name}`}>
-              {selectedSpell?.compatibleBlobs.map((blob, index) => (
-                <Command.Item
-                  key={index}
-                  onSelect={async () => {
-                    await castSpellAsCharm(charmManager, selectedSpell, blob);
-                    setMode("main");
-                    setOpen(false);
-                  }}
-                >
-                  {`Blob ${index + 1}`}
-                </Command.Item>
-              ))}
-            </Command.Group>
-            <Command.Group>
-              <Command.Item onSelect={() => setMode("spellResults")}>
-                Back to Spell Results
-              </Command.Item>
-            </Command.Group>
+            )}
+
+            {(() => {
+              const groups = getCurrentCommands().reduce(
+                (acc, cmd) => {
+                  const group = cmd.group || "Other";
+                  if (!acc[group]) acc[group] = [];
+                  acc[group].push(cmd);
+                  return acc;
+                },
+                {} as Record<string, CommandItem[]>,
+              );
+
+              return Object.entries(groups).map(([groupName, commands]) => (
+                <Command.Group key={groupName} heading={groupName}>
+                  {commands.map((cmd) => (
+                    <Command.Item
+                      key={cmd.id}
+                      onSelect={() => {
+                        if (cmd.children) {
+                          setCommandPath((prev) => [...prev, cmd]);
+                          setMode({
+                            type: "menu",
+                            path: [...commandPath, cmd],
+                            parent: cmd,
+                          });
+                        } else if (cmd.type === "action") {
+                          cmd.handler?.(context);
+                          // Only close if the handler doesn't set a new mode
+                          if (!cmd.handler || cmd.handler.length === 0) {
+                            setOpen(false);
+                          }
+                        } else {
+                          setMode({ type: cmd.type, command: cmd });
+                        }
+                      }}
+                    >
+                      {typeof cmd.title === "function" ? cmd.title(context) : cmd.title}
+                      {cmd.children && " →"}
+                    </Command.Item>
+                  ))}
+                </Command.Group>
+              ));
+            })()}
           </>
         ) : (
-          <>
-            <Command.Group heading="Charm Results">
-              {charmResults.map((charm, index) => (
-                <Command.Item
-                  key={charm.id}
-                  onSelect={() => {
-                    if (focusedReplicaId && charm.id) {
-                      navigate(`/${focusedReplicaId}/${charm.id}`);
-                      setMode("main");
-                      setOpen(false);
-                    }
-                  }}
-                >
-                  {charm.title || `Charm ${index + 1}`}
-                </Command.Item>
-              ))}
-            </Command.Group>
-            <Command.Group>
-              <Command.Item
-                onSelect={() => {
-                  setMode("main");
-                  setCharmResults([]);
-                }}
-              >
-                Back to Main Menu
-              </Command.Item>
-            </Command.Group>
-          </>
+          <CommandProcessor
+            mode={mode}
+            command={commandPath[commandPath.length - 1]}
+            context={context}
+            onComplete={() => {
+              setMode({
+                type: "menu",
+                path: commandPath,
+                parent: commandPath[commandPath.length - 1],
+              });
+            }}
+          />
         )}
       </Command.List>
     </Command.Dialog>

@@ -64,11 +64,17 @@ class DitheringPassClass extends ShaderPass {
 
 // Extend the pass
 extend({ DitheringPass: DitheringPassClass });
-function MorphingMesh() {
+function MorphingMesh({
+  animate = true,
+  animationSpeed = 1,
+}: {
+  animate?: boolean;
+  animationSpeed?: number;
+}) {
   const meshRef = useRef<THREE.Mesh>();
   const startAnimationRef = useRef({
     started: false,
-    startTime: 0
+    startTime: 0,
   });
 
   useEffect(() => {
@@ -135,13 +141,11 @@ function MorphingMesh() {
         }
         coneV.y *= 1.2;
         return coneV;
-      }
+      },
     ];
 
     // Create morph targets
-    baseGeometry.morphAttributes.position = shapes.map(shapeFn =>
-      createMorphTarget(shapeFn)
-    );
+    baseGeometry.morphAttributes.position = shapes.map((shapeFn) => createMorphTarget(shapeFn));
 
     // Update mesh geometry
     meshRef.current.geometry = baseGeometry;
@@ -155,21 +159,36 @@ function MorphingMesh() {
   useFrame((state) => {
     if (!meshRef.current) return;
 
-    const time = state.clock.getElapsedTime();
+    // Multiply time by speed factor
+    const time = state.clock.getElapsedTime() * animationSpeed;
     const influences = meshRef.current.morphTargetInfluences;
 
     if (!influences) return;
 
-    // Initial scale-up animation
+    // Initial scale-up animation (keep this independent of speed)
     if (!startAnimationRef.current.started) {
       startAnimationRef.current.started = true;
-      startAnimationRef.current.startTime = time;
+      startAnimationRef.current.startTime = state.clock.getElapsedTime(); // Use raw time here
     }
 
-    const startProgress = Math.min((time - startAnimationRef.current.startTime) / 0.3, 1.0);
+    const startProgress = Math.min(
+      (state.clock.getElapsedTime() - startAnimationRef.current.startTime) / 0.3,
+      1.0,
+    );
     const startScale = easeOutCubic(startProgress);
 
-    // Animation parameters
+    if (!animate) {
+      influences.fill(0);
+      influences[0] = 1;
+
+      // Even in static mode, apply the speed to the rotation
+      meshRef.current.rotation.set(0, time * 0.5, 0);
+      meshRef.current.scale.set(startScale, startScale, startScale);
+      meshRef.current.position.set(0, 0, 0);
+      return;
+    }
+
+    // Animation parameters - keep durations constant regardless of speed
     const restDuration = 0.5;
     const transitionDuration = 0.2;
     const cycleDuration = restDuration + transitionDuration;
@@ -182,7 +201,7 @@ function MorphingMesh() {
     const cycleTime = totalTime % cycleDuration;
     const isTransitioning = cycleTime > restDuration;
     const transitionProgress = isTransitioning
-      ? 1 - Math.pow(1 - ((cycleTime - restDuration) / transitionDuration), 3)
+      ? 1 - Math.pow(1 - (cycleTime - restDuration) / transitionDuration, 3)
       : 0;
 
     // Reset all influences to 0
@@ -190,31 +209,48 @@ function MorphingMesh() {
 
     // Shape-specific animations
     const animations = [
-      { // Cube
+      {
+        // Cube
         rotation: [time * 0.5, time * 0.3, 0],
-        scale: [1 + Math.sin(time * 2) * 0.2, 1 + Math.sin(time * 2) * 0.2, 1 + Math.sin(time * 2) * 0.2],
-        position: [Math.sin(time) * 0.2, 0, 0]
+        scale: [
+          1 + Math.sin(time * 2) * 0.2,
+          1 + Math.sin(time * 2) * 0.2,
+          1 + Math.sin(time * 2) * 0.2,
+        ],
+        position: [Math.sin(time) * 0.2, 0, 0],
       },
-      { // Sphere
+      {
+        // Sphere
         rotation: [0, time * 0.8, time * 0.4],
-        scale: [1 + Math.cos(time * 3) * 0.15, 1 + Math.cos(time * 3) * 0.15, 1 + Math.cos(time * 3) * 0.15],
-        position: [0, Math.sin(time * 1.5) * 0.2, 0]
+        scale: [
+          1 + Math.cos(time * 3) * 0.15,
+          1 + Math.cos(time * 3) * 0.15,
+          1 + Math.cos(time * 3) * 0.15,
+        ],
+        position: [0, Math.sin(time * 1.5) * 0.2, 0],
       },
-      { // Octahedron
+      {
+        // Octahedron
         rotation: [time * 0.2, time * 0.6, time * 0.3],
-        scale: [1 + Math.sin(time * 4) * 0.1, 1 + Math.sin(time * 4) * 0.1, 1 + Math.sin(time * 4) * 0.1],
-        position: [Math.cos(time * 2) * 0.15, Math.sin(time * 2) * 0.15, 0]
+        scale: [
+          1 + Math.sin(time * 4) * 0.1,
+          1 + Math.sin(time * 4) * 0.1,
+          1 + Math.sin(time * 4) * 0.1,
+        ],
+        position: [Math.cos(time * 2) * 0.15, Math.sin(time * 2) * 0.15, 0],
       },
-      { // Cylinder
+      {
+        // Cylinder
         rotation: [Math.PI / 4, time * 0.4, 0],
         scale: [1, 1 + Math.sin(time * 2.5) * 0.3, 1],
-        position: [0, 0, Math.sin(time) * 0.2]
+        position: [0, 0, Math.sin(time) * 0.2],
       },
-      { // Cone
+      {
+        // Cone
         rotation: [Math.PI / 2 + Math.sin(time) * 0.2, time * 0.7, 0],
         scale: [1, 1 + Math.abs(Math.sin(time * 2)) * 0.5, 1],
-        position: [Math.sin(time * 1.2) * 0.2, Math.cos(time * 1.2) * 0.2, 0]
-      }
+        position: [Math.sin(time * 1.2) * 0.2, Math.cos(time * 1.2) * 0.2, 0],
+      },
     ];
 
     // Current and next animation states
@@ -230,63 +266,65 @@ function MorphingMesh() {
       meshRef.current.rotation.x = THREE.MathUtils.lerp(
         currentAnim.rotation[0],
         nextAnim.rotation[0],
-        transitionProgress
+        transitionProgress,
       );
       meshRef.current.rotation.y = THREE.MathUtils.lerp(
         currentAnim.rotation[1],
         nextAnim.rotation[1],
-        transitionProgress
+        transitionProgress,
       );
       meshRef.current.rotation.z = THREE.MathUtils.lerp(
         currentAnim.rotation[2],
         nextAnim.rotation[2],
-        transitionProgress
+        transitionProgress,
       );
 
       // Interpolate scale
-      meshRef.current.scale.x = THREE.MathUtils.lerp(
-        currentAnim.scale[0],
-        nextAnim.scale[0],
-        transitionProgress
-      ) * startScale;
-      meshRef.current.scale.y = THREE.MathUtils.lerp(
-        currentAnim.scale[1],
-        nextAnim.scale[1],
-        transitionProgress
-      ) * startScale;
-      meshRef.current.scale.z = THREE.MathUtils.lerp(
-        currentAnim.scale[2],
-        nextAnim.scale[2],
-        transitionProgress
-      ) * startScale;
+      meshRef.current.scale.x =
+        THREE.MathUtils.lerp(currentAnim.scale[0], nextAnim.scale[0], transitionProgress) *
+        startScale;
+      meshRef.current.scale.y =
+        THREE.MathUtils.lerp(currentAnim.scale[1], nextAnim.scale[1], transitionProgress) *
+        startScale;
+      meshRef.current.scale.z =
+        THREE.MathUtils.lerp(currentAnim.scale[2], nextAnim.scale[2], transitionProgress) *
+        startScale;
 
       // Interpolate position
       meshRef.current.position.x = THREE.MathUtils.lerp(
         currentAnim.position[0],
         nextAnim.position[0],
-        transitionProgress
+        transitionProgress,
       );
       meshRef.current.position.y = THREE.MathUtils.lerp(
         currentAnim.position[1],
         nextAnim.position[1],
-        transitionProgress
+        transitionProgress,
       );
       meshRef.current.position.z = THREE.MathUtils.lerp(
         currentAnim.position[2],
         nextAnim.position[2],
-        transitionProgress
+        transitionProgress,
       );
     } else {
       influences[currentCycle] = 1;
 
       // Apply current animation state
-      meshRef.current.rotation.set(currentAnim.rotation[0], currentAnim.rotation[1], currentAnim.rotation[2]);
+      meshRef.current.rotation.set(
+        currentAnim.rotation[0],
+        currentAnim.rotation[1],
+        currentAnim.rotation[2],
+      );
       meshRef.current.scale.set(
         currentAnim.scale[0] * startScale,
         currentAnim.scale[1] * startScale,
-        currentAnim.scale[2] * startScale
+        currentAnim.scale[2] * startScale,
       );
-      meshRef.current.position.set(currentAnim.position[0], currentAnim.position[1], currentAnim.position[2]);
+      meshRef.current.position.set(
+        currentAnim.position[0],
+        currentAnim.position[1],
+        currentAnim.position[2],
+      );
     }
   });
 
@@ -296,26 +334,41 @@ function MorphingMesh() {
     </mesh>
   );
 }
+
 type DitheredCubeProps = {
   width?: number;
   height?: number;
   className?: string;
+  animate?: boolean;
+  cameraZoom?: number;
+  animationSpeed?: number; // New prop for controlling animation speed
 };
 
-export const DitheredCube = ({ width = 512, height = 512, className }: DitheredCubeProps) => {
+export const DitheredCube = ({
+  width = 512,
+  height = 512,
+  className,
+  animate = true,
+  cameraZoom = 100,
+  animationSpeed = 1,
+}: DitheredCubeProps) => {
   return (
     <div style={{ width, height, imageRendering: "pixelated" }} className={className}>
       <Canvas
-        // dpr={1}
         gl={{
           antialias: false,
         }}
       >
-        <OrthographicCamera makeDefault position={[0, 0, 5]} zoom={100} near={0.1} far={1000} />
-        {/* <ambientLight intensity={0.2} /> */}
+        <OrthographicCamera
+          makeDefault
+          position={[0, 0, 5]}
+          zoom={cameraZoom}
+          near={0.1}
+          far={1000}
+        />
         <directionalLight position={[2, 2, 1]} intensity={0.5} />
         <directionalLight position={[-2, -2, 1]} intensity={2} />
-        <MorphingMesh />
+        <MorphingMesh animate={animate} animationSpeed={animationSpeed} />
         <OrbitControls enableZoom={true} />
         <Effects>
           <ditheringPass />
