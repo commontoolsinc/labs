@@ -213,6 +213,157 @@ describe("Schema Support", () => {
     });
   });
 
+  describe("AnyOf Support", () => {
+    it("should select the correct candidate for primitive types (number)", () => {
+      const c = getDoc({ value: 42 });
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          value: {
+            anyOf: [{ type: "string" }, { type: "number" }],
+          },
+        },
+      };
+
+      const cell = c.asCell([], undefined, schema);
+      const result = cell.get();
+      expect(result.value).toBe(42);
+    });
+
+    it("should select the correct candidate for primitive types (string)", () => {
+      const c = getDoc({ value: "hello" });
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          value: {
+            anyOf: [{ type: "number" }, { type: "string" }],
+          },
+        },
+      };
+
+      const cell = c.asCell([], undefined, schema);
+      const result = cell.get();
+      expect(result.value).toBe("hello");
+    });
+
+    it("should merge object candidates in anyOf", () => {
+      const c = getDoc({ item: { a: 100, b: "merged" } });
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          item: {
+            anyOf: [
+              { type: "object", properties: { a: { type: "number" } } },
+              { type: "object", properties: { b: { type: "string" } } },
+            ],
+          },
+        },
+      };
+
+      const cell = c.asCell([], undefined, schema);
+      const result = cell.get();
+      expect(result.item.a).toBe(100);
+      expect(result.item.b).toBe("merged");
+    });
+
+    it("should return undefined if no anyOf candidate matches for primitive types", () => {
+      const c = getDoc({ value: true });
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          value: {
+            anyOf: [{ type: "number" }, { type: "string" }],
+          },
+        },
+      };
+
+      const cell = c.asCell([], undefined, schema);
+      const result = cell.get();
+      expect(result.value).toBeUndefined();
+    });
+
+    it("should return undefined when value is an object but no anyOf candidate is an object", () => {
+      const c = getDoc({ value: { a: 1 } });
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          value: {
+            anyOf: [{ type: "number" }, { type: "string" }],
+          },
+        },
+      };
+
+      const cell = c.asCell([], undefined, schema);
+      const result = cell.get();
+      expect(result.value).toBeUndefined();
+    });
+
+    it("should handle anyOf in array items", () => {
+      const c = getDoc({ arr: [42, "test", true] });
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          arr: {
+            type: "array",
+            items: {
+              anyOf: [{ type: "number" }, { type: "string" }],
+            },
+          },
+        },
+      };
+
+      const cell = c.asCell([], undefined, schema);
+      const result = cell.get();
+      expect(result.arr[0]).toBe(42);
+      expect(result.arr[1]).toBe("test");
+      expect(result.arr[2]).toBeUndefined();
+    });
+
+    it("should select the correct candidate when mixing object and array candidates", () => {
+      // Case 1: When the value is an object, the object candidate should be used.
+      const cObject = getDoc({ mixed: { foo: "bar" } });
+      const schemaObject: JSONSchema = {
+        type: "object",
+        properties: {
+          mixed: {
+            anyOf: [
+              { type: "object", properties: { foo: { type: "string" } } },
+              // Array candidate; this should be ignored for object inputs.
+              { type: "array", items: { type: "string" } },
+            ],
+          },
+        },
+      };
+
+      const cellObject = cObject.asCell([], undefined, schemaObject);
+      const resultObject = cellObject.get();
+      // Since the input is an object, the object candidate is selected.
+      expect(resultObject.mixed.foo).toBe("bar");
+
+      // Case 2: When the value is an array, the array candidate should be used.
+      const cArray = getDoc({ mixed: ["bar", "baz"] });
+      const schemaArray: JSONSchema = {
+        type: "object",
+        properties: {
+          mixed: {
+            anyOf: [
+              // Object candidate; this should be ignored for array inputs.
+              { type: "object", properties: { foo: { type: "string" } } },
+              { type: "array", items: { type: "string" } },
+            ],
+          },
+        },
+      };
+
+      const cellArray = cArray.asCell([], undefined, schemaArray);
+      const resultArray = cellArray.get();
+      // Verify that the array candidate is chosen and returns the intended array.
+      expect(resultArray).toEqual({ mixed: ["bar", "baz"] });
+      expect(Array.isArray(resultArray.mixed)).toBe(true);
+      expect(resultArray.mixed).toEqual(["bar", "baz"]);
+    });
+  });
+
   describe("Examples", () => {
     it("allows mapping of fields via interim cells", () => {
       const c = getDoc({

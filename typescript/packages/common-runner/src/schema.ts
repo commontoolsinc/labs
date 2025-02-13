@@ -59,6 +59,60 @@ export function validateAndTransform(
   ({ cell: doc, path } = followLinks({ cell: doc, path }, seen, log));
   const value = doc.getAtPath(path);
 
+  if (resolvedSchema.anyOf && Array.isArray(resolvedSchema.anyOf)) {
+    // If the value is an object (but not an array), only consider branches with type "object"
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      // Run extraction for each union branch.
+      const candidates = resolvedSchema.anyOf
+        .filter((option) => option.type === "object")
+        .map((option) => ({
+          schema: option,
+          // Don't include the current path in the seen array, avoiding triggering cycle detection
+          result: validateAndTransform(doc, path, option, log, rootSchema, seen.slice(0, -1)),
+        }));
+
+      const objectCandidates = candidates.filter((candidate) => {
+        const optionResolved = resolveSchema(candidate.schema, rootSchema);
+        return optionResolved?.type === "object";
+      });
+
+      if (objectCandidates.length === 0) return undefined;
+
+      // Merge all the object extractions
+      let merged: Record<string, any> = {};
+      for (const { result } of objectCandidates) {
+        if (typeof result === "object" && result !== null) {
+          merged = { ...merged, ...result };
+        }
+      }
+      return merged;
+    } else {
+      const candidates = resolvedSchema.anyOf
+        .filter((option) => option.type !== "object")
+        .map((option) => ({
+          schema: option,
+          result: validateAndTransform(doc, path, option, log, rootSchema, seen.slice(0, -1)),
+        }));
+
+      // Otherwise, for non-object or mixed values, select the candidate whose
+      // result's type best matches the expected type.
+      for (const { schema: option, result } of candidates) {
+        const optionResolved = resolveSchema(option, rootSchema);
+        if (
+          optionResolved?.type &&
+          (optionResolved.type === "array"
+            ? Array.isArray(result)
+            : typeof result === optionResolved.type)
+        ) {
+          return result;
+        }
+      }
+
+      // If we get here, we have no candidates that match the expected type.
+      return undefined;
+    }
+  }
+
   if (resolvedSchema.type === "object") {
     if (typeof value !== "object" || value === null) return {};
 

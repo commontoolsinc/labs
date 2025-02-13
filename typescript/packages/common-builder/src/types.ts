@@ -102,6 +102,7 @@ export type JSONSchema = {
   items?: JSONSchema;
   $ref?: string;
   asCell?: boolean;
+  anyOf?: JSONSchema[];
   additionalProperties?: JSONSchema | boolean;
 };
 
