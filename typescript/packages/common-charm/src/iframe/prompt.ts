@@ -23,11 +23,13 @@ export const buildPrompt = ({
   spec,
   newSpec,
   schema,
+  model,
 }: {
   src?: string;
   spec?: string;
   newSpec: string;
   schema: JSONSchema;
+  model?: string;
 }): LLMRequest => {
   const messages = [];
   if (spec && src) {
@@ -46,7 +48,7 @@ ${newSpec}
   const system = systemMd.replace("SCHEMA", JSON.stringify(schema, null, 2));
 
   return {
-    model: SELECTED_MODEL,
+    model: model || SELECTED_MODEL,
     system,
     messages,
     stop: "\n```",

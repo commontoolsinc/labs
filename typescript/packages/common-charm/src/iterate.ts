@@ -8,7 +8,6 @@ import { Charm, CharmManager } from "./charm.js";
 import { buildFullRecipe, getIframeRecipe } from "./iframe/recipe.js";
 import { buildPrompt } from "./iframe/prompt.js";
 
-
 const llmUrl =
   typeof window !== "undefined"
     ? window.location.protocol + "//" + window.location.host + "/api/ai/llm"
@@ -21,13 +20,15 @@ const genSrc = async ({
   spec,
   newSpec,
   schema,
+  model,
 }: {
   src?: string;
   spec?: string;
   newSpec: string;
   schema: JSONSchema;
+  model?: string;
 }) => {
-  const request = buildPrompt({ src, spec, newSpec, schema });
+  const request = buildPrompt({ src, spec, newSpec, schema, model });
 
   let response = await llm.sendRequest(request);
 
@@ -45,6 +46,7 @@ export async function iterate(
   charm: DocImpl<Charm> | null,
   value: string,
   shiftKey: boolean,
+  model?: string,
 ): Promise<EntityId | undefined> {
   if (!charm) {
     console.error("FIXME, no charm, what should we do?");
@@ -64,12 +66,18 @@ export async function iterate(
     spec: iframe.spec,
     newSpec,
     schema: iframe.argumentSchema,
+    model: model,
   });
 
   return saveNewRecipeVersion(charmManager, charm, newIFrameSrc, newSpec);
 }
 
-export const saveNewRecipeVersion = async (charmManager: CharmManager, charm: Charm, newIFrameSrc: string, newSpec: string) => {
+export const saveNewRecipeVersion = async (
+  charmManager: CharmManager,
+  charm: Charm,
+  newIFrameSrc: string,
+  newSpec: string,
+) => {
   const { recipeId, iframe } = getIframeRecipe(charm);
 
   if (!recipeId || !iframe) {
@@ -92,7 +100,7 @@ export const saveNewRecipeVersion = async (charmManager: CharmManager, charm: Ch
     { cell: charm.sourceCell, path: ["argument"] },
     recipeId ? [recipeId] : undefined,
   );
-}
+};
 
 export async function castNewRecipe(
   charmManager: CharmManager,
@@ -116,7 +124,6 @@ export async function castNewRecipe(
   return compileAndRunRecipe(charmManager, newRecipeSrc, newSpec, data);
 }
 
-
 export async function compileAndRunRecipe(
   charmManager: CharmManager,
   recipeSrc: string,
@@ -134,11 +141,11 @@ export async function compileAndRunRecipe(
     console.error("No default recipe found in the compiled exports.");
     return;
   }
-  const parentsIds = parents?.map(id => id.toString());
+  const parentsIds = parents?.map((id) => id.toString());
   addRecipe(recipe, recipeSrc, spec, parentsIds);
   const newCharm = await charmManager.runPersistent(recipe, runOptions);
   charmManager.add([newCharm]);
   await charmManager.syncRecipe(newCharm);
-  
+
   return newCharm.entityId;
 }

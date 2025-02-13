@@ -19,7 +19,7 @@ export type CommandType = "action" | "input" | "confirm" | "select" | "menu";
 export interface CommandItem {
   id: string;
   type: CommandType;
-  title: string;
+  title: string | ((context: CommandContext) => string);
   placeholder?: string;
   group?: string;
   children?: CommandItem[];
@@ -37,6 +37,8 @@ export interface CommandContext {
   setOpen: (open: boolean) => void;
   setMode: (mode: CommandMode) => void;
   loading: boolean;
+  preferredModel?: string;
+  setPreferredModel: (model: string) => void;
   setLoading: (loading: boolean) => void;
 }
 
@@ -214,16 +216,22 @@ export const commands: CommandItem[] = [
   {
     id: "edit-recipe",
     type: "input",
-    title: "Iterate",
+    title: (ctx) => `Iterate${ctx.preferredModel ? ` (${ctx.preferredModel})` : ""}`,
     group: "Edit",
     predicate: (ctx) => !!ctx.focusedCharmId,
-    placeholder: "Enter new recipe",
+    placeholder: "What would you like to change?",
     handler: async (ctx, input) => {
       if (!input || !ctx.focusedCharmId) return;
       ctx.setLoading(true);
       try {
         const charm = await ctx.charmManager.get(ctx.focusedCharmId);
-        const newCharmId = await iterate(ctx.charmManager, charm ?? null, input, false);
+        const newCharmId = await iterate(
+          ctx.charmManager,
+          charm ?? null,
+          input,
+          false,
+          ctx.preferredModel,
+        );
         if (newCharmId) {
           ctx.navigate(`/${ctx.focusedReplicaId}/${charmId(newCharmId)}`);
         }
@@ -418,5 +426,47 @@ export const commands: CommandItem[] = [
         },
       },
     ],
+  },
+  {
+    id: "select-model",
+    type: "action",
+    title: "Select AI Model",
+    group: "Settings",
+    handler: async (ctx) => {
+      ctx.setLoading(true);
+      try {
+        // Fetch models from API
+        const response = await fetch("/api/ai/llm/models");
+        const models = await response.json();
+
+        // Transform the dictionary into select options
+        const modelOptions = Object.entries(models).map(([key, model]: [string, any]) => ({
+          id: key,
+          title: `${key} (${model.capabilities.contextWindow.toLocaleString()} tokens)`,
+          value: {
+            id: key,
+            ...model,
+          },
+        }));
+
+        ctx.setMode({
+          type: "select",
+          command: {
+            id: "model-select",
+            type: "select",
+            title: "Select Model",
+            handler: async (ctx, selectedModel) => {
+              ctx.setPreferredModel(selectedModel.id);
+              ctx.setOpen(false);
+            },
+          },
+          options: modelOptions,
+        });
+      } catch (error) {
+        console.error("Failed to fetch models:", error);
+      } finally {
+        ctx.setLoading(false);
+      }
+    },
   },
 ];

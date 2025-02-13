@@ -163,9 +163,17 @@ export default recipe(Schema, ({ items, title }) => {
 \`\`\`
 `;
 
-export const llmTweakSpec = async ({ spec, change }: { spec: string; change: string }) => {
+export const llmTweakSpec = async ({
+  spec,
+  change,
+  model,
+}: {
+  spec: string;
+  change: string;
+  model?: string;
+}) => {
   const payload = {
-    model: SELECTED_MODEL,
+    model: model || SELECTED_MODEL,
     system: "You are a spec editor for @commontools recipes.  Please respond with the full spec.",
     messages: [
       "what is the current spec?",
@@ -192,12 +200,14 @@ export const iterate = async ({
   originalSrc,
   workingSpec,
   workingSrc,
+  model,
 }: {
   errors?: string;
   originalSpec?: string;
   originalSrc?: string;
   workingSpec?: string;
   workingSrc?: string;
+  model?: string;
 } = {}) => {
   const messages = [];
   let prefill = `\`\`\`tsx\n`;
@@ -234,7 +244,7 @@ RESPOND WITH THE FULL SOURCE CODE
   }
 
   const payload = {
-    model: SELECTED_MODEL,
+    model: model || SELECTED_MODEL,
     system: `You are code generator that implements @commontools recipes.\n${recipeGuide}`,
     messages,
     stop: "\n```",
@@ -258,9 +268,11 @@ export const generateSuggestions = async ({
 export const brokenGenerateSuggestions = async ({
   originalSpec,
   originalSrc,
+  model,
 }: {
   originalSpec: string;
   originalSrc: string;
+  model?: string;
 }) => {
   const messages = [];
 
@@ -301,7 +313,7 @@ Respond in a json block.
   messages.push(`\`\`\`json\n{"suggestions": [{"behaviour": "append", "prompt":`);
 
   const payload = {
-    model: SELECTED_MODEL,
+    model: model || SELECTED_MODEL,
     system,
     messages,
     stop,

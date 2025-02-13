@@ -7,6 +7,7 @@ import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
 import { DitheredCube } from "./DitherCube";
 import { CommandContext, CommandItem, CommandMode, commands } from "./commands";
+import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext";
 
 function CommandProcessor({
   mode,
@@ -67,6 +68,7 @@ export function CommandCenter() {
   const [mode, setMode] = useState<CommandMode>({ type: "main" });
   const [commandPath, setCommandPath] = useState<CommandItem[]>([]);
   const [search, setSearch] = useState("");
+  const { modelId, setPreferredModel } = usePreferredLanguageModel();
 
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
@@ -114,7 +116,7 @@ export function CommandCenter() {
         setMode({
           type: "input",
           command: commands.find((cmd) => cmd.id === "edit-recipe")!,
-          placeholder: "Enter new recipe",
+          placeholder: "What would you like to change?",
         });
       }
     };
@@ -146,6 +148,8 @@ export function CommandCenter() {
     focusedCharmId,
     focusedReplicaId,
     setOpen,
+    preferredModel: modelId ?? undefined,
+    setPreferredModel,
     setMode,
     loading,
     setLoading,
@@ -258,7 +262,7 @@ export function CommandCenter() {
                         }
                       }}
                     >
-                      {cmd.title}
+                      {typeof cmd.title === "function" ? cmd.title(context) : cmd.title}
                       {cmd.children && " →"}
                     </Command.Item>
                   ))}
