@@ -1,7 +1,7 @@
 import { Command } from "cmdk";
 import { useState, useEffect, useRef } from "react";
 import "./commands.css";
-import { castNewRecipe, Charm, CharmManager, iterate, compileAndRunRecipe } from "@commontools/charm";
+import { castNewRecipe, Charm, CharmManager, iterate } from "@commontools/charm";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { useMatch, useNavigate } from "react-router-dom";
 import { castSpell } from "@/search";
@@ -10,24 +10,23 @@ import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Dialog, DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
 
 import { NAME } from "@commontools/builder";
-import { DocImpl, getRecipe, addRecipe } from "@commontools/runner";
+import { DocImpl, getRecipe } from "@commontools/runner";
+import { DitheredCube } from "./DitherCube";
 
 export function CommandCenter() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const importJSONRef = useRef<HTMLInputElement | null>(null);
-  const loadRecipeRef = useRef<HTMLInputElement | null>(null);
+  const importRef = useRef<HTMLInputElement>();
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
 
   // bf: this will need to become a state machine eventualyl
   const [spellResults, setSpellResults] = useState<any[]>([]);
   const [charmResults, setCharmResults] = useState<any[]>([]);
-  const [mode, setMode] = useState<"main" | "spellResults" | "charmResults" | "blobSelection">("main");
-  const [selectedSpell, setSelectedSpell] = useState<any>(null);
+  const [mode, setMode] = useState<"main" | "spellResults" | "charmResults">("main");
 
-  const match = useMatch("/:replicaName/:charmId?");
+  const match = useMatch("/:replicaName/:charmId?/*");
   const focusedCharmId = match?.params.charmId ?? null;
   const focusedReplicaId = match?.params.replicaName ?? null;
 
@@ -59,7 +58,6 @@ export function CommandCenter() {
       setMode("main");
       setSpellResults([]);
       setCharmResults([]);
-      setSelectedSpell(null); // Add this line
     }
   }, [open]);
 
@@ -103,13 +101,13 @@ export function CommandCenter() {
 
     const id = await castNewRecipe(charmManager, { gallery: [dummyData] }, title);
     if (id) {
-      navigate(`/${focusedReplicaId}/${charmId(id)}`);
+      navigate(`/${focusedReplicaId}/${id}`);
     }
     setOpen(false);
   };
 
   const handleImportJSON = async () => {
-    if (!importJSONRef.current) {
+    if (!importRef.current) {
       const input = document.createElement("input");
       input.type = "file";
       input.accept = ".json";
@@ -128,65 +126,27 @@ export function CommandCenter() {
 
           const id = await castNewRecipe(charmManager, data, title);
           if (id) {
-            navigate(`/${focusedReplicaId}/${charmId(id)}`);
+            navigate(`/${focusedReplicaId}/${id}`);
           }
           setOpen(false);
         } catch (err) {
           console.error("Failed to import JSON:", err);
           alert("Failed to import JSON file. Please check the file format.");
         }
-
-        // Reset the input so the file can be chosen again.
-        (e.target as HTMLInputElement).value = "";
       };
 
       document.body.appendChild(input);
-      importJSONRef.current = input;
+      importRef.current = input;
     }
 
-    // Always reset the input value before clicking:
-    importJSONRef.current.value = "";
-    importJSONRef.current.click();
-  };
-
-  const handleLoadRecipe = async () => {
-    if (!loadRecipeRef.current) {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".tsx";
-      input.style.display = "none";
-
-      input.onchange = async (e) => {
-        const file = (e.target as HTMLInputElement).files?.[0];
-        if (!file) return;
-
-        const src = await file.text();
-        const id = await compileAndRunRecipe(charmManager, src, "imported", {});
-        if (id) {
-          navigate(`/${focusedReplicaId}/${charmId(id)}`);
-        }
-
-        setOpen(false);
-        (e.target as HTMLInputElement).value = "";
-      };
-
-      document.body.appendChild(input);
-      loadRecipeRef.current = input;
-    }
-
-    // Always reset the input value before clicking:
-    loadRecipeRef.current.value = "";
-    loadRecipeRef.current.click();
+    importRef.current.click();
   };
 
   // Cleanup file input on unmount
   useEffect(() => {
     return () => {
-      if (importJSONRef.current) {
-        document.body.removeChild(importJSONRef.current);
-      }
-      if (loadRecipeRef.current) {
-        document.body.removeChild(loadRecipeRef.current);
+      if (importRef.current) {
+        document.body.removeChild(importRef.current);
       }
     };
   }, []);
@@ -336,17 +296,29 @@ export function CommandCenter() {
         </>
       </VisuallyHidden>
 
-      <Command.Input
-        placeholder={
-          mode === "main"
-            ? "What would you like to do?"
-            : mode === "spellResults"
-              ? "Search spell results..."
-              : "Search charms..."
-        }
-        value={search}
-        onValueChange={setSearch}
-      />
+      <div className="flex items-center gap-2">
+        <div className="w-10 h-10 flex-shrink-0">
+          <DitheredCube
+            animationSpeed={loading ? 2 : 1}
+            width={40}
+            height={40}
+            animate={loading}
+            cameraZoom={loading ? 12 : 14}
+          />
+        </div>
+        <Command.Input
+          placeholder={
+            mode === "main"
+              ? "What would you like to do?"
+              : mode === "spellResults"
+                ? "Search spell results..."
+                : "Search charms..."
+          }
+          value={search}
+          onValueChange={setSearch}
+          style={{ flexGrow: 1 }}
+        />
+      </div>
       <Command.List>
         <Command.Empty>No results found.</Command.Empty>
 
@@ -378,40 +350,28 @@ export function CommandCenter() {
                 <Command.Item onSelect={handleToggleDetails}>Toggle Details</Command.Item>
               )}
             </Command.Group>
+
             <Command.Group heading="Data">
               <Command.Item onSelect={handleImportJSON}>Import JSON</Command.Item>
-              <Command.Item onSelect={handleLoadRecipe}>Load Recipe</Command.Item>
             </Command.Group>
           </>
         ) : mode === "spellResults" ? (
           <>
             <Command.Group heading="Spell Results">
-              {spellResults
-                .filter(result => result.compatibleBlobs && result.compatibleBlobs.length > 0)
-                .map((result, index) => (
-                  <Command.Item
-                    key={index}
-                    onSelect={async () => {
-                      if (result.compatibleBlobs.length === 1) {
-                        await castSpellAsCharm(charmManager, result, result.compatibleBlobs[0]);
-                        setMode("main");
-                        setOpen(false);
-                      } else {
-                        setSelectedSpell(result);
-                        setMode("blobSelection");
-                      }
-                    }}
-                  >
-                    {`${result.description}#${result.name.slice(-4)} (${result.compatibleBlobs.length})`}
-                  </Command.Item>
-                ))}
-            </Command.Group>
-            {spellResults.filter(result => result.compatibleBlobs && result.compatibleBlobs.length > 0)
-              .length === 0 && (
-                <Command.Item onSelect={() => setMode("main")}>
-                  No spells found with compatible blobs
+              {spellResults.map((result, index) => (
+                <Command.Item
+                  key={index}
+                  onSelect={async () => {
+                    console.log("Selected spell result:", result);
+                    await castSpellAsCharm(charmManager, result, result.compatibleBlobs[0]);
+                    setMode("main");
+                    setOpen(false);
+                  }}
+                >
+                  {result.title || result.name || `Result ${index + 1}`}
                 </Command.Item>
-              )}
+              ))}
+            </Command.Group>
             <Command.Group>
               <Command.Item
                 onSelect={() => {
@@ -420,28 +380,6 @@ export function CommandCenter() {
                 }}
               >
                 Back to Main Menu
-              </Command.Item>
-            </Command.Group>
-          </>
-        ) : mode === "blobSelection" ? (
-          <>
-            <Command.Group heading={`Select blob for ${selectedSpell?.name}`}>
-              {selectedSpell?.compatibleBlobs.map((blob, index) => (
-                <Command.Item
-                  key={index}
-                  onSelect={async () => {
-                    await castSpellAsCharm(charmManager, selectedSpell, blob);
-                    setMode("main");
-                    setOpen(false);
-                  }}
-                >
-                  {`Blob ${index + 1}`}
-                </Command.Item>
-              ))}
-            </Command.Group>
-            <Command.Group>
-              <Command.Item onSelect={() => setMode("spellResults")}>
-                Back to Spell Results
               </Command.Item>
             </Command.Group>
           </>
