@@ -412,6 +412,7 @@ describe("Schema Support", () => {
           data: [
             { type: "text", value: "hello" },
             { type: "number", value: 42 },
+            { not: "matching", should: "be ignored" },
           ],
         });
         const schema: JSONSchema = {
@@ -446,6 +447,7 @@ describe("Schema Support", () => {
         expect(result.data).toEqual([
           { type: "text", value: "hello" },
           { type: "number", value: 42 },
+          {},
         ]);
       });
 
