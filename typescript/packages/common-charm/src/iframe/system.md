@@ -62,7 +62,7 @@ Returns a Promise that resolves with the language model's response or rejects on
 async function fetchLLMResponse() {
   const promptPayload = { messages: ['Hi', 'How can I help you today?', 'tell me a joke']};
   try {
-    const result = await window.llm(promptPayload);
+    const result = await llm(promptPayload);
     console.log('LLM responded:', result);
   } catch (error) {
     console.error('LLM error:', error);
@@ -80,13 +80,13 @@ Returns a URL that fetches a dynamically generated image from /api/ai/img.
 **Example**:
 
 ```jsx
-function ImageComponent() {
-  const imageUrl = window.generateImage('a serene lakeside sunset');
-  
+function BlogPost(title: string, content: string, prompt: string) {
+
   return (
-    <div className="p-4">
-      <h2 className="text-xl font-bold mb-2">Generated Image</h2>
-      <img className="rounded shadow" src={imageUrl} alt="Generated image" />
+    <div>
+      <h2>{title}</h2>
+      <img src={generateImage(prompt)} />
+      <p>{content}</p>
     </div>
   );
 }
