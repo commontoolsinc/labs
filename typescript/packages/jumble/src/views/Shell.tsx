@@ -88,31 +88,17 @@ export default function Shell() {
   return (
     <div className="shell h-full bg-gray-50 border-2 border-black">
       <header className="flex bg-gray-50 items-center justify-between border-b-2 p-2">
-        <NavLink
-          to={replicaName ? `/${replicaName}` : "/"}
-          className="brand flex items-center gap-2"
-        >
-          <ShapeLogo width={32} height={32} shapeColor="#000" containerColor="#d2d2d2" />
-          <h1 className="font-bold jetbrains-mono text-sm text-black hover:underline">
-            Common Tools
-          </h1>
-        </NavLink>
+        <div className="header-start flex items-center gap-2">
+          <NavLink
+            to={replicaName ? `/${replicaName}` : "/"}
+            className="brand flex items-center gap-2"
+          >
+            <ShapeLogo width={32} height={32} shapeColor="#000" containerColor="#d2d2d2" />
+          </NavLink>
 
-        <div className="account">
-          <button className="w-10 h-10 flex items-center justify-center rounded-lg bg-gray-300 hover:bg-gray-400 transition-colors">
-            <MdOutlinePerson size={24} />
-          </button>
-        </div>
-      </header>
-
-      {/* TOOLBAR START */}
-      {/* FIXME(jake): This should be a Toolbar component at some point. */}
-      <div className="toolbar m-4 p-4 border-2 border-black flex items-center justify-between">
-        <div slot="toolbar-start">
           <NavPath replicaId={replicaName} charmId={charmId} />
         </div>
-
-        <div slot="toolbar-end">
+        <div className="header-end">
           {charmId && (
             <NavLink
               to={togglePath}
@@ -126,8 +112,8 @@ export default function Shell() {
             </NavLink>
           )}
         </div>
-      </div>
-      {/* TOOLBAR END */}
+      </header>
+
       <div className="relative h-full">
         <Outlet />
       </div>
