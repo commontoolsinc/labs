@@ -32,7 +32,4 @@ jobs:
       run: |
         cd typescript/packages/common-iframe-sandbox
         pnpm test
-        cd -
-        cd typescript/packages/lookslike-high-level
-        pnpm test
-        cd -
+

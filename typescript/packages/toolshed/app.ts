@@ -9,7 +9,6 @@ import aiSpell from "@/routes/ai/spell/spell.index.ts";
 import discord from "@/routes/integrations/discord/discord.index.ts";
 import blobby from "@/routes/storage/blobby/blobby.index.ts";
 import memory from "@/routes/storage/memory/memory.index.ts";
-import lookslikeHighlevelApp from "@/routes/frontend-proxy/lookslike-highlevel-app.index.ts";
 import frontendProxy from "@/routes/frontend-proxy/frontend-proxy.index.ts";
 
 const app = createApp();
@@ -26,7 +25,6 @@ const routes = [
   discord,
   blobby,
   memory,
-  lookslikeHighlevelApp, // This is a frontend proxy for lookslike-highlevel in the CDN.
   frontendProxy, // This is the frontend proxy for jumble in the CDN.
 ] as const;
 
