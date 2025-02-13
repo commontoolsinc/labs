@@ -3,6 +3,50 @@ import { getDoc, isCell } from "../src/cell.js";
 import type { JSONSchema } from "@commontools/builder";
 
 describe("Schema Support", () => {
+  describe("Examples", () => {
+    it("allows mapping of fields via interim cells", () => {
+      const c = getDoc({
+        id: 1,
+        metadata: {
+          createdAt: "2025-01-06",
+          type: "user",
+        },
+        tags: ["a", "b"],
+      });
+
+      // This is what the system (or someone manually) would create to remap
+      // data to match the desired schema
+      const mappingCell = getDoc({
+        // as-is
+        id: { cell: c, path: ["id"] },
+        // turn single value to set
+        changes: [{ cell: c, path: ["metadata", "createdAt"] }],
+        // rename field and uplift from nested element
+        kind: { cell: c, path: ["metadata", "type"] },
+        // turn set into a single value
+        tag: { cell: c, path: ["tags", 0] },
+      });
+
+      // This schema is how the recipient specifies what they want
+      const schema = {
+        type: "object",
+        properties: {
+          id: { type: "number" },
+          changes: { type: "array", items: { type: "string" } },
+          kind: { type: "string" },
+          tag: { type: "string" },
+        },
+      } as JSONSchema;
+
+      expect(mappingCell.asCell([], undefined, schema).get()).toEqual({
+        id: 1,
+        changes: ["2025-01-06"],
+        kind: "user",
+        tag: "a",
+      });
+    });
+  });
+
   describe("Basic Types", () => {
     it("should handle primitive types", () => {
       const c = getDoc({
@@ -470,50 +514,6 @@ describe("Schema Support", () => {
         const cell = c.asCell([], undefined, schema);
         const result = cell.get();
         expect(result.data).toBeUndefined();
-      });
-    });
-  });
-
-  describe("Examples", () => {
-    it("allows mapping of fields via interim cells", () => {
-      const c = getDoc({
-        id: 1,
-        metadata: {
-          createdAt: "2025-01-06",
-          type: "user",
-        },
-        tags: ["a", "b"],
-      });
-
-      // This is what the system (or someone manually) would create to remap
-      // data to match the desired schema
-      const mappingCell = getDoc({
-        // as-is
-        id: { cell: c, path: ["id"] },
-        // turn single value to set
-        changes: [{ cell: c, path: ["metadata", "createdAt"] }],
-        // rename field and uplift from nested element
-        kind: { cell: c, path: ["metadata", "type"] },
-        // turn set into a single value
-        tag: { cell: c, path: ["tags", 0] },
-      });
-
-      // This schema is how the recipient specifies what they want
-      const schema = {
-        type: "object",
-        properties: {
-          id: { type: "number" },
-          changes: { type: "array", items: { type: "string" } },
-          kind: { type: "string" },
-          tag: { type: "string" },
-        },
-      } as JSONSchema;
-
-      expect(mappingCell.asCell([], undefined, schema).get()).toEqual({
-        id: 1,
-        changes: ["2025-01-06"],
-        kind: "user",
-        tag: "a",
       });
     });
   });
