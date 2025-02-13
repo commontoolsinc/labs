@@ -1,19 +1,12 @@
 import { Command } from "cmdk";
 import "./commands.css";
-import {
-  castNewRecipe,
-  Charm,
-  CharmManager,
-  iterate,
-  compileAndRunRecipe,
-} from "@commontools/charm";
+import { castNewRecipe, Charm, CharmManager, compileAndRunRecipe } from "@commontools/charm";
 import { NavigateFunction } from "react-router-dom";
 import { castSpell } from "@/search";
 import { charmId } from "@/utils/charms";
-import { performIteration } from "@/lib/charmIteration";
 import { NAME } from "@commontools/builder";
 import { DocImpl, getRecipe } from "@commontools/runner";
-import { performIteration } from "@/lib/charmIteration";
+import { performIteration } from "@/utils/charm-iteration";
 
 export type CommandType = "action" | "input" | "confirm" | "select" | "menu";
 

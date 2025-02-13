@@ -7,7 +7,7 @@ import { useCharm } from "@/hooks/use-charm";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { CharmRenderer } from "@/components/CharmRunner";
-import { performIteration } from "@/lib/charmIteration";
+import { performIteration } from "@/utils/charm-iteration";
 import { charmId } from "@/utils/charms";
 
 type Tab = "iterate" | "code" | "data";
