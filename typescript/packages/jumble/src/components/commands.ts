@@ -406,7 +406,12 @@ export const commands: CommandItem[] = [
         placeholder: "Enter replica name",
         handler: (ctx, input) => {
           if (input) {
-            ctx.navigate(`/${input}`);
+            // FIXME(ja): chatting with seefeld - cell should know about
+            // their replica / storage provider
+            // force a full reload otherwise charms and other cells are
+            // written to the new replica but not all the data, and then
+            // things hang!
+            window.location.href = `/${input}`;
           }
           ctx.setOpen(false);
         },
