@@ -18,37 +18,34 @@ This guide explains how to integrate the provided SDK functions into your React 
 
 ## 1. `useDoc` Hook
 
-**What It Does**  
-- Subscribes to real-time updates for a given `key`.
-- Listens for `"update"` messages from the parent, setting the new data in state.
-- Returns a tuple `[doc, updateDoc]`:
-  - `doc`: the current value of the subscribed data (may be `undefined` initially).
-  - `updateDoc`: a function to push updates back to the parent.
+The `useDoc` hook subscribes to real-time updates for a given key and returns a tuple `[doc, setDoc]`:
 
-**Example**:
+- **`doc`**: The current data (which may initially be `undefined`).
+- **`setDoc`**: A function used to update the document data.
+
+**New Behavior – Functional Updates**
+
+The returned `setDoc` supports both direct values and updater functions. This means that, similar to how React's `useState` works, you can pass a function to compute the new state based on the previous state. If a function is provided, it will be called with the current state (`doc`) and its return value will be used as the updated value.
+
+**Example:**
+
 ```jsx
-function MyComponent() {
-  const [doc, updateDoc] = useDoc('myKey');
-
-  useEffect(() => {
-    if (doc !== undefined) {
-      console.log('Document data updated:', doc);
-    }
-  }, [doc]);
+function CounterComponent() {
+  const [counter, setCounter] = useDoc("counter");
 
   return (
-    <div className="p-4 bg-gray-100 rounded shadow">
-      <h2 className="text-xl font-bold">Document Data</h2>
-      <p>{doc || 'No data yet.'}</p>
-      <button
-        className="px-4 py-2 mt-2 bg-blue-600 text-white rounded"
-        onClick={() => updateDoc('New Value')}
-      >
-        Update
+    <div>
+      <h2>Counter: {counter || 0}</h2>
+      <button onClick={() => setCounter((prevCounter || 0) + 1)}>
+        Increment
+      </button>
+      <button onClick={() => setCounter((prevCounter = 0) => prevCounter - 1)}>
+        Decrement
       </button>
     </div>
   );
 }
+```
 
 ## 2. llm Function
 
@@ -57,7 +54,7 @@ function MyComponent() {
 Sends a request to the parent window with a payload object.
 Waits for an "llm-response" message from the parent.
 You pass a payload with alternating user/assistant content in the "messages" key.
-Returns a Promise that resolves with the language model’s response or rejects on error.
+Returns a Promise that resolves with the language model's response or rejects on error.
 
 **Example**:
 
@@ -101,9 +98,9 @@ function ImageComponent() {
 
 **Message Handling**: You can set up custom postMessage handlers if needed; just remember to remove them on component unmount to avoid memory leaks.
 
-**Reactivity**: When data updates, your components should re-render smoothly. Ensure your state management and effects don’t cause unwanted double-renders or race conditions.
+**Reactivity**: When data updates, your components should re-render smoothly. Ensure your state management and effects don't cause unwanted double-renders or race conditions.
 
-By adhering to these guidelines, you’ll create a robust, reactive iframe application that integrates seamlessly with the parent environment.
+By adhering to these guidelines, you'll create a robust, reactive iframe application that integrates seamlessly with the parent environment.
 </guide>
 
 <view-model-schema>

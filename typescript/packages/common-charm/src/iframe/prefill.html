@@ -47,6 +47,9 @@ function useDoc(key) {
   }, [key]);
 
   const updateDoc = (newValue) => {
+    if (typeof newValue === "function") {
+      newValue = newValue(doc);
+    }
     window.parent.postMessage({ type: "write", data: [key, newValue] }, "*");
   };
 
