@@ -45,8 +45,12 @@ const DitheringShader = {
       int index = int(mod(pixelCoord.x, 4.0)) * 4 + int(mod(pixelCoord.y, 4.0));
       float threshold = bayerMatrix[index];
 
-      float final = grey > threshold ? 0.588 : 1.0;
-      gl_FragColor = vec4(vec3(final), 1.0);
+      if (grey > 0.01) { // You might need to adjust this threshold
+        float final = grey > threshold ? 0.588 : 1.0;
+        gl_FragColor = vec4(vec3(final), 1.0);
+      } else {
+        gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+      }
     }
   `,
 };
