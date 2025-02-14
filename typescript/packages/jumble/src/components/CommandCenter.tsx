@@ -6,8 +6,9 @@ import { useMatch, useNavigate } from "react-router-dom";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
 import { DitheredCube } from "./DitherCube";
-import { CommandContext, CommandItem, CommandMode, commands } from "./commands";
+import { CommandContext, CommandItem, CommandMode, commands, getTitle } from "./commands";
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext";
+import { TranscribeInput } from "./TranscribeCommand";
 
 function CommandProcessor({
   mode,
@@ -36,13 +37,20 @@ function CommandProcessor({
 
     case "confirm":
       return (
-        <Command.Group heading={mode.message}>
+        <Command.Group heading={'Confirm'}>
           <Command.Item value="yes" onSelect={() => mode.command.handler?.(context)}>
             Yes
           </Command.Item>
           <Command.Item value="no" onSelect={onComplete}>
             No
           </Command.Item>
+        </Command.Group>
+      );
+
+    case "transcribe":
+      return (
+        <Command.Group>
+          <TranscribeInput mode={mode} context={context} />
         </Command.Group>
       );
 
@@ -101,7 +109,9 @@ export function CommandCenter() {
   }, []);
 
   useEffect(() => {
-    setSearch("");
+    if (!('preserveInput' in mode) || !mode.preserveInput) {
+      setSearch("");
+    }
   }, [mode]);
 
   useEffect(() => {
@@ -156,6 +166,12 @@ export function CommandCenter() {
     setMode,
     loading,
     setLoading,
+    setModeWithInput: (mode: CommandMode, initialInput: string) => {
+      Promise.resolve().then(() => {
+        setMode(mode);
+        setSearch(initialInput);
+      });
+    },
   };
 
   const handleBack = () => {
@@ -187,7 +203,7 @@ export function CommandCenter() {
         </>
       </VisuallyHidden>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2" style={{ display: mode.type == 'transcribe' ? 'none' : 'flex' }}>
         <div className="w-10 h-10 flex-shrink-0">
           <DitheredCube
             animationSpeed={loading ? 2 : 1}
@@ -197,10 +213,11 @@ export function CommandCenter() {
             cameraZoom={loading ? 12 : 14}
           />
         </div>
+
         <Command.Input
           placeholder={
             mode.type === "confirm"
-              ? "Are you sure?"
+              ? mode.message || "Are you sure?"
               : mode.type === "input"
                 ? mode.placeholder
                 : "What would you like to do?"
@@ -220,7 +237,7 @@ export function CommandCenter() {
       </div>
 
       <Command.List>
-        {!loading && mode.type != "input" && <Command.Empty>No results found.</Command.Empty>}
+        {!loading && mode.type != "input" && mode.type != 'transcribe' && <Command.Empty>No results found.</Command.Empty>}
         {loading && (
           <Command.Loading>
             <div className="flex items-center justify-center p-4">
@@ -233,7 +250,7 @@ export function CommandCenter() {
           <>
             {commandPath.length > 0 && (
               <Command.Item onSelect={handleBack}>
-                ← Back to {commandPath[commandPath.length - 2]?.title || "Main Menu"}
+                ← Back to {getTitle(commandPath[commandPath.length - 2].title, context) || "Main Menu"}
               </Command.Item>
             )}
 

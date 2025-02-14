@@ -357,6 +357,7 @@ export const DitheredCube = ({
       <Canvas
         gl={{
           antialias: false,
+          alpha: true,
         }}
       >
         <OrthographicCamera
