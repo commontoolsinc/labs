@@ -8,6 +8,7 @@ import { NAME } from "@commontools/builder";
 import { DocImpl, getRecipe } from "@commontools/runner";
 import { performIteration } from "@/utils/charm-iteration";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
+import { startCharmIndexing } from "@/utils/indexing";
 
 export type CommandType = "action" | "input" | "confirm" | "select" | "menu" | "transcribe";
 
@@ -95,70 +96,303 @@ export const castSpellAsCharm = async (charmManager: CharmManager, result: any, 
   return null;
 };
 
+// Command handlers
+async function handleNewCharm(deps: CommandContext, input: string | undefined) {
+  if (!input) return;
+  deps.setLoading(true);
+  try {
+    const dummyData = {
+      gallery: [{ title: "pizza", prompt: "a yummy pizza" }],
+    };
+    const id = await castNewRecipe(deps.charmManager, { gallery: [dummyData] }, input);
+    if (id) {
+      deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
+    }
+  } finally {
+    deps.setLoading(false);
+    deps.setOpen(false);
+  }
+}
+
+async function handleSearchCharms(deps: CommandContext) {
+  deps.setLoading(true);
+  try {
+    const charms = deps.charmManager.getCharms().get();
+    const results = await Promise.all(
+      charms.map(async (charm) => {
+        const data = charm.cell.get();
+        const title = data?.[NAME] ?? 'Untitled';
+        return {
+          title: title + ` (#${charmId(charm.cell.entityId!).slice(-4)})`,
+          id: charmId(charm.cell.entityId!),
+          value: charm.cell.entityId,
+        };
+      }),
+    );
+    deps.setMode({
+      type: "select",
+      command: {
+        id: "charm-select",
+        type: "select",
+        title: "Select Charm",
+        handler: async (id) => {
+          console.log("Select handler called with:", id);
+          console.log("Navigating to:", `/${deps.focusedReplicaId}/${charmId(id)}`);
+          deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
+          deps.setOpen(false);
+        },
+      },
+      options: results,
+    });
+  } catch (error) {
+    console.error("Search charms error:", error);
+  } finally {
+    deps.setLoading(false);
+  }
+}
+
+async function handleSpellcaster(deps: CommandContext, input: string | undefined) {
+  if (!input || !deps.focusedReplicaId) return;
+  deps.setLoading(true);
+  try {
+    const spells = await castSpell(deps.focusedReplicaId, input);
+    const compatibleSpells = spells.filter(
+      (spell) => spell.compatibleBlobs && spell.compatibleBlobs.length > 0,
+    );
+
+    deps.setMode({
+      type: "select",
+      command: {
+        id: "spell-select",
+        type: "select",
+        title: "Select Spell",
+        handler: async (spell: any) => {
+          if (spell.compatibleBlobs.length === 1) {
+            const entityId = await castSpellAsCharm(
+              deps.charmManager,
+              spell,
+              spell.compatibleBlobs[0],
+            );
+            if (entityId) {
+              deps.navigate(`/${deps.focusedReplicaId}/${charmId(entityId)}`);
+            }
+            deps.setOpen(false);
+          } else {
+            deps.setMode({
+              type: "select",
+              command: {
+                id: "blob-select",
+                type: "select",
+                title: "Select Blob",
+                handler: async (blob) => {
+                  const entityId = await castSpellAsCharm(deps.charmManager, spell, blob);
+                  if (entityId) {
+                    deps.navigate(`/${deps.focusedReplicaId}/${charmId(entityId)}`);
+                  }
+                  deps.setOpen(false);
+                },
+              },
+              options: spell.compatibleBlobs.map((blob: any, i: number) => ({
+                id: String(i),
+                title: `Blob ${i + 1}`,
+                value: blob,
+              })),
+            });
+          }
+        },
+      },
+      options: compatibleSpells.map((spell: any, i: number) => ({
+        id: String(i),
+        title: `${spell.description}#${spell.name.slice(-4)} (${spell.compatibleBlobs.length})`,
+        value: spell,
+      })),
+    });
+  } catch (error) {
+    console.error("Spellcaster error:", error);
+  } finally {
+    deps.setLoading(false);
+  }
+}
+
+async function handleEditRecipe(deps: CommandContext, input: string | undefined) {
+  if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
+  deps.setLoading(true);
+  const newCharmPath = await performIteration(
+    deps.charmManager,
+    deps.focusedCharmId,
+    deps.focusedReplicaId,
+    input,
+    false,
+    deps.preferredModel,
+  );
+  if (newCharmPath) {
+    deps.navigate(newCharmPath);
+  }
+  deps.setLoading(false);
+  deps.setOpen(false);
+}
+
+async function handleDeleteCharm(deps: CommandContext) {
+  if (!deps.focusedCharmId) return;
+  const charm = await deps.charmManager.get(deps.focusedCharmId);
+  if (!charm?.entityId) return;
+  const result = await deps.charmManager.remove(charm.entityId);
+  if (result) {
+    deps.navigate("/");
+  }
+  deps.setOpen(false);
+}
+
+async function handleStartCounterJob(deps: CommandContext) {
+  const jobId = deps.startJob("Counter Job");
+  console.log("Started counter job with ID:", jobId);
+
+  const interval = setInterval(() => {
+    const job = deps.listJobs().find(j => j.id === jobId);
+    console.log("Current job state:", job);
+
+    if (!job || job.status !== 'running') {
+      console.log("Job stopped or not found, clearing interval");
+      clearInterval(interval);
+      return;
+    }
+
+    const currentCount = parseInt(job.messages[job.messages.length - 1]?.split(': ')[1] || '0');
+    const newCount = currentCount + 1;
+    console.log("Updating count from", currentCount, "to", newCount);
+
+    deps.addJobMessage(jobId, `Count: ${newCount}`);
+    console.log(`Count: ${newCount}`);
+    deps.updateJobProgress(jobId, (newCount % 100) / 100);
+
+    if (newCount >= 1000) {
+      console.log("Reached max count, stopping job");
+      deps.stopJob(jobId);
+      clearInterval(interval);
+    }
+  }, 1000);
+
+  console.log("Adding initial message");
+  deps.addJobMessage(jobId, "Count: 0");
+  deps.setOpen(false);
+}
+
+async function handleImportJSON(deps: CommandContext) {
+  deps.setLoading(true);
+  try {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+
+    const file = await new Promise<File>((resolve) => {
+      input.onchange = (e) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (file) resolve(file);
+      };
+      input.click();
+    });
+
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const title = prompt("Enter a title for your imported recipe:");
+    if (!title) return;
+
+    const id = await castNewRecipe(deps.charmManager, data, title);
+    if (id) {
+      deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
+    }
+  } finally {
+    deps.setLoading(false);
+    deps.setOpen(false);
+  }
+}
+
+async function handleLoadRecipe(deps: CommandContext) {
+  deps.setLoading(true);
+  try {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".tsx";
+
+    const file = await new Promise<File>((resolve) => {
+      input.onchange = (e) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (file) resolve(file);
+      };
+      input.click();
+    });
+
+    const src = await file.text();
+    const id = await compileAndRunRecipe(deps.charmManager, src, "imported", {});
+    if (id) {
+      deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
+    }
+  } finally {
+    deps.setLoading(false);
+    deps.setOpen(false);
+  }
+}
+
+async function handleSelectModel(deps: CommandContext) {
+  deps.setLoading(true);
+  try {
+    const response = await fetch("/api/ai/llm/models");
+    const models = await response.json();
+
+    const modelOptions = Object.entries(models).map(([key, model]: [string, any]) => ({
+      id: key,
+      title: `${key} (${model.capabilities.contextWindow.toLocaleString()} tokens)`,
+      value: {
+        id: key,
+        ...model,
+      },
+    }));
+
+    deps.setMode({
+      type: "select",
+      command: {
+        id: "model-select",
+        type: "select",
+        title: "Select Model",
+        handler: async (selectedModel) => {
+          deps.setPreferredModel(selectedModel.id);
+          deps.setOpen(false);
+        },
+      },
+      options: modelOptions,
+    });
+  } catch (error) {
+    console.error("Failed to fetch models:", error);
+  } finally {
+    deps.setLoading(false);
+  }
+}
+
+async function handleIndexCharms(deps: CommandContext) {
+  startCharmIndexing(deps.charmManager, {
+    startJob: deps.startJob,
+    stopJob: deps.stopJob,
+    addJobMessage: deps.addJobMessage,
+    updateJobProgress: deps.updateJobProgress,
+    listJobs: deps.listJobs,
+  });
+  deps.setOpen(false);
+}
+
 export function getCommands(deps: CommandContext): CommandItem[] {
   return [{
     id: "new-charm",
     type: "input",
     title: "New Charm",
     group: "Create",
-    handler: async (input) => {
-      if (!input) return;
-      deps.setLoading(true);
-      try {
-        const dummyData = {
-          gallery: [{ title: "pizza", prompt: "a yummy pizza" }],
-        };
-        const id = await castNewRecipe(deps.charmManager, { gallery: [dummyData] }, input);
-        if (id) {
-          deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
-        }
-      } finally {
-        deps.setLoading(false);
-        deps.setOpen(false);
-      }
-    },
+    handler: (input) => handleNewCharm(deps, input),
   },
   {
     id: "search-charms",
     type: "action",
     title: "Search Charms",
     group: "Navigation",
-    handler: async () => {
-      deps.setLoading(true);
-      try {
-        const charms = deps.charmManager.getCharms().get();
-        const results = await Promise.all(
-          charms.map(async (charm) => {
-            const data = charm.cell.get();
-            const title = data?.[NAME] ?? 'Untitled';
-            return {
-              title: title + ` (#${charmId(charm.cell.entityId!).slice(-4)})`,
-              id: charmId(charm.cell.entityId!),
-              value: charm.cell.entityId,
-            };
-          }),
-        );
-        deps.setMode({
-          type: "select",
-          command: {
-            id: "charm-select",
-            type: "select",
-            title: "Select Charm",
-            handler: async (id) => {
-              console.log("Select handler called with:", id);
-              console.log("Navigating to:", `/${deps.focusedReplicaId}/${charmId(id)}`);
-              deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
-              deps.setOpen(false);
-            },
-          },
-          options: results,
-        });
-      } catch (error) {
-        console.error("Search charms error:", error);
-      } finally {
-        deps.setLoading(false);
-      }
-    },
+    handler: () => handleSearchCharms(deps),
   },
   {
     id: "spellcaster",
@@ -166,68 +400,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
     title: "Spellcaster",
     group: "Create",
     predicate: !!deps.focusedReplicaId,
-    handler: async (input) => {
-      if (!input || !deps.focusedReplicaId) return;
-      deps.setLoading(true);
-      try {
-        const spells = await castSpell(deps.focusedReplicaId, input);
-        const compatibleSpells = spells.filter(
-          (spell) => spell.compatibleBlobs && spell.compatibleBlobs.length > 0,
-        );
-
-        deps.setMode({
-          type: "select",
-          command: {
-            id: "spell-select",
-            type: "select",
-            title: "Select Spell",
-            handler: async (spell: any) => {
-              if (spell.compatibleBlobs.length === 1) {
-                const entityId = await castSpellAsCharm(
-                  deps.charmManager,
-                  spell,
-                  spell.compatibleBlobs[0],
-                );
-                if (entityId) {
-                  deps.navigate(`/${deps.focusedReplicaId}/${charmId(entityId)}`);
-                }
-                deps.setOpen(false);
-              } else {
-                deps.setMode({
-                  type: "select",
-                  command: {
-                    id: "blob-select",
-                    type: "select",
-                    title: "Select Blob",
-                    handler: async (blob) => {
-                      const entityId = await castSpellAsCharm(deps.charmManager, spell, blob);
-                      if (entityId) {
-                        deps.navigate(`/${deps.focusedReplicaId}/${charmId(entityId)}`);
-                      }
-                      deps.setOpen(false);
-                    },
-                  },
-                  options: spell.compatibleBlobs.map((blob: any, i: number) => ({
-                    id: String(i),
-                    title: `Blob ${i + 1}`,
-                    value: blob,
-                  })),
-                });
-              }
-            },
-          },
-          options: compatibleSpells.map((spell: any, i: number) => ({
-            id: String(i),
-            title: `${spell.description}#${spell.name.slice(-4)} (${spell.compatibleBlobs.length})`,
-            value: spell,
-          })),
-        });
-      } catch (error) {
-        console.error("Spellcaster error:", error);
-      } finally {
-        deps.setLoading(false);
-      }
-    },
+    handler: (input) => handleSpellcaster(deps, input),
   },
   {
     id: "edit-recipe",
@@ -236,23 +409,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
     group: "Edit",
     predicate: !!deps.focusedCharmId,
     placeholder: "What would you like to change?",
-    handler: async (input) => {
-      if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
-      deps.setLoading(true);
-      const newCharmPath = await performIteration(
-        deps.charmManager,
-        deps.focusedCharmId,
-        deps.focusedReplicaId,
-        input,
-        false,
-        deps.preferredModel,
-      );
-      if (newCharmPath) {
-        deps.navigate(newCharmPath);
-      }
-      deps.setLoading(false);
-      deps.setOpen(false);
-    },
+    handler: (input) => handleEditRecipe(deps, input),
   },
   {
     id: "delete-charm",
@@ -261,16 +418,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
     group: "Edit",
     predicate: !!deps.focusedCharmId,
     message: "Are you sure you want to delete this charm?",
-    handler: async () => {
-      if (!deps.focusedCharmId) return;
-      const charm = await deps.charmManager.get(deps.focusedCharmId);
-      if (!charm?.entityId) return;
-      const result = await deps.charmManager.remove(charm.entityId);
-      if (result) {
-        deps.navigate("/");
-      }
-      deps.setOpen(false);
-    },
+    handler: () => handleDeleteCharm(deps),
   },
   {
     id: "view-detail",
@@ -364,105 +512,25 @@ export function getCommands(deps: CommandContext): CommandItem[] {
         id: "start-counter-job",
         type: "action",
         title: "Start Counter Job",
-        handler: async () => {
-          const jobId = deps.startJob("Counter Job");
-          console.log("Started counter job with ID:", jobId);
-
-          // Create an interval that updates the job
-          const interval = setInterval(() => {
-            const job = deps.listJobs().find(j => j.id === jobId);
-            console.log("Current job state:", job);
-
-            if (!job || job.status !== 'running') {
-              console.log("Job stopped or not found, clearing interval");
-              clearInterval(interval);
-              return;
-            }
-
-            const currentCount = parseInt(job.messages[job.messages.length - 1]?.split(': ')[1] || '0');
-            const newCount = currentCount + 1;
-            console.log("Updating count from", currentCount, "to", newCount);
-
-            deps.addJobMessage(jobId, `Count: ${newCount}`);
-            console.log(`Count: ${newCount}`);
-            deps.updateJobProgress(jobId, (newCount % 100) / 100); // Progress cycles 0-100%
-
-            if (newCount >= 1000) { // Stop after 1000 counts
-              console.log("Reached max count, stopping job");
-              deps.stopJob(jobId);
-              clearInterval(interval);
-            }
-          }, 1000);
-
-          // Add initial message
-          console.log("Adding initial message");
-          deps.addJobMessage(jobId, "Count: 0");
-          deps.setOpen(false);
-        }
+        handler: () => handleStartCounterJob(deps),
+      },
+      {
+        id: "index-charms",
+        type: "action",
+        title: "Index Charms",
+        handler: () => handleIndexCharms(deps),
       },
       {
         id: "import-json",
         type: "action",
         title: "Import JSON",
-        handler: async () => {
-          deps.setLoading(true);
-          try {
-            const input = document.createElement("input");
-            input.type = "file";
-            input.accept = ".json";
-
-            const file = await new Promise<File>((resolve) => {
-              input.onchange = (e) => {
-                const file = (e.target as HTMLInputElement).files?.[0];
-                if (file) resolve(file);
-              };
-              input.click();
-            });
-
-            const text = await file.text();
-            const data = JSON.parse(text);
-            const title = prompt("Enter a title for your imported recipe:");
-            if (!title) return;
-
-            const id = await castNewRecipe(deps.charmManager, data, title);
-            if (id) {
-              deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
-            }
-          } finally {
-            deps.setLoading(false);
-            deps.setOpen(false);
-          }
-        },
+        handler: () => handleImportJSON(deps),
       },
       {
         id: "load-recipe",
         type: "action",
         title: "Load Recipe",
-        handler: async () => {
-          deps.setLoading(true);
-          try {
-            const input = document.createElement("input");
-            input.type = "file";
-            input.accept = ".tsx";
-
-            const file = await new Promise<File>((resolve) => {
-              input.onchange = (e) => {
-                const file = (e.target as HTMLInputElement).files?.[0];
-                if (file) resolve(file);
-              };
-              input.click();
-            });
-
-            const src = await file.text();
-            const id = await compileAndRunRecipe(deps.charmManager, src, "imported", {});
-            if (id) {
-              deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
-            }
-          } finally {
-            deps.setLoading(false);
-            deps.setOpen(false);
-          }
-        },
+        handler: () => handleLoadRecipe(deps),
       },
       {
         id: "switch-replica",
@@ -471,11 +539,6 @@ export function getCommands(deps: CommandContext): CommandItem[] {
         placeholder: "Enter replica name",
         handler: (input) => {
           if (input) {
-            // FIXME(ja): chatting with seefeld - cell should know about
-            // their replica / storage provider
-            // force a full reload otherwise charms and other cells are
-            // written to the new replica but not all the data, and then
-            // things hang!
             window.location.href = `/${input}`;
           }
           deps.setOpen(false);
@@ -488,42 +551,7 @@ export function getCommands(deps: CommandContext): CommandItem[] {
     type: "action",
     title: "Select AI Model",
     group: "Settings",
-    handler: async () => {
-      deps.setLoading(true);
-      try {
-        // Fetch models from API
-        const response = await fetch("/api/ai/llm/models");
-        const models = await response.json();
-
-        // Transform the dictionary into select options
-        const modelOptions = Object.entries(models).map(([key, model]: [string, any]) => ({
-          id: key,
-          title: `${key} (${model.capabilities.contextWindow.toLocaleString()} tokens)`,
-          value: {
-            id: key,
-            ...model,
-          },
-        }));
-
-        deps.setMode({
-          type: "select",
-          command: {
-            id: "model-select",
-            type: "select",
-            title: "Select Model",
-            handler: async (selectedModel) => {
-              deps.setPreferredModel(selectedModel.id);
-              deps.setOpen(false);
-            },
-          },
-          options: modelOptions,
-        });
-      } catch (error) {
-        console.error("Failed to fetch models:", error);
-      } finally {
-        deps.setLoading(false);
-      }
-    },
+    handler: () => handleSelectModel(deps),
   },
   {
     id: "edit-recipe-voice",
@@ -564,7 +592,6 @@ export function getCommands(deps: CommandContext): CommandItem[] {
               if (job.status === 'running') {
                 deps.stopJob(job.id);
               } else {
-                // You might need to add a resumeJob function to your context
                 // deps.resumeJob(job.id);
               }
               deps.setMode({ type: "main" });
@@ -597,12 +624,10 @@ export function getCommands(deps: CommandContext): CommandItem[] {
         type: "action",
         title: "Clear Completed Jobs",
         handler: async () => {
-          // You might need to add this function to your context
           // deps.clearCompletedJobs();
           deps.setMode({ type: "main" });
         },
       },
     ],
-  }
-  ]
-};
+  }];
+}

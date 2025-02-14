@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useRef } from "react";
 
 export interface BackgroundJob {
   id: string;
@@ -33,7 +33,6 @@ export const BackgroundTaskProvider: React.FC<{ children: React.ReactNode }> = (
 
   const startJob = useCallback((name: string) => {
     const id = crypto.randomUUID();
-    debugger
     jobsRef.current = [...jobsRef.current, {
       id,
       name,
@@ -41,7 +40,6 @@ export const BackgroundTaskProvider: React.FC<{ children: React.ReactNode }> = (
       messages: [],
       startTime: Date.now()
     }];
-    debugger
     return id;
   }, []);
 

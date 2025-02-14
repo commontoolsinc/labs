@@ -6,11 +6,11 @@ import { animated } from "@react-spring/web";
 import { MdOutlineStar } from "react-icons/md";
 
 import { setIframeContextHandler } from "@commontools/iframe-sandbox";
-import { LLMClient } from "@commontools/llm-client";
 import { Action, ReactivityLog, addAction, removeAction } from "@commontools/runner";
 
 import ShellHeader from "@/components/ShellHeader";
 import { CommandCenter } from "@/components/CommandCenter";
+import { llm } from "@/utils/llm";
 
 // FIXME(ja): perhaps this could be in common-charm?  needed to enable iframe with sandboxing
 // This is to prepare Proxy objects to be serialized
@@ -20,13 +20,6 @@ import { CommandCenter } from "@/components/CommandCenter";
 const serializeProxyObjects = (proxy: any) => {
   return proxy == undefined ? undefined : JSON.parse(JSON.stringify(proxy));
 };
-
-const llmUrl =
-  typeof window !== "undefined"
-    ? window.location.protocol + "//" + window.location.host + "/api/ai/llm"
-    : "//api/ai/llm";
-
-const llm = new LLMClient(llmUrl);
 
 setIframeContextHandler({
   read(context: any, key: string): any {
