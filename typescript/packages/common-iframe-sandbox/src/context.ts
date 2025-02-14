@@ -6,6 +6,7 @@ export interface IframeContextHandler {
   subscribe(context: any, key: string, callback: (key: string, value: any) => void): any,
   unsubscribe(context: any, receipt: any): void,
   onLLMRequest(context: any, payload: string): Promise<object>,
+  onError(context: any, error: any): void,
 }
 
 let IframeHandler: IframeContextHandler | null = null;

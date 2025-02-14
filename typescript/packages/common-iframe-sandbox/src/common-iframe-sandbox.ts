@@ -96,9 +96,10 @@ export class CommonIframeSandboxElement extends LitElement {
       case IPC.GuestMessageType.Error: {
         const { description, source, lineno, colno, stacktrace } = message.data;
         const error = { description, source, lineno, colno, stacktrace };
-        this.dispatchEvent(new CustomEvent("error", {
-          detail: error,
-        }));
+        IframeHandler.onError(this.context, error);
+        // this.dispatchEvent(new CustomEvent("error", {
+        //   detail: error,
+        // }));
         return;
       }
 

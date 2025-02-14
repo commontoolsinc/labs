@@ -45,4 +45,7 @@ export const setupIframe = () =>
       console.log("onLLMRequest res", res);
       return res as any;
     },
+    onError(context: any, error: any) {
+      console.log("onError", context, error);
+    },
   });
