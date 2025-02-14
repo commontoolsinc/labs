@@ -23,8 +23,13 @@ const schema: JSONSchema = {
     children: {
       type: "array",
       items: {
-        $ref: "#",
-        asCell: true,
+        anyOf: [
+          { $ref: "#", asCell: true },
+          { type: "string", asCell: true },
+          { type: "number", asCell: true },
+          { type: "boolean", asCell: true },
+          { type: "array", items: { $ref: "#", asCell: true } },
+        ],
       },
     },
   },
@@ -73,7 +78,7 @@ const renderNode = (node: VNode): [HTMLElement | null, Cancel] => {
 const bindChildren = (element: HTMLElement, children: Array<Child>): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
 
-  for (const child of children) {
+  for (const child of children.flat()) {
     if (typeof child === "string" || typeof child === "number" || typeof child === "boolean") {
       // Bind static content
       element.append(child.toString());
