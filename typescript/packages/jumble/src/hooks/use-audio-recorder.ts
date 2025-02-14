@@ -26,6 +26,7 @@ export function useAudioRecorder({
   const audioChunksRef = useRef<Blob[]>([]);
   const startTimeRef = useRef<number | null>(null);
   const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const activeStreamRef = useRef<MediaStream | null>(null);
 
   const updateRecordingTime = useCallback(() => {
     if (!startTimeRef.current) return;
@@ -34,12 +35,26 @@ export function useAudioRecorder({
   }, []);
 
   const cleanupRecording = useCallback(() => {
+    if (mediaRecorderRef.current) {
+      if (mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      mediaRecorderRef.current = null;
+    }
+
+    if (activeStreamRef.current) {
+      activeStreamRef.current.getTracks().forEach(track => track.stop());
+      activeStreamRef.current = null;
+    }
+
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
+
     startTimeRef.current = null;
     setRecordingSeconds(0);
+    setIsRecording(false);
   }, []);
 
   const runFinalTranscription = useCallback(async (audioBlob: Blob) => {
@@ -68,16 +83,15 @@ export function useAudioRecorder({
 
   const startRecording = useCallback(async () => {
     console.log('Starting recording...');
-    if (isRecording || mediaRecorderRef.current) {
-      console.log('Already recording, skipping start');
-      return;
-    }
+
+    cleanupRecording();
 
     try {
       console.log('Requesting microphone access...');
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
       });
+      activeStreamRef.current = stream;
       console.log('Microphone access granted');
 
       console.log('Creating MediaRecorder...');
@@ -137,6 +151,7 @@ export function useAudioRecorder({
       console.log('Timer started');
 
     } catch (error: any) {
+      cleanupRecording();
       console.error('Error in startRecording:', error);
       console.error('Full error details:', {
         name: error.name,
@@ -145,25 +160,21 @@ export function useAudioRecorder({
       });
       onError?.(error);
     }
-  }, [isRecording, transcribe, onRecording, onError, runFinalTranscription, updateRecordingTime]);
+  }, [cleanupRecording, transcribe, onRecording, onError, runFinalTranscription, updateRecordingTime]);
 
   const stopRecording = useCallback(() => {
     console.log('Stopping recording...');
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      setIsRecording(false);
       mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
-      cleanupRecording();
     }
+    cleanupRecording();
   }, [cleanupRecording]);
 
   useEffect(() => {
     return () => {
-      if (mediaRecorderRef.current) {
-        stopRecording();
-      }
+      cleanupRecording();
     };
-  }, [stopRecording]);
+  }, [cleanupRecording]);
 
   return {
     isRecording,
