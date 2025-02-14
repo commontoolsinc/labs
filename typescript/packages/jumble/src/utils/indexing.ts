@@ -1,5 +1,6 @@
 import { CharmManager } from "@commontools/charm";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
+import { charmId } from "./charms";
 import { llm } from "./llm";
 
 interface IndexingContext {
@@ -38,7 +39,6 @@ async function indexCharm(
 ): Promise<void> {
   try {
     // Simulate indexing work for this example
-    const charmId = charm.cell.entityId?.['/'];
     context.addJobMessage(jobId, `Indexing charm ${charmId}...`);
     console.log('indexing', charm)
     const stringified = JSON.stringify(charm.cell.asCell().get());
@@ -53,10 +53,10 @@ async function indexCharm(
     context.addJobMessage(jobId, response);
     console.log(stringified, response);
 
-    await saveToMemory(replica, charmId, response, 'text/plain;variant=description');
+    await saveToMemory(replica, charmId(charm), response, 'text/plain;variant=description');
 
     await new Promise(resolve => setTimeout(resolve, 200)); // Simulate work
-    context.addJobMessage(jobId, `✓ Indexed charm ${charmId}`);
+    context.addJobMessage(jobId, `✓ Indexed charm ${charmId(charm)}`);
   } catch (error) {
     context.addJobMessage(
       jobId,
