@@ -10,6 +10,7 @@ import { CharmRenderer } from "@/components/CharmRunner";
 import { performIteration } from "@/utils/charm-iteration";
 import { charmId } from "@/utils/charms";
 import { DitheredCube } from "@/components/DitherCube";
+import { VariantTray } from "@/components/VariantTray";
 
 type Tab = "iterate" | "code" | "data";
 
@@ -26,17 +27,60 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
   const [selectedModel, setSelectedModel] = useState("anthropic:claude-3-5-sonnet-latest");
   const [showVariants, setShowVariants] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [variants, setVariants] = useState<Charm[]>([]);
+  const [selectedVariant, setSelectedVariant] = useState<Charm | null>(null);
+
+  const variantModels = [
+    "anthropic:claude-3-5-sonnet-latest",
+    "groq:llama-3.3-70b-versatile",
+    "google:gemini-2.0-pro",
+  ];
+
+  const handleVariants = async () => {
+    setLoading(true);
+    setVariants([]);
+    setSelectedVariant(null);
+
+    try {
+      const variantPromises = variantModels.map((model) =>
+        performIteration(charmManager, charmId(charm), replicaName!, iterationInput, false, model),
+      );
+
+      const results = await Promise.all(variantPromises);
+      const validResults = results.filter((path): path is string => !!path);
+
+      const newVariants = await Promise.all(
+        validResults.map((path) => {
+          const id = path.split("/").pop()!;
+          return charmManager.get(id);
+        }),
+      );
+
+      setVariants(newVariants.filter((v): v is Charm => !!v));
+      if (newVariants[0]) setSelectedVariant(newVariants[0]);
+    } catch (error) {
+      console.error("Variants error:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleIterate = async () => {
     if (!iterationInput) return;
     setLoading(true);
+
     try {
+      if (showVariants) {
+        await handleVariants();
+        return;
+      }
+
       const newPath = await performIteration(
         charmManager,
         charmId(charm),
         replicaName!,
         iterationInput,
-        showVariants,
+        false,
         selectedModel,
       );
       if (newPath) {
@@ -116,8 +160,23 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
         </div>
       </div>
       {/* Main Content Area */}
-      <div className="flex-1 h-full overflow-y-auto p-4">
-        <CharmRenderer className="w-full h-full" charm={charm} />
+      <div className="flex-1 h-full overflow-y-auto p-4 relative">
+        {loading && (
+          <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
+            <div className="text-lg font-bold">Generating variants...</div>
+          </div>
+        )}
+
+        <CharmRenderer className="w-full h-full" charm={selectedVariant || charm} />
+
+        {variants.length > 0 && (
+          <VariantTray
+            variants={variants}
+            selectedVariant={selectedVariant}
+            onSelectVariant={setSelectedVariant}
+            variantModels={variantModels}
+          />
+        )}
       </div>
     </div>
   );
@@ -243,22 +302,25 @@ function CharmEditView() {
       <div className="tabs mb-4 flex gap-2">
         <button
           onClick={() => setActiveTab("iterate")}
-          className={`px-4 py-2 rounded ${activeTab === "iterate" ? "bg-gray-200 font-bold" : "bg-gray-100"
-            }`}
+          className={`px-4 py-2 rounded ${
+            activeTab === "iterate" ? "bg-gray-200 font-bold" : "bg-gray-100"
+          }`}
         >
           Iteration
         </button>
         <button
           onClick={() => setActiveTab("code")}
-          className={`px-4 py-2 rounded ${activeTab === "code" ? "bg-gray-200 font-bold" : "bg-gray-100"
-            }`}
+          className={`px-4 py-2 rounded ${
+            activeTab === "code" ? "bg-gray-200 font-bold" : "bg-gray-100"
+          }`}
         >
           Edit Code
         </button>
         <button
           onClick={() => setActiveTab("data")}
-          className={`px-4 py-2 rounded ${activeTab === "data" ? "bg-gray-200 font-bold" : "bg-gray-100"
-            }`}
+          className={`px-4 py-2 rounded ${
+            activeTab === "data" ? "bg-gray-200 font-bold" : "bg-gray-100"
+          }`}
         >
           View Data
         </button>
