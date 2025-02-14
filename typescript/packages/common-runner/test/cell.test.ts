@@ -286,7 +286,7 @@ describe("asCell", () => {
     expect(lastEventSeen).toBe("event");
   });
 
-  it("should call sink only when the cell changes on the subpath", () => {
+  it("should call sink only when the cell changes on the subpath", async () => {
     const c = getDoc({ a: { b: 42, c: 10 }, d: 5 });
     const values: number[] = [];
     c.asCell(["a", "b"]).sink((value) => values.push(value));
@@ -294,6 +294,7 @@ describe("asCell", () => {
     c.setAtPath(["a", "c"], 100);
     c.setAtPath(["a", "b"], 42);
     c.setAtPath(["a", "b"], 300);
+    await idle();
     expect(values).toEqual([42, 300]);
     expect(c.get()).toEqual({ a: { b: 300, c: 100 }, d: 50 });
   });

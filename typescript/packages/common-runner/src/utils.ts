@@ -7,7 +7,7 @@ import {
   unsafe_materializeFactory,
   unsafe_originalRecipe,
   unsafe_parentRecipe,
-  type UnsafeBinding,
+  UnsafeBinding,
 } from "@commontools/builder";
 import {
   type DocImpl,
@@ -291,6 +291,33 @@ export function findAllAliasedCells(binding: any, cell: DocImpl<any>): DocLink[]
   return cells;
 }
 
+// Follows links and returns the last one
+export function followLinks(ref: DocLink, seen: DocLink[] = [], log?: ReactivityLog): DocLink {
+  while (true) {
+    log?.reads.push({ cell: ref.cell, path: ref.path });
+
+    if (seen.some((r) => r.cell === ref.cell && arrayEqual(r.path, ref.path)))
+      throw new Error(
+        `Reference cycle detected ${JSON.stringify(ref.cell.entityId ?? "unknown")} ${ref.path.join(".")}`,
+      );
+    seen.push(ref);
+
+    const target = ref.cell.getAtPath(ref.path);
+
+    if (isQueryResultForDereferencing(target)) ref = getDocLinkOrThrow(target);
+    else if (isCell(target)) ref = target.getAsDocLink();
+    else if (isDocLink(target)) ref = target;
+    else if (isDoc(target)) ref = { cell: target, path: [] } satisfies DocLink;
+    else if (isAlias(target))
+      ref = {
+        cell: target.$alias.cell ?? ref.cell,
+        path: target.$alias.path,
+      } satisfies DocLink;
+    else return ref;
+  }
+}
+
+// Follows cell references and returns the last one
 // Follows cell references and returns the last one
 export function followCellReferences(reference: DocLink, log?: ReactivityLog): any {
   const seen = new Set<DocLink>();
@@ -357,35 +384,6 @@ export function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
     (changedPath.length <= path.length && changedPath.every((key, index) => key === path[index])) ||
     path.every((key, index) => key === changedPath[index])
   );
-}
-
-export function transformToCells(cell: DocImpl<any>, value: any, log?: ReactivityLog): any {
-  if (isQueryResultForDereferencing(value)) {
-    const ref = followCellReferences(getDocLinkOrThrow(value));
-    if (cell === ref.cell) {
-      return transformToCells(cell, cell.getAtPath(ref.path), log);
-    } else return ref.cell.asCell(ref.path, log);
-  } else if (isAlias(value)) {
-    const ref = followCellReferences(followAliases(value, cell, log), log);
-    return ref.cell.asCell(ref.path, log);
-  } else if (isDoc(value)) {
-    return value.asCell([], log);
-  } else if (isDocLink(value)) {
-    const ref = followCellReferences(value, log);
-    return ref.cell.asCell(ref.path, log);
-  } else if (isCell(value)) {
-    return value;
-  }
-
-  if (typeof value === "object" && value !== null) {
-    if (Array.isArray(value)) {
-      return value.map((value) => transformToCells(cell, value, log));
-    } else {
-      return Object.fromEntries(
-        Object.entries(value).map(([key, value]) => [key, transformToCells(cell, value, log)]),
-      );
-    }
-  } else return value;
 }
 
 /**
