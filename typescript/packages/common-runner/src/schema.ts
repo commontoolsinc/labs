@@ -109,16 +109,22 @@ export function validateAndTransform(
       let objectCandidates = options.filter((option) => option.type === "object");
       const numAsCells = objectCandidates.filter((option) => option.asCell).length;
 
+      // If there are more than two asCell branches, merge them
       if (numAsCells > 2) {
-        const optionsWithoutAsCell = objectCandidates.map((option) => {
-          const {
-            asCell: {},
-            ...rest
-          } = option as any;
-          return rest;
-        });
+        const asCellRemoved = objectCandidates
+          .filter((option) => option.asCell)
+          .map((option) =>
+            (option.anyOf ?? [option]).map((branch) => {
+              const {
+                asCell: {},
+                ...rest
+              } = branch as any;
+              return rest;
+            }),
+          )
+          .flat();
         objectCandidates = objectCandidates.filter((option) => !option.asCell);
-        objectCandidates.push({ anyOf: optionsWithoutAsCell });
+        objectCandidates.push({ anyOf: asCellRemoved });
       }
 
       // Run extraction for each union branch.
