@@ -20,7 +20,7 @@ import {
   followLinks,
   compactifyPaths,
 } from "./utils.js";
-import { queueEvent } from "./scheduler.js";
+import { queueEvent, subscribe } from "./scheduler.js";
 import {
   createRef,
   type EntityId,
@@ -51,11 +51,11 @@ import { validateAndTransform } from "./schema.js";
  *
  * @method sink Adds a callback that is called immediately and on cell changes.
  * @param {function} callback - The callback to be called when the cell changes.
- * @returns {function} - A function to cancel the callback.
+ * @returns {function} - A function to Cleanup the callback.
  *
  * @method updates Adds a callback that is called on cell changes.
  * @param {function} callback - The callback to be called when the cell changes.
- * @returns {function} - A function to cancel the callback.
+ * @returns {function} - A function to Cleanup the callback.
  *
  * @method getAsProxy Returns a value proxy for the cell.
  * @param {Path} path - The path to follow.
@@ -580,9 +580,7 @@ function createRegularCell<T>(
             : undefined;
       return doc.asCell([...path, key], log, currentSchema) as Cell<T[K]>;
     },
-    asSchema: (newSchema: JSONSchema) => {
-      return createCell(doc, path, log, newSchema);
-    },
+    asSchema: (newSchema: JSONSchema) => createCell(doc, path, log, newSchema),
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
     getAsDocLink: () => ({ cell: doc, path }) satisfies DocLink,
@@ -613,44 +611,21 @@ function subscribeToReferencedDocs<T>(
   callback: (value: T) => void,
   callCallbackOnFirstRun: boolean,
 ): Cancel {
-  let cancel: Cancel | undefined;
+  const initialLog = { reads: [], writes: [] } satisfies ReactivityLog;
 
-  // Strategy: Determine docs read at current time, and subscribe to them.
-  // On update, unsubscribe from all previous docs, and resubscribe to the ones
-  // read at the time of the update, since it might have changed.
-  function subscribe() {
-    cancel?.();
-    const [cancelGroup, addCancel] = useCancelGroup();
-    cancel = cancelGroup;
+  // Get the value once to determine all the docs that need to be subscribed to.
+  const value = validateAndTransform(doc, path, schema, initialLog) as T;
 
-    const log = {
-      reads: [],
-      writes: [],
-    } as ReactivityLog;
+  // Subscribe to the docs that are read (via logs), call callback on next change.
+  const cancel = subscribe(
+    (log) => callback(validateAndTransform(doc, path, schema, log) as T),
+    initialLog,
+  );
 
-    // We use this to populate `log` with all the docs & paths read, even if value isn't used.
-    const value = validateAndTransform(doc, path, schema, log) as T;
-    const reads = compactifyPaths(log.reads);
-
-    // Flag to prevent calling the callback more than once per run.
-    let alreadyCalled = 0;
-
-    // Now subscribe to all the documents read to create the value.
-    for (const read of reads)
-      addCancel(
-        doc.updates(
-          (_, changedPath) =>
-            pathAffected(changedPath, read.path) && !alreadyCalled++ && callback(subscribe()),
-        ),
-      );
-
-    return value;
-  }
-
-  const value = subscribe();
+  // Call the callback once with initial valueif requested.
   if (callCallbackOnFirstRun) callback(value);
 
-  return cancel!;
+  return cancel;
 }
 
 // Array.prototype's entries, and whether they modify the array
