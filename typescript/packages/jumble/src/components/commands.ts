@@ -7,24 +7,33 @@ import { charmId } from "@/utils/charms";
 import { NAME } from "@commontools/builder";
 import { DocImpl, getRecipe } from "@commontools/runner";
 import { performIteration } from "@/utils/charm-iteration";
+import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
 
 export type CommandType = "action" | "input" | "confirm" | "select" | "menu" | "transcribe";
 
 export interface CommandItem {
   id: string;
   type: CommandType;
-  title: string | ((context: CommandContext) => string);
+  title: string; // No longer needs to be a function
   placeholder?: string;
   group?: string;
-  children?: CommandItem[];
-  handler?: (context: CommandContext, value?: any) => Promise<void> | void;
+  children?: CommandItem[]; // No longer needs to be a function
+  handler?: (value?: any) => Promise<void> | void; // No context param needed
   validate?: (input: string) => boolean;
   message?: string;
-  predicate?: (context: CommandContext) => boolean; // New field
+  predicate?: boolean; // Can be computed value instead of function
 }
 
 export function getTitle(title: string | ((context: CommandContext) => string), context: CommandContext): string {
   return typeof title === 'function' ? title(context) : title;
+}
+
+export function getChildren(
+  children: CommandItem[] | ((context: CommandContext) => CommandItem[]) | undefined,
+  context: CommandContext
+): CommandItem[] {
+  if (!children) return [];
+  return typeof children === 'function' ? children(context) : children;
 }
 
 export interface CommandContext {
@@ -39,11 +48,17 @@ export interface CommandContext {
   setPreferredModel: (model: string) => void;
   setLoading: (loading: boolean) => void;
   setModeWithInput: (mode: CommandMode, initialInput: string) => void;
+  listJobs: () => BackgroundJob[];
+  startJob: (name: string) => string;
+  stopJob: (jobId: string) => void;
+  addJobMessage: (jobId: string, message: string) => void;
+  updateJobProgress: (jobId: string, progress: number) => void;
+  commandPathIds: string[];
 }
 
 export type CommandMode =
   | { type: "main" }
-  | { type: "menu"; path: CommandItem[]; parent: CommandItem }
+  | { type: "menu"; path: string[]; parent: CommandItem }
   | { type: "input"; command: CommandItem; placeholder: string; preserveInput?: boolean }
   | { type: "confirm"; command: CommandItem; message: string }
   | { type: "select"; command: CommandItem; options: SelectOption[] }
@@ -80,26 +95,26 @@ export const castSpellAsCharm = async (charmManager: CharmManager, result: any, 
   return null;
 };
 
-export const commands: CommandItem[] = [
-  {
+export function getCommands(deps: CommandContext): CommandItem[] {
+  return [{
     id: "new-charm",
     type: "input",
     title: "New Charm",
     group: "Create",
-    handler: async (ctx, input) => {
+    handler: async (input) => {
       if (!input) return;
-      ctx.setLoading(true);
+      deps.setLoading(true);
       try {
         const dummyData = {
           gallery: [{ title: "pizza", prompt: "a yummy pizza" }],
         };
-        const id = await castNewRecipe(ctx.charmManager, { gallery: [dummyData] }, input);
+        const id = await castNewRecipe(deps.charmManager, { gallery: [dummyData] }, input);
         if (id) {
-          ctx.navigate(`/${ctx.focusedReplicaId}/${charmId(id)}`);
+          deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
         }
       } finally {
-        ctx.setLoading(false);
-        ctx.setOpen(false);
+        deps.setLoading(false);
+        deps.setOpen(false);
       }
     },
   },
@@ -108,10 +123,10 @@ export const commands: CommandItem[] = [
     type: "action",
     title: "Search Charms",
     group: "Navigation",
-    handler: async (ctx) => {
-      ctx.setLoading(true);
+    handler: async () => {
+      deps.setLoading(true);
       try {
-        const charms = ctx.charmManager.getCharms().get();
+        const charms = deps.charmManager.getCharms().get();
         const results = await Promise.all(
           charms.map(async (charm) => {
             const data = charm.cell.get();
@@ -123,17 +138,17 @@ export const commands: CommandItem[] = [
             };
           }),
         );
-        ctx.setMode({
+        deps.setMode({
           type: "select",
           command: {
             id: "charm-select",
             type: "select",
             title: "Select Charm",
-            handler: async (ctx, id) => {
+            handler: async (id) => {
               console.log("Select handler called with:", id);
-              console.log("Navigating to:", `/${ctx.focusedReplicaId}/${charmId(id)}`);
-              ctx.navigate(`/${ctx.focusedReplicaId}/${charmId(id)}`);
-              ctx.setOpen(false);
+              console.log("Navigating to:", `/${deps.focusedReplicaId}/${charmId(id)}`);
+              deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
+              deps.setOpen(false);
             },
           },
           options: results,
@@ -141,7 +156,7 @@ export const commands: CommandItem[] = [
       } catch (error) {
         console.error("Search charms error:", error);
       } finally {
-        ctx.setLoading(false);
+        deps.setLoading(false);
       }
     },
   },
@@ -150,46 +165,46 @@ export const commands: CommandItem[] = [
     type: "input",
     title: "Spellcaster",
     group: "Create",
-    predicate: (ctx) => !!ctx.focusedReplicaId,
-    handler: async (ctx, input) => {
-      if (!input || !ctx.focusedReplicaId) return;
-      ctx.setLoading(true);
+    predicate: !!deps.focusedReplicaId,
+    handler: async (input) => {
+      if (!input || !deps.focusedReplicaId) return;
+      deps.setLoading(true);
       try {
-        const spells = await castSpell(ctx.focusedReplicaId, input);
+        const spells = await castSpell(deps.focusedReplicaId, input);
         const compatibleSpells = spells.filter(
           (spell) => spell.compatibleBlobs && spell.compatibleBlobs.length > 0,
         );
 
-        ctx.setMode({
+        deps.setMode({
           type: "select",
           command: {
             id: "spell-select",
             type: "select",
             title: "Select Spell",
-            handler: async (ctx, spell: any) => {
+            handler: async (spell: any) => {
               if (spell.compatibleBlobs.length === 1) {
                 const entityId = await castSpellAsCharm(
-                  ctx.charmManager,
+                  deps.charmManager,
                   spell,
                   spell.compatibleBlobs[0],
                 );
                 if (entityId) {
-                  ctx.navigate(`/${ctx.focusedReplicaId}/${charmId(entityId)}`);
+                  deps.navigate(`/${deps.focusedReplicaId}/${charmId(entityId)}`);
                 }
-                ctx.setOpen(false);
+                deps.setOpen(false);
               } else {
-                ctx.setMode({
+                deps.setMode({
                   type: "select",
                   command: {
                     id: "blob-select",
                     type: "select",
                     title: "Select Blob",
-                    handler: async (ctx, blob) => {
-                      const entityId = await castSpellAsCharm(ctx.charmManager, spell, blob);
+                    handler: async (blob) => {
+                      const entityId = await castSpellAsCharm(deps.charmManager, spell, blob);
                       if (entityId) {
-                        ctx.navigate(`/${ctx.focusedReplicaId}/${charmId(entityId)}`);
+                        deps.navigate(`/${deps.focusedReplicaId}/${charmId(entityId)}`);
                       }
-                      ctx.setOpen(false);
+                      deps.setOpen(false);
                     },
                   },
                   options: spell.compatibleBlobs.map((blob: any, i: number) => ({
@@ -210,33 +225,33 @@ export const commands: CommandItem[] = [
       } catch (error) {
         console.error("Spellcaster error:", error);
       } finally {
-        ctx.setLoading(false);
+        deps.setLoading(false);
       }
     },
   },
   {
     id: "edit-recipe",
     type: "input",
-    title: (ctx) => `Iterate${ctx.preferredModel ? ` (${ctx.preferredModel})` : ""}`,
+    title: `Iterate${deps.preferredModel ? ` (${deps.preferredModel})` : ""}`,
     group: "Edit",
-    predicate: (ctx) => !!ctx.focusedCharmId,
+    predicate: !!deps.focusedCharmId,
     placeholder: "What would you like to change?",
-    handler: async (ctx, input) => {
-      if (!input || !ctx.focusedCharmId || !ctx.focusedReplicaId) return;
-      ctx.setLoading(true);
+    handler: async (input) => {
+      if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
+      deps.setLoading(true);
       const newCharmPath = await performIteration(
-        ctx.charmManager,
-        ctx.focusedCharmId,
-        ctx.focusedReplicaId,
+        deps.charmManager,
+        deps.focusedCharmId,
+        deps.focusedReplicaId,
         input,
         false,
-        ctx.preferredModel,
+        deps.preferredModel,
       );
       if (newCharmPath) {
-        ctx.navigate(newCharmPath);
+        deps.navigate(newCharmPath);
       }
-      ctx.setLoading(false);
-      ctx.setOpen(false);
+      deps.setLoading(false);
+      deps.setOpen(false);
     },
   },
   {
@@ -244,17 +259,17 @@ export const commands: CommandItem[] = [
     type: "confirm",
     title: "Delete Charm",
     group: "Edit",
-    predicate: (ctx) => !!ctx.focusedCharmId,
+    predicate: !!deps.focusedCharmId,
     message: "Are you sure you want to delete this charm?",
-    handler: async (ctx) => {
-      if (!ctx.focusedCharmId) return;
-      const charm = await ctx.charmManager.get(ctx.focusedCharmId);
+    handler: async () => {
+      if (!deps.focusedCharmId) return;
+      const charm = await deps.charmManager.get(deps.focusedCharmId);
       if (!charm?.entityId) return;
-      const result = await ctx.charmManager.remove(charm.entityId);
+      const result = await deps.charmManager.remove(charm.entityId);
       if (result) {
-        ctx.navigate("/");
+        deps.navigate("/");
       }
-      ctx.setOpen(false);
+      deps.setOpen(false);
     },
   },
   {
@@ -262,14 +277,14 @@ export const commands: CommandItem[] = [
     type: "action",
     title: "View Detail",
     group: "View",
-    predicate: (ctx) => !!ctx.focusedCharmId,
-    handler: (ctx) => {
-      if (!ctx.focusedCharmId) {
-        ctx.setOpen(false);
+    predicate: !!deps.focusedCharmId,
+    handler: () => {
+      if (!deps.focusedCharmId) {
+        deps.setOpen(false);
         return;
       }
-      ctx.navigate(`/${ctx.focusedReplicaId}/${ctx.focusedCharmId}/detail`);
-      ctx.setOpen(false);
+      deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}/detail`);
+      deps.setOpen(false);
     },
   },
   {
@@ -277,14 +292,14 @@ export const commands: CommandItem[] = [
     type: "action",
     title: "Edit Code",
     group: "View",
-    predicate: (ctx) => !!ctx.focusedCharmId,
-    handler: (ctx) => {
-      if (!ctx.focusedCharmId) {
-        ctx.setOpen(false);
+    predicate: !!deps.focusedCharmId,
+    handler: () => {
+      if (!deps.focusedCharmId) {
+        deps.setOpen(false);
         return;
       }
-      ctx.navigate(`/${ctx.focusedReplicaId}/${ctx.focusedCharmId}/detail#code`);
-      ctx.setOpen(false);
+      deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}/detail#code`);
+      deps.setOpen(false);
     },
   },
   {
@@ -292,14 +307,14 @@ export const commands: CommandItem[] = [
     type: "action",
     title: "View Backing Data",
     group: "View",
-    predicate: (ctx) => !!ctx.focusedCharmId,
-    handler: (ctx) => {
-      if (!ctx.focusedCharmId) {
-        ctx.setOpen(false);
+    predicate: !!deps.focusedCharmId,
+    handler: () => {
+      if (!deps.focusedCharmId) {
+        deps.setOpen(false);
         return;
       }
-      ctx.navigate(`/${ctx.focusedReplicaId}/${ctx.focusedCharmId}/detail#data`);
-      ctx.setOpen(false);
+      deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}/detail#data`);
+      deps.setOpen(false);
     },
   },
   {
@@ -307,14 +322,14 @@ export const commands: CommandItem[] = [
     type: "action",
     title: "View Charm",
     group: "View",
-    predicate: (ctx) => !!ctx.focusedCharmId,
-    handler: (ctx) => {
-      if (!ctx.focusedCharmId) {
-        ctx.setOpen(false);
+    predicate: !!deps.focusedCharmId,
+    handler: () => {
+      if (!deps.focusedCharmId) {
+        deps.setOpen(false);
         return;
       }
-      ctx.navigate(`/${ctx.focusedReplicaId}/${ctx.focusedCharmId}`);
-      ctx.setOpen(false);
+      deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}`);
+      deps.setOpen(false);
     },
   },
   {
@@ -322,9 +337,9 @@ export const commands: CommandItem[] = [
     type: "action",
     title: "Navigate Back",
     group: "Navigation",
-    handler: (ctx) => {
+    handler: () => {
       window.history.back();
-      ctx.setOpen(false);
+      deps.setOpen(false);
     },
   },
   {
@@ -332,12 +347,12 @@ export const commands: CommandItem[] = [
     type: "action",
     title: "Navigate Home",
     group: "Navigation",
-    predicate: (ctx) => !!ctx.focusedReplicaId,
-    handler: (ctx) => {
-      if (ctx.focusedReplicaId) {
-        ctx.navigate(`/${ctx.focusedReplicaId}`);
+    predicate: !!deps.focusedReplicaId,
+    handler: () => {
+      if (deps.focusedReplicaId) {
+        deps.navigate(`/${deps.focusedReplicaId}`);
       }
-      ctx.setOpen(false);
+      deps.setOpen(false);
     },
   },
   {
@@ -346,11 +361,51 @@ export const commands: CommandItem[] = [
     title: "Advanced",
     children: [
       {
+        id: "start-counter-job",
+        type: "action",
+        title: "Start Counter Job",
+        handler: async () => {
+          const jobId = deps.startJob("Counter Job");
+          console.log("Started counter job with ID:", jobId);
+
+          // Create an interval that updates the job
+          const interval = setInterval(() => {
+            const job = deps.listJobs().find(j => j.id === jobId);
+            console.log("Current job state:", job);
+
+            if (!job || job.status !== 'running') {
+              console.log("Job stopped or not found, clearing interval");
+              clearInterval(interval);
+              return;
+            }
+
+            const currentCount = parseInt(job.messages[job.messages.length - 1]?.split(': ')[1] || '0');
+            const newCount = currentCount + 1;
+            console.log("Updating count from", currentCount, "to", newCount);
+
+            deps.addJobMessage(jobId, `Count: ${newCount}`);
+            console.log(`Count: ${newCount}`);
+            deps.updateJobProgress(jobId, (newCount % 100) / 100); // Progress cycles 0-100%
+
+            if (newCount >= 1000) { // Stop after 1000 counts
+              console.log("Reached max count, stopping job");
+              deps.stopJob(jobId);
+              clearInterval(interval);
+            }
+          }, 1000);
+
+          // Add initial message
+          console.log("Adding initial message");
+          deps.addJobMessage(jobId, "Count: 0");
+          deps.setOpen(false);
+        }
+      },
+      {
         id: "import-json",
         type: "action",
         title: "Import JSON",
-        handler: async (ctx) => {
-          ctx.setLoading(true);
+        handler: async () => {
+          deps.setLoading(true);
           try {
             const input = document.createElement("input");
             input.type = "file";
@@ -369,13 +424,13 @@ export const commands: CommandItem[] = [
             const title = prompt("Enter a title for your imported recipe:");
             if (!title) return;
 
-            const id = await castNewRecipe(ctx.charmManager, data, title);
+            const id = await castNewRecipe(deps.charmManager, data, title);
             if (id) {
-              ctx.navigate(`/${ctx.focusedReplicaId}/${charmId(id)}`);
+              deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
             }
           } finally {
-            ctx.setLoading(false);
-            ctx.setOpen(false);
+            deps.setLoading(false);
+            deps.setOpen(false);
           }
         },
       },
@@ -383,8 +438,8 @@ export const commands: CommandItem[] = [
         id: "load-recipe",
         type: "action",
         title: "Load Recipe",
-        handler: async (ctx) => {
-          ctx.setLoading(true);
+        handler: async () => {
+          deps.setLoading(true);
           try {
             const input = document.createElement("input");
             input.type = "file";
@@ -399,13 +454,13 @@ export const commands: CommandItem[] = [
             });
 
             const src = await file.text();
-            const id = await compileAndRunRecipe(ctx.charmManager, src, "imported", {});
+            const id = await compileAndRunRecipe(deps.charmManager, src, "imported", {});
             if (id) {
-              ctx.navigate(`/${ctx.focusedReplicaId}/${charmId(id)}`);
+              deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
             }
           } finally {
-            ctx.setLoading(false);
-            ctx.setOpen(false);
+            deps.setLoading(false);
+            deps.setOpen(false);
           }
         },
       },
@@ -414,7 +469,7 @@ export const commands: CommandItem[] = [
         type: "input",
         title: "Switch Replica",
         placeholder: "Enter replica name",
-        handler: (ctx, input) => {
+        handler: (input) => {
           if (input) {
             // FIXME(ja): chatting with seefeld - cell should know about
             // their replica / storage provider
@@ -423,7 +478,7 @@ export const commands: CommandItem[] = [
             // things hang!
             window.location.href = `/${input}`;
           }
-          ctx.setOpen(false);
+          deps.setOpen(false);
         },
       },
     ],
@@ -433,8 +488,8 @@ export const commands: CommandItem[] = [
     type: "action",
     title: "Select AI Model",
     group: "Settings",
-    handler: async (ctx) => {
-      ctx.setLoading(true);
+    handler: async () => {
+      deps.setLoading(true);
       try {
         // Fetch models from API
         const response = await fetch("/api/ai/llm/models");
@@ -450,15 +505,15 @@ export const commands: CommandItem[] = [
           },
         }));
 
-        ctx.setMode({
+        deps.setMode({
           type: "select",
           command: {
             id: "model-select",
             type: "select",
             title: "Select Model",
-            handler: async (ctx, selectedModel) => {
-              ctx.setPreferredModel(selectedModel.id);
-              ctx.setOpen(false);
+            handler: async (selectedModel) => {
+              deps.setPreferredModel(selectedModel.id);
+              deps.setOpen(false);
             },
           },
           options: modelOptions,
@@ -466,29 +521,88 @@ export const commands: CommandItem[] = [
       } catch (error) {
         console.error("Failed to fetch models:", error);
       } finally {
-        ctx.setLoading(false);
+        deps.setLoading(false);
       }
     },
   },
   {
     id: "edit-recipe-voice",
     type: "transcribe",
-    title: (ctx) => `Iterate (Voice)${ctx.preferredModel ? ` (${ctx.preferredModel})` : ""}`,
+    title: `Iterate (Voice)${deps.preferredModel ? ` (${deps.preferredModel})` : ""}`,
     group: "Edit",
-    predicate: (ctx) => !!ctx.focusedCharmId,
-    handler: async (ctx, transcription) => {
+    predicate: !!deps.focusedCharmId,
+    handler: async (transcription) => {
       if (!transcription) return;
 
-      // Find the edit-recipe command
+      const commands = getCommands(deps);
       const editRecipeCommand = commands.find(cmd => cmd.id === "edit-recipe")!;
 
-      // Set the mode to input with the transcribed text pre-filled
-      ctx.setModeWithInput({
+      deps.setModeWithInput({
         type: "input",
         command: editRecipeCommand,
         placeholder: "What would you like to change?",
         preserveInput: true
       }, transcription);
     },
+  },
+  {
+    id: "background-jobs",
+    type: "menu",
+    title: `Background Jobs (${deps.listJobs().length})`,
+    group: "View",
+    children: [
+      ...deps.listJobs().map((job): CommandItem => ({
+        id: `job-${job.id}`,
+        type: "menu",
+        title: `${job.name} (${job.status})`,
+        children: [
+          {
+            id: `job-${job.id}-toggle`,
+            type: "action",
+            title: job.status === 'running' ? "Pause" : "Resume",
+            handler: async () => {
+              if (job.status === 'running') {
+                deps.stopJob(job.id);
+              } else {
+                // You might need to add a resumeJob function to your context
+                // deps.resumeJob(job.id);
+              }
+              deps.setMode({ type: "main" });
+            },
+          },
+          {
+            id: `job-${job.id}-cancel`,
+            type: "action",
+            title: "Stop",
+            handler: async () => {
+              deps.stopJob(job.id);
+              deps.setMode({ type: "main" });
+            },
+          },
+          {
+            id: `job-${job.id}-messages`,
+            type: "menu",
+            title: "View Messages",
+            children: job.messages.map((msg, i): CommandItem => ({
+              id: `msg-${job.id}-${i}`,
+              type: "action",
+              title: msg,
+              handler: () => {}
+            })),
+          },
+        ],
+      })),
+      {
+        id: "clear-completed-jobs",
+        type: "action",
+        title: "Clear Completed Jobs",
+        handler: async () => {
+          // You might need to add this function to your context
+          // deps.clearCompletedJobs();
+          deps.setMode({ type: "main" });
+        },
+      },
+    ],
   }
-];
+  ]
+};
