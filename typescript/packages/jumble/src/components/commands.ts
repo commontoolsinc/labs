@@ -8,7 +8,7 @@ import { NAME } from "@commontools/builder";
 import { DocImpl, getRecipe } from "@commontools/runner";
 import { performIteration } from "@/utils/charm-iteration";
 
-export type CommandType = "action" | "input" | "confirm" | "select" | "menu";
+export type CommandType = "action" | "input" | "confirm" | "select" | "menu" | "transcribe";
 
 export interface CommandItem {
   id: string;
@@ -23,6 +23,10 @@ export interface CommandItem {
   predicate?: (context: CommandContext) => boolean; // New field
 }
 
+export function getTitle(title: string | ((context: CommandContext) => string), context: CommandContext): string {
+  return typeof title === 'function' ? title(context) : title;
+}
+
 export interface CommandContext {
   charmManager: CharmManager;
   navigate: NavigateFunction;
@@ -34,14 +38,16 @@ export interface CommandContext {
   preferredModel?: string;
   setPreferredModel: (model: string) => void;
   setLoading: (loading: boolean) => void;
+  setModeWithInput: (mode: CommandMode, initialInput: string) => void;
 }
 
 export type CommandMode =
   | { type: "main" }
   | { type: "menu"; path: CommandItem[]; parent: CommandItem }
-  | { type: "input"; command: CommandItem; placeholder: string }
+  | { type: "input"; command: CommandItem; placeholder: string; preserveInput?: boolean }
   | { type: "confirm"; command: CommandItem; message: string }
   | { type: "select"; command: CommandItem; options: SelectOption[] }
+  | { type: "transcribe"; command: CommandItem; placeholder: string }
   | { type: "loading" };
 
 export interface SelectOption {
@@ -109,8 +115,9 @@ export const commands: CommandItem[] = [
         const results = await Promise.all(
           charms.map(async (charm) => {
             const data = charm.cell.get();
+            const title = data?.[NAME] ?? 'Untitled';
             return {
-              title: data[NAME] + ` (#${charmId(charm.cell.entityId!).slice(-4)})`,
+              title: title + ` (#${charmId(charm.cell.entityId!).slice(-4)})`,
               id: charmId(charm.cell.entityId!),
               value: charm.cell.entityId,
             };
@@ -216,6 +223,7 @@ export const commands: CommandItem[] = [
     placeholder: "What would you like to change?",
     handler: async (ctx, input) => {
       if (!input || !ctx.focusedCharmId || !ctx.focusedReplicaId) return;
+      ctx.setLoading(true);
       const newCharmPath = await performIteration(
         ctx.charmManager,
         ctx.focusedCharmId,
@@ -227,6 +235,7 @@ export const commands: CommandItem[] = [
       if (newCharmPath) {
         ctx.navigate(newCharmPath);
       }
+      ctx.setLoading(false);
     },
   },
   {
@@ -460,4 +469,25 @@ export const commands: CommandItem[] = [
       }
     },
   },
+  {
+    id: "edit-recipe-voice",
+    type: "transcribe",
+    title: (ctx) => `Iterate (Voice)${ctx.preferredModel ? ` (${ctx.preferredModel})` : ""}`,
+    group: "Edit",
+    predicate: (ctx) => !!ctx.focusedCharmId,
+    handler: async (ctx, transcription) => {
+      if (!transcription) return;
+
+      // Find the edit-recipe command
+      const editRecipeCommand = commands.find(cmd => cmd.id === "edit-recipe")!;
+
+      // Set the mode to input with the transcribed text pre-filled
+      ctx.setModeWithInput({
+        type: "input",
+        command: editRecipeCommand,
+        placeholder: "What would you like to change?",
+        preserveInput: true
+      }, transcription);
+    },
+  }
 ];
