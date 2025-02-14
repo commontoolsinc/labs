@@ -1,6 +1,6 @@
 # Common Memory
 
-Persistent, transactional memory store.m
+Persistent, transactional memory store.
 
 ## Getting Started
 
