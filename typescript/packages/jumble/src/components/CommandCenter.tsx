@@ -1,14 +1,15 @@
 import { Command } from "cmdk";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import "./commands.css";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { useMatch, useNavigate } from "react-router-dom";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
 import { DitheredCube } from "./DitherCube";
-import { CommandContext, CommandItem, CommandMode, commands, getTitle } from "./commands";
+import { CommandContext, CommandItem, CommandMode, commands, getChildren, getCommands, getTitle } from "./commands";
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext";
 import { TranscribeInput } from "./TranscribeCommand";
+import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext";
 
 function CommandProcessor({
   mode,
@@ -60,7 +61,7 @@ function CommandProcessor({
           {mode.options.map((option) => (
             <Command.Item
               key={option.id}
-              onSelect={() => mode.command.handler?.(context, option.value)} // Use mode.command instead
+              onSelect={() => mode.command.handler?.(context, option.value)}
             >
               {option.title}
             </Command.Item>
@@ -77,15 +78,75 @@ export function CommandCenter() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<CommandMode>({ type: "main" });
-  const [commandPath, setCommandPath] = useState<CommandItem[]>([]);
+  const [commandPathIds, setCommandPathIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const { modelId, setPreferredModel } = usePreferredLanguageModel();
+  const { stopJob, startJob, addJobMessage, listJobs, updateJobProgress } = useBackgroundTasks();
 
   const { charmManager } = useCharmManager();
   const navigate = useNavigate();
   const match = useMatch("/:replicaName/:charmId?/*");
   const focusedCharmId = match?.params.charmId ?? null;
   const focusedReplicaId = match?.params.replicaName ?? null;
+
+  const allCommands = useMemo(() => getCommands({
+    charmManager,
+    navigate,
+    focusedCharmId,
+    focusedReplicaId,
+    setOpen,
+    preferredModel: modelId ?? undefined,
+    setPreferredModel,
+    setMode,
+    loading,
+    setLoading,
+    setModeWithInput: (mode: CommandMode, initialInput: string) => {
+      Promise.resolve().then(() => {
+        setMode(mode);
+        setSearch(initialInput);
+      });
+    },
+    stopJob,
+    startJob,
+    addJobMessage,
+    listJobs,
+    updateJobProgress,
+    commandPathIds,
+  }), [
+    charmManager,
+    navigate,
+    focusedCharmId,
+    focusedReplicaId,
+    modelId,
+    loading,
+    commandPathIds,
+    setMode,
+    setPreferredModel,
+    stopJob,
+    startJob,
+    addJobMessage,
+    listJobs,
+    updateJobProgress,
+  ]);
+
+  const getCommandById = useCallback((id: string): CommandItem | undefined => {
+    const findInCommands = (commands: CommandItem[]): CommandItem | undefined => {
+      for (const cmd of commands) {
+        if (cmd.id === id) return cmd;
+        if (cmd.children) {
+          const found = findInCommands(cmd.children);
+          if (found) return found;
+        }
+      }
+      return undefined;
+    };
+    return findInCommands(allCommands);
+  }, [allCommands]);
+
+  const currentCommandPath = useMemo(() =>
+    commandPathIds.map(id => getCommandById(id)).filter((cmd): cmd is CommandItem => !!cmd),
+    [commandPathIds, getCommandById]
+  );
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -117,7 +178,7 @@ export function CommandCenter() {
   useEffect(() => {
     if (!open) {
       setMode({ type: "main" });
-      setCommandPath([]);
+      setCommandPathIds([]);
     }
   }, [open]);
 
@@ -128,7 +189,7 @@ export function CommandCenter() {
         setOpen(true);
         setMode({
           type: "input",
-          command: commands.find((cmd) => cmd.id === "edit-recipe")!,
+          command: allCommands.find((cmd) => cmd.id === "edit-recipe")!,
           placeholder: "What would you like to change?",
         });
       }
@@ -136,11 +197,10 @@ export function CommandCenter() {
 
     const handleEditRecipeEvent = () => {
       if (focusedCharmId) {
-        // Only open if there's a charm focused
         setOpen(true);
         setMode({
           type: "input",
-          command: commands.find((cmd) => cmd.id === "edit-recipe")!,
+          command: allCommands.find((cmd) => cmd.id === "edit-recipe")!,
           placeholder: "What would you like to change?",
         });
       }
@@ -153,7 +213,7 @@ export function CommandCenter() {
       document.removeEventListener("keydown", handleEditRecipe);
       window.removeEventListener("edit-recipe-command", handleEditRecipeEvent);
     };
-  }, [focusedCharmId]); // Add focusedCharmId as a dependency
+  }, [focusedCharmId, allCommands]);
 
   const context: CommandContext = {
     charmManager,
@@ -172,28 +232,41 @@ export function CommandCenter() {
         setSearch(initialInput);
       });
     },
+    stopJob,
+    startJob,
+    addJobMessage,
+    listJobs,
+    updateJobProgress,
+    commandPathIds,
   };
 
   const handleBack = () => {
-    if (commandPath.length === 1) {
+    if (commandPathIds.length === 1) {
       setMode({ type: "main" });
-      setCommandPath([]);
+      setCommandPathIds([]);
     } else {
-      setCommandPath((prev) => prev.slice(0, -1));
-      setMode({
-        type: "menu",
-        path: commandPath.slice(0, -1),
-        parent: commandPath[commandPath.length - 2],
-      });
+      setCommandPathIds(prev => prev.slice(0, -1));
+      const parentId = commandPathIds[commandPathIds.length - 2];
+      const parentCommand = getCommandById(parentId);
+      if (parentCommand) {
+        setMode({
+          type: "menu",
+          path: commandPathIds.slice(0, -1),
+          parent: parentCommand,
+        });
+      }
     }
   };
 
   const getCurrentCommands = () => {
-    const currentCommands =
-      commandPath.length === 0 ? commands : commandPath[commandPath.length - 1].children || [];
+    const commands = commandPathIds.length === 0
+      ? allCommands
+      : getCommandById(commandPathIds[commandPathIds.length - 1])?.children ?? [];
 
-    return currentCommands.filter((cmd) => !cmd.predicate || cmd.predicate(context));
+    return (commands)
+      .filter(cmd => !cmd.predicate);
   };
+
   return (
     <Command.Dialog title="Common" open={open} onOpenChange={setOpen} label="Command Menu">
       <VisuallyHidden>
@@ -229,7 +302,7 @@ export function CommandCenter() {
             if (mode.type === "input" && e.key === "Enter") {
               e.preventDefault();
               const command = mode.command;
-              command.handler?.(context, search);
+              command.handler?.(search);
             }
           }}
           style={{ flexGrow: 1 }}
@@ -248,14 +321,14 @@ export function CommandCenter() {
 
         {mode.type === "main" || mode.type === "menu" ? (
           <>
-            {commandPath.length > 0 && (
+            {commandPathIds.length > 0 && (
               <Command.Item onSelect={handleBack}>
-                ← Back to {getTitle(commandPath[commandPath.length - 2].title, context) || "Main Menu"}
+                ← Back to {getCommandById(commandPathIds[commandPathIds.length - 2])?.title || "Main Menu"}
               </Command.Item>
             )}
 
             {(() => {
-              const groups = getCurrentCommands().reduce(
+              const groups: Record<string, CommandItem[]> = getCurrentCommands().reduce(
                 (acc, cmd) => {
                   const group = cmd.group || "Other";
                   if (!acc[group]) acc[group] = [];
@@ -272,15 +345,14 @@ export function CommandCenter() {
                       key={cmd.id}
                       onSelect={() => {
                         if (cmd.children) {
-                          setCommandPath((prev) => [...prev, cmd]);
+                          setCommandPathIds((prev) => [...prev, cmd.id]);
                           setMode({
                             type: "menu",
-                            path: [...commandPath, cmd],
+                            path: [...commandPathIds, cmd.id],
                             parent: cmd,
                           });
                         } else if (cmd.type === "action") {
                           cmd.handler?.(context);
-                          // Only close if the handler doesn't set a new mode
                           if (!cmd.handler || cmd.handler.length === 0) {
                             setOpen(false);
                           }
@@ -289,7 +361,7 @@ export function CommandCenter() {
                         }
                       }}
                     >
-                      {typeof cmd.title === "function" ? cmd.title(context) : cmd.title}
+                      {cmd.title}
                       {cmd.children && " →"}
                     </Command.Item>
                   ))}
@@ -300,13 +372,13 @@ export function CommandCenter() {
         ) : (
           <CommandProcessor
             mode={mode}
-            command={commandPath[commandPath.length - 1]}
+            command={currentCommandPath[currentCommandPath.length - 1]}
             context={context}
             onComplete={() => {
               setMode({
                 type: "menu",
-                path: commandPath,
-                parent: commandPath[commandPath.length - 1],
+                path: commandPathIds,
+                parent: currentCommandPath[currentCommandPath.length - 1],
               });
             }}
           />
