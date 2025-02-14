@@ -9,17 +9,10 @@ import {
   unsafe_parentRecipe,
   UnsafeBinding,
 } from "@commontools/builder";
-import {
-  type DocImpl,
-  type DocLink,
-  getDoc,
-  getDocLinkOrThrow,
-  isCell,
-  isDoc,
-  isDocLink,
-  isQueryResultForDereferencing,
-  type ReactivityLog,
-} from "./cell.js";
+import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.js";
+import { getDocLinkOrThrow, isQueryResultForDereferencing } from "./query-result-proxy.js";
+import { isCell } from "./cell.js";
+import { type ReactivityLog } from "./scheduler.js";
 import { createRef } from "./cell-map.js";
 
 export function extractDefaultValues(schema: any): any {

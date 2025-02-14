@@ -2,8 +2,9 @@ import { describe, it, expect } from "vitest";
 import { byRef, handler, JSONSchema, lift, recipe } from "@commontools/builder";
 import { run } from "../src/runner.js";
 import { addModuleByRef } from "../src/module.js";
-import { Cell, getDoc } from "../src/cell.js";
+import { getDoc } from "../src/doc.js";
 import { idle } from "../src/scheduler.js";
+import { type Cell } from "../src/cell.js";
 
 describe("Recipe Runner", () => {
   it("should run a simple recipe", async () => {

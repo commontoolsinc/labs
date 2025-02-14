@@ -1,5 +1,7 @@
 import { type Recipe } from "@commontools/builder";
-import { DocImpl, getDoc, getDocLinkOrThrow, ReactivityLog } from "../cell.js";
+import { type DocImpl, getDoc } from "../doc.js";
+import { getDocLinkOrThrow } from "../query-result-proxy.js";
+import { type ReactivityLog } from "../scheduler.js";
 import { cancels, run } from "../runner.js";
 import { type Action } from "../scheduler.js";
 import { type AddCancel } from "../cancel.js";

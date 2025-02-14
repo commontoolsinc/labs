@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { getDoc, type ReactivityLog } from "../src/cell.js";
+import { getDoc } from "../src/doc.js";
+import { type ReactivityLog } from "../src/scheduler.js";
 import {
   type Action,
   addEventHandler,

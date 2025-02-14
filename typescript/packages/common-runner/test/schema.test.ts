@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { getDoc, isCell } from "../src/cell.js";
+import { getDoc } from "../src/doc.js";
+import { isCell } from "../src/cell.js";
 import type { JSONSchema } from "@commontools/builder";
 
 describe("Schema Support", () => {

@@ -1,5 +1,7 @@
-import { isCell, type DocImpl, type DocLink, type ReactivityLog } from "./cell.js";
 import { JSONSchema } from "@commontools/builder";
+import { type DocImpl, type DocLink } from "./doc.js";
+import { isCell } from "./cell.js";
+import { type ReactivityLog } from "./scheduler.js";
 import { followLinks } from "./utils.js";
 
 export function resolveSchema(

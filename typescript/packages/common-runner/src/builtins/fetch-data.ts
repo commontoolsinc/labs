@@ -1,4 +1,5 @@
-import { type DocImpl, getDoc, type ReactivityLog } from "../cell.js";
+import { type DocImpl, getDoc } from "../doc.js";
+import { type ReactivityLog } from "../scheduler.js";
 import { normalizeToCells } from "../utils.js";
 import { type Action, idle } from "../scheduler.js";
 import { refer } from "merkle-reference";
