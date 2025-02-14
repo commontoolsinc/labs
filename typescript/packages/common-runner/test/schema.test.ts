@@ -517,7 +517,7 @@ describe("Schema Support", () => {
       });
 
       it("should work for the vdom schema with $ref", () => {
-        const c = getDoc({
+        const plain = getDoc({
           type: "vnode",
           name: "div",
           props: { style: { color: "red" } },
@@ -527,6 +527,28 @@ describe("Schema Support", () => {
               { type: "text", value: "hello" },
               { type: "text", value: "world" },
             ],
+            "or just text",
+          ],
+        });
+
+        const withLinks = getDoc({
+          type: "vnode",
+          name: "div",
+          props: {
+            style: {
+              cell: getDoc({ color: "red" }),
+              path: [],
+            },
+          },
+          children: [
+            { type: "text", value: "single" },
+            {
+              cell: getDoc([
+                { type: "text", value: "hello" },
+                { cell: getDoc({ type: "text", value: "world" }), path: [] },
+              ]),
+              path: [],
+            },
             "or just text",
           ],
         });
@@ -556,23 +578,25 @@ describe("Schema Support", () => {
           },
         };
 
-        const cell = c.asCell([], undefined, schema);
-        const result = cell.get();
-        expect(result.type).toBe("vnode");
-        expect(result.name).toBe("div");
-        expect(isCell(result.children)).toBe(false);
-        expect(isCell(result.props)).toBe(false);
-        expect(isCell(result.props.style)).toBe(true);
-        expect(result.props.style.get().color).toBe("red");
-        expect(isCell(result.children[0])).toBe(true);
-        expect(result.children[0].get().value).toBe("single");
-        expect(isCell(result.children[1])).toBe(false);
-        expect(isCell(result.children[1][0])).toBe(true);
-        expect(result.children[1][0].get().value).toBe("hello");
-        expect(isCell(result.children[1][1])).toBe(true);
-        expect(result.children[1][1].get().value).toBe("world");
-        expect(isCell(result.children[2])).toBe(true);
-        expect(result.children[2].get()).toBe("or just text");
+        for (const doc of [plain, withLinks]) {
+          const cell = doc.asCell([], undefined, schema);
+          const result = cell.get();
+          expect(result.type).toBe("vnode");
+          expect(result.name).toBe("div");
+          expect(isCell(result.children)).toBe(false);
+          expect(isCell(result.props)).toBe(false);
+          expect(isCell(result.props.style)).toBe(true);
+          expect(result.props.style.get().color).toBe("red");
+          expect(isCell(result.children[0])).toBe(true);
+          expect(result.children[0].get().value).toBe("single");
+          expect(isCell(result.children[1])).toBe(false);
+          expect(isCell(result.children[1][0])).toBe(true);
+          expect(result.children[1][0].get().value).toBe("hello");
+          expect(isCell(result.children[1][1])).toBe(true);
+          expect(result.children[1][1].get().value).toBe("world");
+          expect(isCell(result.children[2])).toBe(true);
+          expect(result.children[2].get()).toBe("or just text");
+        }
       });
     });
   });
