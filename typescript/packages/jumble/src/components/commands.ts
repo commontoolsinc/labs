@@ -236,6 +236,7 @@ export const commands: CommandItem[] = [
         ctx.navigate(newCharmPath);
       }
       ctx.setLoading(false);
+      ctx.setOpen(false);
     },
   },
   {
