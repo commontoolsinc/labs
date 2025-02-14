@@ -9,6 +9,7 @@ import { javascript } from "@codemirror/lang-javascript";
 import { CharmRenderer } from "@/components/CharmRunner";
 import { performIteration } from "@/utils/charm-iteration";
 import { charmId } from "@/utils/charms";
+import { DitheredCube } from "@/components/DitherCube";
 
 type Tab = "iterate" | "code" | "data";
 
@@ -98,8 +99,17 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
             <button
               onClick={handleIterate}
               disabled={loading}
-              className="px-4 py-2 border-2 border-black bg-gray-50 text-black"
+              className="px-4 py-2 border-2 border-black bg-gray-50 text-black flex items-center gap-2"
             >
+              {loading && (
+                <DitheredCube
+                  animationSpeed={2}
+                  width={24}
+                  height={24}
+                  animate={true}
+                  cameraZoom={12}
+                />
+              )}
               {loading ? "Iterating..." : "Iterate"}
             </button>
           </div>
@@ -233,25 +243,22 @@ function CharmEditView() {
       <div className="tabs mb-4 flex gap-2">
         <button
           onClick={() => setActiveTab("iterate")}
-          className={`px-4 py-2 rounded ${
-            activeTab === "iterate" ? "bg-gray-200 font-bold" : "bg-gray-100"
-          }`}
+          className={`px-4 py-2 rounded ${activeTab === "iterate" ? "bg-gray-200 font-bold" : "bg-gray-100"
+            }`}
         >
           Iteration
         </button>
         <button
           onClick={() => setActiveTab("code")}
-          className={`px-4 py-2 rounded ${
-            activeTab === "code" ? "bg-gray-200 font-bold" : "bg-gray-100"
-          }`}
+          className={`px-4 py-2 rounded ${activeTab === "code" ? "bg-gray-200 font-bold" : "bg-gray-100"
+            }`}
         >
           Edit Code
         </button>
         <button
           onClick={() => setActiveTab("data")}
-          className={`px-4 py-2 rounded ${
-            activeTab === "data" ? "bg-gray-200 font-bold" : "bg-gray-100"
-          }`}
+          className={`px-4 py-2 rounded ${activeTab === "data" ? "bg-gray-200 font-bold" : "bg-gray-100"
+            }`}
         >
           View Data
         </button>
