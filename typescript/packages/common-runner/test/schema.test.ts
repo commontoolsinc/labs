@@ -515,6 +515,60 @@ describe("Schema Support", () => {
         const result = cell.get();
         expect(result.data).toBeUndefined();
       });
+
+      it("should work for the vdom schema with $ref", () => {
+        const c = getDoc({
+          type: "vnode",
+          name: "div",
+          props: { style: { color: "red" } },
+          children: [
+            { type: "text", value: "single" },
+            [
+              { type: "text", value: "hello" },
+              { type: "text", value: "world" },
+            ],
+          ],
+        });
+
+        const schema: JSONSchema = {
+          type: "object",
+          properties: {
+            type: { type: "string" },
+            name: { type: "string" },
+            value: { type: "string" },
+            props: {
+              type: "object",
+              additionalProperties: { asCell: true },
+            },
+            children: {
+              type: "array",
+              items: {
+                anyOf: [
+                  { $ref: "#", asCell: true },
+                  { type: "array", items: { $ref: "#", asCell: true } },
+                ],
+              },
+            },
+          },
+        };
+
+        const cell = c.asCell([], undefined, schema);
+        const result = cell.get();
+        expect(result.type).toBe("vnode");
+        expect(result.name).toBe("div");
+        console.log("result", result);
+        expect(isCell(result.children)).toBe(false);
+        expect(isCell(result.props)).toBe(false);
+        expect(isCell(result.props.style)).toBe(true);
+        expect(result.props.style.get().color).toBe("red");
+        expect(isCell(result.children[0])).toBe(true);
+        expect(result.children[0].get().value).toBe("single");
+        expect(isCell(result.children[1])).toBe(false);
+        expect(isCell(result.children[1][0])).toBe(true);
+        expect(result.children[1][0].get().value).toBe("hello");
+        expect(isCell(result.children[1][1])).toBe(true);
+        expect(result.children[1][1].get().value).toBe("world");
+      });
     });
   });
 });

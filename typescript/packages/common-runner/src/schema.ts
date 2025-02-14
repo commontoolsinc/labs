@@ -1,10 +1,11 @@
-import { type DocImpl, type DocLink, type ReactivityLog } from "./cell.js";
+import { isCell, type DocImpl, type DocLink, type ReactivityLog } from "./cell.js";
 import { JSONSchema } from "@commontools/builder";
 import { followLinks } from "./utils.js";
 
 export function resolveSchema(
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined = schema,
+  filterAsCell = false,
 ): JSONSchema | undefined {
   // Treat undefined/null/{} or any other non-object as no schema
   if (typeof schema !== "object" || schema === null || Object.keys(schema).length === 0)
@@ -15,7 +16,7 @@ export function resolveSchema(
   // Remove asCell flag from schema, so it's describing the destination
   // schema. That means we can't describe a schema that points to top-level
   // references, but that's on purpose.
-  if (schema.asCell && resolvedSchema?.asCell) {
+  if (schema.asCell && resolvedSchema?.asCell && filterAsCell) {
     resolvedSchema = { ...resolvedSchema };
     delete resolvedSchema.asCell;
   }
@@ -44,12 +45,20 @@ export function validateAndTransform(
 ): any {
   if (seen.length > 100) debugger;
 
-  const resolvedSchema = resolveSchema(schema, rootSchema);
+  const resolvedSchema = resolveSchema(schema, rootSchema, true);
 
   // If this should be a reference, return as a Cell of resolvedSchema
   // NOTE: Need to check on the passed schema whether it's a reference, not the
   // resolved schema. The returned reference is of type resolvedSchema though.
-  if (typeof schema === "object" && schema !== null && schema!.asCell)
+  // anyOf gets handled here if all options are cells, so we don't read the
+  // data. Below we handle the case where some options are meant to be cells.
+  if (
+    typeof schema === "object" &&
+    schema !== null &&
+    (schema!.asCell ||
+      (Array.isArray(resolvedSchema?.anyOf) &&
+        resolvedSchema.anyOf.every((option) => option.asCell)))
+  )
     return doc.asCell(path, log, resolvedSchema);
 
   // If there is no schema, return as raw data via query result proxy
@@ -61,10 +70,16 @@ export function validateAndTransform(
 
   // TODO: The behavior when one of the options is very permissive (e.g. no type
   // or an object that allows any props) is not well defined.
-  if (resolvedSchema.anyOf && Array.isArray(resolvedSchema.anyOf)) {
+  if (Array.isArray(resolvedSchema.anyOf)) {
     const options = resolvedSchema.anyOf
-      .map((option) => resolveSchema(option, rootSchema))
+      .map((option) => {
+        const resolved = resolveSchema(option, rootSchema);
+        if (option.asCell) return { ...resolved, asCell: true };
+        else return resolved;
+      })
       .filter((option) => option !== undefined);
+
+    console.log("options", options);
 
     // If the value is an object (but not an array), only consider branches with type "object"
     if (Array.isArray(value)) {
@@ -91,6 +106,21 @@ export function validateAndTransform(
         seen.slice(0, -1),
       );
     } else if (typeof value === "object" && value !== null) {
+      let objectCandidates = options.filter((option) => option.type === "object");
+      const numAsCells = objectCandidates.filter((option) => option.asCell).length;
+
+      if (numAsCells > 2) {
+        const optionsWithoutAsCell = objectCandidates.map((option) => {
+          const {
+            asCell: {},
+            ...rest
+          } = option as any;
+          return rest;
+        });
+        objectCandidates = objectCandidates.filter((option) => !option.asCell);
+        objectCandidates.push({ anyOf: optionsWithoutAsCell });
+      }
+
       // Run extraction for each union branch.
       const candidates = options
         .filter((option) => option.type === "object")
@@ -99,19 +129,13 @@ export function validateAndTransform(
           result: validateAndTransform(doc, path, option, log, rootSchema, seen.slice(0, -1)),
         }));
 
-      const objectCandidates = candidates.filter((candidate) => {
-        const optionResolved = resolveSchema(candidate.schema, rootSchema);
-        return optionResolved?.type === "object";
-      });
-
-      if (objectCandidates.length === 0) return undefined;
+      if (candidates.length === 0) return undefined;
 
       // Merge all the object extractions
       let merged: Record<string, any> = {};
-      for (const { result } of objectCandidates) {
-        if (typeof result === "object" && result !== null) {
-          merged = { ...merged, ...result };
-        }
+      for (const { result } of candidates) {
+        if (isCell(result)) return result; // TODO: Complain if it's a mix of cells and non-cells?
+        if (typeof result === "object" && result !== null) merged = { ...merged, ...result };
       }
       return merged;
     } else {
