@@ -64,16 +64,19 @@ export function run<T, R>(
   recipeFactory?: NodeFactory<T, R>,
   argument?: T,
   resultCell?: DocImpl<R>,
+  description?: string,
 ): DocImpl<R>;
 export function run<T, R = any>(
   recipe?: Recipe | Module,
   argument?: T,
   resultCell?: DocImpl<R>,
+  description?: string,
 ): DocImpl<R>;
 export function run<T, R = any>(
   recipeOrModule?: Recipe | Module,
   argument?: T,
   resultCell: DocImpl<R> = getDoc<R>(),
+  description?: string,
 ): DocImpl<R> {
   if (cancels.has(resultCell)) {
     // If it's already running and no new recipe or argument are given,
@@ -103,6 +106,7 @@ export function run<T, R = any>(
     processCell = resultCell.sourceCell;
     // TODO: Allow keeping of previous argument but still supply defaults
     argument = argument ?? (processCell.get()?.argument as T);
+    description = processCell.get()?.description;
   } else {
     processCell = getDoc();
     resultCell.sourceCell = processCell;
@@ -189,6 +193,7 @@ export function run<T, R = any>(
   processCell.send({
     [TYPE]: recipeId ?? addRecipe(recipe),
     argument,
+    description,
     ...(internal ? { internal: deepCopy(internal) } : {}),
     resultRef: { cell: resultCell, path: [] },
   });
