@@ -94,6 +94,7 @@ export function run<T, R = any>(
   let processCell: DocImpl<{
     [TYPE]: string;
     argument?: T;
+    description?: string;
     internal?: { [key: string]: any };
     resultRef: { cell: DocImpl<R>; path: PropertyKey[] };
   }>;

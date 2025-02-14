@@ -1,6 +1,6 @@
 import { useCell } from "@/hooks/use-cell";
 import { NavLink } from "react-router-dom";
-import { NAME, UI } from "@commontools/builder";
+import { NAME } from "@commontools/builder";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { castNewRecipe } from "@commontools/charm";
 import { charmId } from "@/utils/charms";
@@ -59,7 +59,7 @@ export default function CharmList() {
                 </h3>
                 <div className="w-full bg-gray-50 rounded border border-gray-100 p-3">
                   <pre className="w-full h-24 overflow-hidden whitespace-pre-wrap text-xs text-gray-500">
-                    {JSON.stringify(charm.cell.get()?.[UI], null, 2)}
+                    {charm.cell.sourceCell?.get()?.['description']}
                   </pre>
                 </div>
               </div>

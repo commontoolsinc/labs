@@ -12,24 +12,6 @@ interface IndexingContext {
 }
 
 const CONCURRENT_LIMIT = 3;
-async function saveToMemory(space: string, entity: string, data: any, contentType: string = "application/json"): Promise<Response> {
-  return fetch("/api/storage/memory", {
-    method: "PATCH",
-    headers: {
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      [space]: {
-        assert: {
-          the: contentType,
-          of: entity,
-          is: data
-        }
-      }
-    })
-  });
-}
-
 
 async function indexCharm(
   charm: any,
@@ -53,7 +35,8 @@ async function indexCharm(
     context.addJobMessage(jobId, response);
     console.log(stringified, response);
 
-    await saveToMemory(replica, charmId(charm), response, 'text/plain;variant=description');
+    // note(ja): add the description back to the charm's processCell (not result)
+    charm.cell.sourceCell.setAtPath(['description'], response);
 
     await new Promise(resolve => setTimeout(resolve, 200)); // Simulate work
     context.addJobMessage(jobId, `✓ Indexed charm ${charmId(charm)}`);
