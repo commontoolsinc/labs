@@ -11,7 +11,7 @@ import {
 import { JSONSchema } from "@commontools/builder";
 import * as logger from "./logger.js";
 
-const schema: JSONSchema = {
+const vdomSchema: JSONSchema = {
   type: "object",
   properties: {
     type: { type: "string" },
@@ -33,12 +33,12 @@ const schema: JSONSchema = {
       },
     },
   },
-};
+} as const;
 
 /** Render a view into a parent element */
 export const render = (parent: HTMLElement, view: VNode | Cell<VNode>): Cancel => {
   // If this is a reactive cell, ensure the schema is VNode
-  if (isCell(view)) view = view.asSchema(schema);
+  if (isCell(view)) view = view.asSchema(vdomSchema);
   return effect(view, (view: VNode) => renderImpl(parent, view));
 };
 
