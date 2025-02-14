@@ -14,6 +14,9 @@ import CharmShowView from "@/views/CharmShowView";
 import CharmDetailView from "@/views/CharmDetailView";
 import { LanguageModelProvider } from "./contexts/LanguageModelContext";
 import { BackgroundTaskProvider } from "./contexts/BackgroundTaskContext";
+import { setupIframe } from "./iframe-ctx";
+
+setupIframe();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
