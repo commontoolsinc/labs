@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useAudioRecorder } from '@/hooks/use-audio-recorder';
 import { CommandContext, CommandItem } from './commands';
+import { DitheredCube } from './DitherCube';
 
 interface TranscribeInputProps {
   mode: { command: CommandItem; placeholder: string };
@@ -46,11 +47,14 @@ export function TranscribeInput({ mode, context }: TranscribeInputProps) {
 
   return (
     <div className="flex items-center justify-center p-2 gap-2">
-      <span className="text-sm text-red-500 animate-pulse">
+      <span className={`text-sm ${isRecording ? 'text-red-500 animate-pulse' : ''}`}>
         {isRecording ? (
           <>🎤 Recording... {recordingSeconds}s</>
         ) : isTranscribing ? (
-          <>✍️ Transcribing...</>
+          <div className="flex items-center gap-2">
+            <DitheredCube width={24} height={24} animate animationSpeed={2} cameraZoom={12} />
+            <span>Transcribing...</span>
+          </div>
         ) : null}
       </span>
       {isRecording && (
