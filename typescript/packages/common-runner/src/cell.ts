@@ -9,7 +9,7 @@ import {
 import { followAliases, followLinks } from "./utils.js";
 import { queueEvent, subscribe, type ReactivityLog } from "./scheduler.js";
 import { type EntityId, getEntityId } from "./cell-map.js";
-import { type Cancel } from "./cancel.js";
+import { type Cancel, isCancel, useCancelGroup } from "./cancel.js";
 import { validateAndTransform } from "./schema.js";
 
 /**
@@ -65,8 +65,8 @@ export interface Cell<T> {
       | DocImpl<T extends Array<infer U> ? U : any>
       | DocLink,
   ): void;
-  sink(callback: (value: T) => void): () => void;
-  updates(callback: (value: T) => void): () => void;
+  sink(callback: (value: T) => Cancel | undefined): Cancel;
+  updates(callback: (value: T) => Cancel | undefined): Cancel;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
   asSchema(schema: JSONSchema): Cell<T>;
   getAsQueryResult<Path extends PropertyKey[]>(
@@ -85,8 +85,8 @@ export interface Cell<T> {
 
 export interface Stream<T> {
   send(event: T): void;
-  sink(callback: (event: T) => void): () => void;
-  updates(callback: (event: T) => void): () => void;
+  sink(callback: (event: T) => Cancel | undefined): Cancel;
+  updates(callback: (event: T) => Cancel | undefined): Cancel;
   [isStreamMarker]: true;
 }
 
@@ -141,19 +141,26 @@ export function createCell<T>(
 }
 
 function createStreamCell<T>(doc: DocImpl<any>, path: PropertyKey[]): Stream<T> {
-  const listeners = new Set<(event: T) => void>();
+  const listeners = new Set<(event: T) => Cancel | undefined>();
+
+  let cleanup: Cancel | undefined;
 
   const self: Stream<T> = {
     // Implementing just the subset of Cell<T> that is needed for streams.
     send: (event: T) => {
       queueEvent({ cell: doc, path }, event);
-      listeners.forEach((callback) => callback(event));
+
+      cleanup?.();
+      const [cancel, addCancel] = useCancelGroup();
+      cleanup = cancel;
+
+      listeners.forEach((callback) => addCancel(callback(event)));
     },
-    sink: (callback: (value: T) => void): Cancel => {
+    sink: (callback: (value: T) => Cancel | undefined): Cancel => {
       listeners.add(callback);
       return () => listeners.delete(callback);
     },
-    updates: (callback: (value: T) => void): Cancel => self.sink(callback),
+    updates: (callback: (value: T) => Cancel | undefined): Cancel => self.sink(callback),
     [isStreamMarker]: true,
   } satisfies Stream<T>;
 
@@ -209,9 +216,9 @@ function createRegularCell<T>(
 
       doc.setAtPath(path, [...array, value], log);
     },
-    sink: (callback: (value: T) => void) =>
+    sink: (callback: (value: T) => Cancel | undefined) =>
       subscribeToReferencedDocs(doc, path, schema, callback, true),
-    updates: (callback: (value: T) => void) =>
+    updates: (callback: (value: T) => Cancel | undefined) =>
       subscribeToReferencedDocs(doc, path, schema, callback, false),
     key: <K extends keyof T>(key: K) => {
       const currentSchema =
@@ -253,7 +260,7 @@ function subscribeToReferencedDocs<T>(
   doc: DocImpl<any>,
   path: PropertyKey[],
   schema: JSONSchema | undefined,
-  callback: (value: T) => void,
+  callback: (value: T) => Cancel | undefined,
   callCallbackOnFirstRun: boolean,
 ): Cancel {
   const initialLog = { reads: [], writes: [] } satisfies ReactivityLog;
@@ -262,15 +269,19 @@ function subscribeToReferencedDocs<T>(
   const value = validateAndTransform(doc, path, schema, initialLog) as T;
 
   // Subscribe to the docs that are read (via logs), call callback on next change.
-  const cancel = subscribe(
-    (log) => callback(validateAndTransform(doc, path, schema, log) as T),
-    initialLog,
-  );
+  let cleanup: Cancel | undefined;
+  const cancel = subscribe((log) => {
+    if (isCancel(cleanup)) cleanup();
+    cleanup = callback(validateAndTransform(doc, path, schema, log) as T);
+  }, initialLog);
 
-  // Call the callback once with initial valueif requested.
-  if (callCallbackOnFirstRun) callback(value);
+  // Call the callback once with initial value if requested.
+  if (callCallbackOnFirstRun) cleanup = callback(value);
 
-  return cancel;
+  return () => {
+    cancel();
+    if (isCancel(cleanup)) cleanup();
+  };
 }
 
 /**
