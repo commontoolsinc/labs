@@ -1,4 +1,3 @@
-import { Command } from "cmdk";
 import "./commands.css";
 import { castNewRecipe, Charm, CharmManager, compileAndRunRecipe } from "@commontools/charm";
 import { NavigateFunction } from "react-router-dom";
@@ -25,16 +24,19 @@ export interface CommandItem {
   predicate?: boolean; // Can be computed value instead of function
 }
 
-export function getTitle(title: string | ((context: CommandContext) => string), context: CommandContext): string {
-  return typeof title === 'function' ? title(context) : title;
+export function getTitle(
+  title: string | ((context: CommandContext) => string),
+  context: CommandContext,
+): string {
+  return typeof title === "function" ? title(context) : title;
 }
 
 export function getChildren(
   children: CommandItem[] | ((context: CommandContext) => CommandItem[]) | undefined,
-  context: CommandContext
+  context: CommandContext,
 ): CommandItem[] {
   if (!children) return [];
-  return typeof children === 'function' ? children(context) : children;
+  return typeof children === "function" ? children(context) : children;
 }
 
 export interface CommandContext {
@@ -121,7 +123,7 @@ async function handleSearchCharms(deps: CommandContext) {
     const results = await Promise.all(
       charms.map(async (charm) => {
         const data = charm.cell.get();
-        const title = data?.[NAME] ?? 'Untitled';
+        const title = data?.[NAME] ?? "Untitled";
         return {
           title: title + ` (#${charmId(charm.cell.entityId!).slice(-4)})`,
           id: charmId(charm.cell.entityId!),
@@ -248,16 +250,16 @@ async function handleStartCounterJob(deps: CommandContext) {
   console.log("Started counter job with ID:", jobId);
 
   const interval = setInterval(() => {
-    const job = deps.listJobs().find(j => j.id === jobId);
+    const job = deps.listJobs().find((j) => j.id === jobId);
     console.log("Current job state:", job);
 
-    if (!job || job.status !== 'running') {
+    if (!job || job.status !== "running") {
       console.log("Job stopped or not found, clearing interval");
       clearInterval(interval);
       return;
     }
 
-    const currentCount = parseInt(job.messages[job.messages.length - 1]?.split(': ')[1] || '0');
+    const currentCount = parseInt(job.messages[job.messages.length - 1]?.split(": ")[1] || "0");
     const newCount = currentCount + 1;
     console.log("Updating count from", currentCount, "to", newCount);
 
@@ -380,254 +382,263 @@ async function handleIndexCharms(deps: CommandContext) {
 }
 
 export function getCommands(deps: CommandContext): CommandItem[] {
-  return [{
-    id: "new-charm",
-    type: "input",
-    title: "New Charm",
-    group: "Create",
-    handler: (input) => handleNewCharm(deps, input),
-  },
-  {
-    id: "search-charms",
-    type: "action",
-    title: "Search Charms",
-    group: "Navigation",
-    handler: () => handleSearchCharms(deps),
-  },
-  {
-    id: "spellcaster",
-    type: "input",
-    title: "Spellcaster",
-    group: "Create",
-    predicate: !!deps.focusedReplicaId,
-    handler: (input) => handleSpellcaster(deps, input),
-  },
-  {
-    id: "edit-recipe",
-    type: "input",
-    title: `Iterate${deps.preferredModel ? ` (${deps.preferredModel})` : ""}`,
-    group: "Edit",
-    predicate: !!deps.focusedCharmId,
-    placeholder: "What would you like to change?",
-    handler: (input) => handleEditRecipe(deps, input),
-  },
-  {
-    id: "delete-charm",
-    type: "confirm",
-    title: "Delete Charm",
-    group: "Edit",
-    predicate: !!deps.focusedCharmId,
-    message: "Are you sure you want to delete this charm?",
-    handler: () => handleDeleteCharm(deps),
-  },
-  {
-    id: "view-detail",
-    type: "action",
-    title: "View Detail",
-    group: "View",
-    predicate: !!deps.focusedCharmId,
-    handler: () => {
-      if (!deps.focusedCharmId) {
-        deps.setOpen(false);
-        return;
-      }
-      deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}/detail`);
-      deps.setOpen(false);
+  return [
+    {
+      id: "new-charm",
+      type: "input",
+      title: "New Charm",
+      group: "Create",
+      handler: (input) => handleNewCharm(deps, input),
     },
-  },
-  {
-    id: "edit-code",
-    type: "action",
-    title: "Edit Code",
-    group: "View",
-    predicate: !!deps.focusedCharmId,
-    handler: () => {
-      if (!deps.focusedCharmId) {
-        deps.setOpen(false);
-        return;
-      }
-      deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}/detail#code`);
-      deps.setOpen(false);
+    {
+      id: "search-charms",
+      type: "action",
+      title: "Search Charms",
+      group: "Navigation",
+      handler: () => handleSearchCharms(deps),
     },
-  },
-  {
-    id: "view-data",
-    type: "action",
-    title: "View Backing Data",
-    group: "View",
-    predicate: !!deps.focusedCharmId,
-    handler: () => {
-      if (!deps.focusedCharmId) {
-        deps.setOpen(false);
-        return;
-      }
-      deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}/detail#data`);
-      deps.setOpen(false);
+    {
+      id: "spellcaster",
+      type: "input",
+      title: "Spellcaster",
+      group: "Create",
+      predicate: !!deps.focusedReplicaId,
+      handler: (input) => handleSpellcaster(deps, input),
     },
-  },
-  {
-    id: "view-charm",
-    type: "action",
-    title: "View Charm",
-    group: "View",
-    predicate: !!deps.focusedCharmId,
-    handler: () => {
-      if (!deps.focusedCharmId) {
-        deps.setOpen(false);
-        return;
-      }
-      deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}`);
-      deps.setOpen(false);
+    {
+      id: "edit-recipe",
+      type: "input",
+      title: `Iterate${deps.preferredModel ? ` (${deps.preferredModel})` : ""}`,
+      group: "Edit",
+      predicate: !!deps.focusedCharmId,
+      placeholder: "What would you like to change?",
+      handler: (input) => handleEditRecipe(deps, input),
     },
-  },
-  {
-    id: "back",
-    type: "action",
-    title: "Navigate Back",
-    group: "Navigation",
-    handler: () => {
-      window.history.back();
-      deps.setOpen(false);
+    {
+      id: "delete-charm",
+      type: "confirm",
+      title: "Delete Charm",
+      group: "Edit",
+      predicate: !!deps.focusedCharmId,
+      message: "Are you sure you want to delete this charm?",
+      handler: () => handleDeleteCharm(deps),
     },
-  },
-  {
-    id: "home",
-    type: "action",
-    title: "Navigate Home",
-    group: "Navigation",
-    predicate: !!deps.focusedReplicaId,
-    handler: () => {
-      if (deps.focusedReplicaId) {
-        deps.navigate(`/${deps.focusedReplicaId}`);
-      }
-      deps.setOpen(false);
-    },
-  },
-  {
-    id: "advanced",
-    type: "menu",
-    title: "Advanced",
-    children: [
-      {
-        id: "start-counter-job",
-        type: "action",
-        title: "Start Counter Job",
-        handler: () => handleStartCounterJob(deps),
-      },
-      {
-        id: "index-charms",
-        type: "action",
-        title: "Index Charms",
-        handler: () => handleIndexCharms(deps),
-      },
-      {
-        id: "import-json",
-        type: "action",
-        title: "Import JSON",
-        handler: () => handleImportJSON(deps),
-      },
-      {
-        id: "load-recipe",
-        type: "action",
-        title: "Load Recipe",
-        handler: () => handleLoadRecipe(deps),
-      },
-      {
-        id: "switch-replica",
-        type: "input",
-        title: "Switch Replica",
-        placeholder: "Enter replica name",
-        handler: (input) => {
-          if (input) {
-            window.location.href = `/${input}`;
-          }
+    {
+      id: "view-detail",
+      type: "action",
+      title: "View Detail",
+      group: "View",
+      predicate: !!deps.focusedCharmId,
+      handler: () => {
+        if (!deps.focusedCharmId) {
           deps.setOpen(false);
-        },
+          return;
+        }
+        deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}/detail`);
+        deps.setOpen(false);
       },
-    ],
-  },
-  {
-    id: "select-model",
-    type: "action",
-    title: "Select AI Model",
-    group: "Settings",
-    handler: () => handleSelectModel(deps),
-  },
-  {
-    id: "edit-recipe-voice",
-    type: "transcribe",
-    title: `Iterate (Voice)${deps.preferredModel ? ` (${deps.preferredModel})` : ""}`,
-    group: "Edit",
-    predicate: !!deps.focusedCharmId,
-    handler: async (transcription) => {
-      if (!transcription) return;
-
-      const commands = getCommands(deps);
-      const editRecipeCommand = commands.find(cmd => cmd.id === "edit-recipe")!;
-
-      deps.setModeWithInput({
-        type: "input",
-        command: editRecipeCommand,
-        placeholder: "What would you like to change?",
-        preserveInput: true
-      }, transcription);
     },
-  },
-  {
-    id: "background-jobs",
-    type: "menu",
-    title: `Background Jobs (${deps.listJobs().length})`,
-    group: "View",
-    children: [
-      ...deps.listJobs().map((job): CommandItem => ({
-        id: `job-${job.id}`,
-        type: "menu",
-        title: `${job.name} (${job.status})`,
-        children: [
-          {
-            id: `job-${job.id}-toggle`,
-            type: "action",
-            title: job.status === 'running' ? "Pause" : "Resume",
-            handler: async () => {
-              if (job.status === 'running') {
-                deps.stopJob(job.id);
-              } else {
-                // deps.resumeJob(job.id);
-              }
-              deps.setMode({ type: "main" });
-            },
-          },
-          {
-            id: `job-${job.id}-cancel`,
-            type: "action",
-            title: "Stop",
-            handler: async () => {
-              deps.stopJob(job.id);
-              deps.setMode({ type: "main" });
-            },
-          },
-          {
-            id: `job-${job.id}-messages`,
-            type: "menu",
-            title: "View Messages",
-            children: job.messages.map((msg, i): CommandItem => ({
-              id: `msg-${job.id}-${i}`,
-              type: "action",
-              title: msg,
-              handler: () => {}
-            })),
-          },
-        ],
-      })),
-      {
-        id: "clear-completed-jobs",
-        type: "action",
-        title: "Clear Completed Jobs",
-        handler: async () => {
-          // deps.clearCompletedJobs();
-          deps.setMode({ type: "main" });
-        },
+    {
+      id: "edit-code",
+      type: "action",
+      title: "Edit Code",
+      group: "View",
+      predicate: !!deps.focusedCharmId,
+      handler: () => {
+        if (!deps.focusedCharmId) {
+          deps.setOpen(false);
+          return;
+        }
+        deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}/detail#code`);
+        deps.setOpen(false);
       },
-    ],
-  }];
+    },
+    {
+      id: "view-data",
+      type: "action",
+      title: "View Backing Data",
+      group: "View",
+      predicate: !!deps.focusedCharmId,
+      handler: () => {
+        if (!deps.focusedCharmId) {
+          deps.setOpen(false);
+          return;
+        }
+        deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}/detail#data`);
+        deps.setOpen(false);
+      },
+    },
+    {
+      id: "view-charm",
+      type: "action",
+      title: "View Charm",
+      group: "View",
+      predicate: !!deps.focusedCharmId,
+      handler: () => {
+        if (!deps.focusedCharmId) {
+          deps.setOpen(false);
+          return;
+        }
+        deps.navigate(`/${deps.focusedReplicaId}/${deps.focusedCharmId}`);
+        deps.setOpen(false);
+      },
+    },
+    {
+      id: "back",
+      type: "action",
+      title: "Navigate Back",
+      group: "Navigation",
+      handler: () => {
+        window.history.back();
+        deps.setOpen(false);
+      },
+    },
+    {
+      id: "home",
+      type: "action",
+      title: "Navigate Home",
+      group: "Navigation",
+      predicate: !!deps.focusedReplicaId,
+      handler: () => {
+        if (deps.focusedReplicaId) {
+          deps.navigate(`/${deps.focusedReplicaId}`);
+        }
+        deps.setOpen(false);
+      },
+    },
+    {
+      id: "advanced",
+      type: "menu",
+      title: "Advanced",
+      children: [
+        {
+          id: "start-counter-job",
+          type: "action",
+          title: "Start Counter Job",
+          handler: () => handleStartCounterJob(deps),
+        },
+        {
+          id: "index-charms",
+          type: "action",
+          title: "Index Charms",
+          handler: () => handleIndexCharms(deps),
+        },
+        {
+          id: "import-json",
+          type: "action",
+          title: "Import JSON",
+          handler: () => handleImportJSON(deps),
+        },
+        {
+          id: "load-recipe",
+          type: "action",
+          title: "Load Recipe",
+          handler: () => handleLoadRecipe(deps),
+        },
+        {
+          id: "switch-replica",
+          type: "input",
+          title: "Switch Replica",
+          placeholder: "Enter replica name",
+          handler: (input) => {
+            if (input) {
+              window.location.href = `/${input}`;
+            }
+            deps.setOpen(false);
+          },
+        },
+      ],
+    },
+    {
+      id: "select-model",
+      type: "action",
+      title: "Select AI Model",
+      group: "Settings",
+      handler: () => handleSelectModel(deps),
+    },
+    {
+      id: "edit-recipe-voice",
+      type: "transcribe",
+      title: `Iterate (Voice)${deps.preferredModel ? ` (${deps.preferredModel})` : ""}`,
+      group: "Edit",
+      predicate: !!deps.focusedCharmId,
+      handler: async (transcription) => {
+        if (!transcription) return;
+
+        const commands = getCommands(deps);
+        const editRecipeCommand = commands.find((cmd) => cmd.id === "edit-recipe")!;
+
+        deps.setModeWithInput(
+          {
+            type: "input",
+            command: editRecipeCommand,
+            placeholder: "What would you like to change?",
+            preserveInput: true,
+          },
+          transcription,
+        );
+      },
+    },
+    {
+      id: "background-jobs",
+      type: "menu",
+      title: `Background Jobs (${deps.listJobs().length})`,
+      group: "Other",
+      children: [
+        ...deps.listJobs().map(
+          (job): CommandItem => ({
+            id: `job-${job.id}`,
+            type: "menu",
+            title: `${job.name} (${job.status})`,
+            children: [
+              {
+                id: `job-${job.id}-toggle`,
+                type: "action",
+                title: job.status === "running" ? "Pause" : "Resume",
+                handler: async () => {
+                  if (job.status === "running") {
+                    deps.stopJob(job.id);
+                  } else {
+                    // deps.resumeJob(job.id);
+                  }
+                  deps.setMode({ type: "main" });
+                },
+              },
+              {
+                id: `job-${job.id}-cancel`,
+                type: "action",
+                title: "Stop",
+                handler: async () => {
+                  deps.stopJob(job.id);
+                  deps.setMode({ type: "main" });
+                },
+              },
+              {
+                id: `job-${job.id}-messages`,
+                type: "menu",
+                title: "View Messages",
+                children: job.messages.map(
+                  (msg, i): CommandItem => ({
+                    id: `msg-${job.id}-${i}`,
+                    type: "action",
+                    title: msg,
+                    handler: () => {},
+                  }),
+                ),
+              },
+            ],
+          }),
+        ),
+        {
+          id: "clear-completed-jobs",
+          type: "action",
+          title: "Clear Completed Jobs",
+          handler: async () => {
+            // deps.clearCompletedJobs();
+            deps.setMode({ type: "main" });
+          },
+        },
+      ],
+    },
+  ];
 }
