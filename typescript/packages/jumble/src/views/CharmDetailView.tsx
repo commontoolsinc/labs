@@ -104,8 +104,8 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
               {loading && (
                 <DitheredCube
                   animationSpeed={2}
-                  width={40}
-                  height={40}
+                  width={24}
+                  height={24}
                   animate={true}
                   cameraZoom={12}
                 />
