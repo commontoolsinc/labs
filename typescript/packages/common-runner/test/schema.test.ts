@@ -527,6 +527,7 @@ describe("Schema Support", () => {
               { type: "text", value: "hello" },
               { type: "text", value: "world" },
             ],
+            "or just text",
           ],
         });
 
@@ -545,6 +546,9 @@ describe("Schema Support", () => {
               items: {
                 anyOf: [
                   { $ref: "#", asCell: true },
+                  { type: "string", asCell: true },
+                  { type: "number", asCell: true },
+                  { type: "boolean", asCell: true },
                   { type: "array", items: { $ref: "#", asCell: true } },
                 ],
               },
@@ -556,7 +560,6 @@ describe("Schema Support", () => {
         const result = cell.get();
         expect(result.type).toBe("vnode");
         expect(result.name).toBe("div");
-        console.log("result", result);
         expect(isCell(result.children)).toBe(false);
         expect(isCell(result.props)).toBe(false);
         expect(isCell(result.props.style)).toBe(true);
@@ -568,6 +571,8 @@ describe("Schema Support", () => {
         expect(result.children[1][0].get().value).toBe("hello");
         expect(isCell(result.children[1][1])).toBe(true);
         expect(result.children[1][1].get().value).toBe("world");
+        expect(isCell(result.children[2])).toBe(true);
+        expect(result.children[2].get()).toBe("or just text");
       });
     });
   });
