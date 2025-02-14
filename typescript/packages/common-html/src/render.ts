@@ -1,12 +1,11 @@
 import { isVNode, VNode, Props, Child } from "./jsx.js";
 import {
   effect,
-  isSendable,
-  isReactive,
   useCancelGroup,
   type Cancel,
   type Cell,
   isCell,
+  isStream,
 } from "@commontools/runner";
 import { JSONSchema } from "@commontools/builder";
 import * as logger from "./logger.js";
@@ -89,42 +88,12 @@ const bindChildren = (element: HTMLElement, children: Array<Child>): Cancel => {
       if (childElement) {
         element.append(childElement);
       }
-    } else if (isReactive(child)) {
-      // Bind dynamic content
-      const replacement = child;
+    } else if (isCell(child)) {
       // Anchor for reactive replacement
       let anchor: ChildNode = document.createTextNode("");
-      let endAnchor: ChildNode | undefined = undefined;
       element.append(anchor);
-      const replace = (replacement: any) => {
-        if (isReactive(replacement)) {
-          const cancel = effect(replacement, replace);
-          addCancel(cancel);
-        } else if (Array.isArray(replacement)) {
-          // TODO: Probably should move this up and instead only support the
-          // case where all the children are dynamic. That is, call bindChildren
-          // again from effect.
-
-          // For now a dumb version that replaces the whole list every time
-          while (endAnchor && anchor.nextSibling !== endAnchor) {
-            anchor.nextSibling?.remove();
-          }
-          if (!endAnchor) {
-            endAnchor = document.createTextNode("");
-            anchor.after(endAnchor);
-          }
-
-          // Swap out anchor for each item, so we can use the rest of the code
-          // as if it was a regular node.
-          const originalAnchor = anchor;
-          for (const item of replacement) {
-            const newAnchor = document.createTextNode("");
-            anchor.after(newAnchor);
-            anchor = newAnchor;
-            replace(item);
-          }
-          anchor = originalAnchor;
-        } else if (isVNode(replacement)) {
+      effect(child, (replacement: any) => {
+        if (isVNode(replacement)) {
           const [childElement, cancel] = renderNode(replacement);
           addCancel(cancel);
           if (childElement != null) {
@@ -142,8 +111,7 @@ const bindChildren = (element: HTMLElement, children: Array<Child>): Cancel => {
           anchor.replaceWith(text);
           anchor = text;
         }
-      };
-      replace(replacement);
+      });
     }
   }
   return cancel;
@@ -152,11 +120,11 @@ const bindChildren = (element: HTMLElement, children: Array<Child>): Cancel => {
 const bindProps = (element: HTMLElement, props: Props): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
   for (const [propKey, propValue] of Object.entries(props)) {
-    if (isReactive(propValue) || isSendable(propValue)) {
+    if (isCell(propValue) || isStream(propValue)) {
       const replacement = propValue;
       // If prop is an event, we need to add an event listener
       if (isEventProp(propKey)) {
-        if (!isSendable(replacement)) {
+        if (!isStream(replacement)) {
           throw new TypeError(`Event prop "${propKey}" does not have a send method`);
         }
         const key = cleanEventProp(propKey);

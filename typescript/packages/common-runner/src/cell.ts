@@ -83,6 +83,13 @@ export interface Cell<T> {
   schema?: JSONSchema;
 }
 
+export interface Stream<T> {
+  send(event: T): void;
+  sink(callback: (event: T) => void): () => void;
+  updates(callback: (event: T) => void): () => void;
+  [isStreamMarker]: true;
+}
+
 export function createCell<T>(
   doc: DocImpl<any>,
   path: PropertyKey[] = [],
@@ -129,14 +136,14 @@ export function createCell<T>(
   ref = followLinks(ref, seen, log);
   const isStream = isStreamAlias(ref.cell.getAtPath(ref.path));
 
-  if (isStream) return createStreamCell(ref.cell, ref.path);
+  if (isStream) return createStreamCell(ref.cell, ref.path) as unknown as Cell<T>;
   else return createRegularCell(doc, path, log, schema);
 }
 
-function createStreamCell<T>(doc: DocImpl<any>, path: PropertyKey[]): Cell<T> {
+function createStreamCell<T>(doc: DocImpl<any>, path: PropertyKey[]): Stream<T> {
   const listeners = new Set<(event: T) => void>();
 
-  const self: Cell<T> = {
+  const self: Stream<T> = {
     // Implementing just the subset of Cell<T> that is needed for streams.
     send: (event: T) => {
       queueEvent({ cell: doc, path }, event);
@@ -147,7 +154,8 @@ function createStreamCell<T>(doc: DocImpl<any>, path: PropertyKey[]): Cell<T> {
       return () => listeners.delete(callback);
     },
     updates: (callback: (value: T) => void): Cancel => self.sink(callback),
-  } as Cell<T>;
+    [isStreamMarker]: true,
+  } satisfies Stream<T>;
 
   return self;
 }
@@ -276,3 +284,9 @@ export function isCell(value: any): value is Cell<any> {
 }
 
 const isCellMarker = Symbol("isCell");
+
+export function isStream(value: any): value is Stream<any> {
+  return typeof value === "object" && value !== null && value[isStreamMarker] === true;
+}
+
+const isStreamMarker = Symbol("isStream");
