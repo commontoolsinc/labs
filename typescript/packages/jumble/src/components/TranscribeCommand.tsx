@@ -1,7 +1,7 @@
-import { useEffect } from 'react';
-import { useAudioRecorder } from '@/hooks/use-audio-recorder';
-import { CommandContext, CommandItem } from './commands';
-import { DitheredCube } from './DitherCube';
+import { useEffect } from "react";
+import { useAudioRecorder } from "@/hooks/use-audio-recorder";
+import { CommandContext, CommandItem } from "./commands";
+import { DitheredCube } from "./DitherCube";
 
 interface TranscribeInputProps {
   mode: { command: CommandItem; placeholder: string };
@@ -9,20 +9,15 @@ interface TranscribeInputProps {
 }
 
 export function TranscribeInput({ mode, context }: TranscribeInputProps) {
-  const {
-    isRecording,
-    isTranscribing,
-    recordingSeconds,
-    startRecording,
-    stopRecording
-  } = useAudioRecorder({
-    transcribe: true,
-    onRecording: (recording) => {
-      if (recording.transcription) {
-        mode.command.handler?.(context, recording.transcription);
-      }
-    }
-  });
+  const { isRecording, isTranscribing, recordingSeconds, startRecording, stopRecording } =
+    useAudioRecorder({
+      transcribe: true,
+      onRecording: (recording) => {
+        if (recording.transcription) {
+          mode.command.handler?.(recording.transcription);
+        }
+      },
+    });
 
   // Single effect to start recording once
   useEffect(() => {
@@ -47,7 +42,7 @@ export function TranscribeInput({ mode, context }: TranscribeInputProps) {
 
   return (
     <div className="flex items-center justify-center p-2 gap-2">
-      <span className={`text-sm ${isRecording ? 'text-red-500 animate-pulse' : ''}`}>
+      <span className={`text-sm ${isRecording ? "text-red-500 animate-pulse" : ""}`}>
         {isRecording ? (
           <>🎤 Recording... {recordingSeconds}s</>
         ) : isTranscribing ? (
@@ -58,9 +53,7 @@ export function TranscribeInput({ mode, context }: TranscribeInputProps) {
         ) : null}
       </span>
       {isRecording && (
-        <span className="text-xs text-gray-500">
-          Press Enter when done, Esc to cancel
-        </span>
+        <span className="text-xs text-gray-500">Press Enter when done, Esc to cancel</span>
       )}
     </div>
   );

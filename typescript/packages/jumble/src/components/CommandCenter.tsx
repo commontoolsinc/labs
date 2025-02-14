@@ -6,7 +6,15 @@ import { useMatch, useNavigate } from "react-router-dom";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
 import { DitheredCube } from "./DitherCube";
-import { CommandContext, CommandItem, CommandMode, commands, getChildren, getCommands, getTitle } from "./commands";
+import {
+  CommandContext,
+  CommandItem,
+  CommandMode,
+  commands,
+  getChildren,
+  getCommands,
+  getTitle,
+} from "./commands";
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext";
 import { TranscribeInput } from "./TranscribeCommand";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext";
@@ -38,7 +46,7 @@ function CommandProcessor({
 
     case "confirm":
       return (
-        <Command.Group heading={'Confirm'}>
+        <Command.Group heading={"Confirm"}>
           <Command.Item value="yes" onSelect={() => mode.command.handler?.(context)}>
             Yes
           </Command.Item>
@@ -89,63 +97,70 @@ export function CommandCenter() {
   const focusedCharmId = match?.params.charmId ?? null;
   const focusedReplicaId = match?.params.replicaName ?? null;
 
-  const allCommands = useMemo(() => getCommands({
-    charmManager,
-    navigate,
-    focusedCharmId,
-    focusedReplicaId,
-    setOpen,
-    preferredModel: modelId ?? undefined,
-    setPreferredModel,
-    setMode,
-    loading,
-    setLoading,
-    setModeWithInput: (mode: CommandMode, initialInput: string) => {
-      Promise.resolve().then(() => {
-        setMode(mode);
-        setSearch(initialInput);
-      });
-    },
-    stopJob,
-    startJob,
-    addJobMessage,
-    listJobs,
-    updateJobProgress,
-    commandPathIds,
-  }), [
-    charmManager,
-    navigate,
-    focusedCharmId,
-    focusedReplicaId,
-    modelId,
-    loading,
-    commandPathIds,
-    setMode,
-    setPreferredModel,
-    stopJob,
-    startJob,
-    addJobMessage,
-    listJobs,
-    updateJobProgress,
-  ]);
+  const allCommands = useMemo(
+    () =>
+      getCommands({
+        charmManager,
+        navigate,
+        focusedCharmId,
+        focusedReplicaId,
+        setOpen,
+        preferredModel: modelId ?? undefined,
+        setPreferredModel,
+        setMode,
+        loading,
+        setLoading,
+        setModeWithInput: (mode: CommandMode, initialInput: string) => {
+          Promise.resolve().then(() => {
+            setMode(mode);
+            setSearch(initialInput);
+          });
+        },
+        stopJob,
+        startJob,
+        addJobMessage,
+        listJobs,
+        updateJobProgress,
+        commandPathIds,
+      }),
+    [
+      charmManager,
+      navigate,
+      focusedCharmId,
+      focusedReplicaId,
+      modelId,
+      loading,
+      commandPathIds,
+      setMode,
+      setPreferredModel,
+      stopJob,
+      startJob,
+      addJobMessage,
+      listJobs,
+      updateJobProgress,
+    ],
+  );
 
-  const getCommandById = useCallback((id: string): CommandItem | undefined => {
-    const findInCommands = (commands: CommandItem[]): CommandItem | undefined => {
-      for (const cmd of commands) {
-        if (cmd.id === id) return cmd;
-        if (cmd.children) {
-          const found = findInCommands(cmd.children);
-          if (found) return found;
+  const getCommandById = useCallback(
+    (id: string): CommandItem | undefined => {
+      const findInCommands = (commands: CommandItem[]): CommandItem | undefined => {
+        for (const cmd of commands) {
+          if (cmd.id === id) return cmd;
+          if (cmd.children) {
+            const found = findInCommands(cmd.children);
+            if (found) return found;
+          }
         }
-      }
-      return undefined;
-    };
-    return findInCommands(allCommands);
-  }, [allCommands]);
+        return undefined;
+      };
+      return findInCommands(allCommands);
+    },
+    [allCommands],
+  );
 
-  const currentCommandPath = useMemo(() =>
-    commandPathIds.map(id => getCommandById(id)).filter((cmd): cmd is CommandItem => !!cmd),
-    [commandPathIds, getCommandById]
+  const currentCommandPath = useMemo(
+    () => commandPathIds.map((id) => getCommandById(id)).filter((cmd): cmd is CommandItem => !!cmd),
+    [commandPathIds, getCommandById],
   );
 
   useEffect(() => {
@@ -170,7 +185,7 @@ export function CommandCenter() {
   }, []);
 
   useEffect(() => {
-    if (!('preserveInput' in mode) || !mode.preserveInput) {
+    if (!("preserveInput" in mode) || !mode.preserveInput) {
       setSearch("");
     }
   }, [mode]);
@@ -245,7 +260,7 @@ export function CommandCenter() {
       setMode({ type: "main" });
       setCommandPathIds([]);
     } else {
-      setCommandPathIds(prev => prev.slice(0, -1));
+      setCommandPathIds((prev) => prev.slice(0, -1));
       const parentId = commandPathIds[commandPathIds.length - 2];
       const parentCommand = getCommandById(parentId);
       if (parentCommand) {
@@ -259,12 +274,12 @@ export function CommandCenter() {
   };
 
   const getCurrentCommands = () => {
-    const commands = commandPathIds.length === 0
-      ? allCommands
-      : getCommandById(commandPathIds[commandPathIds.length - 1])?.children ?? [];
+    const commands =
+      commandPathIds.length === 0
+        ? allCommands
+        : (getCommandById(commandPathIds[commandPathIds.length - 1])?.children ?? []);
 
-    return (commands)
-      .filter(cmd => !cmd.predicate);
+    return commands.filter((cmd) => cmd.predicate !== false); // Show command unless predicate is explicitly false
   };
 
   return (
@@ -276,7 +291,10 @@ export function CommandCenter() {
         </>
       </VisuallyHidden>
 
-      <div className="flex items-center gap-2" style={{ display: mode.type == 'transcribe' ? 'none' : 'flex' }}>
+      <div
+        className="flex items-center gap-2"
+        style={{ display: mode.type == "transcribe" ? "none" : "flex" }}
+      >
         <div className="w-10 h-10 flex-shrink-0">
           <DitheredCube
             animationSpeed={loading ? 2 : 1}
@@ -310,7 +328,9 @@ export function CommandCenter() {
       </div>
 
       <Command.List>
-        {!loading && mode.type != "input" && mode.type != 'transcribe' && <Command.Empty>No results found.</Command.Empty>}
+        {!loading && mode.type != "input" && mode.type != "transcribe" && (
+          <Command.Empty>No results found.</Command.Empty>
+        )}
         {loading && (
           <Command.Loading>
             <div className="flex items-center justify-center p-4">
@@ -323,7 +343,8 @@ export function CommandCenter() {
           <>
             {commandPathIds.length > 0 && (
               <Command.Item onSelect={handleBack}>
-                ← Back to {getCommandById(commandPathIds[commandPathIds.length - 2])?.title || "Main Menu"}
+                ← Back to{" "}
+                {getCommandById(commandPathIds[commandPathIds.length - 2])?.title || "Main Menu"}
               </Command.Item>
             )}
 
