@@ -121,10 +121,10 @@ function queueExecution() {
 }
 
 function setDependencies(action: Action, log: ReactivityLog) {
-  const reads = compactifyPaths(log.reads);
-  const writes = compactifyPaths(log.writes);
-  dependencies.set(action, { reads, writes });
-  return reads;
+  dependencies.set(action, {
+    reads: compactifyPaths(log.reads),
+    writes: compactifyPaths(log.writes),
+  });
 }
 
 function handleError(error: Error) {
