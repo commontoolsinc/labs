@@ -1,6 +1,7 @@
 import { Charm } from "@commontools/charm";
 import { CharmRenderer } from "@/components/CharmRunner";
 import { charmId } from "@/utils/charms";
+import { useNavigate, useParams } from "react-router-dom";
 
 interface VariantTrayProps {
   variants: Charm[];
@@ -15,8 +16,21 @@ export function VariantTray({
   onSelectVariant,
   variantModels,
 }: VariantTrayProps) {
+  const navigate = useNavigate();
+  const { replicaName } = useParams();
+
   return (
     <div className="absolute inset-x-4 bottom-24 bg-white/95 backdrop-blur border-2 border-black p-4">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-lg font-bold">Choose a variant</h3>
+        <button
+          onClick={() => selectedVariant && navigate(`/${replicaName}/${charmId(selectedVariant)}`)}
+          className="px-4 py-2 bg-black text-white rounded hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          disabled={!selectedVariant}
+        >
+          Choose
+        </button>
+      </div>
       <div className="flex gap-4 overflow-x-auto ">
         {variants.map((variant, i) => (
           <div key={i} className="flex flex-col items-center">
