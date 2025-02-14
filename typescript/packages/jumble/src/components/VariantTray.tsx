@@ -17,14 +17,14 @@ export function VariantTray({
 }: VariantTrayProps) {
   return (
     <div className="absolute inset-x-4 bottom-24 bg-white/95 backdrop-blur border-2 border-black p-4">
-      <div className="flex gap-4 overflow-x-auto justify-center">
+      <div className="flex gap-4 overflow-x-auto ">
         {variants.map((variant, i) => (
           <div key={i} className="flex flex-col items-center">
             <button
               onClick={() => onSelectVariant(variant)}
               className={`
-                flex-shrink-0 w-96 h-72 border-2 border-black overflow-hidden relative
-                ${variant === selectedVariant ? "opacity-100 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] -translate-y-0.5" : "opacity-70 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]"}
+                flex-shrink-0 w-80 h-56 border-2 border-black overflow-hidden relative
+                ${variant === selectedVariant ? "opacity-100 shadow-[4px_4px_0px_0px_rgba(0,0,0,0.7)] -translate-y-0.5" : "opacity-30 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]"}
                 transition-all duration-150 ease-in-out transform-gpu mt-0.5
               `}
             >
@@ -32,7 +32,7 @@ export function VariantTray({
                 style={{
                   width: "1024px",
                   height: "768px",
-                  transform: "scale(0.375)",
+                  transform: "scale(0.31)",
                   transformOrigin: "top left",
                 }}
               >
