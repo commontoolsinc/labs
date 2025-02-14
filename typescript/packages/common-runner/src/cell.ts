@@ -15,10 +15,8 @@ import {
   followAliases,
   followCellReferences,
   normalizeToCells,
-  pathAffected,
   setNestedValue,
   followLinks,
-  compactifyPaths,
 } from "./utils.js";
 import { queueEvent, subscribe } from "./scheduler.js";
 import {
@@ -28,7 +26,7 @@ import {
   getEntityId,
   setDocByEntityId,
 } from "./cell-map.js";
-import { useCancelGroup, type Cancel } from "./cancel.js";
+import { type Cancel } from "./cancel.js";
 import { validateAndTransform } from "./schema.js";
 
 /**
