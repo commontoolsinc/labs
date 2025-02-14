@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createRef, type EntityId, getDocByEntityId, getEntityId } from "../src/cell-map.js";
-import { getDoc } from "../src/cell.js";
+import { getDoc } from "../src/doc.js";
 import { refer } from "merkle-reference";
 
 describe("refer", () => {

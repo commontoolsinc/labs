@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { getDoc, isCell, isDoc, isDocLink, isQueryResult, ReactivityLog } from "../src/cell.js";
+import { getDoc, isDoc, isDocLink } from "../src/doc.js";
+import { isCell } from "../src/cell.js";
+import { isQueryResult } from "../src/query-result-proxy.js";
+import { type ReactivityLog } from "../src/scheduler.js";
 import { JSONSchema } from "@commontools/builder";
 import { addEventHandler, idle } from "../src/scheduler.js";
 import { compactifyPaths } from "../src/utils.js";

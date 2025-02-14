@@ -1,4 +1,4 @@
-import type { DocImpl, DocLink, ReactivityLog } from "./cell.js";
+import type { DocImpl, DocLink } from "./doc.js";
 import { compactifyPaths, pathAffected } from "./utils.js";
 import type { Cancel } from "./cancel.js";
 
@@ -18,6 +18,17 @@ let running: Promise<void> | undefined = undefined;
 let scheduled = false;
 
 const MAX_ITERATIONS_PER_RUN = 100;
+
+/**
+ * Reactivity log.
+ *
+ * Used to log reads and writes to cells. Used by scheduler to keep track of
+ * dependencies and to topologically sort pending actions before executing them.
+ */
+export type ReactivityLog = {
+  reads: DocLink[];
+  writes: DocLink[];
+};
 
 export function schedule(action: Action, log: ReactivityLog): Cancel {
   setDependencies(action, log);

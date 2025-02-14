@@ -1,14 +1,7 @@
 import { isOpaqueRef } from "@commontools/builder";
-import {
-  type DocImpl,
-  type DocLink,
-  getDoc,
-  getDocLinkOrThrow,
-  isCell,
-  isDoc,
-  isDocLink,
-  isQueryResultForDereferencing,
-} from "./cell.js";
+import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.js";
+import { getDocLinkOrThrow, isQueryResultForDereferencing } from "./query-result-proxy.js";
+import { isCell } from "./cell.js";
 import { refer } from "merkle-reference";
 
 export type EntityId = {
