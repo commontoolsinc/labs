@@ -1,4 +1,4 @@
-import { isVNode, VNode, Props, Child } from "./jsx.js";
+import { isVNode } from "./jsx.js";
 import {
   effect,
   useCancelGroup,
@@ -6,6 +6,7 @@ import {
   type Cell,
   isCell,
   isStream,
+  Stream,
 } from "@commontools/runner";
 import { JSONSchema } from "@commontools/builder";
 import * as logger from "./logger.js";
@@ -30,9 +31,23 @@ const vdomSchema: JSONSchema = {
           { type: "array", items: { $ref: "#", asCell: true } },
         ],
       },
+      asCell: true,
     },
   },
 } as const;
+
+type Props = {
+  [key: string]: string | number | boolean | object | Array<any> | null | Cell<any> | Stream<any>;
+};
+
+type VNode = {
+  type: "vnode";
+  name: string;
+  props: Props;
+  children: Array<Child> | Cell<Array<Child>>;
+};
+
+type Child = VNode | string;
 
 /** Render a view into a parent element */
 export const render = (parent: HTMLElement, view: VNode | Cell<VNode>): Cancel => {
@@ -74,47 +89,130 @@ const renderNode = (node: VNode): [HTMLElement | null, Cancel] => {
   return [element, cancel];
 };
 
-const bindChildren = (element: HTMLElement, children: Array<Child>): Cancel => {
-  const [cancel, addCancel] = useCancelGroup();
+const bindChildren = (
+  element: HTMLElement,
+  children: Array<Child> | Cell<Array<Child>>,
+): Cancel => {
+  // Mapping from stable key to its rendered node and cancel function.
+  let keyedChildren = new Map<string, { node: ChildNode; cancel: Cancel }>();
 
-  for (const child of children.flat()) {
-    if (typeof child === "string" || typeof child === "number" || typeof child === "boolean") {
-      // Bind static content
-      element.append(child.toString());
-    } else if (isVNode(child)) {
-      // Bind static VNode
-      const [childElement, cancel] = renderNode(child);
-      addCancel(cancel);
-      if (childElement) {
-        element.append(childElement);
-      }
-    } else if (isCell(child)) {
-      // Anchor for reactive replacement
-      let anchor: ChildNode = document.createTextNode("");
-      element.append(anchor);
-      effect(child, (replacement: any) => {
-        if (isVNode(replacement)) {
-          const [childElement, cancel] = renderNode(replacement);
-          addCancel(cancel);
-          if (childElement != null) {
-            anchor.replaceWith(childElement);
-            anchor = childElement;
-          } else {
-            logger.warn("Could not render view", replacement);
-          }
+  // Render a child that can be static or reactive. For reactive cells we update
+  // the already-rendered node (using replaceWith) so that we never add an extra
+  // container.
+  const renderChild = (child: Child, key: string): { node: ChildNode; cancel: Cancel } => {
+    if (isCell(child)) {
+      let currentNode: ChildNode | null = null;
+      const cancel = effect(child, (childValue: any) => {
+        let newRendered: { node: ChildNode; cancel: Cancel };
+        if (
+          typeof childValue === "string" ||
+          typeof childValue === "number" ||
+          typeof childValue === "boolean"
+        ) {
+          newRendered = {
+            node: document.createTextNode(childValue.toString()),
+            cancel: () => {},
+          };
+        } else if (isVNode(childValue)) {
+          const [childElement, childCancel] = renderNode(childValue);
+          newRendered = {
+            node: childElement ?? document.createTextNode(""),
+            cancel: childCancel,
+          };
         } else {
-          if (typeof replacement === "object") {
-            console.warn("unexpected object when value was expected", replacement);
-            replacement = JSON.stringify(replacement);
+          if (typeof childValue === "object") {
+            console.warn("unexpected object when value was expected", childValue);
+            childValue = JSON.stringify(childValue);
           }
-          const text = document.createTextNode(`${replacement}`);
-          anchor.replaceWith(text);
-          anchor = text;
+          newRendered = {
+            node: document.createTextNode(childValue.toString()),
+            cancel: () => {},
+          };
         }
+
+        if (currentNode) {
+          // Replace the previous DOM node, if any
+          currentNode.replaceWith(newRendered.node);
+          // Update the mapping entry to capture any newly-rendered node.
+          keyedChildren.set(key, { ...keyedChildren.get(key)!, node: newRendered.node });
+        }
+
+        currentNode = newRendered.node;
+        return newRendered.cancel;
       });
+
+      return { node: currentNode!, cancel };
+    } else {
+      if (typeof child === "string" || typeof child === "number" || typeof child === "boolean") {
+        return { node: document.createTextNode(child.toString()), cancel: () => {} };
+      } else if (isVNode(child)) {
+        const [childElement, cancel] = renderNode(child);
+        return { node: childElement ?? document.createTextNode(""), cancel };
+      } else throw new Error("Unsupported static child type");
     }
-  }
-  return cancel;
+  };
+
+  // When the children array changes, diff its flattened values against what we previously rendered.
+  const updateChildren = (childrenArr: Array<Child | Array<Child>>) => {
+    const newChildren = childrenArr.flat();
+    const newKeyOrder: string[] = [];
+    const newMapping = new Map<string, { node: ChildNode; cancel: Cancel }>();
+    const occurrence = new Map<string, number>();
+
+    for (let i = 0; i < newChildren.length; i++) {
+      const child = newChildren[i];
+      const rawKey = JSON.stringify(child);
+      const count = occurrence.get(rawKey) ?? 0;
+      occurrence.set(rawKey, count + 1);
+      // Composite key ensures that two structurally identical children get unique keys.
+      const key = rawKey + "-" + count;
+      newKeyOrder.push(key);
+      if (keyedChildren.has(key)) {
+        // Reuse an existing rendered node.
+        newMapping.set(key, keyedChildren.get(key)!);
+        keyedChildren.delete(key);
+      } else {
+        // Render a new child.
+        newMapping.set(key, renderChild(child, key));
+      }
+    }
+
+    // Remove any obsolete nodes.
+    for (const [_, { node, cancel }] of keyedChildren.entries()) {
+      cancel();
+      node.remove();
+    }
+
+    // Now update the parent element so that its children appear in newKeyOrder.
+    // We build an array of current DOM nodes to compare by index.
+    const domNodes = Array.from(element.childNodes);
+    for (let i = 0; i < newKeyOrder.length; i++) {
+      const key = newKeyOrder[i];
+      const desiredNode = newMapping.get(key)!.node;
+      // If there's no node at this position, or it’s different, insert desiredNode there.
+      if (domNodes[i] !== desiredNode) {
+        // Using domNodes[i] (which may be undefined) is equivalent to appending
+        // if there’s no node at that index.
+        element.insertBefore(desiredNode, domNodes[i] ?? null);
+      }
+    }
+
+    console.log("keyedChildren", newKeyOrder, newMapping, keyedChildren);
+
+    keyedChildren = newMapping;
+  };
+
+  // Set up a reactive effect so that changes to the children array are diffed and applied.
+  const cancelArrayEffect = effect(children, (childrenVal) => updateChildren(childrenVal));
+
+  // Return a cancel function that tears down the effect and cleans up any rendered nodes.
+  return () => {
+    cancelArrayEffect();
+    for (const { node, cancel } of keyedChildren.values()) {
+      cancel();
+      node.remove();
+    }
+  };
 };
 
 const bindProps = (element: HTMLElement, props: Props): Cancel => {
@@ -144,6 +242,7 @@ const bindProps = (element: HTMLElement, props: Props): Cancel => {
         setProp(element, key, replacement);
       } else {
         const cancel = effect(replacement, (replacement) => {
+          console.log("prop update", propKey, replacement);
           // Replacements are set as properties not attributes to avoid
           // string serialization of complex datatypes.
           setProp(element, propKey, replacement);
