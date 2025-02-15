@@ -15,6 +15,7 @@ import CharmDetailView from "@/views/CharmDetailView";
 import { LanguageModelProvider } from "./contexts/LanguageModelContext";
 import { BackgroundTaskProvider } from "./contexts/BackgroundTaskContext";
 import { setupIframe } from "./iframe-ctx";
+import GenerateJSONView from "@/views/utility/GenerateJSONView";
 
 setupIframe();
 
@@ -28,11 +29,6 @@ createRoot(document.getElementById("root")!).render(
               {/* Redirect root to common-knowledge */}
               <Route path="/" element={<Navigate to="/common-knowledge" replace />} />
 
-              {/* Photoflow routes preserved */}
-              <Route path="/experiments/photoflow" element={<PhotoFlowIndex />} />
-              <Route path="/experiments/photoflow/:photosetName" element={<PhotoSetView />} />
-              <Route path="/experiments/photoflow/:photosetName/spells/new" element={<NewSpell />} />
-
               <Route
                 path="/:replicaName"
                 element={
@@ -45,6 +41,18 @@ createRoot(document.getElementById("root")!).render(
                 <Route path=":charmId" element={<CharmShowView />} />
                 <Route path=":charmId/detail" element={<CharmDetailView />} />
               </Route>
+
+              {/* internal tools / experimental routes */}
+
+              <Route path="/utility/jsongen" element={<GenerateJSONView />} />
+
+              {/* Photoflow routes preserved */}
+              <Route path="/experiments/photoflow" element={<PhotoFlowIndex />} />
+              <Route path="/experiments/photoflow/:photosetName" element={<PhotoSetView />} />
+              <Route
+                path="/experiments/photoflow/:photosetName/spells/new"
+                element={<NewSpell />}
+              />
             </Routes>
           </Router>
         </LanguageModelProvider>
