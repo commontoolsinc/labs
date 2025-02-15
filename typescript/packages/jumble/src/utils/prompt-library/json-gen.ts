@@ -47,9 +47,8 @@ const PROMPT = `Create a JSON object that illustrates the <product_description>`
  */
 export async function generateJSON(
   description: string,
-  model: string = "anthropic:claude-3-5-sonnet-latest",
+  model: string = "groq:llama-3.3-70b-versatile",
 ): Promise<Record<string, unknown>> {
-  model = "groq:llama-3.3-70b-versatile";
   const system = hydratePrompt(SYSTEM_PROMPT, { PRODUCT_DESCRIPTION: description });
   const response = await llm.sendRequest({
     model,
