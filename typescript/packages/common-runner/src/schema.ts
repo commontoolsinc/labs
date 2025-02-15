@@ -61,7 +61,7 @@ export function validateAndTransform(
       (Array.isArray(resolvedSchema?.anyOf) &&
         resolvedSchema.anyOf.every((option) => option.asCell)))
   )
-    return doc.asCell(path, log, resolvedSchema);
+    return doc.asCell(path, log, resolvedSchema, rootSchema);
 
   // If there is no schema, return as raw data via query result proxy
   if (!resolvedSchema) return doc.getAsQueryResult(path, log);
