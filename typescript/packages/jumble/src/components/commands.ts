@@ -8,6 +8,7 @@ import { DocImpl, getRecipe } from "@commontools/runner";
 import { performIteration } from "@/utils/charm-iteration";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
 import { startCharmIndexing } from "@/utils/indexing";
+import { generateJSON } from "@/utils/prompt-library/json-gen";
 
 export type CommandType = "action" | "input" | "confirm" | "select" | "menu" | "transcribe";
 
@@ -103,10 +104,9 @@ async function handleNewCharm(deps: CommandContext, input: string | undefined) {
   if (!input) return;
   deps.setLoading(true);
   try {
-    const dummyData = {
-      gallery: [{ title: "pizza", prompt: "a yummy pizza" }],
-    };
-    const id = await castNewRecipe(deps.charmManager, { gallery: [dummyData] }, input);
+    // Generate JSON blob with an LLM
+    const dummyData = await generateJSON(input);
+    const id = await castNewRecipe(deps.charmManager, dummyData, input);
     if (id) {
       deps.navigate(`/${deps.focusedReplicaId}/${charmId(id)}`);
     }
