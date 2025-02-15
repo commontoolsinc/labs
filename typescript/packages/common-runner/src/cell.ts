@@ -112,12 +112,13 @@ export function createCell<T>(
   // Doc: { foo: { link } }, path: ["foo", "bar"] --> follow link, path: ["bar"]
 
   let ref: DocLink = { cell: doc, path: [] };
+  let resolveLog: ReactivityLog = { reads: [], writes: [] };
   const seen: DocLink[] = [];
 
   let keys = [...path];
   while (keys.length) {
     // First follow all the aliases and links, _before_ accessing the key.
-    ref = followLinks(ref, seen, log);
+    ref = followLinks(ref, seen, resolveLog);
     doc = ref.cell;
     path = [...ref.path, ...keys];
 
@@ -128,17 +129,19 @@ export function createCell<T>(
 
   // Follow aliases on the last key, but no other kinds of links.
   if (isAlias(ref.cell.getAtPath(ref.path))) {
-    ref = followAliases(ref.cell.getAtPath(ref.path), ref.cell, log);
+    ref = followAliases(ref.cell.getAtPath(ref.path), ref.cell, resolveLog);
     doc = ref.cell;
     path = ref.path;
   }
 
   // Then follow the other links and see whether this is a stream alias.
-  ref = followLinks(ref, seen, log);
+  ref = followLinks(ref, seen, resolveLog);
   const isStream = isStreamAlias(ref.cell.getAtPath(ref.path));
 
+  if (log) log.reads.push(...resolveLog.reads);
+
   if (isStream) return createStreamCell(ref.cell, ref.path) as unknown as Cell<T>;
-  else return createRegularCell(doc, path, log, schema, rootSchema);
+  else return createRegularCell(doc, path, log, resolveLog, schema, rootSchema);
 }
 
 function createStreamCell<T>(doc: DocImpl<any>, path: PropertyKey[]): Stream<T> {
@@ -172,11 +175,12 @@ function createRegularCell<T>(
   doc: DocImpl<any>,
   path: PropertyKey[],
   log?: ReactivityLog,
+  resolveLog?: ReactivityLog,
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
 ): Cell<T> {
   const self: Cell<T> = {
-    get: () => validateAndTransform(doc, path, schema, log, rootSchema),
+    get: () => validateAndTransform(doc, path, schema, log),
     set: (newValue: T) => doc.setAtPath(path, newValue, log),
     send: (newValue: T) => self.set(newValue),
     update: (value: Partial<T>) => {
@@ -219,9 +223,9 @@ function createRegularCell<T>(
       doc.setAtPath(path, [...array, value], log);
     },
     sink: (callback: (value: T) => Cancel | undefined) =>
-      subscribeToReferencedDocs(doc, path, schema, rootSchema, callback, true),
+      subscribeToReferencedDocs(callback, true, doc, path, schema, rootSchema, resolveLog),
     updates: (callback: (value: T) => Cancel | undefined) =>
-      subscribeToReferencedDocs(doc, path, schema, rootSchema, callback, false),
+      subscribeToReferencedDocs(callback, false, doc, path, schema, rootSchema, resolveLog),
     key: <K extends keyof T>(key: K) => {
       const currentSchema =
         schema?.type === "object"
@@ -264,24 +268,45 @@ function createRegularCell<T>(
 }
 
 function subscribeToReferencedDocs<T>(
+  callback: (value: T) => Cancel | undefined,
+  callCallbackOnFirstRun: boolean,
   doc: DocImpl<any>,
   path: PropertyKey[],
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined,
-  callback: (value: T) => Cancel | undefined,
-  callCallbackOnFirstRun: boolean,
+  resolveLog?: ReactivityLog,
 ): Cancel {
-  const initialLog = { reads: [], writes: [] } satisfies ReactivityLog;
+  const initialLog = {
+    reads: [...(resolveLog?.reads ?? [])],
+    writes: [...(resolveLog?.writes ?? [])],
+  } satisfies ReactivityLog;
 
   // Get the value once to determine all the docs that need to be subscribed to.
-  const value = validateAndTransform(doc, path, schema, initialLog, rootSchema) as T;
+  const value = validateAndTransform(doc, path, schema, initialLog, false, rootSchema) as T;
 
   // Subscribe to the docs that are read (via logs), call callback on next change.
   let cleanup: Cancel | undefined;
   const cancel = subscribe((log) => {
     if (isCancel(cleanup)) cleanup();
-    cleanup = callback(validateAndTransform(doc, path, schema, log, rootSchema) as T);
+    const newValue = validateAndTransform(doc, path, schema, log, false, rootSchema) as T;
+    cleanup = callback(newValue);
+    console.log("subscribeToReferencedDocs update", {
+      id: JSON.stringify(doc),
+      path,
+      schema,
+      newValue,
+      log: JSON.parse(JSON.stringify(log)),
+      value,
+      initialLog: JSON.parse(JSON.stringify(initialLog)),
+    });
   }, initialLog);
+
+  console.log("subscribeToReferencedDocs", JSON.stringify(doc), {
+    path,
+    schema,
+    value,
+    initialLog: JSON.parse(JSON.stringify(initialLog)),
+  });
 
   // Call the callback once with initial value if requested.
   if (callCallbackOnFirstRun) cleanup = callback(value);
