@@ -1,4 +1,4 @@
-import { Cancel, noOp } from "./cancel.js";
+import { Cancel, isCancel, noOp } from "./cancel.js";
 import { Cell, isCell } from "./cell.js";
 
 /**
@@ -10,11 +10,14 @@ import { Cell, isCell } from "./cell.js";
  * @param {function} callback - The callback to run when the value changes.
  * @returns {function} - A function to cancel the effect.
  */
-export const effect = <T>(value: Cell<T> | T, callback: (value: T) => Cancel | void): Cancel => {
+export const effect = <T>(
+  value: Cell<T> | T,
+  callback: (value: T) => Cancel | undefined | void,
+): Cancel => {
   if (isCell(value)) {
     return value.sink(callback);
   } else {
-    callback(value);
-    return noOp;
+    const cancel = callback(value);
+    return isCancel(cancel) ? cancel : noOp;
   }
 };
