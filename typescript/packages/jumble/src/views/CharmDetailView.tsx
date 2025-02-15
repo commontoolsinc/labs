@@ -1,4 +1,4 @@
-import { saveNewRecipeVersion, IFrameRecipe, Charm } from "@commontools/charm";
+import { saveNewRecipeVersion, IFrameRecipe, Charm, getIframeRecipe } from "@commontools/charm";
 import React, { useEffect, useState } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
@@ -11,6 +11,10 @@ import { performIteration } from "@/utils/charm-iteration";
 import { charmId } from "@/utils/charms";
 import { DitheredCube } from "@/components/DitherCube";
 import { VariantTray } from "@/components/VariantTray";
+import {
+  generateCharmSuggestions,
+  type CharmSuggestion,
+} from "@/utils/prompt-library/charm-suggestions";
 
 type Tab = "iterate" | "code" | "data";
 
@@ -29,6 +33,8 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
   const [loading, setLoading] = useState(false);
   const [variants, setVariants] = useState<Charm[]>([]);
   const [selectedVariant, setSelectedVariant] = useState<Charm | null>(null);
+  const [suggestions, setSuggestions] = useState<CharmSuggestion[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 
   const variantModels = [
     "anthropic:claude-3-5-sonnet-latest",
@@ -91,6 +97,36 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Load suggestions when component mounts
+  useEffect(() => {
+    const loadSuggestions = async () => {
+      setLoadingSuggestions(true);
+      const iframeRecipe = getIframeRecipe(charm);
+      if (!iframeRecipe) {
+        console.error("No iframe recipe found in charm, what should we do?");
+        return;
+      }
+      try {
+        const newSuggestions = await generateCharmSuggestions(
+          iframeRecipe?.iframe?.spec || "",
+          iframeRecipe?.iframe?.src || "",
+          JSON.stringify(iframeRecipe?.iframe?.argumentSchema || {}),
+        );
+        setSuggestions(newSuggestions);
+      } catch (error) {
+        console.error("Failed to load suggestions:", error);
+      } finally {
+        setLoadingSuggestions(false);
+      }
+    };
+    loadSuggestions();
+  }, [charm]);
+
+  const handleSuggestion = async (suggestion: CharmSuggestion) => {
+    setIterationInput(suggestion.prompt);
+    await handleIterate();
   };
 
   return (
@@ -157,6 +193,37 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
               {loading ? "Iterating..." : "Iterate"}
             </button>
           </div>
+        </div>
+
+        {/* New suggestions box */}
+        <div className="bg-white border-2 border-black p-4 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]">
+          <h2 className="text-sm font-bold mb-4">Suggestions</h2>
+          {loadingSuggestions ? (
+            <div className="flex items-center justify-center p-4">
+              <DitheredCube
+                animationSpeed={2}
+                width={24}
+                height={24}
+                animate={true}
+                cameraZoom={12}
+              />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {suggestions.map((suggestion, index) => (
+                <button
+                  key={index}
+                  onClick={() => handleSuggestion(suggestion)}
+                  className="p-2 text-left text-sm border-2 border-black hover:bg-gray-50 transition-colors"
+                >
+                  <span className="font-medium text-xs uppercase text-gray-500">
+                    {suggestion.type}
+                  </span>
+                  <p>{suggestion.prompt}</p>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       {/* Main Content Area */}

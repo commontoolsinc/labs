@@ -5,8 +5,9 @@
  * @returns The hydrated prompt string
  */
 export function hydratePrompt(prompt: string, context: any): string {
-  return prompt.replace(/\{\{([^}]+)\}\}/g, (match, p1) => {
-    return context[p1] || match;
+  return prompt.replace(/\{\{\s*([^}]+)\s*\}\}/g, (match, p1) => {
+    const key = p1.trim();
+    return context[key] || match;
   });
 }
 
