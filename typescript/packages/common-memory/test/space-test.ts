@@ -7,7 +7,7 @@ import * as Fact from "../fact.ts";
 import { refer, createTemporaryDirectory } from "../util.ts";
 
 const the = "application/json";
-const doc = `did:of:${refer({ hello: "world" })}`;
+const doc = `of:${refer({ hello: "world" })}` as const;
 const space = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
 
@@ -331,7 +331,7 @@ test("update does not confuse the/of", new URL(`memory:${space}`), async (sessio
 
   const malformed = Fact.assert({
     the,
-    of: `did:of:${refer({ doc: 2 })}`,
+    of: `of:${refer({ doc: 2 })}`,
     is: { a: true },
     cause: refer(initial),
   });
@@ -730,9 +730,9 @@ test("new memory creation fails after retraction", new URL(`memory:${alice}`), a
 });
 
 test("batch updates", new URL(`memory:${space}`), async (session) => {
-  const hi = `did:of:${refer({ hi: "world" })}`;
-  const hola = `did:of:${refer({ hola: "mundo" })}`;
-  const ciao = `did:of:${refer({ ciao: "mondo" })}`;
+  const hi = `of:${refer({ hi: "world" })}` as const;
+  const hola = `of:${refer({ hola: "mundo" })}` as const;
+  const ciao = `of:${refer({ ciao: "mondo" })}` as const;
 
   const hi1 = Fact.assert({ the, of: hi, is: { hi: 1 } });
   const hola1 = Fact.assert({ the, of: hola, is: { hola: 1 } });

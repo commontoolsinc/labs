@@ -11,7 +11,7 @@ import { refer } from "merkle-reference";
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
 const bob = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
 const space = bob;
-const doc = refer({ hello: "world" }).toString();
+const doc = `of:${refer({ hello: "world" })}` as const;
 const the = "application/json";
 
 const test = (
@@ -196,7 +196,7 @@ test("list single fact", memory, async (session) => {
 });
 
 test("list multiple facts", memory, async (session) => {
-  const doc2 = `did:of:${refer({ doc: 2 })}`;
+  const doc2 = `of:${refer({ doc: 2 })}` as const;
 
   const facts = [
     Fact.assert({ the, of: doc, is: { v: 1 } }),

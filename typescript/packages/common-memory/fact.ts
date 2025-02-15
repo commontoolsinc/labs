@@ -51,14 +51,14 @@ export const claim = (fact: Fact): Invariant => ({
 });
 
 export const iterate = function* (selection: FactSelection): Iterable<Fact> {
-  for (const [of, attributes] of Object.entries(selection)) {
+  for (const [entity, attributes] of Object.entries(selection)) {
     for (const [the, changes] of Object.entries(attributes)) {
       const [change] = Object.entries(changes);
       if (change) {
         const [cause, { is }] = change;
         yield {
           the,
-          of,
+          of: entity as Entity,
           cause: fromString(cause),
           ...(is ? { is } : undefined),
         };

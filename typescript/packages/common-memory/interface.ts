@@ -69,12 +69,12 @@ export interface SubscriptionController {
 /**
  * Unique identifier for the memory space.
  */
-export type MemorySpace = string & { toString(): MemorySpace };
+export type MemorySpace = `did:${string}:${string}`;
 
 /**
  * Unique identifier for the mutable entity.
  */
-export type Entity = string & { toString(): Entity };
+export type Entity = `${string}:${string}`;
 
 /**
  * Type of the fact, usually formatted as media type. By default we expect

@@ -6,6 +6,7 @@ import {
   QueryResult,
   Query,
   Transaction,
+  Entity,
   Session,
   CloseResult,
   Principal,
@@ -199,7 +200,7 @@ class QuerySubscription<Space extends MemorySpace> extends ReadableStream<FactSe
       for (const [the, changes] of Object.entries(attributes)) {
         const [[cause, change]] = Object.entries(changes);
         if (change !== true) {
-          const state = Object.entries(selection?.[of]?.[the] ?? {});
+          const state = Object.entries(selection?.[of as Entity]?.[the] ?? {});
           const [current] = state.length > 0 ? state[0] : [];
           if (cause !== current) {
             Delta.set(changed, [of, the], cause, change);
