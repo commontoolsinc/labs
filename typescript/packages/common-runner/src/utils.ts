@@ -287,8 +287,6 @@ export function findAllAliasedCells(binding: any, cell: DocImpl<any>): DocLink[]
 // Follows links and returns the last one
 export function followLinks(ref: DocLink, seen: DocLink[] = [], log?: ReactivityLog): DocLink {
   while (true) {
-    log?.reads.push({ cell: ref.cell, path: ref.path });
-
     if (seen.some((r) => r.cell === ref.cell && arrayEqual(r.path, ref.path)))
       throw new Error(
         `Reference cycle detected ${JSON.stringify(ref.cell.entityId ?? "unknown")} ${ref.path.join(".")}`,
@@ -307,6 +305,9 @@ export function followLinks(ref: DocLink, seen: DocLink[] = [], log?: Reactivity
         path: target.$alias.path,
       } satisfies DocLink;
     else return ref;
+
+    // Log all the refs that were followed, but not the final value they point to.
+    log?.reads.push({ cell: ref.cell, path: ref.path });
   }
 }
 
