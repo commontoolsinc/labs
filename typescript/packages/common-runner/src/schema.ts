@@ -42,6 +42,7 @@ export function validateAndTransform(
   path: PropertyKey[] = [],
   schema?: JSONSchema,
   log?: ReactivityLog,
+  passOnLog = false,
   rootSchema: JSONSchema | undefined = schema,
   seen: DocLink[] = [],
 ): any {
@@ -61,7 +62,7 @@ export function validateAndTransform(
       (Array.isArray(resolvedSchema?.anyOf) &&
         resolvedSchema.anyOf.every((option) => option.asCell)))
   )
-    return doc.asCell(path, log, resolvedSchema, rootSchema);
+    return doc.asCell(path, passOnLog ? log : undefined, resolvedSchema, rootSchema);
 
   // If there is no schema, return as raw data via query result proxy
   if (!resolvedSchema) return doc.getAsQueryResult(path, log);
@@ -69,6 +70,7 @@ export function validateAndTransform(
   // Handle various types of references
   ({ cell: doc, path } = followLinks({ cell: doc, path }, seen, log));
   const value = doc.getAtPath(path);
+  log?.reads.push({ cell: doc, path });
 
   // TODO: The behavior when one of the options is very permissive (e.g. no type
   // or an object that allows any props) is not well defined.
@@ -86,7 +88,15 @@ export function validateAndTransform(
       if (arrayOptions.length === 0) return undefined;
       if (arrayOptions.length === 1)
         // slice: Don't include the current path in the seen array, avoiding triggering cycle detection
-        return validateAndTransform(doc, path, arrayOptions[0], log, rootSchema, seen.slice(0, -1));
+        return validateAndTransform(
+          doc,
+          path,
+          arrayOptions[0],
+          log,
+          passOnLog,
+          rootSchema,
+          seen.slice(0, -1),
+        );
 
       // TODO: Handle more corner cases like empty anyOf, etc.
       const merged: JSONSchema[] = [];
@@ -101,6 +111,7 @@ export function validateAndTransform(
         path,
         { type: "array", items: { anyOf: merged } },
         log,
+        passOnLog,
         rootSchema,
         seen.slice(0, -1),
       );
@@ -129,26 +140,55 @@ export function validateAndTransform(
       // Run extraction for each union branch.
       const candidates = options
         .filter((option) => option.type === "object")
-        .map((option) => ({
-          schema: option,
-          result: validateAndTransform(doc, path, option, log, rootSchema, seen.slice(0, -1)),
-        }));
+        .map((option) => {
+          const extraLog = { reads: [], writes: [] } satisfies ReactivityLog;
+          return {
+            schema: option,
+            result: validateAndTransform(
+              doc,
+              path,
+              option,
+              extraLog,
+              passOnLog,
+              rootSchema,
+              seen.slice(0, -1),
+            ),
+            extraLog,
+          };
+        });
 
       if (candidates.length === 0) return undefined;
 
       // Merge all the object extractions
       let merged: Record<string, any> = {};
-      for (const { result } of candidates) {
-        if (isCell(result)) return result; // TODO: Complain if it's a mix of cells and non-cells?
-        if (typeof result === "object" && result !== null) merged = { ...merged, ...result };
+      const extraReads: DocLink[] = [];
+      for (const { result, extraLog } of candidates) {
+        if (isCell(result)) {
+          log?.reads.push(...extraLog.reads);
+          return result; // TODO: Complain if it's a mix of cells and non-cells?
+        } else if (typeof result === "object" && result !== null) {
+          merged = { ...merged, ...result };
+          extraReads.push(...extraLog.reads);
+        } else {
+          console.warn("validateAndTransform: unexpected non-object result", result);
+        }
       }
+      log?.reads.push(...extraReads);
       return merged;
     } else {
       const candidates = options
         .filter((option) => (option.type === "integer" ? "number" : option.type) === typeof value)
         .map((option) => ({
           schema: option,
-          result: validateAndTransform(doc, path, option, log, rootSchema, seen.slice(0, -1)),
+          result: validateAndTransform(
+            doc,
+            path,
+            option,
+            log,
+            passOnLog,
+            rootSchema,
+            seen.slice(0, -1),
+          ),
         }));
 
       if (candidates.length === 0) return undefined;
@@ -157,7 +197,15 @@ export function validateAndTransform(
       // If we get more than one candidate, see if there is one that matches anything, and if not return the first one
       const anyTypeOption = options.find((option) => option.type === undefined);
       if (anyTypeOption)
-        return validateAndTransform(doc, path, anyTypeOption, log, rootSchema, seen.slice(0, -1));
+        return validateAndTransform(
+          doc,
+          path,
+          anyTypeOption,
+          log,
+          passOnLog,
+          rootSchema,
+          seen.slice(0, -1),
+        );
       else return candidates[0].result;
     }
   }
@@ -176,6 +224,7 @@ export function validateAndTransform(
             [...path, key],
             propSchema,
             log,
+            passOnLog,
             rootSchema,
             seen,
           );
@@ -197,6 +246,7 @@ export function validateAndTransform(
             [...path, key],
             additionalPropertiesSchema,
             log,
+            passOnLog,
             rootSchema,
             seen,
           );
@@ -212,7 +262,15 @@ export function validateAndTransform(
       return [];
     }
     return value.map((_, i) =>
-      validateAndTransform(doc, [...path, i], resolvedSchema.items!, log, rootSchema),
+      validateAndTransform(
+        doc,
+        [...path, i],
+        resolvedSchema.items!,
+        log,
+        passOnLog,
+        rootSchema,
+        seen,
+      ),
     );
   }
 
