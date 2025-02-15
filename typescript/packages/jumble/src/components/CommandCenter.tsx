@@ -18,6 +18,19 @@ import {
 import { usePreferredLanguageModel } from "@/contexts/LanguageModelContext";
 import { TranscribeInput } from "./TranscribeCommand";
 import { useBackgroundTasks } from "@/contexts/BackgroundTaskContext";
+// import { register } from "@tauri-apps/plugin-global-shortcut";
+import { setupGlobalShortcuts, setupNotifications, setupTray } from "@/hooks/use-tauri";
+
+setupGlobalShortcuts();
+setupNotifications();
+setupTray({ tooltip: "Common Tools" });
+
+// await register('CommandOrControl+Shift+I', (event) => {
+//   if (event?.state === "Pressed") {
+//     console.log('Shortcut triggered');
+//     window.dispatchEvent(new Event("edit-recipe-command"));
+//   }
+// });
 
 function CommandProcessor({
   mode,
