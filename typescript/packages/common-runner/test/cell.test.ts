@@ -292,7 +292,9 @@ describe("asCell", () => {
   it("should call sink only when the cell changes on the subpath", async () => {
     const c = getDoc({ a: { b: 42, c: 10 }, d: 5 });
     const values: number[] = [];
-    c.asCell(["a", "b"]).sink((value) => values.push(value));
+    c.asCell(["a", "b"]).sink((value) => {
+      values.push(value);
+    });
     c.setAtPath(["d"], 50);
     c.setAtPath(["a", "c"], 100);
     c.setAtPath(["a", "b"], 42);
