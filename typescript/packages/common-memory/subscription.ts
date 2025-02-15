@@ -1,6 +1,5 @@
 import {
-  Selector,
-  SubjectSpace,
+  MemorySpace,
   Transaction,
   Brief,
   SubscriptionQuery,
@@ -83,12 +82,6 @@ class Subscription implements Session, SubscriptionController {
   }
 }
 
-interface SubscriptionSession {
-  memory: Memory;
-
-  queries: Set<string>;
-}
-
 const transact = (session: Session, transaction: Transaction) => {
   if (match(session, transaction)) {
     publish(session, { transact: transaction });
@@ -96,12 +89,12 @@ const transact = (session: Session, transaction: Transaction) => {
 };
 
 const match = (session: Session, source: Transaction) => {
-  for (const [the, entities] of Object.entries(source.args.changes)) {
-    for (const [of, changes] of Object.entries(entities)) {
+  for (const [of, attributes] of Object.entries(source.args.changes)) {
+    for (const [the, changes] of Object.entries(attributes)) {
       for (const change of Object.values(changes)) {
-        // If `change.is === {}` we simply confirm that state has not changed
+        // If `change == true` we simply confirm that state has not changed
         // so we don't need to notify those subscribers.
-        if (change == null || change.is != undefined) {
+        if (change !== true) {
           const watches =
             session.watched.has(formatAddress(source.sub, { the, of })) ||
             session.watched.has(formatAddress(source.sub, { the })) ||
@@ -146,24 +139,29 @@ export const close = (session: Session) => {
 export const watch = async (session: Session, source: SubscriptionQuery) => {
   const {
     sub: space,
-    args: { selector },
+    args: { select },
   } = source;
-
-  const channel = formatAddress(space, selector);
-
-  if (!session.watched.has(channel)) {
-    session.watched.add(channel);
-    const result = await session.memory.query(source);
-    if (result.error) {
-      return result;
-    } else {
-      session.brief({
-        sub: source.sub,
-        args: {
-          selector: source.args.selector,
-          selection: result.ok,
-        },
-      });
+  const all = [["_", {}]] as const;
+  const selector = Object.entries(select);
+  for (const [of, attributes] of selector.length > 0 ? selector : all) {
+    const selector = Object.entries(attributes);
+    for (const [the] of selector.length > 0 ? selector : all) {
+      const channel = formatAddress(space, { the, of });
+      if (!session.watched.has(channel)) {
+        session.watched.add(channel);
+        const result = await session.memory.query(source);
+        if (result.error) {
+          return result;
+        } else {
+          session.brief({
+            sub: source.sub,
+            args: {
+              selector: select,
+              selection: result.ok,
+            },
+          });
+        }
+      }
     }
   }
 
@@ -173,13 +171,24 @@ export const watch = async (session: Session, source: SubscriptionQuery) => {
 export const unwatch = (session: Session, source: SubscriptionQuery) => {
   const {
     sub: space,
-    args: { selector },
+    args: { select },
   } = source;
 
-  const channel = formatAddress(space, selector);
+  const all = [["_", {}]] as const;
+  const selector = Object.entries(select);
+  for (const [of, attributes] of selector.length > 0 ? selector : all) {
+    const selector = Object.entries(attributes);
+    for (const [the] of selector.length > 0 ? selector : all) {
+      const channel = formatAddress(space, { the, of });
 
-  session.watched.delete(channel);
+      session.watched.delete(channel);
+    }
+  }
+
+  return { ok: {} };
 };
 
-export const formatAddress = (space: SubjectSpace, { of = "_", the = "_" }: Selector) =>
-  `watch:///${space}/${of}/${the}`;
+export const formatAddress = (
+  space: MemorySpace,
+  { of = "_", the = "_" }: { the?: string; of?: string },
+) => `watch:///${space}/${of}/${the}`;

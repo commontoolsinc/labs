@@ -1,6 +1,10 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
 import * as Memory from "../memory.ts";
 import { refer, Space, Subscriber, Subscription } from "../provider.ts";
+import * as Fact from "../fact.ts";
+import * as Changes from "../changes.ts";
+import * as Transaction from "../transaction.ts";
+import * as Query from "../query.ts";
 
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
 const space = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
@@ -45,17 +49,13 @@ test("subscribe receives unclaimed state", memory, async (session) => {
   const subscriber = Subscriber.create();
   await session.subscribe(subscriber);
 
-  subscriber.watch({
-    cmd: "/memory/query",
-    iss: alice,
-    sub: space,
-    args: {
-      selector: {
-        the,
-        of: doc,
-      },
-    },
-  });
+  subscriber.watch(
+    Query.create({
+      issuer: alice,
+      subject: space,
+      select: { [doc]: { [the]: {} } },
+    }),
+  );
 
   const [none] = await take(subscriber.commands, 1);
 
@@ -65,8 +65,18 @@ test("subscribe receives unclaimed state", memory, async (session) => {
       brief: {
         sub: space,
         args: {
-          selector: { the, of: doc },
-          selection: [],
+          selector: {
+            [doc]: {
+              [the]: {},
+            },
+          },
+          selection: {
+            [space]: {
+              [doc]: {
+                [the]: {},
+              },
+            },
+          },
         },
       },
     },
@@ -78,31 +88,23 @@ test("subscribe receives unclaimed then asserted", memory, async (session) => {
   const subscriber = Subscriber.create();
   await session.subscribe(subscriber);
 
-  const selector = { the, of: doc };
+  const selector = { [doc]: { [the]: {} } };
 
-  subscriber.watch({
-    cmd: "/memory/query",
-    iss: alice,
-    sub: space,
-    args: { selector },
+  subscriber.watch(
+    Query.create({
+      issuer: alice,
+      subject: space,
+      select: selector,
+    }),
+  );
+
+  const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
+
+  const transaction = Transaction.create({
+    issuer: alice,
+    subject: space,
+    changes: Changes.from([v1]),
   });
-
-  const transaction = {
-    cmd: "/memory/transact",
-    iss: alice,
-    sub: space,
-    args: {
-      changes: {
-        [the]: {
-          [doc]: {
-            [refer({ the, of: doc }).toString()]: {
-              is: { v: 1 },
-            },
-          },
-        },
-      },
-    },
-  } as const;
 
   session.transact(transaction);
 
@@ -114,7 +116,13 @@ test("subscribe receives unclaimed then asserted", memory, async (session) => {
         sub: space,
         args: {
           selector,
-          selection: [],
+          selection: {
+            [space]: {
+              [doc]: {
+                [the]: {},
+              },
+            },
+          },
         },
       },
     },
@@ -125,43 +133,32 @@ test("subscribe receives unclaimed then asserted", memory, async (session) => {
 });
 
 test("subscribe receives retraction", memory, async (session) => {
-  const transaction = Space.transaction({
+  const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
+  const transaction = Transaction.create({
     issuer: alice,
     subject: space,
-    changes: {
-      [the]: {
-        [doc]: {
-          [Space.init({ the, of: doc }).toString()]: {
-            is: { v: 1 },
-          },
-        },
-      },
-    },
+    changes: Changes.from([v1]),
   });
 
   await session.transact(transaction);
 
-  const selector = { the, of: doc };
+  const selector = { [doc]: { [the]: {} } };
 
   const subscriber = Subscriber.create();
   await session.subscribe(subscriber);
-  await subscriber.watch({
-    cmd: "/memory/query",
-    iss: alice,
-    sub: space,
-    args: { selector },
-  });
+  await subscriber.watch(
+    Query.create({
+      issuer: alice,
+      subject: space,
+      select: selector,
+    }),
+  );
+  const v2 = Fact.retract(v1);
 
-  const retraction = Space.transaction({
+  const retraction = Transaction.create({
     issuer: alice,
     subject: space,
-    changes: {
-      [the]: {
-        [doc]: {
-          [refer({ is: { v: 1 }, cause: Space.init({ the, of: doc }) }).toString()]: null,
-        },
-      },
-    },
+    changes: Changes.from([v2]),
   });
 
   const retract = await session.transact(retraction);
@@ -175,14 +172,7 @@ test("subscribe receives retraction", memory, async (session) => {
         sub: space,
         args: {
           selector,
-          selection: [
-            {
-              the,
-              of: doc,
-              is: { v: 1 },
-              cause: Space.init({ the, of: doc }),
-            },
-          ],
+          selection: { [space]: Changes.from([v1]) },
         },
       },
     },
@@ -196,48 +186,35 @@ test("subscription watch / unwatch", memory, async (session) => {
   const subscriber = Subscriber.create();
   session.subscribe(subscriber);
 
-  const selector = { the, of: doc };
+  const selector = { [doc]: { [the]: {} } };
 
-  subscriber.watch({
-    cmd: "/memory/query",
-    iss: alice,
-    sub: space,
-    args: {
-      selector,
-    },
-  });
+  subscriber.watch(
+    Query.create({
+      issuer: alice,
+      subject: space,
+      select: selector,
+    }),
+  );
 
   const two = take(subscriber.commands, 2);
-  const t1 = Space.transaction({
+  const v2 = Fact.assert({ the, of: doc2, is: { doc: 2 } });
+
+  const t1 = Transaction.create({
     issuer: alice,
     subject: space,
-    changes: {
-      [the]: {
-        [doc2]: {
-          [Space.init({ the, of: doc2 }).toString()]: {
-            is: { doc: 2 },
-          },
-        },
-      },
-    },
+    changes: Changes.from([v2]),
   });
 
-  const v1 = await session.transact(t1);
+  const r1 = await session.transact(t1);
 
-  assert(v1.ok, "asserted second doc");
+  assert(r1.ok, "asserted second doc");
 
-  const t2 = Space.transaction({
+  const v1 = Fact.assert({ the, of: doc, is: { doc: 1 } });
+
+  const t2 = Transaction.create({
     issuer: alice,
     subject: space,
-    changes: {
-      [the]: {
-        [doc]: {
-          [Space.init({ the, of: doc }).toString()]: {
-            is: { doc: 1 },
-          },
-        },
-      },
-    },
+    changes: Changes.from([v1]),
   });
   await session.transact(t2);
 
@@ -249,7 +226,7 @@ test("subscription watch / unwatch", memory, async (session) => {
           sub: space,
           args: {
             selector,
-            selection: [],
+            selection: { [space]: { [doc]: { [the]: {} } } },
           },
         },
       },
@@ -261,15 +238,14 @@ test("subscription watch / unwatch", memory, async (session) => {
   );
 
   const next = take(subscriber.commands, 1);
-  const selector2 = { the, of: doc2 };
-  await subscriber.watch({
-    cmd: "/memory/query",
-    iss: alice,
-    sub: space,
-    args: {
-      selector: selector2,
-    },
-  });
+  const selector2 = { [doc2]: { [the]: {} } };
+  await subscriber.watch(
+    Query.create({
+      issuer: alice,
+      subject: space,
+      select: selector2,
+    }),
+  );
 
   assertEquals(
     await next,
@@ -279,14 +255,7 @@ test("subscription watch / unwatch", memory, async (session) => {
           sub: space,
           args: {
             selector: selector2,
-            selection: [
-              {
-                the,
-                of: doc2,
-                is: { doc: 2 },
-                cause: Space.init(selector2),
-              },
-            ],
+            selection: { [space]: Changes.from([v2]) },
           },
         },
       },
@@ -294,53 +263,37 @@ test("subscription watch / unwatch", memory, async (session) => {
     "got update for the document was subscribed to",
   );
 
-  subscriber.unwatch({
-    cmd: "/memory/query",
-    iss: alice,
-    sub: space,
-    args: {
-      selector,
-    },
-  });
+  subscriber.unwatch(
+    Query.create({
+      issuer: alice,
+      subject: space,
+      select: selector,
+    }),
+  );
 
   const third = take(subscriber.commands, 1);
 
-  const t3 = Space.transaction({
+  const v3 = Fact.assert({ the, of: doc, is: { doc: 1, t: 3 }, cause: v1 });
+
+  const t3 = Transaction.create({
     issuer: alice,
     subject: space,
-    changes: {
-      [the]: {
-        [doc]: {
-          [refer({ is: { doc: 1 }, cause: Space.init({ the, of: doc }) }).toString()]: {
-            is: { doc: 1, t: 3 },
-          },
-        },
-      },
-    },
+    changes: Changes.from([v3]),
   });
 
-  const v3 = await session.transact(t3);
-  assert(v3.ok);
+  const r3 = await session.transact(t3);
+  assert(r3.ok);
 
-  const t4 = Space.transaction({
+  const v4 = Fact.assert({ the, of: doc2, is: { doc: 2, t: 4 }, cause: v2 });
+
+  const t4 = Transaction.create({
     issuer: alice,
     subject: space,
-    changes: {
-      [the]: {
-        [doc2]: {
-          [refer({ is: { doc: 2 }, cause: Space.init({ the, of: doc2 }) }).toString()]: {
-            is: {
-              doc: 2,
-              t: 4,
-            },
-          },
-        },
-      },
-    },
+    changes: Changes.from([v4]),
   });
 
-  const v4 = await session.transact(t4);
-  assert(v4.ok);
+  const r4 = await session.transact(t4);
+  assert(r4.ok);
 
   assertEquals(
     await third,
@@ -357,15 +310,14 @@ test("close subscription", memory, async (session) => {
   const subscriber = Subscriber.create();
   session.subscribe(subscriber);
 
-  const selector = { the, of: doc };
-  subscriber.watch({
-    cmd: "/memory/query",
-    iss: alice,
-    sub: space,
-    args: {
-      selector,
-    },
-  });
+  const selector = { [doc]: { [the]: {} } };
+  subscriber.watch(
+    Query.create({
+      issuer: alice,
+      subject: space,
+      select: selector,
+    }),
+  );
 
   const inbox = take(subscriber.commands, 2);
 
@@ -381,7 +333,7 @@ test("close subscription", memory, async (session) => {
           sub: space,
           args: {
             selector,
-            selection: [],
+            selection: { [space]: { [doc]: { [the]: {} } } },
           },
         },
       },

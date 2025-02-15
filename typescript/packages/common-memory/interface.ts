@@ -13,37 +13,40 @@ export type SubscriptionCommand = {
 };
 
 export type Brief = {
-  sub: SubjectSpace;
+  sub: MemorySpace;
   args: {
     selector: Selector;
-    selection: Fact[];
+    selection: Selection;
   };
   meta?: Meta;
 };
 
-export interface Session {
+export interface Session<Space extends MemorySpace = MemorySpace> {
   /**
    * Transacts can be used to assert or retract a document from the repository.
    * If `version` asserted / retracted does not match version of the document
    * transaction fails with `ConflictError`. Otherwise document is updated to
    * the new value.
    */
-  transact(transact: Transaction): TransactionResult;
+  transact(transact: Transaction<Space>): TransactionResult<Space>;
 
   /**
    * Queries space for matching entities based on provided selector.
    */
-  query(source: Query): QueryResult;
+  query(source: Query<Space>): QueryResult<Space>;
 
-  close(): AwaitResult<Unit, SystemError>;
+  close(): CloseResult;
 }
 
-export interface SpaceSession extends Session {
-  transact(transact: Transaction): Result<Commit, ConflictError | TransactionError>;
-  query(source: Query): Result<Fact[], QueryError>;
+export interface SpaceSession<Space extends MemorySpace = MemorySpace> extends Session {
+  subject: Space;
+
+  transact(transact: Transaction<Space>): Result<Commit<Space>, ConflictError | TransactionError>;
+  query(source: Query<Space>): Result<Selection<Space>, QueryError>;
+  close(): Result<Unit, SystemError>;
 }
 
-export interface MemorySession extends Session {
+export interface MemorySession<Space extends MemorySpace = MemorySpace> extends Session<Space> {
   subscribe(subscriber: Subscriber): SubscribeResult;
 }
 
@@ -64,9 +67,9 @@ export interface SubscriptionController {
 }
 
 /**
- * Unique identifier for the store.
+ * Unique identifier for the memory space.
  */
-export type SubjectSpace = string & { toString(): SubjectSpace };
+export type MemorySpace = string & { toString(): MemorySpace };
 
 /**
  * Unique identifier for the mutable entity.
@@ -80,100 +83,74 @@ export type Entity = string & { toString(): Entity };
  */
 export type The = string & { toString(): The };
 
+export type Cause<T = Assertion | Retraction | Unclaimed> = string & { toString(): Cause<T> };
+
 /**
  * Describes not yet claimed memory. It describes a lack of fact about memory.
  */
-export interface Unclaimed {
+export interface Unclaimed<T extends The = The, Of extends Entity = Entity> {
   /**
    * Type of the fact, usually formatted as media type. By default we expect
    * this to be  "application/json", but in the future we may support other
    * data types.
    */
-  the: The;
+  the: T;
 
   /**
    * Stable memory identifier that uniquely identifies it.
    */
-  of: Entity;
+  of: Of;
 
   is?: undefined;
   cause?: undefined;
 }
 
 /**
- * Claim denotes a memory state. It describes an immutable value (is) being
- * assigned to the mutable entity (of) of a specific type (the) at given
- * succession denoted by causal reference (cause) to a prior fact about the
- * same memory ({the, of}).
- */
-export interface Statement {
-  /**
-   * Type of the fact, usually formatted as media type. By default we expect
-   * this to be  "application/json", but in the future we may support other
-   * data types.
-   */
-  the: The;
-
-  /**
-   * Stable memory identifier that uniquely identifies it.
-   */
-  of: Entity;
-
-  /**
-   * Current value held by the memory. It can be inlined `JSON` value or a
-   * merkle reference to one.
-   */
-  is: JSONValue | Reference<JSONValue>;
-
-  /**
-   * Reference to the previous `Fact` this one succeeds. When omitted or set
-   * to `null` it implies that this is the first assertion made about the
-   * `{the, of}` and in such case
-   */
-  cause?: Reference<Fact> | Reference<Unclaimed> | null;
-}
-
-// export interface Claim extends Statement {
-//   is: Reference<JSONValue>;
-//   cause: Reference<Fact> | Reference<Unclaimed>;
-// }
-
-export interface Claim {
-  the: The;
-  of: Entity;
-
-  is?: undefined;
-  cause: Reference<Assertion> | Reference<Unclaimed>;
-}
-/**
  * `Assertion` is just like a {@link Statement} except the value MUST be inline
  * {@link JSONValue} as opposed to reference to one. {@link Assertion}s are used
  * to assert facts, wile {@link Statement}s are used to retract them. This allows
  * retracting over the wire without having to sending JSON values back and forth.
  */
-export interface Assertion extends Statement {
-  is: JSONValue;
-  cause: Reference<Fact> | Reference<Unclaimed>;
+export interface Assertion<
+  T extends The = The,
+  Of extends Entity = Entity,
+  Is extends JSONValue = JSONValue,
+> {
+  the: T;
+  of: Of;
+  is: Is;
+  cause:
+    | Reference<Assertion<T, Of, Is>>
+    | Reference<Retraction<T, Of, Is>>
+    | Reference<Unclaimed<T, Of>>;
 }
-
-export type Asserted = {
-  is: JSONValue;
-  cause: Reference<Asserted> | Reference<Retracted> | Reference<Unclaimed>;
-};
-
-export type Retracted = {
-  cause: Reference<Asserted>;
-};
 
 /**
  * Represents retracted {@link Assertion}. It is effectively a tombstone
  * denoting assertion that no longer hold and is a fact in itself.
  */
-export interface Retraction {
-  the: The;
-  of: Entity;
+export interface Retraction<
+  T extends The = The,
+  Of extends Entity = Entity,
+  Is extends JSONValue = JSONValue,
+> {
+  the: T;
+  of: Of;
   is?: undefined;
-  cause: Reference<Assertion>;
+  cause: Reference<Assertion<T, Of, Is>>;
+}
+
+export interface Invariant<
+  T extends The = The,
+  Of extends Entity = Entity,
+  Is extends JSONValue = JSONValue,
+> {
+  the: T;
+  of: Of;
+  fact: Reference<Fact<T, Of, Is>>;
+
+  is?: undefined;
+  cause?: undefined;
 }
 
 /**
@@ -181,46 +158,87 @@ export interface Retraction {
  * represented as {@link Assertion} or since retracted and therefor represented
  * by {@link Retraction}.
  */
-export type Fact = Assertion | Retraction;
+export type Fact<
+  T extends The = The,
+  Of extends Entity = Entity,
+  Is extends JSONValue = JSONValue,
+> = Assertion<T, Of, Is> | Retraction<T, Of, Is>;
+
+export type Statement<
+  T extends The = The,
+  Of extends Entity = Entity,
+  Is extends JSONValue = JSONValue,
+> = Assertion<T, Of, Is> | Retraction<T, Of, Is> | Invariant<T, Of, Is>;
 
 export type State = Fact | Unclaimed;
 
 export type Assert = {
   assert: Assertion;
   retract?: undefined;
-  confirm?: undefined;
+  claim?: undefined;
 };
 
 export type Retract = {
   retract: Retraction;
   assert?: undefined;
-  confirm?: undefined;
+  claim?: undefined;
 };
 
-export type Confirm = {
-  confirm: Claim;
+export type Claim = {
+  claim: Invariant;
   assert?: undefined;
   retract?: undefined;
 };
 
-export type Instruction = Assert | Retract;
-
-export interface Commit extends Assertion {
-  the: "application/commit+json";
-  is: {
-    since: number;
-    transaction: Transaction;
+// export interface Commit extends Assertion {
+//   the: "application/commit+json";
+//   is: {
+//     since: number;
+//     transaction: Transaction;
+//   };
+// }
+export type Commit<Subject extends string = MemorySpace> = {
+  [of in Subject]: {
+    ["application/commit+json"]: {
+      [cause: Cause]: {
+        is: CommitData;
+      };
+    };
   };
-}
+};
 
-type RetractFact = null;
-type ClaimFact = { is?: void };
-type AssertFact = { is: JSONValue };
+export type CommitData = {
+  since: number;
+  transaction: Transaction;
+};
 
-export type Changes = {
-  [the: The]: {
-    [of: Entity]: {
-      [cause: string]: RetractFact | AssertFact | ClaimFact;
+export type ClaimFact = true;
+
+// ⚠️ Note we use `void` as opposed to `undefined` because later makes it
+// incompatible with JSONValue.
+export type RetractFact = { is?: void };
+export type AssertFact<Is extends JSONValue = JSONValue> = { is: Is };
+
+export type Changes<
+  T extends The = The,
+  Of extends Entity = Entity,
+  Is extends JSONValue = JSONValue,
+> = {
+  [of in Of]: {
+    [the in T]: {
+      [cause: Cause]: RetractFact | AssertFact<Is> | ClaimFact;
+    };
+  };
+};
+
+export type FactSelection<
+  T extends The = The,
+  Of extends Entity = Entity,
+  Is extends JSONValue = JSONValue,
+> = {
+  [of in Of]: {
+    [the in T]: {
+      [cause: Cause]: RetractFact | AssertFact<Is>;
     };
   };
 };
@@ -229,56 +247,67 @@ export type Meta = Record<string, string>;
 
 export type Principal = string;
 
-export type Transaction = {
+export type Transaction<Space extends MemorySpace = MemorySpace> = {
   iss: Principal;
-  sub: SubjectSpace;
+  sub: Space;
   cmd: "/memory/transact";
   args: { changes: Changes };
   meta?: Meta;
 };
 
-export type TransactionResult = AwaitResult<
-  Commit,
+export type TransactionResult<Space extends MemorySpace = MemorySpace> = AwaitResult<
+  Commit<Space>,
   ConflictError | TransactionError | ConnectionError
 >;
 
-export type Query = {
+export type Query<Space extends MemorySpace = MemorySpace> = {
   iss: Principal;
-  sub: SubjectSpace;
+  sub: Space;
   cmd: "/memory/query";
-  args: { selector: Selector };
+  args: { select: Selector; since?: number };
 };
 
-export type QueryResult = AwaitResult<Fact[], QueryError | ConnectionError>;
+export type QueryResult<Space extends MemorySpace = MemorySpace> = AwaitResult<
+  Selection<Space>,
+  QueryError | ConnectionError
+>;
+
+export type CloseResult = AwaitResult<Unit, SystemError>;
+
 export type WatchResult = AwaitResult<Unit, QueryError | ConnectionError>;
 
 export type SubscriptionQuery = {
   iss: Principal;
-  sub: SubjectSpace;
+  sub: MemorySpace;
   cmd: "/memory/query";
-  args: { selector: Selector };
+  args: {
+    select: Selector;
+    since?: number;
+  };
 };
 
-export type InferTransactionResult<Instruction> = Instruction extends Assert
-  ? Result<Assertion, ToJSON<ConflictError> | ToJSON<TransactionError>>
-  : Result<Retraction, ToJSON<ConflictError> | ToJSON<TransactionError>>;
+export type SelectAll = "_";
+export type Select<Key extends string, Match> = {
+  [key in Key]: Match;
+} & {
+  _?: Match;
+};
 
 /**
  * Selector that replica can be queried by.
  */
-export interface Selector {
-  the?: The;
-  of?: Entity;
-  is?: {};
-  since?: number;
-}
+export type Selector = Select<Entity, Select<The, Select<Cause, { is?: Unit }>>>;
+
+export type Selection<Space extends MemorySpace = MemorySpace> = {
+  [space in Space]: FactSelection;
+};
 
 export type Unit = {};
 
 /**
  * Generic type used to annotate underlying type with a context of the replica.
  */
-export type In<T> = { [For: SubjectSpace]: T };
+export type In<T> = { [For: MemorySpace]: T };
 
 export type JSONValue = null | boolean | number | string | JSONObject | JSONArray;
 
@@ -314,7 +343,7 @@ export type Conflict = {
   /**
    * Identifier of the replica where conflict occurred.
    */
-  in: SubjectSpace;
+  space: MemorySpace;
 
   /**
    * Type of the fact where a conflict occurred.
@@ -373,7 +402,9 @@ export interface TransactionError extends Error {
 export interface QueryError extends Error {
   name: "QueryError";
   cause: SystemError;
-  selector: Selector & { in: SubjectSpace };
+
+  space: MemorySpace;
+  selector: Selector;
 }
 
 /**

@@ -1,12 +1,17 @@
 import { Database, Transaction as DBTransaction, SqliteError } from "jsr:@db/sqlite";
-import { fromString, refer, Reference } from "npm:merkle-reference";
+import { fromString, refer, Reference } from "merkle-reference";
+import { unclaimed } from "./fact.ts";
+import { from as toChanges, set } from "./changes.ts";
+import { create as createCommit, the as COMMIT_THE } from "./commit.ts";
 import type {
   Result,
-  SubjectSpace,
+  MemorySpace,
   Entity,
-  Selector,
+  CommitData,
+  Selection,
   Unit,
   Fact,
+  The,
   Transaction,
   JSONValue,
   ConflictError,
@@ -20,11 +25,8 @@ import type {
   SystemError,
   Retract,
   Assert,
-  Confirm,
-  Principal,
+  Claim,
   Query,
-  Changes,
-  Meta,
   SpaceSession,
 } from "./interface.ts";
 import * as Error from "./error.ts";
@@ -57,7 +59,7 @@ CREATE TABLE IF NOT EXISTS fact (
 CREATE TABLE IF NOT EXISTS memory (
   the     TEXT NOT NULL,        -- Kind of a fact e.g. "application/json"
   of      TEXT NOT NULL,        -- Entity identifier fact is about
-  fact  TEXT NOT NULL,          -- Link to the fact,
+  fact    TEXT NOT NULL,          -- Link to the fact,
   FOREIGN KEY(fact) REFERENCES fact(this),
   PRIMARY KEY (the, of)         -- Ensure that we have only one fact per entity
 );
@@ -90,9 +92,13 @@ const IMPORT_FACT = `INSERT OR IGNORE INTO fact (this, the, of, 'is', cause, sin
 
 const IMPORT_MEMORY = `INSERT OR IGNORE INTO memory (the, of, fact) VALUES (:the, :of, :fact);`;
 
-const SWAP = `UPDATE memory SET fact = :fact
+const SWAP = `UPDATE memory
+  SET fact = :fact
 WHERE
-(:cause IS NULL AND fact IS NULL) OR fact = :cause;`;
+  fact = :cause
+  AND the = :the
+  AND of = :of;
+`;
 
 const EXPORT = `SELECT
   state.the as the,
@@ -107,6 +113,7 @@ WHERE
   (:the IS NULL OR state.the = :the)
   AND (:of IS NULL OR state.of = :of)
   AND (:is IS NULL OR state.'is' IS NOT NULL)
+  AND (:cause is NULL OR state.cause = :cause)
   AND (:since is NULL or state.since > :since)
 `;
 
@@ -114,23 +121,23 @@ export type Options = {
   url: URL;
 };
 
-interface Session {
-  id: SubjectSpace;
+interface Session<Space extends MemorySpace> {
+  subject: Space;
   store: Database;
 }
 
-class Space implements Session, SpaceSession {
-  constructor(public id: SubjectSpace, public store: Database) {}
+class Space<Subject extends MemorySpace = MemorySpace> implements Session<Subject>, SpaceSession {
+  constructor(public subject: Subject, public store: Database) {}
 
-  transact(transaction: Transaction) {
+  transact(transaction: Transaction<Subject>) {
     return transact(this, transaction);
   }
 
-  query(source: Query) {
+  query(source: Query<Subject>) {
     return query(this, source);
   }
 
-  close(): AsyncResult<{}, SystemError> {
+  close() {
     return close(this);
   }
 }
@@ -156,42 +163,48 @@ export type { Space as View };
 const readAddress = (url: URL) => {
   const { pathname } = url;
   const base = pathname.split("/").pop() as string;
-  const id = base.endsWith(".sqlite") ? base.slice(0, -".sqlite".length) : base;
+  const subject = base.endsWith(".sqlite") ? base.slice(0, -".sqlite".length) : base;
 
-  return { location: url.protocol === "file:" ? url : ":memory:", id };
+  return { location: url.protocol === "file:" ? url : ":memory:", subject };
 };
 
 /**
  * Creates a connection to the existing replica. Errors if replica does not
  * exist.
  */
-export const connect = async ({ url }: Options): AsyncResult<Space, ToJSON<ConnectionError>> => {
+export const connect = async <Subject extends MemorySpace>({
+  url,
+}: Options): AsyncResult<Space<Subject>, ToJSON<ConnectionError>> => {
   const address = readAddress(url);
   try {
     const database = await new Database(address.location, { create: false });
     database.exec(PREPARE);
-    const session = new Space(address.id, database);
+    const session = new Space(address.subject as Subject, database);
     return { ok: session };
   } catch (cause) {
     return { error: Error.connection(url, cause as SqliteError) };
   }
 };
 
-export const open = async ({ url }: Options): AsyncResult<Space, ToJSON<ConnectionError>> => {
+export const open = async <Subject extends MemorySpace>({
+  url,
+}: Options): AsyncResult<Space<Subject>, ConnectionError> => {
   try {
-    const { location, id } = readAddress(url);
+    const { location, subject } = readAddress(url);
     const database = await new Database(location, { create: true });
     database.exec(PREPARE);
-    const session = new Space(id, database);
+    const session = new Space(subject as Subject, database);
     return { ok: session };
   } catch (cause) {
     throw Error.connection(url, cause as SqliteError);
   }
 };
 
-export const close = async ({ store }: Session): AsyncResult<Unit, SystemError> => {
+export const close = <Space extends MemorySpace>({
+  store,
+}: Session<Space>): Result<Unit, SystemError> => {
   try {
-    await store.close();
+    store.close();
     return { ok: {} };
   } catch (cause) {
     return { error: cause as SqliteError };
@@ -202,52 +215,80 @@ type StateRow = {
   fact: string;
   the: string;
   of: Entity;
-  is: string;
+  is: string | null;
   cause: string | null;
   since: number;
 };
 
-/**
- * Creates an implicit fact.
- *
- * @param {object} source
- * @param {string} source.the
- * @param {Entity} source.of
- * @returns {ImplicitFact}
- */
-export const implicit = ({ the, of }: { the: string; of: Entity }) => ({
-  the,
-  of,
-});
+const recall = <Space extends MemorySpace>(
+  { store }: Session<Space>,
+  { the, of }: { the: The; of: Entity },
+): { fact: Fact | null; since?: number; id?: string } => {
+  const row = store.prepare(EXPORT).get({ the, of }) as StateRow | undefined;
+  if (row) {
+    const fact: Fact = {
+      the,
+      of,
+      cause: row.cause ? fromString(row.cause) : refer(unclaimed(row)),
+    };
 
-/**
- * Creates a reference to an implicit fact.
- */
-export const init = ({
-  the = "application/json",
-  of,
-}: {
-  the?: string;
-  of: Entity;
-}): Reference<Assertion> => refer(implicit({ the, of }));
+    if (row.is) {
+      fact.is = JSON.parse(row.is);
+    }
 
-const select = ({ store }: Session, { the, of, is, since }: Selector): Fact[] => {
-  const rows = store.prepare(EXPORT).all({
-    the: the ?? null,
-    of: of ?? null,
-    is: is === undefined ? null : {},
-    since: since ?? null,
-  }) as StateRow[];
-
-  return rows.map((row) => ({
-    the: row.the,
-    of: row.of,
-    ...(row.is ? { is: JSON.parse(row.is) } : {}),
-    cause: (row.cause ? fromString(row.cause) : init(row)) as Reference<Assertion>,
-  }));
+    return { fact, id: row.fact, since: row.since };
+  } else {
+    return { fact: null };
+  }
 };
 
-const importDatum = (session: Session, source: Assertion): Reference<JSONValue> => {
+const select = <Space extends MemorySpace>(
+  { store }: Session<Space>,
+  { since, select }: Query["args"],
+): Selection<Space>[Space] => {
+  const selection = {};
+  const all = [[SelectAll, {}]] as const;
+  const selector = Object.entries(select);
+  for (const [of, attributes] of selector.length > 0 ? selector : all) {
+    if (of !== SelectAll) {
+      set(selection, [], of, {});
+    }
+
+    const selector = Object.entries(attributes);
+    for (const [the, revisions] of selector.length > 0 ? selector : all) {
+      if (the !== SelectAll && of !== SelectAll) {
+        set(selection, [of], the, {});
+      }
+
+      const selector = Object.entries(revisions);
+      for (const [cause, match] of selector.length > 0 ? selector : all) {
+        const rows = store.prepare(EXPORT).all({
+          the: the === SelectAll ? null : the,
+          of: of === SelectAll ? null : of,
+          cause: cause === SelectAll ? null : cause,
+          is: (match as { is?: Unit }).is === undefined ? null : {},
+          since: since ?? null,
+        }) as StateRow[];
+
+        for (const row of rows) {
+          set(
+            selection,
+            [row.of, row.the],
+            row.cause ?? refer(unclaimed(row)).toString(),
+            row.is ? { is: JSON.parse(row.is) } : {},
+          );
+        }
+      }
+    }
+  }
+
+  return selection;
+};
+
+const importDatum = <Space extends MemorySpace>(
+  session: Session<Space>,
+  source: Assertion,
+): Reference<JSONValue> => {
   const is = refer(source.is);
   session.store.run(IMPORT_DATUM, {
     this: is.toString(),
@@ -256,14 +297,14 @@ const importDatum = (session: Session, source: Assertion): Reference<JSONValue> 
   return is;
 };
 
-const iterate = function* (transaction: Transaction): Iterable<Retract | Assert | Confirm> {
-  for (const [the, entities] of Object.entries(transaction.args.changes)) {
-    for (const [of, changes] of Object.entries(entities)) {
-      for (const [cause, change] of Object.entries(changes)) {
-        if (change == null) {
-          yield { retract: { the, of, cause: fromString(cause) } } as Retract;
+const iterate = function* (transaction: Transaction): Iterable<Retract | Assert | Claim> {
+  for (const [of, attributes] of Object.entries(transaction.args.changes)) {
+    for (const [the, revisions] of Object.entries(attributes)) {
+      for (const [cause, change] of Object.entries(revisions)) {
+        if (change == true) {
+          yield { claim: { the, of, fact: fromString(cause) } } as Claim;
         } else if (change.is === undefined) {
-          yield { confirm: { the, of, cause: fromString(cause) } } as Confirm;
+          yield { retract: { the, of, cause: fromString(cause) } } as Retract;
         } else {
           yield { assert: { the, of, is: change.is, cause: fromString(cause) } } as Assert;
         }
@@ -272,33 +313,28 @@ const iterate = function* (transaction: Transaction): Iterable<Retract | Assert 
   }
 };
 
-const swap = (
-  session: Session,
-  source: Retract | Assert | Confirm,
-  { since, transaction }: { since: number; transaction: Transaction },
+const swap = <Space extends MemorySpace>(
+  session: Session<Space>,
+  source: Retract | Assert | Claim,
+  { since, transaction }: { since: number; transaction: Transaction<Space> },
 ) => {
-  const claim = source.assert ?? source.retract ?? source.confirm;
-  const { the, of } = claim;
+  const [{ the, of }, expect] = source.assert
+    ? [source.assert, source.assert.cause]
+    : source.retract
+    ? [source.retract, source.retract.cause]
+    : [source.claim, source.claim.fact];
+  const cause = expect.toString();
+  const base = refer(unclaimed({ the, of })).toString();
+  const expected = cause === base ? null : (expect as Reference<Fact>);
 
   // Derive the merkle reference to the fact that memory will have after
   // successful update. If we have an assertion or retraction we derive fact
   // from it, but if it is a confirmation `cause` is the fact itself.
   const fact = source.assert
-    ? refer({ is: claim.is, cause: claim.cause }).toString()
+    ? refer(source.assert).toString()
     : source.retract
-    ? refer({ cause: claim.cause }).toString()
-    : source.confirm.cause.toString();
-
-  // We do not store implicit facts like `{ the, of }` in the database and
-  // we represent causal reference to such implicit facts via `NULL`, therefore
-  // we asses if causal reference is to an implicit and if so substitute it
-  // with `null`. We also use `null` for an implicit `cause` in the
-  // `RevisionError`, that is because callers aren't expected to specify them
-  // explicitly and telling in the error that hash to implicit was expected
-  // would be confusing.
-  const expected =
-    claim.cause?.toString() === init(claim).toString() ? null : (claim.cause as Reference<Fact>);
-  const cause = expected?.toString() ?? null;
+    ? refer(source.retract).toString()
+    : source.claim.fact.toString();
 
   // If this is an assertion we need to import asserted data and then insert
   // fact referencing it. If it is retraction we don't have data to import
@@ -326,21 +362,15 @@ const swap = (
   // desired update. If conflicting record exists this will be ignored, but that
   // is fine as update in the next step will update it to the desired state.
   if (expected == null) {
-    session.store.run(IMPORT_MEMORY, {
-      the,
-      of,
-      fact,
-    });
+    session.store.run(IMPORT_MEMORY, { the, of, fact });
   }
 
   // Here we finally perform a memory swap. Note that update is conditional and
   // will only update if current record has the same `cause` reference. If that
   // is not the case 0 records will be updated indicating a conflict handled
-  // below.
-  const updated = session.store.run(SWAP, {
-    fact,
-    cause,
-  });
+  // below. Note that passing `the` and `of` is required, if omitted we may
+  // update another memory which has passed `cause`.
+  const updated = session.store.run(SWAP, { fact, cause, the, of });
 
   // If no records were updated it implies that there was no record with
   // matching `cause`. It may be because `cause` referenced implicit fact
@@ -349,14 +379,14 @@ const swap = (
   // is different from the one being asserted. We will asses this by pulling
   // the record and comparing it to desired state.
   if (updated === 0) {
-    const actual = select(session, { the, of })[0] ?? null;
+    const { fact: actual } = recall(session, { the, of });
 
     // If actual state matches desired state it is either was inserted by the
     // `IMPORT_MEMORY` or this was a duplicate call. Either way we do not treat
     // it as a conflict as current state is the asserted one.
-    if (identify(actual ?? { cause: null }) !== fact) {
+    if (refer(actual).toString() !== fact) {
       throw Error.conflict(transaction, {
-        in: transaction.sub,
+        space: transaction.sub,
         the,
         of,
         expected,
@@ -366,71 +396,45 @@ const swap = (
   }
 };
 
-const identify = ({ is, cause }: Fact) =>
-  (is === undefined ? refer({ cause }) : refer({ cause, is })).toString();
-
-const THE_COMMIT = "application/commit+json";
-
-const toSubjectEntity = (subject: SubjectSpace) => refer(subject).toString();
-
-/**
- * Derives a fact for the commit entity from the source data.
- */
-export const toCommit = ({
-  subject,
-  is,
-  cause,
-}: {
-  subject: SubjectSpace;
-  is: Commit["is"];
-  cause?: Reference<Fact>;
-}): Commit => {
-  const of = toSubjectEntity(subject);
-  return {
-    the: THE_COMMIT,
-    of,
-    is,
-    cause: cause ?? init({ the: THE_COMMIT, of }),
-  };
-};
-
-const commit = (session: Session, transaction: Transaction): Commit => {
-  const space = toSubjectEntity(transaction.sub);
-  const row = session.store.prepare(EXPORT).get({
-    the: THE_COMMIT,
-    of: space,
-  }) as StateRow | undefined;
+const commit = <Space extends MemorySpace>(
+  session: Session<Space>,
+  transaction: Transaction<Space>,
+): Commit<Space> => {
+  const the = COMMIT_THE;
+  const of = transaction.sub;
+  const row = session.store.prepare(EXPORT).get({ the, of }) as StateRow | undefined;
 
   const [since, cause] = row
-    ? [(JSON.parse(row.is) as Commit["is"]).since + 1, fromString(row.fact) as Reference<Assertion>]
-    : [0, init({ the: THE_COMMIT, of: space })];
+    ? [
+        (JSON.parse(row.is as string) as CommitData).since + 1,
+        fromString(row.fact) as Reference<Assertion>,
+      ]
+    : [0, refer(unclaimed({ the, of }))];
+
+  const commit = createCommit({ space: of, since, transaction, cause });
 
   for (const fact of iterate(transaction)) {
-    swap(session, fact, { since, transaction });
+    swap(session, fact, commit.is);
   }
 
-  const commit = toCommit({
-    subject: transaction.sub,
-    is: {
-      since,
-      transaction,
-    },
-    cause,
-  });
+  swap(session, { assert: commit }, commit.is);
 
-  swap(session, { assert: commit }, { since, transaction });
-
-  return commit;
+  return toChanges([commit]);
 };
 
-const execute = <Tr extends DBTransaction<(session: Session, transaction: Transaction) => Commit>>(
-  commit: Tr,
-  session: Session,
-  transaction: Transaction,
-): Result<Commit, ToJSON<ConflictError> | ToJSON<TransactionError>> => {
+const execute = <
+  Subject extends MemorySpace,
+  Tr extends DBTransaction<
+    (session: Session<Subject>, transaction: Transaction<Subject>) => Commit<Subject>
+  >,
+>(
+  update: Tr,
+  session: Session<Subject>,
+  transaction: Transaction<Subject>,
+): Result<Commit<Subject>, ConflictError | TransactionError> => {
   try {
     return {
-      ok: commit(session, transaction),
+      ok: update(session, transaction),
     };
   } catch (error) {
     return (error as Error).name === "ConflictError"
@@ -444,32 +448,24 @@ const execute = <Tr extends DBTransaction<(session: Session, transaction: Transa
   }
 };
 
-export const transaction = ({
-  issuer,
-  subject,
-  changes,
-  meta,
-}: {
-  issuer: Principal;
-  subject: SubjectSpace;
-  changes: Changes;
-  meta?: Meta;
-}): Transaction => ({
-  cmd: "/memory/transact",
-  iss: issuer,
-  sub: subject,
-  args: { changes },
-  ...(meta ? { meta } : undefined),
-});
+export const transact = <Space extends MemorySpace>(
+  session: Session<Space>,
+  transaction: Transaction<Space>,
+) => execute(session.store.transaction(commit), session, transaction);
 
-export const transact = (session: Session, transaction: Transaction) =>
-  execute(session.store.transaction(commit), session, transaction);
-
-export const query = (session: Session, source: Query): Result<Fact[], ToJSON<QueryError>> => {
+export const query = <Space extends MemorySpace>(
+  session: Session<Space>,
+  source: Query<Space>,
+): Result<Selection<Space>, QueryError> => {
   try {
-    return { ok: select(session, source.args.selector) };
+    return {
+      ok: {
+        [source.sub]: session.store.transaction(select)(session, source.args),
+      } as Selection<Space>,
+    };
   } catch (error) {
-    const { the, of } = source.args.selector;
-    return { error: Error.query({ the, of, in: session.id }, error as SqliteError) };
+    return { error: Error.query(source.sub, source.args.select, error as SqliteError) };
   }
 };
+
+const SelectAll = "_";

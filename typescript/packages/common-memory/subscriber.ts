@@ -1,44 +1,13 @@
 import { SubscriberCommand, SubscriptionCommand, Query } from "./interface.ts";
 import { Subscriber } from "./provider.ts";
+import * as Socket from "./socket.ts";
 
 export interface Subscriber extends TransformStream<SubscriptionCommand, SubscriberCommand> {}
 
 /**
  * Takes a WebSocket and creates Subscriber.
  */
-export const fromWebSocket = (socket: WebSocket): Subscriber => ({
-  readable: new ReadableStream({
-    start(controller) {
-      socket.onmessage = (event) => {
-        try {
-          controller.enqueue(JSON.parse(event.data) as SubscriberCommand);
-        } catch (error) {
-          controller.error(error);
-        }
-      };
-      socket.onclose = () => {
-        controller.close();
-      };
-      socket.onerror = (event) => {
-        controller.error(event);
-      };
-    },
-    cancel() {
-      socket.close();
-    },
-  }),
-  writable: new WritableStream({
-    write(data: SubscriptionCommand) {
-      socket.send(JSON.stringify(data));
-    },
-    close() {
-      return socket.close();
-    },
-    abort() {
-      return socket.close();
-    },
-  }),
-});
+export const fromWebSocket = (socket: WebSocket): Subscriber => Socket.from(socket);
 
 export const create = () => new SubscriberChannel();
 

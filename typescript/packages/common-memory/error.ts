@@ -10,7 +10,7 @@ import type {
   Selector,
   Transaction,
 } from "./interface.ts";
-import { SubjectSpace } from "./interface.ts";
+import { MemorySpace } from "./interface.ts";
 import { refer } from "./util.ts";
 
 export const conflict = (transaction: Transaction, info: Conflict): ToJSON<ConflictError> =>
@@ -22,9 +22,10 @@ export const transaction = (
 ): ToJSON<TransactionError> => new TheTransactionError(transaction, cause);
 
 export const query = (
-  selector: Selector & { in: SubjectSpace },
+  space: MemorySpace,
+  selector: Selector,
   cause: SystemError,
-): ToJSON<QueryError> => new TheQueryError(selector, cause);
+): ToJSON<QueryError> => new TheQueryError(space, selector, cause);
 
 export const connection = (address: URL, cause: SystemError): ToJSON<ConnectionError> =>
   new TheConnectionError(address.href, cause);
@@ -35,14 +36,14 @@ export class TheConflictError extends Error implements ConflictError {
   constructor(public transaction: Transaction, conflict: Conflict) {
     super(
       conflict.expected == null
-        ? `The ${conflict.the} of ${conflict.of} in ${conflict.in} already exists as ${refer(
+        ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} already exists as ${refer(
             conflict.actual,
           )}`
         : conflict.actual == null
-        ? `The ${conflict.the} of ${conflict.of} in ${conflict.in} was expected to be ${conflict.expected}, but it does not exists`
-        : `The ${conflict.the} of ${conflict.of} in ${conflict.in} was expected to be ${
+        ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${conflict.expected}, but it does not exists`
+        : `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${
             conflict.expected
-          }, but it is ${refer({ is: conflict.actual.is, cause: conflict.actual.cause })}`,
+          }, but it is ${refer(conflict.actual)}`,
     );
 
     this.conflict = conflict;
@@ -85,17 +86,18 @@ export class TheTransactionError extends Error implements TransactionError {
 export class TheQueryError extends Error implements QueryError {
   override name = "QueryError" as const;
   constructor(
-    public selector: Selector & { in: SubjectSpace },
+    public space: MemorySpace,
+    public selector: Selector,
     public override cause: SystemError,
   ) {
-    const { the, of } = selector;
-    super(`Query ${JSON.stringify({ the, of })} in ${selector.in} failed: ${cause.message}`);
+    super(`Query ${JSON.stringify(selector)} in ${space} failed: ${cause.message}`);
   }
   toJSON(): QueryError {
     return {
       name: this.name,
       stack: this.stack ?? "",
       message: this.message,
+      space: this.space,
       selector: this.selector,
       cause: {
         name: this.cause.name,

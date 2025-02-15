@@ -9,7 +9,7 @@ import {
   Query,
   ConnectionError,
   SystemError,
-  SubjectSpace as Subject,
+  MemorySpace as Subject,
   MemorySession,
   SpaceSession,
   Subscriber,
