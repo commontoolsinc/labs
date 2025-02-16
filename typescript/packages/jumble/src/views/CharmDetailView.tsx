@@ -223,7 +223,7 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
             <button
               onClick={handleIterate}
               disabled={loading}
-              className="px-4 py-2 border-2 text-sm border-black bg-gray-50 text-black flex items-center gap-2"
+              className="px-4 py-2 border-2 text-sm border-white bg-black text-white flex items-center gap-2"
             >
               {loading && (
                 <DitheredCube
@@ -238,7 +238,7 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
                 "Iterating..."
               ) : (
                 <span className="text-xs flex justify-between w-full">
-                  Iterate <span className="text-gray-500 font-bold italic">(⌘ + enter)</span>
+                  Iterate <span className="text-gray-400 font-bold italic">(⌘ + enter)</span>
                 </span>
               )}
             </button>
@@ -279,8 +279,9 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
       {/* Main Content Area */}
       <div className="flex-1 h-full overflow-y-auto p-4 relative">
         {loading && (
-          <div className="absolute inset-0 bg-white/80 flex items-center justify-center">
-            <div className="text-lg font-bold">Generating variants...</div>
+          <div className="absolute inset-0 bg-white/80 flex flex-col items-center justify-center">
+            <div className="text-lg font-bold">thinking</div>
+            <LoadingSpinner height={1024} width={1024} visible={true} cameraZoom={400} />
           </div>
         )}
 
