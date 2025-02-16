@@ -6,7 +6,7 @@ import {
   createQueryResultProxy,
   getDocLinkOrValue,
 } from "./query-result-proxy.js";
-import { followAliases, followLinks } from "./utils.js";
+import { resolvePath, followLinks } from "./utils.js";
 import { queueEvent, subscribe, type ReactivityLog } from "./scheduler.js";
 import { type EntityId, getEntityId } from "./cell-map.js";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.js";
@@ -97,51 +97,13 @@ export function createCell<T>(
   schema?: JSONSchema,
   rootSchema: JSONSchema | undefined = schema,
 ): Cell<T> {
-  // Follow aliases, doc links, etc. in path, so that we end up on the right
-  // doc, meaning the one that contains the value we want to access without any
-  // redirects in between.
-  //
-  // If the path points to a redirect itself, we don't want to follow it: Other
-  // functions will do that. We just want to skip the interim ones.
-  //
-  // Let's look at a few examples:
-  //
-  // Doc: { link }, path: [] --> no change
-  // Doc: { link }, path: ["foo"] --> follow link, path: ["foo"]
-  // Doc: { foo: { link } }, path: ["foo"] --> no change
-  // Doc: { foo: { link } }, path: ["foo", "bar"] --> follow link, path: ["bar"]
-
-  let ref: DocLink = { cell: doc, path: [] };
-  let resolveLog: ReactivityLog = { reads: [], writes: [] };
-  const seen: DocLink[] = [];
-
-  let keys = [...path];
-  while (keys.length) {
-    // First follow all the aliases and links, _before_ accessing the key.
-    ref = followLinks(ref, seen, resolveLog);
-    doc = ref.cell;
-    path = [...ref.path, ...keys];
-
-    // Now access the key.
-    const key = keys.shift()!;
-    ref = { cell: doc, path: [...ref.path, key] };
-  }
-
-  // Follow aliases on the last key, but no other kinds of links.
-  if (isAlias(ref.cell.getAtPath(ref.path))) {
-    ref = followAliases(ref.cell.getAtPath(ref.path), ref.cell, resolveLog);
-    doc = ref.cell;
-    path = ref.path;
-  }
-
-  // Then follow the other links and see whether this is a stream alias.
-  ref = followLinks(ref, seen, resolveLog);
-  const isStream = isStreamAlias(ref.cell.getAtPath(ref.path));
-
-  if (log) log.reads.push(...resolveLog.reads);
-
-  if (isStream) return createStreamCell(ref.cell, ref.path) as unknown as Cell<T>;
-  else return createRegularCell(doc, path, log, resolveLog, schema, rootSchema);
+  // Resolve the path to check whether it's a stream. We're not logging this right now.
+  // The corner case where during it's lifetime this changes from non-stream to stream
+  // or vice versa will not be detected.
+  const ref = followLinks(resolvePath(doc, path));
+  if (isStreamAlias(ref.cell.getAtPath(ref.path)))
+    return createStreamCell(ref.cell, ref.path) as unknown as Cell<T>;
+  else return createRegularCell(doc, path, log, schema, rootSchema);
 }
 
 function createStreamCell<T>(doc: DocImpl<any>, path: PropertyKey[]): Stream<T> {
@@ -175,26 +137,32 @@ function createRegularCell<T>(
   doc: DocImpl<any>,
   path: PropertyKey[],
   log?: ReactivityLog,
-  resolveLog?: ReactivityLog,
   schema?: JSONSchema,
   rootSchema?: JSONSchema,
 ): Cell<T> {
   const self: Cell<T> = {
     get: () => validateAndTransform(doc, path, schema, log),
-    set: (newValue: T) => doc.setAtPath(path, newValue, log),
+    set: (newValue: T) => {
+      // TODO: This doesn't respect aliases on write. Should it?
+      const ref = resolvePath(doc, path, log);
+      ref.cell.setAtPath(ref.path, newValue, log);
+    },
     send: (newValue: T) => self.set(newValue),
     update: (value: Partial<T>) => {
-      const previousValue = doc.getAtPath(path);
+      // TODO: This doesn't respect aliases on write. Should it?
+      const ref = resolvePath(doc, path, log);
+      const previousValue = ref.cell.getAtPath(ref.path);
       if (typeof previousValue !== "object" || previousValue === null)
         throw new Error("Can't update non-object value");
       const newValue = {
         ...previousValue,
         ...value,
       };
-      doc.setAtPath(path, newValue, log);
+      ref.cell.setAtPath(ref.path, newValue, log);
     },
     push: (value: any) => {
-      const array = doc.getAtPath(path) ?? [];
+      const ref = resolvePath(doc, path, log);
+      const array = ref.cell.getAtPath(ref.path) ?? [];
       if (!Array.isArray(array)) throw new Error("Can't push into non-array value");
 
       // Every element pushed to the array should be it's own doc or link to
@@ -220,12 +188,12 @@ function createRegularCell<T>(
         }
       }
 
-      doc.setAtPath(path, [...array, value], log);
+      ref.cell.setAtPath(ref.path, [...array, value], log);
     },
     sink: (callback: (value: T) => Cancel | undefined) =>
-      subscribeToReferencedDocs(callback, true, doc, path, schema, rootSchema, resolveLog),
+      subscribeToReferencedDocs(callback, true, doc, path, schema, rootSchema),
     updates: (callback: (value: T) => Cancel | undefined) =>
-      subscribeToReferencedDocs(callback, false, doc, path, schema, rootSchema, resolveLog),
+      subscribeToReferencedDocs(callback, false, doc, path, schema, rootSchema),
     key: <K extends keyof T>(key: K) => {
       const currentSchema =
         schema?.type === "object"
@@ -236,7 +204,7 @@ function createRegularCell<T>(
           : schema?.type === "array"
             ? schema.items
             : undefined;
-      return doc.asCell([...path, key], log, currentSchema, rootSchema) as Cell<T[K]>;
+      return createCell(doc, [...path, key], log, currentSchema, rootSchema) as Cell<T[K]>;
     },
     asSchema: (newSchema: JSONSchema) => createCell(doc, path, log, newSchema, newSchema),
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
@@ -274,11 +242,10 @@ function subscribeToReferencedDocs<T>(
   path: PropertyKey[],
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined,
-  resolveLog?: ReactivityLog,
 ): Cancel {
   const initialLog = {
-    reads: [...(resolveLog?.reads ?? [])],
-    writes: [...(resolveLog?.writes ?? [])],
+    reads: [],
+    writes: [],
   } satisfies ReactivityLog;
 
   // Get the value once to determine all the docs that need to be subscribed to.
@@ -295,9 +262,9 @@ function subscribeToReferencedDocs<T>(
       path,
       schema,
       newValue,
-      log: JSON.parse(JSON.stringify(log)),
+      log,
       value,
-      initialLog: JSON.parse(JSON.stringify(initialLog)),
+      initialLog,
     });
   }, initialLog);
 
@@ -305,7 +272,7 @@ function subscribeToReferencedDocs<T>(
     path,
     schema,
     value,
-    initialLog: JSON.parse(JSON.stringify(initialLog)),
+    initialLog,
   });
 
   // Call the callback once with initial value if requested.

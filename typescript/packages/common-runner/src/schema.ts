@@ -1,8 +1,8 @@
 import { JSONSchema } from "@commontools/builder";
 import { type DocImpl, type DocLink } from "./doc.js";
-import { isCell } from "./cell.js";
+import { isCell, createCell } from "./cell.js";
 import { type ReactivityLog } from "./scheduler.js";
-import { followLinks } from "./utils.js";
+import { resolvePath, followLinks } from "./utils.js";
 
 export function resolveSchema(
   schema: JSONSchema | undefined,
@@ -48,6 +48,11 @@ export function validateAndTransform(
 ): any {
   if (seen.length > 100) debugger;
 
+  // Follow aliases, etc. to last element on path + just aliases on that last one
+  // When we generate cells below, we want them to be based of this value, as that
+  // is what a setter would change when they update a value or reference.
+  ({ cell: doc, path } = resolvePath(doc, path, log));
+
   const resolvedSchema = resolveSchema(schema, rootSchema, true);
 
   // If this should be a reference, return as a Cell of resolvedSchema
@@ -62,15 +67,18 @@ export function validateAndTransform(
       (Array.isArray(resolvedSchema?.anyOf) &&
         resolvedSchema.anyOf.every((option) => option.asCell)))
   )
-    return doc.asCell(path, passOnLog ? log : undefined, resolvedSchema, rootSchema);
+    return createCell(doc, path, passOnLog ? log : undefined, resolvedSchema, rootSchema);
 
   // If there is no schema, return as raw data via query result proxy
   if (!resolvedSchema) return doc.getAsQueryResult(path, log);
 
-  // Handle various types of references
-  ({ cell: doc, path } = followLinks({ cell: doc, path }, seen, log));
-  const value = doc.getAtPath(path);
-  log?.reads.push({ cell: doc, path });
+  // Now resolve further links until we get the actual value. Note that `doc`
+  // and `path` will still point to the parent, as in e.g. the `anyOf` case
+  // below we might still create a new Cell and it should point to the top of
+  // this set of links.
+  const ref = followLinks({ cell: doc, path }, [], log);
+  const value = ref.cell.getAtPath(ref.path);
+  log?.reads.push({ cell: ref.cell, path: ref.path, schema: true });
 
   // TODO: The behavior when one of the options is very permissive (e.g. no type
   // or an object that allows any props) is not well defined.
@@ -87,16 +95,7 @@ export function validateAndTransform(
       const arrayOptions = options.filter((option) => option.type === "array");
       if (arrayOptions.length === 0) return undefined;
       if (arrayOptions.length === 1)
-        // slice: Don't include the current path in the seen array, avoiding triggering cycle detection
-        return validateAndTransform(
-          doc,
-          path,
-          arrayOptions[0],
-          log,
-          passOnLog,
-          rootSchema,
-          seen.slice(0, -1),
-        );
+        return validateAndTransform(doc, path, arrayOptions[0], log, passOnLog, rootSchema, seen);
 
       // TODO: Handle more corner cases like empty anyOf, etc.
       const merged: JSONSchema[] = [];
@@ -113,7 +112,7 @@ export function validateAndTransform(
         log,
         passOnLog,
         rootSchema,
-        seen.slice(0, -1),
+        seen,
       );
     } else if (typeof value === "object" && value !== null) {
       let objectCandidates = options.filter((option) => option.type === "object");
@@ -144,15 +143,7 @@ export function validateAndTransform(
           const extraLog = { reads: [], writes: [] } satisfies ReactivityLog;
           return {
             schema: option,
-            result: validateAndTransform(
-              doc,
-              path,
-              option,
-              extraLog,
-              passOnLog,
-              rootSchema,
-              seen.slice(0, -1),
-            ),
+            result: validateAndTransform(doc, path, option, extraLog, passOnLog, rootSchema, seen),
             extraLog,
           };
         });
@@ -173,22 +164,13 @@ export function validateAndTransform(
           console.warn("validateAndTransform: unexpected non-object result", result);
         }
       }
-      log?.reads.push(...extraReads);
       return merged;
     } else {
       const candidates = options
         .filter((option) => (option.type === "integer" ? "number" : option.type) === typeof value)
         .map((option) => ({
           schema: option,
-          result: validateAndTransform(
-            doc,
-            path,
-            option,
-            log,
-            passOnLog,
-            rootSchema,
-            seen.slice(0, -1),
-          ),
+          result: validateAndTransform(doc, path, option, log, passOnLog, rootSchema, seen),
         }));
 
       if (candidates.length === 0) return undefined;
@@ -197,15 +179,7 @@ export function validateAndTransform(
       // If we get more than one candidate, see if there is one that matches anything, and if not return the first one
       const anyTypeOption = options.find((option) => option.type === undefined);
       if (anyTypeOption)
-        return validateAndTransform(
-          doc,
-          path,
-          anyTypeOption,
-          log,
-          passOnLog,
-          rootSchema,
-          seen.slice(0, -1),
-        );
+        return validateAndTransform(doc, path, anyTypeOption, log, passOnLog, rootSchema, seen);
       else return candidates[0].result;
     }
   }

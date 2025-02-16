@@ -284,15 +284,53 @@ export function findAllAliasedCells(binding: any, cell: DocImpl<any>): DocLink[]
   return cells;
 }
 
+export function resolvePath(
+  doc: DocImpl<any>,
+  path: PropertyKey[],
+  log?: ReactivityLog,
+  seen: DocLink[] = [],
+): DocLink {
+  // Follow aliases, doc links, etc. in path, so that we end up on the right
+  // doc, meaning the one that contains the value we want to access without any
+  // redirects in between.
+  //
+  // If the path points to a redirect itself, we don't want to follow it: Other
+  // functions like followLwill do that. We just want to skip the interim ones.
+  //
+  // Let's look at a few examples:
+  //
+  // Doc: { link }, path: [] --> no change
+  // Doc: { link }, path: ["foo"] --> follow link, path: ["foo"]
+  // Doc: { foo: { link } }, path: ["foo"] --> no change
+  // Doc: { foo: { link } }, path: ["foo", "bar"] --> follow link, path: ["bar"]
+
+  let ref: DocLink = { cell: doc, path: [] };
+
+  let keys = [...path];
+  while (keys.length) {
+    // First follow all the aliases and links, _before_ accessing the key.
+    ref = followLinks(ref, seen, log);
+    doc = ref.cell;
+    path = [...ref.path, ...keys];
+
+    // Now access the key.
+    const key = keys.shift()!;
+    ref = { cell: doc, path: [...ref.path, key] };
+  }
+
+  // Follow aliases on the last key, but no other kinds of links.
+  if (isAlias(ref.cell.getAtPath(ref.path))) {
+    ref = followAliases(ref.cell.getAtPath(ref.path), ref.cell, log);
+    doc = ref.cell;
+    path = ref.path;
+  }
+
+  return ref;
+}
+
 // Follows links and returns the last one
 export function followLinks(ref: DocLink, seen: DocLink[] = [], log?: ReactivityLog): DocLink {
   while (true) {
-    if (seen.some((r) => r.cell === ref.cell && arrayEqual(r.path, ref.path)))
-      throw new Error(
-        `Reference cycle detected ${JSON.stringify(ref.cell.entityId ?? "unknown")} ${ref.path.join(".")}`,
-      );
-    seen.push(ref);
-
     const target = ref.cell.getAtPath(ref.path);
 
     if (isQueryResultForDereferencing(target)) ref = getDocLinkOrThrow(target);
@@ -307,7 +345,14 @@ export function followLinks(ref: DocLink, seen: DocLink[] = [], log?: Reactivity
     else return ref;
 
     // Log all the refs that were followed, but not the final value they point to.
-    log?.reads.push({ cell: ref.cell, path: ref.path });
+    log?.reads.push({ cell: ref.cell, path: ref.path, followLinks: true });
+
+    // Detect cycles (at this point these are all references that point to something)
+    if (seen.some((r) => r.cell === ref.cell && arrayEqual(r.path, ref.path)))
+      throw new Error(
+        `Reference cycle detected ${JSON.stringify(ref.cell.entityId ?? "unknown")} ${ref.path.join(".")}`,
+      );
+    seen.push(ref);
   }
 }
 
@@ -318,7 +363,7 @@ export function followCellReferences(reference: DocLink, log?: ReactivityLog): a
   let result = reference;
 
   while (isDocLink(reference)) {
-    log?.reads.push(reference);
+    log?.reads.push({ cell: reference.cell, path: reference.path, followCellReferences: true });
     result = reference;
     if (seen.has(reference)) throw new Error("Reference cycle detected");
     seen.add(reference);
@@ -341,7 +386,7 @@ export function followAliases(alias: any, cell: DocImpl<any>, log?: ReactivityLo
     if (seen.has(alias)) throw new Error("Alias cycle detected");
     seen.add(alias);
     alias = cell.getAtPath(alias.$alias.path);
-    if (isAlias(alias)) log?.reads.push({ cell, path: alias.$alias.path });
+    if (isAlias(alias)) log?.reads.push({ cell, path: alias.$alias.path, followAliases: true });
   }
 
   return result!;
