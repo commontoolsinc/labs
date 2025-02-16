@@ -126,7 +126,8 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
 
   const handleSuggestion = async (suggestion: CharmSuggestion) => {
     setIterationInput(suggestion.prompt);
-    await handleIterate();
+    setShowVariants(true);
+    setTimeout(() => handleIterate(), 0);
   };
 
   return (
