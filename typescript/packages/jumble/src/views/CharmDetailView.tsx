@@ -214,12 +214,12 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
                 <button
                   key={index}
                   onClick={() => handleSuggestion(suggestion)}
-                  className="p-2 text-left text-sm border-2 border-black hover:bg-gray-50 transition-colors"
+                  className="p-2 text-left text-sm border-2 border-black hover:-translate-y-[2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] shadow-[1px_1px_0px_0px_rgba(0,0,0,0.3)] transition-all duration-100 ease-in-out cursor-pointer"
                 >
                   <span className="font-medium text-xs uppercase text-gray-500">
                     {suggestion.type}
                   </span>
-                  <p>{suggestion.prompt}</p>
+                  <p className="text-xs">{suggestion.prompt}</p>
                 </button>
               ))}
             </div>
