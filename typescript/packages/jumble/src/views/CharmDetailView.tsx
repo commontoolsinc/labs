@@ -234,7 +234,13 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
                   cameraZoom={12}
                 />
               )}
-              {loading ? "Iterating..." : "Iterate"}
+              {loading ? (
+                "Iterating..."
+              ) : (
+                <span className="text-xs flex justify-between w-full">
+                  Iterate <span className="text-gray-500 font-bold italic">(⌘ + enter)</span>
+                </span>
+              )}
             </button>
           </div>
         </div>
