@@ -1,5 +1,5 @@
-import { saveNewRecipeVersion, IFrameRecipe, Charm } from "@commontools/charm";
-import React, { useEffect, useState } from "react";
+import { saveNewRecipeVersion, IFrameRecipe, Charm, getIframeRecipe } from "@commontools/charm";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { LoadingSpinner } from "@/components/Loader";
@@ -11,6 +11,10 @@ import { performIteration } from "@/utils/charm-iteration";
 import { charmId } from "@/utils/charms";
 import { DitheredCube } from "@/components/DitherCube";
 import { VariantTray } from "@/components/VariantTray";
+import {
+  generateCharmSuggestions,
+  type CharmSuggestion,
+} from "@/utils/prompt-library/charm-suggestions";
 
 type Tab = "iterate" | "code" | "data";
 
@@ -29,6 +33,10 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
   const [loading, setLoading] = useState(false);
   const [variants, setVariants] = useState<Charm[]>([]);
   const [selectedVariant, setSelectedVariant] = useState<Charm | null>(null);
+  const [suggestions, setSuggestions] = useState<CharmSuggestion[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [expectedVariantCount, setExpectedVariantCount] = useState(0);
+  const [pendingSuggestion, setPendingSuggestion] = useState<CharmSuggestion | null>(null);
 
   const variantModels = [
     "anthropic:claude-3-5-sonnet-latest",
@@ -39,25 +47,32 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
   const handleVariants = async () => {
     setLoading(true);
     setVariants([]);
-    setSelectedVariant(null);
+    setSelectedVariant(charm);
 
     try {
       const variantPromises = variantModels.map((model) =>
         performIteration(charmManager, charmId(charm), replicaName!, iterationInput, false, model),
       );
 
-      const results = await Promise.all(variantPromises);
-      const validResults = results.filter((path): path is string => !!path);
-
-      const newVariants = await Promise.all(
-        validResults.map((path) => {
-          const id = path.split("/").pop()!;
-          return charmManager.get(id);
-        }),
-      );
-
-      setVariants(newVariants.filter((v): v is Charm => !!v));
-      if (newVariants[0]) setSelectedVariant(newVariants[0]);
+      // Instead of waiting for all promises, handle them as they complete
+      variantPromises.forEach(async (promise) => {
+        try {
+          const path = await promise;
+          if (path) {
+            const id = path.split("/").pop()!;
+            const newCharm = await charmManager.get(id);
+            if (newCharm) {
+              setVariants((prev) => [...prev, newCharm]);
+              // Set the first completed variant as selected if none selected
+              if (!selectedVariant) {
+                setSelectedVariant(newCharm);
+              }
+            }
+          }
+        } catch (error) {
+          console.error("Variant generation error:", error);
+        }
+      });
     } catch (error) {
       console.error("Variants error:", error);
     } finally {
@@ -65,32 +80,91 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
     }
   };
 
-  const handleIterate = async () => {
-    if (!iterationInput) return;
-    setLoading(true);
+  const handleIterate = useCallback(async () => {
+    if (showVariants) {
+      setExpectedVariantCount(variantModels.length);
+      setVariants([]);
+      handleVariants();
+    } else {
+      if (!iterationInput) return;
+      setLoading(true);
+      try {
+        const newPath = await performIteration(
+          charmManager,
+          charmId(charm),
+          replicaName!,
+          iterationInput,
+          false,
+          selectedModel,
+        );
+        if (newPath) {
+          navigate(`${newPath}/detail#iterate`);
+        }
+      } catch (error) {
+        console.error("Iteration error:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+  }, [
+    showVariants,
+    iterationInput,
+    selectedModel,
+    charmManager,
+    charm,
+    replicaName,
+    navigate,
+    handleVariants,
+  ]);
 
-    try {
-      if (showVariants) {
-        await handleVariants();
+  const suggestionsLoadedRef = useRef(false);
+
+  useEffect(() => {
+    console.log("Loading suggestions for charm:", charmId(charm));
+    if (suggestionsLoadedRef.current) return;
+
+    const loadSuggestions = async () => {
+      setLoadingSuggestions(true);
+      const iframeRecipe = getIframeRecipe(charm);
+      if (!iframeRecipe) {
+        console.error("No iframe recipe found in charm, what should we do?");
         return;
       }
-
-      const newPath = await performIteration(
-        charmManager,
-        charmId(charm),
-        replicaName!,
-        iterationInput,
-        false,
-        selectedModel,
-      );
-      if (newPath) {
-        navigate(`${newPath}/detail#iterate`);
+      try {
+        const newSuggestions = await generateCharmSuggestions(
+          iframeRecipe?.iframe?.spec || "",
+          iframeRecipe?.iframe?.src || "",
+          JSON.stringify(iframeRecipe?.iframe?.argumentSchema || {}),
+        );
+        setSuggestions(newSuggestions);
+      } catch (error) {
+        console.error("Failed to load suggestions:", error);
+      } finally {
+        setLoadingSuggestions(false);
       }
-    } catch (error) {
-      console.error("Iteration error:", error);
-    } finally {
-      setLoading(false);
+    };
+
+    suggestionsLoadedRef.current = true;
+    loadSuggestions();
+  }, [charm]);
+
+  useEffect(() => {
+    if (pendingSuggestion) {
+      handleIterate();
+      setPendingSuggestion(null);
     }
+  }, [pendingSuggestion, handleIterate]);
+
+  const handleSuggestion = (suggestion: CharmSuggestion) => {
+    setIterationInput(suggestion.prompt);
+    setShowVariants(true);
+    setPendingSuggestion(suggestion);
+  };
+
+  const handleCancelVariants = () => {
+    setVariants([]);
+    setSelectedVariant(null);
+    setExpectedVariantCount(0);
   };
 
   return (
@@ -104,6 +178,12 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
               placeholder="Tweak your charm"
               value={iterationInput}
               onChange={(e) => setIterationInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  handleIterate();
+                }
+              }}
               className="w-full h-32 p-2 border-2 border-black resize-none"
             />
             <div className="flex items-center gap-2">
@@ -143,7 +223,7 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
             <button
               onClick={handleIterate}
               disabled={loading}
-              className="px-4 py-2 border-2 border-black bg-gray-50 text-black flex items-center gap-2"
+              className="px-4 py-2 border-2 text-sm border-black bg-gray-50 text-black flex items-center gap-2"
             >
               {loading && (
                 <DitheredCube
@@ -154,9 +234,46 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
                   cameraZoom={12}
                 />
               )}
-              {loading ? "Iterating..." : "Iterate"}
+              {loading ? (
+                "Iterating..."
+              ) : (
+                <span className="text-xs flex justify-between w-full">
+                  Iterate <span className="text-gray-500 font-bold italic">(⌘ + enter)</span>
+                </span>
+              )}
             </button>
           </div>
+        </div>
+
+        {/* New suggestions box */}
+        <div className="bg-white border-2 border-black p-4 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]">
+          <h2 className="text-sm font-bold mb-4">Suggestions</h2>
+          {loadingSuggestions ? (
+            <div className="flex items-center justify-center p-4">
+              <DitheredCube
+                animationSpeed={2}
+                width={24}
+                height={24}
+                animate={true}
+                cameraZoom={12}
+              />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {suggestions.map((suggestion, index) => (
+                <button
+                  key={index}
+                  onClick={() => handleSuggestion(suggestion)}
+                  className="p-2 text-left text-sm border-2 border-black hover:-translate-y-[2px] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] shadow-[1px_1px_0px_0px_rgba(0,0,0,0.3)] transition-all duration-100 ease-in-out cursor-pointer"
+                >
+                  <span className="font-medium text-xs uppercase text-gray-500">
+                    {suggestion.type}
+                  </span>
+                  <p className="text-xs">{suggestion.prompt}</p>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       {/* Main Content Area */}
@@ -169,12 +286,15 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
 
         <CharmRenderer className="w-full h-full" charm={selectedVariant || charm} />
 
-        {variants.length > 0 && (
+        {(variants.length > 0 || expectedVariantCount > 0) && (
           <VariantTray
             variants={variants}
             selectedVariant={selectedVariant}
             onSelectVariant={setSelectedVariant}
             variantModels={variantModels}
+            totalExpectedVariants={expectedVariantCount}
+            onCancel={handleCancelVariants}
+            originalCharm={charm}
           />
         )}
       </div>
