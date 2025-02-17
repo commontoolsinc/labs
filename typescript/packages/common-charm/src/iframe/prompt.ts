@@ -1,22 +1,7 @@
 import { JSONSchema } from "@commontools/builder";
-
-async function loadRaw(filePath: string): Promise<string> {
-  // Check if we’re running in Deno (which exposes a global Deno object)
-  if (typeof Deno !== "undefined" && Deno.readTextFile) {
-    // In Deno, read the file from disk using a URL relative to this module.
-    return await Deno.readTextFile(new URL(filePath, import.meta.url));
-  } else {
-    // In Node/Vite, assume Vite’s raw loader is active.
-    // Do a dynamic import with the `?raw` query.
-    // (Vite will transform this import at build time.)
-    const module = await import(filePath + "?raw");
-    return module.default;
-  }
-}
-
-const prefillHtml = await loadRaw("./prefill.html");
-const systemMd = await loadRaw("./system.md");
 import { LLMRequest } from "@commontools/llm-client";
+
+import { prefillHtml, systemMd } from "./static.js";
 
 const responsePrefill = "```html\n" + prefillHtml;
 
