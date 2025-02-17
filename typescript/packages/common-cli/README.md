@@ -1,0 +1,10 @@
+# Charm CLI
+
+`deno run start`
+
+```
+GOOGLE_CLIENT_ID="";
+GOOGLE_CLIENT_SECRET=""
+READWISE_TOKEN=""
+ARENA_API_KEY=""
+```
