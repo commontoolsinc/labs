@@ -1,4 +1,4 @@
-import { isAlias, isStreamAlias } from "@commontools/builder";
+import { isStreamAlias } from "@commontools/builder";
 import { getTopFrame, type JSONSchema } from "@commontools/builder";
 import { getDoc, isDoc, isDocLink, type DocImpl, type DocLink, type DeepKeyLookup } from "./doc.js";
 import {
