@@ -330,30 +330,39 @@ export function resolvePath(
 
 // Follows links and returns the last one
 export function followLinks(ref: DocLink, seen: DocLink[] = [], log?: ReactivityLog): DocLink {
-  while (true) {
+  let nextRef: DocLink | undefined;
+
+  do {
     const target = ref.cell.getAtPath(ref.path);
 
-    if (isQueryResultForDereferencing(target)) ref = getDocLinkOrThrow(target);
-    else if (isCell(target)) ref = target.getAsDocLink();
-    else if (isDocLink(target)) ref = target;
-    else if (isDoc(target)) ref = { cell: target, path: [] } satisfies DocLink;
+    nextRef = undefined;
+    if (isQueryResultForDereferencing(target)) nextRef = getDocLinkOrThrow(target);
+    else if (isCell(target)) nextRef = target.getAsDocLink();
+    else if (isDocLink(target)) nextRef = target;
+    else if (isDoc(target)) nextRef = { cell: target, path: [] } satisfies DocLink;
     else if (isAlias(target))
-      ref = {
+      nextRef = {
         cell: target.$alias.cell ?? ref.cell,
         path: target.$alias.path,
       } satisfies DocLink;
     else return ref;
 
-    // Log all the refs that were followed, but not the final value they point to.
-    log?.reads.push({ cell: ref.cell, path: ref.path, followLinks: true });
+    if (nextRef) {
+      // Log all the refs that were followed, but not the final value they point to.
+      log?.reads.push({ cell: ref.cell, path: ref.path, followLinks: true });
 
-    // Detect cycles (at this point these are all references that point to something)
-    if (seen.some((r) => r.cell === ref.cell && arrayEqual(r.path, ref.path)))
-      throw new Error(
-        `Reference cycle detected ${JSON.stringify(ref.cell.entityId ?? "unknown")} ${ref.path.join(".")}`,
-      );
-    seen.push(ref);
-  }
+      ref = nextRef;
+
+      // Detect cycles (at this point these are all references that point to something)
+      if (seen.some((r) => r.cell === ref.cell && arrayEqual(r.path, ref.path)))
+        throw new Error(
+          `Reference cycle detected ${JSON.stringify(ref.cell.entityId ?? "unknown")} ${ref.path.join(".")}`,
+        );
+      seen.push(ref);
+    }
+  } while (nextRef);
+
+  return ref;
 }
 
 // Follows cell references and returns the last one
