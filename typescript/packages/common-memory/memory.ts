@@ -1,5 +1,4 @@
 import * as Space from "./space.ts";
-import * as Subscription from "./subscription.ts";
 import * as Error from "./error.ts";
 import * as FS from "jsr:@std/fs";
 import {
@@ -13,7 +12,6 @@ import {
   MemorySession,
   SpaceSession,
   Subscriber,
-  SubscriptionController,
   SubscribeResult,
   TransactionResult,
   QueryResult,
@@ -22,7 +20,7 @@ export * from "./interface.ts";
 
 interface Session {
   store: URL;
-  subscriptions: Set<SubscriptionController>;
+  subscribers: Set<Subscriber>;
   spaces: Map<string, SpaceSession>;
 
   memory: MemorySession;
@@ -33,7 +31,7 @@ export class Memory implements Session, MemorySession {
   ready: Promise<unknown>;
   constructor(
     options: Options,
-    public subscriptions: Set<SubscriptionController> = new Set(),
+    public subscribers: Set<Subscriber> = new Set(),
     public spaces: Map<Subject, SpaceSession> = new Map(),
   ) {
     this.store = options.store;
@@ -56,7 +54,10 @@ export class Memory implements Session, MemorySession {
   }
 
   subscribe(subscriber: Subscriber): SubscribeResult {
-    return this.perform(() => subscribe(this, subscriber));
+    return subscribe(this, subscriber);
+  }
+  unsubscribe(subscriber: Subscriber): SubscribeResult {
+    return unsubscribe(this, subscriber);
   }
 
   transact(transaction: Transaction): TransactionResult {
@@ -72,16 +73,14 @@ export class Memory implements Session, MemorySession {
   }
 }
 
-export const subscribe = async (session: Session, subscriber: Subscriber) => {
-  try {
-    const subscription = await Subscription.open(session.memory);
-    session.subscriptions.add(subscription);
-    subscriber.readable.pipeThrough(subscription).pipeTo(subscriber.writable);
+export const subscribe = (session: Session, subscriber: Subscriber) => {
+  session.subscribers.add(subscriber);
+  return { ok: {} };
+};
 
-    return { ok: {} };
-  } catch (cause) {
-    return { error: cause as SystemError };
-  }
+export const unsubscribe = (session: Session, subscriber: Subscriber) => {
+  session.subscribers.delete(subscriber);
+  return { ok: {} };
 };
 
 export const query = async (session: Session, query: Query) => {
@@ -106,12 +105,8 @@ export const transact = async (session: Session, transaction: Transaction) => {
   } else {
     // Notify all the relevant subscribers.
     const promises = [];
-    for (const subscription of session.subscriptions) {
-      if (subscription.open) {
-        promises.push(subscription.transact(transaction));
-      } else {
-        session.subscriptions.delete(subscription);
-      }
+    for (const subscriber of session.subscribers) {
+      promises.push(subscriber.transact(transaction));
     }
     await Promise.all(promises);
   }
@@ -119,7 +114,7 @@ export const transact = async (session: Session, transaction: Transaction) => {
   return result;
 };
 
-const mount = async (
+export const mount = async (
   session: Session,
   subject: Subject,
 ): Promise<Result<SpaceSession, ConnectionError>> => {
@@ -144,7 +139,7 @@ export interface Options {
   store: URL;
 }
 
-export const open = async (options: Options): AsyncResult<MemorySession, ConnectionError> => {
+export const open = async (options: Options): AsyncResult<Memory, ConnectionError> => {
   try {
     if (options.store.protocol === "file:") {
       await FS.ensureDir(options.store);
@@ -161,8 +156,8 @@ export const close = async (session: Session) => {
     promises.push(replica.close());
   }
 
-  for (const subscription of session.subscriptions) {
-    promises.push(subscription.close());
+  for (const subscriber of session.subscribers) {
+    promises.push(subscriber.close());
   }
 
   const results = await Promise.all(promises);

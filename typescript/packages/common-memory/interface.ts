@@ -7,16 +7,231 @@ export type SubscriberCommand = {
   unwatch?: Query;
 };
 
-export type SubscriptionCommand = {
-  transact?: Transaction;
-  brief?: Brief;
+export type Invocation<
+  Subject extends Principal = Principal,
+  Ability extends The = The,
+  Command extends {} = {},
+> = {
+  cmd: Ability;
+  iss: Principal;
+  sub: Subject;
+  args: Command;
+  meta?: Meta;
 };
 
-export type Brief = {
-  sub: MemorySpace;
+export interface MemoryProtocol<Space extends MemorySpace = MemorySpace> {
+  watch(
+    source: Watch<Space>["args"],
+  ): Task<Result<Selection<Space>, QueryError | ConnectionError>, Transaction<Space>>;
+  unwatch(source: Unwatch<Space>["args"]): Task<Result<Unit, ConflictError>>;
+
+  query(query: { select: Selector; since?: number }): Task<Result<Selection<Space>, QueryError>>;
+  transact(source: {
+    changes: Changes;
+  }): Task<Result<Commit<Space>, ConflictError | TransactionError | ConnectionError>>;
+}
+
+export type Protocol<Space extends MemorySpace = MemorySpace> = {
+  memory: MemoryProtocol<Space>;
+};
+
+export type Provider<Protocol extends {}> = {
+  perform(command: ProviderCommand<Protocol>): AwaitResult<Unit, SystemError>;
+};
+
+export interface ConsumerSession<Protocol extends {}>
+  extends TransformStream<ProviderCommand<Protocol>, ConsumerCommand<Protocol>> {}
+
+export interface ProviderSession<Protocol extends {}>
+  extends TransformStream<ConsumerCommand<Protocol>, ProviderCommand<Protocol>> {
+  close(): CloseResult;
+}
+
+export interface Channel<Protocol extends {}>
+  extends TransformStream<ProviderCommand<Protocol>, ConsumerCommand<Protocol>> {}
+
+export type ProviderCommand<Protocol extends {} = {}> = {
+  [Prefix in keyof Protocol]: {
+    [Command in keyof Protocol[Prefix]]: InferProviderCommand<
+      `/${Prefix & string}/${Command & string}`,
+      Protocol[Prefix][Command]
+    >;
+  }[keyof Protocol[keyof Protocol]];
+  // {
+  //   [Key in keyof S]: Key extends Command
+  //     ? S[Command] extends (input: infer In) => Task<infer Return, infer Effect>
+  //       ? Receipt<In & {}, Return & {}, Effect>
+  //       : undefined
+  //     : undefined;
+  // }[keyof S];
+}[keyof Protocol];
+
+export type InferProviderCommand<Ability extends The, Method> = Method extends (
+  command: infer Command,
+) => Task<infer Return, infer Effect>
+  ? Receipt<Invocation<Principal, Ability, Command & {}>, Return & {}, Effect>
+  : never;
+
+export type ProviderEffect<Protocol extends {} = {}> = {
+  [Prefix in keyof Protocol]: {
+    [Command in keyof Protocol[Prefix]]: InferProviderEffect<Protocol[Prefix][Command]>;
+    // {
+    //   [Key in keyof S]: Key extends Command
+    //     ? S[Command] extends (input: infer In) => Task<infer Return, infer Effect>
+    //       ? Receipt<In & {}, Return & {}, Effect>
+    //       : undefined
+    //     : undefined;
+    // }[keyof S];
+  }[keyof Protocol[keyof Protocol]];
+}[keyof Protocol];
+
+export type InferProviderEffect<Method> = Method extends (
+  command: infer Command,
+) => Task<infer Return, infer Effect>
+  ? Effect
+  : never;
+
+export type ProviderReturn<Protocol extends {} = {}> = {
+  [Prefix in keyof Protocol]: {
+    [Command in keyof Protocol[Prefix]]: InferProviderReturn<Protocol[Prefix][Command]>;
+  }[keyof Protocol[keyof Protocol]];
+}[keyof Protocol];
+
+export type InferProviderReturn<Method> = Method extends (
+  command: infer Command,
+) => Task<infer Return, infer Effect>
+  ? Return
+  : never;
+
+export type Consumer<Protocol> = Perform<
+  {
+    [Command in keyof Protocol]: InferEffect<Protocol[Command]>;
+  }[keyof Protocol]
+>;
+
+export type Perform<T extends { Effect: any; Command: any }> = {
+  perform(command: T["Effect"]): AwaitResult<T["Command"][], never>;
+};
+
+export type InferEffect<Method> = Method extends (
+  command: infer Command,
+) => Task<infer Return, infer Effect>
+  ? { Command: Command; Effect: Effect }
+  : never;
+
+export type ConsumerCommand<Protocol extends {} = {}> = {
+  [Prefix in keyof Protocol]: {
+    // [Command in keyof Service]: { [Key in Command]: InferConsumerCommand<Service[Command]> } & {
+    //   [Key in Exclude<keyof Service, Command>]?: undefined;
+    // };
+    [Command in keyof Protocol[Prefix]]: InferConsumerCommand<
+      `/${Prefix & string}/${Command & string}`,
+      Protocol[Prefix][Command]
+    >;
+  }[keyof Protocol[keyof Protocol]];
+}[keyof Protocol];
+
+export type Test = ConsumerCommand<{ memory: MemoryProtocol }>;
+export type InferMethod<Service extends {} = {}> = {
+  [Command in keyof Service]: InferTask<Command, Service[Command]>;
+}[keyof Service];
+
+export type InferTask<Label extends PropertyKey, Method> = Method extends (
+  input: infer In,
+) => Task<infer Return, infer Effect>
+  ? { Command: { [Key in Label]: In }; Task: Task<Return, Effect>; Return: Return }
+  : never;
+
+export type InferConsumerCommand<Ability extends The, Method> = Method extends (
+  command: infer Command extends {},
+) => Task<infer Return, infer Effect>
+  ? Invocation<Principal, Ability, Command>
+  : never;
+
+export type InferConsumerReturn<Service, Run extends Invocation> = {
+  [Prefix in keyof Service]: {
+    [Method in keyof Service[Prefix]]: `/${Prefix & string}/${Method & string}` extends Run["cmd"]
+      ? InferConsumerCommandReturn<Service[Prefix][Method]>
+      : never;
+  }[keyof Service[keyof Service]];
+}[keyof Service];
+
+export type InferConsumerCommandReturn<Method> = Method extends (
+  command: infer Command,
+) => Task<infer Return, infer Effect>
+  ? Return
+  : never;
+
+export type InferConsumerEffect<Service, Run extends Invocation> = {
+  [Prefix in keyof Service]: {
+    [Method in keyof Service[Prefix]]: `/${Prefix & string}/${Method & string}` extends Run["cmd"]
+      ? InferConsumerCommandEffect<Service[Prefix][Method]>
+      : never;
+  }[keyof Service[keyof Service]];
+}[keyof Service];
+
+export type InferConsumerCommandEffect<Method> = Method extends (
+  command: infer Command,
+) => Task<infer Return, infer Effect>
+  ? Effect
+  : never;
+
+export interface Interpreter<Protocol, Run extends Invocation> {
+  interpret(command: InferConsumerEffect<Protocol, Run>): AwaitResult<Unit, SystemError>;
+}
+
+export interface InvokedTask<Protocol, Run extends Invocation> {
+  perform(interpret: Interpreter<Protocol, Run>): InferConsumerReturn<Protocol, Run>;
+}
+
+export type Task<Return, Command = never> = Iterable<Command, Return>;
+
+export type Job<Command extends {} = {}, Return extends {} | null = {} | null, Effect = unknown> = {
+  invoke: Command;
+  return: Return;
+  effect: Effect;
+};
+
+export type WatchTask<Space extends MemorySpace> = Job<
+  { watch: Query<Space>; unwatch?: undefined },
+  QueryResult<Space>,
+  Transaction<Space>
+>;
+
+export type UnwatchTask<Space extends MemorySpace> = Job<
+  { unwatch: Query<Space>; watch?: undefined },
+  Unit,
+  never
+>;
+
+export type SessionTask<Space extends MemorySpace> = UnwatchTask<Space> | WatchTask<Space>;
+
+export type Receipt<Of extends {}, Result extends {} | null, Command> =
+  | { the: "task/return"; of: Reference<Of>; is: Result }
+  | (Command extends never ? never : { the: "task/effect"; of: Reference<Of>; is: Command });
+
+export type Effect<Of extends {}, Command> = {
+  of: Reference<Of>;
+  run: Command;
+  is?: undefined;
+};
+
+export type Return<Of extends {}, Result extends {} | null> = {
+  of: Reference<Of>;
+  is: Result;
+  run?: undefined;
+};
+
+export type SubscriptionCommand<Space extends MemorySpace = MemorySpace> = {
+  transact?: Transaction<Space>;
+  brief?: Brief<Space>;
+};
+
+export type Brief<Space extends MemorySpace = MemorySpace> = {
+  sub: Space;
   args: {
     selector: Selector;
-    selection: Selection;
+    selection: Selection<Space>;
   };
   meta?: Meta;
 };
@@ -47,13 +262,16 @@ export interface SpaceSession<Space extends MemorySpace = MemorySpace> extends S
 }
 
 export interface MemorySession<Space extends MemorySpace = MemorySpace> extends Session<Space> {
-  subscribe(subscriber: Subscriber): SubscribeResult;
+  subscribe(subscriber: Subscriber<Space>): SubscribeResult;
+  unsubscribe(subscriber: Subscriber<Space>): SubscribeResult;
+}
+
+export interface Subscriber<Space extends MemorySpace = MemorySpace> {
+  transact(transaction: Transaction<Space>): AwaitResult<Unit, SystemError>;
+  close(): AwaitResult<Unit, SystemError>;
 }
 
 export type SubscribeResult = AwaitResult<Unit, SystemError>;
-
-export interface Subscription extends TransformStream<SubscriberCommand, SubscriptionCommand> {}
-export interface Subscriber extends TransformStream<SubscriptionCommand, SubscriberCommand> {}
 
 /**
  * Represents a subscription controller that can be used to publish commands or
@@ -245,7 +463,7 @@ export type FactSelection<
 
 export type Meta = Record<string, string>;
 
-export type Principal = string;
+export type Principal = `did:${string}:${string}`;
 
 export type Transaction<Space extends MemorySpace = MemorySpace> = {
   iss: Principal;
@@ -265,6 +483,20 @@ export type Query<Space extends MemorySpace = MemorySpace> = {
   sub: Space;
   cmd: "/memory/query";
   args: { select: Selector; since?: number };
+};
+
+export type Watch<Space extends MemorySpace = MemorySpace> = {
+  iss: Principal;
+  sub: Space;
+  cmd: "/memory/watch";
+  args: { select: Selector; since?: number };
+};
+
+export type Unwatch<Space extends MemorySpace = MemorySpace> = {
+  iss: Principal;
+  sub: Space;
+  cmd: "/memory/unwatch";
+  args: { source: Reference<Watch<Space>> };
 };
 
 export type QueryResult<Space extends MemorySpace = MemorySpace> = AwaitResult<
@@ -317,9 +549,9 @@ export interface JSONArray extends ArrayLike<JSONValue> {}
 
 export type AsyncResult<T extends Unit = Unit, E extends Error = Error> = Promise<Result<T, E>>;
 
-export type AwaitResult<T extends Unit = Unit, E extends Error = Error> =
-  | PromiseLike<Result<T, E>>
-  | Result<T, E>;
+export type Await<T> = PromiseLike<T> | T;
+
+export type AwaitResult<T extends Unit = Unit, E extends Error = Error> = Await<Result<T, E>>;
 
 export type Result<T extends Unit = Unit, E extends Error = Error> = Ok<T> | Fail<E>;
 

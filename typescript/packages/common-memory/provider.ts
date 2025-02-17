@@ -5,8 +5,16 @@ import type {
   Transaction,
   MemorySession,
   Query,
+  Protocol,
+  ProviderCommand,
+  ConsumerCommand,
   Subscriber,
+  ProviderSession,
+  Reference,
+  Watch,
+  CloseResult,
 } from "./interface.ts";
+import * as Subscription from "./subscription.ts";
 
 export * from "./interface.ts";
 export * from "./util.ts";
@@ -15,6 +23,7 @@ export * as Space from "./space.ts";
 export * as Memory from "./memory.ts";
 export * as Subscriber from "./subscriber.ts";
 export * as Subscription from "./subscription.ts";
+import { refer, fromString } from "./reference.ts";
 
 export const open = async (options: Memory.Options): AsyncResult<Provider, ConnectionError> => {
   const result = await Memory.open(options);
@@ -25,8 +34,12 @@ export const open = async (options: Memory.Options): AsyncResult<Provider, Conne
   return { ok: new MemoryProvider(result.ok) };
 };
 
-export interface Provider extends MemorySession {
+export interface Provider {
   fetch(request: Request): Promise<Response>;
+
+  session(): ProviderSession<Protocol>;
+
+  close(): CloseResult;
 }
 
 interface Session {
@@ -34,6 +47,7 @@ interface Session {
 }
 
 class MemoryProvider implements Provider {
+  sessions: Set<ProviderSession<Protocol>> = new Set();
   constructor(public memory: MemorySession) {}
   subscribe(subscriber: Subscriber) {
     return subscribe(this, subscriber);
@@ -48,9 +62,119 @@ class MemoryProvider implements Provider {
   fetch(request: Request) {
     return fetch(this, request);
   }
+  session(): ProviderSession<Protocol> {
+    const session = new MemoryProviderSession(this.memory, this.sessions);
+    this.sessions.add(session);
+    return session;
+  }
 
-  close() {
+  async close() {
+    const promises = [];
+    for (const session of this.sessions) {
+      promises.push(session.close());
+    }
+
+    await Promise.all(promises);
     return this.memory.close();
+  }
+}
+
+class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
+  readable: ReadableStream<ProviderCommand<Protocol>>;
+  writable: WritableStream<ConsumerCommand<Protocol>>;
+  controller: ReadableStreamDefaultController<ProviderCommand<Protocol>> | undefined;
+
+  channels: Map<string, Set<string>> = new Map();
+
+  constructor(
+    public memory: MemorySession,
+    public sessions: null | Set<ProviderSession<Protocol>>,
+  ) {
+    this.readable = new ReadableStream<ProviderCommand<Protocol>>({
+      start: (controller) => this.open(controller),
+      cancel: () => this.cancel(),
+    });
+    this.writable = new WritableStream<ConsumerCommand<Protocol>>({
+      write: async (command) => {
+        await this.invoke(command);
+      },
+      abort: async () => {
+        await this.close();
+      },
+      close: async () => {
+        await this.close();
+      },
+    });
+  }
+  perform(command: ProviderCommand<Protocol>) {
+    this.controller?.enqueue(command);
+    return { ok: {} };
+  }
+  open(controller: ReadableStreamDefaultController<ProviderCommand<Protocol>>) {
+    this.controller = controller;
+  }
+  cancel() {
+    const promise = this.writable.close();
+    this.dispose();
+    return promise;
+  }
+  close() {
+    this.controller?.close();
+    this.dispose();
+
+    return { ok: {} };
+  }
+  dispose() {
+    this.controller = undefined;
+    this.sessions?.delete(this);
+    this.sessions = null;
+  }
+  async invoke(command: ConsumerCommand<Protocol>) {
+    switch (command.cmd) {
+      case "/memory/query": {
+        return this.perform({
+          the: "task/return",
+          of: refer(command),
+          is: await this.memory.query(command),
+        });
+      }
+      case "/memory/transact": {
+        return this.perform({
+          the: "task/return",
+          of: refer(command),
+          is: await this.memory.transact(command),
+        });
+      }
+      case "/memory/watch": {
+        const id = refer(command).toString();
+        this.channels.set(id, new Set(Subscription.channels(command.sub, command.args.select)));
+        return this.memory.subscribe(this);
+      }
+      case "/memory/unwatch": {
+        const id = command.args.source.toString();
+        this.channels.delete(id);
+        if (this.channels.size === 0) {
+          this.memory.unsubscribe(this);
+        }
+
+        return { ok: {} };
+      }
+    }
+    return { ok: {} };
+  }
+
+  transact(transaction: Transaction) {
+    for (const [id, channels] of this.channels) {
+      if (Subscription.match(transaction, channels)) {
+        return this.perform({
+          the: "task/effect",
+          of: fromString(id) as Reference<Watch>,
+          is: transaction,
+        });
+      }
+    }
+
+    return { ok: {} };
   }
 }
 

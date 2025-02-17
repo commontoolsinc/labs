@@ -1,5 +1,5 @@
 import { Database, Transaction as DBTransaction, SqliteError } from "jsr:@db/sqlite";
-import { fromString, refer, Reference } from "merkle-reference";
+import { fromString, refer } from "./reference.ts";
 import { unclaimed } from "./fact.ts";
 import { from as toChanges, set } from "./changes.ts";
 import { create as createCommit, the as COMMIT_THE } from "./commit.ts";
@@ -18,6 +18,7 @@ import type {
   TransactionError,
   QueryError,
   ToJSON,
+  Reference,
   ConnectionError,
   Commit,
   Assertion,
@@ -229,7 +230,7 @@ const recall = <Space extends MemorySpace>(
     const fact: Fact = {
       the,
       of,
-      cause: row.cause ? fromString(row.cause) : refer(unclaimed(row)),
+      cause: row.cause ? (fromString(row.cause) as Reference<Assertion>) : refer(unclaimed(row)),
     };
 
     if (row.is) {
