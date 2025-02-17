@@ -37,7 +37,6 @@ export async function syncRecipeBlobby(id: string) {
     spec = "";
     parents = [];
   }
-  console.log("src", src);
 
   const { recipe, errors } = await buildRecipe(src);
   if (errors) throw new Error(errors);
