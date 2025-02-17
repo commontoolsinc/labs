@@ -74,22 +74,42 @@ function useCharmLoader({
 
 export function CharmRenderer({ charm, className = "" }: CharmRendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [runtimeError, setRuntimeError] = React.useState<Error | null>(null);
 
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+
+    function handleIframeError(event: Event) {
+      const customEvent = event as CustomEvent<Error>;
+      setRuntimeError(customEvent.detail);
+    }
+
+    container.addEventListener("common-iframe-error", handleIframeError);
 
     const cleanup = render(container, charm.asCell().key("$UI"));
 
     return () => {
       cleanup();
       if (container) {
+        container.removeEventListener("common-iframe-error", handleIframeError);
         container.innerHTML = "";
       }
     };
   }, [charm]);
 
-  return <div className={className} ref={containerRef}></div>;
+  return (<>
+    {runtimeError ? (
+      <div className="bg-red-500 text-white p-4">
+        <button className="absolute top-0 right-0" onClick={() => setRuntimeError(null)}>
+          ✖️
+        </button>
+        <pre title={runtimeError.stacktrace}>{runtimeError.description}</pre>
+      </div>
+    ) : null}
+    <div className={className} ref={containerRef}></div>
+  </>
+  );
 }
 
 export function CharmRunner(props: CharmLoaderProps & Omit<CharmRendererProps, "charm">) {
