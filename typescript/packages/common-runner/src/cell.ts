@@ -247,12 +247,15 @@ function subscribeToReferencedDocs<T>(
     reads: [],
     writes: [],
   } satisfies ReactivityLog;
+  let cleanup: Cancel | undefined;
 
   // Get the value once to determine all the docs that need to be subscribed to.
   const value = validateAndTransform(doc, path, schema, initialLog, rootSchema) as T;
 
+  // Call the callback once with initial value if requested.
+  if (callCallbackOnFirstRun) cleanup = callback(value);
+
   // Subscribe to the docs that are read (via logs), call callback on next change.
-  let cleanup: Cancel | undefined;
   const cancel = subscribe((log) => {
     if (isCancel(cleanup)) cleanup();
     const newValue = validateAndTransform(doc, path, schema, log, rootSchema) as T;
@@ -274,9 +277,6 @@ function subscribeToReferencedDocs<T>(
     value,
     initialLog,
   });
-
-  // Call the callback once with initial value if requested.
-  if (callCallbackOnFirstRun) cleanup = callback(value);
 
   return () => {
     cancel();
