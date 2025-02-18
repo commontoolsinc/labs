@@ -1,16 +1,23 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assert } from "@std/assert";
 import env from "@/env.ts";
 import app from "../../../app.ts";
 import { refer } from "merkle-reference";
-import { Space } from "@commontools/memory";
+import {
+  Consumer,
+  ChangesBuilder,
+  Fact,
+  CommitBuilder,
+  TransactionBuilder,
+} from "@commontools/memory";
 import * as FS from "@std/fs";
+import { al } from "@/lookslike-highlevel-dist/assets/index-Cilc_Q7E.js";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
 }
 
 const the = "application/json";
-const doc = refer({ hello: "world" }).toString();
+const doc = `of:${refer({ hello: "world" })}` as const;
 const space = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
 
@@ -18,22 +25,17 @@ const toJSON = <T>(source: T) => JSON.parse(JSON.stringify(source));
 
 Deno.test("test transaction", async (t) => {
   try {
-    const transaction = {
-      cmd: "/memory/transact",
-      iss: alice,
-      sub: space,
-      args: {
-        changes: {
-          [the]: {
-            [doc]: {
-              [refer({ the, of: doc }).toString()]: {
-                is: { hello: "world" },
-              },
-            },
-          },
-        },
-      },
-    } as const;
+    const hello = Fact.assert({
+      the,
+      of: doc,
+      is: { hello: "world" },
+    });
+
+    const transaction = TransactionBuilder.create({
+      issuer: alice,
+      subject: space,
+      changes: ChangesBuilder.from([hello]),
+    });
 
     const response = await app.fetch(
       new Request("http://localhost/api/storage/memory", {
@@ -47,60 +49,57 @@ Deno.test("test transaction", async (t) => {
 
     assertEquals(response.status, 200);
     const json = await response.json();
+
     assertEquals(json, {
-      ok: toJSON(
-        Space.toCommit({
-          space: space,
-          is: {
-            since: 0,
-            transaction,
-          },
+      ok: ChangesBuilder.from([
+        CommitBuilder.create({
+          space,
+          transaction,
         }),
-      ),
+      ]),
     });
   } finally {
     Deno.removeSync(new URL(`./${space}.sqlite`, env.MEMORY_URL));
   }
 });
 
-Deno.test("test subscription", async (t) => {
+Deno.test("test consumer", async (t) => {
   try {
     const server = Deno.serve({ port: 9000 }, app.fetch);
 
     const url = new URL(`http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`);
-    const socket = new WebSocket(url.href);
 
-    await new Promise((resolve) => (socket.onopen = resolve));
+    const session = Consumer.connect({ address: url, as: alice });
+    const memory = session.mount(alice);
 
-    socket.send(
-      JSON.stringify({
-        watch: {
-          cmd: "/memory/query",
-          iss: alice,
-          sub: alice,
-          args: {
-            selector: {
-              the,
-              of: doc,
-            },
-          },
-        },
-      }),
-    );
-
-    const event = await new Promise((resolve) => (socket.onmessage = resolve));
-
-    assertEquals(JSON.parse(((await event) as MessageEvent).data), {
-      brief: {
-        sub: alice,
-        args: {
-          selector: { the, of: doc },
-          selection: [],
+    const result = await memory.query({
+      select: {
+        [doc]: {
+          [the]: {},
         },
       },
     });
 
-    socket.close();
+    assert(result.ok);
+    const query = result.ok;
+    assertEquals(query.facts, []);
+
+    const subscription = query.subscribe();
+
+    const fact = Fact.assert({ the, of: doc, is: { first: "doc" } });
+    const tr = await memory.transact({
+      changes: ChangesBuilder.from([fact]),
+    });
+
+    assert(tr.ok);
+
+    const message = await subscription.getReader().read();
+    assertEquals(message.done, false);
+
+    assertEquals(query.facts, [fact]);
+
+    session.close();
+
     await server.shutdown();
   } finally {
     Deno.removeSync(new URL(`./${alice}.sqlite`, env.MEMORY_URL));

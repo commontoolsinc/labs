@@ -14,11 +14,15 @@ import {
   ConsumerSession,
   ConsumerResultFor,
   ProviderSession,
+  Reference,
   Protocol,
   ConnectionError,
   ConsumerEffectFor,
   InferProtocol,
   Abilities,
+  Invocation,
+  InvocationURL,
+  Subscribe,
 } from "./interface.ts";
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
@@ -42,7 +46,7 @@ class MemoryConsumerSession
   implements ConsumerSession<Protocol>
 {
   controller: TransformStreamDefaultController<ConsumerCommand<Protocol>> | undefined;
-  invocations: Map<string, Job<any>> = new Map();
+  invocations: Map<InvocationURL<Reference<Invocation>>, Job<any>> = new Map();
   constructor(public as: Principal) {
     let controller: undefined | TransformStreamDefaultController<ConsumerCommand<Protocol>>;
     super({
@@ -60,7 +64,7 @@ class MemoryConsumerSession
     this.controller?.enqueue(command);
   }
   receive(command: ProviderCommand<Protocol>) {
-    const id = command.of.toString();
+    const id = command.of;
     if (command.the === "task/return") {
       const invocation = this.invocations.get(id);
       this.invocations.delete(id);
@@ -74,7 +78,7 @@ class MemoryConsumerSession
   execute<Ability extends Abilities<Protocol>>(invocation: Job<Ability>) {
     const command = invocation.toJSON();
 
-    const id = refer(command).toString();
+    const id = `job:${refer(command)}` as InvocationURL<Reference<Invocation>>;
     const pending = this.invocations.get(id);
     if (!pending) {
       this.invocations.set(id, invocation);
@@ -84,14 +88,16 @@ class MemoryConsumerSession
     }
   }
 
-  close() {}
+  close() {
+    this.controller?.terminate();
+  }
   cancel() {}
 
   abort<Ability extends Abilities<Protocol>>(
     invocation: InferProtocol<Protocol>[Ability]["Invocation"] & { cmd: Ability },
   ) {
     const command = invocation.toJSON();
-    const id = refer(command).toString();
+    const id = `job:${refer(command)}` as InvocationURL<Reference<Invocation>>;
     this.invocations.delete(id);
   }
 
@@ -294,7 +300,7 @@ class QuerySubscriptionInvocation<Space extends MemorySpace> extends ConsumerInv
       cmd: "/memory/query/unsubscribe",
       iss: this.iss,
       sub: this.sub,
-      args: { source: refer(this.toJSON()) },
+      args: { source: `job:${refer(this.toJSON())}` as InvocationURL<Reference<Subscribe>> },
     });
 
     invocation.args;

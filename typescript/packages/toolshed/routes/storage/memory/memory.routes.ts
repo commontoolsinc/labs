@@ -7,28 +7,25 @@ export const tags = ["Memory Storage"];
 
 export const Null = z.literal(null);
 export const Unit = z.object({});
-export const Meta = z.record(z.string(), z.string()).describe(
-  "Arbitrary metadata",
-);
-export const The = z.string().describe(
-  "Type of the fact usually formatted as media type",
-);
-export const Of = z.string().describe(
-  "Unique identifier for the mutable entity",
-);
-export const Space = z.string().describe(
-  "Unique did:key identifier of the memory space",
-);
-export const Principal = z.string().describe(
-  "Unique DID identifier of the issuing principal",
-);
-export const Cause = z.string().describe(
-  "Merkle reference to the previous state of the entity",
-);
-export const Retract = z.literal(null).describe("Retracts fact");
-export const Claim = z.object({ is: z.undefined().optional() }).describe(
-  "Expects fact",
-);
+export const Meta = z.record(z.string(), z.string()).describe("Arbitrary metadata");
+export const The = z.string().describe("Type of the fact usually formatted as media type");
+export const Of = z.string().describe("Unique identifier for the mutable entity");
+
+export const DID = z
+  .string()
+  .startsWith("did:")
+  .refine((did): did is `did:${string}:${string}` => true);
+
+export const Space = DID.describe("Unique did:key identifier of the memory space");
+export const Principal = DID.describe("Unique DID identifier of the issuing principal");
+
+export const Cause = z.string().describe("Merkle reference to the previous state of the entity");
+export const Retract = z
+  .object({
+    is: z.literal(undefined).optional().describe("Retraction has no 'is' field"),
+  })
+  .describe("Retracts fact");
+export const Claim = z.literal(true).describe("Expects fact");
 
 export const JSONValue = z.any().describe("Arbitrary JSON value");
 export const Assert = z
@@ -38,7 +35,7 @@ export const Change = Claim.or(Retract)
   .or(Assert)
   .describe("Describes expected state and how it should change");
 export const Changes = z
-  .record(The, z.record(Of, z.record(Cause, Change)))
+  .record(Of, z.record(The, z.record(Cause, Change)))
   .describe("Describes changes to be transacted");
 
 export const Reference = z
@@ -54,15 +51,20 @@ export const Fact = z.object({
   cause: Reference,
 });
 
-export const Since = z.number().int().describe(
-  "Sequence number of the transaction",
+export const Since = z.number().int().describe("Sequence number of the transaction");
+export const Selector = z.record(
+  Of,
+  z.record(
+    The,
+    z.record(
+      Cause,
+      z.object({
+        is: Unit.optional().describe("If omitted will includes retracted facts"),
+      }),
+    ),
+  ),
 );
-export const Selector = z.object({
-  the: The.optional(),
-  of: Of.optional(),
-  is: Unit.optional().describe("If omitted will includes retracted facts"),
-  since: Since.optional(),
-});
+
 export const Transaction = z.object({
   cmd: z.literal("/memory/transact"),
   iss: Principal,
@@ -75,22 +77,26 @@ export const Query = z.object({
   cmd: z.literal("/memory/query"),
   iss: Principal,
   sub: Space,
-  args: z.object({ selector: Selector }),
+  args: z.object({
+    select: Selector,
+    since: z.number().optional(),
+  }),
   meta: Meta.optional(),
 });
 
-export const Commit = z.object({
-  the: z.literal("application/commit+json"),
-  of: Of,
-  is: z.object({
-    since: Since,
-    transaction: Transaction,
-  }),
-  cause: Reference,
+export const CommitData = z.object({
+  since: z.number().int(),
+  transaction: Transaction,
 });
+export const Commit = z.record(
+  Space,
+  z.object({
+    "application/commit+json": z.record(Cause, z.object({ is: CommitData })),
+  }),
+);
 
 export const Conflict = z.object({
-  in: Space,
+  space: Space,
   the: The,
   of: Of,
   expected: Reference.or(Null).describe(`Expected state in the memory space`),
@@ -149,10 +155,7 @@ export const transact = createRoute({
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(ok(Commit), "Successful transaction"),
-    [HttpStatusCodes.CONFLICT]: jsonContent(
-      error(ConflictError),
-      "Conflict occurred",
-    ),
+    [HttpStatusCodes.CONFLICT]: jsonContent(error(ConflictError), "Conflict occurred"),
     [HttpStatusCodes.SERVICE_UNAVAILABLE]: jsonContent(
       error(ConnectionError.or(TransactionError)),
       "Memory service is unable to process transaction",

@@ -16,6 +16,9 @@ import type {
   QueryError,
   Result,
   Selection,
+  InvocationURL,
+  TransactionResult,
+  QueryResult,
 } from "./interface.ts";
 import * as Subscription from "./subscription.ts";
 
@@ -43,6 +46,9 @@ export interface Provider {
   session(): ProviderSession<Protocol>;
 
   close(): CloseResult;
+
+  transact(transaction: Transaction): TransactionResult;
+  query(source: Query): QueryResult;
 }
 
 interface Session {
@@ -87,7 +93,7 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
   writable: WritableStream<ConsumerCommand<Protocol>>;
   controller: ReadableStreamDefaultController<ProviderCommand<Protocol>> | undefined;
 
-  channels: Map<string, Set<string>> = new Map();
+  channels: Map<InvocationURL<Reference<Subscribe>>, Set<string>> = new Map();
 
   constructor(
     public memory: MemorySession,
@@ -137,24 +143,24 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
       case "/memory/query": {
         return this.perform({
           the: "task/return",
-          of: refer(command),
+          of: `job:${refer(command)}` as InvocationURL<Reference<ConsumerCommand<Protocol>>>,
           is: (await this.memory.query(command)) as Result<Selection, QueryError>,
         });
       }
       case "/memory/transact": {
         return this.perform({
           the: "task/return",
-          of: refer(command),
+          of: `job:${refer(command)}` as InvocationURL<Reference<ConsumerCommand<Protocol>>>,
           is: await this.memory.transact(command),
         });
       }
       case "/memory/query/subscribe": {
-        const id = refer(command).toString();
+        const id = `job:${refer(command)}` as InvocationURL<Subscribe>;
         this.channels.set(id, new Set(Subscription.channels(command.sub, command.args.select)));
         return this.memory.subscribe(this);
       }
       case "/memory/query/unsubscribe": {
-        const id = command.args.source.toString();
+        const id = command.args.source;
         this.channels.delete(id);
         if (this.channels.size === 0) {
           this.memory.unsubscribe(this);
@@ -170,7 +176,7 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
         // End unsubscribe call
         this.perform({
           the: "task/return",
-          of: refer(command),
+          of: `job:${refer(command)}` as InvocationURL<Reference<ConsumerCommand<Protocol>>>,
           is: { ok: {} },
         });
       }
@@ -183,7 +189,7 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
       if (Subscription.match(transaction, channels)) {
         return this.perform({
           the: "task/effect",
-          of: fromString(id) as Reference<Subscribe>,
+          of: id,
           is: transaction,
         });
       }

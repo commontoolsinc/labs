@@ -9,18 +9,19 @@ export interface BlobOptions {
   keys?: string;
 }
 
-export async function getAllMemories(
-  replica: string,
-): Promise<Record<string, any>> {
+export async function getAllMemories(replica: string): Promise<Record<string, any>> {
   const res = await client.api.storage.memory.$post({
     json: {
       cmd: "/memory/query",
       iss: "did:web:common.tools",
       sub: replica,
       args: {
-        selector: {
-          the: "application/json",
-          is: {},
+        select: {
+          _: {
+            "application/json": {
+              is: {},
+            },
+          },
         },
       },
     },
@@ -29,8 +30,9 @@ export async function getAllMemories(
   if ("error" in data) {
     throw new Error(`${data?.error}`);
   }
-  const rawMemories: { the?: string; of?: string; is?: any }[] =
-    Array.isArray(data.ok) ? data.ok : [data.ok];
+  const rawMemories: { the?: string; of?: string; is?: any }[] = Array.isArray(data.ok)
+    ? data.ok
+    : [data.ok];
   const memories: { the: string; of: string; is: any }[] = rawMemories
     .filter((m) => m.the && m.of && m.is)
     .map((m: any) => ({

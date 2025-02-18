@@ -23,7 +23,7 @@ export type Protocol<Space extends MemorySpace = MemorySpace> = {
   this: Space;
   memory: {
     transact(source: {
-      changes: Changes;
+      changes: ChangesBuilder;
     }): Task<Result<Commit<Space>, ConflictError | TransactionError | ConnectionError>>;
     query: {
       (query: { select: Selector; since?: number }): Task<Result<Selection<Space>, QueryError>>;
@@ -160,8 +160,10 @@ export type UnwatchTask<Space extends MemorySpace> = Job<
 export type SessionTask<Space extends MemorySpace> = UnwatchTask<Space> | WatchTask<Space>;
 
 export type Receipt<Command extends {}, Result extends {} | null, Effect> =
-  | { the: "task/return"; of: Reference<Command>; is: Awaited<Result> }
-  | (Effect extends never ? never : { the: "task/effect"; of: Reference<Command>; is: Effect });
+  | { the: "task/return"; of: InvocationURL<Reference<Command>>; is: Awaited<Result> }
+  | (Effect extends never
+      ? never
+      : { the: "task/effect"; of: InvocationURL<Reference<Command>>; is: Effect });
 
 export type Effect<Of extends {}, Command> = {
   of: Reference<Of>;
@@ -255,6 +257,8 @@ export type Entity = `${string}:${string}`;
 export type The = string & { toString(): The };
 
 export type Cause<T = Assertion | Retraction | Unclaimed> = string & { toString(): Cause<T> };
+
+export type InvocationURL<T> = `job:${string}` & { toString(): InvocationURL<T> };
 
 /**
  * Describes not yet claimed memory. It describes a lack of fact about memory.
@@ -390,7 +394,7 @@ export type ClaimFact = true;
 export type RetractFact = { is?: void };
 export type AssertFact<Is extends JSONValue = JSONValue> = { is: Is };
 
-export type Changes<
+export type ChangesBuilder<
   T extends The = The,
   Of extends Entity = Entity,
   Is extends JSONValue = JSONValue,
@@ -422,7 +426,7 @@ export type Transaction<Space extends MemorySpace = MemorySpace> = {
   iss: Principal;
   sub: Space;
   cmd: "/memory/transact";
-  args: { changes: Changes };
+  args: { changes: ChangesBuilder };
   meta?: Meta;
 };
 
@@ -451,7 +455,7 @@ export type Unsubscribe<Space extends MemorySpace = MemorySpace> = {
   iss: Principal;
   sub: Space;
   cmd: "/memory/query/unsubscribe";
-  args: { source: Reference<Subscribe<Space>> };
+  args: { source: InvocationURL<Reference<Subscribe<Space>>> };
   Meta?: Meta;
 };
 
