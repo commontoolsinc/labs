@@ -51,9 +51,7 @@ export const query: AppRouteHandler<typeof Routes.query> = async (c) => {
   }
 };
 
-export const subscribe: AppRouteHandler<typeof Routes.subscribe> = async (
-  c,
-) => {
+export const subscribe: AppRouteHandler<typeof Routes.subscribe> = (c) => {
   const { socket, response } = Deno.upgradeWebSocket(c.req.raw);
   const session = Memory.Socket.from(socket);
   session.readable.pipeThrough(memory.session()).pipeTo(session.writable);
