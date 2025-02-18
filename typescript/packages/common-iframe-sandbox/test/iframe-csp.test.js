@@ -186,9 +186,9 @@ function defineTest(name, html, expected) {
       `;
       const iframe = await render(body);
       if (expected == null) {
-        await invertPromise(waitForEvent(iframe, "error"));
+        await invertPromise(waitForEvent(iframe, "common-iframe-error"));
       } else {
-        let event = await waitForEvent(iframe, "error");
+        let event = await waitForEvent(iframe, "common-iframe-error");
         if (typeof expected === "string") {
           assertEquals(event.detail.description, expected);
         } else {
