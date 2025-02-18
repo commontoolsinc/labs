@@ -295,13 +295,18 @@ describe("asCell", () => {
     c.asCell(["a", "b"]).sink((value) => {
       values.push(value);
     });
+    expect(values).toEqual([42]); // Initial call
     c.setAtPath(["d"], 50);
+    await idle();
     c.setAtPath(["a", "c"], 100);
+    await idle();
     c.setAtPath(["a", "b"], 42);
+    await idle();
+    expect(values).toEqual([42]); // Didn't get called again
     c.setAtPath(["a", "b"], 300);
     await idle();
-    expect(values).toEqual([42, 300]);
     expect(c.get()).toEqual({ a: { b: 300, c: 100 }, d: 50 });
+    expect(values).toEqual([42, 300]); // Got called again
   });
 });
 

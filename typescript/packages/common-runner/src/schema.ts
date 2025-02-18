@@ -42,7 +42,6 @@ export function validateAndTransform(
   path: PropertyKey[] = [],
   schema?: JSONSchema,
   log?: ReactivityLog,
-  passOnLog = false,
   rootSchema: JSONSchema | undefined = schema,
   seen: DocLink[] = [],
 ): any {
@@ -67,7 +66,7 @@ export function validateAndTransform(
       (Array.isArray(resolvedSchema?.anyOf) &&
         resolvedSchema.anyOf.every((option) => option.asCell)))
   )
-    return createCell(doc, path, passOnLog ? log : undefined, resolvedSchema, rootSchema);
+    return createCell(doc, path, log, resolvedSchema, rootSchema);
 
   // If there is no schema, return as raw data via query result proxy
   if (!resolvedSchema) return doc.getAsQueryResult(path, log);
@@ -95,7 +94,7 @@ export function validateAndTransform(
       const arrayOptions = options.filter((option) => option.type === "array");
       if (arrayOptions.length === 0) return undefined;
       if (arrayOptions.length === 1)
-        return validateAndTransform(doc, path, arrayOptions[0], log, passOnLog, rootSchema, seen);
+        return validateAndTransform(doc, path, arrayOptions[0], log, rootSchema, seen);
 
       // TODO: Handle more corner cases like empty anyOf, etc.
       const merged: JSONSchema[] = [];
@@ -110,7 +109,6 @@ export function validateAndTransform(
         path,
         { type: "array", items: { anyOf: merged } },
         log,
-        passOnLog,
         rootSchema,
         seen,
       );
@@ -143,7 +141,7 @@ export function validateAndTransform(
           const extraLog = { reads: [], writes: [] } satisfies ReactivityLog;
           return {
             schema: option,
-            result: validateAndTransform(doc, path, option, extraLog, passOnLog, rootSchema, seen),
+            result: validateAndTransform(doc, path, option, extraLog, rootSchema, seen),
             extraLog,
           };
         });
@@ -170,7 +168,7 @@ export function validateAndTransform(
         .filter((option) => (option.type === "integer" ? "number" : option.type) === typeof value)
         .map((option) => ({
           schema: option,
-          result: validateAndTransform(doc, path, option, log, passOnLog, rootSchema, seen),
+          result: validateAndTransform(doc, path, option, log, rootSchema, seen),
         }));
 
       if (candidates.length === 0) return undefined;
@@ -179,7 +177,7 @@ export function validateAndTransform(
       // If we get more than one candidate, see if there is one that matches anything, and if not return the first one
       const anyTypeOption = options.find((option) => option.type === undefined);
       if (anyTypeOption)
-        return validateAndTransform(doc, path, anyTypeOption, log, passOnLog, rootSchema, seen);
+        return validateAndTransform(doc, path, anyTypeOption, log, rootSchema, seen);
       else return candidates[0].result;
     }
   }
@@ -198,7 +196,6 @@ export function validateAndTransform(
             [...path, key],
             propSchema,
             log,
-            passOnLog,
             rootSchema,
             seen,
           );
@@ -220,7 +217,6 @@ export function validateAndTransform(
             [...path, key],
             additionalPropertiesSchema,
             log,
-            passOnLog,
             rootSchema,
             seen,
           );
@@ -236,15 +232,7 @@ export function validateAndTransform(
       return [];
     }
     return value.map((_, i) =>
-      validateAndTransform(
-        doc,
-        [...path, i],
-        resolvedSchema.items!,
-        log,
-        passOnLog,
-        rootSchema,
-        seen,
-      ),
+      validateAndTransform(doc, [...path, i], resolvedSchema.items!, log, rootSchema, seen),
     );
   }
 
