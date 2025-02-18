@@ -156,6 +156,52 @@ importers:
         specifier: ^3.0.4
         version: 3.0.4(@types/debug@4.1.12)(@types/node@22.12.0)(jiti@2.4.2)(lightningcss@1.29.1)
 
+  common-identity:
+    dependencies:
+      '@noble/ed25519':
+        specifier: '*'
+        version: 1.7.3
+      tslib:
+        specifier: ^2.8.1
+        version: 2.8.1
+    devDependencies:
+      '@eslint/js':
+        specifier: ^9.19.0
+        version: 9.19.0
+      '@types/node':
+        specifier: ^22.10.10
+        version: 22.12.0
+      '@web/test-runner':
+        specifier: ^0.19.0
+        version: 0.19.0
+      esbuild:
+        specifier: '*'
+        version: 0.24.2
+      eslint:
+        specifier: ^9.19.0
+        version: 9.19.0(jiti@2.4.2)
+      eslint-config-prettier:
+        specifier: ^10.0.1
+        version: 10.0.1(eslint@9.19.0(jiti@2.4.2))
+      eslint-plugin-prettier:
+        specifier: ^5.2.3
+        version: 5.2.3(eslint-config-prettier@10.0.1(eslint@9.19.0(jiti@2.4.2)))(eslint@9.19.0(jiti@2.4.2))(prettier@3.4.2)
+      globals:
+        specifier: ^15.14.0
+        version: 15.14.0
+      prettier:
+        specifier: ^3.4.2
+        version: 3.4.2
+      typescript:
+        specifier: ^5.7.3
+        version: 5.7.3
+      vite:
+        specifier: ^6.0.11
+        version: 6.0.11(@types/node@22.12.0)(jiti@2.4.2)(lightningcss@1.29.1)
+      vite-plugin-dts:
+        specifier: ^4.5.0
+        version: 4.5.0(@types/node@22.12.0)(rollup@4.32.0)(typescript@5.7.3)(vite@6.0.11(@types/node@22.12.0)(jiti@2.4.2)(lightningcss@1.29.1))
+
   common-iframe-sandbox:
     dependencies:
       lit:
@@ -1043,6 +1089,9 @@ packages:
     resolution: {integrity: sha512-Obb0/gEd/HReTlg8ttaYk+0m62gQJmCblMOjHSMHRrBP2zdfKMHLCRbh/6ex9fSUJMKdjjIEiohwkbGD3wj2Nw==}
     peerDependencies:
       three: '>= 0.159.0'
+
+  '@noble/ed25519@1.7.3':
+    resolution: {integrity: sha512-iR8GBkDt0Q3GyaVcIu7mSsVIqnFbkbRzGLWlvhwunacoLwt4J3swfKhfaM6rN6WY+TBGoYT1GtT1mIh2/jGbRQ==}
 
   '@noble/hashes@1.3.3':
     resolution: {integrity: sha512-V7/fPHgl+jsVPXqqeOzT8egNj2iBIVt+ECeMMG8TdcnTikP3oaBtUVqpT/gYCR68aEBJSF+XbYUxStjbFMqIIA==}
@@ -4988,6 +5037,8 @@ snapshots:
     dependencies:
       promise-worker-transferable: 1.0.4
       three: 0.173.0
+
+  '@noble/ed25519@1.7.3': {}
 
   '@noble/hashes@1.3.3': {}
 
