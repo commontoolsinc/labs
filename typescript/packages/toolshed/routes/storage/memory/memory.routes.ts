@@ -7,22 +7,36 @@ export const tags = ["Memory Storage"];
 
 export const Null = z.literal(null);
 export const Unit = z.object({});
-export const Meta = z.record(z.string(), z.string()).describe("Arbitrary metadata");
-export const The = z.string().describe("Type of the fact usually formatted as media type");
-export const Of = z.string().describe("Unique identifier for the mutable entity");
+export const Meta = z.record(z.string(), z.string()).describe(
+  "Arbitrary metadata",
+);
+export const The = z.string().describe(
+  "Type of the fact usually formatted as media type",
+);
+export const Of = z.string().describe(
+  "Unique identifier for the mutable entity",
+);
 
 export const DID = z
   .string()
   .startsWith("did:")
   .refine((did): did is `did:${string}:${string}` => true);
 
-export const Space = DID.describe("Unique did:key identifier of the memory space");
-export const Principal = DID.describe("Unique DID identifier of the issuing principal");
+export const Space = DID.describe(
+  "Unique did:key identifier of the memory space",
+);
+export const Principal = DID.describe(
+  "Unique DID identifier of the issuing principal",
+);
 
-export const Cause = z.string().describe("Merkle reference to the previous state of the entity");
+export const Cause = z.string().describe(
+  "Merkle reference to the previous state of the entity",
+);
 export const Retract = z
   .object({
-    is: z.literal(undefined).optional().describe("Retraction has no 'is' field"),
+    is: z.literal(undefined).optional().describe(
+      "Retraction has no 'is' field",
+    ),
   })
   .describe("Retracts fact");
 export const Claim = z.literal(true).describe("Expects fact");
@@ -51,7 +65,9 @@ export const Fact = z.object({
   cause: Reference,
 });
 
-export const Since = z.number().int().describe("Sequence number of the transaction");
+export const Since = z.number().int().describe(
+  "Sequence number of the transaction",
+);
 export const Selector = z.record(
   Of,
   z.record(
@@ -59,7 +75,9 @@ export const Selector = z.record(
     z.record(
       Cause,
       z.object({
-        is: Unit.optional().describe("If omitted will includes retracted facts"),
+        is: Unit.optional().describe(
+          "If omitted will includes retracted facts",
+        ),
       }),
     ),
   ),
@@ -155,7 +173,10 @@ export const transact = createRoute({
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(ok(Commit), "Successful transaction"),
-    [HttpStatusCodes.CONFLICT]: jsonContent(error(ConflictError), "Conflict occurred"),
+    [HttpStatusCodes.CONFLICT]: jsonContent(
+      error(ConflictError),
+      "Conflict occurred",
+    ),
     [HttpStatusCodes.SERVICE_UNAVAILABLE]: jsonContent(
       error(ConnectionError.or(TransactionError)),
       "Memory service is unable to process transaction",
