@@ -16,7 +16,7 @@ import { isStatic, markAsStatic } from "@commontools/builder";
 import { StorageProvider, StorageValue } from "./storage/base.js";
 import { LocalStorageProvider } from "./storage/localstorage.js";
 import { InMemoryStorageProvider } from "./storage/memory.js";
-import { RemoteStorageProvider } from "./storage/remote.js";
+import { RemoteStorageProvider, type MemorySpace } from "./storage/remote.js";
 import { debug } from "@commontools/html"; // FIXME(ja): can we move debug to somewhere else?
 
 export function log(...args: any[]) {
@@ -598,7 +598,7 @@ export function createStorage(config: StorageConfig): Storage {
   } else if (config.type === "remote") {
     storageProvider = new RemoteStorageProvider({
       address: new URL("/api/storage/memory", config.url),
-      replica: config.replica,
+      space: config.replica as MemorySpace,
     });
   } else {
     throw new Error("Invalid storage type");

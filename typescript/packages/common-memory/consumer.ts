@@ -22,12 +22,16 @@ import {
   Abilities,
   Invocation,
   InvocationURL,
+  TransactionResult,
   Subscribe,
 } from "./interface.ts";
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
 import * as Changes from "./changes.ts";
 import * as Fact from "./fact.ts";
+
+export * from "./interface.ts";
+export { Changes as ChangesBuilder };
 
 export const connect = ({ address, as }: { address: URL; as: Principal }) =>
   open({
@@ -41,12 +45,15 @@ export const open = ({ as, session }: { as: Principal; session: ProviderSession<
   return consumer;
 };
 
+export const create = ({ as }: { as: Principal }) => new MemoryConsumerSession(as);
+
 class MemoryConsumerSession
   extends TransformStream<ProviderCommand<Protocol>, ConsumerCommand<Protocol>>
-  implements ConsumerSession<Protocol>
+  implements ConsumerSession<Protocol>, MemorySession
 {
   controller: TransformStreamDefaultController<ConsumerCommand<Protocol>> | undefined;
-  invocations: Map<InvocationURL<Reference<Invocation>>, Job<any>> = new Map();
+  invocations: Map<InvocationURL<Reference<Invocation>>, Job<Abilities<Protocol>, Protocol>> =
+    new Map();
   constructor(public as: Principal) {
     let controller: undefined | TransformStreamDefaultController<ConsumerCommand<Protocol>>;
     super({
@@ -75,14 +82,16 @@ class MemoryConsumerSession
     }
   }
 
-  execute<Ability extends Abilities<Protocol>>(invocation: Job<Ability>) {
+  execute<Space extends MemorySpace, Ability extends string>(
+    invocation: ConsumerInvocation<Space, Ability>,
+  ) {
     const command = invocation.toJSON();
 
     const id = `job:${refer(command)}` as InvocationURL<Reference<Invocation>>;
     const pending = this.invocations.get(id);
     if (!pending) {
-      this.invocations.set(id, invocation);
-      this.send(command);
+      this.invocations.set(id, invocation as unknown as Job<Ability, Protocol>);
+      this.send(command as ConsumerCommand<Protocol>);
     } else {
       invocation.return(pending.promise as any);
     }
@@ -106,7 +115,18 @@ class MemoryConsumerSession
   }
 }
 
-class MemorySpaceConsumerSession<Space extends MemorySpace> {
+export interface MemorySession {
+  mount<Space extends MemorySpace>(space: Space): MemorySpaceSession<Space>;
+}
+
+export interface MemorySpaceSession<Space extends MemorySpace = MemorySpace> {
+  transact(source: Transaction<Space>["args"]): TransactionResult<Space>;
+  query(source: Query["args"]): QueryView<Space>;
+}
+
+export type { QueryView };
+
+class MemorySpaceConsumerSession<Space extends MemorySpace> implements MemorySpaceSession<Space> {
   constructor(public space: Space, public session: MemoryConsumerSession) {}
   transact(source: Transaction["args"]) {
     const invocation = new ConsumerInvocation({
@@ -120,8 +140,8 @@ class MemorySpaceConsumerSession<Space extends MemorySpace> {
 
     return invocation;
   }
-  query(source: Query["args"]) {
-    const invocation = new ConsumerInvocation({
+  query(source: Query["args"]): QueryView<Space> {
+    const invocation = new ConsumerInvocation<Space, "/memory/query">({
       cmd: "/memory/query",
       iss: this.session.as,
       sub: this.space,
@@ -134,7 +154,7 @@ class MemorySpaceConsumerSession<Space extends MemorySpace> {
   }
 }
 
-interface Job<Ability> {
+interface Job<Ability, Protocol> {
   toJSON(): ConsumerCommand<Protocol>;
   promise: Promise<ConsumerResultFor<Ability, Protocol>>;
   return(input: Await<ConsumerResultFor<Ability, Protocol>>): void;
@@ -146,8 +166,6 @@ class ConsumerInvocation<Space extends MemorySpace, Ability extends string> {
   return: (input: ConsumerResultFor<Ability, Protocol<Space>>) => void;
 
   constructor(public source: ConsumerCommandFor<Ability, Protocol<Space>>) {
-    source.sub;
-
     let receive;
     this.promise = new Promise<ConsumerResultFor<Ability, Protocol<Space>>>(
       (resolve) => (receive = resolve),
@@ -179,7 +197,7 @@ class ConsumerInvocation<Space extends MemorySpace, Ability extends string> {
   get meta() {
     return this.source.meta;
   }
-  toJSON(): ConsumerCommandFor<Ability, Protocol<Space>> {
+  toJSON(): ConsumerCommand<Protocol<Space>> {
     const { cmd, iss, sub, args, meta } = this.source;
     return {
       cmd,
@@ -187,7 +205,7 @@ class ConsumerInvocation<Space extends MemorySpace, Ability extends string> {
       sub,
       args,
       ...(meta ? { meta } : undefined),
-    };
+    } as ConsumerCommand<Protocol<Space>>;
   }
 }
 
@@ -195,7 +213,7 @@ class QueryView<Space extends MemorySpace> {
   static new<Space extends MemorySpace>(
     session: MemoryConsumerSession,
     invocation: ConsumerInvocation<Space, "/memory/query">,
-  ) {
+  ): QueryView<Space> {
     const view: QueryView<Space> = new QueryView(
       session,
       invocation,
@@ -211,12 +229,14 @@ class QueryView<Space extends MemorySpace> {
 
     return view;
   }
-  selection: Selection<Space> = {} as Selection<Space>;
+  selection: Selection<Space>;
   constructor(
     public session: MemoryConsumerSession,
     public invocation: ConsumerInvocation<Space, "/memory/query">,
     public promise: Promise<Result<QueryView<Space>, QueryError | ConnectionError>>,
-  ) {}
+  ) {
+    this.selection = { [this.space]: {} } as Selection<Space>;
+  }
 
   return(selection: Selection<Space>) {
     this.selection = selection;
@@ -259,7 +279,7 @@ class QueryView<Space extends MemorySpace> {
 
   subscribe() {
     const subscription = new QuerySubscriptionInvocation(this);
-    this.session.execute(subscription as unknown as Job<"/memory/query">);
+    this.session.execute(subscription);
 
     return subscription.readable;
   }
@@ -303,14 +323,12 @@ class QuerySubscriptionInvocation<Space extends MemorySpace> extends ConsumerInv
       args: { source: `job:${refer(this.toJSON())}` as InvocationURL<Reference<Subscribe>> },
     });
 
-    invocation.args;
-
     this.query.session.execute(invocation);
 
     await invocation;
   }
   override perform(transaction: Transaction<Space>) {
-    const selection = this.selection[transaction.sub];
+    const selection = this.selection[this.sub];
     const changed = {};
     for (const [of, attributes] of Object.entries(transaction.args.changes)) {
       for (const [the, changes] of Object.entries(attributes)) {
