@@ -4,23 +4,27 @@ import {
   Transaction,
   Entity,
   Principal,
-  Protocol,
   Selection,
   ProviderCommand,
   ConsumerCommand,
-  FactSelection,
+  ConsumerCommandFor,
+  Await,
   QueryError,
-  InferConsumerReturn,
-  AsyncResult,
+  Result,
   ConsumerSession,
-  ProviderReturn,
+  ConsumerResultFor,
   ProviderSession,
-  Watch,
+  Protocol,
+  ConnectionError,
+  ConsumerEffectFor,
+  InferProtocol,
+  Abilities,
 } from "./interface.ts";
 import { refer } from "./reference.ts";
 import * as Socket from "./socket.ts";
 import * as Changes from "./changes.ts";
 import * as Fact from "./fact.ts";
+
 export const connect = ({ address, as }: { address: URL; as: Principal }) =>
   open({
     as,
@@ -33,151 +37,273 @@ export const open = ({ as, session }: { as: Principal; session: ProviderSession<
   return consumer;
 };
 
-interface PendingInvocation<T> {
-  promise: Promise<T>;
-  return: (result: T) => void;
-}
-
-class MemoryConsumerSession<Space extends MemorySpace>
-  extends TransformStream<ProviderCommand<Protocol<Space>>, ConsumerCommand<Protocol<Space>>>
-  implements ConsumerSession<Protocol<Space>>
+class MemoryConsumerSession
+  extends TransformStream<ProviderCommand<Protocol>, ConsumerCommand<Protocol>>
+  implements ConsumerSession<Protocol>
 {
-  controller: TransformStreamDefaultController<ConsumerCommand<Protocol<Space>>> | undefined;
-  invocations: Map<string, PendingInvocation<ProviderReturn<Protocol<Space>>>> = new Map();
-  subscriptions: Map<string, QuerySubscription<Space>> = new Map();
+  controller: TransformStreamDefaultController<ConsumerCommand<Protocol>> | undefined;
+  invocations: Map<string, Job<any>> = new Map();
   constructor(public as: Principal) {
-    let controller: undefined | TransformStreamDefaultController<ConsumerCommand<Protocol<Space>>>;
+    let controller: undefined | TransformStreamDefaultController<ConsumerCommand<Protocol>>;
     super({
       start: (control) => {
         controller = control;
       },
-      transform: (command) => this.receive(command),
+      transform: (command) => this.receive(command as ProviderCommand<Protocol>),
       cancel: () => this.cancel(),
       flush: () => this.close(),
     });
 
     this.controller = controller;
   }
-  send(command: ConsumerCommand<Protocol<Space>>) {
+  send(command: ConsumerCommand<Protocol>) {
     this.controller?.enqueue(command);
   }
-  receive(command: ProviderCommand<Protocol<Space>>) {
+  receive(command: ProviderCommand<Protocol>) {
     const id = command.of.toString();
     if (command.the === "task/return") {
       const invocation = this.invocations.get(id);
-      invocation?.return(command.is);
       this.invocations.delete(id);
+      invocation?.return(command.is);
     } else if (command.the === "task/effect") {
-      const subscription = this.subscriptions.get(id);
-      subscription?.transact(command.is);
+      const invocation = this.invocations.get(id);
+      invocation?.perform(command.is);
     }
   }
 
-  async subscribe(invocation: Watch): AsyncResult<QuerySubscription<Space>, QueryError> {
-    const id = refer(invocation).toString();
-    let subscription = this.subscriptions.get(id);
-    if (!subscription) {
-      const result = await this.perform({
-        cmd: "/memory/query",
-        iss: this.as,
-        sub: invocation.sub,
-        args: invocation.args,
-      });
+  execute<Ability extends Abilities<Protocol>>(invocation: Job<Ability>) {
+    const command = invocation.toJSON();
 
-      if (result.error) {
-        return result;
-      } else {
-        subscription = new QuerySubscription(this, invocation, result.ok);
-        this.subscriptions.set(id, subscription);
-        this.send(invocation);
-      }
-    }
-
-    return { ok: subscription };
-  }
-  perform<Command extends ConsumerCommand<Protocol<Space>>>(
-    command: Command,
-  ): Promise<InferConsumerReturn<Protocol<Space>, Command>> {
     const id = refer(command).toString();
-    let invocation = this.invocations.get(id);
-    if (!invocation) {
-      const { promise, succeed } = defer<ProviderReturn<Protocol<Space>>>();
-      invocation = { promise, return: succeed };
+    const pending = this.invocations.get(id);
+    if (!pending) {
       this.invocations.set(id, invocation);
       this.send(command);
+    } else {
+      invocation.return(pending.promise as any);
     }
-    return invocation.promise as Promise<InferConsumerReturn<Protocol<Space>, Command>>;
-  }
-  close() {}
-  cancel() {}
-  open(controller: TransformStreamDefaultController<ConsumerCommand<Protocol>>) {
-    this.controller = controller;
   }
 
-  mount<Subject extends Space>(space: Subject): MemorySpaceConsumerSession<Subject> {
-    return new MemorySpaceConsumerSession(space, this as MemoryConsumerSession<Subject>);
+  close() {}
+  cancel() {}
+
+  abort<Ability extends Abilities<Protocol>>(
+    invocation: InferProtocol<Protocol>[Ability]["Invocation"] & { cmd: Ability },
+  ) {
+    const command = invocation.toJSON();
+    const id = refer(command).toString();
+    this.invocations.delete(id);
+  }
+
+  mount<Space extends MemorySpace>(space: Space): MemorySpaceConsumerSession<Space> {
+    return new MemorySpaceConsumerSession(space, this);
   }
 }
 
 class MemorySpaceConsumerSession<Space extends MemorySpace> {
-  constructor(public space: Space, public session: MemoryConsumerSession<Space>) {}
+  constructor(public space: Space, public session: MemoryConsumerSession) {}
   transact(source: Transaction["args"]) {
-    return this.session.perform({
+    const invocation = new ConsumerInvocation({
       cmd: "/memory/transact",
       iss: this.session.as,
       sub: this.space,
       args: source,
     });
+
+    this.session.execute(invocation);
+
+    return invocation;
   }
   query(source: Query["args"]) {
-    return this.session.perform({
+    const invocation = new ConsumerInvocation({
       cmd: "/memory/query",
       iss: this.session.as,
       sub: this.space,
       args: source,
     });
-  }
-  subscribe(query: Watch["args"]): AsyncResult<QuerySubscription<Space>, QueryError> {
-    return this.session.subscribe({
-      cmd: "/memory/watch",
-      iss: this.session.as,
-      sub: this.space,
-      args: query,
-    });
+
+    this.session.execute(invocation);
+
+    return QueryView.new(this.session, invocation);
   }
 }
 
-class QuerySubscription<Space extends MemorySpace> extends ReadableStream<Selection<Space>> {
-  controller: ReadableStreamDefaultController<Selection<Space>> | undefined;
-  constructor(
-    public session: MemoryConsumerSession<Space>,
-    public invocation: Watch,
-    public selection: Selection<Space>,
-  ) {
-    let init: ReadableStreamDefaultController<Selection<Space>> | undefined;
-    super({
-      start: (controller) => {
-        init = controller;
-      },
-      cancel: async () => {
-        this.close();
-      },
-    });
+interface Job<Ability> {
+  toJSON(): ConsumerCommand<Protocol>;
+  promise: Promise<ConsumerResultFor<Ability, Protocol>>;
+  return(input: Await<ConsumerResultFor<Ability, Protocol>>): void;
+  perform(effect: ConsumerEffectFor<Ability, Protocol>): void;
+}
 
-    this.controller = init;
+class ConsumerInvocation<Space extends MemorySpace, Ability extends string> {
+  promise: Promise<ConsumerResultFor<Ability, Protocol<Space>>>;
+  return: (input: ConsumerResultFor<Ability, Protocol<Space>>) => void;
+
+  constructor(public source: ConsumerCommandFor<Ability, Protocol<Space>>) {
+    source.sub;
+
+    let receive;
+    this.promise = new Promise<ConsumerResultFor<Ability, Protocol<Space>>>(
+      (resolve) => (receive = resolve),
+    );
+    this.return = receive as typeof receive & {};
   }
 
-  async close() {
-    this.controller = undefined;
-    return await this.session.perform({
-      cmd: "/memory/unwatch",
-      iss: this.invocation.iss,
-      sub: this.invocation.sub,
-      args: { source: refer(this.invocation) },
-    });
+  then<T, X>(
+    onResolve: (value: ConsumerResultFor<Ability, Protocol<Space>>) => T | PromiseLike<T>,
+    onReject: (reason: any) => X | Promise<X>,
+  ) {
+    return this.promise.then(onResolve, onReject);
+  }
+
+  perform(effect: ConsumerEffectFor<Ability, Protocol>) {}
+
+  get cmd() {
+    return this.source.cmd;
+  }
+  get iss() {
+    return this.source.iss;
+  }
+  get sub() {
+    return this.source.sub;
+  }
+  get args() {
+    return this.source.args;
+  }
+  get meta() {
+    return this.source.meta;
+  }
+  toJSON(): ConsumerCommandFor<Ability, Protocol<Space>> {
+    const { cmd, iss, sub, args, meta } = this.source;
+    return {
+      cmd,
+      iss,
+      sub,
+      args,
+      ...(meta ? { meta } : undefined),
+    };
+  }
+}
+
+class QueryView<Space extends MemorySpace> {
+  static new<Space extends MemorySpace>(
+    session: MemoryConsumerSession,
+    invocation: ConsumerInvocation<Space, "/memory/query">,
+  ) {
+    const view: QueryView<Space> = new QueryView(
+      session,
+      invocation,
+      invocation.promise.then((result: any) => {
+        if (result.error) {
+          return result;
+        } else {
+          view.selection = result.ok as Selection<Space>;
+          return { ok: view };
+        }
+      }),
+    );
+
+    return view;
+  }
+  selection: Selection<Space> = {} as Selection<Space>;
+  constructor(
+    public session: MemoryConsumerSession,
+    public invocation: ConsumerInvocation<Space, "/memory/query">,
+    public promise: Promise<Result<QueryView<Space>, QueryError | ConnectionError>>,
+  ) {}
+
+  return(selection: Selection<Space>) {
+    this.selection = selection;
+  }
+
+  then<T, X>(
+    onResolve: (
+      value: Result<QueryView<Space>, QueryError | ConnectionError>,
+    ) => T | PromiseLike<T>,
+    onReject: (reason: any) => X | Promise<X>,
+  ) {
+    return this.promise.then(onResolve, onReject);
+  }
+
+  get space() {
+    return this.invocation.sub;
   }
 
   transact(transaction: Transaction<Space>) {
+    const selection = this.selection[this.space];
+    for (const [of, attributes] of Object.entries(transaction.args.changes)) {
+      for (const [the, changes] of Object.entries(attributes)) {
+        const [[cause, change]] = Object.entries(changes);
+        if (change !== true) {
+          const state = Object.entries(selection?.[of as Entity]?.[the] ?? {});
+          const [current] = state.length > 0 ? state[0] : [];
+          if (cause !== current) {
+            Changes.set(selection, [of], the, { [cause]: change });
+          }
+        }
+      }
+    }
+
+    return { ok: {} };
+  }
+
+  get facts() {
+    return [...Fact.iterate(this.selection[this.space])];
+  }
+
+  subscribe() {
+    const subscription = new QuerySubscriptionInvocation(this);
+    this.session.execute(subscription as unknown as Job<"/memory/query">);
+
+    return subscription.readable;
+  }
+}
+
+class QuerySubscriptionInvocation<Space extends MemorySpace> extends ConsumerInvocation<
+  Space,
+  "/memory/query/subscribe"
+> {
+  readable: ReadableStream<Selection<Space>>;
+  controller: undefined | ReadableStreamDefaultController<Selection<Space>>;
+
+  selection: Selection<Space>;
+  constructor(public query: QueryView<Space>) {
+    super({
+      cmd: "/memory/query/subscribe",
+      iss: query.invocation.iss,
+      sub: query.invocation.sub,
+      args: query.invocation.args,
+      meta: query.invocation.meta,
+    });
+
+    this.readable = new ReadableStream<Selection<Space>>({
+      start: (controller) => this.open(controller),
+      cancel: () => this.close().then(),
+    });
+
+    this.selection = query.selection;
+  }
+
+  open(controller: ReadableStreamDefaultController<Selection<Space>>) {
+    this.controller = controller;
+  }
+  async close() {
+    this.controller = undefined;
+    this.query.session.abort(this);
+    const invocation = new ConsumerInvocation({
+      cmd: "/memory/query/unsubscribe",
+      iss: this.iss,
+      sub: this.sub,
+      args: { source: refer(this.toJSON()) },
+    });
+
+    invocation.args;
+
+    this.query.session.execute(invocation);
+
+    await invocation;
+  }
+  override perform(transaction: Transaction<Space>) {
     const selection = this.selection[transaction.sub];
     const changed = {};
     for (const [of, attributes] of Object.entries(transaction.args.changes)) {
@@ -198,31 +324,10 @@ class QuerySubscription<Space extends MemorySpace> extends ReadableStream<Select
       this.integrate({ [transaction.sub]: changed } as Selection<Space>);
     }
 
+    this.query.transact(transaction);
     return { ok: {} };
   }
-
-  get facts() {
-    return [...Fact.iterate(this.selection[this.invocation.sub as Space])];
-  }
-
   integrate(differential: Selection<Space>) {
     this.controller?.enqueue(differential);
   }
 }
-
-const defer = <T>() => {
-  let succeed: undefined | Deferred<T>["succeed"];
-  let fail: undefined | Deferred<T>["fail"];
-  const promise = new Promise<T>((resolve, reject) => {
-    succeed = resolve;
-    fail = reject;
-  });
-
-  return { promise, succeed, fail } as Deferred<T>;
-};
-
-type Deferred<T, X extends Error = Error> = {
-  promise: Promise<T>;
-  succeed: (ok: T) => void;
-  fail: (error: X) => void;
-};

@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
+import { assert, assertEquals, assertMatch, assertObjectMatch } from "jsr:@std/assert";
 import * as Fact from "../fact.ts";
 import * as Transaction from "../transaction.ts";
 import * as Changes from "../changes.ts";
@@ -6,7 +6,6 @@ import * as Commit from "../commit.ts";
 import * as Provider from "../provider.ts";
 import * as Consumer from "../consumer.ts";
 import { refer } from "merkle-reference";
-import { setColorEnabled } from "jsr:@std/fmt@0.221/colors";
 
 const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
 const bob = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
@@ -48,13 +47,17 @@ const store = new URL(`memory://`);
 
 test("query empty memory", store, async (session) => {
   const memory = Consumer.open({ as: alice, session }).mount(space);
-  const result = await memory.query({
+  const query = memory.query({
     select: {},
   });
 
-  assertEquals(result, {
-    ok: { [space]: {} },
+  const result = await query;
+
+  assertEquals(result.ok?.selection, {
+    [space]: {},
   });
+
+  assertEquals(query.selection, { [space]: {} });
 });
 
 test("create new memory", store, async (session) => {
@@ -81,22 +84,25 @@ test("create new memory", store, async (session) => {
 
   assertEquals(result, { ok: Changes.from([c1]) });
 
+  const { ok: query } = await memory.query({
+    select: { [doc]: { [the]: {} } },
+  });
+
   assertEquals(
-    await memory.query({
-      select: { [doc]: { [the]: {} } },
-    }),
+    query?.selection,
     {
-      ok: { [space]: Changes.from([v1]) },
+      [space]: Changes.from([v1]),
     },
     "fact was added to the memory",
   );
 
+  const { ok: other } = await consumer.mount(alice).query({
+    select: { [doc]: { [the]: {} } },
+  });
   assertEquals(
-    await consumer.mount(alice).query({
-      select: { [doc]: { [the]: {} } },
-    }),
+    other?.selection,
     {
-      ok: { [alice]: { [doc]: { [the]: {} } } },
+      [alice]: { [doc]: { [the]: {} } },
     },
     "fact is unclaimed in another memory space",
   );
@@ -135,13 +141,7 @@ test("list empty memory", store, async (session) => {
     select: { _: { [the]: {} } },
   });
 
-  assertEquals(
-    result,
-    {
-      ok: { [space]: {} },
-    },
-    "no facts exist",
-  );
+  assertEquals(result.ok?.selection, { [space]: {} }, "no facts exist");
 });
 
 test("list single fact", store, async (session) => {
@@ -154,13 +154,7 @@ test("list single fact", store, async (session) => {
 
   const result = await memory.query({ select: { _: { [the]: {} } } });
 
-  assertEquals(
-    result,
-    {
-      ok: { [space]: Changes.from([v1]) },
-    },
-    "lists single fact",
-  );
+  assertEquals(result.ok?.selection, { [space]: Changes.from([v1]) }, "lists single fact");
 });
 
 test("list multiple facts", store, async (session) => {
@@ -181,13 +175,7 @@ test("list multiple facts", store, async (session) => {
     select: { _: { [the]: {} } },
   });
 
-  assertEquals(
-    result,
-    {
-      ok: { [space]: Changes.from(facts) },
-    },
-    "lists multiple facts",
-  );
+  assertEquals(result.ok?.selection, { [space]: Changes.from(facts) }, "lists multiple facts");
 });
 
 test("list excludes retracted facts", store, async (session) => {
@@ -196,14 +184,10 @@ test("list excludes retracted facts", store, async (session) => {
   // First create and then retract a fact
   await memory.transact({ changes: Changes.from([v1]) });
 
-  assertEquals(
-    await memory.query({
-      select: { [doc]: { [the]: {} } },
-    }),
-    {
-      ok: { [space]: Changes.from([v1]) },
-    },
-  );
+  const q1 = await memory.query({
+    select: { [doc]: { [the]: {} } },
+  });
+  assertEquals(q1.ok?.selection, { [space]: Changes.from([v1]) });
 
   const v2 = Fact.retract(v1);
 
@@ -211,17 +195,11 @@ test("list excludes retracted facts", store, async (session) => {
     changes: Changes.from([v2]),
   });
 
-  const result = await memory.query({
+  const q2 = await memory.query({
     select: { [doc]: { [the]: { is: {} } } },
   });
 
-  assertEquals(
-    result,
-    {
-      ok: { [space]: { [doc]: { [the]: {} } } },
-    },
-    "excludes retracted facts",
-  );
+  assertEquals(q2.ok?.selection, { [space]: { [doc]: { [the]: {} } } }, "excludes retracted facts");
 });
 
 test("list different fact types", store, async (session) => {
@@ -241,19 +219,16 @@ test("list different fact types", store, async (session) => {
   });
 
   assertEquals(
-    jsonResult,
-    {
-      ok: { [space]: Changes.from([json]) },
-    },
+    jsonResult.ok?.selection,
+    { [space]: Changes.from([json]) },
+
     "lists json facts",
   );
 
   assertEquals(
-    textResult,
+    textResult.ok?.selection,
     {
-      ok: {
-        [space]: Changes.from([text]),
-      },
+      [space]: Changes.from([text]),
     },
     "lists text facts",
   );
@@ -280,30 +255,19 @@ test("list facts from different memory spaces", store, async (session) => {
 
   const bobResult = await bobSpace.query({ select: { [doc]: {} } });
 
-  assertEquals(
-    aliceResult,
-    {
-      ok: { [alice]: Changes.from([a]) },
-    },
-    "lists alice's facts",
-  );
+  assertEquals(aliceResult.ok?.selection, { [alice]: Changes.from([a]) }, "lists alice's facts");
 
-  assertEquals(
-    bobResult,
-    {
-      ok: { [bob]: Changes.from([b]) },
-    },
-    "lists bob's facts",
-  );
+  assertEquals(bobResult.ok?.selection, { [bob]: Changes.from([b]) }, "lists bob's facts");
 });
 
 test("subscribe receives unclaimed state", store, async (session) => {
   const memory = Consumer.open({ as: alice, session }).mount(space);
 
-  const { ok: subscription } = await memory.subscribe({ select: { [doc]: { [the]: {} } } });
-  assert(subscription);
+  const { ok: query } = await memory.query({ select: { [doc]: { [the]: {} } } });
+  assert(query);
+
   assertEquals(
-    subscription.selection,
+    query.selection,
     {
       [space]: {
         [doc]: {
@@ -314,12 +278,40 @@ test("subscribe receives unclaimed state", store, async (session) => {
     "noting yet",
   );
 
+  query.subscribe();
+
   const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
   const c1 = await memory.transact({ changes: Changes.from([v1]) });
   assert(c1.ok);
 
-  assertEquals(subscription.selection, { [space]: Changes.from([v1]) });
-  assertEquals(subscription.facts, [v1], "changes were reflected");
+  assertEquals(query.selection, { [space]: Changes.from([v1]) });
+  assertEquals(query.facts, [v1], "changes were reflected");
+});
+
+test("subscribe receives unclaimed state", store, async (session) => {
+  const memory = Consumer.open({ as: alice, session }).mount(space);
+
+  const { ok: query } = await memory.query({ select: { [doc]: { [the]: {} } } });
+  assert(query);
+  assertEquals(
+    query.selection,
+    {
+      [space]: {
+        [doc]: {
+          [the]: {},
+        },
+      },
+    },
+    "noting yet",
+  );
+  query.subscribe();
+
+  const v1 = Fact.assert({ the, of: doc, is: { v: 1 } });
+  const c1 = await memory.transact({ changes: Changes.from([v1]) });
+  assert(c1.ok);
+
+  assertEquals(query.selection, { [space]: Changes.from([v1]) });
+  assertEquals(query.facts, [v1], "changes were reflected");
 });
 
 test("subscription receives retraction", store, async (session) => {
@@ -330,17 +322,18 @@ test("subscription receives retraction", store, async (session) => {
 
   const selector = { [doc]: { [the]: {} } };
 
-  const { ok: subscription } = await memory.subscribe({ select: selector });
-  assert(subscription);
+  const { ok: query } = await memory.query({ select: selector });
+  assert(query);
+  query.subscribe();
 
-  assertEquals(subscription.facts, [v1]);
+  assertEquals(query.facts, [v1]);
   const v2 = Fact.retract(v1);
 
   const retract = await memory.transact({ changes: Changes.from([v2]) });
 
   assert(retract.ok, "retracted");
 
-  assertEquals(subscription.facts, [v2]);
+  assertEquals(query.facts, [v2]);
 });
 
 test("cancel subscription", store, async (session) => {
@@ -348,8 +341,9 @@ test("cancel subscription", store, async (session) => {
   const doc2 = `of:${refer({ doc: 2 })}` as const;
 
   const selector = { [doc]: { [the]: {} } };
-  const { ok: subscription } = await memory.subscribe({ select: selector });
-  assert(subscription);
+  const { ok: query } = await memory.query({ select: selector });
+  assert(query);
+  const subscription = query.subscribe();
 
   const v2 = Fact.assert({ the, of: doc2, is: { doc: 2 } });
 
@@ -364,7 +358,7 @@ test("cancel subscription", store, async (session) => {
   assert(r1.ok, "asserted second doc");
 
   assertEquals(
-    subscription.selection,
+    query.selection,
     {
       [space]: {
         [doc]: { [the]: {} },
@@ -378,13 +372,14 @@ test("cancel subscription", store, async (session) => {
   const r2 = await memory.transact({ changes: Changes.from([v1]) });
   assert(r2.ok);
 
-  assertEquals(subscription.facts, [v1], "received transaction on subscription");
+  assertEquals(query.facts, [v1], "received transaction on subscription");
 
   const selector2 = { [doc2]: { [the]: {} } };
-  const { ok: subscription2 } = await memory.subscribe({ select: selector2 });
-  assert(subscription2, "subscription established");
+  const { ok: query2 } = await memory.query({ select: selector2 });
+  assert(query2, "subscription established");
+  query2.subscribe();
 
-  assertEquals(subscription2.facts, [v2], "has facts from first transaction");
+  assertEquals(query2.facts, [v2], "has facts from first transaction");
   await subscription.cancel();
 
   const v3 = Fact.assert({ the, of: doc, is: { doc: 1, t: 3 }, cause: v1 });
@@ -392,12 +387,12 @@ test("cancel subscription", store, async (session) => {
   const r3 = await memory.transact({ changes: Changes.from([v3]) });
   assert(r3.ok);
 
-  assertEquals(subscription.facts, [v1], "cancelled subscription does not receives a transaction");
+  assertEquals(query.facts, [v1], "cancelled subscription does not receives a transaction");
 
   const v4 = Fact.assert({ the, of: doc2, is: { doc: 2, t: 4 }, cause: v2 });
 
   const r4 = await memory.transact({ changes: Changes.from([v4]) });
   assert(r4.ok);
 
-  assertEquals(subscription2.facts, [v4]);
+  assertEquals(query2.facts, [v4]);
 });

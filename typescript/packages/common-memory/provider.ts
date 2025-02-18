@@ -5,14 +5,17 @@ import type {
   Transaction,
   MemorySession,
   Query,
-  Protocol,
+  Protocol as Protocol,
   ProviderCommand,
   ConsumerCommand,
   Subscriber,
   ProviderSession,
   Reference,
-  Watch,
+  Subscribe,
   CloseResult,
+  QueryError,
+  Result,
+  Selection,
 } from "./interface.ts";
 import * as Subscription from "./subscription.ts";
 
@@ -135,7 +138,7 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
         return this.perform({
           the: "task/return",
           of: refer(command),
-          is: await this.memory.query(command),
+          is: (await this.memory.query(command)) as Result<Selection, QueryError>,
         });
       }
       case "/memory/transact": {
@@ -145,19 +148,31 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
           is: await this.memory.transact(command),
         });
       }
-      case "/memory/watch": {
+      case "/memory/query/subscribe": {
         const id = refer(command).toString();
         this.channels.set(id, new Set(Subscription.channels(command.sub, command.args.select)));
         return this.memory.subscribe(this);
       }
-      case "/memory/unwatch": {
+      case "/memory/query/unsubscribe": {
         const id = command.args.source.toString();
         this.channels.delete(id);
         if (this.channels.size === 0) {
           this.memory.unsubscribe(this);
         }
 
-        return { ok: {} };
+        // End subscription call
+        this.perform({
+          the: "task/return",
+          of: command.args.source,
+          is: { ok: {} },
+        });
+
+        // End unsubscribe call
+        this.perform({
+          the: "task/return",
+          of: refer(command),
+          is: { ok: {} },
+        });
       }
     }
     return { ok: {} };
@@ -168,7 +183,7 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
       if (Subscription.match(transaction, channels)) {
         return this.perform({
           the: "task/effect",
-          of: fromString(id) as Reference<Watch>,
+          of: fromString(id) as Reference<Subscribe>,
           is: transaction,
         });
       }

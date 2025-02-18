@@ -1,13 +1,17 @@
-import { SubscriberCommand, SubscriptionCommand, Query } from "./interface.ts";
+import {
+  SubscriberCommand,
+  SubscriptionCommand,
+  Query,
+  ConsumerSession,
+  Protocol,
+} from "./interface.ts";
 import { Subscriber } from "./provider.ts";
 import * as Socket from "./socket.ts";
-
-export interface Subscriber extends TransformStream<SubscriptionCommand, SubscriberCommand> {}
 
 /**
  * Takes a WebSocket and creates Subscriber.
  */
-export const fromWebSocket = (socket: WebSocket): Subscriber => Socket.from(socket);
+export const fromWebSocket = (socket: WebSocket): ConsumerSession<Protocol> => Socket.from(socket);
 
 export const create = () => new SubscriberChannel();
 
