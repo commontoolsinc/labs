@@ -4,8 +4,8 @@ import { isCell } from "../src/cell.js";
 import type { JSONSchema } from "@commontools/builder";
 import { idle } from "../src/scheduler.js";
 
-describe.only("Schema Support", () => {
-  describe.only("Examples", () => {
+describe("Schema Support", () => {
+  describe("Examples", () => {
     it("allows mapping of fields via interim cells", () => {
       const c = getDoc({
         id: 1,
@@ -48,7 +48,7 @@ describe.only("Schema Support", () => {
       });
     });
 
-    it.skip("should support nested sinks via asCell", async () => {
+    it("should support nested sinks via asCell", async () => {
       const schema: JSONSchema = {
         type: "object",
         properties: {
