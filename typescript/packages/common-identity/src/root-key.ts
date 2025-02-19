@@ -1,37 +1,25 @@
 import { KeyStore } from "./key-store.js";
 import { PassKey } from "./pass-key.js";
-import { rawToEd25519KeyPair } from "./utils.js";
-
-const ED25519 = "ed25519";
-
-// WebCrypto Key formats for Ed25519
-// Non-explicitly described in https://wicg.github.io/webcrypto-secure-curves/#ed25519
-//
-// | Format | Public | Private |
-// | ------ | ------ |---------|
-// | raw    |   X    |         | 
-// | jwk    |   X    |    X    |
-// | pkcs8  |        |    X    |
-// | spki   |   X    |         |
+import { Ed25519KeyPair } from "./ed25519/index.js";
 
 // A `RootKey` represents the primary key from which all identities
 // are derived. A `RootKey` is deterministically derived from a `PassKey`'s
 // PRF output, a 32-byte hash, which is used as ed25519 key material.
 // Typically, there is only one instance of `RootKey` per document.
 export class RootKey {
-  private keypair: CryptoKeyPair;
-  constructor(keypair: CryptoKeyPair) {
+  private keypair: Ed25519KeyPair;
+  constructor(keypair: Ed25519KeyPair) {
     this.keypair = keypair;
   }
 
   // Sign `data` with this `RootKey`.
-  async sign(data: Uint8Array): Promise<ArrayBuffer> {
-    return await window.crypto.subtle.sign(ED25519, this.keypair.privateKey, data);
+  async sign(data: Uint8Array): Promise<Uint8Array> {
+    return await this.keypair.sign(data);
   }
  
   // Verify `signature` and `data` with this `RootKey`.
-  async verify(signature: ArrayBuffer, data: Uint8Array): Promise<boolean> {
-    return await window.crypto.subtle.verify(ED25519, this.keypair.publicKey, signature, data);
+  async verify(signature: Uint8Array, data: Uint8Array): Promise<boolean> {
+    return await this.keypair.verify(signature, data);
   }
 
   // Save this key into a per-origin singleton storage.
@@ -60,7 +48,7 @@ export class RootKey {
       throw new Error("common-identity: No prf found from PassKey");
     }
 
-    const keypair = await rawToEd25519KeyPair(seed);
+    const keypair = await Ed25519KeyPair.generateFromRaw(seed);
     return new RootKey(keypair);
   }
 

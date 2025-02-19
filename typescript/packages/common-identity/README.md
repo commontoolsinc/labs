@@ -20,10 +20,28 @@ The derived 32-bytes is used as raw private key material for a `RootKey`, from w
 The `RootKey` is securely stored in IndexedDb at a well-known location, and on page load, is retrieved,
 acting as a pseudo-cookie for authentication, so that the user does not need to reauthenticate their passkey.
 
-Identities (not yet developed) are derived from root keys. Each *space* and *persona* identity is a keypair,
-used to delegate authority. These keys are derived from the `RootKey` private key, and a "name", such that
-the key can be deterministically derived. Eventually, the server will (probably) record which spaces/personas
-are mapped to a "user" so that authenticating on a new device, the identity keys can be reproduced.
+Personas are deterministically derived from root keys, such that each `RootKey` can derive any number of `PersonaKey`s.
+These personas are visible users to the system, and these identites are used for signing transactions and delegating ownership.
+
+Similarly, a `SpaceKey` is a generated (non-derived) keypair representing an identity of a "space". When `SpaceKey` is generated, it immediately delegates access to a `PersonaKey` before burning its private key.
+
+## Key Derivation
+
+> [!WARNING]
+> This needs a cryptographic review. Using a signed deterministic value as key material could be compromised by an attacker
+> getting specific data signed by a root key.
+
+Deriving a `PersonaKey` from a `RootKey` performs the following algorithm:
+
+* `i` = Encode `name` into bytes
+* `i` = SHA-512 hash `i` 
+* `i` = Sign `i` with root key
+* `i` = SHA-512 hash `i` 
+* Use `i` as raw ed25519 private key material
+
+```
+hash(sign(hash(encode(name))))
+```
 
 ## Browser Support
 
