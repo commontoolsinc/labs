@@ -234,6 +234,18 @@ async function handleEditRecipe(deps: CommandContext, input: string | undefined)
   deps.setOpen(false);
 }
 
+async function handleRenameCharm(deps: CommandContext, input: string | undefined) {
+  if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
+  deps.setLoading(true);
+
+  const charm = await deps.charmManager.get(deps.focusedCharmId);
+  if (!charm) return;
+  charm.asCell().get()[NAME] = input;
+
+  deps.setLoading(false);
+  deps.setOpen(false);
+}
+
 async function handleDeleteCharm(deps: CommandContext) {
   if (!deps.focusedCharmId) return;
   const charm = await deps.charmManager.get(deps.focusedCharmId);
@@ -380,7 +392,6 @@ async function handleIndexCharms(deps: CommandContext) {
   });
   deps.setOpen(false);
 }
-
 export function getCommands(deps: CommandContext): CommandItem[] {
   return [
     {
@@ -404,6 +415,14 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "Create",
       predicate: !!deps.focusedReplicaId,
       handler: (input) => handleSpellcaster(deps, input),
+    },
+    {
+      id: "rename-charm",
+      type: "input",
+      title: "Rename Charm",
+      group: "Edit",
+      predicate: !!deps.focusedCharmId,
+      handler: (input) => handleRenameCharm(deps, input),
     },
     {
       id: "edit-recipe",
