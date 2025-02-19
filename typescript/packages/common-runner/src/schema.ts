@@ -1,5 +1,5 @@
-import { JSONSchema } from "@commontools/builder";
-import { type DocImpl, type DocLink } from "./doc.js";
+import { isAlias, JSONSchema } from "@commontools/builder";
+import { isDocLink, type DocImpl, type DocLink } from "./doc.js";
 import { isCell, createCell } from "./cell.js";
 import { type ReactivityLog } from "./scheduler.js";
 import { resolvePath, followLinks } from "./utils.js";
@@ -65,8 +65,33 @@ export function validateAndTransform(
     (schema!.asCell ||
       (Array.isArray(resolvedSchema?.anyOf) &&
         resolvedSchema.anyOf.every((option) => option.asCell)))
-  )
+  ) {
+    // The reference should reflect the current _value_. So if it's a reference,
+    // read the reference and return a cell based on it.
+    //
+    // But references can be paths beyond the current doc, so we create a
+    // new reference based on the next doc in the chain and the remaining path.
+
+    // Start with -1 so that the first iteration is for the empty path, i.e.
+    // the top of the current doc is already a reference.
+    for (let i = -1; i < path.length; i++) {
+      const value = doc.getAtPath(path.slice(0, i + 1));
+      if (isAlias(value))
+        throw new Error("Unexpected alias in path, should have been handled by resolvePath");
+      if (isDocLink(value)) {
+        log?.reads.push({ cell: doc, path: path.slice(0, i + 1), schemaAsCellLink: true });
+        return createCell(
+          value.cell,
+          [...value.path, ...path.slice(i + 1)],
+          log,
+          resolvedSchema,
+          rootSchema,
+        );
+      }
+    }
+
     return createCell(doc, path, log, resolvedSchema, rootSchema);
+  }
 
   // If there is no schema, return as raw data via query result proxy
   if (!resolvedSchema) return doc.getAsQueryResult(path, log);

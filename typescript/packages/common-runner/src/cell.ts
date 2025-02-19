@@ -69,6 +69,7 @@ export interface Cell<T> {
   updates(callback: (value: T) => Cancel | undefined | void): Cancel;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
   asSchema(schema: JSONSchema): Cell<T>;
+  withLog(log: ReactivityLog): Cell<T>;
   getAsQueryResult<Path extends PropertyKey[]>(
     path?: Path,
     log?: ReactivityLog,
@@ -207,6 +208,7 @@ function createRegularCell<T>(
       return createCell(doc, [...path, key], log, currentSchema, rootSchema) as Cell<T[K]>;
     },
     asSchema: (newSchema: JSONSchema) => createCell(doc, path, log, newSchema, newSchema),
+    withLog: (newLog: ReactivityLog) => createCell(doc, path, newLog, schema, rootSchema),
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
     getAsDocLink: () => ({ cell: doc, path }) satisfies DocLink,
@@ -260,27 +262,35 @@ function subscribeToReferencedDocs<T>(
     if (isCancel(cleanup)) cleanup();
     const newValue = validateAndTransform(doc, path, schema, log, rootSchema) as T;
     cleanup = callback(newValue);
-    console.log("subscribeToReferencedDocs update", {
-      id: JSON.stringify(doc),
+    console.log("subscribeToReferencedDocs update", JSON.stringify(doc), {
+      //doc,
       path,
       schema,
       newValue,
       log,
       value,
-      initialLog,
+      initialLog: JSON.stringify(initialLog),
     });
   }, initialLog);
 
   console.log("subscribeToReferencedDocs", JSON.stringify(doc), {
+    //doc,
     path,
     schema,
     value,
-    initialLog,
+    initialLog: JSON.stringify(initialLog),
   });
 
   return () => {
     cancel();
     if (isCancel(cleanup)) cleanup();
+    console.log("subscribeToReferencedDocs cleanup", JSON.stringify(doc), {
+      //doc,
+      path,
+      schema,
+      value,
+      initialLog: JSON.stringify(initialLog),
+    });
   };
 }
 

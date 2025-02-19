@@ -310,29 +310,27 @@ export function resolvePath(
   while (keys.length) {
     // First follow all the aliases and links, _before_ accessing the key.
     ref = followLinks(ref, seen, log);
-    doc = ref.cell;
-    path = [...ref.path, ...keys];
 
     // Now access the key.
     const key = keys.shift()!;
-    ref = { cell: doc, path: [...ref.path, key] };
+    ref = { cell: ref.cell, path: [...ref.path, key] };
   }
 
   // Follow aliases on the last key, but no other kinds of links.
   if (isAlias(ref.cell.getAtPath(ref.path))) {
+    log?.reads.push({ cell: ref.cell, path: ref.path, resolvePath: true });
     ref = followAliases(ref.cell.getAtPath(ref.path), ref.cell, log);
-    doc = ref.cell;
-    path = ref.path;
   }
 
   return ref;
 }
 
-// Follows links and returns the last one
+// Follows links and returns the last one.
 export function followLinks(ref: DocLink, seen: DocLink[] = [], log?: ReactivityLog): DocLink {
   let nextRef: DocLink | undefined;
 
   do {
+    ref = resolvePath(ref.cell, ref.path, log, seen);
     const target = ref.cell.getAtPath(ref.path);
 
     nextRef = undefined;
@@ -345,7 +343,6 @@ export function followLinks(ref: DocLink, seen: DocLink[] = [], log?: Reactivity
         cell: target.$alias.cell ?? ref.cell,
         path: target.$alias.path,
       } satisfies DocLink;
-    else return ref;
 
     if (nextRef) {
       // Log all the refs that were followed, but not the final value they point to.
@@ -383,11 +380,11 @@ export function followCellReferences(reference: DocLink, log?: ReactivityLog): a
 }
 
 // Follows aliases and returns cell reference describing the last alias.
+// Only logs interim aliases, not the first one, and not the non-alias value.
 export function followAliases(alias: any, cell: DocImpl<any>, log?: ReactivityLog): DocLink {
   const seen = new Set<any>();
   let result: DocLink;
 
-  if (!isAlias(alias)) throw new Error("Not an alias");
   while (isAlias(alias)) {
     if (alias.$alias.cell) cell = alias.$alias.cell;
     result = { cell, path: alias.$alias.path };

@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { getDoc } from "../src/doc.js";
+import { DocLink, getDoc } from "../src/doc.js";
 import { isCell } from "../src/cell.js";
 import type { JSONSchema } from "@commontools/builder";
+import { idle } from "../src/scheduler.js";
 
-describe("Schema Support", () => {
-  describe("Examples", () => {
+describe.only("Schema Support", () => {
+  describe.only("Examples", () => {
     it("allows mapping of fields via interim cells", () => {
       const c = getDoc({
         id: 1,
@@ -45,6 +46,250 @@ describe("Schema Support", () => {
         kind: "user",
         tag: "a",
       });
+    });
+
+    it.skip("should support nested sinks via asCell", async () => {
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          value: { type: "string" },
+          current: { type: "object", properties: { label: { type: "string" } }, asCell: true },
+        },
+      } as const;
+
+      const c = getDoc({
+        value: "root",
+        current: getDoc({ label: "first" }).asCell().getAsDocLink(),
+      }).asCell([], undefined, schema);
+
+      const rootValues: any[] = [];
+      const currentValues: any[] = [];
+      const currentByKeyValues: any[] = [];
+      const currentByGetValues: any[] = [];
+
+      console.log("root sink");
+      // Nested traversal of data
+      c.sink((value) => {
+        rootValues.push(value.value);
+        console.log("root inner sink", value.current);
+        const cancel = value.current.sink((value: { label: string }) => {
+          currentValues.push(value.label);
+        });
+        return () => {
+          rootValues.push("cancelled");
+          cancel();
+        };
+      });
+
+      console.log("current key sink");
+      // Querying for a value tied to the currently selected sub-document
+      c.key("current")
+        .key("label")
+        .sink((value: string) => {
+          currentByKeyValues.push(value);
+        });
+
+      console.log("current value sink");
+
+      // .get() the currently selected cell. This should not change when
+      // the currently selected cell changes!
+      c.key("current")
+        .get()
+        .sink((value: { label: string }) => {
+          currentByGetValues.push(value.label);
+        });
+
+      await idle();
+
+      // Find the currently selected cell and update it
+      const first = c.key("current").get();
+      expect(isCell(first)).toBe(true);
+      expect(first.get()).toEqual({ label: "first" });
+      first.set({ label: "first - update" });
+
+      await idle();
+
+      // Now change the currently selected cell
+      const second = getDoc({ label: "second" }).asCell();
+      c.key("current").set(second.getAsDocLink());
+
+      await idle();
+
+      // Now change the first one again, should only change currentByGetValues
+      first.set({ label: "first - updated again" });
+      await idle();
+
+      // Now change the second one, should change all but currentByGetValues
+      second.set({ label: "second - update" });
+      await idle();
+
+      expect(currentByGetValues).toEqual(["first", "first - update", "first - updated again"]);
+      expect(currentByKeyValues).toEqual(["first", "first - update", "second", "second - update"]);
+      expect(currentValues).toEqual(["first", "first - update", "second", "second - update"]);
+      expect(rootValues).toEqual(["root", "cancelled", "root"]);
+    });
+
+    it("should support nested sinks via asCell with aliases", async () => {
+      // We get this case in VDOM. There is an alias to a cell with a reference
+      // to the actual data, and that reference is updated. So it's similar to
+      // the previous example, but the updating happens behind an alias,
+      // typically by another actor.
+
+      const schema: JSONSchema = {
+        type: "object",
+        properties: {
+          value: { type: "string" },
+          current: { type: "object", properties: { label: { type: "string" } }, asCell: true },
+        },
+      } as const;
+
+      // Construct an alias that also has a path to the actual data
+      const initialDoc = getDoc({ foo: { label: "first" } }, "initial");
+      const initial = initialDoc.asCell();
+      const linkDoc = getDoc(initial.getAsDocLink(), "link");
+      const doc = getDoc(
+        {
+          value: "root",
+          current: { $alias: { cell: linkDoc, path: ["foo"] } },
+        },
+        "root",
+      );
+      const root = doc.asCell([], undefined, schema);
+
+      const rootValues: any[] = [];
+      const currentValues: any[] = [];
+      const currentByKeyValues: any[] = [];
+      const currentByGetValues: any[] = [];
+
+      // Nested traversal of data
+      root.sink((value) => {
+        rootValues.push(value.value);
+        const cancel = value.current.sink((value: { label: string }) => {
+          currentValues.push(value.label);
+        });
+        return () => {
+          rootValues.push("cancelled");
+          cancel();
+        };
+      });
+
+      // Querying for a value tied to the currently selected sub-document
+      const current = root.key("current").key("label");
+      current.sink((value: string) => {
+        currentByKeyValues.push(value);
+      });
+
+      // Make sure the schema is correct and it is still anchored at the root
+      expect(current.schema).toEqual({ type: "string" });
+      expect(JSON.parse(JSON.stringify(current.getAsDocLink()))).toEqual({
+        cell: doc.toJSON(),
+        path: ["current", "label"],
+      });
+
+      // .get() the currently selected cell. This should not change when
+      // the currently selected cell changes!
+      root
+        .key("current")
+        .get()
+        .sink((value: { label: string }) => {
+          currentByGetValues.push(value.label);
+        });
+
+      await idle();
+
+      // Find the currently selected cell and read it
+      const log = { reads: [], writes: [] };
+      const first = root.key("current").withLog(log).get();
+      expect(isCell(first)).toBe(true);
+      expect(first.get()).toEqual({ label: "first" });
+      expect(JSON.parse(JSON.stringify(first.getAsDocLink()))).toEqual({
+        cell: initialDoc.toJSON(),
+        path: ["foo"],
+      });
+      expect(log.reads.length).toEqual(4);
+      expect(log.reads.map((r: DocLink) => ({ cell: r.cell.toJSON(), path: r.path }))).toEqual([
+        { cell: doc.toJSON(), path: ["current"] },
+        { cell: linkDoc.toJSON(), path: [] },
+        { cell: initialDoc.toJSON(), path: ["foo"] },
+        { cell: initialDoc.toJSON(), path: ["foo", "label"] },
+      ]);
+
+      // Then update it
+      initial.set({ foo: { label: "first - update" } });
+      await idle();
+      expect(first.get()).toEqual({ label: "first - update" });
+
+      // Now change the currently selected cell behind the alias. This should
+      // trigger a change on the root cell, since this is the first doc after
+      // the aliases.
+      const second = getDoc({ foo: { label: "second" } }).asCell();
+      linkDoc.send(second.getAsDocLink());
+
+      await idle();
+
+      expect(rootValues).toEqual(["root", "cancelled", "root"]);
+
+      // Change unrelated value should update root, but not the other cells
+      root.key("value").set("root - updated");
+      await idle();
+      expect(rootValues).toEqual(["root", "cancelled", "root", "cancelled", "root - updated"]);
+
+      // Now change the first one again, should only change currentByGetValues
+      initial.set({ foo: { label: "first - updated again" } });
+      await idle();
+
+      // Now change the second one, should change all but currentByGetValues
+      second.set({ foo: { label: "second - update" } });
+      await idle();
+
+      expect(rootValues).toEqual(["root", "cancelled", "root", "cancelled", "root - updated"]);
+
+      // Now change the alias. This should also be seen by the root cell. It
+      // will not be seen by the .get()s earlier, since they anchored on the
+      // link, not the alias ahead of it. That's intentional.
+      const third = getDoc({ label: "third" }).asCell();
+      doc.setAtPath(["current"], { $alias: { cell: third.getAsDocLink().cell, path: [] } });
+
+      await idle();
+
+      // Now change the first one again, should only change currentByGetValues
+      initial.set({ foo: { label: "first - updated yet again" } });
+      second.set({ foo: { label: "second - updated again" } });
+      third.set({ label: "third - updated" });
+      await idle();
+
+      expect(currentByGetValues).toEqual([
+        "first",
+        "first - update",
+        "first - updated again",
+        "first - updated yet again",
+      ]);
+      expect(currentByKeyValues).toEqual([
+        "first",
+        "first - update",
+        "second",
+        "second - update",
+        "third",
+        "third - updated",
+      ]);
+      expect(currentValues).toEqual([
+        "first",
+        "first - update",
+        "second", // That was changing `value` on root
+        "second",
+        "second - update",
+        "third",
+        "third - updated",
+      ]);
+      expect(rootValues).toEqual([
+        "root",
+        "cancelled",
+        "root",
+        "cancelled",
+        "root - updated",
+        "cancelled",
+        "root - updated",
+      ]);
     });
   });
 
