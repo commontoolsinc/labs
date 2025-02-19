@@ -44,10 +44,7 @@ export class ArenaClient {
     this.apiKey = config.apiKey ?? Deno.env.get("ARENA_API_KEY") ?? "";
   }
 
-  private async fetch<T>(
-    endpoint: string,
-    options: RequestInit = {}
-  ): Promise<T> {
+  private async fetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const headers: HeadersInit = {
       "Content-Type": "application/json",
     };
@@ -77,22 +74,17 @@ export class ArenaClient {
 
   async getChannelContents(
     slug: string,
-    params: { page?: number; per?: number } = {}
+    params: { page?: number; per?: number } = {},
   ): Promise<Channel["contents"]> {
     const queryParams = new URLSearchParams();
     if (params.page) queryParams.set("page", params.page.toString());
     if (params.per) queryParams.set("per", params.per.toString());
 
     const query = queryParams.toString();
-    return this.fetch<Channel["contents"]>(
-      `/channels/${slug}/contents${query ? `?${query}` : ""}`
-    );
+    return this.fetch<Channel["contents"]>(`/channels/${slug}/contents${query ? `?${query}` : ""}`);
   }
 
-  async createChannel(params: {
-    title: string;
-    status?: Channel["status"];
-  }): Promise<Channel> {
+  async createChannel(params: { title: string; status?: Channel["status"] }): Promise<Channel> {
     return this.fetch<Channel>("/channels", {
       method: "POST",
       body: JSON.stringify(params),
@@ -104,7 +96,7 @@ export class ArenaClient {
     params: {
       title?: string;
       status?: Channel["status"];
-    }
+    },
   ): Promise<Channel> {
     return this.fetch<Channel>(`/channels/${slug}`, {
       method: "PUT",
@@ -114,9 +106,7 @@ export class ArenaClient {
 
   async addBlockToChannel(
     slug: string,
-    params:
-      | { source: string }
-      | { content: string }
+    params: { source: string } | { content: string },
   ): Promise<void> {
     await this.fetch(`/channels/${slug}/blocks`, {
       method: "POST",
@@ -128,3 +118,16 @@ export class ArenaClient {
     return this.fetch<User[]>(`/channels/${slug}/collaborators`);
   }
 }
+
+// usage:
+// env: ARENA_API_KEY
+// const client = new ArenaClient();
+
+// Get channel info
+// const channel = await client.getChannel("arena-influences");
+
+// Get paginated contents
+// const contents = await client.getChannelContents("arena-influences", {
+//   page: 1,
+//   per: 25,
+// });

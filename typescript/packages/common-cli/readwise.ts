@@ -50,7 +50,7 @@ export class ReadwiseClient {
     const response = await fetch(url, {
       ...options,
       headers: {
-        "Authorization": `Token ${this.token}`,
+        Authorization: `Token ${this.token}`,
         "Content-Type": "application/json",
         ...options.headers,
       },
@@ -74,7 +74,7 @@ export class ReadwiseClient {
 
       // Fetch highlights with random offset
       const response: HighlightResponse = await this.fetch(
-        `/highlights/?page_size=${count}&offset=${randomOffset}`
+        `/highlights/?page_size=${count}&offset=${randomOffset}`,
       );
 
       return response.results;
@@ -85,9 +85,7 @@ export class ReadwiseClient {
   }
 
   async getHighlightsByBook(bookId: number): Promise<ReadwiseHighlight[]> {
-    const response: HighlightResponse = await this.fetch(
-      `/highlights/?book_id=${bookId}`
-    );
+    const response: HighlightResponse = await this.fetch(`/highlights/?book_id=${bookId}`);
     return response.results;
   }
 
@@ -97,8 +95,14 @@ export class ReadwiseClient {
     const isoDate = date.toISOString();
 
     const response: HighlightResponse = await this.fetch(
-      `/highlights/?highlighted_at__gt=${isoDate}`
+      `/highlights/?highlighted_at__gt=${isoDate}`,
     );
     return response.results;
   }
 }
+
+// usage:
+// const client = new ReadwiseClient(Deno.env.get("READWISE_TOKEN") || "");
+// // Fetch some random highlights
+// const highlights = await client.getRandomHighlights(5);
+// console.log(highlights);

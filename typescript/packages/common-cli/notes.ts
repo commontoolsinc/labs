@@ -3,7 +3,7 @@ import { debounce } from "https://deno.land/std@0.216.0/async/debounce.ts";
 
 export interface NoteChange {
   path: string;
-  type: 'add' | 'modify' | 'remove';
+  type: "add" | "modify" | "remove";
   content?: string;
 }
 
@@ -34,18 +34,18 @@ export class NotesWatcher {
       this.watcher = Deno.watchFs(this.path, { recursive: true });
 
       for await (const event of this.watcher) {
-        if (!event.paths[0].endsWith('.md')) continue;
+        if (!event.paths[0].endsWith(".md")) continue;
         console.log(`File event detected: ${event.kind} - ${event.paths[0]}`);
 
         try {
           switch (event.kind) {
-            case 'create':
-            case 'modify': {
+            case "create":
+            case "modify": {
               try {
                 const content = await Deno.readTextFile(event.paths[0]);
                 this.onChange({
                   path: event.paths[0],
-                  type: event.kind === 'create' ? 'add' : 'modify',
+                  type: event.kind === "create" ? "add" : "modify",
                   content,
                 });
               } catch (error) {
@@ -55,19 +55,19 @@ export class NotesWatcher {
               }
               break;
             }
-            case 'remove':
+            case "remove":
               this.onChange({
                 path: event.paths[0],
-                type: 'remove',
+                type: "remove",
               });
               break;
           }
         } catch (error) {
-          console.error('Error processing file change:', error);
+          console.error("Error processing file change:", error);
         }
       }
     } catch (error) {
-      console.error('Error in watcher:', error);
+      console.error("Error in watcher:", error);
     }
   }
 
@@ -89,12 +89,12 @@ export class NotesWatcher {
 
       // Manually list directory contents first
       for await (const dirEntry of Deno.readDir(this.path)) {
-        console.log(`Found entry: ${dirEntry.name} (${dirEntry.isFile ? 'file' : 'directory'})`);
+        console.log(`Found entry: ${dirEntry.name} (${dirEntry.isFile ? "file" : "directory"})`);
       }
 
       console.log("Starting walk...");
       for await (const entry of walk(this.path, {
-        exts: ['.md'],
+        exts: [".md"],
         followSymlinks: false,
         includeDirs: false,
       })) {
@@ -103,7 +103,7 @@ export class NotesWatcher {
           const content = await Deno.readTextFile(entry.path);
           files.push({
             path: entry.path,
-            type: 'add',
+            type: "add",
             content,
           });
           console.log(`Successfully read: ${entry.path}`);
@@ -114,9 +114,25 @@ export class NotesWatcher {
 
       console.log(`Found ${files.length} markdown files`);
     } catch (error) {
-      console.error('Error listing files:', error);
+      console.error("Error listing files:", error);
     }
 
     return files;
   }
 }
+
+// usage:
+// const watcher = new NotesWatcher("/Users/ben/code/common-tools/labs/typescript/packages/common-cli/notes", (change) => {
+//   console.log('File changed:', change.path);
+//   console.log('Change type:', change.type);
+//   if (change.content) {
+//     console.log('Content:', change.content);
+//   }
+// });
+
+// // Get initial list of files
+// const files = await watcher.listFiles();
+// console.log('Initial files:', files);
+
+// // Start watching for changes
+// await watcher.start();
