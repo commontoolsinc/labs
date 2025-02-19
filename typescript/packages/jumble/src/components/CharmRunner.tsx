@@ -1,7 +1,6 @@
 import React, { useRef } from "react";
 import { render } from "@commontools/html";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
-import { useNavigate } from "react-router-dom";
 
 interface CharmLoaderProps {
   charmImport: () => Promise<any>;
@@ -76,25 +75,6 @@ function useCharmLoader({
 export function CharmRenderer({ charm, className = "" }: CharmRendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [runtimeError, setRuntimeError] = React.useState<Error | null>(null);
-  const { charmManager, currentReplica, fixIt } = useCharmManager();
-  const navigate = useNavigate();
-
-  const handleFixIt = async () => {
-    if (!runtimeError) return;
-    try {
-      const newPath = await fixIt({
-        charm,
-        error: runtimeError,
-        charmManager,
-        replicaId: currentReplica,
-      });
-      if (newPath) {
-        navigate(`/${currentReplica}/${newPath}`);
-      }
-    } catch (error) {
-      console.error("Fix it error:", error);
-    }
-  };
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -118,26 +98,17 @@ export function CharmRenderer({ charm, className = "" }: CharmRendererProps) {
     };
   }, [charm]);
 
-  return (
-    <>
-      {runtimeError ? (
-        <div className="bg-red-500 text-white p-4">
-          <div className="flex justify-between items-center mb-2">
-            <button className="hover:opacity-75" onClick={() => setRuntimeError(null)}>
-              ✖️
-            </button>
-            <button
-              onClick={handleFixIt}
-              className="px-2 py-1 bg-white text-red-500 rounded text-sm hover:bg-red-50"
-            >
-              Fix It
-            </button>
-          </div>
-          <pre title={runtimeError.stack}>{runtimeError.message}</pre>
-        </div>
-      ) : null}
-      <div className={className} ref={containerRef}></div>
-    </>
+  return (<>
+    {runtimeError ? (
+      <div className="bg-red-500 text-white p-4">
+        <button className="absolute top-0 right-0" onClick={() => setRuntimeError(null)}>
+          ✖️
+        </button>
+        <pre title={runtimeError.stacktrace}>{runtimeError.description}</pre>
+      </div>
+    ) : null}
+    <div className={className} ref={containerRef}></div>
+  </>
   );
 }
 
