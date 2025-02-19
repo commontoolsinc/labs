@@ -1,6 +1,10 @@
 import React, { useRef } from "react";
 import { render } from "@commontools/html";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { useNavigate } from "react-router-dom";
+import { fixItCharm } from "@/utils/charm-operations";
+import { LuX } from "react-icons/lu";
+import { DitheredCube } from "@/components/DitherCube";
 
 interface CharmLoaderProps {
   charmImport: () => Promise<any>;
@@ -75,6 +79,25 @@ function useCharmLoader({
 export function CharmRenderer({ charm, className = "" }: CharmRendererProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [runtimeError, setRuntimeError] = React.useState<Error | null>(null);
+  const [isFixing, setIsFixing] = React.useState(false);
+  const { charmManager, currentReplica } = useCharmManager();
+  const navigate = useNavigate();
+
+  const handleFixIt = async () => {
+    if (!runtimeError || isFixing) return;
+    setIsFixing(true);
+    try {
+      const newPath = await fixItCharm(charmManager, charm, runtimeError);
+      if (newPath) {
+        setRuntimeError(null); // clear the error
+        navigate(`/${currentReplica}/${newPath}`); // navigate to the new charm
+      }
+    } catch (error) {
+      console.error("Fix it error:", error);
+    } finally {
+      setIsFixing(false);
+    }
+  };
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -98,17 +121,40 @@ export function CharmRenderer({ charm, className = "" }: CharmRendererProps) {
     };
   }, [charm]);
 
-  return (<>
-    {runtimeError ? (
-      <div className="bg-red-500 text-white p-4">
-        <button className="absolute top-0 right-0" onClick={() => setRuntimeError(null)}>
-          ✖️
-        </button>
-        <pre title={runtimeError.stacktrace}>{runtimeError.description}</pre>
-      </div>
-    ) : null}
-    <div className={className} ref={containerRef}></div>
-  </>
+  return (
+    <>
+      {runtimeError ? (
+        <div className="bg-red-500 text-white p-4">
+          <div className="flex items-start justify-between gap-4">
+            <pre title={runtimeError.stack} className="overflow-auto flex-1">
+              {runtimeError.stack}
+            </pre>
+            <div className="flex gap-2 shrink-0">
+              <button
+                onClick={handleFixIt}
+                disabled={isFixing}
+                className="px-2 py-1 bg-white text-red-500 rounded text-sm hover:bg-red-50 disabled:opacity-50 flex items-center gap-2 whitespace-nowrap"
+              >
+                {isFixing && (
+                  <DitheredCube
+                    animationSpeed={2}
+                    width={16}
+                    height={16}
+                    animate={true}
+                    cameraZoom={12}
+                  />
+                )}
+                {isFixing ? "Fixing..." : "Fix It"}
+              </button>
+              <button className="hover:opacity-75" onClick={() => setRuntimeError(null)}>
+                <LuX className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      <div className={className} ref={containerRef}></div>
+    </>
   );
 }
 
