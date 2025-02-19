@@ -1,10 +1,10 @@
 packages:
-  - "lookslike-high-level"
   - "common-charm"
   - "common-builder"
   - "common-runner"
   - "llm-client"
   - "common-ui"
+  - "common-identity"
   - "common-iframe-sandbox"
   - "common-os-ui"
   - "common-html"

@@ -11,7 +11,7 @@ import {
 import { JSONSchema } from "@commontools/builder";
 import * as logger from "./logger.js";
 
-const schema: JSONSchema = {
+const vdomSchema: JSONSchema = {
   type: "object",
   properties: {
     type: { type: "string" },
@@ -23,17 +23,22 @@ const schema: JSONSchema = {
     children: {
       type: "array",
       items: {
-        $ref: "#",
-        asCell: true,
+        anyOf: [
+          { $ref: "#", asCell: true },
+          { type: "string", asCell: true },
+          { type: "number", asCell: true },
+          { type: "boolean", asCell: true },
+          { type: "array", items: { $ref: "#", asCell: true } },
+        ],
       },
     },
   },
-};
+} as const;
 
 /** Render a view into a parent element */
 export const render = (parent: HTMLElement, view: VNode | Cell<VNode>): Cancel => {
   // If this is a reactive cell, ensure the schema is VNode
-  if (isCell(view)) view = view.asSchema(schema);
+  if (isCell(view)) view = view.asSchema(vdomSchema);
   return effect(view, (view: VNode) => renderImpl(parent, view));
 };
 
@@ -73,7 +78,7 @@ const renderNode = (node: VNode): [HTMLElement | null, Cancel] => {
 const bindChildren = (element: HTMLElement, children: Array<Child>): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
 
-  for (const child of children) {
+  for (const child of children.flat()) {
     if (typeof child === "string" || typeof child === "number" || typeof child === "boolean") {
       // Bind static content
       element.append(child.toString());

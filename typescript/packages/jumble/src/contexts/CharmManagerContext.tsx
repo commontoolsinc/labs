@@ -1,7 +1,6 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from "react";
-import { CharmManager } from "@commontools/charm";
+import React, { createContext, useContext, useMemo } from "react";
+import { CharmManager, createStorage } from "@commontools/charm";
 import { useParams } from "react-router-dom";
-import { createStorage } from "@commontools/charm";
 
 export type CharmManagerContextType = {
   charmManager: CharmManager;
@@ -10,28 +9,31 @@ export type CharmManagerContextType = {
 
 const CharmManagerContext = createContext<CharmManagerContextType>(null!);
 
-const defaultManager = new CharmManager(createStorage({ type: "memory" }));
-
 export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { replicaName } = useParams<{ replicaName: string }>();
-  const effectiveReplica = replicaName || "common-knowledge";
 
-  const [charmManager, setCharmManager] = useState<CharmManager>(defaultManager);
-  const previousReplicaRef = useRef<string | undefined>();
+  let effectiveReplica: string;
+  if (replicaName) {
+    // When a replica is provided in the URL, use it and save it as the last visited
+    effectiveReplica = replicaName;
+    localStorage.setItem("lastReplica", replicaName);
+  } else {
+    // Otherwise, pull the last visited replica from local storage.
+    // Falling back to "common-knowledge" if nothing was stored.
+    effectiveReplica = localStorage.getItem("lastReplica") || "common-knowledge";
+  }
 
-  useEffect(() => {
-    if (previousReplicaRef.current === effectiveReplica) {
-      return;
-    }
-    previousReplicaRef.current = effectiveReplica;
-
-    // Create new charm manager instance with updated replica
+  const charmManager = useMemo(() => {
     const storageType = (import.meta as any).env.VITE_STORAGE_TYPE ?? "remote";
-    const storage = storageType === "remote" ?
-      createStorage({ type: "remote", replica: effectiveReplica, url: new URL(location.href) }) :
-      createStorage({ type: storageType as "memory" | "local" });
-    const manager = new CharmManager(storage);
-    setCharmManager(manager);
+    const storage =
+      storageType === "remote"
+        ? createStorage({
+            type: "remote",
+            replica: effectiveReplica,
+            url: new URL(location.href),
+          })
+        : createStorage({ type: storageType as "memory" | "local" });
+    return new CharmManager(storage);
   }, [effectiveReplica]);
 
   return (

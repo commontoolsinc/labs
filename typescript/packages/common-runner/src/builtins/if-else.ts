@@ -1,6 +1,7 @@
-import { type DocImpl, getDoc, getDocLinkOrThrow, type ReactivityLog } from "../cell.js";
+import { type DocImpl, getDoc } from "../doc.js";
 import { type Action } from "../scheduler.js";
-
+import { type ReactivityLog } from "../scheduler.js";
+import { getDocLinkOrThrow } from "../query-result-proxy.js";
 export function ifElse(
   inputsCell: DocImpl<[any, any, any]>,
   sendResult: (result: any) => void,

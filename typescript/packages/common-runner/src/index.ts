@@ -1,18 +1,18 @@
 export { run, stop } from "./runner.js";
 export { addModuleByRef, raw } from "./module.js";
 export { type Action, idle, run as addAction, unschedule as removeAction } from "./scheduler.js";
-export type { Cell, DocImpl, DocLink, QueryResult, ReactivityLog } from "./cell.js";
+export type { DocImpl, DocLink } from "./doc.js";
+export type { Cell } from "./cell.js";
+export type { QueryResult } from "./query-result-proxy.js";
+export type { ReactivityLog } from "./scheduler.js";
+export { getDoc, isDoc, isDocLink } from "./doc.js";
+export { isCell } from "./cell.js";
 export {
-  doc,
-  getDoc,
   getDocLinkOrThrow,
   getDocLinkOrValue,
-  isCell,
-  isDoc,
-  isDocLink,
   isQueryResult,
   isQueryResultForDereferencing,
-} from "./cell.js";
+} from "./query-result-proxy.js";
 export {
   effect,
   type GettableCell,

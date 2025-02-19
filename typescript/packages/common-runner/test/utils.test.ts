@@ -10,7 +10,8 @@ import {
   setNestedValue,
   unwrapOneLevelAndBindtoCell,
 } from "../src/utils.js";
-import { DocLink, getDoc, isDocLink, ReactivityLog } from "../src/cell.js";
+import { DocLink, getDoc, isDocLink } from "../src/doc.js";
+import { type ReactivityLog } from "../src/scheduler.js";
 
 describe("extractDefaultValues", () => {
   it("should extract default values from a schema", () => {

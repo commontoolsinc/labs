@@ -2,8 +2,8 @@
   max-width: 640px;
   width: 100%;
   background: white;
-  border-radius: 8px;
-  padding: 8px;
+  border: 2px solid black;
+  padding: calc(var(--spacing) * 2);
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.1),
     0 4px 6px rgba(0, 0, 0, 0.1);
@@ -25,11 +25,9 @@
 
 [cmdk-input] {
   width: 100%;
-  padding: 8px;
+  padding: calc(var(--spacing) * 1);
   font-size: 16px;
-  border: none;
-  border-bottom: 1px solid #eee;
-  margin-bottom: 8px;
+  margin-bottom: calc(var(--spacing) * 1);
   outline: none;
 }
 
@@ -41,15 +39,14 @@
 [cmdk-group-heading] {
   color: #666;
   font-size: 12px;
-  padding: 8px;
+  padding: calc(var(--spacing) * 1);
   text-transform: uppercase;
   font-weight: 600;
 }
 
 [cmdk-item] {
-  padding: 8px;
+  padding: calc(var(--spacing) * 1);
   cursor: pointer;
-  border-radius: 4px;
 }
 
 [cmdk-item][data-selected="true"] {

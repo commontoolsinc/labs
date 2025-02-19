@@ -1,8 +1,8 @@
-import { DocImpl, getDoc, ReactivityLog } from "../cell.js";
+import { type DocImpl, getDoc } from "../doc.js";
 import { makeClient, SimpleContent, SimpleMessage } from "../llm-client.js";
 import { type Action, idle } from "../scheduler.js";
 import { refer } from "merkle-reference";
-
+import { type ReactivityLog } from "../scheduler.js";
 // TODO(ja): investigate if generateText should be replaced by
 // fetchData with streaming support
 

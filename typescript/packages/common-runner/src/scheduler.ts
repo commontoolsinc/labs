@@ -1,4 +1,4 @@
-import type { DocImpl, DocLink, ReactivityLog } from "./cell.js";
+import type { DocImpl, DocLink } from "./doc.js";
 import { compactifyPaths, pathAffected } from "./utils.js";
 import type { Cancel } from "./cancel.js";
 
@@ -19,6 +19,17 @@ let scheduled = false;
 
 const MAX_ITERATIONS_PER_RUN = 100;
 
+/**
+ * Reactivity log.
+ *
+ * Used to log reads and writes to cells. Used by scheduler to keep track of
+ * dependencies and to topologically sort pending actions before executing them.
+ */
+export type ReactivityLog = {
+  reads: DocLink[];
+  writes: DocLink[];
+};
+
 export function schedule(action: Action, log: ReactivityLog): Cancel {
   setDependencies(action, log);
   log.reads.forEach(({ cell }) => dirty.add(cell));
@@ -36,38 +47,45 @@ export function unschedule(fn: Action): void {
   pending.delete(fn);
 }
 
+export function subscribe(action: Action, log: ReactivityLog): Cancel {
+  setDependencies(action, log);
+
+  cancels.set(
+    action,
+    log.reads.map(({ cell: doc, path }) =>
+      doc.updates((_newValue, changedPath) => {
+        if (pathAffected(changedPath, path)) {
+          dirty.add(doc);
+          queueExecution();
+          pending.add(action);
+        }
+      }),
+    ),
+  );
+
+  return () => unschedule(action);
+}
+
 // Like schedule, but runs the action immediately to gather dependencies
 export async function run(action: Action): Promise<any> {
   const log: ReactivityLog = { reads: [], writes: [] };
 
   if (running) await running;
 
+  let result: any;
   running = new Promise(async (resolve) => {
     try {
-      const result = await action(log);
-
+      result = await action(log);
+    } catch (e) {
+      console.error("caught error", e, action);
+    } finally {
       // Note: By adding the listeners after the call we avoid triggering a re-run
       // of the action if it changed a r/w cell. Note that this also means that
       // those actions can't loop on themselves.
-      setDependencies(action, log);
-      cancels.set(
-        action,
-        Array.from(log.reads).map(({ cell, path }) =>
-          cell.updates((_newValue, changedPath) => {
-            if (pathAffected(changedPath, path)) {
-              dirty.add(cell);
-              queueExecution();
-              pending.add(action);
-            }
-          }),
-        ),
-      );
+      subscribe(action, log);
 
       running = undefined;
       resolve(result);
-    } catch (e) {
-      console.error("caught error", e, action);
-      resolve(undefined);
     }
   });
 

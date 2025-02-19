@@ -1,16 +1,26 @@
 import { DitheredCube } from "./DitherCube";
-export const LoadingSpinner = ({ visible = true }: { visible?: boolean }) => (
+export const LoadingSpinner = ({
+  visible = true,
+  height = 512,
+  width = 512,
+  cameraZoom = 100,
+}: {
+  visible?: boolean;
+  height?: number;
+  width?: number;
+  cameraZoom?: number;
+}) => (
   <div
     style={{
-      width: visible ? "100%" : 0,
-      height: visible ? "100%" : 0,
-      display: "flex",
+      width: visible ? width : 0,
+      height: visible ? height : 0,
+      display: visible ? "flex" : "none",
       alignItems: "center",
       justifyContent: "center",
       opacity: visible ? 1 : 0,
       position: visible ? "relative" : "absolute",
     }}
   >
-    <DitheredCube />
+    <DitheredCube height={height} width={width} cameraZoom={cameraZoom} />
   </div>
 );

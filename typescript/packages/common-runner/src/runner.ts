@@ -16,15 +16,8 @@ import {
   unsafe_originalRecipe,
   type UnsafeBinding,
 } from "@commontools/builder";
-import {
-  type DocImpl,
-  type DocLink,
-  getDoc,
-  isDoc,
-  isDocLink,
-  type ReactivityLog,
-} from "./cell.js";
-import { Action, addEventHandler, schedule } from "./scheduler.js";
+import { type DocImpl, type DocLink, getDoc, isDoc, isDocLink } from "./doc.js";
+import { Action, addEventHandler, schedule, type ReactivityLog } from "./scheduler.js";
 import {
   containsOpaqueRef,
   deepCopy,

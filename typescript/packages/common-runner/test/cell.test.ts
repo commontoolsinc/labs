@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { getDoc, isCell, isDoc, isDocLink, isQueryResult, ReactivityLog } from "../src/cell.js";
+import { getDoc, isDoc, isDocLink } from "../src/doc.js";
+import { isCell } from "../src/cell.js";
+import { isQueryResult } from "../src/query-result-proxy.js";
+import { type ReactivityLog } from "../src/scheduler.js";
 import { JSONSchema } from "@commontools/builder";
 import { addEventHandler, idle } from "../src/scheduler.js";
 import { compactifyPaths } from "../src/utils.js";
@@ -286,7 +289,7 @@ describe("asCell", () => {
     expect(lastEventSeen).toBe("event");
   });
 
-  it("should call sink only when the cell changes on the subpath", () => {
+  it("should call sink only when the cell changes on the subpath", async () => {
     const c = getDoc({ a: { b: 42, c: 10 }, d: 5 });
     const values: number[] = [];
     c.asCell(["a", "b"]).sink((value) => values.push(value));
@@ -294,6 +297,7 @@ describe("asCell", () => {
     c.setAtPath(["a", "c"], 100);
     c.setAtPath(["a", "b"], 42);
     c.setAtPath(["a", "b"], 300);
+    await idle();
     expect(values).toEqual([42, 300]);
     expect(c.get()).toEqual({ a: { b: 300, c: 100 }, d: 50 });
   });

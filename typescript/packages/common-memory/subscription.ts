@@ -118,7 +118,7 @@ const publish = (session: Session, command: SubscriptionCommand) => {
   if (session.controller) {
     session.controller.enqueue(command);
   } else {
-    throw new Error("Subscription is cancelled");
+    console.warn("Subscription is cancelled, not integrating change", change);
   }
 };
 

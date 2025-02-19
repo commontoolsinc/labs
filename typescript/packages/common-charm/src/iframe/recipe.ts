@@ -39,11 +39,12 @@ export const buildFullRecipe = (iframe: IFrameRecipe) => {
   `;
 };
 
-function parseIframeRecipe(source: string) {
+function parseIframeRecipe(source: string): IFrameRecipe | undefined {
   // Extract content between IFRAME-V0 comments
   const match = source.match(/\/\* IFRAME-V0 \*\/([\s\S]*?)\/\* IFRAME-V0 \*\//);
   if (!match) {
-    throw new Error("Could not find IFRAME-V0 section in source");
+    console.warn("no IFRAME-V0 section in source");
+    return undefined;
   }
 
   return JSON.parse(match[1]) as IFrameRecipe;

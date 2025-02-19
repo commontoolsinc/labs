@@ -8,10 +8,7 @@ import {
 } from "@commontools/runner";
 import { buildRecipe } from "./localBuild.js";
 
-export const BLOBBY_SERVER_URL =
-  typeof window !== "undefined"
-    ? window.location.protocol + "//" + window.location.host + "/api/storage/blobby"
-    : "//api/storage/blobby";
+export const BLOBBY_SERVER_URL = "https://toolshed.saga-castor.ts.net/api/storage/blobby";
 
 const recipesKnownToStorage = new Set<string>();
 
