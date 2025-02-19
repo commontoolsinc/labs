@@ -14,7 +14,7 @@ export async function fixItCharm(
   charmManager: CharmManager,
   charm: Charm,
   error: Error,
-  model = "anthropic:claude-3-5-sonnet-latest",
+  model = "google:gemini-2.0-pro",
 ): Promise<string | null> {
   const iframeRecipe = getIframeRecipe(charm);
   if (!iframeRecipe?.iframe) {

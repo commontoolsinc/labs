@@ -6,12 +6,12 @@ interface LanguageModelContextType {
 }
 
 const LanguageModelContext = createContext<LanguageModelContextType>({
-  modelId: "groq:llama-3.3-70b-specdec",
+  modelId: "groq:llama-3.3-70b-versatile",
   setPreferredModel: () => {},
 });
 
 export const LanguageModelProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [modelId, setModelId] = useState<string | null>("groq:llama-3.3-70b-specdec");
+  const [modelId, setModelId] = useState<string | null>("groq:llama-3.3-70b-versatile");
 
   const setPreferredModel = (modelId: string) => {
     setModelId(modelId);
