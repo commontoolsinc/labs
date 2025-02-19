@@ -14,6 +14,10 @@ jobs:
       matrix:
         node-version: [22]
     steps:
+    - name: Install test dependencies
+      run: |
+        sudo apt update
+        sudo apt-get install -y xvfb x11-xserver-utils
     - uses: actions/checkout@v4
     - name: Install pnpm
       uses: pnpm/action-setup@v4
@@ -32,4 +36,8 @@ jobs:
       run: |
         cd typescript/packages/common-iframe-sandbox
         pnpm test
+        cd -
+        cd typescript/packages/common-identity
+        pnpm test
+        cd -
 

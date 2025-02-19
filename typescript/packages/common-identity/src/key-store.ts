@@ -1,3 +1,4 @@
+import { Ed25519KeyPair } from "./ed25519/index.js";
 import { once } from "./utils.js";
 
 const DB_NAME = "key-store";
@@ -16,13 +17,17 @@ export class KeyStore {
   }
 
   // Get the `RootKey` keypair at the globally-known key space. 
-  async get(): Promise<CryptoKeyPair | undefined> {
-    return await this.db.get(STORE_NAME, ROOT_KEY);
+  async get(): Promise<Ed25519KeyPair | undefined> {
+    let result = await this.db.get(STORE_NAME, ROOT_KEY);
+    if (result) {
+      return Ed25519KeyPair.deserialize(result);
+    }
+    return result;
   }
   
   // Set the global `RootKey` keypair at the globally-known key space. 
-  async set(value: CryptoKeyPair): Promise<any> {
-    return await this.db.set(STORE_NAME, ROOT_KEY, value);
+  async set(value: Ed25519KeyPair): Promise<undefined> {
+    await this.db.set(STORE_NAME, ROOT_KEY, value.serialize());
   }
 
   // Clear the key store's table.
