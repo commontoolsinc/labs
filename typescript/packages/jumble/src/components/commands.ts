@@ -5,7 +5,7 @@ import { castSpell } from "@/search";
 import { charmId } from "@/utils/charms";
 import { NAME } from "@commontools/builder";
 import { DocImpl, getRecipe } from "@commontools/runner";
-import { performIteration } from "@/utils/charm-iteration";
+import { iterateCharm } from "@/utils/charm-operations";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
 import { startCharmIndexing } from "@/utils/indexing";
 import { generateJSON } from "@/utils/prompt-library/json-gen";
@@ -219,7 +219,7 @@ async function handleSpellcaster(deps: CommandContext, input: string | undefined
 async function handleEditRecipe(deps: CommandContext, input: string | undefined) {
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
-  const newCharmPath = await performIteration(
+  const newCharmPath = await iterateCharm(
     deps.charmManager,
     deps.focusedCharmId,
     deps.focusedReplicaId,
