@@ -1,8 +1,17 @@
 import { llm } from "@/utils/llm";
 import { hydratePrompt, parseTagFromResponse } from "@/utils/prompt-library/prompting";
+import { recipeGuidePrompt } from "@/utils/prompt-library/recipe-guide";
 
 const SYSTEM_PROMPT = `
 You are a code debugging and fixing assistant. Your task is to analyze buggy code that has caused errors and crashes, and then generate fixed code based on the original specifications. The code runs inside an iframe, and errors bubble up from there.
+
+You must respond with the entire code, not just a partial fix. Do not be lazy, or leave comments about code you didn't include. Include all of the code.
+
+The code running inside the iframe is a "recipe", which must follow the following guide:
+
+${recipeGuidePrompt}
+
+----
 
 You will be provided with the following information:
 
@@ -41,8 +50,7 @@ Your task is to:
 When writing your response:
 
 1. First, provide a brief explanation of the error and its likely cause inside <error_analysis> tags.
-2. Then, write the new, fixed code inside <fixed_code> tags. Ensure that this code resolves the error and meets the requirements specified in the original SPEC.
-3. Finally, provide a brief explanation of the changes you made and how they address the error inside <explanation> tags.
+2. Then, write the new, fixed code inside <fixed_code> tags. Ensure that this code resolves the error and meets the requirements specified in the original SPEC. You must include ALL of the code, not just a partial fix.
 
 Remember to consider the context of the code running inside an iframe and ensure your solution is compatible with this environment. Your goal is to provide a working solution that resolves the error while maintaining the intended functionality described in the SPEC.
 `;
@@ -61,7 +69,7 @@ export async function fixRecipePrompt(
   code: string,
   schema: string,
   error: string,
-  model: string = "anthropic:claude-3-5-sonnet-latest",
+  model: string = "google:gemini-2.0-pro",
 ) {
   const system = hydratePrompt(SYSTEM_PROMPT, {
     SPEC: spec,
@@ -69,7 +77,7 @@ export async function fixRecipePrompt(
     SCHEMA: schema,
     ERROR: error,
   });
-  const prompt = `Please fix the code.`;
+  const prompt = `Please fix the code, do not be lazy, or leave comments about code you didn't include. Include all of the code.`;
   const response = await llm.sendRequest({
     model,
     system,
