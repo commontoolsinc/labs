@@ -360,20 +360,20 @@ interface DataTabProps {
 const DataTab: React.FC<DataTabProps> = ({ charm }) => {
   return (
     <div className="view-tab">
-      <h2 className="text-lg font-semibold mb-2">Charm Data</h2>
-      <div className="mb-4">
-        <pre className="bg-gray-50 p-2 rounded text-sm overflow-auto">
-          {JSON.stringify(charm, null, 2)}
-        </pre>
-      </div>
       {charm.sourceCell && (
         <div className="mb-4">
-          <h3 className="text-md font-semibold mb-1">Source Cell Data</h3>
+          <h3 className="text-md font-semibold mb-1">Argument</h3>
           <pre className="bg-gray-50 p-2 rounded text-sm overflow-auto">
-            {JSON.stringify(charm.sourceCell, null, 2)}
+            {JSON.stringify(charm.sourceCell.get().argument, null, 2)}
           </pre>
         </div>
       )}
+      <h2 className="text-lg font-semibold mb-2">Result</h2>
+      <div className="mb-4">
+        <pre className="bg-gray-50 p-2 rounded text-sm overflow-auto">
+          {JSON.stringify(charm.get(), null, 2)}
+        </pre>
+      </div>
     </div>
   );
 };
