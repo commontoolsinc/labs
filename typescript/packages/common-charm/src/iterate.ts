@@ -106,12 +106,13 @@ export async function castNewRecipe(
   charmManager: CharmManager,
   data: any,
   newSpec: string,
+  newSrc?: string,
 ): Promise<EntityId | undefined> {
   const schema = createJsonSchema({}, data);
   schema.description = newSpec;
   console.log("schema", schema);
 
-  const newIFrameSrc = await genSrc({ newSpec, schema });
+  const newIFrameSrc = newSrc ?? (await genSrc({ newSpec, schema }));
   const name = newIFrameSrc.match(/<title>(.*?)<\/title>/)?.[1] ?? newSpec;
   const newRecipeSrc = buildFullRecipe({
     src: newIFrameSrc,
