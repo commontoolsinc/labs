@@ -36,6 +36,8 @@ export class RemoteStorageProvider implements StorageProvider {
   writer: WritableStreamDefaultWriter<Memory.ProviderCommand<Memory.Protocol>>;
   reader: ReadableStreamDefaultReader<Memory.ConsumerCommand<Memory.Protocol>>;
 
+  connectionCount = 0;
+
   constructor({
     address,
     as = AS,
@@ -199,14 +201,19 @@ export class RemoteStorageProvider implements StorageProvider {
     socket.addEventListener("open", this);
     socket.addEventListener("close", this);
     socket.addEventListener("error", this);
+
+    this.connectionCount += 1;
   }
 
   async open(socket: WebSocket) {
     const { reader, queue } = this;
 
-    for (const local of this.local.values()) {
-      for (const query of local.queries.values()) {
-        query.reconnect();
+    // If we did have connection
+    if (this.connectionCount > 1) {
+      for (const local of this.local.values()) {
+        for (const query of local.queries.values()) {
+          query.reconnect();
+        }
       }
     }
 

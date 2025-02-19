@@ -187,7 +187,7 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
   transact(transaction: Transaction) {
     for (const [id, channels] of this.channels) {
       if (Subscription.match(transaction, channels)) {
-        return this.perform({
+        this.perform({
           the: "task/effect",
           of: id,
           is: transaction,

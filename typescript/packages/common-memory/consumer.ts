@@ -344,11 +344,12 @@ class QuerySubscriptionInvocation<Space extends MemorySpace> extends ConsumerInv
       }
     }
 
+    this.query.transact(transaction);
+
     if (Object.keys(changed).length > 0) {
       this.integrate({ [transaction.sub]: changed } as Selection<Space>);
     }
 
-    this.query.transact(transaction);
     return { ok: {} };
   }
   integrate(differential: Selection<Space>) {
