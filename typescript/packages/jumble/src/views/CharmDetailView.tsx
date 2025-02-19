@@ -7,7 +7,7 @@ import { useCharm } from "@/hooks/use-charm";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
 import { CharmRenderer } from "@/components/CharmRunner";
-import { performIteration } from "@/utils/charm-iteration";
+import { iterateCharm } from "@/utils/charm-operations";
 import { charmId } from "@/utils/charms";
 import { DitheredCube } from "@/components/DitherCube";
 import { VariantTray } from "@/components/VariantTray";
@@ -51,7 +51,7 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
 
     try {
       const variantPromises = variantModels.map((model) =>
-        performIteration(charmManager, charmId(charm), replicaName!, iterationInput, false, model),
+        iterateCharm(charmManager, charmId(charm), replicaName!, iterationInput, false, model),
       );
 
       // Instead of waiting for all promises, handle them as they complete
@@ -89,7 +89,7 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
       if (!iterationInput) return;
       setLoading(true);
       try {
-        const newPath = await performIteration(
+        const newPath = await iterateCharm(
           charmManager,
           charmId(charm),
           replicaName!,
