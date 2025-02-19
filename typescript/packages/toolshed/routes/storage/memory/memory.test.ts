@@ -10,7 +10,6 @@ import {
   TransactionBuilder,
 } from "@commontools/memory";
 import * as FS from "@std/fs";
-import { al } from "@/lookslike-highlevel-dist/assets/index-Cilc_Q7E.js";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
