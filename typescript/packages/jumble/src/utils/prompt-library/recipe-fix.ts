@@ -48,7 +48,7 @@ Remember to consider the context of the code running inside an iframe and ensure
 `;
 
 /**
- * Fixes a charm based on the original specification, code, schema, and error stacktrace.
+ * Given a broken charm, an error, and a model, returns a recipe with the fixed code.
  * @param spec - The specification/description of the web application.
  * @param code - The code of the web application.
  * @param schema - The schema of the web application.
@@ -56,7 +56,7 @@ Remember to consider the context of the code running inside an iframe and ensure
  * @param model - The model to use to generate the description. (default: "anthropic:claude-3-5-sonnet-latest")
  * @returns The recipe.
  */
-export async function fixSpell(
+export async function fixRecipePrompt(
   spec: string,
   code: string,
   schema: string,
@@ -82,6 +82,6 @@ export async function fixSpell(
     ],
   });
 
-  console.log("RESPONSE", parseTagFromResponse(response, "fixed_code"));
+  // console.log("RESPONSE", parseTagFromResponse(response, "fixed_code"));
   return parseTagFromResponse(response, "fixed_code");
 }

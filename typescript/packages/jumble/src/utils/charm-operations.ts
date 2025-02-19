@@ -8,7 +8,7 @@ import {
 import { EntityId } from "@commontools/runner";
 
 import { charmId } from "@/utils/charms";
-import { fixSpell } from "@/utils/prompt-library/spell-fix";
+import { fixRecipePrompt } from "@/utils/prompt-library/recipe-fix";
 
 export async function fixItCharm(
   charmManager: CharmManager,
@@ -21,7 +21,7 @@ export async function fixItCharm(
     throw new Error("No iframe recipe found in charm");
   }
 
-  const fixedCode = await fixSpell(
+  const fixedCode = await fixRecipePrompt(
     iframeRecipe.iframe.spec,
     iframeRecipe.iframe.src,
     JSON.stringify(iframeRecipe.iframe.argumentSchema),
