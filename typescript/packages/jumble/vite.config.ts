@@ -22,6 +22,10 @@ export default defineConfig({
         target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
         changeOrigin: true,
       },
+      "/api/whoami": {
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        changeOrigin: true,
+      },
       "/api/ai/llm": {
         target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
         changeOrigin: true,

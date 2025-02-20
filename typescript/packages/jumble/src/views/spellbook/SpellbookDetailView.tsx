@@ -12,7 +12,7 @@ import {
   LuChevronRight,
   LuMessageSquare,
 } from "react-icons/lu";
-import { getSpell, type Spell, toggleLike } from "@/services/spellbook";
+import { getSpell, type Spell, toggleLike, createComment } from "@/services/spellbook";
 import { ActionButton } from "@/components/spellbook/ActionButton";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
 import { SpellPreview } from "@/components/spellbook/SpellPreview";
@@ -24,6 +24,7 @@ export default function SpellbookDetailView() {
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [isCommentsExpanded, setIsCommentsExpanded] = useState(true);
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(true);
+  const [commentText, setCommentText] = useState("");
 
   // Get the current user's shortname from the URL
   const currentUser =
@@ -70,6 +71,21 @@ export default function SpellbookDetailView() {
       });
     } catch (error) {
       console.error("Failed to toggle like:", error);
+    }
+  };
+
+  const handleComment = async () => {
+    if (!spellId || !spell) return;
+
+    try {
+      const comment = await createComment(spellId, commentText);
+      setSpell({
+        ...spell,
+        comments: [...spell.comments, comment],
+      });
+      setCommentText("");
+    } catch (error) {
+      console.error("Failed to create comment:", error);
     }
   };
 
@@ -180,32 +196,42 @@ export default function SpellbookDetailView() {
             <div className="p-8 border-2 border-black">
               <div className="flex flex-col gap-6">
                 <div className="flex flex-col gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold">Alice</span>
-                    <span className="text-gray-600 text-sm">2 days ago</span>
+                  <textarea
+                    className="w-full px-3 py-2 bg-white border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] focus:outline-none focus:shadow-[2px_2px_0px_0px_rgba(0,0,0,0.7)] placeholder:text-gray-500"
+                    placeholder="Add a comment..."
+                    rows={3}
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      className="px-4 py-2 bg-black text-white hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={handleComment}
+                      disabled={!commentText.trim()}
+                    >
+                      Post Comment
+                    </button>
                   </div>
-                  <p className="text-gray-800">
-                    This spell is amazing! I've been looking for something exactly like this.
-                  </p>
                 </div>
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold">Bob</span>
-                    <span className="text-gray-600 text-sm">1 day ago</span>
-                  </div>
-                  <p className="text-gray-800">
-                    Great work! Would love to see a version that also handles edge cases.
-                  </p>
-                </div>
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold">Charlie</span>
-                    <span className="text-gray-600 text-sm">5 hours ago</span>
-                  </div>
-                  <p className="text-gray-800">
-                    Just what I needed for my project. Thanks for sharing!
-                  </p>
-                </div>
+
+                {[...spell.comments]
+                  .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                  .map((comment) => (
+                    <div key={comment.id} className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <img
+                          src={comment.authorAvatar}
+                          alt={comment.author}
+                          className="w-6 h-6 rounded-full"
+                        />
+                        <span className="font-semibold">{comment.author}</span>
+                        <span className="text-gray-600 text-sm">
+                          {new Date(comment.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <p className="text-gray-800">{comment.content}</p>
+                    </div>
+                  ))}
               </div>
             </div>
           )}

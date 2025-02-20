@@ -17,6 +17,7 @@ export interface Spell {
     id: string;
     content: string;
     author: string;
+    authorAvatar: string;
     createdAt: string;
   }[];
   shares: number;
@@ -26,6 +27,19 @@ export interface LikeResponse {
   success: boolean;
   likes: string[];
   isLiked: boolean;
+}
+
+export interface Comment {
+  id: string;
+  content: string;
+  author: string;
+  authorAvatar: string;
+  createdAt: string;
+}
+
+export interface CommentResponse {
+  success: boolean;
+  comment: Comment;
 }
 
 export async function listAllSpells(searchQuery?: string): Promise<Spell[]> {
@@ -107,7 +121,7 @@ export async function saveSpell(
 }
 
 export async function toggleLike(spellId: string): Promise<LikeResponse> {
-  const response = await fetch(`${TOOLSHED_API_URL}/api/spellbook/${spellId}/like`, {
+  const response = await fetch(`/api/spellbook/${spellId}/like`, {
     method: "POST",
     cache: "no-store",
   });
@@ -117,4 +131,22 @@ export async function toggleLike(spellId: string): Promise<LikeResponse> {
   }
 
   return response.json();
+}
+
+export async function createComment(spellId: string, content: string): Promise<Comment> {
+  const response = await fetch(`/api/spellbook/${spellId}/comment`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ content }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to create comment");
+  }
+
+  const data = await response.json();
+  return data.comment;
 }

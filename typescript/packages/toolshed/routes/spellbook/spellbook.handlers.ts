@@ -1,5 +1,6 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
+  createComment,
   createSpell,
   getSpell,
   likeSpell,
@@ -32,6 +33,17 @@ interface SpellData {
   [key: string]: any;
 }
 
+async function sha256(str: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(str);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join(
+    "",
+  );
+  return hashHex;
+}
+
 function toSpell(hash: string, blobData: SpellData) {
   return {
     id: hash.replace("spellbook-", ""),
@@ -41,6 +53,7 @@ function toSpell(hash: string, blobData: SpellData) {
     ui: blobData.spellbookUI || null,
     publishedAt: blobData.spellbookPublishedAt || "",
     author: blobData.spellbookAuthor || "anon",
+    authorAvatar: blobData.spellbookAuthorAvatar || "",
     likes: blobData.spellbookLikes || [],
     comments: blobData.spellbookComments || [],
     data: blobData,
@@ -223,3 +236,86 @@ export const toggleLikeHandler: AppRouteHandler<typeof toggleLike> = async (
     }, 500);
   }
 };
+
+export const createCommentHandler: AppRouteHandler<typeof createComment> =
+  async (c) => {
+    const logger = c.get("logger");
+    const spellId = c.req.param("spellId");
+    const requesterProfile = {
+      name: c.req.header("tailscale-user-name"),
+      email: c.req.header("tailscale-user-login"),
+      shortName: c.req.header("tailscale-user-login")?.split("@")[0] ||
+        "system",
+      avatar: c.req.header("tailscale-user-profile-pic"),
+    };
+
+    console.log(requesterProfile);
+
+    try {
+      const body = await c.req.json();
+      const { content } = body;
+      const createdAt = new Date().toISOString();
+
+      // First get the current spell data
+      const getRes = await client.api.storage.blobby[":key"].$get({
+        param: {
+          key: `spellbook-${spellId}`,
+        },
+      });
+
+      if (!getRes.ok) {
+        return c.json({ error: "Spell not found" }, 404);
+      }
+
+      const blobData = await getRes.json();
+      const comments = blobData.spellbookComments || [];
+
+      // Create the new comment
+      const commentId = await sha256(
+        `${requesterProfile.shortName}:${content}:${createdAt}`,
+      );
+      const newComment = {
+        id: commentId,
+        content,
+        author: requesterProfile.shortName,
+        authorAvatar: requesterProfile.avatar,
+        createdAt,
+      };
+
+      // Add the new comment to the list
+      comments.push(newComment);
+
+      // Update the spell with new comments
+      const updateRes = await client.api.storage.blobby[":key"].$post({
+        param: {
+          key: `spellbook-${spellId}`,
+        },
+        json: {
+          ...blobData,
+          spellbookComments: comments,
+        },
+      });
+
+      if (!updateRes.ok) {
+        logger.error(
+          "Failed to update spell comments:",
+          await updateRes.text(),
+        );
+        return c.json({
+          success: false,
+          error: "Failed to save comment",
+        }, 500);
+      }
+
+      return c.json({
+        success: true,
+        comment: newComment,
+      });
+    } catch (error) {
+      logger.error({ error }, "Error creating comment");
+      return c.json({
+        success: false,
+        error: "Internal server error",
+      }, 500);
+    }
+  };

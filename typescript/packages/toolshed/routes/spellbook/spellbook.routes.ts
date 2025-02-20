@@ -19,6 +19,7 @@ const SpellSchema = z.object({
     id: z.string(),
     content: z.string(),
     author: z.string(),
+    authorAvatar: z.string(),
     createdAt: z.string(),
   })),
   shares: z.number(),
@@ -47,6 +48,20 @@ const LikeResponseSchema = z.object({
   success: z.boolean(),
   likes: z.array(z.string()),
   isLiked: z.boolean(),
+});
+
+const CommentRequestSchema = z.object({
+  content: z.string(),
+});
+
+const CommentResponseSchema = z.object({
+  success: z.boolean(),
+  comment: z.object({
+    id: z.string(),
+    content: z.string(),
+    author: z.string(),
+    createdAt: z.string(),
+  }),
 });
 
 export const createSpell = createRoute({
@@ -134,6 +149,36 @@ export const toggleLike = createRoute({
     ),
     [HttpStatusCodes.NOT_FOUND]: {
       description: "Spell not found",
+    },
+  },
+});
+
+export const createComment = createRoute({
+  method: "post",
+  path: "/api/spellbook/{spellId}/comment",
+  tags,
+  request: {
+    params: z.object({
+      spellId: z.string(),
+    }),
+    body: {
+      content: {
+        "application/json": {
+          schema: CommentRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      CommentResponseSchema,
+      "Comment created successfully",
+    ),
+    [HttpStatusCodes.NOT_FOUND]: {
+      description: "Spell not found",
+    },
+    [HttpStatusCodes.BAD_REQUEST]: {
+      description: "Invalid comment content",
     },
   },
 });
