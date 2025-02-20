@@ -16,6 +16,8 @@ import { LanguageModelProvider } from "./contexts/LanguageModelContext";
 import { BackgroundTaskProvider } from "./contexts/BackgroundTaskContext";
 import { setupIframe } from "./iframe-ctx";
 import GenerateJSONView from "@/views/utility/GenerateJSONView";
+import SpellbookIndexView from "@/views/spellbook/SpellbookIndexView";
+import SpellbookDetailView from "@/views/spellbook/SpellbookDetailView";
 
 setupIframe();
 
@@ -42,8 +44,11 @@ createRoot(document.getElementById("root")!).render(
                 <Route path=":charmId/detail" element={<CharmDetailView />} />
               </Route>
 
-              {/* internal tools / experimental routes */}
+              {/* Spellbook routes */}
+              <Route path="/spellbook" element={<SpellbookIndexView />} />
+              <Route path="/spellbook/:hash" element={<SpellbookDetailView />} />
 
+              {/* internal tools / experimental routes */}
               <Route path="/utility/jsongen" element={<GenerateJSONView />} />
 
               {/* Photoflow routes preserved */}
