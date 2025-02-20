@@ -1,141 +1,86 @@
 import type { EntityId, Cancel } from "@commontools/runner";
 import { log } from "../storage.js";
 import { type StorageProvider, type StorageValue } from "./base.js";
-import { fromJSON, refer, type Reference } from "merkle-reference";
-import z from "zod";
-import type {
-  State,
-  In,
-  ReplicaID,
-  Entity,
-  Unclaimed,
-  Selector,
-  Fact,
-  ConflictError,
-  TransactionError,
-  Transaction,
-  Result,
-  Command,
-  ConnectionError,
-  JSONValue,
-  AsyncResult,
-} from "@commontools/memory";
+import type { Entity, JSONValue, MemorySpace } from "@commontools/memory/interface";
+import * as Memory from "@commontools/memory/consumer";
+import { assert } from "@commontools/memory/fact";
+import * as Changes from "@commontools/memory/changes";
+export * from "@commontools/memory/interface";
 
-type Revision<T extends Fact | Unclaimed = Fact | Unclaimed> = {
-  at: ReplicaID;
-  this: Reference<T>;
-  value: T;
-};
+interface Local<Space extends MemorySpace = MemorySpace> {
+  memory: Memory.MemorySpaceSession<Space>;
+  queries: Map<Entity, Query<Space>>;
+}
 
+/**
+ * ed25519 key derived from the sha256 of the "common knowledge".
+ */
+const HOME = "did:key:z6Mko2qR9b8mbdPnaEKXvcYwdK7iDnRkh8mEcEP2719aCu6P";
+/**
+ * ed25519 key derived from the sha256 of the "common operator".
+ */
+const AS = "did:key:z6Mkge3xkXc4ksLsf8CtRxunUxcX6dByT4QdWCVEHbUJ8YVn";
 export class RemoteStorageProvider implements StorageProvider {
-  static State = z.object({
-    the: z.string(),
-    of: z.string(),
-    is: z
-      .unknown({})
-      .transform((value) => {
-        if (value && typeof (value as Record<string, unknown>)["/"] === "string") {
-          return fromJSON(value as { "/": string });
-        } else {
-          return value;
-        }
-      })
-      .optional(),
-    cause: z
-      .object({
-        "/": z.string(),
-      })
-      .transform((value) => {
-        return fromJSON(value);
-      })
-      .optional(),
-  });
-
-  static Update = z.record(RemoteStorageProvider.State);
   connection: WebSocket | null = null;
-  session: Promise<WebSocket>;
   address: URL;
-  replica: ReplicaID;
+  workspace: MemorySpace;
   the: string;
+  local: Map<MemorySpace, Local> = new Map();
+  session: Memory.MemorySession;
 
-  subscriptions: Map<string, In<Selector>> = new Map();
-  subscribers: Map<string, Set<Subscriber>> = new Map();
-  local: Map<ReplicaID, Map<Entity, Revision>> = new Map();
+  /**
+   * queue that holds commands that we read from the session, but could not
+   * send because connection was down.
+   */
+  queue: Set<Memory.ConsumerCommand<Memory.Protocol>> = new Set();
+  writer: WritableStreamDefaultWriter<Memory.ProviderCommand<Memory.Protocol>>;
+  reader: ReadableStreamDefaultReader<Memory.ConsumerCommand<Memory.Protocol>>;
+
+  connectionCount = 0;
+
   constructor({
     address,
-    replica = "common-knowledge",
+    as = AS,
+    space = HOME,
     the = "application/json",
   }: {
     address: URL;
-    replica?: ReplicaID;
+    as?: Memory.Principal;
+    space?: MemorySpace;
     the?: string;
   }) {
     this.address = address;
-    this.replica = replica;
+    this.workspace = space;
     this.the = the;
-    this.session = this.open();
+
+    const session = Memory.create({ as });
+    this.reader = session.readable.getReader();
+    this.writer = session.writable.getWriter();
+    this.session = session;
+
+    this.connect();
   }
 
-  space(id: ReplicaID): Map<Entity, Revision> {
-    const space = this.local.get(id);
-    if (space) {
-      return space;
+  mount(space: MemorySpace): Local {
+    const local = this.local.get(space);
+    if (local) {
+      return local;
     } else {
-      const space = new Map();
-      this.local.set(id, space);
-      return space;
+      const local = {
+        memory: this.session.mount(space),
+        queries: new Map(),
+      };
+
+      this.local.set(space, local);
+      return local;
     }
   }
 
-  revision(entity: Entity): Revision | undefined {
-    const space = this.space(this.replica);
-    const revision = space.get(entity);
-    if (revision) {
-      return revision;
-    }
-    return;
-  }
-
-  async perform(command: Command) {
-    const session = await this.session;
-    if (command.unwatch) {
-      session.send(JSON.stringify(command));
-    } else if (command.watch) {
-      session.send(JSON.stringify(command));
-    }
-  }
-
-  async transact(
-    transaction: In<Transaction>,
-  ): AsyncResult<Fact, ConflictError | TransactionError | ConnectionError> {
-    const response = await fetch(this.address.href, {
-      method: "PATCH",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(transaction),
-    });
-
-    const result = (await response.json()) as Result<
-      Fact,
-      ConflictError | TransactionError | ConnectionError
-    >;
-
-    if (result.error) {
-      return result;
-    } else {
-      return { ok: RemoteStorageProvider.State.parse(result.ok) as Fact };
-    }
-  }
-
-  static formatAddress(space: ReplicaID, { of, the }: Selector) {
-    return `watch://${space}/${of}/${the}`;
-  }
-  static toEntity(source: EntityId) {
+  static toEntity(source: EntityId): Entity {
     if (typeof source["/"] === "string") {
-      return source["/"];
+      return `of:${source["/"]}`;
     } else if (source.toJSON) {
-      return source.toJSON()["/"];
+      return `of:${source.toJSON()["/"]}`;
     } else {
       throw Object.assign(
         new TypeError(`💣 Got entity ID that is neither merkle reference nor {'/'}`),
@@ -146,145 +91,86 @@ export class RemoteStorageProvider implements StorageProvider {
     }
   }
 
-  unwatch(selectors: In<Selector>, subscriber: Subscriber): void {
-    for (const [replica, selector] of Object.entries(selectors)) {
-      const address = RemoteStorageProvider.formatAddress(replica, selector);
-      const subscribers = this.subscribers.get(address);
-      if (subscriber) {
-        if (subscribers) {
-          subscribers.delete(subscriber);
-          if (subscribers.size === 0) {
-            this.subscribers.delete(address);
-            // this.perform({ unwatch: { [replica]: selector } });
-          }
-        }
-      }
-    }
-  }
-
-  watch(selectors: In<Selector>, subscriber: Subscriber): void {
-    for (const [replica, selector] of Object.entries(selectors)) {
-      const address = RemoteStorageProvider.formatAddress(replica, selector);
-      if (!this.subscriptions.has(address)) {
-        this.subscriptions.set(address, { [replica]: selector });
-        this.perform({ watch: { [replica]: selector } });
-      }
-
-      const subscribers = this.subscribers.get(address);
-      if (subscriber) {
-        if (subscribers) {
-          subscribers.add(subscriber);
-        } else {
-          this.subscribers.set(address, new Set([subscriber]));
-        }
-      }
-    }
-  }
-
   sink<T = any>(entityId: EntityId, callback: (value: StorageValue<T>) => void): Cancel {
+    const { the } = this;
     const of = RemoteStorageProvider.toEntity(entityId);
+    const local = this.mount(this.workspace);
+    // ⚠️ Types are incorrect because when there is no value we still want to
+    // notify the subscriber.
+    const subscriber = callback as unknown as Subscriber;
+    let query = local.queries.get(of);
+    if (!query) {
+      query = new Query(local.memory.query({ select: { [of]: { [the]: {} } } }));
+      local.queries.set(of, query);
+    }
 
-    const selector = { [this.replica]: { the: this.the, of } };
-    const subscriber = new Sink(this, selector, callback as (value: StorageValue<unknown>) => void);
-
-    this.watch(selector, subscriber);
-
-    return subscriber.cancel;
+    return query.subscribe(subscriber);
   }
-  async sync(entityId: EntityId, expectedInStorage: boolean = false): Promise<void> {
+  async sync(entityId: EntityId): Promise<void> {
+    const { the } = this;
     // Just wait to have a local revision.
     const of = RemoteStorageProvider.toEntity(entityId);
-    const revision = this.revision(of);
-    // We need to wait if we don't have a local revision, or if if we have a
-    // retracted or unclaimed state while expecting value to be in storage.
-    const wait = !revision
-      ? true
-      : revision.value.is === undefined && expectedInStorage
-        ? true
-        : false;
+    const local = this.mount(this.workspace);
+    let query = local.queries.get(of);
+    if (query) {
+      query.subscribe(RemoteStorageProvider.sync);
+    } else {
+      const query = local.memory.query({ select: { [of]: { [the]: {} } } });
+      local.queries.set(of, new Query(query, new Set([RemoteStorageProvider.sync])));
 
-    if (wait) {
-      const selector = { [this.replica]: { the: this.the, of } };
-      const subscriber = new Sync(this, selector, expectedInStorage);
-      this.watch(selector, subscriber);
-      await subscriber.promise;
+      await query.promise;
     }
   }
 
+  /**
+   * Subscriber used by the .sync. We use the same one so we'll have at most one
+   * per `.sync` per query.
+   */
+  static sync(value: JSONValue | undefined) {}
+
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
-    // Does not exists return `undefined`, if not an object return `{}`
     const of = RemoteStorageProvider.toEntity(entityId);
+    const local = this.mount(this.workspace);
+    const query = local.queries.get(of);
 
-    const revision = this.revision(of);
-
-    const value = revision ? (revision.value.is as StorageValue<T> | undefined) : undefined;
-    return value;
+    return query?.value as StorageValue<T> | undefined;
   }
   async send<T = any>(changes: { entityId: EntityId; value: StorageValue<T> }[]): Promise<void> {
-    const promises = [];
     const { the } = this;
-    for (const { entityId, value: newValue } of changes) {
+    const local = this.mount(this.workspace);
+    const facts = [];
+
+    for (const { entityId, value } of changes) {
       const of = RemoteStorageProvider.toEntity(entityId);
-      const currentRevision = this.revision(of);
+      const query = local.queries.get(of);
+      const content = JSON.stringify(value);
+
       // If a revision exists and its current value is identical to the new value,
       // skip sending a PATCH.
-      if (
-        currentRevision &&
-        JSON.stringify(currentRevision.value.is) === JSON.stringify(newValue)
-      ) {
+      if (query && JSON.stringify(query.value) === content) {
         log("RemoteStorageProvider.send: no change detected for", of);
         continue;
       }
 
-      const assertion = {
-        the,
-        of,
-        // Convert the new value into the format expected by the remote API.
-        is: newValue as unknown as JSONValue,
-        cause: currentRevision?.this,
-      };
-
-      promises.push(
-        this.transact({
-          [this.replica]: {
-            assert: {
-              ...assertion,
-              cause: assertion.cause as Reference<Fact> | null | undefined,
-            },
-          },
+      facts.push(
+        assert({
+          the,
+          of,
+          // Convert the new value into the format expected by the remote API.
+          is: JSON.parse(content) as unknown as JSONValue,
+          cause: query?.fact,
         }),
       );
     }
 
-    const results = await Promise.all(promises);
-    for (const result of results) {
-      if (result.error) {
-        console.error(`🙅‍♂️`, result.error);
-      }
-    }
-  }
-
-  update(remote: Revision) {
-    const space = this.space(remote.at);
-    const local = this.revision(remote.value.of);
-    if (local?.this.toString() !== remote.this.toString()) {
-      space.set(remote.value.of, remote);
-      const { value } = remote;
-
-      const address = RemoteStorageProvider.formatAddress(remote.at, value);
-      const subscribers = this.subscribers.get(address);
-      for (const subscriber of subscribers ?? []) {
-        subscriber.integrate(value);
-      }
+    const result = await local.memory.transact({ changes: Changes.from(facts) });
+    if (result.error) {
+      console.error(`🙅‍♂️`, result.error);
     }
   }
 
   receive(data: string) {
-    const update = RemoteStorageProvider.Update.parse(JSON.parse(data)) as In<State>;
-
-    for (const [at, state] of Object.entries(update)) {
-      this.update({ at, this: refer(state), value: state });
-    }
+    return this.writer.write(JSON.parse(data));
   }
 
   handleEvent(event: MessageEvent) {
@@ -292,15 +178,16 @@ export class RemoteStorageProvider implements StorageProvider {
       case "message":
         return this.receive(event.data);
       case "open":
-        return this.connect(event.target as WebSocket);
+        return this.open(event.target as WebSocket);
       case "close":
         return this.disconnect(event);
       case "error":
         return this.disconnect(event);
     }
   }
-  open(): Promise<WebSocket> {
+  connect() {
     const { connection } = this;
+    // If we already have a connection we remove all the listeners from it.
     if (connection) {
       connection.removeEventListener("message", this);
       connection.removeEventListener("open", this);
@@ -315,12 +202,48 @@ export class RemoteStorageProvider implements StorageProvider {
     socket.addEventListener("close", this);
     socket.addEventListener("error", this);
 
-    return RemoteStorageProvider.opened(socket);
+    this.connectionCount += 1;
   }
 
-  connect(_socket: WebSocket) {
-    for (const selector of this.subscriptions.values()) {
-      this.perform({ watch: selector });
+  async open(socket: WebSocket) {
+    const { reader, queue } = this;
+
+    // If we did have connection
+    if (this.connectionCount > 1) {
+      for (const local of this.local.values()) {
+        for (const query of local.queries.values()) {
+          query.reconnect();
+        }
+      }
+    }
+
+    while (this.connection === socket) {
+      // First drain the queued commands if we have them.
+      for (const command of queue) {
+        socket.send(JSON.stringify(command));
+        queue.delete(command);
+      }
+
+      // Next read next command from the session.
+      const next = await reader.read();
+      // If session is closed we're done.
+      if (next.done) {
+        this.close();
+      }
+
+      const command = next.value!;
+
+      // Now we make that our socket is still a current connection as we may
+      // have lost connection while waiting to read a command.
+      if (this.connection === socket) {
+        socket.send(JSON.stringify(command));
+      }
+      // If it is no longer our connection we simply add the command into a
+      // queue so it will be send once connection is reopen.
+      else {
+        this.queue.add(command);
+        break;
+      }
     }
   }
 
@@ -329,7 +252,7 @@ export class RemoteStorageProvider implements StorageProvider {
     // If connection is `null` provider was closed and we do nothing on
     // disconnect.
     if (this.connection === socket) {
-      this.open();
+      this.connect();
     }
   }
 
@@ -394,61 +317,60 @@ export class RemoteStorageProvider implements StorageProvider {
   }
 
   getReplica(): string {
-    return this.replica;
+    return this.workspace;
   }
 }
 
-abstract class Subscriber {
-  constructor(
-    public provider: RemoteStorageProvider,
-    public selector: In<Selector>,
-  ) {
-    this.cancel = this.cancel.bind(this);
-  }
-  abstract integrate(state: State): void;
-  cancel() {
-    this.provider.unwatch(this.selector, this);
-  }
+export interface Subscriber {
+  (value: JSONValue | undefined): void;
 }
 
-class Sink extends Subscriber {
+class Query<Space extends MemorySpace> {
+  reader: ReadableStreamDefaultReader;
   constructor(
-    provider: RemoteStorageProvider,
-    selector: In<Selector>,
-    public notify: (value: StorageValue<unknown>) => void,
+    public query: Memory.QueryView<Space>,
+    public subscribers: Set<Subscriber> = new Set(),
   ) {
-    super(provider, selector);
+    this.reader = query.subscribe().getReader();
+    this.poll();
+  }
+  get value(): JSONValue | undefined {
+    return this.query.facts?.[0]?.is;
+  }
+  get fact() {
+    return this.query.facts[0];
   }
 
-  integrate(state: State) {
-    // If state.is is undefined, we either have a retracted or an unclaimed
-    // memory.
-    if (state.is !== undefined) {
-      const value =
-        state.is === null || typeof state.is !== "object"
-          ? ({} as StorageValue<unknown>)
-          : (state.is as unknown as StorageValue<unknown>);
-
-      this.notify(value);
+  broadcast() {
+    const { value } = this;
+    for (const subscriber of this.subscribers) {
+      subscriber(value);
     }
   }
-}
-
-class Sync extends Subscriber {
-  promise: Promise<void>;
-  notify?: () => void;
-  constructor(
-    provider: RemoteStorageProvider,
-    selector: In<Selector>,
-    public expectedInStorage: boolean = false,
-  ) {
-    super(provider, selector);
-    this.promise = new Promise((notify) => (this.notify = notify));
-  }
-  integrate(state: State) {
-    if (state.is !== undefined || !this.expectedInStorage) {
-      this.notify!();
-      this.cancel();
+  async poll() {
+    const { reader } = this;
+    while (true) {
+      const next = await reader.read();
+      if (next.done) {
+        break;
+      } else {
+        this.broadcast();
+      }
     }
+  }
+
+  reconnect() {
+    // TODO: We could make it possible to rerun the subscription
+    this.reader.cancel();
+    this.reader = this.query.subscribe().getReader();
+    this.poll();
+  }
+
+  subscribe(subscriber: Subscriber): Cancel {
+    this.subscribers.add(subscriber);
+    return () => this.unsubscribe.bind(this, subscriber);
+  }
+  unsubscribe(subscriber: Subscriber) {
+    this.subscribers.delete(subscriber);
   }
 }

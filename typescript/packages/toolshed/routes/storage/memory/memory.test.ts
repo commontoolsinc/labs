@@ -1,78 +1,108 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import env from "@/env.ts";
 import app from "../../../app.ts";
+import { refer } from "merkle-reference";
+import {
+  ChangesBuilder,
+  CommitBuilder,
+  Consumer,
+  Fact,
+  TransactionBuilder,
+} from "@commontools/memory";
+import * as FS from "@std/fs";
 
 if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
 }
 
-const space = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
+const the = "application/json";
+const doc = `of:${refer({ hello: "world" })}` as const;
+const space = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
+const alice = "did:key:z6Mkk89bC3JrVqKie71YEcc5M1SMVxuCgNx6zLZ8SYJsxALi";
+
+const toJSON = <T>(source: T) => JSON.parse(JSON.stringify(source));
 
 Deno.test("test transaction", async (t) => {
-  const entity = "baedreigv6dnlwjzyyzk2z2ld2kapmu6hvqp46f3axmgdowebqgbts5jksi";
-  const response = await app.fetch(
-    new Request("http://localhost/api/storage/memory", {
-      method: "patch",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        [space]: {
-          assert: {
-            the: "application/json",
-            of: entity,
-            is: { hello: "world" },
-          },
-        },
-      }),
-    }),
-  );
-
-  assertEquals(response.status, 200);
-  const json = await response.json();
-  assertEquals(json, {
-    ok: {
-      the: "application/json",
-      of: entity,
+  try {
+    const hello = Fact.assert({
+      the,
+      of: doc,
       is: { hello: "world" },
-      cause: {
-        "/": "baedreiayyshoe2moi4rexyuxp2ag7a22sfymkytfph345g6dmfqtoesabm",
-      },
-    },
-  });
+    });
+
+    const transaction = TransactionBuilder.create({
+      issuer: alice,
+      subject: space,
+      changes: ChangesBuilder.from([hello]),
+    });
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/storage/memory", {
+        method: "patch",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(transaction),
+      }),
+    );
+
+    assertEquals(response.status, 200);
+    const json = await response.json();
+
+    assertEquals(json, {
+      ok: ChangesBuilder.from([
+        CommitBuilder.create({
+          space,
+          transaction,
+        }),
+      ]),
+    });
+  } finally {
+    Deno.removeSync(new URL(`./${space}.sqlite`, env.MEMORY_URL));
+  }
 });
 
-Deno.test("test subscription", async (t) => {
-  const server = Deno.serve({ port: 9000 }, app.fetch);
-  const entity = "did:key:z6MkffDZCkCTWreg8868fG1FGFogcJj5X6PY93pPcWDn9bob";
+Deno.test("test consumer", async (t) => {
+  try {
+    const server = Deno.serve({ port: 9000 }, app.fetch);
 
-  const url = new URL(
-    `http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
-  );
-  const socket = new WebSocket(url.href);
+    const url = new URL(
+      `http://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+    );
 
-  await new Promise((resolve) => (socket.onopen = resolve));
+    const session = Consumer.connect({ address: url, as: alice });
+    const memory = session.mount(alice);
 
-  socket.send(
-    JSON.stringify({
-      watch: {
-        [space]: {
-          the: "application/json",
-          of: entity,
+    const result = await memory.query({
+      select: {
+        [doc]: {
+          [the]: {},
         },
       },
-    }),
-  );
+    });
 
-  const event = await new Promise((resolve) => (socket.onmessage = resolve));
+    assert(result.ok);
+    const query = result.ok;
+    assertEquals(query.facts, []);
 
-  assertEquals(JSON.parse(((await event) as MessageEvent).data), {
-    [space]: {
-      the: "application/json",
-      of: entity,
-    },
-  });
+    const subscription = query.subscribe();
 
-  socket.close();
-  await server.shutdown();
+    const fact = Fact.assert({ the, of: doc, is: { first: "doc" } });
+    const tr = await memory.transact({
+      changes: ChangesBuilder.from([fact]),
+    });
+
+    assert(tr.ok);
+
+    const message = await subscription.getReader().read();
+    assertEquals(message.done, false);
+
+    assertEquals(query.facts, [fact]);
+
+    session.close();
+
+    await server.shutdown();
+  } finally {
+    Deno.removeSync(new URL(`./${alice}.sqlite`, env.MEMORY_URL));
+  }
 });

@@ -1,71 +1,80 @@
-import { Selector, In, ReplicaID, State } from "./interface.ts";
-import * as Replica from "./router.ts";
+import {
+  MemorySpace,
+  Transaction,
+  Brief,
+  SubscriptionQuery,
+  Query,
+  QueryResult,
+  SubscriberCommand,
+  SubscriptionCommand,
+  Selector,
+  SubscriptionController,
+} from "./interface.ts";
 
-export interface Subscriber {
-  integrate(state: In<State>): void;
-
-  close(): void;
+interface Memory {
+  query(source: Query): QueryResult;
 }
 
-/**
- * Represents a subscription controller that can be used to add or remove
- * document addresses to the underlying subscription.
- */
-export interface Subscription {
-  stream: ReadableStream<In<State>>;
-
-  /**
-   * Add a new address to be observed.
-   */
-  watch(address: In<Selector>): void;
-
-  /**
-   * Removes an address from this subscription.
-   */
-  unwatch(address: In<Selector>): void;
-
-  /**
-   * Close the underlying subscription.
-   */
-  close(): void;
+export interface Session extends SubscriptionController {
+  controller: ReadableStreamDefaultController<SubscriptionCommand> | undefined;
+  memory: Memory;
+  watched: Set<string>;
 }
 
-export interface Session extends Subscriber {
-  controller: ReadableStreamDefaultController<In<State>> | undefined;
-  channels: Map<string, In<Selector>>;
-  replica: Replica.Session;
-}
-
-export class TheSubscription implements Session, Subscription, Subscriber {
-  controller: ReadableStreamDefaultController<In<State>> | undefined;
-  stream: ReadableStream<In<State>>;
-  channels: Map<string, In<Selector>> = new Map();
-  constructor(public replica: Replica.Session) {
-    this.stream = new ReadableStream<In<State>>({
-      start: source => {
-        this.controller = source;
-      },
-      cancel: () => {
-        this.cancel();
-      },
+class Subscription implements Session, SubscriptionController {
+  controller: ReadableStreamDefaultController<SubscriptionCommand> | undefined;
+  readable: ReadableStream<SubscriptionCommand>;
+  writable: WritableStream<SubscriberCommand>;
+  constructor(public memory: Memory, public watched: Set<string>) {
+    this.readable = new ReadableStream<SubscriptionCommand>({
+      start: (controller) => this.connect(controller),
+      cancel: () => this.cancel(),
+    });
+    this.writable = new WritableStream<SubscriberCommand>({
+      write: (command) => this.perform(command),
+      close: () => this.close(),
+      abort: () => this.close(),
     });
   }
 
-  watch(selectors: In<Selector>) {
-    watch(this, selectors);
+  connect(controller: ReadableStreamDefaultController<SubscriptionCommand>) {
+    this.controller = controller;
+  }
+
+  get open() {
+    return !!this.controller;
+  }
+
+  async perform(command: SubscriberCommand) {
+    if (command.watch) {
+      await watch(this, command.watch);
+    }
+    if (command.unwatch) {
+      await unwatch(this, command.unwatch);
+    }
+  }
+
+  transact(transaction: Transaction) {
+    return transact(this, transaction);
+  }
+  brief(source: Brief) {
+    return brief(this, source);
+  }
+
+  async watch(source: SubscriptionQuery) {
+    await watch(this, source);
     return this;
   }
 
-  unwatch(selectors: In<Selector>) {
-    unwatch(this, selectors);
+  async unwatch(source: SubscriptionQuery) {
+    await unwatch(this, source);
     return this;
-  }
-
-  integrate(change: In<State>) {
-    return integrate(this, change);
   }
 
   cancel() {
+    return cancel(this);
+  }
+  abort() {
     return cancel(this);
   }
 
@@ -74,23 +83,50 @@ export class TheSubscription implements Session, Subscription, Subscriber {
   }
 }
 
-export const integrate = (session: Session, change: In<State>) => {
-  if (session.controller) {
-    session.controller.enqueue(change);
-  } else {
-    console.warn("Subscription is cancelled, not integrating change", change);
+const transact = (session: Session, transaction: Transaction) => {
+  if (match(transaction, session.watched)) {
+    publish(session, { transact: transaction });
   }
 };
 
-export const open = (replica: Replica.Session) => new TheSubscription(replica);
+export const match = (transaction: Transaction, watched: Set<string>) => {
+  for (const [of, attributes] of Object.entries(transaction.args.changes)) {
+    for (const [the, changes] of Object.entries(attributes)) {
+      for (const change of Object.values(changes)) {
+        // If `change == true` we simply confirm that state has not changed
+        // so we don't need to notify those subscribers.
+        if (change !== true) {
+          const watches =
+            watched.has(formatAddress(transaction.sub, { the, of })) ||
+            watched.has(formatAddress(transaction.sub, { the })) ||
+            watched.has(formatAddress(transaction.sub, { of })) ||
+            watched.has(formatAddress(transaction.sub, {}));
+
+          if (watches) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+  return false;
+};
+
+const brief = (session: Session, brief: Brief) => publish(session, { brief: brief });
+
+const publish = (session: Session, command: SubscriptionCommand) => {
+  if (session.controller) {
+    session.controller.enqueue(command);
+  } else {
+    console.warn("Subscription is cancelled, not integrating change", command);
+  }
+};
+
+export const open = (memory: Memory) => new Subscription(memory, new Set());
 
 export const cancel = (session: Session) => {
   if (session.controller) {
     session.controller = undefined;
-    for (const [, address] of session.channels) {
-      session.replica.unwatch(address, session);
-    }
-    session.channels.clear();
   }
 };
 
@@ -101,26 +137,65 @@ export const close = (session: Session) => {
   }
 };
 
-export const watch = (session: Session, selectors: In<Selector>) => {
-  for (const [space, selector] of Object.entries(selectors)) {
-    const channel = formatAddress(space, selector);
-    if (!session.channels.has(channel)) {
-      const address = { [space]: selector };
-      session.channels.set(channel, address);
-      session.replica.watch(address, session);
+export const channels = function* (space: MemorySpace, selector: Selector) {
+  const all = [["_", {}]] as const;
+  const entities = Object.entries(selector);
+  for (const [of, attributes] of entities.length > 0 ? entities : all) {
+    const selector = Object.entries(attributes);
+    for (const [the] of selector.length > 0 ? selector : all) {
+      yield formatAddress(space, { the, of });
     }
   }
 };
 
-export const unwatch = (session: Session, selectors: In<Selector>) => {
-  for (const [space, selector] of Object.entries(selectors)) {
-    const channel = formatAddress(space, selector);
-    if (session.channels.has(channel)) {
-      session.replica.unwatch({ [space]: selector }, session);
-      session.channels.delete(channel);
+export const watch = async (session: Session, source: SubscriptionQuery) => {
+  const {
+    sub: space,
+    args: { select },
+  } = source;
+
+  for (const channel of channels(space, select)) {
+    if (!session.watched.has(channel)) {
+      session.watched.add(channel);
+      const result = await session.memory.query(source);
+      if (result.error) {
+        return result;
+      } else {
+        session.brief({
+          sub: source.sub,
+          args: {
+            selector: select,
+            selection: result.ok,
+          },
+        });
+      }
     }
   }
+
+  return { ok: {} };
 };
 
-export const formatAddress = (space: ReplicaID, { of, the }: Selector) =>
-  `watch://${space}/${of}/${the}`;
+export const unwatch = (session: Session, source: SubscriptionQuery) => {
+  const {
+    sub: space,
+    args: { select },
+  } = source;
+
+  const all = [["_", {}]] as const;
+  const selector = Object.entries(select);
+  for (const [of, attributes] of selector.length > 0 ? selector : all) {
+    const selector = Object.entries(attributes);
+    for (const [the] of selector.length > 0 ? selector : all) {
+      const channel = formatAddress(space, { the, of });
+
+      session.watched.delete(channel);
+    }
+  }
+
+  return { ok: {} };
+};
+
+export const formatAddress = (
+  space: MemorySpace,
+  { of = "_", the = "_" }: { the?: string; of?: string },
+) => `watch:///${space}/${of}/${the}`;

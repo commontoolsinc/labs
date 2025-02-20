@@ -2,20 +2,252 @@ import type { Reference } from "merkle-reference";
 
 export type { Reference };
 
-export type Command = {
-  watch?: In<Selector>;
-  unwatch?: In<Selector>;
+export type SubscriberCommand = {
+  watch?: Query;
+  unwatch?: Query;
 };
 
+export type Invocation<
+  Ability extends The = The,
+  Of extends Principal = Principal,
+  Command extends {} = {},
+> = {
+  cmd: Ability;
+  iss: Principal;
+  sub: Of;
+  args: Command;
+  meta?: Meta;
+};
+
+export type Protocol<Space extends MemorySpace = MemorySpace> = {
+  this: Space;
+  memory: {
+    transact(source: {
+      changes: ChangesBuilder;
+    }): Task<Result<Commit<Space>, ConflictError | TransactionError | ConnectionError>>;
+    query: {
+      (query: { select: Selector; since?: number }): Task<Result<Selection<Space>, QueryError>>;
+      subscribe(source: Subscribe<Space>["args"]): Task<SubscribeResult, Transaction<Space>>;
+      unsubscribe(source: Unsubscribe<Space>["args"]): Task<SubscribeResult>;
+    };
+  };
+};
+
+export type InferProtocol<Protocol> = UnionToIntersection<InferProtoMethods<Protocol>>;
+export type Abilities<Protocol> = keyof InferProtocol<Protocol>;
+export type InferProtoMethods<Protocol, Methods = Protocol, Prefix extends string = ""> = {
+  [Name in keyof Methods & string]: Methods[Name] extends (
+    input: infer In extends {},
+  ) => Task<infer Out extends {}, infer Effect>
+    ?
+        | {
+            [The in `${Prefix}/${Name}`]: Method<
+              Protocol,
+              `${Prefix}/${Name}`,
+              In,
+              Awaited<Out>,
+              Effect
+            >;
+          }
+        | InferProtoMethods<Protocol, Methods[Name], `${Prefix}/${Name}`>
+    : Methods[Name] extends object
+    ? InferProtoMethods<Protocol, Methods[Name], `${Prefix}/${Name}`>
+    : never;
+}[keyof Methods & string];
+
+export type Method<Protocol, Ability extends The, In extends {}, Out extends {}, Effect> = {
+  The: Ability;
+  Protocol: Protocol;
+  Of: InferOf<Protocol>;
+  In: In;
+  Out: Out;
+  Effect: Effect;
+  Method: (input: In) => Task<Out, Effect>;
+  ConsumerCommand: Invocation<Ability, InferOf<Protocol>, In>;
+  ProviderCommand: Receipt<Invocation<Ability, InferOf<Protocol>, In>, Out, Effect>;
+  Invocation: InvocationView<Invocation<Ability, InferOf<Protocol>, In>, Out, Effect>;
+  Pending: {
+    return(result: Out): void;
+    perform(effect: Effect): void;
+  };
+};
+
+export type InferOf<T> = T extends { this: infer U extends Principal } ? U : never;
 /**
- * Unique identifier for the store.
+ * Utility type that takes union type `U` and produces intersection type of it's members.
  */
-export type ReplicaID = string & { toString(): ReplicaID };
+type UnionToIntersection<U> = (U extends any ? (k: U) => void : never) extends (k: infer I) => void
+  ? I
+  : never;
+
+export type Provider<Protocol extends {}> = {
+  perform(command: ProviderCommand<Protocol>): AwaitResult<Unit, SystemError>;
+};
+
+export interface ConsumerSession<Protocol extends {}>
+  extends TransformStream<ProviderCommand<Protocol>, ConsumerCommand<Protocol>> {}
+
+export interface ProviderSession<Protocol extends {}>
+  extends TransformStream<ConsumerCommand<Protocol>, ProviderCommand<Protocol>> {
+  close(): CloseResult;
+}
+
+export type ProviderCommand<Protocol> = ProtocolMethod<Protocol> extends {
+  ProviderCommand: infer Command;
+}
+  ? Command
+  : never;
+
+export type ProtocolMethod<Protocol> = InferProtocol<Protocol>[Abilities<Protocol>];
+
+export type ConsumerCommand<Protocol> = ProtocolMethod<Protocol> extends {
+  ConsumerCommand: infer Command;
+}
+  ? Command
+  : never;
+
+export type ConsumerCommandFor<Ability, Protocol> = MethodFor<
+  Ability,
+  Protocol
+>["ConsumerCommand"] & { cmd: Ability };
+
+export type ConsumerInputFor<Ability, Protocol> = MethodFor<Ability, Protocol>["In"];
+
+export type ConsumerEffectFor<Ability, Protocol> = MethodFor<Ability, Protocol>["Effect"];
+
+export type ConsumerSpaceFor<Ability, Protocol> = MethodFor<Ability, Protocol>["Of"];
+
+export type MethodFor<Ability, Protocol, Case = ProtocolMethod<Protocol>> = Case extends Method<
+  Protocol,
+  Ability & The,
+  infer In,
+  infer Out,
+  infer Effect
+>
+  ? Method<Protocol, Ability & The, In, Out, Effect>
+  : never;
+
+export type ConsumerResultFor<Ability, Protocol> = MethodFor<Ability, Protocol>["Out"];
+
+export interface InvocationView<Source extends Invocation, Return extends {}, Effect>
+  extends Invocation<Source["cmd"], Source["sub"], Source["args"]> {
+  return(result: Await<Return>): void;
+  perform(effect: Effect): void;
+
+  toJSON(): Source;
+}
+
+export type Task<Return, Command = never> = Iterable<Command, Return>;
+
+export type Job<Command extends {} = {}, Return extends {} | null = {} | null, Effect = unknown> = {
+  invoke: Command;
+  return: Return;
+  effect: Effect;
+};
+
+export type WatchTask<Space extends MemorySpace> = Job<
+  { watch: Query<Space>; unwatch?: undefined },
+  QueryResult<Space>,
+  Transaction<Space>
+>;
+
+export type UnwatchTask<Space extends MemorySpace> = Job<
+  { unwatch: Query<Space>; watch?: undefined },
+  Unit,
+  never
+>;
+
+export type SessionTask<Space extends MemorySpace> = UnwatchTask<Space> | WatchTask<Space>;
+
+export type Receipt<Command extends {}, Result extends {} | null, Effect> =
+  | { the: "task/return"; of: InvocationURL<Reference<Command>>; is: Awaited<Result> }
+  | (Effect extends never
+      ? never
+      : { the: "task/effect"; of: InvocationURL<Reference<Command>>; is: Effect });
+
+export type Effect<Of extends {}, Command> = {
+  of: Reference<Of>;
+  run: Command;
+  is?: undefined;
+};
+
+export type Return<Of extends {}, Result extends {} | null> = {
+  of: Reference<Of>;
+  is: Result;
+  run?: undefined;
+};
+
+export type SubscriptionCommand<Space extends MemorySpace = MemorySpace> = {
+  transact?: Transaction<Space>;
+  brief?: Brief<Space>;
+};
+
+export type Brief<Space extends MemorySpace = MemorySpace> = {
+  sub: Space;
+  args: {
+    selector: Selector;
+    selection: Selection<Space>;
+  };
+  meta?: Meta;
+};
+
+export interface Session<Space extends MemorySpace = MemorySpace> {
+  /**
+   * Transacts can be used to assert or retract a document from the repository.
+   * If `version` asserted / retracted does not match version of the document
+   * transaction fails with `ConflictError`. Otherwise document is updated to
+   * the new value.
+   */
+  transact(transact: Transaction<Space>): TransactionResult<Space>;
+
+  /**
+   * Queries space for matching entities based on provided selector.
+   */
+  query(source: Query<Space>): QueryResult<Space>;
+
+  close(): CloseResult;
+}
+
+export interface SpaceSession<Space extends MemorySpace = MemorySpace> extends Session {
+  subject: Space;
+
+  transact(transact: Transaction<Space>): Result<Commit<Space>, ConflictError | TransactionError>;
+  query(source: Query<Space>): Result<Selection<Space>, QueryError>;
+  close(): Result<Unit, SystemError>;
+}
+
+export interface MemorySession<Space extends MemorySpace = MemorySpace> extends Session<Space> {
+  subscribe(subscriber: Subscriber<Space>): SubscribeResult;
+  unsubscribe(subscriber: Subscriber<Space>): SubscribeResult;
+}
+
+export interface Subscriber<Space extends MemorySpace = MemorySpace> {
+  transact(transaction: Transaction<Space>): AwaitResult<Unit, SystemError>;
+  close(): AwaitResult<Unit, SystemError>;
+}
+
+export type SubscribeResult = AwaitResult<Unit, SystemError>;
+
+/**
+ * Represents a subscription controller that can be used to publish commands or
+ * to close subscription.
+ */
+export interface SubscriptionController {
+  open: boolean;
+  close(): void;
+  transact(source: Transaction): void;
+  brief(source: Brief): void;
+}
+
+/**
+ * Unique identifier for the memory space.
+ */
+export type MemorySpace = `did:${string}:${string}`;
 
 /**
  * Unique identifier for the mutable entity.
  */
-export type Entity = string & { toString(): Entity };
+export type Entity = `${string}:${string}`;
 
 /**
  * Type of the fact, usually formatted as media type. By default we expect
@@ -24,61 +256,28 @@ export type Entity = string & { toString(): Entity };
  */
 export type The = string & { toString(): The };
 
+export type Cause<T = Assertion | Retraction | Unclaimed> = string & { toString(): Cause<T> };
+
+export type InvocationURL<T> = `job:${string}` & { toString(): InvocationURL<T> };
+
 /**
  * Describes not yet claimed memory. It describes a lack of fact about memory.
  */
-export interface Unclaimed {
+export interface Unclaimed<T extends The = The, Of extends Entity = Entity> {
   /**
    * Type of the fact, usually formatted as media type. By default we expect
    * this to be  "application/json", but in the future we may support other
    * data types.
    */
-  the: The;
+  the: T;
 
   /**
    * Stable memory identifier that uniquely identifies it.
    */
-  of: Entity;
+  of: Of;
 
   is?: undefined;
   cause?: undefined;
-}
-
-/**
- * Claim denotes a memory state. It describes an immutable value (is) being
- * assigned to the mutable entity (of) of a specific type (the) at given
- * succession denoted by causal reference (cause) to a prior fact about the
- * same memory ({the, of}).
- */
-export interface Statement {
-  /**
-   * Type of the fact, usually formatted as media type. By default we expect
-   * this to be  "application/json", but in the future we may support other
-   * data types.
-   */
-  the: The;
-
-  /**
-   * Stable memory identifier that uniquely identifies it.
-   */
-  of: Entity;
-
-  /**
-   * Current value held by the memory. It can be inlined `JSON` value or a
-   * merkle reference to one.
-   */
-  is: JSONValue | Reference<JSONValue>;
-
-  /**
-   * Reference to the previous `Fact` this one succeeds. When omitted or set
-   * to `null` it implies that this is the first assertion made about the
-   * `{the, of}` and in such case
-   */
-  cause?: Reference<Fact> | Reference<Unclaimed> | null;
-}
-
-export interface Claim extends Statement {
-  is: JSONValue;
 }
 
 /**
@@ -87,19 +286,46 @@ export interface Claim extends Statement {
  * to assert facts, wile {@link Statement}s are used to retract them. This allows
  * retracting over the wire without having to sending JSON values back and forth.
  */
-export interface Assertion extends Claim {
-  cause: Reference<Fact> | Reference<Unclaimed>;
+export interface Assertion<
+  T extends The = The,
+  Of extends Entity = Entity,
+  Is extends JSONValue = JSONValue,
+> {
+  the: T;
+  of: Of;
+  is: Is;
+  cause:
+    | Reference<Assertion<T, Of, Is>>
+    | Reference<Retraction<T, Of, Is>>
+    | Reference<Unclaimed<T, Of>>;
 }
 
 /**
  * Represents retracted {@link Assertion}. It is effectively a tombstone
  * denoting assertion that no longer hold and is a fact in itself.
  */
-export interface Retraction {
-  the: The;
-  of: Entity;
+export interface Retraction<
+  T extends The = The,
+  Of extends Entity = Entity,
+  Is extends JSONValue = JSONValue,
+> {
+  the: T;
+  of: Of;
   is?: undefined;
-  cause: Reference<Assertion>;
+  cause: Reference<Assertion<T, Of, Is>>;
+}
+
+export interface Invariant<
+  T extends The = The,
+  Of extends Entity = Entity,
+  Is extends JSONValue = JSONValue,
+> {
+  the: T;
+  of: Of;
+  fact: Reference<Fact<T, Of, Is>>;
+
+  is?: undefined;
+  cause?: undefined;
 }
 
 /**
@@ -107,49 +333,189 @@ export interface Retraction {
  * represented as {@link Assertion} or since retracted and therefor represented
  * by {@link Retraction}.
  */
-export type Fact = Assertion | Retraction;
+export type Fact<
+  T extends The = The,
+  Of extends Entity = Entity,
+  Is extends JSONValue = JSONValue,
+> = Assertion<T, Of, Is> | Retraction<T, Of, Is>;
+
+export type Statement<
+  T extends The = The,
+  Of extends Entity = Entity,
+  Is extends JSONValue = JSONValue,
+> = Assertion<T, Of, Is> | Retraction<T, Of, Is> | Invariant<T, Of, Is>;
 
 export type State = Fact | Unclaimed;
 
 export type Assert = {
-  assert: Claim;
+  assert: Assertion;
   retract?: undefined;
+  claim?: undefined;
 };
 
 export type Retract = {
-  retract: Statement;
+  retract: Retraction;
   assert?: undefined;
+  claim?: undefined;
 };
-export type Transaction = Assert | Retract;
 
-export type InferTransactionResult<Transaction> = Transaction extends Assert
-  ? Result<Assertion, ToJSON<ConflictError> | ToJSON<TransactionError>>
-  : Result<Retraction, ToJSON<ConflictError> | ToJSON<TransactionError>>;
+export type Claim = {
+  claim: Invariant;
+  assert?: undefined;
+  retract?: undefined;
+};
+
+// export interface Commit extends Assertion {
+//   the: "application/commit+json";
+//   is: {
+//     since: number;
+//     transaction: Transaction;
+//   };
+// }
+export type Commit<Subject extends string = MemorySpace> = {
+  [of in Subject]: {
+    ["application/commit+json"]: {
+      [cause: Cause]: {
+        is: CommitData;
+      };
+    };
+  };
+};
+
+export type CommitData = {
+  since: number;
+  transaction: Transaction;
+};
+
+export type ClaimFact = true;
+
+// ⚠️ Note we use `void` as opposed to `undefined` because later makes it
+// incompatible with JSONValue.
+export type RetractFact = { is?: void };
+export type AssertFact<Is extends JSONValue = JSONValue> = { is: Is };
+
+export type ChangesBuilder<
+  T extends The = The,
+  Of extends Entity = Entity,
+  Is extends JSONValue = JSONValue,
+> = {
+  [of in Of]: {
+    [the in T]: {
+      [cause: Cause]: RetractFact | AssertFact<Is> | ClaimFact;
+    };
+  };
+};
+
+export type FactSelection<
+  T extends The = The,
+  Of extends Entity = Entity,
+  Is extends JSONValue = JSONValue,
+> = {
+  [of in Of]: {
+    [the in T]: {
+      [cause: Cause]: RetractFact | AssertFact<Is>;
+    };
+  };
+};
+
+export type Meta = Record<string, string>;
+
+export type Principal = `did:${string}:${string}`;
+
+export type Transaction<Space extends MemorySpace = MemorySpace> = {
+  iss: Principal;
+  sub: Space;
+  cmd: "/memory/transact";
+  args: { changes: ChangesBuilder };
+  meta?: Meta;
+};
+
+export type TransactionResult<Space extends MemorySpace = MemorySpace> = AwaitResult<
+  Commit<Space>,
+  ConflictError | TransactionError | ConnectionError
+>;
+
+export type Query<Space extends MemorySpace = MemorySpace> = {
+  iss: Principal;
+  sub: Space;
+  cmd: "/memory/query";
+  meta?: Meta;
+  args: { select: Selector; since?: number };
+};
+
+export type Subscribe<Space extends MemorySpace = MemorySpace> = {
+  iss: Principal;
+  sub: Space;
+  cmd: "/memory/query/subscribe";
+  args: { select: Selector; since?: number };
+  meta?: Meta;
+};
+
+export type Unsubscribe<Space extends MemorySpace = MemorySpace> = {
+  iss: Principal;
+  sub: Space;
+  cmd: "/memory/query/unsubscribe";
+  args: { source: InvocationURL<Reference<Subscribe<Space>>> };
+  Meta?: Meta;
+};
+
+export type QueryResult<Space extends MemorySpace = MemorySpace> = AwaitResult<
+  Selection<Space>,
+  QueryError | ConnectionError
+>;
+
+export type CloseResult = AwaitResult<Unit, SystemError>;
+
+export type WatchResult = AwaitResult<Unit, QueryError | ConnectionError>;
+
+export type SubscriptionQuery = {
+  iss: Principal;
+  sub: MemorySpace;
+  cmd: "/memory/query";
+  args: {
+    select: Selector;
+    since?: number;
+  };
+};
+
+export type SelectAll = "_";
+export type Select<Key extends string, Match> = {
+  [key in Key]: Match;
+} & {
+  _?: Match;
+};
 
 /**
  * Selector that replica can be queried by.
  */
-export interface Selector {
-  the: The;
-  of: Entity;
-}
+export type Selector = Select<Entity, Select<The, Select<Cause, { is?: Unit }>>>;
+
+export type Selection<Space extends MemorySpace = MemorySpace> = {
+  [space in Space]: FactSelection;
+};
+
+export type Unit = {};
 
 /**
  * Generic type used to annotate underlying type with a context of the replica.
  */
-export type In<T> = { [For: ReplicaID]: T };
+export type In<T> = { [For: MemorySpace]: T };
 
 export type JSONValue = null | boolean | number | string | JSONObject | JSONArray;
 
 export interface JSONObject extends Record<string, JSONValue> {}
 
-export interface JSONArray extends Array<JSONValue> {}
+export interface JSONArray extends ArrayLike<JSONValue> {}
 
-export type AsyncResult<T extends {} = {}, E extends Error = Error> = Promise<Result<T, E>>;
+export type AsyncResult<T extends Unit = Unit, E extends Error = Error> = Promise<Result<T, E>>;
 
-export type Result<T extends {} = {}, E extends Error = Error> = Ok<T> | Fail<E>;
+export type Await<T> = PromiseLike<T> | T;
 
-export interface Ok<T extends {}> {
+export type AwaitResult<T extends Unit = Unit, E extends Error = Error> = Await<Result<T, E>>;
+
+export type Result<T extends Unit = Unit, E extends Error = Error> = Ok<T> | Fail<E>;
+
+export interface Ok<T extends Unit> {
   ok: T;
   /**
    * Discriminant to differentiate between Ok and Fail.
@@ -169,7 +535,7 @@ export type Conflict = {
   /**
    * Identifier of the replica where conflict occurred.
    */
-  in: ReplicaID;
+  space: MemorySpace;
 
   /**
    * Type of the fact where a conflict occurred.
@@ -198,6 +564,8 @@ export type ToJSON<T> = T & {
 
 export interface ConflictError extends Error {
   name: "ConflictError";
+
+  transaction: Transaction;
   conflict: Conflict;
 }
 
@@ -220,19 +588,15 @@ export interface TransactionError extends Error {
   /**
    * Fact being stored when the error occurred.
    */
-  fact: Fact & { in: ReplicaID };
+  transaction: Transaction;
 }
 
 export interface QueryError extends Error {
   name: "QueryError";
   cause: SystemError;
-  selector: Selector & { in: ReplicaID };
-}
 
-export interface ListError extends Error {
-  name: "ListError";
-  cause: SystemError;
-  selector: { in: ReplicaID; the?: string; of?: string };
+  space: MemorySpace;
+  selector: Selector;
 }
 
 /**

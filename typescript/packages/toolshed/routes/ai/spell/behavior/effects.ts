@@ -13,7 +13,20 @@ export async function getAllMemories(
   replica: string,
 ): Promise<Record<string, any>> {
   const res = await client.api.storage.memory.$post({
-    json: { [replica]: { the: "application/json" } },
+    json: {
+      cmd: "/memory/query",
+      iss: "did:web:common.tools",
+      sub: replica,
+      args: {
+        select: {
+          _: {
+            "application/json": {
+              is: {},
+            },
+          },
+        },
+      },
+    },
   });
   const data = await res.json();
   if ("error" in data) {
@@ -62,7 +75,7 @@ export async function getAllBlobs(
 
 export async function getBlob(key: string): Promise<unknown> {
   const res = await client.api.storage.blobby[":key"].$get({ param: { key } });
-  const data = await res.json() as any;
+  const data = (await res.json()) as any;
 
   if ("error" in data) {
     throw new Error(data.error);

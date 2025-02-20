@@ -8,26 +8,24 @@ import type {
   SystemError,
   ConnectionError,
   Selector,
-  ListError,
-  The,
+  Transaction,
 } from "./interface.ts";
-import { ReplicaID } from "./interface.ts";
+import { MemorySpace } from "./interface.ts";
 import { refer } from "./util.ts";
 
-export const conflict = (info: Conflict): ToJSON<ConflictError> => new TheConflictError(info);
+export const conflict = (transaction: Transaction, info: Conflict): ToJSON<ConflictError> =>
+  new TheConflictError(transaction, info);
 
-export const transaction = (fact: InFact, cause: SystemError): ToJSON<TransactionError> =>
-  new TheTransactionError(fact, cause);
+export const transaction = (
+  transaction: Transaction,
+  cause: SystemError,
+): ToJSON<TransactionError> => new TheTransactionError(transaction, cause);
 
 export const query = (
-  selector: Selector & { in: ReplicaID },
+  space: MemorySpace,
+  selector: Selector,
   cause: SystemError,
-): ToJSON<QueryError> => new TheQueryError(selector, cause);
-
-export const list = (
-  selector: { in: ReplicaID; the?: string; of?: string },
-  cause: SystemError,
-): ToJSON<ListError> => new TheListError(selector, cause);
+): ToJSON<QueryError> => new TheQueryError(space, selector, cause);
 
 export const connection = (address: URL, cause: SystemError): ToJSON<ConnectionError> =>
   new TheConnectionError(address.href, cause);
@@ -35,15 +33,15 @@ export const connection = (address: URL, cause: SystemError): ToJSON<ConnectionE
 export class TheConflictError extends Error implements ConflictError {
   override name = "ConflictError" as const;
   conflict: Conflict;
-  constructor(conflict: Conflict) {
+  constructor(public transaction: Transaction, conflict: Conflict) {
     super(
       conflict.expected == null
-        ? `The ${conflict.the} of ${conflict.of} in ${conflict.in} already exists as ${refer(
+        ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} already exists as ${refer(
             conflict.actual,
           )}`
         : conflict.actual == null
-        ? `The ${conflict.the} of ${conflict.of} in ${conflict.in} was expected to be ${conflict.expected}, but it does not exists`
-        : `The ${conflict.the} of ${conflict.of} in ${conflict.in} was expected to be ${
+        ? `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${conflict.expected}, but it does not exists`
+        : `The ${conflict.the} of ${conflict.of} in ${conflict.space} was expected to be ${
             conflict.expected
           }, but it is ${refer(conflict.actual)}`,
     );
@@ -57,6 +55,7 @@ export class TheConflictError extends Error implements ConflictError {
       stack: this.stack ?? "",
       message: this.message,
       conflict: this.conflict,
+      transaction: this.transaction,
     };
   }
 }
@@ -65,15 +64,15 @@ export type InFact = Fact & { in: string };
 
 export class TheTransactionError extends Error implements TransactionError {
   override name = "TransactionError" as const;
-  constructor(public fact: InFact, public override cause: SystemError) {
-    super(`Failed to update ${fact.the} of ${fact.of} in ${fact.in}: ${cause.message}`);
+  constructor(public transaction: Transaction, public override cause: SystemError) {
+    super(`Failed to commit transaction because: ${cause.message}`);
   }
   toJSON(): TransactionError {
     return {
       name: this.name,
       stack: this.stack ?? "",
       message: this.message,
-      fact: this.fact,
+      transaction: this.transaction,
       cause: {
         name: this.cause.name,
         code: this.cause.code,
@@ -86,41 +85,19 @@ export class TheTransactionError extends Error implements TransactionError {
 
 export class TheQueryError extends Error implements QueryError {
   override name = "QueryError" as const;
-  constructor(public selector: Selector & { in: ReplicaID }, public override cause: SystemError) {
-    const { the, of } = selector;
-    super(`Query ${JSON.stringify({ the, of })} in ${selector.in} failed: ${cause.message}`);
+  constructor(
+    public space: MemorySpace,
+    public selector: Selector,
+    public override cause: SystemError,
+  ) {
+    super(`Query ${JSON.stringify(selector)} in ${space} failed: ${cause.message}`);
   }
   toJSON(): QueryError {
     return {
       name: this.name,
       stack: this.stack ?? "",
       message: this.message,
-      selector: this.selector,
-      cause: {
-        name: this.cause.name,
-        code: this.cause.code,
-        message: this.cause.message,
-        stack: this.cause.stack ?? "",
-      },
-    };
-  }
-}
-
-export class TheListError extends Error implements ListError {
-  override name = "ListError" as const;
-  constructor(
-    public selector: { in: ReplicaID; the?: string; of?: string },
-    public override cause: SystemError,
-  ) {
-    super(
-      `List query ${JSON.stringify({ the: selector.the, of: selector.of })} in ${selector.in} failed: ${cause.message}`,
-    );
-  }
-  toJSON(): ListError {
-    return {
-      name: this.name,
-      stack: this.stack ?? "",
-      message: this.message,
+      space: this.space,
       selector: this.selector,
       cause: {
         name: this.cause.name,
