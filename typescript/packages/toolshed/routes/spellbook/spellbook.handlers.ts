@@ -6,6 +6,30 @@ import env from "@/env.ts";
 
 const client = hc<AppType>("http://localhost:8000");
 
+interface SpellData {
+  spellbookTitle?: string;
+  recipeName?: string;
+  spellbookDescription?: string;
+  spellbookTags?: string[];
+  spellbookUI?: any;
+  spellbookPublishedAt?: string;
+  spellbookAuthor?: string;
+  [key: string]: any;
+}
+
+function toSpell(hash: string, blobData: SpellData) {
+  return {
+    id: hash.replace("spellbook-", ""),
+    title: blobData.spellbookTitle || blobData.recipeName || "Unnamed Spell",
+    description: blobData.spellbookDescription || "",
+    tags: blobData.spellbookTags || [],
+    ui: blobData.spellbookUI || null,
+    publishedAt: blobData.spellbookPublishedAt || "",
+    author: blobData.spellbookAuthor || "Anonymous",
+    data: blobData,
+  };
+}
+
 export const createSpellHandler: AppRouteHandler<typeof createSpell> = async (
   c,
 ) => {
@@ -73,17 +97,8 @@ export const listSpellsHandler: AppRouteHandler<typeof listSpells> = async (
 
     const data = await blobsRes.json();
     const spells = Object.entries(data).map((
-      [hash, blobData]: [string, any],
-    ) => ({
-      id: hash.replace("spellbook-", ""),
-      title: blobData.spellbookTitle || blobData.recipeName || "Unnamed Spell",
-      description: blobData.spellbookDescription || "",
-      tags: blobData.spellbookTags || [],
-      ui: blobData.spellbookUI || null,
-      publishedAt: blobData.spellbookPublishedAt || "",
-      author: blobData.spellbookAuthor || "Anonymous",
-      data: blobData,
-    }));
+      [hash, blobData]: [string, SpellData],
+    ) => toSpell(hash, blobData));
 
     return c.json({ spells });
   } catch (error) {
@@ -107,16 +122,7 @@ export const getSpellHandler: AppRouteHandler<typeof getSpell> = async (c) => {
     }
 
     const blobData = await response.json();
-    const spell = {
-      id: hash.replace("spellbook-", ""),
-      title: blobData.spellbookTitle || blobData.recipeName || "Unnamed Spell",
-      description: blobData.spellbookDescription || "",
-      tags: blobData.spellbookTags || [],
-      ui: blobData.spellbookUI || null,
-      publishedAt: blobData.spellbookPublishedAt || "",
-      author: blobData.spellbookAuthor || "Anonymous",
-      data: blobData,
-    };
+    const spell = toSpell(hash, blobData);
 
     return c.json(spell);
   } catch (error) {
