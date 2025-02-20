@@ -1,10 +1,15 @@
 import * as ed25519 from "@noble/ed25519";
 import { KeyPair, InsecureCryptoKeyPair, KeyPairRaw } from "../keys.js";
+import { keyToDid } from "./utils.js";
 
 export class NobleEd25519 implements KeyPair {
   private keypair: InsecureCryptoKeyPair;
   constructor(keypair: InsecureCryptoKeyPair) {
     this.keypair = keypair;
+  }
+
+  async did(): Promise<string> {
+    return keyToDid(this.keypair.publicKey);
   }
 
   serialize(): KeyPairRaw {

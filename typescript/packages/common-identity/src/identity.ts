@@ -13,6 +13,11 @@ export class Identity implements KeyPair {
     this.keypair = keypair;
   }
 
+  // Return the DID key of this keypair's public key.
+  async did() {
+    return await this.keypair.did();
+  }
+
   // Sign `data` with this identity.
   async sign(data: Uint8Array): Promise<Uint8Array> {
     return await this.keypair.sign(data);
@@ -34,7 +39,7 @@ export class Identity implements KeyPair {
     const hashed = await hash(seed);
     const signed = await this.sign(hashed);
     const signedHash = await hash(signed);
-    return await Identity.generateFromRaw(signedHash);
+    return await Identity.generateFromRaw(new Uint8Array(signedHash.subarray(0, 32)));
   }
 
   // Generate a new identity from raw ed25519 key material.

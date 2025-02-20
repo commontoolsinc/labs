@@ -1,6 +1,8 @@
-import { KeyPair, KeyPairStatic, KeyPairRaw, isInsecureCryptoKeyPair, isCryptoKeyPair } from "../keys.js";
+import { KeyPair, KeyPairRaw, isInsecureCryptoKeyPair, isCryptoKeyPair } from "../keys.js";
 import { NativeEd25519 } from "./native.js";
 import { NobleEd25519 } from "./noble.js";
+
+type Impl = NativeEd25519 | NobleEd25519;
 
 // Platform-specific implementation of an ED25519 Keypair.
 //
@@ -10,9 +12,19 @@ import { NobleEd25519 } from "./noble.js";
 //
 // [0]: https://caniuse.com/mdn-api_subtlecrypto_sign_ed25519
 export class Ed25519KeyPair implements KeyPair {
-  private impl: KeyPair;
-  constructor(impl: KeyPair) {
+  private impl: Impl;
+  private _did: string | null;
+  constructor(impl: Impl) {
     this.impl = impl;
+    this._did = null;
+  }
+
+  async did() {
+    if (this._did) {
+      return this._did;
+    }
+    this._did = await this.impl.did();
+    return this._did;
   }
 
   serialize(): KeyPairRaw {
@@ -28,13 +40,15 @@ export class Ed25519KeyPair implements KeyPair {
   }
 
   static async generateFromRaw(rawPrivateKey: Uint8Array): Promise<Ed25519KeyPair> {
-    let Class: KeyPairStatic = (await NativeEd25519.isSupported()) ? NativeEd25519 : NobleEd25519;
-    return new Ed25519KeyPair(await Class.generateFromRaw(rawPrivateKey)); 
+    return new Ed25519KeyPair(await NativeEd25519.isSupported() ?
+      await NativeEd25519.generateFromRaw(rawPrivateKey) :
+      await NobleEd25519.generateFromRaw(rawPrivateKey));
   }
   
   static async generate(): Promise<Ed25519KeyPair> {
-    let Class: KeyPairStatic = (await NativeEd25519.isSupported()) ? NativeEd25519 : NobleEd25519;
-    return new Ed25519KeyPair(await Class.generate()); 
+    return new Ed25519KeyPair(await NativeEd25519.isSupported() ?
+      await NativeEd25519.generate() :
+      await NobleEd25519.generate());
   }
 
   static deserialize(input: KeyPairRaw): Ed25519KeyPair {
