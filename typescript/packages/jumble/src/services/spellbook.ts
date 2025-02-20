@@ -1,7 +1,8 @@
-const BLOBBY_BASE_URL = "https://toolshed.saga-castor.ts.net/api/storage/blobby";
+const TOOLSHED_API_URL = import.meta.env.TOOLSHED_API_URL || "http://localhost:8000";
+const BLOBBY_BASE_URL = `${TOOLSHED_API_URL}/api/storage/blobby`;
 
-import { getRecipeSpec, getRecipeSrc, getRecipeParents, getRecipe } from "@commontools/runner";
-import { NAME, TYPE, UI } from "@commontools/builder";
+import { getRecipeSpec, getRecipeSrc, getRecipeParents } from "@commontools/runner";
+import { UI } from "@commontools/builder";
 
 export async function saveSpell(
   spellId: string,

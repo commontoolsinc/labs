@@ -59,7 +59,7 @@ export function ShellHeader({
       const success = await saveSpell(spellId, spell, data.title, data.description, data.tags);
 
       if (success) {
-        const spellbookUrl = `https://toolshed.saga-castor.ts.net/spellbook/spellbook-${spellId}`;
+        const spellbookUrl = `${import.meta.env.TOOLSHED_API_URL || "http://localhost:8000"}/spellbook/spellbook-${spellId}`;
         try {
           await navigator.clipboard.writeText(spellbookUrl);
           toast.success("Published to Spellbook Jr! Spellbook link copied to clipboard");
@@ -95,7 +95,7 @@ export function ShellHeader({
           <>
             <NavLink
               to={togglePath}
-              className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors relative group ${
+              className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors relative group z-10 ${
                 isDetailActive
                   ? "bg-gray-300 hover:bg-gray-400 text-black"
                   : "bg-transparent text-black hover:bg-gray-200"
@@ -108,7 +108,7 @@ export function ShellHeader({
             </NavLink>
             <button
               onClick={() => setIsShareDialogOpen(true)}
-              className="w-10 h-10 flex items-center justify-center rounded-lg transition-colors relative group bg-transparent text-black hover:bg-gray-200"
+              className="w-10 h-10 flex items-center justify-center rounded-lg transition-colors relative group bg-transparent text-black hover:bg-gray-200 z-10 cursor-pointer"
             >
               <LuShare2 size={16} />
               <div className="absolute top-10 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
@@ -119,7 +119,7 @@ export function ShellHeader({
         )}
         <NavLink
           to="/spellbook"
-          className="brand flex items-center gap-2 opacity-30 hover:opacity-100 transition-opacity duration-200 relative group cursor-pointer"
+          className="brand flex items-center gap-2 opacity-30 hover:opacity-100 transition-opacity duration-200 relative group cursor-pointer z-10"
         >
           <ShapeLogo width={32} height={32} shapeColor="#7F08EA" containerColor="#B77EEA" />
           <div className="absolute top-10 left-1/2 -translate-x-2/3 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">

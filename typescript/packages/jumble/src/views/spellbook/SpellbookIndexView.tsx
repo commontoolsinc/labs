@@ -95,9 +95,11 @@ export default function SpellbookIndexView() {
   );
 
   return (
-    <div className="shell h-full bg-gray-50 border-2 border-black">
+    <div className="shell h-screen flex flex-col bg-gray-50 border-2 border-black">
       <SpellbookHeader />
-      <div className="relative h-full p-4">{content}</div>
+      <div className="flex-1 overflow-auto">
+        <div className="p-4 pb-8">{content}</div>
+      </div>
     </div>
   );
 }

@@ -1,4 +1,5 @@
-const BLOBBY_BASE_URL = "https://toolshed.saga-castor.ts.net/api/storage/blobby";
+const TOOLSHED_API_URL = import.meta.env.TOOLSHED_API_URL || "http://localhost:8000";
+const BLOBBY_BASE_URL = `${TOOLSHED_API_URL}/api/storage/blobby`;
 
 export const getAllBlobs = async () => {
   const response = await fetch(`${BLOBBY_BASE_URL}?all=true&prefix=spell-`);

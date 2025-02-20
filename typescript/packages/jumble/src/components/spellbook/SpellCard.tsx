@@ -30,31 +30,31 @@ export default function SpellCard({ hash, title, tags, ui, likes, comments }: Sp
         shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]
         hover:translate-y-[-2px] hover:shadow-[2px_4px_0px_0px_rgba(0,0,0,0.7)]
         transition-[transform,shadow] duration-100 ease-in-out
+        relative
       "
     >
-      <div className="relative aspect-video w-full border-b-2 border-black overflow-hidden">
+      <div className="relative aspect-video w-full border-b-2 border-black overflow-hidden pointer-events-none select-none">
         <SpellPreview ui={ui} />
       </div>
       <div className="p-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-bold text-black">{title}</h2>
-          <div className="flex gap-1">
-            {tags.slice(0, 3).map((tag) => (
-              <span
-                key={tag}
-                onClick={(e) => handleTagClick(e, tag)}
-                className="
-                  text-sm bg-gray-100 px-2 py-1 border border-black
-                  hover:bg-gray-200 cursor-pointer transition-colors
-                "
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
+        <h2 className="text-xl font-bold text-black mb-2">{title}</h2>
+        <div className="flex flex-wrap gap-1">
+          {tags.slice(0, 3).map((tag) => (
+            <span
+              key={tag}
+              onClick={(e) => handleTagClick(e, tag)}
+              className="
+                text-sm bg-gray-100 px-2 py-1 border border-black
+                hover:bg-gray-200 cursor-pointer transition-colors
+                relative z-10
+              "
+            >
+              {tag}
+            </span>
+          ))}
         </div>
 
-        <div className="mt-4 flex items-center justify-between w-full text-sm text-gray-600">
+        <div className="mt-4 flex items-center justify-between w-full text-sm text-gray-600 pointer-events-none select-none">
           <div className="relative group">
             <div className="flex items-center gap-1 cursor-pointer">
               <LuHeart className="w-4 h-4" />
