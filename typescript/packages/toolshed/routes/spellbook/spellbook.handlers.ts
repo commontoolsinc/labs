@@ -4,6 +4,7 @@ import type {
   getSpell,
   likeSpell,
   listSpells,
+  toggleLike,
   unlikeSpell,
 } from "./spellbook.routes.ts";
 import { hc } from "hono/client";
@@ -153,7 +154,7 @@ export const getSpellHandler: AppRouteHandler<typeof getSpell> = async (c) => {
   }
 };
 
-export const likeSpellHandler: AppRouteHandler<typeof likeSpell> = async (
+export const toggleLikeHandler: AppRouteHandler<typeof toggleLike> = async (
   c,
 ) => {
   const logger = c.get("logger");
@@ -179,7 +180,14 @@ export const likeSpellHandler: AppRouteHandler<typeof likeSpell> = async (
 
     const blobData = await getRes.json();
     const likes = new Set(blobData.spellbookLikes || []);
-    likes.add(requesterProfile.shortName);
+    const wasLiked = likes.has(requesterProfile.shortName);
+
+    // Toggle the like
+    if (wasLiked) {
+      likes.delete(requesterProfile.shortName);
+    } else {
+      likes.add(requesterProfile.shortName);
+    }
 
     // Update the spell with new likes
     const updateRes = await client.api.storage.blobby[":key"].$post({
@@ -194,69 +202,24 @@ export const likeSpellHandler: AppRouteHandler<typeof likeSpell> = async (
 
     if (!updateRes.ok) {
       logger.error("Failed to update spell likes:", await updateRes.text());
-      return c.json({ success: false, likes: Array.from(likes) }, 500);
+      return c.json({
+        success: false,
+        likes: Array.from(likes),
+        isLiked: wasLiked,
+      }, 500);
     }
 
     return c.json({
       success: true,
       likes: Array.from(likes),
+      isLiked: !wasLiked,
     });
   } catch (error) {
-    logger.error({ error }, "Error liking spell");
-    return c.json({ success: false, likes: [] }, 500);
-  }
-};
-
-export const unlikeSpellHandler: AppRouteHandler<typeof unlikeSpell> = async (
-  c,
-) => {
-  const logger = c.get("logger");
-  const spellId = c.req.param("spellId");
-  const requesterProfile = {
-    name: c.req.header("tailscale-user-name"),
-    email: c.req.header("tailscale-user-login"),
-    shortName: c.req.header("tailscale-user-login")?.split("@")[0] || "system",
-    avatar: c.req.header("tailscale-user-profile-pic"),
-  };
-
-  try {
-    // First get the current spell data
-    const getRes = await client.api.storage.blobby[":key"].$get({
-      param: {
-        key: `spellbook-${spellId}`,
-      },
-    });
-
-    if (!getRes.ok) {
-      return c.json({ error: "Spell not found" }, 404);
-    }
-
-    const blobData = await getRes.json();
-    const likes = new Set(blobData.spellbookLikes || []);
-    likes.delete(requesterProfile.shortName);
-
-    // Update the spell with new likes
-    const updateRes = await client.api.storage.blobby[":key"].$post({
-      param: {
-        key: `spellbook-${spellId}`,
-      },
-      json: {
-        ...blobData,
-        spellbookLikes: Array.from(likes),
-      },
-    });
-
-    if (!updateRes.ok) {
-      logger.error("Failed to update spell likes:", await updateRes.text());
-      return c.json({ success: false, likes: Array.from(likes) }, 500);
-    }
-
+    logger.error({ error }, "Error toggling spell like");
     return c.json({
-      success: true,
-      likes: Array.from(likes),
-    });
-  } catch (error) {
-    logger.error({ error }, "Error unliking spell");
-    return c.json({ success: false, likes: [] }, 500);
+      success: false,
+      likes: [],
+      isLiked: false,
+    }, 500);
   }
 };

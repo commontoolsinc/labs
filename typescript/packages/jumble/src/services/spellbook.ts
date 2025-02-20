@@ -22,6 +22,12 @@ export interface Spell {
   shares: number;
 }
 
+export interface LikeResponse {
+  success: boolean;
+  likes: string[];
+  isLiked: boolean;
+}
+
 export async function listAllSpells(searchQuery?: string): Promise<Spell[]> {
   const url = new URL(`${TOOLSHED_API_URL}/api/spellbook`);
   if (searchQuery) {
@@ -100,30 +106,15 @@ export async function saveSpell(
   }
 }
 
-export async function likeSpell(spellId: string): Promise<string[]> {
+export async function toggleLike(spellId: string): Promise<LikeResponse> {
   const response = await fetch(`${TOOLSHED_API_URL}/api/spellbook/${spellId}/like`, {
     method: "POST",
     cache: "no-store",
   });
 
   if (!response.ok) {
-    throw new Error("Failed to like spell");
+    throw new Error("Failed to toggle like");
   }
 
-  const data = await response.json();
-  return data.likes;
-}
-
-export async function unlikeSpell(spellId: string): Promise<string[]> {
-  const response = await fetch(`${TOOLSHED_API_URL}/api/spellbook/${spellId}/unlike`, {
-    method: "POST",
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    throw new Error("Failed to unlike spell");
-  }
-
-  const data = await response.json();
-  return data.likes;
+  return response.json();
 }

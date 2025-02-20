@@ -12,7 +12,7 @@ import {
   LuChevronRight,
   LuMessageSquare,
 } from "react-icons/lu";
-import { getSpell, type Spell, likeSpell, unlikeSpell } from "@/services/spellbook";
+import { getSpell, type Spell, toggleLike } from "@/services/spellbook";
 import { ActionButton } from "@/components/spellbook/ActionButton";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
 import { SpellPreview } from "@/components/spellbook/SpellPreview";
@@ -62,14 +62,14 @@ export default function SpellbookDetailView() {
     if (!spellId || !spell) return;
 
     try {
-      const likes = isLiked ? await unlikeSpell(spellId) : await likeSpell(spellId);
+      const { likes } = await toggleLike(spellId);
 
       setSpell({
         ...spell,
         likes,
       });
     } catch (error) {
-      console.error("Failed to update like:", error);
+      console.error("Failed to toggle like:", error);
     }
   };
 

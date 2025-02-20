@@ -48,8 +48,8 @@ export default function SpellbookIndexView() {
             title={spell.title}
             tags={spell.tags}
             ui={spell.ui}
-            likes={12}
-            comments={3}
+            likes={spell.likes.length}
+            comments={spell.comments.length}
           />
         ))}
       </div>
