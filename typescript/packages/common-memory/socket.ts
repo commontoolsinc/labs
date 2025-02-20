@@ -20,6 +20,7 @@ export const from = <In, Out>(socket: WebSocket): TransformStream<Out, In> => {
           controller.close();
         };
         socket.onerror = (event) => {
+          socket.onclose = null;
           controller.error(event);
         };
       },
