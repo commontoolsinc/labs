@@ -35,6 +35,7 @@ export default function SpellbookDetailView() {
   const [loading, setLoading] = useState(true);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [isCommentsExpanded, setIsCommentsExpanded] = useState(true);
+  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(true);
 
   useEffect(() => {
     const fetchSpell = async () => {
@@ -120,7 +121,7 @@ export default function SpellbookDetailView() {
               />
               <ActionButton
                 icon={<LuHeart size={24} className={isLiked ? "fill-black" : ""} />}
-                label="Like"
+                label="12 Likes"
                 onClick={handleLike}
                 popoverMessage="Liked!"
               />
@@ -135,8 +136,30 @@ export default function SpellbookDetailView() {
         </div>
 
         {spell.description && (
-          <div className="border-2 border-black p-4">
-            <p className="text-gray-600 text-lg">{spell.description}</p>
+          <div className="spell-description">
+            <ActionButton
+              className="w-full"
+              icon={
+                <div className="flex items-center gap-2">
+                  <LuBookOpen className="w-5 h-5" />
+                  <span className="text-lg font-semibold">Spellbook Description</span>
+                </div>
+              }
+              label={
+                isDescriptionExpanded ? (
+                  <LuChevronDown className="w-5 h-5" />
+                ) : (
+                  <LuChevronRight className="w-5 h-5" />
+                )
+              }
+              onClick={() => setIsDescriptionExpanded(!isDescriptionExpanded)}
+              popoverMessage=""
+            />
+            {isDescriptionExpanded && (
+              <div className="p-8 border-2 border-black">
+                <p className="text-gray-600 text-lg">{spell.description}</p>
+              </div>
+            )}
           </div>
         )}
 
@@ -229,9 +252,11 @@ export default function SpellbookDetailView() {
     );
 
   return (
-    <div className="shell h-full bg-gray-50 border-2 border-black">
+    <div className="shell h-screen flex flex-col bg-gray-50 border-2 border-black">
       <SpellbookHeader />
-      <div className="relative h-full p-4">{content}</div>
+      <div className="flex-1 overflow-auto">
+        <div className="p-4 pb-8">{content}</div>
+      </div>
     </div>
   );
 }
