@@ -26,7 +26,7 @@ export const effect = <T>(
   if (isCell(value)) {
     return value.sink(callback);
   } else {
-    const cancel = callback(value);
+    const cancel = callback(value as T);
     return isCancel(cancel) ? cancel : noOp;
   }
 };
