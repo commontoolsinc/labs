@@ -64,7 +64,10 @@ export const renderImpl = (parent: HTMLElement, view: VNode): Cancel => {
   }
   parent.append(root);
   logger.debug("Rendered", root);
-  return cancel;
+  return () => {
+    root.remove();
+    cancel();
+  };
 };
 
 export default render;
