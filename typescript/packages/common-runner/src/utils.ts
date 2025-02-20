@@ -404,7 +404,7 @@ export function compactifyPaths(entries: DocLink[]): DocLink[] {
   const cellToPaths = new Map<DocImpl<any>, PropertyKey[][]>();
   for (const { cell, path } of entries) {
     const paths = cellToPaths.get(cell) || [];
-    paths.push(path);
+    paths.push(path.map((key) => key.toString())); // Normalize to strings as keys
     cellToPaths.set(cell, paths);
   }
 
@@ -425,6 +425,7 @@ export function compactifyPaths(entries: DocLink[]): DocLink[] {
 }
 
 export function pathAffected(changedPath: PropertyKey[], path: PropertyKey[]) {
+  changedPath = changedPath.map((key) => key.toString()); // Normalize to strings as keys
   return (
     (changedPath.length <= path.length && changedPath.every((key, index) => key === path[index])) ||
     path.every((key, index) => key === changedPath[index])
