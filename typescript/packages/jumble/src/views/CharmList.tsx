@@ -2,9 +2,9 @@ import { useCell } from "@/hooks/use-cell";
 import { NavLink } from "react-router-dom";
 import { NAME, UI } from "@commontools/builder";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
-import { castNewRecipe, Charm } from "@commontools/charm";
+import { Charm } from "@commontools/charm";
 import { charmId } from "@/utils/charms";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card } from "@/components/Card";
 import { useParams } from "react-router-dom";
 import { render } from "@commontools/html";
@@ -65,35 +65,6 @@ export default function CharmList() {
   console.log("replicaName", replicaName);
   const { charmManager } = useCharmManager();
   const [charms] = useCell(charmManager.getCharms());
-  const commonImportRef = useRef<HTMLElement | null>(null);
-
-  const onImportLocalData = useCallback(
-    (event: CommonDataEvent) => {
-      const [data] = event.detail.data;
-      console.log("Importing local data:", data);
-      // FIXME(ja): this needs better error handling
-      const title = prompt("Enter a title for your recipe:");
-      if (!title) return;
-
-      castNewRecipe(charmManager, data, title);
-      // if (charmId) {
-      //   openCharm(charmId);
-      // }
-    },
-    [charmManager],
-  );
-
-  useEffect(() => {
-    const current = commonImportRef.current;
-    if (current) {
-      current.addEventListener("common-data", onImportLocalData as EventListener);
-    }
-    return () => {
-      if (current) {
-        current.removeEventListener("common-data", onImportLocalData as EventListener);
-      }
-    };
-  }, [replicaName, onImportLocalData]);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-8">
