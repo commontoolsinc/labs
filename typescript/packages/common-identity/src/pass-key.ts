@@ -1,3 +1,4 @@
+import { Identity } from "./identity.js";
 import { bufferSourceToArrayBuffer, random } from "./utils.js";
 
 const RP = "Common Tools";
@@ -23,15 +24,27 @@ export interface PassKeyGetOptions {
 
 // A `PassKey` represents an authentication via a WebAuthn authenticator.
 // A key must first be created for an origin, and then retrieved
-// as a `PassKey` instance. From there, a `RootKey` can be derived/stored.
+// as a `PassKey` instance. From there, a root key `Identity` can be derived/stored.
 export class PassKey {
   private credentials: PublicKeyCredential;
   private constructor(credentials: PublicKeyCredential) {
     this.credentials = credentials;
   }
 
+  // Generate a root key from a `PassKey`.
+  // A root key identity is deterministically derived from a `PassKey`'s
+  // PRF output, a 32-byte hash, which is used as ed25519 key material.
+  async createRootKey(): Promise<Identity> {
+    let seed = this.prf();
+    if (!seed) {
+      throw new Error("common-identity: No prf found from PassKey");
+    }
+
+    return await Identity.generateFromRaw(seed);
+  }
+
   // Return the secret 32-bytes derived from the passkey's PRF data.
-  prf(): Uint8Array | null {
+  private prf(): Uint8Array | null {
     // PRF results are only available when calling `get()`,
     // not during key creation.
     let extResults = this.getCredentials().getClientExtensionResults();

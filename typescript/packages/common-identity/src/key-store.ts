@@ -1,50 +1,51 @@
-import { Ed25519KeyPair } from "./ed25519/index.js";
+import { Identity } from "./identity.js";
 import { once } from "./utils.js";
 
-const DB_NAME = "key-store";
-const STORE_NAME = "key-store";
-const ROOT_KEY = "root-key";
+const DB_NAME = "common-key-store";
+const DEFAULT_STORE_NAME = "key-store";
 const DB_VERSION = 1;
 
 // An abstraction around storing key materials in IndexedDb.
-// For now, we use a hardcoded, well-known database, store, and key-name,
-// such that there's a single location to determine if a root key is
-// available.
 export class KeyStore {
+  static DEFAULT_STORE_NAME = DEFAULT_STORE_NAME;
   private db: DB;
-  constructor(db: DB) {
+  private storeName: string;
+
+  constructor(db: DB, storeName: string) {
     this.db = db;
+    this.storeName = storeName;
   }
 
-  // Get the `RootKey` keypair at the globally-known key space. 
-  async get(): Promise<Ed25519KeyPair | undefined> {
-    let result = await this.db.get(STORE_NAME, ROOT_KEY);
+  // Get the `name` keypair.
+  async get(name: string): Promise<Identity | undefined> {
+    let result = await this.db.get(this.storeName, name);
     if (result) {
-      return Ed25519KeyPair.deserialize(result);
+      return Identity.deserialize(result);
     }
     return result;
   }
   
-  // Set the global `RootKey` keypair at the globally-known key space. 
-  async set(value: Ed25519KeyPair): Promise<undefined> {
-    await this.db.set(STORE_NAME, ROOT_KEY, value.serialize());
+  // Set the `name` keypair with `value`.
+  async set(name: string, value: Identity): Promise<undefined> {
+    await this.db.set(this.storeName, name, value.serialize());
   }
 
   // Clear the key store's table.
   async clear(): Promise<any> {
-    return await this.db.clear(STORE_NAME);
+    return await this.db.clear(this.storeName);
   }
 
-  // Create a new instance of `KeyStore`.
-  static async open(): Promise<KeyStore> {
+  // Opens a new instance of `KeyStore`.
+  // If no `name` provided, `KeyStore.DEFAULT_STORE_NAME` is used. 
+  static async open(name = KeyStore.DEFAULT_STORE_NAME): Promise<KeyStore> {
     let db = await DB.open(DB_NAME, DB_VERSION, (e: IDBVersionChangeEvent) => {
       const { newVersion, oldVersion: _ } = e;
       if (newVersion !== DB_VERSION) { throw new Error("common-identity: Invalid DB version."); }
       if (!e.target) { throw new Error("common-identity: No target on change event."); }
       let db: IDBDatabase = (e.target as IDBRequest).result; 
-      db.createObjectStore(STORE_NAME);
+      db.createObjectStore(name);
     });
-    return new KeyStore(db);
+    return new KeyStore(db, name);
   }
 
 }

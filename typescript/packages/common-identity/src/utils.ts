@@ -18,6 +18,7 @@ export function once(target: EventTarget, eventName: string, callback: (e: any) 
 }
 
 const HASH_ALG = "SHA-512";
+// Hash input via SHA-512.
 export async function hash(input: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await window.crypto.subtle.digest(HASH_ALG, input));
 }
