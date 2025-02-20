@@ -4,6 +4,30 @@ import { isCell, createCell } from "./cell.js";
 import { type ReactivityLog } from "./scheduler.js";
 import { resolvePath, followLinks } from "./utils.js";
 
+/**
+ * Schemas are mostly a subset of JSONSchema.
+ *
+ * One addition is `asCell`. When true, the `.get()` returns an instance of
+ * `Cell`, i.e. a reactive reference to the value underneath. Some implications
+ * this has:
+ *  - If `log` is passed, it will be passed on to new cells, and unless that
+ *    cell is read, no further reads are logged down this branch.
+ *  - The cell reflects as closely as possible the current value. So it doesn't
+ *    change when the underlying reference changes. This is useful to e.g. to
+ *    read the current value of "currently selected item" and keep that constant
+ *    even if in the future another item is selected. NOTE:
+ *    - For this to work, the underlying value should be a reference itself.
+ *      Otherwise the closest parent document is used, so that e.g. reading
+ *      current.name tracks changes on current.
+ *    - If the value is an alias, aliases are followed first and the cell is
+ *      based on the first non-alias value. This is because writes will follow
+ *      aliases as well.
+ *
+ *  Calling `effect` on returned cells within a higher-level `effect` works as
+ *  expected. Be sure to track the cancels, though. (Tracking cancels isn't
+ *  necessary when using the schedueler directly)
+ */
+
 export function resolveSchema(
   schema: JSONSchema | undefined,
   rootSchema: JSONSchema | undefined = schema,
