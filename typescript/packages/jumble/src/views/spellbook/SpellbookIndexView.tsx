@@ -6,7 +6,7 @@ import { SearchBox } from "@/components/spellbook/SearchBox";
 import SpellCard from "@/components/spellbook/SpellCard";
 import { getAllSpellbookBlobs, getBlobByHash } from "@/services/blobby";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
-
+import { LoadingSpinner } from "@/components/Loader";
 interface Spell {
   hash: string;
   name: string;
@@ -60,7 +60,9 @@ export default function SpellbookIndexView() {
   });
 
   const content = loading ? (
-    <div className="text-center">Loading spells...</div>
+    <div className="flex justify-center items-center h-[50vh]">
+      <LoadingSpinner height={256} width={256} cameraZoom={50} />
+    </div>
   ) : (
     <div>
       <div className="mb-8">
