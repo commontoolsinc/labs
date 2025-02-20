@@ -1,26 +1,17 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { SpellPreview } from "@/components/spellbook/SpellPreview";
+import { LuHeart, LuMessageSquare, LuSend } from "react-icons/lu";
 
 interface SpellCardProps {
   hash: string;
   title: string;
   tags: string[];
   ui: any;
-  description: string;
-  publishedAt: string;
-  author: string;
-  data: any;
+  likes: number;
+  comments: number;
 }
 
-export default function SpellCard({
-  hash,
-  title,
-  tags,
-  description,
-  publishedAt,
-  author,
-  ui,
-}: SpellCardProps) {
+export default function SpellCard({ hash, title, tags, ui, likes, comments }: SpellCardProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -45,22 +36,52 @@ export default function SpellCard({
         <SpellPreview ui={ui} />
       </div>
       <div className="p-4">
-        <h2 className="text-xl font-bold text-black">{title}</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-black">{title}</h2>
+          <div className="flex gap-1">
+            {tags.slice(0, 3).map((tag) => (
+              <span
+                key={tag}
+                onClick={(e) => handleTagClick(e, tag)}
+                className="
+                  text-sm bg-gray-100 px-2 py-1 border border-black
+                  hover:bg-gray-200 cursor-pointer transition-colors
+                "
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        </div>
 
-        <p className="mt-2 text-sm text-black">by {author}</p>
-        <div className="mt-2 flex flex-wrap gap-1">
-          {tags.map((tag) => (
-            <span
-              key={tag}
-              onClick={(e) => handleTagClick(e, tag)}
-              className="
-                text-sm bg-gray-100 px-2 py-1 border border-black
-                hover:bg-gray-200 cursor-pointer transition-colors
-              "
-            >
-              {tag}
-            </span>
-          ))}
+        <div className="mt-4 flex items-center justify-between w-full text-sm text-gray-600">
+          <div className="relative group">
+            <div className="flex items-center gap-1 cursor-pointer">
+              <LuHeart className="w-4 h-4" />
+              <span>{likes}</span>
+            </div>
+            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black text-white px-2 py-1 text-sm border border-white pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
+              {likes} likes
+            </div>
+          </div>
+          <div className="relative group">
+            <div className="flex items-center gap-1 cursor-pointer">
+              <LuMessageSquare className="w-4 h-4" />
+              <span>{comments}</span>
+            </div>
+            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black text-white px-2 py-1 text-sm border border-white pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
+              {comments} comments
+            </div>
+          </div>
+          <div className="relative group">
+            <div className="flex items-center gap-1 cursor-pointer">
+              <LuSend className="w-4 h-4" />
+              <span>7</span>
+            </div>
+            <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black text-white px-2 py-1 text-sm border border-white pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
+              7 shares
+            </div>
+          </div>
         </div>
       </div>
     </Link>
