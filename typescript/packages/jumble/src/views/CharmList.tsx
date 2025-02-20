@@ -35,7 +35,7 @@ function CharmPreview({ charm, replicaName }: { charm: Charm; replicaName: strin
   useEffect(() => {
     if (!previewRef.current || !isIntersecting) return;
     const preview = previewRef.current;
-    const charmData = charm.cell.get()?.[UI];
+    const charmData = charm[UI];
     if (!charmData) return;
     preview.innerHTML = ""; // Clear any existing rendered content
     const cancel = render(preview, charmData);
@@ -47,7 +47,7 @@ function CharmPreview({ charm, replicaName }: { charm: Charm; replicaName: strin
       <NavLink to={`/${replicaName}/${charmId(charm)}`}>
         <div>
           <h3 className="text-xl font-semibold text-gray-800 mb-4">
-            {(charm.cell.getAsQueryResult()?.[NAME] || "Unnamed Charm") +
+            {(charm[NAME] || "Unnamed Charm") +
               ` (#${charmId(charm).slice(-4)})`}
           </h3>
           <div
@@ -99,7 +99,6 @@ export default function CharmList() {
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-8">
       {replicaName &&
         charms
-          .filter((c) => !!c.cell)
           .map((charm) => (
             <CharmPreview key={charmId(charm)} charm={charm} replicaName={replicaName} />
           ))}
