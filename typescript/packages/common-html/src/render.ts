@@ -107,16 +107,7 @@ const bindChildren = (
       let currentNode: ChildNode | null = null;
       const cancel = effect(child, (childValue: any) => {
         let newRendered: { node: ChildNode; cancel: Cancel };
-        if (
-          typeof childValue === "string" ||
-          typeof childValue === "number" ||
-          typeof childValue === "boolean"
-        ) {
-          newRendered = {
-            node: document.createTextNode(childValue.toString()),
-            cancel: () => {},
-          };
-        } else if (isVNode(childValue)) {
+        if (isVNode(childValue)) {
           const [childElement, childCancel] = renderNode(childValue);
           newRendered = {
             node: childElement ?? document.createTextNode(""),
@@ -143,6 +134,7 @@ const bindChildren = (
         currentNode = newRendered.node;
         return newRendered.cancel;
       });
+      logger.debug("renderChild", child.toJSON());
 
       return { node: currentNode!, cancel };
     } else {
@@ -200,7 +192,7 @@ const bindChildren = (
       }
     }
 
-    console.log("keyedChildren", newKeyOrder, newMapping, keyedChildren);
+    logger.debug("new element order", { newKeyOrder });
 
     keyedChildren = newMapping;
   };
@@ -222,17 +214,16 @@ const bindProps = (element: HTMLElement, props: Props): Cancel => {
   const [cancel, addCancel] = useCancelGroup();
   for (const [propKey, propValue] of Object.entries(props)) {
     if (isCell(propValue) || isStream(propValue)) {
-      const replacement = propValue;
       // If prop is an event, we need to add an event listener
       if (isEventProp(propKey)) {
-        if (!isStream(replacement)) {
+        if (!isStream(propValue)) {
           throw new TypeError(`Event prop "${propKey}" does not have a send method`);
         }
         const key = cleanEventProp(propKey);
         if (key != null) {
           const cancel = listen(element, key, (event) => {
             const sanitizedEvent = sanitizeEvent(event);
-            replacement.send(sanitizedEvent);
+            propValue.send(sanitizedEvent);
           });
           addCancel(cancel);
         } else {
@@ -242,10 +233,10 @@ const bindProps = (element: HTMLElement, props: Props): Cancel => {
         // Properties starting with $ get passed in as raw values, useful for
         // e.g. passing a cell itself instead of its value.
         const key = propKey.slice(1);
-        setProp(element, key, replacement);
+        setProp(element, key, propValue);
       } else {
-        const cancel = effect(replacement, (replacement) => {
-          console.log("prop update", propKey, replacement);
+        const cancel = effect(propValue, (replacement) => {
+          logger.debug("prop update", propKey, replacement);
           // Replacements are set as properties not attributes to avoid
           // string serialization of complex datatypes.
           setProp(element, propKey, replacement);
