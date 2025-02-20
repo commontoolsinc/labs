@@ -17,7 +17,11 @@ export const from = <In, Out>(socket: WebSocket): TransformStream<Out, In> => {
           }
         };
         socket.onclose = () => {
-          controller.close();
+          try {
+            controller.close();
+          } catch (error) {
+            controller.error(error)
+          }
         };
         socket.onerror = (event) => {
           controller.error(event);
