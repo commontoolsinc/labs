@@ -1,16 +1,28 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface ShareDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (data: { title: string; description: string; tags: string[] }) => void;
+  defaultTitle?: string;
+  isPublishing?: boolean;
 }
 
-export function ShareDialog({ isOpen, onClose, onSubmit }: ShareDialogProps) {
-  const [title, setTitle] = useState("");
+export function ShareDialog({
+  isOpen,
+  onClose,
+  onSubmit,
+  defaultTitle = "",
+  isPublishing = false,
+}: ShareDialogProps) {
+  const [title, setTitle] = useState(defaultTitle);
   const [description, setDescription] = useState("");
   const [tagInput, setTagInput] = useState("");
   const [tags, setTags] = useState<string[]>([]);
+
+  useEffect(() => {
+    setTitle(defaultTitle);
+  }, [defaultTitle]);
 
   if (!isOpen) return null;
 
@@ -68,7 +80,6 @@ export function ShareDialog({ isOpen, onClose, onSubmit }: ShareDialogProps) {
       addTag(tagInput);
     }
     onSubmit({ title, description, tags });
-    onClose();
   };
 
   return (
@@ -84,6 +95,7 @@ export function ShareDialog({ isOpen, onClose, onSubmit }: ShareDialogProps) {
               onChange={(e) => setTitle(e.target.value)}
               className="w-full px-3 py-2 border-2 border-black"
               required
+              disabled={isPublishing}
             />
           </div>
 
@@ -94,6 +106,7 @@ export function ShareDialog({ isOpen, onClose, onSubmit }: ShareDialogProps) {
               onChange={(e) => setDescription(e.target.value)}
               className="w-full px-3 py-2 border-2 border-black"
               rows={3}
+              disabled={isPublishing}
             />
           </div>
 
@@ -111,6 +124,7 @@ export function ShareDialog({ isOpen, onClose, onSubmit }: ShareDialogProps) {
                       type="button"
                       onClick={() => removeTag(tag)}
                       className="ml-1 text-black hover:text-gray-700"
+                      disabled={isPublishing}
                     >
                       ×
                     </button>
@@ -125,6 +139,7 @@ export function ShareDialog({ isOpen, onClose, onSubmit }: ShareDialogProps) {
                 onPaste={handleTagPaste}
                 placeholder="Add tags (press Enter, space, or comma)"
                 className="w-full px-2 py-1 border border-gray-300 focus:outline-none"
+                disabled={isPublishing}
               />
             </div>
           </div>
@@ -133,15 +148,17 @@ export function ShareDialog({ isOpen, onClose, onSubmit }: ShareDialogProps) {
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border-2 border-black hover:bg-gray-100"
+              className="px-4 py-2 border-2 border-black hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={isPublishing}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-black text-white border-2 border-black hover:bg-gray-800"
+              className="px-4 py-2 bg-black text-white border-2 border-black hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              disabled={isPublishing}
             >
-              Share
+              {isPublishing ? "Publishing..." : "Share"}
             </button>
           </div>
         </form>

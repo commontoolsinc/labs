@@ -1,9 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import { LuPencil, LuShare2 } from "react-icons/lu";
 import ShapeLogo from "@/assets/ShapeLogo.svg";
 import { NavPath } from "@/components/NavPath";
 import { ShareDialog } from "@/components/spellbook/ShareDialog";
+import { useCharmManager } from "@/contexts/CharmManagerContext";
+import { NAME, TYPE } from "@commontools/builder";
+import { getSpellSrc, getSpellSpec, getSpellParents, saveSpell } from "@/services/spellbook";
+import { toast } from "react-hot-toast";
 
 type ShellHeaderProps = {
   replicaName?: string;
@@ -18,10 +22,68 @@ export function ShellHeader({
   isDetailActive,
   togglePath,
 }: ShellHeaderProps) {
+  const { charmManager } = useCharmManager();
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const [charmName, setCharmName] = useState<string | null>(null);
+  const [isPublishing, setIsPublishing] = useState(false);
 
-  const handleShare = (data: { title: string; description: string; tags: string[] }) => {
-    console.log("Share data:", data);
+  useEffect(() => {
+    let mounted = true;
+    let cancel: (() => void) | undefined;
+
+    async function getCharm() {
+      if (charmId) {
+        const charm = await charmManager.get(charmId);
+        if (mounted && charm) cancel = charm.asCell([NAME]).sink(setCharmName);
+      }
+    }
+    getCharm();
+
+    return () => {
+      mounted = false;
+      cancel?.();
+    };
+  }, [charmId, charmManager]);
+
+  const handleShare = async (data: { title: string; description: string; tags: string[] }) => {
+    if (!charmId) return;
+
+    setIsPublishing(true);
+    try {
+      const charm = await charmManager.get(charmId);
+      if (!charm) throw new Error("Charm not found");
+
+      const spellId = charm.sourceCell?.get()?.[TYPE];
+      if (!spellId) throw new Error("Spell not found");
+
+      const src = getSpellSrc(spellId) || "";
+      const spec = getSpellSpec(spellId);
+      const parents = getSpellParents(spellId);
+
+      // Strip # from tags as saveSpell expects them without
+      const tags = data.tags.map((tag) => tag.replace(/^#/, ""));
+
+      const success = await saveSpell(spellId, src, spec, parents, data.title, tags);
+
+      if (success) {
+        const spellbookUrl = `https://paas.saga-castor.ts.net/spellbookjr/recipes/spell-${spellId}`;
+        try {
+          await navigator.clipboard.writeText(spellbookUrl);
+          toast.success("Published to Spellbook Jr! Spellbook link copied to clipboard");
+        } catch (err) {
+          toast.success(`Published to Spellbook Jr! Spellbook URL: ${spellbookUrl}`);
+          console.error("Failed to copy to clipboard:", err);
+        }
+      } else {
+        throw new Error("Failed to publish");
+      }
+    } catch (error) {
+      console.error("Failed to publish:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to publish");
+    } finally {
+      setIsPublishing(false);
+      setIsShareDialogOpen(false);
+    }
   };
 
   return (
@@ -43,7 +105,7 @@ export function ShellHeader({
               className={`w-10 h-10 flex items-center justify-center rounded-lg transition-colors relative group ${
                 isDetailActive
                   ? "bg-gray-300 hover:bg-gray-400 text-black"
-                  : "bg-transparent text-black  hover:bg-gray-200"
+                  : "bg-transparent text-black hover:bg-gray-200"
               }`}
             >
               <LuPencil size={16} />
@@ -77,6 +139,8 @@ export function ShellHeader({
         isOpen={isShareDialogOpen}
         onClose={() => setIsShareDialogOpen(false)}
         onSubmit={handleShare}
+        defaultTitle={charmName || ""}
+        isPublishing={isPublishing}
       />
     </header>
   );
