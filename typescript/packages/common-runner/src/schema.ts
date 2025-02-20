@@ -79,7 +79,7 @@ export function validateAndTransform(
       if (isAlias(value))
         throw new Error("Unexpected alias in path, should have been handled by resolvePath");
       if (isDocLink(value)) {
-        log?.reads.push({ cell: doc, path: path.slice(0, i + 1), schemaAsCellLink: true });
+        log?.reads.push({ cell: doc, path: path.slice(0, i + 1) });
         return createCell(
           value.cell,
           [...value.path, ...path.slice(i + 1)],
@@ -102,7 +102,7 @@ export function validateAndTransform(
   // this set of links.
   const ref = followLinks({ cell: doc, path }, [], log);
   const value = ref.cell.getAtPath(ref.path);
-  log?.reads.push({ cell: ref.cell, path: ref.path, schema: true });
+  log?.reads.push({ cell: ref.cell, path: ref.path });
 
   // TODO: The behavior when one of the options is very permissive (e.g. no type
   // or an object that allows any props) is not well defined.

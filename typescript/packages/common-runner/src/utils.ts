@@ -318,7 +318,7 @@ export function resolvePath(
 
   // Follow aliases on the last key, but no other kinds of links.
   if (isAlias(ref.cell.getAtPath(ref.path))) {
-    log?.reads.push({ cell: ref.cell, path: ref.path, resolvePath: true });
+    log?.reads.push({ cell: ref.cell, path: ref.path });
     ref = followAliases(ref.cell.getAtPath(ref.path), ref.cell, log);
   }
 
@@ -346,7 +346,7 @@ export function followLinks(ref: DocLink, seen: DocLink[] = [], log?: Reactivity
 
     if (nextRef) {
       // Log all the refs that were followed, but not the final value they point to.
-      log?.reads.push({ cell: ref.cell, path: ref.path, followLinks: true });
+      log?.reads.push({ cell: ref.cell, path: ref.path });
 
       ref = nextRef;
 
@@ -369,7 +369,7 @@ export function followCellReferences(reference: DocLink, log?: ReactivityLog): a
   let result = reference;
 
   while (isDocLink(reference)) {
-    log?.reads.push({ cell: reference.cell, path: reference.path, followCellReferences: true });
+    log?.reads.push({ cell: reference.cell, path: reference.path });
     result = reference;
     if (seen.has(reference)) throw new Error("Reference cycle detected");
     seen.add(reference);
@@ -392,7 +392,7 @@ export function followAliases(alias: any, cell: DocImpl<any>, log?: ReactivityLo
     if (seen.has(alias)) throw new Error("Alias cycle detected");
     seen.add(alias);
     alias = cell.getAtPath(alias.$alias.path);
-    if (isAlias(alias)) log?.reads.push({ cell, path: alias.$alias.path, followAliases: true });
+    if (isAlias(alias)) log?.reads.push({ cell, path: alias.$alias.path });
   }
 
   return result!;

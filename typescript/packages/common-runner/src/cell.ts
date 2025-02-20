@@ -262,35 +262,11 @@ function subscribeToReferencedDocs<T>(
     if (isCancel(cleanup)) cleanup();
     const newValue = validateAndTransform(doc, path, schema, log, rootSchema) as T;
     cleanup = callback(newValue);
-    console.log("subscribeToReferencedDocs update", JSON.stringify(doc), {
-      //doc,
-      path,
-      schema,
-      newValue,
-      log,
-      value,
-      initialLog: JSON.stringify(initialLog),
-    });
   }, initialLog);
-
-  console.log("subscribeToReferencedDocs", JSON.stringify(doc), {
-    //doc,
-    path,
-    schema,
-    value,
-    initialLog: JSON.stringify(initialLog),
-  });
 
   return () => {
     cancel();
     if (isCancel(cleanup)) cleanup();
-    console.log("subscribeToReferencedDocs cleanup", JSON.stringify(doc), {
-      //doc,
-      path,
-      schema,
-      value,
-      initialLog: JSON.stringify(initialLog),
-    });
   };
 }
 
