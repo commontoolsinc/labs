@@ -1,6 +1,6 @@
 import { Cancel, isCancel, noOp } from "./cancel.js";
 import { Cell, isCell } from "./cell.js";
-import { isDoc, isDocLink } from "./doc.js";
+import { DocImpl, isDoc, isDocLink } from "./doc.js";
 import { getDocLinkOrThrow, isQueryResultForDereferencing } from "./query-result-proxy.js";
 
 /**
@@ -13,7 +13,7 @@ import { getDocLinkOrThrow, isQueryResultForDereferencing } from "./query-result
  * @returns {function} - A function to cancel the effect.
  */
 export const effect = <T>(
-  value: Cell<T> | T,
+  value: Cell<T> | DocImpl<T> | T,
   callback: (value: T) => Cancel | undefined | void,
 ): Cancel => {
   if (isDoc(value)) {
