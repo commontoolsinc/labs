@@ -9,9 +9,20 @@ import { ActionButton } from "@/components/spellbook/ActionButton";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
 import { SpellPreview } from "@/components/spellbook/SpellPreview";
 
+interface SpellbookSpell {
+  hash: string;
+  title: string;
+  tags: string[];
+  ui: any;
+  description: string;
+  publishedAt: string;
+  author: string;
+  data: any;
+}
+
 export default function SpellbookDetailView() {
   const { hash } = useParams<{ hash: string }>();
-  const [spell, setSpell] = useState<any>(null);
+  const [spell, setSpell] = useState<SpellbookSpell | null>(null);
   const [isLiked, setIsLiked] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -20,7 +31,16 @@ export default function SpellbookDetailView() {
       if (!hash) return;
       try {
         const data = await getBlobByHash(hash);
-        setSpell(data);
+        setSpell({
+          hash,
+          title: data.spellbookTitle || data.recipeName || "Unnamed Spell",
+          tags: data.spellbookTags || [],
+          ui: data.spellbookUI || null,
+          description: data.spellbookDescription || "",
+          publishedAt: data.spellbookPublishedAt || "",
+          author: data.spellbookAuthor || "Anonymous",
+          data,
+        });
       } catch (error) {
         console.error("Failed to fetch spell:", error);
       } finally {
@@ -76,23 +96,25 @@ export default function SpellbookDetailView() {
           />
         </div>
 
-        <div
-          className="
-        bg-white border-2 border-black
-        shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]
-      "
-        >
+        <div className="bg-white border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]">
           <div className="relative aspect-video w-full border-b-2 border-black overflow-hidden">
-            <SpellPreview data={spell} />
+            <SpellPreview ui={spell.ui} />
           </div>
 
           <div className="p-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-              <h1 className="text-2xl font-bold">{spell.recipeName || "Unnamed Spell"}</h1>
+              <h1 className="text-2xl font-bold">{spell.title}</h1>
             </div>
 
             <div className="mb-8">
-              <p className="text-gray-600">first created by {spell.blobAuthor || "Anonymous"}</p>
+              <p className="text-gray-600">first created by {spell.author}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {spell.tags.map((tag) => (
+                  <span key={tag} className="text-sm text-gray-600">
+                    #{tag}
+                  </span>
+                ))}
+              </div>
             </div>
 
             <div className="border-2 border-black p-4">
@@ -101,7 +123,7 @@ export default function SpellbookDetailView() {
                 <h2 className="text-lg font-semibold">Spell Details</h2>
               </div>
               <JsonView
-                value={spell}
+                value={spell.data}
                 style={{
                   background: "transparent",
                   fontSize: "0.875rem",
