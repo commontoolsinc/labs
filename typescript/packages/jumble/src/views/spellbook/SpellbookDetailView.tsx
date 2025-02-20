@@ -3,7 +3,15 @@
 import { useState, useEffect } from "react";
 import { useParams, NavLink } from "react-router-dom";
 import JsonView from "@uiw/react-json-view";
-import { LuHeart, LuBookOpen, LuSend, LuCode, LuChevronDown, LuChevronRight } from "react-icons/lu";
+import {
+  LuHeart,
+  LuBookOpen,
+  LuSend,
+  LuCode,
+  LuChevronDown,
+  LuChevronRight,
+  LuMessageSquare,
+} from "react-icons/lu";
 import { getBlobByHash } from "@/services/blobby";
 import { ActionButton } from "@/components/spellbook/ActionButton";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
@@ -26,6 +34,7 @@ export default function SpellbookDetailView() {
   const [isLiked, setIsLiked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
+  const [isCommentsExpanded, setIsCommentsExpanded] = useState(true);
 
   useEffect(() => {
     const fetchSpell = async () => {
@@ -130,6 +139,60 @@ export default function SpellbookDetailView() {
             <p className="text-gray-600 text-lg">{spell.description}</p>
           </div>
         )}
+
+        <div className="spell-comments">
+          <ActionButton
+            className="w-full"
+            icon={
+              <div className="flex items-center gap-2">
+                <LuMessageSquare className="w-5 h-5" />
+                <span className="text-lg font-semibold">Comments</span>
+              </div>
+            }
+            label={
+              isCommentsExpanded ? (
+                <LuChevronDown className="w-5 h-5" />
+              ) : (
+                <LuChevronRight className="w-5 h-5" />
+              )
+            }
+            onClick={() => setIsCommentsExpanded(!isCommentsExpanded)}
+            popoverMessage=""
+          />
+          {isCommentsExpanded && (
+            <div className="p-8 border-2 border-black">
+              <div className="flex flex-col gap-6">
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold">Alice</span>
+                    <span className="text-gray-600 text-sm">2 days ago</span>
+                  </div>
+                  <p className="text-gray-800">
+                    This spell is amazing! I've been looking for something exactly like this.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold">Bob</span>
+                    <span className="text-gray-600 text-sm">1 day ago</span>
+                  </div>
+                  <p className="text-gray-800">
+                    Great work! Would love to see a version that also handles edge cases.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold">Charlie</span>
+                    <span className="text-gray-600 text-sm">5 hours ago</span>
+                  </div>
+                  <p className="text-gray-800">
+                    Just what I needed for my project. Thanks for sharing!
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="spell-details">
           <ActionButton
