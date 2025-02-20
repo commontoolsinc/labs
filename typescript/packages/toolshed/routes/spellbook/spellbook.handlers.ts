@@ -6,7 +6,9 @@ import env from "@/env.ts";
 
 const client = hc<AppType>("http://localhost:8000");
 
-export const listSpellsHandler: AppRouteHandler<typeof listSpells> = async (c) => {
+export const listSpellsHandler: AppRouteHandler<typeof listSpells> = async (
+  c,
+) => {
   const logger = c.get("logger");
   const searchQuery = c.req.query("search")?.toLowerCase();
 
@@ -18,11 +20,11 @@ export const listSpellsHandler: AppRouteHandler<typeof listSpells> = async (c) =
         prefix: "spellbook-",
       },
     });
-    
+
     if (!blobsRes.ok) {
       throw new Error("Failed to fetch blobs from blobby");
     }
-    
+
     const data = await blobsRes.json();
     const hashes = data.blobs as string[];
 
@@ -34,7 +36,8 @@ export const listSpellsHandler: AppRouteHandler<typeof listSpells> = async (c) =
       const blobData = await blobRes.json();
       const spell = {
         hash,
-        title: blobData.spellbookTitle || blobData.recipeName || "Unnamed Spell",
+        title: blobData.spellbookTitle || blobData.recipeName ||
+          "Unnamed Spell",
         description: blobData.spellbookDescription || "",
         tags: blobData.spellbookTags || [],
         ui: blobData.spellbookUI || null,
@@ -45,11 +48,10 @@ export const listSpellsHandler: AppRouteHandler<typeof listSpells> = async (c) =
 
       // Apply search filter if query exists
       if (searchQuery) {
-        const matchesSearch = 
-          spell.title.toLowerCase().includes(searchQuery) ||
+        const matchesSearch = spell.title.toLowerCase().includes(searchQuery) ||
           spell.description.toLowerCase().includes(searchQuery) ||
-          spell.tags.some(tag => tag.toLowerCase().includes(searchQuery));
-        
+          spell.tags.some((tag) => tag.toLowerCase().includes(searchQuery));
+
         return matchesSearch ? spell : null;
       }
 
@@ -71,7 +73,13 @@ export const getSpellHandler: AppRouteHandler<typeof getSpell> = async (c) => {
   const hash = c.req.param("hash");
 
   try {
-    const response = await client.api.storage.blobby[hash].$get();
+    const response = await client.api.storage.blobby[
+      ":key"
+    ].$get({
+      param: {
+        key: hash,
+      },
+    });
     if (!response.ok) {
       return c.json({ error: "Spell not found" }, 404);
     }
@@ -93,4 +101,4 @@ export const getSpellHandler: AppRouteHandler<typeof getSpell> = async (c) => {
     logger.error({ error }, "Error getting spell");
     return c.json({ error: "Internal server error" }, 500);
   }
-}; 
+};
