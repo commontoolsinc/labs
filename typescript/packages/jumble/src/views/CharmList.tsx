@@ -37,9 +37,15 @@ function CharmPreview({ charm, replicaName }: { charm: Charm; replicaName: strin
     const preview = previewRef.current;
     const charmData = charm[UI];
     if (!charmData) return;
-    preview.innerHTML = ""; // Clear any existing rendered content
-    const cancel = render(preview, charmData);
-    return cancel;
+    preview.innerHTML = "";
+
+    try {
+      const cancel = render(preview, charmData);
+      return cancel;
+    } catch (error) {
+      console.error('Failed to render charm preview:', error);
+      preview.innerHTML = '<p>Preview unavailable</p>';
+    }
   }, [charm, isIntersecting]);
 
   return (
