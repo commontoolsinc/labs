@@ -4,23 +4,12 @@ import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { SearchBox } from "@/components/spellbook/SearchBox";
 import SpellCard from "@/components/spellbook/SpellCard";
-import { getAllSpellbookBlobs, getBlobByHash } from "@/services/blobby";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
 import { LoadingSpinner } from "@/components/Loader";
-
-interface SpellbookSpell {
-  hash: string;
-  title: string;
-  tags: string[];
-  ui: any;
-  description: string;
-  publishedAt: string;
-  author: string;
-  data: any;
-}
+import { listAllSpells, type Spell } from "@/services/spellbook";
 
 export default function SpellbookIndexView() {
-  const [spells, setSpells] = useState<SpellbookSpell[]>([]);
+  const [spells, setSpells] = useState<Spell[]>([]);
   const [loading, setLoading] = useState(true);
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
@@ -29,26 +18,8 @@ export default function SpellbookIndexView() {
   useEffect(() => {
     const fetchSpells = async () => {
       try {
-        const hashes = await getAllSpellbookBlobs();
-        console.log("hashes", hashes);
-        const spellPromises = hashes.map(async (hash) => {
-          const data = await getBlobByHash(hash);
-          return {
-            hash,
-            title: data.spellbookTitle || data.recipeName || "Unnamed Spell",
-            tags: data.spellbookTags || [],
-            ui: data.spellbookUI || null,
-            description: data.spellbookDescription || "",
-            publishedAt: data.spellbookPublishedAt || "",
-            author: data.spellbookAuthor || "Anonymous",
-            data,
-            // TODO(jake): add likes and comments, once we have API
-            // spellbookLikes: data.spellbookLikes || 0,
-            // spellbookComments: data.spellbookComments || [],
-          };
-        });
-        const spellsData = await Promise.all(spellPromises);
-        setSpells(spellsData);
+        const spells = await listAllSpells(searchQuery);
+        setSpells(spells);
       } catch (error) {
         console.error("Failed to fetch spells:", error);
       } finally {
@@ -57,16 +28,7 @@ export default function SpellbookIndexView() {
     };
 
     fetchSpells();
-  }, []);
-
-  const filteredSpells = spells.filter((spell) => {
-    if (!searchQuery) return true;
-    return (
-      spell.title.toLowerCase().includes(searchQuery) ||
-      spell.description.toLowerCase().includes(searchQuery) ||
-      spell.tags.some((tag) => tag.toLowerCase().includes(searchQuery))
-    );
-  });
+  }, [searchQuery]);
 
   const content = loading ? (
     <div className="flex justify-center items-center h-[50vh]">
@@ -79,7 +41,7 @@ export default function SpellbookIndexView() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {filteredSpells.map((spell) => (
+        {spells.map((spell) => (
           <SpellCard
             key={spell.hash}
             hash={spell.hash}

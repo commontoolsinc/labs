@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { useTransition } from "react";
+import { useTransition, useState, useEffect } from "react";
+import { useDebounce } from "@/hooks/useDebounce";
 
 interface SearchBoxProps {
   defaultValue?: string;
@@ -9,11 +10,13 @@ export function SearchBox({ defaultValue = "" }: SearchBoxProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [isPending, startTransition] = useTransition();
+  const [searchTerm, setSearchTerm] = useState(defaultValue);
+  const debouncedSearchTerm = useDebounce(searchTerm, 500); // 300ms delay
 
-  const handleSearch = (term: string) => {
+  useEffect(() => {
     const params = new URLSearchParams(location.search);
-    if (term) {
-      params.set("q", term);
+    if (debouncedSearchTerm) {
+      params.set("q", debouncedSearchTerm);
     } else {
       params.delete("q");
     }
@@ -21,14 +24,14 @@ export function SearchBox({ defaultValue = "" }: SearchBoxProps) {
     startTransition(() => {
       navigate(`${location.pathname}?${params.toString()}`);
     });
-  };
+  }, [debouncedSearchTerm, location.pathname, navigate]);
 
   return (
     <div className="flex items-center">
       <input
         type="text"
-        defaultValue={defaultValue}
-        onChange={(e) => handleSearch(e.target.value)}
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
         placeholder="Search spells"
         className={`
           w-full px-3 py-2 bg-white

@@ -4,6 +4,47 @@ const BLOBBY_BASE_URL = `${TOOLSHED_API_URL}/api/storage/blobby`;
 import { getRecipeSpec, getRecipeSrc, getRecipeParents } from "@commontools/runner";
 import { UI } from "@commontools/builder";
 
+export interface Spell {
+  hash: string;
+  title: string;
+  description: string;
+  tags: string[];
+  ui: any;
+  publishedAt: string;
+  author: string;
+  data: any;
+}
+
+export async function listAllSpells(searchQuery?: string): Promise<Spell[]> {
+  const url = new URL(`${TOOLSHED_API_URL}/api/spellbook`);
+  if (searchQuery) {
+    url.searchParams.set("search", searchQuery);
+  }
+
+  const response = await fetch(url.toString(), {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch spells");
+  }
+
+  const data = await response.json();
+  return data.spells;
+}
+
+export async function getSpell(hash: string): Promise<Spell> {
+  const response = await fetch(`${TOOLSHED_API_URL}/api/spellbook/${hash}`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch spell");
+  }
+
+  return response.json();
+}
+
 export async function saveSpell(
   spellId: string,
   spell: any,
