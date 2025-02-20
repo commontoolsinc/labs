@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { SearchBox } from "@/components/spellbook/SearchBox";
 import SpellCard from "@/components/spellbook/SpellCard";
-import { getAllSpellbookBlobs, getBlobByHash, getBlobScreenshotUrl } from "@/services/blobby";
+import { getAllSpellbookBlobs, getBlobByHash } from "@/services/blobby";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
 
 interface Spell {
@@ -13,6 +13,7 @@ interface Spell {
   author: string;
   spellbookTitle: string;
   spellbookTags: string[];
+  data: any;
 }
 
 export default function SpellbookIndexView() {
@@ -34,6 +35,7 @@ export default function SpellbookIndexView() {
             author: data.blobAuthor || "Anonymous",
             spellbookTitle: data.spellbookTitle || data.recipeName || "Unnamed Spell",
             spellbookTags: data.spellbookTags || [],
+            data,
           };
         });
         const spellsData = await Promise.all(spellPromises);
@@ -58,11 +60,9 @@ export default function SpellbookIndexView() {
   });
 
   const content = loading ? (
-    <div className="container mx-auto">
-      <div className="text-center">Loading spells...</div>
-    </div>
+    <div className="text-center">Loading spells...</div>
   ) : (
-    <div className="">
+    <div>
       <div className="mb-8">
         <SearchBox defaultValue={searchQuery} />
       </div>
@@ -77,7 +77,7 @@ export default function SpellbookIndexView() {
             likes={0}
             spellbookTitle={spell.spellbookTitle}
             spellbookTags={spell.spellbookTags}
-            imageUrl={getBlobScreenshotUrl(spell.hash)}
+            data={spell.data}
           />
         ))}
       </div>

@@ -1,4 +1,5 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
+import { SpellPreview } from "@/components/spellbook/SpellPreview";
 
 interface SpellCardProps {
   hash: string;
@@ -7,7 +8,7 @@ interface SpellCardProps {
   likes: number;
   spellbookTitle: string;
   spellbookTags: string[];
-  imageUrl: string;
+  data: any;
 }
 
 export default function SpellCard({
@@ -17,7 +18,7 @@ export default function SpellCard({
   likes,
   spellbookTitle,
   spellbookTags,
-  imageUrl,
+  data,
 }: SpellCardProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -39,8 +40,8 @@ export default function SpellCard({
         transition-[transform,shadow] duration-100 ease-in-out
       "
     >
-      <div className="relative aspect-video w-full border-b-2 border-black">
-        <img src={imageUrl} alt={name} className="object-cover w-full h-full" />
+      <div className="relative aspect-video w-full border-b-2 border-black overflow-hidden">
+        <SpellPreview data={data} />
       </div>
       <div className="p-4">
         <h2 className="text-xl font-bold text-black">{spellbookTitle}</h2>

@@ -4,9 +4,10 @@ import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import JsonView from "@uiw/react-json-view";
 import { LuHeart, LuBookOpen, LuSend, LuCode } from "react-icons/lu";
-import { getBlobByHash, getBlobScreenshotUrl } from "@/services/blobby";
+import { getBlobByHash } from "@/services/blobby";
 import { ActionButton } from "@/components/spellbook/ActionButton";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
+import { SpellPreview } from "@/components/spellbook/SpellPreview";
 
 export default function SpellbookDetailView() {
   const { hash } = useParams<{ hash: string }>();
@@ -81,12 +82,8 @@ export default function SpellbookDetailView() {
         shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]
       "
         >
-          <div className="relative aspect-video w-full border-b-2 border-black">
-            <img
-              src={getBlobScreenshotUrl(hash)}
-              alt={spell.recipeName || "Spell Screenshot"}
-              className="object-cover w-full h-full"
-            />
+          <div className="relative aspect-video w-full border-b-2 border-black overflow-hidden">
+            <SpellPreview data={spell} />
           </div>
 
           <div className="p-6">
