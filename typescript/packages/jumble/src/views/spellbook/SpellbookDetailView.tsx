@@ -12,7 +12,7 @@ import {
   LuChevronRight,
   LuMessageSquare,
 } from "react-icons/lu";
-import { getSpell, type Spell } from "@/services/spellbook";
+import { getSpell, type Spell, likeSpell, unlikeSpell } from "@/services/spellbook";
 import { ActionButton } from "@/components/spellbook/ActionButton";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
 import { SpellPreview } from "@/components/spellbook/SpellPreview";
@@ -20,11 +20,15 @@ import { SpellPreview } from "@/components/spellbook/SpellPreview";
 export default function SpellbookDetailView() {
   const { spellId } = useParams<{ spellId: string }>();
   const [spell, setSpell] = useState<Spell | null>(null);
-  const [isLiked, setIsLiked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
   const [isCommentsExpanded, setIsCommentsExpanded] = useState(true);
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(true);
+
+  // Get the current user's shortname from the URL
+  const currentUser =
+    window.location.hostname === "localhost" ? "system" : window.location.hostname.split(".")[0];
+  const isLiked = spell?.likes.includes(currentUser) || false;
 
   useEffect(() => {
     const fetchSpell = async () => {
@@ -54,9 +58,19 @@ export default function SpellbookDetailView() {
     navigator.clipboard.writeText(url);
   };
 
-  const handleLike = () => {
-    setIsLiked(!isLiked);
-    // TODO: Make API call to whatever service is handling likes
+  const handleLike = async () => {
+    if (!spellId || !spell) return;
+
+    try {
+      const likes = isLiked ? await unlikeSpell(spellId) : await likeSpell(spellId);
+
+      setSpell({
+        ...spell,
+        likes,
+      });
+    } catch (error) {
+      console.error("Failed to update like:", error);
+    }
   };
 
   const content =
@@ -101,9 +115,9 @@ export default function SpellbookDetailView() {
               />
               <ActionButton
                 icon={<LuHeart size={24} className={isLiked ? "fill-black" : ""} />}
-                label="12 Likes"
+                label={`${spell.likes.length} Likes`}
                 onClick={handleLike}
-                popoverMessage="Liked!"
+                popoverMessage={isLiked ? "Liked!" : "Unliked!"}
               />
               <ActionButton
                 icon={<LuSend size={24} />}

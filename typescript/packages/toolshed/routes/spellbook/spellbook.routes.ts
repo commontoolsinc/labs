@@ -43,6 +43,11 @@ const CreateSpellResponseSchema = z.object({
   success: z.boolean(),
 });
 
+const LikeResponseSchema = z.object({
+  success: z.boolean(),
+  likes: z.array(z.string()),
+});
+
 export const createSpell = createRoute({
   method: "post",
   path: "/api/spellbook",
@@ -105,6 +110,46 @@ export const getSpell = createRoute({
     [HttpStatusCodes.OK]: jsonContent(
       SpellSchema,
       "Spell details",
+    ),
+    [HttpStatusCodes.NOT_FOUND]: {
+      description: "Spell not found",
+    },
+  },
+});
+
+export const likeSpell = createRoute({
+  method: "post",
+  path: "/api/spellbook/{spellId}/like",
+  tags,
+  request: {
+    params: z.object({
+      spellId: z.string(),
+    }),
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      LikeResponseSchema,
+      "Spell liked successfully",
+    ),
+    [HttpStatusCodes.NOT_FOUND]: {
+      description: "Spell not found",
+    },
+  },
+});
+
+export const unlikeSpell = createRoute({
+  method: "post",
+  path: "/api/spellbook/{spellId}/unlike",
+  tags,
+  request: {
+    params: z.object({
+      spellId: z.string(),
+    }),
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      LikeResponseSchema,
+      "Spell unliked successfully",
     ),
     [HttpStatusCodes.NOT_FOUND]: {
       description: "Spell not found",

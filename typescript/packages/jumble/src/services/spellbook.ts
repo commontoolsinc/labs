@@ -1,3 +1,5 @@
+const TOOLSHED_API_URL = import.meta.env.TOOLSHED_API_URL || "http://localhost:8000";
+
 import { getRecipeSpec, getRecipeSrc, getRecipeParents } from "@commontools/runner";
 import { UI } from "@commontools/builder";
 
@@ -10,14 +12,23 @@ export interface Spell {
   publishedAt: string;
   author: string;
   data: any;
+  likes: string[];
+  comments: {
+    id: string;
+    content: string;
+    author: string;
+    createdAt: string;
+  }[];
+  shares: number;
 }
 
 export async function listAllSpells(searchQuery?: string): Promise<Spell[]> {
+  const url = new URL(`${TOOLSHED_API_URL}/api/spellbook`);
   if (searchQuery) {
     url.searchParams.set("search", searchQuery);
   }
 
-  const response = await fetch("/api/spellbook", {
+  const response = await fetch(url.toString(), {
     cache: "no-store",
   });
 
@@ -30,7 +41,7 @@ export async function listAllSpells(searchQuery?: string): Promise<Spell[]> {
 }
 
 export async function getSpell(spellId: string): Promise<Spell> {
-  const response = await fetch(`/api/spellbook/spellbook-${spellId}`, {
+  const response = await fetch(`${TOOLSHED_API_URL}/api/spellbook/spellbook-${spellId}`, {
     cache: "no-store",
   });
 
@@ -59,7 +70,7 @@ export async function saveSpell(
       throw new Error("Spell ID is undefined");
     }
 
-    const response = await fetch(`/api/spellbook`, {
+    const response = await fetch(`${TOOLSHED_API_URL}/api/spellbook`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -87,4 +98,32 @@ export async function saveSpell(
     console.error("Failed to save spell:", error);
     return false;
   }
+}
+
+export async function likeSpell(spellId: string): Promise<string[]> {
+  const response = await fetch(`${TOOLSHED_API_URL}/api/spellbook/${spellId}/like`, {
+    method: "POST",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to like spell");
+  }
+
+  const data = await response.json();
+  return data.likes;
+}
+
+export async function unlikeSpell(spellId: string): Promise<string[]> {
+  const response = await fetch(`${TOOLSHED_API_URL}/api/spellbook/${spellId}/unlike`, {
+    method: "POST",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to unlike spell");
+  }
+
+  const data = await response.json();
+  return data.likes;
 }
