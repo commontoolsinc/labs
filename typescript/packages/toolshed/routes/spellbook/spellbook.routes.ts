@@ -6,7 +6,7 @@ import * as HttpStatusCodes from "stoker/http-status-codes";
 const tags = ["Spellbook"];
 
 const SpellSchema = z.object({
-  hash: z.string(),
+  id: z.string(),
   title: z.string(),
   description: z.string(),
   tags: z.array(z.string()),
@@ -14,6 +14,14 @@ const SpellSchema = z.object({
   publishedAt: z.string(),
   author: z.string(),
   data: z.any(),
+  likes: z.array(z.string()),
+  comments: z.array(z.object({
+    id: z.string(),
+    content: z.string(),
+    author: z.string(),
+    createdAt: z.string(),
+  })),
+  shares: z.number(),
 });
 
 const SpellListResponseSchema = z.object({

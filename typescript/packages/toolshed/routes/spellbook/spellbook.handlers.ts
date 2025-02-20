@@ -14,9 +14,14 @@ interface SpellData {
   spellbookUI?: any;
   spellbookPublishedAt?: string;
   spellbookAuthor?: string;
-  likes?: string[];
-  comments?: string[];
-  shares?: number;
+  spellbookLikes?: string[];
+  spellbookComments?: {
+    id: string;
+    content: string;
+    author: string;
+    createdAt: string;
+  }[];
+  spellbookShares?: number;
   [key: string]: any;
 }
 
@@ -29,9 +34,10 @@ function toSpell(hash: string, blobData: SpellData) {
     ui: blobData.spellbookUI || null,
     publishedAt: blobData.spellbookPublishedAt || "",
     author: blobData.spellbookAuthor || "anon",
-    likes: blobData.likes || [],
-    comments: blobData.comments || [],
+    likes: blobData.spellbookLikes || [],
+    comments: blobData.spellbookComments || [],
     data: blobData,
+    shares: blobData.spellbookShares || 0,
   };
 }
 
