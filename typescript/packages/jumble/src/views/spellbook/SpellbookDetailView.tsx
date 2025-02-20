@@ -12,7 +12,14 @@ import {
   LuChevronRight,
   LuMessageSquare,
 } from "react-icons/lu";
-import { getSpell, type Spell, toggleLike, createComment } from "@/services/spellbook";
+import {
+  getSpell,
+  type Spell,
+  toggleLike,
+  createComment,
+  whoami,
+  type UserProfile,
+} from "@/services/spellbook";
 import { ActionButton } from "@/components/spellbook/ActionButton";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
 import { SpellPreview } from "@/components/spellbook/SpellPreview";
@@ -26,10 +33,23 @@ export default function SpellbookDetailView() {
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(true);
   const [commentText, setCommentText] = useState("");
 
-  // Get the current user's shortname from the URL
-  const currentUser =
-    window.location.hostname === "localhost" ? "system" : window.location.hostname.split(".")[0];
-  const isLiked = spell?.likes.includes(currentUser) || false;
+  // FIXME(jake): This should be moved to its own context, but avoiding for now since it will change with webauthn
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+
+  const isLiked = spell?.likes.includes(currentUser?.shortName || "") || false;
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const user = await whoami();
+        setCurrentUser(user);
+      } catch (error) {
+        console.error("Failed to fetch user:", error);
+      }
+    };
+
+    fetchUser();
+  }, []);
 
   useEffect(() => {
     const fetchSpell = async () => {

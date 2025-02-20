@@ -42,6 +42,13 @@ export interface CommentResponse {
   comment: Comment;
 }
 
+export interface UserProfile {
+  name: string | null;
+  email: string | null;
+  shortName: string;
+  avatar: string | null;
+}
+
 export async function listAllSpells(searchQuery?: string): Promise<Spell[]> {
   const url = new URL(`${TOOLSHED_API_URL}/api/spellbook`);
   if (searchQuery) {
@@ -149,4 +156,17 @@ export async function createComment(spellId: string, content: string): Promise<C
 
   const data = await response.json();
   return data.comment;
+}
+
+// FIXME(jake): this should be moved to a separate service
+export async function whoami(): Promise<UserProfile> {
+  const response = await fetch(`/api/whoami`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to get user profile");
+  }
+
+  return response.json();
 }
