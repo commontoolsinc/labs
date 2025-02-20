@@ -195,9 +195,9 @@ export class RemoteStorageProvider implements StorageProvider {
     for (const fact of facts) {
       // If transaction was rejected we simply discard the local fact for the
       // underlying entity even if current local fact has changed. That is
-      // because new fact would have being based on the one that got rejected
-      // and therefor will also be rejected later. If transaction succeeds we
-      // sill remove a local fact as long as it has not change from the one
+      // because new fact would have been based on the one that got rejected
+      // and therefore will also be rejected later. If transaction succeeds we
+      // still remove a local fact as long as it has not changed from the one
       // in our transaction. If it has changed we have another stacked change
       // and we need to keep it until transactions results catch up.
       // ⚠️ Please note that there may have being other transactions based on
