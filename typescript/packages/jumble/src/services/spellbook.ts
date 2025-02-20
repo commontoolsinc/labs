@@ -1,5 +1,4 @@
 const TOOLSHED_API_URL = import.meta.env.TOOLSHED_API_URL || "http://localhost:8000";
-const BLOBBY_BASE_URL = `${TOOLSHED_API_URL}/api/storage/blobby`;
 
 import { getRecipeSpec, getRecipeSrc, getRecipeParents } from "@commontools/runner";
 import { UI } from "@commontools/builder";
@@ -52,43 +51,41 @@ export async function saveSpell(
   description: string,
   tags: string[],
 ): Promise<boolean> {
-  const src = getRecipeSrc(spellId);
-  const spec = getRecipeSpec(spellId);
-  const parents = getRecipeParents(spellId);
-  const ui = spell.resultRef?.cell.get()?.[UI];
   try {
-    const blob = {
-      spellbookTitle: title,
-      spellbookDescription: description,
-      spellbookTags: tags,
-      spellbookPublishedAt: new Date().toISOString(),
-      spellbookAuthor: "jake", // FIXME(jake): once we have api, we can populate author from tailscale headers
-      spellId,
-      parents,
-      src,
-      spec,
-      spellbookUI: ui,
-    };
-
-    console.log(blob);
+    // Get all the required data from commontools first
+    const src = getRecipeSrc(spellId);
+    const spec = getRecipeSpec(spellId);
+    const parents = getRecipeParents(spellId);
+    const ui = spell.resultRef?.cell.get()?.[UI];
 
     if (spellId === undefined) {
       throw new Error("Spell ID is undefined");
     }
 
-    const response = await fetch(`${BLOBBY_BASE_URL}/spellbook-${spellId}`, {
+    const response = await fetch(`${TOOLSHED_API_URL}/api/spellbook`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(blob),
+      body: JSON.stringify({
+        spellId,
+        title,
+        description,
+        tags,
+        src,
+        spec,
+        parents,
+        ui,
+      }),
     });
 
     if (!response.ok) {
       console.error("Failed to save spell:", await response.text());
+      return false;
     }
 
-    return response.ok;
+    const data = await response.json();
+    return data.success;
   } catch (error) {
     console.error("Failed to save spell:", error);
     return false;

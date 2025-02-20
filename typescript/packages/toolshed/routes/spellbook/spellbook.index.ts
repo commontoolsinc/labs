@@ -19,6 +19,7 @@ router.use(
 
 const Router = router
   .openapi(routes.listSpells, handlers.listSpellsHandler)
-  .openapi(routes.getSpell, handlers.getSpellHandler);
+  .openapi(routes.getSpell, handlers.getSpellHandler)
+  .openapi(routes.createSpell, handlers.createSpellHandler);
 
-export default Router; 
+export default Router;

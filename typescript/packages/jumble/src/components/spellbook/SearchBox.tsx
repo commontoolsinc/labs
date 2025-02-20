@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTransition, useState, useEffect } from "react";
-import { useDebounce } from "@/hooks/use-debounce";
+import { useDebounce } from "@/hooks/useDebounce";
 
 interface SearchBoxProps {
   defaultValue?: string;
@@ -24,7 +24,7 @@ export function SearchBox({ defaultValue = "" }: SearchBoxProps) {
     startTransition(() => {
       navigate(`${location.pathname}?${params.toString()}`);
     });
-  }, [debouncedSearchTerm, location.pathname, navigate, location.search]);
+  }, [debouncedSearchTerm, location.pathname, navigate]);
 
   return (
     <div className="flex items-center">
