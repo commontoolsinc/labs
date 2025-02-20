@@ -119,7 +119,7 @@ export function ShellHeader({
         )}
         <NavLink
           to="/spellbook"
-          className="brand flex items-center gap-2 opacity-30 hover:opacity-100 transition-opacity duration-200 relative group"
+          className="brand flex items-center gap-2 opacity-30 hover:opacity-100 transition-opacity duration-200 relative group cursor-pointer"
         >
           <ShapeLogo width={32} height={32} shapeColor="#7F08EA" containerColor="#B77EEA" />
           <div className="absolute top-10 left-1/2 -translate-x-2/3 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
