@@ -1,5 +1,5 @@
 import * as ed25519 from "@noble/ed25519";
-import { ED25519_ALG } from "./utils.js";
+import { ED25519_ALG, keyToDid } from "./utils.js";
 import { KeyPair, KeyPairRaw } from "../keys.js";
 
 // WebCrypto Key formats for Ed25519
@@ -18,6 +18,11 @@ export class NativeEd25519 implements KeyPair {
     this.keypair = keypair;
   }
 
+  async did(): Promise<string> {
+    let rawPublic = await window.crypto.subtle.exportKey("raw", this.keypair.publicKey);
+    return keyToDid(new Uint8Array(rawPublic));
+  }
+
   serialize(): KeyPairRaw {
     return this.keypair;
   }
@@ -34,11 +39,14 @@ export class NativeEd25519 implements KeyPair {
     const pkcs8Private = ed25519RawToPkcs8(rawPrivateKey);
     const rawPublic = await ed25519.getPublicKeyAsync(rawPrivateKey);
     const privateKey = await window.crypto.subtle.importKey("pkcs8", pkcs8Private, ED25519_ALG, false, ["sign"]);
-    const publicKey = await window.crypto.subtle.importKey("raw", rawPublic, ED25519_ALG, false, ["verify"]);
+    // Set the public key to be extractable for DID generation.
+    const publicKey = await window.crypto.subtle.importKey("raw", rawPublic, ED25519_ALG, true, ["verify"]);
     return new NativeEd25519({ publicKey, privateKey });
   }
 
   static async generate(): Promise<NativeEd25519> {
+    // This notably sets only the private key as extractable, ideal as we need
+    // access to the public key for DID generation. 
     let keypair = await window.crypto.subtle.generateKey(ED25519_ALG, false, ["sign", "verify"]);
     return new NativeEd25519(keypair);
   }

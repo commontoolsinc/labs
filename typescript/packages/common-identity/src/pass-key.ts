@@ -66,7 +66,7 @@ export class PassKey {
   // Different data is available within `PublicKeyCredentials` depending
   // on whether it was created or retrieved. We need the PRF assertion
   // only available on "get" requests, so we don't return a `PassKey` here.
-  static async create(name: string, displayName: string): Promise<undefined> {
+  static async create(name: string, displayName: string): Promise<void> {
     const challenge = random(32);
     const userId = random(32);
     const user = {
@@ -109,7 +109,7 @@ export class PassKey {
 
   // Retrieve a `PassKey` from a Web Authn authenticator.
   // In browsers, must be called via a user gesture.
-  static async get({ userVerification, mediation }: PassKeyGetOptions = {}): Promise<PassKey | null> {
+  static async get({ userVerification, mediation }: PassKeyGetOptions = {}): Promise<PassKey> {
     // Select any credential available with the same `RP_ID`.
     let credential = await navigator.credentials.get({
       publicKey: {
@@ -124,7 +124,7 @@ export class PassKey {
     }) as PublicKeyCredential | null;
 
     if (!credential) {
-      return null;
+      throw new Error("common-identity: Could not create credentials.");
     }
 
     // PRF results are only available when calling `get()`,
