@@ -59,7 +59,7 @@ export function ShellHeader({
       const success = await saveSpell(spellId, spell, data.title, data.description, data.tags);
 
       if (success) {
-        const spellbookUrl = `${import.meta.env.TOOLSHED_API_URL || "http://localhost:8000"}/spellbook/spellbook-${spellId}`;
+        const spellbookUrl = `/spellbook/spellbook-${spellId}`;
         try {
           await navigator.clipboard.writeText(spellbookUrl);
           toast.success("Published to Spellbook Jr! Spellbook link copied to clipboard");

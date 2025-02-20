@@ -18,6 +18,10 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ""),
       },
+      "/api/spellbook": {
+        target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
+        changeOrigin: true,
+      },
       "/api/ai/llm": {
         target: process.env.TOOLSHED_API_URL ?? "http://localhost:8000/",
         changeOrigin: true,

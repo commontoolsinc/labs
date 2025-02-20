@@ -51,6 +51,7 @@ export const createSpellHandler: AppRouteHandler<typeof createSpell> = async (
     shortName: c.req.header("tailscale-user-login")?.split("@")[0] || "system",
     avatar: c.req.header("tailscale-user-profile-pic"),
   };
+
   const body = await c.req.json();
 
   try {
