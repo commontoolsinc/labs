@@ -14,18 +14,23 @@ interface SpellData {
   spellbookUI?: any;
   spellbookPublishedAt?: string;
   spellbookAuthor?: string;
+  likes?: string[];
+  comments?: string[];
+  shares?: number;
   [key: string]: any;
 }
 
 function toSpell(hash: string, blobData: SpellData) {
   return {
     id: hash.replace("spellbook-", ""),
-    title: blobData.spellbookTitle || blobData.recipeName || "Unnamed Spell",
+    title: blobData.spellbookTitle || "Unnamed Spell",
     description: blobData.spellbookDescription || "",
     tags: blobData.spellbookTags || [],
     ui: blobData.spellbookUI || null,
     publishedAt: blobData.spellbookPublishedAt || "",
-    author: blobData.spellbookAuthor || "Anonymous",
+    author: blobData.spellbookAuthor || "anon",
+    likes: blobData.likes || [],
+    comments: blobData.comments || [],
     data: blobData,
   };
 }
@@ -37,6 +42,7 @@ export const createSpellHandler: AppRouteHandler<typeof createSpell> = async (
   const requesterProfile = {
     name: c.req.header("tailscale-user-name"),
     email: c.req.header("tailscale-user-login"),
+    shortName: c.req.header("tailscale-user-login")?.split("@")[0] || "system",
     avatar: c.req.header("tailscale-user-profile-pic"),
   };
   const body = await c.req.json();
@@ -55,11 +61,14 @@ export const createSpellHandler: AppRouteHandler<typeof createSpell> = async (
         spellbookDescription: description,
         spellbookTags: tags,
         spellbookPublishedAt: new Date().toISOString(),
-        spellbookAuthor: requesterProfile.name || "system",
+        spellbookAuthor: requesterProfile.shortName || "system",
         parents,
         src,
         spec,
         spellbookUI: ui,
+        likes: [],
+        comments: [],
+        shares: 0,
       },
     });
 
