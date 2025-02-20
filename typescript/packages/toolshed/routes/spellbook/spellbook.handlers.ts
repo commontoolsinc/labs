@@ -26,12 +26,12 @@ export const createSpellHandler: AppRouteHandler<typeof createSpell> = async (
         key: `spellbook-${spellId}`,
       },
       json: {
+        id: spellId,
         spellbookTitle: title,
         spellbookDescription: description,
         spellbookTags: tags,
         spellbookPublishedAt: new Date().toISOString(),
         spellbookAuthor: requesterProfile.name || "system",
-        spellId,
         parents,
         src,
         spec,
@@ -75,7 +75,7 @@ export const listSpellsHandler: AppRouteHandler<typeof listSpells> = async (
     const spells = Object.entries(data).map((
       [hash, blobData]: [string, any],
     ) => ({
-      hash,
+      id: hash.replace("spellbook-", ""),
       title: blobData.spellbookTitle || blobData.recipeName || "Unnamed Spell",
       description: blobData.spellbookDescription || "",
       tags: blobData.spellbookTags || [],
@@ -108,7 +108,7 @@ export const getSpellHandler: AppRouteHandler<typeof getSpell> = async (c) => {
 
     const blobData = await response.json();
     const spell = {
-      hash,
+      id: hash.replace("spellbook-", ""),
       title: blobData.spellbookTitle || blobData.recipeName || "Unnamed Spell",
       description: blobData.spellbookDescription || "",
       tags: blobData.spellbookTags || [],

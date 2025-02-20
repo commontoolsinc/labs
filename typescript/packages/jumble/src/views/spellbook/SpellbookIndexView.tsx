@@ -43,8 +43,8 @@ export default function SpellbookIndexView() {
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {spells.map((spell) => (
           <SpellCard
-            key={spell.hash}
-            hash={spell.hash}
+            key={spell.id}
+            spellId={spell.id}
             title={spell.title}
             tags={spell.tags}
             ui={spell.ui}

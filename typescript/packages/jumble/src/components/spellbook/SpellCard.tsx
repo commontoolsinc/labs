@@ -3,7 +3,7 @@ import { SpellPreview } from "@/components/spellbook/SpellPreview";
 import { LuHeart, LuMessageSquare, LuSend } from "react-icons/lu";
 
 interface SpellCardProps {
-  hash: string;
+  spellId: string;
   title: string;
   tags: string[];
   ui: any;
@@ -11,7 +11,7 @@ interface SpellCardProps {
   comments: number;
 }
 
-export default function SpellCard({ hash, title, tags, ui, likes, comments }: SpellCardProps) {
+export default function SpellCard({ spellId, title, tags, ui, likes, comments }: SpellCardProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -24,7 +24,7 @@ export default function SpellCard({ hash, title, tags, ui, likes, comments }: Sp
 
   return (
     <Link
-      to={`/spellbook/${hash}`}
+      to={`/spellbook/${spellId}`}
       className="
         block bg-white border-2 border-black 
         shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]

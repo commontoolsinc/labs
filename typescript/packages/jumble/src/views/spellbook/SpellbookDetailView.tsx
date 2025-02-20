@@ -12,25 +12,14 @@ import {
   LuChevronRight,
   LuMessageSquare,
 } from "react-icons/lu";
-import { getBlobByHash } from "@/services/blobby";
+import { getSpell, type Spell } from "@/services/spellbook";
 import { ActionButton } from "@/components/spellbook/ActionButton";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
 import { SpellPreview } from "@/components/spellbook/SpellPreview";
 
-interface SpellbookSpell {
-  hash: string;
-  title: string;
-  tags: string[];
-  ui: any;
-  description: string;
-  publishedAt: string;
-  author: string;
-  data: any;
-}
-
 export default function SpellbookDetailView() {
-  const { hash } = useParams<{ hash: string }>();
-  const [spell, setSpell] = useState<SpellbookSpell | null>(null);
+  const { spellId } = useParams<{ spellId: string }>();
+  const [spell, setSpell] = useState<Spell | null>(null);
   const [isLiked, setIsLiked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
@@ -39,19 +28,10 @@ export default function SpellbookDetailView() {
 
   useEffect(() => {
     const fetchSpell = async () => {
-      if (!hash) return;
+      if (!spellId) return;
       try {
-        const data = await getBlobByHash(hash);
-        setSpell({
-          hash,
-          title: data.spellbookTitle || data.recipeName || "Unnamed Spell",
-          tags: data.spellbookTags || [],
-          ui: data.spellbookUI || null,
-          description: data.spellbookDescription || "",
-          publishedAt: data.spellbookPublishedAt || "",
-          author: data.spellbookAuthor || "Anonymous",
-          data,
-        });
+        const spell = await getSpell(spellId);
+        setSpell(spell);
       } catch (error) {
         console.error("Failed to fetch spell:", error);
       } finally {
@@ -60,17 +40,17 @@ export default function SpellbookDetailView() {
     };
 
     fetchSpell();
-  }, [hash]);
+  }, [spellId]);
 
   const handleShare = () => {
-    if (!hash) return;
-    const url = `${window.location.origin}/spellbook/${hash}`;
+    if (!spellId) return;
+    const url = `${window.location.origin}/spellbook/${spellId}`;
     navigator.clipboard.writeText(url);
   };
 
   const handleCopyBlobbyLink = () => {
-    if (!hash) return;
-    const url = `https://paas.saga-castor.ts.net/blobby/blob/${hash}`;
+    if (!spellId) return;
+    const url = `https://paas.saga-castor.ts.net/blobby/blob/${spellId}`;
     navigator.clipboard.writeText(url);
   };
 
@@ -80,7 +60,7 @@ export default function SpellbookDetailView() {
   };
 
   const content =
-    loading || !spell || !hash ? (
+    loading || !spell || !spellId ? (
       <div className="container mx-auto">
         <div className="text-center">Loading spell...</div>
       </div>

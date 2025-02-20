@@ -4,7 +4,7 @@ import { getRecipeSpec, getRecipeSrc, getRecipeParents } from "@commontools/runn
 import { UI } from "@commontools/builder";
 
 export interface Spell {
-  hash: string;
+  id: string;
   title: string;
   description: string;
   tags: string[];
@@ -32,8 +32,8 @@ export async function listAllSpells(searchQuery?: string): Promise<Spell[]> {
   return data.spells;
 }
 
-export async function getSpell(hash: string): Promise<Spell> {
-  const response = await fetch(`${TOOLSHED_API_URL}/api/spellbook/${hash}`, {
+export async function getSpell(spellId: string): Promise<Spell> {
+  const response = await fetch(`${TOOLSHED_API_URL}/api/spellbook/spellbook-${spellId}`, {
     cache: "no-store",
   });
 
