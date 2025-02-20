@@ -3,11 +3,11 @@ import { render } from "@commontools/html";
 import { UI } from "@commontools/builder";
 
 interface SpellPreviewProps {
-  data: any;
+  ui: any;
   className?: string;
 }
 
-export function SpellPreview({ data, className = "" }: SpellPreviewProps) {
+export function SpellPreview({ ui, className = "" }: SpellPreviewProps) {
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [isIntersecting, setIsIntersecting] = useState(false);
 
@@ -26,19 +26,14 @@ export function SpellPreview({ data, className = "" }: SpellPreviewProps) {
   }, []);
 
   useEffect(() => {
-    if (!previewRef.current || !isIntersecting || !data) return;
+    if (!previewRef.current || !isIntersecting || !ui) return;
 
-    console.log("data", data);
     const preview = previewRef.current;
-    const spellData = data.recipe.result[UI];
-    if (!spellData) return;
 
     preview.innerHTML = ""; // Clear any existing rendered content
-    const cancel = render(preview, spellData);
+    const cancel = render(preview, ui);
     return cancel;
-  }, [data, isIntersecting]);
+  }, [ui, isIntersecting]);
 
-  return (
-    <div ref={previewRef} className={`w-full bg-gray-50 rounded min-h-[192px] ${className}`} />
-  );
+  return <div ref={previewRef} className={`w-full bg-gray-50 rounded h-full ${className}`} />;
 }

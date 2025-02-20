@@ -1,5 +1,4 @@
 const BLOBBY_BASE_URL = "https://toolshed.saga-castor.ts.net/api/storage/blobby";
-const SNAP_BASE_URL = "https://paas.saga-castor.ts.net/snap";
 
 export const getAllBlobs = async () => {
   const response = await fetch(`${BLOBBY_BASE_URL}?all=true&prefix=spell-`);
@@ -9,14 +8,14 @@ export const getAllBlobs = async () => {
 };
 
 export const getAllSpellbookBlobs = async () => {
-  const response = await fetch(`${BLOBBY_BASE_URL}?search=spellbookTitle&prefix=spell-`);
+  const response = await fetch(`${BLOBBY_BASE_URL}?all=true&prefix=spellbook-`);
   if (!response.ok) throw new Error("Failed to fetch blobs");
   const data = await response.json();
   return data.blobs as string[];
 };
 
 export const getMyBlobs = async () => {
-  const response = await fetch(`${BLOBBY_BASE_URL}?prefix=spell-`);
+  const response = await fetch(`${BLOBBY_BASE_URL}?prefix=spellbook-`);
   if (!response.ok) throw new Error("Failed to fetch blobs");
   const data = await response.json();
   return data.blobs as string[];
@@ -40,8 +39,4 @@ export const getBlobByHash = async (hash: string) => {
     console.error("Parse error:", error);
     throw new Error("Invalid blob data");
   }
-};
-
-export const getBlobScreenshotUrl = (hash: string) => {
-  return `${SNAP_BASE_URL}/screenshot/${hash}/png`;
 };

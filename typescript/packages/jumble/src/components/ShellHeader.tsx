@@ -6,8 +6,8 @@ import { NavPath } from "@/components/NavPath";
 import { ShareDialog } from "@/components/spellbook/ShareDialog";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { NAME, TYPE } from "@commontools/builder";
-import { getSpellSrc, getSpellSpec, getSpellParents, saveSpell } from "@/services/spellbook";
 import { toast } from "react-hot-toast";
+import { saveSpell } from "@/services/spellbook";
 
 type ShellHeaderProps = {
   replicaName?: string;
@@ -52,21 +52,14 @@ export function ShellHeader({
     try {
       const charm = await charmManager.get(charmId);
       if (!charm) throw new Error("Charm not found");
-
-      const spellId = charm.sourceCell?.get()?.[TYPE];
+      const spell = charm.sourceCell?.get();
+      const spellId = spell?.[TYPE];
       if (!spellId) throw new Error("Spell not found");
 
-      const src = getSpellSrc(spellId) || "";
-      const spec = getSpellSpec(spellId);
-      const parents = getSpellParents(spellId);
-
-      // Strip # from tags as saveSpell expects them without
-      const tags = data.tags.map((tag) => tag.replace(/^#/, ""));
-
-      const success = await saveSpell(spellId, src, spec, parents, data.title, tags);
+      const success = await saveSpell(spellId, spell, data.title, data.description, data.tags);
 
       if (success) {
-        const spellbookUrl = `https://paas.saga-castor.ts.net/spellbookjr/recipes/spell-${spellId}`;
+        const spellbookUrl = `https://toolshed.saga-castor.ts.net/spellbook/spellbook-${spellId}`;
         try {
           await navigator.clipboard.writeText(spellbookUrl);
           toast.success("Published to Spellbook Jr! Spellbook link copied to clipboard");

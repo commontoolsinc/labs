@@ -3,22 +3,23 @@ import { SpellPreview } from "@/components/spellbook/SpellPreview";
 
 interface SpellCardProps {
   hash: string;
-  name: string;
+  title: string;
+  tags: string[];
+  ui: any;
+  description: string;
+  publishedAt: string;
   author: string;
-  likes: number;
-  spellbookTitle: string;
-  spellbookTags: string[];
   data: any;
 }
 
 export default function SpellCard({
   hash,
-  name,
+  title,
+  tags,
+  description,
+  publishedAt,
   author,
-  likes,
-  spellbookTitle,
-  spellbookTags,
-  data,
+  ui,
 }: SpellCardProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -41,15 +42,14 @@ export default function SpellCard({
       "
     >
       <div className="relative aspect-video w-full border-b-2 border-black overflow-hidden">
-        <SpellPreview data={data} />
+        <SpellPreview ui={ui} />
       </div>
       <div className="p-4">
-        <h2 className="text-xl font-bold text-black">{spellbookTitle}</h2>
-        <h3 className="text-sm text-gray-600">({name})</h3>
+        <h2 className="text-xl font-bold text-black">{title}</h2>
 
         <p className="mt-2 text-sm text-black">by {author}</p>
         <div className="mt-2 flex flex-wrap gap-1">
-          {spellbookTags.map((tag) => (
+          {tags.map((tag) => (
             <span
               key={tag}
               onClick={(e) => handleTagClick(e, tag)}
@@ -58,7 +58,7 @@ export default function SpellCard({
                 hover:bg-gray-200 cursor-pointer transition-colors
               "
             >
-              #{tag}
+              {tag}
             </span>
           ))}
         </div>
