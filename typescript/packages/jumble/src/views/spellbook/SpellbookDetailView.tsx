@@ -48,7 +48,7 @@ export default function SpellbookDetailView() {
 
   if (loading || !spell || !hash) {
     return (
-      <div className="min-h-screen bg-purple-50 p-4 md:p-8">
+      <div className="h-full bg-gray-50 p-4">
         <div className="container mx-auto">
           <div className="text-center">Loading spell...</div>
         </div>
@@ -57,9 +57,9 @@ export default function SpellbookDetailView() {
   }
 
   return (
-    <main className="min-h-screen bg-purple-50 p-4 md:p-8">
+    <div className="h-full bg-gray-50 p-4">
       <div className="container mx-auto max-w-4xl flex flex-col gap-4">
-        <div className="actionBar bg-purple-100 rounded-2xl p-4 flex gap-2 justify-between">
+        <div className="flex gap-2 justify-between">
           <ActionButton
             icon={<LuCode size={24} />}
             label="Blobby"
@@ -67,7 +67,7 @@ export default function SpellbookDetailView() {
             popoverMessage="Blobby link copied to clipboard!"
           />
           <ActionButton
-            icon={<LuHeart size={24} className={isLiked ? "fill-purple-600" : ""} />}
+            icon={<LuHeart size={24} className={isLiked ? "fill-black" : ""} />}
             label="Like"
             onClick={handleLike}
             popoverMessage="Liked!"
@@ -80,30 +80,33 @@ export default function SpellbookDetailView() {
           />
         </div>
 
-        <div className="relative aspect-video w-full">
-          <img
-            src={getBlobScreenshotUrl(hash)}
-            alt={spell.recipeName || "Spell Screenshot"}
-            className="rounded-2xl shadow-lg object-cover"
-          />
-        </div>
+        <div
+          className="
+          bg-white border-2 border-black
+          shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]
+        "
+        >
+          <div className="relative aspect-video w-full border-b-2 border-black">
+            <img
+              src={getBlobScreenshotUrl(hash)}
+              alt={spell.recipeName || "Spell Screenshot"}
+              className="object-cover w-full h-full"
+            />
+          </div>
 
-        <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-          <div className="p-4 md:p-8">
+          <div className="p-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-              <h1 className="text-2xl md:text-3xl font-bold text-purple-900">
-                {spell.recipeName || "Unnamed Spell"}
-              </h1>
+              <h1 className="text-2xl font-bold">{spell.recipeName || "Unnamed Spell"}</h1>
             </div>
 
             <div className="mb-8">
               <p className="text-gray-600">first created by {spell.blobAuthor || "Anonymous"}</p>
             </div>
 
-            <div className="bg-purple-50 rounded-lg p-4 md:p-6">
+            <div className="border-2 border-black p-4">
               <div className="flex items-center mb-4">
-                <LuBookOpen className="w-5 h-5 text-purple-700 mr-2" />
-                <h2 className="text-lg md:text-xl font-semibold text-purple-900">Spell Details</h2>
+                <LuBookOpen className="w-5 h-5 mr-2" />
+                <h2 className="text-lg font-semibold">Spell Details</h2>
               </div>
               <JsonView
                 value={spell}
@@ -116,6 +119,6 @@ export default function SpellbookDetailView() {
           </div>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

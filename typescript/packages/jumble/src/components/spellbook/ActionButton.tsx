@@ -20,13 +20,25 @@ export function ActionButton({ icon, label, onClick, popoverMessage }: ActionBut
     <div className="relative">
       <button
         onClick={handleClick}
-        className="flex items-center gap-2 rounded-lg bg-purple-200 px-4 py-2 text-purple-900 hover:bg-purple-300"
+        className="
+          flex items-center gap-2 px-4 py-2 bg-white
+          border-2 border-black
+          shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]
+          hover:translate-y-[-2px] hover:shadow-[2px_4px_0px_0px_rgba(0,0,0,0.7)]
+          transition-[transform,shadow] duration-100 ease-in-out
+        "
       >
         {icon}
         <span>{label}</span>
       </button>
       {showPopover && (
-        <div className="absolute -top-8 left-1/2 -translate-x-1/2 rounded bg-black px-2 py-1 text-sm text-white">
+        <div
+          className="
+          absolute -top-8 left-1/2 -translate-x-1/2 
+          bg-black text-white px-2 py-1 text-sm
+          border border-white
+        "
+        >
           {popoverMessage}
         </div>
       )}

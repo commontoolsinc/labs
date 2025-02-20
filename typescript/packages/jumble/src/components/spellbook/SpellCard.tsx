@@ -32,24 +32,30 @@ export default function SpellCard({
   return (
     <Link
       to={`/spellbook/${hash}`}
-      className="group transform rounded-lg bg-white p-4 shadow-md transition-all hover:scale-105 hover:shadow-lg"
+      className="
+        block bg-white border-2 border-black 
+        shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]
+        hover:translate-y-[-2px] hover:shadow-[2px_4px_0px_0px_rgba(0,0,0,0.7)]
+        transition-[transform,shadow] duration-100 ease-in-out
+      "
     >
-      <div className="relative h-48 w-full overflow-hidden rounded-md">
-        <img src={imageUrl} alt={name} className="object-cover" />
+      <div className="relative aspect-video w-full border-b-2 border-black">
+        <img src={imageUrl} alt={name} className="object-cover w-full h-full" />
       </div>
-      <div className="mt-4">
-        <h2 className="mt-1 text-xl font-bold text-purple-900 group-hover:text-purple-600">
-          {spellbookTitle}
-        </h2>
-        <h3 className="text-sm italic text-purple-900 group-hover:text-purple-600">({name})</h3>
+      <div className="p-4">
+        <h2 className="text-xl font-bold text-black">{spellbookTitle}</h2>
+        <h3 className="text-sm text-gray-600">({name})</h3>
 
-        <p className="mt-1 text-sm text-gray-600">by {author}</p>
-        <div className="mt-1 flex flex-wrap gap-1">
+        <p className="mt-2 text-sm text-black">by {author}</p>
+        <div className="mt-2 flex flex-wrap gap-1">
           {spellbookTags.map((tag) => (
             <span
               key={tag}
               onClick={(e) => handleTagClick(e, tag)}
-              className="text-sm text-purple-600 hover:text-purple-800 hover:underline cursor-pointer"
+              className="
+                text-sm bg-gray-100 px-2 py-1 border border-black
+                hover:bg-gray-200 cursor-pointer transition-colors
+              "
             >
               #{tag}
             </span>

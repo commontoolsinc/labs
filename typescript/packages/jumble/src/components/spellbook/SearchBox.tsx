@@ -30,9 +30,14 @@ export function SearchBox({ defaultValue = "" }: SearchBoxProps) {
         defaultValue={defaultValue}
         onChange={(e) => handleSearch(e.target.value)}
         placeholder="Search spells"
-        className={`text-black border-2 border-purple-900 rounded-full px-2 py-1 ${
-          isPending ? "opacity-50" : ""
-        }`}
+        className={`
+          w-64 px-3 py-2 bg-white
+          border-2 border-black
+          shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]
+          focus:outline-none focus:shadow-[2px_2px_0px_0px_rgba(0,0,0,0.7)]
+          placeholder:text-gray-500
+          ${isPending ? "opacity-50" : ""}
+        `}
       />
     </div>
   );

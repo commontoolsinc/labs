@@ -58,7 +58,7 @@ export default function SpellbookIndexView() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-purple-50 p-4 md:p-8">
+      <div className="h-full bg-gray-50 p-4">
         <div className="container mx-auto">
           <div className="text-center">Loading spells...</div>
         </div>
@@ -67,10 +67,10 @@ export default function SpellbookIndexView() {
   }
 
   return (
-    <div className="min-h-screen bg-purple-50 p-4 md:p-8">
+    <div className="h-full bg-gray-50 p-4">
       <div className="container mx-auto">
         <div className="mb-8">
-          <h1 className="mb-4 text-3xl font-bold text-purple-900">Spellbook</h1>
+          <h1 className="mb-4 text-3xl font-bold">Spellbook</h1>
           <SearchBox defaultValue={searchQuery} />
         </div>
 
