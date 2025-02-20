@@ -27,6 +27,7 @@
     "@commontools/builder": "workspace:*",
     "@commontools/charm": "workspace:*",
     "@commontools/html": "workspace:*",
+    "@commontools/identity": "workspace:*",
     "@commontools/iframe-sandbox": "workspace:*",
     "@commontools/llm-client": "workspace:*",
     "@commontools/os-ui": "workspace:*",

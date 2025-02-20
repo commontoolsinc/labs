@@ -484,6 +484,9 @@ importers:
       '@commontools/html':
         specifier: workspace:*
         version: link:../common-html
+      '@commontools/identity':
+        specifier: workspace:*
+        version: link:../common-identity
       '@commontools/iframe-sandbox':
         specifier: workspace:*
         version: link:../common-iframe-sandbox
