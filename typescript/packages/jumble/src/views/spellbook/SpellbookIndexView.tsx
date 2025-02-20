@@ -7,6 +7,7 @@ import SpellCard from "@/components/spellbook/SpellCard";
 import { getAllSpellbookBlobs, getBlobByHash } from "@/services/blobby";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
 import { LoadingSpinner } from "@/components/Loader";
+
 interface Spell {
   hash: string;
   name: string;
