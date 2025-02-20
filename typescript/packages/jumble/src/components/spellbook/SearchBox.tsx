@@ -31,7 +31,7 @@ export function SearchBox({ defaultValue = "" }: SearchBoxProps) {
         onChange={(e) => handleSearch(e.target.value)}
         placeholder="Search spells"
         className={`
-          w-64 px-3 py-2 bg-white
+          w-full px-3 py-2 bg-white
           border-2 border-black
           shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]
           focus:outline-none focus:shadow-[2px_2px_0px_0px_rgba(0,0,0,0.7)]

@@ -6,6 +6,7 @@ import JsonView from "@uiw/react-json-view";
 import { LuHeart, LuBookOpen, LuSend, LuCode } from "react-icons/lu";
 import { getBlobByHash, getBlobScreenshotUrl } from "@/services/blobby";
 import { ActionButton } from "@/components/spellbook/ActionButton";
+import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
 
 export default function SpellbookDetailView() {
   const { hash } = useParams<{ hash: string }>();
@@ -46,18 +47,12 @@ export default function SpellbookDetailView() {
     // TODO: Make API call to whatever service is handling likes
   };
 
-  if (loading || !spell || !hash) {
-    return (
-      <div className="h-full bg-gray-50 p-4">
-        <div className="container mx-auto">
-          <div className="text-center">Loading spell...</div>
-        </div>
+  const content =
+    loading || !spell || !hash ? (
+      <div className="container mx-auto">
+        <div className="text-center">Loading spell...</div>
       </div>
-    );
-  }
-
-  return (
-    <div className="h-full bg-gray-50 p-4">
+    ) : (
       <div className="container mx-auto max-w-4xl flex flex-col gap-4">
         <div className="flex gap-2 justify-between">
           <ActionButton
@@ -82,9 +77,9 @@ export default function SpellbookDetailView() {
 
         <div
           className="
-          bg-white border-2 border-black
-          shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]
-        "
+        bg-white border-2 border-black
+        shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)]
+      "
         >
           <div className="relative aspect-video w-full border-b-2 border-black">
             <img
@@ -119,6 +114,12 @@ export default function SpellbookDetailView() {
           </div>
         </div>
       </div>
+    );
+
+  return (
+    <div className="shell h-full bg-gray-50 border-2 border-black">
+      <SpellbookHeader />
+      <div className="relative h-full p-4">{content}</div>
     </div>
   );
 }

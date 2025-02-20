@@ -5,6 +5,7 @@ import { useLocation } from "react-router-dom";
 import { SearchBox } from "@/components/spellbook/SearchBox";
 import SpellCard from "@/components/spellbook/SpellCard";
 import { getAllSpellbookBlobs, getBlobByHash, getBlobScreenshotUrl } from "@/services/blobby";
+import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
 
 interface Spell {
   hash: string;
@@ -56,39 +57,37 @@ export default function SpellbookIndexView() {
     );
   });
 
-  if (loading) {
-    return (
-      <div className="h-full bg-gray-50 p-4">
-        <div className="container mx-auto">
-          <div className="text-center">Loading spells...</div>
-        </div>
+  const content = loading ? (
+    <div className="container mx-auto">
+      <div className="text-center">Loading spells...</div>
+    </div>
+  ) : (
+    <div className="">
+      <div className="mb-8">
+        <SearchBox defaultValue={searchQuery} />
       </div>
-    );
-  }
+
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {filteredSpells.map((spell) => (
+          <SpellCard
+            key={spell.hash}
+            hash={spell.hash}
+            name={spell.name}
+            author={spell.author}
+            likes={0}
+            spellbookTitle={spell.spellbookTitle}
+            spellbookTags={spell.spellbookTags}
+            imageUrl={getBlobScreenshotUrl(spell.hash)}
+          />
+        ))}
+      </div>
+    </div>
+  );
 
   return (
-    <div className="h-full bg-gray-50 p-4">
-      <div className="container mx-auto">
-        <div className="mb-8">
-          <h1 className="mb-4 text-3xl font-bold">Spellbook</h1>
-          <SearchBox defaultValue={searchQuery} />
-        </div>
-
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredSpells.map((spell) => (
-            <SpellCard
-              key={spell.hash}
-              hash={spell.hash}
-              name={spell.name}
-              author={spell.author}
-              likes={0}
-              spellbookTitle={spell.spellbookTitle}
-              spellbookTags={spell.spellbookTags}
-              imageUrl={getBlobScreenshotUrl(spell.hash)}
-            />
-          ))}
-        </div>
-      </div>
+    <div className="shell h-full bg-gray-50 border-2 border-black">
+      <SpellbookHeader />
+      <div className="relative h-full p-4">{content}</div>
     </div>
   );
 }
