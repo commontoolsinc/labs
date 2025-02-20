@@ -81,6 +81,14 @@ export const listSpells = createRoute({
       SpellListResponseSchema,
       "List of spells",
     ),
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: {
+      description: "Error fetching spells",
+      content: {
+        "application/json": {
+          schema: SpellListResponseSchema,
+        },
+      },
+    },
   },
 });
 

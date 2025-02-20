@@ -118,7 +118,7 @@ export const listSpellsHandler: AppRouteHandler<typeof listSpells> = async (
     return c.json({ spells });
   } catch (error) {
     logger.error({ error }, "Error listing spells");
-    return c.json({ error: "Internal server error" }, 500);
+    return c.json({ spells: [] }, 500);
   }
 };
 
