@@ -10,6 +10,11 @@ export const createSpellHandler: AppRouteHandler<typeof createSpell> = async (
   c,
 ) => {
   const logger = c.get("logger");
+  const requesterProfile = {
+    name: c.req.header("tailscale-user-name"),
+    email: c.req.header("tailscale-user-login"),
+    avatar: c.req.header("tailscale-user-profile-pic"),
+  };
   const body = await c.req.json();
 
   try {
@@ -25,7 +30,7 @@ export const createSpellHandler: AppRouteHandler<typeof createSpell> = async (
         spellbookDescription: description,
         spellbookTags: tags,
         spellbookPublishedAt: new Date().toISOString(),
-        spellbookAuthor: "jake", // FIXME(jake): once we have api, we can populate author from tailscale headers
+        spellbookAuthor: requesterProfile.name || "system",
         spellId,
         parents,
         src,
@@ -53,11 +58,12 @@ export const listSpellsHandler: AppRouteHandler<typeof listSpells> = async (
   const searchQuery = c.req.query("search")?.toLowerCase();
 
   try {
-    // Get all spellbook blobs from blobby
+    // Get all spellbook blobs with their data from blobby
     const blobsRes = await client.api.storage.blobby.$get({
       query: {
-        all: true,
+        allWithData: "true",
         prefix: "spellbook-",
+        search: searchQuery,
       },
     });
 
@@ -66,46 +72,18 @@ export const listSpellsHandler: AppRouteHandler<typeof listSpells> = async (
     }
 
     const data = await blobsRes.json();
-    const hashes = data.blobs as string[];
-
-    // Fetch each spell's data
-    const spellPromises = hashes.map(async (hash) => {
-      const blobRes = await client.api.storage.blobby[":key"].$get({
-        param: {
-          key: hash,
-        },
-      });
-      if (!blobRes.ok) return null;
-
-      const blobData = await blobRes.json();
-      const spell = {
-        hash,
-        title: blobData.spellbookTitle || blobData.recipeName ||
-          "Unnamed Spell",
-        description: blobData.spellbookDescription || "",
-        tags: blobData.spellbookTags || [],
-        ui: blobData.spellbookUI || null,
-        publishedAt: blobData.spellbookPublishedAt || "",
-        author: blobData.spellbookAuthor || "Anonymous",
-        data: blobData,
-      };
-
-      // Apply search filter if query exists
-      if (searchQuery) {
-        const matchesSearch = spell.title.toLowerCase().includes(searchQuery) ||
-          spell.description.toLowerCase().includes(searchQuery) ||
-          spell.tags.some((tag: string) =>
-            tag.toLowerCase().includes(searchQuery)
-          );
-
-        return matchesSearch ? spell : null;
-      }
-
-      return spell;
-    });
-
-    const spells = (await Promise.all(spellPromises))
-      .filter((spell): spell is NonNullable<typeof spell> => spell !== null);
+    const spells = Object.entries(data).map((
+      [hash, blobData]: [string, any],
+    ) => ({
+      hash,
+      title: blobData.spellbookTitle || blobData.recipeName || "Unnamed Spell",
+      description: blobData.spellbookDescription || "",
+      tags: blobData.spellbookTags || [],
+      ui: blobData.spellbookUI || null,
+      publishedAt: blobData.spellbookPublishedAt || "",
+      author: blobData.spellbookAuthor || "Anonymous",
+      data: blobData,
+    }));
 
     return c.json({ spells });
   } catch (error) {
