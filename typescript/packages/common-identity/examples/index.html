@@ -79,8 +79,9 @@ label { padding: 10px; }
 </nav>
 </div>
 <script type="module">
-import { PassKey, RootKey } from "../dist/identity.js";
+import { PassKey, Identity, KeyStore } from "../dist/identity.js";
 const $ = s => document.querySelector(s);
+const ROOT_KEY = "$ROOT_KEY";
 const encoder = new TextEncoder();
 let passKeyDeferred = defer();
 let rootKey = null;
@@ -90,19 +91,23 @@ let rootKey = null;
   // from a successful registration
   maybeDisplayRegisterSuccess();
 
+  // Open the key store at the default location.
+  let store = await KeyStore.open();
+
   // First check if we've already stored a root key.
-  let rootKey = await RootKey.fromStorage();
+  let rootKey = await store.get(ROOT_KEY);
   if (rootKey) {
     setRootKey(rootKey);
     return;
   }
+
   // If no root key set, wait for user to authenticate a PassKey,
   // either by creating a new one, or reauthenticating.
   let passKey = await passKeyDeferred.promise;
-  // Create and set a root key from the passkey
-  rootKey = await RootKey.fromPassKey(passKey);
+  // Create a root key derive from the pass key.
+  rootKey = await passKey.createRootKey();
   // Store root key to storage for subsequent page loads
-  await rootKey.saveToStorage();
+  await store.set(ROOT_KEY, rootKey);
   setRootKey(rootKey);
 })();
 
