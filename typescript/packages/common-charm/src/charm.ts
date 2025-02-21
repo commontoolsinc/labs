@@ -165,26 +165,26 @@ export class CharmManager {
 
   // FIXME(JA): this really really really needs to be revisited
   async syncRecipe(charm: Cell<Charm>) {
-    await this.syncRecipeCells(charm);
-    await this.syncRecipeBlobby(this.getSourceDoc(charm)?.get()?.[TYPE]);
+    const recipeId = this.getSourceDoc(charm)?.get()?.[TYPE];
+
+    return Promise.all([this.syncRecipeCells(recipeId), this.syncRecipeBlobby(recipeId)]);
   }
 
-  async syncRecipeCells(charm: Cell<Charm>) {
+  async syncRecipeCells(recipeId: string) {
     // NOTE(ja): I don't think this actually syncs the recipe
-    const recipeId = this.getSourceDoc(charm)?.get()?.[TYPE];
     if (recipeId) await this.storage.syncCell({ "/": recipeId });
   }
 
   // FIXME(ja): blobby seems to be using toString not toJSON
-  async syncRecipeBlobby(entityId: string) {
-    await syncRecipeBlobby(getEntityId(entityId)?.["/"] as string);
+  async syncRecipeBlobby(recipeId: string) {
+    await syncRecipeBlobby(recipeId);
   }
 
   async sync(entity: string | EntityId | Cell<any>, waitForStorage: boolean = false) {
     await this.storage.syncCell(entity, waitForStorage);
   }
 
-  getSourceDoc(charm: Cell<Charm>): DocImpl<any> | undefined {
+  private getSourceDoc(charm: Cell<Charm>): DocImpl<any> | undefined {
     return charm.getAsDocLink().cell?.sourceCell;
   }
 }
