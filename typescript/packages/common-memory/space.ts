@@ -3,6 +3,8 @@ import { fromString, refer } from "./reference.ts";
 import { unclaimed } from "./fact.ts";
 import { from as toChanges, set } from "./changes.ts";
 import { create as createCommit, the as COMMIT_THE } from "./commit.ts";
+import * as Principal from "./principal.ts";
+import * as Access from "./access.ts";
 import type {
   Result,
   MemorySpace,
@@ -29,6 +31,9 @@ import type {
   Claim,
   Query,
   SpaceSession,
+  Issuer,
+  Authorization,
+  AuthorizationError,
 } from "./interface.ts";
 import * as Error from "./error.ts";
 export * from "./interface.ts";
@@ -123,12 +128,12 @@ export type Options = {
 };
 
 interface Session<Space extends MemorySpace> {
-  subject: Space;
+  subject: Issuer<Space>;
   store: Database;
 }
 
 class Space<Subject extends MemorySpace = MemorySpace> implements Session<Subject>, SpaceSession {
-  constructor(public subject: Subject, public store: Database) {}
+  constructor(public subject: Issuer<Subject>, public store: Database) {}
 
   transact(transaction: Transaction<Subject>) {
     return transact(this, transaction);
@@ -161,12 +166,16 @@ export type { Space as View };
  * location in first instance is URL itself but `:memory:` in the second, which
  * is what {@link Database} expects.
  */
-const readAddress = (url: URL) => {
+const readAddress = (url: URL): Result<{ subject: Issuer; address: URL | null }, SyntaxError> => {
   const { pathname } = url;
   const base = pathname.split("/").pop() as string;
-  const subject = base.endsWith(".sqlite") ? base.slice(0, -".sqlite".length) : base;
+  const did = base.endsWith(".sqlite") ? base.slice(0, -".sqlite".length) : base;
+  const { ok: subject, error } = Principal.fromDID(did);
+  if (error) {
+    return { error };
+  }
 
-  return { location: url.protocol === "file:" ? url : ":memory:", subject };
+  return { ok: { address: url.protocol === "file:" ? url : null, subject } };
 };
 
 /**
@@ -176,11 +185,16 @@ const readAddress = (url: URL) => {
 export const connect = async <Subject extends MemorySpace>({
   url,
 }: Options): AsyncResult<Space<Subject>, ToJSON<ConnectionError>> => {
-  const address = readAddress(url);
   try {
-    const database = await new Database(address.location, { create: false });
+    const result = readAddress(url);
+    if (result.error) {
+      throw result.error;
+    }
+    const { address, subject } = result.ok;
+
+    const database = await new Database(address ?? ":memory:", { create: false });
     database.exec(PREPARE);
-    const session = new Space(address.subject as Subject, database);
+    const session = new Space(subject as Issuer<Subject>, database);
     return { ok: session };
   } catch (cause) {
     return { error: Error.connection(url, cause as SqliteError) };
@@ -191,10 +205,14 @@ export const open = async <Subject extends MemorySpace>({
   url,
 }: Options): AsyncResult<Space<Subject>, ConnectionError> => {
   try {
-    const { location, subject } = readAddress(url);
-    const database = await new Database(location, { create: true });
+    const result = readAddress(url);
+    if (result.error) {
+      throw result.error;
+    }
+    const { address, subject } = result.ok;
+    const database = await new Database(address ?? ":memory:", { create: true });
     database.exec(PREPARE);
-    const session = new Space(subject as Subject, database);
+    const session = new Space(subject as Issuer<Subject>, database);
     return { ok: session };
   } catch (cause) {
     throw Error.connection(url, cause as SqliteError);
@@ -449,15 +467,29 @@ const execute = <
   }
 };
 
-export const transact = <Space extends MemorySpace>(
+export const transact = async <Space extends MemorySpace>(
   session: Session<Space>,
   transaction: Transaction<Space>,
-) => execute(session.store.transaction(commit), session, transaction);
+  authorization: Authorization,
+) => {
+  const result = await Access.claim(transaction, authorization);
+  if (result.ok) {
+    return execute(session.store.transaction(commit), session, transaction);
+  } else {
+    return result;
+  }
+};
 
-export const query = <Space extends MemorySpace>(
+export const query = async <Space extends MemorySpace>(
   session: Session<Space>,
-  source: Query<Space>,
-): Result<Selection<Space>, QueryError> => {
+  command: Query<Space>,
+  authorization: Authorization,
+): AsyncResult<Selection<Space>, QueryError | AuthorizationError> => {
+  const { ok: source, error } = await Access.claim(command, authorization);
+  if (error) {
+    return { error };
+  }
+
   try {
     return {
       ok: {

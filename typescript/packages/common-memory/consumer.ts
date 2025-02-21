@@ -3,7 +3,7 @@ import {
   Query,
   Transaction,
   Entity,
-  Principal,
+  DID,
   Selection,
   ProviderCommand,
   ConsumerCommand,
@@ -33,19 +33,19 @@ import * as Fact from "./fact.ts";
 export * from "./interface.ts";
 export { Changes as ChangesBuilder };
 
-export const connect = ({ address, as }: { address: URL; as: Principal }) =>
+export const connect = ({ address, as }: { address: URL; as: DID }) =>
   open({
     as,
     session: Socket.from(new WebSocket(address)) as ProviderSession<Protocol>,
   });
 
-export const open = ({ as, session }: { as: Principal; session: ProviderSession<Protocol> }) => {
+export const open = ({ as, session }: { as: DID; session: ProviderSession<Protocol> }) => {
   const consumer = new MemoryConsumerSession(as);
   session.readable.pipeThrough(consumer).pipeTo(session.writable);
   return consumer;
 };
 
-export const create = ({ as }: { as: Principal }) => new MemoryConsumerSession(as);
+export const create = ({ as }: { as: DID }) => new MemoryConsumerSession(as);
 
 class MemoryConsumerSession
   extends TransformStream<ProviderCommand<Protocol>, ConsumerCommand<Protocol>>
@@ -54,7 +54,7 @@ class MemoryConsumerSession
   controller: TransformStreamDefaultController<ConsumerCommand<Protocol>> | undefined;
   invocations: Map<InvocationURL<Reference<Invocation>>, Job<Abilities<Protocol>, Protocol>> =
     new Map();
-  constructor(public as: Principal) {
+  constructor(public as: DID) {
     let controller: undefined | TransformStreamDefaultController<ConsumerCommand<Protocol>>;
     super({
       start: (control) => {

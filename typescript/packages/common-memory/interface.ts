@@ -7,13 +7,50 @@ export type SubscriberCommand = {
   unwatch?: Query;
 };
 
-export type Invocation<
-  Ability extends The = The,
-  Of extends Principal = Principal,
-  Command extends {} = {},
-> = {
+/**
+ * Some principal identified via DID identifier.
+ */
+export interface Principal<ID extends DID = DID> {
+  id: ID;
+}
+
+/**
+ * Principal capable of issuing an {@link Authorization}.
+ */
+export interface Authority extends Principal {
+  authorize<T extends JSONValue>(access: Iterable<Reference<T> | T>): Await<Authorization<T>>;
+}
+
+export interface Issuer<ID extends DID = DID> extends Principal<ID> {
+  verify(payload: Uint8Array, signature: Uint8Array): AwaitResult<Unit, AuthorizationError>;
+}
+
+export interface ToBytes<T> extends Uint8Array {
+  valueOf(): this & ToBytes<T>;
+}
+
+export type ToString<T> = string & {
+  valueOf(): ToString<T>;
+};
+
+export interface Signature extends Uint8Array {}
+
+/**
+ * Represents a verifiable authorization issued by specific {@link Authority}.
+ * It is slightly more abstract notion than signed payload.
+ */
+export type Authorization<T extends JSONValue = JSONValue> = [
+  proof: Signature,
+  access: Record<ToString<Reference<T>>, Unit>,
+];
+
+export interface AuthorizationError extends Error {
+  name: "AuthorizationError";
+}
+
+export type Invocation<Ability extends The = The, Of extends DID = DID, Command extends {} = {}> = {
   cmd: Ability;
-  iss: Principal;
+  iss: DID;
   sub: Of;
   args: Command;
   meta?: Meta;
@@ -72,7 +109,7 @@ export type Method<Protocol, Ability extends The, In extends {}, Out extends {},
   };
 };
 
-export type InferOf<T> = T extends { this: infer U extends Principal } ? U : never;
+export type InferOf<T> = T extends { this: infer U extends DID } ? U : never;
 /**
  * Utility type that takes union type `U` and produces intersection type of it's members.
  */
@@ -209,7 +246,7 @@ export interface Session<Space extends MemorySpace = MemorySpace> {
 }
 
 export interface SpaceSession<Space extends MemorySpace = MemorySpace> extends Session {
-  subject: Space;
+  subject: Issuer<Space>;
 
   transact(transact: Transaction<Space>): Result<Commit<Space>, ConflictError | TransactionError>;
   query(source: Query<Space>): Result<Selection<Space>, QueryError>;
@@ -420,10 +457,12 @@ export type FactSelection<
 
 export type Meta = Record<string, string>;
 
-export type Principal = `did:${string}:${string}`;
+export type DID = `did:${string}:${string}`;
+
+export type DIDKey = `did:key:${string}`;
 
 export type Transaction<Space extends MemorySpace = MemorySpace> = {
-  iss: Principal;
+  iss: DID;
   sub: Space;
   cmd: "/memory/transact";
   args: { changes: ChangesBuilder };
@@ -436,7 +475,7 @@ export type TransactionResult<Space extends MemorySpace = MemorySpace> = AwaitRe
 >;
 
 export type Query<Space extends MemorySpace = MemorySpace> = {
-  iss: Principal;
+  iss: DID;
   sub: Space;
   cmd: "/memory/query";
   meta?: Meta;
@@ -444,7 +483,7 @@ export type Query<Space extends MemorySpace = MemorySpace> = {
 };
 
 export type Subscribe<Space extends MemorySpace = MemorySpace> = {
-  iss: Principal;
+  iss: DID;
   sub: Space;
   cmd: "/memory/query/subscribe";
   args: { select: Selector; since?: number };
@@ -452,12 +491,14 @@ export type Subscribe<Space extends MemorySpace = MemorySpace> = {
 };
 
 export type Unsubscribe<Space extends MemorySpace = MemorySpace> = {
-  iss: Principal;
+  iss: DID;
   sub: Space;
   cmd: "/memory/query/unsubscribe";
   args: { source: InvocationURL<Reference<Subscribe<Space>>> };
   Meta?: Meta;
 };
+
+export type Command = Transaction | Query | Subscribe | Unsubscribe;
 
 export type QueryResult<Space extends MemorySpace = MemorySpace> = AwaitResult<
   Selection<Space>,
@@ -469,7 +510,7 @@ export type CloseResult = AwaitResult<Unit, SystemError>;
 export type WatchResult = AwaitResult<Unit, QueryError | ConnectionError>;
 
 export type SubscriptionQuery = {
-  iss: Principal;
+  iss: DID;
   sub: MemorySpace;
   cmd: "/memory/query";
   args: {
