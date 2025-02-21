@@ -64,6 +64,11 @@ const CommentResponseSchema = z.object({
   }),
 });
 
+const ShareResponseSchema = z.object({
+  success: z.boolean(),
+  shares: z.number(),
+});
+
 export const createSpell = createRoute({
   method: "post",
   path: "/api/spellbook",
@@ -179,6 +184,26 @@ export const createComment = createRoute({
     },
     [HttpStatusCodes.BAD_REQUEST]: {
       description: "Invalid comment content",
+    },
+  },
+});
+
+export const shareSpell = createRoute({
+  method: "post",
+  path: "/api/spellbook/{spellId}/share",
+  tags,
+  request: {
+    params: z.object({
+      spellId: z.string(),
+    }),
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      ShareResponseSchema,
+      "Spell share count incremented successfully",
+    ),
+    [HttpStatusCodes.NOT_FOUND]: {
+      description: "Spell not found",
     },
   },
 });

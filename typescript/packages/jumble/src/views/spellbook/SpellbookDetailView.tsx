@@ -19,6 +19,7 @@ import {
   createComment,
   whoami,
   type UserProfile,
+  shareSpell,
 } from "@/services/spellbook";
 import { ActionButton } from "@/components/spellbook/ActionButton";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
@@ -67,10 +68,21 @@ export default function SpellbookDetailView() {
     fetchSpell();
   }, [spellId]);
 
-  const handleShare = () => {
-    if (!spellId) return;
-    const url = `${window.location.origin}/spellbook/${spellId}`;
-    navigator.clipboard.writeText(url);
+  const handleShare = async () => {
+    if (!spellId || !spell) return;
+
+    try {
+      const url = `${window.location.origin}/spellbook/${spellId}`;
+      await navigator.clipboard.writeText(url);
+
+      const { shares } = await shareSpell(spellId);
+      setSpell({
+        ...spell,
+        shares,
+      });
+    } catch (error) {
+      console.error("Failed to share spell:", error);
+    }
   };
 
   const handleCopyBlobbyLink = () => {
@@ -151,13 +163,13 @@ export default function SpellbookDetailView() {
               />
               <ActionButton
                 icon={<LuHeart size={24} className={isLiked ? "fill-black" : ""} />}
-                label={`${spell.likes.length} Likes`}
+                label={`${spell.likes.length} ${spell.likes.length === 1 ? "Like" : "Likes"}`}
                 onClick={handleLike}
                 popoverMessage={isLiked ? "Liked!" : "Unliked!"}
               />
               <ActionButton
                 icon={<LuSend size={24} />}
-                label="Share"
+                label={`${spell.shares} ${spell.shares === 1 ? "Share" : "Shares"}`}
                 onClick={handleShare}
                 popoverMessage="Shareable spell link copied to clipboard!"
               />

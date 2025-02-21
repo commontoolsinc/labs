@@ -22,6 +22,7 @@ const Router = router
   .openapi(routes.getSpell, handlers.getSpellHandler)
   .openapi(routes.createSpell, handlers.createSpellHandler)
   .openapi(routes.toggleLike, handlers.toggleLikeHandler)
-  .openapi(routes.createComment, handlers.createCommentHandler);
+  .openapi(routes.createComment, handlers.createCommentHandler)
+  .openapi(routes.shareSpell, handlers.shareSpellHandler);
 
 export default Router;

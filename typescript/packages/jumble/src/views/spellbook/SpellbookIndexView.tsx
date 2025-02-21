@@ -50,6 +50,7 @@ export default function SpellbookIndexView() {
             ui={spell.ui}
             likes={spell.likes.length}
             comments={spell.comments.length}
+            shares={spell.shares}
           />
         ))}
       </div>

@@ -9,9 +9,18 @@ interface SpellCardProps {
   ui: any;
   likes: number;
   comments: number;
+  shares: number;
 }
 
-export default function SpellCard({ spellId, title, tags, ui, likes, comments }: SpellCardProps) {
+export default function SpellCard({
+  spellId,
+  title,
+  tags,
+  ui,
+  likes,
+  comments,
+  shares,
+}: SpellCardProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -61,7 +70,7 @@ export default function SpellCard({ spellId, title, tags, ui, likes, comments }:
               <span>{likes}</span>
             </div>
             <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black text-white px-2 py-1 text-sm border border-white pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
-              {likes} likes
+              {likes} {likes === 1 ? "like" : "likes"}
             </div>
           </div>
           <div className="relative group">
@@ -70,16 +79,16 @@ export default function SpellCard({ spellId, title, tags, ui, likes, comments }:
               <span>{comments}</span>
             </div>
             <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black text-white px-2 py-1 text-sm border border-white pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
-              {comments} comments
+              {comments} {comments === 1 ? "comment" : "comments"}
             </div>
           </div>
           <div className="relative group">
             <div className="flex items-center gap-1 cursor-pointer">
               <LuSend className="w-4 h-4" />
-              <span>7</span>
+              <span>{shares}</span>
             </div>
             <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-black text-white px-2 py-1 text-sm border border-white pointer-events-none whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
-              7 shares
+              {shares} {shares === 1 ? "share" : "shares"}
             </div>
           </div>
         </div>

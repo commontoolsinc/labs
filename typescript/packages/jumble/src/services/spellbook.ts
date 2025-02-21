@@ -49,6 +49,11 @@ export interface UserProfile {
   avatar: string | null;
 }
 
+export interface ShareResponse {
+  success: boolean;
+  shares: number;
+}
+
 export async function listAllSpells(searchQuery?: string): Promise<Spell[]> {
   const url = new URL(`${TOOLSHED_API_URL}/api/spellbook`);
   if (searchQuery) {
@@ -166,6 +171,19 @@ export async function whoami(): Promise<UserProfile> {
 
   if (!response.ok) {
     throw new Error("Failed to get user profile");
+  }
+
+  return response.json();
+}
+
+export async function shareSpell(spellId: string): Promise<ShareResponse> {
+  const response = await fetch(`/api/spellbook/${spellId}/share`, {
+    method: "POST",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to share spell");
   }
 
   return response.json();

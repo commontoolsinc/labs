@@ -5,6 +5,7 @@ import type {
   getSpell,
   likeSpell,
   listSpells,
+  shareSpell,
   toggleLike,
   unlikeSpell,
 } from "./spellbook.routes.ts";
@@ -319,3 +320,56 @@ export const createCommentHandler: AppRouteHandler<typeof createComment> =
       }, 500);
     }
   };
+
+export const shareSpellHandler: AppRouteHandler<typeof shareSpell> = async (
+  c,
+) => {
+  const logger = c.get("logger");
+  const spellId = c.req.param("spellId");
+
+  try {
+    // First get the current spell data
+    const getRes = await client.api.storage.blobby[":key"].$get({
+      param: {
+        key: `spellbook-${spellId}`,
+      },
+    });
+
+    if (!getRes.ok) {
+      return c.json({ error: "Spell not found" }, 404);
+    }
+
+    const blobData = await getRes.json();
+    const currentShares = blobData.spellbookShares || 0;
+
+    // Update the spell with incremented share count
+    const updateRes = await client.api.storage.blobby[":key"].$post({
+      param: {
+        key: `spellbook-${spellId}`,
+      },
+      json: {
+        ...blobData,
+        spellbookShares: currentShares + 1,
+      },
+    });
+
+    if (!updateRes.ok) {
+      logger.error("Failed to update spell shares:", await updateRes.text());
+      return c.json({
+        success: false,
+        shares: currentShares,
+      }, 500);
+    }
+
+    return c.json({
+      success: true,
+      shares: currentShares + 1,
+    });
+  } catch (error) {
+    logger.error({ error }, "Error sharing spell");
+    return c.json({
+      success: false,
+      shares: 0,
+    }, 500);
+  }
+};
