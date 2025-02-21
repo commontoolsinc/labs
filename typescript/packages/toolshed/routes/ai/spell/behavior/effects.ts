@@ -1,5 +1,6 @@
 import { AppType } from "@/app.ts";
 import { hc } from "hono/client";
+import { Memory } from "@commontools/memory";
 
 const client = hc<AppType>("http://localhost:8000/");
 export interface BlobOptions {
@@ -7,6 +8,24 @@ export interface BlobOptions {
   prefix?: string;
   search?: string;
   keys?: string;
+}
+
+export class MemoryError extends Error {
+  context: any;
+
+  constructor(message: string, context?: any) {
+    super(message);
+    this.name = "MemoryError";
+    this.context = context;
+  }
+}
+
+function handleErrorResponse(data: any) {
+  if ("cause" in data.error) {
+    throw new MemoryError(data?.error?.cause?.message, data);
+  } else {
+    throw new MemoryError(data?.error?.message, data);
+  }
 }
 
 export async function getAllMemories(
@@ -30,8 +49,9 @@ export async function getAllMemories(
   });
   const data = await res.json();
   if ("error" in data) {
-    throw data.error;
+    handleErrorResponse(data);
   }
+
   const rawMemories: { the?: string; of?: string; is?: any }[] =
     Array.isArray(data.ok) ? data.ok : [data.ok];
   const memories: { the: string; of: string; is: any }[] = rawMemories
@@ -68,7 +88,7 @@ export async function getAllBlobs(
   const res = await client.api.storage.blobby.$get({ query });
   const data = await res.json();
   if ("error" in data) {
-    throw data.error;
+    handleErrorResponse(data);
   }
   return data.blobs || data;
 }
@@ -78,7 +98,7 @@ export async function getBlob(key: string): Promise<unknown> {
   const data = (await res.json()) as any;
 
   if ("error" in data) {
-    throw data.error;
+    handleErrorResponse(data);
   }
 
   return data;
