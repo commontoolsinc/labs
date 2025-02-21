@@ -76,6 +76,7 @@ export interface Cell<T> {
     log?: ReactivityLog,
   ): QueryResult<DeepKeyLookup<T, Path>>;
   getAsDocLink(): DocLink;
+  getSourceCell<T = any>(schema?: JSONSchema): Cell<T> | undefined;
   toJSON(): { cell: { "/": string } | undefined; path: PropertyKey[] };
   value: T;
   docLink: DocLink;
@@ -221,6 +222,8 @@ function createRegularCell<T>(
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
     getAsDocLink: () => ({ cell: doc, path }) satisfies DocLink,
+    getSourceCell: <T = any>(schema?: JSONSchema) =>
+      doc.sourceCell?.asCell([], log, schema) as Cell<T> | undefined,
     toJSON: () =>
       // TODO: Should this include the schema, as cells are defiined by doclink & schema?
       ({ cell: doc.toJSON(), path }) satisfies {

@@ -34,6 +34,13 @@ export const charmListSchema: JSONSchema = {
   items: { ...charmSchema, asCell: true },
 } as const;
 
+export const processSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    [TYPE]: { type: "string" },
+  },
+} as const;
+
 export type StorageType = "remote" | "memory" | "local";
 
 export class CharmManager {
@@ -164,10 +171,12 @@ export class CharmManager {
   }
 
   // FIXME(JA): this really really really needs to be revisited
-  async syncRecipe(charm: Cell<Charm>) {
-    const recipeId = this.getSourceDoc(charm)?.get()?.[TYPE];
+  async syncRecipe(charm: Cell<Charm>): Promise<string> {
+    const recipeId = charm.getSourceCell(processSchema)?.get()?.[TYPE];
 
-    return Promise.all([this.syncRecipeCells(recipeId), this.syncRecipeBlobby(recipeId)]);
+    return Promise.all([this.syncRecipeCells(recipeId), this.syncRecipeBlobby(recipeId)]).then(
+      () => recipeId,
+    );
   }
 
   async syncRecipeCells(recipeId: string) {
@@ -182,9 +191,5 @@ export class CharmManager {
 
   async sync(entity: string | EntityId | Cell<any>, waitForStorage: boolean = false) {
     await this.storage.syncCell(entity, waitForStorage);
-  }
-
-  private getSourceDoc(charm: Cell<Charm>): DocImpl<any> | undefined {
-    return charm.getAsDocLink().cell?.sourceCell;
   }
 }

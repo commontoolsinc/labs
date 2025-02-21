@@ -1,6 +1,6 @@
 import { JSONSchema, TYPE } from "@commontools/builder";
-import { Charm } from "../charm.js";
-import { getRecipe, getRecipeSrc } from "@commontools/runner";
+import { Charm, processSchema } from "../charm.js";
+import { Cell, getRecipe, getRecipeSrc } from "@commontools/runner";
 
 export type IFrameRecipe = {
   src: string;
@@ -50,8 +50,8 @@ function parseIframeRecipe(source: string): IFrameRecipe | undefined {
   return JSON.parse(match[1]) as IFrameRecipe;
 }
 
-export const getIframeRecipe = (charm: Charm) => {
-  const recipeId = charm.sourceCell?.get()?.[TYPE];
+export const getIframeRecipe = (charm: Cell<Charm>) => {
+  const recipeId = charm.getSourceCell(processSchema)?.get()?.[TYPE];
   if (!recipeId) {
     console.error("FIXME, no recipeId, what should we do?");
     return {};
