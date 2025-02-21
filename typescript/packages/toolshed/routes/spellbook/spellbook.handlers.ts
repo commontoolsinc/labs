@@ -2,6 +2,7 @@ import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
   createComment,
   createSpell,
+  deleteSpell,
   getSpell,
   listSpells,
   shareSpell,
@@ -431,5 +432,37 @@ export const trackRunHandler: AppRouteHandler<typeof trackRun> = async (c) => {
       success: false,
       runs: 0,
     }, 500);
+  }
+};
+
+export const deleteSpellHandler: AppRouteHandler<typeof deleteSpell> = async (
+  c,
+) => {
+  console.log("deleteSpellHandler");
+  const logger = c.get("logger");
+  const spellId = c.req.param("spellId");
+
+  try {
+    // Delete the spellbook blob
+    const deleteRes = await client.api.storage.blobby[":key"].$delete({
+      param: {
+        key: `spellbook-${spellId}`,
+      },
+    });
+
+    console.log("wat", deleteRes);
+
+    if (!deleteRes.ok) {
+      if (deleteRes.status === 404) {
+        return c.json({ error: "Spell not found" }, 404);
+      }
+      logger.error("Failed to delete spell:", await deleteRes.text());
+      return c.json({ success: false }, 500);
+    }
+
+    return c.json({ success: true });
+  } catch (error) {
+    logger.error({ error }, "Error deleting spell");
+    return c.json({ success: false }, 500);
   }
 };

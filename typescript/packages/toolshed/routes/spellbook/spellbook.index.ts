@@ -24,6 +24,7 @@ const Router = router
   .openapi(routes.toggleLike, handlers.toggleLikeHandler)
   .openapi(routes.createComment, handlers.createCommentHandler)
   .openapi(routes.shareSpell, handlers.shareSpellHandler)
-  .openapi(routes.trackRun, handlers.trackRunHandler);
+  .openapi(routes.trackRun, handlers.trackRunHandler)
+  .openapi(routes.deleteSpell, handlers.deleteSpellHandler);
 
 export default Router;
