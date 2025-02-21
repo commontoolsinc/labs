@@ -210,3 +210,17 @@ export async function trackRun(spellId: string): Promise<RunResponse> {
 
   return response.json();
 }
+
+export async function deleteSpell(spellId: string): Promise<boolean> {
+  const response = await fetch(`/api/spellbook/${spellId}`, {
+    method: "DELETE",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to delete spell");
+  }
+
+  const data = await response.json();
+  return data.success;
+}

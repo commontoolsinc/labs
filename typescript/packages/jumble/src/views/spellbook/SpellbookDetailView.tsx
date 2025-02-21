@@ -10,8 +10,8 @@ import {
   LuChevronDown,
   LuChevronRight,
   LuMessageSquare,
-  LuPlay,
   LuShare2,
+  LuTrash2,
 } from "react-icons/lu";
 import {
   getSpellbookBlob,
@@ -22,6 +22,7 @@ import {
   type UserProfile,
   shareSpell,
   trackRun,
+  deleteSpell,
 } from "@/services/spellbook";
 import { ActionButton } from "@/components/spellbook/ActionButton";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
@@ -143,6 +144,23 @@ export default function SpellbookDetailView() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!spellId || !spell) return;
+
+    if (!confirm("Are you sure you want to delete this spell? This action cannot be undone.")) {
+      return;
+    }
+
+    try {
+      const success = await deleteSpell(spellId);
+      if (success) {
+        navigate("/spellbook");
+      }
+    } catch (error) {
+      console.error("Failed to delete spell:", error);
+    }
+  };
+
   const content =
     loading || !spell || !spellId ? (
       <div className="container mx-auto">
@@ -196,6 +214,15 @@ export default function SpellbookDetailView() {
                 onClick={handleRun}
                 popoverMessage="Launching spell..."
               />
+              {currentUser?.shortName === spell.author && (
+                <ActionButton
+                  icon={<LuTrash2 size={24} />}
+                  label="Delete"
+                  onClick={handleDelete}
+                  className="text-red-600 hover:text-red-700"
+                  popoverMessage="Delete spell"
+                />
+              )}
             </div>
           </div>
         </div>
