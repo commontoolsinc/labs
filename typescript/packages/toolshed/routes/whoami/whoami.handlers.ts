@@ -1,7 +1,7 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type { whoami } from "./whoami.routes.ts";
 
-export const whoamiHandler: AppRouteHandler<typeof whoami> = async (c) => {
+export const whoamiHandler: AppRouteHandler<typeof whoami> = (c) => {
   const requesterProfile = {
     name: c.req.header("tailscale-user-name"),
     email: c.req.header("tailscale-user-login"),
