@@ -386,6 +386,73 @@ async function handleIndexCharms(deps: CommandContext) {
   });
   deps.setOpen(false);
 }
+
+async function handleUseDataInSpell(deps: CommandContext) {
+  deps.setLoading(true);
+  try {
+    // Mock data - this would be replaced with actual fetch request
+    const mockSpells = [
+      { id: "spell1", name: "Transform to Table", description: "Converts data into table format" },
+      { id: "spell2", name: "Generate Summary", description: "Creates a summary of the data" },
+      { id: "spell3", name: "Convert to Chart", description: "Visualizes data as a chart" },
+    ];
+
+    deps.setMode({
+      type: "select",
+      command: {
+        id: "spell-select",
+        type: "select",
+        title: "Select Spell to Use",
+        handler: async (selectedSpell) => {
+          console.log("Selected spell:", selectedSpell);
+          // TODO: Implement actual spell casting logic
+          deps.setOpen(false);
+        },
+      },
+      options: mockSpells.map((spell) => ({
+        id: spell.id,
+        title: `${spell.name} - ${spell.description}`,
+        value: spell,
+      })),
+    });
+  } finally {
+    deps.setLoading(false);
+  }
+}
+
+async function handleUseSpellOnOtherData(deps: CommandContext) {
+  deps.setLoading(true);
+  try {
+    // Mock data - this would be replaced with actual fetch request
+    const mockCharms = [
+      { id: "charm1", name: "User Data", description: "Contains user information" },
+      { id: "charm2", name: "Product Catalog", description: "List of products" },
+      { id: "charm3", name: "Analytics", description: "Website analytics data" },
+    ];
+
+    deps.setMode({
+      type: "select",
+      command: {
+        id: "charm-data-select",
+        type: "select",
+        title: "Select Charm Data to Use",
+        handler: async (selectedCharm) => {
+          console.log("Selected charm:", selectedCharm);
+          // TODO: Implement actual data processing logic
+          deps.setOpen(false);
+        },
+      },
+      options: mockCharms.map((charm) => ({
+        id: charm.id,
+        title: `${charm.name} - ${charm.description}`,
+        value: charm,
+      })),
+    });
+  } finally {
+    deps.setLoading(false);
+  }
+}
+
 export function getCommands(deps: CommandContext): CommandItem[] {
   return [
     {
@@ -402,13 +469,35 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       group: "Navigation",
       handler: () => handleSearchCharms(deps),
     },
+    // Create a new Spellcaster menu that contains all spell-related commands
     {
-      id: "spellcaster",
-      type: "input",
+      id: "spellcaster-menu",
+      type: "menu",
       title: "Spellcaster",
       group: "Create",
       predicate: !!deps.focusedReplicaId,
-      handler: (input) => handleSpellcaster(deps, input),
+      children: [
+        {
+          id: "spellcaster",
+          type: "input",
+          title: "Search Spells",
+          handler: (input) => handleSpellcaster(deps, input),
+        },
+        {
+          id: "use-data-in-spell",
+          type: "action",
+          title: "Use Current Data in Spell",
+          predicate: !!deps.focusedCharmId,
+          handler: () => handleUseDataInSpell(deps),
+        },
+        {
+          id: "use-spell-on-other-data",
+          type: "action",
+          title: "Use Current Spell on Other Data",
+          predicate: !!deps.focusedCharmId,
+          handler: () => handleUseSpellOnOtherData(deps),
+        },
+      ],
     },
     {
       id: "rename-charm",

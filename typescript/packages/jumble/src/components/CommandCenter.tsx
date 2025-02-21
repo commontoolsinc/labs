@@ -317,10 +317,15 @@ export function CommandCenter() {
           value={search}
           onValueChange={setSearch}
           onKeyDown={(e) => {
+            // Only handle Enter for input mode, ignore for select mode
             if (mode.type === "input" && e.key === "Enter") {
               e.preventDefault();
               const command = mode.command;
               command.handler?.(search);
+            }
+            // For select mode, prevent the default Enter behavior
+            if (mode.type === "select" && e.key === "Enter") {
+              e.preventDefault();
             }
           }}
           style={{ flexGrow: 1 }}
@@ -373,8 +378,10 @@ export function CommandCenter() {
                             parent: cmd,
                           });
                         } else if (cmd.type === "action") {
-                          cmd.handler?.(context);
-                          if (!cmd.handler || cmd.handler.length === 0) {
+                          // Only close if the handler doesn't return a Promise
+                          // This allows async handlers that change mode to keep the palette open
+                          const result = cmd.handler?.(context);
+                          if (!cmd.handler || (!result && cmd.handler.length === 0)) {
                             setOpen(false);
                           }
                         } else {
