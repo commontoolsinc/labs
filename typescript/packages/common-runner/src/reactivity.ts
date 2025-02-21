@@ -16,14 +16,7 @@ export const effect = <T>(
   value: Cell<T> | DocImpl<T> | T,
   callback: (value: T) => Cancel | undefined | void,
 ): Cancel => {
-  if (isDoc(value)) {
-    value = value.asCell();
-  } else {
-    if (isQueryResultForDereferencing(value)) value = getDocLinkOrThrow(value) as any;
-    if (isDocLink(value)) value = value.cell.asCell(value.path);
-  }
-
-  if (isCell(value)) {
+  if (isCell(value) || isDoc(value)) {
     return value.sink(callback);
   } else {
     const cancel = callback(value as T);
