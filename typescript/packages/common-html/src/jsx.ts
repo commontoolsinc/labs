@@ -1,3 +1,5 @@
+import type { Cell, Stream } from "@commontools/runner";
+
 declare global {
   namespace JSX {
     interface IntrinsicElements {
@@ -32,18 +34,18 @@ export function h(
  * variable (dynamic).
  */
 export type Props = {
-  [key: string]: string | number | boolean | object | Array<any> | null;
+  [key: string]: string | number | boolean | object | Array<any> | null | Cell<any> | Stream<any>;
 };
 
 /** A child in a view can be one of a few things */
-export type Child = VNode | string;
+export type Child = VNode | string | Cell<Child> | Array<Child>;
 
 /** A "virtual view node", e.g. a virtual DOM element */
 export type VNode = {
   type: "vnode";
   name: string;
   props: Props;
-  children: Array<Child>;
+  children: Array<Child> | Cell<Array<Child>>;
 };
 
 export const isVNode = (value: unknown): value is VNode => {

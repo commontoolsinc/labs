@@ -1,4 +1,4 @@
-import { isVNode } from "./jsx.js";
+import { isVNode, type Child, type Props, type VNode } from "./jsx.js";
 import {
   effect,
   useCancelGroup,
@@ -6,7 +6,6 @@ import {
   type Cell,
   isCell,
   isStream,
-  Stream,
 } from "@commontools/runner";
 import { JSONSchema } from "@commontools/builder";
 import * as logger from "./logger.js";
@@ -35,19 +34,6 @@ const vdomSchema: JSONSchema = {
     },
   },
 } as const;
-
-type Props = {
-  [key: string]: string | number | boolean | object | Array<any> | null | Cell<any> | Stream<any>;
-};
-
-type VNode = {
-  type: "vnode";
-  name: string;
-  props: Props;
-  children: Array<Child> | Cell<Array<Child>>;
-};
-
-type Child = VNode | string;
 
 /** Render a view into a parent element */
 export const render = (parent: HTMLElement, view: VNode | Cell<VNode>): Cancel => {
