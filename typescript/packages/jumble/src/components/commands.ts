@@ -246,13 +246,9 @@ async function handleRenameCharm(deps: CommandContext, input: string | undefined
 
 async function handleDeleteCharm(deps: CommandContext) {
   if (!deps.focusedCharmId) return;
-  const charm = await deps.charmManager.get(deps.focusedCharmId);
-  if (!charm?.entityId) return;
-  const result = await deps.charmManager.remove(charm.entityId);
-  if (result) {
-    deps.navigate("/");
-  }
-  deps.setOpen(false);
+  const result = await deps.charmManager.remove(deps.focusedCharmId);
+  if (result) deps.navigate("/");
+  else deps.setOpen(false);
 }
 
 async function handleStartCounterJob(deps: CommandContext) {

@@ -1,6 +1,6 @@
 import { type DocImpl, getDoc } from "../doc.js";
 import { type ReactivityLog } from "../scheduler.js";
-import { normalizeToCells } from "../utils.js";
+import { normalizeToDocLinks } from "../utils.js";
 import { type Action, idle } from "../scheduler.js";
 import { refer } from "merkle-reference";
 
@@ -86,7 +86,7 @@ export function fetchData(
       .then(async (data) => {
         if (thisRun !== currentRun) return;
 
-        normalizeToCells(parentCell, data, undefined, log, {
+        normalizeToDocLinks(parentCell, data, undefined, log, {
           fetchData: { url },
           cause,
         });

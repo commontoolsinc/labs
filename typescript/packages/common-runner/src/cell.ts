@@ -6,7 +6,7 @@ import {
   createQueryResultProxy,
   getDocLinkOrValue,
 } from "./query-result-proxy.js";
-import { resolvePath, followLinks } from "./utils.js";
+import { resolvePath, followLinks, prepareForSaving } from "./utils.js";
 import { queueEvent, subscribe, type ReactivityLog } from "./scheduler.js";
 import { type EntityId, getEntityId } from "./cell-map.js";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.js";
@@ -147,7 +147,14 @@ function createRegularCell<T>(
     set: (newValue: T) => {
       // TODO: This doesn't respect aliases on write. Should it?
       const ref = resolvePath(doc, path, log);
-      ref.cell.setAtPath(ref.path, newValue, log);
+      if (
+        prepareForSaving(ref.cell, newValue, ref.cell.getAtPath(ref.path), log, {
+          parent: getTopFrame()?.cause,
+          doc: ref.cell,
+          path: ref.path,
+        })
+      )
+        ref.cell.setAtPath(ref.path, newValue, log);
     },
     send: (newValue: T) => self.set(newValue),
     update: (value: Partial<T>) => {

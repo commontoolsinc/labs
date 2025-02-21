@@ -2,7 +2,12 @@ import { isAlias } from "@commontools/builder";
 import { getTopFrame, toOpaqueRef } from "@commontools/builder";
 import { getDoc, isDoc, isDocLink, makeOpaqueRef, type DocImpl, type DocLink } from "./doc.js";
 import { queueEvent, type ReactivityLog } from "./scheduler.js";
-import { followAliases, followCellReferences, normalizeToCells, setNestedValue } from "./utils.js";
+import {
+  followAliases,
+  followCellReferences,
+  normalizeToDocLinks,
+  setNestedValue,
+} from "./utils.js";
 
 // Array.prototype's entries, and whether they modify the array
 enum ArrayMethodType {
@@ -170,7 +175,7 @@ export function createQueryResultProxy<T>(
 
               // Turn any newly added elements into cells. And if there was a
               // change at all, update the cell.
-              normalizeToCells(valueCell, copy, target, log, {
+              normalizeToDocLinks(valueCell, copy, target, log, {
                 parent: valueCell.entityId,
                 method: prop,
                 call: new Error().stack,
@@ -190,7 +195,7 @@ export function createQueryResultProxy<T>(
                   call: new Error().stack,
                   context: getTopFrame()?.cause ?? "unknown",
                 };
-                normalizeToCells(valueCell, result, undefined, log, cause);
+                normalizeToDocLinks(valueCell, result, undefined, log, cause);
 
                 const resultCell = getDoc<any[]>(undefined, cause);
                 resultCell.send(result);
@@ -221,7 +226,7 @@ export function createQueryResultProxy<T>(
       }
 
       // Make sure that any nested arrays are made of cells.
-      normalizeToCells(valueCell, value, undefined, log, {
+      normalizeToDocLinks(valueCell, value, undefined, log, {
         cell: valueCell.entityId,
         path: [...valuePath, prop],
       });

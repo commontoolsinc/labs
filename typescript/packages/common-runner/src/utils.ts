@@ -87,7 +87,7 @@ export function sendValueToBinding(
   if (isAlias(binding)) {
     const ref = followAliases(binding, cell, log);
     if (!isDocLink(value) && !isDoc(value) && !isAlias(value)) {
-      normalizeToCells(cell, value, ref.cell.getAtPath(ref.path), log, binding);
+      normalizeToDocLinks(cell, value, ref.cell.getAtPath(ref.path), log, binding);
     }
     setNestedValue(ref.cell, ref.path, value, log);
   } else if (Array.isArray(binding)) {
@@ -450,7 +450,7 @@ export function staticDataToNestedCells(
 ): any {
   value = maybeUnwrapProxy(value);
   value = deepCopy(value);
-  normalizeToCells(parentCell, value, undefined, log, cause);
+  normalizeToDocLinks(parentCell, value, undefined, log, cause);
   return value;
 }
 
@@ -467,8 +467,8 @@ export function staticDataToNestedCells(
  * cells.
  * @returns Whether the value was changed.
  */
-export function normalizeToCells(
-  parentCell: DocImpl<any>,
+export function normalizeToDocLinks(
+  parentDoc: DocImpl<any>,
   value: any,
   previous?: any,
   log?: ReactivityLog,
@@ -501,10 +501,11 @@ export function normalizeToCells(
     let itemId = null;
     let preceedingItemId = null;
     for (let i = 0; i < value.length; i++) {
-      const item = maybeUnwrapProxy(value[i]);
+      let item = maybeUnwrapProxy(value[i]);
+      if (isCell(item)) item = item.getAsDocLink();
       if (item !== value[i]) value[i] = item; // Capture unwrapped value
       const previousItem = previous ? maybeUnwrapProxy(previous[i]) : undefined;
-      if (!(isDoc(item) || isDocLink(item) || isAlias(item) || isCell(item))) {
+      if (!(isDoc(item) || isDocLink(item) || isAlias(item))) {
         // TODO: Should this depend on the value if there is no id provided?
         // This is probably generating extra churn on ids.
         itemId =
@@ -515,8 +516,8 @@ export function normalizeToCells(
                 index: i,
                 preceeding: preceedingItemId,
               });
-        const different = normalizeToCells(
-          parentCell,
+        const different = normalizeToDocLinks(
+          parentDoc,
           value[i],
           isDocLink(previousItem) ? previousItem.cell.getAtPath(previousItem.path) : previousItem,
           log,
@@ -532,7 +533,7 @@ export function normalizeToCells(
         } else {
           value[i] = { cell: getDoc(value[i]), path: [] } satisfies DocLink;
           value[i].cell.entityId = itemId;
-          value[i].cell.sourceCell = parentCell;
+          value[i].cell.sourceCell = parentDoc;
 
           preceedingItemId = itemId;
           log?.writes.push(value[i]);
@@ -549,7 +550,7 @@ export function normalizeToCells(
       const item = maybeUnwrapProxy(value[key]);
       if (item !== value[key]) value[key] = item; // Capture unwrapped value
       const previousItem = previous ? maybeUnwrapProxy(previous[key]) : undefined;
-      let change = normalizeToCells(parentCell, item, previousItem, log, {
+      let change = normalizeToDocLinks(parentDoc, item, previousItem, log, {
         parent: cause,
         key,
       });
@@ -566,10 +567,25 @@ export function normalizeToCells(
   } else if (isDocLink(previous)) {
     // value is a literal value here and the last clause
     changed = value !== previous.cell.getAtPath(previous.path);
+  } else if (isCell(previous)) {
+    changed = value !== previous.get();
   } else {
     changed = value !== previous;
   }
   return changed;
+}
+
+export function prepareForSaving(
+  doc: DocImpl<any>,
+  value: any,
+  previous?: any,
+  log?: ReactivityLog,
+  cause?: any,
+): any {
+  if (isCell(value)) return value.getAsDocLink();
+  else if (isDocLink(value)) return value;
+  else if (isDoc(value)) return { cell: value, path: [] };
+  else return normalizeToDocLinks(doc, value, previous, log, cause);
 }
 
 function maybeUnwrapProxy(value: any): any {

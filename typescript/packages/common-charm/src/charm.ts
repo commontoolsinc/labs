@@ -86,7 +86,7 @@ export class CharmManager {
   }
 
   // note: removing a charm doesn't clean up the charm's cells
-  async remove(idOrCharm: EntityId | Cell<Charm>) {
+  async remove(idOrCharm: string | EntityId | Cell<Charm>) {
     await this.storage.syncCell(this.charmsDoc);
     // bf: horrible code, this indicates inconsistent data structures somewhere
     const id = getEntityId(idOrCharm);

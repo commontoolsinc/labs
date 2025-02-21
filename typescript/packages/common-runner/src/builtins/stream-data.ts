@@ -1,5 +1,5 @@
 import { type DocImpl, getDoc } from "../doc.js";
-import { normalizeToCells } from "../utils.js";
+import { normalizeToDocLinks } from "../utils.js";
 import { type Action, idle } from "../scheduler.js";
 import { type ReactivityLog } from "../scheduler.js";
 
@@ -124,7 +124,7 @@ export function streamData(
               data: JSON.parse(data),
             };
 
-            normalizeToCells(parentCell, parsedData, undefined, log, {
+            normalizeToDocLinks(parentCell, parsedData, undefined, log, {
               streamData: { url },
               cause,
             });

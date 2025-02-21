@@ -77,7 +77,7 @@ export const createRef = (source: Object = {}, cause: any = crypto.randomUUID())
  * @returns The entity ID, or undefined if the value is not a cell.
  */
 export const getEntityId = (value: any): { "/": string } | undefined => {
-  if (typeof value === "string") return JSON.parse(value);
+  if (typeof value === "string") return value.startsWith("{") ? JSON.parse(value) : { "/": value };
   if (typeof value === "object" && value !== null && "/" in value)
     return JSON.parse(JSON.stringify(value));
 
