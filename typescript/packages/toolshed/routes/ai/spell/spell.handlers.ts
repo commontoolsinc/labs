@@ -14,6 +14,7 @@ import { processSchema } from "@/routes/ai/spell/fulfill.ts";
 import { candidates } from "@/routes/ai/spell/caster.ts";
 import { CasterSchemaRoute } from "@/routes/ai/spell/spell.routes.ts";
 import { processSpellSearch } from "@/routes/ai/spell/behavior/spell-search.ts";
+import { captureException } from "@sentry/deno";
 
 export const ProcessSchemaRequestSchema = z.object({
   schema: z.record(
@@ -190,6 +191,7 @@ export const fulfill: AppRouteHandler<ProcessSchemaRoute> = async (c) => {
     return c.json(response, HttpStatusCodes.OK);
   } catch (error) {
     logger.error({ error }, "Error processing schema");
+    captureException(error);
     return c.json(
       { error: "Failed to process schema" },
       HttpStatusCodes.INTERNAL_SERVER_ERROR,
@@ -212,6 +214,7 @@ export const search: AppRouteHandler<SearchSchemaRoute> = async (c) => {
     return c.json(response, HttpStatusCodes.OK);
   } catch (error) {
     logger.error({ error }, "Error processing search");
+    captureException(error);
     return c.json(
       { error: "Failed to process search" },
       HttpStatusCodes.INTERNAL_SERVER_ERROR,
@@ -243,6 +246,7 @@ export const caster: AppRouteHandler<CasterSchemaRoute> = async (c) => {
     );
   } catch (error) {
     logger.error({ error }, "Error processing schema");
+    captureException(error);
     return c.json(
       { error: "Failed to process schema" },
       HttpStatusCodes.INTERNAL_SERVER_ERROR,
@@ -294,6 +298,7 @@ export const spellSearch: AppRouteHandler<SpellSearchRoute> = async (c) => {
     return c.json(response, HttpStatusCodes.OK);
   } catch (error) {
     logger.error({ error }, "Error processing spell search");
+    captureException(error);
     return c.json(
       { error: "Failed to process spell search" },
       HttpStatusCodes.INTERNAL_SERVER_ERROR,
