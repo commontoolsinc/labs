@@ -33,3 +33,20 @@ export async function getUserBlobs(
 export async function getAllBlobs(redis: RedisClient): Promise<string[]> {
   return await redis.sMembers(`${REDIS_PREFIX}:blobs`);
 }
+
+export async function removeBlobFromUser(
+  redis: RedisClient,
+  hash: string,
+) {
+  // Get all users associated with this blob
+  const users = await getBlobUsers(redis, hash);
+
+  // Remove the blob from all user sets and global sets
+  await Promise.all([
+    ...users.map((user) =>
+      redis.sRem(`${REDIS_PREFIX}:user:${user}:blobs`, hash)
+    ),
+    redis.sRem(`${REDIS_PREFIX}:blobs`, hash),
+    redis.del(`${REDIS_PREFIX}:blob:${hash}:users`),
+  ]);
+}

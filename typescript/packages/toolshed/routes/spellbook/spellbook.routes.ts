@@ -235,3 +235,25 @@ export const trackRun = createRoute({
     },
   },
 });
+
+export const deleteSpell = createRoute({
+  method: "delete",
+  path: "/api/spellbook/{spellId}",
+  tags,
+  request: {
+    params: z.object({
+      spellId: z.string(),
+    }),
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      z.object({
+        success: z.boolean(),
+      }),
+      "Spell deleted successfully",
+    ),
+    [HttpStatusCodes.NOT_FOUND]: {
+      description: "Spell not found",
+    },
+  },
+});

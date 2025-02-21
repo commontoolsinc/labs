@@ -1,11 +1,17 @@
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
+  deleteBlob,
   getBlob,
   getBlobPath,
   listBlobs,
   uploadBlob,
 } from "./blobby.routes.ts";
-import { addBlobToUser, getAllBlobs, getUserBlobs } from "./lib/redis.ts";
+import {
+  addBlobToUser,
+  getAllBlobs,
+  getUserBlobs,
+  removeBlobFromUser,
+} from "./lib/redis.ts";
 import type { RedisClientType } from "redis";
 import { DiskStorage } from "@/routes/storage/blobby/lib/storage.ts";
 import env from "@/env.ts";
@@ -162,5 +168,34 @@ export const listBlobsHandler: AppRouteHandler<typeof listBlobs> = async (
   } catch (error) {
     logger.error({ error }, "Error listing blobs");
     return c.json({ error: "Internal server error" }, 500);
+  }
+};
+
+export const deleteBlobHandler: AppRouteHandler<typeof deleteBlob> = async (
+  c,
+) => {
+  const redis = c.get("blobbyRedis");
+  if (!redis) throw new Error("Redis client not found in context");
+  const logger = c.get("logger");
+  const key = c.req.param("key");
+
+  try {
+    // Check if blob exists first
+    const exists = await storage.getBlob(key);
+    if (!exists) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
+    // Delete the blob from storage
+    await storage.deleteBlob(key);
+
+    // Remove from user's blob list in Redis
+    await removeBlobFromUser(redis, key);
+
+    logger.info({ key }, "Blob deleted successfully");
+    return c.json({ success: true });
+  } catch (error) {
+    logger.error({ error, key }, "Failed to delete blob");
+    return c.json({ success: false }, 500);
   }
 };
