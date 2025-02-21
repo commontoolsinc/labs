@@ -35,5 +35,10 @@ export function SpellPreview({ ui, className = "" }: SpellPreviewProps) {
     return cancel;
   }, [ui, isIntersecting]);
 
-  return <div ref={previewRef} className={`w-full bg-gray-50 rounded h-full ${className}`} />;
+  return (
+    <div
+      ref={previewRef}
+      className={`w-full bg-gray-50 rounded h-full pointer-events-none select-none ${className}`}
+    />
+  );
 }

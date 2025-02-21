@@ -43,8 +43,8 @@ function CharmPreview({ charm, replicaName }: { charm: Charm; replicaName: strin
       const cancel = render(preview, charmData);
       return cancel;
     } catch (error) {
-      console.error('Failed to render charm preview:', error);
-      preview.innerHTML = '<p>Preview unavailable</p>';
+      console.error("Failed to render charm preview:", error);
+      preview.innerHTML = "<p>Preview unavailable</p>";
     }
   }, [charm, isIntersecting]);
 
@@ -53,12 +53,11 @@ function CharmPreview({ charm, replicaName }: { charm: Charm; replicaName: strin
       <NavLink to={`/${replicaName}/${charmId(charm)}`}>
         <div>
           <h3 className="text-xl font-semibold text-gray-800 mb-4">
-            {(charm[NAME] || "Unnamed Charm") +
-              ` (#${charmId(charm).slice(-4)})`}
+            {(charm[NAME] || "Unnamed Charm") + ` (#${charmId(charm).slice(-4)})`}
           </h3>
           <div
             ref={previewRef}
-            className="w-full bg-gray-50 rounded border border-gray-100 min-h-[192px]"
+            className="w-full bg-gray-50 rounded border border-gray-100 min-h-[192px] pointer-events-none select-none"
           ></div>
         </div>
       </NavLink>
@@ -74,10 +73,9 @@ export default function CharmList() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 p-8">
       {replicaName &&
-        charms
-          .map((charm) => (
-            <CharmPreview key={charmId(charm)} charm={charm} replicaName={replicaName} />
-          ))}
+        charms.map((charm) => (
+          <CharmPreview key={charmId(charm)} charm={charm} replicaName={replicaName} />
+        ))}
     </div>
   );
 }
