@@ -85,6 +85,7 @@ const ROOT_KEY = "$ROOT_KEY";
 const encoder = new TextEncoder();
 let passKeyDeferred = defer();
 let rootKey = null;
+let store = null;
 
 (async function init() {
   // Show registration success if we were redirected
@@ -92,7 +93,7 @@ let rootKey = null;
   maybeDisplayRegisterSuccess();
 
   // Open the key store at the default location.
-  let store = await KeyStore.open();
+  store = await KeyStore.open();
 
   // First check if we've already stored a root key.
   let rootKey = await store.get(ROOT_KEY);
@@ -139,12 +140,14 @@ $("#sign-message").addEventListener("input", async (e) => {
   const data = encoder.encode(e.target.value);
   const signature = await rootKey.sign(data);
   $("#signature").innerText = btoa(String.fromCharCode(...new Uint8Array(signature))); 
-  setVerificationStatus(await rootKey.verify(signature, data));
+  setVerificationStatus(await rootKey.verifier().verify(signature, data));
 });
 
 $("#clear-db").addEventListener("click", async (e) => {
-  await RootKey.clearStorage();
-  window.location.reload();
+  if (store) {
+    await store.clear();
+    window.location.reload();
+  }
 });
 
 $("#auth").addEventListener("click", e => {

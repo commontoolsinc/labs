@@ -1,8 +1,6 @@
-import { KeyPair, KeyPairRaw, isInsecureCryptoKeyPair, isCryptoKeyPair } from "../keys.js";
-import { NativeEd25519 } from "./native.js";
-import { NobleEd25519 } from "./noble.js";
-
-type Impl = NativeEd25519 | NobleEd25519;
+import { KeyPairRaw, isInsecureCryptoKeyPair, isCryptoKeyPair, Signer, Verifier, DID } from "../interface.js";
+import { NativeEd25519Signer, NativeEd25519Verifier, isNativeEd25519Supported } from "./native.js";
+import { NobleEd25519Signer, NobleEd25519Verifier } from "./noble.js";
 
 // Platform-specific implementation of an ED25519 Keypair.
 //
@@ -11,20 +9,14 @@ type Impl = NativeEd25519 | NobleEd25519;
 // is used.
 //
 // [0]: https://caniuse.com/mdn-api_subtlecrypto_sign_ed25519
-export class Ed25519KeyPair implements KeyPair {
-  private impl: Impl;
-  private _did: string | null;
-  constructor(impl: Impl) {
+export class Ed25519Signer implements Signer {
+  private impl: NativeEd25519Signer | NobleEd25519Signer;
+  constructor(impl: NativeEd25519Signer | NobleEd25519Signer) {
     this.impl = impl;
-    this._did = null;
   }
 
-  async did() {
-    if (this._did) {
-      return this._did;
-    }
-    this._did = await this.impl.did();
-    return this._did;
+  verifier(): Verifier {
+    return this.impl.verifier();
   }
 
   serialize(): KeyPairRaw {
@@ -35,29 +27,58 @@ export class Ed25519KeyPair implements KeyPair {
     return this.impl.sign(data);
   }
 
-  verify(signature: Uint8Array, data: Uint8Array): Promise<boolean> {
-    return this.impl.verify(signature, data);
-  }
-
-  static async generateFromRaw(rawPrivateKey: Uint8Array): Promise<Ed25519KeyPair> {
-    return new Ed25519KeyPair(await NativeEd25519.isSupported() ?
-      await NativeEd25519.generateFromRaw(rawPrivateKey) :
-      await NobleEd25519.generateFromRaw(rawPrivateKey));
+  static async fromRaw(rawPrivateKey: Uint8Array): Promise<Ed25519Signer> {
+    return new Ed25519Signer(await isNativeEd25519Supported() ?
+      await NativeEd25519Signer.fromRaw(rawPrivateKey) :
+      await NobleEd25519Signer.fromRaw(rawPrivateKey));
   }
   
-  static async generate(): Promise<Ed25519KeyPair> {
-    return new Ed25519KeyPair(await NativeEd25519.isSupported() ?
-      await NativeEd25519.generate() :
-      await NobleEd25519.generate());
+  static async generate(): Promise<Ed25519Signer> {
+    return new Ed25519Signer(await isNativeEd25519Supported() ?
+      await NativeEd25519Signer.generate() :
+      await NobleEd25519Signer.generate());
   }
 
-  static deserialize(input: KeyPairRaw): Ed25519KeyPair {
+  static deserialize(input: KeyPairRaw): Ed25519Signer {
     if (isCryptoKeyPair(input)) {
-      return new Ed25519KeyPair(NativeEd25519.deserialize(input));
+      return new Ed25519Signer(NativeEd25519Signer.deserialize(input));
     } else if (isInsecureCryptoKeyPair(input)) {
-      return new Ed25519KeyPair(NobleEd25519.deserialize(input));
+      return new Ed25519Signer(NobleEd25519Signer.deserialize(input));
     } else {
       throw new Error("common-identity: Could not deserialize key.");
     }
   };
+}
+
+export class Ed25519Verifier implements Verifier {
+  private impl: NativeEd25519Verifier | NobleEd25519Verifier;
+  private _did: string | null;
+  constructor(impl: NativeEd25519Verifier | NobleEd25519Verifier) {
+    this.impl = impl;
+    this._did = null;
+  }
+
+  verify(signature: Uint8Array, data: Uint8Array): Promise<boolean> {
+    return this.impl.verify(signature, data);
+  }
+
+  async did(): Promise<string> {
+    if (this._did) {
+      return this._did;
+    }
+    this._did = await this.impl.did();
+    return this._did;
+  }
+
+  static async fromDid(did: DID): Promise<Ed25519Verifier> {
+    return new Ed25519Verifier(await isNativeEd25519Supported() ?
+      await NativeEd25519Verifier.fromDid(did) :
+      await NobleEd25519Verifier.fromDid(did));
+  }
+
+  static async fromRaw(rawPublicKey: Uint8Array): Promise<Ed25519Verifier> {
+    return new Ed25519Verifier(await isNativeEd25519Supported() ?
+      await NativeEd25519Verifier.fromRaw(rawPublicKey) :
+      await NobleEd25519Verifier.fromRaw(rawPublicKey));
+  }
 }
