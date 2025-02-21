@@ -7,20 +7,14 @@ export interface Spell {
   id: string;
   title: string;
   description: string;
+  author: string;
   tags: string[];
   ui: any;
-  publishedAt: string;
-  author: string;
   data: any;
   likes: string[];
-  comments: {
-    id: string;
-    content: string;
-    author: string;
-    authorAvatar: string;
-    createdAt: string;
-  }[];
   shares: number;
+  runs: number;
+  comments: Comment[];
 }
 
 export interface LikeResponse {
@@ -52,6 +46,10 @@ export interface UserProfile {
 export interface ShareResponse {
   success: boolean;
   shares: number;
+}
+
+export interface RunResponse {
+  runs: number;
 }
 
 export async function listAllSpells(searchQuery?: string): Promise<Spell[]> {
@@ -184,6 +182,19 @@ export async function shareSpell(spellId: string): Promise<ShareResponse> {
 
   if (!response.ok) {
     throw new Error("Failed to share spell");
+  }
+
+  return response.json();
+}
+
+export async function trackRun(spellId: string): Promise<RunResponse> {
+  const response = await fetch(`${TOOLSHED_API_URL}/api/spellbook/${spellId}/run`, {
+    method: "POST",
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to track spell run");
   }
 
   return response.json();

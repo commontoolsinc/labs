@@ -13,8 +13,10 @@ const SpellSchema = z.object({
   ui: z.any(),
   publishedAt: z.string(),
   author: z.string(),
+  authorAvatar: z.string(),
   data: z.any(),
   likes: z.array(z.string()),
+  runs: z.number(),
   comments: z.array(z.object({
     id: z.string(),
     content: z.string(),
@@ -67,6 +69,11 @@ const CommentResponseSchema = z.object({
 const ShareResponseSchema = z.object({
   success: z.boolean(),
   shares: z.number(),
+});
+
+const RunResponseSchema = z.object({
+  success: z.boolean(),
+  runs: z.number(),
 });
 
 export const createSpell = createRoute({
@@ -201,6 +208,26 @@ export const shareSpell = createRoute({
     [HttpStatusCodes.OK]: jsonContent(
       ShareResponseSchema,
       "Spell share count incremented successfully",
+    ),
+    [HttpStatusCodes.NOT_FOUND]: {
+      description: "Spell not found",
+    },
+  },
+});
+
+export const trackRun = createRoute({
+  method: "post",
+  path: "/api/spellbook/{spellId}/run",
+  tags,
+  request: {
+    params: z.object({
+      spellId: z.string(),
+    }),
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      RunResponseSchema,
+      "Spell run count incremented successfully",
     ),
     [HttpStatusCodes.NOT_FOUND]: {
       description: "Spell not found",

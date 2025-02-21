@@ -7,6 +7,7 @@ import type {
   listSpells,
   shareSpell,
   toggleLike,
+  trackRun,
   unlikeSpell,
 } from "./spellbook.routes.ts";
 import { hc } from "hono/client";
@@ -24,10 +25,13 @@ interface SpellData {
   spellbookPublishedAt?: string;
   spellbookAuthor?: string;
   spellbookLikes?: string[];
+  spellbookAuthorAvatar?: string;
+  spellbookRuns?: number;
   spellbookComments?: {
     id: string;
     content: string;
     author: string;
+    authorAvatar: string;
     createdAt: string;
   }[];
   spellbookShares?: number;
@@ -59,6 +63,7 @@ function toSpell(hash: string, blobData: SpellData) {
     comments: blobData.spellbookComments || [],
     data: blobData,
     shares: blobData.spellbookShares || 0,
+    runs: blobData.spellbookRuns || 0,
   };
 }
 
@@ -90,6 +95,8 @@ export const createSpellHandler: AppRouteHandler<typeof createSpell> = async (
         spellbookTags: tags,
         spellbookPublishedAt: new Date().toISOString(),
         spellbookAuthor: requesterProfile.shortName || "system",
+        spellbookAuthorAvatar: requesterProfile.avatar || "",
+        spellbookRuns: 0,
         parents,
         src,
         spec,
@@ -370,6 +377,57 @@ export const shareSpellHandler: AppRouteHandler<typeof shareSpell> = async (
     return c.json({
       success: false,
       shares: 0,
+    }, 500);
+  }
+};
+
+export const trackRunHandler: AppRouteHandler<typeof trackRun> = async (c) => {
+  const logger = c.get("logger");
+  const spellId = c.req.param("spellId");
+
+  try {
+    // First get the current spell data
+    const getRes = await client.api.storage.blobby[":key"].$get({
+      param: {
+        key: `spellbook-${spellId}`,
+      },
+    });
+
+    if (!getRes.ok) {
+      return c.json({ error: "Spell not found" }, 404);
+    }
+
+    const blobData = await getRes.json();
+    const currentRuns = blobData.spellbookRuns || 0;
+
+    // Update the spell with incremented run count
+    const updateRes = await client.api.storage.blobby[":key"].$post({
+      param: {
+        key: `spellbook-${spellId}`,
+      },
+      json: {
+        ...blobData,
+        spellbookRuns: currentRuns + 1,
+      },
+    });
+
+    if (!updateRes.ok) {
+      logger.error("Failed to update spell runs:", await updateRes.text());
+      return c.json({
+        success: false,
+        runs: currentRuns,
+      }, 500);
+    }
+
+    return c.json({
+      success: true,
+      runs: currentRuns + 1,
+    });
+  } catch (error) {
+    logger.error({ error }, "Error tracking spell run");
+    return c.json({
+      success: false,
+      runs: 0,
     }, 500);
   }
 };

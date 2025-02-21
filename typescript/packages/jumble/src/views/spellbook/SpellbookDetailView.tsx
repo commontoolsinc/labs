@@ -1,16 +1,17 @@
 // SpellbookDetailView.tsx
 
 import { useState, useEffect } from "react";
-import { useParams, NavLink } from "react-router-dom";
+import { useParams, NavLink, useNavigate } from "react-router-dom";
 import JsonView from "@uiw/react-json-view";
 import {
   LuHeart,
   LuBookOpen,
   LuSend,
-  LuCode,
   LuChevronDown,
   LuChevronRight,
   LuMessageSquare,
+  LuPlay,
+  LuShare2,
 } from "react-icons/lu";
 import {
   getSpell,
@@ -20,6 +21,7 @@ import {
   whoami,
   type UserProfile,
   shareSpell,
+  trackRun,
 } from "@/services/spellbook";
 import { ActionButton } from "@/components/spellbook/ActionButton";
 import { SpellbookHeader } from "@/components/spellbook/SpellbookHeader";
@@ -27,6 +29,7 @@ import { SpellPreview } from "@/components/spellbook/SpellPreview";
 
 export default function SpellbookDetailView() {
   const { spellId } = useParams<{ spellId: string }>();
+  const navigate = useNavigate();
   const [spell, setSpell] = useState<Spell | null>(null);
   const [loading, setLoading] = useState(true);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(false);
@@ -85,10 +88,29 @@ export default function SpellbookDetailView() {
     }
   };
 
-  const handleCopyBlobbyLink = () => {
-    if (!spellId) return;
-    const url = `https://paas.saga-castor.ts.net/blobby/blob/${spellId}`;
-    navigator.clipboard.writeText(url);
+  const handleRun = async () => {
+    if (!spellId || !spell) return;
+
+    try {
+      // Optimistically update the run count
+      setSpell({
+        ...spell,
+        runs: (spell.runs || 0) + 1,
+      });
+
+      // Navigate immediately
+      navigate(`/spellbook/launch/${spellId}`);
+
+      // Track the run in the background
+      await trackRun(spellId);
+    } catch (error) {
+      console.error("Failed to run spell:", error);
+      // Revert the optimistic update on error
+      setSpell({
+        ...spell,
+        runs: spell.runs || 0,
+      });
+    }
   };
 
   const handleLike = async () => {
@@ -156,11 +178,12 @@ export default function SpellbookDetailView() {
           <div className="p-6">
             <div className="flex gap-2 justify-between">
               <ActionButton
-                icon={<LuCode size={24} />}
-                label="Blobby"
-                onClick={handleCopyBlobbyLink}
-                popoverMessage="Blobby link copied to clipboard!"
+                icon={<LuShare2 size={24} />}
+                label={`${spell.shares} ${spell.shares === 1 ? "Share" : "Shares"}`}
+                onClick={handleShare}
+                popoverMessage="Shareable spell link copied to clipboard!"
               />
+
               <ActionButton
                 icon={<LuHeart size={24} className={isLiked ? "fill-black" : ""} />}
                 label={`${spell.likes.length} ${spell.likes.length === 1 ? "Like" : "Likes"}`}
@@ -169,9 +192,9 @@ export default function SpellbookDetailView() {
               />
               <ActionButton
                 icon={<LuSend size={24} />}
-                label={`${spell.shares} ${spell.shares === 1 ? "Share" : "Shares"}`}
-                onClick={handleShare}
-                popoverMessage="Shareable spell link copied to clipboard!"
+                label={`${spell.runs || 0} ${(spell.runs || 0) === 1 ? "Run" : "Runs"}`}
+                onClick={handleRun}
+                popoverMessage="Launching spell..."
               />
             </div>
           </div>

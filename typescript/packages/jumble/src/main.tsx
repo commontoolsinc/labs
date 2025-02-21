@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from "react-router-dom";
 import "@/styles/index.css";
 import PhotoFlowIndex from "@/views/experiments/photoflow/Index.tsx";
 import PhotoSetView from "@/views/experiments/photoflow/PhotoSetView.tsx";
@@ -47,6 +47,14 @@ createRoot(document.getElementById("root")!).render(
               {/* Spellbook routes */}
               <Route path="/spellbook" element={<SpellbookIndexView />} />
               <Route path="/spellbook/:spellId" element={<SpellbookDetailView />} />
+              <Route
+                path="/spellbook/launch/:spellId"
+                element={() => {
+                  const { spellId } = useParams();
+                  console.log("Launching spell:", spellId);
+                  return <div>Launching spell {spellId}...</div>;
+                }}
+              />
 
               {/* internal tools / experimental routes */}
               <Route path="/utility/jsongen" element={<GenerateJSONView />} />
