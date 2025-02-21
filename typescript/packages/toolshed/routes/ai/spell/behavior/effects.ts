@@ -50,6 +50,7 @@ export async function getAllMemories(
   const data = await res.json();
   if ("error" in data) {
     handleErrorResponse(data);
+    return [];
   }
 
   const rawMemories: { the?: string; of?: string; is?: any }[] =
@@ -89,6 +90,7 @@ export async function getAllBlobs(
   const data = await res.json();
   if ("error" in data) {
     handleErrorResponse(data);
+    return [];
   }
   return data.blobs || data;
 }
@@ -99,6 +101,7 @@ export async function getBlob(key: string): Promise<unknown> {
 
   if ("error" in data) {
     handleErrorResponse(data);
+    return [];
   }
 
   return data;
