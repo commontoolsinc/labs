@@ -13,7 +13,9 @@ export interface StorageProvider {
    * @param batch - Batch of entity IDs & values to send.
    * @returns Promise that resolves when the value is sent.
    */
-  send<T = any>(batch: { entityId: EntityId; value: StorageValue<T> }[]): Promise<void>;
+  send<T = any>(
+    batch: { entityId: EntityId; value: StorageValue<T> }[],
+  ): Promise<{ ok: {}; error?: undefined } | { ok?: undefined; error?: Error }>;
 
   /**
    * Sync a value from storage. Use `get()` to retrieve the value.
@@ -62,7 +64,9 @@ export abstract class BaseStorageProvider implements StorageProvider {
   protected waitingForSync = new Map<string, Promise<void>>();
   protected waitingForSyncResolvers = new Map<string, () => void>();
 
-  abstract send<T = any>(batch: { entityId: EntityId; value: StorageValue<T> }[]): Promise<void>;
+  abstract send<T = any>(
+    batch: { entityId: EntityId; value: StorageValue<T> }[],
+  ): Promise<{ ok: {}; error?: undefined } | { ok?: undefined; error: Error }>;
 
   abstract sync(entityId: EntityId, expectedInStorage: boolean): Promise<void>;
 

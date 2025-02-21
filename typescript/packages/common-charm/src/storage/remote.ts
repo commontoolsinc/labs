@@ -7,9 +7,25 @@ import { assert } from "@commontools/memory/fact";
 import * as Changes from "@commontools/memory/changes";
 export * from "@commontools/memory/interface";
 
-interface Local<Space extends MemorySpace = MemorySpace> {
+/**
+ * Represents a state of the memory space.
+ */
+interface MemoryState<Space extends MemorySpace = MemorySpace> {
+  /**
+   * Session to a remote memory space.
+   */
   memory: Memory.MemorySpaceSession<Space>;
-  queries: Map<Entity, Query<Space>>;
+  /**
+   * Local representation of the remote state. It holds set of active query
+   * subscriptions that update state as we receive changes in our subscription.
+   */
+  remote: Map<Entity, Query<Space>>;
+
+  /**
+   * Local state of the memory space. It may be ahead of the `remote` if
+   * changes occur faster than transaction roundtrip.
+   */
+  local: Map<Entity, Memory.Fact>;
 }
 
 /**
@@ -25,7 +41,7 @@ export class RemoteStorageProvider implements StorageProvider {
   address: URL;
   workspace: MemorySpace;
   the: string;
-  local: Map<MemorySpace, Local> = new Map();
+  state: Map<MemorySpace, MemoryState> = new Map();
   session: Memory.MemorySession;
 
   /**
@@ -61,18 +77,19 @@ export class RemoteStorageProvider implements StorageProvider {
     this.connect();
   }
 
-  mount(space: MemorySpace): Local {
-    const local = this.local.get(space);
-    if (local) {
-      return local;
+  mount(space: MemorySpace): MemoryState {
+    const state = this.state.get(space);
+    if (state) {
+      return state;
     } else {
-      const local = {
+      const state = {
         memory: this.session.mount(space),
-        queries: new Map(),
+        remote: new Map(),
+        local: new Map(),
       };
 
-      this.local.set(space, local);
-      return local;
+      this.state.set(space, state);
+      return state;
     }
   }
 
@@ -98,10 +115,10 @@ export class RemoteStorageProvider implements StorageProvider {
     // ⚠️ Types are incorrect because when there is no value we still want to
     // notify the subscriber.
     const subscriber = callback as unknown as Subscriber;
-    let query = local.queries.get(of);
+    let query = local.remote.get(of);
     if (!query) {
       query = new Query(local.memory.query({ select: { [of]: { [the]: {} } } }));
-      local.queries.set(of, query);
+      local.remote.set(of, query);
     }
 
     return query.subscribe(subscriber);
@@ -111,12 +128,12 @@ export class RemoteStorageProvider implements StorageProvider {
     // Just wait to have a local revision.
     const of = RemoteStorageProvider.toEntity(entityId);
     const local = this.mount(this.workspace);
-    let query = local.queries.get(of);
+    let query = local.remote.get(of);
     if (query) {
       query.subscribe(RemoteStorageProvider.sync);
     } else {
       const query = local.memory.query({ select: { [of]: { [the]: {} } } });
-      local.queries.set(of, new Query(query, new Set([RemoteStorageProvider.sync])));
+      local.remote.set(of, new Query(query, new Set([RemoteStorageProvider.sync])));
 
       await query.promise;
     }
@@ -131,42 +148,74 @@ export class RemoteStorageProvider implements StorageProvider {
   get<T = any>(entityId: EntityId): StorageValue<T> | undefined {
     const of = RemoteStorageProvider.toEntity(entityId);
     const local = this.mount(this.workspace);
-    const query = local.queries.get(of);
+    const query = local.remote.get(of);
 
     return query?.value as StorageValue<T> | undefined;
   }
-  async send<T = any>(changes: { entityId: EntityId; value: StorageValue<T> }[]): Promise<void> {
+  async send<T = any>(
+    changes: { entityId: EntityId; value: StorageValue<T> }[],
+  ): Promise<Awaited<Memory.TransactionResult>> {
     const { the } = this;
-    const local = this.mount(this.workspace);
+    const { local, remote, memory } = this.mount(this.workspace);
     const facts = [];
 
     for (const { entityId, value } of changes) {
       const of = RemoteStorageProvider.toEntity(entityId);
-      const query = local.queries.get(of);
       const content = JSON.stringify(value);
+      // Cause is last fact for the the given `{ the, of }` pair. If we have a
+      // a local fact we use that as it may be ahead, otherwise we use a remote
+      // fact.
+      const cause = local.get(of) ?? remote.get(of)?.fact;
 
-      // If a revision exists and its current value is identical to the new value,
-      // skip sending a PATCH.
-      if (query && JSON.stringify(query.value) === content) {
+      // If desired state is same as current state this is redundant and we skip
+      if (cause && JSON.stringify(cause.is) === content) {
         log("RemoteStorageProvider.send: no change detected for", of);
         continue;
       }
 
-      facts.push(
-        assert({
-          the,
-          of,
-          // Convert the new value into the format expected by the remote API.
-          is: JSON.parse(content) as unknown as JSONValue,
-          cause: query?.fact,
-        }),
-      );
+      const fact = assert({
+        the,
+        of,
+        // ⚠️ We do JSON roundtrips to strip of the undefined values that
+        // cause problems with serialization.
+        is: JSON.parse(content) as unknown as JSONValue,
+        cause,
+      });
+
+      local.set(of, fact);
+      facts.push(fact);
     }
 
-    const result = await local.memory.transact({ changes: Changes.from(facts) });
-    if (result.error) {
-      console.error(`🙅‍♂️`, result.error);
+    const result = await memory.transact({ changes: Changes.from(facts) });
+
+    // Once we have a result of the transaction we clear out local facts we
+    // created, we need to do this otherwise subsequent transactions will
+    // continue assuming local state even though we may get some remote changes
+    // since.
+    for (const fact of facts) {
+      // If transaction was rejected we simply discard the local fact for the
+      // underlying entity even if current local fact has changed. That is
+      // because new fact would have been based on the one that got rejected
+      // and therefore will also be rejected later. If transaction succeeds we
+      // still remove a local fact as long as it has not changed from the one
+      // in our transaction. If it has changed we have another stacked change
+      // and we need to keep it until transactions results catch up.
+      // ⚠️ Please note that there may have being other transactions based on
+      // this one that change other entities, but that those will also will get
+      // rejected and when they will deal with clearing up contingent entities.
+      //
+      // ⚠️ It is worth calling out that in theory our `remote` may not have
+      // caught up yet and removing local fact could cause a backslide until
+      // remote catches up. In practice however memory provider sends subscribed
+      // query updates ahead of transaction result on the same socket connection
+      // so by this time `remote` should be up to date, which is why we choose
+      // to avoid added complexity that would require handling described scenario.
+      if (result.error || local.get(fact.of) === fact) {
+        local.delete(fact.of);
+      }
     }
+
+    return result;
   }
 
   receive(data: string) {
@@ -210,8 +259,8 @@ export class RemoteStorageProvider implements StorageProvider {
 
     // If we did have connection
     if (this.connectionCount > 1) {
-      for (const local of this.local.values()) {
-        for (const query of local.queries.values()) {
+      for (const local of this.state.values()) {
+        for (const query of local.remote.values()) {
           query.reconnect();
         }
       }

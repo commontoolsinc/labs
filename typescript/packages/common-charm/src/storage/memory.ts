@@ -28,7 +28,7 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
     }
   }
 
-  async send<T = any>(batch: { entityId: EntityId; value: StorageValue<T> }[]): Promise<void> {
+  async send<T = any>(batch: { entityId: EntityId; value: StorageValue<T> }[]) {
     for (const { entityId, value } of batch) {
       const key = JSON.stringify(entityId);
       const valueString = JSON.stringify(value);
@@ -39,6 +39,8 @@ export class InMemoryStorageProvider extends BaseStorageProvider {
         inMemoryStorageSubscribers.forEach((listener) => listener(key, value));
       }
     }
+
+    return { ok: {} };
   }
 
   async sync(entityId: EntityId, expectedInStorage: boolean = false): Promise<void> {
