@@ -1,6 +1,8 @@
 import { KeyPairRaw, isInsecureCryptoKeyPair, isCryptoKeyPair, Signer, Verifier, DID } from "../interface.js";
 import { NativeEd25519Signer, NativeEd25519Verifier, isNativeEd25519Supported } from "./native.js";
 import { NobleEd25519Signer, NobleEd25519Verifier } from "./noble.js";
+import * as bip39 from "@scure/bip39"
+import { wordlist } from "@scure/bip39/wordlists/english"
 
 // Platform-specific implementation of an ED25519 Keypair.
 //
@@ -37,6 +39,16 @@ export class Ed25519Signer implements Signer {
     return new Ed25519Signer(await isNativeEd25519Supported() ?
       await NativeEd25519Signer.generate() :
       await NobleEd25519Signer.generate());
+  }
+  
+  static async generateMnemonic(): Promise<[Ed25519Signer, string]> {
+    let mnemonic = bip39.generateMnemonic(wordlist, 256);
+    return [await Ed25519Signer.fromMnemonic(mnemonic), mnemonic]; 
+  }
+  
+  static async fromMnemonic(mnemonic: string): Promise<Ed25519Signer> {
+    let bytes = bip39.mnemonicToEntropy(mnemonic, wordlist);
+    return await Ed25519Signer.fromRaw(bytes);
   }
 
   static deserialize(input: KeyPairRaw): Ed25519Signer {
