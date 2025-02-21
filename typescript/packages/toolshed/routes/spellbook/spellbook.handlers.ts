@@ -22,6 +22,7 @@ interface SpellData {
   spellbookUI?: any;
   spellbookPublishedAt?: string;
   spellbookAuthor?: string;
+  parents?: string[];
   likes?: string[];
   spellbookAuthorAvatar?: string;
   runs?: number;

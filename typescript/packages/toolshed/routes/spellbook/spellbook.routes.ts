@@ -15,6 +15,7 @@ const SpellSchema = z.object({
   author: z.string(),
   authorAvatar: z.string(),
   data: z.any(),
+  parents: z.array(z.string()),
   likes: z.array(z.string()),
   runs: z.number(),
   comments: z.array(z.object({
