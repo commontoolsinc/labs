@@ -30,7 +30,7 @@ export async function getAllMemories(
   });
   const data = await res.json();
   if ("error" in data) {
-    throw new Error(`${data?.error}`);
+    throw data.error;
   }
   const rawMemories: { the?: string; of?: string; is?: any }[] =
     Array.isArray(data.ok) ? data.ok : [data.ok];
@@ -68,7 +68,7 @@ export async function getAllBlobs(
   const res = await client.api.storage.blobby.$get({ query });
   const data = await res.json();
   if ("error" in data) {
-    throw new Error(data.error);
+    throw data.error;
   }
   return data.blobs || data;
 }
@@ -78,7 +78,7 @@ export async function getBlob(key: string): Promise<unknown> {
   const data = (await res.json()) as any;
 
   if ("error" in data) {
-    throw new Error(data.error);
+    throw data.error;
   }
 
   return data;
