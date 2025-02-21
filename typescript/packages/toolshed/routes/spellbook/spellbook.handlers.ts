@@ -84,12 +84,35 @@ export const createSpellHandler: AppRouteHandler<typeof createSpell> = async (
   try {
     const { spellId, spell, title, description, tags, src, spec, parents, ui } =
       body;
+    const spellKey = `spellbook-${spellId}`;
 
-    // Save to blobby with spellbook- prefix
+    // Check if spell already exists
+    const existingSpell = await client.api.storage.blobby[":key"].$get({
+      param: { key: spellKey },
+    });
+
+    if (existingSpell.ok) {
+      // Spell exists, increment shares
+      const existingData = await existingSpell.json() as SpellData;
+      const updateRes = await client.api.storage.blobby[":key"].$post({
+        param: { key: spellKey },
+        json: {
+          ...existingData,
+          shares: (existingData.shares || 0) + 1,
+        },
+      });
+
+      if (!updateRes.ok) {
+        logger.error("Failed to update shares:", await updateRes.text());
+        return c.json({ success: false }, 500);
+      }
+
+      return c.json({ success: true });
+    }
+
+    // Create new spell
     const blobRes = await client.api.storage.blobby[":key"].$post({
-      param: {
-        key: `spellbook-${spellId}`,
-      },
+      param: { key: spellKey },
       json: {
         id: spellId,
         spellbookTitle: title,
