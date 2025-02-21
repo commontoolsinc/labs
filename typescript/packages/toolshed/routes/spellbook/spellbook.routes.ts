@@ -39,7 +39,7 @@ const CreateSpellRequestSchema = z.object({
   tags: z.array(z.string()),
   src: z.any(),
   spec: z.any(),
-  parents: z.array(z.string()),
+  parents: z.array(z.string()).optional(),
   ui: z.any().optional(),
 });
 
