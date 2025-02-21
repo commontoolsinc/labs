@@ -188,7 +188,7 @@ export async function shareSpell(spellId: string): Promise<ShareResponse> {
 }
 
 export async function trackRun(spellId: string): Promise<RunResponse> {
-  const response = await fetch(`${TOOLSHED_API_URL}/api/spellbook/${spellId}/run`, {
+  const response = await fetch(`/api/spellbook/${spellId}/run`, {
     method: "POST",
     credentials: "include",
   });
