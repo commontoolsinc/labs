@@ -18,6 +18,7 @@ import { setupIframe } from "./iframe-ctx";
 import GenerateJSONView from "@/views/utility/GenerateJSONView";
 import SpellbookIndexView from "@/views/spellbook/SpellbookIndexView";
 import SpellbookDetailView from "@/views/spellbook/SpellbookDetailView";
+import SpellbookLaunchView from "./views/spellbook/SpellbookLaunchView";
 
 setupIframe();
 
@@ -47,14 +48,7 @@ createRoot(document.getElementById("root")!).render(
               {/* Spellbook routes */}
               <Route path="/spellbook" element={<SpellbookIndexView />} />
               <Route path="/spellbook/:spellId" element={<SpellbookDetailView />} />
-              <Route
-                path="/spellbook/launch/:spellId"
-                element={() => {
-                  const { spellId } = useParams();
-                  console.log("Launching spell:", spellId);
-                  return <div>Launching spell {spellId}...</div>;
-                }}
-              />
+              <Route path="/spellbook/launch/:spellId" element={<SpellbookLaunchView />} />
 
               {/* internal tools / experimental routes */}
               <Route path="/utility/jsongen" element={<GenerateJSONView />} />
