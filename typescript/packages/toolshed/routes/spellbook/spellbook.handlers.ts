@@ -456,7 +456,7 @@ export const deleteSpellHandler: AppRouteHandler<typeof deleteSpell> = async (
       if (deleteRes.status === 404) {
         return c.json({ error: "Spell not found" }, 404);
       }
-      logger.error("Failed to delete spell:", await deleteRes.text());
+      logger.error("Failed to delete spell:", spellId);
       return c.json({ success: false }, 500);
     }
 
