@@ -1,5 +1,3 @@
-const TOOLSHED_API_URL = import.meta.env.TOOLSHED_API_URL || "http://localhost:8000";
-
 import { getRecipeSpec, getRecipeSrc, getRecipeParents } from "@commontools/runner";
 import { UI } from "@commontools/builder";
 
@@ -53,12 +51,12 @@ export interface RunResponse {
 }
 
 export async function listAllSpells(searchQuery?: string): Promise<Spell[]> {
-  const url = new URL(`${TOOLSHED_API_URL}/api/spellbook`);
+  let url = `/api/spellbook`;
   if (searchQuery) {
-    url.searchParams.set("search", searchQuery);
+    url += `?search=${searchQuery}`;
   }
 
-  const response = await fetch(url.toString(), {
+  const response = await fetch(url, {
     cache: "no-store",
   });
 
@@ -70,8 +68,20 @@ export async function listAllSpells(searchQuery?: string): Promise<Spell[]> {
   return data.spells;
 }
 
-export async function getSpell(spellId: string): Promise<Spell> {
-  const response = await fetch(`${TOOLSHED_API_URL}/api/spellbook/spellbook-${spellId}`, {
+export async function getSpellbookBlob(spellId: string): Promise<Spell> {
+  const response = await fetch(`/api/spellbook/spellbook-${spellId}`, {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch spell");
+  }
+
+  return response.json();
+}
+
+export async function getSpellBlob(spellId: string): Promise<object> {
+  const response = await fetch(`/api/storage/blobby/spell-${spellId}`, {
     cache: "no-store",
   });
 
@@ -100,13 +110,14 @@ export async function saveSpell(
       throw new Error("Spell ID is undefined");
     }
 
-    const response = await fetch(`${TOOLSHED_API_URL}/api/spellbook`, {
+    const response = await fetch(`/api/spellbook`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         spellId,
+        spell,
         title,
         description,
         tags,

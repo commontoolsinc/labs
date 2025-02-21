@@ -14,7 +14,7 @@ import {
   LuShare2,
 } from "react-icons/lu";
 import {
-  getSpell,
+  getSpellbookBlob,
   type Spell,
   toggleLike,
   createComment,
@@ -59,7 +59,7 @@ export default function SpellbookDetailView() {
     const fetchSpell = async () => {
       if (!spellId) return;
       try {
-        const spell = await getSpell(spellId);
+        const spell = await getSpellbookBlob(spellId);
         setSpell(spell);
       } catch (error) {
         console.error("Failed to fetch spell:", error);

@@ -48,7 +48,14 @@ createRoot(document.getElementById("root")!).render(
               {/* Spellbook routes */}
               <Route path="/spellbook" element={<SpellbookIndexView />} />
               <Route path="/spellbook/:spellId" element={<SpellbookDetailView />} />
-              <Route path="/spellbook/launch/:spellId" element={<SpellbookLaunchView />} />
+              <Route
+                path="/spellbook/launch/:spellId"
+                element={
+                  <CharmsManagerProvider>
+                    <SpellbookLaunchView />
+                  </CharmsManagerProvider>
+                }
+              />
 
               {/* internal tools / experimental routes */}
               <Route path="/utility/jsongen" element={<GenerateJSONView />} />

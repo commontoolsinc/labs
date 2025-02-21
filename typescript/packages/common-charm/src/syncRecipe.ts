@@ -8,7 +8,8 @@ import {
 } from "@commontools/runner";
 import { buildRecipe } from "./localBuild.js";
 
-export const BLOBBY_SERVER_URL = "https://toolshed.saga-castor.ts.net/api/storage/blobby";
+const TOOLSHED_API_URL = import.meta.env.VITE_TOOLSHED_API_URL || "http://localhost:8000";
+export const BLOBBY_SERVER_URL = `${TOOLSHED_API_URL}/api/storage/blobby`;
 
 const recipesKnownToStorage = new Set<string>();
 

@@ -64,6 +64,7 @@ function toSpell(hash: string, blobData: SpellData) {
     data: blobData,
     shares: blobData.spellbookShares || 0,
     runs: blobData.spellbookRuns || 0,
+    spell: blobData.spell,
   };
 }
 
@@ -81,7 +82,8 @@ export const createSpellHandler: AppRouteHandler<typeof createSpell> = async (
   const body = await c.req.json();
 
   try {
-    const { spellId, title, description, tags, src, spec, parents, ui } = body;
+    const { spellId, spell, title, description, tags, src, spec, parents, ui } =
+      body;
 
     // Save to blobby with spellbook- prefix
     const blobRes = await client.api.storage.blobby[":key"].$post({
@@ -104,6 +106,7 @@ export const createSpellHandler: AppRouteHandler<typeof createSpell> = async (
         likes: [],
         comments: [],
         shares: 0,
+        spell,
       },
     });
 
