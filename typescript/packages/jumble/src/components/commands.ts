@@ -4,7 +4,7 @@ import { NavigateFunction } from "react-router-dom";
 import { castSpell } from "@/search";
 import { charmId } from "@/utils/charms";
 import { NAME } from "@commontools/builder";
-import { DocImpl, getRecipe } from "@commontools/runner";
+import { Cell, getDocByEntityId, getEntityId, getRecipe } from "@commontools/runner";
 import { iterateCharm } from "@/utils/charm-operations";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
 import { startCharmIndexing } from "@/utils/indexing";
@@ -86,12 +86,11 @@ export const castSpellAsCharm = async (charmManager: CharmManager, result: any, 
     const recipe = getRecipe(recipeId);
     if (!recipe) return;
 
+    console.log("Syncing blob...");
+    const blobCell = getDocByEntityId({ "/": blob.key }, true)!.asCell(["argument"]);
+    await charmManager.sync(blobCell, true);
     console.log("Casting...");
-    const doc = await charmManager.sync({ "/": blob.key }, true);
-    const charm: DocImpl<Charm> = await charmManager.runPersistent(recipe, {
-      cell: doc,
-      path: ["argument"],
-    });
+    const charm: Cell<Charm> = await charmManager.runPersistent(recipe, blobCell);
     charmManager.add([charm]);
     return charm.entityId;
   }
@@ -119,18 +118,17 @@ async function handleNewCharm(deps: CommandContext, input: string | undefined) {
 async function handleSearchCharms(deps: CommandContext) {
   deps.setLoading(true);
   try {
-    const charms = deps.charmManager.getCharms().get();
-    const results = await Promise.all(
-      charms.map(async (charm) => {
-        const data = charm.cell.get();
-        const title = data?.[NAME] ?? "Untitled";
-        return {
-          title: title + ` (#${charmId(charm.cell.entityId!).slice(-4)})`,
-          id: charmId(charm.cell.entityId!),
-          value: charm.cell.entityId,
-        };
-      }),
-    );
+    const charms = deps.charmManager.getCharms();
+    await deps.charmManager.sync(charms);
+    const results = charms.get().map((charm) => {
+      const data = charm.get();
+      const title = data?.[NAME] ?? "Untitled";
+      return {
+        title: title + ` (#${charmId(charm.entityId!)!.slice(-4)})`,
+        id: charmId(charm.entityId!)!,
+        value: charm.entityId!,
+      };
+    });
     deps.setMode({
       type: "select",
       command: {
@@ -240,7 +238,7 @@ async function handleRenameCharm(deps: CommandContext, input: string | undefined
 
   const charm = await deps.charmManager.get(deps.focusedCharmId);
   if (!charm) return;
-  charm.asCell().get()[NAME] = input;
+  charm.key(NAME).set(input);
 
   deps.setLoading(false);
   deps.setOpen(false);

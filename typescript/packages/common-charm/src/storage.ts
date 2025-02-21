@@ -11,6 +11,8 @@ import {
   idle,
   isQueryResultForDereferencing,
   getDocLinkOrThrow,
+  Cell,
+  isCell,
 } from "@commontools/runner";
 import { isStatic, markAsStatic } from "@commontools/builder";
 import { StorageProvider, StorageValue } from "./storage/base.js";
@@ -54,7 +56,7 @@ export interface Storage {
    * @throws Will throw if called on a cell without an entity ID.
    */
   syncCell<T = any>(
-    cell: DocImpl<T> | EntityId | string,
+    cell: DocImpl<T> | EntityId | string | Cell<any>,
     expectedInStorage?: boolean,
   ): Promise<DocImpl<T>> | DocImpl<T>;
 
@@ -153,7 +155,7 @@ class StorageImpl implements Storage {
   private addCancel: AddCancel;
 
   syncCell<T>(
-    subject: DocImpl<T> | EntityId | string,
+    subject: DocImpl<T> | EntityId | string | Cell<any>,
     expectedInStorage: boolean = false,
   ): Promise<DocImpl<T>> | DocImpl<T> {
     const entityCell = this._ensureIsSynced(subject, expectedInStorage);
@@ -174,7 +176,7 @@ class StorageImpl implements Storage {
   }
 
   private _ensureIsSynced<T>(
-    subject: DocImpl<T> | EntityId | string,
+    subject: DocImpl<T> | EntityId | string | Cell<any>,
     expectedInStorage: boolean = false,
   ): DocImpl<T> {
     const entityCell = this._fromIdToCell<T>(subject);
@@ -563,7 +565,8 @@ class StorageImpl implements Storage {
   }
 
   // Support referencing as cell, via entity ID or as stringified entity ID
-  private _fromIdToCell<T>(subject: DocImpl<any> | EntityId | string): DocImpl<T> {
+  private _fromIdToCell<T>(subject: DocImpl<any> | EntityId | string | Cell<any>): DocImpl<T> {
+    if (isCell(subject)) subject = subject.getAsDocLink().cell;
     if (isDoc(subject)) {
       if (!subject.entityId) throw new Error("Cell has no entity ID");
       // If a cell by this id is already known, return the prior one instead.

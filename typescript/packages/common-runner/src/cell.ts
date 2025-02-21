@@ -65,6 +65,7 @@ export interface Cell<T> {
       | DocImpl<T extends Array<infer U> ? U : any>
       | DocLink,
   ): void;
+  equals(other: Cell<any>): boolean;
   sink(callback: (value: T) => Cancel | undefined | void): Cancel;
   updates(callback: (value: T) => Cancel | undefined | void): Cancel;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
@@ -191,6 +192,7 @@ function createRegularCell<T>(
 
       ref.cell.setAtPath(ref.path, [...array, value], log);
     },
+    equals: (other: Cell<any>) => JSON.stringify(self) === JSON.stringify(other),
     sink: (callback: (value: T) => Cancel | undefined) =>
       subscribeToReferencedDocs(callback, true, doc, path, schema, rootSchema),
     updates: (callback: (value: T) => Cancel | undefined) =>
