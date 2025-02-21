@@ -35,7 +35,7 @@ describe("ed25519 comparison", async () => {
 
 // These tests are run with both Native and Noble implementations.
 // Code at the start and end of the `describe` function sets this up.
-describe("ed25519", () => {
+describe("ed25519 impl", () => {
   let innerIt = globalThis.it;
   const tests = []; 
   const it = (name, fn) => tests.push({ name, fn });

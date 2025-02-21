@@ -45,6 +45,16 @@ export class Identity implements Signer {
     return new Identity(await Ed25519Signer.generate());
   }
 
+  static async generateMnemonic(): Promise<[Identity, string]> {
+    let [signer, mnemonic] = await Ed25519Signer.generateMnemonic();
+    return [new Identity(signer), mnemonic]; 
+  }
+
+  static async fromMnemonic(mnemonic: string): Promise<Identity> {
+    let signer = await Ed25519Signer.fromMnemonic(mnemonic);
+    return new Identity(signer);
+  }
+
   // Deserialize `input` from storage into an `Identity`.
   static deserialize(input: any): Identity {
     return new Identity(Ed25519Signer.deserialize(input)); 
