@@ -40,7 +40,7 @@ export class PassKey {
       throw new Error("common-identity: No prf found from PassKey");
     }
 
-    return await Identity.generateFromRaw(seed);
+    return await Identity.fromRaw(seed);
   }
 
   // Return the secret 32-bytes derived from the passkey's PRF data.
