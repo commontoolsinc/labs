@@ -6,7 +6,6 @@ import { NavPath } from "@/components/NavPath";
 import { ShareDialog } from "@/components/spellbook/ShareDialog";
 import { useCharmManager } from "@/contexts/CharmManagerContext";
 import { NAME, TYPE } from "@commontools/builder";
-import { toast } from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 import { saveSpell } from "@/services/spellbook";
 
@@ -63,9 +62,7 @@ export function ShellHeader({
         const spellbookUrl = `/spellbook/${spellId}`;
         try {
           await navigator.clipboard.writeText(spellbookUrl);
-          toast.success("Published to Spellbook Jr! Spellbook link copied to clipboard");
         } catch (err) {
-          toast.success(`Published to Spellbook Jr! Spellbook URL: ${spellbookUrl}`);
           console.error("Failed to copy to clipboard:", err);
         }
         navigate(spellbookUrl);
@@ -74,7 +71,6 @@ export function ShellHeader({
       }
     } catch (error) {
       console.error("Failed to publish:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to publish");
     } finally {
       setIsPublishing(false);
       setIsShareDialogOpen(false);
