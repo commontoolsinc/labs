@@ -1,7 +1,6 @@
 import { Cancel, isCancel, noOp } from "./cancel.js";
 import { Cell, isCell } from "./cell.js";
-import { DocImpl, isDoc, isDocLink } from "./doc.js";
-import { getDocLinkOrThrow, isQueryResultForDereferencing } from "./query-result-proxy.js";
+import { DocImpl, isDoc } from "./doc.js";
 
 /**
  * Effect that runs a callback when the value changes. The callback is also
@@ -16,6 +15,8 @@ export const effect = <T>(
   value: Cell<T> | DocImpl<T> | T,
   callback: (value: T) => Cancel | undefined | void,
 ): Cancel => {
+  if (isDoc(value)) value = value.asCell();
+
   if (isCell(value) || isDoc(value)) {
     return value.sink(callback);
   } else {
