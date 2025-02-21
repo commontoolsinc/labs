@@ -6,6 +6,10 @@ import {
   CasterResponseSchema,
   ProcessSchemaRequestSchema,
   ProcessSchemaResponseSchema,
+  RecastRequestSchema,
+  RecastResponseSchema,
+  ReuseRequestSchema,
+  ReuseResponseSchema,
   SearchSchemaRequestSchema,
   SearchSchemaResponseSchema,
   SpellSearchRequestSchema,
@@ -126,3 +130,56 @@ export const spellSearch = createRoute({
 });
 
 export type SpellSearchRoute = typeof spellSearch;
+
+export const recast = createRoute({
+  path: "/ai/spell/recast",
+  method: "post",
+  tags,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: RecastRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      RecastResponseSchema,
+      "The recast result",
+    ),
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
+      ErrorResponseSchema,
+      "An error occurred",
+    ),
+  },
+});
+
+export const reuse = createRoute({
+  path: "/ai/spell/reuse",
+  method: "post",
+  tags,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: ReuseRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      ReuseResponseSchema,
+      "The reuse result",
+    ),
+    [HttpStatusCodes.INTERNAL_SERVER_ERROR]: jsonContent(
+      ErrorResponseSchema,
+      "An error occurred",
+    ),
+  },
+});
+
+export type RecastRoute = typeof recast;
+export type ReuseRoute = typeof reuse;

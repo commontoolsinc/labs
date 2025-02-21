@@ -78,6 +78,42 @@ export async function getAllMemories(
   return memoryMap;
 }
 
+export async function getMemory(
+  key: string,
+  replica: string,
+): Promise<unknown> {
+  const res = await client.api.storage.memory.$post({
+    json: {
+      cmd: "/memory/query",
+      iss: "did:web:common.tools",
+      sub: replica,
+      args: {
+        select: {
+          ["of:" + key]: {
+            "application/json": {
+              is: {},
+            },
+          },
+        },
+      },
+    },
+  });
+  const data = await res.json();
+  if ("error" in data) {
+    handleErrorResponse(data);
+    return null;
+  }
+
+  console.log(data);
+
+  const memory = Array.isArray(data.ok) ? data.ok[0] : data.ok;
+  if (!memory?.is?.value?.argument) {
+    return null;
+  }
+
+  return memory.is.value.argument;
+}
+
 export async function getAllBlobs(
   options: BlobOptions = {},
 ): Promise<string[] | { [id: string]: any }> {

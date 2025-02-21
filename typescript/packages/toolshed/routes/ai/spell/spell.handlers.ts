@@ -1,10 +1,17 @@
 import * as HttpStatusCodes from "stoker/http-status-codes";
 import { z } from "zod";
-import { getAllBlobs, getAllMemories, getBlob } from "./behavior/effects.ts";
+import {
+  getAllBlobs,
+  getAllMemories,
+  getBlob,
+  getMemory,
+} from "./behavior/effects.ts";
 
 import type { AppRouteHandler } from "@/lib/types.ts";
 import type {
   ProcessSchemaRoute,
+  RecastRoute,
+  ReuseRoute,
   SearchSchemaRoute,
   SpellSearchRoute,
 } from "./spell.routes.ts";
@@ -301,6 +308,87 @@ export const spellSearch: AppRouteHandler<SpellSearchRoute> = async (c) => {
     captureException(error);
     return c.json(
       { error: "Failed to process spell search" },
+      HttpStatusCodes.INTERNAL_SERVER_ERROR,
+    );
+  }
+};
+export const RecastRequestSchema = z.object({
+  charmId: z.string(),
+  replica: z.string(),
+});
+
+export const ReuseRequestSchema = z.object({
+  charmId: z.string(),
+  replica: z.string(),
+});
+
+const CharmDataSchema = z.object({
+  id: z.string(),
+  data: z.record(z.any()),
+  spell: z.record(z.any()),
+  schema: z.record(z.any()),
+});
+
+export const RecastResponseSchema = z.object({
+  result: z.record(z.any()),
+});
+
+export const ReuseResponseSchema = z.object({
+  result: z.record(z.any()),
+});
+
+export type RecastRequest = z.infer<typeof RecastRequestSchema>;
+export type ReuseRequest = z.infer<typeof ReuseRequestSchema>;
+export type RecastResponse = z.infer<typeof RecastResponseSchema>;
+export type ReuseResponse = z.infer<typeof ReuseResponseSchema>;
+
+export const recast: AppRouteHandler<RecastRoute> = async (c) => {
+  const logger: Logger = c.get("logger");
+  const body = (await c.req.json()) as RecastRequest;
+  const startTime = performance.now();
+
+  try {
+    console.log("body", body);
+    const memories = await getAllMemories(body.replica);
+    console.log("memories", memories);
+    const charm = await getMemory(body.charmId, body.replica);
+    console.log("charm", charm);
+
+    const response: RecastResponse = {
+      result: {},
+    };
+
+    return c.json(response, HttpStatusCodes.OK);
+  } catch (error) {
+    logger.error({ error }, "Error processing recast");
+    captureException(error);
+    return c.json(
+      { error: "Failed to process recast" },
+      HttpStatusCodes.INTERNAL_SERVER_ERROR,
+    );
+  }
+};
+
+export const reuse: AppRouteHandler<ReuseRoute> = async (c) => {
+  const logger: Logger = c.get("logger");
+  const body = (await c.req.json()) as ReuseRequest;
+  const startTime = performance.now();
+
+  try {
+    console.log("body", body);
+    const charm = await getMemory(body.charmId, body.replica);
+    console.log("charm", charm);
+
+    const response: ReuseResponse = {
+      result: {},
+    };
+
+    return c.json(response, HttpStatusCodes.OK);
+  } catch (error) {
+    logger.error({ error }, "Error processing reuse");
+    captureException(error);
+    return c.json(
+      { error: "Failed to process reuse" },
       HttpStatusCodes.INTERNAL_SERVER_ERROR,
     );
   }
