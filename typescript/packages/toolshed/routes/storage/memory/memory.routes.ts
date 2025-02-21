@@ -94,7 +94,7 @@ export const Transaction = z.object({
 export const Query = z.object({
   cmd: z.literal("/memory/query"),
   iss: Principal,
-  sub: Space.or(z.string()),
+  sub: Space,
   args: z.object({
     select: Selector,
     since: z.number().optional(),
