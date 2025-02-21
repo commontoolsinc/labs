@@ -12,11 +12,7 @@ interface RecipeDetailProps {
   screenshotUrl: string;
 }
 
-export default function RecipeDetail({
-  recipe,
-  recipeHash,
-  screenshotUrl,
-}: RecipeDetailProps) {
+export default function RecipeDetail({ recipe, recipeHash, screenshotUrl }: RecipeDetailProps) {
   const [isLiked, setIsLiked] = useState(false);
 
   const handleShare = () => {
@@ -48,12 +44,7 @@ export default function RecipeDetail({
               popoverMessage="Blobby link copied to clipboard!"
             />
             <ActionButton
-              icon={
-                <LuHeart
-                  size={24}
-                  className={isLiked ? "fill-purple-600" : ""}
-                />
-              }
+              icon={<LuHeart size={24} className={isLiked ? "fill-purple-600" : ""} />}
               label="Like"
               onClick={handleLike}
               popoverMessage="Liked!"
@@ -83,9 +74,7 @@ export default function RecipeDetail({
               </div>
 
               <div className="mb-8">
-                <p className="text-gray-600">
-                  first created by {recipe.blobAuthor || "Anonymous"}
-                </p>
+                <p className="text-gray-600">first created by {recipe.blobAuthor || "Anonymous"}</p>
               </div>
 
               <div className="bg-purple-50 rounded-lg p-4 md:p-6">
