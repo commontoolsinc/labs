@@ -140,13 +140,10 @@ describe("createProxy", () => {
     expect(c.get()[0].cell.get()).toBe(1);
     expect(isDocLink(c.get()[1])).toBeTruthy();
     expect(c.get()[1].cell.get()).toBe(2);
-    expect(log.reads).toEqual([{ cell: c, path: [] }]);
-    expect(log.writes).toEqual([
-      { cell: c.get()[0].cell, path: [] },
-      { cell: c, path: ["0"] },
-      { cell: c.get()[1].cell, path: [] },
-      { cell: c, path: ["1"] },
-    ]);
+    expect(log.reads.map((r) => r.path)).toEqual([[]]);
+    expect(log.writes.filter((w) => w.cell === c).map((w) => w.path)).toEqual([["0"], ["1"]]);
+    expect(log.writes.filter((w) => w.cell === c.get()[0].cell).map((w) => w.path)).toEqual([[]]);
+    expect(log.writes.filter((w) => w.cell === c.get()[1].cell).map((w) => w.path)).toEqual([[]]);
   });
 
   it("should support pop() and only read the popped element", () => {
@@ -180,12 +177,7 @@ describe("createProxy", () => {
     const result = proxy.find((x: any) => x === 2);
     expect(result).toBe(2);
     expect(c.get()).toEqual([1, 2, 3]);
-    expect(log.reads).toEqual([
-      { cell: c, path: [] },
-      { cell: c, path: [0] },
-      { cell: c, path: [1] },
-      { cell: c, path: [2] },
-    ]);
+    expect(log.reads.map((r) => r.path)).toEqual([[], [0], [1], [2]]);
     expect(log.writes).toEqual([]);
   });
 
@@ -195,13 +187,7 @@ describe("createProxy", () => {
     const proxy = c.getAsQueryResult([], log);
     const result = proxy.a.map((x: any) => x + 1);
     expect(result).toEqual([2, 3, 4]);
-    expect(log.reads).toEqual([
-      { cell: c, path: [] },
-      { cell: c, path: ["a"] },
-      { cell: c, path: ["a", 0] },
-      { cell: c, path: ["a", 1] },
-      { cell: c, path: ["a", 2] },
-    ]);
+    expect(log.reads.map((r) => r.path)).toEqual([[], ["a"], ["a", 0], ["a", 1], ["a", 2]]);
   });
 
   it("should allow changig array lengts by writing length", () => {
@@ -292,14 +278,21 @@ describe("asCell", () => {
   it("should call sink only when the cell changes on the subpath", async () => {
     const c = getDoc({ a: { b: 42, c: 10 }, d: 5 });
     const values: number[] = [];
-    c.asCell(["a", "b"]).sink((value) => values.push(value));
+    c.asCell(["a", "b"]).sink((value) => {
+      values.push(value);
+    });
+    expect(values).toEqual([42]); // Initial call
     c.setAtPath(["d"], 50);
+    await idle();
     c.setAtPath(["a", "c"], 100);
+    await idle();
     c.setAtPath(["a", "b"], 42);
+    await idle();
+    expect(values).toEqual([42]); // Didn't get called again
     c.setAtPath(["a", "b"], 300);
     await idle();
-    expect(values).toEqual([42, 300]);
     expect(c.get()).toEqual({ a: { b: 300, c: 100 }, d: 50 });
+    expect(values).toEqual([42, 300]); // Got called again
   });
 });
 

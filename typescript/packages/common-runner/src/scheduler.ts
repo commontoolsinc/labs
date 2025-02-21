@@ -31,8 +31,8 @@ export type ReactivityLog = {
 };
 
 export function schedule(action: Action, log: ReactivityLog): Cancel {
-  setDependencies(action, log);
-  log.reads.forEach(({ cell }) => dirty.add(cell));
+  const reads = setDependencies(action, log);
+  reads.forEach(({ cell }) => dirty.add(cell));
 
   queueExecution();
   pending.add(action);
@@ -48,11 +48,11 @@ export function unschedule(fn: Action): void {
 }
 
 export function subscribe(action: Action, log: ReactivityLog): Cancel {
-  setDependencies(action, log);
+  const reads = setDependencies(action, log);
 
   cancels.set(
     action,
-    log.reads.map(({ cell: doc, path }) =>
+    reads.map(({ cell: doc, path }) =>
       doc.updates((_newValue, changedPath) => {
         if (pathAffected(changedPath, path)) {
           dirty.add(doc);
@@ -132,10 +132,10 @@ function queueExecution() {
 }
 
 function setDependencies(action: Action, log: ReactivityLog) {
-  dependencies.set(action, {
-    reads: compactifyPaths(log.reads),
-    writes: compactifyPaths(log.writes),
-  });
+  const reads = compactifyPaths(log.reads);
+  const writes = compactifyPaths(log.writes);
+  dependencies.set(action, { reads, writes });
+  return reads;
 }
 
 function handleError(error: Error) {

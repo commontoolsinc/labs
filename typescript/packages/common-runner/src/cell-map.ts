@@ -76,11 +76,10 @@ export const createRef = (source: Object = {}, cause: any = crypto.randomUUID())
  * @param value - The value to extract the entity ID from.
  * @returns The entity ID, or undefined if the value is not a cell.
  */
-export const getEntityId = (value: any): EntityId | undefined => {
-  if (typeof value === "string") return JSON.parse(value) as EntityId;
-  if (typeof value === "object" && value !== null && "/" in value) {
-    return value as EntityId;
-  }
+export const getEntityId = (value: any): { "/": string } | undefined => {
+  if (typeof value === "string") return JSON.parse(value);
+  if (typeof value === "object" && value !== null && "/" in value)
+    return JSON.parse(JSON.stringify(value));
 
   let ref: DocLink | undefined = undefined;
 
@@ -92,8 +91,9 @@ export const getEntityId = (value: any): EntityId | undefined => {
   if (!ref?.cell.entityId) return undefined;
 
   if (ref.path.length > 0) {
-    return createRef({ path: ref.path }, ref.cell.entityId);
-  } else return ref.cell.entityId;
+    console.warn("getEntityId: path support experimental", ref.path);
+    return JSON.parse(JSON.stringify(createRef({ path: ref.path }, ref.cell.entityId)));
+  } else return JSON.parse(JSON.stringify(ref.cell.entityId));
 };
 
 export function getDocByEntityId<T = any>(
