@@ -55,6 +55,7 @@ const Router = router
   .openapi(routes.uploadBlob, handlers.uploadBlobHandler)
   .openapi(routes.getBlob, handlers.getBlobHandler)
   .openapi(routes.getBlobPath, handlers.getBlobPathHandler)
-  .openapi(routes.listBlobs, handlers.listBlobsHandler);
+  .openapi(routes.listBlobs, handlers.listBlobsHandler)
+  .openapi(routes.deleteBlob, handlers.deleteBlobHandler);
 
 export default Router;

@@ -26,4 +26,14 @@ export class DiskStorage {
       throw error;
     }
   }
+
+  async deleteBlob(hash: string): Promise<void> {
+    try {
+      await Deno.remove(this.getPath(hash));
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+    }
+  }
 }
