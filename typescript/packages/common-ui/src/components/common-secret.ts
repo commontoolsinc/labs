@@ -39,7 +39,7 @@ async function importPublicKey(pemKey: string): Promise<CryptoKey> {
       name: "RSA-OAEP",
       hash: "SHA-256",
     },
-    true,
+    false,
     ["encrypt"],
   );
 }
@@ -116,11 +116,33 @@ export class CommonSecretElement extends LitElement {
   @property({ type: String }) value = "";
   @property({ type: String }) placeholder = "Enter secret";
   @property({ type: String }) appearance = "default";
-  @property({ type: String, attribute: "pubkey" }) pubkey = "";
-  @property({ type: Boolean }) private isInputEmpty = true;
+  /**
+   * The RSA public key in PEM format (base64-encoded with BEGIN/END markers).
+   * Example:
+   * -----BEGIN PUBLIC KEY-----
+   * MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA...
+   * -----END PUBLIC KEY-----
+   */
+  @property({ type: String, attribute: "pubkey" })
+  get pubkey() {
+    return this._pubkey || CommonSecretElement.PUBLIC_KEY;
+  }
+  set pubkey(value: string) {
+    const oldValue = this._pubkey;
+    this._pubkey = value;
+    // Clear cached key when pubkey changes
+    if (oldValue !== value) {
+      this._importedPublicKey = null;
+    }
+    this.requestUpdate("pubkey", oldValue);
+  }
+  private _pubkey = "";
 
   // Cache the imported public key.
   private _importedPublicKey: CryptoKey | null = null;
+
+  // Add static property for global public key
+  static PUBLIC_KEY: string;
 
   private async getImportedPublicKey(): Promise<CryptoKey> {
     if (this._importedPublicKey) {
@@ -160,9 +182,12 @@ export class CommonSecretElement extends LitElement {
     this.dispatchEvent(new CommonSecretEvent({ id: this.id, value: encryptedValue }));
   }
 
+  private get isInputEmpty(): boolean {
+    return !this.value;
+  }
+
   private handleInput(e: Event) {
     const input = e.target as HTMLInputElement;
-    this.isInputEmpty = !input.value;
     this.value = input.value;
   }
 
@@ -173,15 +198,14 @@ export class CommonSecretElement extends LitElement {
           <input
             class="input"
             .value="${this.value}"
-            placeholder="${this.pubkey ? this.placeholder : "Missing public key"}"
+            placeholder="${this.placeholder}"
             type="password"
-            ?disabled="${!this.pubkey}"
             @input="${this.handleInput}"
             aria-label="Secret value input"
           />
           <button
             @click="${this.onSetClick}"
-            ?disabled="${!this.pubkey || this.isInputEmpty}"
+            ?disabled="${this.isInputEmpty}"
             aria-label="Set secret value"
           >
             Save Secret

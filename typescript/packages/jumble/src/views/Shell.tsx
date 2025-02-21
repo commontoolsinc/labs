@@ -1,5 +1,6 @@
-import "@commontools/ui";
-
+import * as ui from "@commontools/ui";
+// FIXME(ja): get the actual public key from common-memory
+ui.components.CommonSecret.CommonSecretElement.PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApNCchd6mdyJUKF9mL9GskmTq0hKHUUoXJkU7UkSeQ0jEN1S7ES1+ehHlMbYrYaUlCtW6eXFh1T9E2J8ccp/74kJsC/4gjVBtJK7FNUB4RHBGfV1EPfN8P/v6WLC1H878g7LTA0kZn2/H87YE3G4d9/MKWxadyCizCJiuQ3LoB5ry/SJ/UR78kQ7aP51xMy7Iwc3ZxpRqJoj+xXaRwKg2oDASxZ+Q+LAGlPxNi+X5tFNKGqnYG2M3Bk5EUpel0Idt2QYISDVIpaZkMMWKrNu49Opv+1SYOfRnNpvNbob+IomDe7GY6eyLDtOnNHGy3mox9BrQXUsXr4DJn/jAU/Xk3QIDAQAB\n-----END PUBLIC KEY-----`;
 import { useCallback } from "react";
 import { Outlet, useParams, useLocation } from "react-router-dom";
 import { animated } from "@react-spring/web";
