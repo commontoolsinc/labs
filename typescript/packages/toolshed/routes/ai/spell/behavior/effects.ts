@@ -31,6 +31,10 @@ function handleErrorResponse(data: any) {
 export async function getAllMemories(
   replica: string,
 ): Promise<Record<string, any>> {
+  if (!replica.startsWith("did:")) {
+    replica = `did:key:${replica}`;
+  }
+
   const res = await client.api.storage.memory.$post({
     json: {
       cmd: "/memory/query",
