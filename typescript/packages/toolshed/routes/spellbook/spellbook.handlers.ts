@@ -3,12 +3,10 @@ import type {
   createComment,
   createSpell,
   getSpell,
-  likeSpell,
   listSpells,
   shareSpell,
   toggleLike,
   trackRun,
-  unlikeSpell,
 } from "./spellbook.routes.ts";
 import { hc } from "hono/client";
 import { type AppType } from "@/app.ts";
@@ -24,17 +22,17 @@ interface SpellData {
   spellbookUI?: any;
   spellbookPublishedAt?: string;
   spellbookAuthor?: string;
-  spellbookLikes?: string[];
+  likes?: string[];
   spellbookAuthorAvatar?: string;
-  spellbookRuns?: number;
-  spellbookComments?: {
+  runs?: number;
+  comments?: {
     id: string;
     content: string;
     author: string;
     authorAvatar: string;
     createdAt: string;
   }[];
-  spellbookShares?: number;
+  shares?: number;
   [key: string]: any;
 }
 
@@ -59,11 +57,11 @@ function toSpell(hash: string, blobData: SpellData) {
     publishedAt: blobData.spellbookPublishedAt || "",
     author: blobData.spellbookAuthor || "anon",
     authorAvatar: blobData.spellbookAuthorAvatar || "",
-    likes: blobData.spellbookLikes || [],
-    comments: blobData.spellbookComments || [],
+    likes: blobData.likes || [],
+    comments: blobData.comments || [],
     data: blobData,
-    shares: blobData.spellbookShares || 0,
-    runs: blobData.spellbookRuns || 0,
+    shares: blobData.shares || 0,
+    runs: blobData.runs || 0,
     spell: blobData.spell,
   };
 }
@@ -196,14 +194,14 @@ export const toggleLikeHandler: AppRouteHandler<typeof toggleLike> = async (
       param: {
         key: `spellbook-${spellId}`,
       },
-    });
+    }) as SpellData;
 
     if (!getRes.ok) {
       return c.json({ error: "Spell not found" }, 404);
     }
 
     const blobData = await getRes.json();
-    const likes = new Set(blobData.spellbookLikes || []);
+    const likes = new Set(blobData.likes || []);
     const wasLiked = likes.has(requesterProfile.shortName);
 
     // Toggle the like
@@ -220,7 +218,7 @@ export const toggleLikeHandler: AppRouteHandler<typeof toggleLike> = async (
       },
       json: {
         ...blobData,
-        spellbookLikes: Array.from(likes),
+        likes: Array.from(likes),
       },
     });
 
@@ -278,8 +276,8 @@ export const createCommentHandler: AppRouteHandler<typeof createComment> =
         return c.json({ error: "Spell not found" }, 404);
       }
 
-      const blobData = await getRes.json();
-      const comments = blobData.spellbookComments || [];
+      const blobData = await getRes.json() as SpellData;
+      const comments = blobData.comments || [];
 
       // Create the new comment
       const commentId = await sha256(
@@ -289,7 +287,7 @@ export const createCommentHandler: AppRouteHandler<typeof createComment> =
         id: commentId,
         content,
         author: requesterProfile.shortName,
-        authorAvatar: requesterProfile.avatar,
+        authorAvatar: requesterProfile.avatar || "",
         createdAt,
       };
 
@@ -303,7 +301,7 @@ export const createCommentHandler: AppRouteHandler<typeof createComment> =
         },
         json: {
           ...blobData,
-          spellbookComments: comments,
+          comments,
         },
       });
 
@@ -349,8 +347,8 @@ export const shareSpellHandler: AppRouteHandler<typeof shareSpell> = async (
       return c.json({ error: "Spell not found" }, 404);
     }
 
-    const blobData = await getRes.json();
-    const currentShares = blobData.spellbookShares || 0;
+    const blobData = await getRes.json() as SpellData;
+    const currentShares = blobData.shares || 0;
 
     // Update the spell with incremented share count
     const updateRes = await client.api.storage.blobby[":key"].$post({
@@ -359,7 +357,7 @@ export const shareSpellHandler: AppRouteHandler<typeof shareSpell> = async (
       },
       json: {
         ...blobData,
-        spellbookShares: currentShares + 1,
+        shares: currentShares + 1,
       },
     });
 
@@ -400,8 +398,8 @@ export const trackRunHandler: AppRouteHandler<typeof trackRun> = async (c) => {
       return c.json({ error: "Spell not found" }, 404);
     }
 
-    const blobData = await getRes.json();
-    const currentRuns = blobData.spellbookRuns || 0;
+    const blobData = await getRes.json() as SpellData;
+    const currentRuns = blobData.runs || 0;
 
     // Update the spell with incremented run count
     const updateRes = await client.api.storage.blobby[":key"].$post({
@@ -410,7 +408,7 @@ export const trackRunHandler: AppRouteHandler<typeof trackRun> = async (c) => {
       },
       json: {
         ...blobData,
-        spellbookRuns: currentRuns + 1,
+        runs: currentRuns + 1,
       },
     });
 
