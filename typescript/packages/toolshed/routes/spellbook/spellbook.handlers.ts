@@ -105,7 +105,7 @@ export const createSpellHandler: AppRouteHandler<typeof createSpell> = async (
         spellbookUI: ui,
         likes: [],
         comments: [],
-        shares: 0,
+        shares: 1,
         spell,
       },
     });
