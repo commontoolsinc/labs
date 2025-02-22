@@ -15,12 +15,18 @@ import {
   generateCharmSuggestions,
   type CharmSuggestion,
 } from "@/utils/prompt-library/charm-suggestions";
-
+import { Cell } from "@commontools/runner";
 type Tab = "iterate" | "code" | "data";
 
 interface IterationTabProps {
-  charm: Charm;
+  charm: Cell<Charm>;
 }
+
+const variantModels = [
+  "anthropic:claude-3-5-sonnet-latest",
+  "groq:llama-3.3-70b-versatile",
+  "google:gemini-2.0-pro",
+] as const;
 
 const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
   const { replicaName } = useParams();
@@ -31,56 +37,52 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
   const [selectedModel, setSelectedModel] = useState("anthropic:claude-3-5-sonnet-latest");
   const [showVariants, setShowVariants] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [variants, setVariants] = useState<Charm[]>([]);
-  const [selectedVariant, setSelectedVariant] = useState<Charm | null>(null);
+  const [variants, setVariants] = useState<Cell<Charm>[]>([]);
+  const [selectedVariant, setSelectedVariant] = useState<Cell<Charm> | null>(null);
   const [suggestions, setSuggestions] = useState<CharmSuggestion[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [expectedVariantCount, setExpectedVariantCount] = useState(0);
   const [pendingSuggestion, setPendingSuggestion] = useState<CharmSuggestion | null>(null);
 
-  const variantModels = [
-    "anthropic:claude-3-5-sonnet-latest",
-    "groq:llama-3.3-70b-versatile",
-    "google:gemini-2.0-pro",
-  ];
+  const handleIterate = useCallback(async () => {
+    const handleVariants = async () => {
+      setLoading(true);
+      setVariants([]);
+      setSelectedVariant(charm);
 
-  const handleVariants = async () => {
-    setLoading(true);
-    setVariants([]);
-    setSelectedVariant(charm);
+      try {
+        const variantPromises = variantModels.map((model) =>
+          iterateCharm(charmManager, charmId(charm)!, replicaName!, iterationInput, false, model),
+        );
 
-    try {
-      const variantPromises = variantModels.map((model) =>
-        iterateCharm(charmManager, charmId(charm), replicaName!, iterationInput, false, model),
-      );
-
-      // Instead of waiting for all promises, handle them as they complete
-      variantPromises.forEach(async (promise) => {
-        try {
-          const path = await promise;
-          if (path) {
-            const id = path.split("/").pop()!;
-            const newCharm = await charmManager.get(id);
-            if (newCharm) {
-              setVariants((prev) => [...prev, newCharm]);
-              // Set the first completed variant as selected if none selected
-              if (!selectedVariant) {
-                setSelectedVariant(newCharm);
+        // Instead of waiting for all promises, handle them as they complete
+        let first = true;
+        variantPromises.forEach(async (promise) => {
+          try {
+            const path = await promise;
+            if (path) {
+              const id = path.split("/").pop()!;
+              const newCharm = await charmManager.get(id);
+              if (newCharm) {
+                setVariants((prev) => [...prev, newCharm]);
+                // Set the first completed variant as selected if none selected
+                if (first) {
+                  setSelectedVariant(newCharm);
+                  first = false;
+                }
               }
             }
+          } catch (error) {
+            console.error("Variant generation error:", error);
           }
-        } catch (error) {
-          console.error("Variant generation error:", error);
-        }
-      });
-    } catch (error) {
-      console.error("Variants error:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+        });
+      } catch (error) {
+        console.error("Variants error:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  const handleIterate = useCallback(async () => {
     if (showVariants) {
       setExpectedVariantCount(variantModels.length);
       setVariants([]);
@@ -91,7 +93,7 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
       try {
         const newPath = await iterateCharm(
           charmManager,
-          charmId(charm),
+          charmId(charm)!,
           replicaName!,
           iterationInput,
           false,
@@ -106,16 +108,7 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
         setLoading(false);
       }
     }
-  }, [
-    showVariants,
-    iterationInput,
-    selectedModel,
-    charmManager,
-    charm,
-    replicaName,
-    navigate,
-    handleVariants,
-  ]);
+  }, [showVariants, iterationInput, selectedModel, charmManager, charm, replicaName, navigate]);
 
   const suggestionsLoadedRef = useRef(false);
 
@@ -304,7 +297,7 @@ const IterationTab: React.FC<IterationTabProps> = ({ charm }) => {
 };
 
 interface CodeTabProps {
-  charm: Charm;
+  charm: Cell<Charm>;
   iframeRecipe: IFrameRecipe | null;
 }
 
@@ -380,12 +373,13 @@ const DataTab: React.FC<DataTabProps> = ({ charm }) => {
 
 // FIXME(jake): Eventually, we might move these tab views into their own components and use URL routes for deep linking.
 
+const validTabs: Tab[] = ["iterate", "code", "data"] as const;
+
 function CharmEditView() {
   const { charmId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
 
-  const validTabs: Tab[] = ["iterate", "code", "data"];
   // Set initial tab from hash (default to "code")
   const initialTab = location.hash.slice(1) as Tab;
   const [activeTab, setActiveTab] = useState<Tab>(
@@ -398,7 +392,7 @@ function CharmEditView() {
     if (validTabs.includes(hashTab as Tab) && hashTab !== activeTab) {
       setActiveTab(hashTab as Tab);
     }
-  }, [location.hash]);
+  }, [location.hash, activeTab]);
 
   // Update URL hash when activeTab changes
   useEffect(() => {

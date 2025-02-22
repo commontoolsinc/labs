@@ -172,7 +172,7 @@ export class CharmManager {
 
   // FIXME(JA): this really really really needs to be revisited
   async syncRecipe(charm: Cell<Charm>): Promise<string> {
-    const recipeId = charm.getSourceCell(processSchema)?.get()?.[TYPE];
+    const recipeId = charm.getSourceCell()?.get()?.[TYPE];
 
     return Promise.all([this.syncRecipeCells(recipeId), this.syncRecipeBlobby(recipeId)]).then(
       () => recipeId,

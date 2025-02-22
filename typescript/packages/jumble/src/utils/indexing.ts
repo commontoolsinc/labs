@@ -2,7 +2,8 @@ import { CharmManager } from "@commontools/charm";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
 import { charmId } from "./charms";
 import { llm } from "./llm";
-
+import { Cell } from "@commontools/runner";
+import { Charm } from "@commontools/charm";
 interface IndexingContext {
   startJob: (name: string) => string;
   stopJob: (jobId: string) => void;
@@ -36,14 +37,14 @@ async function saveToMemory(
 }
 
 async function indexCharm(
-  charm: any,
+  charm: Cell<Charm>,
   jobId: string,
   context: IndexingContext,
   replica: string,
 ): Promise<void> {
   try {
     // Simulate indexing work for this example
-    context.addJobMessage(jobId, `Indexing charm ${charmId}...`);
+    context.addJobMessage(jobId, `Indexing charm ${charmId(charm)}...`);
     console.log("indexing", charm);
     const stringified = JSON.stringify(charm.asSchema({}).get());
 
@@ -59,7 +60,7 @@ async function indexCharm(
     context.addJobMessage(jobId, response);
     console.log(stringified, response);
 
-    await saveToMemory(replica, charmId(charm), response, "text/plain;variant=description");
+    await saveToMemory(replica, charmId(charm)!, response, "text/plain;variant=description");
 
     await new Promise((resolve) => setTimeout(resolve, 200)); // Simulate work
     context.addJobMessage(jobId, `✓ Indexed charm ${charmId(charm)}`);
@@ -101,7 +102,7 @@ export async function startCharmIndexing(
       }
 
       await Promise.all(
-        batch.map((charm) => indexCharm(charm, jobId, context, charmManager.getReplica())),
+        batch.map((charm) => indexCharm(charm, jobId, context, charmManager.getReplica()!)),
       );
 
       completed += batch.length;
