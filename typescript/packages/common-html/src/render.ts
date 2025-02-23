@@ -89,50 +89,40 @@ const bindChildren = (
   // the already-rendered node (using replaceWith) so that we never add an extra
   // container.
   const renderChild = (child: Child, key: string): { node: ChildNode; cancel: Cancel } => {
-    if (isCell(child)) {
-      let currentNode: ChildNode | null = null;
-      const cancel = effect(child, (childValue: any) => {
-        let newRendered: { node: ChildNode; cancel: Cancel };
-        if (isVNode(childValue)) {
-          const [childElement, childCancel] = renderNode(childValue);
-          newRendered = {
-            node: childElement ?? document.createTextNode(""),
-            cancel: childCancel,
-          };
-        } else {
-          if (typeof childValue === "object") {
-            console.warn("unexpected object when value was expected", childValue);
-            childValue = JSON.stringify(childValue);
-          }
-          newRendered = {
-            node: document.createTextNode(childValue.toString()),
-            cancel: () => {},
-          };
+    let currentNode: ChildNode | null = null;
+    const cancel = effect(child, (childValue: any) => {
+      let newRendered: { node: ChildNode; cancel: Cancel };
+      if (isVNode(childValue)) {
+        const [childElement, childCancel] = renderNode(childValue);
+        newRendered = {
+          node: childElement ?? document.createTextNode(""),
+          cancel: childCancel,
+        };
+      } else {
+        if (childValue === null || childValue === undefined) {
+          childValue = "";
+        } else if (typeof childValue === "object") {
+          console.warn("unexpected object when value was expected", childValue);
+          childValue = JSON.stringify(childValue);
         }
+        newRendered = {
+          node: document.createTextNode(childValue.toString()),
+          cancel: () => {},
+        };
+      }
 
-        if (currentNode) {
-          // Replace the previous DOM node, if any
-          currentNode.replaceWith(newRendered.node);
-          // Update the mapping entry to capture any newly-rendered node.
-          keyedChildren.set(key, { ...keyedChildren.get(key)!, node: newRendered.node });
-        }
+      if (currentNode) {
+        // Replace the previous DOM node, if any
+        currentNode.replaceWith(newRendered.node);
+        // Update the mapping entry to capture any newly-rendered node.
+        keyedChildren.set(key, { ...keyedChildren.get(key)!, node: newRendered.node });
+      }
 
-        currentNode = newRendered.node;
-        return newRendered.cancel;
-      });
-      logger.debug("renderChild", child.toJSON());
+      currentNode = newRendered.node;
+      return newRendered.cancel;
+    });
 
-      return { node: currentNode!, cancel };
-    } else {
-      if (typeof child === "undefined" || child === null) {
-        return { node: document.createTextNode(""), cancel: () => {} };
-      } else if (typeof child === "string" || typeof child === "number" || typeof child === "boolean") {
-        return { node: document.createTextNode(child.toString()), cancel: () => {} };
-      } else if (isVNode(child)) {
-        const [childElement, cancel] = renderNode(child);
-        return { node: childElement ?? document.createTextNode(""), cancel };
-      } else throw new Error("Unsupported static child type");
-    }
+    return { node: currentNode!, cancel };
   };
 
   // When the children array changes, diff its flattened values against what we previously rendered.
