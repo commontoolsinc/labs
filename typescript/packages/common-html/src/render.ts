@@ -124,7 +124,9 @@ const bindChildren = (
 
       return { node: currentNode!, cancel };
     } else {
-      if (typeof child === "string" || typeof child === "number" || typeof child === "boolean") {
+      if (typeof child === "undefined" || child === null) {
+        return { node: document.createTextNode(""), cancel: () => {} };
+      } else if (typeof child === "string" || typeof child === "number" || typeof child === "boolean") {
         return { node: document.createTextNode(child.toString()), cancel: () => {} };
       } else if (isVNode(child)) {
         const [childElement, cancel] = renderNode(child);
