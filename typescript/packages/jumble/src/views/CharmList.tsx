@@ -8,13 +8,14 @@ import { useEffect, useRef, useState } from "react";
 import { Card } from "@/components/Card";
 import { useParams } from "react-router-dom";
 import { render } from "@commontools/html";
+import { Cell } from "@commontools/runner";
 
 export interface CommonDataEvent extends CustomEvent {
   detail: {
     data: any[];
   };
 }
-function CharmPreview({ charm, replicaName }: { charm: Charm; replicaName: string }) {
+function CharmPreview({ charm, replicaName }: { charm: Cell<Charm>; replicaName: string }) {
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [isIntersecting, setIsIntersecting] = useState(false);
 
@@ -37,13 +38,10 @@ function CharmPreview({ charm, replicaName }: { charm: Charm; replicaName: strin
   useEffect(() => {
     if (!previewRef.current || !isIntersecting) return;
     const preview = previewRef.current;
-    const charmData = charm[UI];
-    if (!charmData) return;
     preview.innerHTML = "";
 
     try {
-      const cancel = render(preview, charmData);
-      return cancel;
+      return render(preview, charm.key(UI));
     } catch (error) {
       console.error("Failed to render charm preview:", error);
       preview.innerHTML = "<p>Preview unavailable</p>";
@@ -68,7 +66,7 @@ function CharmPreview({ charm, replicaName }: { charm: Charm; replicaName: strin
       <NavLink to={`/${replicaName}/${charmId(charm)}`}>
         <div>
           <h3 className="text-xl font-semibold text-gray-800 mb-4">
-            {(charm[NAME] || "Unnamed Charm") + ` (#${charmId(charm).slice(-4)})`}
+            {(charm.get()[NAME] || "Unnamed Charm") + ` (#${charmId(charm)!.slice(-4)})`}
           </h3>
           <div
             ref={previewRef}

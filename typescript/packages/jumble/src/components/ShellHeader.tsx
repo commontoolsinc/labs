@@ -34,7 +34,9 @@ export function ShellHeader({
     async function getCharm() {
       if (charmId) {
         const charm = await charmManager.get(charmId);
-        if (mounted && charm) cancel = charm.asCell([NAME]).sink(setCharmName);
+        cancel = charm?.key(NAME).sink((value) => {
+          if (mounted) setCharmName(value ?? null);
+        });
       }
     }
     getCharm();

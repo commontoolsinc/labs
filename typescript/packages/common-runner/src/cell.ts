@@ -6,7 +6,7 @@ import {
   createQueryResultProxy,
   getDocLinkOrValue,
 } from "./query-result-proxy.js";
-import { resolvePath, followLinks } from "./utils.js";
+import { resolvePath, followLinks, prepareForSaving } from "./utils.js";
 import { queueEvent, subscribe, type ReactivityLog } from "./scheduler.js";
 import { type EntityId, getEntityId } from "./cell-map.js";
 import { type Cancel, isCancel, useCancelGroup } from "./cancel.js";
@@ -65,6 +65,7 @@ export interface Cell<T> {
       | DocImpl<T extends Array<infer U> ? U : any>
       | DocLink,
   ): void;
+  equals(other: Cell<any>): boolean;
   sink(callback: (value: T) => Cancel | undefined | void): Cancel;
   updates(callback: (value: T) => Cancel | undefined | void): Cancel;
   key<K extends keyof T>(valueKey: K): Cell<T[K]>;
@@ -75,6 +76,7 @@ export interface Cell<T> {
     log?: ReactivityLog,
   ): QueryResult<DeepKeyLookup<T, Path>>;
   getAsDocLink(): DocLink;
+  getSourceCell<T = any>(schema?: JSONSchema): Cell<T> | undefined;
   toJSON(): { cell: { "/": string } | undefined; path: PropertyKey[] };
   value: T;
   docLink: DocLink;
@@ -146,7 +148,14 @@ function createRegularCell<T>(
     set: (newValue: T) => {
       // TODO: This doesn't respect aliases on write. Should it?
       const ref = resolvePath(doc, path, log);
-      ref.cell.setAtPath(ref.path, newValue, log);
+      if (
+        prepareForSaving(ref.cell, newValue, ref.cell.getAtPath(ref.path), log, {
+          parent: getTopFrame()?.cause,
+          doc: ref.cell,
+          path: ref.path,
+        })
+      )
+        ref.cell.setAtPath(ref.path, newValue, log);
     },
     send: (newValue: T) => self.set(newValue),
     update: (value: Partial<T>) => {
@@ -191,6 +200,7 @@ function createRegularCell<T>(
 
       ref.cell.setAtPath(ref.path, [...array, value], log);
     },
+    equals: (other: Cell<any>) => JSON.stringify(self) === JSON.stringify(other),
     sink: (callback: (value: T) => Cancel | undefined) =>
       subscribeToReferencedDocs(callback, true, doc, path, schema, rootSchema),
     updates: (callback: (value: T) => Cancel | undefined) =>
@@ -212,6 +222,8 @@ function createRegularCell<T>(
     getAsQueryResult: (subPath: PropertyKey[] = [], newLog?: ReactivityLog) =>
       createQueryResultProxy(doc, [...path, ...subPath], newLog ?? log),
     getAsDocLink: () => ({ cell: doc, path }) satisfies DocLink,
+    getSourceCell: <T = any>(schema?: JSONSchema) =>
+      doc.sourceCell?.asCell([], log, schema) as Cell<T> | undefined,
     toJSON: () =>
       // TODO: Should this include the schema, as cells are defiined by doclink & schema?
       ({ cell: doc.toJSON(), path }) satisfies {

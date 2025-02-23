@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { DocImpl, effect } from "@commontools/runner";
+import { Cell, effect } from "@commontools/runner";
 
-export function useCell<T>(cell: DocImpl<T>): [T, (value: T) => void] {
+export function useCell<T>(cell: Cell<T>): [T, (value: T) => void] {
   const [value, setValue] = useState<T>(cell.get());
 
   useEffect(() => {
@@ -18,7 +18,7 @@ export function useCell<T>(cell: DocImpl<T>): [T, (value: T) => void] {
   return [
     value,
     (newValue: T) => {
-      cell.asCell().set(newValue);
+      cell.set(newValue);
     },
   ];
 }

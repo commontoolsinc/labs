@@ -110,7 +110,7 @@ export function CharmRenderer({ charm, className = "" }: CharmRendererProps) {
 
     container.addEventListener("common-iframe-error", handleIframeError);
 
-    const cleanup = render(container, charm.asCell().key("$UI"));
+    const cleanup = render(container, charm.key("$UI"));
 
     return () => {
       cleanup();

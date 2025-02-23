@@ -1,7 +1,6 @@
-import { addRecipe, EntityId } from "@commontools/runner";
+import { addRecipe, Cell, EntityId } from "@commontools/runner";
 import { LLMClient } from "@commontools/llm-client";
 import { createJsonSchema, JSONSchema } from "@commontools/builder";
-import { type DocImpl } from "@commontools/runner";
 
 import { tsToExports } from "./localBuild.js";
 import { Charm, CharmManager } from "./charm.js";
@@ -43,7 +42,7 @@ const genSrc = async ({
 
 export async function iterate(
   charmManager: CharmManager,
-  charm: DocImpl<Charm> | null,
+  charm: Cell<Charm> | null,
   value: string,
   shiftKey: boolean,
   model?: string,
@@ -74,7 +73,7 @@ export async function iterate(
 
 export const saveNewRecipeVersion = async (
   charmManager: CharmManager,
-  charm: Charm,
+  charm: Cell<Charm>,
   newIFrameSrc: string,
   newSpec: string,
 ) => {
@@ -97,7 +96,7 @@ export const saveNewRecipeVersion = async (
     charmManager,
     newRecipeSrc,
     newSpec,
-    { cell: charm.sourceCell, path: ["argument"] },
+    charm.getSourceCell()?.key("argument"),
     recipeId ? [recipeId] : undefined,
   );
 };
@@ -129,7 +128,7 @@ export async function compileAndRunRecipe(
   recipeSrc: string,
   spec: string,
   runOptions: any,
-  parents?: EntityId[],
+  parents?: string[],
 ): Promise<EntityId | undefined> {
   const { exports, errors } = await tsToExports(recipeSrc);
   if (errors) {

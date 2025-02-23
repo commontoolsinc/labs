@@ -2,7 +2,8 @@ import { CharmManager } from "@commontools/charm";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
 import { charmId } from "./charms";
 import { llm } from "./llm";
-
+import { Cell } from "@commontools/runner";
+import { Charm } from "@commontools/charm";
 interface IndexingContext {
   startJob: (name: string) => string;
   stopJob: (jobId: string) => void;
@@ -12,63 +13,66 @@ interface IndexingContext {
 }
 
 const CONCURRENT_LIMIT = 3;
-async function saveToMemory(space: string, entity: string, data: any, contentType: string = "application/json"): Promise<Response> {
+async function saveToMemory(
+  space: string,
+  entity: string,
+  data: any,
+  contentType: string = "application/json",
+): Promise<Response> {
   return fetch("/api/storage/memory", {
     method: "PATCH",
     headers: {
-      "content-type": "application/json"
+      "content-type": "application/json",
     },
     body: JSON.stringify({
       [space]: {
         assert: {
           the: contentType,
           of: entity,
-          is: data
-        }
-      }
-    })
+          is: data,
+        },
+      },
+    }),
   });
 }
 
-
 async function indexCharm(
-  charm: any,
+  charm: Cell<Charm>,
   jobId: string,
   context: IndexingContext,
-  replica: string
+  replica: string,
 ): Promise<void> {
   try {
     // Simulate indexing work for this example
-    context.addJobMessage(jobId, `Indexing charm ${charmId}...`);
-    console.log('indexing', charm)
-    const stringified = JSON.stringify(charm.cell.asCell().get());
+    context.addJobMessage(jobId, `Indexing charm ${charmId(charm)}...`);
+    console.log("indexing", charm);
+    const stringified = JSON.stringify(charm.asSchema({}).get());
 
     const response = await llm.sendRequest({
-      model: 'anthropic:claude-3-5-sonnet-latest',
-      messages: [{
-        role: "user",
-        content: `Analyze this UI component JSON and describe it in a single terse paragraph with up to 2 relevant hashtags: ${stringified}`
-      }]
+      model: "anthropic:claude-3-5-sonnet-latest",
+      messages: [
+        {
+          role: "user",
+          content: `Analyze this UI component JSON and describe it in a single terse paragraph with up to 2 relevant hashtags: ${stringified}`,
+        },
+      ],
     });
     context.addJobMessage(jobId, response);
     console.log(stringified, response);
 
-    await saveToMemory(replica, charmId(charm), response, 'text/plain;variant=description');
+    await saveToMemory(replica, charmId(charm)!, response, "text/plain;variant=description");
 
-    await new Promise(resolve => setTimeout(resolve, 200)); // Simulate work
+    await new Promise((resolve) => setTimeout(resolve, 200)); // Simulate work
     context.addJobMessage(jobId, `✓ Indexed charm ${charmId(charm)}`);
   } catch (error) {
-    context.addJobMessage(
-      jobId,
-      `Failed to index charm ${charm.entityId}: ${error}`
-    );
+    context.addJobMessage(jobId, `Failed to index charm ${charm.entityId}: ${error}`);
     console.error(error);
   }
 }
 
 export async function startCharmIndexing(
   charmManager: CharmManager,
-  context: IndexingContext
+  context: IndexingContext,
 ): Promise<void> {
   const jobId = context.startJob("Indexing Charms");
   context.addJobMessage(jobId, "Starting charm indexing...");
@@ -91,14 +95,14 @@ export async function startCharmIndexing(
       const batch = charms.slice(i, i + CONCURRENT_LIMIT);
 
       // Check if job was stopped
-      const job = context.listJobs().find(j => j.id === jobId);
-      if (!job || job.status !== 'running') {
+      const job = context.listJobs().find((j) => j.id === jobId);
+      if (!job || job.status !== "running") {
         context.addJobMessage(jobId, "Indexing stopped by user");
         return;
       }
 
       await Promise.all(
-        batch.map(charm => indexCharm(charm, jobId, context, charmManager.getReplica()))
+        batch.map((charm) => indexCharm(charm, jobId, context, charmManager.getReplica()!)),
       );
 
       completed += batch.length;
@@ -106,16 +110,13 @@ export async function startCharmIndexing(
       context.updateJobProgress(jobId, progress);
       context.addJobMessage(
         jobId,
-        `Progress: ${completed}/${total} charms (${Math.round(progress * 100)}%)`
+        `Progress: ${completed}/${total} charms (${Math.round(progress * 100)}%)`,
       );
     }
 
     context.addJobMessage(jobId, "Indexing completed successfully");
   } catch (error) {
-    context.addJobMessage(
-      jobId,
-      `Indexing failed with error: ${error}`
-    );
+    context.addJobMessage(jobId, `Indexing failed with error: ${error}`);
     console.error(error);
   } finally {
     context.stopJob(jobId);

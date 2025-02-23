@@ -7,10 +7,15 @@ export type CharmManagerContextType = {
   currentReplica: string;
 };
 
-const CharmManagerContext = createContext<CharmManagerContextType>(null!);
+const CharmManagerContext = createContext<CharmManagerContextType>({
+  charmManager: null!,
+  currentReplica: undefined!,
+});
 
 export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { replicaName } = useParams<{ replicaName: string }>();
+
+  console.log("CharmManagerProvider", replicaName);
 
   let effectiveReplica: string;
   if (replicaName) {
