@@ -61,13 +61,13 @@ export function ShellHeader({
       const success = await saveSpell(spellId, spell, data.title, data.description, data.tags);
 
       if (success) {
-        const spellbookUrl = `/spellbook/${spellId}`;
+        const fullUrl = `${window.location.protocol}//${window.location.host}/spellbook/${spellId}`;
         try {
-          await navigator.clipboard.writeText(spellbookUrl);
+          await navigator.clipboard.writeText(fullUrl);
         } catch (err) {
           console.error("Failed to copy to clipboard:", err);
         }
-        navigate(spellbookUrl);
+        navigate(`/spellbook/${spellId}`);
       } else {
         throw new Error("Failed to publish");
       }
@@ -112,7 +112,7 @@ export function ShellHeader({
             >
               <LuShare2 size={16} />
               <div className="absolute top-10 left-1/2 -translate-x-1/2 bg-gray-800 text-white px-2 py-1 rounded text-sm opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                Share
+                Publish
               </div>
             </button>
           </>

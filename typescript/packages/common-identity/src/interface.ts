@@ -1,13 +1,19 @@
-export interface KeyPairStatic {
-  generateFromRaw(rawPrivateKey: Uint8Array): Promise<KeyPair>;
-  generate(): Promise<KeyPair>;
-  deserialize(input: any): KeyPair;
+export type DID = `did:${string}:${string}`;
+
+export type KeyPair = {
+  privateKey: Signer,
+  publicKey: Verifier,
+};
+
+export interface Signer {
+  sign(data: Uint8Array): Promise<Uint8Array>;
+  verifier(): Verifier;
+  serialize(): KeyPairRaw;
 }
 
-export interface KeyPair {
-  sign(data: Uint8Array): Promise<Uint8Array>;
+export interface Verifier {
   verify(signature: Uint8Array, data: Uint8Array): Promise<boolean>;
-  serialize(): KeyPairRaw;
+  did(): Promise<string>;
 }
 
 export type InsecureCryptoKeyPair = {

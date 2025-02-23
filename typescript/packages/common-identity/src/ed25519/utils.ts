@@ -1,6 +1,14 @@
-import bs58 from "bs58";
+import { base58btc } from "multiformats/bases/base58";
+import { varint } from "multiformats";
+import { DID } from "../interface.js";
 
 export const ED25519_ALG = "Ed25519";
+const ED25519_CODE = 0xed;
+const ED25519_PUB_KEY_RAW_SIZE = 32;
+const ED25519_PUB_KEY_TAG_SIZE = varint.encodingLength(ED25519_CODE);
+const ED25519_PUB_KEY_TAGGED_SIZE = ED25519_PUB_KEY_RAW_SIZE + ED25519_PUB_KEY_TAG_SIZE;
+const DID_KEY_PREFIX = `did:key:`;
+const DID_KEY_PREFIX_SIZE = DID_KEY_PREFIX.length;
 
 // 0x302e020100300506032b657004220420
 // via https://stackoverflow.com/a/79135112
@@ -15,12 +23,28 @@ export function ed25519RawToPkcs8(rawPrivateKey: Uint8Array): Uint8Array {
   return new Uint8Array([...PKCS8_PREFIX, ...rawPrivateKey]);
 }
 
-const ED25519_MAGIC_BYTES = new Uint8Array([0xed, 0x01]);
 
 // Convert public key bytes into a `did:key:z...`.
-export function keyToDid(publicKey: Uint8Array): string {
-  let bytes = new Uint8Array(ED25519_MAGIC_BYTES.length + publicKey.length);
-  bytes.set(ED25519_MAGIC_BYTES);
-  bytes.set(publicKey, ED25519_MAGIC_BYTES.length);
-  return `did:key:z${bs58.encode(bytes)}`;
+export function bytesToDid(publicKey: Uint8Array): DID {
+  let bytes = new Uint8Array(ED25519_PUB_KEY_TAGGED_SIZE);
+  varint.encodeTo(ED25519_CODE, bytes);
+  bytes.set(publicKey, ED25519_PUB_KEY_TAG_SIZE);
+  return `did:key:${base58btc.encode(bytes)}`;
+}
+
+// Convert DID key into public key bytes.
+export function didToBytes(did: DID): Uint8Array {
+  const bytes = base58btc.decode(did.slice(DID_KEY_PREFIX_SIZE));
+  const [code] = varint.decode(bytes);
+  if (code !== ED25519_CODE) {
+    throw new RangeError(
+      `Unsupported key algorithm expected 0x${ED25519_CODE.toString(16)}, instead of 0x${code.toString(16)}`,
+    );
+  }
+  if (bytes.length !== ED25519_PUB_KEY_TAGGED_SIZE) {
+    throw new RangeError(
+      `Expected Uint8Array with byteLength ${ED25519_PUB_KEY_TAGGED_SIZE}, instead got Uint8Array with byteLength ${bytes.byteLength}`,
+    );
+  }
+  return bytes.subarray(ED25519_PUB_KEY_TAG_SIZE);
 }

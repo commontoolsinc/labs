@@ -1,5 +1,5 @@
-import { Ed25519KeyPair } from "./ed25519/index.js";
-import { KeyPair, KeyPairRaw } from "./keys.js";
+import { Ed25519Signer, Ed25519Verifier } from "./ed25519/index.js";
+import { DID, KeyPairRaw, Signer, Verifier } from "./interface.js";
 import { hash } from "./utils.js";
 
 const textEncoder = new TextEncoder();
@@ -7,15 +7,14 @@ const textEncoder = new TextEncoder();
 // An `Identity` represents a public/private key pair.
 //
 // Additional keys can be deterministically derived from an identity. 
-export class Identity implements KeyPair {
-  private keypair: Ed25519KeyPair;
-  constructor(keypair: Ed25519KeyPair) {
+export class Identity implements Signer {
+  private keypair: Ed25519Signer;
+  constructor(keypair: Ed25519Signer) {
     this.keypair = keypair;
   }
 
-  // Return the DID key of this keypair's public key.
-  async did() {
-    return await this.keypair.did();
+  verifier(): VerifierIdentity {
+    return new VerifierIdentity(this.keypair.verifier());
   }
 
   // Sign `data` with this identity.
@@ -23,11 +22,6 @@ export class Identity implements KeyPair {
     return await this.keypair.sign(data);
   }
  
-  // Verify `signature` and `data` with this identity.
-  async verify(signature: Uint8Array, data: Uint8Array): Promise<boolean> {
-    return await this.keypair.verify(signature, data);
-  }
-
   // Serialize this identity for storage.
   serialize(): KeyPairRaw {
     return this.keypair.serialize();
@@ -36,24 +30,53 @@ export class Identity implements KeyPair {
   // Derive a new `Identity` given a seed string.
   async derive(name: string): Promise<Identity> {
     const seed = textEncoder.encode(name);
-    const hashed = await hash(seed);
-    const signed = await this.sign(hashed);
+    const signed = await this.sign(seed);
     const signedHash = await hash(signed);
-    return await Identity.generateFromRaw(new Uint8Array(signedHash.subarray(0, 32)));
+    return await Identity.fromRaw(new Uint8Array(signedHash));
   }
 
   // Generate a new identity from raw ed25519 key material.
-  static async generateFromRaw(rawPrivateKey: Uint8Array): Promise<Identity> {
-    return new Identity(await Ed25519KeyPair.generateFromRaw(rawPrivateKey));
+  static async fromRaw(rawPrivateKey: Uint8Array): Promise<Identity> {
+    return new Identity(await Ed25519Signer.fromRaw(rawPrivateKey));
   }
   
   // Generate a new identity.
   static async generate(): Promise<Identity> {
-    return new Identity(await Ed25519KeyPair.generate());
+    return new Identity(await Ed25519Signer.generate());
+  }
+
+  static async generateMnemonic(): Promise<[Identity, string]> {
+    let [signer, mnemonic] = await Ed25519Signer.generateMnemonic();
+    return [new Identity(signer), mnemonic]; 
+  }
+
+  static async fromMnemonic(mnemonic: string): Promise<Identity> {
+    let signer = await Ed25519Signer.fromMnemonic(mnemonic);
+    return new Identity(signer);
   }
 
   // Deserialize `input` from storage into an `Identity`.
   static deserialize(input: any): Identity {
-    return new Identity(Ed25519KeyPair.deserialize(input)); 
+    return new Identity(Ed25519Signer.deserialize(input)); 
+  }
+}
+
+export class VerifierIdentity implements Verifier {
+  private inner: Verifier;
+
+  constructor(inner: Verifier) {
+    this.inner = inner;
+  }
+
+  async verify(signature: Uint8Array, data: Uint8Array): Promise<boolean> {
+    return await this.inner.verify(signature, data);
+  }
+
+  async did(): Promise<string> {
+    return await this.inner.did();
+  }
+
+  static async fromDid(did: DID): Promise<VerifierIdentity> {
+    return new VerifierIdentity(await Ed25519Verifier.fromDid(did));
   }
 }

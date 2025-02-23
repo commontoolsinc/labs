@@ -53,7 +53,7 @@ export interface RunResponse {
 export async function listAllSpells(searchQuery?: string): Promise<Spell[]> {
   let url = `/api/spellbook`;
   if (searchQuery) {
-    url += `?search=${searchQuery}`;
+    url += `?search=${encodeURIComponent(searchQuery)}`;
   }
 
   const response = await fetch(url, {
