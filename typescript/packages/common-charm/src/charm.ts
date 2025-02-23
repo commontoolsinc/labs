@@ -10,6 +10,7 @@ import {
   isDoc,
   isDocLink,
   run,
+  getEntityId,
 } from "@commontools/runner";
 import { type Storage } from "./storage.js";
 import { syncRecipeBlobby } from "./syncRecipe.js";
@@ -78,7 +79,7 @@ export class CharmManager {
   async remove(idOrCharm: EntityId | DocLink) {
     await this.storage.syncCell(this.charms);
     // bf: horrible code, this indicates inconsistent data structures somewhere
-    const id = isDocLink(idOrCharm) ? idOrCharm?.cell?.entityId?.["/"] : idOrCharm["/"];
+    const id = isDocLink(idOrCharm) ? getEntityId(idOrCharm) : idOrCharm["/"];
     const newCharms = this.charms.get().filter(({ cell }) => {
       const cellId = cell.entityId?.toJSON?.()["/"] || cell.entityId?.["/"];
       return cellId !== String(id);
