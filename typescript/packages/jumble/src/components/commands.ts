@@ -4,7 +4,7 @@ import { NavigateFunction } from "react-router-dom";
 import { castSpell } from "@/search";
 import { charmId } from "@/utils/charms";
 import { NAME } from "@commontools/builder";
-import { Cell, getDocByEntityId, getEntityId, getRecipe } from "@commontools/runner";
+import { Cell, getDocByEntityId, getRecipe } from "@commontools/runner";
 import { iterateCharm } from "@/utils/charm-operations";
 import { BackgroundJob } from "@/contexts/BackgroundTaskContext";
 import { startCharmIndexing } from "@/utils/indexing";
@@ -157,7 +157,7 @@ async function handleSpellcaster(deps: CommandContext, input: string | undefined
   try {
     const spells = await castSpell(deps.focusedReplicaId, input);
     const compatibleSpells = spells.filter(
-      (spell) => spell.compatibleBlobs && spell.compatibleBlobs.length > 0,
+      (spell: any) => spell.compatibleBlobs && spell.compatibleBlobs.length > 0,
     );
 
     deps.setMode({

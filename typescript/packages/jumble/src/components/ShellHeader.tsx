@@ -54,7 +54,7 @@ export function ShellHeader({
     try {
       const charm = await charmManager.get(charmId);
       if (!charm) throw new Error("Charm not found");
-      const spell = charm.sourceCell?.get();
+      const spell = charm.getSourceCell()?.get();
       const spellId = spell?.[TYPE];
       if (!spellId) throw new Error("Spell not found");
 
