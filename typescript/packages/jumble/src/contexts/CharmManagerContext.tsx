@@ -12,15 +12,9 @@ const CharmManagerContext = createContext<CharmManagerContextType>(null!);
 export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { replicaName } = useParams<{ replicaName: string }>();
 
-  let effectiveReplica: string;
+  // Save the current replica as the last visited
   if (replicaName) {
-    // When a replica is provided in the URL, use it and save it as the last visited
-    effectiveReplica = replicaName;
     localStorage.setItem("lastReplica", replicaName);
-  } else {
-    // Otherwise, pull the last visited replica from local storage.
-    // Falling back to "common-knowledge" if nothing was stored.
-    effectiveReplica = localStorage.getItem("lastReplica") || "common-knowledge";
   }
 
   const charmManager = useMemo(() => {
@@ -29,15 +23,15 @@ export const CharmsManagerProvider: React.FC<{ children: React.ReactNode }> = ({
       storageType === "remote"
         ? createStorage({
             type: "remote",
-            replica: effectiveReplica,
+            replica: replicaName!,
             url: new URL(location.href),
           })
         : createStorage({ type: storageType as "memory" | "local" });
     return new CharmManager(storage);
-  }, [effectiveReplica]);
+  }, [replicaName]);
 
   return (
-    <CharmManagerContext.Provider value={{ charmManager, currentReplica: effectiveReplica }}>
+    <CharmManagerContext.Provider value={{ charmManager, currentReplica: replicaName! }}>
       {children}
     </CharmManagerContext.Provider>
   );
