@@ -1,4 +1,3 @@
-import { AppType } from "@/app.ts";
 import { hc } from "hono/client";
 import { Memory } from "@commontools/memory";
 
@@ -108,14 +107,29 @@ export async function getMemory(
     return null;
   }
 
-  console.log(data);
-
+  console.log(key, data);
   const memory = Array.isArray(data.ok) ? data.ok[0] : data.ok;
-  if (!memory?.is?.value?.argument) {
-    return null;
-  }
 
-  return memory.is.value.argument;
+  // format
+  // {
+  //   ok: {
+  //     "did:key:replica": {
+  //       "of:charmId": {
+  //         "application/json": {
+  //           "causeId": {
+  //             "is": {
+  //               "value": {...}
+  //             }
+  //           }
+  //         }
+  //       }
+  //     }
+  //   }
+  // }
+
+  const memoryData = memory[replica]["of:" + key]["application/json"];
+  const [, firstValue] = Object.entries(memoryData)[0];
+  return (firstValue as any)?.is?.value;
 }
 
 export async function getAllBlobs(

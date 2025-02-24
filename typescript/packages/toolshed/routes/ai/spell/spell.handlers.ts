@@ -380,7 +380,7 @@ export const reuse: AppRouteHandler<ReuseRoute> = async (c) => {
     console.log("charm", charm);
 
     const response: ReuseResponse = {
-      result: {},
+      result: charm,
     };
 
     return c.json(response, HttpStatusCodes.OK);
