@@ -153,69 +153,6 @@ async function handleSearchCharms(deps: CommandContext) {
   }
 }
 
-async function handleSpellcaster(deps: CommandContext, input: string | undefined) {
-  if (!input || !deps.focusedReplicaId) return;
-  deps.setLoading(true);
-  try {
-    const spells = await castSpell(deps.focusedReplicaId, input);
-    const compatibleSpells = spells.filter(
-      (spell: any) => spell.compatibleBlobs && spell.compatibleBlobs.length > 0,
-    );
-
-    deps.setMode({
-      type: "select",
-      command: {
-        id: "spell-select",
-        type: "select",
-        title: "Select Spell",
-        handler: async (spell: any) => {
-          if (spell.compatibleBlobs.length === 1) {
-            const entityId = await castSpellAsCharm(
-              deps.charmManager,
-              spell,
-              spell.compatibleBlobs[0],
-            );
-            if (entityId) {
-              deps.navigate(`/${deps.focusedReplicaId}/${charmId(entityId)}`);
-            }
-            deps.setOpen(false);
-          } else {
-            deps.setMode({
-              type: "select",
-              command: {
-                id: "blob-select",
-                type: "select",
-                title: "Select Blob",
-                handler: async (blob) => {
-                  const entityId = await castSpellAsCharm(deps.charmManager, spell, blob);
-                  if (entityId) {
-                    deps.navigate(`/${deps.focusedReplicaId}/${charmId(entityId)}`);
-                  }
-                  deps.setOpen(false);
-                },
-              },
-              options: spell.compatibleBlobs.map((blob: any, i: number) => ({
-                id: String(i),
-                title: `Blob ${i + 1}`,
-                value: blob,
-              })),
-            });
-          }
-        },
-      },
-      options: compatibleSpells.map((spell: any, i: number) => ({
-        id: String(i),
-        title: `${spell.description}#${spell.name.slice(-4)} (${spell.compatibleBlobs.length})`,
-        value: spell,
-      })),
-    });
-  } catch (error) {
-    console.error("Spellcaster error:", error);
-  } finally {
-    deps.setLoading(false);
-  }
-}
-
 async function handleEditRecipe(deps: CommandContext, input: string | undefined) {
   if (!input || !deps.focusedCharmId || !deps.focusedReplicaId) return;
   deps.setLoading(true);
@@ -431,8 +368,15 @@ async function handleUseDataInSpell(deps: CommandContext) {
 
           const charm = await deps.charmManager.get(deps.focusedCharmId);
           const sourceCell = charm?.getSourceCell();
-          debugger;
-          await castSpellAsCharm(deps.charmManager, selectedSpell.id, sourceCell?.entityId?.["/"]);
+          const sourceId = sourceCell?.entityId?.["/"];
+          if (!sourceId) {
+            console.error("No source ID found");
+            return;
+          }
+          const newCharmId = await castSpellAsCharm(deps.charmManager, selectedSpell.id, sourceId);
+          if (newCharmId) {
+            deps.navigate(`/${deps.focusedReplicaId}/${charmId(newCharmId)}`);
+          }
           deps.setOpen(false);
         },
       },
@@ -501,25 +445,19 @@ export function getCommands(deps: CommandContext): CommandItem[] {
       predicate: !!deps.focusedReplicaId,
       children: [
         {
-          id: "spellcaster",
-          type: "input",
-          title: "Search Spells",
-          handler: (input) => handleSpellcaster(deps, input),
-        },
-        {
           id: "use-data-in-spell",
           type: "action",
           title: "Use Current Data in Spell",
           predicate: !!deps.focusedCharmId,
           handler: () => handleUseDataInSpell(deps),
         },
-        {
-          id: "use-spell-on-other-data",
-          type: "action",
-          title: "Use Current Spell on Other Data",
-          predicate: !!deps.focusedCharmId,
-          handler: () => handleUseSpellOnOtherData(deps),
-        },
+        // {
+        //   id: "use-spell-on-other-data",
+        //   type: "action",
+        //   title: "Use Current Spell on Other Data",
+        //   predicate: !!deps.focusedCharmId,
+        //   handler: () => handleUseSpellOnOtherData(deps),
+        // },
       ],
     },
     {
