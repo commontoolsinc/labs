@@ -34,13 +34,12 @@ Similarly, a `SpaceKey` is a generated (non-derived) keypair representing an ide
 Deriving a `PersonaKey` from a `RootKey` performs the following algorithm:
 
 * `i` = Encode `name` into bytes
-* `i` = SHA-512 hash `i` 
 * `i` = Sign `i` with root key
-* `i` = SHA-512 hash `i` 
+* `i` = SHA-256 hash `i` 
 * Use `i` as raw ed25519 private key material
 
 ```
-hash(sign(hash(encode(name))))
+hash(sign(encode(name)))
 ```
 
 ## Browser Support
@@ -51,6 +50,17 @@ Additionally, the PRF extension **is not** currently supported in Firefox and Sa
 
 * [Firefox: Support WebAuthn PRF Extension](https://bugzilla.mozilla.org/show_bug.cgi?id=1863819)
 * [Safari: PRF extension not supported in Safari's Cross-Device WebAuthn Flow](https://developer.apple.com/forums/thread/774112)
+
+### Support Matrix
+
+Here are the triples (OS+browser+authenticator) we've tested this identity flow on. Additionally, [passkeys.dev](https://passkeys.dev) maintains another [Device Support] matrix.
+
+| OS           | Browser        | Authenticator | Status             | Notes              |
+| ------------ | -------------- | ------------- | ------------------ | ------------------ |
+| MacOS        | Chrome         | iCloud        | :white_check_mark: |                    |
+| MacOS        | Chrome         | 1Password     | :x:                | PRF not supported. |
+| Linux/Fedora | Firefox (135+) | Yubikey       | :white_check_mark: |                    |
+| Linux/Fedora | Chrome         | Yubikey       | :white_check_mark: |                    |
 
 ### Algorithms
 
@@ -119,3 +129,4 @@ function setRootKey(rootKey) {
 
 [Web Authentication API]: https://developer.mozilla.org/en-US/docs/Web/API/Web_Authentication_API
 [PRF extension]: https://github.com/w3c/webauthn/wiki/Explainer:-PRF-extension
+[Device Support]: https://passkeys.dev/device-support/
