@@ -19,6 +19,9 @@ import type {
   InvocationURL,
   TransactionResult,
   QueryResult,
+  UCAN,
+  AuthorizationError,
+  Invocation,
 } from "./interface.ts";
 import * as Subscription from "./subscription.ts";
 
@@ -30,6 +33,8 @@ export * as Memory from "./memory.ts";
 export * as Subscriber from "./subscriber.ts";
 export * as Subscription from "./subscription.ts";
 import { refer, fromString } from "./reference.ts";
+import * as Principal from "./principal.ts";
+import * as Access from "./access.ts";
 
 export const open = async (options: Memory.Options): AsyncResult<Provider, ConnectionError> => {
   const result = await Memory.open(options);
@@ -90,7 +95,7 @@ class MemoryProvider implements Provider {
 
 class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
   readable: ReadableStream<ProviderCommand<Protocol>>;
-  writable: WritableStream<ConsumerCommand<Protocol>>;
+  writable: WritableStream<UCAN<ConsumerCommand<Protocol>>>;
   controller: ReadableStreamDefaultController<ProviderCommand<Protocol>> | undefined;
 
   channels: Map<InvocationURL<Reference<Subscribe>>, Set<string>> = new Map();
@@ -103,7 +108,7 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
       start: (controller) => this.open(controller),
       cancel: () => this.cancel(),
     });
-    this.writable = new WritableStream<ConsumerCommand<Protocol>>({
+    this.writable = new WritableStream<UCAN<ConsumerCommand<Protocol>>>({
       write: async (command) => {
         await this.invoke(command);
       },
@@ -138,30 +143,42 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
     this.sessions?.delete(this);
     this.sessions = null;
   }
-  async invoke(command: ConsumerCommand<Protocol>) {
-    switch (command.cmd) {
+  async invoke({ invocation, authorization }: UCAN<ConsumerCommand<Protocol>>) {
+    const { error } = await Access.authorize(invocation, authorization);
+    if (error) {
+      return this.perform({
+        the: "task/return",
+        of: `job:${refer(invocation)}` as InvocationURL<Reference<ConsumerCommand<Protocol>>>,
+        is: { error } as Result<Selection, AuthorizationError>,
+      });
+    }
+
+    const of = `job:${refer(invocation)}` as InvocationURL<Reference<ConsumerCommand<Protocol>>>;
+
+    switch (invocation.cmd) {
       case "/memory/query": {
         return this.perform({
           the: "task/return",
-          of: `job:${refer(command)}` as InvocationURL<Reference<ConsumerCommand<Protocol>>>,
-          is: (await this.memory.query(command)) as Result<Selection, QueryError>,
+          of,
+          is: (await this.memory.query(invocation)) as Result<Selection, QueryError>,
         });
       }
       case "/memory/transact": {
         return this.perform({
           the: "task/return",
-          of: `job:${refer(command)}` as InvocationURL<Reference<ConsumerCommand<Protocol>>>,
-          is: await this.memory.transact(command),
+          of,
+          is: await this.memory.transact(invocation),
         });
       }
       case "/memory/query/subscribe": {
-        const id = `job:${refer(command)}` as InvocationURL<Subscribe>;
-        this.channels.set(id, new Set(Subscription.channels(command.sub, command.args.select)));
+        this.channels.set(
+          of,
+          new Set(Subscription.channels(invocation.sub, invocation.args.select)),
+        );
         return this.memory.subscribe(this);
       }
       case "/memory/query/unsubscribe": {
-        const id = command.args.source;
-        this.channels.delete(id);
+        this.channels.delete(of);
         if (this.channels.size === 0) {
           this.memory.unsubscribe(this);
         }
@@ -169,19 +186,23 @@ class MemoryProviderSession implements ProviderSession<Protocol>, Subscriber {
         // End subscription call
         this.perform({
           the: "task/return",
-          of: command.args.source,
+          of: invocation.args.source,
           is: { ok: {} },
         });
 
         // End unsubscribe call
-        this.perform({
+        return this.perform({
           the: "task/return",
-          of: `job:${refer(command)}` as InvocationURL<Reference<ConsumerCommand<Protocol>>>,
+          of,
           is: { ok: {} },
         });
       }
+      default: {
+        return {
+          error: new RangeError(`Unknown command ${(invocation as Invocation).cmd}`),
+        };
+      }
     }
-    return { ok: {} };
   }
 
   transact(transaction: Transaction) {

@@ -61,7 +61,7 @@ export class RemoteStorageProvider implements StorageProvider {
     the = "application/json",
   }: {
     address: URL;
-    as?: Memory.Principal;
+    as?: Memory.DID;
     space?: MemorySpace;
     the?: string;
   }) {
