@@ -20,7 +20,7 @@ export class KeyStore {
   async get(name: string): Promise<Identity | undefined> {
     let result = await this.db.get(this.storeName, name);
     if (result) {
-      return Identity.deserialize(result);
+      return await Identity.deserialize(result);
     }
     return result;
   }
