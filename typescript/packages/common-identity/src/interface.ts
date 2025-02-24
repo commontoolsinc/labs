@@ -13,7 +13,7 @@ export interface Signer {
 
 export interface Verifier {
   verify(signature: Uint8Array, data: Uint8Array): Promise<boolean>;
-  did(): Promise<string>;
+  did(): DID;
 }
 
 export type InsecureCryptoKeyPair = {

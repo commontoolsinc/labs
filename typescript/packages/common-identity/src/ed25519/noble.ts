@@ -12,10 +12,6 @@ export class NobleEd25519Signer implements Signer {
     return new NobleEd25519Verifier(this.keypair.publicKey);
   }
 
-  async did(): Promise<string> {
-    return bytesToDid(this.keypair.publicKey);
-  }
-
   serialize(): InsecureCryptoKeyPair {
     return this.keypair;
   }
@@ -34,23 +30,25 @@ export class NobleEd25519Signer implements Signer {
     return await NobleEd25519Signer.fromRaw(privateKey);
   }
 
-  static deserialize(keypair: InsecureCryptoKeyPair) {
+  static async deserialize(keypair: InsecureCryptoKeyPair) {
     return new NobleEd25519Signer(keypair);
   }
 }
 
 export class NobleEd25519Verifier implements Verifier {
   private publicKey: Uint8Array;
+  private _did: DID;
   constructor(publicKey: Uint8Array) {
     this.publicKey = publicKey;
+    this._did = bytesToDid(publicKey);
   }
 
   async verify(signature: Uint8Array, data: Uint8Array): Promise<boolean> {
     return await ed25519.verifyAsync(signature, data, this.publicKey);
   }
 
-  async did(): Promise<string> {
-    return bytesToDid(this.publicKey);
+  did(): DID{
+    return this._did;
   }
   
   static async fromDid(did: DID): Promise<NobleEd25519Verifier> {

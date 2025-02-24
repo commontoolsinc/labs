@@ -7,11 +7,11 @@ export function User() {
   
   useEffect(() => {
     let ignore = false;
-    async function setDidInner() {
+    function setDidInner() {
       if (!user) {
         return;
       }
-      let did = await user.verifier().did();
+      let did = user.verifier().did();
       if (!ignore) {
         setDid(did);
       }
